@@ -8,7 +8,16 @@ const translations: Record<LanguageCode, TranslationSchema> = {
   "zh-CN": zhCN,
 };
 
-let currentLang: LanguageCode = loadLanguage() || "EN";
+/** Map a system locale (e.g. "zh-CN", "en-US") to a supported LanguageCode, or null. */
+export function detectSystemLanguage(
+  locale: string = Intl.DateTimeFormat().resolvedOptions().locale,
+): LanguageCode | null {
+  if (locale.startsWith("zh")) return "zh-CN";
+  if (locale.startsWith("en")) return "EN";
+  return null;
+}
+
+let currentLang: LanguageCode = loadLanguage() ?? detectSystemLanguage() ?? "EN";
 
 type Listener = () => void;
 const listeners: Listener[] = [];
