@@ -39,7 +39,7 @@ describe("mount — initial render", () => {
       },
     );
     await flush();
-    expect(w.output().startsWith("\r\n\n\x1b[2A")).toBe(true);
+    expect(w.output().startsWith("\r\n\n\n\x1b[3A")).toBe(true);
     handle.destroy();
   });
 
