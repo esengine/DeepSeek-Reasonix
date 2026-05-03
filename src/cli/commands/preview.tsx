@@ -25,7 +25,12 @@ interface HistoryEntry {
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const SPINNER_TICK_MS = 80;
-const STREAM_DURATION_MS = 1500;
+const TOKEN_TICK_MS = 33;
+const CHARS_PER_TICK = 3;
+
+function buildResponse(userText: string): string {
+  return `you said: ${userText}. Streamed cell-by-cell — only the new chars get patched.`;
+}
 
 interface SlashCommand {
   readonly name: string;
@@ -106,11 +111,13 @@ function HintBar({ streaming }: { streaming: boolean }): React.ReactElement {
 
 interface StreamingProps {
   readonly userText: string;
+  readonly response: string;
   readonly frame: number;
+  readonly done: boolean;
 }
 
-function StreamingRow({ userText, frame }: StreamingProps): React.ReactElement {
-  const glyph = SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? "·";
+function StreamingRow({ userText, response, frame, done }: StreamingProps): React.ReactElement {
+  const glyph = done ? "‹" : (SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? "·");
   return (
     <inkCompat.Box flexDirection="column">
       <inkCompat.Box flexDirection="row" gap={1}>
@@ -118,8 +125,8 @@ function StreamingRow({ userText, frame }: StreamingProps): React.ReactElement {
         <inkCompat.Text>{userText}</inkCompat.Text>
       </inkCompat.Box>
       <inkCompat.Box flexDirection="row" gap={1}>
-        <inkCompat.Text color={BRAND}>{glyph}</inkCompat.Text>
-        <inkCompat.Text dimColor>thinking…</inkCompat.Text>
+        <inkCompat.Text color={done ? OK : BRAND}>{glyph}</inkCompat.Text>
+        <inkCompat.Text>{response.length > 0 ? response : "thinking…"}</inkCompat.Text>
       </inkCompat.Box>
     </inkCompat.Box>
   );
@@ -161,6 +168,8 @@ function trySlash(
 
 interface InflightState {
   readonly userText: string;
+  readonly fullResponse: string;
+  readonly revealed: number;
   readonly frame: number;
 }
 
@@ -179,26 +188,36 @@ export function PreviewShell({ onExit }: ShellProps): React.ReactElement {
   const streaming = inflight !== null;
   useEffect(() => {
     if (!streaming) return;
-    const tick = setInterval(() => {
+    const spin = setInterval(() => {
       const cur = inflightRef.current;
       if (!cur) return;
-      setInflight({ userText: cur.userText, frame: cur.frame + 1 });
+      setInflight({ ...cur, frame: cur.frame + 1 });
     }, SPINNER_TICK_MS);
-    const finish = setTimeout(() => {
+    const reveal = setInterval(() => {
       const cur = inflightRef.current;
       if (!cur) return;
-      const id = nextIdRef.current;
-      nextIdRef.current = id + 2;
-      setHistory((prev) => [
-        ...prev,
-        { id, role: "user", text: cur.userText },
-        { id: id + 1, role: "echo", text: `you said: ${cur.userText}` },
-      ]);
-      setInflight(null);
-    }, STREAM_DURATION_MS);
+      if (cur.revealed >= cur.fullResponse.length) {
+        clearInterval(reveal);
+        setTimeout(() => {
+          const fin = inflightRef.current;
+          if (!fin) return;
+          const id = nextIdRef.current;
+          nextIdRef.current = id + 2;
+          setHistory((prev) => [
+            ...prev,
+            { id, role: "user", text: fin.userText },
+            { id: id + 1, role: "echo", text: fin.fullResponse },
+          ]);
+          setInflight(null);
+        }, 200);
+        return;
+      }
+      const next = Math.min(cur.fullResponse.length, cur.revealed + CHARS_PER_TICK);
+      setInflight({ ...cur, revealed: next });
+    }, TOKEN_TICK_MS);
     return () => {
-      clearInterval(tick);
-      clearTimeout(finish);
+      clearInterval(spin);
+      clearInterval(reveal);
     };
   }, [streaming]);
 
@@ -232,7 +251,7 @@ export function PreviewShell({ onExit }: ShellProps): React.ReactElement {
         setDraft("");
         return;
       }
-      setInflight({ userText: text, frame: 0 });
+      setInflight({ userText: text, fullResponse: buildResponse(text), revealed: 0, frame: 0 });
       draftRef.current = "";
       setDraft("");
       return;
@@ -261,7 +280,12 @@ export function PreviewShell({ onExit }: ShellProps): React.ReactElement {
       </inkCompat.Box>
       {inflight ? (
         <inkCompat.Box marginTop={1}>
-          <StreamingRow userText={inflight.userText} frame={inflight.frame} />
+          <StreamingRow
+            userText={inflight.userText}
+            response={inflight.fullResponse.slice(0, inflight.revealed)}
+            frame={inflight.frame}
+            done={inflight.revealed >= inflight.fullResponse.length}
+          />
         </inkCompat.Box>
       ) : (
         <PromptLine value={draft} placeholder="say something…" />

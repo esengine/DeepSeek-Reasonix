@@ -119,12 +119,12 @@ describe("preview shell — submit + streaming", () => {
     expect(mid).toContain("thinking");
     expect(mid).not.toContain("you said: hello");
 
-    await new Promise((r) => setTimeout(r, 1700));
+    await new Promise((r) => setTimeout(r, 2500));
     await flush();
     const out = w.output();
     expect(out).toContain("you said: hello");
     handle.destroy();
-  }, 5000);
+  }, 8000);
 
   it("input is paused while streaming — keystrokes during the stream are dropped", async () => {
     const w = makeTestWriter();
@@ -142,13 +142,13 @@ describe("preview shell — submit + streaming", () => {
     await flush();
     stdin.push("X");
     await flush();
-    await new Promise((r) => setTimeout(r, 1700));
+    await new Promise((r) => setTimeout(r, 2500));
     await flush();
     const after = w.output();
     expect(after).toContain("you said: first");
     expect(after).not.toContain("you said: firstX");
     handle.destroy();
-  }, 5000);
+  }, 8000);
 
   it("empty submit is a no-op (no streaming starts)", async () => {
     const w = makeTestWriter();
