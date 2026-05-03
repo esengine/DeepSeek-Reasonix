@@ -119,7 +119,7 @@ import {
 import { SIDEBAR_MIN_TOTAL_COLS, SidebarPanel } from "./layout/SidebarPanel.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import { ToastRail } from "./layout/ToastRail.js";
-import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
+import { ViewportBudgetProvider, useIsModalActive } from "./layout/viewport-budget.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
@@ -295,13 +295,13 @@ function AppInner({
     s.cards.some((c) => c.kind === "user" || c.kind === "streaming"),
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
-  const activePlanCard = useAgentState((s) => {
+  const isModalActive = useIsModalActive();
+  const rawActivePlanCard = useAgentState((s) => {
     for (let i = s.cards.length - 1; i >= 0; i--) {
       const c = s.cards[i];
       if (
         c?.kind === "plan" &&
         c.variant === "active" &&
-        c.steps.some((step) => step.status !== "queued") &&
         c.steps.some((step) => step.status !== "done" && step.status !== "skipped")
       ) {
         return c;
@@ -309,6 +309,9 @@ function AppInner({
     }
     return null;
   });
+  // Approval modals (PlanConfirm etc.) suppress the pinned plan card so
+  // the user reviews the picker, not a preview of an unapproved plan.
+  const activePlanCard = isModalActive ? null : rawActivePlanCard;
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [languageVersion, setLanguageVersion] = useState(0);

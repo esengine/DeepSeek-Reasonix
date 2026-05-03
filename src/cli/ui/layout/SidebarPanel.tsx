@@ -6,6 +6,7 @@ import React from "react";
 import type { Card, PlanStep } from "../state/cards.js";
 import { useAgentState } from "../state/provider.js";
 import { CARD, FG, TONE } from "../theme/tokens.js";
+import { useIsModalActive } from "./viewport-budget.js";
 
 export const SIDEBAR_WIDTH = 28;
 /** Below this terminal width, sidebar refuses to render so the main column has room to breathe. */
@@ -21,9 +22,12 @@ export function SidebarPanel({
   subagentActivity,
 }: SidebarPanelProps): React.ReactElement | null {
   const cards = useAgentState((s) => s.cards);
-  const activePlan = findActivePlan(cards);
+  const isModalActive = useIsModalActive();
+  const activePlan = isModalActive ? null : findActivePlan(cards);
 
   // No plan = no sidebar. Tools/usage alone aren't worth eating 28 cols.
+  // Approval modals (PlanConfirm etc.) suppress the sidebar so the
+  // pre-approval plan card doesn't preview before the user accepts.
   if (!activePlan) return null;
 
   return (
@@ -37,15 +41,15 @@ export function SidebarPanel({
 }
 
 export function findActivePlan(cards: ReadonlyArray<Card>) {
-  // Mirrors the App.tsx selector. "Active" means execution-started: at least
-  // one step has left `queued` AND not all steps are done/skipped. Plans
-  // pending user approval have every step in `queued` and must NOT trigger.
+  // Mirrors the App.tsx selector. Returns the latest active plan with work
+  // pending. Approval-pending suppression lives at the call site via
+  // `useIsModalActive()` — finding-an-active-plan doesn't depend on modal
+  // state, so the predicate stays pure and unit-testable.
   for (let i = cards.length - 1; i >= 0; i--) {
     const c = cards[i];
     if (
       c?.kind === "plan" &&
       c.variant === "active" &&
-      c.steps.some((s) => s.status !== "queued") &&
       c.steps.some((s) => s.status !== "done" && s.status !== "skipped")
     ) {
       return c;

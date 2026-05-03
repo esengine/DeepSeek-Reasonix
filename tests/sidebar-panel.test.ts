@@ -68,12 +68,14 @@ describe("windowSteps", () => {
 });
 
 describe("findActivePlan", () => {
-  it("returns null when every step is queued — plan is awaiting approval", () => {
+  it("returns the plan when all steps are queued — pre-execution state", () => {
+    // Approval-pending suppression is the caller's job (via useIsModalActive);
+    // findActivePlan only checks variant + has-pending-work.
     const cards: Card[] = [planCard([step("a"), step("b"), step("c")])];
-    expect(findActivePlan(cards)).toBeNull();
+    expect(findActivePlan(cards)).toBe(cards[0]);
   });
 
-  it("returns the plan once any step has left queued", () => {
+  it("returns the plan while any step is running", () => {
     const cards: Card[] = [planCard([step("a", "running"), step("b"), step("c")])];
     expect(findActivePlan(cards)).toBe(cards[0]);
   });
