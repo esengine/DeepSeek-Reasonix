@@ -14,6 +14,7 @@ export type { Diff, Patch } from "./diff/patch.js";
 export { type DiffPools, diffFrames } from "./diff/diff-frames.js";
 export { serializePatches } from "./diff/serialize.js";
 export { Renderer, type RendererOptions } from "./runtime/renderer.js";
+export { renderToBytes } from "./runtime/render-to-bytes.js";
 export { type TestWriter, makeTestWriter } from "./runtime/test-writer.js";
 export { type Handle, type MountOptions, mount } from "./reconciler/mount.js";
 export {

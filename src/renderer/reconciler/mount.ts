@@ -2,10 +2,12 @@ import { type ReactNode, createElement } from "react";
 import { type DiffPools, diffFrames } from "../diff/diff-frames.js";
 import { type Cursor, type Frame, emptyFrame } from "../diff/frame.js";
 import { serializePatches } from "../diff/serialize.js";
+import { RendererBridgeContext } from "../ink-compat/renderer-bridge.js";
 import { ViewportContext } from "../ink-compat/viewport.js";
 import { KeystrokeContext, KeystrokeReader, type KeystrokeSource } from "../input/index.js";
 import { renderToScreen } from "../layout/layout.js";
 import type { LayoutNode } from "../layout/node.js";
+import { renderToBytes } from "../runtime/render-to-bytes.js";
 import { type HostRoot, hostToLayoutNode, reconciler } from "./host-config.js";
 
 export interface MountOptions {
@@ -20,6 +22,7 @@ export interface MountOptions {
 export interface Handle {
   update(element: ReactNode): void;
   resize(width: number, height: number): void;
+  emitStatic(element: ReactNode): void;
   destroy(): void;
 }
 
@@ -66,11 +69,32 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
     null,
   );
 
+  const emitStatic = (node: ReactNode): void => {
+    if (destroyed) return;
+    const bytes = renderToBytes(node, viewportWidth, opts.pools);
+    if (bytes.length === 0) return;
+    if (frame.screen.height > 0) {
+      opts.write(`\r\x1b[${frame.screen.height}A\x1b[J`);
+    } else {
+      opts.write("\r\x1b[J");
+    }
+    opts.write(bytes);
+    frame = emptyFrame(viewportWidth, viewportHeight);
+    root.onCommit();
+  };
+
+  const bridge = { emitStatic };
+
   const wrap = (node: ReactNode): ReactNode => {
+    const withBridge: ReactNode = createElement(
+      RendererBridgeContext.Provider,
+      { value: bridge },
+      node,
+    );
     const withViewport: ReactNode = createElement(
       ViewportContext.Provider,
       { value: { columns: viewportWidth, rows: viewportHeight } },
-      node,
+      withBridge,
     );
     return reader
       ? createElement(KeystrokeContext.Provider, { value: reader }, withViewport)
@@ -97,6 +121,7 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
         /* committed */
       });
     },
+    emitStatic,
     destroy(): void {
       if (destroyed) return;
       destroyed = true;
