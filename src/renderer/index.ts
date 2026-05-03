@@ -6,3 +6,5 @@ export { type Rectangle, Screen } from "./screen/screen.js";
 export { type DiffCallback, diffEach } from "./screen/diff.js";
 export type { BoxNode, LayoutNode, TextNode } from "./layout/node.js";
 export { type RenderPools, renderToScreen } from "./layout/layout.js";
+export { Box, type BoxProps, Text, type TextProps } from "./react/components.js";
+export { type RenderOptions, render } from "./react/render.js";
