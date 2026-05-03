@@ -9,12 +9,15 @@ import {
   saveReasoningEffort,
   writeConfig,
 } from "../../config.js";
+import { getLanguage, getSupportedLanguages, setLanguage } from "../../i18n/index.js";
+import type { LanguageCode } from "../../i18n/types.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
 
 interface SettingsBody {
   apiKey?: unknown;
   baseUrl?: unknown;
+  lang?: unknown;
   preset?: unknown;
   reasoningEffort?: unknown;
   search?: unknown;
@@ -50,6 +53,7 @@ export async function handleSettings(
         apiKey: cfg.apiKey ? redactKey(cfg.apiKey) : null,
         apiKeySet: Boolean(cfg.apiKey),
         baseUrl: cfg.baseUrl ?? null,
+        lang: getLanguage(),
         preset: cfg.preset ?? "auto",
         reasoningEffort: cfg.reasoningEffort ?? "max",
         search: cfg.search !== false,
@@ -73,6 +77,18 @@ export async function handleSettings(
     const cfg = readConfig(ctx.configPath);
     const changed: string[] = [];
 
+    if (fields.lang !== undefined) {
+      const raw = String(fields.lang);
+      const supported = getSupportedLanguages();
+      const langCode = supported.find((l) => l.toLowerCase() === raw.toLowerCase()) as
+        | LanguageCode
+        | undefined;
+      if (!langCode) {
+        return { status: 400, body: { error: `lang must be one of: ${supported.join(", ")}` } };
+      }
+      setLanguage(langCode);
+      changed.push("lang");
+    }
     if (fields.apiKey !== undefined) {
       if (typeof fields.apiKey !== "string" || !isPlausibleKey(fields.apiKey)) {
         return { status: 400, body: { error: "apiKey must be a plausible sk- token" } };

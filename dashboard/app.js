@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "preact/hooks";
 import { MODE } from "./src/lib/api";
 import { ToastStack, appBus } from "./src/lib/bus";
 import { ErrorBoundary, ErrorOverlay } from "./src/lib/error-boundary";
-import { t, useLang } from "./src/i18n";
+import { initLangFromServer, t, useLang } from "./src/i18n";
 import { ChatPanel } from "./src/panels/chat";
 import { HooksPanel } from "./src/panels/hooks";
 import { McpPanel } from "./src/panels/mcp";
@@ -60,7 +60,14 @@ function tabSections() {
 
 function App() {
   useLang();
-  const [activeId, setActiveId] = useState("chat");
+  useEffect(() => { initLangFromServer(); }, []);
+  const [activeId, setActiveId] = useState(() => {
+    try {
+      return localStorage.getItem("rx.activeTab") ?? "chat";
+    } catch {
+      return "chat";
+    }
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem("rx.sidebarCollapsed") === "1";
@@ -75,9 +82,19 @@ function App() {
       /* private mode / disabled storage — ignore */
     }
   }, [sidebarCollapsed]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("rx.activeTab", activeId);
+    } catch {
+      /* private mode / disabled storage — ignore */
+    }
+  }, [activeId]);
   const TAB_SECTIONS = tabSections();
   const ALL_TABS = TAB_SECTIONS.flatMap((s) => s.tabs);
   const active = ALL_TABS.find((t) => t.id === activeId) ?? ALL_TABS[0];
+  useEffect(() => {
+    if (active.id !== activeId) setActiveId(active.id);
+  }, [active.id, activeId]);
 
   useEffect(() => {
     const onNav = (ev) => {
