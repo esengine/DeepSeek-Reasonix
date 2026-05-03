@@ -1,29 +1,37 @@
 /** Markdown → Ink. Parsing via marked; visual mapping mirrors dashboard/app.css `.md` rules. Code blocks pass through cli-highlight for ANSI syntax coloring. */
 
 import { highlight, supportsLanguage } from "cli-highlight";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { type Token, type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
+import { wrapToCells } from "../../frame/width.js";
 import { FG, SURFACE, TONE } from "./theme/tokens.js";
 
-/** Right-pad to `cells` visual columns — wide chars (CJK, emoji) count as 2. */
-function padToCells(text: string, cells: number): string {
-  const w = stringWidth(text);
-  if (w >= cells) return text;
-  return text + " ".repeat(cells - w);
+/** Left margin consumed by CardBox (marginLeft=2 + borderLeft=1) + body paddingLeft. */
+const BODY_LEFT_CELLS = 7;
+
+const MarkdownWidthCtx = React.createContext<number | undefined>(undefined);
+
+function useWidth(): number {
+  const ctx = React.useContext(MarkdownWidthCtx);
+  if (ctx !== undefined) return ctx;
+  return (useStdout()?.stdout?.columns ?? process.stdout.columns ?? 80) - BODY_LEFT_CELLS;
 }
 
 marked.setOptions({ gfm: true, breaks: false });
 
-export function Markdown({ text }: { text: string }): React.ReactElement {
+export function Markdown({ text, width }: { text: string; width?: number }): React.ReactElement {
   const tokens = React.useMemo(() => marked.lexer(text), [text]);
+  const ctxWidth = width !== undefined ? Math.max(1, width) : undefined;
   return (
-    <Box flexDirection="column" gap={1}>
-      {tokens.map((token, i) => (
-        <BlockToken key={`${i}-${token.type}`} token={token} />
-      ))}
-    </Box>
+    <MarkdownWidthCtx.Provider value={ctxWidth}>
+      <Box flexDirection="column" gap={1}>
+        {tokens.map((token, i) => (
+          <BlockToken key={`${i}-${token.type}`} token={token} />
+        ))}
+      </Box>
+    </MarkdownWidthCtx.Provider>
   );
 }
 
@@ -100,7 +108,7 @@ function ListItem({
   const marker = item.task ? (item.checked ? "✓" : "○") : ordered ? `${index}.` : "·";
   const markerColor = item.task ? (item.checked ? TONE.ok : FG.faint) : FG.meta;
   const dim = item.task && item.checked === true;
-  const indent = "  ".repeat(depth + 1);
+  const indent = " ".repeat(depth + 1);
   return (
     <Box>
       <Text color={markerColor}>{`${indent}${marker} `}</Text>
@@ -135,14 +143,14 @@ function CodeBlock({ token }: { token: Tokens.Code }): React.ReactElement {
     <Box flexDirection="column">
       {lang ? (
         <Box>
-          <Text color={FG.meta}>{`  ${lang}`}</Text>
+          <Text color={FG.meta}>{` ${lang}`}</Text>
         </Box>
       ) : null}
       <Box flexDirection="column">
         {lines.map((line, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: code lines are positional and stable per render
           <Text key={`code-${i}`} backgroundColor={SURFACE.bgElev}>
-            {`  ${line}  `}
+            {` ${line} `}
           </Text>
         ))}
       </Box>
@@ -165,7 +173,7 @@ function Blockquote({ token }: { token: Tokens.Blockquote }): React.ReactElement
     <Box flexDirection="column">
       {(token.tokens ?? []).map((child, i) => (
         <Box key={`${i}-${child.type}`} flexDirection="row">
-          <Text color={TONE.brand}>{"  ▎  "}</Text>
+          <Text color={TONE.brand}>{" ▎ "}</Text>
           <Box flexDirection="column" flexGrow={1}>
             {child.type === "paragraph" ? (
               <Text italic color={FG.sub}>
@@ -181,54 +189,170 @@ function Blockquote({ token }: { token: Tokens.Blockquote }): React.ReactElement
   );
 }
 
-function HorizontalRule(): React.ReactElement {
-  return <Text color={FG.faint}>{"  ────────────────────────────────────"}</Text>;
+/** Right-pad to `cells` visual columns — wide chars (CJK, emoji) count as 2. */
+function padToCells(text: string, cells: number): string {
+  const w = stringWidth(text);
+  if (w >= cells) return text;
+  return text + " ".repeat(cells - w);
 }
 
-function Table({ token }: { token: Tokens.Table }): React.ReactElement {
-  const colCount = token.header.length;
-  const headerCells = token.header.map((c) => plainText(c.tokens));
-  const bodyCells = token.rows.map((row) => row.map((c) => plainText(c.tokens)));
-  const widths = new Array(colCount).fill(0);
+function HorizontalRule(): React.ReactElement {
+  const width = useWidth();
+  const rule = "─".repeat(Math.max(width, 1));
+  return <Text color={FG.faint}>{` ${rule}`}</Text>;
+}
+
+/** Pure function — no React deps. */
+export function tableLayout(
+  headerCells: string[],
+  bodyCells: string[][],
+  availableWidth: number,
+): ColumnarLayout | FallbackLayout {
+  const colCount = headerCells.length;
+  const GAP = " ";
+  const GAP_W = stringWidth(GAP);
+  const widths = new Array<number>(colCount).fill(0);
   for (let c = 0; c < colCount; c++) {
     widths[c] = Math.max(
       stringWidth(headerCells[c] ?? ""),
       ...bodyCells.map((r) => stringWidth(r[c] ?? "")),
     );
   }
-  const GAP = "  ";
-  const ruleRow = widths.map((w) => "─".repeat(w)).join(GAP);
+  const totalWidth = widths.reduce((s, w) => s + w, 0) + GAP_W * (colCount - 1);
+  if (totalWidth <= availableWidth) {
+    return { fallback: false, widths, colCount, gap: GAP };
+  }
+  // Fallback: key/value pairs, label column = widest header, value gets the rest.
+  const rawLabel = Math.max(...headerCells.map((h) => stringWidth(h))) + 2; // label + ": "
+  const labelPad = Math.min(rawLabel, availableWidth - 1);
+  const valueCells = availableWidth - labelPad;
+  return { fallback: true, labelPad, valueCells };
+}
+
+interface ColumnarLayout {
+  fallback: false;
+  widths: number[];
+  colCount: number;
+  gap: string;
+}
+interface FallbackLayout {
+  fallback: true;
+  labelPad: number;
+  valueCells: number;
+}
+
+function Table({ token }: { token: Tokens.Table }): React.ReactElement {
+  const width = useWidth();
+  const headerCells = token.header.map((c) => plainText(c.tokens));
+  const bodyCells = token.rows.map((row) => row.map((c) => plainText(c.tokens)));
+  const layout = tableLayout(headerCells, bodyCells, width);
+  if (!layout.fallback)
+    return (
+      <ColumnarTable
+        headerCells={headerCells}
+        bodyCells={bodyCells}
+        widths={layout.widths}
+        colCount={headerCells.length}
+        gap={layout.gap}
+      />
+    );
+  return (
+    <FallbackTable
+      headerCells={headerCells}
+      bodyCells={bodyCells}
+      labelPad={layout.labelPad}
+      valueCells={layout.valueCells}
+    />
+  );
+}
+
+function ColumnarTable({
+  headerCells,
+  bodyCells,
+  widths,
+  colCount,
+  gap,
+}: {
+  headerCells: string[];
+  bodyCells: string[][];
+  widths: number[];
+  colCount: number;
+  gap: string;
+}): React.ReactElement {
+  const ruleRow = widths.map((w) => "─".repeat(w)).join(gap);
   return (
     <Box flexDirection="column">
       <Box>
-        <Text>{"      "}</Text>
+        <Text> </Text>
         {headerCells.map((cell, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: header cells positional
           <React.Fragment key={`h-${i}`}>
             <Text bold color={FG.sub}>
               {padToCells(cell, widths[i]!)}
             </Text>
-            {i < colCount - 1 ? <Text>{GAP}</Text> : null}
+            {i < colCount - 1 ? <Text>{gap}</Text> : null}
           </React.Fragment>
         ))}
       </Box>
       <Box>
-        <Text>{"      "}</Text>
+        <Text> </Text>
         <Text color={FG.faint}>{ruleRow}</Text>
       </Box>
       {bodyCells.map((row, ri) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: body rows positional
         <Box key={`tr-${ri}`}>
-          <Text>{"      "}</Text>
+          <Text> </Text>
           {row.map((cell, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: cells positional
             <React.Fragment key={`c-${ri}-${i}`}>
               <Text color={FG.body}>{padToCells(cell ?? "", widths[i]!)}</Text>
-              {i < colCount - 1 ? <Text>{GAP}</Text> : null}
+              {i < colCount - 1 ? <Text>{gap}</Text> : null}
             </React.Fragment>
           ))}
         </Box>
       ))}
+    </Box>
+  );
+}
+
+function FallbackTable({
+  headerCells,
+  bodyCells,
+  labelPad,
+  valueCells,
+}: {
+  headerCells: string[];
+  bodyCells: string[][];
+  labelPad: number;
+  valueCells: number;
+}): React.ReactElement {
+  return (
+    <Box flexDirection="column">
+      {headerCells.map((h, ci) => {
+        const label = `${padToCells(h, labelPad - 2)}: `;
+        const values = bodyCells.map((r) => r[ci] ?? "");
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: header cells positional
+          <Box key={`fk-${ci}`} flexDirection="column">
+            {values.map((v, ri) => {
+              const lines = wrapToCells(v, valueCells);
+              return lines.map((line, li) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: fallback table lines are positional
+                <Box key={`fv-${ri}-${li}`}>
+                  {li === 0 ? (
+                    <Text bold color={FG.sub}>
+                      {label}
+                    </Text>
+                  ) : (
+                    <Text>{padToCells("", labelPad)}</Text>
+                  )}
+                  <Text color={FG.body}>{line}</Text>
+                </Box>
+              ));
+            })}
+          </Box>
+        );
+      })}
     </Box>
   );
 }
@@ -347,7 +471,7 @@ function InlineToken({ token }: { token: Token }): React.ReactElement {
   }
 }
 
-function plainText(tokens: Token[] | undefined): string {
+export function plainText(tokens: Token[] | undefined): string {
   if (!tokens) return "";
   let out = "";
   for (const t of tokens) {
