@@ -38,13 +38,108 @@ export function renderToScreen(
   const laid = layout(node, w, pools);
   const cap = maxHeight !== undefined ? Math.max(0, Math.floor(maxHeight)) : laid.rows.length;
   const skip = Math.max(0, laid.rows.length - cap);
-  const h = laid.rows.length - skip;
-  const screen = new Screen(w, h);
+  return blitRowSlice(laid.rows, skip, laid.rows.length, w, pools);
+}
+
+export interface ViewportSplit {
+  readonly screen: Screen;
+  readonly skipped: number;
+  readonly totalRows: number;
+  serializePromoted(fromRow: number, toRow: number): string;
+}
+
+export function renderViewport(
+  node: LayoutNode,
+  width: number,
+  pools: RenderPools,
+  maxHeight: number,
+): ViewportSplit {
+  const w = Math.max(0, width | 0);
+  if (w === 0) {
+    return {
+      screen: new Screen(0, 0),
+      skipped: 0,
+      totalRows: 0,
+      serializePromoted: () => "",
+    };
+  }
+  const laid = layout(node, w, pools);
+  const cap = Math.max(0, Math.floor(maxHeight));
+  const skipped = Math.max(0, laid.rows.length - cap);
+  const screen = blitRowSlice(laid.rows, skipped, laid.rows.length, w, pools);
+  return {
+    screen,
+    skipped,
+    totalRows: laid.rows.length,
+    serializePromoted: (fromRow, toRow) =>
+      serializeRowSlice(
+        laid.rows,
+        Math.max(0, fromRow),
+        Math.min(toRow, laid.rows.length),
+        w,
+        pools,
+      ),
+  };
+}
+
+function blitRowSlice(
+  rows: LayoutRows,
+  fromRow: number,
+  toRow: number,
+  width: number,
+  pools: RenderPools,
+): Screen {
+  const h = Math.max(0, toRow - fromRow);
+  const screen = new Screen(width, h);
   for (let y = 0; y < h; y++) {
-    for (const frag of laid.rows[y + skip]!) blitFragment(screen, frag, y, pools);
+    for (const frag of rows[y + fromRow]!) blitFragment(screen, frag, y, pools);
   }
   screen.resetDamage();
   return screen;
+}
+
+function serializeRowSlice(
+  rows: LayoutRows,
+  fromRow: number,
+  toRow: number,
+  width: number,
+  pools: RenderPools,
+): string {
+  if (toRow <= fromRow) return "";
+  const screen = blitRowSlice(rows, fromRow, toRow, width, pools);
+  let out = "";
+  let curStyle = pools.style.none;
+  let curLink = 0;
+  for (let y = 0; y < screen.height; y++) {
+    if (y > 0) {
+      out += pools.style.transition(curStyle, pools.style.none);
+      curStyle = pools.style.none;
+      if (curLink !== 0) {
+        out += "\x1b]8;;\x1b\\";
+        curLink = 0;
+      }
+      out += "\r\n";
+    }
+    for (let x = 0; x < screen.width; x++) {
+      const cell = screen.cellAt(x, y);
+      if (!cell) continue;
+      if (cell.width === CellWidth.SpacerTail) continue;
+      if (cell.styleId !== curStyle) {
+        out += pools.style.transition(curStyle, cell.styleId);
+        curStyle = cell.styleId;
+      }
+      if (cell.hyperlinkId !== curLink) {
+        const uri = pools.hyperlink.get(cell.hyperlinkId) ?? "";
+        out += `\x1b]8;;${uri}\x1b\\`;
+        curLink = cell.hyperlinkId;
+      }
+      out += pools.char.get(cell.charId);
+    }
+  }
+  out += pools.style.transition(curStyle, pools.style.none);
+  if (curLink !== 0) out += "\x1b]8;;\x1b\\";
+  out += "\r\n";
+  return out;
 }
 
 function layout(node: LayoutNode, availableWidth: number, pools: RenderPools): Laid {

@@ -6,7 +6,7 @@ import { RendererBridgeContext } from "../ink-compat/renderer-bridge.js";
 import { AppContext } from "../ink-compat/use-app.js";
 import { ViewportContext } from "../ink-compat/viewport.js";
 import { KeystrokeContext, KeystrokeReader, type KeystrokeSource } from "../input/index.js";
-import { renderToScreen } from "../layout/layout.js";
+import { renderViewport } from "../layout/layout.js";
 import type { LayoutNode } from "../layout/node.js";
 import { renderToBytes } from "../runtime/render-to-bytes.js";
 import { type HostRoot, hostToLayoutNode, reconciler } from "./host-config.js";
@@ -36,6 +36,7 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
   let viewportHeight = opts.viewportHeight;
   let frame: Frame = emptyFrame(viewportWidth, viewportHeight);
   let reservedRows = 0;
+  let promotedRows = 0;
   let destroyed = false;
   let lastElement: ReactNode = element;
 
@@ -47,7 +48,20 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       if (destroyed) return;
       const layout = collectRootLayout(root.children);
       const maxHeight = Math.max(1, viewportHeight - 1);
-      const screen = renderToScreen(layout, viewportWidth, opts.pools, maxHeight);
+      const split = renderViewport(layout, viewportWidth, opts.pools, maxHeight);
+      const newPromote = Math.max(0, split.skipped - promotedRows);
+      if (newPromote > 0) {
+        if (frame.screen.height > 0) {
+          opts.write(`\r\x1b[${frame.screen.height}A\x1b[J`);
+        } else if (reservedRows === 0) {
+          opts.write("\r\x1b[J");
+        }
+        opts.write(split.serializePromoted(promotedRows, split.skipped));
+        promotedRows = split.skipped;
+        frame = emptyFrame(viewportWidth, viewportHeight);
+        reservedRows = 0;
+      }
+      const screen = split.screen;
       const targetReserve = Math.min(screen.height, Math.max(0, viewportHeight - 1));
       if (targetReserve > reservedRows) {
         const delta = targetReserve - reservedRows;
