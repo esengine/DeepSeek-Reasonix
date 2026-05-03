@@ -17,6 +17,8 @@ export interface Keystroke {
   readonly return: boolean;
   readonly escape: boolean;
   readonly tab: boolean;
+  readonly wheelUp: boolean;
+  readonly wheelDown: boolean;
 }
 
 export function emptyKeystroke(): Keystroke {
@@ -39,6 +41,8 @@ export function emptyKeystroke(): Keystroke {
     return: false,
     escape: false,
     tab: false,
+    wheelUp: false,
+    wheelDown: false,
   };
 }
 
@@ -152,6 +156,15 @@ function parseCsi(s: string, start: number): Consumed {
 
 function decodeCsi(params: string, final: string, raw: string): Keystroke {
   const base = { ...emptyKeystroke(), raw };
+
+  if (params.startsWith("<") && (final === "M" || final === "m")) {
+    const mouse = params.slice(1).split(";");
+    const button = Number.parseInt(mouse[0] ?? "", 10);
+    if (button === 64) return { ...base, wheelUp: true };
+    if (button === 65) return { ...base, wheelDown: true };
+    return base;
+  }
+
   const segments = params.split(";");
   const modCode = segments[1] ? Number.parseInt(segments[1], 10) : 1;
   const mods = decodeModifiers(modCode);

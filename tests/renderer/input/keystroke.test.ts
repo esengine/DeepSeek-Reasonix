@@ -107,6 +107,23 @@ describe("parseKeystrokes — modifier-encoded CSI", () => {
   });
 });
 
+describe("parseKeystrokes — SGR mouse wheel", () => {
+  it("button 64 → wheelUp", () => {
+    const k = parseKeystrokes("\x1b[<64;10;5M")[0]!;
+    expect(k.wheelUp).toBe(true);
+    expect(k.wheelDown).toBe(false);
+  });
+  it("button 65 → wheelDown", () => {
+    const k = parseKeystrokes("\x1b[<65;10;5M")[0]!;
+    expect(k.wheelDown).toBe(true);
+    expect(k.wheelUp).toBe(false);
+  });
+  it("'m' release variant works the same way", () => {
+    const k = parseKeystrokes("\x1b[<64;10;5m")[0]!;
+    expect(k.wheelUp).toBe(true);
+  });
+});
+
 describe("parseKeystrokes — sequences in one chunk", () => {
   it("paste of two characters yields two events", () => {
     const keys = parseKeystrokes("ab");

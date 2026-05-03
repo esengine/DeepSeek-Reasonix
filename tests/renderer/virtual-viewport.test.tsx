@@ -168,6 +168,45 @@ describe("virtual viewport — bottom-stick + PgUp/PgDn scrolling", () => {
     handle.destroy();
   });
 
+  it("wheel-up scrolls back by ~3 rows; wheel-down by ~3 rows", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(<Tower rows={20} />, {
+      viewportWidth: 20,
+      viewportHeight: 6,
+      pools: pools(),
+      write: w.write,
+      stdin,
+      scroll: "virtual",
+    });
+    await flush();
+    stdin.push("\x1b[<64;1;1M");
+    await flush();
+    let screen = applyBytes(w.output(), 20, 6);
+    expect(screen.slice(0, 5)).toEqual(["row-12", "row-13", "row-14", "row-15", "row-16"]);
+    stdin.push("\x1b[<65;1;1M");
+    await flush();
+    screen = applyBytes(w.output(), 20, 6);
+    expect(screen.slice(0, 5)).toEqual(["row-15", "row-16", "row-17", "row-18", "row-19"]);
+    handle.destroy();
+  });
+
+  it("enables SGR mouse mode at mount, disables on destroy", async () => {
+    const w = makeTestWriter();
+    const handle = mount(<Tower rows={5} />, {
+      viewportWidth: 20,
+      viewportHeight: 6,
+      pools: pools(),
+      write: w.write,
+      stdin: makeFakeStdin(),
+      scroll: "virtual",
+    });
+    await flush();
+    expect(w.output()).toContain("\x1b[?1000h\x1b[?1006h");
+    handle.destroy();
+    expect(w.output()).toContain("\x1b[?1006l\x1b[?1000l");
+  });
+
   it("End scrolls back to the bottom", async () => {
     const w = makeTestWriter();
     const stdin = makeFakeStdin();

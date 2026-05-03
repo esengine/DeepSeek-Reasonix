@@ -35,6 +35,8 @@ export interface Handle {
 
 const RESET_SGR = "\x1b[0m";
 const CLOSE_HYPERLINK = "\x1b]8;;\x1b\\";
+const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1006h";
+const DISABLE_MOUSE = "\x1b[?1006l\x1b[?1000l";
 
 export function mount(element: ReactNode, opts: MountOptions): Handle {
   const scrollMode: ScrollMode = opts.scroll ?? "scrollback";
@@ -65,12 +67,15 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
   };
 
   if (reader && scrollMode === "virtual") {
+    opts.write(ENABLE_MOUSE);
     reader.subscribe((k) => {
       const window = Math.max(1, viewportHeight - 1);
       if (k.pageUp) scrollBy(-window);
       else if (k.pageDown) scrollBy(window);
       else if (k.home) scrollBy(-Number.MAX_SAFE_INTEGER);
       else if (k.end) scrollBy(Number.MAX_SAFE_INTEGER);
+      else if (k.wheelUp) scrollBy(-3);
+      else if (k.wheelDown) scrollBy(3);
     });
   }
 
@@ -242,7 +247,8 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       reconciler.updateContainer(null, container, null, () => {
         /* committed */
       });
-      opts.write(`${RESET_SGR}${CLOSE_HYPERLINK}`);
+      const teardown = scrollMode === "virtual" ? DISABLE_MOUSE : "";
+      opts.write(`${teardown}${RESET_SGR}${CLOSE_HYPERLINK}`);
     },
   };
 }
