@@ -57,7 +57,11 @@ function layoutBox(node: BoxNode, availableWidth: number, pools: RenderPools): L
   const padLeft = clampPad(node.paddingLeft);
   const padRight = clampPad(node.paddingRight);
   const horizBorder = (useLeft ? 1 : 0) + (useRight ? 1 : 0);
-  const innerWidth = Math.max(0, availableWidth - horizBorder - padLeft - padRight);
+  const outerWidth =
+    node.width !== undefined
+      ? Math.max(0, Math.min(availableWidth, Math.floor(node.width)))
+      : availableWidth;
+  const innerWidth = Math.max(0, outerWidth - horizBorder - padLeft - padRight);
 
   const inner =
     node.flexDirection === "row"
@@ -83,7 +87,7 @@ function layoutBox(node: BoxNode, availableWidth: number, pools: RenderPools): L
       }
       next.push(...row);
       if (useRight && border) {
-        next.push(makeBorderFragment(border.right, availableWidth - 1, rightStyleId));
+        next.push(makeBorderFragment(border.right, outerWidth - 1, rightStyleId));
       }
       contentRows[i] = next;
     }
@@ -95,7 +99,7 @@ function layoutBox(node: BoxNode, availableWidth: number, pools: RenderPools): L
       makeBorderEdge(
         border,
         "top",
-        availableWidth,
+        outerWidth,
         useLeft,
         useRight,
         node.borderTopColor ?? node.borderColor,
@@ -109,7 +113,7 @@ function layoutBox(node: BoxNode, availableWidth: number, pools: RenderPools): L
       makeBorderEdge(
         border,
         "bottom",
-        availableWidth,
+        outerWidth,
         useLeft,
         useRight,
         node.borderBottomColor ?? node.borderColor,
@@ -118,7 +122,16 @@ function layoutBox(node: BoxNode, availableWidth: number, pools: RenderPools): L
     );
   }
 
-  return { rows: allRows, width: availableWidth };
+  if (node.height !== undefined) {
+    const target = Math.max(0, Math.floor(node.height));
+    if (allRows.length > target) {
+      allRows.length = target;
+    } else {
+      while (allRows.length < target) allRows.push([]);
+    }
+  }
+
+  return { rows: allRows, width: outerWidth };
 }
 
 function makeBorderFragment(glyph: string, leftPad: number, styleId: number): RowFragment {
@@ -284,6 +297,7 @@ function intrinsicWidth(node: LayoutNode): number {
     }
     return max;
   }
+  if (node.width !== undefined) return Math.max(0, Math.floor(node.width));
   const padLeft = clampPad(node.paddingLeft);
   const padRight = clampPad(node.paddingRight);
   const border = resolveBorderStyle(node.borderStyle);

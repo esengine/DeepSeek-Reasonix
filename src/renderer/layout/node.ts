@@ -16,6 +16,8 @@ export interface BoxNode {
   readonly flexDirection?: "column" | "row";
   readonly flexGrow?: number;
   readonly justifyContent?: JustifyContent;
+  readonly width?: number;
+  readonly height?: number;
   readonly paddingTop?: number;
   readonly paddingBottom?: number;
   readonly paddingLeft?: number;

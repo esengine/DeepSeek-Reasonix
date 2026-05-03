@@ -41,10 +41,14 @@ function elementToLayoutNode(element: ReactElement): LayoutNode | null {
       flexDirection?: "column" | "row";
       flexGrow?: number;
       justifyContent?: BoxProps["justifyContent"];
+      width?: number;
+      height?: number;
     } = {};
     if (boxProps.flexDirection !== undefined) flex.flexDirection = boxProps.flexDirection;
     if (boxProps.flexGrow !== undefined) flex.flexGrow = boxProps.flexGrow;
     if (boxProps.justifyContent !== undefined) flex.justifyContent = boxProps.justifyContent;
+    if (boxProps.width !== undefined) flex.width = boxProps.width;
+    if (boxProps.height !== undefined) flex.height = boxProps.height;
     const border = resolveBorder(boxProps);
     return { kind: "box", children, ...flex, ...padding, ...border } satisfies BoxNode;
   }

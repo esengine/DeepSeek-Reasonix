@@ -53,6 +53,8 @@ export function Box(props: InkBoxProps): React.ReactElement {
       flexDirection={props.flexDirection}
       flexGrow={marginTop || marginBottom || marginLeft || marginRight ? undefined : props.flexGrow}
       justifyContent={props.justifyContent}
+      width={typeof props.width === "number" ? props.width : undefined}
+      height={typeof props.height === "number" ? props.height : undefined}
       paddingTop={padTop}
       paddingBottom={padBottom}
       paddingLeft={padLeft}

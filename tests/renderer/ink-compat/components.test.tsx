@@ -176,6 +176,36 @@ describe("ink-compat Spacer — flexGrow fills remaining row space", () => {
   });
 });
 
+describe("ink-compat Box — width / height pass through", () => {
+  it("width={N} clips content past the box's outer width", () => {
+    const p = pools();
+    const s = render(
+      <Box width={6}>
+        <Text>abcdefghij</Text>
+      </Box>,
+      { width: 20, pools: p },
+    );
+    expect(read(s, p)[0]?.startsWith("abcdef ")).toBe(true);
+    expect(read(s, p)[0]?.includes("ghij")).toBe(false);
+  });
+
+  it("height={1} on an empty Box renders a single empty spacer row", () => {
+    const p = pools();
+    const s = render(
+      <Box flexDirection="column">
+        <Text>up</Text>
+        <Box height={1} />
+        <Text>dn</Text>
+      </Box>,
+      { width: 5, pools: p },
+    );
+    const lines = read(s, p);
+    expect(lines[0]).toContain("up");
+    expect(lines[1]?.trim()).toBe("");
+    expect(lines[2]).toContain("dn");
+  });
+});
+
 describe("ink-compat Box — justifyContent passes through", () => {
   it("space-between distributes children to both edges", () => {
     const p = pools();
