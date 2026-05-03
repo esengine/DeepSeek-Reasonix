@@ -13,3 +13,5 @@ export { type Cursor, type Frame, emptyFrame } from "./diff/frame.js";
 export type { Diff, Patch } from "./diff/patch.js";
 export { type DiffPools, diffFrames } from "./diff/diff-frames.js";
 export { serializePatches } from "./diff/serialize.js";
+export { Renderer, type RendererOptions } from "./runtime/renderer.js";
+export { type TestWriter, makeTestWriter } from "./runtime/test-writer.js";
