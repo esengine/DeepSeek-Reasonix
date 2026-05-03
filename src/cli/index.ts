@@ -350,6 +350,14 @@ program
   });
 
 program
+  .command("banner-demo")
+  .description("experimental — welcome banner rendered through the ink-compat shim")
+  .action(async () => {
+    const { runBannerDemo } = await import("./commands/banner-demo.js");
+    await runBannerDemo();
+  });
+
+program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
