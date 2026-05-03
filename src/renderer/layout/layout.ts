@@ -1,4 +1,20 @@
-import stringWidth from "string-width";
+import stringWidthRaw from "string-width";
+
+// Box drawing block (U+2500..U+257F) renders as width 1 on every terminal we
+// care about — Windows Terminal included. We pin that explicitly because
+// otherwise stringWidth's `ambiguousIsNarrow: false` mode treats them as wide
+// and our borders break. For everything else we err on the wide side so that
+// the layout reserves enough cells when the terminal renders ambiguous chars
+// (▶ ⊞ ↻ ◆ etc) as 2 columns; on Western terms this just leaves a trailing
+// blank cell after each, which is harmless.
+function stringWidth(s: string): number {
+  if (s.length === 0) return 0;
+  if (s.length === 1) {
+    const code = s.charCodeAt(0);
+    if (code >= 0x2500 && code <= 0x257f) return 1;
+  }
+  return stringWidthRaw(s, { ambiguousIsNarrow: false });
+}
 import type { CharPool } from "../pools/char-pool.js";
 import type { HyperlinkPool } from "../pools/hyperlink-pool.js";
 import type { AnsiCode, StylePool } from "../pools/style-pool.js";

@@ -107,8 +107,24 @@ function writeCell(
 
   transitionStyle(out, cursor, cell.styleId, pools);
   transitionHyperlink(out, cursor, cell.hyperlinkId, pools);
-  out.push({ type: "stdout", content: pools.char.get(cell.charId) });
-  cursor.x += cell.width === CellWidth.Wide ? 2 : 1;
+  const isWide = cell.width === CellWidth.Wide;
+  const charStr = pools.char.get(cell.charId);
+  if (isWide) {
+    // Compensation for terminal-vs-layout width disagreement on East Asian
+    // Ambiguous chars: pre-write a space at col+1 (so it's blank on Western
+    // terms where the glyph renders only 1 wide), then jump back, write the
+    // char, then force the cursor to col+2 regardless of how many cells the
+    // terminal actually advanced. Borrowed from Claude Code's logUpdate.
+    out.push({ type: "cursorTo", col: cursor.x + 1 });
+    out.push({ type: "stdout", content: " " });
+    out.push({ type: "cursorTo", col: cursor.x });
+    out.push({ type: "stdout", content: charStr });
+    cursor.x += 2;
+    out.push({ type: "cursorTo", col: cursor.x });
+  } else {
+    out.push({ type: "stdout", content: charStr });
+    cursor.x += 1;
+  }
 }
 
 function transitionStyle(

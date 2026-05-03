@@ -172,7 +172,7 @@ describe("diffFrames — hyperlink transitions", () => {
 });
 
 describe("diffFrames — wide-char (CJK) handling", () => {
-  it("skips SpacerTail; the wide glyph alone advances the cursor", () => {
+  it("skips SpacerTail; emits compensation around wide glyph (leading space + cha + char + cha)", () => {
     const p = pools();
     withPools(p, () => {
       const a = frame(4, 1);
@@ -192,7 +192,7 @@ describe("diffFrames — wide-char (CJK) handling", () => {
       });
       const out = diffFrames(a, b, p);
       const stdout = out.filter((pp): pp is Patch & { type: "stdout" } => pp.type === "stdout");
-      expect(stdout.map((p) => p.content)).toEqual(["你"]);
+      expect(stdout.map((p) => p.content)).toEqual([" ", "你"]);
     });
   });
 });
