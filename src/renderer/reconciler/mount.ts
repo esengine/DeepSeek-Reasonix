@@ -35,6 +35,7 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
   let viewportWidth = opts.viewportWidth;
   let viewportHeight = opts.viewportHeight;
   let frame: Frame = emptyFrame(viewportWidth, viewportHeight);
+  let reservedRows = 0;
   let destroyed = false;
   let lastElement: ReactNode = element;
 
@@ -46,12 +47,14 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       if (destroyed) return;
       const layout = collectRootLayout(root.children);
       const screen = renderToScreen(layout, viewportWidth, opts.pools);
-      const isFirstPaint = frame.screen.height === 0 && screen.height > 0;
-      if (isFirstPaint) {
-        const reserve = Math.min(screen.height, Math.max(0, viewportHeight - 1));
-        let prelude = "\r";
-        if (reserve > 0) prelude += `${"\n".repeat(reserve)}\x1b[${reserve}A`;
+      const targetReserve = Math.min(screen.height, Math.max(0, viewportHeight - 1));
+      if (targetReserve > reservedRows) {
+        const delta = targetReserve - reservedRows;
+        let prelude = "";
+        if (reservedRows === 0) prelude += "\r";
+        prelude += `${"\n".repeat(delta)}\x1b[${delta}A`;
         opts.write(prelude);
+        reservedRows = targetReserve;
       }
       const next: Frame = {
         screen,
