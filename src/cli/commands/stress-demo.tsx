@@ -103,8 +103,13 @@ function decoratePlan(status: PlanStep["status"], spin: string): { glyph: string
   }
 }
 
+const SHELL_WINDOW = 5;
+
 function ShellCard({ lines, frame }: { lines: number; frame: number }): React.ReactElement {
-  const visible = SHELL_LINES.slice(0, lines);
+  const total = Math.min(lines, SHELL_LINES.length);
+  const startIdx = Math.max(0, total - SHELL_WINDOW);
+  const visible = SHELL_LINES.slice(startIdx, total);
+  const hidden = startIdx;
   const running = lines < SHELL_LINES.length;
   const spin = SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? "·";
   return (
@@ -120,10 +125,13 @@ function ShellCard({ lines, frame }: { lines: number; frame: number }): React.Re
         <inkCompat.Text color={BRAND} bold>
           npm test
         </inkCompat.Text>
+        {hidden > 0 ? (
+          <inkCompat.Text color={FAINT}>{`(+${hidden} earlier)`}</inkCompat.Text>
+        ) : null}
       </inkCompat.Box>
       {visible.map((line, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: shell output lines are positional + append-only
-        <inkCompat.Text key={`shell-${i}`} dimColor={line.startsWith(" PASS")}>
+        <inkCompat.Text key={`shell-${startIdx + i}`} dimColor={line.startsWith(" PASS")}>
           {line || " "}
         </inkCompat.Text>
       ))}
@@ -221,9 +229,7 @@ export function StressShell({ onExit }: ShellProps): React.ReactElement {
       <ShellCard lines={shellLines} frame={shellFrame} />
       <ResponseCard revealed={revealed} frame={responseFrame} />
       <inkCompat.Box marginTop={1}>
-        <inkCompat.Text dimColor>
-          stress mode · 4 concurrent live regions · PgUp/PgDn scroll · Esc exit
-        </inkCompat.Text>
+        <inkCompat.Text dimColor>stress mode · 4 concurrent live regions · Esc exit</inkCompat.Text>
       </inkCompat.Box>
     </inkCompat.Box>
   );
@@ -261,7 +267,6 @@ export async function runStressDemo(opts: StressDemoOptions = {}): Promise<void>
     write: (bytes) => stdout.write(bytes),
     stdin,
     onExit: () => resolveExit(),
-    scroll: "virtual",
   });
 
   const onResize = () => handle.resize(stdout.columns ?? 80, stdout.rows ?? 30);
