@@ -9,6 +9,7 @@ import {
   mount,
   useKeystroke,
 } from "../../renderer/index.js";
+import { MarkdownView } from "../ui/markdown-view.js";
 import type { Card } from "../ui/state/cards.js";
 import type { AgentEvent } from "../ui/state/events.js";
 import { AgentStoreProvider, useAgentState, useDispatch } from "../ui/state/provider.js";
@@ -19,7 +20,6 @@ const FAINT = "#6e7681";
 const META = "#8b949e";
 const ACCENT = "#d2a8ff";
 const OK = "#7ee787";
-const ERR = "#ff8b81";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 const SPINNER_TICK_MS = 80;
@@ -47,9 +47,13 @@ export function buildScript(): ReadonlyArray<ScriptStep> {
     "and let the cell-diff renderer paint the cards.",
   ];
   const replyChunks = [
-    "Mounting through the cell-diff renderer.\n",
-    "Each card is dispatched through the real reducer ",
-    "and rendered without Ink — only the changed cells get patched on stdout.",
+    "## Mount path\n\n",
+    "Each card is dispatched through the real reducer and rendered ",
+    "**without Ink** — only the changed cells get patched on stdout.\n\n",
+    "Key bits:\n\n",
+    "- `mount()` from `src/renderer/index.ts:19`\n",
+    "- markdown via `markdownToLines()`\n",
+    "- spans wrapped in `inkCompat.Text`\n",
   ];
   return [
     { delayMs: 200, event: { type: "user.submit", text: "show me the chat-v2 mount" } },
@@ -114,23 +118,27 @@ function previewLine(text: string, max = 72): string {
   return `${flat.slice(0, max - 1)}…`;
 }
 
-function summarize(card: Card): { glyph: string; tone: string; head: string; body: string } {
+interface CardHeader {
+  readonly glyph: string;
+  readonly tone: string;
+  readonly head: string;
+}
+
+function headerFor(card: Card): CardHeader {
   switch (card.kind) {
     case "user":
-      return { glyph: "›", tone: ACCENT, head: "you", body: previewLine(card.text) };
+      return { glyph: "›", tone: ACCENT, head: "you" };
     case "reasoning":
       return {
         glyph: card.streaming ? "◇" : "◆",
         tone: META,
         head: card.streaming ? "reasoning…" : `reasoning · ${card.tokens}t`,
-        body: previewLine(card.text),
       };
     case "streaming":
       return {
         glyph: card.done ? "‹" : "▸",
         tone: card.done ? OK : BRAND,
         head: card.done ? "reply" : "streaming…",
-        body: previewLine(card.text),
       };
     case "tool": {
       const status = card.aborted
@@ -143,32 +151,36 @@ function summarize(card: Card): { glyph: string; tone: string; head: string; bod
               : `exit ${card.exitCode}`
             : "running";
       const tone = card.done && !card.aborted && !card.rejected ? OK : BRAND;
-      return {
-        glyph: card.done ? "▣" : "▢",
-        tone,
-        head: `${card.name} · ${status}`,
-        body: previewLine(card.output) || "(no output)",
-      };
+      return { glyph: card.done ? "▣" : "▢", tone, head: `${card.name} · ${status}` };
     }
     case "live":
-      return {
-        glyph: "·",
-        tone: META,
-        head: card.variant,
-        body: previewLine(card.text),
-      };
+      return { glyph: "·", tone: META, head: card.variant };
     default:
-      return {
-        glyph: "·",
-        tone: META,
-        head: card.kind,
-        body: "",
-      };
+      return { glyph: "·", tone: META, head: card.kind };
+  }
+}
+
+function CardBody({ card }: { card: Card }): React.ReactElement | null {
+  switch (card.kind) {
+    case "user":
+      return <inkCompat.Text>{previewLine(card.text)}</inkCompat.Text>;
+    case "reasoning":
+    case "streaming":
+      return card.text.length > 0 ? <MarkdownView text={card.text} /> : null;
+    case "tool":
+      return (
+        <inkCompat.Text color={FAINT}>{previewLine(card.output) || "(no output)"}</inkCompat.Text>
+      );
+    case "live":
+      return <inkCompat.Text>{previewLine(card.text)}</inkCompat.Text>;
+    default:
+      return null;
   }
 }
 
 function CardRow({ card }: { card: Card }): React.ReactElement {
-  const { glyph, tone, head, body } = summarize(card);
+  const { glyph, tone, head } = headerFor(card);
+  const body = <CardBody card={card} />;
   return (
     <inkCompat.Box flexDirection="column">
       <inkCompat.Box flexDirection="row" gap={1}>
@@ -177,9 +189,9 @@ function CardRow({ card }: { card: Card }): React.ReactElement {
         </inkCompat.Text>
         <inkCompat.Text color={tone}>{head}</inkCompat.Text>
       </inkCompat.Box>
-      {body.length > 0 ? (
-        <inkCompat.Box flexDirection="row" paddingLeft={2}>
-          <inkCompat.Text>{body}</inkCompat.Text>
+      {body ? (
+        <inkCompat.Box flexDirection="column" paddingLeft={2}>
+          {body}
         </inkCompat.Box>
       ) : null}
     </inkCompat.Box>
