@@ -27,3 +27,4 @@ export {
   parseKeystrokes,
   useKeystroke,
 } from "./input/index.js";
+export * as inkCompat from "./ink-compat/index.js";

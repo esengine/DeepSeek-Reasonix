@@ -2,6 +2,7 @@ import { type ReactNode, createElement } from "react";
 import { type DiffPools, diffFrames } from "../diff/diff-frames.js";
 import { type Cursor, type Frame, emptyFrame } from "../diff/frame.js";
 import { serializePatches } from "../diff/serialize.js";
+import { ViewportContext } from "../ink-compat/viewport.js";
 import { KeystrokeContext, KeystrokeReader, type KeystrokeSource } from "../input/index.js";
 import { renderToScreen } from "../layout/layout.js";
 import type { LayoutNode } from "../layout/node.js";
@@ -30,6 +31,7 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
   let viewportHeight = opts.viewportHeight;
   let frame: Frame = emptyFrame(viewportWidth, viewportHeight);
   let destroyed = false;
+  let lastElement: ReactNode = element;
 
   const reader = opts.stdin ? new KeystrokeReader({ source: opts.stdin }) : null;
 
@@ -64,8 +66,16 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
     null,
   );
 
-  const wrap = (node: ReactNode): ReactNode =>
-    reader ? createElement(KeystrokeContext.Provider, { value: reader }, node) : node;
+  const wrap = (node: ReactNode): ReactNode => {
+    const withViewport: ReactNode = createElement(
+      ViewportContext.Provider,
+      { value: { columns: viewportWidth, rows: viewportHeight } },
+      node,
+    );
+    return reader
+      ? createElement(KeystrokeContext.Provider, { value: reader }, withViewport)
+      : withViewport;
+  };
 
   reconciler.updateContainer(wrap(element), container, null, () => {
     /* committed */
@@ -74,6 +84,7 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
   return {
     update(nextElement: ReactNode): void {
       if (destroyed) return;
+      lastElement = nextElement;
       reconciler.updateContainer(wrap(nextElement), container, null, () => {
         /* committed */
       });
@@ -82,7 +93,9 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       if (destroyed) return;
       viewportWidth = width;
       viewportHeight = height;
-      root.onCommit();
+      reconciler.updateContainer(wrap(lastElement), container, null, () => {
+        /* committed */
+      });
     },
     destroy(): void {
       if (destroyed) return;
