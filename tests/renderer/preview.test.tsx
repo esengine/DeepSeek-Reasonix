@@ -1,6 +1,6 @@
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PreviewShell } from "../../src/cli/commands/preview.js";
 import {
   CharPool,
@@ -100,30 +100,8 @@ describe("preview shell — typing", () => {
   });
 });
 
-describe("preview shell — submit + history", () => {
-  it("Enter pushes the draft into history and clears the prompt", async () => {
-    const w = makeTestWriter();
-    const stdin = makeFakeStdin();
-    const handle = mount(<PreviewShell onExit={() => {}} />, {
-      viewportWidth: 60,
-      viewportHeight: 10,
-      pools: pools(),
-      write: w.write,
-      stdin,
-    });
-    await flush();
-    stdin.push("hello");
-    await flush();
-    stdin.push("\r");
-    await flush();
-    await flush();
-    const out = w.output();
-    expect(out).toContain("hello");
-    expect(out).toContain("you said: hello");
-    handle.destroy();
-  });
-
-  it("two consecutive submits stack into history", async () => {
+describe("preview shell — submit + streaming", () => {
+  it("Enter starts a streaming spinner; the echo lands after the stream completes", async () => {
     const w = makeTestWriter();
     const stdin = makeFakeStdin();
     const handle = mount(<PreviewShell onExit={() => {}} />, {
@@ -134,19 +112,45 @@ describe("preview shell — submit + history", () => {
       stdin,
     });
     await flush();
-    stdin.push("one\r");
+    stdin.push("hello\r");
     await flush();
     await flush();
-    stdin.push("two\r");
-    await flush();
+    const mid = w.output();
+    expect(mid).toContain("thinking");
+    expect(mid).not.toContain("you said: hello");
+
+    await new Promise((r) => setTimeout(r, 1700));
     await flush();
     const out = w.output();
-    expect(out).toContain("you said: one");
-    expect(out).toContain("you said: two");
+    expect(out).toContain("you said: hello");
     handle.destroy();
-  });
+  }, 5000);
 
-  it("empty submit (Enter on blank prompt) is a no-op", async () => {
+  it("input is paused while streaming — keystrokes during the stream are dropped", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(<PreviewShell onExit={() => {}} />, {
+      viewportWidth: 60,
+      viewportHeight: 12,
+      pools: pools(),
+      write: w.write,
+      stdin,
+    });
+    await flush();
+    stdin.push("first\r");
+    await flush();
+    await flush();
+    stdin.push("X");
+    await flush();
+    await new Promise((r) => setTimeout(r, 1700));
+    await flush();
+    const after = w.output();
+    expect(after).toContain("you said: first");
+    expect(after).not.toContain("you said: firstX");
+    handle.destroy();
+  }, 5000);
+
+  it("empty submit is a no-op (no streaming starts)", async () => {
     const w = makeTestWriter();
     const stdin = makeFakeStdin();
     const handle = mount(<PreviewShell onExit={() => {}} />, {
@@ -160,7 +164,9 @@ describe("preview shell — submit + history", () => {
     w.flush();
     stdin.push("\r");
     await flush();
-    expect(w.output()).not.toContain("you said:");
+    const out = w.output();
+    expect(out).not.toContain("you said:");
+    expect(out).not.toContain("thinking");
     handle.destroy();
   });
 });
@@ -199,18 +205,18 @@ describe("preview shell — slash commands", () => {
       stdin,
     });
     await flush();
-    stdin.push("hello\r");
+    stdin.push("/help\r");
     await flush();
     await flush();
     stdin.push("/clear\r");
     await flush();
     await flush();
     w.flush();
-    stdin.push("after\r");
+    stdin.push("/help\r");
     await flush();
     await flush();
     const after = w.output();
-    expect(after).toContain("you said: after");
+    expect(after).toContain("available commands");
     handle.destroy();
   });
 

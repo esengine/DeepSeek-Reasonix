@@ -1,5 +1,5 @@
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   CharPool,
   type Handle,
@@ -22,6 +22,10 @@ interface HistoryEntry {
   readonly role: "user" | "echo" | "info" | "error";
   readonly text: string;
 }
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+const SPINNER_TICK_MS = 80;
+const STREAM_DURATION_MS = 1500;
 
 interface SlashCommand {
   readonly name: string;
@@ -90,10 +94,33 @@ function PromptLine({ value, placeholder }: PromptLineProps): React.ReactElement
   );
 }
 
-function HintBar(): React.ReactElement {
+function HintBar({ streaming }: { streaming: boolean }): React.ReactElement {
   return (
     <inkCompat.Box marginTop={1}>
-      <inkCompat.Text dimColor>Enter submit · / for commands · Esc exit</inkCompat.Text>
+      <inkCompat.Text dimColor>
+        {streaming ? "thinking — input paused" : "Enter submit · / for commands · Esc exit"}
+      </inkCompat.Text>
+    </inkCompat.Box>
+  );
+}
+
+interface StreamingProps {
+  readonly userText: string;
+  readonly frame: number;
+}
+
+function StreamingRow({ userText, frame }: StreamingProps): React.ReactElement {
+  const glyph = SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? "·";
+  return (
+    <inkCompat.Box flexDirection="column">
+      <inkCompat.Box flexDirection="row" gap={1}>
+        <inkCompat.Text color={ACCENT}>›</inkCompat.Text>
+        <inkCompat.Text>{userText}</inkCompat.Text>
+      </inkCompat.Box>
+      <inkCompat.Box flexDirection="row" gap={1}>
+        <inkCompat.Text color={BRAND}>{glyph}</inkCompat.Text>
+        <inkCompat.Text dimColor>thinking…</inkCompat.Text>
+      </inkCompat.Box>
     </inkCompat.Box>
   );
 }
@@ -107,14 +134,12 @@ interface Reply {
   readonly text: string;
 }
 
-function handleSubmit(
+function trySlash(
   text: string,
   onExit: () => void,
   onClear: () => void,
-): ReadonlyArray<Reply> | "cleared" {
-  if (!text.startsWith("/")) {
-    return [{ role: "echo", text: `you said: ${text}` }];
-  }
+): ReadonlyArray<Reply> | "cleared" | null {
+  if (!text.startsWith("/")) return null;
   const [name] = text.split(/\s+/, 1);
   const cmd = name ?? text;
   if (cmd === "/exit") {
@@ -134,33 +159,80 @@ function handleSubmit(
   return [{ role: "error", text: `unknown command: ${cmd}` }];
 }
 
+interface InflightState {
+  readonly userText: string;
+  readonly frame: number;
+}
+
 export function PreviewShell({ onExit }: ShellProps): React.ReactElement {
   const [history, setHistory] = useState<ReadonlyArray<HistoryEntry>>([]);
   const [draft, setDraft] = useState("");
+  const [inflight, setInflight] = useState<InflightState | null>(null);
   const draftRef = useRef("");
   const nextIdRef = useRef(0);
+  const inflightRef = useRef<InflightState | null>(null);
+
+  useEffect(() => {
+    inflightRef.current = inflight;
+  }, [inflight]);
+
+  const streaming = inflight !== null;
+  useEffect(() => {
+    if (!streaming) return;
+    const tick = setInterval(() => {
+      const cur = inflightRef.current;
+      if (!cur) return;
+      setInflight({ userText: cur.userText, frame: cur.frame + 1 });
+    }, SPINNER_TICK_MS);
+    const finish = setTimeout(() => {
+      const cur = inflightRef.current;
+      if (!cur) return;
+      const id = nextIdRef.current;
+      nextIdRef.current = id + 2;
+      setHistory((prev) => [
+        ...prev,
+        { id, role: "user", text: cur.userText },
+        { id: id + 1, role: "echo", text: `you said: ${cur.userText}` },
+      ]);
+      setInflight(null);
+    }, STREAM_DURATION_MS);
+    return () => {
+      clearInterval(tick);
+      clearTimeout(finish);
+    };
+  }, [streaming]);
 
   useKeystroke((k) => {
     if (k.escape) {
       onExit();
       return;
     }
+    if (inflightRef.current) return;
     if (k.return) {
       const text = draftRef.current.trim();
       if (text.length === 0) return;
-      const replies = handleSubmit(text, onExit, () => {
+      const slashResult = trySlash(text, onExit, () => {
         nextIdRef.current = 0;
         setHistory([]);
       });
-      if (replies !== "cleared") {
+      if (slashResult === "cleared") {
+        draftRef.current = "";
+        setDraft("");
+        return;
+      }
+      if (slashResult) {
         const id = nextIdRef.current;
-        nextIdRef.current = id + 1 + replies.length;
+        nextIdRef.current = id + 1 + slashResult.length;
         setHistory((prev) => [
           ...prev,
           { id, role: "user", text },
-          ...replies.map((r, i) => ({ id: id + 1 + i, role: r.role, text: r.text })),
+          ...slashResult.map((r, i) => ({ id: id + 1 + i, role: r.role, text: r.text })),
         ]);
+        draftRef.current = "";
+        setDraft("");
+        return;
       }
+      setInflight({ userText: text, frame: 0 });
       draftRef.current = "";
       setDraft("");
       return;
@@ -187,8 +259,14 @@ export function PreviewShell({ onExit }: ShellProps): React.ReactElement {
           {(entry) => <HistoryRow key={entry.id} entry={entry} />}
         </inkCompat.Static>
       </inkCompat.Box>
-      <PromptLine value={draft} placeholder="say something…" />
-      <HintBar />
+      {inflight ? (
+        <inkCompat.Box marginTop={1}>
+          <StreamingRow userText={inflight.userText} frame={inflight.frame} />
+        </inkCompat.Box>
+      ) : (
+        <PromptLine value={draft} placeholder="say something…" />
+      )}
+      <HintBar streaming={inflight !== null} />
     </inkCompat.Box>
   );
 }
