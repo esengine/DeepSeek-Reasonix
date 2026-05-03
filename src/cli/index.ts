@@ -358,6 +358,14 @@ program
   });
 
 program
+  .command("select-demo")
+  .description("experimental — single-select list rendered through the ink-compat shim")
+  .action(async () => {
+    const { runSelectDemo } = await import("./commands/select-demo.js");
+    await runSelectDemo();
+  });
+
+program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
