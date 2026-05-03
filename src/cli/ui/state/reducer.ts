@@ -60,7 +60,9 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
     case "tool.chunk":
       return mutateCard(state, event.id, "tool", (c) => ({ ...c, output: c.output + event.text }));
 
-    case "tool.end":
+    case "tool.end": {
+      const finalOutput = event.output ?? "";
+      const rejected = isPlanModeRejection(finalOutput);
       return mutateCard(state, event.id, "tool", (c) => ({
         ...c,
         done: true,
@@ -68,7 +70,9 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         exitCode: event.exitCode,
         elapsedMs: event.elapsedMs,
         ...(event.aborted ? { aborted: true } : {}),
+        ...(rejected ? { rejected: true } : {}),
       }));
+    }
 
     case "tool.retry":
       return mutateCard(state, event.id, "tool", (c) => ({
@@ -379,4 +383,15 @@ function makeLiveCard(
   tone: LiveCard["tone"],
 ): LiveCard {
   return { kind: "live", id: nextId("live"), ts: Date.now(), variant, text, tone };
+}
+
+/** Detect the plan-mode bounce marker emitted by ToolRegistry.dispatch when refusing a write tool. */
+function isPlanModeRejection(output: string): boolean {
+  if (!output) return false;
+  try {
+    const parsed = JSON.parse(output);
+    return parsed?.rejectedReason === "plan-mode";
+  } catch {
+    return false;
+  }
 }

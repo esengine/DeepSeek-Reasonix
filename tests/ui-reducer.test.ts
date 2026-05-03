@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { ReasoningCard, StreamingCard, UserCard } from "../src/cli/ui/state/cards.js";
+import type {
+  ReasoningCard,
+  StreamingCard,
+  ToolCard,
+  UserCard,
+} from "../src/cli/ui/state/cards.js";
 import type { AgentEvent } from "../src/cli/ui/state/events.js";
 import { parseEvent } from "../src/cli/ui/state/events.js";
 import { reduce } from "../src/cli/ui/state/reducer.js";
@@ -70,6 +75,34 @@ describe("ui reducer", () => {
   it("ignores chunks for unknown ids", () => {
     const s = run([{ type: "streaming.chunk", id: "missing", text: "lost" }]);
     expect(s.cards).toHaveLength(0);
+  });
+
+  it("flags tool card as rejected when tool.end output carries plan-mode marker", () => {
+    const planBounce = JSON.stringify({
+      error: "write_file: unavailable in plan mode — ...",
+      rejectedReason: "plan-mode",
+    });
+    const s = run([
+      { type: "tool.start", id: "t1", name: "write_file", args: { path: "x.ts", content: "y" } },
+      { type: "tool.end", id: "t1", output: planBounce, elapsedMs: 2 },
+    ]);
+    const card = s.cards[0] as ToolCard;
+    expect(card.rejected).toBe(true);
+    expect(card.done).toBe(true);
+  });
+
+  it("does not flag rejection on a regular error output", () => {
+    const s = run([
+      { type: "tool.start", id: "t1", name: "edit_file", args: { path: "x" } },
+      {
+        type: "tool.end",
+        id: "t1",
+        output: JSON.stringify({ error: "edit_file: search not found" }),
+        elapsedMs: 5,
+      },
+    ]);
+    const card = s.cards[0] as ToolCard;
+    expect(card.rejected).toBeUndefined();
   });
 
   it("changes mode and accumulates session cost", () => {

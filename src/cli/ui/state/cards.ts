@@ -44,6 +44,8 @@ export interface ToolCard extends CardBase {
   elapsedMs: number;
   retry?: { attempt: number; max: number };
   aborted?: boolean;
+  /** Set when dispatch refused the call (e.g. plan-mode bounce). UI swaps spinner for a red "rejected" badge and hides the verbose error body. */
+  rejected?: boolean;
 }
 
 export interface TaskStep {

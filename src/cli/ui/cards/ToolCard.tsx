@@ -33,7 +33,9 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const visible = truncated ? allLines.slice(-tail) : allLines;
   const hidden = truncated ? allLines.length - visible.length : 0;
   const errColor = card.exitCode && card.exitCode !== 0 ? CARD.error.color : FG.sub;
-  const showBody = visible.length > 0;
+  // Rejected calls show a single trailing badge — the verbose JSON error body
+  // is already conveyed by the badge, so dropping the body keeps the card tight.
+  const showBody = !card.rejected && visible.length > 0;
 
   return (
     <Box flexDirection="column">
@@ -43,12 +45,12 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
         title={card.name}
         subtitle={argsLabel || undefined}
         meta={meta || undefined}
-        inline={!card.done ? <Spinner kind="braille" color={CARD.tool.color} bold /> : undefined}
-        trailing={
-          card.retry ? (
-            <Text color={TONE.warn} bold>{`↻ retry ${card.retry.attempt}/${card.retry.max}`}</Text>
+        inline={
+          !card.done && !card.rejected ? (
+            <Spinner kind="braille" color={CARD.tool.color} bold />
           ) : undefined
         }
+        trailing={trailingBadge(card)}
       />
       {showBody && (
         <>
@@ -71,6 +73,20 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   );
 }
 
+function trailingBadge(card: ToolCardData): React.ReactNode {
+  if (card.rejected) {
+    return (
+      <Text color={CARD.error.color} bold>
+        ✗ rejected
+      </Text>
+    );
+  }
+  if (card.retry) {
+    return <Text color={TONE.warn} bold>{`↻ retry ${card.retry.attempt}/${card.retry.max}`}</Text>;
+  }
+  return undefined;
+}
+
 function formatArgsSummary(args: unknown): string {
   if (typeof args === "string") return args.length > 60 ? `${args.slice(0, 60)}…` : args;
   if (args && typeof args === "object") {
@@ -89,8 +105,12 @@ function formatArgsSummary(args: unknown): string {
 
 function formatMeta(card: ToolCardData): string {
   const parts: string[] = [];
+  const inputBytes = largestStringInputBytes(card.args);
+  if (inputBytes !== null) parts.push(`${formatBytes(inputBytes)} in`);
   if (card.elapsedMs > 0) parts.push(`${(card.elapsedMs / 1000).toFixed(2)}s`);
-  if (card.aborted) {
+  if (card.rejected) {
+    // Trailing badge carries the status; meta stays clean (no "exit N").
+  } else if (card.aborted) {
     parts.push("aborted");
   } else if (card.done) {
     if (card.exitCode === 0) parts.push("exit 0");
@@ -99,4 +119,25 @@ function formatMeta(card: ToolCardData): string {
     parts.push("running");
   }
   return parts.length > 0 ? `· ${parts.join(" · ")}` : "";
+}
+
+const INPUT_SIZE_THRESHOLD = 1024;
+
+/** Largest string field on args, when above threshold. Surfaces input bulk for write_file (content), edit_file (replace), run_command (long stdin), etc. without per-tool special cases. */
+export function largestStringInputBytes(args: unknown): number | null {
+  let max = 0;
+  if (typeof args === "string") {
+    max = args.length;
+  } else if (args && typeof args === "object") {
+    for (const v of Object.values(args as Record<string, unknown>)) {
+      if (typeof v === "string" && v.length > max) max = v.length;
+    }
+  }
+  return max >= INPUT_SIZE_THRESHOLD ? max : null;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }

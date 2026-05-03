@@ -137,6 +137,7 @@ export class ToolRegistry {
     if (this._planMode && !isReadOnlyCall(tool, args)) {
       return JSON.stringify({
         error: `${name}: unavailable in plan mode — this is a read-only exploration phase. Use read_file / list_directory / search_files / directory_tree / web_search / allowlisted shell commands to investigate. Call submit_plan with your proposed plan when you're ready for the user's review.`,
+        rejectedReason: "plan-mode",
       });
     }
 
