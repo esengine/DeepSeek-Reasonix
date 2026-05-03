@@ -8,9 +8,9 @@ import { useAgentState } from "../state/provider.js";
 import { CARD, FG, TONE } from "../theme/tokens.js";
 import { useIsModalActive } from "./viewport-budget.js";
 
-export const SIDEBAR_WIDTH = 28;
+export const SIDEBAR_WIDTH = 36;
 /** Below this terminal width, sidebar refuses to render so the main column has room to breathe. */
-export const SIDEBAR_MIN_TOTAL_COLS = 88;
+export const SIDEBAR_MIN_TOTAL_COLS = 96;
 
 export interface SidebarPanelProps {
   ongoingTool?: { name: string; args?: string } | null;
@@ -112,10 +112,11 @@ function StepRow({ step, index }: { step: PlanStep; index: number }) {
   const glyph = STATUS_GLYPH[step.status];
   const color = STATUS_COLOR[step.status];
   const num = `${index + 1}.`;
-  const truncated = truncate(step.title, SIDEBAR_WIDTH - 6);
+  // [X] checkbox + " 12. " prefix eats ~8 cols → title gets the rest.
+  const truncated = truncate(step.title, SIDEBAR_WIDTH - 10);
   return (
     <Box>
-      <Text color={color}>{glyph}</Text>
+      <Text color={color}>{`[${glyph}]`}</Text>
       <Text color={step.status === "running" ? FG.strong : FG.sub}>{` ${num} ${truncated}`}</Text>
     </Box>
   );
