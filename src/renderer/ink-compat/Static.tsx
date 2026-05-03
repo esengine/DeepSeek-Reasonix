@@ -14,7 +14,11 @@ export function Static<T>(props: StaticProps<T>): React.ReactElement | null {
 
   useEffect(() => {
     if (!bridge) return;
-    if (props.items.length <= lastIndex.current) return;
+    if (props.items.length < lastIndex.current) {
+      lastIndex.current = props.items.length;
+      return;
+    }
+    if (props.items.length === lastIndex.current) return;
     const fresh = props.items.slice(lastIndex.current);
     const startIndex = lastIndex.current;
     lastIndex.current = props.items.length;

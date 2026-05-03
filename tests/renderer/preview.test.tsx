@@ -165,6 +165,101 @@ describe("preview shell — submit + history", () => {
   });
 });
 
+describe("preview shell — slash commands", () => {
+  it("/help lists available commands", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(<PreviewShell onExit={() => {}} />, {
+      viewportWidth: 60,
+      viewportHeight: 12,
+      pools: pools(),
+      write: w.write,
+      stdin,
+    });
+    await flush();
+    stdin.push("/help\r");
+    await flush();
+    await flush();
+    const out = w.output();
+    expect(out).toContain("available commands");
+    expect(out).toContain("/help");
+    expect(out).toContain("/clear");
+    expect(out).toContain("/exit");
+    handle.destroy();
+  });
+
+  it("/clear empties the history", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(<PreviewShell onExit={() => {}} />, {
+      viewportWidth: 60,
+      viewportHeight: 12,
+      pools: pools(),
+      write: w.write,
+      stdin,
+    });
+    await flush();
+    stdin.push("hello\r");
+    await flush();
+    await flush();
+    stdin.push("/clear\r");
+    await flush();
+    await flush();
+    w.flush();
+    stdin.push("after\r");
+    await flush();
+    await flush();
+    const after = w.output();
+    expect(after).toContain("you said: after");
+    handle.destroy();
+  });
+
+  it("/exit triggers onExit", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    let exited = false;
+    const handle = mount(
+      <PreviewShell
+        onExit={() => {
+          exited = true;
+        }}
+      />,
+      {
+        viewportWidth: 60,
+        viewportHeight: 12,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("/exit\r");
+    await flush();
+    expect(exited).toBe(true);
+    handle.destroy();
+  });
+
+  it("unknown / command renders an error row", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(<PreviewShell onExit={() => {}} />, {
+      viewportWidth: 60,
+      viewportHeight: 12,
+      pools: pools(),
+      write: w.write,
+      stdin,
+    });
+    await flush();
+    stdin.push("/banana\r");
+    await flush();
+    await flush();
+    const out = w.output();
+    expect(out).toContain("unknown command");
+    expect(out).toContain("/banana");
+    handle.destroy();
+  });
+});
+
 describe("preview shell — exit", () => {
   it("Esc triggers onExit", async () => {
     const w = makeTestWriter();

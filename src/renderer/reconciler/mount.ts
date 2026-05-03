@@ -111,6 +111,8 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       : withViewport;
   };
 
+  opts.write("\r\x1b[J");
+
   reconciler.updateContainer(wrap(element), container, null, () => {
     /* committed */
   });

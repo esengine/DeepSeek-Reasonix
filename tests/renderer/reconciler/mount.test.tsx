@@ -23,6 +23,19 @@ function flush(): Promise<void> {
 }
 
 describe("mount — initial render", () => {
+  it("anchors the cursor to col 0 + clears below before the first paint", async () => {
+    const w = makeTestWriter();
+    const handle = mount(<Text>hi</Text>, {
+      viewportWidth: 5,
+      viewportHeight: 1,
+      pools: pools(),
+      write: w.write,
+    });
+    await flush();
+    expect(w.output().startsWith("\r\x1b[J")).toBe(true);
+    handle.destroy();
+  });
+
   it("paints the initial element via the reconciler", async () => {
     const w = makeTestWriter();
     const handle = mount(<Text>hi</Text>, {

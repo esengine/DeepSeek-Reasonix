@@ -14,12 +14,25 @@ const BRAND = "#79c0ff";
 const FAINT = "#6e7681";
 const ACCENT = "#d2a8ff";
 const OK = "#7ee787";
+const ERR = "#ff8b81";
+const META = "#8b949e";
 
 interface HistoryEntry {
   readonly id: number;
-  readonly role: "user" | "echo";
+  readonly role: "user" | "echo" | "info" | "error";
   readonly text: string;
 }
+
+interface SlashCommand {
+  readonly name: string;
+  readonly summary: string;
+}
+
+const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
+  { name: "/help", summary: "list available commands" },
+  { name: "/clear", summary: "clear the history" },
+  { name: "/exit", summary: "leave the preview" },
+];
 
 function Header(): React.ReactElement {
   return (
@@ -33,14 +46,26 @@ function Header(): React.ReactElement {
 }
 
 function HistoryRow({ entry }: { entry: HistoryEntry }): React.ReactElement {
-  const tone = entry.role === "user" ? ACCENT : OK;
-  const glyph = entry.role === "user" ? "›" : "‹";
+  const { tone, glyph } = decorate(entry.role);
   return (
     <inkCompat.Box flexDirection="row" gap={1}>
       <inkCompat.Text color={tone}>{glyph}</inkCompat.Text>
-      <inkCompat.Text>{entry.text}</inkCompat.Text>
+      <inkCompat.Text color={entry.role === "info" ? META : undefined}>{entry.text}</inkCompat.Text>
     </inkCompat.Box>
   );
+}
+
+function decorate(role: HistoryEntry["role"]): { tone: string; glyph: string } {
+  switch (role) {
+    case "user":
+      return { tone: ACCENT, glyph: "›" };
+    case "echo":
+      return { tone: OK, glyph: "‹" };
+    case "info":
+      return { tone: META, glyph: "·" };
+    case "error":
+      return { tone: ERR, glyph: "✖" };
+  }
 }
 
 interface PromptLineProps {
@@ -68,13 +93,45 @@ function PromptLine({ value, placeholder }: PromptLineProps): React.ReactElement
 function HintBar(): React.ReactElement {
   return (
     <inkCompat.Box marginTop={1}>
-      <inkCompat.Text dimColor>Enter submit · Esc exit</inkCompat.Text>
+      <inkCompat.Text dimColor>Enter submit · / for commands · Esc exit</inkCompat.Text>
     </inkCompat.Box>
   );
 }
 
 interface ShellProps {
   onExit: () => void;
+}
+
+interface Reply {
+  readonly role: "echo" | "info" | "error";
+  readonly text: string;
+}
+
+function handleSubmit(
+  text: string,
+  onExit: () => void,
+  onClear: () => void,
+): ReadonlyArray<Reply> | "cleared" {
+  if (!text.startsWith("/")) {
+    return [{ role: "echo", text: `you said: ${text}` }];
+  }
+  const [name] = text.split(/\s+/, 1);
+  const cmd = name ?? text;
+  if (cmd === "/exit") {
+    onExit();
+    return [{ role: "info", text: "exiting…" }];
+  }
+  if (cmd === "/clear") {
+    onClear();
+    return "cleared";
+  }
+  if (cmd === "/help") {
+    return [
+      { role: "info", text: "available commands:" },
+      ...SLASH_COMMANDS.map((c) => ({ role: "info" as const, text: `  ${c.name} — ${c.summary}` })),
+    ];
+  }
+  return [{ role: "error", text: `unknown command: ${cmd}` }];
 }
 
 export function PreviewShell({ onExit }: ShellProps): React.ReactElement {
@@ -91,13 +148,19 @@ export function PreviewShell({ onExit }: ShellProps): React.ReactElement {
     if (k.return) {
       const text = draftRef.current.trim();
       if (text.length === 0) return;
-      const id = nextIdRef.current;
-      nextIdRef.current = id + 2;
-      setHistory((prev) => [
-        ...prev,
-        { id, role: "user", text },
-        { id: id + 1, role: "echo", text: `you said: ${text}` },
-      ]);
+      const replies = handleSubmit(text, onExit, () => {
+        nextIdRef.current = 0;
+        setHistory([]);
+      });
+      if (replies !== "cleared") {
+        const id = nextIdRef.current;
+        nextIdRef.current = id + 1 + replies.length;
+        setHistory((prev) => [
+          ...prev,
+          { id, role: "user", text },
+          ...replies.map((r, i) => ({ id: id + 1 + i, role: r.role, text: r.text })),
+        ]);
+      }
       draftRef.current = "";
       setDraft("");
       return;
