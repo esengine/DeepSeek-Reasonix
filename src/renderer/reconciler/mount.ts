@@ -6,10 +6,12 @@ import { RendererBridgeContext } from "../ink-compat/renderer-bridge.js";
 import { AppContext } from "../ink-compat/use-app.js";
 import { ViewportContext } from "../ink-compat/viewport.js";
 import { KeystrokeContext, KeystrokeReader, type KeystrokeSource } from "../input/index.js";
-import { renderViewport } from "../layout/layout.js";
+import { renderViewport, renderVirtual } from "../layout/layout.js";
 import type { LayoutNode } from "../layout/node.js";
 import { renderToBytes } from "../runtime/render-to-bytes.js";
 import { type HostRoot, hostToLayoutNode, reconciler } from "./host-config.js";
+
+export type ScrollMode = "scrollback" | "virtual";
 
 export interface MountOptions {
   readonly viewportWidth: number;
@@ -19,6 +21,9 @@ export interface MountOptions {
   readonly cursor?: () => Cursor;
   readonly stdin?: KeystrokeSource;
   readonly onExit?: (error?: Error) => void;
+  /** "scrollback" (default): rows that overflow viewport go to scrollback, frozen.
+   *  "virtual": full layout stays live in memory; PgUp/PgDown/Home/End scroll within. */
+  readonly scroll?: ScrollMode;
 }
 
 export interface Handle {
@@ -32,54 +37,120 @@ const RESET_SGR = "\x1b[0m";
 const CLOSE_HYPERLINK = "\x1b]8;;\x1b\\";
 
 export function mount(element: ReactNode, opts: MountOptions): Handle {
+  const scrollMode: ScrollMode = opts.scroll ?? "scrollback";
   let viewportWidth = opts.viewportWidth;
   let viewportHeight = opts.viewportHeight;
   let frame: Frame = emptyFrame(viewportWidth, viewportHeight);
   let reservedRows = 0;
   let promotedRows = 0;
+  let scrollOffset = 0;
+  let stickyBottom = true;
+  let lastTotalRows = 0;
   let destroyed = false;
   let lastElement: ReactNode = element;
 
   const reader = opts.stdin ? new KeystrokeReader({ source: opts.stdin }) : null;
+
+  const scrollBy = (delta: number): void => {
+    if (scrollMode !== "virtual") return;
+    const window = Math.max(1, viewportHeight - 1);
+    const maxOffset = Math.max(0, lastTotalRows - window);
+    const next = Math.max(0, Math.min(maxOffset, scrollOffset + delta));
+    if (next === scrollOffset) return;
+    scrollOffset = next;
+    stickyBottom = next === maxOffset;
+    if (root.children.length > 0) {
+      root.onCommit();
+    }
+  };
+
+  if (reader && scrollMode === "virtual") {
+    reader.subscribe((k) => {
+      const window = Math.max(1, viewportHeight - 1);
+      if (k.pageUp) scrollBy(-window);
+      else if (k.pageDown) scrollBy(window);
+      else if (k.home) scrollBy(-Number.MAX_SAFE_INTEGER);
+      else if (k.end) scrollBy(Number.MAX_SAFE_INTEGER);
+    });
+  }
+
+  const commitScrollback = (layout: LayoutNode): void => {
+    const maxHeight = Math.max(1, viewportHeight - 1);
+    const split = renderViewport(layout, viewportWidth, opts.pools, maxHeight);
+    const newPromote = Math.max(0, split.skipped - promotedRows);
+    if (newPromote > 0) {
+      if (frame.screen.height > 0) {
+        opts.write(`\r\x1b[${frame.screen.height}A\x1b[J`);
+      } else if (reservedRows === 0) {
+        opts.write("\r\x1b[J");
+      }
+      opts.write(split.serializePromoted(promotedRows, split.skipped));
+      promotedRows = split.skipped;
+      frame = emptyFrame(viewportWidth, viewportHeight);
+      reservedRows = 0;
+    }
+    const screen = split.screen;
+    const targetReserve = Math.min(screen.height, Math.max(0, viewportHeight - 1));
+    if (targetReserve > reservedRows) {
+      const delta = targetReserve - reservedRows;
+      let prelude = "";
+      if (reservedRows === 0) prelude += "\r";
+      prelude += `${"\n".repeat(delta)}\x1b[${delta}A`;
+      opts.write(prelude);
+      reservedRows = targetReserve;
+    }
+    const next: Frame = {
+      screen,
+      viewportWidth,
+      viewportHeight,
+      cursor: opts.cursor?.() ?? { x: 0, y: screen.height, visible: true },
+    };
+    const patches = diffFrames(frame, next, opts.pools);
+    if (patches.length > 0) opts.write(serializePatches(patches));
+    frame = next;
+  };
+
+  const commitVirtual = (layout: LayoutNode): void => {
+    const window = Math.max(1, viewportHeight - 1);
+    const virt = renderVirtual(layout, viewportWidth, opts.pools);
+    const maxOffset = Math.max(0, virt.totalRows - window);
+    if (stickyBottom || virt.totalRows < lastTotalRows) {
+      scrollOffset = maxOffset;
+    } else {
+      scrollOffset = Math.min(scrollOffset, maxOffset);
+    }
+    lastTotalRows = virt.totalRows;
+    const screen = virt.windowAt(scrollOffset, window);
+    const targetReserve = Math.min(window, Math.max(0, viewportHeight - 1));
+    if (targetReserve > reservedRows) {
+      const delta = targetReserve - reservedRows;
+      let prelude = "";
+      if (reservedRows === 0) prelude += "\r";
+      prelude += `${"\n".repeat(delta)}\x1b[${delta}A`;
+      opts.write(prelude);
+      reservedRows = targetReserve;
+    }
+    const next: Frame = {
+      screen,
+      viewportWidth,
+      viewportHeight,
+      cursor: opts.cursor?.() ?? { x: 0, y: screen.height, visible: true },
+    };
+    const patches = diffFrames(frame, next, opts.pools);
+    if (patches.length > 0) opts.write(serializePatches(patches));
+    frame = next;
+  };
 
   const root: HostRoot = {
     children: [],
     onCommit: () => {
       if (destroyed) return;
       const layout = collectRootLayout(root.children);
-      const maxHeight = Math.max(1, viewportHeight - 1);
-      const split = renderViewport(layout, viewportWidth, opts.pools, maxHeight);
-      const newPromote = Math.max(0, split.skipped - promotedRows);
-      if (newPromote > 0) {
-        if (frame.screen.height > 0) {
-          opts.write(`\r\x1b[${frame.screen.height}A\x1b[J`);
-        } else if (reservedRows === 0) {
-          opts.write("\r\x1b[J");
-        }
-        opts.write(split.serializePromoted(promotedRows, split.skipped));
-        promotedRows = split.skipped;
-        frame = emptyFrame(viewportWidth, viewportHeight);
-        reservedRows = 0;
+      if (scrollMode === "virtual") {
+        commitVirtual(layout);
+      } else {
+        commitScrollback(layout);
       }
-      const screen = split.screen;
-      const targetReserve = Math.min(screen.height, Math.max(0, viewportHeight - 1));
-      if (targetReserve > reservedRows) {
-        const delta = targetReserve - reservedRows;
-        let prelude = "";
-        if (reservedRows === 0) prelude += "\r";
-        prelude += `${"\n".repeat(delta)}\x1b[${delta}A`;
-        opts.write(prelude);
-        reservedRows = targetReserve;
-      }
-      const next: Frame = {
-        screen,
-        viewportWidth,
-        viewportHeight,
-        cursor: opts.cursor?.() ?? { x: 0, y: screen.height, visible: true },
-      };
-      const patches = diffFrames(frame, next, opts.pools);
-      if (patches.length > 0) opts.write(serializePatches(patches));
-      frame = next;
     },
   };
 
@@ -155,6 +226,9 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       frame = emptyFrame(width, height);
       reservedRows = 0;
       promotedRows = 0;
+      scrollOffset = 0;
+      stickyBottom = true;
+      lastTotalRows = 0;
       opts.write("\x1b[2J\x1b[H");
       reconciler.updateContainer(wrap(lastElement), container, null, () => {
         /* committed */

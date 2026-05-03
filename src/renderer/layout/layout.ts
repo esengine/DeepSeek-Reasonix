@@ -98,6 +98,30 @@ function blitRowSlice(
   return screen;
 }
 
+export interface VirtualLayout {
+  readonly totalRows: number;
+  windowAt(scrollOffset: number, windowHeight: number): Screen;
+}
+
+export function renderVirtual(node: LayoutNode, width: number, pools: RenderPools): VirtualLayout {
+  const w = Math.max(0, width | 0);
+  if (w === 0) {
+    return {
+      totalRows: 0,
+      windowAt: () => new Screen(0, 0),
+    };
+  }
+  const laid = layout(node, w, pools);
+  return {
+    totalRows: laid.rows.length,
+    windowAt(scrollOffset, windowHeight) {
+      const start = Math.max(0, Math.min(laid.rows.length, Math.floor(scrollOffset)));
+      const end = Math.max(start, Math.min(laid.rows.length, start + Math.floor(windowHeight)));
+      return blitRowSlice(laid.rows, start, end, w, pools);
+    },
+  };
+}
+
 function serializeRowSlice(
   rows: LayoutRows,
   fromRow: number,
