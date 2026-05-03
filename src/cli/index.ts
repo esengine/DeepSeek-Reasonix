@@ -390,6 +390,14 @@ program
   });
 
 program
+  .command("chat-v2")
+  .description("experimental — chat App tree mounted on the cell-diff renderer (Esc to exit)")
+  .action(async () => {
+    const { runChatV2 } = await import("./commands/chat-v2.js");
+    await runChatV2();
+  });
+
+program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
