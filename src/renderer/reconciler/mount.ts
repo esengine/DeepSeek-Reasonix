@@ -152,6 +152,10 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       if (destroyed) return;
       viewportWidth = width;
       viewportHeight = height;
+      frame = emptyFrame(width, height);
+      reservedRows = 0;
+      promotedRows = 0;
+      opts.write("\x1b[2J\x1b[H");
       reconciler.updateContainer(wrap(lastElement), container, null, () => {
         /* committed */
       });
