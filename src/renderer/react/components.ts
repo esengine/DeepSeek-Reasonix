@@ -1,6 +1,9 @@
-import type { ReactNode } from "react";
+import React, { type ReactElement, type ReactNode } from "react";
 import type { BorderStyle, BorderStyleName } from "../layout/borders.js";
 import type { AnsiCode } from "../pools/style-pool.js";
+
+export const HOST_BOX = "rsx-box" as const;
+export const HOST_TEXT = "rsx-text" as const;
 
 export interface BoxProps {
   readonly children?: ReactNode;
@@ -31,12 +34,10 @@ export interface TextProps {
   readonly hyperlink?: string;
 }
 
-const HOST_GUARD = "Reasonix renderer host element — only rendered through cell-tui's render().";
-
-export function Box(_props: BoxProps): never {
-  throw new Error(HOST_GUARD);
+export function Box(props: BoxProps): ReactElement {
+  return React.createElement(HOST_BOX, props);
 }
 
-export function Text(_props: TextProps): never {
-  throw new Error(HOST_GUARD);
+export function Text(props: TextProps): ReactElement {
+  return React.createElement(HOST_TEXT, props);
 }

@@ -2,7 +2,7 @@ import { Fragment, type ReactElement, type ReactNode, isValidElement } from "rea
 import { type RenderPools, renderToScreen } from "../layout/layout.js";
 import type { BoxNode, LayoutNode, TextNode } from "../layout/node.js";
 import type { Screen } from "../screen/screen.js";
-import { Box, type BoxProps, Text, type TextProps } from "./components.js";
+import { type BoxProps, HOST_BOX, HOST_TEXT, type TextProps } from "./components.js";
 
 export interface RenderOptions {
   readonly width: number;
@@ -33,7 +33,7 @@ function elementToLayoutNode(element: ReactElement): LayoutNode | null {
   const type = element.type;
   const props = element.props as { children?: ReactNode };
 
-  if (type === Box) {
+  if (type === HOST_BOX) {
     const boxProps = element.props as BoxProps;
     const children = childrenToLayoutNodes(props.children);
     const padding = resolvePadding(boxProps);
@@ -44,7 +44,7 @@ function elementToLayoutNode(element: ReactElement): LayoutNode | null {
     return { kind: "box", children, ...flex, ...padding, ...border } satisfies BoxNode;
   }
 
-  if (type === Text) {
+  if (type === HOST_TEXT) {
     const textProps = element.props as TextProps;
     return {
       kind: "text",

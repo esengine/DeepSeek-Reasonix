@@ -171,12 +171,14 @@ describe("render — style + hyperlink threading", () => {
   });
 });
 
-describe("render — direct host invocation throws", () => {
-  it("calling Box() directly throws (host marker, not real component)", () => {
-    expect(() => Box({})).toThrow(/host element/i);
+describe("render — Box / Text are host-typed elements", () => {
+  it("Box returns a React element with the host-box type", () => {
+    const el = Box({});
+    expect(el.type).toBe("rsx-box");
   });
 
-  it("calling Text() directly throws", () => {
-    expect(() => Text({})).toThrow(/host element/i);
+  it("Text returns a React element with the host-text type", () => {
+    const el = Text({});
+    expect(el.type).toBe("rsx-text");
   });
 });
