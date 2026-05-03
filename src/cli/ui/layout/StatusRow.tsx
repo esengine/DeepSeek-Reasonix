@@ -1,13 +1,10 @@
-import { Box, Text, useStdout } from "ink";
+import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { Countdown } from "../primitives/Countdown.js";
 import { useAgentState } from "../state/provider.js";
 import type { Mode, NetworkState, StatusBar } from "../state/state.js";
 import { FG, TONE, USD_TO_CNY } from "../theme/tokens.js";
-
-const RULE_PAD = 4;
-const RULE_MIN = 20;
 
 function balanceColor(cny: number): string {
   if (cny < 5) return TONE.err;
@@ -18,19 +15,21 @@ function balanceColor(cny: number): string {
 export function StatusRow(): React.ReactElement {
   const status = useAgentState((s) => s.status);
   const session = useAgentState((s) => s.session);
-  const { stdout } = useStdout();
-  const cols = stdout?.columns ?? 80;
-  const ruleWidth = Math.max(RULE_MIN, cols - RULE_PAD);
   const turnCny = status.cost * USD_TO_CNY;
   const sessionCny = status.sessionCost * USD_TO_CNY;
   const hasTurn = status.cost > 0;
 
   return (
     <Box flexDirection="column">
-      <Box>
-        <Text>{"  "}</Text>
-        <Text color={FG.faint}>{"─".repeat(ruleWidth)}</Text>
-      </Box>
+      <Box
+        paddingX={1}
+        borderStyle="single"
+        borderTop
+        borderRight={false}
+        borderBottom={false}
+        borderLeft={false}
+        borderTopColor={FG.faint}
+      />
       <Box flexDirection="row">
         <Text>{"  "}</Text>
         {status.recording ? (

@@ -112,8 +112,9 @@ function StepRow({ step, index }: { step: PlanStep; index: number }) {
   const glyph = STATUS_GLYPH[step.status];
   const color = STATUS_COLOR[step.status];
   const num = `${index + 1}.`;
-  // [X] checkbox + " 12. " prefix eats ~8 cols → title gets the rest.
-  const truncated = truncate(step.title, SIDEBAR_WIDTH - 10);
+  // [X] checkbox + " 12. " prefix eats ~8 cols. 2-col safety margin so
+  // wide-char step titles (CJK) can't push the bracket cluster off-screen.
+  const truncated = truncate(step.title, SIDEBAR_WIDTH - 12);
   return (
     <Box>
       <Text color={color}>{`[${glyph}]`}</Text>
