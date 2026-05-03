@@ -50,7 +50,7 @@ export function Box(props: InkBoxProps): React.ReactElement {
   const borderColor = fgCode(props.borderColor);
   const inner = (
     <RsxBox
-      flexDirection={props.flexDirection}
+      flexDirection={props.flexDirection ?? "row"}
       flexGrow={marginTop || marginBottom || marginLeft || marginRight ? undefined : props.flexGrow}
       justifyContent={props.justifyContent}
       width={typeof props.width === "number" ? props.width : undefined}

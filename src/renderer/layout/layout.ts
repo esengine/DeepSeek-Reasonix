@@ -27,13 +27,21 @@ interface Laid {
   width: number;
 }
 
-export function renderToScreen(node: LayoutNode, width: number, pools: RenderPools): Screen {
+export function renderToScreen(
+  node: LayoutNode,
+  width: number,
+  pools: RenderPools,
+  maxHeight?: number,
+): Screen {
   const w = Math.max(0, width | 0);
   if (w === 0) return new Screen(0, 0);
   const laid = layout(node, w, pools);
-  const screen = new Screen(w, laid.rows.length);
-  for (let y = 0; y < laid.rows.length; y++) {
-    for (const frag of laid.rows[y]!) blitFragment(screen, frag, y, pools);
+  const cap = maxHeight !== undefined ? Math.max(0, Math.floor(maxHeight)) : laid.rows.length;
+  const skip = Math.max(0, laid.rows.length - cap);
+  const h = laid.rows.length - skip;
+  const screen = new Screen(w, h);
+  for (let y = 0; y < h; y++) {
+    for (const frag of laid.rows[y + skip]!) blitFragment(screen, frag, y, pools);
   }
   screen.resetDamage();
   return screen;

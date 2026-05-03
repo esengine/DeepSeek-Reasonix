@@ -46,7 +46,8 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
     onCommit: () => {
       if (destroyed) return;
       const layout = collectRootLayout(root.children);
-      const screen = renderToScreen(layout, viewportWidth, opts.pools);
+      const maxHeight = Math.max(1, viewportHeight - 1);
+      const screen = renderToScreen(layout, viewportWidth, opts.pools, maxHeight);
       const targetReserve = Math.min(screen.height, Math.max(0, viewportHeight - 1));
       if (targetReserve > reservedRows) {
         const delta = targetReserve - reservedRows;
