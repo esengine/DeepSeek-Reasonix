@@ -10,6 +10,8 @@ export interface TextNode {
 export interface BoxNode {
   readonly kind: "box";
   readonly children: ReadonlyArray<LayoutNode>;
+  readonly flexDirection?: "column" | "row";
+  readonly flexGrow?: number;
   readonly paddingTop?: number;
   readonly paddingBottom?: number;
   readonly paddingLeft?: number;

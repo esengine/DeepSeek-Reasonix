@@ -37,7 +37,10 @@ function elementToLayoutNode(element: ReactElement): LayoutNode | null {
     const boxProps = element.props as BoxProps;
     const children = childrenToLayoutNodes(props.children);
     const padding = resolvePadding(boxProps);
-    return { kind: "box", children, ...padding } satisfies BoxNode;
+    const flex: { flexDirection?: "column" | "row"; flexGrow?: number } = {};
+    if (boxProps.flexDirection !== undefined) flex.flexDirection = boxProps.flexDirection;
+    if (boxProps.flexGrow !== undefined) flex.flexGrow = boxProps.flexGrow;
+    return { kind: "box", children, ...flex, ...padding } satisfies BoxNode;
   }
 
   if (type === Text) {

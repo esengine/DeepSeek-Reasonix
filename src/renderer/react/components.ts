@@ -3,6 +3,8 @@ import type { AnsiCode } from "../pools/style-pool.js";
 
 export interface BoxProps {
   readonly children?: ReactNode;
+  readonly flexDirection?: "column" | "row";
+  readonly flexGrow?: number;
   readonly paddingTop?: number;
   readonly paddingBottom?: number;
   readonly paddingLeft?: number;

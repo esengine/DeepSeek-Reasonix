@@ -12,89 +12,168 @@ export interface RenderPools {
   readonly hyperlink: HyperlinkPool;
 }
 
-interface TextRow {
+interface RowFragment {
   readonly graphemes: ReadonlyArray<{ glyph: string; width: number }>;
   readonly styleId: number;
   readonly hyperlinkId: number;
   readonly leftPad: number;
 }
 
-const EMPTY_ROW: TextRow = {
-  graphemes: [],
-  styleId: 0,
-  hyperlinkId: 0,
-  leftPad: 0,
-};
+type LayoutRows = RowFragment[][];
+
+interface Laid {
+  rows: LayoutRows;
+  width: number;
+}
 
 export function renderToScreen(node: LayoutNode, width: number, pools: RenderPools): Screen {
   const w = Math.max(0, width | 0);
   if (w === 0) return new Screen(0, 0);
-  const rows: TextRow[] = [];
-  walk(node, w, 0, pools, rows);
-  const screen = new Screen(w, rows.length);
-  for (let y = 0; y < rows.length; y++) {
-    blitRow(screen, rows[y]!, y, pools);
+  const laid = layout(node, w, pools);
+  const screen = new Screen(w, laid.rows.length);
+  for (let y = 0; y < laid.rows.length; y++) {
+    for (const frag of laid.rows[y]!) blitFragment(screen, frag, y, pools);
   }
   screen.resetDamage();
   return screen;
 }
 
-function walk(
-  node: LayoutNode,
-  width: number,
-  leftPad: number,
-  pools: RenderPools,
-  out: TextRow[],
-): void {
-  if (node.kind === "text") {
-    pushTextRows(node, width, leftPad, pools, out);
-    return;
-  }
-  pushBoxRows(node, width, leftPad, pools, out);
+function layout(node: LayoutNode, availableWidth: number, pools: RenderPools): Laid {
+  if (availableWidth <= 0) return { rows: [], width: 0 };
+  if (node.kind === "text") return layoutText(node, availableWidth, pools);
+  return layoutBox(node, availableWidth, pools);
 }
 
-function pushBoxRows(
-  node: BoxNode,
-  width: number,
-  leftPad: number,
-  pools: RenderPools,
-  out: TextRow[],
-): void {
+function layoutBox(node: BoxNode, availableWidth: number, pools: RenderPools): Laid {
   const padTop = clampPad(node.paddingTop);
   const padBottom = clampPad(node.paddingBottom);
   const padLeft = clampPad(node.paddingLeft);
   const padRight = clampPad(node.paddingRight);
-  const innerWidth = Math.max(0, width - padLeft - padRight);
-  const innerLeftPad = leftPad + padLeft;
+  const innerWidth = Math.max(0, availableWidth - padLeft - padRight);
 
-  for (let i = 0; i < padTop; i++) out.push(EMPTY_ROW);
-  if (innerWidth > 0) {
-    for (const child of node.children) walk(child, innerWidth, innerLeftPad, pools, out);
-  }
-  for (let i = 0; i < padBottom; i++) out.push(EMPTY_ROW);
+  const inner =
+    node.flexDirection === "row"
+      ? layoutRow(node, innerWidth, pools)
+      : layoutColumn(node, innerWidth, pools);
+
+  const shifted = shiftFragments(inner.rows, padLeft);
+  const top = blanks(padTop);
+  const bottom = blanks(padBottom);
+  return {
+    rows: [...top, ...shifted, ...bottom],
+    width: availableWidth,
+  };
 }
 
-function pushTextRows(
-  node: TextNode,
-  width: number,
-  leftPad: number,
-  pools: RenderPools,
-  out: TextRow[],
-): void {
-  if (width <= 0) return;
+function layoutColumn(node: BoxNode, innerWidth: number, pools: RenderPools): Laid {
+  const rows: LayoutRows = [];
+  for (const child of node.children) {
+    const laid = layout(child, innerWidth, pools);
+    rows.push(...laid.rows);
+  }
+  return { rows, width: innerWidth };
+}
+
+function layoutRow(node: BoxNode, innerWidth: number, pools: RenderPools): Laid {
+  if (innerWidth === 0 || node.children.length === 0) {
+    return { rows: [], width: innerWidth };
+  }
+  const allocations = allocateRowWidths(node.children, innerWidth);
+  const childResults = node.children.map((child, i) => layout(child, allocations[i] ?? 0, pools));
+
+  let xOffset = 0;
+  const merged: LayoutRows = [];
+  for (let i = 0; i < childResults.length; i++) {
+    const child = childResults[i]!;
+    const allocated = allocations[i] ?? 0;
+    for (let y = 0; y < child.rows.length; y++) {
+      while (merged.length <= y) merged.push([]);
+      for (const frag of child.rows[y]!) {
+        merged[y]!.push({ ...frag, leftPad: frag.leftPad + xOffset });
+      }
+    }
+    xOffset += allocated;
+  }
+  return { rows: merged, width: innerWidth };
+}
+
+function allocateRowWidths(children: ReadonlyArray<LayoutNode>, available: number): number[] {
+  const intrinsics = children.map((c) => Math.min(intrinsicWidth(c), available));
+  const grows = children.map((c) => (c.kind === "box" ? Math.max(0, c.flexGrow ?? 0) : 0));
+  const totalIntrinsic = intrinsics.reduce((s, w) => s + w, 0);
+
+  if (totalIntrinsic > available) {
+    const scale = available / totalIntrinsic;
+    const out = intrinsics.map((w) => Math.floor(w * scale));
+    let used = out.reduce((s, w) => s + w, 0);
+    for (let i = 0; used < available && i < out.length; i++) {
+      out[i]!++;
+      used++;
+    }
+    return out;
+  }
+
+  const slack = available - totalIntrinsic;
+  const totalGrow = grows.reduce((s, g) => s + g, 0);
+  if (slack === 0 || totalGrow === 0) return intrinsics;
+
+  const out = intrinsics.slice();
+  let distributed = 0;
+  for (let i = 0; i < out.length; i++) {
+    if (grows[i]! > 0) {
+      const add = Math.floor((slack * grows[i]!) / totalGrow);
+      out[i]! += add;
+      distributed += add;
+    }
+  }
+  for (let i = 0; distributed < slack && i < out.length; i++) {
+    if (grows[i]! > 0) {
+      out[i]!++;
+      distributed++;
+    }
+  }
+  return out;
+}
+
+function intrinsicWidth(node: LayoutNode): number {
+  if (node.kind === "text") {
+    let max = 0;
+    for (const line of node.content.split("\n")) {
+      const w = Math.max(0, stringWidth(line));
+      if (w > max) max = w;
+    }
+    return max;
+  }
+  const padLeft = clampPad(node.paddingLeft);
+  const padRight = clampPad(node.paddingRight);
+  if (node.children.length === 0) return padLeft + padRight;
+  if (node.flexDirection === "row") {
+    return padLeft + padRight + node.children.reduce((s, c) => s + intrinsicWidth(c), 0);
+  }
+  let max = 0;
+  for (const c of node.children) {
+    const w = intrinsicWidth(c);
+    if (w > max) max = w;
+  }
+  return padLeft + padRight + max;
+}
+
+function layoutText(node: TextNode, width: number, pools: RenderPools): Laid {
   const styleId = node.style ? pools.style.intern(node.style) : pools.style.none;
   const hyperlinkId = pools.hyperlink.intern(node.hyperlink);
   const segmenter = getSegmenter();
+  const rows: LayoutRows = [];
   for (const line of node.content.split("\n")) {
     const wrapped = wrapLine(line, width, segmenter);
     if (wrapped.length === 0) {
-      out.push({ graphemes: [], styleId, hyperlinkId, leftPad });
+      rows.push([{ graphemes: [], styleId, hyperlinkId, leftPad: 0 }]);
       continue;
     }
     for (const row of wrapped) {
-      out.push({ graphemes: row, styleId, hyperlinkId, leftPad });
+      rows.push([{ graphemes: row, styleId, hyperlinkId, leftPad: 0 }]);
     }
   }
+  return { rows, width };
 }
 
 function wrapLine(
@@ -123,23 +202,34 @@ function wrapLine(
   return rows;
 }
 
-function blitRow(screen: Screen, row: TextRow, y: number, pools: RenderPools): void {
-  let x = row.leftPad;
-  for (const { glyph, width } of row.graphemes) {
+function shiftFragments(rows: LayoutRows, dx: number): LayoutRows {
+  if (dx === 0) return rows;
+  return rows.map((row) => row.map((frag) => ({ ...frag, leftPad: frag.leftPad + dx })));
+}
+
+function blanks(n: number): LayoutRows {
+  const out: LayoutRows = [];
+  for (let i = 0; i < n; i++) out.push([]);
+  return out;
+}
+
+function blitFragment(screen: Screen, frag: RowFragment, y: number, pools: RenderPools): void {
+  let x = frag.leftPad;
+  for (const { glyph, width } of frag.graphemes) {
     if (x >= screen.width) break;
     const charId = pools.char.intern(glyph);
     const cell: Cell = {
       charId,
-      styleId: row.styleId,
-      hyperlinkId: row.hyperlinkId,
+      styleId: frag.styleId,
+      hyperlinkId: frag.hyperlinkId,
       width: width === 2 ? CellWidth.Wide : CellWidth.Single,
     };
     screen.writeCell(x, y, cell);
     if (width === 2 && x + 1 < screen.width) {
       screen.writeCell(x + 1, y, {
         charId: 1,
-        styleId: row.styleId,
-        hyperlinkId: row.hyperlinkId,
+        styleId: frag.styleId,
+        hyperlinkId: frag.hyperlinkId,
         width: CellWidth.SpacerTail,
       });
     }
