@@ -374,6 +374,14 @@ program
   });
 
 program
+  .command("stress-demo")
+  .description("experimental — 4 concurrent live regions exercising the cell-diff renderer")
+  .action(async () => {
+    const { runStressDemo } = await import("./commands/stress-demo.js");
+    await runStressDemo();
+  });
+
+program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
