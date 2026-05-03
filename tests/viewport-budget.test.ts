@@ -3,7 +3,6 @@ import { type ZoneId, allocateRows } from "../src/cli/ui/layout/viewport-budget.
 
 const ZONE_PRIORITY: Record<ZoneId, number> = {
   modal: 100,
-  "plan-card": 80,
   status: 60,
   input: 50,
   stream: 10,
@@ -52,19 +51,15 @@ describe("allocateRows — priority-greedy allocation", () => {
   });
 
   it("low-priority claim may exceed remaining rows when forced to its min", () => {
-    // 30-row term; modal claims 26, plan-card claims 5..5, stream wants min 4
+    // 30-row term; modal claims 26, status claims 5..5, stream wants min 4
     const out = allocateRows(
-      [
-        claim("modal", 26, 26),
-        claim("plan-card", 5, 5),
-        claim("stream", 4, Number.POSITIVE_INFINITY),
-      ],
+      [claim("modal", 26, 26), claim("status", 5, 5), claim("stream", 4, Number.POSITIVE_INFINITY)],
       30,
     );
     expect(out.get("modal")).toBe(26);
-    // After modal, 4 rows left. plan-card forced to its min of 5 (exceeds avail).
-    expect(out.get("plan-card")).toBe(5);
-    // After plan-card forced to 5, stream gets its min of 4.
+    // After modal, 4 rows left. status forced to its min of 5 (exceeds avail).
+    expect(out.get("status")).toBe(5);
+    // After status forced to 5, stream gets its min of 4.
     expect(out.get("stream")).toBe(4);
   });
 

@@ -32,11 +32,9 @@ import {
   editModeHintShown,
   loadEditMode,
   loadReasoningEffort,
-  loadSidebarOpen,
   markEditModeHintShown,
   saveEditMode,
   saveReasoningEffort,
-  saveSidebarOpen,
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
 import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
@@ -115,10 +113,9 @@ import {
   ThinkingRow,
   UndoBanner,
 } from "./layout/LiveRows.js";
-import { SIDEBAR_MIN_TOTAL_COLS, SidebarPanel } from "./layout/SidebarPanel.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import { ToastRail } from "./layout/ToastRail.js";
-import { ViewportBudgetProvider, useIsModalActive } from "./layout/viewport-budget.js";
+import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
@@ -294,23 +291,6 @@ function AppInner({
     s.cards.some((c) => c.kind === "user" || c.kind === "streaming"),
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
-  const isModalActive = useIsModalActive();
-  const rawActivePlanCard = useAgentState((s) => {
-    for (let i = s.cards.length - 1; i >= 0; i--) {
-      const c = s.cards[i];
-      if (
-        c?.kind === "plan" &&
-        c.variant === "active" &&
-        c.steps.some((step) => step.status !== "done" && step.status !== "skipped")
-      ) {
-        return c;
-      }
-    }
-    return null;
-  });
-  // Approval modals (PlanConfirm etc.) suppress the sidebar so the user
-  // reviews the picker, not a preview of an unapproved plan.
-  const activePlanCard = isModalActive ? null : rawActivePlanCard;
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [languageVersion, setLanguageVersion] = useState(0);
@@ -330,23 +310,6 @@ function AppInner({
   // "▸ tool<X> running…" pulse-spinner row so long tool calls don't
   // look like the app hung.
   const [ongoingTool, setOngoingTool] = useState<{ name: string; args?: string } | null>(null);
-  // Sidebar visibility — persisted in config; default on (panel self-hides when no plan is active).
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
-    const stored = loadSidebarOpen();
-    if (typeof stored === "boolean") return stored;
-    return true;
-  });
-  const toggleSidebar = useCallback(() => {
-    setSidebarOpen((cur) => {
-      const next = !cur;
-      try {
-        saveSidebarOpen(next);
-      } catch {
-        /* config write failures shouldn't break the UI */
-      }
-      return next;
-    });
-  }, []);
   // Latest progress frame for the currently-running tool (MCP
   // `notifications/progress`). `null` when no progress has been
   // reported for this tool call — OngoingToolRow still spins, just
@@ -1228,10 +1191,6 @@ function AppInner({
     }
     if (key.ctrl && key.input === "c") {
       quitProcess();
-      return;
-    }
-    if (key.ctrl && key.input === "\\") {
-      toggleSidebar();
       return;
     }
     if (key.escape && busy) {
@@ -3199,16 +3158,6 @@ function AppInner({
     [],
   );
 
-  // Sidebar renders the active plan when there's room. When it does, the plan
-  // is *moved* there — not duplicated — so we drop it from the inline stream.
-  // On narrow terminals (or when the user has Ctrl+\ collapsed it), the plan
-  // card stays inline in the stream as a regular card.
-  const sidebarVisible =
-    !PLAIN_UI &&
-    sidebarOpen &&
-    (process.stdout.columns ?? 80) >= SIDEBAR_MIN_TOTAL_COLS &&
-    activePlanCard !== null;
-
   return (
     <>
       <TickerProvider
@@ -3242,7 +3191,7 @@ function AppInner({
           <Box flexDirection="row">
             <Box flexDirection="column" flexGrow={1}>
               <Box flexDirection="column">
-                <CardStream excludeId={sidebarVisible ? activePlanCard?.id : undefined} />
+                <CardStream />
                 {/*
           Welcome card on the empty state. Visible only when nothing
           has happened yet (no past events, nothing in flight, no
@@ -3539,9 +3488,6 @@ function AppInner({
                 </>
               )}
             </Box>
-            {sidebarVisible ? (
-              <SidebarPanel ongoingTool={ongoingTool} subagentActivity={subagentActivity} />
-            ) : null}
           </Box>
         </ViewportBudgetProvider>
       </TickerProvider>

@@ -33,8 +33,6 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Persisted sidebar visibility — undefined = auto (open on cols ≥ 120). */
-  sidebarOpen?: boolean;
   projects?: {
     [absoluteRootDir: string]: {
       shellAllowed?: string[];
@@ -85,20 +83,6 @@ export function saveLanguage(lang: LanguageCode, path: string = defaultConfigPat
 export function loadApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.DEEPSEEK_API_KEY) return process.env.DEEPSEEK_API_KEY;
   return readConfig(path).apiKey;
-}
-
-export function loadSidebarOpen(path: string = defaultConfigPath()): boolean | undefined {
-  return readConfig(path).sidebarOpen;
-}
-
-export function saveSidebarOpen(
-  open: boolean | undefined,
-  path: string = defaultConfigPath(),
-): void {
-  const cfg = readConfig(path);
-  if (open === undefined) cfg.sidebarOpen = undefined;
-  else cfg.sidebarOpen = open;
-  writeConfig(cfg, path);
 }
 
 export function searchEnabled(path: string = defaultConfigPath()): boolean {

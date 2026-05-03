@@ -4,12 +4,11 @@ import { useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
 
-export type ZoneId = "modal" | "plan-card" | "status" | "input" | "stream" | "safety";
+export type ZoneId = "modal" | "status" | "input" | "stream" | "safety";
 
 /** Higher number = claims rows first. */
 const ZONE_PRIORITY: Record<ZoneId, number> = {
   modal: 100,
-  "plan-card": 80,
   status: 60,
   input: 50,
   stream: 10,
@@ -158,10 +157,4 @@ export function useTotalRows(): number {
   const ctx = useContext(BudgetContext);
   const { stdout } = useStdout();
   return ctx?.totalRows ?? stdout?.rows ?? 40;
-}
-
-/** True when any modal-priority zone is claimed. Replaces the long !pendingShell && !pendingEdit && ... chains. */
-export function useIsModalActive(): boolean {
-  const ctx = useContext(BudgetContext);
-  return ctx?.claims.has("modal") ?? false;
 }
