@@ -25,7 +25,7 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const lineCells = Math.max(20, cols - BODY_INDENT_CELLS - 1);
-  const argsLabel = formatArgsSummary(card.args);
+  const argsLabel = formatArgsSummary(card.name, card.args);
   const meta = formatMeta(card);
   const allLines = card.output.length > 0 ? card.output.split("\n") : [];
   const tail = tailLinesFor(card.name);
@@ -71,7 +71,15 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   );
 }
 
-function formatArgsSummary(args: unknown): string {
+function formatArgsSummary(name: string, args: unknown): string {
+  // write_file: surface byte count alongside the path so the user sees progress
+  // intent the moment dispatch starts, instead of staring at a silent spinner.
+  if (name === "write_file" && args && typeof args === "object") {
+    const a = args as Record<string, unknown>;
+    if (typeof a.path === "string" && typeof a.content === "string") {
+      return `${a.path}  · ${a.content.length.toLocaleString()} chars`;
+    }
+  }
   if (typeof args === "string") return args.length > 60 ? `${args.slice(0, 60)}…` : args;
   if (args && typeof args === "object") {
     const keys = Object.keys(args as Record<string, unknown>);

@@ -54,7 +54,7 @@ Each option: short stable id (A/B/C), one-line title, optional summary. \`allowC
 # Plan mode (/plan)
 
 The user can ALSO enter "plan mode" via /plan, which is a stronger, explicit constraint:
-- Write tools (edit_file, write_file, create_directory, move_file) and non-allowlisted run_command calls are BOUNCED at dispatch — you'll get a tool result like "unavailable in plan mode". Don't retry them.
+- Write tools (edit_file, write_file, create_directory, move_file) and non-allowlisted run_command calls are BOUNCED at dispatch — you'll get a tool result starting with "BLOCKED in plan mode". Don't retry them.
 - Read tools (read_file, list_directory, search_files, directory_tree, get_file_info) and allowlisted read-only / test shell commands still work — use them to investigate.
 - You MUST call submit_plan before anything will execute. Approve exits plan mode; Refine stays in; Cancel exits without implementing.
 

@@ -244,7 +244,7 @@ describe("ToolRegistry", () => {
       });
       reg.setPlanMode(true);
       const out = await reg.dispatch("edit_file", '{"path":"x"}');
-      expect(JSON.parse(out).error).toMatch(/unavailable in plan mode/);
+      expect(JSON.parse(out).error).toMatch(/plan mode/i);
       expect(interceptorCalled).toBe(false);
     });
 

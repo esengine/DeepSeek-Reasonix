@@ -38,7 +38,7 @@ describe("ToolRegistry plan mode", () => {
     const out = await reg.dispatch("mutate", "{}");
     expect(ran).toBe(false);
     const payload = JSON.parse(out);
-    expect(payload.error).toMatch(/unavailable in plan mode/);
+    expect(payload.error).toMatch(/plan mode/i);
     expect(payload.error).toMatch(/submit_plan/);
   });
 
@@ -67,7 +67,7 @@ describe("ToolRegistry plan mode", () => {
     expect(readOut).toBe("did-read");
     // Write call: refused.
     const writeOut = await reg.dispatch("maybe_read", '{"kind":"write"}');
-    expect(JSON.parse(writeOut).error).toMatch(/unavailable in plan mode/);
+    expect(JSON.parse(writeOut).error).toMatch(/plan mode/i);
   });
 
   it("readOnlyCheck takes precedence over readOnly when both are set", async () => {

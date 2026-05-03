@@ -136,7 +136,7 @@ export class ToolRegistry {
     // `run_command` is read-only iff the command matches its allowlist).
     if (this._planMode && !isReadOnlyCall(tool, args)) {
       return JSON.stringify({
-        error: `${name}: unavailable in plan mode — this is a read-only exploration phase. Use read_file / list_directory / search_files / directory_tree / web_search / allowlisted shell commands to investigate. Call submit_plan with your proposed plan when you're ready for the user's review.`,
+        error: `${name}: BLOCKED in plan mode. Call submit_plan now with your proposed plan — writes execute only after user approval. Do NOT retry write tools this turn.`,
       });
     }
 
