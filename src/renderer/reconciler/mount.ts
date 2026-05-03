@@ -3,6 +3,7 @@ import { type DiffPools, diffFrames } from "../diff/diff-frames.js";
 import { type Cursor, type Frame, emptyFrame } from "../diff/frame.js";
 import { serializePatches } from "../diff/serialize.js";
 import { RendererBridgeContext } from "../ink-compat/renderer-bridge.js";
+import { AppContext } from "../ink-compat/use-app.js";
 import { ViewportContext } from "../ink-compat/viewport.js";
 import { KeystrokeContext, KeystrokeReader, type KeystrokeSource } from "../input/index.js";
 import { renderToScreen } from "../layout/layout.js";
@@ -17,6 +18,7 @@ export interface MountOptions {
   readonly write: (bytes: string) => void;
   readonly cursor?: () => Cursor;
   readonly stdin?: KeystrokeSource;
+  readonly onExit?: (error?: Error) => void;
 }
 
 export interface Handle {
@@ -85,11 +87,19 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
 
   const bridge = { emitStatic };
 
+  const appApi = {
+    exit: (error?: Error): void => {
+      if (destroyed) return;
+      queueMicrotask(() => opts.onExit?.(error));
+    },
+  };
+
   const wrap = (node: ReactNode): ReactNode => {
+    const withApp: ReactNode = createElement(AppContext.Provider, { value: appApi }, node);
     const withBridge: ReactNode = createElement(
       RendererBridgeContext.Provider,
       { value: bridge },
-      node,
+      withApp,
     );
     const withViewport: ReactNode = createElement(
       ViewportContext.Provider,
