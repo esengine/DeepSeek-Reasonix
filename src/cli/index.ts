@@ -382,6 +382,14 @@ program
   });
 
 program
+  .command("card-demo")
+  .description("experimental — full chat-card lifecycle demo (reasoning / tool / plan / response)")
+  .action(async () => {
+    const { runCardDemo } = await import("./commands/card-demo.js");
+    await runCardDemo();
+  });
+
+program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
