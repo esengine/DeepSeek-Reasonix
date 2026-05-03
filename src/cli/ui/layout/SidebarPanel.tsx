@@ -95,17 +95,23 @@ function PlanSection({ card }: { card: { steps: PlanStep[]; title: string } }) {
         tone={CARD.plan.color}
       />
       <Divider />
-      {visible.kind === "all" ? null : (
-        <Text color={FG.faint}>{`(${visible.hidden} earlier hidden)`}</Text>
-      )}
+      {visible.kind === "windowed" ? (
+        <HiddenIndicator count={visible.hidden} suffix="earlier hidden" />
+      ) : null}
       {visible.steps.map((s, i) => (
         <StepRow key={s.id} step={s} index={visible.startIndex + i} />
       ))}
-      {visible.kind === "windowed" && visible.hiddenAfter > 0 ? (
-        <Text color={FG.faint}>{`(${visible.hiddenAfter} more)`}</Text>
+      {visible.kind === "windowed" ? (
+        <HiddenIndicator count={visible.hiddenAfter} suffix="more" />
       ) : null}
     </>
   );
+}
+
+/** Always renders one row in windowed mode; shows count when > 0, blank placeholder otherwise. The blank holds the row so the sidebar's total height stays stable as the running step crosses the window edges — without this, the indicator flips on/off mid-execution and Ink's erase-then-reprint leaks the previous frame. */
+function HiddenIndicator({ count, suffix }: { count: number; suffix: string }) {
+  if (count <= 0) return <Box height={1} />;
+  return <Text color={FG.faint}>{`(${count} ${suffix})`}</Text>;
 }
 
 function StepRow({ step, index }: { step: PlanStep; index: number }) {
