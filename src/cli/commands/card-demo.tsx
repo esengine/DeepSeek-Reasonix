@@ -21,6 +21,8 @@ const ERR = "#ff8b81";
 const PEND = "#484f58";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
+type ToolTone = "read" | "write" | "bash" | "search" | "fetch" | "mcp" | "patch";
+
 interface UserItem {
   readonly kind: "user";
   readonly text: string;
@@ -31,6 +33,7 @@ interface ReasoningSettled {
   readonly paragraphs: number;
   readonly tokens: number;
   readonly seconds: number;
+  readonly aborted?: boolean;
 }
 interface ToolSettled {
   readonly kind: "tool";
@@ -55,7 +58,7 @@ interface PlanSettled {
 }
 interface ResponseSettled {
   readonly kind: "response";
-  readonly text: string;
+  readonly lines: ReadonlyArray<{ kind: "text" | "code" | "header" | "list"; text: string }>;
   readonly aborted?: boolean;
 }
 interface DiffItem {
@@ -103,7 +106,6 @@ type StaticItem =
   | ErrorItem
   | WarnItem;
 
-type ToolTone = "read" | "write" | "bash" | "search" | "fetch" | "mcp";
 const TOOL_GLYPH: Record<ToolTone, string> = {
   read: "▤",
   write: "▥",
@@ -111,6 +113,7 @@ const TOOL_GLYPH: Record<ToolTone, string> = {
   search: "⊙",
   fetch: "⌬",
   mcp: "⊕",
+  patch: "✎",
 };
 const TOOL_COLOR: Record<ToolTone, string> = {
   read: BRAND,
@@ -119,7 +122,65 @@ const TOOL_COLOR: Record<ToolTone, string> = {
   search: BRAND,
   fetch: VIOLET,
   mcp: VIOLET,
+  patch: WARN,
 };
+const TOOL_TAIL_LEN: Record<ToolTone, number> = {
+  read: 2,
+  write: 2,
+  bash: 5,
+  search: 2,
+  fetch: 2,
+  mcp: 5,
+  patch: 2,
+};
+
+interface ReasoningActive {
+  readonly id: string;
+  readonly kind: "reasoning";
+  readonly tail: ReadonlyArray<string>;
+  readonly tokens: number;
+  readonly frame: number;
+  readonly aborted?: boolean;
+}
+interface ToolActive {
+  readonly id: string;
+  readonly kind: "tool";
+  readonly tone: ToolTone;
+  readonly name: string;
+  readonly args: string;
+  readonly outputLines: ReadonlyArray<string>;
+  readonly elapsedMs: number;
+  readonly frame: number;
+  readonly retry?: { attempt: number; max: number };
+}
+interface PlanActive {
+  readonly id: string;
+  readonly kind: "plan";
+  readonly title: string;
+  readonly steps: ReadonlyArray<PlanStep>;
+  readonly inProgressIdx: number | null;
+  readonly frame: number;
+}
+interface SubAgentActive {
+  readonly id: string;
+  readonly kind: "subagent";
+  readonly task: string;
+  readonly children: ReadonlyArray<SubAgentChild>;
+  readonly frame: number;
+}
+interface SubAgentChild {
+  readonly status: "running" | "done";
+  readonly kind: "reasoning" | "tool" | "diff";
+  readonly summary: string;
+  readonly tone?: ToolTone;
+}
+interface ResponseActive {
+  readonly id: string;
+  readonly kind: "response";
+  readonly tail: ReadonlyArray<string>;
+  readonly frame: number;
+}
+type ActiveCard = ReasoningActive | ToolActive | PlanActive | SubAgentActive | ResponseActive;
 
 function StaticRow({ item }: { item: StaticItem }): React.ReactElement {
   switch (item.kind) {
@@ -136,12 +197,12 @@ function StaticRow({ item }: { item: StaticItem }): React.ReactElement {
       return (
         <inkCompat.Box flexDirection="column" marginTop={1}>
           <inkCompat.Box flexDirection="row" gap={1}>
-            <inkCompat.Text color={ACCENT}>◆</inkCompat.Text>
-            <inkCompat.Text color={ACCENT} bold>
-              reasoning
+            <inkCompat.Text color={item.aborted ? ERR : ACCENT}>◆</inkCompat.Text>
+            <inkCompat.Text color={item.aborted ? ERR : ACCENT} bold>
+              {item.aborted ? "reasoning (aborted)" : "reasoning"}
             </inkCompat.Text>
             <inkCompat.Text color={FAINT}>
-              {`⋯ ${item.paragraphs} ¶ · ${item.tokens} tok · ${item.seconds.toFixed(1)}s · /reasoning last`}
+              {`${item.paragraphs}¶ · ${item.tokens} tok · ${item.seconds.toFixed(1)}s`}
             </inkCompat.Text>
           </inkCompat.Box>
           {item.tail.map((line, i) => (
@@ -177,25 +238,31 @@ function StaticRow({ item }: { item: StaticItem }): React.ReactElement {
           ))}
         </inkCompat.Box>
       );
-    case "response": {
-      const lines = item.text.split("\n");
+    case "response":
       return (
         <inkCompat.Box flexDirection="column" marginTop={1}>
           <inkCompat.Box flexDirection="row" gap={1}>
-            <inkCompat.Text color={OK}>‹</inkCompat.Text>
-            <inkCompat.Text color={OK} bold>
+            <inkCompat.Text color={item.aborted ? ERR : OK}>‹</inkCompat.Text>
+            <inkCompat.Text color={item.aborted ? ERR : OK} bold>
               {item.aborted ? "response (truncated by esc)" : "response"}
             </inkCompat.Text>
           </inkCompat.Box>
-          {lines.map((line, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: response body lines are positional
+          {item.lines.map((line, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: response body lines positional
             <inkCompat.Box key={`resp-${i}`} paddingLeft={2}>
-              <inkCompat.Text>{line || " "}</inkCompat.Text>
+              {line.kind === "code" ? (
+                <inkCompat.Text color={BRAND}>{line.text || " "}</inkCompat.Text>
+              ) : line.kind === "header" ? (
+                <inkCompat.Text bold>{line.text || " "}</inkCompat.Text>
+              ) : line.kind === "list" ? (
+                <inkCompat.Text>{`  • ${line.text}`}</inkCompat.Text>
+              ) : (
+                <inkCompat.Text>{line.text || " "}</inkCompat.Text>
+              )}
             </inkCompat.Box>
           ))}
         </inkCompat.Box>
       );
-    }
     case "diff":
       return (
         <inkCompat.Box flexDirection="column" marginTop={1}>
@@ -206,7 +273,7 @@ function StaticRow({ item }: { item: StaticItem }): React.ReactElement {
             <inkCompat.Text color={ERR}>{`-${item.removed}`}</inkCompat.Text>
           </inkCompat.Box>
           {item.preview.map((row, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: diff preview lines are positional
+            // biome-ignore lint/suspicious/noArrayIndexKey: diff preview lines positional
             <inkCompat.Box key={`d-${i}`} paddingLeft={2} flexDirection="row" gap={1}>
               <inkCompat.Text color={row.kind === "+" ? OK : row.kind === "-" ? ERR : FAINT}>
                 {row.kind}
@@ -228,7 +295,7 @@ function StaticRow({ item }: { item: StaticItem }): React.ReactElement {
             <inkCompat.Text color={FAINT}>{`· ${item.seconds.toFixed(1)}s`}</inkCompat.Text>
           </inkCompat.Box>
           {item.children.map((c, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: subagent children are positional
+            // biome-ignore lint/suspicious/noArrayIndexKey: subagent children positional
             <inkCompat.Box key={`sub-${i}`} paddingLeft={2} flexDirection="row" gap={1}>
               <inkCompat.Text color={VIOLET}>▎</inkCompat.Text>
               <inkCompat.Text color={subChildColor(c.kind)}>{subChildGlyph(c.kind)}</inkCompat.Text>
@@ -282,7 +349,7 @@ function ToolStaticRow({ item }: { item: ToolSettled }): React.ReactElement {
           </inkCompat.Text>
         ) : null}
         {item.status === "retry" && item.retryInfo ? (
-          <inkCompat.Text color={WARN}>{`↻ ${item.retryInfo}`}</inkCompat.Text>
+          <inkCompat.Text color={WARN}>{`R ${item.retryInfo}`}</inkCompat.Text>
         ) : null}
         <inkCompat.Text color={FAINT}>{`${item.seconds.toFixed(1)}s`}</inkCompat.Text>
       </inkCompat.Box>
@@ -290,7 +357,7 @@ function ToolStaticRow({ item }: { item: ToolSettled }): React.ReactElement {
         <>
           {item.hidden > 0 ? (
             <inkCompat.Box paddingLeft={2}>
-              <inkCompat.Text color={FAINT}>{`⋮ ${item.hidden} earlier lines`}</inkCompat.Text>
+              <inkCompat.Text color={FAINT}>{`: ${item.hidden} earlier lines`}</inkCompat.Text>
             </inkCompat.Box>
           ) : null}
           {item.output.map((line, i) => (
@@ -364,61 +431,6 @@ function subChildColor(kind: SubChild["kind"]): string {
   }
 }
 
-interface ReasoningActive {
-  readonly kind: "reasoning";
-  readonly tail: ReadonlyArray<string>;
-  readonly tokens: number;
-  readonly frame: number;
-}
-interface ToolActive {
-  readonly kind: "tool";
-  readonly tone: ToolTone;
-  readonly name: string;
-  readonly args: string;
-  readonly outputLines: ReadonlyArray<string>;
-  readonly elapsedMs: number;
-  readonly frame: number;
-}
-interface PlanActive {
-  readonly kind: "plan";
-  readonly steps: ReadonlyArray<PlanStep>;
-  readonly inProgressIdx: number;
-  readonly frame: number;
-}
-interface ResponseActive {
-  readonly kind: "response";
-  readonly tail: ReadonlyArray<string>;
-  readonly frame: number;
-}
-type ActiveCard = ReasoningActive | ToolActive | PlanActive | ResponseActive;
-
-const REASONING_BURST = [
-  "Looking at recent test failures in src/loop.test.ts.",
-  "The assertion shape changed — expects a stripped trailing marker.",
-  "But the new tokenizer in src/parser.ts keeps it.",
-  "Two paths: patch tokenizer's strip step, or update the test expectation.",
-  "The strip step is the safer fix; expectation matches user-visible output.",
-  "Plan: rewire strip → run tests → if green, ship; otherwise update expectation.",
-];
-
-const SHELL_LONG = [
-  " PASS  src/loop.test.ts",
-  " PASS  src/parser.test.ts",
-  " PASS  src/cli/index.test.ts",
-  " PASS  src/cli/commands/chat.test.ts",
-  " PASS  src/diff/cell.test.ts",
-  " PASS  src/diff/screen.test.ts",
-  " PASS  src/renderer/layout.test.ts",
-  " PASS  src/renderer/diff.test.ts",
-  " PASS  src/renderer/serialize.test.ts",
-  "",
-  "Test Suites: 9 passed, 9 total",
-  "Tests:       142 passed, 142 total",
-] as const;
-
-const RESPONSE_TEXT =
-  "The failing test is on src/loop.test.ts line 42 — the assertion expects the parser to drop the trailing tool-call marker, but the new tokenizer keeps it. Two paths forward: patch the tokenizer's strip step, or update the expectation. I'd patch the tokenizer — keeps existing tests green and matches user-visible output. Want me to draft the change?";
-
 function ReasoningCard({ card }: { card: ReasoningActive }): React.ReactElement {
   const spin = SPINNER[card.frame % SPINNER.length] ?? "·";
   return (
@@ -448,7 +460,8 @@ function ReasoningCard({ card }: { card: ReasoningActive }): React.ReactElement 
 
 function ToolActiveCard({ card }: { card: ToolActive }): React.ReactElement {
   const spin = SPINNER[card.frame % SPINNER.length] ?? "·";
-  const tail = card.outputLines.slice(-5);
+  const tailLen = TOOL_TAIL_LEN[card.tone];
+  const tail = card.outputLines.slice(-tailLen);
   const hidden = Math.max(0, card.outputLines.length - tail.length);
   const seconds = (card.elapsedMs / 1000).toFixed(1);
   const c = TOOL_COLOR[card.tone];
@@ -467,10 +480,15 @@ function ToolActiveCard({ card }: { card: ToolActive }): React.ReactElement {
           {card.name}
         </inkCompat.Text>
         <inkCompat.Text color={FAINT}>{card.args}</inkCompat.Text>
+        {card.retry ? (
+          <inkCompat.Text color={WARN}>
+            {`R ${card.retry.attempt}/${card.retry.max}`}
+          </inkCompat.Text>
+        ) : null}
         <inkCompat.Text color={FAINT}>{`· ${seconds}s`}</inkCompat.Text>
       </inkCompat.Box>
       {hidden > 0 ? (
-        <inkCompat.Text color={FAINT}>{`⋮ ${hidden} earlier lines`}</inkCompat.Text>
+        <inkCompat.Text color={FAINT}>{`: ${hidden} earlier lines`}</inkCompat.Text>
       ) : null}
       {tail.map((line, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: tool active tail positional
@@ -484,6 +502,7 @@ function ToolActiveCard({ card }: { card: ToolActive }): React.ReactElement {
 
 function PlanActiveCard({ card }: { card: PlanActive }): React.ReactElement {
   const spin = SPINNER[card.frame % SPINNER.length] ?? "·";
+  const done = card.steps.filter((s) => s.status === "done" || s.status === "skipped").length;
   return (
     <inkCompat.Box
       flexDirection="column"
@@ -495,8 +514,9 @@ function PlanActiveCard({ card }: { card: PlanActive }): React.ReactElement {
       <inkCompat.Box flexDirection="row" gap={1}>
         <inkCompat.Text color={ACCENT}>⊞</inkCompat.Text>
         <inkCompat.Text color={ACCENT} bold>
-          plan
+          {card.title}
         </inkCompat.Text>
+        <inkCompat.Text color={FAINT}>{`${done} of ${card.steps.length} done`}</inkCompat.Text>
       </inkCompat.Box>
       {card.steps.map((step, i) => {
         const running = i === card.inProgressIdx;
@@ -509,6 +529,46 @@ function PlanActiveCard({ card }: { card: PlanActive }): React.ReactElement {
             </inkCompat.Text>
             {step.note ? <inkCompat.Text color={FAINT}>{`· ${step.note}`}</inkCompat.Text> : null}
             {running ? <inkCompat.Text color={FAINT}>← in progress</inkCompat.Text> : null}
+          </inkCompat.Box>
+        );
+      })}
+    </inkCompat.Box>
+  );
+}
+
+function SubAgentActiveCard({ card }: { card: SubAgentActive }): React.ReactElement {
+  const spin = SPINNER[card.frame % SPINNER.length] ?? "·";
+  const runningCount = card.children.filter((c) => c.status === "running").length;
+  return (
+    <inkCompat.Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={VIOLET}
+      paddingX={1}
+      marginTop={1}
+    >
+      <inkCompat.Box flexDirection="row" gap={1}>
+        <inkCompat.Text color={VIOLET}>{spin}</inkCompat.Text>
+        <inkCompat.Text color={VIOLET} bold>
+          subagent
+        </inkCompat.Text>
+        <inkCompat.Text>{card.task}</inkCompat.Text>
+        <inkCompat.Text color={FAINT}>{`${runningCount} running`}</inkCompat.Text>
+      </inkCompat.Box>
+      {card.children.map((c, i) => {
+        const cglyph = c.status === "running" ? spin : "✓";
+        const ccolor = c.status === "running" ? BRAND : OK;
+        return (
+          <inkCompat.Box
+            // biome-ignore lint/suspicious/noArrayIndexKey: subagent active children positional
+            key={`sc-${i}`}
+            flexDirection="row"
+            gap={1}
+          >
+            <inkCompat.Text color={VIOLET}>▎</inkCompat.Text>
+            <inkCompat.Text color={ccolor}>{cglyph}</inkCompat.Text>
+            <inkCompat.Text color={subChildColor(c.kind)}>{subChildGlyph(c.kind)}</inkCompat.Text>
+            <inkCompat.Text dimColor={c.status === "done"}>{c.summary}</inkCompat.Text>
           </inkCompat.Box>
         );
       })}
@@ -540,9 +600,23 @@ function ResponseActiveCard({ card }: { card: ResponseActive }): React.ReactElem
   );
 }
 
-function StatusRow({ elapsedMs }: { elapsedMs: number }): React.ReactElement {
+function ActiveCardView({ card }: { card: ActiveCard }): React.ReactElement {
+  switch (card.kind) {
+    case "reasoning":
+      return <ReasoningCard card={card} />;
+    case "tool":
+      return <ToolActiveCard card={card} />;
+    case "plan":
+      return <PlanActiveCard card={card} />;
+    case "subagent":
+      return <SubAgentActiveCard card={card} />;
+    case "response":
+      return <ResponseActiveCard card={card} />;
+  }
+}
+
+function StatusRow({ elapsedMs, cost }: { elapsedMs: number; cost: number }): React.ReactElement {
   const seconds = (elapsedMs / 1000).toFixed(1);
-  const cost = (elapsedMs / 1000) * 0.0008;
   return (
     <inkCompat.Box flexDirection="row" gap={2}>
       <inkCompat.Text color={BRAND} bold>
@@ -579,10 +653,19 @@ interface ShellProps {
   onExit: () => void;
 }
 
+interface DemoApi {
+  setActive(updater: (prev: readonly ActiveCard[]) => readonly ActiveCard[]): void;
+  push(item: StaticItem): void;
+  reset(): void;
+  cancelled: () => boolean;
+  sleep(ms: number): Promise<void>;
+}
+
 export function CardDemoShell({ onExit }: ShellProps): React.ReactElement {
-  const [history, setHistory] = useState<ReadonlyArray<StaticItem>>([]);
-  const [active, setActive] = useState<ActiveCard | null>(null);
+  const [history, setHistory] = useState<readonly StaticItem[]>([]);
+  const [active, setActive] = useState<readonly ActiveCard[]>([]);
   const [elapsed, setElapsed] = useState(0);
+  const [cost, setCost] = useState(0);
   const startedRef = useRef(Date.now());
 
   useKeystroke((k) => {
@@ -591,38 +674,34 @@ export function CardDemoShell({ onExit }: ShellProps): React.ReactElement {
 
   useEffect(() => {
     const id = setInterval(() => {
-      setElapsed(Date.now() - startedRef.current);
+      const now = Date.now() - startedRef.current;
+      setElapsed(now);
+      setCost((now / 1000) * 0.0008);
     }, 100);
     return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    const stages = buildScript();
-    let i = 0;
-    const runNext = (): void => {
-      if (cancelled) return;
-      if (i >= stages.length) {
-        setActive(null);
-        setTimeout(() => {
-          if (cancelled) return;
-          setHistory([]);
-          startedRef.current = Date.now();
-          i = 0;
-          runNext();
-        }, 1500);
-        return;
-      }
-      const stage = stages[i];
-      i++;
-      if (!stage) return;
-      stage(setActive, (item) => {
+    const api: DemoApi = {
+      setActive: (updater) => {
+        if (cancelled) return;
+        setActive((prev) => updater(prev));
+      },
+      push: (item) => {
+        if (cancelled) return;
         setHistory((prev) => [...prev, item]);
-      }).then(() => {
-        if (!cancelled) runNext();
-      });
+      },
+      reset: () => {
+        if (cancelled) return;
+        setActive([]);
+        setHistory([]);
+        startedRef.current = Date.now();
+      },
+      cancelled: () => cancelled,
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     };
-    runNext();
+    void runScript(api);
     return () => {
       cancelled = true;
     };
@@ -630,275 +709,647 @@ export function CardDemoShell({ onExit }: ShellProps): React.ReactElement {
 
   return (
     <inkCompat.Box flexDirection="column">
-      <StatusRow elapsedMs={elapsed} />
+      <StatusRow elapsedMs={elapsed} cost={cost} />
       <inkCompat.Box flexDirection="column">
         {history.map((item, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: append-only history
           <StaticRow key={`h-${i}`} item={item} />
         ))}
       </inkCompat.Box>
-      {active ? (
-        active.kind === "reasoning" ? (
-          <ReasoningCard card={active} />
-        ) : active.kind === "tool" ? (
-          <ToolActiveCard card={active} />
-        ) : active.kind === "plan" ? (
-          <PlanActiveCard card={active} />
-        ) : (
-          <ResponseActiveCard card={active} />
-        )
-      ) : (
-        <PromptInput />
-      )}
+      {active.map((card, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: live region cards positional
+        <ActiveCardView key={`a-${i}-${card.id}`} card={card} />
+      ))}
+      {active.length === 0 ? <PromptInput /> : null}
       <HintBar />
     </inkCompat.Box>
   );
 }
 
-type Stage = (
-  setActive: (a: ActiveCard | null) => void,
-  push: (item: StaticItem) => void,
-) => Promise<void>;
+function replaceById(
+  cards: readonly ActiveCard[],
+  id: string,
+  next: ActiveCard | null,
+): readonly ActiveCard[] {
+  if (next === null) return cards.filter((c) => c.id !== id);
+  return cards.map((c) => (c.id === id ? next : c));
+}
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+function appendCard(cards: readonly ActiveCard[], card: ActiveCard): readonly ActiveCard[] {
+  return [...cards, card];
+}
 
-function buildScript(): Stage[] {
-  return [
-    async (_setActive, push) => {
-      push({ kind: "user", text: "fix the failing test in src/loop.test.ts" });
-      await sleep(400);
-    },
+async function runScript(api: DemoApi): Promise<void> {
+  while (!api.cancelled()) {
+    await sceneFixFailingTest(api);
+    if (api.cancelled()) return;
+    await api.sleep(1000);
+    if (api.cancelled()) return;
+    await sceneSubagent(api);
+    if (api.cancelled()) return;
+    await api.sleep(800);
+    if (api.cancelled()) return;
+    await sceneEdgeCases(api);
+    if (api.cancelled()) return;
+    await api.sleep(1500);
+    api.reset();
+    await api.sleep(500);
+  }
+}
 
-    async (setActive, push) => {
-      const start = Date.now();
-      let frame = 0;
-      let tokens = 0;
-      let textRevealed = "";
-      const fullText = REASONING_BURST.join(" ");
-      const tick = setInterval(() => {
-        frame++;
-        const next = Math.min(fullText.length, textRevealed.length + 6);
-        textRevealed = fullText.slice(0, next);
-        tokens = Math.floor(textRevealed.length / 3);
-        const lines = wrapText(textRevealed, 60);
-        const tail = lines.slice(-4);
-        setActive({ kind: "reasoning", tail, tokens, frame });
-      }, 60);
-      await sleep(2400);
-      clearInterval(tick);
-      const seconds = (Date.now() - start) / 1000;
-      const lines = wrapText(textRevealed, 60);
-      setActive(null);
-      push({
+async function streamReasoning(
+  api: DemoApi,
+  fullText: string,
+  durationMs: number,
+  abortAtMs?: number,
+): Promise<{ tokens: number; lines: string[]; aborted: boolean }> {
+  const id = "reason";
+  const start = Date.now();
+  let frame = 0;
+  let revealed = "";
+  let aborted = false;
+  api.setActive((prev) => appendCard(prev, { id, kind: "reasoning", tail: [], tokens: 0, frame }));
+  while (Date.now() - start < durationMs && !api.cancelled()) {
+    if (abortAtMs !== undefined && Date.now() - start >= abortAtMs) {
+      aborted = true;
+      break;
+    }
+    await api.sleep(60);
+    frame++;
+    revealed = fullText.slice(0, Math.min(fullText.length, revealed.length + 6));
+    const lines = wrapText(revealed, 70);
+    const tail = lines.slice(-4);
+    const tokens = Math.floor(revealed.length / 3);
+    const aborting = abortAtMs !== undefined && Date.now() - start >= abortAtMs - 100;
+    api.setActive((prev) =>
+      replaceById(prev, id, {
+        id,
         kind: "reasoning",
-        tail: lines.slice(-2),
-        paragraphs: REASONING_BURST.length,
+        tail,
         tokens,
-        seconds,
-      });
-      await sleep(300);
-    },
+        frame,
+        aborted: aborting,
+      }),
+    );
+  }
+  api.setActive((prev) => replaceById(prev, id, null));
+  const lines = wrapText(revealed, 70);
+  return { tokens: Math.floor(revealed.length / 3), lines, aborted };
+}
 
-    async (setActive, push) => {
-      const start = Date.now();
-      const target = ["import { Loop } from './loop.js';", "", "test('parser strips trailer', …"];
-      let frame = 0;
-      const tick = setInterval(() => {
-        frame++;
-        setActive({
-          kind: "tool",
-          tone: "read",
-          name: "read_file",
-          args: "src/loop.test.ts",
-          outputLines: target,
-          elapsedMs: Date.now() - start,
-          frame,
-        });
-      }, 80);
-      await sleep(700);
-      clearInterval(tick);
-      setActive(null);
-      push({
+async function streamTool(
+  api: DemoApi,
+  config: {
+    tone: ToolTone;
+    name: string;
+    args: string;
+    output: ReadonlyArray<string>;
+    durationMs: number;
+    retry?: { attempt: number; max: number };
+  },
+): Promise<void> {
+  const id = `tool-${Math.random().toString(36).slice(2)}`;
+  const start = Date.now();
+  let frame = 0;
+  const out: string[] = [];
+  api.setActive((prev) =>
+    appendCard(prev, {
+      id,
+      kind: "tool",
+      tone: config.tone,
+      name: config.name,
+      args: config.args,
+      outputLines: out,
+      elapsedMs: 0,
+      frame,
+      retry: config.retry,
+    }),
+  );
+  const lineRate = config.durationMs / Math.max(1, config.output.length);
+  let lineIdx = 0;
+  while (Date.now() - start < config.durationMs && !api.cancelled()) {
+    await api.sleep(80);
+    frame++;
+    const elapsed = Date.now() - start;
+    while (lineIdx < config.output.length && elapsed > lineIdx * lineRate) {
+      out.push(config.output[lineIdx] ?? "");
+      lineIdx++;
+    }
+    api.setActive((prev) =>
+      replaceById(prev, id, {
+        id,
         kind: "tool",
-        tone: "read",
-        name: "read_file",
-        args: "src/loop.test.ts",
-        output: target.slice(-2),
-        hidden: 38,
-        seconds: (Date.now() - start) / 1000,
-        status: "ok",
-      });
-      await sleep(200);
-    },
+        tone: config.tone,
+        name: config.name,
+        args: config.args,
+        outputLines: out.slice(),
+        elapsedMs: elapsed,
+        frame,
+        retry: config.retry,
+      }),
+    );
+  }
+  api.setActive((prev) => replaceById(prev, id, null));
+}
 
-    async (setActive, push) => {
-      const start = Date.now();
-      let frame = 0;
-      const lines: string[] = [];
-      const spinTimer = setInterval(() => {
-        frame++;
-        setActive({
-          kind: "tool",
-          tone: "bash",
-          name: "bash",
-          args: "npm test",
-          outputLines: lines.slice(),
-          elapsedMs: Date.now() - start,
-          frame,
-        });
-      }, 80);
-      const lineTimer = setInterval(() => {
-        if (lines.length < SHELL_LONG.length) {
-          lines.push(SHELL_LONG[lines.length] ?? "");
-        }
-      }, 240);
-      await sleep(SHELL_LONG.length * 240 + 400);
-      clearInterval(spinTimer);
-      clearInterval(lineTimer);
-      setActive(null);
-      push({
-        kind: "tool",
-        tone: "bash",
-        name: "bash",
-        args: "npm test",
-        output: SHELL_LONG.slice(-5),
-        hidden: SHELL_LONG.length - 5,
-        seconds: (Date.now() - start) / 1000,
-        status: "ok",
-      });
-      await sleep(300);
-    },
+async function sceneFixFailingTest(api: DemoApi): Promise<void> {
+  api.push({ kind: "user", text: "fix the failing test in src/loop.test.ts" });
+  await api.sleep(400);
+  if (api.cancelled()) return;
 
-    async (_setActive, push) => {
-      push({
-        kind: "tool",
-        tone: "bash",
-        name: "bash",
-        args: "npm run lint",
-        output: ["error: command not found: biome", "exit code 127"],
-        hidden: 0,
-        seconds: 0.4,
-        status: "retry",
-        retryInfo: "retry 1/3",
-      });
-      await sleep(500);
-    },
+  // 1. reasoning
+  const reasoningText =
+    "Looking at recent test failures in src/loop.test.ts. The assertion shape changed -- expects a stripped trailing marker. The new tokenizer in src/parser.ts keeps it. Two paths: patch tokenizer's strip step, or update the test expectation.";
+  const reasonStart = Date.now();
+  const r = await streamReasoning(api, reasoningText, 2200);
+  if (api.cancelled()) return;
+  api.push({
+    kind: "reasoning",
+    tail: r.lines.slice(-2),
+    paragraphs: 3,
+    tokens: r.tokens,
+    seconds: (Date.now() - reasonStart) / 1000,
+  });
+  await api.sleep(200);
 
-    async (setActive, push) => {
-      const start = Date.now();
-      const labels: PlanStep[] = [
-        { status: "todo", label: "patch tokenizer.strip()" },
-        { status: "todo", label: "rerun npm test" },
-        { status: "todo", label: "rebuild dist", note: "skip if cached" },
-        { status: "todo", label: "publish patch" },
-      ];
-      const steps = labels.slice();
-      let frame = 0;
-      let cur = 0;
-      const tick = setInterval(() => {
-        frame++;
-        setActive({ kind: "plan", steps: steps.slice(), inProgressIdx: cur, frame });
-      }, 80);
-      while (cur < steps.length) {
-        await sleep(750);
-        steps[cur] = { ...steps[cur]!, status: "done" };
-        cur++;
-      }
-      clearInterval(tick);
-      setActive(null);
-      push({
-        kind: "plan",
-        steps: steps.slice(),
-        seconds: (Date.now() - start) / 1000,
-      });
-      await sleep(300);
-    },
-
-    async (_setActive, push) => {
-      push({
-        kind: "tool",
-        tone: "write",
-        name: "write_file",
-        args: "src/parser.ts (12+ 3-)",
-        output: [],
-        hidden: 0,
-        seconds: 0.0,
-        status: "rejected",
-      });
-      await sleep(400);
-    },
-
-    async (_setActive, push) => {
-      push({
-        kind: "diff",
-        file: "src/parser.ts",
-        added: 12,
-        removed: 3,
-        preview: [
-          { kind: " ", text: "function strip(token: string) {" },
-          { kind: "-", text: "  return token.trimEnd();" },
-          { kind: "+", text: "  if (token.endsWith(TRAILER)) {" },
-          { kind: "+", text: "    return token.slice(0, -TRAILER.length);" },
-          { kind: "+", text: "  }" },
-          { kind: "+", text: "  return token;" },
-          { kind: " ", text: "}" },
-        ],
-      });
-      await sleep(500);
-    },
-
-    async (_setActive, push) => {
-      push({
-        kind: "subagent",
-        task: "investigate flaky tokenizer regression",
-        seconds: 8.4,
-        ok: true,
-        children: [
-          { kind: "reasoning", summary: "scanning the parser fixtures" },
-          { kind: "tool", summary: "grep TRAILER src/" },
-          { kind: "tool", summary: "read src/parser.ts" },
-          { kind: "diff", summary: "src/parser.ts +12 -3" },
-        ],
-      });
-      await sleep(400);
-    },
-
-    async (setActive, push) => {
-      let frame = 0;
-      let revealed = 0;
-      const tick = setInterval(() => {
-        frame++;
-        revealed = Math.min(RESPONSE_TEXT.length, revealed + 6);
-        const lines = wrapText(RESPONSE_TEXT.slice(0, revealed), 70);
-        setActive({ kind: "response", tail: lines.slice(-4), frame });
-      }, 33);
-      while (revealed < RESPONSE_TEXT.length) await sleep(50);
-      clearInterval(tick);
-      setActive(null);
-      push({ kind: "response", text: RESPONSE_TEXT });
-      await sleep(500);
-    },
-
-    async (_setActive, push) => {
-      push({
-        kind: "usage",
-        inputTokens: 1842,
-        outputTokens: 421,
-        totalCost: 0.0094,
-      });
-      await sleep(400);
-    },
-
-    async (_setActive, push) => {
-      push({ kind: "warn", message: "context budget at 73% · /compact suggested" });
-      await sleep(400);
-    },
-
-    async (_setActive, push) => {
-      push({ kind: "error", message: "rate-limit hit on next request · retrying in 3s…" });
-      await sleep(700);
-    },
+  // 2. plan executes step-by-step
+  const planId = "plan-main";
+  const planStart = Date.now();
+  let frame = 0;
+  const steps: PlanStep[] = [
+    { status: "todo", label: "locate failing assertion" },
+    { status: "todo", label: "patch tokenizer.strip()" },
+    { status: "todo", label: "verify with npm test" },
+    { status: "todo", label: "publish patch" },
   ];
+
+  const renderPlan = (inProgressIdx: number | null) => {
+    api.setActive((prev) =>
+      replaceById(
+        prev.find((c) => c.id === planId) ? prev : appendCard(prev, makePlan()),
+        planId,
+        makePlan(),
+      ),
+    );
+    function makePlan(): PlanActive {
+      return {
+        id: planId,
+        kind: "plan",
+        title: "fix loop test",
+        steps: steps.slice(),
+        inProgressIdx,
+        frame,
+      };
+    }
+  };
+
+  // ensure plan card mounted
+  api.setActive((prev) =>
+    appendCard(prev, {
+      id: planId,
+      kind: "plan",
+      title: "fix loop test",
+      steps: steps.slice(),
+      inProgressIdx: 0,
+      frame,
+    }),
+  );
+
+  // local frame tick for plan spinner while sub-tools run
+  const planTick = setInterval(() => {
+    frame++;
+    api.setActive((prev) => {
+      const cur = prev.find((c) => c.id === planId);
+      if (!cur || cur.kind !== "plan") return prev;
+      return replaceById(prev, planId, { ...cur, frame });
+    });
+  }, 80);
+
+  try {
+    // step 0: search
+    steps[0] = { ...steps[0]!, status: "running" };
+    renderPlan(0);
+    await streamTool(api, {
+      tone: "search",
+      name: "grep",
+      args: "TRAILER src/parser.ts",
+      output: [
+        "src/parser.ts:42:const TRAILER = '<|/tool|>';",
+        "src/parser.ts:67:  if (s.endsWith(TRAILER))",
+      ],
+      durationMs: 800,
+    });
+    if (api.cancelled()) return;
+    api.push({
+      kind: "tool",
+      tone: "search",
+      name: "grep",
+      args: "TRAILER src/parser.ts",
+      output: ["src/parser.ts:67:  if (s.endsWith(TRAILER))"],
+      hidden: 1,
+      seconds: 0.8,
+      status: "ok",
+    });
+    steps[0] = { ...steps[0]!, status: "done" };
+    renderPlan(1);
+    await api.sleep(300);
+    if (api.cancelled()) return;
+
+    // step 1: write file (rejected)
+    steps[1] = { ...steps[1]!, status: "running" };
+    renderPlan(1);
+    await streamTool(api, {
+      tone: "write",
+      name: "write_file",
+      args: "src/parser.ts (full rewrite)",
+      output: [],
+      durationMs: 600,
+    });
+    if (api.cancelled()) return;
+    api.push({
+      kind: "tool",
+      tone: "write",
+      name: "write_file",
+      args: "src/parser.ts (full rewrite)",
+      output: [],
+      hidden: 0,
+      seconds: 0.6,
+      status: "rejected",
+    });
+    steps[1] = { ...steps[1]!, status: "blocked", note: "rejected; trying patch instead" };
+    renderPlan(null);
+    await api.sleep(800);
+    if (api.cancelled()) return;
+
+    // step 1 retry: patch (smaller)
+    steps[1] = { ...steps[1]!, status: "running", note: undefined };
+    renderPlan(1);
+    await streamTool(api, {
+      tone: "patch",
+      name: "edit_file",
+      args: "src/parser.ts -3+12",
+      output: [
+        "applying hunk 1/1",
+        "--- src/parser.ts",
+        "+++ src/parser.ts",
+        "@@ -42,3 +42,12 @@",
+        "+function strip(token: string) {...}",
+      ],
+      durationMs: 1100,
+    });
+    if (api.cancelled()) return;
+    api.push({
+      kind: "tool",
+      tone: "patch",
+      name: "edit_file",
+      args: "src/parser.ts -3+12",
+      output: ["+function strip(token: string) {...}"],
+      hidden: 4,
+      seconds: 1.1,
+      status: "ok",
+    });
+    steps[1] = { ...steps[1]!, status: "done" };
+    renderPlan(2);
+    await api.sleep(300);
+    if (api.cancelled()) return;
+
+    // step 2: bash with retry chain
+    steps[2] = { ...steps[2]!, status: "running" };
+    renderPlan(2);
+
+    const bashOutput = [
+      " RUNS  src/loop.test.ts",
+      " FAIL  src/loop.test.ts",
+      "  expect(received).toBe(expected)",
+      "  - expected:  '<final>'",
+      "  + received:  '<final><|/tool|>'",
+    ];
+    await streamTool(api, {
+      tone: "bash",
+      name: "bash",
+      args: "npm test",
+      output: bashOutput,
+      durationMs: 900,
+      retry: { attempt: 1, max: 3 },
+    });
+    if (api.cancelled()) return;
+    api.push({
+      kind: "tool",
+      tone: "bash",
+      name: "bash",
+      args: "npm test",
+      output: bashOutput.slice(-5),
+      hidden: 0,
+      seconds: 0.9,
+      status: "retry",
+      retryInfo: "1/3",
+    });
+    await api.sleep(200);
+
+    // retry 2 — succeed
+    const bashOk = [
+      " PASS  src/loop.test.ts",
+      " PASS  src/parser.test.ts",
+      " PASS  src/diff/cell.test.ts",
+      " PASS  src/diff/screen.test.ts",
+      " PASS  src/renderer/layout.test.ts",
+      "Tests:       142 passed",
+    ];
+    await streamTool(api, {
+      tone: "bash",
+      name: "bash",
+      args: "npm test",
+      output: bashOk,
+      durationMs: 1300,
+      retry: { attempt: 2, max: 3 },
+    });
+    if (api.cancelled()) return;
+    api.push({
+      kind: "tool",
+      tone: "bash",
+      name: "bash",
+      args: "npm test",
+      output: bashOk.slice(-5),
+      hidden: 1,
+      seconds: 1.3,
+      status: "ok",
+    });
+    steps[2] = { ...steps[2]!, status: "done" };
+    renderPlan(3);
+    await api.sleep(300);
+    if (api.cancelled()) return;
+
+    // step 3: bash deploy
+    steps[3] = { ...steps[3]!, status: "running" };
+    renderPlan(3);
+    await streamTool(api, {
+      tone: "bash",
+      name: "bash",
+      args: "npm run build && npm publish",
+      output: [
+        "  > tsup",
+        "  ESM Build start",
+        "  CJS Build start",
+        "  DTS Build start",
+        "  ESM done",
+        "  + reasonix@0.24.0",
+      ],
+      durationMs: 1500,
+    });
+    if (api.cancelled()) return;
+    api.push({
+      kind: "tool",
+      tone: "bash",
+      name: "bash",
+      args: "npm run build && npm publish",
+      output: ["  + reasonix@0.24.0"],
+      hidden: 5,
+      seconds: 1.5,
+      status: "ok",
+    });
+    steps[3] = { ...steps[3]!, status: "done" };
+    renderPlan(null);
+  } finally {
+    clearInterval(planTick);
+  }
+
+  // settle plan
+  await api.sleep(400);
+  api.setActive((prev) => replaceById(prev, planId, null));
+  api.push({ kind: "plan", steps: steps.slice(), seconds: (Date.now() - planStart) / 1000 });
+  await api.sleep(300);
+  if (api.cancelled()) return;
+
+  // diff
+  api.push({
+    kind: "diff",
+    file: "src/parser.ts",
+    added: 12,
+    removed: 3,
+    preview: [
+      { kind: " ", text: "function strip(token: string) {" },
+      { kind: "-", text: "  return token.trimEnd();" },
+      { kind: "+", text: "  if (token.endsWith(TRAILER)) {" },
+      { kind: "+", text: "    return token.slice(0, -TRAILER.length);" },
+      { kind: "+", text: "  }" },
+      { kind: "+", text: "  return token;" },
+      { kind: " ", text: "}" },
+    ],
+  });
+  await api.sleep(400);
+  if (api.cancelled()) return;
+
+  // streaming response with markdown
+  await streamMarkdownResponse(api);
+}
+
+async function streamMarkdownResponse(api: DemoApi): Promise<void> {
+  const lines: { kind: "text" | "code" | "header" | "list"; text: string }[] = [
+    { kind: "header", text: "## Patch landed" },
+    { kind: "text", text: "Tests pass on second retry. The patch:" },
+    { kind: "text", text: "" },
+    { kind: "code", text: "function strip(token: string) {" },
+    { kind: "code", text: "  if (token.endsWith(TRAILER))" },
+    { kind: "code", text: "    return token.slice(0, -TRAILER.length);" },
+    { kind: "code", text: "  return token;" },
+    { kind: "code", text: "}" },
+    { kind: "text", text: "" },
+    { kind: "list", text: "checks the suffix before slicing — no spurious slices on plain tokens" },
+    { kind: "list", text: "released as 0.24.0 to npm" },
+  ];
+  const id = "resp";
+  let frame = 0;
+  let revealed = 0;
+  api.setActive((prev) => appendCard(prev, { id, kind: "response", tail: [], frame }));
+  while (revealed < lines.length && !api.cancelled()) {
+    await api.sleep(160);
+    frame++;
+    revealed = Math.min(lines.length, revealed + 1);
+    const tail = lines
+      .slice(0, revealed)
+      .slice(-4)
+      .map((l) =>
+        l.kind === "code" ? `  ${l.text}` : l.kind === "list" ? `  - ${l.text}` : l.text,
+      );
+    api.setActive((prev) => replaceById(prev, id, { id, kind: "response", tail, frame }));
+  }
+  api.setActive((prev) => replaceById(prev, id, null));
+  api.push({ kind: "response", lines });
+  await api.sleep(200);
+  if (api.cancelled()) return;
+  api.push({ kind: "usage", inputTokens: 1842, outputTokens: 421, totalCost: 0.0094 });
+}
+
+async function sceneSubagent(api: DemoApi): Promise<void> {
+  api.push({ kind: "user", text: "investigate the auth flow regressions in 0.24" });
+  await api.sleep(400);
+  if (api.cancelled()) return;
+
+  const id = "sub";
+  let frame = 0;
+  const start = Date.now();
+  const children: SubAgentChild[] = [
+    { status: "running", kind: "reasoning", summary: "scanning auth fixtures" },
+    { status: "running", kind: "tool", summary: "grep 'authToken' src/", tone: "search" },
+    { status: "running", kind: "tool", summary: "read src/auth/session.ts", tone: "read" },
+  ];
+  api.setActive((prev) =>
+    appendCard(prev, {
+      id,
+      kind: "subagent",
+      task: "auth regressions",
+      children: children.slice(),
+      frame,
+    }),
+  );
+  const tick = setInterval(() => {
+    frame++;
+    api.setActive((prev) => {
+      const cur = prev.find((c) => c.id === id);
+      if (!cur || cur.kind !== "subagent") return prev;
+      return replaceById(prev, id, { ...cur, frame, children: children.slice() });
+    });
+  }, 80);
+
+  try {
+    await api.sleep(1200);
+    if (api.cancelled()) return;
+    children[0] = { ...children[0]!, status: "done" };
+    await api.sleep(900);
+    if (api.cancelled()) return;
+    children[1] = { ...children[1]!, status: "done" };
+    await api.sleep(1100);
+    if (api.cancelled()) return;
+    children[2] = { ...children[2]!, status: "done" };
+    children.push({ status: "running", kind: "diff", summary: "patching session.ts" });
+    await api.sleep(1000);
+    if (api.cancelled()) return;
+    children[3] = { ...children[3]!, status: "done" };
+    await api.sleep(400);
+  } finally {
+    clearInterval(tick);
+  }
+
+  api.setActive((prev) => replaceById(prev, id, null));
+  api.push({
+    kind: "subagent",
+    task: "auth regressions",
+    children: [
+      { kind: "reasoning", summary: "scanned 14 fixtures, found 2 stale" },
+      { kind: "tool", summary: "grep 'authToken' src/" },
+      { kind: "tool", summary: "read src/auth/session.ts" },
+      { kind: "diff", summary: "src/auth/session.ts +5 -2" },
+    ],
+    seconds: (Date.now() - start) / 1000,
+    ok: true,
+  });
+  await api.sleep(400);
+  if (api.cancelled()) return;
+
+  // CJK streaming response
+  const id2 = "resp-cjk";
+  const text =
+    "我已经定位到问题：session.ts 的 token 续期逻辑在 0.24 改了顺序，导致旧 token 在 refresh 之前就被清掉。修了，再跑测试都过了。";
+  const lines: { kind: "text" | "code" | "header" | "list"; text: string }[] = [
+    { kind: "header", text: "结论" },
+    { kind: "text", text },
+    { kind: "list", text: "已修复，提交在 src/auth/session.ts" },
+  ];
+  let frame2 = 0;
+  let revealed2 = 0;
+  api.setActive((prev) => appendCard(prev, { id: id2, kind: "response", tail: [], frame: frame2 }));
+  while (revealed2 < lines.length && !api.cancelled()) {
+    await api.sleep(180);
+    frame2++;
+    revealed2++;
+    const tail = lines
+      .slice(0, revealed2)
+      .slice(-4)
+      .map((l) => (l.kind === "list" ? `  - ${l.text}` : l.text));
+    api.setActive((prev) =>
+      replaceById(prev, id2, { id: id2, kind: "response", tail, frame: frame2 }),
+    );
+  }
+  api.setActive((prev) => replaceById(prev, id2, null));
+  api.push({ kind: "response", lines });
+}
+
+async function sceneEdgeCases(api: DemoApi): Promise<void> {
+  api.push({ kind: "user", text: "summarize the deploy log" });
+  await api.sleep(400);
+  if (api.cancelled()) return;
+
+  // aborted reasoning
+  const reasoningText =
+    "Pulling deploy logs from the last hour. Looking for warnings and errors. The database connection retried 3 times before stabilizing...";
+  const reasonStart = Date.now();
+  const r = await streamReasoning(api, reasoningText, 1200, 800);
+  if (api.cancelled()) return;
+  api.push({
+    kind: "reasoning",
+    tail: r.lines.slice(-2),
+    paragraphs: 1,
+    tokens: r.tokens,
+    seconds: (Date.now() - reasonStart) / 1000,
+    aborted: true,
+  });
+  await api.sleep(300);
+  if (api.cancelled()) return;
+
+  // mcp tool
+  await streamTool(api, {
+    tone: "mcp",
+    name: "mcp.linear.search_issues",
+    args: '{"query":"deploy error","limit":5}',
+    output: [
+      "INC-2871 — db pool exhausted on retry",
+      "INC-2872 — auth refresh race",
+      "INC-2873 — log shipper timeout",
+    ],
+    durationMs: 1100,
+  });
+  if (api.cancelled()) return;
+  api.push({
+    kind: "tool",
+    tone: "mcp",
+    name: "mcp.linear.search_issues",
+    args: '{"query":"deploy error","limit":5}',
+    output: ["INC-2873 — log shipper timeout"],
+    hidden: 2,
+    seconds: 1.1,
+    status: "ok",
+  });
+  await api.sleep(300);
+  if (api.cancelled()) return;
+
+  // long fetch
+  await streamTool(api, {
+    tone: "fetch",
+    name: "web_fetch",
+    args: "https://status.deepseek.com/api/incidents",
+    output: ["status: 200", '{"incidents":[]}'],
+    durationMs: 700,
+  });
+  if (api.cancelled()) return;
+  api.push({
+    kind: "tool",
+    tone: "fetch",
+    name: "web_fetch",
+    args: "https://status.deepseek.com/api/incidents",
+    output: ["status: 200", '{"incidents":[]}'],
+    hidden: 0,
+    seconds: 0.7,
+    status: "ok",
+  });
+  await api.sleep(300);
+  if (api.cancelled()) return;
+
+  // warn + error
+  api.push({ kind: "warn", message: "context budget at 73% · /compact suggested" });
+  await api.sleep(400);
+  api.push({ kind: "error", message: "rate-limit hit · backing off 8s" });
+  await api.sleep(500);
+  api.push({ kind: "usage", inputTokens: 487, outputTokens: 96, totalCost: 0.0021 });
 }
 
 function wrapText(text: string, width: number): string[] {
