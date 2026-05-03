@@ -366,6 +366,14 @@ program
   });
 
 program
+  .command("preview")
+  .description("experimental — minimal chat shell on the cell-diff renderer (echo mode)")
+  .action(async () => {
+    const { runPreview } = await import("./commands/preview.js");
+    await runPreview();
+  });
+
+program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
