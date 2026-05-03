@@ -1,4 +1,4 @@
-import { type Cell, cellsEqual } from "./cell.js";
+import { type Cell, EMPTY_CELL, cellsEqual } from "./cell.js";
 import type { Screen } from "./screen.js";
 
 export type DiffCallback = (
@@ -16,7 +16,9 @@ export function diffEach(prev: Screen, next: Screen, cb: DiffCallback): boolean 
       const a = prev.cellAt(x, y);
       const b = next.cellAt(x, y);
       if (a === b) continue;
-      if (a !== undefined && b !== undefined && cellsEqual(a, b)) continue;
+      const ac = a ?? EMPTY_CELL;
+      const bc = b ?? EMPTY_CELL;
+      if (cellsEqual(ac, bc)) continue;
       if (cb(x, y, a, b) === true) return true;
     }
   }

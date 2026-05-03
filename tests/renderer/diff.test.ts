@@ -73,4 +73,23 @@ describe("diffEach", () => {
     });
     expect(calls).toContainEqual([1, 1]);
   });
+
+  it("OOB on one side is treated as EMPTY_CELL — empty-on-both-sides emits nothing", () => {
+    const wide = new Screen(80, 24);
+    const tall = new Screen(80, 6);
+    const cb = vi.fn();
+    diffEach(wide, tall, cb);
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("populated cell on prev whose row is OOB on next emits a clear", () => {
+    const prev = new Screen(80, 24);
+    prev.writeCell(5, 10, cell({ charId: 42 }));
+    const next = new Screen(80, 6);
+    const calls: Array<[number, number]> = [];
+    diffEach(prev, next, (x, y) => {
+      calls.push([x, y]);
+    });
+    expect(calls).toEqual([[5, 10]]);
+  });
 });
