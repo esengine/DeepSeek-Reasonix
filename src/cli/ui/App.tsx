@@ -90,7 +90,6 @@ import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
-import { PlanCard } from "./cards/PlanCard.js";
 import { writeClipboard } from "./clipboard.js";
 import { formatEditResults, partitionEdits } from "./edit-history.js";
 import { loopEventToDashboard } from "./effects/loop-to-dashboard.js";
@@ -309,8 +308,8 @@ function AppInner({
     }
     return null;
   });
-  // Approval modals (PlanConfirm etc.) suppress the pinned plan card so
-  // the user reviews the picker, not a preview of an unapproved plan.
+  // Approval modals (PlanConfirm etc.) suppress the sidebar so the user
+  // reviews the picker, not a preview of an unapproved plan.
   const activePlanCard = isModalActive ? null : rawActivePlanCard;
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3200,6 +3199,16 @@ function AppInner({
     [],
   );
 
+  // Sidebar renders the active plan when there's room. When it does, the plan
+  // is *moved* there — not duplicated — so we drop it from the inline stream.
+  // On narrow terminals (or when the user has Ctrl+\ collapsed it), the plan
+  // card stays inline in the stream as a regular card.
+  const sidebarVisible =
+    !PLAIN_UI &&
+    sidebarOpen &&
+    (process.stdout.columns ?? 80) >= SIDEBAR_MIN_TOTAL_COLS &&
+    activePlanCard !== null;
+
   return (
     <>
       <TickerProvider
@@ -3233,7 +3242,7 @@ function AppInner({
           <Box flexDirection="row">
             <Box flexDirection="column" flexGrow={1}>
               <Box flexDirection="column">
-                <CardStream excludeId={activePlanCard?.id} />
+                <CardStream excludeId={sidebarVisible ? activePlanCard?.id : undefined} />
                 {/*
           Welcome card on the empty state. Visible only when nothing
           has happened yet (no past events, nothing in flight, no
@@ -3336,11 +3345,6 @@ function AppInner({
                 ) : null}
                 <ToastRail />
               </Box>
-              {!PLAIN_UI && activePlanCard ? (
-                <Box flexDirection="column" marginY={1}>
-                  <PlanCard card={activePlanCard} />
-                </Box>
-              ) : null}
               {stagedInput ? (
                 <PlanRefineInput
                   mode={stagedInput.mode}
@@ -3535,9 +3539,7 @@ function AppInner({
                 </>
               )}
             </Box>
-            {!PLAIN_UI &&
-            sidebarOpen &&
-            (process.stdout.columns ?? 80) >= SIDEBAR_MIN_TOTAL_COLS ? (
+            {sidebarVisible ? (
               <SidebarPanel ongoingTool={ongoingTool} subagentActivity={subagentActivity} />
             ) : null}
           </Box>
