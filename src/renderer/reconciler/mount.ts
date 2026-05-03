@@ -66,6 +66,8 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
     }
   };
 
+  let exitCleanup: (() => void) | null = null;
+  let signalCleanup: (() => void) | null = null;
   if (reader && scrollMode === "virtual") {
     opts.write(ENABLE_MOUSE);
     reader.subscribe((k) => {
@@ -77,6 +79,19 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       else if (k.wheelUp) scrollBy(-3);
       else if (k.wheelDown) scrollBy(3);
     });
+    if (typeof process !== "undefined" && process.on) {
+      exitCleanup = () => {
+        try {
+          opts.write(DISABLE_MOUSE);
+        } catch {
+          /* stdout already closed */
+        }
+      };
+      signalCleanup = () => process.exit(130);
+      process.on("exit", exitCleanup);
+      process.on("SIGINT", signalCleanup);
+      process.on("SIGTERM", signalCleanup);
+    }
   }
 
   const commitScrollback = (layout: LayoutNode): void => {
@@ -249,6 +264,15 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       });
       const teardown = scrollMode === "virtual" ? DISABLE_MOUSE : "";
       opts.write(`${teardown}${RESET_SGR}${CLOSE_HYPERLINK}`);
+      if (exitCleanup && typeof process !== "undefined" && process.off) {
+        process.off("exit", exitCleanup);
+        exitCleanup = null;
+      }
+      if (signalCleanup && typeof process !== "undefined" && process.off) {
+        process.off("SIGINT", signalCleanup);
+        process.off("SIGTERM", signalCleanup);
+        signalCleanup = null;
+      }
     },
   };
 }
