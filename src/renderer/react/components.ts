@@ -3,6 +3,13 @@ import type { AnsiCode } from "../pools/style-pool.js";
 
 export interface BoxProps {
   readonly children?: ReactNode;
+  readonly paddingTop?: number;
+  readonly paddingBottom?: number;
+  readonly paddingLeft?: number;
+  readonly paddingRight?: number;
+  readonly paddingX?: number;
+  readonly paddingY?: number;
+  readonly padding?: number;
 }
 
 export interface TextProps {

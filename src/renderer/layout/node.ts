@@ -10,6 +10,10 @@ export interface TextNode {
 export interface BoxNode {
   readonly kind: "box";
   readonly children: ReadonlyArray<LayoutNode>;
+  readonly paddingTop?: number;
+  readonly paddingBottom?: number;
+  readonly paddingLeft?: number;
+  readonly paddingRight?: number;
 }
 
 export type LayoutNode = TextNode | BoxNode;

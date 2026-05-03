@@ -2,7 +2,7 @@ import { Fragment, type ReactElement, type ReactNode, isValidElement } from "rea
 import { type RenderPools, renderToScreen } from "../layout/layout.js";
 import type { BoxNode, LayoutNode, TextNode } from "../layout/node.js";
 import type { Screen } from "../screen/screen.js";
-import { Box, Text, type TextProps } from "./components.js";
+import { Box, type BoxProps, Text, type TextProps } from "./components.js";
 
 export interface RenderOptions {
   readonly width: number;
@@ -34,8 +34,10 @@ function elementToLayoutNode(element: ReactElement): LayoutNode | null {
   const props = element.props as { children?: ReactNode };
 
   if (type === Box) {
+    const boxProps = element.props as BoxProps;
     const children = childrenToLayoutNodes(props.children);
-    return { kind: "box", children } satisfies BoxNode;
+    const padding = resolvePadding(boxProps);
+    return { kind: "box", children, ...padding } satisfies BoxNode;
   }
 
   if (type === Text) {
@@ -86,6 +88,29 @@ function collectText(children: ReactNode): string {
 
 function emptyBox(): BoxNode {
   return { kind: "box", children: [] };
+}
+
+interface ResolvedPadding {
+  paddingTop?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  paddingRight?: number;
+}
+
+function resolvePadding(props: BoxProps): ResolvedPadding {
+  const all = props.padding;
+  const x = props.paddingX ?? all;
+  const y = props.paddingY ?? all;
+  const top = props.paddingTop ?? y;
+  const bottom = props.paddingBottom ?? y;
+  const left = props.paddingLeft ?? x;
+  const right = props.paddingRight ?? x;
+  const out: ResolvedPadding = {};
+  if (top !== undefined) out.paddingTop = top;
+  if (bottom !== undefined) out.paddingBottom = bottom;
+  if (left !== undefined) out.paddingLeft = left;
+  if (right !== undefined) out.paddingRight = right;
+  return out;
 }
 
 function notNull<T>(v: T | null): v is T {

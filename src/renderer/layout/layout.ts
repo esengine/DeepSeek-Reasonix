@@ -1,10 +1,10 @@
 import stringWidth from "string-width";
 import type { CharPool } from "../pools/char-pool.js";
 import type { HyperlinkPool } from "../pools/hyperlink-pool.js";
-import type { AnsiCode, StylePool } from "../pools/style-pool.js";
+import type { StylePool } from "../pools/style-pool.js";
 import { type Cell, CellWidth } from "../screen/cell.js";
 import { Screen } from "../screen/screen.js";
-import type { LayoutNode, TextNode } from "./node.js";
+import type { BoxNode, LayoutNode, TextNode } from "./node.js";
 
 export interface RenderPools {
   readonly char: CharPool;
@@ -16,12 +16,21 @@ interface TextRow {
   readonly graphemes: ReadonlyArray<{ glyph: string; width: number }>;
   readonly styleId: number;
   readonly hyperlinkId: number;
+  readonly leftPad: number;
 }
+
+const EMPTY_ROW: TextRow = {
+  graphemes: [],
+  styleId: 0,
+  hyperlinkId: 0,
+  leftPad: 0,
+};
 
 export function renderToScreen(node: LayoutNode, width: number, pools: RenderPools): Screen {
   const w = Math.max(0, width | 0);
   if (w === 0) return new Screen(0, 0);
-  const rows = collectRows(node, w, pools);
+  const rows: TextRow[] = [];
+  walk(node, w, 0, pools, rows);
   const screen = new Screen(w, rows.length);
   for (let y = 0; y < rows.length; y++) {
     blitRow(screen, rows[y]!, y, pools);
@@ -30,32 +39,60 @@ export function renderToScreen(node: LayoutNode, width: number, pools: RenderPoo
   return screen;
 }
 
-function collectRows(node: LayoutNode, width: number, pools: RenderPools): TextRow[] {
-  const out: TextRow[] = [];
-  walk(node, width, pools, out);
-  return out;
-}
-
-function walk(node: LayoutNode, width: number, pools: RenderPools, out: TextRow[]): void {
+function walk(
+  node: LayoutNode,
+  width: number,
+  leftPad: number,
+  pools: RenderPools,
+  out: TextRow[],
+): void {
   if (node.kind === "text") {
-    pushTextRows(node, width, pools, out);
+    pushTextRows(node, width, leftPad, pools, out);
     return;
   }
-  for (const child of node.children) walk(child, width, pools, out);
+  pushBoxRows(node, width, leftPad, pools, out);
 }
 
-function pushTextRows(node: TextNode, width: number, pools: RenderPools, out: TextRow[]): void {
+function pushBoxRows(
+  node: BoxNode,
+  width: number,
+  leftPad: number,
+  pools: RenderPools,
+  out: TextRow[],
+): void {
+  const padTop = clampPad(node.paddingTop);
+  const padBottom = clampPad(node.paddingBottom);
+  const padLeft = clampPad(node.paddingLeft);
+  const padRight = clampPad(node.paddingRight);
+  const innerWidth = Math.max(0, width - padLeft - padRight);
+  const innerLeftPad = leftPad + padLeft;
+
+  for (let i = 0; i < padTop; i++) out.push(EMPTY_ROW);
+  if (innerWidth > 0) {
+    for (const child of node.children) walk(child, innerWidth, innerLeftPad, pools, out);
+  }
+  for (let i = 0; i < padBottom; i++) out.push(EMPTY_ROW);
+}
+
+function pushTextRows(
+  node: TextNode,
+  width: number,
+  leftPad: number,
+  pools: RenderPools,
+  out: TextRow[],
+): void {
+  if (width <= 0) return;
   const styleId = node.style ? pools.style.intern(node.style) : pools.style.none;
   const hyperlinkId = pools.hyperlink.intern(node.hyperlink);
   const segmenter = getSegmenter();
   for (const line of node.content.split("\n")) {
     const wrapped = wrapLine(line, width, segmenter);
     if (wrapped.length === 0) {
-      out.push({ graphemes: [], styleId, hyperlinkId });
+      out.push({ graphemes: [], styleId, hyperlinkId, leftPad });
       continue;
     }
     for (const row of wrapped) {
-      out.push({ graphemes: row, styleId, hyperlinkId });
+      out.push({ graphemes: row, styleId, hyperlinkId, leftPad });
     }
   }
 }
@@ -87,7 +124,7 @@ function wrapLine(
 }
 
 function blitRow(screen: Screen, row: TextRow, y: number, pools: RenderPools): void {
-  let x = 0;
+  let x = row.leftPad;
   for (const { glyph, width } of row.graphemes) {
     if (x >= screen.width) break;
     const charId = pools.char.intern(glyph);
@@ -108,6 +145,12 @@ function blitRow(screen: Screen, row: TextRow, y: number, pools: RenderPools): v
     }
     x += width;
   }
+}
+
+function clampPad(v: number | undefined): number {
+  if (v === undefined) return 0;
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.floor(v));
 }
 
 let _segmenter: Intl.Segmenter | undefined;
