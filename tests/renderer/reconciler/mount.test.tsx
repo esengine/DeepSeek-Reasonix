@@ -23,16 +23,23 @@ function flush(): Promise<void> {
 }
 
 describe("mount — initial render", () => {
-  it("anchors the cursor to col 0 + clears below before the first paint", async () => {
+  it("anchors cursor to col 0 + reserves vertical space before the first paint", async () => {
     const w = makeTestWriter();
-    const handle = mount(<Text>hi</Text>, {
-      viewportWidth: 5,
-      viewportHeight: 1,
-      pools: pools(),
-      write: w.write,
-    });
+    const handle = mount(
+      <Box flexDirection="column">
+        <Text>row1</Text>
+        <Text>row2</Text>
+        <Text>row3</Text>
+      </Box>,
+      {
+        viewportWidth: 10,
+        viewportHeight: 24,
+        pools: pools(),
+        write: w.write,
+      },
+    );
     await flush();
-    expect(w.output().startsWith("\r\x1b[J")).toBe(true);
+    expect(w.output().startsWith("\r\n\n\x1b[2A")).toBe(true);
     handle.destroy();
   });
 
