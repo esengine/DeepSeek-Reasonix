@@ -13,6 +13,7 @@ export interface BoxProps {
   readonly justifyContent?: JustifyContent;
   readonly width?: number;
   readonly height?: number;
+  readonly gap?: number;
   readonly paddingTop?: number;
   readonly paddingBottom?: number;
   readonly paddingLeft?: number;

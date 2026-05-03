@@ -43,12 +43,14 @@ function elementToLayoutNode(element: ReactElement): LayoutNode | null {
       justifyContent?: BoxProps["justifyContent"];
       width?: number;
       height?: number;
+      gap?: number;
     } = {};
     if (boxProps.flexDirection !== undefined) flex.flexDirection = boxProps.flexDirection;
     if (boxProps.flexGrow !== undefined) flex.flexGrow = boxProps.flexGrow;
     if (boxProps.justifyContent !== undefined) flex.justifyContent = boxProps.justifyContent;
     if (boxProps.width !== undefined) flex.width = boxProps.width;
     if (boxProps.height !== undefined) flex.height = boxProps.height;
+    if (boxProps.gap !== undefined) flex.gap = boxProps.gap;
     const border = resolveBorder(boxProps);
     return { kind: "box", children, ...flex, ...padding, ...border } satisfies BoxNode;
   }

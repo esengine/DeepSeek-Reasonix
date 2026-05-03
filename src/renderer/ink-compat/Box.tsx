@@ -55,6 +55,7 @@ export function Box(props: InkBoxProps): React.ReactElement {
       justifyContent={props.justifyContent}
       width={typeof props.width === "number" ? props.width : undefined}
       height={typeof props.height === "number" ? props.height : undefined}
+      gap={props.gap}
       paddingTop={padTop}
       paddingBottom={padBottom}
       paddingLeft={padLeft}

@@ -86,6 +86,7 @@ function assignBoxProps(node: BoxNode, props: BoxProps): BoxNode {
   if (props.justifyContent !== undefined) result.justifyContent = props.justifyContent;
   if (props.width !== undefined) result.width = props.width;
   if (props.height !== undefined) result.height = props.height;
+  if (props.gap !== undefined) result.gap = props.gap;
   if (props.borderStyle !== undefined) result.borderStyle = props.borderStyle;
   if (props.borderTop !== undefined) result.borderTop = props.borderTop;
   if (props.borderBottom !== undefined) result.borderBottom = props.borderBottom;

@@ -178,8 +178,10 @@ function makeBorderEdge(
 
 function layoutColumn(node: BoxNode, innerWidth: number, pools: RenderPools): Laid {
   const rows: LayoutRows = [];
-  for (const child of node.children) {
-    const laid = layout(child, innerWidth, pools);
+  const gap = clampPad(node.gap);
+  for (let i = 0; i < node.children.length; i++) {
+    if (i > 0 && gap > 0) rows.push(...blanks(gap));
+    const laid = layout(node.children[i]!, innerWidth, pools);
     rows.push(...laid.rows);
   }
   return { rows, width: innerWidth };
@@ -189,9 +191,12 @@ function layoutRow(node: BoxNode, innerWidth: number, pools: RenderPools): Laid 
   if (innerWidth === 0 || node.children.length === 0) {
     return { rows: [], width: innerWidth };
   }
-  const allocations = allocateRowWidths(node.children, innerWidth);
+  const gap = clampPad(node.gap);
+  const gapTotal = gap * Math.max(0, node.children.length - 1);
+  const remaining = Math.max(0, innerWidth - gapTotal);
+  const allocations = allocateRowWidths(node.children, remaining);
   const childResults = node.children.map((child, i) => layout(child, allocations[i] ?? 0, pools));
-  const offsets = computeRowOffsets(allocations, innerWidth, node.justifyContent);
+  const offsets = computeRowOffsets(allocations, remaining, node.justifyContent, gap);
 
   const merged: LayoutRows = [];
   for (let i = 0; i < childResults.length; i++) {
@@ -209,18 +214,20 @@ function layoutRow(node: BoxNode, innerWidth: number, pools: RenderPools): Laid 
 
 function computeRowOffsets(
   allocations: ReadonlyArray<number>,
-  innerWidth: number,
+  remaining: number,
   justify: BoxNode["justifyContent"],
+  gap: number,
 ): number[] {
   const offsets: number[] = [];
   let cursor = 0;
-  for (const a of allocations) {
+  for (let i = 0; i < allocations.length; i++) {
+    if (i > 0) cursor += gap;
     offsets.push(cursor);
-    cursor += a;
+    cursor += allocations[i] ?? 0;
   }
   if (!justify || justify === "flex-start") return offsets;
   const used = allocations.reduce((s, a) => s + a, 0);
-  const slack = Math.max(0, innerWidth - used);
+  const slack = Math.max(0, remaining - used);
   if (slack === 0) return offsets;
 
   if (justify === "flex-end") {
@@ -233,15 +240,15 @@ function computeRowOffsets(
   if (justify === "space-between") {
     if (allocations.length <= 1) return offsets;
     const gaps = allocations.length - 1;
-    const gap = Math.floor(slack / gaps);
-    let extra = slack - gap * gaps;
+    const extraGap = Math.floor(slack / gaps);
+    let extra = slack - extraGap * gaps;
     const out: number[] = [];
     let c = 0;
     for (let i = 0; i < allocations.length; i++) {
       out.push(c);
       c += allocations[i] ?? 0;
       if (i < allocations.length - 1) {
-        c += gap + (extra > 0 ? 1 : 0);
+        c += gap + extraGap + (extra > 0 ? 1 : 0);
         if (extra > 0) extra--;
       }
     }
@@ -305,7 +312,15 @@ function intrinsicWidth(node: LayoutNode): number {
     (border && node.borderLeft !== false ? 1 : 0) + (border && node.borderRight !== false ? 1 : 0);
   if (node.children.length === 0) return padLeft + padRight + borderH;
   if (node.flexDirection === "row") {
-    return padLeft + padRight + borderH + node.children.reduce((s, c) => s + intrinsicWidth(c), 0);
+    const gap = clampPad(node.gap);
+    const gapTotal = gap * Math.max(0, node.children.length - 1);
+    return (
+      padLeft +
+      padRight +
+      borderH +
+      gapTotal +
+      node.children.reduce((s, c) => s + intrinsicWidth(c), 0)
+    );
   }
   let max = 0;
   for (const c of node.children) {
