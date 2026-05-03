@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { BorderStyle, BorderStyleName } from "../layout/borders.js";
 import type { AnsiCode } from "../pools/style-pool.js";
 
 export interface BoxProps {
@@ -12,6 +13,16 @@ export interface BoxProps {
   readonly paddingX?: number;
   readonly paddingY?: number;
   readonly padding?: number;
+  readonly borderStyle?: BorderStyle | BorderStyleName;
+  readonly borderTop?: boolean;
+  readonly borderBottom?: boolean;
+  readonly borderLeft?: boolean;
+  readonly borderRight?: boolean;
+  readonly borderColor?: ReadonlyArray<AnsiCode>;
+  readonly borderTopColor?: ReadonlyArray<AnsiCode>;
+  readonly borderBottomColor?: ReadonlyArray<AnsiCode>;
+  readonly borderLeftColor?: ReadonlyArray<AnsiCode>;
+  readonly borderRightColor?: ReadonlyArray<AnsiCode>;
 }
 
 export interface TextProps {

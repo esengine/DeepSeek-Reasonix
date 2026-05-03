@@ -4,6 +4,7 @@ export { StylePool, type AnsiCode } from "./pools/style-pool.js";
 export { type Cell, CellWidth, EMPTY_CELL, cellsEqual } from "./screen/cell.js";
 export { type Rectangle, Screen } from "./screen/screen.js";
 export { type DiffCallback, diffEach } from "./screen/diff.js";
+export type { BorderStyle, BorderStyleName } from "./layout/borders.js";
 export type { BoxNode, LayoutNode, TextNode } from "./layout/node.js";
 export { type RenderPools, renderToScreen } from "./layout/layout.js";
 export { Box, type BoxProps, Text, type TextProps } from "./react/components.js";

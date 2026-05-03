@@ -1,9 +1,10 @@
 import stringWidth from "string-width";
 import type { CharPool } from "../pools/char-pool.js";
 import type { HyperlinkPool } from "../pools/hyperlink-pool.js";
-import type { StylePool } from "../pools/style-pool.js";
+import type { AnsiCode, StylePool } from "../pools/style-pool.js";
 import { type Cell, CellWidth } from "../screen/cell.js";
 import { Screen } from "../screen/screen.js";
+import { type BorderStyle, resolveBorderStyle } from "./borders.js";
 import type { BoxNode, LayoutNode, TextNode } from "./node.js";
 
 export interface RenderPools {
@@ -45,24 +46,121 @@ function layout(node: LayoutNode, availableWidth: number, pools: RenderPools): L
 }
 
 function layoutBox(node: BoxNode, availableWidth: number, pools: RenderPools): Laid {
+  const border = resolveBorderStyle(node.borderStyle);
+  const useTop = border !== undefined && node.borderTop !== false;
+  const useBottom = border !== undefined && node.borderBottom !== false;
+  const useLeft = border !== undefined && node.borderLeft !== false;
+  const useRight = border !== undefined && node.borderRight !== false;
+
   const padTop = clampPad(node.paddingTop);
   const padBottom = clampPad(node.paddingBottom);
   const padLeft = clampPad(node.paddingLeft);
   const padRight = clampPad(node.paddingRight);
-  const innerWidth = Math.max(0, availableWidth - padLeft - padRight);
+  const horizBorder = (useLeft ? 1 : 0) + (useRight ? 1 : 0);
+  const innerWidth = Math.max(0, availableWidth - horizBorder - padLeft - padRight);
 
   const inner =
     node.flexDirection === "row"
       ? layoutRow(node, innerWidth, pools)
       : layoutColumn(node, innerWidth, pools);
 
-  const shifted = shiftFragments(inner.rows, padLeft);
-  const top = blanks(padTop);
-  const bottom = blanks(padBottom);
+  const contentRows: LayoutRows = [
+    ...blanks(padTop),
+    ...shiftFragments(inner.rows, padLeft + (useLeft ? 1 : 0)),
+    ...blanks(padBottom),
+  ];
+
+  if (useLeft || useRight) {
+    const leftStyle = node.borderLeftColor ?? node.borderColor;
+    const rightStyle = node.borderRightColor ?? node.borderColor;
+    const leftStyleId = leftStyle ? pools.style.intern(leftStyle) : pools.style.none;
+    const rightStyleId = rightStyle ? pools.style.intern(rightStyle) : pools.style.none;
+    for (let i = 0; i < contentRows.length; i++) {
+      const row = contentRows[i]!;
+      const next: typeof row = [];
+      if (useLeft && border) {
+        next.push(makeBorderFragment(border.left, 0, leftStyleId));
+      }
+      next.push(...row);
+      if (useRight && border) {
+        next.push(makeBorderFragment(border.right, availableWidth - 1, rightStyleId));
+      }
+      contentRows[i] = next;
+    }
+  }
+
+  const allRows: LayoutRows = [];
+  if (useTop && border) {
+    allRows.push(
+      makeBorderEdge(
+        border,
+        "top",
+        availableWidth,
+        useLeft,
+        useRight,
+        node.borderTopColor ?? node.borderColor,
+        pools,
+      ),
+    );
+  }
+  allRows.push(...contentRows);
+  if (useBottom && border) {
+    allRows.push(
+      makeBorderEdge(
+        border,
+        "bottom",
+        availableWidth,
+        useLeft,
+        useRight,
+        node.borderBottomColor ?? node.borderColor,
+        pools,
+      ),
+    );
+  }
+
+  return { rows: allRows, width: availableWidth };
+}
+
+function makeBorderFragment(glyph: string, leftPad: number, styleId: number): RowFragment {
+  const w = Math.max(1, stringWidth(glyph));
   return {
-    rows: [...top, ...shifted, ...bottom],
-    width: availableWidth,
+    graphemes: [{ glyph, width: w }],
+    styleId,
+    hyperlinkId: 0,
+    leftPad,
   };
+}
+
+function makeBorderEdge(
+  style: BorderStyle,
+  side: "top" | "bottom",
+  width: number,
+  useLeft: boolean,
+  useRight: boolean,
+  color: ReadonlyArray<AnsiCode> | undefined,
+  pools: RenderPools,
+): RowFragment[] {
+  if (width <= 0) return [];
+  const corners =
+    side === "top" ? [style.topLeft, style.topRight] : [style.bottomLeft, style.bottomRight];
+  const edge = side === "top" ? style.top : style.bottom;
+  const styleId = color ? pools.style.intern(color) : pools.style.none;
+  const graphemes: Array<{ glyph: string; width: number }> = [];
+  for (let x = 0; x < width; x++) {
+    let glyph: string;
+    if (x === 0 && useLeft) glyph = corners[0]!;
+    else if (x === width - 1 && useRight) glyph = corners[1]!;
+    else glyph = edge;
+    graphemes.push({ glyph, width: Math.max(1, stringWidth(glyph)) });
+  }
+  return [
+    {
+      graphemes,
+      styleId,
+      hyperlinkId: 0,
+      leftPad: 0,
+    },
+  ];
 }
 
 function layoutColumn(node: BoxNode, innerWidth: number, pools: RenderPools): Laid {
@@ -146,16 +244,19 @@ function intrinsicWidth(node: LayoutNode): number {
   }
   const padLeft = clampPad(node.paddingLeft);
   const padRight = clampPad(node.paddingRight);
-  if (node.children.length === 0) return padLeft + padRight;
+  const border = resolveBorderStyle(node.borderStyle);
+  const borderH =
+    (border && node.borderLeft !== false ? 1 : 0) + (border && node.borderRight !== false ? 1 : 0);
+  if (node.children.length === 0) return padLeft + padRight + borderH;
   if (node.flexDirection === "row") {
-    return padLeft + padRight + node.children.reduce((s, c) => s + intrinsicWidth(c), 0);
+    return padLeft + padRight + borderH + node.children.reduce((s, c) => s + intrinsicWidth(c), 0);
   }
   let max = 0;
   for (const c of node.children) {
     const w = intrinsicWidth(c);
     if (w > max) max = w;
   }
-  return padLeft + padRight + max;
+  return padLeft + padRight + borderH + max;
 }
 
 function layoutText(node: TextNode, width: number, pools: RenderPools): Laid {

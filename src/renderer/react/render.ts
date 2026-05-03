@@ -40,7 +40,8 @@ function elementToLayoutNode(element: ReactElement): LayoutNode | null {
     const flex: { flexDirection?: "column" | "row"; flexGrow?: number } = {};
     if (boxProps.flexDirection !== undefined) flex.flexDirection = boxProps.flexDirection;
     if (boxProps.flexGrow !== undefined) flex.flexGrow = boxProps.flexGrow;
-    return { kind: "box", children, ...flex, ...padding } satisfies BoxNode;
+    const border = resolveBorder(boxProps);
+    return { kind: "box", children, ...flex, ...padding, ...border } satisfies BoxNode;
   }
 
   if (type === Text) {
@@ -98,6 +99,34 @@ interface ResolvedPadding {
   paddingBottom?: number;
   paddingLeft?: number;
   paddingRight?: number;
+}
+
+interface ResolvedBorder {
+  borderStyle?: BoxProps["borderStyle"];
+  borderTop?: boolean;
+  borderBottom?: boolean;
+  borderLeft?: boolean;
+  borderRight?: boolean;
+  borderColor?: BoxProps["borderColor"];
+  borderTopColor?: BoxProps["borderTopColor"];
+  borderBottomColor?: BoxProps["borderBottomColor"];
+  borderLeftColor?: BoxProps["borderLeftColor"];
+  borderRightColor?: BoxProps["borderRightColor"];
+}
+
+function resolveBorder(props: BoxProps): ResolvedBorder {
+  const out: ResolvedBorder = {};
+  if (props.borderStyle !== undefined) out.borderStyle = props.borderStyle;
+  if (props.borderTop !== undefined) out.borderTop = props.borderTop;
+  if (props.borderBottom !== undefined) out.borderBottom = props.borderBottom;
+  if (props.borderLeft !== undefined) out.borderLeft = props.borderLeft;
+  if (props.borderRight !== undefined) out.borderRight = props.borderRight;
+  if (props.borderColor !== undefined) out.borderColor = props.borderColor;
+  if (props.borderTopColor !== undefined) out.borderTopColor = props.borderTopColor;
+  if (props.borderBottomColor !== undefined) out.borderBottomColor = props.borderBottomColor;
+  if (props.borderLeftColor !== undefined) out.borderLeftColor = props.borderLeftColor;
+  if (props.borderRightColor !== undefined) out.borderRightColor = props.borderRightColor;
+  return out;
 }
 
 function resolvePadding(props: BoxProps): ResolvedPadding {
