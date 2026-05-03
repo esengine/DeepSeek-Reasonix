@@ -35,8 +35,9 @@ export interface Handle {
 
 const RESET_SGR = "\x1b[0m";
 const CLOSE_HYPERLINK = "\x1b]8;;\x1b\\";
-const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1006h";
-const DISABLE_MOUSE = "\x1b[?1006l\x1b[?1000l";
+// alt-screen + button-event mouse + SGR coords. Shift+drag bypasses for native selection.
+const ENTER_VIRTUAL = "\x1b[?1049h\x1b[2J\x1b[H\x1b[?1002h\x1b[?1006h";
+const LEAVE_VIRTUAL = "\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?1049l";
 
 export function mount(element: ReactNode, opts: MountOptions): Handle {
   const scrollMode: ScrollMode = opts.scroll ?? "scrollback";
@@ -68,21 +69,23 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
 
   let exitCleanup: (() => void) | null = null;
   let signalCleanup: (() => void) | null = null;
-  if (reader && scrollMode === "virtual") {
-    opts.write(ENABLE_MOUSE);
-    reader.subscribe((k) => {
-      const window = Math.max(1, viewportHeight - 1);
-      if (k.pageUp) scrollBy(-window);
-      else if (k.pageDown) scrollBy(window);
-      else if (k.home) scrollBy(-Number.MAX_SAFE_INTEGER);
-      else if (k.end) scrollBy(Number.MAX_SAFE_INTEGER);
-      else if (k.wheelUp) scrollBy(-3);
-      else if (k.wheelDown) scrollBy(3);
-    });
+  if (scrollMode === "virtual") {
+    opts.write(ENTER_VIRTUAL);
+    if (reader) {
+      reader.subscribe((k) => {
+        const window = Math.max(1, viewportHeight - 1);
+        if (k.pageUp) scrollBy(-window);
+        else if (k.pageDown) scrollBy(window);
+        else if (k.home) scrollBy(-Number.MAX_SAFE_INTEGER);
+        else if (k.end) scrollBy(Number.MAX_SAFE_INTEGER);
+        else if (k.wheelUp) scrollBy(-3);
+        else if (k.wheelDown) scrollBy(3);
+      });
+    }
     if (typeof process !== "undefined" && process.on) {
       exitCleanup = () => {
         try {
-          opts.write(DISABLE_MOUSE);
+          opts.write(LEAVE_VIRTUAL);
         } catch {
           /* stdout already closed */
         }
@@ -262,7 +265,7 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       reconciler.updateContainer(null, container, null, () => {
         /* committed */
       });
-      const teardown = scrollMode === "virtual" ? DISABLE_MOUSE : "";
+      const teardown = scrollMode === "virtual" ? LEAVE_VIRTUAL : "";
       opts.write(`${teardown}${RESET_SGR}${CLOSE_HYPERLINK}`);
       if (exitCleanup && typeof process !== "undefined" && process.off) {
         process.off("exit", exitCleanup);

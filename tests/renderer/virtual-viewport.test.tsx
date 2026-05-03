@@ -191,7 +191,7 @@ describe("virtual viewport — bottom-stick + PgUp/PgDn scrolling", () => {
     handle.destroy();
   });
 
-  it("enables SGR mouse mode at mount, disables on destroy", async () => {
+  it("enters alt-screen + mouse capture at mount; restores on destroy", async () => {
     const w = makeTestWriter();
     const handle = mount(<Tower rows={5} />, {
       viewportWidth: 20,
@@ -202,9 +202,15 @@ describe("virtual viewport — bottom-stick + PgUp/PgDn scrolling", () => {
       scroll: "virtual",
     });
     await flush();
-    expect(w.output()).toContain("\x1b[?1000h\x1b[?1006h");
+    const onMount = w.output();
+    expect(onMount).toContain("\x1b[?1049h");
+    expect(onMount).toContain("\x1b[?1002h");
+    expect(onMount).toContain("\x1b[?1006h");
     handle.destroy();
-    expect(w.output()).toContain("\x1b[?1006l\x1b[?1000l");
+    const afterDestroy = w.output();
+    expect(afterDestroy).toContain("\x1b[?1049l");
+    expect(afterDestroy).toContain("\x1b[?1002l");
+    expect(afterDestroy).toContain("\x1b[?1006l");
   });
 
   it("End scrolls back to the bottom", async () => {
