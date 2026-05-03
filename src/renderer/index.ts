@@ -9,3 +9,6 @@ export type { BoxNode, LayoutNode, TextNode } from "./layout/node.js";
 export { type RenderPools, renderToScreen } from "./layout/layout.js";
 export { Box, type BoxProps, Text, type TextProps } from "./react/components.js";
 export { type RenderOptions, render } from "./react/render.js";
+export { type Cursor, type Frame, emptyFrame } from "./diff/frame.js";
+export type { Diff, Patch } from "./diff/patch.js";
+export { type DiffPools, diffFrames } from "./diff/diff-frames.js";
