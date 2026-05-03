@@ -342,6 +342,14 @@ mcp
 program.command("version").description(t("cli.version")).action(versionCommand);
 
 program
+  .command("renderer-demo")
+  .description("experimental — interactive cell-diff renderer demo (separate from the main TUI)")
+  .action(async () => {
+    const { runRendererDemo } = await import("./commands/renderer-demo.js");
+    await runRendererDemo();
+  });
+
+program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
