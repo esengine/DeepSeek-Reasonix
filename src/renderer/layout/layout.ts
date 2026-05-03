@@ -178,21 +178,63 @@ function layoutRow(node: BoxNode, innerWidth: number, pools: RenderPools): Laid 
   }
   const allocations = allocateRowWidths(node.children, innerWidth);
   const childResults = node.children.map((child, i) => layout(child, allocations[i] ?? 0, pools));
+  const offsets = computeRowOffsets(allocations, innerWidth, node.justifyContent);
 
-  let xOffset = 0;
   const merged: LayoutRows = [];
   for (let i = 0; i < childResults.length; i++) {
     const child = childResults[i]!;
-    const allocated = allocations[i] ?? 0;
+    const xOffset = offsets[i] ?? 0;
     for (let y = 0; y < child.rows.length; y++) {
       while (merged.length <= y) merged.push([]);
       for (const frag of child.rows[y]!) {
         merged[y]!.push({ ...frag, leftPad: frag.leftPad + xOffset });
       }
     }
-    xOffset += allocated;
   }
   return { rows: merged, width: innerWidth };
+}
+
+function computeRowOffsets(
+  allocations: ReadonlyArray<number>,
+  innerWidth: number,
+  justify: BoxNode["justifyContent"],
+): number[] {
+  const offsets: number[] = [];
+  let cursor = 0;
+  for (const a of allocations) {
+    offsets.push(cursor);
+    cursor += a;
+  }
+  if (!justify || justify === "flex-start") return offsets;
+  const used = allocations.reduce((s, a) => s + a, 0);
+  const slack = Math.max(0, innerWidth - used);
+  if (slack === 0) return offsets;
+
+  if (justify === "flex-end") {
+    return offsets.map((o) => o + slack);
+  }
+  if (justify === "center") {
+    const left = Math.floor(slack / 2);
+    return offsets.map((o) => o + left);
+  }
+  if (justify === "space-between") {
+    if (allocations.length <= 1) return offsets;
+    const gaps = allocations.length - 1;
+    const gap = Math.floor(slack / gaps);
+    let extra = slack - gap * gaps;
+    const out: number[] = [];
+    let c = 0;
+    for (let i = 0; i < allocations.length; i++) {
+      out.push(c);
+      c += allocations[i] ?? 0;
+      if (i < allocations.length - 1) {
+        c += gap + (extra > 0 ? 1 : 0);
+        if (extra > 0) extra--;
+      }
+    }
+    return out;
+  }
+  return offsets;
 }
 
 function allocateRowWidths(children: ReadonlyArray<LayoutNode>, available: number): number[] {

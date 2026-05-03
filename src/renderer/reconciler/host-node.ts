@@ -83,6 +83,7 @@ function assignBoxProps(node: BoxNode, props: BoxProps): BoxNode {
   if (right !== undefined) result.paddingRight = right;
   if (props.flexDirection !== undefined) result.flexDirection = props.flexDirection;
   if (props.flexGrow !== undefined) result.flexGrow = props.flexGrow;
+  if (props.justifyContent !== undefined) result.justifyContent = props.justifyContent;
   if (props.borderStyle !== undefined) result.borderStyle = props.borderStyle;
   if (props.borderTop !== undefined) result.borderTop = props.borderTop;
   if (props.borderBottom !== undefined) result.borderBottom = props.borderBottom;

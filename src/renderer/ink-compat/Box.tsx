@@ -32,7 +32,7 @@ export interface InkBoxProps {
   readonly width?: number | string;
   readonly height?: number | string;
   readonly minWidth?: number;
-  readonly justifyContent?: "flex-start" | "flex-end" | "center" | "space-between" | "space-around";
+  readonly justifyContent?: "flex-start" | "flex-end" | "center" | "space-between";
   readonly alignItems?: "flex-start" | "flex-end" | "center" | "stretch";
   readonly gap?: number;
 }
@@ -52,6 +52,7 @@ export function Box(props: InkBoxProps): React.ReactElement {
     <RsxBox
       flexDirection={props.flexDirection}
       flexGrow={marginTop || marginBottom || marginLeft || marginRight ? undefined : props.flexGrow}
+      justifyContent={props.justifyContent}
       paddingTop={padTop}
       paddingBottom={padBottom}
       paddingLeft={padLeft}

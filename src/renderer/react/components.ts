@@ -1,5 +1,6 @@
 import React, { type ReactElement, type ReactNode } from "react";
 import type { BorderStyle, BorderStyleName } from "../layout/borders.js";
+import type { JustifyContent } from "../layout/node.js";
 import type { AnsiCode } from "../pools/style-pool.js";
 
 export const HOST_BOX = "rsx-box" as const;
@@ -9,6 +10,7 @@ export interface BoxProps {
   readonly children?: ReactNode;
   readonly flexDirection?: "column" | "row";
   readonly flexGrow?: number;
+  readonly justifyContent?: JustifyContent;
   readonly paddingTop?: number;
   readonly paddingBottom?: number;
   readonly paddingLeft?: number;

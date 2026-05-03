@@ -175,3 +175,30 @@ describe("ink-compat Spacer — flexGrow fills remaining row space", () => {
     expect(line.endsWith("R")).toBe(true);
   });
 });
+
+describe("ink-compat Box — justifyContent passes through", () => {
+  it("space-between distributes children to both edges", () => {
+    const p = pools();
+    const s = render(
+      <Box flexDirection="row" justifyContent="space-between">
+        <Text>L</Text>
+        <Text>R</Text>
+      </Box>,
+      { width: 12, pools: p },
+    );
+    const line = read(s, p)[0] ?? "";
+    expect(line.startsWith("L")).toBe(true);
+    expect(line.endsWith("R")).toBe(true);
+  });
+
+  it("center centers a single child", () => {
+    const p = pools();
+    const s = render(
+      <Box flexDirection="row" justifyContent="center">
+        <Text>X</Text>
+      </Box>,
+      { width: 7, pools: p },
+    );
+    expect(read(s, p)[0]).toBe("   X   ");
+  });
+});

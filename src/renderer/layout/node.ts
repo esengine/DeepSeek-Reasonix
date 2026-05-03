@@ -8,11 +8,14 @@ export interface TextNode {
   readonly hyperlink?: string;
 }
 
+export type JustifyContent = "flex-start" | "flex-end" | "center" | "space-between";
+
 export interface BoxNode {
   readonly kind: "box";
   readonly children: ReadonlyArray<LayoutNode>;
   readonly flexDirection?: "column" | "row";
   readonly flexGrow?: number;
+  readonly justifyContent?: JustifyContent;
   readonly paddingTop?: number;
   readonly paddingBottom?: number;
   readonly paddingLeft?: number;
