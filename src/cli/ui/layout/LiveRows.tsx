@@ -46,17 +46,21 @@ export function ModeStatusBar({
     running > 0 ? (
       <Text color={TONE.warn} bold>{`  ·  ⏵ ${running} job${running === 1 ? "" : "s"}`}</Text>
     ) : null;
+  const editLabel = editMode === "yolo" ? "YOLO" : editMode === "auto" ? "AUTO" : "REVIEW";
+  const editColor = editMode === "yolo" ? TONE.err : editMode === "auto" ? TONE.accent : TONE.brand;
   if (planMode) {
+    // Show edit-mode alongside PLAN so the user can tell whether post-approve
+    // edits will land hands-off (AUTO/YOLO) or still need per-edit y/n (REVIEW).
     return (
       <ModeBarFrame>
         <ModePill label="PLAN MODE" color={TONE.err} flash={flash} />
-        <Text color={FG.faint}>{"   writes gated · /plan off to leave"}</Text>
+        <Text> </Text>
+        <ModePill label={editLabel} color={editColor} flash={false} />
+        <Text color={FG.faint}>{"   writes gated · Shift+Tab to flip · /plan off to leave"}</Text>
         {jobsTag}
       </ModeBarFrame>
     );
   }
-  const label = editMode === "yolo" ? "YOLO" : editMode === "auto" ? "AUTO" : "REVIEW";
-  const pillColor = editMode === "yolo" ? TONE.err : editMode === "auto" ? TONE.accent : TONE.brand;
   const mid =
     editMode === "yolo"
       ? "edits + shell auto · /undo to roll back"
@@ -67,7 +71,7 @@ export function ModeStatusBar({
           : "edits queued · y apply · n discard";
   return (
     <ModeBarFrame>
-      <ModePill label={label} color={pillColor} flash={flash} />
+      <ModePill label={editLabel} color={editColor} flash={flash} />
       <Text color={FG.faint}>{`   ${mid} · Shift+Tab to flip`}</Text>
       {jobsTag}
     </ModeBarFrame>
