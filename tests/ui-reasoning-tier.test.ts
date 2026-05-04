@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelBadgeFor } from "../src/cli/ui/primitives/Pill.js";
+import { modelBadgeFor } from "../src/cli/ui/cards/model-badge.js";
 
 describe("modelBadgeFor", () => {
   it("maps deepseek-v4-flash to flash class", () => {
