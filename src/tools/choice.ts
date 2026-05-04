@@ -1,5 +1,6 @@
 /** Branching primitive separate from submit_plan; throws ChoiceRequestedError so the TUI can mount a picker and the model stops. */
 
+import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
 
 export interface ChoiceOption {
@@ -104,7 +105,7 @@ export function registerChoiceTool(
       },
       required: ["question", "options"],
     },
-    fn: async (args: { question: string; options: unknown; allowCustom?: boolean }) => {
+    fn: async (args: { question: string; options: unknown; allowCustom?: boolean }, ctx) => {
       const question = (args?.question ?? "").trim();
       if (!question) {
         throw new Error(
@@ -124,7 +125,14 @@ export function registerChoiceTool(
       }
       const allowCustom = args?.allowCustom === true;
       opts.onChoiceRequested?.(question, options);
-      throw new ChoiceRequestedError(question, options, allowCustom);
+      // Block until the user picks an option, types custom text, or cancels
+      const verdict = await (ctx?.confirmationGate ?? pauseGate).ask({
+        kind: "choice",
+        payload: { question, options, allowCustom },
+      });
+      if (verdict.type === "pick") return `user picked: ${verdict.optionId}`;
+      if (verdict.type === "text") return `user answered: ${verdict.text}`;
+      return "user cancelled the choice";
     },
   });
   return registry;

@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
+import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { ToolRegistry } from "../src/tools.js";
@@ -1043,6 +1044,169 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     // No "error" event leaked through.
     expect(events.find((e) => e.role === "error")).toBeUndefined();
     // Loop terminated cleanly so the TUI's busy state unsticks.
+    expect(events[events.length - 1]?.role).toBe("done");
+  });
+
+  it.skip("defers sibling tool calls when change_workspace pops the confirmation modal", async () => {
+    // This test is skipped — change_workspace was removed (fb1b306).
+    // The model emits TWO tool calls in one assistant message:
+    // change_workspace + write_file. The workspace switch needs user
+    // approval; the write must NOT execute against the OLD root before
+    // the user confirms (silent data loss). Both still get tool
+    // results — the deferred one with a clear "skipped" payload — so
+    // tool_call ↔ tool pairing stays valid for DeepSeek's next turn.
+    const { registerWorkspaceTool } = await import("../src/tools/workspace.js");
+
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "change_workspace",
+              arguments: `{"path":"${process.cwd().replace(/\\/g, "/")}"}`,
+            },
+          },
+          {
+            id: "call_2",
+            type: "function",
+            function: {
+              name: "write_marker",
+              arguments: '{"value":"should-not-fire"}',
+            },
+          },
+        ],
+      },
+      { content: "ok" },
+    ]);
+
+    const tools = new ToolRegistry();
+    registerWorkspaceTool(tools);
+    let writeFired = false;
+    tools.register<{ value: string }, string>({
+      name: "write_marker",
+      parameters: { type: "object", properties: { value: { type: "string" } } },
+      fn: ({ value }) => {
+        writeFired = true;
+        return value;
+      },
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const toolResults: Array<{ name: string; content: string }> = [];
+    for await (const ev of loop.step("switch and write")) {
+      if (ev.role === "tool" && ev.toolName) {
+        toolResults.push({ name: ev.toolName, content: ev.content });
+      }
+    }
+
+    expect(writeFired).toBe(false);
+    expect(toolResults).toHaveLength(2);
+    expect(toolResults[0]?.name).toBe("change_workspace");
+    expect(toolResults[0]?.content).toContain("WorkspaceConfirmationError");
+    expect(toolResults[1]?.name).toBe("write_marker");
+    expect(toolResults[1]?.content).toContain("deferred");
+  });
+
+  it("blocks on confirmation gate without letting the model retry in the same turn", async () => {
+    // An auto-approving gate so the tool doesn't block forever in tests.
+    // In production, the singleton gate shows the ShellConfirm modal.
+    const gate = new PauseGate();
+    // Override ask to auto-approve without blocking.
+    const origAsk = gate.ask.bind(gate);
+    void origAsk;
+    gate.ask = (_opts: { kind: string; payload?: unknown }) => {
+      return Promise.resolve<ConfirmationChoice>({ type: "run_once" });
+    };
+
+    // A tool that uses the confirmation gate (like run_command does)
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "run_command",
+      description: "run a command — needs confirmation",
+      parameters: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+      fn: async (_args: { command: string }, ctx) => {
+        // Simulate what shell.ts does: block on the gate
+        const realGate = ctx?.confirmationGate ?? gate;
+        const choice = await (realGate.ask({
+          kind: "run_command",
+          payload: { command: "echo ok" },
+        }) as Promise<ConfirmationChoice>);
+        if (choice.type === "deny") {
+          throw new Error("user denied: echo ok");
+        }
+        return "$ echo ok\n[exit 0]\nok";
+      },
+    });
+
+    // Response 1: model emits a run_command tool call
+    const toolCallResp: FakeResponseShape = {
+      content: "",
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "run_command",
+            arguments: '{"command":"echo ok"}',
+          },
+        },
+      ],
+    };
+    // Response 2: model sees the tool output and responds naturally
+    const followUpResp: FakeResponseShape = {
+      content: "Command ran successfully — output was 'ok'.",
+      tool_calls: [],
+    };
+
+    const responses: FakeResponseShape[] = [toolCallResp, followUpResp];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: fakeFetch(responses) as unknown as typeof fetch,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      confirmationGate: gate,
+    });
+
+    const events: Array<{ role: string; content?: string }> = [];
+    for await (const ev of loop.step("run something")) {
+      events.push({ role: ev.role, content: ev.content });
+    }
+
+    // The tool result should be the normal command output — not a
+    // NeedsConfirmationError string
+    const toolEvents = events.filter((e) => e.role === "tool");
+    expect(toolEvents).toHaveLength(1);
+    expect(toolEvents[0]?.content).toContain("ok");
+    expect(toolEvents[0]?.content).not.toContain("NeedsConfirmationError");
+    expect(toolEvents[0]?.content).not.toContain("user denied");
+
+    // Two model calls: first generates the tool call, second responds to the
+    // output. The gate made the tool return real output synchronously — no
+    // error, no NeedsConfirmationError, no synthetic retry.
+    const finals = events.filter((e) => e.role === "assistant_final");
+    expect(finals).toHaveLength(2);
+    // Second call should be the natural follow-up, not a workaround
+    expect(finals[1]?.content).toMatch(/ran successfully/);
+
+    // Turn ends cleanly
     expect(events[events.length - 1]?.role).toBe("done");
   });
 

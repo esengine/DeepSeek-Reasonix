@@ -5,6 +5,8 @@ import {
   aggregateBranchUsage,
   runBranches,
 } from "./consistency.js";
+import type { PauseGate } from "./core/pause-gate.js";
+import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
 import { type HarvestOptions, type TypedPlanState, emptyPlanState, harvest } from "./harvest.js";
 import {
   type HookOutcome,
@@ -119,6 +121,8 @@ export interface CacheFirstLoopOptions {
   hooks?: ResolvedHook[];
   /** `cwd` reported to hooks; `reasonix code` sets this to the sandbox root, not shell home. */
   hookCwd?: string;
+  /** PauseGate bridge — defaults to singleton, injectable for tests. */
+  confirmationGate?: PauseGate;
 }
 
 export interface ReconfigurableOptions {
@@ -160,6 +164,9 @@ export class CacheFirstLoop {
   hooks: ResolvedHook[];
   hookCwd: string;
 
+  /** PauseGate bridge — defaults to singleton, injectable for tests. */
+  readonly confirmationGate: PauseGate;
+
   /** Number of messages that were pre-loaded from the session file. */
   readonly resumedMessageCount: number;
 
@@ -187,6 +194,7 @@ export class CacheFirstLoop {
     this.maxToolIters = opts.maxToolIters ?? 64;
     this.hooks = opts.hooks ?? [];
     this.hookCwd = opts.hookCwd ?? process.cwd();
+    this.confirmationGate = opts.confirmationGate ?? defaultPauseGate;
 
     // Resolve branch config first (since it forces harvest on).
     if (typeof opts.branch === "number") {
@@ -1295,6 +1303,7 @@ export class CacheFirstLoop {
           result = await this.tools.dispatch(name, args, {
             signal,
             maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
+            confirmationGate: this.confirmationGate,
           });
 
           // PostToolUse hooks — block is meaningless after the fact, so

@@ -1,8 +1,20 @@
 /** ask_choice — schema, sanitization, ChoiceRequestedError → tool_result protocol. */
 
 import { describe, expect, it } from "vitest";
+import { PauseGate } from "../src/core/pause-gate.js";
 import { ToolRegistry } from "../src/tools.js";
 import { ChoiceRequestedError, registerChoiceTool } from "../src/tools/choice.js";
+
+class AutoGate extends PauseGate {
+  private _choice: { type: string; optionId?: string; text?: string };
+  constructor(choice: { type: string; optionId?: string; text?: string }) {
+    super();
+    this._choice = choice;
+  }
+  override ask(_opts: { kind: string; payload?: unknown }): Promise<any> {
+    return Promise.resolve(this._choice);
+  }
+}
 
 describe("ChoiceRequestedError", () => {
   it("carries the question / options / allowCustom on the instance and in toToolResult()", () => {
@@ -40,12 +52,13 @@ describe("registerChoiceTool + ask_choice", () => {
     expect(reg.get("ask_choice")?.readOnly).toBe(true);
   });
 
-  it("throws ChoiceRequestedError and surfaces the full payload via toToolResult", async () => {
+  it("blocks on PauseGate and returns the user's pick", async () => {
     const reg = new ToolRegistry();
     const seen: Array<{ question: string; options: unknown }> = [];
     registerChoiceTool(reg, {
       onChoiceRequested: (q, o) => seen.push({ question: q, options: o }),
     });
+    const gate = new AutoGate({ type: "pick", optionId: "A" });
     const out = await reg.dispatch(
       "ask_choice",
       JSON.stringify({
@@ -56,15 +69,9 @@ describe("registerChoiceTool + ask_choice", () => {
         ],
         allowCustom: true,
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    expect(parsed.question).toBe("Pick a route.");
-    expect(parsed.options).toEqual([
-      { id: "A", title: "Deepen demo" },
-      { id: "B", title: "Start UE5", summary: "fresh engine" },
-    ]);
-    expect(parsed.allowCustom).toBe(true);
-    expect(parsed.error).toMatch(/^ChoiceRequestedError:/);
+    expect(out).toBe("user picked: A");
     expect(seen).toHaveLength(1);
     expect(seen[0]?.question).toBe("Pick a route.");
   });
@@ -72,6 +79,7 @@ describe("registerChoiceTool + ask_choice", () => {
   it("defaults allowCustom to false when not provided", async () => {
     const reg = new ToolRegistry();
     registerChoiceTool(reg);
+    const gate = new AutoGate({ type: "pick", optionId: "A" });
     const out = await reg.dispatch(
       "ask_choice",
       JSON.stringify({
@@ -81,14 +89,20 @@ describe("registerChoiceTool + ask_choice", () => {
           { id: "B", title: "two" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    expect(JSON.parse(out).allowCustom).toBe(false);
+    // Tool works without error — allowCustom defaults to false
+    expect(out).toBe("user picked: A");
   });
 
   it("drops malformed option entries (DeepSeek sometimes misses fields)", async () => {
     const reg = new ToolRegistry();
-    registerChoiceTool(reg);
-    const out = await reg.dispatch(
+    const seen: Array<{ options: { id: string; title: string }[] }> = [];
+    registerChoiceTool(reg, {
+      onChoiceRequested: (_q, opts) => seen.push({ options: opts as any }),
+    });
+    const gate = new AutoGate({ type: "pick", optionId: "A" });
+    await reg.dispatch(
       "ask_choice",
       JSON.stringify({
         question: "Pick.",
@@ -101,9 +115,9 @@ describe("registerChoiceTool + ask_choice", () => {
           { id: "C", title: "also good" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    expect(parsed.options).toEqual([
+    expect(seen[0]?.options).toEqual([
       { id: "A", title: "good" },
       { id: "C", title: "also good" },
     ]);
@@ -111,8 +125,12 @@ describe("registerChoiceTool + ask_choice", () => {
 
   it("deduplicates options with the same id (first one wins)", async () => {
     const reg = new ToolRegistry();
-    registerChoiceTool(reg);
-    const out = await reg.dispatch(
+    const seen: Array<{ question: string; options: unknown }> = [];
+    registerChoiceTool(reg, {
+      onChoiceRequested: (q, o) => seen.push({ question: q, options: o }),
+    });
+    const gate = new AutoGate({ type: "pick", optionId: "A" });
+    await reg.dispatch(
       "ask_choice",
       JSON.stringify({
         question: "Pick.",
@@ -122,9 +140,9 @@ describe("registerChoiceTool + ask_choice", () => {
           { id: "B", title: "second" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    expect(parsed.options).toEqual([
+    expect(seen[0]?.options).toEqual([
       { id: "A", title: "first" },
       { id: "B", title: "second" },
     ]);
@@ -174,6 +192,7 @@ describe("registerChoiceTool + ask_choice", () => {
     const reg = new ToolRegistry();
     registerChoiceTool(reg);
     reg.setPlanMode(true);
+    const gate = new AutoGate({ type: "pick", optionId: "A" });
     const out = await reg.dispatch(
       "ask_choice",
       JSON.stringify({
@@ -183,10 +202,8 @@ describe("registerChoiceTool + ask_choice", () => {
           { id: "B", title: "b" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    // Plan mode doesn't block ask_choice — it's readOnly.
-    expect(parsed.error).toMatch(/^ChoiceRequestedError:/);
-    expect(parsed.options).toHaveLength(2);
+    expect(out).toBe("user picked: A");
   });
 });

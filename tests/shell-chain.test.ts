@@ -254,10 +254,11 @@ describe("runCommand wired with chains", () => {
   it("refuses a chain when one segment is not allowlisted", async () => {
     const registry = new ToolRegistry();
     registerShellTools(registry, { rootDir: tmp });
+    // Non-allowlisted segment with no confirmation listener throws
     const out = await registry.dispatch(
       "run_command",
       JSON.stringify({ command: "git status | rm -rf dist" }),
     );
-    expect(out).toMatch(/NeedsConfirmationError/);
+    expect(out).toMatch(/no confirmation listener registered/);
   });
 });

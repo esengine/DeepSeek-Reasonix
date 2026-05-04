@@ -16,7 +16,7 @@ export interface ToolEventContext {
   toolStartedAtRef: MutableRefObject<number | null>;
   toolHistoryRef: MutableRefObject<Array<{ toolName: string; text: string }>>;
   setPendingShell: Dispatch<
-    SetStateAction<{ command: string; kind: "run_command" | "run_background" } | null>
+    SetStateAction<{ id: number; command: string; kind: "run_command" | "run_background" } | null>
   >;
   setPendingPlan: Dispatch<SetStateAction<string | null>>;
   setPendingRevision: Dispatch<
@@ -50,122 +50,6 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
       toolName: ev.toolName ?? "?",
       text: ev.content,
     });
-  }
-
-  if (
-    ctx.codeModeOn &&
-    (ev.toolName === "run_command" || ev.toolName === "run_background") &&
-    ev.content.includes('"NeedsConfirmationError:') &&
-    ev.toolArgs
-  ) {
-    try {
-      const parsed = JSON.parse(ev.toolArgs) as { command?: unknown };
-      if (typeof parsed.command === "string" && parsed.command.trim()) {
-        ctx.setPendingShell({
-          command: parsed.command.trim(),
-          kind: ev.toolName as "run_command" | "run_background",
-        });
-      }
-    } catch {
-      /* malformed args — skip the prompt */
-    }
-  }
-
-  if (
-    ctx.codeModeOn &&
-    ev.toolName === "submit_plan" &&
-    ev.content.includes('"PlanProposedError:')
-  ) {
-    try {
-      const parsed = JSON.parse(ev.content) as {
-        plan?: unknown;
-        steps?: unknown;
-        summary?: unknown;
-      };
-      if (typeof parsed.plan === "string" && parsed.plan.trim()) {
-        const planText = parsed.plan.trim();
-        ctx.setPendingPlan(planText);
-        const steps = Array.isArray(parsed.steps) ? (parsed.steps as PlanStep[]) : null;
-        ctx.planStepsRef.current = steps;
-        ctx.completedStepIdsRef.current = new Set();
-        ctx.planBodyRef.current = planText;
-        ctx.planSummaryRef.current =
-          typeof parsed.summary === "string" && parsed.summary.trim()
-            ? parsed.summary.trim()
-            : null;
-        ctx.persistPlanState();
-        const summary =
-          typeof parsed.summary === "string" && parsed.summary.trim() ? parsed.summary.trim() : "";
-        const title = summary ? `Plan · ${summary}` : "Plan submitted";
-        ctx.log.showPlan({
-          title,
-          steps: (steps ?? []).map((s) => ({ id: s.id, title: s.title, status: "queued" })),
-          variant: "active",
-        });
-      }
-    } catch {
-      /* malformed payload — skip the picker */
-    }
-  }
-
-  if (ev.toolName === "revise_plan" && ev.content.includes('"PlanRevisionProposedError:')) {
-    try {
-      const parsed = JSON.parse(ev.content) as {
-        reason?: unknown;
-        remainingSteps?: unknown;
-        summary?: unknown;
-      };
-      const reason = typeof parsed.reason === "string" ? parsed.reason.trim() : "";
-      const remainingSteps = Array.isArray(parsed.remainingSteps)
-        ? (parsed.remainingSteps as PlanStep[]).filter(
-            (s) =>
-              s &&
-              typeof s.id === "string" &&
-              s.id.trim() &&
-              typeof s.title === "string" &&
-              s.title.trim() &&
-              typeof s.action === "string" &&
-              s.action.trim(),
-          )
-        : [];
-      if (reason && remainingSteps.length > 0) {
-        const summary =
-          typeof parsed.summary === "string" ? parsed.summary.trim() || undefined : undefined;
-        ctx.setPendingRevision({ reason, remainingSteps, summary });
-      }
-    } catch {
-      /* malformed payload — skip the picker */
-    }
-  }
-
-  if (ev.toolName === "ask_choice" && ev.content.includes('"ChoiceRequestedError:')) {
-    try {
-      const parsed = JSON.parse(ev.content) as {
-        question?: unknown;
-        options?: unknown;
-        allowCustom?: unknown;
-      };
-      const question = typeof parsed.question === "string" ? parsed.question.trim() : "";
-      const options = Array.isArray(parsed.options)
-        ? (parsed.options as ChoiceOption[]).filter(
-            (o) =>
-              o &&
-              typeof o.id === "string" &&
-              o.id.trim() &&
-              typeof o.title === "string" &&
-              o.title.trim(),
-          )
-        : [];
-      if (question && options.length >= 2) {
-        ctx.setPendingChoice({
-          question,
-          options,
-          allowCustom: parsed.allowCustom === true,
-        });
-      }
-    } catch {
-      /* malformed payload — skip the picker */
-    }
   }
 
   if (ev.toolName === "mark_step_complete") {

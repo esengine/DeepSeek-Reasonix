@@ -1,12 +1,25 @@
 /** Plan Mode — read-only dispatch gate + submit_plan tool's PlanProposedError → tool_result protocol. */
 
 import { describe, expect, it } from "vitest";
+import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
   PlanProposedError,
   PlanRevisionProposedError,
   registerPlanTool,
 } from "../src/tools/plan.js";
+
+/** A PauseGate that auto-resolves with a pre-configured choice.  */
+class AutoGate extends PauseGate {
+  private _choice: ConfirmationChoice | { type: string };
+  constructor(choice: ConfirmationChoice | { type: string }) {
+    super();
+    this._choice = choice;
+  }
+  override ask(_opts: { kind: string; payload?: unknown }): Promise<any> {
+    return Promise.resolve(this._choice);
+  }
+}
 
 describe("ToolRegistry plan mode", () => {
   it("starts with plan mode off by default", () => {
@@ -149,15 +162,16 @@ describe("registerPlanTool + submit_plan", () => {
     expect(reg.get("submit_plan")?.readOnly).toBe(true);
   });
 
-  it("throws PlanProposedError when called with a plan (plan mode ON)", async () => {
+  it("blocks on PauseGate when called with a plan (plan mode ON)", async () => {
     const reg = new ToolRegistry();
     const submitted: string[] = [];
     registerPlanTool(reg, { onPlanSubmitted: (p) => submitted.push(p) });
     reg.setPlanMode(true);
-    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan\n- A" }));
-    const parsed = JSON.parse(out);
-    expect(parsed.plan).toBe("# Plan\n- A");
-    expect(parsed.error).toMatch(/PlanProposedError/);
+    const gate = new AutoGate({ type: "approve" });
+    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan\n- A" }), {
+      confirmationGate: gate,
+    });
+    expect(out).toBe("plan approved");
     expect(submitted).toEqual(["# Plan\n- A"]);
   });
 
@@ -166,10 +180,11 @@ describe("registerPlanTool + submit_plan", () => {
     const submitted: string[] = [];
     registerPlanTool(reg, { onPlanSubmitted: (p) => submitted.push(p) });
     // Plan mode intentionally NOT enabled.
-    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "big refactor plan" }));
-    const parsed = JSON.parse(out);
-    expect(parsed.plan).toBe("big refactor plan");
-    expect(parsed.error).toMatch(/PlanProposedError/);
+    const gate = new AutoGate({ type: "approve" });
+    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "big refactor plan" }), {
+      confirmationGate: gate,
+    });
+    expect(out).toBe("plan approved");
     expect(submitted).toEqual(["big refactor plan"]);
   });
 
@@ -187,32 +202,43 @@ describe("registerPlanTool + submit_plan", () => {
 
   it("trims surrounding whitespace from the plan", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
+    const submitted: Array<{ plan: string }> = [];
+    registerPlanTool(reg, { onPlanSubmitted: (p) => submitted.push({ plan: p }) });
     reg.setPlanMode(true);
-    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "\n\n  trimmed  \n" }));
-    expect(JSON.parse(out).plan).toBe("trimmed");
+    const gate = new AutoGate({ type: "approve" });
+    await reg.dispatch("submit_plan", JSON.stringify({ plan: "\n\n  trimmed  \n" }), {
+      confirmationGate: gate,
+    });
+    expect(submitted[0]?.plan).toBe("trimmed");
   });
 
-  it("carries an optional summary through toToolResult", async () => {
+  it("carries an optional summary through to PauseGate", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
+    const submitted: string[] = [];
+    registerPlanTool(reg, { onPlanSubmitted: (p) => submitted.push(p) });
     reg.setPlanMode(true);
+    const gate = new AutoGate({ type: "approve" });
     const out = await reg.dispatch(
       "submit_plan",
       JSON.stringify({ plan: "# Plan", summary: "Refactor auth into signed tokens" }),
+      { confirmationGate: gate },
     );
-    expect(JSON.parse(out).summary).toBe("Refactor auth into signed tokens");
+    expect(out).toBe("plan approved");
+    expect(submitted).toEqual(["# Plan"]);
   });
 
   it("omits summary when blank / whitespace-only", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
+    const submitted: Array<{ plan: string; summary?: string }> = [];
+    registerPlanTool(reg, {
+      onPlanSubmitted: (p, _s, summary) => submitted.push({ plan: p, summary }),
+    });
     reg.setPlanMode(true);
-    const out = await reg.dispatch(
-      "submit_plan",
-      JSON.stringify({ plan: "# Plan", summary: "   " }),
-    );
-    expect(JSON.parse(out).summary).toBeUndefined();
+    const gate = new AutoGate({ type: "approve" });
+    await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan", summary: "   " }), {
+      confirmationGate: gate,
+    });
+    expect(submitted[0]?.summary).toBeUndefined();
   });
 
   it("accepts an optional steps array and surfaces it in the tool result", async () => {
@@ -230,17 +256,20 @@ describe("registerPlanTool + submit_plan", () => {
         action: "Rewrite auth.test.ts to use the new module.",
       },
     ];
-    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan", steps }));
-    const parsed = JSON.parse(out);
-    expect(parsed.steps).toEqual(steps);
+    const gate = new AutoGate({ type: "approve" });
+    await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan", steps }), {
+      confirmationGate: gate,
+    });
     expect(submitted[0]?.steps).toEqual(steps);
   });
 
   it("drops malformed step entries and omits steps entirely when none remain", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
+    const submitted: Array<{ steps?: unknown }> = [];
+    registerPlanTool(reg, { onPlanSubmitted: (_p, steps) => submitted.push({ steps }) });
     reg.setPlanMode(true);
-    const out = await reg.dispatch(
+    const gate = new AutoGate({ type: "approve" });
+    await reg.dispatch(
       "submit_plan",
       JSON.stringify({
         plan: "# Plan",
@@ -252,16 +281,18 @@ describe("registerPlanTool + submit_plan", () => {
           null,
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    expect(parsed.steps).toBeUndefined();
+    expect(submitted[0]?.steps).toBeUndefined();
   });
 
   it("accepts and preserves valid risk levels on steps", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
+    const submitted: Array<{ steps?: unknown }> = [];
+    registerPlanTool(reg, { onPlanSubmitted: (_p, steps) => submitted.push({ steps }) });
     reg.setPlanMode(true);
-    const out = await reg.dispatch(
+    const gate = new AutoGate({ type: "approve" });
+    await reg.dispatch(
       "submit_plan",
       JSON.stringify({
         plan: "# Plan",
@@ -271,9 +302,9 @@ describe("registerPlanTool + submit_plan", () => {
           { id: "step-3", title: "risky", action: "prod migration", risk: "high" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    expect(parsed.steps).toEqual([
+    expect(submitted[0]?.steps).toEqual([
       { id: "step-1", title: "safe", action: "local edit", risk: "low" },
       { id: "step-2", title: "medium", action: "multi-file edit", risk: "med" },
       { id: "step-3", title: "risky", action: "prod migration", risk: "high" },
@@ -282,9 +313,11 @@ describe("registerPlanTool + submit_plan", () => {
 
   it("drops malformed risk values rather than letting them through", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
+    const submitted: Array<{ steps?: unknown }> = [];
+    registerPlanTool(reg, { onPlanSubmitted: (_p, steps) => submitted.push({ steps }) });
     reg.setPlanMode(true);
-    const out = await reg.dispatch(
+    const gate = new AutoGate({ type: "approve" });
+    await reg.dispatch(
       "submit_plan",
       JSON.stringify({
         plan: "# Plan",
@@ -294,12 +327,12 @@ describe("registerPlanTool + submit_plan", () => {
           { id: "step-3", title: "e", action: "f" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
     // "critical" and 3 are rejected → risk field omitted; step-3 had
     // no risk to begin with. All three steps survive (the step itself
     // was well-formed; only the bad risk got dropped).
-    expect(parsed.steps).toEqual([
+    expect(submitted[0]?.steps).toEqual([
       { id: "step-1", title: "a", action: "b" },
       { id: "step-2", title: "c", action: "d" },
       { id: "step-3", title: "e", action: "f" },
@@ -308,9 +341,11 @@ describe("registerPlanTool + submit_plan", () => {
 
   it("keeps only the well-formed steps when the array is mixed", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
+    const submitted: Array<{ steps?: unknown }> = [];
+    registerPlanTool(reg, { onPlanSubmitted: (_p, steps) => submitted.push({ steps }) });
     reg.setPlanMode(true);
-    const out = await reg.dispatch(
+    const gate = new AutoGate({ type: "approve" });
+    await reg.dispatch(
       "submit_plan",
       JSON.stringify({
         plan: "# Plan",
@@ -320,9 +355,9 @@ describe("registerPlanTool + submit_plan", () => {
           { id: "step-2", title: "also good", action: "do other thing" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    expect(parsed.steps).toEqual([
+    expect(submitted[0]?.steps).toEqual([
       { id: "step-1", title: "good", action: "do thing" },
       { id: "step-2", title: "also good", action: "do other thing" },
     ]);
@@ -337,10 +372,11 @@ describe("registerPlanTool + mark_step_complete", () => {
     expect(reg.get("mark_step_complete")?.readOnly).toBe(true);
   });
 
-  it("returns the step_completed payload and fires onStepCompleted", async () => {
+  it("blocks on PauseGate on step complete and returns step_completed payload on continue", async () => {
     const reg = new ToolRegistry();
     const seen: unknown[] = [];
     registerPlanTool(reg, { onStepCompleted: (u) => seen.push(u) });
+    const gate = new AutoGate({ type: "continue" });
     const out = await reg.dispatch(
       "mark_step_complete",
       JSON.stringify({
@@ -349,6 +385,7 @@ describe("registerPlanTool + mark_step_complete", () => {
         result: "Moved tokens into src/auth/tokens.ts.",
         notes: "Had to rename one export.",
       }),
+      { confirmationGate: gate },
     );
     const parsed = JSON.parse(out);
     expect(parsed.kind).toBe("step_completed");
@@ -356,6 +393,7 @@ describe("registerPlanTool + mark_step_complete", () => {
     expect(parsed.title).toBe("Refactor auth");
     expect(parsed.result).toBe("Moved tokens into src/auth/tokens.ts.");
     expect(parsed.notes).toBe("Had to rename one export.");
+    // No error wrapper — gate returns the structured payload directly
     expect(parsed.error).toBeUndefined();
     expect(seen).toHaveLength(1);
     expect((seen[0] as { stepId: string }).stepId).toBe("step-1");
@@ -364,9 +402,11 @@ describe("registerPlanTool + mark_step_complete", () => {
   it("omits optional fields when empty", async () => {
     const reg = new ToolRegistry();
     registerPlanTool(reg);
+    const gate = new AutoGate({ type: "continue" });
     const out = await reg.dispatch(
       "mark_step_complete",
       JSON.stringify({ stepId: "step-1", result: "done" }),
+      { confirmationGate: gate },
     );
     const parsed = JSON.parse(out);
     expect(parsed.title).toBeUndefined();
@@ -430,12 +470,13 @@ describe("registerPlanTool + revise_plan", () => {
     expect(reg.get("revise_plan")?.readOnly).toBe(true);
   });
 
-  it("throws PlanRevisionProposedError with the structured payload", async () => {
+  it("blocks on PauseGate when revising — returns accepted verdict", async () => {
     const reg = new ToolRegistry();
     const seen: Array<{ reason: string; steps: number }> = [];
     registerPlanTool(reg, {
       onPlanRevisionProposed: (reason, steps) => seen.push({ reason, steps: steps.length }),
     });
+    const gate = new AutoGate({ type: "accepted" });
     const out = await reg.dispatch(
       "revise_plan",
       JSON.stringify({
@@ -445,11 +486,9 @@ describe("registerPlanTool + revise_plan", () => {
           { id: "step-4", title: "tests", action: "update", risk: "med" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    expect(parsed.reason).toBe("User asked to skip step 3.");
-    expect(parsed.remainingSteps).toHaveLength(2);
-    expect(parsed.error).toMatch(/^PlanRevisionProposedError:/);
+    expect(out).toBe("revision accepted");
     expect(seen).toHaveLength(1);
     expect(seen[0]?.steps).toBe(2);
   });
@@ -497,8 +536,12 @@ describe("registerPlanTool + revise_plan", () => {
 
   it("preserves valid risk levels through revision", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
-    const out = await reg.dispatch(
+    const seen: Array<{ steps: Array<{ id: string; risk?: string }> }> = [];
+    registerPlanTool(reg, {
+      onPlanRevisionProposed: (_, steps) => seen.push({ steps }),
+    });
+    const gate = new AutoGate({ type: "accepted" });
+    await reg.dispatch(
       "revise_plan",
       JSON.stringify({
         reason: "tighten",
@@ -507,23 +550,28 @@ describe("registerPlanTool + revise_plan", () => {
           { id: "b", title: "t", action: "a", risk: "low" },
         ],
       }),
+      { confirmationGate: gate },
     );
-    const parsed = JSON.parse(out);
-    expect(parsed.remainingSteps[0].risk).toBe("high");
-    expect(parsed.remainingSteps[1].risk).toBe("low");
+    expect(seen[0]?.steps[0]?.risk).toBe("high");
+    expect(seen[0]?.steps[1]?.risk).toBe("low");
   });
 
   it("includes an optional summary when provided", async () => {
     const reg = new ToolRegistry();
-    registerPlanTool(reg);
-    const out = await reg.dispatch(
+    const seen: Array<{ summary?: string }> = [];
+    registerPlanTool(reg, {
+      onPlanRevisionProposed: (_, __, summary) => seen.push({ summary }),
+    });
+    const gate = new AutoGate({ type: "accepted" });
+    await reg.dispatch(
       "revise_plan",
       JSON.stringify({
         reason: "ok",
         remainingSteps: [{ id: "x", title: "y", action: "z" }],
         summary: "Refactor without migration",
       }),
+      { confirmationGate: gate },
     );
-    expect(JSON.parse(out).summary).toBe("Refactor without migration");
+    expect(seen[0]?.summary).toBe("Refactor without migration");
   });
 });

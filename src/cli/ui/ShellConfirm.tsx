@@ -35,7 +35,7 @@ export function ShellConfirm({ command, allowPrefix, kind, onChoose }: ShellConf
         glyph="✗"
         title="Deny — provide context"
         metaRight="optional"
-        footerHint="⏎ submit  ·  esc skip (deny without reason)"
+        footerHint="type context  ·  ⏎ submit with reason  ·  esc skip (deny without reason)"
       >
         <DenyContextInput
           onSubmit={(context) => onChoose("deny", context || undefined)}
@@ -51,7 +51,7 @@ export function ShellConfirm({ command, allowPrefix, kind, onChoose }: ShellConf
       glyph={isBackground ? "⏱" : "?"}
       title={isBackground ? "Background process" : "Shell command"}
       metaRight="awaiting"
-      footerHint="↑↓ pick  ·  ⏎ confirm  ·  esc cancel"
+      footerHint="↑↓ pick  ·  ⏎ confirm  ·  Tab add context  ·  esc cancel"
     >
       <Box marginBottom={1}>
         <Text color={FG.faint}>{subtitle}</Text>
@@ -80,12 +80,15 @@ export function ShellConfirm({ command, allowPrefix, kind, onChoose }: ShellConf
           {
             value: "deny",
             label: "deny",
-            hint: "skip; agent will pick an alternative",
+            hint: "press Tab to add context telling the model why",
           },
         ]}
         onSubmit={(v) => {
           if (v === "deny") setPhase("deny");
           else onChoose(v as ShellConfirmChoice);
+        }}
+        onTab={(v) => {
+          if (v === "deny") setPhase("deny");
         }}
         onCancel={() => onChoose("deny")}
       />

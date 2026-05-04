@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
   NeedsConfirmationError,
@@ -17,6 +18,27 @@ import {
   smartDecodeOutput,
   tokenizeCommand,
 } from "../src/tools/shell.js";
+
+/** A PauseGate that auto-resolves with a pre-configured choice. */
+/** A PauseGate that records call args for assertions. */
+class SpyGate extends PauseGate {
+  lastCall: { kind: string; payload?: unknown } | null = null;
+  override ask(opts: { kind: string; payload?: unknown }): Promise<any> {
+    this.lastCall = opts;
+    return Promise.resolve({ type: "run_once" } as ConfirmationChoice);
+  }
+}
+
+class AutoGate extends PauseGate {
+  private _choice: ConfirmationChoice;
+  constructor(choice: ConfirmationChoice) {
+    super();
+    this._choice = choice;
+  }
+  override ask(_opts: { kind: string; payload?: unknown }): Promise<ConfirmationChoice> {
+    return Promise.resolve(this._choice);
+  }
+}
 
 describe("tokenizeCommand", () => {
   it("splits on whitespace", () => {
@@ -274,15 +296,34 @@ describe("registerShellTools — dispatch integration", () => {
     expect(out).toMatch(/\[exit 0\]/);
   });
 
-  it("refuses non-allowlisted commands with NeedsConfirmationError", async () => {
+  it("blocks non-allowlisted commands via confirmation gate, runs on approve", async () => {
     const registry = new ToolRegistry();
     registerShellTools(registry, { rootDir: tmp });
+    const gate = new AutoGate({ type: "run_once" });
     const out = await registry.dispatch(
       "run_command",
-      JSON.stringify({ command: "rm -rf node_modules" }),
+      JSON.stringify({ command: "node --version" }),
+      { confirmationGate: gate },
     );
-    expect(out).toMatch(/NeedsConfirmationError/);
-    expect(out).toMatch(/rm -rf node_modules/);
+    // The command should run (approve-auto) and return normal output
+    expect(out).toMatch(/\$ node --version/);
+    expect(out).toMatch(/\[exit 0\]/);
+    expect(out).not.toMatch(/NeedsConfirmationError/);
+    expect(out).not.toMatch(/user denied/);
+  });
+
+  it("passes the correct kind to the gate — regression check for argument swap", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp });
+    const spy = new SpyGate();
+    await registry.dispatch("run_command", JSON.stringify({ command: "npm i" }), {
+      confirmationGate: spy,
+    });
+    // The gate must receive kind="run_command" in the first argument,
+    // NOT the command string (old ConfirmationGate swapped these).
+    expect(spy.lastCall).not.toBeNull();
+    expect(spy.lastCall!.kind).toBe("run_command");
+    expect(spy.lastCall!.payload).toEqual({ command: "npm i" });
   });
 
   it("allowAll:true bypasses the allowlist entirely", async () => {
@@ -310,8 +351,13 @@ describe("registerShellTools — dispatch integration", () => {
     const list: string[] = [];
     registerShellTools(registry, { rootDir: tmp, extraAllowed: () => list });
 
-    const before = await registry.dispatch("run_command", JSON.stringify({ command: cmd }));
-    expect(before).toMatch(/NeedsConfirmationError/);
+    // Before: command is not in extraAllowed → gate blocks → auto-deny
+    const denyGate = new AutoGate({ type: "deny" });
+    const before = await registry.dispatch("run_command", JSON.stringify({ command: cmd }), {
+      confirmationGate: denyGate,
+    });
+    expect(before).toMatch(/user denied/);
+    expect(before).toMatch(/node -e/);
 
     // Simulate the TUI's "always allow" click — mutate the source the
     // getter reads. No re-registration; the live tool instance picks
@@ -319,7 +365,7 @@ describe("registerShellTools — dispatch integration", () => {
     list.push("node -e");
 
     const after = await registry.dispatch("run_command", JSON.stringify({ command: cmd }));
-    expect(after).not.toMatch(/NeedsConfirmationError/);
+    expect(after).not.toMatch(/user denied/);
     expect(after).toMatch(/\[exit 0\]/);
     expect(after).toContain("ok");
   });
@@ -337,17 +383,24 @@ describe("registerShellTools — dispatch integration", () => {
       allowAll: () => yoloOn,
     });
 
-    const beforeYolo = await registry.dispatch("run_command", JSON.stringify({ command: cmd }));
-    expect(beforeYolo).toMatch(/NeedsConfirmationError/);
+    const denyGate = new AutoGate({ type: "deny" });
+    const beforeYolo = await registry.dispatch("run_command", JSON.stringify({ command: cmd }), {
+      confirmationGate: denyGate,
+    });
+    expect(beforeYolo).toMatch(/user denied/);
+    expect(beforeYolo).toMatch(/node -e/);
 
     yoloOn = true;
     const duringYolo = await registry.dispatch("run_command", JSON.stringify({ command: cmd }));
-    expect(duringYolo).not.toMatch(/NeedsConfirmationError/);
+    expect(duringYolo).not.toMatch(/user denied/);
     expect(duringYolo).toMatch(/\[exit 0\]/);
 
     yoloOn = false;
-    const afterYolo = await registry.dispatch("run_command", JSON.stringify({ command: cmd }));
-    expect(afterYolo).toMatch(/NeedsConfirmationError/);
+    const afterYolo = await registry.dispatch("run_command", JSON.stringify({ command: cmd }), {
+      confirmationGate: denyGate,
+    });
+    expect(afterYolo).toMatch(/user denied/);
+    expect(afterYolo).toMatch(/node -e/);
   });
 });
 

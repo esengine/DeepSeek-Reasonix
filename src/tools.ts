@@ -1,9 +1,12 @@
+import type { PauseGate } from "./core/pause-gate.js";
 import { truncateForModel, truncateForModelByTokens } from "./mcp/registry.js";
 import { analyzeSchema, flattenSchema, nestArguments } from "./repair/flatten.js";
 import type { JSONSchema, ToolSpec } from "./types.js";
 
 export interface ToolCallContext {
   signal?: AbortSignal;
+  /** Inject a mock PauseGate for tests. When absent, tools use the singleton. */
+  confirmationGate?: PauseGate;
 }
 
 export interface ToolDefinition<A = any, R = any> {
@@ -102,7 +105,13 @@ export class ToolRegistry {
   async dispatch(
     name: string,
     argumentsRaw: string | Record<string, unknown>,
-    opts: { signal?: AbortSignal; maxResultChars?: number; maxResultTokens?: number } = {},
+    opts: {
+      signal?: AbortSignal;
+      maxResultChars?: number;
+      maxResultTokens?: number;
+      /** Inject a mock PauseGate for tests. */
+      confirmationGate?: PauseGate;
+    } = {},
   ): Promise<string> {
     const tool = this._tools.get(name);
     if (!tool) {
@@ -158,7 +167,10 @@ export class ToolRegistry {
     }
 
     try {
-      const result = await tool.fn(args, { signal: opts.signal });
+      const result = await tool.fn(args, {
+        signal: opts.signal,
+        confirmationGate: opts.confirmationGate,
+      });
       const str = typeof result === "string" ? result : JSON.stringify(result);
       // Pre-clip at dispatch so a single fat result can't balloon the
       // log (and disk session file) on its way in. Healing at load time

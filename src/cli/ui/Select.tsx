@@ -19,6 +19,8 @@ export interface SingleSelectProps<V extends string> {
   initialValue?: V;
   onSubmit: (value: V) => void;
   onCancel?: () => void;
+  /** Fired when Tab is pressed on the currently highlighted item. */
+  onTab?: (value: V) => void;
   /** Optional dim footer beneath the list. */
   footer?: string;
 }
@@ -27,6 +29,7 @@ export function SingleSelect<V extends string>({
   items,
   initialValue,
   onSubmit,
+  onTab,
   onCancel,
   footer,
 }: SingleSelectProps<V>) {
@@ -45,6 +48,9 @@ export function SingleSelect<V extends string>({
     } else if (ev.return) {
       const chosen = items[index];
       if (chosen && !chosen.disabled) onSubmit(chosen.value);
+    } else if (ev.tab) {
+      const chosen = items[index];
+      if (chosen && !chosen.disabled) onTab?.(chosen.value);
     } else if (ev.escape && onCancel) {
       onCancel();
     }

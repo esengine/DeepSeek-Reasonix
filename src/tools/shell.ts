@@ -3,6 +3,8 @@
 import { type ChildProcess, type SpawnOptions, spawn, spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import * as pathMod from "node:path";
+import { addProjectShellAllowed } from "../config.js";
+import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
 import { JobRegistry } from "./jobs.js";
 import {
@@ -591,7 +593,17 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_command: empty command");
       if (!isAllowAll() && !isCommandAllowed(cmd, getExtraAllowed())) {
-        throw new NeedsConfirmationError(cmd);
+        const gate = ctx?.confirmationGate ?? pauseGate;
+        const choice = await gate.ask({ kind: "run_command", payload: { command: cmd } });
+        if (choice.type === "deny") {
+          throw new Error(
+            `user denied: ${cmd}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`,
+          );
+        }
+        if (choice.type === "always_allow") {
+          addProjectShellAllowed(rootDir, choice.prefix);
+        }
+        // "run_once" — fall through and execute
       }
       const effectiveTimeout = Math.max(1, Math.min(600, args.timeoutSec ?? timeoutSec));
       const result = await runCommand(cmd, {
@@ -627,8 +639,18 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
     fn: async (args: { command: string; waitSec?: number }, ctx) => {
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_background: empty command");
-      if (!isAllowAll() && !isAllowed(cmd, getExtraAllowed())) {
-        throw new NeedsConfirmationError(cmd);
+      if (!isAllowAll() && !isCommandAllowed(cmd, getExtraAllowed())) {
+        const gate = ctx?.confirmationGate ?? pauseGate;
+        const choice = await gate.ask({ kind: "run_background", payload: { command: cmd } });
+        if (choice.type === "deny") {
+          throw new Error(
+            `user denied: ${cmd}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`,
+          );
+        }
+        if (choice.type === "always_allow") {
+          addProjectShellAllowed(rootDir, choice.prefix);
+        }
+        // "run_once" — fall through and execute
       }
       const result = await jobs.start(cmd, {
         cwd: rootDir,

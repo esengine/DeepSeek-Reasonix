@@ -1,3 +1,4 @@
+import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
 import { PlanProposedError, PlanRevisionProposedError } from "./plan-errors.js";
 import type { PlanStep, PlanStepRisk, StepCompletion } from "./plan-types.js";
@@ -94,7 +95,7 @@ function registerSubmitPlan(registry: ToolRegistry, opts: PlanToolOptions): void
       },
       required: ["plan"],
     },
-    fn: async (args: { plan: string; steps?: unknown; summary?: string }) => {
+    fn: async (args: { plan: string; steps?: unknown; summary?: string }, ctx) => {
       const plan = (args?.plan ?? "").trim();
       if (!plan) {
         throw new Error("submit_plan: empty plan — write a markdown plan and try again.");
@@ -103,7 +104,14 @@ function registerSubmitPlan(registry: ToolRegistry, opts: PlanToolOptions): void
       const summary =
         typeof args?.summary === "string" ? args.summary.trim() || undefined : undefined;
       opts.onPlanSubmitted?.(plan, steps);
-      throw new PlanProposedError(plan, steps, summary);
+      // Block until the user approves, refines, or cancels
+      const verdict = await (ctx?.confirmationGate ?? pauseGate).ask({
+        kind: "plan_proposed",
+        payload: { plan, steps, summary },
+      });
+      if (verdict.type === "approve") return "plan approved";
+      if (verdict.type === "refine") throw new Error("user requested refinement");
+      throw new Error("plan cancelled");
     },
   });
 }
@@ -138,7 +146,7 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
       },
       required: ["stepId", "result"],
     },
-    fn: async (args: { stepId: string; title?: string; result: string; notes?: string }) => {
+    fn: async (args: { stepId: string; title?: string; result: string; notes?: string }, ctx) => {
       const stepId = (args?.stepId ?? "").trim();
       const result = (args?.result ?? "").trim();
       if (!stepId) {
@@ -155,7 +163,14 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
       if (title) update.title = title;
       if (notes) update.notes = notes;
       opts.onStepCompleted?.(update);
-      return update;
+      // Block until the user continues, revises, or stops
+      const verdict = await (ctx?.confirmationGate ?? pauseGate).ask({
+        kind: "plan_checkpoint",
+        payload: { stepId, title, result, notes },
+      });
+      if (verdict.type === "continue") return JSON.stringify(update);
+      if (verdict.type === "revise") throw new Error("user requested revision at checkpoint");
+      throw new Error("user stopped at checkpoint");
     },
   });
 }
@@ -187,7 +202,7 @@ function registerRevisePlan(registry: ToolRegistry, opts: PlanToolOptions): void
       },
       required: ["reason", "remainingSteps"],
     },
-    fn: async (args: { reason: string; remainingSteps: unknown; summary?: string }) => {
+    fn: async (args: { reason: string; remainingSteps: unknown; summary?: string }, ctx) => {
       const reason = (args?.reason ?? "").trim();
       if (!reason) {
         throw new Error(
@@ -203,7 +218,14 @@ function registerRevisePlan(registry: ToolRegistry, opts: PlanToolOptions): void
       const summary =
         typeof args?.summary === "string" ? args.summary.trim() || undefined : undefined;
       opts.onPlanRevisionProposed?.(reason, remainingSteps, summary);
-      throw new PlanRevisionProposedError(reason, remainingSteps, summary);
+      // Block until the user accepts, rejects, or cancels the revision
+      const verdict = await (ctx?.confirmationGate ?? pauseGate).ask({
+        kind: "plan_revision",
+        payload: { reason, remainingSteps, summary },
+      });
+      if (verdict.type === "accepted") return "revision accepted";
+      if (verdict.type === "rejected") throw new Error("revision rejected");
+      throw new Error("revision cancelled");
     },
   });
 }
