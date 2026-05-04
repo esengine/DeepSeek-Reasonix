@@ -73,6 +73,7 @@
     "picomatch": "^4.0.4",
     "react": "^18.3.1",
     "react-reconciler": "^0.29.2",
+    "shell-quote": "^1.8.3",
     "string-width": "^7.2.0",
     "yoga-layout": "^3.2.1",
     "zod": "^4.4.1"
@@ -83,6 +84,7 @@
     "@types/picomatch": "^4.0.3",
     "@types/react": "^18.3.12",
     "@types/react-reconciler": "^0.28.9",
+    "@types/shell-quote": "^1.7.5",
     "esbuild": "^0.21.5",
     "highlight.js": "^11.10.0",
     "htm": "^3.1.1",

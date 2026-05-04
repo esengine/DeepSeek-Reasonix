@@ -5,9 +5,16 @@ import { existsSync, statSync } from "node:fs";
 import * as pathMod from "node:path";
 import type { ToolRegistry } from "../tools.js";
 import { JobRegistry } from "./jobs.js";
+import {
+  type CommandChain,
+  UnsupportedSyntaxError,
+  chainAllowed,
+  parseCommandChain,
+  runChain,
+} from "./shell-chain.js";
 
 /** Kill child + descendants. Windows: taskkill /T /F. Unix: SIGKILL the process group when detached, else fall back to SIGKILL on the leader. */
-function killProcessTree(child: ChildProcess): void {
+export function killProcessTree(child: ChildProcess): void {
   if (!child.pid || child.killed) return;
   if (process.platform === "win32") {
     try {
@@ -203,6 +210,18 @@ export function isAllowed(cmd: string, extra: readonly string[] = []): boolean {
   return false;
 }
 
+/** For chain commands, every segment must individually clear the allowlist. */
+export function isCommandAllowed(cmd: string, extra: readonly string[] = []): boolean {
+  let chain: CommandChain | null;
+  try {
+    chain = parseCommandChain(cmd);
+  } catch {
+    return false;
+  }
+  if (chain === null) return isAllowed(cmd, extra);
+  return chainAllowed(chain, (seg) => isAllowed(seg, extra));
+}
+
 export interface RunCommandResult {
   exitCode: number | null;
   /** Combined stdout+stderr, truncated to `maxOutputChars` with a marker. */
@@ -220,16 +239,26 @@ export async function runCommand(
     signal?: AbortSignal;
   },
 ): Promise<RunCommandResult> {
+  const timeoutSec = opts.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
+  const maxChars = opts.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
   const argv = tokenizeCommand(cmd);
   if (argv.length === 0) throw new Error("run_command: empty command");
+  const chain = parseCommandChain(cmd);
+  if (chain !== null) {
+    return await runChain(chain, {
+      cwd: opts.cwd,
+      timeoutSec,
+      maxOutputChars: maxChars,
+      signal: opts.signal,
+    });
+  }
   const operator = detectShellOperator(cmd);
   if (operator !== null) {
     throw new Error(
-      `run_command: shell operator "${operator}" is not supported — this tool spawns one process, no shell expansion. Split into separate run_command calls and combine the output in your reasoning (e.g. instead of \`grep foo *.ts | wc -l\`, call \`grep -c foo *.ts\` or two separate commands). To pass "${operator}" as a literal argument, wrap it in quotes.`,
+      `run_command: shell operator "${operator}" is not supported — only \`|\`, \`||\`, \`&&\`, \`;\` chain operators are spawned natively. Redirects (\`>\`, \`<\`, \`2>&1\`) and background (\`&\`) are not supported — split into separate run_command calls. To pass "${operator}" as a literal argument, wrap it in quotes.`,
     );
   }
-  const timeoutMs = (opts.timeoutSec ?? DEFAULT_TIMEOUT_SEC) * 1000;
-  const maxChars = opts.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
+  const timeoutMs = timeoutSec * 1000;
 
   const spawnOpts: SpawnOptions = {
     cwd: opts.cwd,
@@ -538,7 +567,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "run_command",
     description:
-      "Run a shell command in the project root and return its combined stdout+stderr.\n\nConstraints (read these before the first call):\n• ONE process per call, NO shell expansion. `&&`, `||`, `|`, `;`, `>`, `<`, `2>&1` are all rejected up-front — split into separate calls and combine results in reasoning. Example: instead of `grep foo *.ts | wc -l`, use `grep -c foo *.ts`; instead of `cd sub && npm test`, use `npm test --prefix sub` (or whatever --cwd flag the binary accepts).\n• `cd` DOES NOT PERSIST between calls — each call spawns a fresh process rooted at the project. If a tool needs a subdirectory, pass it via the tool's own flag (`npm --prefix`, `cargo -C`, `git -C`, `pytest tests/…`), NOT via a preceding `cd`.\n• Avoid commands with unbounded output (`netstat -ano`, `find /`, etc.) — they waste tokens. Filter at source: `netstat -ano -p TCP`, `find src -name '*.ts'`, `grep -c`, `wc -l`.\n\nCommon read-only inspection and test/lint/typecheck commands run immediately; anything that could mutate state, install dependencies, or touch the network is refused until the user confirms it in the TUI. Prefer this over asking the user to run a command manually — after edits, run the project's tests to verify.",
+      "Run a shell command in the project root and return its combined stdout+stderr.\n\nConstraints (read these before the first call):\n• Chain operators `|`, `||`, `&&`, `;` ARE supported — parsed natively, no shell invoked, so semantics are identical on Windows / macOS / Linux. Each chain segment is allowlist-checked individually: `git status | grep main` runs if both halves are allowed.\n• Redirects (`>`, `<`, `>>`, `2>&1`, `&>`), background `&`, command substitution `$(…)`, env-var expansion `$VAR`, subshells `(…)`, and process substitution `<(…)` are NOT supported and rejected up-front. Use the binary's own flags (e.g. `node --output=file` instead of `node ... > file`) or split into separate calls.\n• `cd` DOES NOT PERSIST between calls — each call spawns a fresh process rooted at the project. If a tool needs a subdirectory, pass it via the tool's own flag (`npm --prefix`, `cargo -C`, `git -C`, `pytest tests/…`), NOT via a preceding `cd`.\n• Glob patterns (`*.ts`) are passed through as literal arguments — no shell expansion. Use `grep -r`, `rg`, `find -name`, etc.\n• Avoid commands with unbounded output (`netstat -ano`, `find /`, etc.) — they waste tokens. Filter at source: `netstat -ano -p TCP`, `find src -name '*.ts'`, `grep -c`, `wc -l`.\n\nCommon read-only inspection and test/lint/typecheck commands run immediately; anything that could mutate state, install dependencies, or touch the network is refused until the user confirms it in the TUI. Prefer this over asking the user to run a command manually — after edits, run the project's tests to verify.",
     // Plan-mode gate: allow allowlisted commands through (git status,
     // cargo check, ls, grep …) so the model can actually investigate
     // during planning. Anything that would otherwise trigger a
@@ -547,7 +576,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       if (isAllowAll()) return true;
       const cmd = typeof args?.command === "string" ? args.command.trim() : "";
       if (!cmd) return false;
-      return isAllowed(cmd, getExtraAllowed());
+      return isCommandAllowed(cmd, getExtraAllowed());
     },
     parameters: {
       type: "object",
@@ -555,7 +584,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         command: {
           type: "string",
           description:
-            'Full command line. Tokenized with POSIX-ish quoting; no shell expansion. Pipes (`|`), redirects (`>`, `<`, `2>`), and `&&`/`||` chaining are rejected with an error — split into separate calls instead. To pass an operator character as a literal argument (e.g. a regex), wrap it in quotes: `grep "a|b" file.txt`.',
+            'Full command line. POSIX-ish quoting. Chain operators `|`, `||`, `&&`, `;` work — parsed natively (no shell). Redirects (`>`, `<`, `2>&1`), background `&`, env-var expansion `$VAR`, and command substitution `$(…)` are rejected. To pass an operator character as a literal argument (e.g. a regex), wrap it in quotes: `grep "a|b" file.txt`.',
         },
         timeoutSec: {
           type: "integer",
@@ -567,7 +596,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
     fn: async (args: { command: string; timeoutSec?: number }, ctx) => {
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_command: empty command");
-      if (!isAllowAll() && !isAllowed(cmd, getExtraAllowed())) {
+      if (!isAllowAll() && !isCommandAllowed(cmd, getExtraAllowed())) {
         throw new NeedsConfirmationError(cmd);
       }
       const effectiveTimeout = Math.max(1, Math.min(600, args.timeoutSec ?? timeoutSec));

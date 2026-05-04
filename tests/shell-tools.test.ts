@@ -109,7 +109,7 @@ describe("detectShellOperator", () => {
   });
 });
 
-describe("runCommand pipe/redirect rejection", () => {
+describe("runCommand redirect rejection", () => {
   let tmp: string;
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "reasonix-shell-pipe-"));
@@ -118,26 +118,38 @@ describe("runCommand pipe/redirect rejection", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("rejects a pipe command with a helpful error", async () => {
-    await expect(runCommand("echo hi | cat", { cwd: tmp })).rejects.toThrow(
-      /shell operator "\|" is not supported/,
-    );
-  });
-
-  it("rejects a redirect command with a helpful error", async () => {
+  it("rejects stdout redirect", async () => {
     await expect(runCommand("echo hi > out.txt", { cwd: tmp })).rejects.toThrow(
       /shell operator ">" is not supported/,
     );
   });
 
-  it("error message points the model at splitting the call", async () => {
-    try {
-      await runCommand("a && b", { cwd: tmp });
-    } catch (err) {
-      expect((err as Error).message).toMatch(/Split into separate run_command calls/i);
-      return;
-    }
-    throw new Error("expected runCommand to reject");
+  it("rejects stderr-merge redirect", async () => {
+    await expect(runCommand("node -v 2>&1", { cwd: tmp })).rejects.toThrow(/shell operator/);
+  });
+
+  it("rejects background `&`", async () => {
+    await expect(runCommand("node -v &", { cwd: tmp })).rejects.toThrow(
+      /shell operator "&" is not supported/,
+    );
+  });
+
+  it("rejects `$VAR` env-var expansion", async () => {
+    await expect(runCommand("echo $HOME", { cwd: tmp })).rejects.toThrow(
+      /\$HOME expansion is not supported/,
+    );
+  });
+
+  it("rejects command substitution `$(…)`", async () => {
+    await expect(runCommand("echo $(date)", { cwd: tmp })).rejects.toThrow(/command substitution/);
+  });
+
+  it("rejects an empty leading segment", async () => {
+    await expect(runCommand("; echo hi", { cwd: tmp })).rejects.toThrow(/empty segment before/);
+  });
+
+  it("rejects a chain ending with an operator", async () => {
+    await expect(runCommand("echo hi &&", { cwd: tmp })).rejects.toThrow(/chain ends with/);
   });
 });
 
