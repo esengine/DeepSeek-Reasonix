@@ -1,7 +1,7 @@
 import { Box, Text, useApp } from "ink";
-import TextInput from "ink-text-input";
 import React, { useState } from "react";
 import { defaultConfigPath, isPlausibleKey, redactKey, saveApiKey } from "../../config.js";
+import { MaskedInput } from "./MaskedInput.js";
 import { COLOR, GLYPH, GRADIENT } from "./theme.js";
 
 export interface SetupProps {
@@ -63,7 +63,7 @@ export function Setup({ onReady }: SetupProps) {
         <Text bold color={COLOR.primary}>
           {" › "}
         </Text>
-        <TextInput
+        <MaskedInput
           value={value}
           onChange={setValue}
           onSubmit={handleSubmit}
