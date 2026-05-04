@@ -50,6 +50,12 @@ function summary(env: BridgeEnv, host: McpClientHost): McpServerSummary {
       prompts: { supported: false, reason: "" },
       elapsedMs: 50,
     },
+    readResource(uri) {
+      return host.client.readResource(uri);
+    },
+    getPrompt(name, args) {
+      return args !== undefined ? host.client.getPrompt(name, args) : host.client.getPrompt(name);
+    },
   };
 }
 

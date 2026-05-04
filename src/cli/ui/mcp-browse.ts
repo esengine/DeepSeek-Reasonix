@@ -1,6 +1,5 @@
 /** `/resource` + `/prompt` handlers — async (round-trip to MCP server), so App.tsx calls directly instead of `handleSlash`. */
 
-import type { McpClient } from "../../mcp/client.js";
 import type {
   GetPromptResult,
   McpPromptMessage,
@@ -161,9 +160,8 @@ export async function handleMcpBrowseSlash(
       );
       return;
     }
-    const client: McpClient = server.host.client;
     try {
-      const result = await client.readResource(arg);
+      const result = await server.readResource(arg);
       log.pushInfo(formatResourceContents(arg, result));
     } catch (err) {
       log.pushWarning("readResource failed", (err as Error).message);
@@ -180,9 +178,8 @@ export async function handleMcpBrowseSlash(
     );
     return;
   }
-  const client: McpClient = server.host.client;
   try {
-    const result = await client.getPrompt(arg);
+    const result = await server.getPrompt(arg);
     log.pushInfo(formatPromptMessages(arg, result));
   } catch (err) {
     log.pushWarning("getPrompt failed", (err as Error).message);

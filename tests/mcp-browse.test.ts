@@ -56,10 +56,18 @@ function server(
   // Tests pass a stubbed `client` for convenience; wrap it in the host shape
   // the bridge expects.
   const { client, ...rest } = partial;
+  const host = rest.host ?? { client: client as never };
   return {
     spec: partial.spec ?? `fake://${partial.label}`,
     toolCount: partial.toolCount ?? 0,
-    host: rest.host ?? { client: client as never },
+    host,
+    bridgeEnv: partial.bridgeEnv ?? {
+      registry: {} as never,
+      host,
+      prefix: "",
+      maxResultChars: 32_000,
+      tracker: null,
+    },
     report: partial.report ?? {
       protocolVersion: "2024-11-05",
       serverInfo: { name: partial.label, version: "1.0" },
@@ -67,6 +75,12 @@ function server(
       tools: { supported: true, items: [] },
       resources: { supported: true, items: [] },
       prompts: { supported: true, items: [] },
+    },
+    readResource(uri) {
+      return host.client.readResource(uri);
+    },
+    getPrompt(name, args) {
+      return args !== undefined ? host.client.getPrompt(name, args) : host.client.getPrompt(name);
     },
     ...rest,
   };
