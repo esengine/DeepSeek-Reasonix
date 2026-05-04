@@ -1,8 +1,9 @@
 import type { EditMode } from "../../../config.js";
-import type { InspectionReport } from "../../../mcp/inspect.js";
-import type { BridgeEnv, McpClientHost } from "../../../mcp/registry.js";
+import type { McpServerSummary } from "../../../mcp/summary.js";
 import type { JobRegistry } from "../../../tools/jobs.js";
 import type { PlanStep } from "../../../tools/plan.js";
+
+export type { McpServerSummary } from "../../../mcp/summary.js";
 
 export interface SlashResult {
   /** Text to display back to the user as a system/info line. */
@@ -113,21 +114,6 @@ export interface SlashContext {
   stopDashboard?: () => Promise<void>;
   /** Snapshot the dashboard's URL when running, null otherwise. */
   getDashboardUrl?: () => string | null;
-}
-
-export interface McpServerSummary {
-  /** Short label shown in the `/mcp` output (server namespace or "anon"). */
-  label: string;
-  /** Original --mcp spec string. */
-  spec: string;
-  /** Count of tools bridged into the Reasonix registry from this server. */
-  toolCount: number;
-  /** Full inspection snapshot — used for the resources + prompts sections. */
-  report: InspectionReport;
-  /** Mutable client handle so `/mcp reconnect` can swap the underlying socket without re-bridging tools. */
-  host: McpClientHost;
-  /** Captured at first-bridge time so append-drift reconnects can register newly-added tools with the same options. */
-  bridgeEnv: BridgeEnv;
 }
 
 export interface SlashCommandSpec {

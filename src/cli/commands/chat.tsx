@@ -9,6 +9,7 @@ import { parseMcpSpec } from "../../mcp/spec.js";
 import { SseTransport } from "../../mcp/sse.js";
 import { type McpTransport, StdioTransport } from "../../mcp/stdio.js";
 import { StreamableHttpTransport } from "../../mcp/streamable-http.js";
+import { buildMcpServerSummary } from "../../mcp/summary.js";
 import {
   deleteSession,
   listSessionsForWorkspace,
@@ -278,14 +279,16 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
         );
         clients.push(mcp);
         successfulSpecs.push(raw);
-        mcpServers.push({
-          label,
-          spec: raw,
-          toolCount: bridge.registeredNames.length,
-          report,
-          host,
-          bridgeEnv: bridge.env,
-        });
+        mcpServers.push(
+          buildMcpServerSummary({
+            label,
+            spec: raw,
+            toolCount: bridge.registeredNames.length,
+            report,
+            host,
+            bridgeEnv: bridge.env,
+          }),
+        );
       } catch (err) {
         // Per-server failure is non-fatal: one broken server shouldn't
         // kill a chat that has working servers configured. Recover by
