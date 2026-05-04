@@ -125,6 +125,15 @@ function parseEscape(s: string, start: number): Consumed {
     return parseCsi(s, start);
   }
 
+  // Alt+Enter — terminals send \x1b\r (or \x1b\n on some). Surface as
+  // meta+return so multi-line reducers can distinguish it from a bare Enter.
+  if (next === "\r" || next === "\n") {
+    return {
+      key: { ...emptyKeystroke(), raw: `\x1b${next}`, meta: true, return: true },
+      length: 2,
+    };
+  }
+
   if (isPrintable(next)) {
     return {
       key: { ...emptyKeystroke(), raw: `\x1b${next}`, meta: true, input: next },

@@ -170,18 +170,19 @@ describe("SimplePromptInput — cursor movement", () => {
     h.destroy();
   });
 
-  it("ctrl+u clears everything before the cursor", async () => {
+  it("ctrl+u clears the whole buffer", async () => {
+    // Reasonix convention (matches the live chat input): ctrl+u kills the
+    // entire buffer rather than only the part before the cursor — the
+    // ergonomic alternative for getting rid of a long paste.
     const h = harness();
     await flush();
     h.push("abcdef");
     await flush();
-    h.push("\x1b[D"); // cursor before 'f'
-    await flush();
-    h.push("\x1b[D"); // cursor before 'e'
+    h.push("\x1b[D");
     await flush();
     h.push("\x15"); // ctrl+u
     await flush();
-    expect(h.values.at(-1)).toBe("ef");
+    expect(h.values.at(-1)).toBe("");
     h.destroy();
   });
 
@@ -200,12 +201,13 @@ describe("SimplePromptInput — cursor movement", () => {
     h.destroy();
   });
 
-  it("delete removes the char under the cursor", async () => {
+  it("delete acts as backspace (Reasonix convention)", async () => {
+    // The live chat input collapses forward-delete onto backspace because
+    // some Windows terminals report Backspace without setting the
+    // backspace flag; v2 follows the same convention via processMultilineKey.
     const h = harness();
     await flush();
     h.push("abc");
-    await flush();
-    h.push("\x1b[D");
     await flush();
     h.push("\x1b[D");
     await flush();
@@ -213,6 +215,108 @@ describe("SimplePromptInput — cursor movement", () => {
     await flush();
     expect(h.values.at(-1)).toBe("ac");
     h.destroy();
+  });
+});
+
+describe("SimplePromptInput — multi-line", () => {
+  it("Alt+Enter inserts a newline", async () => {
+    const h = harness();
+    await flush();
+    h.push("foo");
+    await flush();
+    h.push("\x1b\r"); // Alt+Enter
+    await flush();
+    h.push("bar");
+    await flush();
+    expect(h.values.at(-1)).toBe("foo\nbar");
+    h.destroy();
+  });
+
+  it("Enter on a multi-line buffer still submits", async () => {
+    const h = harness();
+    await flush();
+    h.push("a");
+    await flush();
+    h.push("\x1b\r"); // Alt+Enter for newline
+    await flush();
+    h.push("b");
+    await flush();
+    h.push("\r"); // Enter — submit
+    await flush();
+    expect(h.submits).toEqual(["a\nb"]);
+    h.destroy();
+  });
+
+  it("up arrow moves cursor up one logical line", async () => {
+    const h = harness();
+    await flush();
+    h.push("first");
+    await flush();
+    h.push("\x1b\r");
+    await flush();
+    h.push("second");
+    await flush();
+    h.push("\x1b[A"); // up arrow
+    await flush();
+    h.push("X"); // should land on the first line
+    await flush();
+    // Cursor was at end of "second" (col 6); up keeps col but first line is
+    // "first" (len 5), so cursor clamps to 5 → "firstX\nsecond".
+    expect(h.values.at(-1)).toBe("firstX\nsecond");
+    h.destroy();
+  });
+
+  it("down arrow moves cursor down one logical line", async () => {
+    const h = harness();
+    await flush();
+    h.push("ab");
+    await flush();
+    h.push("\x1b\r");
+    await flush();
+    h.push("cd");
+    await flush();
+    h.push("\x1b[H"); // home → cursor 0
+    await flush();
+    h.push("\x1b[B"); // down → second line, col 0
+    await flush();
+    h.push("X");
+    await flush();
+    expect(h.values.at(-1)).toBe("ab\nXcd");
+    h.destroy();
+  });
+
+  it("backslash + Enter at end-of-buffer continues to a new line", async () => {
+    const h = harness();
+    await flush();
+    h.push("foo\\");
+    await flush();
+    h.push("\r");
+    await flush();
+    h.push("bar");
+    await flush();
+    expect(h.values.at(-1)).toBe("foo\nbar");
+    h.destroy();
+  });
+
+  it("up arrow on empty buffer fires onHistoryPrev", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    let prevs = 0;
+    const handle = mount(
+      <SimplePromptInput
+        value=""
+        onChange={() => {}}
+        onHistoryPrev={() => {
+          prevs++;
+        }}
+      />,
+      { viewportWidth: 40, viewportHeight: 4, pools: pools(), write: w.write, stdin },
+    );
+    await flush();
+    stdin.push("\x1b[A");
+    await flush();
+    expect(prevs).toBe(1);
+    handle.destroy();
   });
 });
 
