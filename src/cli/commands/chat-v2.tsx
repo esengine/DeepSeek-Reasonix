@@ -7,9 +7,9 @@ import {
   StylePool,
   inkCompat,
   mount,
-  useKeystroke,
 } from "../../renderer/index.js";
 import { MarkdownView } from "../ui/markdown-view.js";
+import { SimplePromptInput } from "../ui/prompt-input-v2.js";
 import type { Card } from "../ui/state/cards.js";
 import type { AgentEvent } from "../ui/state/events.js";
 import { AgentStoreProvider, useAgentState, useDispatch } from "../ui/state/provider.js";
@@ -36,62 +36,67 @@ export interface ScriptStep {
   readonly event: AgentEvent;
 }
 
-/** Canned turn lifecycle. user → reasoning → streaming → tool → turn.end. Plays once. */
-export function buildScript(): ReadonlyArray<ScriptStep> {
-  const reasonId = "r-1";
-  const replyId = "s-1";
-  const toolId = "t-1";
-  const reasonChunks = [
-    "The user wants the streaming pipeline preview. ",
-    "I'll dispatch a few staged events through the real reducer ",
-    "and let the cell-diff renderer paint the cards.",
-  ];
-  const replyChunks = [
-    "## Mount path\n\n",
-    "Each card is dispatched through the real reducer and rendered ",
-    "**without Ink** — only the changed cells get patched on stdout.\n\n",
-    "Key bits:\n\n",
-    "- `mount()` from `src/renderer/index.ts:19`\n",
-    "- markdown via `markdownToLines()`\n",
-    "- spans wrapped in `inkCompat.Text`\n",
-  ];
+/** Builds a canned reply turn for the given user text. The chat-v2 demo
+ *  isn't backed by a real model, so each submission gets a stock
+ *  reasoning + streaming cycle that quotes the input back. */
+export function buildReply(userText: string, turn: number): ReadonlyArray<ScriptStep> {
+  const reasonId = `r-${turn}`;
+  const replyId = `s-${turn}`;
   return [
-    { delayMs: 200, event: { type: "user.submit", text: "show me the chat-v2 mount" } },
-    { delayMs: 200, event: { type: "turn.start", turnId: "turn-1" } },
-    { delayMs: 100, event: { type: "reasoning.start", id: reasonId } },
-    { delayMs: 200, event: { type: "reasoning.chunk", id: reasonId, text: reasonChunks[0]! } },
-    { delayMs: 200, event: { type: "reasoning.chunk", id: reasonId, text: reasonChunks[1]! } },
-    { delayMs: 200, event: { type: "reasoning.chunk", id: reasonId, text: reasonChunks[2]! } },
+    { delayMs: 50, event: { type: "turn.start", turnId: `t-${turn}` } },
+    { delayMs: 50, event: { type: "reasoning.start", id: reasonId } },
     {
-      delayMs: 100,
-      event: { type: "reasoning.end", id: reasonId, paragraphs: 1, tokens: 42 },
-    },
-    {
-      delayMs: 100,
-      event: { type: "tool.start", id: toolId, name: "shell", args: { cmd: "ls" } },
-    },
-    { delayMs: 250, event: { type: "tool.chunk", id: toolId, text: "src/\nrenderer/\n" } },
-    {
-      delayMs: 250,
+      delayMs: 80,
       event: {
-        type: "tool.end",
-        id: toolId,
-        output: "src/\nrenderer/\n",
-        exitCode: 0,
-        elapsedMs: 230,
+        type: "reasoning.chunk",
+        id: reasonId,
+        text: "Routing the message through the cell-diff renderer demo. ",
       },
     },
-    { delayMs: 100, event: { type: "streaming.start", id: replyId } },
-    { delayMs: 200, event: { type: "streaming.chunk", id: replyId, text: replyChunks[0]! } },
-    { delayMs: 200, event: { type: "streaming.chunk", id: replyId, text: replyChunks[1]! } },
-    { delayMs: 200, event: { type: "streaming.chunk", id: replyId, text: replyChunks[2]! } },
-    { delayMs: 100, event: { type: "streaming.end", id: replyId } },
     {
-      delayMs: 200,
+      delayMs: 80,
+      event: {
+        type: "reasoning.chunk",
+        id: reasonId,
+        text: "No real model is wired up — replies are canned.",
+      },
+    },
+    {
+      delayMs: 60,
+      event: { type: "reasoning.end", id: reasonId, paragraphs: 1, tokens: 18 },
+    },
+    { delayMs: 50, event: { type: "streaming.start", id: replyId } },
+    {
+      delayMs: 80,
+      event: {
+        type: "streaming.chunk",
+        id: replyId,
+        text: `## You said\n\n> ${userText}\n\n`,
+      },
+    },
+    {
+      delayMs: 80,
+      event: {
+        type: "streaming.chunk",
+        id: replyId,
+        text: "Each card flows through the real reducer at ",
+      },
+    },
+    {
+      delayMs: 80,
+      event: {
+        type: "streaming.chunk",
+        id: replyId,
+        text: "`src/cli/ui/state/reducer.ts`, then renders via `inkCompat`.\n",
+      },
+    },
+    { delayMs: 50, event: { type: "streaming.end", id: replyId } },
+    {
+      delayMs: 80,
       event: {
         type: "turn.end",
-        usage: { prompt: 120, reason: 42, output: 36, cacheHit: 0.5, cost: 0.00034 },
-        elapsedMs: 1800,
+        usage: { prompt: 80, reason: 18, output: 28, cacheHit: 0.5, cost: 0.00021 },
+        elapsedMs: 600,
       },
     },
   ];
@@ -107,7 +112,9 @@ function Header({ inProgress, frame }: { inProgress: boolean; frame: number }): 
       <inkCompat.Text color={BRAND} bold>
         Reasonix
       </inkCompat.Text>
-      <inkCompat.Text color={FAINT}>chat-v2 · cell-diff renderer · Esc to exit</inkCompat.Text>
+      <inkCompat.Text color={FAINT}>
+        chat-v2 · cell-diff renderer · type a message · Esc on empty to exit
+      </inkCompat.Text>
     </inkCompat.Box>
   );
 }
@@ -211,53 +218,56 @@ function TurnTrailer(): React.ReactElement | null {
 }
 
 interface ShellProps {
-  readonly script: ReadonlyArray<ScriptStep>;
   readonly onExit: () => void;
+  /** Override the reply-script generator. Tests use a zero-delay variant. */
+  readonly buildReply?: (userText: string, turn: number) => ReadonlyArray<ScriptStep>;
 }
 
-export function ChatV2Shell({ script, onExit }: ShellProps): React.ReactElement {
+export function ChatV2Shell({
+  onExit,
+  buildReply: buildReplyOverride,
+}: ShellProps): React.ReactElement {
   const cards = useAgentState((s) => s.cards);
   const inProgress = useAgentState((s) => s.turnInProgress);
   const dispatch = useDispatch();
   const [frame, setFrame] = useState(0);
-  const [done, setDone] = useState(false);
-  const playedRef = useRef(false);
+  const [draft, setDraft] = useState("");
+  const turnRef = useRef(0);
+  const dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
 
-  useKeystroke((k) => {
-    if (k.escape || (k.ctrl && k.input === "c")) onExit();
-  });
-
-  useEffect(() => {
-    if (playedRef.current) return;
-    playedRef.current = true;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let i = 0;
-    const step = () => {
-      if (cancelled || i >= script.length) {
-        if (!cancelled) setDone(true);
-        return;
-      }
-      const cur = script[i]!;
-      timer = setTimeout(() => {
-        if (cancelled) return;
-        dispatch(cur.event);
-        i++;
-        step();
-      }, cur.delayMs);
-    };
-    step();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [script, dispatch]);
+  const replyBuilder = buildReplyOverride ?? buildReply;
 
   useEffect(() => {
     if (!inProgress) return;
     const id = setInterval(() => setFrame((f) => f + 1), SPINNER_TICK_MS);
     return () => clearInterval(id);
   }, [inProgress]);
+
+  const playReply = (text: string): void => {
+    const turn = ++turnRef.current;
+    const steps = replyBuilder(text, turn);
+    let i = 0;
+    const step = (): void => {
+      if (i >= steps.length) return;
+      const cur = steps[i]!;
+      setTimeout(() => {
+        dispatchRef.current(cur.event);
+        i++;
+        step();
+      }, cur.delayMs);
+    };
+    step();
+  };
+
+  const handleSubmit = (text: string): void => {
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return;
+    if (inProgress) return;
+    dispatchRef.current({ type: "user.submit", text: trimmed });
+    setDraft("");
+    playReply(trimmed);
+  };
 
   return (
     <inkCompat.Box flexDirection="column">
@@ -268,11 +278,16 @@ export function ChatV2Shell({ script, onExit }: ShellProps): React.ReactElement 
         ))}
       </inkCompat.Box>
       <TurnTrailer />
-      {done ? (
-        <inkCompat.Box marginTop={1}>
-          <inkCompat.Text color={FAINT}>— end of demo · press Esc to exit —</inkCompat.Text>
-        </inkCompat.Box>
-      ) : null}
+      <inkCompat.Box marginTop={1}>
+        <SimplePromptInput
+          value={draft}
+          onChange={setDraft}
+          onSubmit={handleSubmit}
+          onCancel={onExit}
+          disabled={inProgress}
+          placeholder={inProgress ? "thinking…" : "type a message and hit enter…"}
+        />
+      </inkCompat.Box>
     </inkCompat.Box>
   );
 }
@@ -280,8 +295,6 @@ export function ChatV2Shell({ script, onExit }: ShellProps): React.ReactElement 
 export interface ChatV2Options {
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
-  /** Override the canned playback (used by tests). */
-  readonly script?: ReadonlyArray<ScriptStep>;
 }
 
 export async function runChatV2(opts: ChatV2Options = {}): Promise<void> {
@@ -304,11 +317,9 @@ export async function runChatV2(opts: ChatV2Options = {}): Promise<void> {
     resolveExit = resolve;
   });
 
-  const script = opts.script ?? buildScript();
-
   const handle: Handle = mount(
     <AgentStoreProvider session={DEMO_SESSION}>
-      <ChatV2Shell script={script} onExit={() => resolveExit()} />
+      <ChatV2Shell onExit={() => resolveExit()} />
     </AgentStoreProvider>,
     {
       viewportWidth: stdout.columns ?? 80,

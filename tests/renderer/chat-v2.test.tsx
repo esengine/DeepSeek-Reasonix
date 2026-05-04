@@ -38,30 +38,34 @@ function makeFakeStdin(): KeystrokeSource & { push: (s: string) => void } {
   };
 }
 
-const FAST_SCRIPT: ReadonlyArray<ScriptStep> = [
-  { delayMs: 0, event: { type: "user.submit", text: "hello chat-v2" } },
-  { delayMs: 0, event: { type: "turn.start", turnId: "t-1" } },
-  { delayMs: 0, event: { type: "reasoning.start", id: "r-1" } },
-  { delayMs: 0, event: { type: "reasoning.chunk", id: "r-1", text: "thinking-line" } },
-  { delayMs: 0, event: { type: "reasoning.end", id: "r-1", paragraphs: 1, tokens: 7 } },
-  { delayMs: 0, event: { type: "streaming.start", id: "s-1" } },
-  { delayMs: 0, event: { type: "streaming.chunk", id: "s-1", text: "answer-line" } },
-  { delayMs: 0, event: { type: "streaming.end", id: "s-1" } },
-  {
-    delayMs: 0,
-    event: {
-      type: "turn.end",
-      usage: { prompt: 100, reason: 7, output: 11, cacheHit: 0.4, cost: 0.0001 },
+/** Zero-delay reply builder so tests don't wait on real timers. */
+function instantReply(userText: string, turn: number): ReadonlyArray<ScriptStep> {
+  const reasonId = `r-${turn}`;
+  const replyId = `s-${turn}`;
+  return [
+    { delayMs: 0, event: { type: "turn.start", turnId: `t-${turn}` } },
+    { delayMs: 0, event: { type: "reasoning.start", id: reasonId } },
+    { delayMs: 0, event: { type: "reasoning.chunk", id: reasonId, text: "thinking…" } },
+    { delayMs: 0, event: { type: "reasoning.end", id: reasonId, paragraphs: 1, tokens: 5 } },
+    { delayMs: 0, event: { type: "streaming.start", id: replyId } },
+    { delayMs: 0, event: { type: "streaming.chunk", id: replyId, text: `echo: ${userText}` } },
+    { delayMs: 0, event: { type: "streaming.end", id: replyId } },
+    {
+      delayMs: 0,
+      event: {
+        type: "turn.end",
+        usage: { prompt: 10, reason: 5, output: 5, cacheHit: 0, cost: 0.0001 },
+      },
     },
-  },
-];
+  ];
+}
 
 describe("chat-v2 shell — initial paint", () => {
-  it("renders the header before the script plays", async () => {
+  it("renders the header and the empty prompt", async () => {
     const w = makeTestWriter();
     const handle = mount(
       <AgentStoreProvider session={DEMO_SESSION}>
-        <ChatV2Shell script={[]} onExit={() => {}} />
+        <ChatV2Shell onExit={() => {}} />
       </AgentStoreProvider>,
       {
         viewportWidth: 80,
@@ -75,50 +79,106 @@ describe("chat-v2 shell — initial paint", () => {
     const out = w.output();
     expect(out).toContain("Reasonix");
     expect(out).toContain("chat-v2");
-    expect(out).toContain("Esc");
+    expect(out).toContain("type a message");
     handle.destroy();
   });
 });
 
-describe("chat-v2 shell — playback through the real reducer", () => {
-  it("dispatched events flow through useAgentState into rendered card rows", async () => {
+describe("chat-v2 shell — interactive submit", () => {
+  it("typed text is submitted on Enter and the canned reply lands", async () => {
     const w = makeTestWriter();
+    const stdin = makeFakeStdin();
     const handle = mount(
       <AgentStoreProvider session={DEMO_SESSION}>
-        <ChatV2Shell script={FAST_SCRIPT} onExit={() => {}} />
+        <ChatV2Shell onExit={() => {}} buildReply={instantReply} />
       </AgentStoreProvider>,
       {
         viewportWidth: 80,
         viewportHeight: 24,
         pools: pools(),
         write: w.write,
-        stdin: makeFakeStdin(),
+        stdin,
       },
     );
-    // FAST_SCRIPT has zero-delay setTimeout chains; flush enough microtask
-    // ticks that the whole sequence drains.
+    await flush();
+    stdin.push("hello");
+    await flush();
+    stdin.push("\r");
+    // Drain the zero-delay setTimeout chain (8 events × 1 microtask each).
     for (let i = 0; i < 30; i++) await flush();
     const out = w.output();
-    expect(out).toContain("hello chat-v2");
-    expect(out).toContain("thinking-line");
-    expect(out).toContain("answer-line");
-    expect(out).toContain("end of demo");
+    expect(out).toContain("hello");
+    expect(out).toContain("thinking");
+    expect(out).toMatch(/echo/);
+    handle.destroy();
+  });
+
+  it("two consecutive submits append two user cards", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell onExit={() => {}} buildReply={instantReply} />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 80,
+        viewportHeight: 24,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("first\r");
+    for (let i = 0; i < 30; i++) await flush();
+    stdin.push("second\r");
+    for (let i = 0; i < 30; i++) await flush();
+    const out = w.output();
+    expect(out).toContain("first");
+    expect(out).toContain("second");
+    handle.destroy();
+  });
+
+  it("blank submit is a no-op", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    let userSubmits = 0;
+    const recordingReply = (text: string, turn: number) => {
+      userSubmits++;
+      return instantReply(text, turn);
+    };
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell onExit={() => {}} buildReply={recordingReply} />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 60,
+        viewportHeight: 10,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("\r");
+    for (let i = 0; i < 5; i++) await flush();
+    expect(userSubmits).toBe(0);
     handle.destroy();
   });
 });
 
 describe("chat-v2 shell — exit", () => {
-  it("Esc invokes onExit", async () => {
+  it("Esc on the empty prompt invokes onExit", async () => {
     const w = makeTestWriter();
     const stdin = makeFakeStdin();
     let exited = false;
     const handle = mount(
       <AgentStoreProvider session={DEMO_SESSION}>
         <ChatV2Shell
-          script={[]}
           onExit={() => {
             exited = true;
           }}
+          buildReply={instantReply}
         />
       </AgentStoreProvider>,
       {
@@ -133,6 +193,36 @@ describe("chat-v2 shell — exit", () => {
     stdin.push("\x1b");
     await flush();
     expect(exited).toBe(true);
+    handle.destroy();
+  });
+
+  it("Esc on a non-empty prompt clears the value but does NOT exit", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    let exited = false;
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell
+          onExit={() => {
+            exited = true;
+          }}
+          buildReply={instantReply}
+        />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 60,
+        viewportHeight: 8,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("draft");
+    await flush();
+    stdin.push("\x1b");
+    await flush();
+    expect(exited).toBe(false);
     handle.destroy();
   });
 });
