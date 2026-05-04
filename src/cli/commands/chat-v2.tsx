@@ -105,6 +105,8 @@ export function buildReply(userText: string, turn: number): ReadonlyArray<Script
 
 function Header({ inProgress, frame }: { inProgress: boolean; frame: number }): React.ReactElement {
   const glyph = inProgress ? (SPINNER[frame % SPINNER.length] ?? "·") : "◈";
+  const session = useAgentState((s) => s.session);
+  const showSession = session.id !== DEMO_SESSION.id;
   return (
     <inkCompat.Box flexDirection="row" gap={1}>
       <inkCompat.Text color={inProgress ? BRAND : ACCENT} bold>
@@ -114,7 +116,9 @@ function Header({ inProgress, frame }: { inProgress: boolean; frame: number }): 
         Reasonix
       </inkCompat.Text>
       <inkCompat.Text color={FAINT}>
-        chat-v2 · cell-diff renderer · type a message · Esc on empty to exit
+        {showSession
+          ? `chat-v2 · session "${session.id}" · Esc on empty to exit`
+          : "chat-v2 · cell-diff renderer · Esc on empty to exit"}
       </inkCompat.Text>
     </inkCompat.Box>
   );
@@ -365,10 +369,41 @@ export interface ChatV2Options {
   readonly stdin?: NodeJS.ReadStream;
   readonly model?: string;
   readonly system?: string;
+  /** Session name to persist to / resume from. Default: ad-hoc unnamed. */
+  readonly session?: string;
+  /** With `session`: force a fresh timestamped suffix instead of resuming. */
+  readonly forceNew?: boolean;
+  /** With `session`: pick the latest `name-*` prefix even if `name` itself exists. */
+  readonly forceResume?: boolean;
 }
 
 const DEFAULT_SYSTEM =
   "You are Reasonix, a helpful DeepSeek-powered assistant. Be concise and accurate.";
+
+async function loadInitialCards(sessionName: string): Promise<ReadonlyArray<Card> | undefined> {
+  const { loadSessionMessages } = await import("../../memory/session.js");
+  const msgs = loadSessionMessages(sessionName);
+  if (msgs.length === 0) return undefined;
+  // Replay only the user-side turns as cards. Replaying assistant content
+  // would require a full re-render of streaming + tool sequences, which
+  // we don't have on disk in event form. The user's own messages are
+  // enough context for the recall — the new turn's response will arrive
+  // streamed from the model.
+  const cards: Card[] = [];
+  let seq = 0;
+  for (const m of msgs) {
+    if (m.role !== "user") continue;
+    const text = typeof m.content === "string" ? m.content : "";
+    if (text.length === 0) continue;
+    cards.push({
+      kind: "user",
+      id: `replay-user-${seq++}`,
+      ts: Date.now(),
+      text,
+    });
+  }
+  return cards.length > 0 ? cards : undefined;
+}
 
 async function buildDefaultTools(): Promise<import("../../tools.js").ToolRegistry> {
   const { ToolRegistry } = await import("../../tools.js");
@@ -383,7 +418,7 @@ async function buildDefaultTools(): Promise<import("../../tools.js").ToolRegistr
   return tools;
 }
 
-function makeRealRunTurn(model: string, system: string): RunTurn {
+function makeRealRunTurn(model: string, system: string, session: string | undefined): RunTurn {
   // The loop construction is per-turn so dependencies stay lazy; the same
   // CacheFirstLoop instance is reused via closure to preserve cache state
   // and the running session transcript across turns.
@@ -396,7 +431,7 @@ function makeRealRunTurn(model: string, system: string): RunTurn {
     const tools = await buildDefaultTools();
     const client = new DeepSeekClient();
     const prefix = new ImmutablePrefix({ system, toolSpecs: tools.specs() });
-    const loop = new CacheFirstLoop({ client, prefix, model, tools });
+    const loop = new CacheFirstLoop({ client, prefix, model, tools, session });
     return { loop };
   };
 
@@ -443,14 +478,27 @@ export async function runChatV2(opts: ChatV2Options = {}): Promise<void> {
   stdout.write("\x1b[?2004h");
 
   // Real DeepSeek loop when an API key is present; canned demo otherwise.
-  // The canned path lets new users explore chat-v2's UI without an account.
   const apiKey = process.env.DEEPSEEK_API_KEY;
+  const { resolved: resolvedSession } = apiKey
+    ? (await import("../../memory/session.js")).resolveSession(
+        opts.session,
+        opts.forceNew,
+        opts.forceResume,
+      )
+    : { resolved: undefined };
   const runTurn: RunTurn | undefined = apiKey
-    ? makeRealRunTurn(opts.model ?? "deepseek-chat", opts.system ?? DEFAULT_SYSTEM)
+    ? makeRealRunTurn(opts.model ?? "deepseek-chat", opts.system ?? DEFAULT_SYSTEM, resolvedSession)
     : undefined;
 
+  const sessionInfo: SessionInfo = resolvedSession
+    ? { ...DEMO_SESSION, id: resolvedSession }
+    : DEMO_SESSION;
+
+  // Replay user-side history from disk so resumed sessions show prior turns.
+  const initialCards = resolvedSession ? await loadInitialCards(resolvedSession) : undefined;
+
   const handle: Handle = mount(
-    <AgentStoreProvider session={DEMO_SESSION}>
+    <AgentStoreProvider session={sessionInfo} initialCards={initialCards}>
       <ChatV2Shell onExit={() => resolveExit()} runTurn={runTurn} />
     </AgentStoreProvider>,
     {

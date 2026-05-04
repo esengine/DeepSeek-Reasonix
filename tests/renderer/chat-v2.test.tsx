@@ -278,6 +278,36 @@ describe("chat-v2 shell — tool flow", () => {
   });
 });
 
+describe("chat-v2 shell — resumed session", () => {
+  it("rendering with initialCards replays prior user turns immediately", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(
+      <AgentStoreProvider
+        session={DEMO_SESSION}
+        initialCards={[
+          { kind: "user", id: "u-1", ts: 1, text: "first question" },
+          { kind: "user", id: "u-2", ts: 2, text: "second question" },
+        ]}
+      >
+        <ChatV2Shell onExit={() => {}} runTurn={instantRunTurn} />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 80,
+        viewportHeight: 12,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    const out = w.output();
+    expect(out).toContain("first question");
+    expect(out).toContain("second question");
+    handle.destroy();
+  });
+});
+
 describe("chat-v2 shell — long-conversation overflow", () => {
   it("settled cards from older turns appear in the byte stream as scrollback writes", async () => {
     const w = makeTestWriter();
