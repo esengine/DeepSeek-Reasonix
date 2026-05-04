@@ -1,53 +1,56 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { BarRow } from "../primitives/BarRow.js";
 import type { ErrorCard as ErrorCardData } from "../state/cards.js";
-import { CARD, FG } from "../theme/tokens.js";
-import { CardHeader } from "./CardHeader.js";
+import { FG, TONE } from "../theme/tokens.js";
 
 const STACK_TAIL = 5;
 
 export function ErrorCard({ card }: { card: ErrorCardData }): React.ReactElement {
-  const meta =
+  const retryNote =
     card.retries !== undefined && card.retries > 0
       ? `· ${card.retries} retr${card.retries === 1 ? "y" : "ies"}`
-      : undefined;
+      : null;
   const stackLines = card.stack ? card.stack.split("\n") : [];
   const stackTrunc = stackLines.length > STACK_TAIL;
   const stackVisible = stackTrunc ? stackLines.slice(-STACK_TAIL) : stackLines;
   const stackHidden = stackTrunc ? stackLines.length - stackVisible.length : 0;
   const hasStack = stackVisible.length > 0;
+  const messageLines = card.message.split("\n");
 
   return (
-    <Box flexDirection="column">
-      <CardHeader tone="error" glyph="✖" title="Error" subtitle={card.title} meta={meta} />
-      <BarRow tone="error" indent={0} />
-      {card.message.split("\n").map((line, i) => (
-        <BarRow key={`${card.id}:msg:${i}`} tone="error">
-          <Text color={CARD.error.color}>{line}</Text>
-        </BarRow>
+    <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="row" gap={1}>
+        <Text color={TONE.err}>✖</Text>
+        <Text color={TONE.err} bold>
+          {card.title || "error"}
+        </Text>
+        {retryNote ? <Text color={FG.faint}>{retryNote}</Text> : null}
+      </Box>
+      {messageLines.map((line, i) => (
+        <Box key={`${card.id}:msg:${i}`} paddingLeft={2}>
+          <Text color={TONE.err}>{line || " "}</Text>
+        </Box>
       ))}
-      {hasStack && (
+      {hasStack ? (
         <>
-          <BarRow tone="error" indent={0} />
-          <BarRow tone="error">
-            <Text color={FG.meta}>{"stack trace"}</Text>
-          </BarRow>
-          {stackHidden > 0 && (
-            <BarRow tone="error">
+          <Box paddingLeft={2} marginTop={1}>
+            <Text color={FG.meta}>stack trace</Text>
+          </Box>
+          {stackHidden > 0 ? (
+            <Box paddingLeft={2}>
               <Text color={FG.faint}>
                 {`⋮ ${stackHidden} earlier stack line${stackHidden === 1 ? "" : "s"} hidden`}
               </Text>
-            </BarRow>
-          )}
+            </Box>
+          ) : null}
           {stackVisible.map((line, i) => (
-            <BarRow key={`${card.id}:stk:${stackHidden + i}`} tone="error">
-              <Text color={FG.meta}>{line}</Text>
-            </BarRow>
+            <Box key={`${card.id}:stk:${stackHidden + i}`} paddingLeft={2}>
+              <Text color={FG.meta}>{line || " "}</Text>
+            </Box>
           ))}
         </>
-      )}
+      ) : null}
     </Box>
   );
 }
