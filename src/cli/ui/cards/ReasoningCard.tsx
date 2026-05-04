@@ -8,7 +8,7 @@ import { CursorBlock } from "../primitives/CursorBlock.js";
 import { PILL_MODEL, PILL_SECTION, Pill, modelBadgeFor } from "../primitives/Pill.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { ReasoningCard as ReasoningCardData } from "../state/cards.js";
-import { FG, TONE } from "../theme/tokens.js";
+import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 
 /** Streaming preview tail length — wide enough to feel responsive, small enough not to thrash on every chunk. Full body lives in the events log. */
 const STREAMING_PREVIEW_LINES = 4;
@@ -28,7 +28,7 @@ export function ReasoningCard({
 
   const allLines = card.text.length > 0 ? card.text.split("\n") : [];
   const showBody = expanded && (allLines.length > 0 || card.streaming);
-  const tone = card.aborted ? TONE.err : TONE.accent;
+  const tone = card.aborted ? TONE.err : card.streaming ? TONE_ACTIVE.accent : TONE.accent;
 
   return (
     <Card tone={tone}>
@@ -45,7 +45,7 @@ export function ReasoningCard({
 
 function ReasoningHeader({ card }: { card: ReasoningCardData }): React.ReactElement {
   const streamingActive = card.streaming && !card.aborted;
-  const headColor = card.aborted ? TONE.err : TONE.accent;
+  const headColor = card.aborted ? TONE.err : streamingActive ? TONE_ACTIVE.accent : TONE.accent;
   const glyph = streamingActive ? "◇" : "◆";
   const title = streamingActive ? "reasoning…" : card.aborted ? "reasoning (aborted)" : "reasoning";
   const meta: MetaItem[] = [];
@@ -64,7 +64,7 @@ function ReasoningHeader({ card }: { card: ReasoningCardData }): React.ReactElem
       meta={meta.length > 0 ? meta : undefined}
       right={
         <>
-          {streamingActive ? <Spinner kind="braille" color={TONE.accent} /> : null}
+          {streamingActive ? <Spinner kind="braille" color={TONE_ACTIVE.accent} /> : null}
           {modelBadge ? (
             <Pill label={modelBadge.label} {...PILL_MODEL[modelBadge.kind]} bold={false} />
           ) : null}

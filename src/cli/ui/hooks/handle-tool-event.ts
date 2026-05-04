@@ -25,9 +25,6 @@ export interface ToolEventContext {
   setPendingChoice: Dispatch<
     SetStateAction<{ question: string; options: ChoiceOption[]; allowCustom: boolean } | null>
   >;
-  setPendingCheckpoint: Dispatch<
-    SetStateAction<{ stepId: string; title?: string; completed: number; total: number } | null>
-  >;
   planStepsRef: MutableRefObject<PlanStep[] | null>;
   completedStepIdsRef: MutableRefObject<Set<string>>;
   planBodyRef: MutableRefObject<string | null>;
@@ -173,7 +170,7 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
 
   if (ev.toolName === "mark_step_complete") {
     try {
-      const parsed = JSON.parse(ev.content) as Partial<StepCompletion> & { error?: string };
+      const parsed = JSON.parse(ev.content) as Partial<StepCompletion>;
       const stepId = parsed.stepId;
       if (parsed.kind === "step_completed" && typeof stepId === "string") {
         ctx.completedStepIdsRef.current.add(stepId);
@@ -191,9 +188,6 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
               `▸ plan complete — all ${total} step${total === 1 ? "" : "s"} done · archived`,
             );
           }
-        }
-        if (typeof parsed.error === "string" && parsed.error.startsWith("PlanCheckpointError:")) {
-          ctx.setPendingCheckpoint({ stepId, title, completed, total });
         }
       }
     } catch {

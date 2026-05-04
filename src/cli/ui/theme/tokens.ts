@@ -16,6 +16,17 @@ export const TONE = {
   info: "#79c0ff",
 } as const;
 
+/** Used only while a card is streaming/running, so live cards stand out from settled history. */
+export const TONE_ACTIVE = {
+  brand: "#a5d6ff",
+  accent: "#e2c5ff",
+  violet: "#c8aaff",
+  ok: "#a8f5ad",
+  warn: "#ffc99e",
+  err: "#ffaba3",
+  info: "#a5d6ff",
+} as const;
+
 export const SURFACE = {
   bg: "#0a0c10",
   bgInput: "#0d1015",

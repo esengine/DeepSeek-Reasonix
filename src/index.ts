@@ -87,7 +87,6 @@ export type { MemoryToolsOptions } from "./tools/memory.js";
 export { ChoiceRequestedError, registerChoiceTool } from "./tools/choice.js";
 export type { ChoiceOption, ChoiceToolOptions } from "./tools/choice.js";
 export {
-  PlanCheckpointError,
   PlanProposedError,
   PlanRevisionProposedError,
   registerPlanTool,

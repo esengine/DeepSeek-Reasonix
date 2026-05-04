@@ -1,14 +1,14 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
-import React from "react";
-import { Card as CardWrap } from "../primitives/Card.js";
+import React, { useContext } from "react";
+import { ActiveCardContext, Card as CardWrap } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { Card, SubAgentCard as SubAgentCardData } from "../state/cards.js";
-import { CARD, FG, TONE } from "../theme/tokens.js";
+import { CARD, FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 
 const STATUS_COLOR: Record<SubAgentCardData["status"], string> = {
-  running: TONE.violet,
+  running: TONE_ACTIVE.violet,
   done: TONE.ok,
   failed: TONE.err,
 };
@@ -17,12 +17,13 @@ export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactE
   const headColor = STATUS_COLOR[card.status];
   const headGlyph = card.status === "failed" ? "✖" : "⌬";
   const runningChildren = card.children.filter((c) => !isChildDone(c)).length;
-  const headerMeta =
-    card.status === "running"
-      ? runningChildren > 0
-        ? [`${runningChildren} running`]
-        : ["working"]
-      : [{ text: card.status, color: headColor }];
+  const isRunning = card.status === "running";
+  const inLive = useContext(ActiveCardContext);
+  const headerMeta = isRunning
+    ? runningChildren > 0
+      ? [`${runningChildren} running`]
+      : ["working"]
+    : [{ text: card.status, color: headColor }];
   return (
     <CardWrap tone={headColor}>
       <CardHeader
@@ -39,7 +40,7 @@ export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactE
       )}
       {card.children.map((child) => (
         <Box key={child.id} flexDirection="row" gap={1}>
-          <Text color={TONE.violet}>▎</Text>
+          {inLive ? null : <Text color={TONE.violet}>▎</Text>}
           <ChildRow card={child} />
         </Box>
       ))}

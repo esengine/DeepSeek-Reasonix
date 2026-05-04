@@ -342,63 +342,6 @@ mcp
 program.command("version").description(t("cli.version")).action(versionCommand);
 
 program
-  .command("renderer-demo")
-  .description("experimental — interactive cell-diff renderer demo (separate from the main TUI)")
-  .action(async () => {
-    const { runRendererDemo } = await import("./commands/renderer-demo.js");
-    await runRendererDemo();
-  });
-
-program
-  .command("banner-demo")
-  .description("experimental — welcome banner rendered through the ink-compat shim")
-  .action(async () => {
-    const { runBannerDemo } = await import("./commands/banner-demo.js");
-    await runBannerDemo();
-  });
-
-program
-  .command("select-demo")
-  .description("experimental — single-select list rendered through the ink-compat shim")
-  .action(async () => {
-    const { runSelectDemo } = await import("./commands/select-demo.js");
-    await runSelectDemo();
-  });
-
-program
-  .command("preview")
-  .description("experimental — minimal chat shell on the cell-diff renderer (echo mode)")
-  .action(async () => {
-    const { runPreview } = await import("./commands/preview.js");
-    await runPreview();
-  });
-
-program
-  .command("stress-demo")
-  .description("experimental — 4 concurrent live regions exercising the cell-diff renderer")
-  .action(async () => {
-    const { runStressDemo } = await import("./commands/stress-demo.js");
-    await runStressDemo();
-  });
-
-program
-  .command("card-demo")
-  .description("experimental — full chat-card lifecycle demo (reasoning / tool / plan / response)")
-  .action(async () => {
-    const { runCardDemo } = await import("./commands/card-demo.js");
-    await runCardDemo();
-  });
-
-program
-  .command("flicker-demo")
-  .description("experimental — reproduces the streaming + modal flicker scenario for testing")
-  .option("--real-modal", "use real ApprovalCard + useReserveRows (mirror live chat path)")
-  .action(async (cliOpts: { realModal?: boolean }) => {
-    const { runFlickerDemo } = await import("./commands/flicker-demo.js");
-    await runFlickerDemo({ realModal: cliOpts.realModal });
-  });
-
-program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))

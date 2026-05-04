@@ -1,6 +1,6 @@
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { type ReactNode } from "react";
-import type { BorderStyleName } from "../layout/borders.js";
+import type { BorderStyle, BorderStyleName } from "../layout/borders.js";
 import type { AlignItems, FlexWrap, JustifyContent } from "../layout/node.js";
 import { Box as RsxBox } from "../react/components.js";
 import { fgCode } from "./colors.js";
@@ -26,7 +26,7 @@ export interface InkBoxProps {
   readonly marginBottom?: number;
   readonly marginLeft?: number;
   readonly marginRight?: number;
-  readonly borderStyle?: BorderStyleName;
+  readonly borderStyle?: BorderStyle | BorderStyleName;
   readonly borderColor?: string;
   readonly borderTopColor?: string;
   readonly borderBottomColor?: string;

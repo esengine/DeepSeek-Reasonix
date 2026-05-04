@@ -9,7 +9,7 @@ import { CardHeader } from "../primitives/CardHeader.js";
 import { PILL_MODEL, Pill, modelBadgeFor } from "../primitives/Pill.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { StreamingCard as StreamingCardData } from "../state/cards.js";
-import { FG, TONE } from "../theme/tokens.js";
+import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 
 /** Streaming preview tail length — bounded live region so chunks don't thrash whole-card layout. */
 const STREAMING_PREVIEW_LINES = 4;
@@ -41,7 +41,7 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   const visualLines = allLines.flatMap((l) => wrapToCells(l, lineCells));
   const visible = visualLines.slice(-STREAMING_PREVIEW_LINES);
   const aborted = !!card.aborted;
-  const headColor = aborted ? TONE.err : TONE.brand;
+  const headColor = aborted ? TONE.err : TONE_ACTIVE.brand;
   const glyph = aborted ? "‹" : "◈";
   const headLabel = aborted ? "aborted" : "writing…";
 
@@ -53,7 +53,7 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
         title={headLabel}
         right={
           <>
-            {aborted ? null : <Spinner kind="braille" color={TONE.brand} />}
+            {aborted ? null : <Spinner kind="braille" color={TONE_ACTIVE.brand} />}
             {modelPill}
           </>
         }

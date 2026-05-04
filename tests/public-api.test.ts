@@ -145,7 +145,6 @@ const PUBLIC_API: readonly string[] = [
   "PROJECT_MEMORY_MAX_CHARS",
   "PageContent",
   "PickerCandidate",
-  "PlanCheckpointError",
   "PlanProposedError",
   "PlanRevisionProposedError",
   "PlanStep",

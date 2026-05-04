@@ -23,10 +23,10 @@ const LINE_GLYPH = {
 export function DiffCard({ card }: { card: DiffCardData }): React.ReactElement {
   const showFooter = card.hunks.length > 0;
   return (
-    <Card tone={TONE.warn}>
+    <Card tone={TONE.ok}>
       <CardHeader
         glyph="±"
-        tone={TONE.warn}
+        tone={TONE.ok}
         title={card.file}
         titleColor={FG.body}
         meta={[

@@ -65,7 +65,6 @@ function summarizeStructured(content: string): ToolSummary | null {
       // Plan / Choice errors are control-flow signals, not real errors.
       const isControlSignal =
         tag === "PlanProposedError" ||
-        tag === "PlanCheckpointError" ||
         tag === "PlanRevisionProposedError" ||
         tag === "ChoiceRequestedError" ||
         tag === "NeedsConfirmationError";

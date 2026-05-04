@@ -10,6 +10,17 @@ export interface CardProps {
   children: React.ReactNode;
 }
 
+const STRIPE_BORDER = {
+  topLeft: " ",
+  top: " ",
+  topRight: " ",
+  left: "▎",
+  right: " ",
+  bottomLeft: " ",
+  bottom: " ",
+  bottomRight: " ",
+} as const;
+
 export function Card({ tone, children }: CardProps): React.ReactElement {
   const active = useContext(ActiveCardContext);
   if (!active) {
@@ -22,9 +33,12 @@ export function Card({ tone, children }: CardProps): React.ReactElement {
   return (
     <Box
       flexDirection="column"
-      borderStyle="round"
+      borderStyle={STRIPE_BORDER}
       borderColor={tone}
-      paddingX={1}
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      paddingLeft={1}
       marginTop={1}
       width="100%"
     >

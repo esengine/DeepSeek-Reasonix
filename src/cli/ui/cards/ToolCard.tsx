@@ -6,7 +6,7 @@ import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { ToolCard as ToolCardData } from "../state/cards.js";
-import { FG, TONE } from "../theme/tokens.js";
+import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 
 const READ_TAIL = 2;
 const OTHER_TAIL = 5;
@@ -55,7 +55,9 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
         subtitle={argsLabel || undefined}
         meta={meta.length > 0 ? meta : undefined}
         right={
-          status === "running" ? <Spinner kind="braille" color={TONE.brand} bold /> : undefined
+          status === "running" ? (
+            <Spinner kind="braille" color={TONE_ACTIVE.brand} bold />
+          ) : undefined
         }
       />
       {showBody && (
@@ -114,7 +116,7 @@ function headerColorFor(s: ToolStatus): string {
     case "aborted":
       return TONE.err;
     case "running":
-      return TONE.brand;
+      return TONE_ACTIVE.brand;
   }
 }
 

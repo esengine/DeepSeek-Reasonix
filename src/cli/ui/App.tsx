@@ -72,7 +72,6 @@ import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { McpBrowser } from "./McpBrowser.js";
-import { type CheckpointChoice, PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
 import { PlanReviseConfirm, type ReviseChoice } from "./PlanReviseConfirm.js";
@@ -109,6 +108,7 @@ import {
 } from "./layout/LiveRows.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import { ToastRail } from "./layout/ToastRail.js";
+import { PlanLiveRow } from "./layout/plan-live-row.js";
 import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
@@ -543,33 +543,10 @@ function AppInner({
     plan: string;
     mode: "refine" | "approve" | "reject";
   } | null>(null);
-  // Mid-execution pause from `mark_step_complete` — the model finished
-  // a step and the loop is now waiting for the user to pick Continue /
-  // Revise / Stop. Distinct from `pendingPlan` because at this point
-  // the plan has already been approved and execution is in flight; the
-  // picker just checkpoints each step.
-  const [pendingCheckpoint, setPendingCheckpoint] = useState<{
-    stepId: string;
-    title?: string;
-    completed: number;
-    total: number;
-  } | null>(null);
-  // Staged entry for the Revise feedback input at a checkpoint. Carries
-  // enough context (stepId, title, counters) that Esc can restore the
-  // picker instead of dropping back into raw execution. Same two-step
-  // pattern as `stagedInput` for plan approvals.
-  const [stagedCheckpointRevise, setStagedCheckpointRevise] = useState<{
-    stepId: string;
-    title?: string;
-    completed: number;
-    total: number;
-  } | null>(null);
   // Plan revision proposal from `revise_plan`. Non-null mounts the
   // PlanReviseConfirm picker showing a step-level diff. Accept replaces
   // remaining steps in planStepsRef; Reject drops the proposal and the
-  // model continues with the original plan. The model is most likely
-  // to call this in response to the user's checkpoint Revise feedback,
-  // but it can fire at any tool-dispatch moment.
+  // model continues with the original plan.
   const [pendingRevision, setPendingRevision] = useState<{
     reason: string;
     remainingSteps: PlanStep[];
@@ -578,9 +555,9 @@ function AppInner({
   // Branching question from `ask_choice`. Non-null mounts ChoiceConfirm;
   // user picks an option (synthetic "user picked <id>"), types a
   // custom answer (synthetic "user answered: <text>"), or cancels.
-  // Kept separate from pendingPlan / pendingCheckpoint because a
-  // branch question is orthogonal to plan state — it can fire in
-  // chat mode or mid-plan when the model genuinely needs a decision.
+  // Kept separate from pendingPlan because a branch question is
+  // orthogonal to plan state — it can fire in chat mode or mid-plan
+  // when the model genuinely needs a decision.
   const [pendingChoice, setPendingChoice] = useState<{
     question: string;
     options: ChoiceOption[];
@@ -970,23 +947,6 @@ function AppInner({
   }, [pendingEditReview, broadcastDashboardEvent]);
 
   useEffect(() => {
-    if (!pendingCheckpoint) return;
-    broadcastDashboardEvent({
-      kind: "modal-up",
-      modal: {
-        kind: "checkpoint",
-        stepId: pendingCheckpoint.stepId,
-        title: pendingCheckpoint.title,
-        completed: pendingCheckpoint.completed,
-        total: pendingCheckpoint.total,
-      },
-    });
-    return () => {
-      broadcastDashboardEvent({ kind: "modal-down", modalKind: "checkpoint" });
-    };
-  }, [pendingCheckpoint, broadcastDashboardEvent]);
-
-  useEffect(() => {
     if (!pendingRevision) return;
     broadcastDashboardEvent({
       kind: "modal-up",
@@ -1242,8 +1202,6 @@ function AppInner({
       !stagedInput &&
       !pendingEditReview &&
       !walkthroughActive &&
-      !pendingCheckpoint &&
-      !stagedCheckpointRevise &&
       !pendingChoice &&
       !stagedChoiceCustom &&
       !pendingRevision
@@ -1278,8 +1236,6 @@ function AppInner({
       !stagedInput &&
       !pendingEditReview &&
       !walkthroughActive &&
-      !pendingCheckpoint &&
-      !stagedCheckpointRevise &&
       !pendingChoice &&
       !stagedChoiceCustom &&
       !pendingRevision &&
@@ -1786,15 +1742,6 @@ function AppInner({
               remaining: pendingEdits.current.length,
             };
           }
-          if (pendingCheckpoint) {
-            return {
-              kind: "checkpoint",
-              stepId: pendingCheckpoint.stepId,
-              title: pendingCheckpoint.title,
-              completed: pendingCheckpoint.completed,
-              total: pendingCheckpoint.total,
-            };
-          }
           if (pendingRevision) {
             return {
               kind: "revision",
@@ -1840,20 +1787,6 @@ function AppInner({
             resolve({ choice, denyContext: undefined });
           }
         },
-        resolveCheckpointConfirm: (choice, text) => {
-          // Web's "revise" path sends feedback in one shot; we hand the
-          // current pending checkpoint to the submit handler directly,
-          // skipping the TUI's staged-input two-step. continue/stop fall
-          // through to the regular picker handler.
-          if (choice === "revise" && typeof text === "string") {
-            const snap = pendingCheckpoint;
-            setPendingCheckpoint(null);
-            if (!snap) return;
-            handleCheckpointReviseSubmitRef.current(text, snap).catch(() => undefined);
-            return;
-          }
-          handleCheckpointConfirmRef.current(choice).catch(() => undefined);
-        },
         resolveReviseConfirm: (choice) => {
           handleReviseConfirmRef.current(choice).catch(() => undefined);
         },
@@ -1887,7 +1820,6 @@ function AppInner({
     pendingShell,
     pendingChoice,
     pendingEditReview,
-    pendingCheckpoint,
     pendingRevision,
     agentStore,
   ]);
@@ -2501,7 +2433,6 @@ function AppInner({
               setPendingPlan,
               setPendingRevision,
               setPendingChoice,
-              setPendingCheckpoint,
               planStepsRef,
               completedStepIdsRef,
               planBodyRef,
@@ -2916,102 +2847,6 @@ function AppInner({
   }, [stagedInput]);
 
   /**
-   * Checkpoint picker callback. Continue / Stop fire a synthetic user
-   * message immediately; Revise defers to a feedback input so the user
-   * can tell the model what to change before the next step.
-   */
-  const handleCheckpointConfirm = useCallback(
-    async (choice: CheckpointChoice) => {
-      const snap = pendingCheckpoint;
-      if (!snap) return;
-      setPendingCheckpoint(null);
-      if (choice === "revise") {
-        setStagedCheckpointRevise(snap);
-        return;
-      }
-      // Auto file-snapshot per plan step so /restore can rewind to before this step ran.
-      if (codeMode && choice === "continue") {
-        const paths = touchedPaths();
-        if (paths.length > 0) {
-          try {
-            const cpName = snap.title ? `${snap.stepId} · ${snap.title}` : snap.stepId;
-            const meta = createCheckpoint({
-              rootDir: codeMode.rootDir,
-              name: cpName.slice(0, 60),
-              paths,
-              source: "auto-pre-restore",
-            });
-            log.pushInfo(
-              `⛁ checkpoint saved · ${meta.id} · ${meta.fileCount} file${meta.fileCount === 1 ? "" : "s"} · /restore ${meta.id} to roll back this step`,
-            );
-          } catch {
-            /* checkpoint failure is best-effort — don't block the step */
-          }
-        }
-      }
-      const label = snap.title ? `${snap.stepId} · ${snap.title}` : snap.stepId;
-      const counter = snap.total > 0 ? ` (${snap.completed}/${snap.total})` : "";
-      const { marker, synthetic } =
-        choice === "continue"
-          ? {
-              marker: `▸ continuing after ${label}${counter}`,
-              synthetic: `Step ${label} is complete. Proceed with the next step of the approved plan. If no steps remain, summarize the whole run.`,
-            }
-          : {
-              marker: `▸ plan stopped at ${label}${counter}`,
-              synthetic: `The user stopped the plan after step ${label}. Do not run any more steps and do not call any tools. Write a short summary of what was completed across all finished steps and what's left unfinished.`,
-            };
-      await syntheticSubmit.post({ marker, synthetic });
-    },
-    [pendingCheckpoint, syntheticSubmit, codeMode, touchedPaths, log],
-  );
-
-  // Same ref-wrap pattern as handlePlanConfirm — keeps the memo'd
-  // PlanCheckpointConfirm from re-rendering on every parent tick.
-  const handleCheckpointConfirmRef = useRef(handleCheckpointConfirm);
-  useEffect(() => {
-    handleCheckpointConfirmRef.current = handleCheckpointConfirm;
-  }, [handleCheckpointConfirm]);
-  const stableHandleCheckpointConfirm = useCallback(
-    async (choice: CheckpointChoice) => handleCheckpointConfirmRef.current(choice),
-    [],
-  );
-
-  /**
-   * Revise feedback submitted — push a synthetic adjustment message.
-   *
-   * Accepts an optional snap override so the web's "revise + text in
-   * one shot" path can pass the checkpoint snapshot directly without
-   * waiting on a setStagedCheckpointRevise → re-render → ref-mirror
-   * round trip. The TUI's two-step path passes no override and falls
-   * back to the staged state populated by the picker.
-   */
-  const handleCheckpointReviseSubmit = useCallback(
-    async (feedback: string, snapOverride?: typeof stagedCheckpointRevise) => {
-      const snap = snapOverride ?? stagedCheckpointRevise;
-      setStagedCheckpointRevise(null);
-      if (!snap) return;
-      const label = snap.title ? `${snap.stepId} · ${snap.title}` : snap.stepId;
-      const trimmed = feedback.trim();
-      const synthetic = trimmed
-        ? `Step ${label} is complete. Before running the next step, adjust based on this user feedback:\n\n${trimmed}\n\nIf the feedback only tweaks how you execute (extra constraints, style preferences), continue with the updated guidance. If it changes which steps run (skip a step, swap two steps, add a new step), call \`revise_plan\` with the updated remainingSteps — that pops a diff picker the user can accept or reject. Only call submit_plan again if the entire approach has fundamentally changed.`
-        : `Step ${label} is complete. Continue with the current plan.`;
-      const marker = trimmed
-        ? `▸ revising after ${label} — ${trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed}`
-        : `▸ continuing after ${label}`;
-      await syntheticSubmit.post({ marker, synthetic });
-    },
-    [stagedCheckpointRevise, syntheticSubmit],
-  );
-
-  /** Esc on the revise input — restore the checkpoint picker. */
-  const handleCheckpointReviseCancel = useCallback(() => {
-    const snap = stagedCheckpointRevise;
-    setStagedCheckpointRevise(null);
-    if (snap) setPendingCheckpoint(snap);
-  }, [stagedCheckpointRevise]);
-
-  /**
    * ChoiceConfirm callback. Pick fires a synthetic "user picked <id>"
    * and lets the model continue down that branch. Custom defers to a
    * free-form input. Cancel drops the question entirely.
@@ -3068,13 +2903,6 @@ function AppInner({
     async (choice: ChoiceConfirmChoice) => handleChoiceConfirmRef.current(choice),
     [],
   );
-  // Ref-mirrors so the web's resolveXxx callbacks (registered in
-  // startDashboard, frozen at boot) keep calling the latest handler.
-  const handleCheckpointReviseSubmitRef = useRef(handleCheckpointReviseSubmit);
-  useEffect(() => {
-    handleCheckpointReviseSubmitRef.current = handleCheckpointReviseSubmit;
-  }, [handleCheckpointReviseSubmit]);
-
   /** Custom free-form answer submitted — ship it as a synthetic message. */
   const handleChoiceCustomSubmit = useCallback(
     async (answer: string) => {
@@ -3169,8 +2997,6 @@ function AppInner({
           !!pendingShell ||
           !!pendingEditReview ||
           walkthroughActive ||
-          !!pendingCheckpoint ||
-          !!stagedCheckpointRevise ||
           !!pendingChoice ||
           !!stagedChoiceCustom ||
           !!pendingRevision ||
@@ -3218,8 +3044,6 @@ function AppInner({
                 !pendingMcpBrowser &&
                 !stagedInput &&
                 !pendingEditReview &&
-                !pendingCheckpoint &&
-                !stagedCheckpointRevise &&
                 ongoingTool ? (
                   <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
                 ) : null}
@@ -3231,8 +3055,6 @@ function AppInner({
                 !pendingMcpBrowser &&
                 !stagedInput &&
                 !pendingEditReview &&
-                !pendingCheckpoint &&
-                !stagedCheckpointRevise &&
                 subagentActivity ? (
                   <SubagentRow activity={subagentActivity} />
                 ) : null}
@@ -3244,8 +3066,6 @@ function AppInner({
                 !pendingMcpBrowser &&
                 !stagedInput &&
                 !pendingEditReview &&
-                !pendingCheckpoint &&
-                !stagedCheckpointRevise &&
                 !ongoingTool &&
                 statusLine ? (
                   <ThinkingRow text={statusLine} />
@@ -3259,8 +3079,6 @@ function AppInner({
                 !pendingMcpBrowser &&
                 !stagedInput &&
                 !pendingEditReview &&
-                !pendingCheckpoint &&
-                !stagedCheckpointRevise &&
                 !pendingChoice &&
                 !stagedChoiceCustom &&
                 !pendingRevision ? (
@@ -3282,13 +3100,21 @@ function AppInner({
                 !pendingMcpBrowser &&
                 !stagedInput &&
                 !pendingEditReview &&
-                !pendingCheckpoint &&
-                !stagedCheckpointRevise &&
                 busy &&
                 !isStreaming &&
                 !ongoingTool &&
                 !statusLine ? (
                   <ThinkingRow text="processing…" />
+                ) : null}
+                {!PLAIN_UI &&
+                !pendingShell &&
+                !pendingPlan &&
+                !pendingReviseEditor &&
+                !pendingSessionsPicker &&
+                !pendingMcpBrowser &&
+                !stagedInput &&
+                !pendingEditReview ? (
+                  <PlanLiveRow />
                 ) : null}
                 <ToastRail />
               </Box>
@@ -3297,12 +3123,6 @@ function AppInner({
                   mode={stagedInput.mode}
                   onSubmit={handleStagedInputSubmit}
                   onCancel={handleStagedInputCancel}
-                />
-              ) : stagedCheckpointRevise ? (
-                <PlanRefineInput
-                  mode="checkpoint-revise"
-                  onSubmit={handleCheckpointReviseSubmit}
-                  onCancel={handleCheckpointReviseCancel}
                 />
               ) : stagedChoiceCustom ? (
                 <PlanRefineInput
@@ -3326,16 +3146,6 @@ function AppInner({
                   newRemaining={pendingRevision.remainingSteps}
                   summary={pendingRevision.summary}
                   onChoose={stableHandleReviseConfirm}
-                />
-              ) : pendingCheckpoint ? (
-                <PlanCheckpointConfirm
-                  stepId={pendingCheckpoint.stepId}
-                  title={pendingCheckpoint.title}
-                  completed={pendingCheckpoint.completed}
-                  total={pendingCheckpoint.total}
-                  steps={planStepsRef.current ?? undefined}
-                  completedStepIds={completedStepIdsRef.current}
-                  onChoose={stableHandleCheckpointConfirm}
                 />
               ) : pendingSessionsPicker ? (
                 <SessionPicker

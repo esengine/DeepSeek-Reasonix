@@ -125,6 +125,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   },
   { cmd: "keys", summary: "show all keyboard shortcuts and prompt prefixes" },
   { cmd: "plans", summary: "list this session's active + archived plans, newest first" },
+  { cmd: "stop", summary: "abort the current model turn (typed alternative to Esc)" },
   {
     cmd: "replay",
     summary: "load an archived plan as a read-only Time Travel snapshot (default: newest)",

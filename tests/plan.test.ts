@@ -3,7 +3,6 @@
 import { describe, expect, it } from "vitest";
 import { ToolRegistry } from "../src/tools.js";
 import {
-  PlanCheckpointError,
   PlanProposedError,
   PlanRevisionProposedError,
   registerPlanTool,
@@ -338,7 +337,7 @@ describe("registerPlanTool + mark_step_complete", () => {
     expect(reg.get("mark_step_complete")?.readOnly).toBe(true);
   });
 
-  it("throws PlanCheckpointError with the step_completed payload and fires onStepCompleted", async () => {
+  it("returns the step_completed payload and fires onStepCompleted", async () => {
     const reg = new ToolRegistry();
     const seen: unknown[] = [];
     registerPlanTool(reg, { onStepCompleted: (u) => seen.push(u) });
@@ -357,10 +356,7 @@ describe("registerPlanTool + mark_step_complete", () => {
     expect(parsed.title).toBe("Refactor auth");
     expect(parsed.result).toBe("Moved tokens into src/auth/tokens.ts.");
     expect(parsed.notes).toBe("Had to rename one export.");
-    expect(parsed.error).toMatch(/^PlanCheckpointError:/);
-    // STOP instruction — same pattern as PlanProposedError so the
-    // model doesn't race past the picker with more tool calls.
-    expect(parsed.error).toMatch(/STOP/);
+    expect(parsed.error).toBeUndefined();
     expect(seen).toHaveLength(1);
     expect((seen[0] as { stepId: string }).stepId).toBe("step-1");
   });
@@ -376,7 +372,7 @@ describe("registerPlanTool + mark_step_complete", () => {
     expect(parsed.title).toBeUndefined();
     expect(parsed.notes).toBeUndefined();
     expect(parsed.result).toBe("done");
-    expect(parsed.error).toMatch(/^PlanCheckpointError:/);
+    expect(parsed.error).toBeUndefined();
   });
 
   it("rejects an empty stepId", async () => {
@@ -397,35 +393,6 @@ describe("registerPlanTool + mark_step_complete", () => {
       JSON.stringify({ stepId: "step-1", result: "   " }),
     );
     expect(JSON.parse(out).error).toMatch(/result is required/);
-  });
-});
-
-describe("PlanCheckpointError", () => {
-  it("carries the step payload on the instance and in toToolResult()", () => {
-    const err = new PlanCheckpointError({
-      stepId: "step-2",
-      title: "Update tests",
-      result: "Rewrote three suites.",
-      notes: "One test still flaky.",
-    });
-    expect(err.name).toBe("PlanCheckpointError");
-    expect(err.stepId).toBe("step-2");
-    expect(err.title).toBe("Update tests");
-    expect(err.result).toBe("Rewrote three suites.");
-    expect(err.notes).toBe("One test still flaky.");
-    const payload = err.toToolResult();
-    expect(payload.kind).toBe("step_completed");
-    expect(payload.stepId).toBe("step-2");
-    expect(payload.error).toMatch(/^PlanCheckpointError:/);
-    expect(payload.error).toMatch(/STOP/);
-  });
-
-  it("omits title/notes from toToolResult when they weren't supplied", () => {
-    const err = new PlanCheckpointError({ stepId: "step-1", result: "done" });
-    const payload = err.toToolResult();
-    expect(payload.title).toBeUndefined();
-    expect(payload.notes).toBeUndefined();
-    expect(payload.result).toBe("done");
   });
 });
 

@@ -19,7 +19,6 @@ describe("summarizeToolResult — error envelopes", () => {
   it("recognizes Plan / Choice control-flow signals as NON-errors", () => {
     const cases = [
       "PlanProposedError",
-      "PlanCheckpointError",
       "PlanRevisionProposedError",
       "ChoiceRequestedError",
       "NeedsConfirmationError",

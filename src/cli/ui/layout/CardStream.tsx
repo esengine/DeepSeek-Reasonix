@@ -12,12 +12,9 @@ function isSettled(card: Card): boolean {
     case "streaming":
     case "tool":
     case "branch":
-      return card.done;
+      return card.done || !!card.aborted;
     case "reasoning":
-      return !card.streaming;
-    case "plan":
-      if (card.variant !== "active") return true;
-      return card.steps.every((s) => s.status === "done" || s.status === "skipped");
+      return !card.streaming || !!card.aborted;
     default:
       return true;
   }
@@ -25,15 +22,11 @@ function isSettled(card: Card): boolean {
 
 export function CardStream(): React.ReactElement {
   const cards = useAgentState((s) => s.cards);
-  let cutoff = cards.length;
-  for (let i = 0; i < cards.length; i++) {
-    if (!isSettled(cards[i] as Card)) {
-      cutoff = i;
-      break;
-    }
-  }
-  const committed = cards.slice(0, cutoff);
-  const live = cards.slice(cutoff);
+  const lastIdx = cards.length - 1;
+  const lastCard = lastIdx >= 0 ? (cards[lastIdx] as Card) : null;
+  const lastIsLive = !!lastCard && !isSettled(lastCard);
+  const committed: Card[] = lastIsLive ? cards.slice(0, lastIdx) : cards.slice();
+  const live: Card[] = lastIsLive && lastCard ? [lastCard] : [];
   // Static items are emitted via bridge.emitStatic, which renders them in an
   // off-tree React reconciler — context from the live tree does NOT propagate.
   // The ActiveCardContext.Provider must therefore live inside the children

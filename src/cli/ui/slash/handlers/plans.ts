@@ -81,7 +81,15 @@ const replay: SlashHandler = (args, loop) => {
   };
 };
 
+const stop: SlashHandler = (_args, loop) => {
+  loop.abort();
+  return {
+    info: "▸ plan stopped — model aborted; type a follow-up to continue or start a new task.",
+  };
+};
+
 export const handlers: Record<string, SlashHandler> = {
   plans,
   replay,
+  stop,
 };

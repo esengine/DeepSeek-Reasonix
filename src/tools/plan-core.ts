@@ -1,9 +1,5 @@
 import type { ToolRegistry } from "../tools.js";
-import {
-  PlanCheckpointError,
-  PlanProposedError,
-  PlanRevisionProposedError,
-} from "./plan-errors.js";
+import { PlanProposedError, PlanRevisionProposedError } from "./plan-errors.js";
 import type { PlanStep, PlanStepRisk, StepCompletion } from "./plan-types.js";
 
 // Tool descriptions (teaching prompts for the model). Edit here, not inline.
@@ -12,7 +8,7 @@ const SUBMIT_PLAN_DESCRIPTION =
   "Submit ONE concrete plan you've already decided on. Use this for tasks that warrant a review gate — multi-file refactors, architecture changes, anything that would be expensive or confusing to undo. Skip it for small fixes (one-line typo, obvious bug with a clear fix) — just make the change. The user will either approve (you then implement it), ask for refinement, or cancel. If the user has already enabled /plan mode, writes are blocked at dispatch and you MUST use this. CRITICAL: do NOT use submit_plan to present alternative routes (A/B/C, option 1/2/3) for the user to pick from — the picker only exposes approve/refine/cancel, so a menu plan strands the user with no way to choose. For branching decisions, call `ask_choice` instead; only call submit_plan once the user has picked a direction and you have a single actionable plan. Write the plan as markdown with a one-line summary, a bulleted list of files to touch and what will change, and any risks or open questions. STRONGLY PREFERRED: pass `steps` — an array of {id, title, action, risk?} — so the UI renders a structured step list above the approval picker and tracks per-step progress. Use risk='high' for steps that touch prod data / break public APIs / are hard to undo; 'med' for non-trivial but reversible (multi-file edits, schema tweaks); 'low' for safe local work. After each step, call `mark_step_complete` so the user sees progress ticks.";
 
 const MARK_STEP_COMPLETE_DESCRIPTION =
-  "Mark one step of the approved plan as done AND pause for the user to review. Call this after finishing each step. The TUI shows a ✓ progress row and mounts a Continue / Revise / Stop picker — you MUST stop calling tools after this fires and wait for the next user message. Pass the `stepId` from the plan's steps array, a short `result` (what you did), and optional `notes` for anything surprising (errors, scope changes, follow-ups). This tool doesn't change any files. Don't call it if the plan didn't include structured steps, and don't invent ids that weren't in the original plan.";
+  "Mark one step of the approved plan as done. Call this after finishing each step, then immediately continue with the NEXT step — do not stop or wait for the user. The TUI updates the plan card's progress in place. After the FINAL step, write a brief reply summarizing what was done and end the turn. Pass the `stepId` from the plan's steps array, a short `result` (what you did), and optional `notes` for anything surprising (errors, scope changes, follow-ups). This tool doesn't change any files. Don't call it if the plan didn't include structured steps, and don't invent ids that weren't in the original plan.";
 
 const REVISE_PLAN_DESCRIPTION =
   "Surgically replace the REMAINING steps of an in-flight plan. Call this when the user has given feedback at a checkpoint that warrants a structured plan change — skip a step, swap two steps, add a new step, change risk, etc. Pass: `reason` (one sentence why), `remainingSteps` (the new tail of the plan, replacing whatever steps haven't been done yet), and optional `summary` (updated one-line plan summary). Done steps are NEVER touched — keep them out of `remainingSteps`. The TUI shows a diff (removed in red, kept in gray, added in green) and the user accepts or rejects. Don't call this for trivial mid-step adjustments — just keep executing. Don't call submit_plan for revisions either — that resets the whole plan including completed steps. Use submit_plan only when the entire approach has changed; use revise_plan when the tail needs editing.";
@@ -159,7 +155,7 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
       if (title) update.title = title;
       if (notes) update.notes = notes;
       opts.onStepCompleted?.(update);
-      throw new PlanCheckpointError({ stepId, title, result, notes });
+      return update;
     },
   });
 }

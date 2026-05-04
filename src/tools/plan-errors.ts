@@ -1,6 +1,6 @@
 /** Plan-mode errors carry `toToolResult` so dispatch serializes structured payloads the TUI parses to mount pickers. */
 
-import type { PlanStep, StepCompletion } from "./plan-types.js";
+import type { PlanStep } from "./plan-types.js";
 
 export class PlanProposedError extends Error {
   readonly plan: string;
@@ -23,35 +23,6 @@ export class PlanProposedError extends Error {
     };
     if (this.steps && this.steps.length > 0) payload.steps = this.steps;
     if (this.summary) payload.summary = this.summary;
-    return payload;
-  }
-}
-
-export class PlanCheckpointError extends Error {
-  readonly stepId: string;
-  readonly title?: string;
-  readonly result: string;
-  readonly notes?: string;
-  constructor(update: { stepId: string; title?: string; result: string; notes?: string }) {
-    super(
-      "PlanCheckpointError: step complete — STOP calling tools. The TUI has paused the plan for user review. Wait for the next user message; it will either say continue (proceed to the next step), request a revision (adjust the remaining plan), or stop (summarize and end).",
-    );
-    this.name = "PlanCheckpointError";
-    this.stepId = update.stepId;
-    this.title = update.title;
-    this.result = update.result;
-    this.notes = update.notes;
-  }
-
-  toToolResult(): { error: string } & StepCompletion {
-    const payload: { error: string } & StepCompletion = {
-      error: `${this.name}: ${this.message}`,
-      kind: "step_completed",
-      stepId: this.stepId,
-      result: this.result,
-    };
-    if (this.title) payload.title = this.title;
-    if (this.notes) payload.notes = this.notes;
     return payload;
   }
 }
