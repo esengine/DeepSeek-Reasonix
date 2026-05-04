@@ -2,6 +2,7 @@ import { t } from "../../../../i18n/index.js";
 import type { CacheFirstLoop } from "../../../../loop.js";
 import { applyMcpAppend } from "../../mcp-append.js";
 import { toggleMcpDisabled } from "../../mcp-disable.js";
+import { healthBadge } from "../../mcp-health.js";
 import { kickOffMcpReconnect } from "../../mcp-reconnect-kickoff.js";
 import type { SlashHandler } from "../dispatch.js";
 import { appendSection } from "../helpers.js";
@@ -38,7 +39,9 @@ const mcp: SlashHandler = (args, loop, ctx) => {
       const serverName = report.serverInfo.name || "(unknown)";
       const serverVer = report.serverInfo.version ? ` v${report.serverInfo.version}` : "";
       const health = healthBadge(report.elapsedMs);
-      lines.push(`${health}  [${s.label}] ${serverName}${serverVer}  —  ${s.spec}`);
+      lines.push(
+        `${health.glyph} ${health.label} [${s.label}] ${serverName}${serverVer} — ${s.spec}`,
+      );
       lines.push(t("handlers.mcp.toolsLabel", { count: s.toolCount }));
       appendSection(lines, "resources", report.resources);
       appendSection(lines, "prompts  ", report.prompts);
@@ -71,12 +74,6 @@ const mcp: SlashHandler = (args, loop, ctx) => {
   lines.push(t("handlers.mcp.fallbackChange"));
   return { info: lines.join("\n") };
 };
-
-function healthBadge(elapsedMs: number): string {
-  if (elapsedMs < 500) return `● healthy · ${elapsedMs}ms`;
-  if (elapsedMs < 3000) return `◌ slow · ${elapsedMs}ms`;
-  return `✗ very slow · ${elapsedMs}ms`;
-}
 
 function toggleDisabled(
   action: "disable" | "enable",
