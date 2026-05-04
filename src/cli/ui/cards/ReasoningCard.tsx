@@ -3,18 +3,15 @@ import { Box, Text, useStdout } from "ink";
 import React from "react";
 import { clipToCells, wrapToCells } from "../../../frame/width.js";
 import { CursorBlock } from "../primitives/BarRow.js";
-import { CardBox } from "../primitives/CardBox.js";
-import { PILL_MODEL, PILL_SECTION, Pill, modelBadgeFor } from "../primitives/Pill.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { ReasoningCard as ReasoningCardData } from "../state/cards.js";
-import { CARD, FG } from "../theme/tokens.js";
+import { FG, TONE } from "../theme/tokens.js";
 
-/** Streaming live region stays at this many rows so Ink's eraseLines can't miscount enough to flicker. Full body lands in scrollback once the card settles. */
+/** Streaming preview tail length — wide enough to feel responsive, small enough not to thrash on every chunk. Full body lives in the events log. */
 const STREAMING_PREVIEW_LINES = 4;
-/** Settled reasoning collapses to tail-only — once the model is done thinking, the conclusion is the actionable signal; the rest is in the events log via `/reasoning last`. */
+/** Once settled, only the conclusion is actionable; the rest is in `/reasoning last`. */
 const SETTLED_TAIL_LINES = 2;
-const HEADER_PAD = 1;
-const BODY_PAD = 4;
+const BODY_PAD = 2;
 
 export function ReasoningCard({
   card,
@@ -29,56 +26,44 @@ export function ReasoningCard({
 
   const allLines = card.text.length > 0 ? card.text.split("\n") : [];
   const showBody = expanded && (allLines.length > 0 || card.streaming);
-  const barColor = card.streaming ? CARD.reasoning.color : FG.faint;
 
   return (
-    <CardBox color={barColor}>
+    <Box flexDirection="column" marginTop={1}>
       <ReasoningHeader card={card} />
-      {showBody && (
-        <>
-          <Box height={1} />
-          {card.streaming ? (
-            <StreamingPreview card={card} allLines={allLines} lineCells={lineCells} />
-          ) : (
-            <SettledPreview card={card} allLines={allLines} lineCells={lineCells} />
-          )}
-        </>
-      )}
-    </CardBox>
+      {showBody &&
+        (card.streaming ? (
+          <StreamingPreview card={card} allLines={allLines} lineCells={lineCells} />
+        ) : (
+          <SettledPreview card={card} allLines={allLines} lineCells={lineCells} />
+        ))}
+    </Box>
   );
 }
 
 function ReasoningHeader({ card }: { card: ReasoningCardData }): React.ReactElement {
-  const badge = modelBadgeFor(card.model);
-  const mdl = PILL_MODEL[badge.kind];
-  const sec = PILL_SECTION.reason;
+  const streamingActive = card.streaming && !card.aborted;
+  const headColor = card.aborted ? TONE.err : streamingActive ? TONE.accent : TONE.accent;
+  const glyph = streamingActive ? "◇" : "◆";
   const meta = headerMeta(card);
   const duration = headerDuration(card);
   return (
-    <Box paddingLeft={HEADER_PAD} flexDirection="row">
-      <Pill label="REASONING" bg={sec.bg} fg={sec.fg} />
-      <Text>{"  "}</Text>
-      <Pill label={badge.label} bg={mdl.bg} fg={mdl.fg} />
-      {meta && (
-        <>
-          <Text>{"  "}</Text>
-          <Text color={FG.faint}>{meta}</Text>
-        </>
-      )}
-      <Box flexGrow={1} />
-      {card.streaming && !card.aborted && (
-        <>
-          <Spinner kind="braille" color={CARD.reasoning.color} />
-          <Text color={CARD.reasoning.color}>{" thinking…"}</Text>
-        </>
-      )}
-      {duration && <Text color={FG.faint}>{duration}</Text>}
+    <Box flexDirection="row" gap={1}>
+      <Text color={headColor}>{glyph}</Text>
+      <Text color={headColor} bold>
+        {streamingActive ? "reasoning…" : card.aborted ? "reasoning (aborted)" : "reasoning"}
+      </Text>
+      {meta ? <Text color={FG.faint}>{`· ${meta}`}</Text> : null}
+      {duration ? <Text color={FG.faint}>{`· ${duration}`}</Text> : null}
+      {streamingActive ? (
+        <Box flexDirection="row">
+          <Spinner kind="braille" color={TONE.accent} />
+        </Box>
+      ) : null}
     </Box>
   );
 }
 
 function headerMeta(card: ReasoningCardData): string {
-  if (card.aborted) return "aborted";
   if (card.streaming) {
     return card.tokens > 0 ? `${card.tokens.toLocaleString()} tok` : "";
   }
@@ -112,7 +97,7 @@ function SettledPreview({ card, allLines, lineCells }: BodyProps): React.ReactEl
   const droppedLines = Math.max(0, visualLines.length - visible.length);
   return (
     <>
-      {droppedLines > 0 && <ElisionHint droppedLines={droppedLines} card={card} />}
+      {droppedLines > 0 ? <ElisionHint droppedLines={droppedLines} card={card} /> : null}
       <BodyLines card={card} lines={visible} lineCells={lineCells} indexOffset={droppedLines} />
     </>
   );
