@@ -398,6 +398,14 @@ program
   });
 
 program
+  .command("input-demo")
+  .description("experimental — single-line PromptInput on the cell-diff renderer")
+  .action(async () => {
+    const { runInputDemo } = await import("./commands/input-demo.js");
+    await runInputDemo();
+  });
+
+program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
