@@ -332,6 +332,10 @@ export async function runChatV2(opts: ChatV2Options = {}): Promise<void> {
     resolveExit = resolve;
   });
 
+  // Enable bracketed-paste so the keystroke parser sees pastes as one
+  // atomic chunk and SimplePromptInput can sentinel-fold them.
+  stdout.write("\x1b[?2004h");
+
   const handle: Handle = mount(
     <AgentStoreProvider session={DEMO_SESSION}>
       <ChatV2Shell onExit={() => resolveExit()} />
@@ -354,6 +358,7 @@ export async function runChatV2(opts: ChatV2Options = {}): Promise<void> {
   } finally {
     stdout.off("resize", onResize);
     handle.destroy();
+    stdout.write("\x1b[?2004l");
     stdin.pause();
   }
 }

@@ -2,28 +2,34 @@
 
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import stringWidth from "string-width";
+import stringWidthLib from "string-width";
 import { inkCompat, useCursor, useKeystroke } from "../../renderer/index.js";
 import { lineAndColumn, processMultilineKey } from "./multiline-keys.js";
+import {
+  PASTE_SENTINEL_RANGE,
+  type PasteEntry,
+  decodePasteSentinel,
+  encodePasteSentinel,
+  expandPasteSentinels,
+  formatBytesShort,
+  makePasteEntry,
+} from "./paste-sentinels.js";
 
 const FG_BODY = "#c9d1d9";
 const FG_FAINT = "#6e7681";
 const TONE_BRAND = "#79c0ff";
+const TONE_PASTE = "#d2a8ff";
 
 export interface SimplePromptInputProps {
   readonly value: string;
   readonly onChange: (next: string) => void;
+  /** Called with the EXPANDED value — paste sentinels are replaced with their original content. */
   readonly onSubmit?: (value: string) => void;
   readonly onCancel?: () => void;
-  /** Fired when ↑ pushes past the top of an empty / boundary buffer. Parent walks history. */
   readonly onHistoryPrev?: () => void;
-  /** Fired when ↓ pushes past the bottom of an empty / boundary buffer. */
   readonly onHistoryNext?: () => void;
-  /** Hint shown when value is empty. */
   readonly placeholder?: string;
-  /** Leading marker before the input. Default `›`. */
   readonly prefix?: string;
-  /** Disable input; cursor still renders. */
   readonly disabled?: boolean;
 }
 
@@ -47,12 +53,16 @@ export function SimplePromptInput({
     if (cursor > value.length) setCursor(value.length);
   }
 
-  // Multiple keystrokes can flush in one stdin chunk before React commits;
-  // hold the latest value/cursor in refs so the handler reads them fresh.
   const valueRef = React.useRef(value);
   valueRef.current = value;
   const cursorRef = React.useRef(cursor);
   cursorRef.current = cursor;
+
+  // Paste registry — keyed by sentinel id, holds original content. The id is
+  // a small integer that we encode as a single PUA codepoint in the buffer
+  // (see paste-sentinels.ts) so cursor arithmetic stays in char units.
+  const pastesRef = React.useRef<Map<number, PasteEntry>>(new Map());
+  const nextPasteIdRef = React.useRef(0);
 
   const apply = (nextValue: string | null, nextCursor: number | null): void => {
     if (nextValue !== null && nextValue !== valueRef.current) {
@@ -63,6 +73,16 @@ export function SimplePromptInput({
       cursorRef.current = nextCursor;
       setCursor(nextCursor);
     }
+  };
+
+  const registerPaste = (content: string): void => {
+    const v = valueRef.current;
+    const c = cursorRef.current;
+    const id = nextPasteIdRef.current % PASTE_SENTINEL_RANGE;
+    nextPasteIdRef.current = id + 1;
+    pastesRef.current.set(id, makePasteEntry(id, content));
+    const sentinel = encodePasteSentinel(id);
+    apply(v.slice(0, c) + sentinel + v.slice(c), c + 1);
   };
 
   useKeystroke((k) => {
@@ -103,28 +123,25 @@ export function SimplePromptInput({
       return;
     }
     if (action.pasteRequest) {
-      // Paste support is deferred to 5d-21f; for now insert the raw content.
-      const v = valueRef.current;
-      const c = cursorRef.current;
-      const merged = v.slice(0, c) + action.pasteRequest.content + v.slice(c);
-      apply(merged, c + action.pasteRequest.content.length);
+      registerPaste(action.pasteRequest.content);
       return;
     }
     if (action.submit) {
-      onSubmit?.(action.submitValue ?? valueRef.current);
+      const raw = action.submitValue ?? valueRef.current;
+      onSubmit?.(expandPasteSentinels(raw, pastesRef.current));
       return;
     }
     apply(action.next, action.cursor);
   });
 
-  // Cursor positioning: split logical lines and project the (line, col) onto
-  // the rendered rows. The prompt prefix sits on the FIRST logical line; the
-  // following lines are gutter-padded by spaces of the same width.
+  // Cursor positioning: project (line, col) onto rendered rows. Sentinels
+  // expand to their placeholder width; everything else uses stringWidth.
   const lines = value.length === 0 ? [""] : value.split("\n");
   const { line: cursorLine, col: cursorCol } = lineAndColumn(value, cursor);
-  const prefixCells = stringCells(prefix) + 1; // prefix + the gap=1 space
+  const prefixCells = stringCells(prefix) + 1; // prefix + gap=1 space
   const lineText = lines[cursorLine] ?? "";
-  const cursorVisualCol = prefixCells + stringCells(lineText.slice(0, cursorCol));
+  const cursorVisualCol =
+    prefixCells + measureCells(lineText.slice(0, cursorCol), pastesRef.current);
   const rowFromBottom = lines.length - 1 - cursorLine;
   useCursor(disabled ? null : { col: cursorVisualCol, rowFromBottom, visible: true });
 
@@ -147,7 +164,7 @@ export function SimplePromptInput({
               {placeholder ?? "type a message…"}
             </inkCompat.Text>
           ) : (
-            <inkCompat.Text color={FG_BODY}>{ln.length > 0 ? ln : " "}</inkCompat.Text>
+            <LineSegments line={ln} pastes={pastesRef.current} />
           )}
         </inkCompat.Box>
       ))}
@@ -155,9 +172,81 @@ export function SimplePromptInput({
   );
 }
 
+interface LineSegmentsProps {
+  readonly line: string;
+  readonly pastes: ReadonlyMap<number, PasteEntry>;
+}
+
+function LineSegments({ line, pastes }: LineSegmentsProps): React.ReactElement {
+  if (line.length === 0) {
+    return <inkCompat.Text color={FG_BODY}> </inkCompat.Text>;
+  }
+  // Walk the line and split into runs of text vs paste sentinels so each
+  // segment renders with its own style.
+  const segments: React.ReactNode[] = [];
+  let buf = "";
+  let segIdx = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    const id = decodePasteSentinel(ch);
+    if (id === null) {
+      buf += ch;
+      continue;
+    }
+    if (buf.length > 0) {
+      segments.push(
+        <inkCompat.Text key={`seg-${segIdx++}-t`} color={FG_BODY}>
+          {buf}
+        </inkCompat.Text>,
+      );
+      buf = "";
+    }
+    const entry = pastes.get(id);
+    segments.push(
+      <inkCompat.Text key={`seg-${segIdx++}-p${id}`} color={TONE_PASTE}>
+        {pasteLabel(id, entry)}
+      </inkCompat.Text>,
+    );
+  }
+  if (buf.length > 0) {
+    segments.push(
+      <inkCompat.Text key={`seg-${segIdx++}-t`} color={FG_BODY}>
+        {buf}
+      </inkCompat.Text>,
+    );
+  }
+  return <>{segments}</>;
+}
+
+function pasteLabel(id: number, entry: PasteEntry | undefined): string {
+  if (!entry) return `[paste #${id + 1} · (missing)]`;
+  return `[paste #${id + 1} · ${entry.lineCount}l · ${formatBytesShort(entry.charCount)}]`;
+}
+
 function stringCells(s: string): number {
   if (s.length === 0) return 0;
-  return stringWidth(s);
+  return stringWidthLib(s);
+}
+
+/** Visual width with paste sentinels expanded to their placeholder. */
+function measureCells(s: string, pastes: ReadonlyMap<number, PasteEntry>): number {
+  let n = 0;
+  let plain = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!;
+    const id = decodePasteSentinel(ch);
+    if (id === null) {
+      plain += ch;
+      continue;
+    }
+    if (plain.length > 0) {
+      n += stringWidthLib(plain);
+      plain = "";
+    }
+    n += pasteLabel(id, pastes.get(id)).length;
+  }
+  if (plain.length > 0) n += stringWidthLib(plain);
+  return n;
 }
 
 function lineKey(line: string, idx: number): string {

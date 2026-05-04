@@ -320,6 +320,65 @@ describe("SimplePromptInput — multi-line", () => {
   });
 });
 
+/** Wrap a content string in bracketed-paste markers so the keystroke parser
+ *  emits it as a single paste-burst keystroke. */
+function paste(content: string): string {
+  return `\x1b[200~${content}\x1b[201~`;
+}
+
+describe("SimplePromptInput — paste handling", () => {
+  it("a multi-line paste burst inserts a single sentinel into the buffer", async () => {
+    const h = harness();
+    await flush();
+    h.push("foo");
+    await flush();
+    h.push(paste("line one\nline two\nline three"));
+    await flush();
+    // Buffer should be "foo" + 1 sentinel char (single PUA codepoint).
+    const v = h.values.at(-1) ?? "";
+    expect(v.length).toBe(4);
+    expect(v.startsWith("foo")).toBe(true);
+    h.destroy();
+  });
+
+  it("submitting a buffer with a paste expands the sentinel back to full content", async () => {
+    const h = harness();
+    await flush();
+    h.push("prefix ");
+    await flush();
+    h.push(paste("alpha\nbeta\ngamma"));
+    await flush();
+    h.push(" suffix");
+    await flush();
+    h.push("\r");
+    await flush();
+    expect(h.submits).toEqual(["prefix alpha\nbeta\ngamma suffix"]);
+    h.destroy();
+  });
+
+  it("a one-keystroke backspace removes the entire pasted blob", async () => {
+    const h = harness();
+    await flush();
+    h.push(paste("paste-line-1\npaste-line-2"));
+    await flush();
+    // Before backspace: 1 sentinel char in the buffer.
+    expect((h.values.at(-1) ?? "").length).toBe(1);
+    h.push("\x7f");
+    await flush();
+    expect(h.values.at(-1)).toBe("");
+    h.destroy();
+  });
+
+  it("placeholder label appears in the rendered output", async () => {
+    const h = harness();
+    await flush();
+    h.push(paste("hello\nworld"));
+    await flush();
+    expect(h.output()).toContain("paste");
+    h.destroy();
+  });
+});
+
 describe("SimplePromptInput — render", () => {
   it("placeholder shows when empty", async () => {
     const w = makeTestWriter();

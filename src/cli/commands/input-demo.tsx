@@ -110,6 +110,8 @@ export async function runInputDemo(opts: InputDemoOptions = {}): Promise<void> {
     resolveExit = resolve;
   });
 
+  stdout.write("\x1b[?2004h");
+
   const handle: Handle = mount(<InputDemoShell onExit={() => resolveExit()} />, {
     viewportWidth: stdout.columns ?? 80,
     viewportHeight: stdout.rows ?? 24,
@@ -127,6 +129,7 @@ export async function runInputDemo(opts: InputDemoOptions = {}): Promise<void> {
   } finally {
     stdout.off("resize", onResize);
     handle.destroy();
+    stdout.write("\x1b[?2004l");
     stdin.pause();
   }
 }

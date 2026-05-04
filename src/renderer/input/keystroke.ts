@@ -85,8 +85,33 @@ interface Consumed {
   length: number;
 }
 
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+
 function parseOne(s: string, start: number): Consumed {
   const ch = s[start]!;
+
+  // Bracketed-paste: terminal wraps pasted content in ESC[200~ ... ESC[201~.
+  // Surface the entire payload as ONE keystroke so multi-line reducers can
+  // recognise it as a paste burst and allocate a single sentinel.
+  if (ch === "\x1b" && s.startsWith(PASTE_START, start)) {
+    const bodyStart = start + PASTE_START.length;
+    const endIdx = s.indexOf(PASTE_END, bodyStart);
+    if (endIdx >= 0) {
+      const content = s.slice(bodyStart, endIdx);
+      return {
+        key: {
+          ...emptyKeystroke(),
+          raw: s.slice(start, endIdx + PASTE_END.length),
+          input: content,
+        },
+        length: endIdx + PASTE_END.length - start,
+      };
+    }
+    // Unterminated paste in this chunk — fall through to generic escape
+    // parsing. Real terminals send the wrapper atomically; if it splits we
+    // lose the marker but recover the content as normal keystrokes.
+  }
 
   if (ch === "\x1b") {
     return parseEscape(s, start);
