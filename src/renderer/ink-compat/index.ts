@@ -7,3 +7,4 @@ export { type ColorName, bgCode, fgCode } from "./colors.js";
 export { type ViewportSize, ViewportContext, useStdout } from "./viewport.js";
 export { type AppApi, AppContext, useApp } from "./use-app.js";
 export { type InkInputHandler, type InkKey, type UseInputOptions, useInput } from "./use-input.js";
+export { type InkLikeInstance, type InkLikeRenderOptions, render } from "./render.js";
