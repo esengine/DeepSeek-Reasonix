@@ -343,6 +343,88 @@ describe("chat-v2 shell — long-conversation overflow", () => {
   });
 });
 
+describe("chat-v2 shell — slash commands", () => {
+  it("/help renders the available commands inline without invoking runTurn", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    let runCount = 0;
+    const trackingRunTurn = makeCannedRunTurn((text, turn) => {
+      runCount++;
+      return instantReply(text, turn);
+    });
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell onExit={() => {}} runTurn={trackingRunTurn} />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 80,
+        viewportHeight: 30,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("/help\r");
+    for (let i = 0; i < 30; i++) await flush();
+    expect(runCount).toBe(0);
+    const out = w.output();
+    expect(out).toContain("/help");
+    expect(out).toContain("/clear");
+    handle.destroy();
+  });
+
+  it("/exit invokes onExit", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    let exited = false;
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell
+          onExit={() => {
+            exited = true;
+          }}
+          runTurn={instantRunTurn}
+        />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 60,
+        viewportHeight: 8,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("/exit\r");
+    await flush();
+    expect(exited).toBe(true);
+    handle.destroy();
+  });
+
+  it("unknown /command renders an error live card", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell onExit={() => {}} runTurn={instantRunTurn} />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 80,
+        viewportHeight: 12,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("/banana\r");
+    for (let i = 0; i < 5; i++) await flush();
+    expect(w.output()).toMatch(/unknown command/);
+    handle.destroy();
+  });
+});
+
 describe("chat-v2 shell — exit", () => {
   it("Esc on the empty prompt invokes onExit", async () => {
     const w = makeTestWriter();

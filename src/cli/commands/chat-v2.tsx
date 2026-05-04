@@ -8,11 +8,17 @@ import {
   inkCompat,
   mount,
 } from "../../renderer/index.js";
+import { isSlashInput, runSlash } from "../ui/chat-v2-slash.js";
 import { MarkdownView } from "../ui/markdown-view.js";
 import { SimplePromptInput } from "../ui/prompt-input-v2.js";
 import type { Card } from "../ui/state/cards.js";
 import type { AgentEvent } from "../ui/state/events.js";
-import { AgentStoreProvider, useAgentState, useDispatch } from "../ui/state/provider.js";
+import {
+  AgentStoreProvider,
+  useAgentState,
+  useAgentStore,
+  useDispatch,
+} from "../ui/state/provider.js";
 import type { SessionInfo } from "../ui/state/state.js";
 import { usePromptHistory } from "../ui/use-prompt-history.js";
 
@@ -267,6 +273,7 @@ export function ChatV2Shell({ onExit, runTurn = defaultRunTurn }: ShellProps): R
   const cards = useAgentState((s) => s.cards);
   const inProgress = useAgentState((s) => s.turnInProgress);
   const dispatch = useDispatch();
+  const store = useAgentStore();
   const [frame, setFrame] = useState(0);
   const [draft, setDraft] = useState("");
   const turnRef = useRef(0);
@@ -274,6 +281,8 @@ export function ChatV2Shell({ onExit, runTurn = defaultRunTurn }: ShellProps): R
   dispatchRef.current = dispatch;
   const runTurnRef = useRef(runTurn);
   runTurnRef.current = runTurn;
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
   const history = usePromptHistory();
 
   useEffect(() => {
@@ -286,10 +295,18 @@ export function ChatV2Shell({ onExit, runTurn = defaultRunTurn }: ShellProps): R
     const trimmed = text.trim();
     if (trimmed.length === 0) return;
     if (inProgress) return;
-    const turn = ++turnRef.current;
-    dispatchRef.current({ type: "user.submit", text: trimmed });
     history.recordSubmit(trimmed);
     setDraft("");
+
+    if (isSlashInput(trimmed)) {
+      const outcome = runSlash(trimmed, { state: store.getState() });
+      for (const ev of outcome.events) dispatchRef.current(ev);
+      if (outcome.exit) onExitRef.current();
+      return;
+    }
+
+    const turn = ++turnRef.current;
+    dispatchRef.current({ type: "user.submit", text: trimmed });
     void runTurnRef.current(trimmed, turn, (ev) => dispatchRef.current(ev));
   };
 
