@@ -370,24 +370,47 @@ export interface ChatV2Options {
 const DEFAULT_SYSTEM =
   "You are Reasonix, a helpful DeepSeek-powered assistant. Be concise and accurate.";
 
+async function buildDefaultTools(): Promise<import("../../tools.js").ToolRegistry> {
+  const { ToolRegistry } = await import("../../tools.js");
+  const { searchEnabled } = await import("../../config.js");
+  const { registerWebTools } = await import("../../tools/web.js");
+  const { registerMemoryTools } = await import("../../tools/memory.js");
+  const { registerChoiceTool } = await import("../../tools/choice.js");
+  const tools = new ToolRegistry();
+  if (searchEnabled()) registerWebTools(tools);
+  registerMemoryTools(tools, {});
+  registerChoiceTool(tools);
+  return tools;
+}
+
 function makeRealRunTurn(model: string, system: string): RunTurn {
-  return async (userText, turn, dispatch) => {
-    // Lazy-load to keep the demo path import-light. The renderer module
-    // shouldn't pull in the full DeepSeek client unless an interactive turn
-    // is actually firing.
+  // The loop construction is per-turn so dependencies stay lazy; the same
+  // CacheFirstLoop instance is reused via closure to preserve cache state
+  // and the running session transcript across turns.
+  let loopPromise: Promise<{
+    loop: import("../../loop.js").CacheFirstLoop;
+  }> | null = null;
+
+  const setupLoop = async () => {
     const { DeepSeekClient, ImmutablePrefix, CacheFirstLoop } = await import("../../index.js");
-    const { makeLoopBridge } = await import("../ui/loop-bridge.js");
+    const tools = await buildDefaultTools();
     const client = new DeepSeekClient();
-    const prefix = new ImmutablePrefix({ system });
-    const loop = new CacheFirstLoop({ client, prefix, model });
+    const prefix = new ImmutablePrefix({ system, toolSpecs: tools.specs() });
+    const loop = new CacheFirstLoop({ client, prefix, model, tools });
+    return { loop };
+  };
+
+  return async (userText, turn, dispatch) => {
+    const { makeLoopBridge } = await import("../ui/loop-bridge.js");
     const bridge = makeLoopBridge(`turn-${turn}`);
+    if (!loopPromise) loopPromise = setupLoop();
+    const { loop } = await loopPromise;
     try {
       for await (const ev of loop.step(userText)) {
         for (const out of bridge.consume(ev)) dispatch(out);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Synthesise an error LoopEvent so the bridge closes any open cards.
       for (const out of bridge.consume({ turn, role: "error", content: msg, error: msg })) {
         dispatch(out);
       }

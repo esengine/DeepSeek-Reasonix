@@ -210,6 +210,74 @@ describe("chat-v2 shell — history navigation", () => {
   });
 });
 
+describe("chat-v2 shell — tool flow", () => {
+  it("a runTurn that emits tool events produces a tool card", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const toolRunTurn = makeCannedRunTurn((userText, turn) => {
+      const reasonId = `r-${turn}`;
+      const replyId = `s-${turn}`;
+      const toolId = `t-${turn}`;
+      return [
+        { delayMs: 0, event: { type: "turn.start", turnId: `t-${turn}` } },
+        { delayMs: 0, event: { type: "reasoning.start", id: reasonId } },
+        {
+          delayMs: 0,
+          event: { type: "reasoning.chunk", id: reasonId, text: "I'll list the directory." },
+        },
+        { delayMs: 0, event: { type: "reasoning.end", id: reasonId, paragraphs: 1, tokens: 5 } },
+        {
+          delayMs: 0,
+          event: { type: "tool.start", id: toolId, name: "shell", args: { cmd: "ls" } },
+        },
+        {
+          delayMs: 0,
+          event: {
+            type: "tool.end",
+            id: toolId,
+            output: "src/\nrenderer/\n",
+            exitCode: 0,
+            elapsedMs: 12,
+          },
+        },
+        { delayMs: 0, event: { type: "streaming.start", id: replyId } },
+        {
+          delayMs: 0,
+          event: { type: "streaming.chunk", id: replyId, text: `Listed ${userText}.` },
+        },
+        { delayMs: 0, event: { type: "streaming.end", id: replyId } },
+        {
+          delayMs: 0,
+          event: {
+            type: "turn.end",
+            usage: { prompt: 10, reason: 5, output: 5, cacheHit: 0, cost: 0.0001 },
+          },
+        },
+      ];
+    });
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell onExit={() => {}} runTurn={toolRunTurn} />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 80,
+        viewportHeight: 30,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("./somewhere\r");
+    for (let i = 0; i < 30; i++) await flush();
+    const out = w.output();
+    expect(out).toContain("shell");
+    expect(out).toContain("ok");
+    expect(out).toMatch(/Listed/);
+    handle.destroy();
+  });
+});
+
 describe("chat-v2 shell — long-conversation overflow", () => {
   it("settled cards from older turns appear in the byte stream as scrollback writes", async () => {
     const w = makeTestWriter();
