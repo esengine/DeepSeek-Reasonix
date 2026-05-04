@@ -28,10 +28,12 @@ export default defineConfig([
     target: "node22",
     outDir: "dist/cli",
     banner: { js: "#!/usr/bin/env node" },
-    // Force the CLI bundle to inline "ink" so the alias actually fires.
-    // Without noExternal, tsup keeps "ink" as a literal external import and
-    // node would resolve it to the real package at runtime.
-    noExternal: ["ink"],
+    // Force the CLI bundle to inline "ink" + anything that depends on it so
+    // the alias actually fires. Without noExternal, tsup keeps "ink" as a
+    // literal external import and node would resolve it to the real
+    // package at runtime; ink-text-input's internal `from "ink"` would
+    // also slip past the alias.
+    noExternal: ["ink", "ink-text-input"],
     esbuildOptions(options) {
       options.alias = { ...(options.alias ?? {}), ink: inkCompatPath };
     },
