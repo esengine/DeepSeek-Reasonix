@@ -115,7 +115,13 @@ export class StdioTransport implements McpTransport {
       /* already ended */
     }
     if (this.child.exitCode === null && !this.child.killed) {
-      this.child.kill("SIGTERM");
+      // child.kill("SIGTERM") throws EINVAL on Windows; plain kill()
+      // can also throw on failed spawns. Swallow both.
+      try {
+        this.child.kill(process.platform === "win32" ? undefined : "SIGTERM");
+      } catch {
+        /* already exited or unsignallable */
+      }
     }
   }
 

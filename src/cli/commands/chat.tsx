@@ -210,6 +210,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     if (!tools) tools = new ToolRegistry();
     for (const raw of requestedSpecs) {
       let label = "anon";
+      let mcp: McpClient | undefined;
       try {
         const spec = parseMcpSpec(raw);
         label = spec.name ?? "anon";
@@ -230,7 +231,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
             : spec.transport === "streamable-http"
               ? new StreamableHttpTransport({ url: spec.url })
               : new StdioTransport({ command: spec.command, args: spec.args });
-        const mcp = new McpClient({ transport });
+        mcp = new McpClient({ transport });
         await mcp.initialize();
         // Host indirection lets `/mcp reconnect` swap the underlying client
         // without re-bridging the registered tools (closures resolve via
@@ -294,6 +295,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
         // kill a chat that has working servers configured. Recover by
         // recording the failure and continuing; user fixes via `reasonix
         // setup` without losing their other servers.
+        await mcp?.close().catch(() => undefined);
         const reason = (err as Error).message;
         failedSpecs.push({ spec: raw, reason });
         process.stderr.write(

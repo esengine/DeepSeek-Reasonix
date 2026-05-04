@@ -88,6 +88,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     tools = new ToolRegistry();
     for (const raw of requestedSpecs) {
       let label = "anon";
+      let mcp: McpClient | undefined;
       try {
         const spec = parseMcpSpec(raw);
         label = spec.name ?? "anon";
@@ -108,7 +109,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
             : spec.transport === "streamable-http"
               ? new StreamableHttpTransport({ url: spec.url })
               : new StdioTransport({ command: spec.command, args: spec.args });
-        const mcp = new McpClient({ transport });
+        mcp = new McpClient({ transport });
         await mcp.initialize();
         const bridge = await bridgeMcpTools(mcp, {
           registry: tools,
@@ -134,6 +135,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
         // one-shot `run` invocation with a broken MCP server otherwise
         // fails the whole run over a side-concern tool the task might
         // not even touch.
+        await mcp?.close().catch(() => undefined);
         process.stderr.write(
           `${formatMcpLifecycleEvent({ state: "failed", name: label, reason: (err as Error).message })}\n  → run \`reasonix setup\` to remove broken entries from your saved config.\n`,
         );
