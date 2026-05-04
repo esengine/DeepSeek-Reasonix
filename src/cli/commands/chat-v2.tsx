@@ -282,11 +282,22 @@ export function ChatV2Shell({
     if (recalled !== null) setDraft(recalled);
   };
 
+  // Split cards into settled vs in-flight. Settled cards flow through
+  // inkCompat.Static — once promoted they live in terminal scrollback and
+  // never re-render, so a long stream of replies can't blow past the
+  // viewport's live region. Only the actively-streaming card stays live.
+  const cutoff = firstUnsettledIndex(cards);
+  const settled = cards.slice(0, cutoff);
+  const live = cards.slice(cutoff);
+
   return (
     <inkCompat.Box flexDirection="column">
       <Header inProgress={inProgress} frame={frame} />
       <inkCompat.Box flexDirection="column" marginTop={1} gap={1}>
-        {cards.map((c) => (
+        <inkCompat.Static items={settled}>
+          {(card) => <CardRow key={card.id} card={card} />}
+        </inkCompat.Static>
+        {live.map((c) => (
           <CardRow key={c.id} card={c} />
         ))}
       </inkCompat.Box>
@@ -305,6 +316,31 @@ export function ChatV2Shell({
       </inkCompat.Box>
     </inkCompat.Box>
   );
+}
+
+/** First index whose card is still in-flight. Anything before it is safe to
+ *  promote to scrollback because no future event can mutate it. */
+export function firstUnsettledIndex(cards: ReadonlyArray<Card>): number {
+  for (let i = 0; i < cards.length; i++) {
+    if (!isSettled(cards[i] as Card)) return i;
+  }
+  return cards.length;
+}
+
+function isSettled(card: Card): boolean {
+  switch (card.kind) {
+    case "streaming":
+    case "tool":
+    case "branch":
+      return card.done;
+    case "reasoning":
+      return !card.streaming;
+    case "plan":
+      if (card.variant !== "active") return true;
+      return card.steps.every((s) => s.status === "done" || s.status === "skipped");
+    default:
+      return true;
+  }
 }
 
 export interface ChatV2Options {

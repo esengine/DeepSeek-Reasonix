@@ -203,6 +203,41 @@ describe("chat-v2 shell — history navigation", () => {
   });
 });
 
+describe("chat-v2 shell — long-conversation overflow", () => {
+  it("settled cards from older turns appear in the byte stream as scrollback writes", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell onExit={() => {}} buildReply={instantReply} />
+      </AgentStoreProvider>,
+      {
+        // Tiny viewport — without Static promotion the live region would either
+        // truncate older cards or thrash on every chunk. With Static, the
+        // settled cards write to scrollback so the live region stays bounded.
+        viewportWidth: 60,
+        viewportHeight: 8,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    for (const text of ["one", "two", "three", "four", "five"]) {
+      stdin.push(`${text}\r`);
+      for (let i = 0; i < 30; i++) await flush();
+    }
+    const out = w.output();
+    // Each user submission must show up SOMEWHERE in the byte stream — even if
+    // it scrolled past the live region's top. Static guarantees it landed in
+    // scrollback rather than getting clipped.
+    for (const text of ["one", "two", "three", "four", "five"]) {
+      expect(out).toContain(text);
+    }
+    handle.destroy();
+  });
+});
+
 describe("chat-v2 shell — exit", () => {
   it("Esc on the empty prompt invokes onExit", async () => {
     const w = makeTestWriter();

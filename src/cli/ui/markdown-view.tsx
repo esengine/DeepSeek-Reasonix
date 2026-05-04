@@ -13,8 +13,10 @@ const TONE_WARN = "#f0b07d";
 const SURFACE_ELEV = "#161b22";
 
 export function MarkdownView({ text }: { text: string }): React.ReactElement {
-  const lines = React.useMemo(() => markdownToLines(text), [text]);
-  return <MarkdownLines lines={lines} />;
+  // No useMemo: the renderer's Static-path uses a one-shot tree walker that
+  // doesn't set up a React dispatcher, so hook calls would throw. Parsing on
+  // every render is cheap (marked.lexer is allocation-light).
+  return <MarkdownLines lines={markdownToLines(text)} />;
 }
 
 export function MarkdownLines({
