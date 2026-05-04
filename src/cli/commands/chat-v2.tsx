@@ -218,16 +218,48 @@ function TurnTrailer(): React.ReactElement | null {
   );
 }
 
+/** Run a single user-turn. The default implementation plays the canned
+ *  buildReply script; runChatV2 swaps in a real DeepSeek loop when an API
+ *  key is available. */
+export type RunTurn = (
+  userText: string,
+  turn: number,
+  dispatch: (ev: AgentEvent) => void,
+) => Promise<void>;
+
 interface ShellProps {
   readonly onExit: () => void;
-  /** Override the reply-script generator. Tests use a zero-delay variant. */
-  readonly buildReply?: (userText: string, turn: number) => ReadonlyArray<ScriptStep>;
+  /** Override how a turn plays out — tests pass a zero-delay canned script,
+   *  the real entry passes a loop-driven streamer. Default: canned demo. */
+  readonly runTurn?: RunTurn;
 }
 
-export function ChatV2Shell({
-  onExit,
-  buildReply: buildReplyOverride,
-}: ShellProps): React.ReactElement {
+export function makeCannedRunTurn(
+  builder: (userText: string, turn: number) => ReadonlyArray<ScriptStep>,
+): RunTurn {
+  return (userText, turn, dispatch) =>
+    new Promise((resolve) => {
+      const steps = builder(userText, turn);
+      let i = 0;
+      const step = (): void => {
+        if (i >= steps.length) {
+          resolve();
+          return;
+        }
+        const cur = steps[i]!;
+        setTimeout(() => {
+          dispatch(cur.event);
+          i++;
+          step();
+        }, cur.delayMs);
+      };
+      step();
+    });
+}
+
+const defaultRunTurn: RunTurn = makeCannedRunTurn(buildReply);
+
+export function ChatV2Shell({ onExit, runTurn = defaultRunTurn }: ShellProps): React.ReactElement {
   const cards = useAgentState((s) => s.cards);
   const inProgress = useAgentState((s) => s.turnInProgress);
   const dispatch = useDispatch();
@@ -236,9 +268,9 @@ export function ChatV2Shell({
   const turnRef = useRef(0);
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
+  const runTurnRef = useRef(runTurn);
+  runTurnRef.current = runTurn;
   const history = usePromptHistory();
-
-  const replyBuilder = buildReplyOverride ?? buildReply;
 
   useEffect(() => {
     if (!inProgress) return;
@@ -246,30 +278,15 @@ export function ChatV2Shell({
     return () => clearInterval(id);
   }, [inProgress]);
 
-  const playReply = (text: string): void => {
-    const turn = ++turnRef.current;
-    const steps = replyBuilder(text, turn);
-    let i = 0;
-    const step = (): void => {
-      if (i >= steps.length) return;
-      const cur = steps[i]!;
-      setTimeout(() => {
-        dispatchRef.current(cur.event);
-        i++;
-        step();
-      }, cur.delayMs);
-    };
-    step();
-  };
-
   const handleSubmit = (text: string): void => {
     const trimmed = text.trim();
     if (trimmed.length === 0) return;
     if (inProgress) return;
+    const turn = ++turnRef.current;
     dispatchRef.current({ type: "user.submit", text: trimmed });
     history.recordSubmit(trimmed);
     setDraft("");
-    playReply(trimmed);
+    void runTurnRef.current(trimmed, turn, (ev) => dispatchRef.current(ev));
   };
 
   const handleHistoryPrev = (): void => {
@@ -346,6 +363,36 @@ function isSettled(card: Card): boolean {
 export interface ChatV2Options {
   readonly stdout?: NodeJS.WriteStream;
   readonly stdin?: NodeJS.ReadStream;
+  readonly model?: string;
+  readonly system?: string;
+}
+
+const DEFAULT_SYSTEM =
+  "You are Reasonix, a helpful DeepSeek-powered assistant. Be concise and accurate.";
+
+function makeRealRunTurn(model: string, system: string): RunTurn {
+  return async (userText, turn, dispatch) => {
+    // Lazy-load to keep the demo path import-light. The renderer module
+    // shouldn't pull in the full DeepSeek client unless an interactive turn
+    // is actually firing.
+    const { DeepSeekClient, ImmutablePrefix, CacheFirstLoop } = await import("../../index.js");
+    const { makeLoopBridge } = await import("../ui/loop-bridge.js");
+    const client = new DeepSeekClient();
+    const prefix = new ImmutablePrefix({ system });
+    const loop = new CacheFirstLoop({ client, prefix, model });
+    const bridge = makeLoopBridge(`turn-${turn}`);
+    try {
+      for await (const ev of loop.step(userText)) {
+        for (const out of bridge.consume(ev)) dispatch(out);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Synthesise an error LoopEvent so the bridge closes any open cards.
+      for (const out of bridge.consume({ turn, role: "error", content: msg, error: msg })) {
+        dispatch(out);
+      }
+    }
+  };
 }
 
 export async function runChatV2(opts: ChatV2Options = {}): Promise<void> {
@@ -372,9 +419,16 @@ export async function runChatV2(opts: ChatV2Options = {}): Promise<void> {
   // atomic chunk and SimplePromptInput can sentinel-fold them.
   stdout.write("\x1b[?2004h");
 
+  // Real DeepSeek loop when an API key is present; canned demo otherwise.
+  // The canned path lets new users explore chat-v2's UI without an account.
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const runTurn: RunTurn | undefined = apiKey
+    ? makeRealRunTurn(opts.model ?? "deepseek-chat", opts.system ?? DEFAULT_SYSTEM)
+    : undefined;
+
   const handle: Handle = mount(
     <AgentStoreProvider session={DEMO_SESSION}>
-      <ChatV2Shell onExit={() => resolveExit()} />
+      <ChatV2Shell onExit={() => resolveExit()} runTurn={runTurn} />
     </AgentStoreProvider>,
     {
       viewportWidth: stdout.columns ?? 80,

@@ -1,7 +1,12 @@
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { describe, expect, it } from "vitest";
-import { ChatV2Shell, DEMO_SESSION, type ScriptStep } from "../../src/cli/commands/chat-v2.js";
+import {
+  ChatV2Shell,
+  DEMO_SESSION,
+  type ScriptStep,
+  makeCannedRunTurn,
+} from "../../src/cli/commands/chat-v2.js";
 import { AgentStoreProvider } from "../../src/cli/ui/state/provider.js";
 import {
   CharPool,
@@ -60,6 +65,8 @@ function instantReply(userText: string, turn: number): ReadonlyArray<ScriptStep>
   ];
 }
 
+const instantRunTurn = makeCannedRunTurn(instantReply);
+
 describe("chat-v2 shell — initial paint", () => {
   it("renders the header and the empty prompt", async () => {
     const w = makeTestWriter();
@@ -90,7 +97,7 @@ describe("chat-v2 shell — interactive submit", () => {
     const stdin = makeFakeStdin();
     const handle = mount(
       <AgentStoreProvider session={DEMO_SESSION}>
-        <ChatV2Shell onExit={() => {}} buildReply={instantReply} />
+        <ChatV2Shell onExit={() => {}} runTurn={instantRunTurn} />
       </AgentStoreProvider>,
       {
         viewportWidth: 80,
@@ -118,7 +125,7 @@ describe("chat-v2 shell — interactive submit", () => {
     const stdin = makeFakeStdin();
     const handle = mount(
       <AgentStoreProvider session={DEMO_SESSION}>
-        <ChatV2Shell onExit={() => {}} buildReply={instantReply} />
+        <ChatV2Shell onExit={() => {}} runTurn={instantRunTurn} />
       </AgentStoreProvider>,
       {
         viewportWidth: 80,
@@ -143,13 +150,13 @@ describe("chat-v2 shell — interactive submit", () => {
     const w = makeTestWriter();
     const stdin = makeFakeStdin();
     let userSubmits = 0;
-    const recordingReply = (text: string, turn: number) => {
+    const recordingRunTurn = makeCannedRunTurn((text, turn) => {
       userSubmits++;
       return instantReply(text, turn);
-    };
+    });
     const handle = mount(
       <AgentStoreProvider session={DEMO_SESSION}>
-        <ChatV2Shell onExit={() => {}} buildReply={recordingReply} />
+        <ChatV2Shell onExit={() => {}} runTurn={recordingRunTurn} />
       </AgentStoreProvider>,
       {
         viewportWidth: 60,
@@ -173,7 +180,7 @@ describe("chat-v2 shell — history navigation", () => {
     const stdin = makeFakeStdin();
     const handle = mount(
       <AgentStoreProvider session={DEMO_SESSION}>
-        <ChatV2Shell onExit={() => {}} buildReply={instantReply} />
+        <ChatV2Shell onExit={() => {}} runTurn={instantRunTurn} />
       </AgentStoreProvider>,
       {
         viewportWidth: 80,
@@ -209,7 +216,7 @@ describe("chat-v2 shell — long-conversation overflow", () => {
     const stdin = makeFakeStdin();
     const handle = mount(
       <AgentStoreProvider session={DEMO_SESSION}>
-        <ChatV2Shell onExit={() => {}} buildReply={instantReply} />
+        <ChatV2Shell onExit={() => {}} runTurn={instantRunTurn} />
       </AgentStoreProvider>,
       {
         // Tiny viewport — without Static promotion the live region would either
@@ -249,7 +256,7 @@ describe("chat-v2 shell — exit", () => {
           onExit={() => {
             exited = true;
           }}
-          buildReply={instantReply}
+          runTurn={instantRunTurn}
         />
       </AgentStoreProvider>,
       {
@@ -277,7 +284,7 @@ describe("chat-v2 shell — exit", () => {
           onExit={() => {
             exited = true;
           }}
-          buildReply={instantReply}
+          runTurn={instantRunTurn}
         />
       </AgentStoreProvider>,
       {
