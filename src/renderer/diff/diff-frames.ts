@@ -42,6 +42,10 @@ export function diffFrames(prev: Frame, next: Frame, pools: DiffPools): Patch[] 
     moveTo(out, cursor, next.cursor.x, next.cursor.y, next.viewportWidth);
   }
 
+  if (prev.cursor.visible !== next.cursor.visible) {
+    out.push({ type: "cursorVisible", visible: next.cursor.visible });
+  }
+
   resetTrailingState(out, cursor, pools);
   return out;
 }

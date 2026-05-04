@@ -9,6 +9,7 @@ import { KeystrokeContext, KeystrokeReader, type KeystrokeSource } from "../inpu
 import { renderViewport, renderVirtual } from "../layout/layout.js";
 import type { LayoutNode } from "../layout/node.js";
 import { renderToBytes } from "../runtime/render-to-bytes.js";
+import { CursorContext, type CursorTarget } from "./cursor.js";
 import { type HostRoot, hostToLayoutNode, reconciler } from "./host-config.js";
 
 export type ScrollMode = "scrollback" | "virtual";
@@ -53,6 +54,26 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
   let lastElement: ReactNode = element;
 
   const reader = opts.stdin ? new KeystrokeReader({ source: opts.stdin }) : null;
+
+  let cursorTarget: CursorTarget | null = null;
+  const setCursorTarget = (next: CursorTarget | null): void => {
+    cursorTarget = next;
+    if (!destroyed && root.children.length > 0) root.onCommit();
+  };
+
+  const computeCursor = (screenHeight: number): Cursor => {
+    if (cursorTarget) {
+      const rowFromBottom = Math.max(0, cursorTarget.rowFromBottom ?? 0);
+      const y = Math.max(0, screenHeight - 1 - rowFromBottom);
+      return {
+        x: Math.max(0, cursorTarget.col),
+        y,
+        visible: cursorTarget.visible !== false,
+      };
+    }
+    if (opts.cursor) return opts.cursor();
+    return { x: 0, y: screenHeight, visible: true };
+  };
 
   const scrollBy = (delta: number): void => {
     if (scrollMode !== "virtual") return;
@@ -126,7 +147,7 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       screen,
       viewportWidth,
       viewportHeight,
-      cursor: opts.cursor?.() ?? { x: 0, y: screen.height, visible: true },
+      cursor: computeCursor(screen.height),
     };
     const patches = diffFrames(frame, next, opts.pools);
     if (patches.length > 0) opts.write(serializePatches(patches));
@@ -157,7 +178,7 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       screen,
       viewportWidth,
       viewportHeight,
-      cursor: opts.cursor?.() ?? { x: 0, y: screen.height, visible: true },
+      cursor: computeCursor(screen.height),
     };
     const patches = diffFrames(frame, next, opts.pools);
     if (patches.length > 0) opts.write(serializePatches(patches));
@@ -225,9 +246,14 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       { value: { columns: viewportWidth, rows: viewportHeight } },
       withBridge,
     );
+    const withCursor: ReactNode = createElement(
+      CursorContext.Provider,
+      { value: setCursorTarget },
+      withViewport,
+    );
     return reader
-      ? createElement(KeystrokeContext.Provider, { value: reader }, withViewport)
-      : withViewport;
+      ? createElement(KeystrokeContext.Provider, { value: reader }, withCursor)
+      : withCursor;
   };
 
   reconciler.updateContainer(wrap(element), container, null, () => {

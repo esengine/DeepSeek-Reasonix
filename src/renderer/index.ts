@@ -18,6 +18,12 @@ export { renderToBytes } from "./runtime/render-to-bytes.js";
 export { type TestWriter, makeTestWriter } from "./runtime/test-writer.js";
 export { type Handle, type MountOptions, mount } from "./reconciler/mount.js";
 export {
+  CursorContext,
+  type CursorSetter,
+  type CursorTarget,
+  useCursor,
+} from "./reconciler/cursor.js";
+export {
   type Keystroke,
   KeystrokeContext,
   KeystrokeReader,

@@ -20,6 +20,8 @@ function serializeOne(patch: Patch): string {
       return cursorMove(patch.dx, patch.dy);
     case "cursorTo":
       return `${CSI}${patch.col + 1}G`;
+    case "cursorVisible":
+      return patch.visible ? `${CSI}?25h` : `${CSI}?25l`;
     case "carriageReturn":
       return "\r";
     case "styleStr":
