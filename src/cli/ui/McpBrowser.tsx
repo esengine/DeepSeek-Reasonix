@@ -5,6 +5,7 @@ import { Box, Text } from "ink";
 import React, { useState } from "react";
 import { useKeystroke } from "./keystroke-context.js";
 import { toggleMcpDisabled } from "./mcp-disable.js";
+import { healthBadge } from "./mcp-health.js";
 import { type ApplyAppend, kickOffMcpReconnect } from "./mcp-reconnect-kickoff.js";
 import type { McpServerSummary } from "./slash/types.js";
 import { COLOR } from "./theme.js";
@@ -104,13 +105,6 @@ function ServerRow({ server, active }: { server: McpServerSummary; active: boole
       ) : null}
     </Box>
   );
-}
-
-function healthBadge(elapsedMs: number): { glyph: string; label: string; color: string } {
-  if (elapsedMs === 0) return { glyph: "✗", label: "no inspect data", color: COLOR.err };
-  if (elapsedMs < 500) return { glyph: "●", label: `healthy · ${elapsedMs}ms`, color: COLOR.ok };
-  if (elapsedMs < 3000) return { glyph: "◌", label: `slow · ${elapsedMs}ms`, color: COLOR.warn };
-  return { glyph: "✗", label: `very slow · ${elapsedMs}ms`, color: COLOR.err };
 }
 
 function capabilityList(s: McpServerSummary): string {
