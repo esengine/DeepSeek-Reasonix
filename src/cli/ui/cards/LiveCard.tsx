@@ -5,6 +5,11 @@ import { Spinner } from "../primitives/Spinner.js";
 import type { LiveCard as LiveCardData } from "../state/cards.js";
 import { FG, TONE } from "../theme/tokens.js";
 
+/** LiveCard is a single transient row — used for thinking / undo / aborted /
+ *  retry hints. It deliberately does NOT use CardLayout: no marginTop spacer,
+ *  no body, no bold-title pattern. The signal is "something is happening
+ *  right now"; full card chrome would be too heavy. */
+
 const TONE_TO_COLOR = {
   ok: TONE.ok,
   warn: TONE.warn,
@@ -31,8 +36,7 @@ export function LiveCard({ card }: { card: LiveCardData }): React.ReactElement {
   const color = TONE_TO_COLOR[card.tone];
   const glyph = VARIANT_GLYPH[card.variant];
   return (
-    <Box flexDirection="row">
-      <Text>{"  "}</Text>
+    <Box flexDirection="row" gap={1}>
       {card.variant === "thinking" ? (
         <Spinner kind="circle" color={color} bold />
       ) : (
@@ -40,8 +44,8 @@ export function LiveCard({ card }: { card: LiveCardData }): React.ReactElement {
           {glyph}
         </Text>
       )}
-      <Text color={FG.body}>{` ${card.text}`}</Text>
-      {card.meta !== undefined && <Text color={FG.faint}>{`   ${card.meta}`}</Text>}
+      <Text color={FG.body}>{card.text}</Text>
+      {card.meta !== undefined ? <Text color={FG.faint}>{card.meta}</Text> : null}
     </Box>
   );
 }

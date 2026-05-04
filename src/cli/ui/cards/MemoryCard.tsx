@@ -1,10 +1,9 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { BarRow } from "../primitives/BarRow.js";
 import type { MemoryCard as MemoryCardData, MemoryEntry } from "../state/cards.js";
 import { FG, TONE } from "../theme/tokens.js";
-import { CardHeader } from "./CardHeader.js";
+import { CardLayout } from "./CardLayout.js";
 
 const CATEGORY_ORDER: ReadonlyArray<MemoryEntry["category"]> = [
   "user",
@@ -42,42 +41,27 @@ export function MemoryCard({ card }: { card: MemoryCardData }): React.ReactEleme
   const tokens =
     card.tokens > 1024 ? `~${(card.tokens / 1024).toFixed(1)}K tok` : `~${card.tokens} tok`;
   return (
-    <Box flexDirection="column">
-      <CardHeader
-        tone="memory"
-        glyph="⌑"
-        title="Context"
-        subtitle={`·  ${summary}`}
-        meta={tokens}
-        titleColor={FG.sub}
-      />
-      {CATEGORY_ORDER.filter((c) => counts[c] > 0).map((category) => {
+    <CardLayout glyph="⌑" tone={FG.meta} title="memory" meta={`${summary} · ${tokens}`}>
+      {CATEGORY_ORDER.filter((c) => counts[c] > 0).map((category, ci) => {
         const all = card.entries.filter((e) => e.category === category);
         const shown = all.slice(0, 5);
         const remaining = all.length - shown.length;
         return (
-          <Box key={category} flexDirection="column">
-            <BarRow tone="memory" indent={0} />
-            <BarRow tone="memory">
-              <Text color={FG.faint}>
-                {CATEGORY_LABEL[category]} ({counts[category]})
-              </Text>
-            </BarRow>
+          <Box key={category} flexDirection="column" marginTop={ci > 0 ? 1 : 0}>
+            <Text color={FG.faint}>
+              {CATEGORY_LABEL[category]} ({counts[category]})
+            </Text>
             {shown.map((entry) => (
-              <BarRow key={`${category}:${entry.summary}`} tone="memory">
-                <Text color={CATEGORY_GLYPH_COLOR[category]}>{CATEGORY_GLYPH[category]} </Text>
+              <Box key={`${category}:${entry.summary}`} flexDirection="row" gap={1}>
+                <Text color={CATEGORY_GLYPH_COLOR[category]}>{CATEGORY_GLYPH[category]}</Text>
                 <Text color={FG.sub}>{entry.summary}</Text>
-              </BarRow>
+              </Box>
             ))}
-            {remaining > 0 && (
-              <BarRow tone="memory">
-                <Text color={FG.faint}>{`⋮ +${remaining} more`}</Text>
-              </BarRow>
-            )}
+            {remaining > 0 ? <Text color={FG.faint}>{`⋮ +${remaining} more`}</Text> : null}
           </Box>
         );
       })}
-    </Box>
+    </CardLayout>
   );
 }
 

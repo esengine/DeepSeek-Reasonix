@@ -1,7 +1,12 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { CARD, type CardTone, FG, SURFACE } from "../theme/tokens.js";
+import { CARD, type CardTone, FG } from "../theme/tokens.js";
+import { CardLayout } from "./CardLayout.js";
+
+/** Generic confirmation-modal wrapper used by Plan / Edit / Choice / Shell /
+ *  Checkpoint / Revise pickers. Looks like a regular card on top with a
+ *  horizontal rule + footer hint underneath; children fill the body. */
 
 const SEPARATOR_PAD = 6;
 const MIN_SEPARATOR = 20;
@@ -15,7 +20,8 @@ export interface ApprovalCardProps {
   glyph?: string;
   title: string;
   metaRight?: string;
-  /** Override metaRight color — defaults to FG.faint. Use the tone color to match design's status indicator (e.g. "awaiting" in accent for plan-confirm). */
+  /** Override metaRight color — defaults to FG.faint. Use the tone color to
+   *  match design's status indicator (e.g. "awaiting" in accent for plan-confirm). */
   metaRightColor?: string;
   children?: React.ReactNode;
   footerHint?: string;
@@ -49,34 +55,15 @@ export function ApprovalCard({
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const ruleWidth = Math.max(MIN_SEPARATOR, cols - SEPARATOR_PAD);
+  const meta = metaRight ? <Text color={metaRightColor ?? FG.faint}>{metaRight}</Text> : undefined;
 
   return (
-    <Box flexDirection="column" marginY={1}>
-      <Box flexDirection="row">
-        <Text color={palette.color} backgroundColor={SURFACE.bgElev}>
-          {" ▎ "}
-        </Text>
-        <Text bold color={palette.color} backgroundColor={SURFACE.bgElev}>
-          {`${headerGlyph}  `}
-        </Text>
-        <Text bold color={FG.strong} backgroundColor={SURFACE.bgElev}>
-          {` ${title} `}
-        </Text>
-        {metaRight !== undefined && (
-          <Text color={metaRightColor ?? FG.faint} backgroundColor={SURFACE.bgElev}>
-            {`  ${metaRight} `}
-          </Text>
-        )}
-      </Box>
-      <Box flexDirection="column" paddingX={2} marginTop={1}>
-        {children}
-      </Box>
-      <Box paddingX={2} marginTop={1}>
+    <CardLayout glyph={headerGlyph} tone={palette.color} title={title} meta={meta}>
+      {children}
+      <Box marginTop={1}>
         <Text color={FG.faint}>{"─".repeat(ruleWidth)}</Text>
       </Box>
-      <Box paddingX={2}>
-        <Text color={FG.faint}>{footerHint}</Text>
-      </Box>
-    </Box>
+      <Text color={FG.faint}>{footerHint}</Text>
+    </CardLayout>
   );
 }

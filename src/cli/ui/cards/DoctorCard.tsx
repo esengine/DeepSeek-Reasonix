@@ -1,10 +1,9 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { BarRow } from "../primitives/BarRow.js";
 import type { DoctorCard as DoctorCardData, DoctorCheckEntry } from "../state/cards.js";
-import { CARD, FG, TONE } from "../theme/tokens.js";
-import { CardHeader } from "./CardHeader.js";
+import { FG, TONE } from "../theme/tokens.js";
+import { CardLayout } from "./CardLayout.js";
 
 const LEVEL_COLOR: Record<DoctorCheckEntry["level"], string> = {
   ok: TONE.ok,
@@ -30,19 +29,20 @@ export function DoctorCard({ card }: { card: DoctorCardData }): React.ReactEleme
   const fail = card.checks.filter((c) => c.level === "fail").length;
   const summary = `${card.checks.length} checks · ${ok} passed${warn > 0 ? ` · ${warn} warn` : ""}${fail > 0 ? ` · ${fail} fail` : ""}`;
   const labelWidth = card.checks.reduce((m, c) => Math.max(m, c.label.length), 0);
+  const headerTone = fail > 0 ? TONE.err : warn > 0 ? TONE.warn : TONE.ok;
 
   return (
-    <Box flexDirection="column">
-      <CardHeader tone="tool" glyph="⚕" title="Doctor" meta={summary} barColor={CARD.tool.color} />
-      <BarRow tone="tool" indent={0} />
+    <CardLayout glyph="⚕" tone={headerTone} title="doctor" meta={summary}>
       {card.checks.map((c) => (
-        <BarRow key={c.label} tone="tool">
+        <Box key={c.label} flexDirection="row" gap={1}>
           <Text color={LEVEL_COLOR[c.level]}>{LEVEL_GLYPH[c.level]}</Text>
-          <Text bold color={FG.body}>{`  ${c.label.padEnd(labelWidth + 1)}`}</Text>
+          <Text bold color={FG.body}>
+            {c.label.padEnd(labelWidth)}
+          </Text>
           <Text color={FG.sub}>{c.detail}</Text>
-          <Text color={LEVEL_COLOR[c.level]}>{`    ${LEVEL_TAG[c.level]}`}</Text>
-        </BarRow>
+          <Text color={LEVEL_COLOR[c.level]}>{LEVEL_TAG[c.level]}</Text>
+        </Box>
       ))}
-    </Box>
+    </CardLayout>
   );
 }

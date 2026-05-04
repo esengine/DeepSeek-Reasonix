@@ -1,40 +1,30 @@
-import { Text } from "ink";
-import { Box } from "ink";
+import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { BarRow } from "../primitives/BarRow.js";
 import type { BranchCard as BranchCardData } from "../state/cards.js";
-import { CARD, FG, TONE } from "../theme/tokens.js";
-import { CardHeader } from "./CardHeader.js";
-
-const BAR_CELLS = 28;
+import { FG, TONE } from "../theme/tokens.js";
+import { CardLayout } from "./CardLayout.js";
+import { ProgressBar } from "./ProgressBar.js";
 
 export function BranchCard({ card }: { card: BranchCardData }): React.ReactElement {
   const ratio = card.total > 0 ? card.completed / card.total : 0;
-  const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)));
-  const tone = card.done ? TONE.ok : CARD.streaming.color;
+  const tone = card.done ? TONE.ok : TONE.brand;
   return (
-    <Box flexDirection="column">
-      <CardHeader
-        tone="streaming"
-        glyph="⎇"
-        title={card.done ? "Branching done" : "Branching"}
-        meta={`· ${card.completed} of ${card.total} samples`}
-        barColor={tone}
-      />
-      <BarRow tone="streaming" indent={0} />
-      <BarRow tone="streaming">
-        <Text color={tone}>{"█".repeat(filled)}</Text>
-        <Text color={FG.faint}>{"░".repeat(BAR_CELLS - filled)}</Text>
-        <Text color={FG.faint}>{`  ${(ratio * 100).toFixed(0)}%`}</Text>
-      </BarRow>
-      {!card.done && card.completed > 0 && (
-        <BarRow tone="streaming">
-          <Text color={FG.faint}>
-            {`latest: #${card.latestIndex} · T=${card.latestTemperature.toFixed(2)} · ${card.latestUncertainties} unc`}
-          </Text>
-        </BarRow>
-      )}
-    </Box>
+    <CardLayout
+      glyph="⎇"
+      tone={tone}
+      title={card.done ? "branching done" : "branching"}
+      meta={`${card.completed}/${card.total} samples`}
+    >
+      <Box flexDirection="row" gap={1}>
+        <ProgressBar ratio={ratio} color={tone} />
+        <Text color={FG.faint}>{`${(ratio * 100).toFixed(0)}%`}</Text>
+      </Box>
+      {!card.done && card.completed > 0 ? (
+        <Text color={FG.faint}>
+          {`latest: #${card.latestIndex} · T=${card.latestTemperature.toFixed(2)} · ${card.latestUncertainties} unc`}
+        </Text>
+      ) : null}
+    </CardLayout>
   );
 }

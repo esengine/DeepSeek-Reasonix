@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import type { PlanCard as PlanCardData, PlanStep } from "../state/cards.js";
 import { FG, TONE } from "../theme/tokens.js";
+import { CardLayout } from "./CardLayout.js";
 
 const STATUS_GLYPH: Record<PlanStep["status"], string> = {
   queued: "○",
@@ -29,19 +30,12 @@ export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
   const progress = `${variantTag}${doneCount}/${card.steps.length} done`;
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box flexDirection="row" gap={1}>
-        <Text color={TONE.accent}>⊞</Text>
-        <Text color={TONE.accent} bold>
-          {card.title}
-        </Text>
-        <Text color={FG.faint}>{`· ${progress}`}</Text>
-      </Box>
+    <CardLayout glyph="⊞" tone={TONE.accent} title={card.title} meta={progress}>
       {card.steps.map((step, i) => {
         const isActive = step.status === "running";
         const titleColor = isActive ? FG.strong : FG.sub;
         return (
-          <Box key={step.id} paddingLeft={2} flexDirection="row" gap={1}>
+          <Box key={step.id} flexDirection="row" gap={1}>
             <Text color={STATUS_COLOR[step.status]}>{STATUS_GLYPH[step.status]}</Text>
             <Text bold={isActive} color={titleColor}>
               {`${i + 1}. ${step.title}`}
@@ -50,6 +44,6 @@ export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
           </Box>
         );
       })}
-    </Box>
+    </CardLayout>
   );
 }

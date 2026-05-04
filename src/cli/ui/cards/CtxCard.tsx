@@ -1,23 +1,33 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { BarRow } from "../primitives/BarRow.js";
 import type { CtxCard as CtxCardData } from "../state/cards.js";
 import { FG, TONE } from "../theme/tokens.js";
-import { CardHeader } from "./CardHeader.js";
+import { CardLayout } from "./CardLayout.js";
+import { ProgressBar } from "./ProgressBar.js";
 
 const BAR_CELLS = 32;
 
-function row(label: string, tokens: number, ratio: number, color: string): React.ReactElement {
-  const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)));
+function Row({
+  label,
+  tokens,
+  ratio,
+  color,
+}: {
+  label: string;
+  tokens: number;
+  ratio: number;
+  color: string;
+}): React.ReactElement {
   return (
-    <BarRow tone="usage">
+    <Box flexDirection="row" gap={1}>
       <Text color={FG.sub}>{label.padEnd(8)}</Text>
-      <Text color={color}>{"█".repeat(filled)}</Text>
-      <Text color={FG.faint}>{"░".repeat(BAR_CELLS - filled)}</Text>
-      <Text bold color={FG.body}>{`  ${tokens.toLocaleString()}`}</Text>
-      <Text color={FG.faint}>{`  ${(ratio * 100).toFixed(1)}%`}</Text>
-    </BarRow>
+      <ProgressBar ratio={ratio} color={color} cells={BAR_CELLS} />
+      <Text bold color={FG.body}>
+        {tokens.toLocaleString()}
+      </Text>
+      <Text color={FG.faint}>{`${(ratio * 100).toFixed(1)}%`}</Text>
+    </Box>
   );
 }
 
@@ -25,32 +35,42 @@ export function CtxCard({ card }: { card: CtxCardData }): React.ReactElement {
   const cap = Math.max(1, card.ctxMax);
   const used = card.systemTokens + card.toolsTokens + card.logTokens + card.inputTokens;
   const usedPct = (used / cap) * 100;
-  const meta = `· ${used.toLocaleString()} / ${cap.toLocaleString()} (${usedPct.toFixed(1)}%)`;
+  const meta = `${used.toLocaleString()} / ${cap.toLocaleString()} (${usedPct.toFixed(1)}%)`;
 
   return (
-    <Box flexDirection="column">
-      <CardHeader tone="usage" glyph="⌘" title="Context window" meta={meta} />
-      <BarRow tone="usage" indent={0} />
-      {row("system", card.systemTokens, card.systemTokens / cap, TONE.brand)}
-      {row("tools", card.toolsTokens, card.toolsTokens / cap, TONE.warn)}
-      {row("log", card.logTokens, card.logTokens / cap, TONE.ok)}
-      {row("input", card.inputTokens, card.inputTokens / cap, TONE.accent)}
-      {card.topTools.length > 0 && (
-        <>
-          <BarRow tone="usage" indent={0} />
-          <BarRow tone="usage">
-            <Text color={FG.faint}>
-              {`top tools (${card.toolsCount} total · ${card.logMessages} log msgs):`}
-            </Text>
-          </BarRow>
+    <CardLayout glyph="⌘" tone={TONE.brand} title="context window" meta={meta}>
+      <Row
+        label="system"
+        tokens={card.systemTokens}
+        ratio={card.systemTokens / cap}
+        color={TONE.brand}
+      />
+      <Row
+        label="tools"
+        tokens={card.toolsTokens}
+        ratio={card.toolsTokens / cap}
+        color={TONE.warn}
+      />
+      <Row label="log" tokens={card.logTokens} ratio={card.logTokens / cap} color={TONE.ok} />
+      <Row
+        label="input"
+        tokens={card.inputTokens}
+        ratio={card.inputTokens / cap}
+        color={TONE.accent}
+      />
+      {card.topTools.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={FG.faint}>
+            {`top tools (${card.toolsCount} total · ${card.logMessages} log msgs):`}
+          </Text>
           {card.topTools.slice(0, 5).map((t) => (
-            <BarRow key={`${t.turn}-${t.name}`} tone="usage">
-              <Text color={FG.sub}>{`  ${t.name}`}</Text>
-              <Text color={FG.faint}>{`  · turn ${t.turn} · ${t.tokens.toLocaleString()}`}</Text>
-            </BarRow>
+            <Box key={`${t.turn}-${t.name}`} flexDirection="row" gap={1}>
+              <Text color={FG.sub}>{t.name}</Text>
+              <Text color={FG.faint}>{`· turn ${t.turn} · ${t.tokens.toLocaleString()}`}</Text>
+            </Box>
           ))}
-        </>
-      )}
-    </Box>
+        </Box>
+      ) : null}
+    </CardLayout>
   );
 }

@@ -1,10 +1,9 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { BarRow } from "../primitives/BarRow.js";
 import type { SearchCard as SearchCardData, SearchHit } from "../state/cards.js";
-import { FG } from "../theme/tokens.js";
-import { CardHeader } from "./CardHeader.js";
+import { FG, TONE } from "../theme/tokens.js";
+import { CardLayout } from "./CardLayout.js";
 
 export function SearchCard({ card }: { card: SearchCardData }): React.ReactElement {
   const fileCount = new Set(card.hits.map((h) => h.file)).size;
@@ -13,34 +12,28 @@ export function SearchCard({ card }: { card: SearchCardData }): React.ReactEleme
   } · ${(card.elapsedMs / 1000).toFixed(2)}s`;
 
   return (
-    <Box flexDirection="column">
-      <CardHeader tone="search" glyph="⊙" title="Search" subtitle={`"${card.query}"`} meta={meta} />
-      {card.hits.length > 0 && (
+    <CardLayout glyph="⊙" tone={TONE.info} title={`"${card.query}"`} meta={meta}>
+      {card.hits.length === 0 ? null : (
         <>
-          <BarRow tone="search" indent={0} />
-          {groupByFile(card.hits.slice(0, 10)).map(([file, hits]) => (
-            <Box key={file} flexDirection="column">
-              <BarRow tone="search">
-                <Text bold color={FG.strong}>
-                  {file}
-                </Text>
-              </BarRow>
+          {groupByFile(card.hits.slice(0, 10)).map(([file, hits], gi) => (
+            <Box key={file} flexDirection="column" marginTop={gi > 0 ? 1 : 0}>
+              <Text bold color={FG.strong}>
+                {file}
+              </Text>
               {hits.map((h, i) => (
-                <BarRow key={`${file}:${h.line}:${i}`} tone="search">
+                <Box key={`${file}:${h.line}:${i}`} flexDirection="row">
                   <Text color={FG.faint}>{`${h.line.toString().padStart(4)} │ `}</Text>
                   <HighlightedLine text={h.preview} start={h.matchStart} end={h.matchEnd} />
-                </BarRow>
+                </Box>
               ))}
             </Box>
           ))}
-          {card.hits.length > 10 && (
-            <BarRow tone="search">
-              <Text color={FG.faint}>{`⋮ +${card.hits.length - 10} more hits`}</Text>
-            </BarRow>
-          )}
+          {card.hits.length > 10 ? (
+            <Text color={FG.faint}>{`⋮ +${card.hits.length - 10} more hits`}</Text>
+          ) : null}
         </>
       )}
-    </Box>
+    </CardLayout>
   );
 }
 

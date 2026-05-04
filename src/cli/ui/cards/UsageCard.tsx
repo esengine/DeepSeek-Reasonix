@@ -1,10 +1,10 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { BarRow } from "../primitives/BarRow.js";
 import type { UsageCard as UsageCardData } from "../state/cards.js";
 import { FG, TONE, formatCNY } from "../theme/tokens.js";
-import { CardHeader } from "./CardHeader.js";
+import { CardLayout } from "./CardLayout.js";
+import { ProgressBar } from "./ProgressBar.js";
 
 const BAR_CELLS = 30;
 
@@ -14,14 +14,28 @@ function compactNum(n: number): string {
   return String(n);
 }
 
-function bar(ratio: number, color: string): React.ReactElement {
-  const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)));
-  const empty = BAR_CELLS - filled;
+function Row({
+  label,
+  ratio,
+  color,
+  tokens,
+  trail,
+}: {
+  label: string;
+  ratio: number;
+  color: string;
+  tokens: number;
+  trail?: string;
+}): React.ReactElement {
   return (
-    <>
-      <Text color={color}>{"█".repeat(filled)}</Text>
-      <Text color={FG.faint}>{"░".repeat(empty)}</Text>
-    </>
+    <Box flexDirection="row" gap={1}>
+      <Text color={FG.sub}>{label.padEnd(8)}</Text>
+      <ProgressBar ratio={ratio} color={color} cells={BAR_CELLS} />
+      <Text bold color={FG.body}>
+        {tokens.toLocaleString()}
+      </Text>
+      {trail ? <Text color={FG.faint}>{trail}</Text> : null}
+    </Box>
   );
 }
 
@@ -32,67 +46,59 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
   const reasonRatio = card.tokens.reason / cap;
   const outputRatio = card.tokens.output / cap;
   const elapsed = card.elapsedMs !== undefined ? ` · ${(card.elapsedMs / 1000).toFixed(1)}s` : "";
-  const meta = `${formatCNY(card.cost)}${elapsed}`;
+  const meta = `turn ${card.turn} · ${formatCNY(card.cost)}${elapsed}`;
 
   return (
-    <Box flexDirection="column">
-      <CardHeader tone="usage" glyph="Σ" title="Usage" subtitle={`turn ${card.turn}`} meta={meta} />
-      <BarRow tone="usage" indent={0} />
-      <BarRow tone="usage">
-        <Text color={FG.sub}>{"prompt    "}</Text>
-        {bar(promptRatio, TONE.brand)}
-        <Text bold color={FG.body}>{`  ${card.tokens.prompt.toLocaleString()}`}</Text>
-        <Text color={FG.faint}>{` / 1M · ${(promptRatio * 100).toFixed(1)}%`}</Text>
-      </BarRow>
-      <BarRow tone="usage">
-        <Text color={FG.sub}>{"reason    "}</Text>
-        {bar(reasonRatio, TONE.accent)}
-        <Text bold color={FG.body}>{`  ${card.tokens.reason.toLocaleString()}`}</Text>
-      </BarRow>
-      <BarRow tone="usage">
-        <Text color={FG.sub}>{"output    "}</Text>
-        {bar(outputRatio, TONE.brand)}
-        <Text bold color={FG.body}>{`  ${card.tokens.output.toLocaleString()}`}</Text>
-      </BarRow>
-      <BarRow tone="usage" indent={0} />
-      <BarRow tone="usage">
-        <Text color={FG.sub}>{"cache hit "}</Text>
-        {bar(card.cacheHit, TONE.ok)}
-        <Text bold color={TONE.ok}>{`  ${(card.cacheHit * 100).toFixed(1)}%`}</Text>
-      </BarRow>
-      <BarRow tone="usage" indent={0} />
-      <BarRow tone="usage">
-        <Text color={FG.faint}>{"session "}</Text>
+    <CardLayout glyph="Σ" tone={TONE.brand} title="usage" meta={meta}>
+      <Row
+        label="prompt"
+        ratio={promptRatio}
+        color={TONE.brand}
+        tokens={card.tokens.prompt}
+        trail={`/ 1M · ${(promptRatio * 100).toFixed(1)}%`}
+      />
+      <Row label="reason" ratio={reasonRatio} color={TONE.accent} tokens={card.tokens.reason} />
+      <Row label="output" ratio={outputRatio} color={TONE.brand} tokens={card.tokens.output} />
+      <Box marginTop={1}>
+        <Row
+          label="cache"
+          ratio={card.cacheHit}
+          color={TONE.ok}
+          tokens={Math.round(card.cacheHit * 100)}
+          trail="%"
+        />
+      </Box>
+      <Box flexDirection="row" gap={1} marginTop={1}>
+        <Text color={FG.faint}>session</Text>
         <Text bold color={FG.body}>{`⛁ ${formatCNY(card.sessionCost, 3)}`}</Text>
-        {card.balance !== undefined && (
+        {card.balance !== undefined ? (
           <>
-            <Text color={FG.meta}>{"  ·  "}</Text>
-            <Text color={FG.faint}>{"balance "}</Text>
+            <Text color={FG.faint}>· balance</Text>
             <Text bold color={TONE.brand}>{`¥${card.balance.toFixed(2)}`}</Text>
           </>
-        )}
-      </BarRow>
-    </Box>
+        ) : null}
+      </Box>
+    </CardLayout>
   );
 }
 
 function CompactUsageRow({ card }: { card: UsageCardData }): React.ReactElement {
-  const elapsed = card.elapsedMs !== undefined ? `  ·  ${(card.elapsedMs / 1000).toFixed(1)}s` : "";
+  const elapsed = card.elapsedMs !== undefined ? ` · ${(card.elapsedMs / 1000).toFixed(1)}s` : "";
   return (
-    <Box>
-      <Text color={FG.faint}>{`  Σ  turn ${card.turn}  ·  `}</Text>
-      <Text
-        color={FG.meta}
-      >{`${compactNum(card.tokens.prompt)} prompt · ${compactNum(card.tokens.output)} out`}</Text>
-      <Text color={FG.faint}>{"  ·  cache "}</Text>
+    <Box flexDirection="row" gap={1}>
+      <Text color={FG.faint}>{`Σ turn ${card.turn}`}</Text>
+      <Text color={FG.meta}>
+        {`${compactNum(card.tokens.prompt)} prompt · ${compactNum(card.tokens.output)} out`}
+      </Text>
+      <Text color={FG.faint}>· cache</Text>
       <Text color={TONE.ok}>{`${(card.cacheHit * 100).toFixed(0)}%`}</Text>
-      <Text color={FG.faint}>{`  ·  ${formatCNY(card.cost)}${elapsed}`}</Text>
-      {card.balance !== undefined && (
+      <Text color={FG.faint}>{`· ${formatCNY(card.cost)}${elapsed}`}</Text>
+      {card.balance !== undefined ? (
         <>
-          <Text color={FG.faint}>{"  ·  "}</Text>
+          <Text color={FG.faint}>·</Text>
           <Text color={TONE.brand}>{`¥${card.balance.toFixed(2)}`}</Text>
         </>
-      )}
+      ) : null}
     </Box>
   );
 }

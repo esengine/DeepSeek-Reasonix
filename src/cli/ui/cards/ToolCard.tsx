@@ -1,14 +1,14 @@
-import { Box, Text, useStdout } from "ink";
+import { Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { clipToCells } from "../../../frame/width.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { ToolCard as ToolCardData } from "../state/cards.js";
 import { FG, TONE } from "../theme/tokens.js";
+import { CardLayout } from "./CardLayout.js";
 
 const READ_TAIL = 2;
 const OTHER_TAIL = 5;
-const BODY_PAD = 2;
 
 /** Read-style tools dump file/list bodies — short tail is enough; the model already has the full text in context. */
 function tailLinesFor(name: string): number {
@@ -22,7 +22,7 @@ function tailLinesFor(name: string): number {
 export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
-  const lineCells = Math.max(20, cols - BODY_PAD - 4);
+  const lineCells = Math.max(20, cols - 6);
   const argsLabel = formatArgsSummary(card.args);
   const allLines = card.output.length > 0 ? card.output.split("\n") : [];
   const tail = tailLinesFor(card.name);
@@ -30,54 +30,56 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const visible = truncated ? allLines.slice(-tail) : allLines;
   const hidden = truncated ? allLines.length - visible.length : 0;
   const status = toolStatus(card);
-  const headColor = headerColorFor(status);
+  const tone = headerColorFor(status);
   const errColor = card.exitCode && card.exitCode !== 0 ? TONE.err : FG.sub;
   // Rejected calls show a single trailing badge — the verbose JSON error body
   // is already conveyed by the badge, so dropping the body keeps the card tight.
   const showBody = !card.rejected && visible.length > 0;
 
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box flexDirection="row" gap={1}>
-        <Text color={headColor}>{statusGlyph(status)}</Text>
-        <Text color={headColor} bold>
-          {card.name}
+  const meta = (
+    <>
+      {argsLabel ? <Text color={FG.faint}>{argsLabel}</Text> : null}
+      {card.retry ? (
+        <Text color={TONE.warn} bold>{`↻ ${card.retry.attempt}/${card.retry.max}`}</Text>
+      ) : null}
+      {card.rejected ? (
+        <Text color={TONE.err} bold>
+          rejected
         </Text>
-        {argsLabel ? <Text color={FG.faint}>{argsLabel}</Text> : null}
-        {card.retry ? (
-          <Text color={TONE.warn} bold>{`↻ ${card.retry.attempt}/${card.retry.max}`}</Text>
-        ) : null}
-        {card.rejected ? (
-          <Text color={TONE.err} bold>
-            rejected
-          </Text>
-        ) : null}
-        <Text color={FG.faint}>{metaTrail(card)}</Text>
-        {status === "running" ? (
-          <Box flexDirection="row">
-            <Spinner kind="braille" color={TONE.brand} bold />
-          </Box>
-        ) : null}
-      </Box>
-      {showBody && (
+      ) : null}
+      <Text color={FG.faint}>{metaTrail(card)}</Text>
+    </>
+  );
+
+  return (
+    <CardLayout
+      glyph={statusGlyph(status)}
+      tone={tone}
+      title={card.name}
+      meta={meta}
+      trailing={
+        status === "running" ? <Spinner kind="braille" color={TONE.brand} bold /> : undefined
+      }
+    >
+      {showBody ? (
         <>
           {hidden > 0 ? (
-            <Box paddingLeft={BODY_PAD}>
-              <Text color={FG.faint}>
-                {`⋮ ${hidden} earlier line${hidden === 1 ? "" : "s"} (use /tool to read full)`}
-              </Text>
-            </Box>
+            <Text color={FG.faint}>
+              {`⋮ ${hidden} earlier line${hidden === 1 ? "" : "s"} (use /tool to read full)`}
+            </Text>
           ) : null}
           {visible.map((line, i) => (
-            <Box key={`${card.id}:${hidden + i}`} paddingLeft={BODY_PAD}>
-              <Text color={errColor} dimColor={!card.exitCode || card.exitCode === 0}>
-                {clipToCells(line, lineCells) || " "}
-              </Text>
-            </Box>
+            <Text
+              key={`${card.id}:${hidden + i}`}
+              color={errColor}
+              dimColor={!card.exitCode || card.exitCode === 0}
+            >
+              {clipToCells(line, lineCells) || " "}
+            </Text>
           ))}
         </>
-      )}
-    </Box>
+      ) : null}
+    </CardLayout>
   );
 }
 

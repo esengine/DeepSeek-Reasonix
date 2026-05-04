@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import type { TaskCard as TaskCardData, TaskStep } from "../state/cards.js";
 import { FG, TONE } from "../theme/tokens.js";
+import { CardLayout } from "./CardLayout.js";
 
 const STEP_GLYPH: Record<TaskStep["status"], string> = {
   queued: "○",
@@ -32,18 +33,21 @@ const TASK_GLYPH: Record<TaskCardData["status"], string> = {
 
 export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
   const elapsed = `${(card.elapsedMs / 1000).toFixed(1)}s`;
+  const meta = (
+    <>
+      <Text color={FG.body}>{card.title}</Text>
+      <Text color={FG.faint}>{`· ${elapsed} · ${card.status}`}</Text>
+    </>
+  );
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box flexDirection="row" gap={1}>
-        <Text color={TASK_COLOR[card.status]}>{TASK_GLYPH[card.status]}</Text>
-        <Text color={TASK_COLOR[card.status]} bold>
-          {`step ${card.index}/${card.total}`}
-        </Text>
-        <Text color={FG.body}>{card.title}</Text>
-        <Text color={FG.faint}>{`· ${elapsed} · ${card.status}`}</Text>
-      </Box>
+    <CardLayout
+      glyph={TASK_GLYPH[card.status]}
+      tone={TASK_COLOR[card.status]}
+      title={`step ${card.index}/${card.total}`}
+      meta={meta}
+    >
       {card.steps.map((step) => (
-        <Box key={step.id} paddingLeft={2} flexDirection="row" gap={1}>
+        <Box key={step.id} flexDirection="row" gap={1}>
           <Text color={STEP_COLOR[step.status]}>{STEP_GLYPH[step.status]}</Text>
           <Text bold color={FG.body}>
             {(step.toolName ?? "step").padEnd(7)}
@@ -55,6 +59,6 @@ export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
           ) : null}
         </Box>
       ))}
-    </Box>
+    </CardLayout>
   );
 }
