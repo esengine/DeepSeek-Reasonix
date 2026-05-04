@@ -14,6 +14,7 @@ import type { Card } from "../ui/state/cards.js";
 import type { AgentEvent } from "../ui/state/events.js";
 import { AgentStoreProvider, useAgentState, useDispatch } from "../ui/state/provider.js";
 import type { SessionInfo } from "../ui/state/state.js";
+import { usePromptHistory } from "../ui/use-prompt-history.js";
 
 const BRAND = "#79c0ff";
 const FAINT = "#6e7681";
@@ -235,6 +236,7 @@ export function ChatV2Shell({
   const turnRef = useRef(0);
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
+  const history = usePromptHistory();
 
   const replyBuilder = buildReplyOverride ?? buildReply;
 
@@ -265,8 +267,19 @@ export function ChatV2Shell({
     if (trimmed.length === 0) return;
     if (inProgress) return;
     dispatchRef.current({ type: "user.submit", text: trimmed });
+    history.recordSubmit(trimmed);
     setDraft("");
     playReply(trimmed);
+  };
+
+  const handleHistoryPrev = (): void => {
+    const recalled = history.recallPrev(draft);
+    if (recalled !== null) setDraft(recalled);
+  };
+
+  const handleHistoryNext = (): void => {
+    const recalled = history.recallNext();
+    if (recalled !== null) setDraft(recalled);
   };
 
   return (
@@ -284,6 +297,8 @@ export function ChatV2Shell({
           onChange={setDraft}
           onSubmit={handleSubmit}
           onCancel={onExit}
+          onHistoryPrev={handleHistoryPrev}
+          onHistoryNext={handleHistoryNext}
           disabled={inProgress}
           placeholder={inProgress ? "thinking…" : "type a message and hit enter…"}
         />

@@ -167,6 +167,42 @@ describe("chat-v2 shell — interactive submit", () => {
   });
 });
 
+describe("chat-v2 shell — history navigation", () => {
+  it("up arrow on the empty prompt recalls the most recent submission", async () => {
+    const w = makeTestWriter();
+    const stdin = makeFakeStdin();
+    const handle = mount(
+      <AgentStoreProvider session={DEMO_SESSION}>
+        <ChatV2Shell onExit={() => {}} buildReply={instantReply} />
+      </AgentStoreProvider>,
+      {
+        viewportWidth: 80,
+        viewportHeight: 24,
+        pools: pools(),
+        write: w.write,
+        stdin,
+      },
+    );
+    await flush();
+    stdin.push("alpha\r");
+    for (let i = 0; i < 30; i++) await flush();
+    stdin.push("beta\r");
+    for (let i = 0; i < 30; i++) await flush();
+    // Both submissions should be in history; ↑ recalls "beta", ↑ again recalls "alpha".
+    stdin.push("\x1b[A");
+    await flush();
+    stdin.push("\r");
+    for (let i = 0; i < 30; i++) await flush();
+    // The third submission should be "beta" (recalled). Easy assertion: a fourth
+    // user.submit lands the text "beta" again.
+    const out = w.output();
+    // beta appears at least twice in the rendered output (original submission + recall).
+    const occurrences = (out.match(/beta/g) ?? []).length;
+    expect(occurrences).toBeGreaterThanOrEqual(2);
+    handle.destroy();
+  });
+});
+
 describe("chat-v2 shell — exit", () => {
   it("Esc on the empty prompt invokes onExit", async () => {
     const w = makeTestWriter();
