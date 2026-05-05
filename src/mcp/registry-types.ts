@@ -9,6 +9,8 @@ export interface RegistryInstall {
   url?: string;
   /** Env var names the user must set. */
   requiredEnv?: string[];
+  /** Trailing args to pass after the package id — e.g. ["run", "<qualifiedName>"] for `npx -y @smithery/cli run X`. */
+  extraArgs?: string[];
 }
 
 export interface RegistryEntry {

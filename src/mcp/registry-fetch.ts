@@ -172,6 +172,47 @@ function normalizeSmithery(s: SmitheryServer): RegistryEntry | null {
   return entry;
 }
 
+interface SmitheryConnection {
+  type?: string;
+  deploymentUrl?: string;
+  bundleUrl?: string;
+  runtime?: string;
+}
+
+interface SmitheryDetailResponse {
+  qualifiedName?: string;
+  remote?: boolean;
+  deploymentUrl?: string | null;
+  connections?: SmitheryConnection[];
+}
+
+/** Resolve a Smithery listing entry into a runnable install. http → streamable-http remote; stdio → spawn via @smithery/cli. */
+export async function fetchSmitheryDetail(
+  qualifiedName: string,
+  fetcher: typeof fetch = globalThis.fetch,
+): Promise<RegistryInstall | null> {
+  const url = `${SMITHERY_REGISTRY_URL}/${encodeURIComponent(qualifiedName)}`;
+  const resp = await timeoutFetch(url, fetcher);
+  if (!resp.ok) return null;
+  const json = (await resp.json()) as SmitheryDetailResponse;
+  const conn = json.connections?.[0];
+  if (!conn) return null;
+  if (conn.type === "http" || conn.type === "ws") {
+    const deploymentUrl = conn.deploymentUrl ?? json.deploymentUrl;
+    if (!deploymentUrl) return null;
+    return { runtime: "remote", transport: "streamable-http", url: deploymentUrl };
+  }
+  if (conn.type === "stdio") {
+    return {
+      runtime: "npm",
+      packageId: "@smithery/cli",
+      transport: "stdio",
+      extraArgs: ["run", qualifiedName],
+    };
+  }
+  return null;
+}
+
 export async function fetchSmitheryFirstPage(
   fetcher: typeof fetch = globalThis.fetch,
 ): Promise<RegistryEntry[]> {
@@ -430,14 +471,15 @@ export function specStringFor(name: string, install: RegistryInstall): string {
     if (install.transport === "streamable-http") return `${safe}=streamable+${install.url}`;
     return `${safe}=${install.url}`;
   }
+  const trail = install.extraArgs?.length ? ` ${install.extraArgs.join(" ")}` : "";
   if (install.runtime === "npm") {
     if (!install.packageId) throw new Error(`npm install for ${name} has no packageId`);
     const pinned = install.version ? `${install.packageId}@${install.version}` : install.packageId;
-    return `${safe}=npx -y ${pinned}`;
+    return `${safe}=npx -y ${pinned}${trail}`;
   }
   if (install.runtime === "pypi") {
     if (!install.packageId) throw new Error(`pypi install for ${name} has no packageId`);
-    return `${safe}=uvx ${install.packageId}`;
+    return `${safe}=uvx ${install.packageId}${trail}`;
   }
   throw new Error(`unsupported install runtime: ${(install as RegistryInstall).runtime}`);
 }

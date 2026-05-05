@@ -9,6 +9,7 @@ import {
   CACHE_TTL_MS,
   fallbackFromCatalog,
   fetchOfficialPage,
+  fetchSmitheryDetail,
   fetchSmitheryFirstPage,
   handleToFetchResult,
   loadMorePages,
@@ -456,6 +457,84 @@ describe("handleToFetchResult", () => {
   });
 });
 
+describe("fetchSmitheryDetail", () => {
+  it("maps http connection to remote streamable-http", async () => {
+    const fetchImpl = mockFetch({
+      "https://registry.smithery.ai/servers/exa": {
+        ok: true,
+        json: {
+          qualifiedName: "exa",
+          remote: true,
+          deploymentUrl: "https://exa.run.tools",
+          connections: [{ type: "http", deploymentUrl: "https://exa.run.tools" }],
+        },
+      },
+    });
+    const r = await fetchSmitheryDetail("exa", fetchImpl);
+    expect(r).toEqual({
+      runtime: "remote",
+      transport: "streamable-http",
+      url: "https://exa.run.tools",
+    });
+  });
+
+  it("maps stdio connection to npx @smithery/cli run with extraArgs", async () => {
+    const fetchImpl = mockFetch({
+      "https://registry.smithery.ai/servers/hugeicons": {
+        ok: true,
+        json: {
+          qualifiedName: "hugeicons/mcp-server",
+          remote: false,
+          connections: [{ type: "stdio", bundleUrl: "https://x", runtime: "node" }],
+        },
+      },
+    });
+    const r = await fetchSmitheryDetail("hugeicons", fetchImpl);
+    expect(r).toEqual({
+      runtime: "npm",
+      packageId: "@smithery/cli",
+      transport: "stdio",
+      extraArgs: ["run", "hugeicons"],
+    });
+  });
+
+  it("returns null on 404", async () => {
+    const fetchImpl = mockFetch({
+      "https://registry.smithery.ai/servers/missing": { ok: false, status: 404, json: {} },
+    });
+    const r = await fetchSmitheryDetail("missing", fetchImpl);
+    expect(r).toBeNull();
+  });
+
+  it("returns null when connection type is unrecognized", async () => {
+    const fetchImpl = mockFetch({
+      "https://registry.smithery.ai/servers/x": {
+        ok: true,
+        json: { qualifiedName: "x", connections: [{ type: "carrier-pigeon" }] },
+      },
+    });
+    const r = await fetchSmitheryDetail("x", fetchImpl);
+    expect(r).toBeNull();
+  });
+
+  it("URL-encodes the qualifiedName", async () => {
+    let seenUrl = "";
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      seenUrl = typeof input === "string" ? input : input.toString();
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          qualifiedName: "vendor/x",
+          connections: [{ type: "http", deploymentUrl: "https://x.example" }],
+        }),
+      } as unknown as Response;
+    }) as typeof fetch;
+    await fetchSmitheryDetail("vendor/x", fetchImpl);
+    expect(seenUrl).toContain("vendor%2Fx");
+  });
+});
+
 describe("fallbackFromCatalog", () => {
   it("maps every catalog entry to a stdio npm RegistryEntry", () => {
     const entries = fallbackFromCatalog();
@@ -519,6 +598,17 @@ describe("specStringFor", () => {
         transport: "stdio",
       }),
     ).toBe("py=uvx mcp-server-py");
+  });
+
+  it("appends extraArgs after the package id (smithery stdio shape)", () => {
+    expect(
+      specStringFor("vendor/x", {
+        runtime: "npm",
+        packageId: "@smithery/cli",
+        transport: "stdio",
+        extraArgs: ["run", "vendor/x"],
+      }),
+    ).toBe("x=npx -y @smithery/cli run vendor/x");
   });
 
   it("throws when npm install lacks packageId", () => {

@@ -2,6 +2,7 @@ import { readConfig, writeConfig } from "../../config.js";
 import { MCP_CATALOG, mcpCommandFor } from "../../mcp/catalog.js";
 import {
   type FetchProgress,
+  fetchSmitheryDetail,
   handleToFetchResult,
   loadMorePages,
   openRegistry,
@@ -84,9 +85,7 @@ function printEntry(e: RegistryEntry, indent = "  "): void {
   if (e.install?.requiredEnv?.length) {
     console.log(`${indent}    needs: ${e.install.requiredEnv.join(", ")}`);
   } else if (!e.install) {
-    console.log(
-      `${indent}    (smithery listing — install info fetched on demand; not yet supported)`,
-    );
+    console.log(`${indent}    (smithery listing — install detail fetched lazily on install)`);
   }
 }
 
@@ -272,12 +271,15 @@ export async function mcpInstallCommand(name: string, opts: McpInstallOptions = 
     process.exit(1);
   }
 
+  if (!entry.install && entry.source === "smithery") {
+    process.stderr.write(`▸ fetching smithery install detail for ${entry.name}…\n`);
+    const fetched = await fetchSmitheryDetail(entry.name);
+    if (fetched) entry.install = fetched;
+  }
+
   if (!entry.install) {
     console.error(
-      `"${entry.name}" comes from the smithery listing which doesn't expose install metadata.`,
-    );
-    console.error(
-      `Install via Smithery's CLI directly:  npx -y @smithery/cli install ${entry.name}`,
+      `Could not derive install metadata for "${entry.name}" — try \`npx -y @smithery/cli install ${entry.name}\` directly.`,
     );
     process.exit(1);
   }

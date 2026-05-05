@@ -2,6 +2,7 @@
 
 import { readConfig, writeConfig } from "../../config.js";
 import {
+  fetchSmitheryDetail,
   handleToFetchResult,
   loadMorePages,
   openRegistry,
@@ -220,11 +221,15 @@ export async function handleMcp(
           },
         };
       }
+      if (!entry.install && entry.source === "smithery") {
+        const fetched = await fetchSmitheryDetail(entry.name);
+        if (fetched) entry.install = fetched;
+      }
       if (!entry.install) {
         return {
           status: 422,
           body: {
-            error: `${entry.name} is from the smithery listing — install metadata not available`,
+            error: `Could not derive install metadata for ${entry.name}`,
             hint: `npx -y @smithery/cli install ${entry.name}`,
           },
         };
