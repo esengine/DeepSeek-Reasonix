@@ -279,6 +279,12 @@ export const en = {
     marketplaceNeedsEnv: "needs env: {names}",
     marketplaceSourceTag: "[{source}]",
     marketplaceNoInstall: "smithery listing — install metadata not exposed; use `npx -y @smithery/cli install {name}` directly",
+    marketplaceFetchOnInstall: "Smithery listing — install detail fetched on Install. http servers map to streamable-http remotes; stdio servers run via @smithery/cli.",
+    marketplaceInstalledBadge: "installed",
+    marketplaceUninstall: "Uninstall",
+    marketplaceEnvTitle: "Required environment variables",
+    marketplaceEnvHint: "Set these in your shell before next `reasonix code` so the bridged server can authenticate.",
+    marketplaceRestartHint: "Spec written to ~/.reasonix/config.json. Restart `reasonix code` to bridge the server (live hot-reload is on the roadmap).",
   },
   memory: {
     loading: "loading memory…",

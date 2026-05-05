@@ -55,6 +55,10 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   },
   { cmd: "mcp", summary: "list MCP servers + tools attached to this session" },
   {
+    cmd: "mcp browse",
+    summary: "browse the MCP marketplace — search registry, install with Enter",
+  },
+  {
     cmd: "resource",
     argsHint: "[uri]",
     summary: "browse + read MCP resources (no arg → list URIs; <uri> → fetch contents)",

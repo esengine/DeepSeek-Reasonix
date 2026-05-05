@@ -75,6 +75,7 @@ interface OfficialServerCore {
   packages?: OfficialPackage[];
   remotes?: Array<{ type?: string; url?: string }>;
   websiteUrl?: string;
+  icons?: Array<{ src?: string }>;
 }
 
 interface OfficialServerEntry {
@@ -120,6 +121,8 @@ function normalizeOfficial(server: OfficialServerCore | undefined): RegistryEntr
   };
   if (install) entry.install = install;
   if (server.websiteUrl) entry.homepage = server.websiteUrl;
+  const icon = server.icons?.find((i) => i.src)?.src;
+  if (icon) entry.iconUrl = icon;
   return entry;
 }
 
@@ -152,6 +155,7 @@ interface SmitheryServer {
   description?: string;
   useCount?: number;
   homepage?: string;
+  iconUrl?: string;
 }
 
 interface SmitheryResponse {
@@ -169,6 +173,7 @@ function normalizeSmithery(s: SmitheryServer): RegistryEntry | null {
   };
   if (typeof s.useCount === "number") entry.popularity = s.useCount;
   if (s.homepage) entry.homepage = s.homepage;
+  if (s.iconUrl) entry.iconUrl = s.iconUrl;
   return entry;
 }
 

@@ -25,6 +25,8 @@ export interface RegistryEntry {
   popularity?: number;
   /** Project / homepage URL. */
   homepage?: string;
+  /** Icon URL — official: first packages[0].icons[0].src; smithery: iconUrl on listing. */
+  iconUrl?: string;
 }
 
 export interface CachePagination {

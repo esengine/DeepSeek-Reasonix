@@ -279,6 +279,12 @@ export const zhCN = {
     marketplaceNeedsEnv: "需设置环境变量：{names}",
     marketplaceSourceTag: "[{source}]",
     marketplaceNoInstall: "Smithery 列表项 — 不暴露安装元数据；请直接 `npx -y @smithery/cli install {name}`",
+    marketplaceFetchOnInstall: "Smithery 列表 — 安装时再拉详情。HTTP 服务映射为 streamable-http 远端；stdio 服务通过 @smithery/cli 运行。",
+    marketplaceInstalledBadge: "已安装",
+    marketplaceUninstall: "卸载",
+    marketplaceEnvTitle: "必需的环境变量",
+    marketplaceEnvHint: "下次启动 `reasonix code` 之前在 shell 里设好，桥接的服务器才能正常鉴权。",
+    marketplaceRestartHint: "已写入 ~/.reasonix/config.json。重启 `reasonix code` 后服务器才会真正桥接（热重载在路线图上）。",
   },
   memory: {
     loading: "加载记忆…",

@@ -12,6 +12,8 @@ export interface SlashResult {
   openSessionsPicker?: boolean;
   /** Open the MCP browser modal — used by `/mcp` slash in interactive contexts. */
   openMcpBrowser?: boolean;
+  /** Open the MCP registry marketplace modal — used by `/mcp browse`. */
+  openMcpMarketplace?: boolean;
   /** Open the arg-completer picker for this command (e.g. `/language` → language picker). */
   openArgPickerFor?: string;
   /** Exit the app. */

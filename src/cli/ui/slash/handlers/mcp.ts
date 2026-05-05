@@ -19,6 +19,9 @@ const mcp: SlashHandler = (args, loop, ctx) => {
   if (sub === "reconnect") {
     return triggerReconnect(args[1], servers, ctx.postInfo, loop);
   }
+  if (sub === "browse" || sub === "install" || sub === "marketplace") {
+    return { openMcpMarketplace: true };
+  }
   // `/mcp text` (or non-TTY) falls through to the printed-card path. The
   // default `/mcp` opens the interactive browser modal.
   const wantsTextDump = sub === "text";

@@ -27,6 +27,7 @@ interface RegistryInstall {
   transport: string;
   url?: string;
   requiredEnv?: string[];
+  extraArgs?: string[];
 }
 
 interface RegistryEntryDto {
@@ -37,6 +38,29 @@ interface RegistryEntryDto {
   install?: RegistryInstall;
   popularity?: number;
   homepage?: string;
+  iconUrl?: string;
+}
+
+/** Mirror of src/mcp/registry-fetch.ts:specStringFor — kept in sync to detect already-installed state without an extra round-trip. */
+function specForEntry(e: RegistryEntryDto): string | null {
+  if (!e.install) return null;
+  const localName = e.name.split("/").pop() ?? e.name;
+  const safe = localName.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^-+|-+$/g, "") || "mcp";
+  const trail = e.install.extraArgs?.length ? ` ${e.install.extraArgs.join(" ")}` : "";
+  if (e.install.runtime === "remote" && e.install.url) {
+    if (e.install.transport === "streamable-http") return `${safe}=streamable+${e.install.url}`;
+    return `${safe}=${e.install.url}`;
+  }
+  if (e.install.runtime === "npm" && e.install.packageId) {
+    const pinned = e.install.version
+      ? `${e.install.packageId}@${e.install.version}`
+      : e.install.packageId;
+    return `${safe}=npx -y ${pinned}${trail}`;
+  }
+  if (e.install.runtime === "pypi" && e.install.packageId) {
+    return `${safe}=uvx ${e.install.packageId}${trail}`;
+  }
+  return null;
 }
 
 interface RegistryListResponse {
@@ -265,6 +289,7 @@ export function McpPanel() {
                     setOpenUnbridged(null);
                   },
                   loadMore: () => loadRegistry(registryQuery, (registry?.loaded ?? 0) / 30 + 5),
+                  installedSpecs: new Set(specs ?? []),
                 })
               : null
           }
@@ -315,7 +340,12 @@ export function McpPanel() {
             ? renderRegistryDetail({
                 entry: openRegistry,
                 busy,
+                installedSpec: (() => {
+                  const spec = specForEntry(openRegistry);
+                  return spec && (specs ?? []).includes(spec) ? spec : null;
+                })(),
                 onInstall: () => installFromRegistry(openRegistry),
+                onUninstall: (spec: string) => removeSpec(spec),
                 onClose: () => setOpenRegistry(null),
               })
             : openUnbridged != null
@@ -438,6 +468,7 @@ interface MarketplaceRowsArgs {
   openRegistry: RegistryEntryDto | null;
   setOpenRegistry: (entry: RegistryEntryDto) => void;
   loadMore: () => void;
+  installedSpecs: Set<string>;
 }
 
 function renderMarketplaceRows({
@@ -446,6 +477,7 @@ function renderMarketplaceRows({
   openRegistry,
   setOpenRegistry,
   loadMore,
+  installedSpecs,
 }: MarketplaceRowsArgs) {
   if (!registry && registryLoading) {
     return html`<div style="color:var(--fg-3);padding:14px;font-size:12px">${t("mcp.marketplaceLoading")}</div>`;
@@ -457,13 +489,18 @@ function renderMarketplaceRows({
     ${registry.entries.map((e) => {
       const sel = openRegistry?.name === e.name;
       const tag = t("mcp.marketplaceSourceTag", { source: e.source });
+      const spec = specForEntry(e);
+      const installed = spec !== null && installedSpecs.has(spec);
       const pop =
         e.popularity !== undefined
           ? html` <span class="dim">· ${fmtNum(e.popularity)}</span>`
           : null;
+      const icon = e.iconUrl
+        ? html`<img src=${e.iconUrl} alt="" style="width:16px;height:16px;border-radius:3px;margin-right:6px;vertical-align:middle;object-fit:cover" loading="lazy" referrerpolicy="no-referrer" onError=${(ev: Event) => ((ev.target as HTMLImageElement).style.display = "none")} />`
+        : null;
       return html`
         <div class=${`ssl-row ${sel ? "sel" : ""}`} onClick=${() => setOpenRegistry(e)}>
-          <span class="name">${e.name} <span class="pill">${tag}</span></span>
+          <span class="name">${icon}${e.name} <span class="pill">${tag}</span>${installed ? html` <span class="pill ok">${t("mcp.marketplaceInstalledBadge")}</span>` : null}</span>
           <span class="preview">${e.description}</span>
           <span class="meta">${pop}</span>
         </div>
@@ -484,13 +521,23 @@ function renderMarketplaceRows({
 interface RegistryDetailArgs {
   entry: RegistryEntryDto;
   busy: boolean;
+  installedSpec: string | null;
   onInstall: () => void;
+  onUninstall: (spec: string) => void;
   onClose: () => void;
 }
 
-function renderRegistryDetail({ entry, busy, onInstall, onClose }: RegistryDetailArgs) {
-  const installable = !!entry.install;
-  const meta = entry.install
+function renderRegistryDetail({
+  entry,
+  busy,
+  installedSpec,
+  onInstall,
+  onUninstall,
+  onClose,
+}: RegistryDetailArgs) {
+  const installable = !!entry.install || entry.source === "smithery";
+  const installed = installedSpec !== null;
+  const specPreview = entry.install
     ? `${entry.install.runtime} · ${entry.install.transport}${
         entry.install.packageId
           ? ` · ${entry.install.packageId}`
@@ -499,37 +546,80 @@ function renderRegistryDetail({ entry, busy, onInstall, onClose }: RegistryDetai
             : ""
       }${entry.install.version ? `@${entry.install.version}` : ""}`
     : "";
+  const icon = entry.iconUrl
+    ? html`<img src=${entry.iconUrl} alt="" style="width:24px;height:24px;border-radius:4px;margin-right:8px;vertical-align:middle;object-fit:cover" loading="lazy" referrerpolicy="no-referrer" onError=${(ev: Event) => ((ev.target as HTMLImageElement).style.display = "none")} />`
+    : null;
   return html`
     <div class="sessions-detail-h">
-      <span class="name">${entry.name}</span>
+      <span class="name">${icon}${entry.name}${installed ? html` <span class="pill ok">${t("mcp.marketplaceInstalledBadge")}</span>` : null}</span>
       <span class="ws">${t("mcp.marketplaceSourceTag", { source: entry.source })}${
         entry.popularity !== undefined ? ` · ${fmtNum(entry.popularity)} uses` : ""
-      }</span>
+      }${entry.homepage ? html` · <a href=${entry.homepage} target="_blank" rel="noopener noreferrer">homepage</a>` : ""}</span>
       <span class="actions">
-        <button class="btn primary" disabled=${busy || !installable} onClick=${onInstall}>${t("mcp.marketplaceInstall")}</button>
+        ${
+          installed
+            ? html`<button
+                class="btn"
+                disabled=${busy}
+                onClick=${() => onUninstall(installedSpec)}
+                style="border-color:var(--c-err);color:var(--c-err)"
+              >${t("mcp.marketplaceUninstall")}</button>`
+            : html`<button class="btn primary" disabled=${busy || !installable} onClick=${onInstall}>${t("mcp.marketplaceInstall")}</button>`
+        }
         <button class="btn ghost" onClick=${onClose}>${t("common.back")}</button>
       </span>
     </div>
+
     <div class="card" style="margin-bottom:12px">
       <div class="card-b" style="font-size:13px;line-height:1.6">${entry.description || "—"}</div>
     </div>
+
     ${
-      installable
+      entry.install
         ? html`<div class="card" style="margin-bottom:12px">
             <div class="card-h"><span class="title">${t("mcp.spec")}</span></div>
-            <code class="mono" style="font-size:11.5px;color:var(--fg-2);word-break:break-all">${meta}</code>
-          </div>`
-        : html`<div class="card accent-warn" style="margin-bottom:12px">
-            <div class="card-b" style="font-size:13px;line-height:1.6">
-              ${t("mcp.marketplaceNoInstall", { name: entry.name })}
+            <div class="card-b">
+              <code class="mono" style="font-size:11.5px;color:var(--fg-2);word-break:break-all;display:block">${specPreview}</code>
+              ${
+                installedSpec
+                  ? html`<div style="margin-top:8px;font-size:11px;color:var(--fg-3)">
+                      <span class="dim">on disk:</span> <code class="mono">${installedSpec}</code>
+                    </div>`
+                  : null
+              }
             </div>
           </div>`
+        : entry.source === "smithery"
+          ? html`<div class="card" style="margin-bottom:12px">
+              <div class="card-b" style="font-size:13px;line-height:1.6;color:var(--fg-3)">
+                ${t("mcp.marketplaceFetchOnInstall")}
+              </div>
+            </div>`
+          : null
     }
+
     ${
       entry.install?.requiredEnv?.length
-        ? html`<div class="card accent-brand">
+        ? html`<div class="card accent-brand" style="margin-bottom:12px">
+            <div class="card-h"><span class="title">${t("mcp.marketplaceEnvTitle")}</span></div>
             <div class="card-b" style="font-size:13px">
-              ${t("mcp.marketplaceNeedsEnv", { names: entry.install.requiredEnv.join(", ") })}
+              ${entry.install.requiredEnv.map(
+                (name) =>
+                  html`<div><code class="mono" style="color:var(--c-warn)">${name}</code></div>`,
+              )}
+              <div style="margin-top:6px;color:var(--fg-3);font-size:12px">
+                ${t("mcp.marketplaceEnvHint")}
+              </div>
+            </div>
+          </div>`
+        : null
+    }
+
+    ${
+      installed
+        ? html`<div class="card accent-warn">
+            <div class="card-b" style="font-size:12.5px;line-height:1.6">
+              ${t("mcp.marketplaceRestartHint")}
             </div>
           </div>`
         : null

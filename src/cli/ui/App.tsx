@@ -72,6 +72,7 @@ import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { McpBrowser } from "./McpBrowser.js";
+import { McpMarketplace } from "./McpMarketplace.js";
 import { PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
@@ -531,6 +532,8 @@ function AppInner({
   const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>([]);
   /** True while the McpBrowser modal is open (triggered by `/mcp`). */
   const [pendingMcpBrowser, setPendingMcpBrowser] = useState(false);
+  /** True while the McpMarketplace modal is open (triggered by `/mcp browse`). */
+  const [pendingMcpMarketplace, setPendingMcpMarketplace] = useState(false);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
   // returns "refine" or "approve", we defer the loop-resume and show
@@ -1213,6 +1216,7 @@ function AppInner({
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
       !pendingMcpBrowser &&
+      !pendingMcpMarketplace &&
       !stagedInput &&
       !pendingEditReview &&
       !walkthroughActive &&
@@ -1247,6 +1251,7 @@ function AppInner({
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
       !pendingMcpBrowser &&
+      !pendingMcpMarketplace &&
       !stagedInput &&
       !pendingEditReview &&
       !walkthroughActive &&
@@ -2179,6 +2184,11 @@ function AppInner({
         }
         if (result.openMcpBrowser) {
           setPendingMcpBrowser(true);
+          promptHistory.current.push(text);
+          return;
+        }
+        if (result.openMcpMarketplace) {
+          setPendingMcpMarketplace(true);
           promptHistory.current.push(text);
           return;
         }
@@ -3132,6 +3142,7 @@ function AppInner({
           !!pendingReviseEditor ||
           pendingSessionsPicker ||
           pendingMcpBrowser ||
+          pendingMcpMarketplace ||
           !!pendingShell ||
           !!pendingEditReview ||
           walkthroughActive ||
@@ -3182,6 +3193,7 @@ function AppInner({
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
                 !pendingMcpBrowser &&
+                !pendingMcpMarketplace &&
                 !stagedInput &&
                 !pendingEditReview &&
                 ongoingTool ? (
@@ -3193,6 +3205,7 @@ function AppInner({
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
                 !pendingMcpBrowser &&
+                !pendingMcpMarketplace &&
                 !stagedInput &&
                 !pendingEditReview &&
                 subagentActivity ? (
@@ -3204,6 +3217,7 @@ function AppInner({
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
                 !pendingMcpBrowser &&
+                !pendingMcpMarketplace &&
                 !stagedInput &&
                 !pendingEditReview &&
                 !ongoingTool &&
@@ -3217,6 +3231,7 @@ function AppInner({
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
                 !pendingMcpBrowser &&
+                !pendingMcpMarketplace &&
                 !stagedInput &&
                 !pendingEditReview &&
                 !pendingChoice &&
@@ -3240,6 +3255,7 @@ function AppInner({
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
                 !pendingMcpBrowser &&
+                !pendingMcpMarketplace &&
                 !stagedInput &&
                 !pendingEditReview &&
                 busy &&
@@ -3254,6 +3270,7 @@ function AppInner({
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
                 !pendingMcpBrowser &&
+                !pendingMcpMarketplace &&
                 !stagedInput &&
                 !pendingEditReview ? (
                   <PlanLiveRow />
@@ -3358,6 +3375,11 @@ function AppInner({
                     setLiveMcpServers((prev) => replaceMcpServerSummary(prev, target, updated));
                     return updated;
                   }}
+                />
+              ) : pendingMcpMarketplace ? (
+                <McpMarketplace
+                  onClose={() => setPendingMcpMarketplace(false)}
+                  postInfo={(text) => log.pushInfo(text)}
                 />
               ) : pendingPlan ? (
                 <PlanConfirm
