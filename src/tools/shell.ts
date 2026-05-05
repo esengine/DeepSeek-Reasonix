@@ -252,12 +252,6 @@ export async function runCommand(
       signal: opts.signal,
     });
   }
-  const operator = detectShellOperator(cmd);
-  if (operator !== null) {
-    throw new Error(
-      `run_command: shell operator "${operator}" is not supported — only \`|\`, \`||\`, \`&&\`, \`;\` chain operators are spawned natively. Redirects (\`>\`, \`<\`, \`2>&1\`) and background (\`&\`) are not supported — split into separate run_command calls. To pass "${operator}" as a literal argument, wrap it in quotes.`,
-    );
-  }
   const timeoutMs = timeoutSec * 1000;
 
   const spawnOpts: SpawnOptions = {
@@ -567,7 +561,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "run_command",
     description:
-      "Run a shell command in the project root and return its combined stdout+stderr.\n\nConstraints (read these before the first call):\n• Chain operators `|`, `||`, `&&`, `;` ARE supported — parsed natively, no shell invoked, so semantics are identical on Windows / macOS / Linux. Each chain segment is allowlist-checked individually: `git status | grep main` runs if both halves are allowed.\n• Redirects (`>`, `<`, `>>`, `2>&1`, `&>`), background `&`, command substitution `$(…)`, env-var expansion `$VAR`, subshells `(…)`, and process substitution `<(…)` are NOT supported and rejected up-front. Use the binary's own flags (e.g. `node --output=file` instead of `node ... > file`) or split into separate calls.\n• `cd` DOES NOT PERSIST between calls — each call spawns a fresh process rooted at the project. If a tool needs a subdirectory, pass it via the tool's own flag (`npm --prefix`, `cargo -C`, `git -C`, `pytest tests/…`), NOT via a preceding `cd`.\n• Glob patterns (`*.ts`) are passed through as literal arguments — no shell expansion. Use `grep -r`, `rg`, `find -name`, etc.\n• Avoid commands with unbounded output (`netstat -ano`, `find /`, etc.) — they waste tokens. Filter at source: `netstat -ano -p TCP`, `find src -name '*.ts'`, `grep -c`, `wc -l`.\n\nCommon read-only inspection and test/lint/typecheck commands run immediately; anything that could mutate state, install dependencies, or touch the network is refused until the user confirms it in the TUI. Prefer this over asking the user to run a command manually — after edits, run the project's tests to verify.",
+      "Run a shell command in the project root and return its combined stdout+stderr.\n\nConstraints (read these before the first call):\n• Chain operators `|`, `||`, `&&`, `;` ARE supported — parsed natively, no shell invoked, so semantics are identical on Windows / macOS / Linux. Each chain segment is allowlist-checked individually: `git status | grep main` runs if both halves are allowed.\n• File redirects ARE supported: `>` truncate, `>>` append, `<` stdin from file, `2>` / `2>>` stderr to file, `2>&1` merge stderr→stdout, `&>` both to file. Targets resolve relative to the project root. At most one redirect per fd per segment.\n• Background `&`, heredoc `<<`, command substitution `$(…)`, subshells `(…)`, and process substitution `<(…)` are NOT supported. Wrap a literal `&` arg in quotes; for input use a `<` file or the binary's own --input flag.\n• Env-var expansion `$VAR` is NOT performed — `$VAR` is passed as a literal string. Use the binary's own --env flag or substitute the value yourself.\n• `cd` DOES NOT PERSIST between calls — each call spawns a fresh process rooted at the project. If a tool needs a subdirectory, pass it via the tool's own flag (`npm --prefix`, `cargo -C`, `git -C`, `pytest tests/…`), NOT via a preceding `cd`.\n• Glob patterns (`*.ts`) are passed through as literal arguments — no shell expansion. Use `grep -r`, `rg`, `find -name`, etc.\n• Avoid commands with unbounded output (`netstat -ano`, `find /`, etc.) — they waste tokens. Filter at source: `netstat -ano -p TCP`, `find src -name '*.ts'`, `grep -c`, `wc -l`.\n\nCommon read-only inspection and test/lint/typecheck commands run immediately; anything that could mutate state, install dependencies, or touch the network is refused until the user confirms it in the TUI. Prefer this over asking the user to run a command manually — after edits, run the project's tests to verify.",
     // Plan-mode gate: allow allowlisted commands through (git status,
     // cargo check, ls, grep …) so the model can actually investigate
     // during planning. Anything that would otherwise trigger a
@@ -584,7 +578,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         command: {
           type: "string",
           description:
-            'Full command line. POSIX-ish quoting. Chain operators `|`, `||`, `&&`, `;` work — parsed natively (no shell). Redirects (`>`, `<`, `2>&1`), background `&`, env-var expansion `$VAR`, and command substitution `$(…)` are rejected. To pass an operator character as a literal argument (e.g. a regex), wrap it in quotes: `grep "a|b" file.txt`.',
+            'Full command line. POSIX-ish quoting. Chain operators `|`, `||`, `&&`, `;` and file redirects `>` / `>>` / `<` / `2>` / `2>>` / `2>&1` / `&>` work natively (no shell). Background `&`, heredoc `<<`, env-var expansion `$VAR`, and command substitution `$(…)` are rejected (or passed through as literal in the case of `$VAR`). To pass an operator character as a literal argument (e.g. a regex), wrap it in quotes: `grep "a|b" file.txt`.',
         },
         timeoutSec: {
           type: "integer",

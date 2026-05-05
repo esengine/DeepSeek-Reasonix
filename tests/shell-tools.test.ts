@@ -109,7 +109,7 @@ describe("detectShellOperator", () => {
   });
 });
 
-describe("runCommand redirect rejection", () => {
+describe("runCommand syntax rejection", () => {
   let tmp: string;
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "reasonix-shell-pipe-"));
@@ -118,19 +118,15 @@ describe("runCommand redirect rejection", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("rejects stdout redirect", async () => {
-    await expect(runCommand("echo hi > out.txt", { cwd: tmp })).rejects.toThrow(
-      /shell operator ">" is not supported/,
-    );
-  });
-
-  it("rejects stderr-merge redirect", async () => {
-    await expect(runCommand("node -v 2>&1", { cwd: tmp })).rejects.toThrow(/shell operator/);
-  });
-
   it("rejects background `&`", async () => {
     await expect(runCommand("node -v &", { cwd: tmp })).rejects.toThrow(
       /shell operator "&" is not supported/,
+    );
+  });
+
+  it("rejects heredoc `<<`", async () => {
+    await expect(runCommand("cat << EOF", { cwd: tmp })).rejects.toThrow(
+      /shell operator "<<" is not supported/,
     );
   });
 
@@ -140,6 +136,18 @@ describe("runCommand redirect rejection", () => {
 
   it("rejects a chain ending with an operator", async () => {
     await expect(runCommand("echo hi &&", { cwd: tmp })).rejects.toThrow(/chain ends with/);
+  });
+
+  it("rejects a redirect missing its target", async () => {
+    await expect(runCommand("echo hi >", { cwd: tmp })).rejects.toThrow(
+      /redirect ">" is missing a target/,
+    );
+  });
+
+  it("rejects multiple stdout redirects in one segment", async () => {
+    await expect(runCommand("echo hi > a > b", { cwd: tmp })).rejects.toThrow(
+      /multiple stdout redirects/,
+    );
   });
 });
 

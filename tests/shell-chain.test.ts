@@ -61,10 +61,13 @@ describe("parseCommandChain", () => {
     expect(c!.ops).toEqual([";"]);
   });
 
-  it("rejects redirects discovered inside a chain segment", () => {
-    expect(() => parseCommandChain("echo hi ; ls > out.txt")).toThrow(/">"/);
-    expect(() => parseCommandChain("git status | wc -l > out.txt")).toThrow(/">"/);
-    expect(() => parseCommandChain("a ; cmd 2>&1")).toThrow(/2>&1/);
+  it("parses redirects inside a chain segment (now supported)", () => {
+    const c1 = parseCommandChain("echo hi ; ls > out.txt");
+    expect(c1!.segments[1]!.redirects).toEqual([{ kind: ">", target: "out.txt" }]);
+    const c2 = parseCommandChain("git status | wc -l > out.txt");
+    expect(c2!.segments[1]!.redirects).toEqual([{ kind: ">", target: "out.txt" }]);
+    const c3 = parseCommandChain("a ; cmd 2>&1");
+    expect(c3!.segments[1]!.redirects).toEqual([{ kind: "2>&1", target: "" }]);
   });
 
   it("rejects background `&` discovered inside a chain segment", () => {
