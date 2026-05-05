@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ToolRegistry } from "../src/tools.js";
 import { lineDiff, registerFilesystemTools } from "../src/tools/filesystem.js";
+import { displayRel } from "../src/tools/filesystem.js";
 
 describe("filesystem tools (built-in, sandbox-enforced)", () => {
   let root: string;
@@ -242,6 +243,14 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).not.toMatch(/escapes sandbox/);
       expect(out).toContain("util.ts");
     });
+
+    it("returns slash-normalized paths (no backslashes)", async () => {
+      await fs.mkdir(join(root, "src", "cli", "ui"), { recursive: true });
+      await fs.writeFile(join(root, "src", "cli", "ui", "App.tsx"), "// app\n");
+      const out = await tools.dispatch("search_files", JSON.stringify({ pattern: "App" }));
+      expect(out).toContain("src/cli/ui/App.tsx");
+      expect(out).not.toMatch(/src[\\]cli/);
+    });
   });
 
   describe("search_content", () => {
@@ -251,8 +260,8 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
         "search_content",
         JSON.stringify({ pattern: "export const x" }),
       );
-      // Format: path:line: text
-      expect(out).toMatch(/src[\\/]index\.ts:1: export const x = 1;/);
+      // Format: path:line: text (always slash-normalized)
+      expect(out).toMatch(/src\/index\.ts:1: export const x = 1;/);
     });
 
     it("matches across multiple files and reports each line", async () => {
@@ -342,6 +351,17 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       );
       expect(out).toMatch(/no matches/);
     });
+
+    it("returns slash-normalized path prefixes (no backslashes)", async () => {
+      await fs.mkdir(join(root, "src", "cli", "ui"), { recursive: true });
+      await fs.writeFile(join(root, "src", "cli", "ui", "App.tsx"), "UNIQUE_MARKER_42\n");
+      const out = await tools.dispatch(
+        "search_content",
+        JSON.stringify({ pattern: "UNIQUE_MARKER_42" }),
+      );
+      expect(out).toMatch(/src\/cli\/ui\/App\.tsx:1:/);
+      expect(out).not.toMatch(/src[\\]cli/);
+    });
   });
 
   describe("get_file_info", () => {
@@ -374,6 +394,16 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       await tools.dispatch("write_file", JSON.stringify({ path: "a/b/c/deep.txt", content: "x" }));
       const disk = await fs.readFile(join(root, "a", "b", "c", "deep.txt"), "utf8");
       expect(disk).toBe("x");
+    });
+
+    it("returns slash-normalized path in output", async () => {
+      await fs.mkdir(join(root, "src", "cli"), { recursive: true });
+      const out = await tools.dispatch(
+        "write_file",
+        JSON.stringify({ path: "src/cli/new.ts", content: "export {}" }),
+      );
+      expect(out).toContain("src/cli/new.ts");
+      expect(out).not.toMatch(/src[\\]cli/);
     });
 
     it("rejects writes outside the sandbox", async () => {
@@ -608,5 +638,23 @@ describe("lineDiff — LCS line-level diff used by edit_file", () => {
     expect(d[0]!.line).toContain("prestigePointsGainElement");
     // The rest are pure additions.
     expect(d.slice(1).every((o) => o.op === "+")).toBe(true);
+  });
+});
+
+describe("displayRel — slash-normalized relative paths", () => {
+  it("normalizes backslashes to forward slashes", () => {
+    const root = "C:\\root";
+    const full = "C:\\root\\src\\cli\\ui\\App.tsx";
+    const result = displayRel(root, full);
+    expect(result).not.toContain("\\");
+    expect(result).toContain("/");
+  });
+
+  it("returns forward-slash paths on POSIX systems", () => {
+    const root = "/tmp/test-root";
+    const full = "/tmp/test-root/src/foo.ts";
+    const result = displayRel(root, full);
+    expect(result).toBe("src/foo.ts");
+    expect(result).not.toContain("\\");
   });
 });

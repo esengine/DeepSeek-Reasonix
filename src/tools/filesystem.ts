@@ -30,6 +30,10 @@ const SKIP_DIR_NAMES: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.dirs)
 /** First line of binary defense; NUL-byte sniff is the second (catches mislabeled `.txt`). */
 const BINARY_EXTENSIONS: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.exts);
 
+export function displayRel(rootDir: string, full: string): string {
+  return pathMod.relative(rootDir, full).replaceAll("\\", "/");
+}
+
 function isLikelyBinaryByName(name: string): boolean {
   const dot = name.lastIndexOf(".");
   if (dot < 0) return false;
@@ -319,7 +323,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
           const lower = e.name.toLowerCase();
           const hit = re ? re.test(e.name) : lower.includes(needle);
           if (hit) {
-            const rel = pathMod.relative(rootDir, full);
+            const rel = displayRel(rootDir, full);
             if (totalBytes + rel.length + 1 > maxListBytes) {
               matches.push("[… search truncated — refine pattern …]");
               return;
@@ -436,7 +440,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
           const firstNul = raw.indexOf(0);
           if (firstNul !== -1 && firstNul < 8 * 1024) continue;
           const text = raw.toString("utf8");
-          const rel = pathMod.relative(rootDir, full);
+          const rel = displayRel(rootDir, full);
           const lines = text.split(/\r?\n/);
           for (let li = 0; li < lines.length; li++) {
             const line = lines[li]!;
@@ -510,7 +514,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       const abs = safePath(args.path);
       await fs.mkdir(pathMod.dirname(abs), { recursive: true });
       await fs.writeFile(abs, args.content, "utf8");
-      return `wrote ${args.content.length} chars to ${pathMod.relative(rootDir, abs)}`;
+      return `wrote ${args.content.length} chars to ${displayRel(rootDir, abs)}`;
     },
   });
 
@@ -538,18 +542,18 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       const adaptedReplace = args.replace.replace(/\r?\n/g, le);
       const firstIdx = before.indexOf(adaptedSearch);
       if (firstIdx < 0) {
-        throw new Error(`edit_file: search text not found in ${pathMod.relative(rootDir, abs)}`);
+        throw new Error(`edit_file: search text not found in ${displayRel(rootDir, abs)}`);
       }
       const nextIdx = before.indexOf(adaptedSearch, firstIdx + 1);
       if (nextIdx >= 0) {
         throw new Error(
-          `edit_file: search text appears multiple times in ${pathMod.relative(rootDir, abs)} — include more context to disambiguate`,
+          `edit_file: search text appears multiple times in ${displayRel(rootDir, abs)} — include more context to disambiguate`,
         );
       }
       const after =
         before.slice(0, firstIdx) + adaptedReplace + before.slice(firstIdx + adaptedSearch.length);
       await fs.writeFile(abs, after, "utf8");
-      const rel = pathMod.relative(rootDir, abs);
+      const rel = displayRel(rootDir, abs);
       const header = `edited ${rel} (${adaptedSearch.length}→${adaptedReplace.length} chars)`;
       const startLine = before.slice(0, firstIdx).split(/\r?\n/).length;
       const diff = renderEditDiff(adaptedSearch, adaptedReplace, startLine);
@@ -568,7 +572,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
     fn: async (args: { path: string }) => {
       const abs = safePath(args.path);
       await fs.mkdir(abs, { recursive: true });
-      return `created ${pathMod.relative(rootDir, abs)}/`;
+      return `created ${displayRel(rootDir, abs)}/`;
     },
   });
 
@@ -588,7 +592,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       const dst = safePath(args.destination);
       await fs.mkdir(pathMod.dirname(dst), { recursive: true });
       await fs.rename(src, dst);
-      return `moved ${pathMod.relative(rootDir, src)} → ${pathMod.relative(rootDir, dst)}`;
+      return `moved ${displayRel(rootDir, src)} → ${displayRel(rootDir, dst)}`;
     },
   });
 
