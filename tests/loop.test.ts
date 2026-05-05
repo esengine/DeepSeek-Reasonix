@@ -580,6 +580,121 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(summary!.content).toMatch(/context budget running low/);
   });
 
+  it("compactHistory replaces head with summary, keeps tail within token budget", async () => {
+    const responses: FakeResponseShape[] = [
+      { content: "User explored auth and billing modules; landed on session refactor plan." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+
+    // Seed 6 user/assistant pairs with chunky content so we can
+    // reason about token weight; each pair ≈ 20 tokens.
+    for (let i = 0; i < 6; i++) {
+      loop.log.append({
+        role: "user",
+        content: `question number ${i} with some words to weigh it`,
+      });
+      loop.log.append({ role: "assistant", content: `answer number ${i} with similar bulk` });
+    }
+    expect(loop.log.length).toBe(12);
+
+    // Budget of ~60 tokens fits ~3 trailing pairs.
+    const result = await loop.compactHistory({ keepRecentTokens: 60 });
+    expect(result.folded).toBe(true);
+    expect(result.beforeMessages).toBe(12);
+    expect(result.afterMessages).toBeLessThan(12);
+
+    const entries = loop.log.entries;
+    expect(entries[0]!.role).toBe("assistant");
+    expect(entries[0]!.content as string).toMatch(/HISTORY SUMMARY/);
+    expect(entries[1]!.role).toBe("user");
+    expect(entries[entries.length - 1]!.content).toMatch(/answer number 5/);
+  });
+
+  it("compactHistory no-ops when head wouldn't shrink log meaningfully", async () => {
+    const client = makeClient([{ content: "summary" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.log.append({ role: "user", content: "q0" });
+    loop.log.append({ role: "assistant", content: "a0" });
+    loop.log.append({ role: "user", content: "q1" });
+    loop.log.append({ role: "assistant", content: "a1" });
+
+    // Budget large enough to cover everything → no fold needed.
+    const result = await loop.compactHistory({ keepRecentTokens: 10_000 });
+    expect(result.folded).toBe(false);
+    expect(loop.log.length).toBe(4);
+  });
+
+  it("auto-folds history when promptTokens crosses 50% of ctxMax", async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const responses: FakeResponseShape[] = [
+      // Iter 0: tool call with usage above 50% of 1M ctx.
+      {
+        content: "",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
+        usage: {
+          prompt_tokens: 600_000,
+          completion_tokens: 10,
+          total_tokens: 600_010,
+          prompt_cache_hit_tokens: 500_000,
+          prompt_cache_miss_tokens: 100_000,
+        },
+      },
+      // Summary call response (compactHistory).
+      { content: "Earlier turns explored topic X and decided Y." },
+      // Iter 1 (after fold): wrap-up.
+      { content: "done." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 8,
+    });
+    // Seed 18 user/assistant turns with realistic per-message bulk so
+    // the fold's tail-token budget (20% of 1M = 200k) actually covers
+    // only the trailing turns, not all of them. Each pair ≈ 25k tokens.
+    const fillLines = (label: string, n: number) =>
+      Array.from(
+        { length: n },
+        (_, i) =>
+          `${label} line ${i}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
+      ).join("\n");
+    for (let i = 0; i < 18; i++) {
+      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 800)}` });
+      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 800)}` });
+    }
+    const beforeMessages = loop.log.length;
+
+    const events: { role: string; content?: string }[] = [];
+    for await (const ev of loop.step("continue")) {
+      events.push({ role: ev.role, content: ev.content });
+    }
+
+    const foldWarn = events.find(
+      (e) => e.role === "warning" && /folded \d+ messages/.test(e.content ?? ""),
+    );
+    expect(foldWarn).toBeDefined();
+    expect(foldWarn!.content).toMatch(/folded \d+ messages/);
+    expect(loop.log.length).toBeLessThan(beforeMessages);
+  }, 30_000);
+
   it("pre-clips new tool results at dispatch so they never enter the log oversized", async () => {
     const reg = new ToolRegistry();
     // Tool returns ~50k chars of realistic-shape log text; the default
