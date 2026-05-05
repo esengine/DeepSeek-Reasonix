@@ -228,10 +228,9 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/unknown command/);
   });
 
-  it("/mcp with no servers attached points at reasonix setup", () => {
+  it("/mcp with no servers attached opens the marketplace tab directly", () => {
     const r = handleSlash("mcp", [], makeLoop());
-    expect(r.info).toMatch(/no MCP servers/);
-    expect(r.info).toMatch(/reasonix setup/);
+    expect(r.openMcpHub).toEqual({ tab: "marketplace" });
   });
 
   it("/mcp shows the spec strings from SlashContext", () => {
@@ -715,8 +714,13 @@ describe("handleSlash", () => {
         },
       ],
     });
-    expect(r.openMcpBrowser).toBe(true);
+    expect(r.openMcpHub).toEqual({ tab: "live" });
     expect(r.info).toBeUndefined();
+  });
+
+  it("/mcp browse opens the hub on the marketplace tab", () => {
+    const r = handleSlash("mcp", ["browse"], makeLoop());
+    expect(r.openMcpHub).toEqual({ tab: "marketplace" });
   });
 
   it("/mcp text falls through to the printed-card view (non-TTY / replay)", () => {

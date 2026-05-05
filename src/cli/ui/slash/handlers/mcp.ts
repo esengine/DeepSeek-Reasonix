@@ -20,16 +20,20 @@ const mcp: SlashHandler = (args, loop, ctx) => {
     return triggerReconnect(args[1], servers, ctx.postInfo, loop);
   }
   if (sub === "browse" || sub === "install" || sub === "marketplace") {
-    return { openMcpMarketplace: true };
+    return { openMcpHub: { tab: "marketplace" } };
   }
   // `/mcp text` (or non-TTY) falls through to the printed-card path. The
-  // default `/mcp` opens the interactive browser modal.
+  // default `/mcp` opens the unified hub on the Live tab when servers
+  // exist, or jumps straight to Marketplace when nothing's bridged yet.
   const wantsTextDump = sub === "text";
-  if (servers.length === 0 && specs.length === 0 && toolSpecs.length === 0) {
-    return { info: t("handlers.mcp.noServers") };
+  if (!wantsTextDump && servers.length === 0 && specs.length === 0 && toolSpecs.length === 0) {
+    return { openMcpHub: { tab: "marketplace" } };
   }
   if (!wantsTextDump && servers.length > 0) {
-    return { openMcpBrowser: true };
+    return { openMcpHub: { tab: "live" } };
+  }
+  if (servers.length === 0 && specs.length === 0 && toolSpecs.length === 0) {
+    return { info: t("handlers.mcp.noServers") };
   }
   // Rich path — we have full inspection reports, so show each server
   // with its tools / resources / prompts grouped together.

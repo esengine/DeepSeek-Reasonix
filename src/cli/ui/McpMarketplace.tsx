@@ -237,7 +237,7 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp }: McpMarketplaceP
       if (selected) void installOrToggle(selected);
       return;
     }
-    if (ev.tab) {
+    if (ev.pageDown) {
       void fetchMore();
       return;
     }
@@ -310,7 +310,7 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp }: McpMarketplaceP
       <Box marginTop={1}>
         <Text dimColor>
           type filter · ↑↓ pick · enter{" "}
-          {selected && isInstalled(state.installedSpecs, selected) ? "uninstall" : "install"} · tab
+          {selected && isInstalled(state.installedSpecs, selected) ? "uninstall" : "install"} · PgDn
           load more · esc close
         </Text>
       </Box>

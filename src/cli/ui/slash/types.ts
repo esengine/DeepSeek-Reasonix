@@ -10,10 +10,8 @@ export interface SlashResult {
   info?: string;
   /** Open the SessionPicker modal mid-chat — used by `/sessions` slash. */
   openSessionsPicker?: boolean;
-  /** Open the MCP browser modal — used by `/mcp` slash in interactive contexts. */
-  openMcpBrowser?: boolean;
-  /** Open the MCP registry marketplace modal — used by `/mcp browse`. */
-  openMcpMarketplace?: boolean;
+  /** Open the unified MCP hub — `/mcp` defaults to "live", `/mcp browse` to "marketplace". */
+  openMcpHub?: { tab: "live" | "marketplace" };
   /** Open the arg-completer picker for this command (e.g. `/language` → language picker). */
   openArgPickerFor?: string;
   /** Exit the app. */

@@ -690,7 +690,13 @@ main { padding: 32px 40px 60px 32px; min-width: 0; }
 .crumbs .sep { color: var(--fg-4); }
 
 /* ── Sessions panel ──────────────────────────────────────────────────── */
-.sessions-grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px; min-height: 540px; }
+.sessions-grid {
+  display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px;
+  /* Floor for short lists (so the panel still feels substantial), ceiling so
+     long lists scroll internally instead of pushing the rest of the page. */
+  min-height: 540px;
+  max-height: calc(100vh - 140px);
+}
 .sessions-list { background: var(--bg-elev); border: 1px solid var(--bd); border-radius: var(--r); display: flex; flex-direction: column; overflow: hidden; }
 .sessions-list .ssl-h { padding: 10px 12px; border-bottom: 1px solid var(--bd); display: flex; align-items: center; gap: 8px; }
 .sessions-list .ssl-h input {

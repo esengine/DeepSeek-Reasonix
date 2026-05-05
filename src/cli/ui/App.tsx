@@ -71,8 +71,7 @@ import { openTranscriptFile, recordFromLoopEvent, writeRecord } from "../../tran
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
-import { McpBrowser } from "./McpBrowser.js";
-import { McpMarketplace } from "./McpMarketplace.js";
+import { McpHub } from "./McpHub.js";
 import { PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
@@ -537,10 +536,8 @@ function AppInner({
   /** True while the SessionPicker is open mid-chat (triggered by `/sessions`). */
   const [pendingSessionsPicker, setPendingSessionsPicker] = useState(false);
   const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>([]);
-  /** True while the McpBrowser modal is open (triggered by `/mcp`). */
-  const [pendingMcpBrowser, setPendingMcpBrowser] = useState(false);
-  /** True while the McpMarketplace modal is open (triggered by `/mcp browse`). */
-  const [pendingMcpMarketplace, setPendingMcpMarketplace] = useState(false);
+  /** Opens the unified McpHub modal — null when closed. `tab` selects the initial tab. */
+  const [pendingMcpHub, setPendingMcpHub] = useState<{ tab: "live" | "marketplace" } | null>(null);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
   // returns "refine" or "approve", we defer the loop-resume and show
@@ -1222,8 +1219,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
-      !pendingMcpBrowser &&
-      !pendingMcpMarketplace &&
+      !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
       !walkthroughActive &&
@@ -1257,8 +1253,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
-      !pendingMcpBrowser &&
-      !pendingMcpMarketplace &&
+      !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
       !walkthroughActive &&
@@ -2204,13 +2199,8 @@ function AppInner({
           promptHistory.current.push(text);
           return;
         }
-        if (result.openMcpBrowser) {
-          setPendingMcpBrowser(true);
-          promptHistory.current.push(text);
-          return;
-        }
-        if (result.openMcpMarketplace) {
-          setPendingMcpMarketplace(true);
+        if (result.openMcpHub) {
+          setPendingMcpHub({ tab: result.openMcpHub.tab });
           promptHistory.current.push(text);
           return;
         }
@@ -3164,8 +3154,7 @@ function AppInner({
           !!pendingPlan ||
           !!pendingReviseEditor ||
           pendingSessionsPicker ||
-          pendingMcpBrowser ||
-          pendingMcpMarketplace ||
+          !!pendingMcpHub ||
           !!pendingShell ||
           !!pendingEditReview ||
           walkthroughActive ||
@@ -3215,8 +3204,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
-                !pendingMcpBrowser &&
-                !pendingMcpMarketplace &&
+                !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
                 ongoingTool ? (
@@ -3227,8 +3215,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
-                !pendingMcpBrowser &&
-                !pendingMcpMarketplace &&
+                !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
                 subagentActivity ? (
@@ -3239,8 +3226,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
-                !pendingMcpBrowser &&
-                !pendingMcpMarketplace &&
+                !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
                 !ongoingTool &&
@@ -3253,8 +3239,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
-                !pendingMcpBrowser &&
-                !pendingMcpMarketplace &&
+                !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
                 !pendingChoice &&
@@ -3277,8 +3262,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
-                !pendingMcpBrowser &&
-                !pendingMcpMarketplace &&
+                !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
                 busy &&
@@ -3292,8 +3276,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
-                !pendingMcpBrowser &&
-                !pendingMcpMarketplace &&
+                !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview ? (
                   <PlanLiveRow />
@@ -3387,22 +3370,18 @@ function AppInner({
                     }
                   }}
                 />
-              ) : pendingMcpBrowser ? (
-                <McpBrowser
-                  servers={liveMcpServers}
+              ) : pendingMcpHub ? (
+                <McpHub
+                  initialTab={pendingMcpHub.tab}
+                  liveServers={liveMcpServers}
                   configPath={defaultConfigPath()}
-                  onClose={() => setPendingMcpBrowser(false)}
+                  onClose={() => setPendingMcpHub(null)}
                   postInfo={(text) => log.pushInfo(text)}
                   applyAppend={(target, addedTools) => {
                     const updated = applyMcpAppend(loop, target, addedTools);
                     setLiveMcpServers((prev) => replaceMcpServerSummary(prev, target, updated));
                     return updated;
                   }}
-                />
-              ) : pendingMcpMarketplace ? (
-                <McpMarketplace
-                  onClose={() => setPendingMcpMarketplace(false)}
-                  postInfo={(text) => log.pushInfo(text)}
                   reloadMcp={
                     mcpRuntime
                       ? async () => {
