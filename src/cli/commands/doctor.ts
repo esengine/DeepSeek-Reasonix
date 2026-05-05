@@ -226,7 +226,7 @@ async function checkSessions(): Promise<Check> {
       return {
         label: "sessions     ",
         level: "warn",
-        detail: `${detail} · ${stale} idle ≥90d (run /prune-sessions)`,
+        detail: `${detail} · ${stale} idle ≥90d (run \`reasonix prune-sessions\`)`,
       };
     }
     return { label: "sessions     ", level: "ok", detail };

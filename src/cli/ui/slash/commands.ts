@@ -139,11 +139,6 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   },
   { cmd: "forget", summary: "delete the current session from disk" },
   {
-    cmd: "prune-sessions",
-    summary: "delete sessions idle ≥N days (default 90) — frees disk on long-time installs",
-    argsHint: "[days]",
-  },
-  {
     cmd: "semantic",
     summary: "show semantic_search status — built? Ollama installed? how to enable",
   },

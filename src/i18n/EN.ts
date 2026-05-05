@@ -22,6 +22,7 @@ export const EN: TranslationSchema = {
     doctor: "One-command health check.",
     commit: "Draft a commit message from the staged diff.",
     sessions: "List saved chat sessions, or inspect one by name.",
+    pruneSessions: "Delete saved sessions idle ≥N days (default 90). Use --dry-run to preview.",
     events: "Pretty-print the kernel event-log sidecar.",
     replay: "Interactive Ink TUI to scrub through a transcript.",
     diff: "Compare two transcripts in a split-pane Ink TUI.",
@@ -91,6 +92,8 @@ export const EN: TranslationSchema = {
     ollamaUrlHint: "Ollama server URL",
     skipPromptsHint: "skip confirmation prompts",
     verboseHint: "show full session metadata",
+    pruneDaysHint: "delete sessions idle this many days or more (default 90)",
+    pruneDryRunHint: "list what would be deleted without removing anything",
     eventTypeHint: "filter by event type",
     eventSinceHint: "start from this event id",
     eventTailHint: "show only the last N events",
@@ -204,10 +207,6 @@ export const EN: TranslationSchema = {
       argsHint: "<name>",
     },
     forget: { description: "delete the current session from disk" },
-    "prune-sessions": {
-      description: "delete sessions idle ≥N days (default 90) — frees disk on long-time installs",
-      argsHint: "[days]",
-    },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
       description: "show semantic_search status — built? Ollama installed? how to enable",
@@ -601,9 +600,6 @@ export const EN: TranslationSchema = {
       forgetInfo:
         '▸ deleted session "{name}" — current screen still shows the conversation, but next launch starts fresh',
       forgetFailed: 'could not delete session "{name}" (already gone?)',
-      pruneUsage: "▸ usage: /prune-sessions [days]   — defaults to {default}, must be ≥1",
-      pruneNone: "▸ nothing to prune — no sessions idle ≥{days} days",
-      pruneInfo: "▸ pruned {count} session{s} idle ≥{days} days: {names}",
       renameUsage: "usage: /rename <new-name>",
       renameNoSession: "not in a session — nothing to rename",
       renameFailed:

@@ -36,6 +36,7 @@ import { eventsCommand } from "./commands/events.js";
 import { indexCommand } from "./commands/index.js";
 import { mcpInspectCommand } from "./commands/mcp-inspect.js";
 import { mcpListCommand } from "./commands/mcp.js";
+import { pruneSessionsCommand } from "./commands/prune-sessions.js";
 import { replayCommand } from "./commands/replay.js";
 import { runCommand } from "./commands/run.js";
 import { sessionsCommand } from "./commands/sessions.js";
@@ -260,6 +261,15 @@ program
   .option("-v, --verbose", t("ui.verboseHint"))
   .action((name: string | undefined, opts) => {
     sessionsCommand({ name, verbose: !!opts.verbose });
+  });
+
+program
+  .command("prune-sessions")
+  .description(t("cli.pruneSessions"))
+  .option("--days <n>", t("ui.pruneDaysHint"), (v) => Number.parseInt(v, 10))
+  .option("--dry-run", t("ui.pruneDryRunHint"))
+  .action((opts) => {
+    pruneSessionsCommand({ days: opts.days, dryRun: !!opts.dryRun });
   });
 
 program

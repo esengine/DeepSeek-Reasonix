@@ -22,6 +22,7 @@ export interface TranslationSchema {
     doctor: string;
     commit: string;
     sessions: string;
+    pruneSessions: string;
     events: string;
     replay: string;
     diff: string;
@@ -84,6 +85,8 @@ export interface TranslationSchema {
     ollamaUrlHint: string;
     skipPromptsHint: string;
     verboseHint: string;
+    pruneDaysHint: string;
+    pruneDryRunHint: string;
     eventTypeHint: string;
     eventSinceHint: string;
     eventTailHint: string;

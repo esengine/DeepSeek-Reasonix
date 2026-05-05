@@ -1,13 +1,6 @@
 import { t } from "../../../../i18n/index.js";
-import {
-  deleteSession,
-  listSessions,
-  pruneStaleSessions,
-  renameSession,
-} from "../../../../memory/session.js";
+import { deleteSession, listSessions, renameSession } from "../../../../memory/session.js";
 import type { SlashHandler } from "../dispatch.js";
-
-const STALE_THRESHOLD_DAYS = 90;
 
 const sessions: SlashHandler = () => ({ openSessionsPicker: true });
 
@@ -21,28 +14,6 @@ const forget: SlashHandler = (_args, loop) => {
     info: ok
       ? t("handlers.sessions.forgetInfo", { name })
       : t("handlers.sessions.forgetFailed", { name }),
-  };
-};
-
-const pruneSessions: SlashHandler = (args) => {
-  const raw = args?.[0];
-  const days = raw ? Number.parseInt(raw, 10) : STALE_THRESHOLD_DAYS;
-  if (!Number.isFinite(days) || days < 1) {
-    return {
-      info: t("handlers.sessions.pruneUsage", { default: STALE_THRESHOLD_DAYS }),
-    };
-  }
-  const removed = pruneStaleSessions(days);
-  if (removed.length === 0) {
-    return { info: t("handlers.sessions.pruneNone", { days }) };
-  }
-  return {
-    info: t("handlers.sessions.pruneInfo", {
-      count: removed.length,
-      s: removed.length === 1 ? "" : "s",
-      days,
-      names: removed.join(", "),
-    }),
   };
 };
 
@@ -70,5 +41,4 @@ export const handlers: Record<string, SlashHandler> = {
   forget,
   rename,
   resume,
-  "prune-sessions": pruneSessions,
 };
