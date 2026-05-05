@@ -22,15 +22,13 @@ const mcp: SlashHandler = (args, loop, ctx) => {
   if (sub === "browse" || sub === "install" || sub === "marketplace") {
     return { openMcpHub: { tab: "marketplace" } };
   }
-  // `/mcp text` (or non-TTY) falls through to the printed-card path. The
-  // default `/mcp` opens the unified hub on the Live tab when servers
-  // exist, or jumps straight to Marketplace when nothing's bridged yet.
+  // Interactive default: ALWAYS open the hub. Live tab when servers
+  // are bridged, Marketplace tab otherwise (so a fresh user lands on
+  // "discover + install" instead of an empty list). `/mcp text` is the
+  // only path to the printed-card dump — used by replay / non-TTY.
   const wantsTextDump = sub === "text";
-  if (!wantsTextDump && servers.length === 0 && specs.length === 0 && toolSpecs.length === 0) {
-    return { openMcpHub: { tab: "marketplace" } };
-  }
-  if (!wantsTextDump && servers.length > 0) {
-    return { openMcpHub: { tab: "live" } };
+  if (!wantsTextDump) {
+    return { openMcpHub: { tab: servers.length > 0 ? "live" : "marketplace" } };
   }
   if (servers.length === 0 && specs.length === 0 && toolSpecs.length === 0) {
     return { info: t("handlers.mcp.noServers") };

@@ -233,8 +233,8 @@ describe("handleSlash", () => {
     expect(r.openMcpHub).toEqual({ tab: "marketplace" });
   });
 
-  it("/mcp shows the spec strings from SlashContext", () => {
-    const r = handleSlash("mcp", [], makeLoop(), {
+  it("/mcp text shows the spec strings from SlashContext", () => {
+    const r = handleSlash("mcp", ["text"], makeLoop(), {
       mcpSpecs: [
         "filesystem=npx -y @modelcontextprotocol/server-filesystem /tmp",
         "kb=https://kb.example.com/sse",
@@ -243,6 +243,13 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/MCP servers \(2\)/);
     expect(r.info).toMatch(/server-filesystem/);
     expect(r.info).toMatch(/kb.example.com/);
+  });
+
+  it("/mcp opens the hub on Marketplace when no servers are bridged (even with native tools)", () => {
+    const r = handleSlash("mcp", [], makeLoop(), {
+      mcpSpecs: ["filesystem=npx -y @scope/fs /tmp"],
+    });
+    expect(r.openMcpHub).toEqual({ tab: "marketplace" });
   });
 
   it("/compact returns synchronously with a 'folding…' status and fires fold async", async () => {
@@ -805,8 +812,8 @@ describe("handleSlash", () => {
     });
   });
 
-  it("/mcp falls back to the spec-only list when mcpServers is absent", () => {
-    const r = handleSlash("mcp", [], makeLoop(), {
+  it("/mcp text falls back to the spec-only list when mcpServers is absent", () => {
+    const r = handleSlash("mcp", ["text"], makeLoop(), {
       mcpSpecs: ["filesystem=npx -y @scope/fs /tmp"],
     });
     expect(r.info).toMatch(/MCP servers \(1\)/);
