@@ -33,17 +33,9 @@ describe("parseCommandChain", () => {
     expect(c!.ops).toEqual(["&&", "||", ";"]);
   });
 
-  it("handles `|` without surrounding spaces (`a|b`)", () => {
-    const c = parseCommandChain("git status|grep main");
-    expect(c!.segments.map((s) => s.argv)).toEqual([
-      ["git", "status"],
-      ["grep", "main"],
-    ]);
-  });
-
   it("preserves quoted operators as literal arguments", () => {
-    const c = parseCommandChain('grep "a|b" file');
-    expect(c).toBeNull();
+    expect(parseCommandChain('grep "a|b" file')).toBeNull();
+    expect(parseCommandChain("grep 'a|b' file")).toBeNull();
   });
 
   it("passes globs through as literal patterns (no shell expansion)", () => {
@@ -51,30 +43,50 @@ describe("parseCommandChain", () => {
     expect(c!.segments[0]!.argv).toEqual(["ls", "*.ts"]);
   });
 
-  it("rejects redirects", () => {
-    expect(() => parseCommandChain("echo hi > out.txt")).toThrow(UnsupportedSyntaxError);
-    expect(() => parseCommandChain("sort < in.txt")).toThrow(/<.*not supported/);
-    expect(() => parseCommandChain("cmd 2>&1")).toThrow(/not supported/);
+  it("does NOT split on chain chars embedded inside larger tokens", () => {
+    // `--flag=1&2` is one POSIX token; the `&` is a literal byte. Tokens
+    // containing `&` / `|` / `;` chars but not at the start are passed
+    // through untouched, matching the lenient single-command tokenizer.
+    expect(parseCommandChain("cargo run -- --flag=1&2")).toBeNull();
+    expect(parseCommandChain("grep a|b file")).toBeNull();
+    expect(parseCommandChain("echo a;b")).toBeNull();
   });
 
-  it("rejects background `&`", () => {
-    expect(() => parseCommandChain("long_task &")).toThrow(/"&" is not supported/);
+  it("allows embedded chain chars inside chain segments", () => {
+    const c = parseCommandChain("git status ; cargo run -- --flag=1&2");
+    expect(c!.segments.map((s) => s.argv)).toEqual([
+      ["git", "status"],
+      ["cargo", "run", "--", "--flag=1&2"],
+    ]);
+    expect(c!.ops).toEqual([";"]);
   });
 
-  it("rejects env-var expansion", () => {
-    expect(() => parseCommandChain("echo $HOME")).toThrow(/\$HOME expansion/);
+  it("rejects redirects discovered inside a chain segment", () => {
+    expect(() => parseCommandChain("echo hi ; ls > out.txt")).toThrow(/">"/);
+    expect(() => parseCommandChain("git status | wc -l > out.txt")).toThrow(/">"/);
+    expect(() => parseCommandChain("a ; cmd 2>&1")).toThrow(/2>&1/);
   });
 
-  it("rejects command substitution", () => {
-    expect(() => parseCommandChain("echo $(date)")).toThrow(/command substitution/);
+  it("rejects background `&` discovered inside a chain segment", () => {
+    expect(() => parseCommandChain("git status ; long &")).toThrow(/"&" is not supported/);
   });
 
   it("rejects empty leading segments", () => {
     expect(() => parseCommandChain("; echo hi")).toThrow(/empty segment/);
+    expect(() => parseCommandChain("|| cat")).toThrow(/empty segment/);
   });
 
   it("rejects a chain ending with an operator", () => {
     expect(() => parseCommandChain("echo hi &&")).toThrow(/chain ends with/);
+    expect(() => parseCommandChain("echo hi ;")).toThrow(/chain ends with/);
+  });
+
+  it("rejects empty middle segments", () => {
+    expect(() => parseCommandChain("a ; ; b")).toThrow(/empty segment/);
+  });
+
+  it("rejects unclosed quotes inside a chain segment", () => {
+    expect(() => parseCommandChain('git status ; echo "open')).toThrow(/unclosed/);
   });
 });
 
@@ -104,7 +116,7 @@ describe("isCommandAllowed", () => {
 
   it("returns false for unsupported syntax (rather than throwing)", () => {
     expect(isCommandAllowed("echo hi > out.txt")).toBe(false);
-    expect(isCommandAllowed("echo $(date)")).toBe(false);
+    expect(isCommandAllowed("echo hi &")).toBe(false);
   });
 });
 

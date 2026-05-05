@@ -1,8 +1,13 @@
 /** Parse + spawn `cmd1 | cmd2 && cmd3` ourselves — never invoke a shell, sidestep PS5.1's `&&` parse error. */
 
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
-import { parse as shellParse } from "shell-quote";
-import { killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
+import {
+  detectShellOperator,
+  killProcessTree,
+  prepareSpawn,
+  smartDecodeOutput,
+  tokenizeCommand,
+} from "./shell.js";
 
 export type ChainOp = "|" | "||" | "&&" | ";";
 
@@ -16,8 +21,6 @@ export interface CommandChain {
   ops: ChainOp[];
 }
 
-const CHAIN_OPS = new Set<string>(["|", "||", "&&", ";"]);
-
 export class UnsupportedSyntaxError extends Error {
   constructor(detail: string) {
     super(`run_command: ${detail}`);
@@ -25,55 +28,92 @@ export class UnsupportedSyntaxError extends Error {
   }
 }
 
-/** Returns null on plain commands (caller takes the simple path); throws on unsupported syntax. */
-export function parseCommandChain(cmd: string): CommandChain | null {
-  // shell-quote calls env() with name="" for `$(...)` — defer that to the `(` op handler.
-  const tokens = shellParse(cmd, (name: string) =>
-    name === "" ? "$" : { op: "$VAR" as const, name },
-  );
-  const segments: ChainSegment[] = [];
+/** Whitespace-bounded splitter — chain ops only count when they begin a token, so `--flag=1&2` stays literal. */
+function splitOnChainOps(cmd: string): { segs: string[]; ops: ChainOp[] } {
+  const segs: string[] = [];
   const ops: ChainOp[] = [];
-  let cur: string[] = [];
-  let sawChainOp = false;
-  for (const t of tokens) {
-    if (typeof t === "string") {
-      cur.push(t);
+  let segStart = 0;
+  let i = 0;
+  let quote: '"' | "'" | null = null;
+  let atTokenStart = true;
+  while (i < cmd.length) {
+    const ch = cmd[i]!;
+    if (quote) {
+      if (ch === quote) quote = null;
+      else if (ch === "\\" && quote === '"' && i + 1 < cmd.length) i++;
+      i++;
+      atTokenStart = false;
       continue;
     }
-    if ("comment" in t) continue;
-    const op = (t as { op: string }).op;
-    if (CHAIN_OPS.has(op)) {
-      sawChainOp = true;
-      if (cur.length === 0) throw new UnsupportedSyntaxError(`empty segment before "${op}"`);
-      segments.push({ argv: cur });
-      ops.push(op as ChainOp);
-      cur = [];
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      i++;
+      atTokenStart = false;
       continue;
     }
-    if (op === "glob") {
-      cur.push((t as { pattern: string }).pattern);
+    if (ch === " " || ch === "\t") {
+      i++;
+      atTokenStart = true;
       continue;
     }
-    if (op === "$VAR") {
-      const name = (t as { name: string }).name;
+    if (atTokenStart) {
+      let op: ChainOp | null = null;
+      let opLen = 0;
+      const next = cmd[i + 1];
+      if (ch === "|" && next === "|") {
+        op = "||";
+        opLen = 2;
+      } else if (ch === "&" && next === "&") {
+        op = "&&";
+        opLen = 2;
+      } else if (ch === "|") {
+        op = "|";
+        opLen = 1;
+      } else if (ch === ";") {
+        op = ";";
+        opLen = 1;
+      }
+      if (op !== null) {
+        segs.push(cmd.slice(segStart, i));
+        ops.push(op);
+        i += opLen;
+        segStart = i;
+        atTokenStart = true;
+        continue;
+      }
+    }
+    i++;
+    atTokenStart = false;
+  }
+  segs.push(cmd.slice(segStart));
+  return { segs, ops };
+}
+
+/** Returns null on plain commands (caller takes the simple path); throws on unsupported syntax inside any segment. */
+export function parseCommandChain(cmd: string): CommandChain | null {
+  const { segs, ops } = splitOnChainOps(cmd);
+  if (ops.length === 0) return null;
+  const segments: ChainSegment[] = [];
+  for (let i = 0; i < segs.length; i++) {
+    const trimmed = segs[i]!.trim();
+    if (trimmed.length === 0) {
+      const op = i === 0 ? ops[0]! : ops[i - 1]!;
       throw new UnsupportedSyntaxError(
-        `\$${name} expansion is not supported — pass values as literals, or use the binary's own --env flag`,
+        i === 0
+          ? `empty segment before "${op}"`
+          : i === segs.length - 1
+            ? `chain ends with "${op}"`
+            : `empty segment between "${ops[i - 1]}" and "${ops[i]}"`,
       );
     }
-    if (op === "(" || op === ")") {
+    const segOp = detectShellOperator(trimmed);
+    if (segOp !== null) {
       throw new UnsupportedSyntaxError(
-        "command substitution / subshells are not supported — split into separate calls",
+        `shell operator "${segOp}" is not supported — only \`|\`, \`||\`, \`&&\`, \`;\` chain operators are spawned natively. Redirects (\`>\`, \`<\`, \`2>&1\`) and background (\`&\`) require splitting into separate run_command calls.`,
       );
     }
-    throw new UnsupportedSyntaxError(
-      `shell operator "${op}" is not supported — only \`|\`, \`||\`, \`&&\`, \`;\` chain operators work; redirects (\`>\`, \`<\`, \`2>&1\`) are rejected`,
-    );
+    segments.push({ argv: tokenizeCommand(trimmed) });
   }
-  if (!sawChainOp) return null;
-  if (cur.length === 0) {
-    throw new UnsupportedSyntaxError(`chain ends with "${ops[ops.length - 1]}"`);
-  }
-  segments.push({ argv: cur });
   return { segments, ops };
 }
 

@@ -134,16 +134,6 @@ describe("runCommand redirect rejection", () => {
     );
   });
 
-  it("rejects `$VAR` env-var expansion", async () => {
-    await expect(runCommand("echo $HOME", { cwd: tmp })).rejects.toThrow(
-      /\$HOME expansion is not supported/,
-    );
-  });
-
-  it("rejects command substitution `$(…)`", async () => {
-    await expect(runCommand("echo $(date)", { cwd: tmp })).rejects.toThrow(/command substitution/);
-  });
-
   it("rejects an empty leading segment", async () => {
     await expect(runCommand("; echo hi", { cwd: tmp })).rejects.toThrow(/empty segment before/);
   });
