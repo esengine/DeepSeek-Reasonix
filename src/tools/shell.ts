@@ -120,6 +120,11 @@ export const BUILTIN_ALLOWLIST: ReadonlyArray<string> = [
   "mypy",
 ];
 
+/** Inside `"…"` only `\"` and `\\` are escapes — `\X` otherwise stays literal so Windows paths like `"C:\Users\foo\.bar"` survive tokenization. */
+export function isDqEscape(prev: string, next: string | undefined): boolean {
+  return prev === "\\" && (next === '"' || next === "\\");
+}
+
 /** No env / glob / backtick / `$(…)` expansion — prevents bypass of allowlist via concatenation. */
 export function tokenizeCommand(cmd: string): string[] {
   const out: string[] = [];
@@ -130,7 +135,7 @@ export function tokenizeCommand(cmd: string): string[] {
     if (quote) {
       if (ch === quote) {
         quote = null;
-      } else if (ch === "\\" && quote === '"' && i + 1 < cmd.length) {
+      } else if (quote === '"' && isDqEscape(ch, cmd[i + 1])) {
         cur += cmd[++i];
       } else {
         cur += ch;
@@ -174,7 +179,7 @@ export function detectShellOperator(cmd: string): string | null {
     if (quote) {
       if (ch === quote) {
         quote = null;
-      } else if (ch === "\\" && quote === '"' && i + 1 < cmd.length) {
+      } else if (quote === '"' && isDqEscape(ch, cmd[i + 1])) {
         cur += cmd[++i];
         curQuoted = true;
       } else {

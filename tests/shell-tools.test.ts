@@ -56,6 +56,17 @@ describe("tokenizeCommand", () => {
     expect(tokenizeCommand('echo "a \\"b\\" c"')).toEqual(["echo", 'a "b" c']);
   });
 
+  // Issue #265 — `\` was eaten as a generic escape inside `"..."`, so
+  // Windows path separators got dropped (`thron\.reasonix` → `thron.reasonix`).
+  // Only `\"` and `\\` are escapes now; everything else is literal.
+  it("preserves Windows path backslashes inside double quotes", () => {
+    expect(tokenizeCommand('dir /b "C:\\Users\\thron\\.reasonix"')).toEqual([
+      "dir",
+      "/b",
+      "C:\\Users\\thron\\.reasonix",
+    ]);
+  });
+
   it("rejects unclosed quotes", () => {
     expect(() => tokenizeCommand('grep "unclosed')).toThrow(/unclosed/);
     expect(() => tokenizeCommand("grep 'unclosed")).toThrow(/unclosed/);
@@ -701,6 +712,18 @@ describe("prepareSpawn", () => {
       isFile: (p) => hits.has(p),
     });
     expect(out.args[3]).toBe('chcp 65001 >nul & C:\\tools\\tool.CMD "a&b" "c|d"');
+  });
+
+  it("preserves Windows path backslashes through tokenize → prepareSpawn (issue #265)", () => {
+    const argv = tokenizeCommand('dir /b "C:\\Users\\thron\\.reasonix"');
+    const out = prepareSpawn(argv, {
+      platform: "win32",
+      env: { PATH: "C:\\nope", PATHEXT: ".EXE" },
+      pathDelimiter: ";",
+      isFile: () => false,
+    });
+    expect(out.bin).toBe("cmd.exe");
+    expect(out.args[3]).toBe("chcp 65001 >nul & dir /b C:\\Users\\thron\\.reasonix");
   });
 
   it("routes bare unresolved Windows commands through cmd.exe (builtins)", () => {

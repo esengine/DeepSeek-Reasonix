@@ -3,7 +3,7 @@
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import * as pathMod from "node:path";
-import { killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
+import { isDqEscape, killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
 
 export type ChainOp = "|" | "||" | "&&" | ";";
 
@@ -45,7 +45,7 @@ function splitOnChainOps(cmd: string): { segs: string[]; ops: ChainOp[] } {
     const ch = cmd[i]!;
     if (quote) {
       if (ch === quote) quote = null;
-      else if (ch === "\\" && quote === '"' && i + 1 < cmd.length) i++;
+      else if (quote === '"' && isDqEscape(ch, cmd[i + 1])) i++;
       i++;
       atTokenStart = false;
       continue;
@@ -119,7 +119,7 @@ function parseSegment(segStr: string): ChainSegment {
     if (quote) {
       if (ch === quote) {
         quote = null;
-      } else if (ch === "\\" && quote === '"' && i + 1 < segStr.length) {
+      } else if (quote === '"' && isDqEscape(ch, segStr[i + 1])) {
         cur += segStr[++i] ?? "";
         curHasContent = true;
       } else {
