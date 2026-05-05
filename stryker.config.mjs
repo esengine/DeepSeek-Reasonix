@@ -8,28 +8,32 @@ const config = {
   // Ignore symlinks and large dirs that stryker can't copy.
   ignorePatterns: ["home_sessions", ".reasonix", "node_modules"],
 
-  // Only mutate the files we changed (focus on PauseGate + tool integrations).
+  // Target load-bearing modules — keeps runs fast (~minutes) so contributors
+  // actually run it. UI, MCP transport, renderer, and TUI primitives are
+  // better tested by snapshot/integration than mutation.
   mutate: [
-    "src/core/pause-gate.ts",
+    "src/loop.ts",
+    "src/context-manager.ts",
+    "src/core/**/*.ts",
     "src/tools/shell.ts",
     "src/tools/plan-core.ts",
     "src/tools/choice.ts",
-    "src/loop.ts",
+    "src/repair/**/*.ts",
   ],
 
-  // Run only relevant test files for the mutated code.
+  // Run only the test files that cover the mutated modules.
+  testFiles: [
+    "tests/loop.test.ts",
+    "tests/shell-tools.test.ts",
+    "tests/plan.test.ts",
+    "tests/choice.test.ts",
+    "tests/repair/*.test.ts",
+  ],
+
   testRunnerNodeArgs: ["--experimental-vm-modules"],
   vitest: {
     configFile: "vitest.config.ts",
   },
-
-  // Only run tests relevant to the mutated files.
-  testFiles: [
-    "tests/pause-gate.test.ts",
-    "tests/shell-tools.test.ts",
-    "tests/plan.test.ts",
-    "tests/choice.test.ts",
-  ],
 
   // Thresholds — fail if mutation score drops below this.
   thresholds: {
