@@ -32,8 +32,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test (vitest)
-        run: npm test
+      - name: Test (vitest + coverage)
+        run: npm run test:coverage
+
+      - name: Coverage job summary
+        if: always()
+        run: node scripts/coverage-summary.mjs
 
       - name: Build (tsup)
         run: npm run build

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+.stryker-tmp/
 .env
 .env.local
 *.log
