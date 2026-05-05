@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ToolRegistry } from "../src/tools.js";
 import { lineDiff, registerFilesystemTools } from "../src/tools/filesystem.js";
-import { displayRel } from "../src/tools/filesystem.js";
+import { compileNameFilter, displayRel } from "../src/tools/filesystem.js";
 
 describe("filesystem tools (built-in, sandbox-enforced)", () => {
   let root: string;
@@ -384,6 +384,95 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       );
       expect(out).toMatch(/src\/cli\/ui\/App\.tsx:1:/);
       expect(out).not.toMatch(/src[\\]cli/);
+    });
+
+    describe("glob filter", () => {
+      beforeEach(async () => {
+        await fs.mkdir(join(root, "src", "ui"), { recursive: true });
+        await fs.writeFile(join(root, "src", "alpha.ts"), "TARGETSTRING\n");
+        await fs.writeFile(join(root, "src", "beta.tsx"), "TARGETSTRING\n");
+        await fs.writeFile(join(root, "src", "ui", "gamma.tsx"), "TARGETSTRING\n");
+        await fs.writeFile(join(root, "notes.md"), "TARGETSTRING\n");
+      });
+
+      it("real glob: '*.ts' matches only .ts (not .tsx)", async () => {
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TARGETSTRING", glob: "*.ts" }),
+        );
+        expect(out).toContain("src/alpha.ts:");
+        expect(out).not.toContain("beta.tsx");
+        expect(out).not.toContain("gamma.tsx");
+        expect(out).not.toContain("notes.md");
+      });
+
+      it("real glob: '**/*.tsx' matches across subdirs", async () => {
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TARGETSTRING", glob: "**/*.tsx" }),
+        );
+        expect(out).toContain("src/beta.tsx:");
+        expect(out).toContain("src/ui/gamma.tsx:");
+        expect(out).not.toContain("alpha.ts:");
+        expect(out).not.toContain("notes.md");
+      });
+
+      it("real glob: brace expansion '*.{ts,tsx}'", async () => {
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TARGETSTRING", glob: "*.{ts,tsx}" }),
+        );
+        expect(out).toContain("src/alpha.ts:");
+        expect(out).toContain("src/beta.tsx:");
+        expect(out).not.toContain("notes.md");
+      });
+
+      it("substring fallback: '.ts' still works (matches .ts and .tsx)", async () => {
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TARGETSTRING", glob: ".ts" }),
+        );
+        expect(out).toContain("src/alpha.ts:");
+        expect(out).toContain("src/beta.tsx:");
+        expect(out).not.toContain("notes.md");
+      });
+
+      it("substring fallback: 'beta' matches by basename substring", async () => {
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TARGETSTRING", glob: "beta" }),
+        );
+        expect(out).toContain("src/beta.tsx:");
+        expect(out).not.toContain("alpha.ts:");
+        expect(out).not.toContain("gamma.tsx:");
+      });
+    });
+  });
+
+  describe("compileNameFilter", () => {
+    it("returns null for empty / undefined input", () => {
+      expect(compileNameFilter(null)).toBeNull();
+      expect(compileNameFilter(undefined)).toBeNull();
+      expect(compileNameFilter("")).toBeNull();
+    });
+
+    it("substring path for plain strings (case-insensitive)", () => {
+      const m = compileNameFilter(".TS")!;
+      expect(m("Foo.ts", "src/Foo.ts")).toBe(true);
+      expect(m("Foo.tsx", "src/Foo.tsx")).toBe(true);
+      expect(m("Foo.md", "src/Foo.md")).toBe(false);
+    });
+
+    it("real glob path for patterns with metachars; basename match", () => {
+      const m = compileNameFilter("*.ts")!;
+      expect(m("alpha.ts", "src/alpha.ts")).toBe(true);
+      expect(m("alpha.tsx", "src/alpha.tsx")).toBe(false);
+    });
+
+    it("rel-path match when pattern contains '/'", () => {
+      const m = compileNameFilter("src/**/*.tsx")!;
+      expect(m("App.tsx", "src/cli/App.tsx")).toBe(true);
+      expect(m("App.tsx", "tests/App.tsx")).toBe(false);
     });
   });
 

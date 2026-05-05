@@ -2,6 +2,7 @@
 
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import picomatch from "picomatch";
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
 import type { ToolRegistry } from "../tools.js";
 
@@ -32,6 +33,22 @@ const BINARY_EXTENSIONS: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.ex
 
 export function displayRel(rootDir: string, full: string): string {
   return pathMod.relative(rootDir, full).replaceAll("\\", "/");
+}
+
+const GLOB_METACHARS = /[*?{[]/;
+
+/** Glob via picomatch when metachars present, else case-insensitive substring — keeps `.ts` / `test` callers working. Slash in pattern → match rel-path; otherwise basename. */
+export function compileNameFilter(
+  filter: string | null | undefined,
+): ((name: string, rel: string) => boolean) | null {
+  if (!filter) return null;
+  if (!GLOB_METACHARS.test(filter)) {
+    const needle = filter.toLowerCase();
+    return (name) => name.toLowerCase().includes(needle);
+  }
+  const matchPath = filter.includes("/");
+  const isMatch = picomatch(filter, { dot: true, nocase: true });
+  return matchPath ? (_n, rel) => isMatch(rel) : (name) => isMatch(name);
 }
 
 function isLikelyBinaryByName(name: string): boolean {
@@ -367,7 +384,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
         glob: {
           type: "string",
           description:
-            "Optional file-name suffix or substring filter. Examples: '.ts' (only TypeScript), 'test' (any file with 'test' in the name). Reduces noise when you know the file shape.",
+            "Optional filename filter. Real glob when the value contains `*`, `?`, `{`, or `[` — e.g. '*.ts', '**/*.tsx', 'src/**/*.{ts,tsx}'. Plain substring otherwise — e.g. '.ts' (suffix), 'test' (anywhere in the name). Patterns containing `/` match against the path relative to the search root; otherwise just the basename.",
         },
         case_sensitive: {
           type: "boolean",
@@ -391,7 +408,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       const startAbs = safePath(args.path ?? ".");
       const caseSensitive = args.case_sensitive === true;
       const includeDeps = args.include_deps === true;
-      const nameFilter = typeof args.glob === "string" ? args.glob.toLowerCase() : null;
+      const nameMatch = compileNameFilter(typeof args.glob === "string" ? args.glob : null);
       // Try the pattern as a regex first (lets the model say `\bdispatch\(`
       // for a word-bounded match); fall back to literal substring on
       // invalid regex. No `g` flag — we test once per line, so global
@@ -424,9 +441,9 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
             continue;
           }
           if (!e.isFile()) continue;
-          if (nameFilter && !e.name.toLowerCase().includes(nameFilter)) continue;
-          if (isLikelyBinaryByName(e.name)) continue;
           const full = pathMod.join(dir, e.name);
+          if (nameMatch && !nameMatch(e.name, displayRel(rootDir, full))) continue;
+          if (isLikelyBinaryByName(e.name)) continue;
           let stat: import("node:fs").Stats;
           try {
             stat = await fs.stat(full);
