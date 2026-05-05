@@ -288,6 +288,9 @@ function AppInner({
   const [busy, setBusy] = useState(false);
   const [languageVersion, setLanguageVersion] = useState(0);
   useEffect(() => onLanguageChange(() => setLanguageVersion((v) => v + 1)), []);
+  // Live MCP server list: initialized from the boot-time prop, then
+  // updated immutably when append-drift adds tools mid-session.
+  const [liveMcpServers, setLiveMcpServers] = useState<McpServerSummary[]>(() => mcpServers ?? []);
   // Tracks whether the current turn has been aborted via Esc, so the
   // Esc handler only fires once per turn (repeated presses would yield
   // stacked warning events).
@@ -994,7 +997,7 @@ function AppInner({
     codeMode,
     rootDir: currentRootDir,
     models,
-    mcpServers,
+    mcpServers: liveMcpServers,
   });
 
   // Wire the shared progressSink so the bridge's onProgress → us.
@@ -1621,7 +1624,7 @@ function AppInner({
         usageLogPath: defaultUsageLogPath(),
         loop,
         tools,
-        mcpServers,
+        mcpServers: liveMcpServers,
         getCurrentCwd: () => (codeMode ? currentRootDirRef.current : undefined),
         getEditMode: () => (codeMode ? editModeRef.current : undefined),
         getPlanMode: () => planModeRef.current,
@@ -1813,7 +1816,7 @@ function AppInner({
   }, [
     loop,
     tools,
-    mcpServers,
+    liveMcpServers,
     codeMode,
     session,
     togglePlanMode,
@@ -2076,7 +2079,7 @@ function AppInner({
         const arg = mcpBrowseMatch[2]?.trim() ?? "";
         promptHistory.current.push(text);
         log.pushUser(text);
-        await handleMcpBrowseSlash(kind, arg, mcpServers ?? [], log);
+        await handleMcpBrowseSlash(kind, arg, liveMcpServers, log);
         return;
       }
 
@@ -2084,7 +2087,7 @@ function AppInner({
       if (slash) {
         const result = handleSlash(slash.cmd, slash.args, loop, {
           mcpSpecs,
-          mcpServers,
+          mcpServers: liveMcpServers,
           codeUndo: codeMode ? codeUndo : undefined,
           codeApply: codeMode ? codeApply : undefined,
           codeDiscard: codeMode ? codeDiscard : undefined,
@@ -2508,7 +2511,7 @@ function AppInner({
       loop,
       latestVersion,
       mcpSpecs,
-      mcpServers,
+      liveMcpServers,
       models,
       planMode,
       session,
@@ -3191,11 +3194,22 @@ function AppInner({
                 />
               ) : pendingMcpBrowser ? (
                 <McpBrowser
-                  servers={mcpServers ?? []}
+                  servers={liveMcpServers}
                   configPath={defaultConfigPath()}
                   onClose={() => setPendingMcpBrowser(false)}
                   postInfo={(text) => log.pushInfo(text)}
-                  applyAppend={(target, addedTools) => applyMcpAppend(loop, target, addedTools)}
+                  applyAppend={(target, addedTools) => {
+                    const updated = applyMcpAppend(loop, target, addedTools);
+                    setLiveMcpServers((prev) =>
+                      prev.map((server) =>
+                        server === target ||
+                        (server.label === target.label && server.spec === target.spec)
+                          ? updated
+                          : server,
+                      ),
+                    );
+                    return updated;
+                  }}
                 />
               ) : pendingPlan ? (
                 <PlanConfirm

@@ -5,8 +5,8 @@ import type { McpTool } from "../../mcp/types.js";
 import { formatMcpLifecycleEvent } from "./mcp-lifecycle.js";
 import type { McpServerSummary } from "./slash/types.js";
 
-/** Applies append-drift mid-session: registers each new MCP tool in the registry + prefix. */
-export type ApplyAppend = (target: McpServerSummary, addedTools: McpTool[]) => void;
+/** Applies append-drift mid-session: registers each new MCP tool in the registry + prefix. Returns the updated summary. */
+export type ApplyAppend = (target: McpServerSummary, addedTools: McpTool[]) => McpServerSummary;
 
 /** Kicks off async reconnect; returns the start-line, schedules result via postInfo. */
 export function kickOffMcpReconnect(
@@ -18,17 +18,20 @@ export function kickOffMcpReconnect(
   // Only opt into "append" when the caller wired an applyAppend handler;
   // otherwise the reconnect refuses append-drift with a "restart" message.
   const accept = applyAppend ? (["identity", "append"] as const) : (["identity"] as const);
+  // Use a mutable local so the async closure can update it after applyAppend
+  // without reassigning the function parameter (linter: noParameterAssign).
+  let liveTarget = target;
   void (async () => {
     try {
       const result = await reconnectMcpServer({
-        host: target.host,
-        spec: target.spec,
+        host: liveTarget.host,
+        spec: liveTarget.spec,
         beforeTools,
         accept,
       });
       if (result.ok) {
         if (result.kind === "append" && applyAppend) {
-          applyAppend(target, result.addedTools);
+          liveTarget = applyAppend(liveTarget, result.addedTools);
         }
         postInfo(
           formatMcpLifecycleEvent({

@@ -98,16 +98,25 @@ describe("applyMcpAppend", () => {
     expect(prefix.fingerprint).not.toBe(before);
   });
 
-  it("updates the summary's tool count + report.tools.items", () => {
+  it("returns a new summary with updated tool count + items, leaving the original unchanged", () => {
     const { loop } = makeLoop();
     const { env, host } = makeFakeMcp();
     env.registry = loop.tools;
     const target = summary(env, host);
+    const origItems = target.report.tools.supported ? target.report.tools.items : [];
 
-    applyMcpAppend(loop, target, [newTool]);
-    expect(target.toolCount).toBe(1);
-    if (!target.report.tools.supported) throw new Error("unreachable");
-    expect(target.report.tools.items.map((t) => t.name)).toContain("delete_file");
+    const result = applyMcpAppend(loop, target, [newTool]);
+
+    // Original object is not mutated
+    expect(target.toolCount).toBe(0);
+    if (target.report.tools.supported) {
+      expect(target.report.tools.items).toBe(origItems);
+    }
+    // Returned object is a new reference with updated data
+    expect(result).not.toBe(target);
+    expect(result.toolCount).toBe(1);
+    if (!result.report.tools.supported) throw new Error("unreachable");
+    expect(result.report.tools.items.map((t) => t.name)).toContain("delete_file");
   });
 
   it("skips MCP tools without a name (defensive)", () => {
@@ -116,8 +125,35 @@ describe("applyMcpAppend", () => {
     env.registry = loop.tools;
     const target = summary(env, host);
 
-    applyMcpAppend(loop, target, [{ name: "", inputSchema: { type: "object" } } as McpTool]);
+    const result = applyMcpAppend(loop, target, [
+      { name: "", inputSchema: { type: "object" } } as McpTool,
+    ]);
+    // Nothing accepted — returns the same reference, no side effects
+    expect(result).toBe(target);
     expect(loop.tools.size).toBe(0);
     expect(target.toolCount).toBe(0);
+  });
+
+  it("propagates the updated summary into the owning server list via the state-updater pattern", () => {
+    const { loop } = makeLoop();
+    const { env, host } = makeFakeMcp();
+    env.registry = loop.tools;
+    const server = summary(env, host);
+    const servers = [server];
+
+    const updated = applyMcpAppend(loop, server, [newTool]);
+
+    // Simulate the setLiveMcpServers updater from App.tsx
+    const next = servers.map((s) =>
+      s === server || (s.label === server.label && s.spec === server.spec) ? updated : s,
+    );
+
+    // The owning list now points at the new summary
+    expect(next).toHaveLength(1);
+    expect(next[0]).toBe(updated);
+    expect(next[0].toolCount).toBe(1);
+    // The original list and server are untouched
+    expect(servers[0]).toBe(server);
+    expect(servers[0].toolCount).toBe(0);
   });
 });

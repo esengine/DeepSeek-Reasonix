@@ -1,4 +1,4 @@
-/** Applies an MCP append-drift mid-session: registers each new tool in the loop's registry + prefix, and updates the summary's report. */
+/** Applies an MCP append-drift mid-session: registers each new tool in the loop's registry + prefix, and returns an updated summary. Immutable — does not mutate the input `target`. */
 
 import type { CacheFirstLoop } from "../../loop.js";
 import { registerSingleMcpTool } from "../../mcp/registry.js";
@@ -10,7 +10,7 @@ export function applyMcpAppend(
   loop: CacheFirstLoop,
   target: McpServerSummary,
   addedTools: McpTool[],
-): void {
+): McpServerSummary {
   const accepted: McpTool[] = [];
   for (const mcpTool of addedTools) {
     if (!mcpTool.name) continue;
@@ -27,14 +27,18 @@ export function applyMcpAppend(
     loop.prefix.addTool(spec);
     accepted.push(mcpTool);
   }
-  if (accepted.length === 0) return;
-  // Refresh the summary's snapshot so `/mcp` and the browser modal show the
-  // new shape on their next render.
-  if (target.report.tools.supported) {
-    const merged = [...target.report.tools.items, ...accepted];
-    // biome-ignore lint/suspicious/noExplicitAny: report is a typed snapshot we mutate in place; deeper refactor isn't worth it here
-    (target.report.tools as any).items = merged;
-    // biome-ignore lint/suspicious/noExplicitAny: same — toolCount mirrors items.length post-append
-    (target as any).toolCount = merged.length;
-  }
+  if (accepted.length === 0 || !target.report.tools.supported) return target;
+
+  const merged = [...target.report.tools.items, ...accepted];
+  return {
+    ...target,
+    toolCount: merged.length,
+    report: {
+      ...target.report,
+      tools: {
+        supported: true as const,
+        items: merged,
+      },
+    },
+  };
 }
