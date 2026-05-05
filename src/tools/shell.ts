@@ -201,13 +201,59 @@ export function detectShellOperator(cmd: string): string | null {
   return check();
 }
 
-/** Match on space-normalized leading tokens — `git   status  -s` matches the `git status` prefix. */
+/** Per-prefix demotion: an otherwise-allowlisted match falls back to the confirm gate when one of these tokens appears in the tail. Issue #257: `git branch -D` skipped review. Each token also matches its `--flag=value` form. */
+const RISKY_ARGS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  // Branch / remote mutation
+  "git branch": ["-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy", "--force"],
+  "git remote": ["add", "remove", "rm", "rename", "set-url", "set-head", "prune"],
+  // `--output` writes to an arbitrary path; `--ext-diff` invokes user-config'd external programs.
+  "git diff": ["--output", "--ext-diff"],
+  "git log": ["--output"],
+  "git show": ["--output"],
+  // `-exec*` / `-ok*` are RCE; `-delete` and `-fprint*` write to arbitrary paths.
+  find: ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"],
+  // Auto-fix mutates source files.
+  "npx eslint": ["--fix", "--fix-dry-run"],
+  "npx biome check": ["--write", "--apply", "--apply-unsafe"],
+  ruff: ["--fix", "--unsafe-fixes", "format"],
+};
+
+function tailHasRisky(tail: readonly string[], risky: readonly string[]): boolean {
+  for (const a of tail) {
+    for (const r of risky) {
+      if (a === r) return true;
+      if (a.startsWith(`${r}=`)) return true;
+    }
+  }
+  return false;
+}
+
+/** Allowlist match on leading argv tokens; demoted by `RISKY_ARGS` when a destructive flag appears in the tail. */
 export function isAllowed(cmd: string, extra: readonly string[] = []): boolean {
-  const normalized = cmd.trim().replace(/\s+/g, " ");
+  let argv: string[];
+  try {
+    argv = tokenizeCommand(cmd);
+  } catch {
+    return false;
+  }
+  if (argv.length === 0) return false;
+
   const allowlist = [...BUILTIN_ALLOWLIST, ...extra];
   for (const prefix of allowlist) {
-    if (normalized === prefix) return true;
-    if (normalized.startsWith(`${prefix} `)) return true;
+    const prefixTokens = prefix.split(" ");
+    if (argv.length < prefixTokens.length) continue;
+    let match = true;
+    for (let i = 0; i < prefixTokens.length; i++) {
+      if (argv[i] !== prefixTokens[i]) {
+        match = false;
+        break;
+      }
+    }
+    if (!match) continue;
+
+    const risky = RISKY_ARGS[prefix];
+    if (risky && tailHasRisky(argv.slice(prefixTokens.length), risky)) return false;
+    return true;
   }
   return false;
 }

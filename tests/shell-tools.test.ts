@@ -201,6 +201,70 @@ describe("isAllowed", () => {
     expect(isAllowed("my-lint src/")).toBe(false);
     expect(isAllowed("my-lint src/", ["my-lint"])).toBe(true);
   });
+
+  // Issue #257 — allowlisted prefixes used to let destructive flags through
+  // because the match only looked at the leading tokens. Demotion rules
+  // bounce these specific risky tail tokens back to the confirm gate.
+  describe("risky-arg demotion", () => {
+    it("demotes destructive git-branch flags", () => {
+      expect(isAllowed("git branch")).toBe(true);
+      expect(isAllowed("git branch -v")).toBe(true);
+      expect(isAllowed("git branch --list")).toBe(true);
+      expect(isAllowed("git branch -d feature/foo")).toBe(false);
+      expect(isAllowed("git branch -D feature/foo")).toBe(false);
+      expect(isAllowed("git branch --delete feature/foo")).toBe(false);
+      expect(isAllowed("git branch -m old new")).toBe(false);
+      expect(isAllowed("git branch -M old new")).toBe(false);
+      expect(isAllowed("git branch -c old new")).toBe(false);
+      expect(isAllowed("git branch -C old new")).toBe(false);
+      expect(isAllowed("git branch --force foo origin/main")).toBe(false);
+    });
+
+    it("demotes mutating git-remote subcommands", () => {
+      expect(isAllowed("git remote")).toBe(true);
+      expect(isAllowed("git remote -v")).toBe(true);
+      expect(isAllowed("git remote show origin")).toBe(true);
+      expect(isAllowed("git remote add upstream https://example.com/x.git")).toBe(false);
+      expect(isAllowed("git remote remove origin")).toBe(false);
+      expect(isAllowed("git remote rm origin")).toBe(false);
+      expect(isAllowed("git remote set-url origin https://example.com/x.git")).toBe(false);
+      expect(isAllowed("git remote prune origin")).toBe(false);
+    });
+
+    it("demotes write-anywhere / external-program git flags", () => {
+      expect(isAllowed("git diff main")).toBe(true);
+      expect(isAllowed("git diff --output foo.patch main")).toBe(false);
+      expect(isAllowed("git diff --output=foo.patch main")).toBe(false);
+      expect(isAllowed("git diff --ext-diff main")).toBe(false);
+      expect(isAllowed("git log --output=log.txt")).toBe(false);
+      expect(isAllowed("git show --output=show.txt HEAD")).toBe(false);
+    });
+
+    it("demotes destructive find actions", () => {
+      expect(isAllowed("find . -name '*.ts'")).toBe(true);
+      expect(isAllowed("find src -type f")).toBe(true);
+      expect(isAllowed("find . -delete")).toBe(false);
+      expect(isAllowed("find . -name '*.tmp' -delete")).toBe(false);
+      expect(isAllowed("find . -exec rm {} ;")).toBe(false);
+      expect(isAllowed("find . -execdir rm {} ;")).toBe(false);
+      expect(isAllowed("find . -fprint /tmp/x")).toBe(false);
+      expect(isAllowed("find . -fprintf /tmp/x %p")).toBe(false);
+    });
+
+    it("demotes auto-fix flags on linters / formatters", () => {
+      expect(isAllowed("npx eslint src")).toBe(true);
+      expect(isAllowed("npx eslint --fix src")).toBe(false);
+      expect(isAllowed("npx eslint --fix-dry-run src")).toBe(false);
+      expect(isAllowed("npx biome check src")).toBe(true);
+      expect(isAllowed("npx biome check --write src")).toBe(false);
+      expect(isAllowed("npx biome check --apply src")).toBe(false);
+      expect(isAllowed("npx biome check --apply-unsafe src")).toBe(false);
+      expect(isAllowed("ruff check src")).toBe(true);
+      expect(isAllowed("ruff check --fix src")).toBe(false);
+      expect(isAllowed("ruff check --unsafe-fixes src")).toBe(false);
+      expect(isAllowed("ruff format src")).toBe(false);
+    });
+  });
 });
 
 describe("runCommand", () => {
