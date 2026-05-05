@@ -24,7 +24,6 @@ import {
 import {
   type EditMode,
   type PresetName,
-  addProjectShellAllowed,
   defaultConfigPath,
   editModeHintShown,
   loadEditMode,
@@ -73,6 +72,7 @@ import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { McpBrowser } from "./McpBrowser.js";
+import { PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
 import { PlanReviseConfirm, type ReviseChoice } from "./PlanReviseConfirm.js";
@@ -97,7 +97,6 @@ import {
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
 import { useScrollback } from "./hooks/useScrollback.js";
-import { useSyntheticSubmit } from "./hooks/useSyntheticSubmit.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
 import {
@@ -2629,14 +2628,6 @@ function AppInner({
     return () => clearTimeout(timer);
   }, [activeLoop, stopLoop, log]);
 
-  const syntheticSubmit = useSyntheticSubmit({
-    log,
-    busy,
-    loop,
-    setQueuedSubmit,
-    handleSubmit,
-  });
-
   /**
    * ShellConfirm callback. Resolves the PauseGate so the
    * blocked tool function can proceed. The tool handles running the
@@ -2981,7 +2972,8 @@ function AppInner({
       setPendingCheckpoint(null);
       const gid = pendingGateIdRef.current;
       if (choice === "revise") {
-        if (gid !== null) pauseGate.resolve(gid, { type: "revise" });
+        // Don't resolve the gate yet — wait for the staged feedback input
+        // and let handleCheckpointReviseSubmit resolve with the feedback text.
         setStagedCheckpointRevise(snap);
         return;
       }
@@ -3030,18 +3022,21 @@ function AppInner({
     [],
   );
 
-  /** Revise feedback submitted — resolves the gate with revise. */
+  /** Revise feedback submitted — resolves the gate with feedback. */
   const handleCheckpointReviseSubmit = useCallback(
-    async (feedback: string, snapOverride?: { stepId: string; title?: string }) => {
+    (feedback: string, snapOverride?: { stepId: string; title?: string }) => {
       const snap = snapOverride;
       setStagedCheckpointRevise(null);
       if (!snap) return;
       const label = snap.title ? `${snap.stepId} · ${snap.title}` : snap.stepId;
       const trimmed = feedback.trim();
-      // User wants to revise — push the feedback via gate, model will
-      // call revise_plan on the next iteration.
       const gid = pendingGateIdRef.current;
-      if (gid !== null) pauseGate.resolve(gid, { type: "revise" });
+      if (gid !== null) {
+        pauseGate.resolve(
+          gid,
+          trimmed ? { type: "revise", feedback: trimmed } : { type: "revise" },
+        );
+      }
       const marker = trimmed
         ? `▸ revising after ${label} — ${trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed}`
         : `▸ continuing after ${label}`;
@@ -3139,6 +3134,8 @@ function AppInner({
           !!pendingChoice ||
           !!stagedChoiceCustom ||
           !!pendingRevision ||
+          !!stagedCheckpointRevise ||
+          !!pendingCheckpoint ||
           // Idle gate: when nothing is actively happening, suspend the
           // 8Hz/1Hz heartbeats. The cursor blink, gradient pulse, and
           // spinner glyphs are pure cosmetics — running them at idle
@@ -3220,7 +3217,9 @@ function AppInner({
                 !pendingEditReview &&
                 !pendingChoice &&
                 !stagedChoiceCustom &&
-                !pendingRevision ? (
+                !pendingRevision &&
+                !stagedCheckpointRevise &&
+                !pendingCheckpoint ? (
                   <UndoBanner banner={undoBanner} />
                 ) : null}
                 {/*
@@ -3269,6 +3268,12 @@ function AppInner({
                   onSubmit={handleChoiceCustomSubmit}
                   onCancel={handleChoiceCustomCancel}
                 />
+              ) : stagedCheckpointRevise ? (
+                <PlanRefineInput
+                  mode="checkpoint-revise"
+                  onSubmit={(text) => handleCheckpointReviseSubmit(text, stagedCheckpointRevise)}
+                  onCancel={handleCheckpointReviseCancel}
+                />
               ) : pendingChoice ? (
                 <ChoiceConfirm
                   question={pendingChoice.question}
@@ -3285,6 +3290,16 @@ function AppInner({
                   newRemaining={pendingRevision.remainingSteps}
                   summary={pendingRevision.summary}
                   onChoose={stableHandleReviseConfirm}
+                />
+              ) : pendingCheckpoint ? (
+                <PlanCheckpointConfirm
+                  stepId={pendingCheckpoint.stepId}
+                  title={pendingCheckpoint.title}
+                  completed={pendingCheckpoint.completed}
+                  total={pendingCheckpoint.total}
+                  steps={planStepsRef.current ?? undefined}
+                  completedStepIds={completedStepIdsRef.current}
+                  onChoose={stableHandleCheckpointConfirm}
                 />
               ) : pendingSessionsPicker ? (
                 <SessionPicker

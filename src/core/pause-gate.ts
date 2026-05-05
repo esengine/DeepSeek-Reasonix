@@ -9,7 +9,10 @@ export type ConfirmationChoice =
 
 export type PlanVerdict = { type: "approve" } | { type: "refine" } | { type: "cancel" };
 
-export type CheckpointVerdict = { type: "continue" } | { type: "revise" } | { type: "stop" };
+export type CheckpointVerdict =
+  | { type: "continue" }
+  | { type: "revise"; feedback?: string }
+  | { type: "stop" };
 
 export type RevisionVerdict = { type: "accepted" } | { type: "rejected" } | { type: "cancelled" };
 

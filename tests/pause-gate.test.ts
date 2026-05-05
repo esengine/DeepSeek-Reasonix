@@ -78,6 +78,36 @@ describe("PauseGate", () => {
     await expect(promise).resolves.toEqual({ type: "run_once" });
   });
 
+  it("CheckpointVerdict carries feedback on revise", async () => {
+    const gate = new PauseGate();
+    gate.on(() => {});
+
+    const promise = gate.ask({
+      kind: "plan_checkpoint",
+      payload: { stepId: "step-1", result: "done" },
+    });
+    const req = gate.current!;
+    gate.resolve(req.id, { type: "revise", feedback: "rename to auth-tokens.ts instead" });
+    await expect(promise).resolves.toEqual({
+      type: "revise",
+      feedback: "rename to auth-tokens.ts instead",
+    });
+  });
+
+  it("CheckpointVerdict revise without feedback is accepted", async () => {
+    const gate = new PauseGate();
+    gate.on(() => {});
+
+    const promise = gate.ask({
+      kind: "plan_checkpoint",
+      payload: { stepId: "step-2", result: "added tests" },
+    });
+    const req = gate.current!;
+    // Bare revise — no feedback string
+    gate.resolve(req.id, { type: "revise" });
+    await expect(promise).resolves.toEqual({ type: "revise" });
+  });
+
   it("multiple pending requests queue independently", async () => {
     const gate = new PauseGate();
     const listener = vi.fn();

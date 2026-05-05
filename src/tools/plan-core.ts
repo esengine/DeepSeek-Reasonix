@@ -169,7 +169,10 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
         payload: { stepId, title, result, notes },
       });
       if (verdict.type === "continue") return JSON.stringify(update);
-      if (verdict.type === "revise") throw new Error("user requested revision at checkpoint");
+      if (verdict.type === "revise") {
+        if (verdict.feedback) return `revision requested: ${verdict.feedback}`;
+        throw new Error("user requested revision at checkpoint");
+      }
       throw new Error("user stopped at checkpoint");
     },
   });

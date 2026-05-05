@@ -434,6 +434,31 @@ describe("registerPlanTool + mark_step_complete", () => {
     );
     expect(JSON.parse(out).error).toMatch(/result is required/);
   });
+
+  it("surfaces revise feedback in the tool result when gate resolves with feedback", async () => {
+    const reg = new ToolRegistry();
+    registerPlanTool(reg);
+    const gate = new AutoGate({ type: "revise", feedback: "skip step 3 and add auth middleware" });
+    const out = await reg.dispatch(
+      "mark_step_complete",
+      JSON.stringify({ stepId: "step-2", result: "added tests" }),
+      { confirmationGate: gate },
+    );
+    // Not JSON — the tool returns a plain string when feedback is present
+    expect(out).toBe("revision requested: skip step 3 and add auth middleware");
+  });
+
+  it("throws user requested revision when revise has no feedback", async () => {
+    const reg = new ToolRegistry();
+    registerPlanTool(reg);
+    const gate = new AutoGate({ type: "revise" });
+    const out = await reg.dispatch(
+      "mark_step_complete",
+      JSON.stringify({ stepId: "step-3", result: "finished wiring" }),
+      { confirmationGate: gate },
+    );
+    expect(JSON.parse(out).error).toMatch(/user requested revision at checkpoint/);
+  });
 });
 
 describe("PlanRevisionProposedError", () => {
