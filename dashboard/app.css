@@ -691,13 +691,18 @@ main { padding: 32px 40px 60px 32px; min-width: 0; }
 
 /* ── Sessions panel ──────────────────────────────────────────────────── */
 .sessions-grid {
-  display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px;
-  /* Floor for short lists (so the panel still feels substantial), ceiling so
-     long lists scroll internally instead of pushing the rest of the page. */
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  /* `minmax(0, 1fr)` on the row + `min-height: 0` on the children is the
+     standard recipe for "let the inner overflow:auto take effect" — without
+     it the grid items default to min-height: auto (= content size) and
+     grow past the parent's max-height, dragging .app-body along. */
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
   min-height: 540px;
   max-height: calc(100vh - 140px);
 }
-.sessions-list { background: var(--bg-elev); border: 1px solid var(--bd); border-radius: var(--r); display: flex; flex-direction: column; overflow: hidden; }
+.sessions-list { background: var(--bg-elev); border: 1px solid var(--bd); border-radius: var(--r); display: flex; flex-direction: column; overflow: hidden; min-height: 0; min-width: 0; }
 .sessions-list .ssl-h { padding: 10px 12px; border-bottom: 1px solid var(--bd); display: flex; align-items: center; gap: 8px; }
 .sessions-list .ssl-h input {
   flex: 1; background: var(--bg-input); border: 1px solid var(--bd); border-radius: var(--r);
@@ -716,7 +721,7 @@ main { padding: 32px 40px 60px 32px; min-width: 0; }
 .ssl-row .meta { display: flex; gap: 10px; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-4); margin-top: 2px; }
 .ssl-row .meta .v { color: var(--fg-2); }
 
-.sessions-detail { background: var(--bg-elev); border: 1px solid var(--bd); border-radius: var(--r); padding: 14px 16px; overflow: auto; }
+.sessions-detail { background: var(--bg-elev); border: 1px solid var(--bd); border-radius: var(--r); padding: 14px 16px; overflow: auto; min-height: 0; min-width: 0; }
 .sessions-detail-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--bd); }
 .sessions-detail-h .name { font-family: var(--font-mono); font-size: 14px; color: var(--fg-0); font-weight: 600; }
 .sessions-detail-h .ws   { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
