@@ -20,10 +20,6 @@ import {
   truncateForModelByTokens,
 } from "./mcp/registry.js";
 
-const ARGS_COMPACT_THRESHOLD_TOKENS = 800;
-/** Per-turn cap on tool RESULTS — 3k is enough head+tail to cite, model can re-read for detail. */
-const TURN_END_RESULT_CAP_TOKENS = 3000;
-
 const FAILURE_ESCALATION_THRESHOLD = 3;
 const ESCALATION_MODEL = "deepseek-v4-pro";
 /** Accepts `<<<NEEDS_PRO>>>` or `<<<NEEDS_PRO: reason>>>` (reason trimmed, may be empty). */
@@ -269,39 +265,6 @@ export class CacheFirstLoop {
       }
     } else {
       this.resumedMessageCount = 0;
-    }
-  }
-
-  /** Shrink huge edit_file/write_file args post-dispatch — tool result already explains. */
-  private compactToolCallArgsAfterResponse(): void {
-    const before = this.log.toMessages();
-    const { messages, healedCount } = shrinkOversizedToolCallArgsByTokens(
-      before,
-      ARGS_COMPACT_THRESHOLD_TOKENS,
-    );
-    if (healedCount === 0) return;
-    this.log.compactInPlace(messages);
-    if (this.sessionName) {
-      try {
-        rewriteSession(this.sessionName, messages);
-      } catch {
-        /* disk full / perms — in-memory compaction still helps this session */
-      }
-    }
-  }
-
-  /** Preventive end-of-turn shrink — trim big results before they ride into the next prompt. */
-  private autoCompactToolResultsOnTurnEnd(): void {
-    const before = this.log.toMessages();
-    const shrunk = shrinkOversizedToolResultsByTokens(before, TURN_END_RESULT_CAP_TOKENS);
-    if (shrunk.healedCount === 0) return;
-    this.log.compactInPlace(shrunk.messages);
-    if (this.sessionName) {
-      try {
-        rewriteSession(this.sessionName, shrunk.messages);
-      } catch {
-        /* disk full / perms — in-memory compaction still helps this session */
-      }
     }
   }
 
@@ -646,7 +609,6 @@ export class CacheFirstLoop {
           content: stoppedMsg,
           forcedSummary: true,
         };
-        this.autoCompactToolResultsOnTurnEnd();
         yield { turn: this._turn, role: "done", content: stoppedMsg };
         // Reset to a fresh, non-aborted controller before returning.
         // Without this the carry-abort logic above sees the still-
@@ -976,7 +938,6 @@ export class CacheFirstLoop {
         // synthetic OR user re-prompt) starts immediately and gets to
         // produce its own answer.
         if (signal.aborted) {
-          this.autoCompactToolResultsOnTurnEnd();
           yield { turn: this._turn, role: "done", content: "" };
           // Reset the controller so the carry-abort check at the top of
           // the NEXT step() doesn't inherit this turn's aborted state.
@@ -1159,94 +1120,50 @@ export class CacheFirstLoop {
           yield* this.forceSummaryAfterIterLimit({ reason: "stuck" });
           return;
         }
-        this.autoCompactToolResultsOnTurnEnd();
         yield { turn: this._turn, role: "done", content: assistantContent };
         return;
       }
 
-      // Token-budget guard — the real stop condition. Iter count is a
-      // proxy that misses the actual constraint: how close the prompt
-      // already is to DeepSeek's 131k context. If we're over 80%, the
-      // NEXT call (with the just-executed tools' results stuffed into
-      // history) will be worse, and fairly soon it'll 400 with
-      // "maximum context length".
-      //
-      // Strategy, in order:
-      //   1. Try auto-compacting the log (shrink oversized tool
-      //      results). If that gets us back under 80% we keep going —
-      //      the user doesn't lose their turn to a premature summary.
-      //   2. If still over after compact, divert to the forced-summary
-      //      path. BUT first drop the trailing assistant-with-tool_calls
-      //      that we just appended — we haven't executed the tools yet,
-      //      so sending this to the summary call with no matching tool
-      //      responses would 400 ("insufficient tool messages following
-      //      tool_calls"). The summary is about what was LEARNED so far,
-      //      not what we intended to do next.
+      // Token-budget guard. Over 80% of context, force-summarize and
+      // exit the turn — the next iter would only get worse. We used to
+      // try in-place compaction here, but mutating mid-history bytes
+      // invalidates DeepSeek's prompt cache from the mutation point on,
+      // turning a "save 50% of prompt size" win into a "lose 90% of
+      // cache discount" loss. See scripts/probe-cache.mjs.
       const ctxMax = DEEPSEEK_CONTEXT_TOKENS[this.model] ?? DEFAULT_CONTEXT_TOKENS;
-      // Proactive 40-80% pre-shrink to 4k so we don't fall into the 80% reactive 1k cap.
-      if (usage) {
-        const ratio = usage.promptTokens / ctxMax;
-        if (ratio > 0.4 && ratio <= 0.8) {
-          const before = usage.promptTokens;
-          const soft = this.compact(4_000);
-          if (soft.healedCount > 0) {
-            const after = Math.max(0, before - soft.tokensSaved);
-            yield {
-              turn: this._turn,
-              role: "warning",
-              content: `context ${before.toLocaleString()}/${ctxMax.toLocaleString()} (${Math.round(
-                ratio * 100,
-              )}%) — proactively compacted ${soft.healedCount} tool result(s) to 4k tokens, saved ${soft.tokensSaved.toLocaleString()} tokens (now ~${after.toLocaleString()}). Staying ahead of the 80% guard.`,
-            };
-          }
-        }
-      }
       if (usage && usage.promptTokens / ctxMax > 0.8) {
         const before = usage.promptTokens;
-        const compactResult = this.compact(1_000);
-        if (compactResult.healedCount > 0) {
-          const after = Math.max(0, before - compactResult.tokensSaved);
-          yield {
-            turn: this._turn,
-            role: "warning",
-            content: `context ${before.toLocaleString()}/${ctxMax.toLocaleString()} — auto-compacted ${compactResult.healedCount} oversized tool result(s), saved ${compactResult.tokensSaved.toLocaleString()} tokens (now ~${after.toLocaleString()}). Continuing.`,
-          };
-          // Intentionally don't re-check the threshold here: even if
-          // compaction didn't fully clear us under 80%, one more tool
-          // call's overhead isn't going to overflow, and the NEXT
-          // iter's fresh `usage` from the API will catch real danger.
-        } else {
-          yield {
-            turn: this._turn,
-            role: "warning",
-            content: `context ${before.toLocaleString()}/${ctxMax.toLocaleString()} (${Math.round(
-              (before / ctxMax) * 100,
-            )}%) — nothing to auto-compact. Forcing summary from what was gathered.`,
-          };
-          // Drop the trailing assistant-with-tool_calls we just
-          // appended. The forced-summary call would otherwise trip
-          // DeepSeek's "insufficient tool messages following tool_calls"
-          // validator, since we bail BEFORE dispatching the tools.
-          const tail = this.log.entries[this.log.entries.length - 1];
-          if (
-            tail &&
-            tail.role === "assistant" &&
-            Array.isArray(tail.tool_calls) &&
-            tail.tool_calls.length > 0
-          ) {
-            const kept = this.log.entries.slice(0, -1);
-            this.log.compactInPlace([...kept]);
-            if (this.sessionName) {
-              try {
-                rewriteSession(this.sessionName, kept);
-              } catch {
-                /* disk issue shouldn't block the summary path */
-              }
+        yield {
+          turn: this._turn,
+          role: "warning",
+          content: `context ${before.toLocaleString()}/${ctxMax.toLocaleString()} (${Math.round(
+            (before / ctxMax) * 100,
+          )}%) — forcing summary from what was gathered. Run /clear or /compact to reset.`,
+        };
+        // Drop the trailing assistant-with-tool_calls we just appended.
+        // The forced-summary call would otherwise trip DeepSeek's
+        // "insufficient tool messages following tool_calls" validator,
+        // since we bail BEFORE dispatching the tools. Tail-only mutation
+        // doesn't break cache (cache match terminates at the prefix).
+        const tail = this.log.entries[this.log.entries.length - 1];
+        if (
+          tail &&
+          tail.role === "assistant" &&
+          Array.isArray(tail.tool_calls) &&
+          tail.tool_calls.length > 0
+        ) {
+          const kept = this.log.entries.slice(0, -1);
+          this.log.compactInPlace([...kept]);
+          if (this.sessionName) {
+            try {
+              rewriteSession(this.sessionName, kept);
+            } catch {
+              /* disk issue shouldn't block the summary path */
             }
           }
-          yield* this.forceSummaryAfterIterLimit({ reason: "context-guard" });
-          return;
         }
+        yield* this.forceSummaryAfterIterLimit({ reason: "context-guard" });
+        return;
       }
 
       for (const call of repairedCalls) {
@@ -1319,12 +1236,6 @@ export class CacheFirstLoop {
           name,
           content: result,
         });
-        // Auto-shrink the matching tool_call's args now that the tool
-        // has responded. No-op when args are under the threshold; when
-        // over, the next turn's prompt + cache key carry the compact
-        // marker instead of the raw SEARCH/REPLACE payload. See
-        // compactToolCallArgsAfterResponse for the trade-offs.
-        this.compactToolCallArgsAfterResponse();
         // Cost-aware escalation: check for "flash is struggling" shapes
         // (SEARCH-not-found, etc). If threshold hits here, surface a
         // one-time warning so the user knows the next call upgraded.
@@ -1413,7 +1324,6 @@ export class CacheFirstLoop {
         stats: summaryStats,
         forcedSummary: true,
       };
-      this.autoCompactToolResultsOnTurnEnd();
       yield { turn: this._turn, role: "done", content: summary };
     } catch (err) {
       const label = errorLabelFor(opts.reason, this.maxToolIters);
@@ -1423,7 +1333,6 @@ export class CacheFirstLoop {
         content: "",
         error: `${label} and the fallback summary call failed: ${(err as Error).message}. Run /clear and retry with a narrower question, or raise --max-tool-iters.`,
       };
-      this.autoCompactToolResultsOnTurnEnd();
       yield { turn: this._turn, role: "done", content: "" };
     }
   }
