@@ -119,9 +119,8 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   { cmd: "retry", summary: "truncate & resend your last message (fresh sample)" },
   {
     cmd: "compact",
-    argsHint: "[tokens]",
     summary:
-      "shrink oversized tool results AND tool-call args (edit_file search/replace) in the log; cap in tokens, default 4000",
+      "fold older turns into a summary message (cache-safe). Auto-fires at 50% ctx; this is the manual trigger.",
   },
   { cmd: "keys", summary: "show all keyboard shortcuts and prompt prefixes" },
   { cmd: "plans", summary: "list this session's active + archived plans, newest first" },

@@ -252,57 +252,22 @@ describe("handleSlash", () => {
     expect(r.exit).toBeUndefined(); // /setup doesn't auto-exit — user presses /exit
   });
 
-  it("/compact says 'nothing to compact' when no tool messages exceed the cap", () => {
+  it("/compact returns synchronously with a 'folding…' status and fires fold async", async () => {
     const loop = makeLoop();
-    loop.log.append({ role: "user", content: "hi" });
-    loop.log.append({ role: "tool", tool_call_id: "t1", content: "short result" });
-    const r = handleSlash("compact", [], loop);
-    expect(r.info).toMatch(/nothing to compact/);
-    expect(r.info).toMatch(/tokens/);
-  });
-
-  it("/compact shrinks oversized tool results and reports tokens saved", () => {
-    const loop = makeLoop();
-    loop.log.append({ role: "user", content: "read a big file" });
-    // Realistic log-shape content — avoids the BPE O(n²) pathological
-    // path on pure-repeat inputs while still tokenizing well over the
-    // default 4000-token cap.
-    loop.log.append({
-      role: "tool",
-      tool_call_id: "t1",
-      content: "ERROR: line failed with detail and context\n".repeat(2000),
+    let posted = "";
+    const r = handleSlash("compact", [], loop, {
+      postInfo: (text) => {
+        posted = text;
+      },
     });
-    const r = handleSlash("compact", [], loop);
-    // Slash message now covers both passes (tool results + tool-call
-    // args); the "1 payload" and a token-saved count are what matters
-    // for this test's invariant.
-    expect(r.info).toMatch(/compacted 1 payload/);
-    expect(r.info).toMatch(/saved [\d,]+ tokens/);
-    // After compaction the tool content should be much smaller than
-    // the original 84KB, comfortably under the cap's char worst-case.
-    const toolEntry = loop.log.entries.find((m) => m.role === "tool");
-    expect(typeof toolEntry?.content).toBe("string");
-    expect((toolEntry?.content as string).length).toBeLessThan(20_000);
-  });
-
-  it("/compact honors a custom token cap argument", () => {
-    const loop = makeLoop();
-    loop.log.append({
-      role: "tool",
-      tool_call_id: "t1",
-      content: "INFO: event ok\n".repeat(1500),
-    });
-    // 500-token cap should shrink the message hard.
-    const r = handleSlash("compact", ["500"], loop);
-    expect(r.info).toMatch(/compacted 1/);
-    expect(r.info).toMatch(/500 tokens each/);
-    const toolEntry = loop.log.entries.find((m) => m.role === "tool");
-    expect((toolEntry?.content as string).length).toBeLessThan(3_000);
-  });
-
-  it("/help mentions /compact", () => {
-    const r = handleSlash("help", [], makeLoop());
-    expect(r.info).toMatch(/\/compact/);
+    // Sync return is the starting status, not the result.
+    expect(r.info).toMatch(/folding/i);
+    // Fold call is in flight; await it via the public API to reach the postInfo path.
+    // Empty log → noop result.
+    await loop.compactHistory();
+    // Poll briefly for the postInfo (handler's promise settles in the same tick).
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(posted).toMatch(/nothing to fold|folded/);
   });
 
   it("/preset auto = v4-flash + auto-escalate, no harvest, no branch", () => {

@@ -145,7 +145,7 @@ export function CtxBreakdownBlock({ data }: { data: CtxBreakdownData }): React.R
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>{"  /compact shrinks oversized tool results · /new wipes log"}</Text>
+        <Text dimColor>{"  /compact folds (auto at 50%) · /new wipes log"}</Text>
       </Box>
     </Box>
   );

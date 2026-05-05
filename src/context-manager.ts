@@ -3,7 +3,6 @@ import { Usage } from "./client.js";
 import { healLoadedMessages } from "./loop.js";
 import { thinkingModeForModel } from "./loop.js";
 import { stripHallucinatedToolMarkup } from "./loop.js";
-import { shrinkOversizedToolCallArgsByTokens, shrinkOversizedToolResultsByTokens } from "./loop.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
 import { rewriteSession } from "./memory/session.js";
@@ -58,12 +57,6 @@ export interface FoldResult {
   beforeMessages: number;
   afterMessages: number;
   summaryChars: number;
-}
-
-export interface InPlaceCompactResult {
-  healedCount: number;
-  tokensSaved: number;
-  charsSaved: number;
 }
 
 export class ContextManager {
@@ -148,22 +141,6 @@ export class ContextManager {
       afterMessages: replacement.length,
       summaryChars: summary.length,
     };
-  }
-
-  /** In-place shrink of oversized tool results / args — breaks prompt cache; keep for emergencies + manual `/compact`. */
-  inPlaceCompact(maxTokens: number): InPlaceCompactResult {
-    const before = this.deps.log.toMessages();
-    const resultsPass = shrinkOversizedToolResultsByTokens(before, maxTokens);
-    const argsPass = shrinkOversizedToolCallArgsByTokens(resultsPass.messages, maxTokens);
-    const messages = argsPass.messages;
-    const healedCount = resultsPass.healedCount + argsPass.healedCount;
-    const tokensSaved = resultsPass.tokensSaved + argsPass.tokensSaved;
-    const charsSaved = resultsPass.charsSaved + argsPass.charsSaved;
-    if (healedCount > 0) {
-      this.deps.log.compactInPlace(messages);
-      this.persistRewrite(messages);
-    }
-    return { healedCount, tokensSaved, charsSaved };
   }
 
   /** Drop a trailing in-flight assistant-with-tool_calls before a forced summary. Tail-only mutation; prefix cache safe. */

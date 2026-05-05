@@ -667,9 +667,11 @@ describe("CacheFirstLoop (non-streaming)", () => {
       stream: false,
       maxToolIters: 8,
     });
-    // Seed 18 user/assistant turns with realistic per-message bulk so
-    // the fold's tail-token budget (20% of 1M = 200k) actually covers
-    // only the trailing turns, not all of them. Each pair ≈ 25k tokens.
+    // Seed 18 user/assistant turns sized so the LOG estimate stays
+    // below the 95% preflight threshold (otherwise preflight folds
+    // first and the auto-fold path never runs). The mocked usage of
+    // 600k below is what trips the auto-fold check, independent of the
+    // tokenizer's view of the seed.
     const fillLines = (label: string, n: number) =>
       Array.from(
         { length: n },
@@ -677,8 +679,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
           `${label} line ${i}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
       ).join("\n");
     for (let i = 0; i < 18; i++) {
-      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 800)}` });
-      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 800)}` });
+      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 400)}` });
+      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 400)}` });
     }
     const beforeMessages = loop.log.length;
 

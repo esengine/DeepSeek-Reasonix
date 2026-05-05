@@ -275,14 +275,6 @@ export class CacheFirstLoop {
     });
   }
 
-  compact(maxTokens = 4000): {
-    healedCount: number;
-    tokensSaved: number;
-    charsSaved: number;
-  } {
-    return this.context.inPlaceCompact(maxTokens);
-  }
-
   /** Replace older turns with one summary message; keep tail within keepRecentTokens budget. */
   async compactHistory(opts?: { keepRecentTokens?: number }): Promise<{
     folded: boolean;
@@ -652,25 +644,31 @@ export class CacheFirstLoop {
       }
       let messages = this.buildMessages(pendingUser);
 
-      // Preflight context check. Local estimate of the outgoing payload —
+      // Preflight context check. Local estimate of the outgoing payload
       // catches cases where prior usage didn't warn us (fresh resume, one
-      // huge tool result). Above 95% we run the in-place emergency
-      // compact (the only remaining cache-breaking path; will be
-      // replaced by a fold attempt in PR-D).
+      // huge tool result). Above 95% we attempt a fold as a last resort —
+      // it costs one summary call but stays cache-friendly. If the fold
+      // can't shrink anything, we surface a warning and let the request
+      // go (and likely 400) so the user knows to /clear.
       {
         const decision = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
         if (decision.needsAction) {
           const { estimateTokens: estimate, ctxMax } = decision;
-          const result = this.context.inPlaceCompact(1_000);
-          if (result.healedCount > 0) {
+          yield {
+            turn: this._turn,
+            role: "status",
+            content: "preflight: context near full, attempting fold…",
+          };
+          const result = await this.context.fold(this.model);
+          if (result.folded) {
             yield {
               turn: this._turn,
               role: "warning",
               content: `preflight: request ~${estimate.toLocaleString()}/${ctxMax.toLocaleString()} tokens (${Math.round(
                 (estimate / ctxMax) * 100,
-              )}%) — pre-compacted ${result.healedCount} tool result(s), saved ${result.tokensSaved.toLocaleString()} tokens. Sending.`,
+              )}%) — folded ${result.beforeMessages} messages → ${result.afterMessages} (summary ${result.summaryChars} chars). Sending.`,
             };
-            // Rebuild with the compacted log so we send the smaller payload.
+            // Rebuild with the folded log so we send the smaller payload.
             messages = this.buildMessages(pendingUser);
           } else {
             yield {
@@ -678,7 +676,7 @@ export class CacheFirstLoop {
               role: "warning",
               content: `preflight: request ~${estimate.toLocaleString()}/${ctxMax.toLocaleString()} tokens (${Math.round(
                 (estimate / ctxMax) * 100,
-              )}%) and nothing to auto-compact — DeepSeek will likely 400. Run /forget or /clear to start fresh.`,
+              )}%) and nothing left to fold — DeepSeek will likely 400. Run /clear or /new to start fresh.`,
             };
           }
         }
@@ -1146,7 +1144,7 @@ export class CacheFirstLoop {
           role: "warning",
           content: `context ${before.toLocaleString()}/${ctxMax.toLocaleString()} (${Math.round(
             (before / ctxMax) * 100,
-          )}%) — forcing summary from what was gathered. Run /clear or /compact to reset.`,
+          )}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.`,
         };
         this.context.trimTrailingToolCalls();
         yield* this.forceSummaryAfterIterLimit({ reason: "context-guard" });

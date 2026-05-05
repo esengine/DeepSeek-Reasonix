@@ -83,12 +83,12 @@ describe("preflight context-size check", () => {
       events.push({ role: ev.role, content: ev.content });
     }
 
-    // Preflight fires BEFORE the request — expect a warning that names
-    // the preflight path and reports tokens saved from compaction.
+    // Preflight fires BEFORE the request — expect a warning naming the
+    // preflight path and the fold result (cache-safe: append-only summary).
     const warn = events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? ""));
     expect(warn).toBeDefined();
-    expect(warn!.content).toMatch(/pre-compacted \d+ tool result/);
-    expect(warn!.content).toMatch(/saved [\d,]+ tokens/);
+    expect(warn!.content).toMatch(/folded \d+ messages/);
+    expect(warn!.content).toMatch(/summary \d+ chars/);
 
     // Loop still completed normally (no forced summary, no error).
     expect(events.find((e) => e.role === "error")).toBeUndefined();
@@ -116,11 +116,11 @@ describe("preflight context-size check", () => {
     expect(anyPreflight).toBeUndefined();
   });
 
-  it("warns (but does not block) when over 95% with nothing to compact", async () => {
-    // Tiny budget AND a system prompt that alone overwhelms it. No
-    // tool messages exist, so compact has nothing to shrink — the
-    // preflight should still surface a warning so the failure isn't
-    // mysterious; the request goes out regardless and DeepSeek decides.
+  it("warns (but does not block) when over 95% with nothing to fold", async () => {
+    // Tiny budget AND a system prompt that alone overwhelms it. The log
+    // is empty, so fold has nothing to shrink — the preflight surfaces
+    // a warning so the failure isn't mysterious; the request goes out
+    // regardless and DeepSeek decides.
     DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL] = 500;
     const bulkyPrompt = "You are a careful assistant. ".repeat(300);
 
@@ -139,7 +139,7 @@ describe("preflight context-size check", () => {
 
     const warn = events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? ""));
     expect(warn).toBeDefined();
-    expect(warn!.content).toMatch(/nothing to auto-compact/);
+    expect(warn!.content).toMatch(/nothing left to fold/);
     // Run still reaches the final step — the user sees the warning
     // and can react, but we don't short-circuit on our own.
     const finals = events.filter((e) => e.role === "assistant_final");

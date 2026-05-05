@@ -301,7 +301,7 @@ export const zhCN: TranslationSchema = {
       helpPrompt:
         "  /prompt [name]           浏览 + 获取 MCP 提示（无参数 → 列出名称；<name> → 渲染）",
       helpSetup: "  /setup                   （退出 + 重新配置）→ 运行 `reasonix setup`",
-      helpCompact: "  /compact [tokens]        缩小历史中的大型工具结果（默认 4000 tokens/结果）",
+      helpCompact: "  /compact                 折叠旧轮次为摘要（cache-safe，50% 自动触发）",
       helpThink: "  /think                   转储最近一轮的完整 R1 推理（仅推理模型）",
       helpTool: "  /tool [N]                列出工具调用（或转储第 N 个的完整输出，1=最近）",
       helpCost: "  /cost [text]             空 → 上一轮花费；带文本 → 估算发送成本",
@@ -628,9 +628,10 @@ export const zhCN: TranslationSchema = {
       toolNotFound: "无法读取工具调用 #{n}",
       toolInfo: "↳ tool<{name}> #{n}（{chars} 字符）：",
       contextInfo: "上下文：~{total} / {max}（{pct}%）· 系统 {sys} · 工具 {tools} · 日志 {log}",
-      compactNone: "▸ 无需压缩 — 历史中没有工具结果或工具调用参数超过 {cap} tokens。",
-      compactInfo:
-        "▸ 已压缩 {count} 个负载至每个 {cap} tokens（工具结果 + 工具调用参数），节省 {tokens} tokens（{chars} 字符）。会话文件已重写。",
+      compactStarting: "▸ 正在折叠旧轮次为摘要…",
+      compactNoop: "▸ 无需折叠 — 日志已足够小，或最近轮次本身已超过预算。",
+      compactDone: "▸ 已折叠 {before} 条消息 → {after}（摘要 {chars} 字符）。继续。",
+      compactFailed: "▸ 折叠失败：{reason}",
       costNoTurn: "尚无轮次 — `/cost` 显示最近一轮的 token + 花费明细。",
       costNeedsTui: "/cost 需要 TUI 上下文（postUsage 已连接）。",
       costNoPricing: '▸ /cost：模型 "{model}" 无定价表。请在 telemetry/stats.ts 中添加。',

@@ -160,23 +160,26 @@ function renderTinyBar(pct: number, width: number): string {
   return `[${"█".repeat(filled)}${"░".repeat(w - filled)}]`;
 }
 
-const compact: SlashHandler = (args, loop) => {
-  const tight = Number.parseInt(args[0] ?? "", 10);
-  const cap = Number.isFinite(tight) && tight >= 100 ? tight : 4000;
-  const { healedCount, tokensSaved, charsSaved } = loop.compact(cap);
-  if (healedCount === 0) {
-    return {
-      info: t("handlers.observability.compactNone", { cap: cap.toLocaleString() }),
-    };
-  }
-  return {
-    info: t("handlers.observability.compactInfo", {
-      count: healedCount,
-      cap: cap.toLocaleString(),
-      tokens: tokensSaved.toLocaleString(),
-      chars: charsSaved.toLocaleString(),
-    }),
-  };
+const compact: SlashHandler = (_args, loop, ctx) => {
+  void loop
+    .compactHistory()
+    .then((r) => {
+      if (!r.folded) {
+        ctx.postInfo?.(t("handlers.observability.compactNoop"));
+        return;
+      }
+      ctx.postInfo?.(
+        t("handlers.observability.compactDone", {
+          before: r.beforeMessages,
+          after: r.afterMessages,
+          chars: r.summaryChars.toLocaleString(),
+        }),
+      );
+    })
+    .catch((err: Error) => {
+      ctx.postInfo?.(t("handlers.observability.compactFailed", { reason: err.message }));
+    });
+  return { info: t("handlers.observability.compactStarting") };
 };
 
 const cost: SlashHandler = (args, loop, ctx) => {

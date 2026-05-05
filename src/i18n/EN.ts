@@ -311,7 +311,7 @@ export const EN: TranslationSchema = {
         "  /prompt [name]           browse + fetch MCP prompts (no arg → list names; <name> → render)",
       helpSetup: "  /setup                   (exit + reconfigure) → run `reasonix setup`",
       helpCompact:
-        "  /compact [tokens]        shrink large tool results in history (default 4000 tokens/result)",
+        "  /compact                 fold older turns into a summary (cache-safe; auto-fires at 50% ctx)",
       helpThink:
         "  /think                   dump the most recent turn's full R1 reasoning (reasoner only)",
       helpTool:
@@ -684,10 +684,10 @@ export const EN: TranslationSchema = {
       toolNotFound: "could not read tool call #{n}",
       toolInfo: "↳ tool<{name}> #{n} ({chars} chars):",
       contextInfo: "context: ~{total} of {max} ({pct}%) · system {sys} · tools {tools} · log {log}",
-      compactNone:
-        "▸ nothing to compact — no tool result or tool-call args in history exceed {cap} tokens.",
-      compactInfo:
-        "▸ compacted {count} payload(s) to {cap} tokens each (tool results + tool-call args), saved {tokens} tokens ({chars} chars). Session file rewritten.",
+      compactStarting: "▸ folding older turns into a summary…",
+      compactNoop: "▸ nothing to fold — log already small or recent turns alone exceed the budget.",
+      compactDone: "▸ folded {before} messages → {after} (summary {chars} chars). Continuing.",
+      compactFailed: "▸ fold failed: {reason}",
       costNoTurn: "no turn yet — `/cost` shows the most recent turn's token + spend breakdown.",
       costNeedsTui: "/cost needs a TUI context (postUsage wired).",
       costNoPricing:
