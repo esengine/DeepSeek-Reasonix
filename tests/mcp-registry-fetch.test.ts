@@ -189,7 +189,7 @@ describe("openRegistry — initial open", () => {
     const fetchImpl = (async (input: RequestInfo | URL) => {
       callCount++;
       const url = typeof input === "string" ? input : input.toString();
-      if (url.startsWith("https://registry.modelcontextprotocol.io")) {
+      if (url.startsWith("https://registry.modelcontextprotocol.io/")) {
         return { ok: true, status: 200, json: async () => PAGE_1 } as unknown as Response;
       }
       throw new Error(`unmocked: ${url}`);
@@ -204,8 +204,8 @@ describe("openRegistry — initial open", () => {
 
   it("falls back to smithery when official fails", async () => {
     const fetchImpl = mockFetch({
-      "https://registry.modelcontextprotocol.io": { ok: false, status: 503, json: {} },
-      "https://registry.smithery.ai": { ok: true, json: SMITHERY_RESPONSE },
+      "https://registry.modelcontextprotocol.io/": { ok: false, status: 503, json: {} },
+      "https://registry.smithery.ai/": { ok: true, json: SMITHERY_RESPONSE },
     });
     const handle = await openRegistry({ fetcher: fetchImpl, cachePath });
     expect(handle.source).toBe("smithery");
@@ -215,8 +215,8 @@ describe("openRegistry — initial open", () => {
 
   it("falls back to local catalog when both registries fail and no cache exists", async () => {
     const fetchImpl = mockFetch({
-      "https://registry.modelcontextprotocol.io": { ok: false, status: 503, json: {} },
-      "https://registry.smithery.ai": { ok: false, status: 503, json: {} },
+      "https://registry.modelcontextprotocol.io/": { ok: false, status: 503, json: {} },
+      "https://registry.smithery.ai/": { ok: false, status: 503, json: {} },
     });
     const handle = await openRegistry({ fetcher: fetchImpl, cachePath });
     expect(handle.source).toBe("local");
@@ -236,8 +236,8 @@ describe("openRegistry — initial open", () => {
       }),
     );
     const fetchImpl = mockFetch({
-      "https://registry.modelcontextprotocol.io": { ok: false, status: 503, json: {} },
-      "https://registry.smithery.ai": { ok: false, status: 503, json: {} },
+      "https://registry.modelcontextprotocol.io/": { ok: false, status: 503, json: {} },
+      "https://registry.smithery.ai/": { ok: false, status: 503, json: {} },
     });
     const handle = await openRegistry({ fetcher: fetchImpl, cachePath });
     expect(handle.source).toBe("official");
@@ -274,7 +274,7 @@ describe("openRegistry — initial open", () => {
       }),
     );
     const fetchImpl = mockFetch({
-      "https://registry.modelcontextprotocol.io": { ok: true, json: PAGE_1 },
+      "https://registry.modelcontextprotocol.io/": { ok: true, json: PAGE_1 },
     });
     const handle = await openRegistry({ fetcher: fetchImpl, cachePath });
     expect(handle.fromCache).toBe(false);
@@ -293,7 +293,7 @@ describe("openRegistry — initial open", () => {
       }),
     );
     const fetchImpl = mockFetch({
-      "https://registry.modelcontextprotocol.io": { ok: true, json: PAGE_1 },
+      "https://registry.modelcontextprotocol.io/": { ok: true, json: PAGE_1 },
     });
     const handle = await openRegistry({ fetcher: fetchImpl, cachePath, noCache: true });
     expect(handle.fromCache).toBe(false);
@@ -311,7 +311,7 @@ describe("openRegistry — initial open", () => {
 
   it("writes the cache file after a successful first-page fetch", async () => {
     const fetchImpl = mockFetch({
-      "https://registry.modelcontextprotocol.io": { ok: true, json: PAGE_1 },
+      "https://registry.modelcontextprotocol.io/": { ok: true, json: PAGE_1 },
     });
     await openRegistry({ fetcher: fetchImpl, cachePath });
     const persisted = JSON.parse(readFileSync(cachePath, "utf8"));
@@ -389,8 +389,8 @@ describe("loadMorePages", () => {
 
   it("is a no-op for non-official sources", async () => {
     const fetchImpl = mockFetch({
-      "https://registry.modelcontextprotocol.io": { ok: false, status: 503, json: {} },
-      "https://registry.smithery.ai": { ok: true, json: SMITHERY_RESPONSE },
+      "https://registry.modelcontextprotocol.io/": { ok: false, status: 503, json: {} },
+      "https://registry.smithery.ai/": { ok: true, json: SMITHERY_RESPONSE },
     });
     const handle = await openRegistry({ fetcher: fetchImpl, cachePath });
     expect(handle.source).toBe("smithery");
@@ -447,7 +447,7 @@ describe("handleToFetchResult", () => {
 
   it("flattens the handle into a result with hasMore reflecting the cursor", async () => {
     const fetchImpl = mockFetch({
-      "https://registry.modelcontextprotocol.io": { ok: true, json: PAGE_1 },
+      "https://registry.modelcontextprotocol.io/": { ok: true, json: PAGE_1 },
     });
     const handle = await openRegistry({ fetcher: fetchImpl, cachePath });
     const r = handleToFetchResult(handle);
