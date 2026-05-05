@@ -309,7 +309,6 @@ export const EN: TranslationSchema = {
         "  /resource [uri]          browse + read MCP resources (no arg → list URIs; <uri> → fetch)",
       helpPrompt:
         "  /prompt [name]           browse + fetch MCP prompts (no arg → list names; <name> → render)",
-      helpSetup: "  /setup                   (exit + reconfigure) → run `reasonix setup`",
       helpCompact:
         "  /compact                 fold older turns into a summary (cache-safe; auto-fires at 50% ctx)",
       helpThink:
@@ -452,8 +451,6 @@ export const EN: TranslationSchema = {
         "  /resource [uri]        browse & read resources exposed by your MCP servers",
       keysMcpPrompt: "  /prompt [name]         browse & fetch prompts exposed by your MCP servers",
       keysUseful: "Useful slashes: /help · /context · /stats · /compact · /new · /exit",
-      setupInfo:
-        "To reconfigure (preset, MCP servers, API key), exit this chat and run `reasonix setup`. Changes take effect on next launch.",
       retryNone: "nothing to retry — no prior user message in this session's log.",
       retryInfo: '▸ retrying: "{preview}"',
       loopTuiOnly: "/loop is only available in the interactive TUI (not in run/replay).",

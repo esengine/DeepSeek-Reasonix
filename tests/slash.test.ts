@@ -246,12 +246,6 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/kb.example.com/);
   });
 
-  it("/setup prints instructions to exit and run reasonix setup", () => {
-    const r = handleSlash("setup", [], makeLoop());
-    expect(r.info).toMatch(/reasonix setup/);
-    expect(r.exit).toBeUndefined(); // /setup doesn't auto-exit — user presses /exit
-  });
-
   it("/compact returns synchronously with a 'folding…' status and fires fold async", async () => {
     const loop = makeLoop();
     let posted = "";
@@ -320,10 +314,9 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/\/forget/);
   });
 
-  it("/help mentions /mcp and /setup", () => {
+  it("/help mentions /mcp", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/mcp/);
-    expect(r.info).toMatch(/\/setup/);
   });
 
   it("/undo outside code mode says it's not available", () => {

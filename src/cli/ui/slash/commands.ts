@@ -143,7 +143,6 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "delete sessions idle ≥N days (default 90) — frees disk on long-time installs",
     argsHint: "[days]",
   },
-  { cmd: "setup", summary: "reminds you to exit and run `reasonix setup`" },
   {
     cmd: "semantic",
     summary: "show semantic_search status — built? Ollama installed? how to enable",

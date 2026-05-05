@@ -300,7 +300,6 @@ export const zhCN: TranslationSchema = {
         "  /resource [uri]          浏览 + 读取 MCP 资源（无参数 → 列出 URI；<uri> → 获取）",
       helpPrompt:
         "  /prompt [name]           浏览 + 获取 MCP 提示（无参数 → 列出名称；<name> → 渲染）",
-      helpSetup: "  /setup                   （退出 + 重新配置）→ 运行 `reasonix setup`",
       helpCompact: "  /compact                 折叠旧轮次为摘要（cache-safe，50% 自动触发）",
       helpThink: "  /think                   转储最近一轮的完整 R1 推理（仅推理模型）",
       helpTool: "  /tool [N]                列出工具调用（或转储第 N 个的完整输出，1=最近）",
@@ -414,8 +413,6 @@ export const zhCN: TranslationSchema = {
       keysMcpResource: "  /resource [uri]        浏览并读取 MCP 服务器暴露的资源",
       keysMcpPrompt: "  /prompt [name]         浏览并获取 MCP 服务器暴露的提示",
       keysUseful: "常用斜杠命令：/help · /context · /stats · /compact · /new · /exit",
-      setupInfo:
-        "要重新配置（预设、MCP 服务器、API 密钥），请退出此聊天并运行 `reasonix setup`。更改在下次启动时生效。",
       retryNone: "没有可重试的内容 — 此会话日志中没有先前的用户消息。",
       retryInfo: '▸ 重试中："{preview}"',
       loopTuiOnly: "/loop 仅在交互式 TUI 中可用（不在 run/replay 中）。",

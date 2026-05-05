@@ -77,7 +77,6 @@ const help: SlashHandler = () => ({
     t("handlers.basic.helpMcp"),
     t("handlers.basic.helpResource"),
     t("handlers.basic.helpPrompt"),
-    t("handlers.basic.helpSetup"),
     t("handlers.basic.helpCompact"),
     t("handlers.basic.helpThink"),
     t("handlers.basic.helpTool"),
@@ -147,10 +146,6 @@ const help: SlashHandler = () => ({
   ].join("\n"),
 });
 
-const setup: SlashHandler = () => ({
-  info: t("handlers.basic.setupInfo"),
-});
-
 const retry: SlashHandler = (_args, loop) => {
   const prev = loop.retryLastUser();
   if (!prev) {
@@ -201,7 +196,6 @@ export const handlers: Record<string, SlashHandler> = {
   keys,
   help,
   "?": help,
-  setup,
   retry,
   loop,
 };
