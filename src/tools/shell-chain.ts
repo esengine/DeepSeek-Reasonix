@@ -426,10 +426,20 @@ async function runPipeGroup(
         const prev = children[i - 1]!;
         prev.stdout?.on("error", () => {});
         child.stdin?.on("error", () => {});
-        prev.stdout?.pipe(child.stdin!);
-        if (segments[i - 1]!.redirects.some((r) => r.kind === "2>&1") && prev.stderr) {
+        const prevMergesStderr =
+          segments[i - 1]!.redirects.some((r) => r.kind === "2>&1") && !!prev.stderr;
+        if (prevMergesStderr && prev.stderr) {
           prev.stderr.on("error", () => {});
+          let openSources = 2;
+          const closeIfDone = () => {
+            if (--openSources === 0) child.stdin?.end();
+          };
+          prev.stdout?.pipe(child.stdin!, { end: false });
           prev.stderr.pipe(child.stdin!, { end: false });
+          prev.stdout?.once("end", closeIfDone);
+          prev.stderr.once("end", closeIfDone);
+        } else {
+          prev.stdout?.pipe(child.stdin!);
         }
       }
       if (child.stderr && io.stderrFd === null && !(io.mergeStderrToStdout && !isLast)) {

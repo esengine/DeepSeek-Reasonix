@@ -183,6 +183,17 @@ describe("runChain — redirect execution", () => {
     expect(contents).toContain("err-line");
   });
 
+  it("`cmd1 2>&1 | cmd2` merges stderr into the pipe to cmd2", async () => {
+    const c = parseCommandChain(
+      "node -e \"console.error('err'); process.stdout.write('out')\" 2>&1 | node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>process.stdout.write('GOT['+d+']'))\"",
+    )!;
+    const r = await runChain(c, { cwd: tmp, ...baseOpts });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("GOT[");
+    expect(r.output).toContain("out");
+    expect(r.output).toContain("err");
+  });
+
   it("redirects work across pipe boundaries (`<` on first, `>` on last)", async () => {
     writeFileSync(join(tmp, "data.txt"), "alpha\nbeta\n");
     const c = parseCommandChain(
