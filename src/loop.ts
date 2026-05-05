@@ -20,16 +20,6 @@ import {
   truncateForModelByTokens,
 } from "./mcp/registry.js";
 
-/** Auto-fold when a turn's response shows promptTokens above this fraction of ctxMax. */
-const HISTORY_FOLD_THRESHOLD = 0.5;
-/** Tail budget after fold, as a fraction of ctxMax. Sized to leave 25%+ headroom before next fold. */
-const HISTORY_FOLD_TAIL_FRACTION = 0.2;
-/** Skip the fold if the head wouldn't shrink the log by at least this fraction — avoids re-fold thrash. */
-const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
-/** Prepended to fold summary content so the model knows it's a synthesized recap, not its own past output. */
-const HISTORY_FOLD_MARKER =
-  "[CONVERSATION HISTORY SUMMARY — earlier turns folded for context efficiency]\n\n";
-
 const FAILURE_ESCALATION_THRESHOLD = 3;
 const ESCALATION_MODEL = "deepseek-v4-pro";
 /** Accepts `<<<NEEDS_PRO>>>` or `<<<NEEDS_PRO: reason>>>` (reason trimmed, may be empty). */
@@ -37,16 +27,12 @@ const NEEDS_PRO_MARKER_PREFIX = "<<<NEEDS_PRO";
 const NEEDS_PRO_MARKER_RE = /^<<<NEEDS_PRO(?::\s*([^>]*))?>>>/;
 /** Buffer cap before flushing — must fit `<<<NEEDS_PRO: reason>>>` without premature flush. */
 const NEEDS_PRO_BUFFER_CHARS = 256;
+import { ContextManager } from "./context-manager.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
 import { appendSessionMessage, loadSessionMessages, rewriteSession } from "./memory/session.js";
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
-import {
-  DEEPSEEK_CONTEXT_TOKENS,
-  DEFAULT_CONTEXT_TOKENS,
-  SessionStats,
-  type TurnStats,
-} from "./telemetry/stats.js";
-import { countTokens, estimateConversationTokens, estimateRequestTokens } from "./tokenizer.js";
+import { SessionStats, type TurnStats } from "./telemetry/stats.js";
+import { countTokens } from "./tokenizer.js";
 import { ToolRegistry } from "./tools.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
@@ -180,6 +166,7 @@ export class CacheFirstLoop {
   private _turnFailureTypes: Record<string, number> = {};
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
+  private context!: ContextManager;
 
   constructor(opts: CacheFirstLoopOptions) {
     this.client = opts.client;
@@ -277,6 +264,15 @@ export class CacheFirstLoop {
     } else {
       this.resumedMessageCount = 0;
     }
+
+    this.context = new ContextManager({
+      client: this.client,
+      log: this.log,
+      stats: this.stats,
+      sessionName: this.sessionName,
+      getAbortSignal: () => this._turnAbort.signal,
+      getCurrentTurn: () => this._turn,
+    });
   }
 
   compact(maxTokens = 4000): {
@@ -284,120 +280,17 @@ export class CacheFirstLoop {
     tokensSaved: number;
     charsSaved: number;
   } {
-    const before = this.log.toMessages();
-    // Two-pass results+args. NOT healLoadedMessages — would strip an in-flight tool_calls tail.
-    const resultsPass = shrinkOversizedToolResultsByTokens(before, maxTokens);
-    const argsPass = shrinkOversizedToolCallArgsByTokens(resultsPass.messages, maxTokens);
-    const messages = argsPass.messages;
-    const healedCount = resultsPass.healedCount + argsPass.healedCount;
-    const tokensSaved = resultsPass.tokensSaved + argsPass.tokensSaved;
-    const charsSaved = resultsPass.charsSaved + argsPass.charsSaved;
-    if (healedCount > 0) {
-      this.log.compactInPlace(messages);
-      if (this.sessionName) {
-        try {
-          rewriteSession(this.sessionName, messages);
-        } catch {
-          /* disk full or perms — compaction still applies in-memory */
-        }
-      }
-    }
-    return { healedCount, tokensSaved, charsSaved };
+    return this.context.inPlaceCompact(maxTokens);
   }
 
   /** Replace older turns with one summary message; keep tail within keepRecentTokens budget. */
-  async compactHistory(opts?: {
-    keepRecentTokens?: number;
-  }): Promise<{
+  async compactHistory(opts?: { keepRecentTokens?: number }): Promise<{
     folded: boolean;
     beforeMessages: number;
     afterMessages: number;
     summaryChars: number;
   }> {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[this.model] ?? DEFAULT_CONTEXT_TOKENS;
-    const tailBudget = opts?.keepRecentTokens ?? Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
-    const all = this.log.toMessages();
-    const noop = {
-      folded: false,
-      beforeMessages: all.length,
-      afterMessages: all.length,
-      summaryChars: 0,
-    };
-    if (all.length === 0) return noop;
-
-    const tokenCounts = all.map((m) => estimateConversationTokens([m]));
-    const totalTokens = tokenCounts.reduce((a, b) => a + b, 0);
-
-    // Walk backward from the end; the boundary is the latest user-role
-    // message such that everything from there to the end fits in
-    // tailBudget. Snapping to a user-msg boundary keeps tool_calls /
-    // tool-result pairs intact (they live within a single turn).
-    let cumTokens = 0;
-    let boundary = all.length;
-    for (let i = all.length - 1; i >= 0; i--) {
-      if (cumTokens + tokenCounts[i]! > tailBudget) break;
-      cumTokens += tokenCounts[i]!;
-      if (all[i]!.role === "user") boundary = i;
-    }
-    if (boundary <= 0) return noop;
-
-    const head = all.slice(0, boundary);
-    const tail = all.slice(boundary);
-    const headTokens = totalTokens - cumTokens;
-    if (headTokens < totalTokens * HISTORY_FOLD_MIN_SAVINGS_FRACTION) return noop;
-
-    const summary = await this.summarizeForFold(head);
-    if (!summary) return noop;
-
-    const summaryMsg: ChatMessage = {
-      role: "assistant",
-      content: HISTORY_FOLD_MARKER + summary,
-    };
-    const replacement = [summaryMsg, ...tail];
-    this.log.compactInPlace(replacement);
-    if (this.sessionName) {
-      try {
-        rewriteSession(this.sessionName, replacement);
-      } catch {
-        /* disk full / perms — in-memory fold still applies */
-      }
-    }
-    return {
-      folded: true,
-      beforeMessages: all.length,
-      afterMessages: replacement.length,
-      summaryChars: summary.length,
-    };
-  }
-
-  private async summarizeForFold(messagesToSummarize: ChatMessage[]): Promise<string> {
-    const summaryModel = "deepseek-v4-flash";
-    const systemPrompt =
-      "You compress conversation history for a coding agent. Output one prose recap that preserves: the user's overall goal, decisions and conclusions reached, files inspected or modified, important tool results still relevant to ongoing work, and any open todos. Skip turn-by-turn play-by-play. No tool calls, no markdown headings, no SEARCH/REPLACE blocks — plain prose only.";
-    const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
-      ...healed,
-      {
-        role: "user",
-        content:
-          "Summarize the conversation above as plain prose. This summary replaces the original turns to free context — make it self-contained.",
-      },
-    ];
-    try {
-      const resp = await this.client.chat({
-        model: summaryModel,
-        messages,
-        signal: this._turnAbort.signal,
-        thinking: thinkingModeForModel(summaryModel),
-        reasoningEffort: "high",
-      });
-      this.stats.record(this._turn, summaryModel, resp.usage ?? new Usage());
-      const cleaned = stripHallucinatedToolMarkup((resp.content ?? "").trim());
-      return cleaned;
-    } catch {
-      return "";
-    }
+    return this.context.fold(this.model, opts);
   }
 
   appendAndPersist(message: ChatMessage): void {
@@ -759,20 +652,16 @@ export class CacheFirstLoop {
       }
       let messages = this.buildMessages(pendingUser);
 
-      // Preflight context check. Reactive auto-compact at 60%/80%
-      // keys off the PREVIOUS turn's server-reported prompt_tokens,
-      // so a single new oversized tool result (or a fresh resumed
-      // session) can push this turn's request straight past 131,072
-      // tokens before we ever see a usage number — DeepSeek 400s with
-      // "maximum context length". Here we estimate the outgoing
-      // payload locally and compact preemptively when it's in the red
-      // zone (>95% of the model's context window). One cheap
-      // tokenize-pass per iter, only on our side.
+      // Preflight context check. Local estimate of the outgoing payload —
+      // catches cases where prior usage didn't warn us (fresh resume, one
+      // huge tool result). Above 95% we run the in-place emergency
+      // compact (the only remaining cache-breaking path; will be
+      // replaced by a fold attempt in PR-D).
       {
-        const ctxMax = DEEPSEEK_CONTEXT_TOKENS[this.model] ?? DEFAULT_CONTEXT_TOKENS;
-        const estimate = estimateRequestTokens(messages, this.prefix.toolSpecs);
-        if (estimate / ctxMax > 0.95) {
-          const result = this.compact(1_000);
+        const decision = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
+        if (decision.needsAction) {
+          const { estimateTokens: estimate, ctxMax } = decision;
+          const result = this.context.inPlaceCompact(1_000);
           if (result.healedCount > 0) {
             yield {
               turn: this._turn,
@@ -1231,19 +1120,13 @@ export class CacheFirstLoop {
         return;
       }
 
-      // History fold — once we cross 50% of ctxMax, replace older turns
-      // with a single summary message and keep the recent K turns raw.
-      // One cache break at fold time, then per-turn cost drops back to
-      // the post-warmup baseline. Fires at most once per turn.
-      const ctxMax = DEEPSEEK_CONTEXT_TOKENS[this.model] ?? DEFAULT_CONTEXT_TOKENS;
-      if (
-        usage &&
-        !this._foldedThisTurn &&
-        usage.promptTokens / ctxMax > HISTORY_FOLD_THRESHOLD &&
-        usage.promptTokens / ctxMax <= 0.8
-      ) {
+      // Context-management decision after each turn's response.
+      // ContextManager owns the policy; loop renders the events.
+      const decision = this.context.decideAfterUsage(usage, this.model, this._foldedThisTurn);
+      if (decision.kind === "fold") {
         this._foldedThisTurn = true;
-        const before = usage.promptTokens;
+        const before = decision.promptTokens;
+        const ctxMax = decision.ctxMax;
         yield { turn: this._turn, role: "status", content: "compacting history…" };
         const result = await this.compactHistory();
         if (result.folded) {
@@ -1255,14 +1138,9 @@ export class CacheFirstLoop {
             )}%) — folded ${result.beforeMessages} messages → ${result.afterMessages} (summary ${result.summaryChars} chars). Continuing.`,
           };
         }
-      }
-
-      // Token-budget guard. Over 80% of context, force-summarize and
-      // exit the turn. Belt-and-braces: history fold above should keep us
-      // here only if the fold itself failed or the recent K turns alone
-      // already exceed 80%.
-      if (usage && usage.promptTokens / ctxMax > 0.8) {
-        const before = usage.promptTokens;
+      } else if (decision.kind === "exit-with-summary") {
+        const before = decision.promptTokens;
+        const ctxMax = decision.ctxMax;
         yield {
           turn: this._turn,
           role: "warning",
@@ -1270,28 +1148,7 @@ export class CacheFirstLoop {
             (before / ctxMax) * 100,
           )}%) — forcing summary from what was gathered. Run /clear or /compact to reset.`,
         };
-        // Drop the trailing assistant-with-tool_calls we just appended.
-        // The forced-summary call would otherwise trip DeepSeek's
-        // "insufficient tool messages following tool_calls" validator,
-        // since we bail BEFORE dispatching the tools. Tail-only mutation
-        // doesn't break cache (cache match terminates at the prefix).
-        const tail = this.log.entries[this.log.entries.length - 1];
-        if (
-          tail &&
-          tail.role === "assistant" &&
-          Array.isArray(tail.tool_calls) &&
-          tail.tool_calls.length > 0
-        ) {
-          const kept = this.log.entries.slice(0, -1);
-          this.log.compactInPlace([...kept]);
-          if (this.sessionName) {
-            try {
-              rewriteSession(this.sessionName, kept);
-            } catch {
-              /* disk issue shouldn't block the summary path */
-            }
-          }
-        }
+        this.context.trimTrailingToolCalls();
         yield* this.forceSummaryAfterIterLimit({ reason: "context-guard" });
         return;
       }
