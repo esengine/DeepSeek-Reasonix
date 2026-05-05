@@ -233,6 +233,18 @@ export function parseCommandChain(cmd: string): CommandChain | null {
     }
     segments.push(parseSegment(trimmed));
   }
+  // Reject `cd` inside parsed chains — the executor cannot carry cwd
+  // changes between segments, and silently running the wrong directory
+  // is worse than rejecting early with clear guidance.
+  for (const seg of segments) {
+    const cmdName = seg.argv[0] ?? "";
+    if (cmdName.toLowerCase() === "cd") {
+      throw new UnsupportedSyntaxError(
+        "cd in parsed command chains does not change cwd for later segments. Use a command-native cwd flag instead, such as `npm --prefix <dir> run <script>`, `git -C <dir> ...`, or `cargo -C <dir> ...`.",
+      );
+    }
+  }
+
   if (ops.length === 0 && segments[0]!.redirects.length === 0) return null;
   return { segments, ops };
 }

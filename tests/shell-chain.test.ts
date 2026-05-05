@@ -91,6 +91,30 @@ describe("parseCommandChain", () => {
   it("rejects unclosed quotes inside a chain segment", () => {
     expect(() => parseCommandChain('git status ; echo "open')).toThrow(/unclosed/);
   });
+
+  it("rejects `cd` in the first chain segment with cwd guidance", () => {
+    expect(() => parseCommandChain('cd nested && node -e "process.cwd()"')).toThrow(
+      /cd in parsed command chains does not change cwd/,
+    );
+  });
+
+  it("rejects `cd` anywhere in the chain, not only the first segment", () => {
+    expect(() => parseCommandChain("echo ok && cd nested")).toThrow(
+      /cd in parsed command chains does not change cwd/,
+    );
+  });
+
+  it("rejects `cd` with uppercase CD (case-insensitive)", () => {
+    expect(() => parseCommandChain("CD .. && echo hi")).toThrow(
+      /cd in parsed command chains does not change cwd/,
+    );
+  });
+
+  it("still accepts a normal chain without `cd`", () => {
+    const c = parseCommandChain("echo hello && echo world");
+    expect(c).not.toBeNull();
+    expect(c!.segments.map((s) => s.argv[0])).toEqual(["echo", "echo"]);
+  });
 });
 
 describe("chainAllowed", () => {
