@@ -101,15 +101,17 @@ export function McpPanel() {
   const [registryQuery, setRegistryQuery] = useState("");
   const [registryLoading, setRegistryLoading] = useState(false);
   const [openRegistry, setOpenRegistry] = useState<RegistryEntryDto | null>(null);
+  /** Display cap — grows by 50 each "load more" click. Server caps response size at this. */
+  const [displayLimit, setDisplayLimit] = useState(50);
 
-  const loadRegistry = useCallback(async (q: string, pages: number) => {
+  const loadRegistry = useCallback(async (q: string, pages: number, limit: number) => {
     setRegistryLoading(true);
     try {
       const params = new URLSearchParams();
       if (q.trim()) params.set("q", q.trim());
       params.set("pages", String(pages));
       params.set("maxPages", String(Math.max(20, pages)));
-      params.set("limit", "50");
+      params.set("limit", String(limit));
       const r = await api<RegistryListResponse>(`/mcp/registry?${params.toString()}`);
       setRegistry(r);
     } catch (err) {
@@ -122,12 +124,14 @@ export function McpPanel() {
   useEffect(() => {
     if (filter !== "marketplace") return;
     if (registry) return;
-    void loadRegistry("", 1);
-  }, [filter, registry, loadRegistry]);
+    void loadRegistry("", 1, displayLimit);
+  }, [filter, registry, loadRegistry, displayLimit]);
 
   useEffect(() => {
     if (filter !== "marketplace") return;
-    const handle = setTimeout(() => void loadRegistry(registryQuery, 1), 300);
+    // Reset the display cap whenever the user retypes; new query = fresh top-50.
+    setDisplayLimit(50);
+    const handle = setTimeout(() => void loadRegistry(registryQuery, 1, 50), 300);
     return () => clearTimeout(handle);
   }, [registryQuery, filter, loadRegistry]);
 
@@ -293,7 +297,15 @@ export function McpPanel() {
                     setOpen(null);
                     setOpenUnbridged(null);
                   },
-                  loadMore: () => loadRegistry(registryQuery, (registry?.loaded ?? 0) / 30 + 5),
+                  loadMore: () => {
+                    const nextLimit = displayLimit + 50;
+                    setDisplayLimit(nextLimit);
+                    // Pages: walk far enough to fill the new cap (each page ≈ 30
+                    // entries) plus a few-page lookahead so the next click also
+                    // has fresh data.
+                    const pagesNeeded = Math.ceil(nextLimit / 30) + 3;
+                    void loadRegistry(registryQuery, pagesNeeded, nextLimit);
+                  },
                   installedSpecs: new Set(specs ?? []),
                 })
               : null
@@ -476,6 +488,44 @@ interface MarketplaceRowsArgs {
   installedSpecs: Set<string>;
 }
 
+function renderLoadMoreFooter({
+  registry,
+  registryLoading,
+  loadMore,
+}: Pick<MarketplaceRowsArgs, "registry" | "registryLoading" | "loadMore">) {
+  if (!registry) return null;
+  const shown = registry.entries.length;
+  const total = registry.matched;
+  const moreCached = total > shown;
+  const moreOnNetwork = registry.hasMore;
+  const canDoSomething = moreCached || moreOnNetwork;
+
+  // Three states:
+  //   1. Loading           — disabled button + spinner-ish label
+  //   2. More available    — primary button + count of what's loaded
+  //   3. Exhausted         — distinct success-tinted card so the user
+  //      doesn't think the button stopped responding
+  if (canDoSomething) {
+    const label = registryLoading
+      ? t("mcp.marketplaceLoading")
+      : t("mcp.marketplaceMoreLabel", {
+          shown,
+          total: moreOnNetwork ? `${total}+` : `${total}`,
+        });
+    return html`<div style="padding:10px 12px;display:flex;align-items:center;gap:10px">
+      <button class="btn primary" disabled=${registryLoading} onClick=${loadMore}>${label}</button>
+      <span style="font-size:11px;color:var(--fg-3)">
+        ${moreOnNetwork ? t("mcp.marketplaceMoreHint") : t("mcp.marketplaceMoreCachedHint")}
+      </span>
+    </div>`;
+  }
+
+  return html`<div style="padding:12px;background:var(--bg-elev-2,rgba(36,143,242,0.07));border-top:1px solid var(--bd);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-2)">
+    <span style="color:var(--c-ok)">✓</span>
+    <span>${t("mcp.marketplaceExhaustedFull", { total })}</span>
+  </div>`;
+}
+
 function renderMarketplaceRows({
   registry,
   registryLoading,
@@ -511,15 +561,7 @@ function renderMarketplaceRows({
         </div>
       `;
     })}
-    ${
-      registry.hasMore
-        ? html`<div style="padding:10px 12px">
-          <button class="btn" disabled=${registryLoading} onClick=${loadMore}>
-            ${registryLoading ? t("mcp.marketplaceLoading") : t("mcp.marketplaceMore")}
-          </button>
-        </div>`
-        : html`<div style="padding:10px 12px;color:var(--fg-3);font-size:11px">${t("mcp.marketplaceExhausted")}</div>`
-    }
+    ${renderLoadMoreFooter({ registry, registryLoading, loadMore })}
   `;
 }
 

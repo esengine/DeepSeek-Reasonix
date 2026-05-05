@@ -161,10 +161,15 @@ export async function handleMcp(
   }
 
   // Marketplace registry — open + lazy-paginate. Query: ?pages=N&q=&maxPages=&limit=&refresh=1
+  // Caps are generous on purpose: registry walks are bounded by the upstream
+  // 24h cache, and an HTTP response of ~1000 entries is still under 1 MB.
+  // The dashboard's "load more" click bumps these by 50 entries / 3 pages
+  // each time, so without these ceilings users would hit a frustrating wall
+  // after a few clicks.
   if (method === "GET" && rest[0] === "registry" && (rest[1] === undefined || rest[1] === "list")) {
-    const pagesWanted = clampInt(query.get("pages"), 1, 50, 1);
-    const maxPages = clampInt(query.get("maxPages"), 1, 50, 20);
-    const limit = clampInt(query.get("limit"), 1, 200, 30);
+    const pagesWanted = clampInt(query.get("pages"), 1, 200, 1);
+    const maxPages = clampInt(query.get("maxPages"), 1, 200, 20);
+    const limit = clampInt(query.get("limit"), 1, 1000, 30);
     const refreshRaw = query.get("refresh");
     const refresh = refreshRaw === "1" || refreshRaw === "true";
     const q = (query.get("q") ?? "").trim().toLowerCase();
