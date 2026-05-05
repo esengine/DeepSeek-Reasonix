@@ -251,6 +251,29 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toContain("src/cli/ui/App.tsx");
       expect(out).not.toMatch(/src[\\]cli/);
     });
+
+    it("skips dependency/build/VCS dirs by default", async () => {
+      await fs.mkdir(join(root, "node_modules", "lib"), { recursive: true });
+      await fs.writeFile(join(root, "node_modules", "lib", "marker.ts"), "x");
+      await fs.mkdir(join(root, "dist"), { recursive: true });
+      await fs.writeFile(join(root, "dist", "marker.ts"), "x");
+      await fs.mkdir(join(root, "src"), { recursive: true });
+      await fs.writeFile(join(root, "src", "marker.ts"), "x");
+      const out = await tools.dispatch("search_files", JSON.stringify({ pattern: "marker" }));
+      expect(out).toContain("src/marker.ts");
+      expect(out).not.toContain("node_modules");
+      expect(out).not.toContain("dist/marker.ts");
+    });
+
+    it("walks dependency dirs when include_deps:true", async () => {
+      await fs.mkdir(join(root, "node_modules", "lib"), { recursive: true });
+      await fs.writeFile(join(root, "node_modules", "lib", "marker.ts"), "x");
+      const out = await tools.dispatch(
+        "search_files",
+        JSON.stringify({ pattern: "marker", include_deps: true }),
+      );
+      expect(out).toContain("node_modules/lib/marker.ts");
+    });
   });
 
   describe("search_content", () => {

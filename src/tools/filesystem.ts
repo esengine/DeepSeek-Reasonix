@@ -284,7 +284,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
   registry.register({
     name: "search_files",
     description:
-      "Find files whose NAME matches a substring or regex. Case-insensitive. Walks the directory recursively under the sandbox root. Returns one path per line.",
+      "Find files whose NAME matches a substring or regex. Case-insensitive. Walks the directory recursively under the sandbox root. Returns one path per line. Skips dependency / VCS / build directories (node_modules, .git, dist, build, .next, target, .venv) by default.",
     readOnly: true,
     parameters: {
       type: "object",
@@ -294,12 +294,18 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
           type: "string",
           description: "Substring (or regex) to match against filenames.",
         },
+        include_deps: {
+          type: "boolean",
+          description:
+            "When true, also walk node_modules / .git / dist / build / etc. Off by default — most filename searches are about the user's own code.",
+        },
       },
       required: ["pattern"],
     },
-    fn: async (args: { path?: string; pattern: string }) => {
+    fn: async (args: { path?: string; pattern: string; include_deps?: boolean }) => {
       const startAbs = safePath(args.path ?? ".");
       const needle = args.pattern.toLowerCase();
+      const includeDeps = args.include_deps === true;
       // Try as regex first (permits users who want patterns); fall
       // back to plain substring when it's not a valid regex. Flag `i`
       // so matching is case-insensitive regardless of path.
@@ -331,7 +337,10 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
             matches.push(rel);
             totalBytes += rel.length + 1;
           }
-          if (e.isDirectory()) await walk(full);
+          if (e.isDirectory()) {
+            if (!includeDeps && SKIP_DIR_NAMES.has(e.name)) continue;
+            await walk(full);
+          }
         }
       };
       await walk(startAbs);
