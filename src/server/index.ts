@@ -177,7 +177,7 @@ export async function dispatch(
         return;
       }
     }
-    const result = await handleApi(path.slice("/api/".length), method, body, ctx);
+    const result = await handleApi(path.slice("/api/".length), method, body, ctx, url.searchParams);
     res.writeHead(result.status, { "content-type": "application/json" });
     res.end(JSON.stringify(result.body));
     return;

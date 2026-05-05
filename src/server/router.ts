@@ -31,6 +31,7 @@ export async function handleApi(
   method: string,
   body: string,
   ctx: DashboardContext,
+  query: URLSearchParams = new URLSearchParams(),
 ): Promise<ApiResult> {
   // Strip a trailing slash so /api/usage and /api/usage/ both work.
   const normalized = pathTail.replace(/\/+$/, "");
@@ -71,7 +72,7 @@ export async function handleApi(
       case "skills":
         return await handleSkills(method, rest, body, ctx);
       case "mcp":
-        return await handleMcp(method, rest, body, ctx);
+        return await handleMcp(method, rest, body, ctx, query);
       case "semantic":
         return await handleSemantic(method, rest, body, ctx);
       case "index-config":

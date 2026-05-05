@@ -102,6 +102,15 @@ export interface TranslationSchema {
     labelBHint: string;
     mcpListDescription: string;
     mcpInspectDescription: string;
+    mcpSearchDescription: string;
+    mcpInstallDescription: string;
+    mcpBrowseDescription: string;
+    mcpLocalHint: string;
+    mcpRefreshHint: string;
+    mcpLimitHint: string;
+    mcpPagesHint: string;
+    mcpAllHint: string;
+    mcpMaxPagesHint: string;
     jsonHintCatalog: string;
     jsonHintReport: string;
     modelOverrideFlash: string;

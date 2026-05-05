@@ -34,8 +34,9 @@ import { diffCommand } from "./commands/diff.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { eventsCommand } from "./commands/events.js";
 import { indexCommand } from "./commands/index.js";
+import { mcpBrowseCommand } from "./commands/mcp-browse.js";
 import { mcpInspectCommand } from "./commands/mcp-inspect.js";
-import { mcpListCommand } from "./commands/mcp.js";
+import { mcpInstallCommand, mcpListCommand, mcpSearchCommand } from "./commands/mcp.js";
 import { pruneSessionsCommand } from "./commands/prune-sessions.js";
 import { replayCommand } from "./commands/replay.js";
 import { runCommand } from "./commands/run.js";
@@ -332,8 +333,77 @@ mcp
   .command("list")
   .description(t("ui.mcpListDescription"))
   .option("--json", t("ui.jsonHintCatalog"))
-  .action((opts) => {
-    mcpListCommand({ json: !!opts.json });
+  .option("--local", t("ui.mcpLocalHint"))
+  .option("--refresh", t("ui.mcpRefreshHint"))
+  .option("--limit <n>", t("ui.mcpLimitHint"), (v) => Number.parseInt(v, 10))
+  .option("--pages <n>", t("ui.mcpPagesHint"), (v) => Number.parseInt(v, 10))
+  .option("--all", t("ui.mcpAllHint"))
+  .action(async (opts) => {
+    try {
+      await mcpListCommand({
+        json: !!opts.json,
+        local: !!opts.local,
+        refresh: !!opts.refresh,
+        limit: typeof opts.limit === "number" && opts.limit > 0 ? opts.limit : undefined,
+        pages: typeof opts.pages === "number" && opts.pages > 0 ? opts.pages : undefined,
+        all: !!opts.all,
+      });
+    } catch (err) {
+      process.stderr.write(`mcp list failed: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+mcp
+  .command("search <query>")
+  .description(t("ui.mcpSearchDescription"))
+  .option("--json", t("ui.jsonHintCatalog"))
+  .option("--refresh", t("ui.mcpRefreshHint"))
+  .option("--limit <n>", t("ui.mcpLimitHint"), (v) => Number.parseInt(v, 10))
+  .option("--max-pages <n>", t("ui.mcpMaxPagesHint"), (v) => Number.parseInt(v, 10))
+  .action(async (query: string, opts) => {
+    try {
+      await mcpSearchCommand(query, {
+        json: !!opts.json,
+        refresh: !!opts.refresh,
+        limit: typeof opts.limit === "number" && opts.limit > 0 ? opts.limit : undefined,
+        maxPages:
+          typeof opts.maxPages === "number" && opts.maxPages > 0 ? opts.maxPages : undefined,
+      });
+    } catch (err) {
+      process.stderr.write(`mcp search failed: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+mcp
+  .command("install <name>")
+  .description(t("ui.mcpInstallDescription"))
+  .option("--refresh", t("ui.mcpRefreshHint"))
+  .option("--max-pages <n>", t("ui.mcpMaxPagesHint"), (v) => Number.parseInt(v, 10))
+  .action(async (name: string, opts) => {
+    try {
+      await mcpInstallCommand(name, {
+        refresh: !!opts.refresh,
+        maxPages:
+          typeof opts.maxPages === "number" && opts.maxPages > 0 ? opts.maxPages : undefined,
+      });
+    } catch (err) {
+      process.stderr.write(`mcp install failed: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
+  });
+
+mcp
+  .command("browse")
+  .description(t("ui.mcpBrowseDescription"))
+  .action(async () => {
+    try {
+      await mcpBrowseCommand();
+    } catch (err) {
+      process.stderr.write(`mcp browse failed: ${(err as Error).message}\n`);
+      process.exit(1);
+    }
   });
 
 mcp
