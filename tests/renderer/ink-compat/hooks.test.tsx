@@ -82,6 +82,27 @@ describe("useStdout — viewport from mount/resize", () => {
     expect(w.output()).toContain("cols=80");
     handle.destroy();
   });
+
+  // Regression for #249: \x1b[2J on Windows conhost scrolls content into
+  // scrollback rather than erasing, so a later grow-resize pulls duplicate
+  // input/toolbar rows back. resize() must clear in place via \x1b[J.
+  it("resize uses in-place clear, not \\x1b[2J", async () => {
+    const w = makeTestWriter();
+    const handle = mount(<Text>hello</Text>, {
+      viewportWidth: 40,
+      viewportHeight: 8,
+      pools: pools(),
+      write: w.write,
+    });
+    await flush();
+    w.flush();
+    handle.resize(60, 16);
+    await flush();
+    const out = w.output();
+    expect(out).not.toContain("\x1b[2J");
+    expect(out).toContain("\x1b[J");
+    handle.destroy();
+  });
 });
 
 describe("useApp — exit via context", () => {

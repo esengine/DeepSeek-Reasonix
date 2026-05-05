@@ -46,7 +46,6 @@ const LEAVE_VIRTUAL = "\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?1049l";
 // DEC 2026 synchronized output — defers paint until ESU so half-arrived diffs don't flash.
 const BSU = "\x1b[?2026h";
 const ESU = "\x1b[?2026l";
-const ERASE_SCREEN = "\x1b[2J\x1b[H";
 
 export function mount(element: ReactNode, opts: MountOptions): Handle {
   const scrollMode: ScrollMode = opts.scroll ?? "scrollback";
@@ -60,13 +59,18 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
   let lastTotalRows = 0;
   let destroyed = false;
   let lastElement: ReactNode = element;
-  // Set by resize() so the clear is folded into the next commit's sync block.
-  let pendingClear = false;
+  // Set by resize(); -1 = none. \x1b[2J would scroll content into scrollback
+  // on Windows conhost, so we rewind + \x1b[J to fill in place instead.
+  let pendingClearRewind = -1;
 
   // Empty input is dropped — bare BSU+ESU can briefly flash on some terminals.
   const flushFrame = (out: string): void => {
-    const buffer = pendingClear ? ERASE_SCREEN + out : out;
-    pendingClear = false;
+    let buffer = out;
+    if (pendingClearRewind >= 0) {
+      const r = pendingClearRewind;
+      buffer = (r > 0 ? `\r\x1b[${r}A\x1b[J` : "\r\x1b[J") + buffer;
+      pendingClearRewind = -1;
+    }
     if (buffer.length === 0) return;
     opts.write(BSU + buffer + ESU);
   };
@@ -311,6 +315,10 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       if (destroyed) return;
       // Same-dim events fire 2-3× per drag on most terminals; skip duplicates.
       if (width === viewportWidth && height === viewportHeight) return;
+      // Capture rewind distance before discarding frame state below.
+      if (frame.screen.height > 0 || reservedRows > 0) {
+        pendingClearRewind = Math.max(0, frame.cursor.y);
+      }
       viewportWidth = width;
       viewportHeight = height;
       frame = emptyFrame(width, height);
@@ -321,8 +329,6 @@ export function mount(element: ReactNode, opts: MountOptions): Handle {
       scrollOffset = 0;
       stickyBottom = true;
       lastTotalRows = 0;
-      // Folded into the next commit so clear+repaint is one atomic block.
-      pendingClear = true;
       reconciler.updateContainer(wrap(lastElement), container, null, () => {
         /* committed */
       });
