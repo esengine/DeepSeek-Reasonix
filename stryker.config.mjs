@@ -42,6 +42,13 @@ const config = {
     break: 50,
   },
 
+  // Reporters — JSON gives us structured data for automated analysis.
+  // Keep "progress" so the progress bar doesn't vanish during the run.
+  reporters: ["progress", "clear-text", "html", "json"],
+  jsonReporter: {
+    fileName: "reports/mutation/mutation.json",
+  },
+
   // Concurrency; adjust based on your machine.
   concurrency: 4,
 
