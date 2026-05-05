@@ -94,6 +94,13 @@ export interface SlashContext {
   /** `/apply-plan` clears the picker so its own `resubmit` doesn't double-fire approval. */
   clearPendingPlan?: () => void;
   reloadHooks?: () => number;
+  /** Diff config.mcp[] vs live bridges → add/close clients accordingly. Wired from chat.tsx mcpRuntime. */
+  reloadMcp?: () => Promise<{
+    added: string[];
+    removed: string[];
+    failed: Array<{ spec: string; reason: string }>;
+    summaries: McpServerSummary[];
+  }>;
   /** `null` → still in flight OR offline; consumers can't distinguish, so always offer `refreshLatestVersion`. */
   latestVersion?: string | null;
   refreshLatestVersion?: () => void;

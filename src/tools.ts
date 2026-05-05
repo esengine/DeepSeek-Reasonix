@@ -74,6 +74,11 @@ export class ToolRegistry {
     return this;
   }
 
+  /** Drop a registered tool. Returns true if the name was present. Used by MCP hot-unbridge. */
+  unregister(name: string): boolean {
+    return this._tools.delete(name);
+  }
+
   has(name: string): boolean {
     return this._tools.has(name);
   }

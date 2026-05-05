@@ -109,7 +109,16 @@ export async function handleMcp(
     cfg.mcp = [...list, spec.trim()];
     writeConfig(cfg, ctx.configPath);
     ctx.audit?.({ ts: Date.now(), action: "add-mcp-spec", payload: { spec } });
-    return { status: 200, body: { added: true, requiresRestart: !ctx.reloadMcp } };
+    let bridged = false;
+    if (ctx.reloadMcp) {
+      try {
+        await ctx.reloadMcp();
+        bridged = true;
+      } catch {
+        /* fall through to requiresRestart */
+      }
+    }
+    return { status: 200, body: { added: true, requiresRestart: !bridged, bridged } };
   }
 
   if (method === "DELETE" && rest[0] === "specs") {
@@ -125,7 +134,16 @@ export async function handleMcp(
     cfg.mcp = list.filter((s) => s !== spec);
     writeConfig(cfg, ctx.configPath);
     ctx.audit?.({ ts: Date.now(), action: "remove-mcp-spec", payload: { spec } });
-    return { status: 200, body: { removed: true, requiresRestart: !ctx.reloadMcp } };
+    let bridged = false;
+    if (ctx.reloadMcp) {
+      try {
+        await ctx.reloadMcp();
+        bridged = true;
+      } catch {
+        /* fall through */
+      }
+    }
+    return { status: 200, body: { removed: true, requiresRestart: !bridged, bridged } };
   }
 
   if (method === "POST" && rest[0] === "reload") {
@@ -247,9 +265,26 @@ export async function handleMcp(
         action: "install-mcp-from-registry",
         payload: { name: entry.name, spec },
       });
+      let bridged = false;
+      let bridgeError: string | undefined;
+      if (ctx.reloadMcp) {
+        try {
+          await ctx.reloadMcp();
+          bridged = true;
+        } catch (err) {
+          bridgeError = (err as Error).message;
+        }
+      }
       return {
         status: 200,
-        body: { added: true, requiresRestart: !ctx.reloadMcp, spec, entry },
+        body: {
+          added: true,
+          requiresRestart: !ctx.reloadMcp || !!bridgeError,
+          bridged,
+          bridgeError,
+          spec,
+          entry,
+        },
       };
     } catch (err) {
       return { status: 500, body: { error: (err as Error).message } };

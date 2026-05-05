@@ -275,6 +275,7 @@ export const zhCN = {
     marketplaceInstall: "安装",
     marketplacePickHint: "在左侧选择服务器，然后点安装。",
     marketplaceInstalled: "已安装 → {spec}",
+    marketplaceInstalledBridged: "已安装并桥接 → {spec}",
     marketplaceAlready: "已安装过",
     marketplaceNeedsEnv: "需设置环境变量：{names}",
     marketplaceSourceTag: "[{source}]",

@@ -134,18 +134,23 @@ export function McpPanel() {
   const installFromRegistry = useCallback(async (entry: RegistryEntryDto) => {
     setBusy(true);
     try {
-      const r = await api<{ added: boolean; alreadyPresent?: boolean; spec: string }>(
-        "/mcp/registry/install",
-        { method: "POST", body: { name: entry.name } },
-      );
+      const r = await api<{
+        added: boolean;
+        alreadyPresent?: boolean;
+        bridged?: boolean;
+        spec: string;
+      }>("/mcp/registry/install", { method: "POST", body: { name: entry.name } });
       if (r.alreadyPresent) {
         setInfo(t("mcp.marketplaceAlready"));
+      } else if (r.bridged) {
+        setInfo(t("mcp.marketplaceInstalledBridged", { spec: r.spec }));
       } else {
         setInfo(t("mcp.marketplaceInstalled", { spec: r.spec }));
       }
-      setTimeout(() => setInfo(null), 4000);
-      const fresh = await api<{ specs: string[] }>("/mcp/specs");
-      setSpecs(fresh.specs);
+      setTimeout(() => setInfo(null), 5000);
+      // Reload BOTH live + spec lists since hot-reload should have
+      // attached the new bridge.
+      await load();
     } catch (err) {
       setError((err as Error).message);
     } finally {

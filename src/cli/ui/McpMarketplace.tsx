@@ -21,6 +21,12 @@ export interface McpMarketplaceProps {
   onClose: () => void;
   /** Pushed back into the chat scrollback after install/uninstall. */
   postInfo: (text: string) => void;
+  /** Optional hot-reload — present in chat session, absent in standalone CLI use. */
+  reloadMcp?: () => Promise<{
+    added: string[];
+    removed: string[];
+    failed: Array<{ spec: string; reason: string }>;
+  }>;
 }
 
 interface State {
@@ -60,7 +66,7 @@ function isInstalled(installedSpecs: string[], entry: RegistryEntry): string | n
   }
 }
 
-export function McpMarketplace({ onClose, postInfo }: McpMarketplaceProps) {
+export function McpMarketplace({ onClose, postInfo, reloadMcp }: McpMarketplaceProps) {
   const [state, setState] = useState<State>({
     handle: null,
     loading: true,
@@ -134,7 +140,18 @@ export function McpMarketplace({ onClose, postInfo }: McpMarketplaceProps) {
           installedSpecs: next,
           status: `uninstalled ${entry.name}`,
         }));
-        postInfo(`✓ uninstalled ${entry.name} — restart \`reasonix code\` to drop the bridge`);
+        if (reloadMcp) {
+          try {
+            await reloadMcp();
+            postInfo(`✓ uninstalled ${entry.name} — bridge dropped`);
+          } catch (err) {
+            postInfo(
+              `✓ uninstalled ${entry.name} — restart \`reasonix code\` to drop the bridge (reload failed: ${(err as Error).message})`,
+            );
+          }
+        } else {
+          postInfo(`✓ uninstalled ${entry.name} — restart \`reasonix code\` to drop the bridge`);
+        }
         return;
       }
 
@@ -178,12 +195,28 @@ export function McpMarketplace({ onClose, postInfo }: McpMarketplaceProps) {
         const envHint = install.requiredEnv?.length
           ? `  ·  needs env: ${install.requiredEnv.join(", ")}`
           : "";
-        postInfo(`✓ installed ${entry.name} — restart \`reasonix code\` to bridge${envHint}`);
+        if (reloadMcp) {
+          try {
+            const r = await reloadMcp();
+            const failedHere = r.failed.find((f) => f.spec === spec);
+            if (failedHere) {
+              postInfo(`▲ installed ${entry.name} — bridge failed: ${failedHere.reason}${envHint}`);
+            } else {
+              postInfo(`✓ installed ${entry.name} — bridged${envHint}`);
+            }
+          } catch (err) {
+            postInfo(
+              `✓ installed ${entry.name} — restart \`reasonix code\` to bridge (reload failed: ${(err as Error).message})${envHint}`,
+            );
+          }
+        } else {
+          postInfo(`✓ installed ${entry.name} — restart \`reasonix code\` to bridge${envHint}`);
+        }
       } catch (err) {
         setState((s) => ({ ...s, status: `install failed: ${(err as Error).message}` }));
       }
     },
-    [state.installedSpecs, postInfo],
+    [state.installedSpecs, postInfo, reloadMcp],
   );
 
   useKeystroke((ev) => {

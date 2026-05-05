@@ -2,6 +2,7 @@ import { render } from "ink";
 import React, { useState } from "react";
 import { loadApiKey, readConfig, searchEnabled } from "../../config.js";
 import { loadDotenv } from "../../env.js";
+import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import { type McpClientHost, bridgeMcpTools } from "../../mcp/registry.js";
@@ -33,6 +34,220 @@ export interface ProgressInfo {
   progress: number;
   total?: number;
   message?: string;
+}
+
+interface SpecRecord {
+  spec: string;
+  client: McpClient;
+  summary: McpServerSummary;
+  /** Names of bridged tools — used for hot-unbridge. */
+  registeredNames: string[];
+  /** ToolSpec snapshots captured AFTER bridge — handed to loop.prefix.addTool on hot-add. */
+  registeredSpecs: import("../../types.js").ToolSpec[];
+}
+
+interface RuntimeContext {
+  getTools: () => ToolRegistry | undefined;
+  getMcpPrefix: () => string | undefined;
+  getRequestedCount: () => number;
+  progressSink: { current: ((info: ProgressInfo) => void) | null };
+}
+
+export interface McpRuntime {
+  size(): number;
+  specs(): string[];
+  summaries(): McpServerSummary[];
+  addSpec(
+    raw: string,
+    loop?: CacheFirstLoop,
+  ): Promise<{ ok: true; summary: McpServerSummary } | { ok: false; reason: string }>;
+  removeSpec(raw: string, loop?: CacheFirstLoop): Promise<boolean>;
+  reloadFromConfig(loop?: CacheFirstLoop): Promise<{
+    added: string[];
+    removed: string[];
+    failed: Array<{ spec: string; reason: string }>;
+    summaries: McpServerSummary[];
+  }>;
+  closeAll(): Promise<void>;
+}
+
+function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
+  const records = new Map<string, SpecRecord>();
+  const insertionOrder: string[] = [];
+
+  async function addSpec(
+    raw: string,
+    loop?: CacheFirstLoop,
+  ): Promise<{ ok: true; summary: McpServerSummary } | { ok: false; reason: string }> {
+    if (records.has(raw)) {
+      return { ok: true, summary: records.get(raw)!.summary };
+    }
+    const tools = ctx.getTools();
+    if (!tools) return { ok: false, reason: "no tool registry available" };
+    const disabledNames = new Set(readConfig().mcpDisabled ?? []);
+    let label = "anon";
+    let mcp: McpClient | undefined;
+    try {
+      const spec = parseMcpSpec(raw);
+      label = spec.name ?? "anon";
+      if (spec.name && disabledNames.has(spec.name)) {
+        process.stderr.write(`${formatMcpLifecycleEvent({ state: "disabled", name: label })}\n`);
+        return { ok: false, reason: "disabled by user" };
+      }
+      process.stderr.write(`${formatMcpLifecycleEvent({ state: "handshake", name: label })}\n`);
+      const t0 = Date.now();
+      const namePrefix = spec.name
+        ? `${spec.name}_`
+        : ctx.getRequestedCount() === 1 && ctx.getMcpPrefix()
+          ? (ctx.getMcpPrefix() as string)
+          : "";
+      const transport: McpTransport =
+        spec.transport === "sse"
+          ? new SseTransport({ url: spec.url })
+          : spec.transport === "streamable-http"
+            ? new StreamableHttpTransport({ url: spec.url })
+            : new StdioTransport({ command: spec.command, args: spec.args });
+      mcp = new McpClient({ transport });
+      await mcp.initialize();
+      const host: McpClientHost = { client: mcp };
+      const bridge = await bridgeMcpTools(mcp, {
+        registry: tools,
+        namePrefix,
+        serverName: label,
+        host,
+        onProgress: (info) => ctx.progressSink.current?.(info),
+        onSlow: (info) =>
+          process.stderr.write(
+            `${formatMcpSlowToast({ name: info.serverName, p95Ms: info.p95Ms, sampleSize: info.sampleSize })}\n`,
+          ),
+      });
+      let report: InspectionReport;
+      try {
+        report = await inspectMcpServer(mcp);
+      } catch {
+        report = {
+          protocolVersion: mcp.protocolVersion,
+          serverInfo: mcp.serverInfo,
+          capabilities: mcp.serverCapabilities ?? {},
+          tools: { supported: true, items: [] },
+          resources: { supported: false, reason: "inspect failed" },
+          prompts: { supported: false, reason: "inspect failed" },
+          elapsedMs: 0,
+        };
+      }
+      const ms = Date.now() - t0;
+      const resourceCount = report.resources.supported ? report.resources.items.length : 0;
+      const promptCount = report.prompts.supported ? report.prompts.items.length : 0;
+      process.stderr.write(
+        `${formatMcpLifecycleEvent({
+          state: "connected",
+          name: label,
+          tools: bridge.registeredNames.length,
+          resources: resourceCount,
+          prompts: promptCount,
+          ms,
+        })}\n`,
+      );
+      const summary = buildMcpServerSummary({
+        label,
+        spec: raw,
+        toolCount: bridge.registeredNames.length,
+        report,
+        host,
+        bridgeEnv: bridge.env,
+      });
+      // Snapshot tool specs AFTER bridge so hot-add can replay them into loop.prefix.
+      const allSpecs = tools.specs();
+      const registeredSpecs = allSpecs.filter((s) =>
+        bridge.registeredNames.includes(s.function.name),
+      );
+      records.set(raw, {
+        spec: raw,
+        client: mcp,
+        summary,
+        registeredNames: bridge.registeredNames,
+        registeredSpecs,
+      });
+      insertionOrder.push(raw);
+      // Hot-add: shift the prefix so the live loop sees the new tools
+      // on the very next turn. Each addTool is one cache-miss turn.
+      if (loop) for (const s of registeredSpecs) loop.prefix.addTool(s);
+      return { ok: true, summary };
+    } catch (err) {
+      await mcp?.close().catch(() => undefined);
+      const reason = (err as Error).message;
+      process.stderr.write(
+        `${formatMcpLifecycleEvent({ state: "failed", name: label, reason })}\n  → run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).\n`,
+      );
+      return { ok: false, reason };
+    }
+  }
+
+  async function removeSpec(raw: string, loop?: CacheFirstLoop): Promise<boolean> {
+    const record = records.get(raw);
+    if (!record) return false;
+    await record.client.close().catch(() => undefined);
+    const tools = ctx.getTools();
+    for (const name of record.registeredNames) {
+      tools?.unregister(name);
+      loop?.prefix.removeTool(name);
+    }
+    records.delete(raw);
+    const idx = insertionOrder.indexOf(raw);
+    if (idx >= 0) insertionOrder.splice(idx, 1);
+    return true;
+  }
+
+  async function reloadFromConfig(loop?: CacheFirstLoop): Promise<{
+    added: string[];
+    removed: string[];
+    failed: Array<{ spec: string; reason: string }>;
+    summaries: McpServerSummary[];
+  }> {
+    const desired = readConfig().mcp ?? [];
+    const desiredSet = new Set(desired);
+    const currentSet = new Set(records.keys());
+    const added: string[] = [];
+    const removed: string[] = [];
+    const failed: Array<{ spec: string; reason: string }> = [];
+
+    for (const spec of [...currentSet]) {
+      if (!desiredSet.has(spec)) {
+        await removeSpec(spec, loop);
+        removed.push(spec);
+      }
+    }
+    for (const spec of desired) {
+      if (currentSet.has(spec)) continue;
+      const result = await addSpec(spec, loop);
+      if (result.ok) added.push(spec);
+      else failed.push({ spec, reason: result.reason });
+    }
+    return { added, removed, failed, summaries: summaries() };
+  }
+
+  function specs(): string[] {
+    return [...insertionOrder];
+  }
+  function summaries(): McpServerSummary[] {
+    return insertionOrder
+      .map((s) => records.get(s)?.summary)
+      .filter((s): s is McpServerSummary => Boolean(s));
+  }
+  async function closeAll(): Promise<void> {
+    for (const r of records.values()) await r.client.close().catch(() => undefined);
+    records.clear();
+    insertionOrder.length = 0;
+  }
+  return {
+    size: () => records.size,
+    specs,
+    summaries,
+    addSpec,
+    removeSpec,
+    reloadFromConfig,
+    closeAll,
+  };
 }
 
 export interface ChatOptions {
@@ -96,6 +311,8 @@ interface RootProps extends ChatOptions {
   progressSink: { current: ((info: ProgressInfo) => void) | null };
   /** Show the SessionPicker (full list) when no --session was specified and saved sessions exist. */
   showPicker: boolean;
+  /** Hot-reload runtime — passed through to App so /mcp browse + dashboard can bridge after install. */
+  mcpRuntime: McpRuntime;
 }
 
 function Root({
@@ -105,6 +322,7 @@ function Root({
   mcpServers,
   progressSink,
   showPicker,
+  mcpRuntime,
   ...appProps
 }: RootProps) {
   const [key, setKey] = useState<string | undefined>(initialKey);
@@ -176,6 +394,7 @@ function Root({
         tools={tools}
         mcpSpecs={mcpSpecs}
         mcpServers={mcpServers}
+        mcpRuntime={mcpRuntime}
         progressSink={progressSink}
         codeMode={appProps.codeMode}
         noDashboard={appProps.noDashboard}
@@ -190,10 +409,6 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const initialKey = loadApiKey();
 
   const requestedSpecs = opts.mcp ?? [];
-  const clients: McpClient[] = [];
-  const successfulSpecs: string[] = [];
-  const failedSpecs: Array<{ spec: string; reason: string }> = [];
-  const mcpServers: McpServerSummary[] = [];
   // Shared progress sink: the bridge's onProgress callback writes
   // through `progressSink.current`, which App.tsx sets to its UI
   // updater on mount. Started null so early progress frames (before
@@ -204,115 +419,25 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // replacing. When no seed AND no MCP, tools stays undefined and
   // the loop runs as a bare chat.
   let tools: ToolRegistry | undefined = opts.seedTools;
+  if (requestedSpecs.length > 0 && !tools) tools = new ToolRegistry();
 
-  const disabledNames = new Set(readConfig().mcpDisabled ?? []);
-  if (requestedSpecs.length > 0) {
-    if (!tools) tools = new ToolRegistry();
-    for (const raw of requestedSpecs) {
-      let label = "anon";
-      let mcp: McpClient | undefined;
-      try {
-        const spec = parseMcpSpec(raw);
-        label = spec.name ?? "anon";
-        if (spec.name && disabledNames.has(spec.name)) {
-          process.stderr.write(`${formatMcpLifecycleEvent({ state: "disabled", name: label })}\n`);
-          continue;
-        }
-        process.stderr.write(`${formatMcpLifecycleEvent({ state: "handshake", name: label })}\n`);
-        const t0 = Date.now();
-        const prefix = spec.name
-          ? `${spec.name}_`
-          : requestedSpecs.length === 1 && opts.mcpPrefix
-            ? opts.mcpPrefix
-            : "";
-        const transport: McpTransport =
-          spec.transport === "sse"
-            ? new SseTransport({ url: spec.url })
-            : spec.transport === "streamable-http"
-              ? new StreamableHttpTransport({ url: spec.url })
-              : new StdioTransport({ command: spec.command, args: spec.args });
-        mcp = new McpClient({ transport });
-        await mcp.initialize();
-        // Host indirection lets `/mcp reconnect` swap the underlying client
-        // without re-bridging the registered tools (closures resolve via
-        // host.client at call time).
-        const host: McpClientHost = { client: mcp };
-        const bridge = await bridgeMcpTools(mcp, {
-          registry: tools,
-          namePrefix: prefix,
-          serverName: label,
-          host,
-          onProgress: (info) => progressSink.current?.(info),
-          onSlow: (info) =>
-            process.stderr.write(
-              `${formatMcpSlowToast({ name: info.serverName, p95Ms: info.p95Ms, sampleSize: info.sampleSize })}\n`,
-            ),
-        });
-        // Inspect collects resources + prompts once so `/mcp` can render them
-        // synchronously. Servers that don't support these fall through as
-        // `{supported: false}` instead of throwing.
-        let report: InspectionReport;
-        try {
-          report = await inspectMcpServer(mcp);
-        } catch {
-          report = {
-            protocolVersion: mcp.protocolVersion,
-            serverInfo: mcp.serverInfo,
-            capabilities: mcp.serverCapabilities ?? {},
-            tools: { supported: true, items: [] },
-            resources: { supported: false, reason: "inspect failed" },
-            prompts: { supported: false, reason: "inspect failed" },
-            elapsedMs: 0,
-          };
-        }
-        const ms = Date.now() - t0;
-        const resourceCount = report.resources.supported ? report.resources.items.length : 0;
-        const promptCount = report.prompts.supported ? report.prompts.items.length : 0;
-        process.stderr.write(
-          `${formatMcpLifecycleEvent({
-            state: "connected",
-            name: label,
-            tools: bridge.registeredNames.length,
-            resources: resourceCount,
-            prompts: promptCount,
-            ms,
-          })}\n`,
-        );
-        clients.push(mcp);
-        successfulSpecs.push(raw);
-        mcpServers.push(
-          buildMcpServerSummary({
-            label,
-            spec: raw,
-            toolCount: bridge.registeredNames.length,
-            report,
-            host,
-            bridgeEnv: bridge.env,
-          }),
-        );
-      } catch (err) {
-        // Per-server failure is non-fatal: one broken server shouldn't
-        // kill a chat that has working servers configured. Recover by
-        // recording the failure and continuing; user fixes via `reasonix
-        // setup` without losing their other servers.
-        await mcp?.close().catch(() => undefined);
-        const reason = (err as Error).message;
-        failedSpecs.push({ spec: raw, reason });
-        process.stderr.write(
-          `${formatMcpLifecycleEvent({ state: "failed", name: label, reason })}\n  → run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).\n`,
-        );
-      }
-    }
-    // If every requested server failed AND no seed registry was
-    // provided, drop the empty registry so the loop still runs as a
-    // bare chat instead of advertising zero tools. If the caller
-    // passed seedTools we keep the registry — the seed tools are
-    // still there and usable.
-    if (successfulSpecs.length === 0 && !opts.seedTools) {
-      tools = undefined;
-    }
+  const runtime = createMcpRuntime({
+    getTools: () => tools,
+    getMcpPrefix: () => opts.mcpPrefix,
+    getRequestedCount: () => requestedSpecs.length,
+    progressSink,
+  });
+
+  const failedSpecs: Array<{ spec: string; reason: string }> = [];
+  for (const raw of requestedSpecs) {
+    const result = await runtime.addSpec(raw);
+    if (!result.ok) failedSpecs.push({ spec: raw, reason: result.reason });
   }
-  const mcpSpecs = successfulSpecs;
+  if (runtime.size() === 0 && !opts.seedTools) {
+    tools = undefined;
+  }
+  const mcpSpecs = runtime.specs();
+  const mcpServers = runtime.summaries();
 
   // Register web search/fetch tools unless explicitly disabled. DDG
   // backs them with no key required; the model invokes them whenever
@@ -367,6 +492,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       tools={tools}
       mcpSpecs={mcpSpecs}
       mcpServers={mcpServers}
+      mcpRuntime={runtime}
       progressSink={progressSink}
       showPicker={showPicker}
       {...opts}
@@ -378,6 +504,6 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   try {
     await waitUntilExit();
   } finally {
-    for (const c of clients) await c.close();
+    await runtime.closeAll();
   }
 }

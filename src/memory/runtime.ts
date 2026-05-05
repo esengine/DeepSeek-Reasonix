@@ -42,6 +42,15 @@ export class ImmutablePrefix {
     return true;
   }
 
+  /** Mirror of addTool for MCP hot-unbridge. Same cache-miss cost — prefix changes shape. */
+  removeTool(name: string): boolean {
+    const idx = this._toolSpecs.findIndex((t) => t.function?.name === name);
+    if (idx < 0) return false;
+    this._toolSpecs.splice(idx, 1);
+    this._fingerprintCache = null;
+    return true;
+  }
+
   get fingerprint(): string {
     if (this._fingerprintCache !== null) return this._fingerprintCache;
     this._fingerprintCache = this.computeFingerprint();

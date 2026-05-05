@@ -275,6 +275,7 @@ export const en = {
     marketplaceInstall: "Install",
     marketplacePickHint: "Pick a server on the left, then Install.",
     marketplaceInstalled: "installed → {spec}",
+    marketplaceInstalledBridged: "installed + bridged → {spec}",
     marketplaceAlready: "already installed",
     marketplaceNeedsEnv: "needs env: {names}",
     marketplaceSourceTag: "[{source}]",

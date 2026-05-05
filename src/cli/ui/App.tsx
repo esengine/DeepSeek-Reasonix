@@ -152,6 +152,12 @@ export interface AppProps {
    */
   mcpServers?: McpServerSummary[];
   /**
+   * Hot-reload runtime owned by chatCommand. Lets slash + dashboard
+   * trigger an add/remove round-trip after the user installs from the
+   * marketplace, without restarting the process.
+   */
+  mcpRuntime?: import("../commands/chat.js").McpRuntime;
+  /**
    * Shared ref the MCP bridge's onProgress callback writes through.
    * We attach our updater to `progressSink.current` on mount so any
    * `notifications/progress` frame from any bridged tool flows into
@@ -275,6 +281,7 @@ function AppInner({
   tools,
   mcpSpecs,
   mcpServers,
+  mcpRuntime,
   progressSink,
   codeMode,
   noDashboard,
@@ -1834,6 +1841,13 @@ function AppInner({
           return fresh.length;
         },
         addToolToPrefix: (spec) => loop.prefix.addTool(spec),
+        reloadMcp: mcpRuntime
+          ? async () => {
+              const r = await mcpRuntime.reloadFromConfig(loop);
+              setLiveMcpServers(r.summaries);
+              return r.summaries.length;
+            }
+          : undefined,
       });
       dashboardRef.current = handle;
       setDashboardUrlState(handle.url);
@@ -1858,6 +1872,7 @@ function AppInner({
     pendingEditReview,
     pendingRevision,
     agentStore,
+    mcpRuntime,
   ]);
 
   const stopDashboard = useCallback(async (): Promise<void> => {
@@ -2171,6 +2186,13 @@ function AppInner({
             setHookList(fresh);
             return fresh.length;
           },
+          reloadMcp: mcpRuntime
+            ? async () => {
+                const r = await mcpRuntime.reloadFromConfig(loop);
+                setLiveMcpServers(r.summaries);
+                return r;
+              }
+            : undefined,
           latestVersion,
           refreshLatestVersion,
           models,
@@ -2589,6 +2611,7 @@ function AppInner({
       prefixHash,
       log,
       agentStore.dispatch,
+      mcpRuntime,
     ],
   );
 
@@ -3380,6 +3403,15 @@ function AppInner({
                 <McpMarketplace
                   onClose={() => setPendingMcpMarketplace(false)}
                   postInfo={(text) => log.pushInfo(text)}
+                  reloadMcp={
+                    mcpRuntime
+                      ? async () => {
+                          const r = await mcpRuntime.reloadFromConfig(loop);
+                          setLiveMcpServers(r.summaries);
+                          return r;
+                        }
+                      : undefined
+                  }
                 />
               ) : pendingPlan ? (
                 <PlanConfirm
