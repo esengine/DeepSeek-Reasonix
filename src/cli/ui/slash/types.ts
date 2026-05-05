@@ -84,6 +84,7 @@ export interface SlashContext {
     cost: number;
     sessionCost: number;
     balance?: number;
+    balanceCurrency?: string;
     elapsedMs?: number;
   }) => void;
   dispatch?: (event: import("../state/events.js").AgentEvent) => void;

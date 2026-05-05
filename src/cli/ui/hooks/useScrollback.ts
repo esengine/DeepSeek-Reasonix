@@ -38,6 +38,7 @@ export interface Scrollback {
     cost: number;
     sessionCost: number;
     balance?: number;
+    balanceCurrency?: string;
     elapsedMs?: number;
   }): string;
   showPlan(args: {
@@ -219,6 +220,7 @@ export function useScrollback(): Scrollback {
           cost: args.cost,
           sessionCost: args.sessionCost,
           balance: args.balance,
+          balanceCurrency: args.balanceCurrency,
           elapsedMs: args.elapsedMs,
         });
         return id;

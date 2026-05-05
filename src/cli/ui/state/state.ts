@@ -28,6 +28,7 @@ export interface StatusBar {
   cost: number;
   sessionCost: number;
   balance?: number;
+  balanceCurrency?: string;
   cacheHit: number;
   countdownSeconds?: number;
   recording?: { sizeBytes: number; events: number; path: string };

@@ -4,16 +4,16 @@ import React from "react";
 import { Countdown } from "../primitives/Countdown.js";
 import { useAgentState } from "../state/provider.js";
 import type { Mode, NetworkState, StatusBar } from "../state/state.js";
-import { FG, TONE, USD_TO_CNY } from "../theme/tokens.js";
+import {
+  FG,
+  TONE,
+  balanceColorForBalance,
+  formatCost,
+  formatWalletDisplay,
+} from "../theme/tokens.js";
 
 const RULE_PAD = 4;
 const RULE_MIN = 20;
-
-function balanceColor(cny: number): string {
-  if (cny < 5) return TONE.err;
-  if (cny < 20) return TONE.warn;
-  return TONE.brand;
-}
 
 export function StatusRow(): React.ReactElement {
   const status = useAgentState((s) => s.status);
@@ -21,8 +21,6 @@ export function StatusRow(): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const ruleWidth = Math.max(RULE_MIN, cols - RULE_PAD);
-  const turnCny = status.cost * USD_TO_CNY;
-  const sessionCny = status.sessionCost * USD_TO_CNY;
   const hasTurn = status.cost > 0;
 
   return (
@@ -48,16 +46,25 @@ export function StatusRow(): React.ReactElement {
             <Text bold color={TONE.brand}>
               {"▸ "}
             </Text>
-            <Text bold color={FG.body}>{`¥${turnCny.toFixed(4)} turn`}</Text>
+            <Text bold color={FG.body}>
+              {`${formatCost(status.cost, status.balanceCurrency)} turn`}
+            </Text>
           </>
         )}
         <Sep />
-        <Text color={FG.sub}>{`¥${sessionCny.toFixed(3)} session`}</Text>
-        {status.balance !== undefined && (
+        <Text
+          color={FG.sub}
+        >{`${formatCost(status.sessionCost, status.balanceCurrency, 3)} session`}</Text>
+        {formatWalletDisplay(status.balance, status.balanceCurrency) !== null && (
           <>
             <Sep />
             <Text color={FG.faint}>{"wallet "}</Text>
-            <Text bold color={balanceColor(status.balance)}>{`¥${status.balance.toFixed(2)}`}</Text>
+            <Text
+              bold
+              color={balanceColorForBalance(status.balance!, status.balanceCurrency ?? "CNY")}
+            >
+              {formatWalletDisplay(status.balance, status.balanceCurrency)}
+            </Text>
           </>
         )}
         <Sep />

@@ -250,6 +250,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         cost: event.cost,
         sessionCost: event.sessionCost,
         balance: event.balance,
+        balanceCurrency: event.balanceCurrency,
         elapsedMs: event.elapsedMs,
       });
 

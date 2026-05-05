@@ -862,7 +862,10 @@ function AppInner({
   useEffect(() => {
     balanceRef.current = balance;
     if (balance) {
-      agentStore.dispatch({ type: "session.update", patch: { balance: balance.total } });
+      agentStore.dispatch({
+        type: "session.update",
+        patch: { balance: balance.total, balanceCurrency: balance.currency },
+      });
     }
   }, [balance, agentStore]);
 

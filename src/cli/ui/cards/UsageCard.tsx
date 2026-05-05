@@ -4,7 +4,7 @@ import React from "react";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { UsageCard as UsageCardData } from "../state/cards.js";
-import { FG, TONE, formatCNY } from "../theme/tokens.js";
+import { FG, TONE, formatCNY, formatWalletDisplay } from "../theme/tokens.js";
 
 const BAR_CELLS = 30;
 
@@ -70,7 +70,9 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
         {card.balance !== undefined ? (
           <>
             <Text color={FG.faint}>· balance</Text>
-            <Text bold color={TONE.brand}>{`¥${card.balance.toFixed(2)}`}</Text>
+            <Text bold color={TONE.brand}>
+              {formatWalletDisplay(card.balance, card.balanceCurrency)}
+            </Text>
           </>
         ) : null}
       </Box>
@@ -91,7 +93,9 @@ function CompactUsageRow({ card }: { card: UsageCardData }): React.ReactElement 
       <Text color={TONE.ok}>{`${(card.cacheHit * 100).toFixed(0)}%`}</Text>
       <Text color={FG.faint}>{`· ${formatCNY(card.cost)}${elapsed}`}</Text>
       {card.balance !== undefined ? (
-        <Text color={TONE.brand}>{`· ¥${card.balance.toFixed(2)}`}</Text>
+        <Text color={TONE.brand}>
+          {`· ${formatWalletDisplay(card.balance, card.balanceCurrency)}`}
+        </Text>
       ) : null}
     </Box>
   );

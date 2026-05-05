@@ -117,6 +117,7 @@ const sessionUpdate = z.object({
     cost: z.number().optional(),
     sessionCost: z.number().optional(),
     balance: z.number().optional(),
+    balanceCurrency: z.string().optional(),
     cacheHit: z.number().optional(),
   }),
 });
@@ -241,6 +242,7 @@ const usageShow = z.object({
   cost: z.number().nonnegative(),
   sessionCost: z.number().nonnegative(),
   balance: z.number().optional(),
+  balanceCurrency: z.string().optional(),
   elapsedMs: z.number().nonnegative().optional(),
 });
 

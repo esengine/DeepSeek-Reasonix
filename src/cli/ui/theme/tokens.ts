@@ -63,3 +63,45 @@ export function formatCNY(usd: number, fractionDigits = 4): string {
   const cny = usd * USD_TO_CNY;
   return `¥${cny.toFixed(fractionDigits)}`;
 }
+
+export function formatBalance(balance: { currency: string; total: number }): string {
+  const sym = balance.currency === "USD" ? "$" : balance.currency === "CNY" ? "¥" : "";
+  return sym
+    ? `${sym}${balance.total.toFixed(2)}`
+    : `${balance.currency} ${balance.total.toFixed(2)}`;
+}
+
+export function formatBalanceLabel(balance: { currency: string; total: number }): string {
+  const sym = balance.currency === "USD" ? "$" : balance.currency === "CNY" ? "¥" : "";
+  const suf = sym ? "" : ` ${balance.currency}`;
+  return `w ${sym}${balance.total.toFixed(2)}${suf}`;
+}
+
+export function formatWalletDisplay(
+  balance: number | undefined,
+  balanceCurrency?: string,
+): string | null {
+  if (balance === undefined) return null;
+  const cur = balanceCurrency ?? "";
+  const sym = cur === "USD" ? "$" : cur === "CNY" ? "¥" : "";
+  if (sym) return `${sym}${balance.toFixed(2)}`;
+  if (cur) return `${cur} ${balance.toFixed(2)}`;
+  return `${balance.toFixed(2)}`;
+}
+
+export function balanceColorCny(cny: number): string {
+  if (cny < 5) return TONE.err;
+  if (cny < 20) return TONE.warn;
+  return TONE.brand;
+}
+
+export function formatCost(costUsd: number, balanceCurrency?: string, fractionDigits = 4): string {
+  if (balanceCurrency === "USD") return `$${costUsd.toFixed(fractionDigits)}`;
+  const cny = costUsd * USD_TO_CNY;
+  return `¥${cny.toFixed(fractionDigits)}`;
+}
+
+export function balanceColorForBalance(balance: number, currency: string): string {
+  const cny = currency === "USD" ? balance * USD_TO_CNY : balance;
+  return balanceColorCny(cny);
+}

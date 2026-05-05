@@ -116,6 +116,7 @@ export interface UsageCard extends CardBase {
   readonly cost: number;
   readonly sessionCost: number;
   readonly balance?: number;
+  readonly balanceCurrency?: string;
   /** Wall-clock for the turn — surfaced as `· 1.2s` in the header meta. */
   readonly elapsedMs?: number;
   /** Auto-emitted per-turn cards render as a single dim row; /cost emits the full breakdown. */

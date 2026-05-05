@@ -5,6 +5,7 @@ import stringWidth from "string-width";
 import type { SessionSummary } from "../../telemetry/stats.js";
 import { ChromeRule } from "./primitives.js";
 import { COLOR, GRADIENT } from "./theme.js";
+import { formatBalanceLabel } from "./theme/tokens.js";
 
 const COLD_START_TURNS = 3;
 const CACHE_BAR_CELLS = 10;
@@ -163,12 +164,6 @@ export function ChromeBar(props: ChromeBarProps): React.ReactElement {
       <ChromeRule />
     </Box>
   );
-}
-
-function formatBalanceLabel(balance: { currency: string; total: number }): string {
-  const sym = balance.currency === "USD" ? "$" : balance.currency === "CNY" ? "¥" : "";
-  const suf = sym ? "" : ` ${balance.currency}`;
-  return `w ${sym}${balance.total.toFixed(2)}${suf}`;
 }
 
 function CostPill({
