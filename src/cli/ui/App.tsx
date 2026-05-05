@@ -113,6 +113,7 @@ import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
+import { replaceMcpServerSummary } from "./mcp-server-list.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { resolvePreset } from "./presets.js";
 import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
@@ -3200,14 +3201,7 @@ function AppInner({
                   postInfo={(text) => log.pushInfo(text)}
                   applyAppend={(target, addedTools) => {
                     const updated = applyMcpAppend(loop, target, addedTools);
-                    setLiveMcpServers((prev) =>
-                      prev.map((server) =>
-                        server === target ||
-                        (server.label === target.label && server.spec === target.spec)
-                          ? updated
-                          : server,
-                      ),
-                    );
+                    setLiveMcpServers((prev) => replaceMcpServerSummary(prev, target, updated));
                     return updated;
                   }}
                 />
