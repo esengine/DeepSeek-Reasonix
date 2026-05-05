@@ -697,6 +697,67 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBeLessThan(beforeMessages);
   }, 30_000);
 
+  it("uses the aggressive fold tier when promptTokens crosses 70% of ctxMax", async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const responses: FakeResponseShape[] = [
+      // Iter 0: usage at 75% of 1M ctx — squarely in the aggressive band.
+      {
+        content: "",
+        tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
+        usage: {
+          prompt_tokens: 750_000,
+          completion_tokens: 10,
+          total_tokens: 750_010,
+          prompt_cache_hit_tokens: 600_000,
+          prompt_cache_miss_tokens: 150_000,
+        },
+      },
+      // Summary call (compactHistory).
+      { content: "Earlier turns covered topic X." },
+      // Iter 1 wrap-up.
+      { content: "done." },
+    ];
+    const client = makeClient(responses);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 8,
+    });
+    const fillLines = (label: string, n: number) =>
+      Array.from(
+        { length: n },
+        (_, i) =>
+          `${label} line ${i}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
+      ).join("\n");
+    for (let i = 0; i < 18; i++) {
+      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 400)}` });
+      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 400)}` });
+    }
+
+    const events: { role: string; content?: string }[] = [];
+    for await (const ev of loop.step("continue")) {
+      events.push({ role: ev.role, content: ev.content });
+    }
+
+    // The warning should call out the aggressive tier explicitly.
+    const foldWarn = events.find(
+      (e) => e.role === "warning" && /aggressively folded/.test(e.content ?? ""),
+    );
+    expect(foldWarn).toBeDefined();
+    // And the status line should advertise it too, so users know why
+    // recent context got trimmed harder than usual.
+    const status = events.find((e) => e.role === "status" && /aggressive/.test(e.content ?? ""));
+    expect(status).toBeDefined();
+  }, 30_000);
+
   it("pre-clips new tool results at dispatch so they never enter the log oversized", async () => {
     const reg = new ToolRegistry();
     // Tool returns ~50k chars of realistic-shape log text; the default

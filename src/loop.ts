@@ -1125,15 +1125,20 @@ export class CacheFirstLoop {
         this._foldedThisTurn = true;
         const before = decision.promptTokens;
         const ctxMax = decision.ctxMax;
-        yield { turn: this._turn, role: "status", content: "compacting history…" };
-        const result = await this.compactHistory();
+        const aggressiveTag = decision.aggressive ? " (aggressive)" : "";
+        yield {
+          turn: this._turn,
+          role: "status",
+          content: `compacting history${aggressiveTag}…`,
+        };
+        const result = await this.compactHistory({ keepRecentTokens: decision.tailBudget });
         if (result.folded) {
           yield {
             turn: this._turn,
             role: "warning",
             content: `context ${before.toLocaleString()}/${ctxMax.toLocaleString()} (${Math.round(
               (before / ctxMax) * 100,
-            )}%) — folded ${result.beforeMessages} messages → ${result.afterMessages} (summary ${result.summaryChars} chars). Continuing.`,
+            )}%) — ${decision.aggressive ? "aggressively folded" : "folded"} ${result.beforeMessages} messages → ${result.afterMessages} (summary ${result.summaryChars} chars). Continuing.`,
           };
         }
       } else if (decision.kind === "exit-with-summary") {

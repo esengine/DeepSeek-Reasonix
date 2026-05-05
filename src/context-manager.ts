@@ -16,8 +16,12 @@ import type { ChatMessage } from "./types.js";
 
 /** Auto-fold when a turn's response shows promptTokens above this fraction of ctxMax. */
 export const HISTORY_FOLD_THRESHOLD = 0.5;
-/** Tail budget after fold, as a fraction of ctxMax. */
+/** Tail budget after a normal fold, as a fraction of ctxMax. */
 export const HISTORY_FOLD_TAIL_FRACTION = 0.2;
+/** Above this fraction the normal fold's tail budget didn't buy enough headroom — fold harder. */
+export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = 0.7;
+/** Tail budget after an aggressive fold — half the normal one, sacrifices recent context for headroom. */
+export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = 0.1;
 /** Skip the fold if the head wouldn't shrink the log by at least this fraction. */
 export const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
 /** Above this fraction we exit the turn with a summary instead of folding (defense in depth). */
@@ -44,6 +48,10 @@ export interface PostUsageDecision {
   promptTokens: number;
   ctxMax: number;
   ratio: number;
+  /** Token budget for the recent tail when kind === "fold"; smaller in the aggressive band. */
+  tailBudget?: number;
+  /** True when this fold is in the 70-85% band — used in user-facing messaging. */
+  aggressive?: boolean;
 }
 
 export interface PreflightDecision {
@@ -71,13 +79,28 @@ export class ContextManager {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
     if (!usage) return { kind: "none", promptTokens: 0, ctxMax, ratio: 0 };
     const ratio = usage.promptTokens / ctxMax;
+    const base = { promptTokens: usage.promptTokens, ctxMax, ratio };
     if (ratio > FORCE_SUMMARY_THRESHOLD) {
-      return { kind: "exit-with-summary", promptTokens: usage.promptTokens, ctxMax, ratio };
+      return { kind: "exit-with-summary", ...base };
     }
-    if (ratio > HISTORY_FOLD_THRESHOLD && !alreadyFoldedThisTurn) {
-      return { kind: "fold", promptTokens: usage.promptTokens, ctxMax, ratio };
+    if (alreadyFoldedThisTurn) return { kind: "none", ...base };
+    if (ratio > HISTORY_FOLD_AGGRESSIVE_THRESHOLD) {
+      return {
+        kind: "fold",
+        ...base,
+        tailBudget: Math.floor(ctxMax * HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION),
+        aggressive: true,
+      };
     }
-    return { kind: "none", promptTokens: usage.promptTokens, ctxMax, ratio };
+    if (ratio > HISTORY_FOLD_THRESHOLD) {
+      return {
+        kind: "fold",
+        ...base,
+        tailBudget: Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION),
+        aggressive: false,
+      };
+    }
+    return { kind: "none", ...base };
   }
 
   /** Local-side preflight before sending a request — catches oversized payloads early. */
