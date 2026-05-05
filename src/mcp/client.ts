@@ -234,9 +234,12 @@ export class McpClient {
         signal.addEventListener("abort", abortHandler, { once: true });
       }
     });
+    promise.catch(() => undefined);
     try {
-      await this.transport.send(frame);
+      await Promise.race([this.transport.send(frame), promise.then(() => undefined)]);
     } catch (err) {
+      const pending = this.pending.get(id);
+      if (pending) clearTimeout(pending.timeout);
       this.pending.delete(id);
       if (abortHandler && signal) signal.removeEventListener("abort", abortHandler);
       throw err;
