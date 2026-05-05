@@ -1,15 +1,7 @@
 /** apiKey is write-only on the wire; GET always returns a redacted form so dashboard screenshots don't leak credentials. */
 
-import {
-  isPlausibleKey,
-  readConfig,
-  redactKey,
-  saveApiKey,
-  saveEditMode,
-  saveReasoningEffort,
-  writeConfig,
-} from "../../config.js";
-import { getLanguage, getSupportedLanguages, setLanguage } from "../../i18n/index.js";
+import { isPlausibleKey, readConfig, redactKey, saveEditMode, writeConfig } from "../../config.js";
+import { getLanguage, getSupportedLanguages, setLanguageRuntime } from "../../i18n/index.js";
 import type { LanguageCode } from "../../i18n/types.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
@@ -76,6 +68,7 @@ export async function handleSettings(
     const fields = parseBody(body);
     const cfg = readConfig(ctx.configPath);
     const changed: string[] = [];
+    let cfgDirty = false;
 
     if (fields.lang !== undefined) {
       const raw = String(fields.lang);
@@ -86,37 +79,43 @@ export async function handleSettings(
       if (!langCode) {
         return { status: 400, body: { error: `lang must be one of: ${supported.join(", ")}` } };
       }
-      setLanguage(langCode);
+      cfg.lang = langCode;
+      setLanguageRuntime(langCode);
+      cfgDirty = true;
       changed.push("lang");
     }
+
     if (fields.apiKey !== undefined) {
       if (typeof fields.apiKey !== "string" || !isPlausibleKey(fields.apiKey)) {
         return { status: 400, body: { error: "apiKey must be a plausible sk- token" } };
       }
-      // saveApiKey reads + writes the entire file with chmod 600.
-      saveApiKey(fields.apiKey, ctx.configPath);
+      cfg.apiKey = fields.apiKey.trim();
+      cfgDirty = true;
       changed.push("apiKey");
     }
+
     if (fields.baseUrl !== undefined) {
       if (typeof fields.baseUrl !== "string" || !fields.baseUrl.trim()) {
         return { status: 400, body: { error: "baseUrl must be a non-empty string" } };
       }
       cfg.baseUrl = fields.baseUrl.trim();
-      writeConfig(cfg, ctx.configPath);
+      cfgDirty = true;
       changed.push("baseUrl");
     }
+
     if (fields.preset !== undefined) {
       if (typeof fields.preset !== "string" || !VALID_PRESETS.has(fields.preset)) {
         return { status: 400, body: { error: "preset must be auto | flash | pro" } };
       }
       cfg.preset = fields.preset as "auto" | "flash" | "pro" | "fast" | "smart" | "max";
-      writeConfig(cfg, ctx.configPath);
+      cfgDirty = true;
+      changed.push("preset");
       // Apply to the LIVE loop too so the user doesn't have to restart
       // their session to feel the change. The callback canonicalizes
       // legacy aliases via resolvePreset internally.
       ctx.applyPresetLive?.(fields.preset);
-      changed.push("preset");
     }
+
     if (fields.reasoningEffort !== undefined) {
       if (
         typeof fields.reasoningEffort !== "string" ||
@@ -124,17 +123,23 @@ export async function handleSettings(
       ) {
         return { status: 400, body: { error: "reasoningEffort must be high | max" } };
       }
-      saveReasoningEffort(fields.reasoningEffort as "high" | "max", ctx.configPath);
-      ctx.applyEffortLive?.(fields.reasoningEffort as "high" | "max");
+      cfg.reasoningEffort = fields.reasoningEffort as "high" | "max";
+      cfgDirty = true;
       changed.push("reasoningEffort");
+      ctx.applyEffortLive?.(fields.reasoningEffort as "high" | "max");
     }
+
     if (fields.search !== undefined) {
       if (typeof fields.search !== "boolean") {
         return { status: 400, body: { error: "search must be a boolean" } };
       }
       cfg.search = fields.search;
-      writeConfig(cfg, ctx.configPath);
+      cfgDirty = true;
       changed.push("search");
+    }
+
+    if (cfgDirty) {
+      writeConfig(cfg, ctx.configPath);
     }
 
     if (changed.length > 0) {
