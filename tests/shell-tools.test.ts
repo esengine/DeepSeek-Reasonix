@@ -19,13 +19,12 @@ import {
   tokenizeCommand,
 } from "../src/tools/shell.js";
 
-/** A PauseGate that auto-resolves with a pre-configured choice. */
-/** A PauseGate that records call args for assertions. */
+/** A PauseGate that records call args and denies — denial keeps the spawn from actually running. */
 class SpyGate extends PauseGate {
   lastCall: { kind: string; payload?: unknown } | null = null;
   override ask(opts: { kind: string; payload?: unknown }): Promise<any> {
     this.lastCall = opts;
-    return Promise.resolve({ type: "run_once" } as ConfirmationChoice);
+    return Promise.resolve({ type: "deny" } as ConfirmationChoice);
   }
 }
 
@@ -389,11 +388,11 @@ describe("registerShellTools — dispatch integration", () => {
     const registry = new ToolRegistry();
     registerShellTools(registry, { rootDir: tmp });
     const spy = new SpyGate();
+    // SpyGate denies, so the dispatch never spawns — keeps this test off
+    // the npm-cold-start critical path on slow CI / Windows.
     await registry.dispatch("run_command", JSON.stringify({ command: "npm i" }), {
       confirmationGate: spy,
     });
-    // The gate must receive kind="run_command" in the first argument,
-    // NOT the command string (old ConfirmationGate swapped these).
     expect(spy.lastCall).not.toBeNull();
     expect(spy.lastCall!.kind).toBe("run_command");
     expect(spy.lastCall!.payload).toEqual({ command: "npm i" });
