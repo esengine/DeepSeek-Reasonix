@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,37 +29,36 @@ function resolveAssetDir(): string {
 
 const ASSET_DIR = resolveAssetDir();
 
-let cachedIndex: string | null = null;
-let cachedApp: string | null = null;
-let cachedAppMap: string | null = null;
-let cachedCss: string | null = null;
+/** mtime-keyed cache — `npm run build` invalidates without restart. */
+const fileCache = new Map<string, { body: string; mtimeMs: number }>();
+
+function loadCachedFile(path: string): string {
+  const stat = statSync(path);
+  const cached = fileCache.get(path);
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.body;
+  const body = readFileSync(path, "utf8");
+  fileCache.set(path, { body, mtimeMs: stat.mtimeMs });
+  return body;
+}
 
 function loadIndexTemplate(): string {
-  if (cachedIndex) return cachedIndex;
-  cachedIndex = readFileSync(join(ASSET_DIR, "index.html"), "utf8");
-  return cachedIndex;
+  return loadCachedFile(join(ASSET_DIR, "index.html"));
 }
 
 function loadApp(): string {
-  if (cachedApp) return cachedApp;
-  cachedApp = readFileSync(join(ASSET_DIR, "dist", "app.js"), "utf8");
-  return cachedApp;
+  return loadCachedFile(join(ASSET_DIR, "dist", "app.js"));
 }
 
 function loadAppMap(): string | null {
-  if (cachedAppMap) return cachedAppMap;
   try {
-    cachedAppMap = readFileSync(join(ASSET_DIR, "dist", "app.js.map"), "utf8");
-    return cachedAppMap;
+    return loadCachedFile(join(ASSET_DIR, "dist", "app.js.map"));
   } catch {
     return null;
   }
 }
 
 function loadCss(): string {
-  if (cachedCss) return cachedCss;
-  cachedCss = readFileSync(join(ASSET_DIR, "app.css"), "utf8");
-  return cachedCss;
+  return loadCachedFile(join(ASSET_DIR, "app.css"));
 }
 
 /** Token HTML-attribute-escaped in case a future mint produces non-hex bytes. */
@@ -77,14 +76,9 @@ export function renderIndexHtml(token: string, mode: "standalone" | "attached"):
 
 /** Vendor CSS the bundle pulls from npm and the build script copies into `dashboard/dist/`. */
 const VENDOR_CSS_NAMES = new Set(["vendor-hljs.css", "vendor-uplot.css"]);
-const cachedVendorCss = new Map<string, string>();
 
 function loadVendorCss(name: string): string {
-  const cached = cachedVendorCss.get(name);
-  if (cached !== undefined) return cached;
-  const body = readFileSync(join(ASSET_DIR, "dist", name), "utf8");
-  cachedVendorCss.set(name, body);
-  return body;
+  return loadCachedFile(join(ASSET_DIR, "dist", name));
 }
 
 export function serveAsset(name: string): { body: string; contentType: string } | null {
