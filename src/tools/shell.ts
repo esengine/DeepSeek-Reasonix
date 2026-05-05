@@ -210,8 +210,20 @@ const RISKY_ARGS: Readonly<Record<string, ReadonlyArray<string>>> = {
   "git diff": ["--output", "--ext-diff"],
   "git log": ["--output"],
   "git show": ["--output"],
-  // `-exec*` / `-ok*` are RCE; `-delete` and `-fprint*` write to arbitrary paths.
-  find: ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"],
+  // `-exec*` / `-ok*` are RCE; `-delete` and `-fprint*` / `-fls` write to arbitrary paths.
+  find: [
+    "-delete",
+    "-exec",
+    "-execdir",
+    "-ok",
+    "-okdir",
+    "-fprint",
+    "-fprint0",
+    "-fprintf",
+    "-fls",
+  ],
+  // `-o FILE` writes the tree to an arbitrary path.
+  tree: ["-o"],
   // Auto-fix mutates source files.
   "npx eslint": ["--fix", "--fix-dry-run"],
   "npx biome check": ["--write", "--apply", "--apply-unsafe"],

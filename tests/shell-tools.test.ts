@@ -248,7 +248,16 @@ describe("isAllowed", () => {
       expect(isAllowed("find . -exec rm {} ;")).toBe(false);
       expect(isAllowed("find . -execdir rm {} ;")).toBe(false);
       expect(isAllowed("find . -fprint /tmp/x")).toBe(false);
+      expect(isAllowed("find . -fprint0 /tmp/x")).toBe(false);
       expect(isAllowed("find . -fprintf /tmp/x %p")).toBe(false);
+    });
+
+    it("demotes tree -o (write-anywhere)", () => {
+      expect(isAllowed("tree")).toBe(true);
+      expect(isAllowed("tree src")).toBe(true);
+      expect(isAllowed("tree -L 2")).toBe(true);
+      expect(isAllowed("tree -o /tmp/x")).toBe(false);
+      expect(isAllowed("tree -o=/tmp/x")).toBe(false);
     });
 
     it("demotes auto-fix flags on linters / formatters", () => {
