@@ -15,6 +15,8 @@ export interface InkTextProps {
   readonly strikethrough?: boolean;
   readonly inverse?: boolean;
   readonly wrap?: "wrap" | "truncate" | "truncate-start" | "truncate-middle" | "truncate-end";
+  /** OSC 8 hyperlink target — emitted as proper escape bytes, never inlined into cell content. */
+  readonly hyperlink?: string;
 }
 
 const SGR = {
@@ -38,5 +40,9 @@ export function Text(props: InkTextProps): React.ReactElement {
   if (props.underline) codes.push(SGR.underline);
   if (props.inverse) codes.push(SGR.inverse);
   if (props.strikethrough) codes.push(SGR.strikethrough);
-  return <RsxText style={codes.length > 0 ? codes : undefined}>{props.children}</RsxText>;
+  return (
+    <RsxText style={codes.length > 0 ? codes : undefined} hyperlink={props.hyperlink}>
+      {props.children}
+    </RsxText>
+  );
 }

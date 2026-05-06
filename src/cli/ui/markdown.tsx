@@ -370,12 +370,17 @@ function Inline({ tokens }: { tokens: Token[] }): React.ReactElement {
 const FILE_REF_RE = /\b([A-Za-z0-9_./@\-]+\.[A-Za-z0-9]{1,6})(?::(\d+)(?:-(\d+))?)?\b/g;
 const MENTION_RE = /(?<![A-Za-z0-9_])@([A-Za-z0-9_./\-]+\.[A-Za-z0-9]{1,6})/g;
 
-function osc8(label: string, target: string, color: string): React.ReactElement {
-  const open = `\x1b]8;;${target}\x07`;
-  const close = "\x1b]8;;\x07";
+function looksLikeFileRef(path: string, hasLine: boolean): boolean {
+  if (hasLine) return true;
+  if (path.includes("/")) return true;
+  const ext = path.split(".").pop() ?? "";
+  return ext.length >= 2;
+}
+
+function osc8(label: string, _target: string, color: string): React.ReactElement {
   return (
     <Text color={color} underline>
-      {`${open}${label}${close}`}
+      {label}
     </Text>
   );
 }
@@ -402,6 +407,7 @@ function renderInlineText(raw: string): React.ReactElement {
     if (hits.some((h) => start < h.end && end > h.start)) continue;
     const path = m[1]!;
     const line = m[2];
+    if (!looksLikeFileRef(path, line !== undefined)) continue;
     const target = line ? `file://${path}:${line}` : `file://${path}`;
     hits.push({ start, end, node: osc8(m[0], target, TONE.brand) });
   }

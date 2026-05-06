@@ -82,6 +82,36 @@ describe("Markdown component", () => {
   });
 });
 
+describe("Markdown — issue #330 file-ref over-match regression", () => {
+  it("English abbreviations 'e.g' / 'i.e' are NOT treated as file refs", async () => {
+    const { mount } = await import("../src/renderer/reconciler/mount.js");
+    const { CharPool } = await import("../src/renderer/pools/char-pool.js");
+    const { StylePool } = await import("../src/renderer/pools/style-pool.js");
+    const { HyperlinkPool } = await import("../src/renderer/pools/hyperlink-pool.js");
+    async function bytesFor(text: string): Promise<string> {
+      const chunks: string[] = [];
+      const handle = mount(React.createElement(Markdown, { text }), {
+        viewportWidth: 80,
+        viewportHeight: 10,
+        pools: { char: new CharPool(), style: new StylePool(), hyperlink: new HyperlinkPool() },
+        write: (s: string) => {
+          chunks.push(s);
+        },
+      });
+      await new Promise((r) => setTimeout(r, 100));
+      const out = chunks.join("");
+      handle.destroy();
+      return out;
+    }
+    for (const sample of ["use e.g. like this", "i.e. like that", "(e.g. Google)"]) {
+      const out = await bytesFor(sample);
+      expect(out.includes("]8;;")).toBe(false);
+      expect(out.includes("file://e.g")).toBe(false);
+      expect(out.includes("file://i.e")).toBe(false);
+    }
+  });
+});
+
 // Table layout invariants: bounded width, no separator rows, content preservation.
 
 /** Parse a GFM table into header/body cells via the same pipeline as the component. */
