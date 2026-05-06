@@ -92,11 +92,10 @@ export class DeepSeekClient {
       );
     }
     this.apiKey = apiKey;
-    this.baseUrl = (
-      opts.baseUrl ??
-      process.env.DEEPSEEK_BASE_URL ??
-      "https://api.deepseek.com"
-    ).replace(/\/+$/, "");
+    let url = opts.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com";
+    // Manual trim — `/\/+$/` is O(n²) on slash-heavy non-matches per CodeQL js/polynomial-redos.
+    while (url.endsWith("/")) url = url.slice(0, -1);
+    this.baseUrl = url;
     // 11 min. DeepSeek's load-balancer may keep a connection open for
     // up to 10 minutes while the request waits in queue (non-streaming
     // sends empty lines, streaming sends `:` SSE keep-alive comments —

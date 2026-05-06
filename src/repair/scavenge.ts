@@ -14,11 +14,20 @@ export interface ScavengeResult {
   notes: string[];
 }
 
+/** Bounds the regex input — DSML matchers are O(n²) on adversarial input per CodeQL js/polynomial-redos. */
+const MAX_SCAVENGE_INPUT = 100 * 1024;
+
 export function scavengeToolCalls(
   reasoningContent: string | null | undefined,
   opts: ScavengeOptions,
 ): ScavengeResult {
   if (!reasoningContent) return { calls: [], notes: [] };
+  if (reasoningContent.length > MAX_SCAVENGE_INPUT) {
+    return {
+      calls: [],
+      notes: [`scavenge skipped: reasoning_content too large (${reasoningContent.length} chars)`],
+    };
+  }
   const max = opts.maxCalls ?? 4;
   const notes: string[] = [];
   const out: ToolCall[] = [];

@@ -315,8 +315,10 @@ export function expandAtMentions(
   for (const match of text.matchAll(AT_MENTION_PATTERN)) {
     const rawPath = match[1] ?? "";
     // Strip trailing dot (sentence terminator): `@foo.ts.` → `@foo.ts`.
-    // Keep internal dots intact.
-    const cleaned = rawPath.replace(/\.+$/, "");
+    // Keep internal dots intact. Manual loop instead of `/\.+$/` — the
+    // regex is O(n²) on dot-heavy non-matches per CodeQL js/polynomial-redos.
+    let cleaned = rawPath;
+    while (cleaned.endsWith(".")) cleaned = cleaned.slice(0, -1);
     if (!cleaned) continue;
     const token = `@${cleaned}`;
     if (seen.has(token)) continue;
