@@ -1,6 +1,18 @@
 /** SEARCH must match byte-for-byte; empty SEARCH = create new file. No fuzzy match — silent wrong edit beats a missing one. */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 
 export interface EditBlock {
@@ -69,49 +81,92 @@ export function applyEditBlock(block: EditBlock, rootDir: string): ApplyResult {
   }
 
   const searchEmpty = block.search.length === 0;
-  const exists = existsSync(absTarget);
+
+  // Branch on intent first so each path makes exactly one `open` call
+  // — keeps CodeQL's flow analyser from tripping over a check→use
+  // chain across two opens (js/file-system-race).
+  if (searchEmpty) {
+    try {
+      mkdirSync(dirname(absTarget), { recursive: true });
+      const fd = openSync(absTarget, "wx");
+      try {
+        writeSync(fd, block.replace);
+      } finally {
+        closeSync(fd);
+      }
+      return { path: block.path, status: "created" };
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "EEXIST") {
+        return {
+          path: block.path,
+          status: "not-found",
+          message: "empty SEARCH only creates new files — this file already exists",
+        };
+      }
+      return { path: block.path, status: "error", message: e.message };
+    }
+  }
 
   try {
-    if (!exists) {
-      if (!searchEmpty) {
+    // Modify path. ENOENT is reported as `file-missing` so the model
+    // knows it needs an empty SEARCH to create the file.
+    let fd: number;
+    try {
+      fd = openSync(absTarget, "r+");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         return {
           path: block.path,
           status: "file-missing",
           message: "file does not exist; to create it, use an empty SEARCH block",
         };
       }
-      mkdirSync(dirname(absTarget), { recursive: true });
-      writeFileSync(absTarget, block.replace, "utf8");
-      return { path: block.path, status: "created" };
+      throw err;
     }
 
-    const content = readFileSync(absTarget, "utf8");
-    if (searchEmpty) {
-      return {
-        path: block.path,
-        status: "not-found",
-        message: "empty SEARCH only creates new files — this file already exists",
-      };
+    try {
+      const stat = fstatSync(fd);
+      const inBuf = Buffer.alloc(stat.size);
+      let readBytes = 0;
+      while (readBytes < stat.size) {
+        const n = readSync(fd, inBuf, readBytes, stat.size - readBytes, readBytes);
+        if (n <= 0) break;
+        readBytes += n;
+      }
+      const content = inBuf.toString("utf8", 0, readBytes);
+      const le = lineEndingOf(content);
+      const adaptedSearch = block.search.replace(/\r?\n/g, le);
+      const adaptedReplace = block.replace.replace(/\r?\n/g, le);
+      const idx = content.indexOf(adaptedSearch);
+      if (idx === -1) {
+        return {
+          path: block.path,
+          status: "not-found",
+          message: "SEARCH text does not match the current file content exactly",
+        };
+      }
+      // Replace only the first occurrence — if the model needs multiple
+      // identical edits it should emit multiple blocks (each anchored by
+      // more surrounding context). Auto-expanding to replace-all is a
+      // footgun when the same string legitimately appears in several
+      // unrelated places.
+      const replaced = `${content.slice(0, idx)}${adaptedReplace}${content.slice(idx + adaptedSearch.length)}`;
+      // Truncate first so a shorter result doesn't leave stale tail
+      // bytes; ftruncate also pads with NUL when the new length is
+      // longer, which we then overwrite below.
+      const outBuf = Buffer.from(replaced, "utf8");
+      ftruncateSync(fd, outBuf.length);
+      let written = 0;
+      while (written < outBuf.length) {
+        const n = writeSync(fd, outBuf, written, outBuf.length - written, written);
+        if (n <= 0) break;
+        written += n;
+      }
+      return { path: block.path, status: "applied" };
+    } finally {
+      closeSync(fd);
     }
-    const le = lineEndingOf(content);
-    const adaptedSearch = block.search.replace(/\r?\n/g, le);
-    const adaptedReplace = block.replace.replace(/\r?\n/g, le);
-    const idx = content.indexOf(adaptedSearch);
-    if (idx === -1) {
-      return {
-        path: block.path,
-        status: "not-found",
-        message: "SEARCH text does not match the current file content exactly",
-      };
-    }
-    // Replace only the first occurrence — if the model needs multiple
-    // identical edits it should emit multiple blocks (each anchored by
-    // more surrounding context). Auto-expanding to replace-all is a
-    // footgun when the same string legitimately appears in several
-    // unrelated places.
-    const replaced = `${content.slice(0, idx)}${adaptedReplace}${content.slice(idx + adaptedSearch.length)}`;
-    writeFileSync(absTarget, replaced, "utf8");
-    return { path: block.path, status: "applied" };
   } catch (err) {
     return { path: block.path, status: "error", message: (err as Error).message };
   }
