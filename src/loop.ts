@@ -18,13 +18,14 @@ import {
 
 import { ContextManager } from "./context-manager.js";
 import { summarizeBranch } from "./loop/branch.js";
-import { errorLabelFor, formatLoopError, reasonPrefixFor } from "./loop/errors.js";
+import { formatLoopError } from "./loop/errors.js";
 import {
   NEEDS_PRO_BUFFER_CHARS,
   isEscalationRequest,
   looksLikePartialEscalationMarker,
   parseEscalationMarker,
 } from "./loop/escalation.js";
+import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "./loop/force-summary.js";
 import {
   fixToolCallPairing,
   healLoadedMessages,
@@ -32,6 +33,7 @@ import {
   stampMissingReasoningForThinkingMode,
 } from "./loop/healing.js";
 import { hookWarnings, safeParseToolArgs } from "./loop/hook-events.js";
+import { buildAssistantMessage, buildSyntheticAssistantMessage } from "./loop/messages.js";
 import {
   looksLikeCompleteJson,
   shrinkOversizedToolCallArgsByTokens,
@@ -43,6 +45,7 @@ import {
   stripHallucinatedToolMarkup,
   thinkingModeForModel,
 } from "./loop/thinking.js";
+import { TurnFailureTracker } from "./loop/turn-failure-tracker.js";
 import type { BranchSummary, LoopEvent } from "./loop/types.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
 import { appendSessionMessage, loadSessionMessages, rewriteSession } from "./memory/session.js";
@@ -52,7 +55,6 @@ import { countTokens } from "./tokenizer.js";
 import { ToolRegistry } from "./tools.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
-const FAILURE_ESCALATION_THRESHOLD = 3;
 const ESCALATION_MODEL = "deepseek-v4-pro";
 
 export {
@@ -146,8 +148,7 @@ export class CacheFirstLoop {
 
   private _proArmedForNextTurn = false;
   private _escalateThisTurn = false;
-  private _turnFailureCount = 0;
-  private _turnFailureTypes: Record<string, number> = {};
+  private readonly _turnFailures = new TurnFailureTracker();
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
   private context!: ContextManager;
@@ -379,39 +380,10 @@ export class CacheFirstLoop {
 
   /** Returns true ONLY on the tipping call — caller surfaces a one-shot warning. */
   private noteToolFailureSignal(resultJson: string, repair?: RepairReport): boolean {
-    let bumped = false;
-    const bump = (kind: string, by = 1): void => {
-      this._turnFailureCount += by;
-      this._turnFailureTypes[kind] = (this._turnFailureTypes[kind] ?? 0) + by;
-      bumped = true;
-    };
-    // edit_file / write_file SEARCH mismatch → `{"error":"Error: search text not found…"}`
-    if (resultJson.includes('"error"') && resultJson.includes("search text not found")) {
-      bump("search-mismatch");
-    }
-    // Per-flavor tagging so the warning can say "3× truncated" not "3 repair signals".
-    if (repair) {
-      if (repair.scavenged > 0) bump("scavenged", repair.scavenged);
-      if (repair.truncationsFixed > 0) bump("truncated", repair.truncationsFixed);
-      if (repair.stormsBroken > 0) bump("repeat-loop", repair.stormsBroken);
-    }
-    if (
-      bumped &&
-      !this._escalateThisTurn &&
-      this.autoEscalate &&
-      this._turnFailureCount >= FAILURE_ESCALATION_THRESHOLD
-    ) {
-      this._escalateThisTurn = true;
-      return true;
-    }
-    return false;
-  }
-
-  private formatFailureBreakdown(): string {
-    const parts = Object.entries(this._turnFailureTypes)
-      .filter(([, n]) => n > 0)
-      .map(([kind, n]) => `${n}× ${kind}`);
-    return parts.length > 0 ? parts.join(", ") : `${this._turnFailureCount} repair/error signal(s)`;
+    if (!this._turnFailures.noteAndCrossedThreshold(resultJson, repair)) return false;
+    if (this._escalateThisTurn || !this.autoEscalate) return false;
+    this._escalateThisTurn = true;
+    return true;
   }
 
   private buildMessages(pendingUser: string | null): ChatMessage[] {
@@ -487,8 +459,7 @@ export class CacheFirstLoop {
     // consume the /pro armed flag into `_escalateThisTurn` (so the
     // armed intent is one-shot — next turn starts fresh on flash
     // unless the user re-arms or mid-turn escalation triggers).
-    this._turnFailureCount = 0;
-    this._turnFailureTypes = {};
+    this._turnFailures.reset();
     this._turnSelfCorrected = false;
     this._escalateThisTurn = false;
     this._foldedThisTurn = false;
@@ -556,7 +527,7 @@ export class CacheFirstLoop {
         // every assistant message, so we attach an empty-string
         // placeholder to satisfy the validator without inventing
         // reasoning we don't have. V3 gets a plain message as before.
-        this.appendAndPersist(this.syntheticAssistantMessage(stoppedMsg));
+        this.appendAndPersist(buildSyntheticAssistantMessage(stoppedMsg, this.model));
         yield {
           turn: this._turn,
           role: "assistant_final",
@@ -994,7 +965,7 @@ export class CacheFirstLoop {
       );
 
       this.appendAndPersist(
-        this.assistantMessage(
+        buildAssistantMessage(
           assistantContent,
           repairedCalls,
           this.modelForCurrentCall(),
@@ -1020,7 +991,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
-          content: `⇧ auto-escalating to ${ESCALATION_MODEL} for the rest of this turn — flash hit ${this.formatFailureBreakdown()}. Next turn falls back to ${this.model} unless /pro is armed.`,
+          content: `⇧ auto-escalating to ${ESCALATION_MODEL} for the rest of this turn — flash hit ${this._turnFailures.formatBreakdown()}. Next turn falls back to ${this.model} unless /pro is armed.`,
         };
       }
 
@@ -1034,7 +1005,7 @@ export class CacheFirstLoop {
       if (allSuppressed && !this._turnSelfCorrected) {
         this._turnSelfCorrected = true;
         this.replaceTailAssistantMessage(
-          this.assistantMessage(
+          buildAssistantMessage(
             assistantContent,
             toolCalls,
             this.modelForCurrentCall(),
@@ -1073,7 +1044,7 @@ export class CacheFirstLoop {
 
       if (repairedCalls.length === 0) {
         if (allSuppressed) {
-          yield* this.forceSummaryAfterIterLimit({ reason: "stuck" });
+          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
           return;
         }
         yield { turn: this._turn, role: "done", content: assistantContent };
@@ -1114,7 +1085,7 @@ export class CacheFirstLoop {
           )}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.`,
         };
         this.context.trimTrailingToolCalls();
-        yield* this.forceSummaryAfterIterLimit({ reason: "context-guard" });
+        yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "context-guard" });
         return;
       }
 
@@ -1196,7 +1167,7 @@ export class CacheFirstLoop {
           yield {
             turn: this._turn,
             role: "warning",
-            content: `⇧ auto-escalating to ${ESCALATION_MODEL} for the rest of this turn — flash hit ${this.formatFailureBreakdown()}. Next turn falls back to ${this.model} unless /pro is armed.`,
+            content: `⇧ auto-escalating to ${ESCALATION_MODEL} for the rest of this turn — flash hit ${this._turnFailures.formatBreakdown()}. Next turn falls back to ${this.model} unless /pro is armed.`,
           };
         }
         yield {
@@ -1214,80 +1185,19 @@ export class CacheFirstLoop {
     // user staring at a blank prompt), force one final no-tools call so
     // the model must produce a text summary from everything it has
     // already seen.
-    yield* this.forceSummaryAfterIterLimit({ reason: "budget" });
+    yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "budget" });
   }
 
-  private async *forceSummaryAfterIterLimit(
-    opts: { reason: "budget" | "aborted" | "context-guard" | "stuck" } = { reason: "budget" },
-  ): AsyncGenerator<LoopEvent> {
-    try {
-      // The summary call is non-streaming (reasoner, 30-60s typical).
-      // Without this status the user sees nothing happening after the
-      // yellow "budget reached" warning until the summary arrives.
-      yield {
-        turn: this._turn,
-        role: "status",
-        content: "summarizing what was gathered…",
-      };
-      const messages = this.buildMessages(null);
-      // Passing `tools: undefined` was supposed to force a text
-      // response, but R1 can still hallucinate tool-call markup
-      // (e.g. DSML `<｜DSML｜function_calls>…</｜DSML｜function_calls>`)
-      // in prose when it's been primed by prior tool use. An explicit
-      // user-role instruction plus post-hoc stripping of known
-      // hallucination shapes keeps the user from seeing raw markup.
-      messages.push({
-        role: "user",
-        content:
-          "I'm out of tool-call budget for this turn. Summarize in plain prose what you learned from the tool results above. Do NOT emit any tool calls, function-call markup, DSML invocations, or SEARCH/REPLACE edit blocks — they will be silently discarded. Just plain text.",
-      });
-      // Cost optimization: the forced summary is a wrap-up of work
-      // already done, not fresh reasoning. Pin it to flash with
-      // effort=high regardless of the main turn's model — pro is
-      // 12× overkill for "paraphrase these tool results into prose."
-      // Budget-exhausted turns are exactly when we DON'T want to
-      // also torch the wallet.
-      const summaryModel = "deepseek-v4-flash";
-      const summaryEffort: "high" | "max" = "high";
-      const resp = await this.client.chat({
-        model: summaryModel,
-        messages,
-        // no tools → model is forced to answer in text
-        signal: this._turnAbort.signal,
-        thinking: thinkingModeForModel(summaryModel),
-        reasoningEffort: summaryEffort,
-      });
-      const rawContent = resp.content?.trim() ?? "";
-      const cleaned = stripHallucinatedToolMarkup(rawContent);
-      const summary =
-        cleaned ||
-        "(model emitted fake tool-call markup instead of a prose summary — try /retry with a narrower question, or /think to inspect R1's reasoning)";
-      const reasonPrefix = reasonPrefixFor(opts.reason, this.maxToolIters);
-      const annotated = `${reasonPrefix}\n\n${summary}`;
-      // Record under the actual model used (flash), not `this.model`,
-      // so per-turn cost and `/stats` reflect reality.
-      const summaryStats = this.stats.record(this._turn, summaryModel, resp.usage ?? new Usage());
-      this.appendAndPersist(
-        this.assistantMessage(summary, [], summaryModel, resp.reasoningContent),
-      );
-      yield {
-        turn: this._turn,
-        role: "assistant_final",
-        content: annotated,
-        stats: summaryStats,
-        forcedSummary: true,
-      };
-      yield { turn: this._turn, role: "done", content: summary };
-    } catch (err) {
-      const label = errorLabelFor(opts.reason, this.maxToolIters);
-      yield {
-        turn: this._turn,
-        role: "error",
-        content: "",
-        error: `${label} and the fallback summary call failed: ${(err as Error).message}. Run /clear and retry with a narrower question, or raise --max-tool-iters.`,
-      };
-      yield { turn: this._turn, role: "done", content: "" };
-    }
+  private summaryContext(): ForceSummaryContext {
+    return {
+      client: this.client,
+      signal: this._turnAbort.signal,
+      buildMessages: () => this.buildMessages(null),
+      appendAndPersist: (m) => this.appendAndPersist(m),
+      recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
+      turn: this._turn,
+      maxToolIters: this.maxToolIters,
+    };
   }
 
   async run(userInput: string, onEvent?: (ev: LoopEvent) => void): Promise<string> {
@@ -1298,29 +1208,6 @@ export class CacheFirstLoop {
       if (ev.role === "done") break;
     }
     return final;
-  }
-
-  /** Thinking-mode producer ⇒ reasoning_content MUST be set (even ""), or next call 400s. */
-  private assistantMessage(
-    content: string,
-    toolCalls: ToolCall[],
-    producingModel: string,
-    reasoningContent?: string | null,
-  ): ChatMessage {
-    const msg: ChatMessage = { role: "assistant", content };
-    if (toolCalls.length > 0) msg.tool_calls = toolCalls;
-    // V4-era deepseek-chat returns reasoning_content even with thinking.type
-    // disabled, and the API rejects round-trips that drop it. Whitelist on
-    // model name is too brittle — preserve whenever the producer emitted any.
-    if (isThinkingModeModel(producingModel) || (reasoningContent && reasoningContent.length > 0)) {
-      msg.reasoning_content = reasoningContent ?? "";
-    }
-    return msg;
-  }
-
-  /** Abort notices etc — uses this.model as stand-in producer for the thinking-mode stamp. */
-  private syntheticAssistantMessage(content: string): ChatMessage {
-    return this.assistantMessage(content, [], this.model, "");
   }
 }
 
