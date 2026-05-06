@@ -3,6 +3,58 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] — 2026-05-06
+
+**Headline:** tool dispatch is no longer strictly serial. When the model
+emits multiple `parallelSafe`-annotated tool calls in one turn (multiple
+`read_file`, multiple `spawn_subagent`, etc.), the loop now races them
+together via `Promise.allSettled`; a non-`parallelSafe` call ends the
+chunk and runs alone, so read-after-write ordering still holds. Tool
+yields and history append still land in declared order regardless of
+which call settles first — the model and UI see the same shape they
+would under serial dispatch. The TUI's `SubagentRow` becomes
+`SubagentLiveStack`, rendering 1 → rich card, 2..max → compact rows,
+> max → "+N more running…" fold. Closes umbrella #325.
+
+**Tool dispatch:**
+
+- feat(tools): `ToolDefinition.parallelSafe?: boolean` — opt-in
+  annotation, default `false`. `ToolRegistry.isParallelSafe(name)` for
+  the dispatcher to query; unknown / unannotated tools resolve to
+  `false` so third-party MCP tools must explicitly opt in. Built-in
+  read-only filesystem (`read_file`, `list_directory`,
+  `directory_tree`, `search_files`, `search_content`,
+  `get_file_info`), web (`web_search`, `web_fetch`), `recall_memory`,
+  `semantic_search`, isolated child loops (`run_skill`,
+  `spawn_subagent`), and in-memory job queries (`job_output`,
+  `list_jobs`) are annotated. Mutating tools stay default. (PR #326)
+- feat(loop): chunked parallel tool dispatch. Replaces `for...of +
+  await` in the dispatch loop with a chunking loop that groups
+  consecutive `parallelSafe` calls and races them; unsafe calls form
+  serial barriers. `runOneToolCall` extracts per-call lifecycle
+  (PreToolUse + dispatch + PostToolUse) so the chunk can fan out via
+  `Promise.allSettled` while the loop body keeps yielding events in
+  declared order. Two new env knobs: `REASONIX_PARALLEL_MAX` (chunk
+  size cap, default 3, hard max 16) and `REASONIX_TOOL_DISPATCH=serial`
+  (escape hatch). Tests cover parallel timing, serial barrier on mixed
+  safe/unsafe, declared-order yields under racey completion, and both
+  env-knob overrides. (PR #327)
+
+**TUI:**
+
+- feat(ui): `SubagentEvent` carries a stable `runId` per spawn so the
+  sink can key concurrent runs apart instead of overwriting one shared
+  row. `useSubagent` keeps an array of in-flight activities;
+  `SubagentLiveStack` renders 1 → rich card (unchanged), 2..max →
+  compact rows with per-row spinner + iter + last tool, > max →
+  compact rows + "+N more running…" fold. (PR #327)
+
+**Docs:**
+
+- docs(architecture): `docs/ARCHITECTURE.md` Pillar 1 gains a
+  "Parallel tool dispatch" section explaining the chunking rule, both
+  env knobs, and the list of built-in tools that opt in. (PR #328)
+
 ## [0.28.0] — 2026-05-06
 
 **Headline:** subagent capability sharpened on three axes — skills can
