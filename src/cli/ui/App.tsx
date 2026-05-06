@@ -97,6 +97,7 @@ import {
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
+import { useQuit } from "./hooks/useQuit.js";
 import { useScrollback } from "./hooks/useScrollback.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useKeystroke } from "./keystroke-context.js";
@@ -1113,25 +1114,8 @@ function AppInner({
     }
   }, [session, loop, codeMode, syncPendingCount, log]);
 
-  // Ctrl+C exits, period. SIGINT (cooked-mode terminals + Node's
-  // Windows console handler) and \x03 byte (raw-mode stdin) both
-  // converge on `quitProcess`. We call `process.exit` directly rather
-  // than Ink's `exit()` because the singleton stdin-reader keeps a
-  // `data` listener attached — `exit()` would unmount the React tree
-  // but the event loop would stay alive and the terminal would hang.
-  // Esc handles "abort the current turn" separately; Ctrl+C is the
-  // universal "I'm done" key, no banner, no double-press dance.
-  const quitProcess = useCallback(() => {
-    transcriptRef.current?.end();
-    process.exit(0);
-  }, []);
-
-  useEffect(() => {
-    process.on("SIGINT", quitProcess);
-    return () => {
-      process.off("SIGINT", quitProcess);
-    };
-  }, [quitProcess]);
+  // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
+  const quitProcess = useQuit(transcriptRef);
 
   // Esc during busy → forward to the loop as an abort signal. The loop
   // finishes the tool call in flight (we can't kill subprocess stdio
