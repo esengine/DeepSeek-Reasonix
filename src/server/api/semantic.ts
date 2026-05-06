@@ -1,6 +1,6 @@
 /** Job state in a module-scoped Map keyed by project root so multi-root dashboards don't collide; CLI `reasonix index` runs independently. */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { loadIndexConfig } from "../../config.js";
 import {
@@ -186,7 +186,9 @@ function readIndexMeta(root: string): IndexMetaResponse | { exists: false } {
   const dir = join(root, INDEX_DIR_NAME);
   const metaPath = join(dir, "index.meta.json");
   const dataPath = join(dir, "index.jsonl");
-  if (!existsSync(metaPath) || !existsSync(dataPath)) return { exists: false };
+  // Try-read both files unconditionally — the catch covers "file
+  // missing" without a path-based existsSync precheck (CodeQL flags
+  // the precheck as a stat→read race).
   let meta: { dim?: number; model?: string; updatedAt?: string };
   try {
     meta = JSON.parse(readFileSync(metaPath, "utf8"));
@@ -197,8 +199,24 @@ function readIndexMeta(root: string): IndexMetaResponse | { exists: false } {
   const files = new Set<string>();
   let sizeBytes = 0;
   try {
-    sizeBytes = statSync(dataPath).size;
-    const raw = readFileSync(dataPath, "utf8");
+    // Bind size and content to the same fd so a concurrent rebuild
+    // can't grow the file between stat and read (CodeQL js/file-system-race).
+    const fd = openSync(dataPath, "r");
+    let raw: string;
+    try {
+      const stat = fstatSync(fd);
+      sizeBytes = stat.size;
+      const buf = Buffer.alloc(stat.size);
+      let read = 0;
+      while (read < stat.size) {
+        const n = readSync(fd, buf, read, stat.size - read, read);
+        if (n <= 0) break;
+        read += n;
+      }
+      raw = buf.toString("utf8", 0, read);
+    } finally {
+      closeSync(fd);
+    }
     for (const line of raw.split(/\r?\n/)) {
       if (!line.trim()) continue;
       chunks++;

@@ -74,15 +74,24 @@ interface IndexSummary {
 /** 10MB read cap so `/semantic` stays snappy on very large repos. */
 async function readIndexMeta(rootDir: string): Promise<IndexSummary | null> {
   const dataPath = path.join(rootDir, ".reasonix", "semantic", "index.jsonl");
+  let raw: string;
   try {
-    const stat = await fs.stat(dataPath);
-    if (stat.size > 10 * 1024 * 1024) {
-      // For huge indexes, give an order-of-magnitude estimate from
-      // file size (avg ~500 bytes/chunk in practice). Files won't
-      // be available, so we report just the chunk approximation.
-      return { chunks: Math.round(stat.size / 500), files: 0 };
+    // Bind size check and content to the same fd so a concurrent
+    // rebuild can't grow the file past the 10MB threshold between
+    // stat and read (CodeQL js/file-system-race).
+    const fh = await fs.open(dataPath, "r");
+    try {
+      const stat = await fh.stat();
+      if (stat.size > 10 * 1024 * 1024) {
+        // For huge indexes, give an order-of-magnitude estimate from
+        // file size (avg ~500 bytes/chunk in practice). Files won't
+        // be available, so we report just the chunk approximation.
+        return { chunks: Math.round(stat.size / 500), files: 0 };
+      }
+      raw = await fh.readFile("utf8");
+    } finally {
+      await fh.close();
     }
-    const raw = await fs.readFile(dataPath, "utf8");
     const seenPaths = new Set<string>();
     let chunks = 0;
     for (const line of raw.split("\n")) {

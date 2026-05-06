@@ -193,24 +193,15 @@ export async function* walkChunks(
         onSkip(rel, "pattern");
         continue;
       }
-      let stat: import("node:fs").Stats;
-      try {
-        stat = await fs.stat(abs);
-      } catch {
-        onSkip(rel, "readError");
+      // Open once and check size + read against the same fd. Skipping
+      // a path-based `fs.stat` upstream is intentional — stat→open is
+      // the TOCTOU shape CodeQL flags as js/file-system-race.
+      const result = await readSizeBoundedFile(abs, filters.maxFileBytes);
+      if (result.kind === "skip") {
+        onSkip(rel, result.reason);
         continue;
       }
-      if (stat.size > filters.maxFileBytes) {
-        onSkip(rel, "tooLarge");
-        continue;
-      }
-      let text: string;
-      try {
-        text = await fs.readFile(abs, "utf8");
-      } catch {
-        onSkip(rel, "readError");
-        continue;
-      }
+      const text = result.text;
       if (text.indexOf("\0") !== -1) {
         onSkip(rel, "binaryContent");
         continue;
@@ -234,4 +225,21 @@ export async function chunkDirectory(root: string, opts: ChunkOptions = {}): Pro
   const out: CodeChunk[] = [];
   for await (const c of walkChunks(root, opts)) out.push(c);
   return out;
+}
+
+type ReadFileResult = { kind: "ok"; text: string } | { kind: "skip"; reason: SkipReason };
+
+async function readSizeBoundedFile(abs: string, maxBytes: number): Promise<ReadFileResult> {
+  try {
+    const fh = await fs.open(abs, "r");
+    try {
+      const stat = await fh.stat();
+      if (stat.size > maxBytes) return { kind: "skip", reason: "tooLarge" };
+      return { kind: "ok", text: await fh.readFile("utf8") };
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return { kind: "skip", reason: "readError" };
+  }
 }

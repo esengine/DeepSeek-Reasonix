@@ -2,10 +2,16 @@
 
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
+  renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -72,20 +78,31 @@ const USAGE_COMPACTION_THRESHOLD_BYTES = 5 * 1024 * 1024;
 const USAGE_RETENTION_DAYS = 365;
 
 function compactUsageLogIfLarge(path: string, now: number): void {
-  let size: number;
-  try {
-    size = statSync(path).size;
-  } catch {
-    return;
-  }
-  if (size < USAGE_COMPACTION_THRESHOLD_BYTES) return;
-  const cutoff = now - USAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  // Open once for the size check + read so they bind to the same fd
+  // (CodeQL js/file-system-race). Concurrent appenders that grow the
+  // log between check and read can no longer cause us to act on a
+  // stale size and rewrite based on partial content.
   let raw: string;
   try {
-    raw = readFileSync(path, "utf8");
+    const fd = openSync(path, "r");
+    try {
+      const stat = fstatSync(fd);
+      if (stat.size < USAGE_COMPACTION_THRESHOLD_BYTES) return;
+      const buf = Buffer.alloc(stat.size);
+      let read = 0;
+      while (read < stat.size) {
+        const n = readSync(fd, buf, read, stat.size - read, read);
+        if (n <= 0) break;
+        read += n;
+      }
+      raw = buf.toString("utf8", 0, read);
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return;
   }
+  const cutoff = now - USAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   const lines = raw.split(/\r?\n/);
   const kept: string[] = [];
   for (const line of lines) {
@@ -99,10 +116,20 @@ function compactUsageLogIfLarge(path: string, now: number): void {
   }
   // No-op when nothing aged out — avoids rewrite storms on fresh logs.
   if (kept.length === lines.filter((l) => l.trim()).length) return;
+  // Write to a sibling tmp path then rename — atomic from a reader's
+  // POV and severs CodeQL's stat→write taint chain. Concurrent
+  // appenders during the compaction window lose their entries; we
+  // accept that for a best-effort usage log.
+  const tmp = `${path}.compacting`;
   try {
-    writeFileSync(path, kept.length > 0 ? `${kept.join("\n")}\n` : "", "utf8");
+    writeFileSync(tmp, kept.length > 0 ? `${kept.join("\n")}\n` : "", "utf8");
+    renameSync(tmp, path);
   } catch {
-    /* best-effort */
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* tmp may not exist — ignore */
+    }
   }
 }
 
