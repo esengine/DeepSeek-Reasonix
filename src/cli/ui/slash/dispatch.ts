@@ -16,6 +16,7 @@ import { handlers as plansHandlers } from "./handlers/plans.js";
 import { handlers as semanticHandlers } from "./handlers/semantic.js";
 import { handlers as sessionsHandlers } from "./handlers/sessions.js";
 import { handlers as skillHandlers } from "./handlers/skill.js";
+import { handlers as webSearchEngineHandlers } from "./handlers/web-search-engine.js";
 import type { SlashContext, SlashResult } from "./types.js";
 
 /** Synchronous return — async work fires-and-forgets via `ctx.postInfo` to keep input non-blocking. */
@@ -38,6 +39,7 @@ const HANDLERS: Record<string, SlashHandler> = {
   ...semanticHandlers,
   ...sessionsHandlers,
   ...skillHandlers,
+  ...webSearchEngineHandlers,
 };
 
 export function handleSlash(

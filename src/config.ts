@@ -33,6 +33,10 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
+  /** Web search engine backend: "mojeek" (default, scrapes Mojeek) or "searxng" (self-hosted SearXNG). */
+  webSearchEngine?: "mojeek" | "searxng";
+  /** Base URL for SearXNG instance (default http://localhost:8080). */
+  webSearchEndpoint?: string;
   projects?: {
     [absoluteRootDir: string]: {
       shellAllowed?: string[];
@@ -91,6 +95,18 @@ export function searchEnabled(path: string = defaultConfigPath()): boolean {
   const cfg = readConfig(path).search;
   if (cfg === false) return false;
   return true;
+}
+
+export function webSearchEngine(path: string = defaultConfigPath()): "mojeek" | "searxng" {
+  const cfg = readConfig(path).webSearchEngine;
+  if (cfg === "searxng") return "searxng";
+  return "mojeek";
+}
+
+export function webSearchEndpoint(path: string = defaultConfigPath()): string {
+  const cfg = readConfig(path).webSearchEndpoint;
+  if (cfg && typeof cfg === "string") return cfg;
+  return "http://localhost:8080";
 }
 
 export function saveApiKey(key: string, path: string = defaultConfigPath()): void {

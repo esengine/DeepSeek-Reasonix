@@ -28,6 +28,10 @@ export interface WebFetchOptions {
 export interface WebSearchOptions {
   topK?: number;
   signal?: AbortSignal;
+  /** Backend engine: "mojeek" (scrapes Mojeek HTML) or "searxng" (self-hosted SearXNG JSON API). */
+  engine?: "mojeek" | "searxng";
+  /** Base URL for SearXNG. Default http://localhost:8080. */
+  endpoint?: string;
 }
 
 const DEFAULT_FETCH_MAX_CHARS = 32_000;
@@ -46,6 +50,13 @@ export async function webSearch(
   query: string,
   opts: WebSearchOptions = {},
 ): Promise<SearchResult[]> {
+  if (opts.engine === "searxng") {
+    return searchSearxng(query, opts);
+  }
+  return searchMojeek(query, opts);
+}
+
+async function searchMojeek(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
   const resp = await fetch(`${MOJEEK_ENDPOINT}?q=${encodeURIComponent(query)}`, {
     headers: {
@@ -67,6 +78,88 @@ export async function webSearch(
     throw new Error(
       `web_search: 0 results but response doesn't look like a real empty page (${html.length} chars, first 120: ${html.slice(0, 120).replace(/\s+/g, " ")})`,
     );
+  }
+  return results;
+}
+
+async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
+  const raw = opts.endpoint ?? "http://localhost:8080";
+  // Ensure protocol prefix — users often type "localhost:8075" without http://
+  const baseUrl = (raw.includes("://") ? raw : `http://${raw}`).replace(/\/+$/, "");
+
+  // JSON API is often blocked by SearXNG's default limiter; HTML always works.
+  const url = `${baseUrl}/search?format=html&q=${encodeURIComponent(query)}`;
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html",
+      },
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(
+        `web_search: Cannot reach SearXNG server at ${raw}. Please install SearXNG (https://github.com/searxng/searxng) and start it (e.g. \`docker run -d -p 8080:8080 searxng/searxng\`), or switch to the default engine with /web-search-engine mojeek.`,
+      );
+    }
+    throw err;
+  }
+  if (!resp.ok) throw new Error(`web_search ${resp.status}`);
+  const html = await resp.text();
+  const results = parseSearxngHtmlResults(html).slice(0, topK);
+  if (results.length === 0) {
+    if (/no results found|did not match any documents/i.test(html)) return [];
+    throw new Error(
+      `web_search: 0 results but SearXNG response doesn't look like an empty results page (${html.length} chars)`,
+    );
+  }
+  return results;
+}
+
+export function parseSearxngHtmlResults(html: string): SearchResult[] {
+  const root = parseHtml(html);
+  const results: SearchResult[] = [];
+
+  // Try <article class="result"> first (default SearXNG theme)
+  const articles = root.querySelectorAll("article.result, div.result");
+  if (articles.length > 0) {
+    for (const article of articles) {
+      const link = article.querySelector("h3 a, h4 a, a[href^='http']");
+      if (!link) continue;
+      const href = link.getAttribute("href");
+      if (!href) continue;
+      const title = link.textContent.trim();
+      if (!title) continue;
+      let snippet = "";
+      for (const p of article.querySelectorAll("p")) {
+        const text = p.textContent.trim();
+        if (text.length > 10 && !text.includes(title)) {
+          snippet = text;
+          break;
+        }
+      }
+      if (!snippet) {
+        const cs = article.querySelector(".content, .result-content, [class*='snippet']");
+        if (cs) snippet = cs.textContent.trim();
+      }
+      results.push({ title, url: href, snippet });
+    }
+    return results;
+  }
+
+  // Some SearXNG themes don't use <article> — fall back to <h3><a> pairs.
+  for (const a of root.querySelectorAll("h3 a[href]")) {
+    const href = a.getAttribute("href");
+    if (!href || href.startsWith("#")) continue;
+    const title = a.textContent.trim();
+    if (!title) continue;
+    let snippet = "";
+    const p = a.parentNode?.parentNode?.querySelector("p");
+    if (p) snippet = p.textContent.trim();
+    results.push({ title, url: href, snippet });
   }
   return results;
 }
@@ -283,6 +376,10 @@ export interface WebToolsOptions {
   defaultTopK?: number;
   /** Byte cap for `web_fetch` extracted text. */
   maxFetchChars?: number;
+  /** Backend engine: "mojeek" (default, scrapes Mojeek) or "searxng" (self-hosted SearXNG). */
+  webSearchEngine?: "mojeek" | "searxng";
+  /** Base URL for SearXNG (default http://localhost:8080). */
+  webSearchEndpoint?: string;
 }
 
 export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions = {}): ToolRegistry {
@@ -292,7 +389,8 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
   registry.register({
     name: "web_search",
     description:
-      "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this.",
+      "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this." +
+      " To change the backend, use /web-search-engine mojeek|searxng.",
     readOnly: true,
     parallelSafe: true,
     parameters: {
@@ -307,9 +405,17 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
       required: ["query"],
     },
     fn: async (args: { query: string; topK?: number }, ctx) => {
+      // Re-read config on each call so /web-search-engine takes effect immediately.
+      const { webSearchEngine: getEngine, webSearchEndpoint: getEndpoint } = await import(
+        "../config.js"
+      );
+      const engine = opts.webSearchEngine ?? getEngine();
+      const endpoint = opts.webSearchEndpoint ?? getEndpoint();
       const results = await webSearch(args.query, {
         topK: args.topK ?? defaultTopK,
         signal: ctx?.signal,
+        engine,
+        endpoint,
       });
       return formatSearchResults(args.query, results);
     },

@@ -78,6 +78,12 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "show / manage pinned memory (REASONIX.md + ~/.reasonix/memory)",
   },
   {
+    cmd: "web-search-engine",
+    argsHint: "<mojeek|searxng> [<endpoint>]",
+    summary: "switch web search backend — mojeek (default, no deps) or searxng (self-hosted)",
+    argCompleter: ["mojeek", "searxng"],
+  },
+  {
     cmd: "skill",
     argsHint: "[list|show <name>|<name> [args]]",
     summary: "list / run user skills (<project>/.reasonix/skills + ~/.reasonix/skills)",

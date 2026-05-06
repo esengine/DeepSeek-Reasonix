@@ -1,6 +1,12 @@
 import { render } from "ink";
 import React, { useState } from "react";
-import { loadApiKey, readConfig, searchEnabled } from "../../config.js";
+import {
+  loadApiKey,
+  readConfig,
+  searchEnabled,
+  webSearchEndpoint,
+  webSearchEngine,
+} from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
@@ -444,7 +450,10 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // a question needs info fresher than its training data.
   if (searchEnabled()) {
     if (!tools) tools = new ToolRegistry();
-    registerWebTools(tools);
+    registerWebTools(tools, {
+      webSearchEngine: webSearchEngine(),
+      webSearchEndpoint: webSearchEndpoint(),
+    });
   }
 
   // Memory tools — available in every session, not just code mode.
