@@ -443,5 +443,8 @@ export function buildSpec(name: string, argsByName: Record<string, string>): str
 }
 
 function quoteIfNeeded(s: string): string {
-  return /\s|"/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
+  // Escape backslashes BEFORE quotes — otherwise a trailing `\` in the
+  // input would consume the closing quote when a downstream parser
+  // un-escapes the output (CodeQL js/incomplete-sanitization).
+  return /\s|"/.test(s) ? `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : s;
 }

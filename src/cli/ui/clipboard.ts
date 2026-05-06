@@ -1,6 +1,6 @@
 /** OSC 52 clipboard write + temp-file fallback. */
 
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,7 +13,11 @@ export interface ClipboardWrite {
 }
 
 export function writeClipboard(text: string): ClipboardWrite {
-  const filePath = join(tmpdir(), `reasonix-clip-${Date.now()}.txt`);
+  // mkdtemp creates a private 0700 directory atomically — keeps the
+  // file out of the shared tmp namespace where a sibling process can
+  // race or read it (CodeQL js/insecure-temporary-file).
+  const dir = mkdtempSync(join(tmpdir(), "reasonix-clip-"));
+  const filePath = join(dir, "clip.txt");
   let osc52 = false;
   if (text.length <= OSC_52_LIMIT) {
     const b64 = Buffer.from(text, "utf8").toString("base64");

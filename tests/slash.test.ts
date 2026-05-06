@@ -242,7 +242,7 @@ describe("handleSlash", () => {
     });
     expect(r.info).toMatch(/MCP servers \(2\)/);
     expect(r.info).toMatch(/server-filesystem/);
-    expect(r.info).toMatch(/kb.example.com/);
+    expect(r.info).toContain("kb.example.com");
   });
 
   it("/mcp opens the hub on Marketplace when no servers are bridged (even with native tools)", () => {
