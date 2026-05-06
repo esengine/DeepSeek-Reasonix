@@ -182,15 +182,14 @@ async function readBodyCapped(resp: Response, maxBytes: number): Promise<string>
   return out;
 }
 
+/** Hard cap so the per-request HTML budget stays linear-time even on adversarial pages. */
+const MAX_HTML_INPUT = 5 * 1024 * 1024;
+
+const STRIP_BLOCK_TAGS = ["script", "style", "noscript", "nav", "footer", "aside", "svg"];
+
 export function htmlToText(html: string): string {
-  let s = html;
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
-  s = s.replace(/<noscript[\s\S]*?<\/noscript>/gi, "");
-  s = s.replace(/<nav[\s\S]*?<\/nav>/gi, "");
-  s = s.replace(/<footer[\s\S]*?<\/footer>/gi, "");
-  s = s.replace(/<aside[\s\S]*?<\/aside>/gi, "");
-  s = s.replace(/<svg[\s\S]*?<\/svg>/gi, "");
+  let s = html.length > MAX_HTML_INPUT ? html.slice(0, MAX_HTML_INPUT) : html;
+  for (const tag of STRIP_BLOCK_TAGS) s = stripTagBlock(s, tag);
   // Preserve paragraph breaks by turning common block tags into newlines.
   s = s.replace(/<\/?(p|div|br|h[1-6]|li|tr|section|article)\b[^>]*>/gi, "\n");
   s = s.replace(/<[^>]+>/g, "");
@@ -205,14 +204,66 @@ function stripHtml(s: string): string {
   return s.replace(/<[^>]+>/g, "");
 }
 
+/** Remove `<tag …>…</tag>` blocks via indexOf — the regex form `<tag[\s\S]*?</tag>` is O(n²) on adversarial input AND has well-known bypasses (`</tag >`, nested openings revealed after one pass). */
+function stripTagBlock(s: string, tag: string): string {
+  const lower = s.toLowerCase();
+  const openLead = `<${tag}`;
+  const closeLead = `</${tag}`;
+  let pos = 0;
+  let out = "";
+  while (pos < s.length) {
+    const openIdx = lower.indexOf(openLead, pos);
+    if (openIdx < 0) {
+      out += s.slice(pos);
+      break;
+    }
+    // Followed by `>`, `/`, or whitespace — otherwise it's a different tag (`<scriptfoo>`).
+    const after = s.charCodeAt(openIdx + openLead.length);
+    const isTagBoundary = after === 0x3e || after === 0x2f || after === 0x20 || after === 0x09;
+    if (!isTagBoundary) {
+      out += s.slice(pos, openIdx + 1);
+      pos = openIdx + 1;
+      continue;
+    }
+    const closeIdx = lower.indexOf(closeLead, openIdx + openLead.length);
+    if (closeIdx < 0) {
+      // No closer — drop the open tag and everything after, matching the original regex's "no match" behaviour at end of input.
+      out += s.slice(pos, openIdx);
+      break;
+    }
+    const closeEnd = s.indexOf(">", closeIdx + closeLead.length);
+    if (closeEnd < 0) {
+      out += s.slice(pos, openIdx);
+      break;
+    }
+    out += s.slice(pos, openIdx);
+    pos = closeEnd + 1;
+  }
+  return out;
+}
+
+const HTML_ENTITIES: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+/** Single-pass decode — the previous chained `replace`s decoded `&amp;lt;` into `<` because `&amp;` ran before `&lt;`. */
 function decodeHtmlEntities(s: string): string {
-  return s
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+  return s.replace(/&(#\d+|#x[0-9a-fA-F]+|\w+);/g, (raw, name: string) => {
+    if (name.startsWith("#x") || name.startsWith("#X")) {
+      const code = Number.parseInt(name.slice(2), 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : raw;
+    }
+    if (name.startsWith("#")) {
+      const code = Number.parseInt(name.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : raw;
+    }
+    return HTML_ENTITIES[name.toLowerCase()] ?? raw;
+  });
 }
 
 function extractTitle(html: string): string | undefined {
