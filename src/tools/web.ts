@@ -1,5 +1,6 @@
 /** web_search uses Mojeek (DDG returns anti-bot 202 to unauthenticated POSTs); web_fetch sniffs HTML to text. */
 
+import { parse as parseHtml } from "node-html-parser";
 import type { ToolRegistry } from "../tools.js";
 
 export interface SearchResult {
@@ -185,14 +186,36 @@ async function readBodyCapped(resp: Response, maxBytes: number): Promise<string>
 /** Hard cap so the per-request HTML budget stays linear-time even on adversarial pages. */
 const MAX_HTML_INPUT = 5 * 1024 * 1024;
 
-const STRIP_BLOCK_TAGS = ["script", "style", "noscript", "nav", "footer", "aside", "svg"];
+const STRIP_BLOCK_TAGS = "script, style, noscript, nav, footer, aside, svg";
+
+/** Block-level tags that should produce a paragraph break in the extracted text. */
+const BLOCK_BREAK_TAGS = new Set([
+  "p",
+  "div",
+  "br",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "li",
+  "tr",
+  "section",
+  "article",
+]);
 
 export function htmlToText(html: string): string {
-  let s = html.length > MAX_HTML_INPUT ? html.slice(0, MAX_HTML_INPUT) : html;
-  for (const tag of STRIP_BLOCK_TAGS) s = stripTagBlock(s, tag);
-  // Preserve paragraph breaks by turning common block tags into newlines.
-  s = s.replace(/<\/?(p|div|br|h[1-6]|li|tr|section|article)\b[^>]*>/gi, "\n");
-  s = s.replace(/<[^>]+>/g, "");
+  const input = html.length > MAX_HTML_INPUT ? html.slice(0, MAX_HTML_INPUT) : html;
+  // Real HTML parser — sidesteps the well-known regex anti-patterns
+  // (`<X[\s\S]*?</X>`, `<[^>]+>`) CodeQL flags as bad-tag-filter and
+  // incomplete-multi-character-sanitization.
+  const root = parseHtml(input);
+  for (const node of root.querySelectorAll(STRIP_BLOCK_TAGS)) node.remove();
+
+  const out: string[] = [];
+  walkExtract(root, out);
+  let s = out.join("");
   s = decodeHtmlEntities(s);
   s = s.replace(/[ \t]+/g, " ");
   s = s.replace(/\n[ \t]+/g, "\n");
@@ -200,46 +223,29 @@ export function htmlToText(html: string): string {
   return s.trim();
 }
 
-function stripHtml(s: string): string {
-  return s.replace(/<[^>]+>/g, "");
+interface WalkableNode {
+  nodeType: number;
+  rawText?: string;
+  text?: string;
+  rawTagName?: string;
+  childNodes: WalkableNode[];
 }
 
-/** Remove `<tag …>…</tag>` blocks via indexOf — the regex form `<tag[\s\S]*?</tag>` is O(n²) on adversarial input AND has well-known bypasses (`</tag >`, nested openings revealed after one pass). */
-function stripTagBlock(s: string, tag: string): string {
-  const lower = s.toLowerCase();
-  const openLead = `<${tag}`;
-  const closeLead = `</${tag}`;
-  let pos = 0;
-  let out = "";
-  while (pos < s.length) {
-    const openIdx = lower.indexOf(openLead, pos);
-    if (openIdx < 0) {
-      out += s.slice(pos);
-      break;
-    }
-    // Followed by `>`, `/`, or whitespace — otherwise it's a different tag (`<scriptfoo>`).
-    const after = s.charCodeAt(openIdx + openLead.length);
-    const isTagBoundary = after === 0x3e || after === 0x2f || after === 0x20 || after === 0x09;
-    if (!isTagBoundary) {
-      out += s.slice(pos, openIdx + 1);
-      pos = openIdx + 1;
-      continue;
-    }
-    const closeIdx = lower.indexOf(closeLead, openIdx + openLead.length);
-    if (closeIdx < 0) {
-      // No closer — drop the open tag and everything after, matching the original regex's "no match" behaviour at end of input.
-      out += s.slice(pos, openIdx);
-      break;
-    }
-    const closeEnd = s.indexOf(">", closeIdx + closeLead.length);
-    if (closeEnd < 0) {
-      out += s.slice(pos, openIdx);
-      break;
-    }
-    out += s.slice(pos, openIdx);
-    pos = closeEnd + 1;
+function walkExtract(node: WalkableNode, out: string[]): void {
+  // nodeType 3 = TEXT_NODE; 1 = ELEMENT_NODE per node-html-parser.
+  if (node.nodeType === 3) {
+    out.push(node.rawText ?? node.text ?? "");
+    return;
   }
-  return out;
+  const tag = node.rawTagName?.toLowerCase();
+  const isBreak = tag !== undefined && BLOCK_BREAK_TAGS.has(tag);
+  if (isBreak) out.push("\n");
+  for (const child of node.childNodes) walkExtract(child, out);
+  if (isBreak) out.push("\n");
+}
+
+function stripHtml(s: string): string {
+  return parseHtml(s).text;
 }
 
 const HTML_ENTITIES: Readonly<Record<string, string>> = {

@@ -72,6 +72,7 @@
     "commander": "^12.1.0",
     "eventsource-parser": "^3.0.0",
     "ignore": "^7.0.5",
+    "node-html-parser": "^7.1.0",
     "picomatch": "^4.0.4",
     "react": "^18.3.1",
     "react-reconciler": "^0.29.2",
