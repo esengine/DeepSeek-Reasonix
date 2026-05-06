@@ -6,13 +6,6 @@ import type { Scrollback } from "./useScrollback.js";
 
 export type SlashOutcome = { kind: "consumed" } | { kind: "resubmit"; text: string };
 
-interface ActiveLoopShape {
-  prompt: string;
-  intervalMs: number;
-  nextFireAt: number;
-  iter: number;
-}
-
 export interface ApplySlashResultContext {
   log: Scrollback;
   stdoutWrite: (chunk: string) => void;
@@ -20,7 +13,7 @@ export interface ApplySlashResultContext {
   syncPendingCount: () => void;
   session: string | null;
   codeModeOn: boolean;
-  activeLoopRef: MutableRefObject<ActiveLoopShape | null>;
+  isLoopActive: () => boolean;
   stopLoop: () => void;
   quitProcess: () => void;
   pushHistory: (text: string) => void;
@@ -34,7 +27,7 @@ export function applySlashResult(result: SlashResult, ctx: ApplySlashResultConte
     // the process is exiting. Use quitProcess (process.exit) rather than
     // Ink's exit(): the singleton stdin reader keeps a `data` listener
     // attached, so exit() unmounts React but leaves the event loop alive.
-    if (ctx.activeLoopRef.current) ctx.stopLoop();
+    if (ctx.isLoopActive()) ctx.stopLoop();
     ctx.quitProcess();
     return { kind: "consumed" };
   }
@@ -50,7 +43,7 @@ export function applySlashResult(result: SlashResult, ctx: ApplySlashResultConte
       clearPendingEdits(ctx.session);
       ctx.syncPendingCount();
     }
-    if (ctx.activeLoopRef.current) ctx.stopLoop();
+    if (ctx.isLoopActive()) ctx.stopLoop();
     return { kind: "consumed" };
   }
   if (result.info) {

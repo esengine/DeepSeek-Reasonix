@@ -97,6 +97,7 @@ import {
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
+import { useLoopMode } from "./hooks/useLoopMode.js";
 import { useQuit } from "./hooks/useQuit.js";
 import { useScrollback } from "./hooks/useScrollback.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
@@ -628,32 +629,12 @@ function AppInner({
   // have changed. Shape mirrors AtUrlExpansion + an optional `body`
   // so the trailing block can be reconstructed from cache alone.
   const atUrlCache = useRef<Map<string, AtUrlExpansion & { body?: string }>>(new Map());
-  // Active /loop state. Null when no loop is running. Re-issuing /loop
-  // replaces the slot. Cancellation is centralized in stopLoop() so
-  // every cancel-trigger (Esc, /clear, /new, user-typed submit, /loop
-  // stop, exit) goes through one path. The timer is held in a sibling
-  // ref so React effects don't have to re-run on every timer tick.
-  const [activeLoop, setActiveLoop] = useState<{
-    prompt: string;
-    intervalMs: number;
-    nextFireAt: number;
-    iter: number;
-  } | null>(null);
-  const loopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // handleSubmit is defined far below as a useCallback. The /loop timer
   // needs to call the LATEST closure on each firing (config could have
   // shifted mid-loop), so we mirror it through a ref. The mirror is
   // synced in a useEffect once handleSubmit is defined.
   const handleSubmitRef = useRef<((raw: string) => Promise<void>) | null>(null);
   const busyRef = useRef<boolean>(false);
-  const activeLoopRef = useRef<typeof activeLoop>(activeLoop);
-  // Set true by the loop timer just before it calls handleSubmitRef so
-  // handleSubmit's "any user submit cancels the loop" guard knows to
-  // skip itself. Reset to false at the top of every handleSubmit.
-  const loopFiringRef = useRef<boolean>(false);
-  useEffect(() => {
-    activeLoopRef.current = activeLoop;
-  }, [activeLoop]);
   // Full untruncated tool results, in arrival order. ToolCard clips
   // output at 400 chars for display; `/tool N` reads from this ref to
   // show the real thing. Not persisted — a
@@ -1159,14 +1140,14 @@ function AppInner({
       // Esc during a busy turn also kills any active /loop — the user
       // is taking over. Loops persist past plain Esc when the system is
       // idle so a long-cadence loop doesn't die from random key noise.
-      if (activeLoopRef.current) stopLoop();
+      if (isLoopActive()) stopLoop();
       loop.abort();
       return;
     }
     // Esc when idle ALSO cancels an active loop, since hitting Esc with
     // nothing else going on is a clear "stop whatever's running"
     // gesture. No-op when no loop is active.
-    if (key.escape && !busy && activeLoopRef.current) {
+    if (key.escape && !busy && isLoopActive()) {
       stopLoop();
       return;
     }
@@ -1532,39 +1513,15 @@ function AppInner({
     setPendingPlan(null);
   }, []);
 
-  /**
-   * Cancel the active /loop. Centralized so every cancel-trigger
-   * (explicit /loop stop, Esc, /clear, /new, exit, the very first
-   * user-typed prompt while a loop is active) goes through one path.
-   * Idempotent — calling with no active loop is a no-op.
-   */
-  const stopLoop = useCallback(() => {
-    if (loopTimerRef.current) {
-      clearTimeout(loopTimerRef.current);
-      loopTimerRef.current = null;
-    }
-    const cur = activeLoopRef.current;
-    if (!cur) return;
-    setActiveLoop(null);
-    log.pushInfo(`▸ loop stopped (after ${cur.iter} iter${cur.iter === 1 ? "" : "s"}).`);
-  }, [log]);
-
-  /**
-   * Start a new /loop. Replaces any prior loop. The actual timer is
-   * scheduled by the useEffect downstream that watches `activeLoop`.
-   */
-  const startLoop = useCallback((intervalMs: number, prompt: string) => {
-    if (loopTimerRef.current) {
-      clearTimeout(loopTimerRef.current);
-      loopTimerRef.current = null;
-    }
-    setActiveLoop({
-      prompt,
-      intervalMs,
-      nextFireAt: Date.now() + intervalMs,
-      iter: 0,
-    });
-  }, []);
+  const {
+    startLoop,
+    stopLoop,
+    getLoopStatus,
+    isLoopActive,
+    isLoopFiring,
+    clearFiringFlag,
+    activeLoop,
+  } = useLoopMode({ log, busyRef, handleSubmitRef });
 
   /**
    * Mount the per-block walkthrough modal against the pending-edits
@@ -1922,30 +1879,17 @@ function AppInner({
     [codeApply, codeDiscard, log],
   );
 
-  /** Snapshot for the `/loop` (no-arg) status branch. */
-  const getLoopStatus = useCallback(() => {
-    const cur = activeLoopRef.current;
-    if (!cur) return null;
-    return {
-      prompt: cur.prompt,
-      intervalMs: cur.intervalMs,
-      iter: cur.iter,
-      nextFireMs: Math.max(0, cur.nextFireAt - Date.now()),
-    };
-  }, []);
-
   const handleSubmit = useCallback(
     async (raw: string) => {
       let text = raw.trim();
       if (!text) return;
       // Cancel-on-user-input: any user-typed submit cancels an active
       // /loop, regardless of busy state. Loop-fired submits set the
-      // `loopFiringRef` flag so the timer's own re-submit doesn't
-      // self-cancel.
-      if (activeLoopRef.current && !loopFiringRef.current) {
+      // firing flag so the timer's own re-submit doesn't self-cancel.
+      if (isLoopActive() && !isLoopFiring()) {
         stopLoop();
       }
-      loopFiringRef.current = false;
+      clearFiringFlag();
       if (busy) return;
 
       // @-mention picker intercept. When the picker is open (trailing
@@ -2172,7 +2116,7 @@ function AppInner({
           syncPendingCount,
           session: session ?? null,
           codeModeOn: !!codeMode,
-          activeLoopRef,
+          isLoopActive,
           stopLoop,
           quitProcess,
           pushHistory,
@@ -2547,6 +2491,9 @@ function AppInner({
       stopLoop,
       startLoop,
       getLoopStatus,
+      isLoopActive,
+      isLoopFiring,
+      clearFiringFlag,
       startWalkthrough,
       startDashboard,
       stopDashboard,
@@ -2569,49 +2516,6 @@ function AppInner({
   useEffect(() => {
     handleSubmitRef.current = handleSubmit;
   }, [handleSubmit]);
-
-  // /loop timer. Re-runs whenever activeLoop's `nextFireAt` shifts —
-  // either because startLoop set a fresh schedule or because the
-  // previous timer fired and bumped the next-fire time. Cleanup
-  // clears the in-flight timer so a stopLoop / replacement doesn't
-  // leak a fire after cancel.
-  useEffect(() => {
-    if (!activeLoop) return;
-    const delay = Math.max(0, activeLoop.nextFireAt - Date.now());
-    const timer = setTimeout(async () => {
-      loopTimerRef.current = null;
-      // Skip the firing entirely when a prior turn is still running.
-      // Re-arm in 1s so the loop catches up the moment busy clears,
-      // rather than waiting a full interval after a slow turn.
-      if (busyRef.current) {
-        setActiveLoop((cur) => (cur ? { ...cur, nextFireAt: Date.now() + 1000 } : cur));
-        return;
-      }
-      const cur = activeLoopRef.current;
-      if (!cur) return;
-      const nextIter = cur.iter + 1;
-      // Schedule the NEXT firing now (independent of how long this
-      // turn takes). Keeps the cadence honest even when individual
-      // turns are slow.
-      setActiveLoop((c) =>
-        c ? { ...c, iter: nextIter, nextFireAt: Date.now() + cur.intervalMs } : c,
-      );
-      log.pushInfo(`▸ /loop iter ${nextIter} → ${cur.prompt}`);
-      loopFiringRef.current = true;
-      try {
-        await handleSubmitRef.current?.(cur.prompt);
-      } catch {
-        // Persistent submission errors → kill the loop rather than
-        // spam the screen. User can re-issue /loop once they fix
-        // whatever's wrong.
-        stopLoop();
-      } finally {
-        loopFiringRef.current = false;
-      }
-    }, delay);
-    loopTimerRef.current = timer;
-    return () => clearTimeout(timer);
-  }, [activeLoop, stopLoop, log]);
 
   /**
    * ShellConfirm callback. Resolves the PauseGate so the
