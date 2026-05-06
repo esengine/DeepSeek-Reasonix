@@ -30,6 +30,30 @@ export function formatLoopError(err: Error): string {
   return msg;
 }
 
+export function reasonPrefixFor(
+  reason: "budget" | "aborted" | "context-guard" | "stuck",
+  iterCap: number,
+): string {
+  if (reason === "aborted") return "[aborted by user (Esc) — summarizing what I found so far]";
+  if (reason === "context-guard") {
+    return "[context budget running low — summarizing before the next call would overflow]";
+  }
+  if (reason === "stuck") {
+    return "[stuck on a repeated tool call — explaining what was tried and what's blocking progress]";
+  }
+  return `[tool-call budget (${iterCap}) reached — forcing summary from what I found]`;
+}
+
+export function errorLabelFor(
+  reason: "budget" | "aborted" | "context-guard" | "stuck",
+  iterCap: number,
+): string {
+  if (reason === "aborted") return "aborted by user";
+  if (reason === "context-guard") return "context-guard triggered (prompt > 80% of window)";
+  if (reason === "stuck") return "stuck (repeated tool call suppressed by storm-breaker)";
+  return `tool-call budget (${iterCap}) reached`;
+}
+
 function extractDeepSeekErrorMessage(body: string): string {
   const trimmed = body.trim();
   if (!trimmed) return "(no message)";

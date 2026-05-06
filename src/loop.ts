@@ -22,15 +22,14 @@ import {
   truncateForModelByTokens,
 } from "./mcp/registry.js";
 
-const FAILURE_ESCALATION_THRESHOLD = 3;
-const ESCALATION_MODEL = "deepseek-v4-pro";
-/** Accepts `<<<NEEDS_PRO>>>` or `<<<NEEDS_PRO: reason>>>` (reason trimmed, may be empty). */
-const NEEDS_PRO_MARKER_PREFIX = "<<<NEEDS_PRO";
-const NEEDS_PRO_MARKER_RE = /^<<<NEEDS_PRO(?::\s*([^>]*))?>>>/;
-/** Buffer cap before flushing — must fit `<<<NEEDS_PRO: reason>>>` without premature flush. */
-const NEEDS_PRO_BUFFER_CHARS = 256;
 import { ContextManager } from "./context-manager.js";
-import { formatLoopError } from "./loop/errors.js";
+import { errorLabelFor, formatLoopError, reasonPrefixFor } from "./loop/errors.js";
+import {
+  NEEDS_PRO_BUFFER_CHARS,
+  isEscalationRequest,
+  looksLikePartialEscalationMarker,
+  parseEscalationMarker,
+} from "./loop/escalation.js";
 import {
   fixToolCallPairing,
   healLoadedMessages,
@@ -55,6 +54,9 @@ import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { countTokens } from "./tokenizer.js";
 import { ToolRegistry } from "./tools.js";
 import type { ChatMessage, ToolCall } from "./types.js";
+
+const FAILURE_ESCALATION_THRESHOLD = 3;
+const ESCALATION_MODEL = "deepseek-v4-pro";
 
 export {
   fixToolCallPairing,
@@ -431,33 +433,6 @@ export class CacheFirstLoop {
 
   private modelForCurrentCall(): string {
     return this._escalateThisTurn ? ESCALATION_MODEL : this.model;
-  }
-
-  /** Anchored to lead — mid-text matches are normal content (user asking about the marker). */
-  private parseEscalationMarker(content: string): { matched: boolean; reason?: string } {
-    const m = NEEDS_PRO_MARKER_RE.exec(content.trimStart());
-    if (!m) return { matched: false };
-    const reason = m[1]?.trim();
-    return { matched: true, reason: reason || undefined };
-  }
-
-  /** Convenience boolean — same gate the streaming path used to call. */
-  private isEscalationRequest(content: string): boolean {
-    return this.parseEscalationMarker(content).matched;
-  }
-
-  /** Drives streaming flush — while plausibly partial, keep accumulating; else flush. */
-  private looksLikePartialEscalationMarker(buf: string): boolean {
-    const t = buf.trimStart();
-    if (t.length === 0) return true;
-    if (t.length <= NEEDS_PRO_MARKER_PREFIX.length) {
-      return NEEDS_PRO_MARKER_PREFIX.startsWith(t);
-    }
-    if (!t.startsWith(NEEDS_PRO_MARKER_PREFIX)) return false;
-    const rest = t.slice(NEEDS_PRO_MARKER_PREFIX.length);
-    // Only `>` (close) or `:` (reason) are valid after the prefix.
-    if (rest[0] !== ">" && rest[0] !== ":") return false;
-    return true;
   }
 
   /** Returns true ONLY on the tipping call — caller surfaces a one-shot warning. */
@@ -862,7 +837,7 @@ export class CacheFirstLoop {
                 // Early exit: marker matches — break and let the
                 // post-call retry path take over. No delta was yielded
                 // so the user sees nothing flicker.
-                if (this.isEscalationRequest(escalationBuf)) {
+                if (isEscalationRequest(escalationBuf)) {
                   break;
                 }
                 // Flush once we have enough content to rule out the
@@ -870,7 +845,7 @@ export class CacheFirstLoop {
                 // the look-ahead window).
                 if (
                   escalationBuf.length >= NEEDS_PRO_BUFFER_CHARS ||
-                  !this.looksLikePartialEscalationMarker(escalationBuf)
+                  !looksLikePartialEscalationMarker(escalationBuf)
                 ) {
                   escalationBufFlushed = true;
                   yield {
@@ -942,7 +917,7 @@ export class CacheFirstLoop {
           // buffer ISN'T the marker, flush it as the final delta so
           // the user sees it. Marker-match is handled post-call.
           if (bufferForEscalation && !escalationBufFlushed && escalationBuf.length > 0) {
-            if (!this.isEscalationRequest(escalationBuf)) {
+            if (!isEscalationRequest(escalationBuf)) {
               yield {
                 turn: this._turn,
                 role: "assistant_delta",
@@ -1008,9 +983,9 @@ export class CacheFirstLoop {
       if (
         this.autoEscalate &&
         this.modelForCurrentCall() !== ESCALATION_MODEL &&
-        this.isEscalationRequest(assistantContent)
+        isEscalationRequest(assistantContent)
       ) {
-        const { reason } = this.parseEscalationMarker(assistantContent);
+        const { reason } = parseEscalationMarker(assistantContent);
         this._escalateThisTurn = true;
         const reasonSuffix = reason ? ` — ${reason}` : "";
         yield {
@@ -1427,30 +1402,6 @@ function* hookWarnings(outcomes: HookOutcome[], turn: number): Generator<LoopEve
     if (o.decision === "pass") continue;
     yield { turn, role: "warning", content: formatHookOutcomeMessage(o) };
   }
-}
-
-function reasonPrefixFor(
-  reason: "budget" | "aborted" | "context-guard" | "stuck",
-  iterCap: number,
-): string {
-  if (reason === "aborted") return "[aborted by user (Esc) — summarizing what I found so far]";
-  if (reason === "context-guard") {
-    return "[context budget running low — summarizing before the next call would overflow]";
-  }
-  if (reason === "stuck") {
-    return "[stuck on a repeated tool call — explaining what was tried and what's blocking progress]";
-  }
-  return `[tool-call budget (${iterCap}) reached — forcing summary from what I found]`;
-}
-
-function errorLabelFor(
-  reason: "budget" | "aborted" | "context-guard" | "stuck",
-  iterCap: number,
-): string {
-  if (reason === "aborted") return "aborted by user";
-  if (reason === "context-guard") return "context-guard triggered (prompt > 80% of window)";
-  if (reason === "stuck") return "stuck (repeated tool call suppressed by storm-breaker)";
-  return `tool-call budget (${iterCap}) reached`;
 }
 
 function summarizeBranch(chosen: BranchSample, samples: BranchSample[]): BranchSummary {
