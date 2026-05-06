@@ -276,6 +276,39 @@ describe("emptyFrame", () => {
   });
 });
 
+describe("diffFrames — issue #330 row-shrink trail clear", () => {
+  it("emits clearToEOL when prev row had content past next's last visible cell", () => {
+    const p = pools();
+    withPools(p, () => {
+      const a = frame(40, 1, (s) => {
+        const text = "  run this command, ask again next time";
+        for (let x = 0; x < text.length; x++) s.writeCell(x, 0, cell(p, text[x]!));
+      });
+      const b = frame(40, 1, (s) => {
+        const text = "  allow always";
+        for (let x = 0; x < text.length; x++) s.writeCell(x, 0, cell(p, text[x]!));
+      });
+      const out = diffFrames(a, b, p);
+      const trail = out.filter((pp) => pp.type === "clearToEOL");
+      expect(trail).toHaveLength(1);
+    });
+  });
+
+  it("does NOT emit clearToEOL when next row reaches the same width as prev", () => {
+    const p = pools();
+    withPools(p, () => {
+      const a = frame(10, 1, (s) => {
+        for (const [x, ch] of "abcdefghij".split("").entries()) s.writeCell(x, 0, cell(p, ch));
+      });
+      const b = frame(10, 1, (s) => {
+        for (const [x, ch] of "ABCDEFGHIJ".split("").entries()) s.writeCell(x, 0, cell(p, ch));
+      });
+      const out = diffFrames(a, b, p);
+      expect(out.filter((pp) => pp.type === "clearToEOL")).toHaveLength(0);
+    });
+  });
+});
+
 // Silence the unused-EMPTY_CELL import lint by referencing it.
 // eslint-disable-next-line
 void EMPTY_CELL;

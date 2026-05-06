@@ -7,6 +7,7 @@ export type Patch =
   | { readonly type: "styleStr"; readonly str: string }
   | { readonly type: "hyperlink"; readonly uri: string }
   | { readonly type: "clear"; readonly count: number }
+  | { readonly type: "clearToEOL" }
   | { readonly type: "clearTerminal" };
 
 export type Diff = ReadonlyArray<Patch>;

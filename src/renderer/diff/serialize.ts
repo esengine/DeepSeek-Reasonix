@@ -30,6 +30,8 @@ function serializeOne(patch: Patch): string {
       return `${ESC}]8;;${patch.uri}${ST}`;
     case "clear":
       return clearLines(patch.count);
+    case "clearToEOL":
+      return `${CSI}K`;
     case "clearTerminal":
       return `${CSI}2J${CSI}H`;
   }

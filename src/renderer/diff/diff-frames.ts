@@ -38,6 +38,8 @@ export function diffFrames(prev: Frame, next: Frame, pools: DiffPools): Patch[] 
     return undefined;
   });
 
+  appendTrailClears(out, cursor, prev, next);
+
   if (next.cursor.x !== cursor.x || next.cursor.y !== cursor.y) {
     moveTo(out, cursor, next.cursor.x, next.cursor.y, next.viewportWidth);
   }
@@ -157,4 +159,31 @@ function transitionHyperlink(
 function resetTrailingState(out: Patch[], cursor: CursorState, pools: DiffPools): void {
   transitionStyle(out, cursor, pools.style.none, pools);
   transitionHyperlink(out, cursor, 0, pools);
+}
+
+/** Per-row trail clear when prev had content past next's last visible cell — defends shrinking rows against terminal-state desync. */
+function appendTrailClears(out: Patch[], cursor: CursorState, prev: Frame, next: Frame): void {
+  const w = Math.min(prev.screen.width, next.viewportWidth);
+  const h = Math.max(prev.screen.height, next.screen.height);
+  for (let y = 0; y < h; y++) {
+    let lastNextCol = -1;
+    for (let x = next.screen.width - 1; x >= 0; x--) {
+      const c = next.screen.cellAt(x, y);
+      if (c && c.charId !== 0) {
+        lastNextCol = x;
+        break;
+      }
+    }
+    let prevHasTrail = false;
+    for (let x = lastNextCol + 1; x < w; x++) {
+      const c = prev.screen.cellAt(x, y);
+      if (c && c.charId !== 0) {
+        prevHasTrail = true;
+        break;
+      }
+    }
+    if (!prevHasTrail) continue;
+    moveTo(out, cursor, Math.max(0, lastNextCol + 1), y, next.viewportWidth);
+    out.push({ type: "clearToEOL" });
+  }
 }
