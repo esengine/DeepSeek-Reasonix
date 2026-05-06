@@ -65,6 +65,10 @@ const PHASE_RE = /\bPhase\s+\d+\b/i;
 const BANNER_RE = /\/\/\s*[─=\-*#]{3,}/;
 const INCIDENT_RE =
   /\b(user reported|screenshot showed|incident|hotfix for|fix for #?\d|introduced in v|regression from v|pre-v\d|legacy v)/i;
+const BARE_TODO_RE = /(?:^|[^A-Za-z0-9_])(TODO|HACK)(?!\(#\d+\))/;
+const FIXME_RE = /(?:^|[^A-Za-z0-9_])FIXME\b/;
+const TRANSLATOR_NOTE_RE =
+  /\b(translator(?:'s)? note|english version|chinese version|英文版|中文版)\b/i;
 
 describe("comment policy (CLAUDE.md)", () => {
   test("module-essay headers ≤ 2 lines", () => {
@@ -116,6 +120,53 @@ describe("comment policy (CLAUDE.md)", () => {
   test("no banner separator comments", () => {
     const offenders = scan(FILES, (line) => BANNER_RE.test(line));
     expect(offenders, format(offenders, "No section-banner separator comments.")).toEqual([]);
+  });
+
+  test("TODO / HACK markers must carry a (#nnn) issue anchor", () => {
+    const offenders: string[] = [];
+    for (const { rel, src } of FILES) {
+      const lines = src.split("\n");
+      lines.forEach((line, idx) => {
+        const c = commentText(line);
+        if (c && BARE_TODO_RE.test(c))
+          offenders.push(`${rel}:${idx + 1} — ${line.trim().slice(0, 100)}`);
+      });
+    }
+    expect(
+      offenders,
+      format(offenders, "Bare TODO/HACK is debt leakage — write `TODO(#nnn): ...`."),
+    ).toEqual([]);
+  });
+
+  test("no FIXME markers — fix it or open an issue + TODO", () => {
+    const offenders: string[] = [];
+    for (const { rel, src } of FILES) {
+      const lines = src.split("\n");
+      lines.forEach((line, idx) => {
+        const c = commentText(line);
+        if (c && FIXME_RE.test(c))
+          offenders.push(`${rel}:${idx + 1} — ${line.trim().slice(0, 100)}`);
+      });
+    }
+    expect(offenders, format(offenders, "FIXME is banned — use TODO(#nnn) or fix now.")).toEqual(
+      [],
+    );
+  });
+
+  test("no translator-note comments", () => {
+    const offenders: string[] = [];
+    for (const { rel, src } of FILES) {
+      const lines = src.split("\n");
+      lines.forEach((line, idx) => {
+        const c = commentText(line);
+        if (c && TRANSLATOR_NOTE_RE.test(c))
+          offenders.push(`${rel}:${idx + 1} — ${line.trim().slice(0, 100)}`);
+      });
+    }
+    expect(
+      offenders,
+      format(offenders, "i18n strings are self-documenting — no translator notes."),
+    ).toEqual([]);
   });
 
   test("no multi-line block comments > 3 lines", () => {
