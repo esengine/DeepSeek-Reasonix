@@ -5,6 +5,10 @@ import * as pathMod from "node:path";
 import picomatch from "picomatch";
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
 import type { ToolRegistry } from "../tools.js";
+import { applyEdit } from "./fs/edit.js";
+import { searchContent, searchFiles } from "./fs/search.js";
+
+export { lineDiff } from "./fs/edit.js";
 
 export interface FilesystemToolsOptions {
   /** Absolute directory the tools may read/write. Paths outside this are refused. */
@@ -319,50 +323,12 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["pattern"],
     },
-    fn: async (args: { path?: string; pattern: string; include_deps?: boolean }) => {
-      const startAbs = safePath(args.path ?? ".");
-      const needle = args.pattern.toLowerCase();
-      const includeDeps = args.include_deps === true;
-      // Try as regex first (permits users who want patterns); fall
-      // back to plain substring when it's not a valid regex. Flag `i`
-      // so matching is case-insensitive regardless of path.
-      let re: RegExp | null = null;
-      try {
-        re = new RegExp(args.pattern, "i");
-      } catch {
-        re = null;
-      }
-      const matches: string[] = [];
-      let totalBytes = 0;
-      const walk = async (dir: string): Promise<void> => {
-        let entries: import("node:fs").Dirent[];
-        try {
-          entries = await fs.readdir(dir, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const e of entries) {
-          const full = pathMod.join(dir, e.name);
-          const lower = e.name.toLowerCase();
-          const hit = re ? re.test(e.name) : lower.includes(needle);
-          if (hit) {
-            const rel = displayRel(rootDir, full);
-            if (totalBytes + rel.length + 1 > maxListBytes) {
-              matches.push("[… search truncated — refine pattern …]");
-              return;
-            }
-            matches.push(rel);
-            totalBytes += rel.length + 1;
-          }
-          if (e.isDirectory()) {
-            if (!includeDeps && SKIP_DIR_NAMES.has(e.name)) continue;
-            await walk(full);
-          }
-        }
-      };
-      await walk(startAbs);
-      return matches.length === 0 ? "(no matches)" : matches.join("\n");
-    },
+    fn: async (args: { path?: string; pattern: string; include_deps?: boolean }) =>
+      searchFiles(
+        { rootDir, maxListBytes, skipDirNames: SKIP_DIR_NAMES },
+        safePath(args.path ?? "."),
+        args,
+      ),
   });
 
   registry.register({
@@ -404,98 +370,18 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       glob?: string;
       case_sensitive?: boolean;
       include_deps?: boolean;
-    }) => {
-      const startAbs = safePath(args.path ?? ".");
-      const caseSensitive = args.case_sensitive === true;
-      const includeDeps = args.include_deps === true;
-      const nameMatch = compileNameFilter(typeof args.glob === "string" ? args.glob : null);
-      // Try the pattern as a regex first (lets the model say `\bdispatch\(`
-      // for a word-bounded match); fall back to literal substring on
-      // invalid regex. No `g` flag — we test once per line, so global
-      // statefulness (lastIndex tracking) would just be noise.
-      let re: RegExp | null = null;
-      try {
-        re = new RegExp(args.pattern, caseSensitive ? "" : "i");
-      } catch {
-        re = null;
-      }
-      const needle = caseSensitive ? args.pattern : args.pattern.toLowerCase();
-      const matches: string[] = [];
-      let totalBytes = 0;
-      let scanned = 0;
-      let truncated = false;
-
-      const walk = async (dir: string): Promise<void> => {
-        if (truncated) return;
-        let entries: import("node:fs").Dirent[];
-        try {
-          entries = await fs.readdir(dir, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const e of entries) {
-          if (truncated) return;
-          if (e.isDirectory()) {
-            if (!includeDeps && SKIP_DIR_NAMES.has(e.name)) continue;
-            await walk(pathMod.join(dir, e.name));
-            continue;
-          }
-          if (!e.isFile()) continue;
-          const full = pathMod.join(dir, e.name);
-          if (nameMatch && !nameMatch(e.name, displayRel(rootDir, full))) continue;
-          if (isLikelyBinaryByName(e.name)) continue;
-          let stat: import("node:fs").Stats;
-          try {
-            stat = await fs.stat(full);
-          } catch {
-            continue;
-          }
-          // Per-file size cap so a 50MB log doesn't dominate the search.
-          // Anything legitimately interesting fits in 2 MB; bigger files
-          // are usually data dumps or generated bundles.
-          if (stat.size > 2 * 1024 * 1024) continue;
-          let raw: Buffer;
-          try {
-            raw = await fs.readFile(full);
-          } catch {
-            continue;
-          }
-          // Content-based binary sniff: a NUL byte in the first 8KB is
-          // a strong indicator. Catches binaries with .json or .txt
-          // extensions (yes, this happens).
-          const firstNul = raw.indexOf(0);
-          if (firstNul !== -1 && firstNul < 8 * 1024) continue;
-          const text = raw.toString("utf8");
-          const rel = displayRel(rootDir, full);
-          const lines = text.split(/\r?\n/);
-          for (let li = 0; li < lines.length; li++) {
-            const line = lines[li]!;
-            const lineForCheck = caseSensitive ? line : line.toLowerCase();
-            const hit = re ? re.test(line) : lineForCheck.includes(needle);
-            if (!hit) continue;
-            // Truncate very long lines so one giant minified file
-            // doesn't blow the budget on a single match.
-            const display = line.length > 200 ? `${line.slice(0, 200)}…` : line;
-            const out = `${rel}:${li + 1}: ${display}`;
-            if (totalBytes + out.length + 1 > maxListBytes) {
-              matches.push(`[… truncated at ${maxListBytes} bytes — refine pattern or path …]`);
-              truncated = true;
-              return;
-            }
-            matches.push(out);
-            totalBytes += out.length + 1;
-          }
-          scanned++;
-        }
-      };
-      await walk(startAbs);
-      if (matches.length === 0) {
-        return scanned === 0
-          ? "(no files scanned — path empty or all files filtered out)"
-          : `(no matches across ${scanned} file${scanned === 1 ? "" : "s"})`;
-      }
-      return matches.join("\n");
-    },
+    }) =>
+      searchContent(
+        {
+          rootDir,
+          maxListBytes,
+          skipDirNames: SKIP_DIR_NAMES,
+          isBinaryByName: isLikelyBinaryByName,
+          nameMatch: compileNameFilter(typeof args.glob === "string" ? args.glob : null),
+        },
+        safePath(args.path ?? "."),
+        args,
+      ),
   });
 
   registry.register({
@@ -557,34 +443,8 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["path", "search", "replace"],
     },
-    fn: async (args: { path: string; search: string; replace: string }) => {
-      const abs = safePath(args.path);
-      const before = await fs.readFile(abs, "utf8");
-      if (args.search.length === 0) {
-        throw new Error("edit_file: search cannot be empty");
-      }
-      const le = before.includes("\r\n") ? "\r\n" : "\n";
-      const adaptedSearch = args.search.replace(/\r?\n/g, le);
-      const adaptedReplace = args.replace.replace(/\r?\n/g, le);
-      const firstIdx = before.indexOf(adaptedSearch);
-      if (firstIdx < 0) {
-        throw new Error(`edit_file: search text not found in ${displayRel(rootDir, abs)}`);
-      }
-      const nextIdx = before.indexOf(adaptedSearch, firstIdx + 1);
-      if (nextIdx >= 0) {
-        throw new Error(
-          `edit_file: search text appears multiple times in ${displayRel(rootDir, abs)} — include more context to disambiguate`,
-        );
-      }
-      const after =
-        before.slice(0, firstIdx) + adaptedReplace + before.slice(firstIdx + adaptedSearch.length);
-      await fs.writeFile(abs, after, "utf8");
-      const rel = displayRel(rootDir, abs);
-      const header = `edited ${rel} (${adaptedSearch.length}→${adaptedReplace.length} chars)`;
-      const startLine = before.slice(0, firstIdx).split(/\r?\n/).length;
-      const diff = renderEditDiff(adaptedSearch, adaptedReplace, startLine);
-      return `${header}\n${diff}`;
-    },
+    fn: async (args: { path: string; search: string; replace: string }) =>
+      applyEdit(rootDir, safePath(args.path), args),
   });
 
   registry.register({
@@ -623,59 +483,4 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
   });
 
   return registry;
-}
-
-function renderEditDiff(search: string, replace: string, startLine: number): string {
-  const a = search.split(/\r?\n/);
-  const b = replace.split(/\r?\n/);
-  const diff = lineDiff(a, b);
-  const hunk = `@@ -${startLine},${a.length} +${startLine},${b.length} @@`;
-  const body = diff.map((d) => `${d.op === " " ? " " : d.op} ${d.line}`).join("\n");
-  return `${hunk}\n${body}`;
-}
-
-export function lineDiff(
-  a: readonly string[],
-  b: readonly string[],
-): Array<{ op: "-" | "+" | " "; line: string }> {
-  const n = a.length;
-  const m = b.length;
-  // dp[i][j] = LCS length of a[0..i) and b[0..j).
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  for (let i = 1; i <= n; i++) {
-    for (let j = 1; j <= m; j++) {
-      if (a[i - 1] === b[j - 1]) dp[i]![j] = dp[i - 1]![j - 1]! + 1;
-      else dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
-    }
-  }
-  // Backtrack to recover the op sequence.
-  const out: Array<{ op: "-" | "+" | " "; line: string }> = [];
-  let i = n;
-  let j = m;
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      out.unshift({ op: " ", line: a[i - 1]! });
-      i--;
-      j--;
-    } else if ((dp[i - 1]![j] ?? 0) > (dp[i]![j - 1] ?? 0)) {
-      out.unshift({ op: "-", line: a[i - 1]! });
-      i--;
-    } else {
-      // Tie-break goes here (strictly less or equal): take the
-      // insertion first during backtrack so the final forward order
-      // renders removals BEFORE additions for a substitution —
-      // matches git-diff convention of `- old / + new`.
-      out.unshift({ op: "+", line: b[j - 1]! });
-      j--;
-    }
-  }
-  while (i > 0) {
-    out.unshift({ op: "-", line: a[i - 1]! });
-    i--;
-  }
-  while (j > 0) {
-    out.unshift({ op: "+", line: b[j - 1]! });
-    j--;
-  }
-  return out;
 }
