@@ -90,6 +90,8 @@ ${TUI_FORMATTING_RULES}`;
 
 const DEFAULT_MAX_RESULT_CHARS = 8000;
 const DEFAULT_MAX_ITERS = 16;
+const MIN_MAX_ITERS = 1;
+const MAX_MAX_ITERS = 32;
 // Subagents default to flash — their work is read-and-synthesize
 // (explore, research), which doesn't need the 12× pro tier. Skill
 // frontmatter `model: deepseek-v4-pro` is the opt-in override for
@@ -380,10 +382,19 @@ export function registerSubagentTool(
           description:
             "Which DeepSeek model the subagent runs on. Default is 'deepseek-v4-flash' — cheap and fast, fine for explore/research-style subtasks. Override to 'deepseek-v4-pro' (~12× more expensive) when the subtask genuinely needs the stronger model: cross-file architecture, subtle bug hunts, anything where flash has empirically underperformed.",
         },
+        max_iters: {
+          type: "integer",
+          minimum: MIN_MAX_ITERS,
+          maximum: MAX_MAX_ITERS,
+          description: `Cap on the subagent's tool-call iterations. Default 16. Lower (e.g. 6-8) for narrow verify-style tasks; higher (e.g. 24) for broad exploration. Hard range: ${MIN_MAX_ITERS}-${MAX_MAX_ITERS}; out-of-range values are clamped to the nearest end.`,
+        },
       },
       required: ["task"],
     },
-    fn: async (args: { task?: unknown; system?: unknown; model?: unknown }, ctx) => {
+    fn: async (
+      args: { task?: unknown; system?: unknown; model?: unknown; max_iters?: unknown },
+      ctx,
+    ) => {
       const task = typeof args.task === "string" ? args.task.trim() : "";
       if (!task) {
         return JSON.stringify({
@@ -398,13 +409,14 @@ export function registerSubagentTool(
         typeof args.model === "string" && args.model.startsWith("deepseek-")
           ? args.model
           : defaultModel;
+      const callerIters = clampMaxIters(args.max_iters);
       const result = await spawnSubagent({
         client: opts.client,
         parentRegistry,
         system,
         task,
         model,
-        maxToolIters,
+        maxToolIters: callerIters ?? maxToolIters,
         maxResultChars,
         sink,
         parentSignal: ctx?.signal,
@@ -414,6 +426,15 @@ export function registerSubagentTool(
   });
 
   return parentRegistry;
+}
+
+/** Floats round down; non-finite / wrong-type yields undefined so caller falls back to its default. */
+function clampMaxIters(raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  const n = Math.floor(raw);
+  if (n < MIN_MAX_ITERS) return MIN_MAX_ITERS;
+  if (n > MAX_MAX_ITERS) return MAX_MAX_ITERS;
+  return n;
 }
 
 /** Plan-mode state propagates — a subagent spawned under `/plan` MUST NOT escape it. */
