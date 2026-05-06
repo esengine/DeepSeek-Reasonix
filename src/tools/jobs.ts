@@ -160,6 +160,8 @@ export class JobRegistry {
         child: null,
         readyPromise: Promise.resolve(),
         signalReady: () => {},
+        closedPromise: Promise.resolve(),
+        signalClosed: () => {},
       };
       this.jobs.set(id, job);
       return {
@@ -177,6 +179,10 @@ export class JobRegistry {
     const readyPromise = new Promise<void>((res) => {
       readyResolve = res;
     });
+    let closedResolve: () => void = () => {};
+    const closedPromise = new Promise<void>((res) => {
+      closedResolve = res;
+    });
     const job: InternalJob = {
       id,
       command: trimmed,
@@ -189,6 +195,8 @@ export class JobRegistry {
       child,
       readyPromise,
       signalReady: readyResolve,
+      closedPromise,
+      signalClosed: closedResolve,
     };
     this.jobs.set(id, job);
 
@@ -232,11 +240,13 @@ export class JobRegistry {
       job.running = false;
       job.spawnError = err.message;
       job.signalReady();
+      job.signalClosed();
     });
     child.on("close", (code) => {
       job.running = false;
       job.exitCode = code;
       job.signalReady();
+      job.signalClosed();
     });
 
     const onAbort = () => this.stop(id, { graceMs: 100 });
@@ -308,8 +318,10 @@ export class JobRegistry {
         /* already dead — fall through */
       }
     }
-    // Wait for the close event or graceMs, then SIGKILL.
-    await Promise.race([job.readyPromise, new Promise<void>((res) => setTimeout(res, graceMs))]);
+    // closedPromise (not readyPromise) — readyPromise can have fired at
+    // startup on a ready-signal regex match, which would short-circuit
+    // this race even though the process is still alive.
+    await Promise.race([job.closedPromise, new Promise<void>((res) => setTimeout(res, graceMs))]);
     if (job.running) {
       if (job.pid !== null) {
         killProcessTree(job.pid, "SIGKILL");
@@ -320,10 +332,10 @@ export class JobRegistry {
           /* ignore */
         }
       }
-      // Give the OS a moment to reap the tree so our exitCode field
-      // catches it before we return. Windows taskkill can take up to
-      // ~700ms to propagate on a three-level tree (npm → node → vite).
-      await new Promise<void>((res) => setTimeout(res, 800));
+      // Wait for the actual close handler — a fixed timer can return
+      // before Node's `close` event fires under load (Windows taskkill
+      // /T /F on a three-level tree can take ~1s to propagate).
+      await Promise.race([job.closedPromise, new Promise<void>((res) => setTimeout(res, 5000))]);
     }
     return snapshot(job);
   }
@@ -387,6 +399,9 @@ interface InternalJob extends JobRecord {
   readyPromise: Promise<void>;
   /** Fires readyPromise — called by ready-signal OR close/error handlers. */
   signalReady: () => void;
+  /** Resolves only on close/error — never on ready-signal. Used by stop() to wait for actual exit. */
+  closedPromise: Promise<void>;
+  signalClosed: () => void;
 }
 
 export interface JobReadResult {
