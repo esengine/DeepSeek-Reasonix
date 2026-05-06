@@ -8,13 +8,7 @@ import {
 import type { PauseGate } from "./core/pause-gate.js";
 import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
 import { type HarvestOptions, type TypedPlanState, emptyPlanState, harvest } from "./harvest.js";
-import {
-  type HookOutcome,
-  type HookPayload,
-  type ResolvedHook,
-  formatHookOutcomeMessage,
-  runHooks,
-} from "./hooks.js";
+import { type HookPayload, type ResolvedHook, runHooks } from "./hooks.js";
 import {
   DEFAULT_MAX_RESULT_CHARS,
   DEFAULT_MAX_RESULT_TOKENS,
@@ -23,6 +17,7 @@ import {
 } from "./mcp/registry.js";
 
 import { ContextManager } from "./context-manager.js";
+import { summarizeBranch } from "./loop/branch.js";
 import { errorLabelFor, formatLoopError, reasonPrefixFor } from "./loop/errors.js";
 import {
   NEEDS_PRO_BUFFER_CHARS,
@@ -36,6 +31,7 @@ import {
   healLoadedMessagesByTokens,
   stampMissingReasoningForThinkingMode,
 } from "./loop/healing.js";
+import { hookWarnings, safeParseToolArgs } from "./loop/hook-events.js";
 import {
   looksLikeCompleteJson,
   shrinkOversizedToolCallArgsByTokens,
@@ -47,6 +43,7 @@ import {
   stripHallucinatedToolMarkup,
   thinkingModeForModel,
 } from "./loop/thinking.js";
+import type { BranchSummary, LoopEvent } from "./loop/types.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
 import { appendSessionMessage, loadSessionMessages, rewriteSession } from "./memory/session.js";
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
@@ -72,62 +69,7 @@ export {
   stripHallucinatedToolMarkup,
   thinkingModeForModel,
 };
-
-export type EventRole =
-  | "assistant_delta"
-  | "assistant_final"
-  /** Only liveness signal during a large-args tool call (no content/reasoning bytes). */
-  | "tool_call_delta"
-  /** Pre-dispatch ping so the TUI can show a spinner during long tool awaits. */
-  | "tool_start"
-  | "tool"
-  | "done"
-  | "error"
-  | "warning"
-  /** Transient indicator for silent phases; UI clears on next primary event. */
-  | "status"
-  | "branch_start"
-  | "branch_progress"
-  | "branch_done";
-
-export interface BranchSummary {
-  budget: number;
-  chosenIndex: number;
-  uncertainties: number[]; // per-sample uncertainty counts
-  temperatures: number[];
-}
-
-export interface BranchProgress {
-  completed: number;
-  total: number;
-  latestIndex: number;
-  latestTemperature: number;
-  latestUncertainties: number;
-}
-
-export interface LoopEvent {
-  turn: number;
-  role: EventRole;
-  content: string;
-  reasoningDelta?: string;
-  toolName?: string;
-  /** Raw args JSON — needed by `reasonix diff` to explain why a tool was called. */
-  toolArgs?: string;
-  /** Cumulative arguments-string length for `role === "tool_call_delta"`. */
-  toolCallArgsChars?: number;
-  /** Zero-based index of the tool call this delta belongs to (multi-tool progress). */
-  toolCallIndex?: number;
-  /** Count of tool calls whose args have parsed as valid JSON (UI progress, not dispatch gate). */
-  toolCallReadyCount?: number;
-  stats?: TurnStats;
-  planState?: TypedPlanState;
-  repair?: RepairReport;
-  branch?: BranchSummary;
-  branchProgress?: BranchProgress;
-  error?: string;
-  /** Display-only — code-mode applier MUST skip SEARCH/REPLACE in forced-summary text. */
-  forcedSummary?: boolean;
-}
+export type { BranchProgress, BranchSummary, EventRole, LoopEvent } from "./loop/types.js";
 
 export interface CacheFirstLoopOptions {
   client: DeepSeekClient;
@@ -1386,29 +1328,4 @@ function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-function safeParseToolArgs(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-
-/** Format non-pass hook outcomes as `LoopEvent`s of role `warning`. */
-function* hookWarnings(outcomes: HookOutcome[], turn: number): Generator<LoopEvent> {
-  for (const o of outcomes) {
-    if (o.decision === "pass") continue;
-    yield { turn, role: "warning", content: formatHookOutcomeMessage(o) };
-  }
-}
-
-function summarizeBranch(chosen: BranchSample, samples: BranchSample[]): BranchSummary {
-  return {
-    budget: samples.length,
-    chosenIndex: chosen.index,
-    uncertainties: samples.map((s) => s.planState.uncertainties.length),
-    temperatures: samples.map((s) => s.temperature),
-  };
 }
