@@ -3,6 +3,37 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] — 2026-05-06
+
+**Headline:** subagent capability sharpened on three axes — skills can
+now scope a child to a specific tool subset via `allowed-tools`
+frontmatter, callers can request a per-spawn iter budget via the new
+`max_iters` arg (clamped 1-32), and two built-in personas (`explore`,
+`verify`) are selectable inline via a `type` arg without writing a
+skill. Closes umbrella #316.
+
+**Subagent:**
+
+- feat(subagent): honor skill `allowed-tools` frontmatter when forking
+  the child registry. The field was parsed but ignored ("Unused in v1");
+  now it scopes the subagent to the named tools only. New
+  `forkRegistryWithAllowList` helper alongside `forkRegistryExcluding`;
+  `NEVER_INHERITED` (`spawn_subagent` / `submit_plan`) still wins so
+  depth=1 + plan-mode guarantees hold even if a skill names them. An
+  allow-list naming a tool the parent doesn't have returns a structured
+  error result (no API call burned). (#317, PR #320)
+- feat(subagent): expose `max_iters` on the `spawn_subagent` tool
+  schema. Clamped to 1-32 at the boundary; floats round down; non-numeric
+  / missing falls back to the registration-time default (still 16).
+  Verify-style tasks can ask for 6-8, explore-style can ask for 24+.
+  (#318, PR #321)
+- feat(subagent): two built-in personas selectable via `type` arg —
+  `explore` (wide-net read-only investigation, 20-iter budget) and
+  `verify` (narrow yes/no with evidence, 8-iter budget). Caller's
+  explicit `system` / `max_iters` override the type's defaults. Prompts
+  live in new `src/tools/subagent-types.ts` so `subagent.ts` stays
+  under the 500-line target. (#319, PR #322)
+
 ## [0.27.3] — 2026-05-06
 
 **Headline:** USD-account users now see `$` instead of `¥` everywhere
