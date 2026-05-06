@@ -303,6 +303,38 @@ describe("Skill frontmatter — runAs", () => {
     expect(store.read("rsr")?.model).toBe("deepseek-reasoner");
     expect(store.read("wrong")?.model).toBeUndefined();
   });
+
+  it("parses comma-separated allowed-tools into a trimmed list", () => {
+    writeSkillDir(
+      home,
+      "global",
+      "scoped",
+      { description: "...", runAs: "subagent", "allowed-tools": "read, search_content,write" },
+      "body",
+      home,
+    );
+    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+    expect(store.read("scoped")?.allowedTools).toEqual(["read", "search_content", "write"]);
+  });
+
+  it("treats missing allowed-tools as undefined (full inheritance)", () => {
+    writeSkillDir(home, "global", "open", { description: "...", runAs: "subagent" }, "body", home);
+    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+    expect(store.read("open")?.allowedTools).toBeUndefined();
+  });
+
+  it("treats an allowed-tools field with only whitespace/commas as undefined", () => {
+    writeSkillDir(
+      home,
+      "global",
+      "empty",
+      { description: "...", runAs: "subagent", "allowed-tools": " , , " },
+      "body",
+      home,
+    );
+    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+    expect(store.read("empty")?.allowedTools).toBeUndefined();
+  });
 });
 
 describe("Built-in skills", () => {

@@ -7,7 +7,9 @@ import {
   type SubagentEvent,
   type SubagentSink,
   forkRegistryExcluding,
+  forkRegistryWithAllowList,
   registerSubagentTool,
+  spawnSubagent,
 } from "../src/tools/subagent.js";
 
 interface FakeResponseShape {
@@ -422,5 +424,109 @@ describe("forkRegistryExcluding", () => {
     const child = forkRegistryExcluding(parent, new Set());
     const out = await child.dispatch("counter", "{}");
     expect(out).toBe("n=1");
+  });
+});
+
+describe("forkRegistryWithAllowList", () => {
+  it("includes only names in the allow-list", () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "read", fn: () => "read" });
+    parent.register({ name: "write", fn: () => "write" });
+    parent.register({ name: "shell", fn: () => "shell" });
+    const child = forkRegistryWithAllowList(parent, new Set(["read", "write"]), new Set());
+    expect(child.has("read")).toBe(true);
+    expect(child.has("write")).toBe(true);
+    expect(child.has("shell")).toBe(false);
+    expect(child.size).toBe(2);
+  });
+
+  it("alsoExclude wins over allow", () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "spawn_subagent", fn: () => "x" });
+    parent.register({ name: "read", fn: () => "read" });
+    const child = forkRegistryWithAllowList(
+      parent,
+      new Set(["read", "spawn_subagent"]),
+      new Set(["spawn_subagent"]),
+    );
+    expect(child.has("read")).toBe(true);
+    expect(child.has("spawn_subagent")).toBe(false);
+  });
+
+  it("propagates parent plan mode", () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "read", fn: () => "x" });
+    parent.setPlanMode(true);
+    const child = forkRegistryWithAllowList(parent, new Set(["read"]), new Set());
+    expect(child.planMode).toBe(true);
+  });
+
+  it("ignores allow-list names that are not registered (caller validates)", () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "read", fn: () => "x" });
+    const child = forkRegistryWithAllowList(parent, new Set(["read", "ghost"]), new Set());
+    expect(child.has("read")).toBe(true);
+    expect(child.has("ghost")).toBe(false);
+    expect(child.size).toBe(1);
+  });
+});
+
+describe("spawnSubagent allowedTools", () => {
+  it("scopes the child registry to the allow-list", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "read", fn: () => "read result" });
+    parent.register({ name: "write", fn: () => "write result" });
+    parent.register({ name: "shell", fn: () => "shell result" });
+    const client = makeClient([{ content: "done" }]);
+    const result = await spawnSubagent({
+      client,
+      parentRegistry: parent,
+      system: "test",
+      task: "test",
+      allowedTools: ["read"],
+    });
+    expect(result.success).toBe(true);
+    expect(parent.has("write")).toBe(true);
+    expect(parent.has("shell")).toBe(true);
+  });
+
+  it("returns a structured error when allow-list names a tool the parent does not have", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "read", fn: () => "read result" });
+    const client = makeClient([{ content: "should not run" }]);
+    const result = await spawnSubagent({
+      client,
+      parentRegistry: parent,
+      system: "test",
+      task: "test",
+      allowedTools: ["read", "missing_tool"],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("missing_tool");
+    expect(result.error).toContain("allow-list");
+    expect(result.turns).toBe(0);
+    expect(result.toolIters).toBe(0);
+  });
+
+  it("emits start then end with the validation error and runs no API call", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "read", fn: () => "read result" });
+    const fetchSpy = vi.fn();
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: fetchSpy as unknown as typeof fetch,
+    });
+    const { sink, events } = makeSink();
+    await spawnSubagent({
+      client,
+      parentRegistry: parent,
+      system: "test",
+      task: "test",
+      allowedTools: ["ghost"],
+      sink,
+    });
+    expect(events.map((e) => e.kind)).toEqual(["start", "end"]);
+    expect(events[1]?.error).toContain("ghost");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

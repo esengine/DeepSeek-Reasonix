@@ -28,8 +28,8 @@ export interface Skill {
   scope: SkillScope;
   /** Absolute path to the SKILL.md (or {name}.md) file, or "(builtin)" for shipped defaults. */
   path: string;
-  /** Raw `allowed-tools` field from frontmatter, if any. Unused in v1. */
-  allowedTools?: string;
+  /** Parsed `allowed-tools` frontmatter — when present, the spawned subagent's registry is scoped to these literal tool names. */
+  allowedTools?: readonly string[];
   runAs: SkillRunAs;
   /** Subagent model override; only meaningful when `runAs === "subagent"`. */
   model?: string;
@@ -67,6 +67,15 @@ function parseFrontmatter(raw: string): { data: Record<string, string>; body: st
 
 function isValidSkillName(name: string): boolean {
   return VALID_SKILL_NAME.test(name);
+}
+
+function parseAllowedTools(raw: string | undefined): readonly string[] | undefined {
+  if (raw === undefined) return undefined;
+  const names = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return names.length > 0 ? Object.freeze(names) : undefined;
 }
 
 export class SkillStore {
@@ -176,7 +185,7 @@ export class SkillStore {
       body: body.trim(),
       scope,
       path,
-      allowedTools: data["allowed-tools"],
+      allowedTools: parseAllowedTools(data["allowed-tools"]),
       runAs: parseRunAs(data.runAs),
       model: data.model?.startsWith("deepseek-") ? data.model : undefined,
     };

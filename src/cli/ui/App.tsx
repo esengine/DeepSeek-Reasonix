@@ -780,6 +780,7 @@ function AppInner({
             // Per-skill model override (frontmatter `model: ...`),
             // else falls through to spawnSubagent's default.
             model: skill.model,
+            allowedTools: skill.allowedTools,
             sink: subagentSinkRef.current,
             // Stamped onto every event so the TUI sink + usage log can
             // attribute the run to a skill without extra bookkeeping.

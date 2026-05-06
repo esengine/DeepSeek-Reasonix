@@ -46,6 +46,8 @@ export interface SpawnSubagentOptions {
   /** Forwarded into the child loop so parent Esc cancels nested work. */
   parentSignal?: AbortSignal;
   skillName?: string;
+  /** Scopes the child registry to these literal tool names; NEVER_INHERITED still wins. Driven by skill `allowed-tools` frontmatter. */
+  allowedTools?: readonly string[];
 }
 
 export interface SubagentResult {
@@ -122,7 +124,44 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     elapsedMs: 0,
   });
 
-  const childTools = forkRegistryExcluding(opts.parentRegistry, NEVER_INHERITED_TOOLS);
+  if (opts.allowedTools) {
+    const missing = opts.allowedTools.filter((n) => !opts.parentRegistry.has(n));
+    if (missing.length > 0) {
+      const errorMessage = `subagent allow-list names tool(s) not registered in the parent: ${missing.join(", ")}. Fix the skill's \`allowed-tools\` frontmatter or check spelling.`;
+      sink?.current?.({
+        kind: "end",
+        task: taskPreview,
+        skillName,
+        model,
+        iter: 0,
+        elapsedMs: Date.now() - startedAt,
+        error: errorMessage,
+        turns: 0,
+        costUsd: 0,
+        usage: new Usage(),
+      });
+      return {
+        success: false,
+        output: "",
+        error: errorMessage,
+        turns: 0,
+        toolIters: 0,
+        elapsedMs: Date.now() - startedAt,
+        costUsd: 0,
+        model,
+        skillName,
+        usage: new Usage(),
+      };
+    }
+  }
+
+  const childTools = opts.allowedTools
+    ? forkRegistryWithAllowList(
+        opts.parentRegistry,
+        new Set(opts.allowedTools),
+        NEVER_INHERITED_TOOLS,
+      )
+    : forkRegistryExcluding(opts.parentRegistry, NEVER_INHERITED_TOOLS);
   const childPrefix = new ImmutablePrefix({
     system: opts.system,
     toolSpecs: childTools.specs(),
@@ -391,6 +430,25 @@ export function forkRegistryExcluding(
     // Re-register copies the public ToolDefinition fields. The child
     // re-runs auto-flatten analysis on its own, which produces an
     // identical flatSchema for the same input — no surprise.
+    child.register(def);
+  }
+  if (parent.planMode) child.setPlanMode(true);
+  return child;
+}
+
+/** alsoExclude wins over allow so NEVER_INHERITED still drops `spawn_subagent` even if a skill allow-list names it. */
+export function forkRegistryWithAllowList(
+  parent: ToolRegistry,
+  allow: ReadonlySet<string>,
+  alsoExclude: ReadonlySet<string>,
+): ToolRegistry {
+  const child = new ToolRegistry();
+  for (const spec of parent.specs()) {
+    const name = spec.function.name;
+    if (!allow.has(name)) continue;
+    if (alsoExclude.has(name)) continue;
+    const def = parent.get(name);
+    if (!def) continue;
     child.register(def);
   }
   if (parent.planMode) child.setPlanMode(true);
