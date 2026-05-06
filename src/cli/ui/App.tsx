@@ -394,10 +394,14 @@ function AppInner({
   }, [stdout]);
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
-  // subagentRunner closure can read the ref.
+  // subagentRunner closure can read the ref. The wallet-currency thunk
+  // reads from a ref populated AFTER useSessionInfo loads balance, so the
+  // subagent-end cost suffix renders in the live wallet's symbol.
+  const walletCurrencyRef = useRef<string | undefined>(undefined);
   const { activity: subagentActivity, sinkRef: subagentSinkRef } = useSubagent({
     session,
     log,
+    getWalletCurrency: () => walletCurrencyRef.current,
   });
   // Transient "what's happening" text set by the loop during silent
   // phases (harvest round-trip, between-iteration R1 thinking, forced
@@ -887,6 +891,7 @@ function AppInner({
   const balanceRef = useRef<typeof balance>(null);
   useEffect(() => {
     balanceRef.current = balance;
+    walletCurrencyRef.current = balance?.currency;
     if (balance) {
       agentStore.dispatch({
         type: "session.update",

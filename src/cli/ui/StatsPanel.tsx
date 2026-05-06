@@ -6,6 +6,7 @@ import type { EditMode } from "../../config.js";
 import type { SessionSummary } from "../../telemetry/stats.js";
 import { Bar, ChromeRule } from "./primitives.js";
 import { COLOR, GRADIENT } from "./theme.js";
+import { formatBalance, formatCost } from "./theme/tokens.js";
 
 const COLD_START_TURNS = 3;
 
@@ -91,9 +92,9 @@ function ChromeRow({
   const cacheColor =
     summary.cacheHitRatio >= 0.7 ? COLOR.ok : summary.cacheHitRatio >= 0.4 ? COLOR.warn : COLOR.err;
   const balanceLabel = balance
-    ? `[w ${balance.currency === "USD" ? "$" : ""}${balance.total.toFixed(2)}${balance.currency !== "USD" ? ` ${balance.currency}` : ""}]`
+    ? `[${formatBalance(balance.total, balance.currency, { label: true })}]`
     : "";
-  const costLabel = `[$${summary.totalCostUsd.toFixed(4)}]`;
+  const costLabel = `[${formatCost(summary.totalCostUsd, balance?.currency)}]`;
   const cacheLabel = "[c ▰▰▰▰▰▰ 100%]";
   const updateLabel = updateAvailable ? `↑ ${updateAvailable}` : "";
 
