@@ -1,6 +1,6 @@
 /** `#` writes project memory, `#g` global; `##+` stays a markdown heading; `\#` escapes and submits the literal `#`. */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { PROJECT_MEMORY_FILE } from "../../memory/project.js";
@@ -79,18 +79,28 @@ function appendBulletToFile(path: string, note: string, newFileHeader: string): 
   const trimmed = note.trim();
   if (!trimmed) throw new Error("note body cannot be empty");
   const bullet = `- ${trimmed}\n`;
-  if (!existsSync(path)) {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${newFileHeader}${bullet}`, "utf8");
-    return { path, created: true };
-  }
-  let prefix = "";
+  mkdirSync(dirname(path), { recursive: true });
+  // One `a+` open covers both branches: O_APPEND lands every write
+  // atomically at end-of-file (concurrent appenders interleave whole
+  // bullets), O_CREAT creates the file when it's missing, and we use
+  // `fstat().size === 0` as the "we just created it" signal to decide
+  // whether to emit the file header. Single fd from open through
+  // write — no path-based check between (CodeQL js/file-system-race).
+  const fd = openSync(path, "a+");
   try {
-    const existing = readFileSync(path, "utf8");
-    if (existing.length > 0 && !existing.endsWith("\n")) prefix = "\n";
-  } catch {
-    // Unreadable but exists — let appendFileSync surface the real error.
+    const stat = fstatSync(fd);
+    if (stat.size === 0) {
+      writeSync(fd, `${newFileHeader}${bullet}`);
+      return { path, created: true };
+    }
+    // Existing file — peek the trailing byte to decide whether to
+    // insert a leading newline. Same fd → no separate stat→read race.
+    const tail = Buffer.alloc(1);
+    readSync(fd, tail, 0, 1, stat.size - 1);
+    const prefix = tail[0] !== 0x0a ? "\n" : "";
+    writeSync(fd, `${prefix}${bullet}`);
+    return { path, created: false };
+  } finally {
+    closeSync(fd);
   }
-  appendFileSync(path, `${prefix}${bullet}`, "utf8");
-  return { path, created: false };
 }
