@@ -41,6 +41,11 @@ describe("eventsCommand", () => {
       ev(4, "tool.intent", { callId: "tc-1", name: "list_directory", args: '{"path":"src"}' }),
       ev(5, "tool.dispatched", { callId: "tc-1" }),
       ev(6, "tool.result", { callId: "tc-1", ok: true, output: "App.tsx\n", durationMs: 12 }),
+      ev(7, "tool.call", {
+        name: "run_command",
+        args: { command: "npm test", apiKey: "[redacted]" },
+      }),
+      ev(8, "tool.confirm.allow", { kind: "run_command", payload: { command: "npm test" } }),
     ]);
 
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -55,6 +60,8 @@ describe("eventsCommand", () => {
     expect(out).toContain("prefix=abcd1234");
     expect(out).toContain("tc-1 list_directory");
     expect(out).toContain("tc-1 ok 8B"); // "App.tsx\n".length === 8
+    expect(out).toContain('run_command args={"command":"npm test","apiKey":"[redacted]"}');
+    expect(out).toContain('run_command "npm test"');
   });
 
   it("--type filters to one event variant", () => {

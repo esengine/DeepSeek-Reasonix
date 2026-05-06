@@ -208,6 +208,10 @@ export class CacheFirstLoop {
   private _foldedThisTurn = false;
   private context!: ContextManager;
 
+  get currentTurn(): number {
+    return this._turn;
+  }
+
   constructor(opts: CacheFirstLoopOptions) {
     this.client = opts.client;
     this.prefix = opts.prefix;

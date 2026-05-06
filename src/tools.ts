@@ -30,6 +30,13 @@ export interface ToolRegistryOptions {
   autoFlatten?: boolean;
 }
 
+export type ToolCallAuditEvent = {
+  name: string;
+  args: Record<string, unknown>;
+};
+
+export type ToolCallAuditListener = (event: ToolCallAuditEvent) => void;
+
 /** String return short-circuits dispatch; null/undefined falls through to the tool fn. */
 export type ToolInterceptor = (
   name: string,
@@ -41,6 +48,7 @@ export class ToolRegistry {
   private readonly _autoFlatten: boolean;
   private _planMode = false;
   private _interceptor: ToolInterceptor | null = null;
+  private _auditListener: ToolCallAuditListener | null = null;
 
   constructor(opts: ToolRegistryOptions = {}) {
     this._autoFlatten = opts.autoFlatten !== false;
@@ -59,6 +67,10 @@ export class ToolRegistry {
   /** At most one interceptor active; calling twice replaces. */
   setToolInterceptor(fn: ToolInterceptor | null): void {
     this._interceptor = fn;
+  }
+
+  setAuditListener(fn: ToolCallAuditListener | null): void {
+    this._auditListener = fn;
   }
 
   register<A, R>(def: ToolDefinition<A, R>): this {
@@ -172,6 +184,11 @@ export class ToolRegistry {
     }
 
     try {
+      try {
+        this._auditListener?.({ name, args });
+      } catch {
+        /* audit path must never break tool execution */
+      }
       const result = await tool.fn(args, {
         signal: opts.signal,
         confirmationGate: opts.confirmationGate,

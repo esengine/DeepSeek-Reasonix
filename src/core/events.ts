@@ -76,6 +76,32 @@ export interface ToolResultEvent extends EventBase {
   durationMs: number;
 }
 
+export interface ToolCallEvent extends EventBase {
+  type: "tool.call";
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface ToolConfirmAllowEvent extends EventBase {
+  type: "tool.confirm.allow";
+  kind: "run_command" | "run_background";
+  payload: { command: string };
+}
+
+export interface ToolConfirmDenyEvent extends EventBase {
+  type: "tool.confirm.deny";
+  kind: "run_command" | "run_background";
+  payload: { command: string };
+  denyContext?: string;
+}
+
+export interface ToolConfirmAlwaysAllowEvent extends EventBase {
+  type: "tool.confirm.always_allow";
+  kind: "run_command" | "run_background";
+  payload: { command: string };
+  prefix: string;
+}
+
 export interface FileTouchedEvent extends EventBase {
   type: "effect.file.touched";
   path: string;
@@ -197,6 +223,10 @@ export type Event =
   | ToolDispatchedEvent
   | ToolDeniedEvent
   | ToolResultEvent
+  | ToolCallEvent
+  | ToolConfirmAllowEvent
+  | ToolConfirmDenyEvent
+  | ToolConfirmAlwaysAllowEvent
   | FileTouchedEvent
   | MemoryWrittenEvent
   | PlanSubmittedEvent

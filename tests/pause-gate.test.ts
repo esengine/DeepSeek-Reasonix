@@ -131,4 +131,70 @@ describe("PauseGate", () => {
     await expect(p2).resolves.toEqual({ type: "deny" });
     expect(gate.current).toBeNull();
   });
+
+  it("emits audit events for run_once / deny / always_allow shell decisions", async () => {
+    const gate = new PauseGate();
+    const audit = vi.fn();
+    gate.setAuditListener(audit);
+    gate.on(() => {});
+
+    const allow = gate.ask({ kind: "run_command", payload: { command: "npm test" } });
+    gate.resolve(gate.current!.id, { type: "run_once" } as ConfirmationChoice);
+    await expect(allow).resolves.toEqual({ type: "run_once" });
+
+    const deny = gate.ask({ kind: "run_background", payload: { command: "npm run dev" } });
+    gate.resolve(gate.current!.id, {
+      type: "deny",
+      denyContext: "too risky",
+    } as ConfirmationChoice);
+    await expect(deny).resolves.toEqual({ type: "deny", denyContext: "too risky" });
+
+    const always = gate.ask({ kind: "run_command", payload: { command: "npm run lint" } });
+    gate.resolve(gate.current!.id, {
+      type: "always_allow",
+      prefix: "npm run",
+    } as ConfirmationChoice);
+    await expect(always).resolves.toEqual({ type: "always_allow", prefix: "npm run" });
+
+    expect(audit.mock.calls).toEqual([
+      [
+        {
+          type: "tool.confirm.allow",
+          kind: "run_command",
+          payload: { command: "npm test" },
+        },
+      ],
+      [
+        {
+          type: "tool.confirm.deny",
+          kind: "run_background",
+          payload: { command: "npm run dev" },
+          denyContext: "too risky",
+        },
+      ],
+      [
+        {
+          type: "tool.confirm.always_allow",
+          kind: "run_command",
+          payload: { command: "npm run lint" },
+          prefix: "npm run",
+        },
+      ],
+    ]);
+  });
+
+  it("does not emit audit events for non-tool pauses", async () => {
+    const gate = new PauseGate();
+    const audit = vi.fn();
+    gate.setAuditListener(audit);
+    gate.on(() => {});
+
+    const promise = gate.ask({
+      kind: "plan_proposed",
+      payload: { plan: "# Plan", steps: [], summary: "ship it" },
+    });
+    gate.resolve(gate.current!.id, { type: "approve" });
+    await expect(promise).resolves.toEqual({ type: "approve" });
+    expect(audit).not.toHaveBeenCalled();
+  });
 });

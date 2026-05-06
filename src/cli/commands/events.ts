@@ -80,6 +80,14 @@ function detailsFor(e: Event): string {
       return `${e.callId} reason=${e.reason}`;
     case "tool.result":
       return `${e.callId} ${e.ok ? "ok" : "err"} ${e.output.length}B${e.truncated ? " [trunc]" : ""}`;
+    case "tool.call":
+      return `${e.name} args=${truncate(JSON.stringify(e.args), 60)}`;
+    case "tool.confirm.allow":
+      return `${e.kind} ${quote(e.payload.command, 60)}`;
+    case "tool.confirm.deny":
+      return `${e.kind} ${quote(e.payload.command, 60)}${e.denyContext ? ` — ${truncate(e.denyContext, 40)}` : ""}`;
+    case "tool.confirm.always_allow":
+      return `${e.kind} ${quote(e.payload.command, 60)} prefix=${truncate(e.prefix, 30)}`;
     case "effect.file.touched":
       return `${e.mode} ${e.path} (${e.bytes}B)`;
     case "effect.memory.written":

@@ -809,6 +809,50 @@ function AppInner({
     return l;
   }, [model, system, harvest, branch, budgetUsd, session, tools, codeMode]);
 
+  useEffect(() => {
+    if (!session || !tools) return;
+    tools.setAuditListener((event) => {
+      const sink = eventSinkRef.current;
+      const eventizer = eventizerRef.current;
+      if (!sink || !eventizer) return;
+      sink.append(eventizer.emitToolCall(loop.currentTurn, event.name, event.args));
+    });
+    pauseGate.setAuditListener((event) => {
+      const sink = eventSinkRef.current;
+      const eventizer = eventizerRef.current;
+      if (!sink || !eventizer) return;
+      switch (event.type) {
+        case "tool.confirm.allow":
+          sink.append(eventizer.emitToolConfirmAllow(loop.currentTurn, event.kind, event.payload));
+          break;
+        case "tool.confirm.deny":
+          sink.append(
+            eventizer.emitToolConfirmDeny(
+              loop.currentTurn,
+              event.kind,
+              event.payload,
+              event.denyContext,
+            ),
+          );
+          break;
+        case "tool.confirm.always_allow":
+          sink.append(
+            eventizer.emitToolConfirmAlwaysAllow(
+              loop.currentTurn,
+              event.kind,
+              event.payload,
+              event.prefix,
+            ),
+          );
+          break;
+      }
+    });
+    return () => {
+      tools.setAuditListener(null);
+      pauseGate.setAuditListener(null);
+    };
+  }, [loop, session, tools]);
+
   // Keep the loop's hook list in sync after a `/hooks reload`. The
   // loop's field is intentionally mutable for exactly this case —
   // construction happens once, hook edits are picked up live.

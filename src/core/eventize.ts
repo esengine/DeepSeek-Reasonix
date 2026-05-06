@@ -1,5 +1,6 @@
 import type { LoopEvent } from "../loop.js";
 import type { ChatMessage, RawUsage, ToolCall } from "../types.js";
+import { redactEventValue } from "./event-redaction.js";
 import type {
   Event,
   ErrorEvent as KernelErrorEvent,
@@ -10,6 +11,10 @@ import type {
   SessionOpenedEvent,
   SlashInvokedEvent,
   StatusEvent,
+  ToolCallEvent,
+  ToolConfirmAllowEvent,
+  ToolConfirmAlwaysAllowEvent,
+  ToolConfirmDenyEvent,
   ToolDispatchedEvent,
   ToolIntentEvent,
   ToolResultEvent,
@@ -122,6 +127,66 @@ export class Eventizer {
       afterMessages: after,
       reason,
       replacementMessages,
+    };
+  }
+
+  emitToolCall(turn: number, name: string, args: Record<string, unknown>): ToolCallEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: "tool.call",
+      name,
+      args: redactEventValue(args),
+    };
+  }
+
+  emitToolConfirmAllow(
+    turn: number,
+    kind: "run_command" | "run_background",
+    payload: { command: string },
+  ): ToolConfirmAllowEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: "tool.confirm.allow",
+      kind,
+      payload: redactEventValue(payload),
+    };
+  }
+
+  emitToolConfirmDeny(
+    turn: number,
+    kind: "run_command" | "run_background",
+    payload: { command: string },
+    denyContext?: string,
+  ): ToolConfirmDenyEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: "tool.confirm.deny",
+      kind,
+      payload: redactEventValue(payload),
+      denyContext,
+    };
+  }
+
+  emitToolConfirmAlwaysAllow(
+    turn: number,
+    kind: "run_command" | "run_background",
+    payload: { command: string },
+    prefix: string,
+  ): ToolConfirmAlwaysAllowEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: "tool.confirm.always_allow",
+      kind,
+      payload: redactEventValue(payload),
+      prefix,
     };
   }
 

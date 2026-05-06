@@ -21,6 +21,25 @@ export type ChoiceVerdict =
   | { type: "text"; text: string }
   | { type: "cancel" };
 
+export type ToolConfirmationAuditEvent =
+  | {
+      type: "tool.confirm.allow";
+      kind: "run_command" | "run_background";
+      payload: { command: string };
+    }
+  | {
+      type: "tool.confirm.deny";
+      kind: "run_command" | "run_background";
+      payload: { command: string };
+      denyContext?: string;
+    }
+  | {
+      type: "tool.confirm.always_allow";
+      kind: "run_command" | "run_background";
+      payload: { command: string };
+      prefix: string;
+    };
+
 interface PauseResponseMap {
   run_command: ConfirmationChoice;
   run_background: ConfirmationChoice;
@@ -48,6 +67,7 @@ export type PauseRequest = {
 };
 
 type GateListener = (request: PauseRequest) => void;
+type AuditListener = (event: ToolConfirmationAuditEvent) => void;
 
 /** Named options for PauseGate.ask() — makes it obvious which field is kind vs payload. */
 export interface PauseAskOpts<K extends PauseKind = PauseKind> {
@@ -59,6 +79,7 @@ export class PauseGate {
   private _nextId = 0;
   private _pending = new Map<number, { resolve: (data: unknown) => void; request: PauseRequest }>();
   private _listeners: Set<GateListener> = new Set();
+  private _auditListener: AuditListener | null = null;
 
   /** Block until the user responds. Takes a named options object so the
    *  kind and payload fields don't get confused at the call site. */
@@ -88,7 +109,12 @@ export class PauseGate {
     const p = this._pending.get(id);
     if (!p) return;
     this._pending.delete(id);
+    this.emitAuditEvent(p.request, data);
     p.resolve(data);
+  }
+
+  setAuditListener(fn: AuditListener | null): void {
+    this._auditListener = fn;
   }
 
   /** Subscribe to new pause requests. Returns an unsubscribe function. */
@@ -103,6 +129,45 @@ export class PauseGate {
   get current(): PauseRequest | null {
     for (const [, p] of this._pending) return p.request;
     return null;
+  }
+
+  private emitAuditEvent(request: PauseRequest, data: unknown): void {
+    if (!this._auditListener) return;
+    if (request.kind !== "run_command" && request.kind !== "run_background") return;
+    if (!data || typeof data !== "object") return;
+    const choice = data as Partial<ConfirmationChoice>;
+    try {
+      switch (choice.type) {
+        case "run_once":
+          this._auditListener({
+            type: "tool.confirm.allow",
+            kind: request.kind,
+            payload: request.payload as { command: string },
+          });
+          break;
+        case "deny":
+          this._auditListener({
+            type: "tool.confirm.deny",
+            kind: request.kind,
+            payload: request.payload as { command: string },
+            denyContext: choice.denyContext,
+          });
+          break;
+        case "always_allow":
+          if (typeof choice.prefix !== "string") return;
+          this._auditListener({
+            type: "tool.confirm.always_allow",
+            kind: request.kind,
+            payload: request.payload as { command: string },
+            prefix: choice.prefix,
+          });
+          break;
+        default:
+          break;
+      }
+    } catch {
+      /* audit path must never break the gate */
+    }
   }
 }
 

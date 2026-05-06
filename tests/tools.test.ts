@@ -19,6 +19,30 @@ describe("ToolRegistry", () => {
     expect(result).toBe("5");
   });
 
+  it("emits tool.call audit events with parsed args", async () => {
+    const reg = new ToolRegistry();
+    const seen: Array<{ name: string; args: Record<string, unknown> }> = [];
+    reg.register({
+      name: "echo",
+      fn: (args: { msg: string; apiKey: string }) => args.msg,
+    });
+    reg.setAuditListener((event) => {
+      seen.push({
+        name: event.name,
+        args: JSON.parse(JSON.stringify(event.args)) as Record<string, unknown>,
+      });
+    });
+
+    await reg.dispatch("echo", '{"msg":"hi","apiKey":"secret-value"}');
+
+    expect(seen).toEqual([
+      {
+        name: "echo",
+        args: { msg: "hi", apiKey: "secret-value" },
+      },
+    ]);
+  });
+
   it("returns structured error for unknown tool", async () => {
     const reg = new ToolRegistry();
     const out = await reg.dispatch("nope", "{}");
