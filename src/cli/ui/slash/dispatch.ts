@@ -17,6 +17,7 @@ import { handlers as sessionsHandlers } from "./handlers/sessions.js";
 import { handlers as skillHandlers } from "./handlers/skill.js";
 import { handlers as themeHandlers } from "./handlers/theme.js";
 import { handlers as webSearchEngineHandlers } from "./handlers/web-search-engine.js";
+import { nearestCommands } from "./nearest.js";
 import type { SlashContext, SlashResult } from "./types.js";
 
 /** Synchronous return — async work fires-and-forgets via `ctx.postInfo` to keep input non-blocking. */
@@ -50,5 +51,10 @@ export function handleSlash(
 ): SlashResult {
   const h = HANDLERS[resolveSlashAlias(cmd)];
   if (h) return h(args, loop, ctx);
+  const suggestions = nearestCommands(cmd, Object.keys(HANDLERS));
+  if (suggestions.length > 0) {
+    const list = suggestions.map((name) => `/${name}`).join(", ");
+    return { unknown: true, info: `unknown command: /${cmd} — did you mean ${list}?` };
+  }
   return { unknown: true, info: `unknown command: /${cmd}  (try /help)` };
 }
