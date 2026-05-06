@@ -105,22 +105,30 @@ export async function searchContent(
       const full = pathMod.join(dir, e.name);
       if (ctx.nameMatch && !ctx.nameMatch(e.name, displayRel(ctx.rootDir, full))) continue;
       if (ctx.isBinaryByName(e.name)) continue;
-      let stat: import("node:fs").Stats;
+      // Open once and reuse the fd so the size check and read bind to the
+      // same inode — avoids the stat→readFile TOCTOU race CodeQL flags.
+      let fh: import("node:fs/promises").FileHandle;
       try {
-        stat = await fs.stat(full);
+        fh = await fs.open(full, "r");
       } catch {
         continue;
       }
-      // Per-file size cap so a 50MB log doesn't dominate the search.
-      // Anything legitimately interesting fits in 2 MB; bigger files
-      // are usually data dumps or generated bundles.
-      if (stat.size > 2 * 1024 * 1024) continue;
       let raw: Buffer;
       try {
-        raw = await fs.readFile(full);
+        const st = await fh.stat();
+        // Per-file size cap so a 50MB log doesn't dominate the search.
+        // Anything legitimately interesting fits in 2 MB; bigger files
+        // are usually data dumps or generated bundles.
+        if (st.size > 2 * 1024 * 1024) {
+          await fh.close();
+          continue;
+        }
+        raw = await fh.readFile();
       } catch {
+        await fh.close().catch(() => {});
         continue;
       }
+      await fh.close();
       // Content-based binary sniff: NUL byte in the first 8KB. Catches
       // binaries with .json or .txt extensions (yes, this happens).
       const firstNul = raw.indexOf(0);
