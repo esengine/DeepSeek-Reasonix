@@ -5,9 +5,9 @@ import {
   fmtAgo,
   listCheckpoints,
   restoreCheckpoint,
-} from "../../../../code/checkpoints.js";
-import type { EditMode } from "../../../../config.js";
-import { t } from "../../../../i18n/index.js";
+} from "@/code/checkpoints.js";
+import type { EditMode } from "@/config.js";
+import { t } from "@/i18n/index.js";
 import { parseEditIndices } from "../../edit-history.js";
 import type { SlashHandler } from "../dispatch.js";
 import { runGitCommit, stripOuterQuotes } from "../helpers.js";

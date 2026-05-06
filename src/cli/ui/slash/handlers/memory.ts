@@ -1,10 +1,6 @@
-import { t } from "../../../../i18n/index.js";
-import {
-  PROJECT_MEMORY_FILE,
-  memoryEnabled,
-  readProjectMemory,
-} from "../../../../memory/project.js";
-import { type MemoryScope, MemoryStore } from "../../../../memory/user.js";
+import { t } from "@/i18n/index.js";
+import { PROJECT_MEMORY_FILE, memoryEnabled, readProjectMemory } from "@/memory/project.js";
+import { type MemoryScope, MemoryStore } from "@/memory/user.js";
 import type { SlashHandler } from "../dispatch.js";
 import { resolveMemoryTarget } from "../helpers.js";
 

@@ -1,6 +1,6 @@
 import { basename } from "node:path";
-import { listPlanArchives, loadPlanState, relativeTime } from "../../../../code/plan-store.js";
-import { t } from "../../../../i18n/index.js";
+import { listPlanArchives, loadPlanState, relativeTime } from "@/code/plan-store.js";
+import { t } from "@/i18n/index.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const plans: SlashHandler = (_args, loop) => {

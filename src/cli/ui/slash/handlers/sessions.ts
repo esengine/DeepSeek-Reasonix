@@ -1,5 +1,5 @@
-import { t } from "../../../../i18n/index.js";
-import { deleteSession, listSessions, renameSession } from "../../../../memory/session.js";
+import { t } from "@/i18n/index.js";
+import { deleteSession, listSessions, renameSession } from "@/memory/session.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const sessions: SlashHandler = () => ({ openSessionsPicker: true });

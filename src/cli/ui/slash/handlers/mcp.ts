@@ -1,5 +1,5 @@
-import { t } from "../../../../i18n/index.js";
-import type { CacheFirstLoop } from "../../../../loop.js";
+import { t } from "@/i18n/index.js";
+import type { CacheFirstLoop } from "@/loop.js";
 import { applyMcpAppend } from "../../mcp-append.js";
 import { toggleMcpDisabled } from "../../mcp-disable.js";
 import { slashHealthBadge } from "../../mcp-health.js";

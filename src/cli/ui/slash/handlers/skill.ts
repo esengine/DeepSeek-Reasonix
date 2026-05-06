@@ -1,5 +1,5 @@
-import { t } from "../../../../i18n/index.js";
-import { SkillStore } from "../../../../skills.js";
+import { t } from "@/i18n/index.js";
+import { SkillStore } from "@/skills.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const skill: SlashHandler = (args, _loop, ctx) => {

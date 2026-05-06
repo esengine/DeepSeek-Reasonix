@@ -1,10 +1,10 @@
-import { t } from "../../../../i18n/index.js";
+import { t } from "@/i18n/index.js";
 import {
   DEEPSEEK_CONTEXT_TOKENS,
   DEEPSEEK_PRICING,
   DEFAULT_CONTEXT_TOKENS,
-} from "../../../../telemetry/stats.js";
-import { countTokens } from "../../../../tokenizer.js";
+} from "@/telemetry/stats.js";
+import { countTokens } from "@/tokenizer.js";
 import { computeCtxBreakdown } from "../../ctx-breakdown.js";
 import type { SlashHandler } from "../dispatch.js";
 import { compactNum, formatToolList } from "../helpers.js";
@@ -208,7 +208,7 @@ const cost: SlashHandler = (args, loop, ctx) => {
   return {};
 };
 
-function estimateCost(userText: string, loop: import("../../../../loop.js").CacheFirstLoop) {
+function estimateCost(userText: string, loop: import("@/loop.js").CacheFirstLoop) {
   const pricing = DEEPSEEK_PRICING[loop.model];
   if (!pricing) {
     return { info: t("handlers.observability.costNoPricing", { model: loop.model }) };

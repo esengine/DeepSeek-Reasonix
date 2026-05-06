@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import * as pathMod from "node:path";
-import { t } from "../../../../i18n/index.js";
+import { t } from "@/i18n/index.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const INIT_PROMPT = [

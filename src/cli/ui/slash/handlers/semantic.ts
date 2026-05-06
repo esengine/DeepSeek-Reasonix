@@ -2,9 +2,9 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { probeOllama } from "../../../../index/semantic/embedding.js";
-import { t } from "../../../../index/semantic/i18n.js";
-import { findOllamaBinary } from "../../../../index/semantic/ollama-launcher.js";
+import { probeOllama } from "@/index/semantic/embedding.js";
+import { t } from "@/index/semantic/i18n.js";
+import { findOllamaBinary } from "@/index/semantic/ollama-launcher.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const semantic: SlashHandler = (_args, _loop, ctx) => {

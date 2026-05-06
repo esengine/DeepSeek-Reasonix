@@ -4,10 +4,10 @@ import {
   type ResolvedHook,
   globalSettingsPath,
   projectSettingsPath,
-} from "../../../../hooks.js";
-import { t } from "../../../../i18n/index.js";
-import { aggregateUsage, defaultUsageLogPath, readUsageLog } from "../../../../telemetry/usage.js";
-import { VERSION, compareVersions, isNpxInstall } from "../../../../version.js";
+} from "@/hooks.js";
+import { t } from "@/i18n/index.js";
+import { aggregateUsage, defaultUsageLogPath, readUsageLog } from "@/telemetry/usage.js";
+import { VERSION, compareVersions, isNpxInstall } from "@/version.js";
 import { runDoctorChecks } from "../../../commands/doctor.js";
 import { renderDashboard } from "../../../commands/stats.js";
 import type { SlashHandler } from "../dispatch.js";

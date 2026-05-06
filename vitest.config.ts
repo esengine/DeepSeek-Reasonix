@@ -9,7 +9,10 @@ const inkCompatPath = resolve(here, "src/renderer/ink-compat/index.ts");
 
 export default defineConfig({
   resolve: {
-    alias: { ink: inkCompatPath },
+    alias: {
+      ink: inkCompatPath,
+      "@": resolve(here, "src"),
+    },
   },
   test: {
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],

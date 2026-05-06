@@ -1,5 +1,5 @@
-import { t } from "../../../../i18n/index.js";
-import type { JobRecord } from "../../../../tools/jobs.js";
+import { t } from "@/i18n/index.js";
+import type { JobRecord } from "@/tools/jobs.js";
 import type { SlashHandler } from "../dispatch.js";
 
 function statusIcon(r: JobRecord): string {

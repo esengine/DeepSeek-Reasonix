@@ -1,4 +1,4 @@
-import { t } from "../../../../i18n/index.js";
+import { t } from "@/i18n/index.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const dashboard: SlashHandler = (args, _loop, ctx) => {

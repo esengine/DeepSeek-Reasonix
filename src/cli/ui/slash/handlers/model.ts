@@ -1,5 +1,5 @@
-import { saveReasoningEffort } from "../../../../config.js";
-import { t } from "../../../../i18n/index.js";
+import { saveReasoningEffort } from "@/config.js";
+import { t } from "@/i18n/index.js";
 import { PRESETS } from "../../presets.js";
 import type { SlashHandler } from "../dispatch.js";
 

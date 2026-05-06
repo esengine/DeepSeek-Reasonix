@@ -3,9 +3,9 @@ import {
   clearProjectShellAllowed,
   loadProjectShellAllowed,
   removeProjectShellAllowed,
-} from "../../../../config.js";
-import { t } from "../../../../i18n/index.js";
-import { BUILTIN_ALLOWLIST } from "../../../../tools/shell.js";
+} from "@/config.js";
+import { t } from "@/i18n/index.js";
+import { BUILTIN_ALLOWLIST } from "@/tools/shell.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const permissions: SlashHandler = (args, _loop, ctx) => {

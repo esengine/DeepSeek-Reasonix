@@ -1,10 +1,5 @@
-import {
-  getSupportedLanguages,
-  notifyLanguageChange,
-  setLanguage,
-  t,
-} from "../../../../i18n/index.js";
-import type { LanguageCode } from "../../../../i18n/types.js";
+import { getSupportedLanguages, notifyLanguageChange, setLanguage, t } from "@/i18n/index.js";
+import type { LanguageCode } from "@/i18n/types.js";
 import type { SlashHandler } from "../dispatch.js";
 
 export const handlers: Record<string, SlashHandler> = {
