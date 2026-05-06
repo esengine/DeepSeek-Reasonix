@@ -35,7 +35,7 @@ import { doctorCommand } from "./commands/doctor.js";
 import { eventsCommand } from "./commands/events.js";
 import { indexCommand } from "./commands/index.js";
 import { mcpBrowseCommand } from "./commands/mcp-browse.js";
-import { mcpInspectCommand } from "./commands/mcp-inspect.js";
+import { formatMcpInspectFailure, mcpInspectCommand } from "./commands/mcp-inspect.js";
 import { mcpInstallCommand, mcpListCommand, mcpSearchCommand } from "./commands/mcp.js";
 import { pruneSessionsCommand } from "./commands/prune-sessions.js";
 import { replayCommand } from "./commands/replay.js";
@@ -414,7 +414,7 @@ mcp
     try {
       await mcpInspectCommand({ spec, json: !!opts.json });
     } catch (err) {
-      process.stderr.write(`mcp inspect failed: ${(err as Error).message}\n`);
+      process.stderr.write(`mcp inspect failed: ${formatMcpInspectFailure(err)}\n`);
       process.exit(1);
     }
   });

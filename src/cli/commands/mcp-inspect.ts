@@ -35,6 +35,32 @@ export async function mcpInspectCommand(opts: McpInspectOptions): Promise<void> 
   }
 }
 
+export function formatMcpInspectFailure(err: unknown): string {
+  const error = err instanceof Error ? err : new Error(String(err));
+  const message = error.message;
+  const code = (error as NodeJS.ErrnoException).code;
+
+  if (code === "ENOENT") {
+    const command = message.match(/^spawn\s+([^\s]+)\s+ENOENT$/)?.[1] ?? "the command";
+    return `${message} — try: install or verify \`${command}\`, then check the MCP spec's command spelling`;
+  }
+
+  if (code === "ECONNREFUSED") {
+    const target = message.match(/\b(https?:\/\/\S+|\d+\.\d+\.\d+\.\d+:\d+|localhost:\d+)\b/i)?.[1];
+    return `${message} — try: confirm ${target ?? "the MCP server"} is running and the host/port match the spec`;
+  }
+
+  if (/^MCP request initialize \(id=\d+\) timed out after \d+ms$/.test(message)) {
+    return `${message} — try: confirm the target speaks MCP and completes the handshake before the request timeout`;
+  }
+
+  if (/^(empty MCP spec|MCP spec ".*" has name but no command)/.test(message)) {
+    return `${message} — try: pass \`name=command args\` or an http(s):// URL`;
+  }
+
+  return message;
+}
+
 function formatReport(nsName: string, r: InspectionReport): string {
   const lines: string[] = [];
   lines.push(`MCP server [${nsName}]`);

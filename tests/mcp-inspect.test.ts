@@ -1,6 +1,7 @@
 /** inspectMcpServer — runs against the fake transport. */
 
 import { describe, expect, it } from "vitest";
+import { formatMcpInspectFailure } from "../src/cli/commands/mcp-inspect.js";
 import { McpClient } from "../src/mcp/client.js";
 import { inspectMcpServer } from "../src/mcp/inspect.js";
 import type { McpTransport } from "../src/mcp/stdio.js";
@@ -221,5 +222,43 @@ describe("McpClient: initialize records serverInfo + protocolVersion + instructi
     await client.initialize();
     expect(client.serverInstructions).toBeUndefined();
     await client.close();
+  });
+});
+
+describe("formatMcpInspectFailure", () => {
+  it("adds a command-install hint for ENOENT spawn errors", () => {
+    const err = Object.assign(new Error("spawn npx-typo ENOENT"), { code: "ENOENT" });
+    expect(formatMcpInspectFailure(err)).toBe(
+      "spawn npx-typo ENOENT — try: install or verify `npx-typo`, then check the MCP spec's command spelling",
+    );
+  });
+
+  it("adds a host/port hint for connection refused errors", () => {
+    const err = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8787"), {
+      code: "ECONNREFUSED",
+    });
+    expect(formatMcpInspectFailure(err)).toBe(
+      "connect ECONNREFUSED 127.0.0.1:8787 — try: confirm 127.0.0.1:8787 is running and the host/port match the spec",
+    );
+  });
+
+  it("adds a handshake hint for initialize timeouts", () => {
+    const err = new Error("MCP request initialize (id=1) timed out after 60000ms");
+    expect(formatMcpInspectFailure(err)).toBe(
+      "MCP request initialize (id=1) timed out after 60000ms — try: confirm the target speaks MCP and completes the handshake before the request timeout",
+    );
+  });
+
+  it("adds a spec-shape hint for malformed specs", () => {
+    expect(formatMcpInspectFailure(new Error("empty MCP spec"))).toBe(
+      "empty MCP spec — try: pass `name=command args` or an http(s):// URL",
+    );
+    expect(formatMcpInspectFailure(new Error('MCP spec "fs=" has name but no command'))).toBe(
+      'MCP spec "fs=" has name but no command — try: pass `name=command args` or an http(s):// URL',
+    );
+  });
+
+  it("leaves unknown errors unchanged", () => {
+    expect(formatMcpInspectFailure(new Error("boom"))).toBe("boom");
   });
 });
