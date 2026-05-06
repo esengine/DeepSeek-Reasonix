@@ -67,7 +67,7 @@ import { formatCommandResult, runCommand } from "../../tools/shell.js";
 import { registerSkillTools } from "../../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
 import { webFetch } from "../../tools/web.js";
-import { openTranscriptFile, recordFromLoopEvent, writeRecord } from "../../transcript/log.js";
+import { openTranscriptFile } from "../../transcript/log.js";
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
@@ -97,6 +97,7 @@ import {
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
 import { useScrollback } from "./hooks/useScrollback.js";
+import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
 import {
@@ -1548,14 +1549,7 @@ function AppInner({
 
   const prefixHash = loop.prefix.fingerprint;
 
-  const writeTranscript = useCallback(
-    (ev: LoopEvent) => {
-      const stream = transcriptRef.current;
-      if (!stream) return;
-      writeRecord(stream, recordFromLoopEvent(ev, { model, prefixHash }));
-    },
-    [model, prefixHash],
-  );
+  const writeTranscript = useTranscriptWriter(transcriptRef, model, prefixHash);
 
   /**
    * Toggle plan mode on the local state AND on the ToolRegistry. The
