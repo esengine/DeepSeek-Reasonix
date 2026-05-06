@@ -3,6 +3,58 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.3] — 2026-05-06
+
+**Headline:** USD-account users now see `$` instead of `¥` everywhere
+money is shown in the TUI — wallet balance, turn cost, session cost,
+top-bar cost label, subagent end-event cost suffix, and the UsageCard
+header / body / wallet line. Pre-fix a USD wallet rendered
+`¥0.0352 turn · ¥0.461 session · wallet ¥0.91`; now it renders
+`$0.0308 turn · $0.064 session · wallet $0.91`. The display follows
+the wallet currency reported by the DeepSeek API (`currency: "USD"|"CNY"`),
+not the UI language — a CNY account on an English UI still sees `¥`,
+and vice versa. Originally reported in #278 by @Explosion-Scratch.
+
+**UI / currency:**
+
+- fix(ui): USD wallets render `$` for wallet balance, turn cost, and
+  session cost. State + event schemas now carry `balanceCurrency`
+  through `App.tsx → reducer → StatusBar` so every render site sees
+  the wallet symbol the API reported. Originally drafted by @wviana
+  in #272; the TUI plumbing through state.ts / cards.ts / events.ts /
+  reducer.ts / useScrollback.ts / slash/types.ts was the bulk of the
+  fix.
+- fix(ui): balance color threshold checks USD against the CNY scale
+  (`$0.91 ≈ ¥6.55`) rather than treating `0.91` as `< ¥5 → red`. USD
+  wallets now correctly show yellow at low-but-not-empty balances.
+- fix(ui): `StatsPanel.ChromeRow` cost label and `useSubagent`
+  end-event cost suffix follow the wallet currency too — pre-fix
+  these always rendered `$`. (#313)
+- refactor(ui): seven currency helpers in `theme/tokens.ts`
+  (`formatCNY` / `formatBalance` / `formatBalanceLabel` /
+  `formatWalletDisplay` / `formatCost` / `balanceColorCny` /
+  `balanceColorForBalance`) collapsed to three: `formatBalance`,
+  `formatCost`, `balanceColor`. Undefined currency defaults to CNY
+  (matches pre-fix unconditional `¥`) so the transient first-turn
+  case where balance arrived but currency hasn't is consistent.
+- chore(ui): remove orphan `ChromeBar.tsx` (258 lines). `App.tsx`
+  mounts `StatsPanel`'s diverged `ChromeRow`, which is the bar users
+  actually see. The two formatter helpers ChromeBar once owned now
+  live in `theme/tokens.ts`. (#314)
+
+**Loop:**
+
+- refactor(loop): `loop.ts` 1331 → 1219 (−112). Three sibling files
+  under `src/loop/`: `messages.ts` (pure ChatMessage builders),
+  `turn-failure-tracker.ts` (per-turn failure count + threshold
+  tipping), `force-summary.ts` (forced-summary generator behind a
+  small DI context). Continues the #308 / #309 cadence — small
+  per-helper extractions, no behavior change. (#311)
+
+**Known follow-up:** `SessionPicker` still hardcodes `¥` for
+per-session cost in the session-history list, tracked in #312
+(good-first-issue).
+
 ## [0.25.1] — 2026-05-05
 
 **Headline:** `run_command` learns the four common shell chain
