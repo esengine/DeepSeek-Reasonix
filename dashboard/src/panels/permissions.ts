@@ -122,8 +122,8 @@ export function PermissionsPanel() {
       }
 
       <div class="chips">
-        <span class="chip-f active">${t("permissions.project")} <span class="ct">${p.project.length}</span></span>
-        <span class="chip-f">${t("permissions.builtin")} <span class="ct">${p.builtin.length}</span></span>
+        <span class="chip-f static active">${t("permissions.project")} <span class="ct">${p.project.length}</span></span>
+        <span class="chip-f static">${t("permissions.builtin")} <span class="ct">${p.builtin.length}</span></span>
       </div>
 
       ${

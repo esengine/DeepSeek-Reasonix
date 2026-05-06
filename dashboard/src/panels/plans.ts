@@ -37,6 +37,7 @@ export function PlansPanel() {
   const { data, error, loading } = usePoll<PlansData>("/plans", 8000);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   const [filter, setFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "done">("all");
 
   if (loading && !data)
     return html`<div class="card" style="color:var(--fg-3)">${t("plans.loading")}</div>`;
@@ -48,13 +49,19 @@ export function PlansPanel() {
       ${t("plans.noPlans")}
     </div>`;
 
+  const statusFiltered =
+    statusFilter === "all"
+      ? plans
+      : statusFilter === "active"
+        ? plans.filter((p) => p.completionRatio > 0 && p.completionRatio < 1)
+        : plans.filter((p) => p.completionRatio >= 1);
   const filtered = filter.trim()
-    ? plans.filter(
+    ? statusFiltered.filter(
         (p) =>
           p.session.toLowerCase().includes(filter.toLowerCase()) ||
           (p.summary ?? "").toLowerCase().includes(filter.toLowerCase()),
       )
-    : plans;
+    : statusFiltered;
 
   const open = openIdx !== null ? plans[openIdx] : null;
 
@@ -71,12 +78,21 @@ export function PlansPanel() {
           />
         </div>
         <div class="chips" style="padding:0 12px 8px">
-          <span class="chip-f active">${t("common.all")} <span class="ct">${plans.length}</span></span>
-          <span class="chip-f">
+          <span
+            class=${`chip-f ${statusFilter === "all" ? "active" : ""}`}
+            onClick=${() => setStatusFilter("all")}
+          >${t("common.all")} <span class="ct">${plans.length}</span></span>
+          <span
+            class=${`chip-f ${statusFilter === "active" ? "active" : ""}`}
+            onClick=${() => setStatusFilter("active")}
+          >
             ${t("plans.active")}
             <span class="ct">${plans.filter((p) => p.completionRatio > 0 && p.completionRatio < 1).length}</span>
           </span>
-          <span class="chip-f">
+          <span
+            class=${`chip-f ${statusFilter === "done" ? "active" : ""}`}
+            onClick=${() => setStatusFilter("done")}
+          >
             ${t("plans.done")} <span class="ct">${plans.filter((p) => p.completionRatio >= 1).length}</span>
           </span>
         </div>

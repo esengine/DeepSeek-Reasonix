@@ -179,13 +179,13 @@ export function SemanticPanel() {
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px;align-items:start">
       <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
         <div class="chips">
-          <span class=${`chip-f ${idx?.exists ? "active" : ""}`}>
+          <span class=${`chip-f static ${idx?.exists ? "active" : ""}`}>
             ${idx?.exists ? t("semantic.indexBuilt") : t("semantic.noIndex")}
           </span>
           ${
             ready
-              ? html`<span class="chip-f" style="border-color:var(--c-ok);color:var(--c-ok)">${t("semantic.ready")}</span>`
-              : html`<span class="chip-f" style="border-color:var(--c-warn);color:var(--c-warn)">${t("semantic.setupNeeded")}</span>`
+              ? html`<span class="chip-f static" style="border-color:var(--c-ok);color:var(--c-ok)">${t("semantic.ready")}</span>`
+              : html`<span class="chip-f static" style="border-color:var(--c-warn);color:var(--c-warn)">${t("semantic.setupNeeded")}</span>`
           }
         </div>
         ${info ? html`<div><span class="pill info">${info}</span></div>` : null}
@@ -730,7 +730,7 @@ function ChipFormRow({
       <div style="display:flex;flex-wrap:wrap;gap:4px">
         ${value.map(
           (e) => html`
-            <span class="chip-f">
+            <span class="chip-f static">
               <span>${e}</span>
               <span class="x" style="cursor:pointer" onClick=${() => remove(e)} title="remove">×</span>
             </span>

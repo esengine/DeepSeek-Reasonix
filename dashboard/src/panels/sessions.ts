@@ -68,7 +68,7 @@ export function SessionsPanel() {
           />
         </div>
         <div class="chips" style="padding:0 12px 8px">
-          <span class="chip-f active">${t("common.all")} <span class="ct">${sessions.length}</span></span>
+          <span class="chip-f static active">${t("common.all")} <span class="ct">${sessions.length}</span></span>
         </div>
         <div class="ssl-rows">
           ${filtered.map(

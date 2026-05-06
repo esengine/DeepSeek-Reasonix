@@ -174,8 +174,8 @@ export function UsagePanel() {
   return html`
     <div style="display:flex;flex-direction:column;gap:6px">
       <div class="chips">
-        <span class="chip-f active">${t("usage.records", { count: u.recordCount.toLocaleString() })}</span>
-        <span class="chip-f">${u.logSize}</span>
+        <span class="chip-f static active">${t("usage.records", { count: u.recordCount.toLocaleString() })}</span>
+        <span class="chip-f static">${u.logSize}</span>
       </div>
 
       ${

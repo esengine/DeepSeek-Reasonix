@@ -812,6 +812,9 @@ main { padding: 32px 40px 60px 32px; min-width: 0; }
 }
 .chip-f:hover { background: var(--bg-hover); color: var(--fg-1); }
 .chip-f.active { color: var(--c-brand); border-color: var(--c-brand); background: rgba(121,192,255,.08); }
+.chip-f.static { cursor: default; }
+.chip-f.static:hover { background: var(--bg-elev); color: var(--fg-2); }
+.chip-f.static.active:hover { color: var(--c-brand); background: rgba(121,192,255,.08); }
 .chip-f .ct { color: var(--fg-4); font-size: 10px; }
 .chip-f.active .ct { color: var(--c-brand); }
 .chip-f .x { color: var(--fg-4); padding: 0 2px; }

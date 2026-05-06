@@ -68,6 +68,7 @@ export function HooksPanel() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
+  const [eventFilter, setEventFilter] = useState<string>("all");
 
   const load = useCallback(async () => {
     try {
@@ -129,19 +130,31 @@ export function HooksPanel() {
     data.events.length > 0
       ? data.events
       : Array.from(new Set(matrixRows.flatMap((r) => Object.keys(r.cells))));
+  const visibleRows =
+    eventFilter === "all"
+      ? matrixRows
+      : matrixRows.filter((r) => r.cells[eventFilter]?.on);
   const gridCols = `220px repeat(${Math.max(events.length, 1)}, minmax(0, 1fr))`;
 
   return html`
     <div style="display:flex;flex-direction:column;gap:6px">
       <div class="chips">
-        <span class="chip-f active">${t("hooks.resolved")} <span class="ct">${data.resolved.length}</span></span>
-        ${data.events.map((ev) => html`<span class="chip-f">${ev}</span>`)}
+        <span
+          class=${`chip-f ${eventFilter === "all" ? "active" : ""}`}
+          onClick=${() => setEventFilter("all")}
+        >${t("hooks.resolved")} <span class="ct">${data.resolved.length}</span></span>
+        ${data.events.map(
+          (ev) => html`<span
+            class=${`chip-f ${eventFilter === ev ? "active" : ""}`}
+            onClick=${() => setEventFilter(ev)}
+          >${ev}</span>`,
+        )}
       </div>
       ${info ? html`<div><span class="pill ok">${info}</span></div>` : null}
       ${error ? html`<div class="card accent-err">${error}</div>` : null}
 
       ${sectionH3(t("hooks.eventMatrix"), t("hooks.matrixSub", { scripts: matrixRows.length, s: matrixRows.length === 1 ? "" : "s", events: events.length }))}${
-        matrixRows.length === 0
+        visibleRows.length === 0
           ? html`<div class="card" style="color:var(--fg-3)">
               ${t("hooks.noHooks")}
             </div>`
@@ -152,7 +165,7 @@ export function HooksPanel() {
                   <div>${t("hooks.colScript")}</div>
                   ${events.map((ev) => html`<div>${ev}</div>`)}
                 </div>
-                ${matrixRows.map(
+                ${visibleRows.map(
                   (r) => html`
                     <div class="row" style=${`grid-template-columns:${gridCols}`}>
                       <div class="cell" title=${r.command}>

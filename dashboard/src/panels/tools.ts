@@ -37,8 +37,8 @@ export function ToolsPanel() {
   return html`
     <div style="display:flex;flex-direction:column;gap:14px">
       <div class="chips">
-        <span class="chip-f active">${t("common.all")} <span class="ct">${d.total}</span></span>
-        ${d.planMode ? html`<span class="chip-f" style="border-color:var(--c-warn);color:var(--c-warn)">${t("tools.planMode")}</span>` : null}
+        <span class="chip-f static active">${t("common.all")} <span class="ct">${d.total}</span></span>
+        ${d.planMode ? html`<span class="chip-f static" style="border-color:var(--c-warn);color:var(--c-warn)">${t("tools.planMode")}</span>` : null}
       </div>
 
       ${

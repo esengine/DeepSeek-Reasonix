@@ -29,6 +29,7 @@ export function SkillsPanel() {
   const [newName, setNewName] = useState("");
   const [newScope, setNewScope] = useState<"global" | "project">("global");
   const [filter, setFilter] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<"all" | Scope>("all");
 
   const load = useCallback(async () => {
     try {
@@ -120,13 +121,15 @@ export function SkillsPanel() {
     ...data.global.map((s) => ({ scope: "global" as Scope, ...s })),
     ...data.builtin.map((s) => ({ scope: "builtin" as Scope, ...s })),
   ];
+  const scopeFiltered =
+    scopeFilter === "all" ? allWith : allWith.filter((s) => s.scope === scopeFilter);
   const filtered = filter.trim()
-    ? allWith.filter(
+    ? scopeFiltered.filter(
         (s) =>
           s.name.toLowerCase().includes(filter.toLowerCase()) ||
           (s.description ?? "").toLowerCase().includes(filter.toLowerCase()),
       )
-    : allWith;
+    : scopeFiltered;
 
   return html`
     <div class="sessions-grid">
@@ -141,10 +144,22 @@ export function SkillsPanel() {
           />
         </div>
         <div class="chips" style="padding:0 12px 8px">
-          <span class="chip-f active">${t("common.all")} <span class="ct">${allWith.length}</span></span>
-          <span class="chip-f">${t("skills.project")} <span class="ct">${data.project.length}</span></span>
-          <span class="chip-f">${t("skills.global")} <span class="ct">${data.global.length}</span></span>
-          <span class="chip-f">${t("skills.builtin")} <span class="ct">${data.builtin.length}</span></span>
+          <span
+            class=${`chip-f ${scopeFilter === "all" ? "active" : ""}`}
+            onClick=${() => setScopeFilter("all")}
+          >${t("common.all")} <span class="ct">${allWith.length}</span></span>
+          <span
+            class=${`chip-f ${scopeFilter === "project" ? "active" : ""}`}
+            onClick=${() => setScopeFilter("project")}
+          >${t("skills.project")} <span class="ct">${data.project.length}</span></span>
+          <span
+            class=${`chip-f ${scopeFilter === "global" ? "active" : ""}`}
+            onClick=${() => setScopeFilter("global")}
+          >${t("skills.global")} <span class="ct">${data.global.length}</span></span>
+          <span
+            class=${`chip-f ${scopeFilter === "builtin" ? "active" : ""}`}
+            onClick=${() => setScopeFilter("builtin")}
+          >${t("skills.builtin")} <span class="ct">${data.builtin.length}</span></span>
         </div>
 
         <div style="padding:0 12px 8px;display:flex;gap:6px;flex-wrap:wrap">

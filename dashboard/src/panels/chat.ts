@@ -559,7 +559,7 @@ export function ChatPanel() {
     <div class="chat-shell">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
         <div class="chips" style="padding:0">
-          <span class="chip-f active">${MODE === "attached" ? t("chat.modeMirror") : t("chat.modeView")}</span>
+          <span class="chip-f static active">${MODE === "attached" ? t("chat.modeMirror") : t("chat.modeView")}</span>
         </div>
         <div class="header-pickers" style="margin-left:auto">
           ${
