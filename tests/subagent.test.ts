@@ -446,6 +446,98 @@ describe("registerSubagentTool", () => {
     const parsed = JSON.parse(out);
     expect(parsed.tool_iters).toBe(4);
   });
+
+  it("type=explore uses the explore persona and 20-iter budget", async () => {
+    const seenSystems: string[] = [];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async (_url: any, init: any) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        const sys = (body.messages ?? []).find((m: any) => m.role === "system");
+        if (sys) seenSystems.push(sys.content);
+        return new Response(
+          JSON.stringify({
+            choices: [
+              { index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as any,
+    });
+    const parent = new ToolRegistry();
+    registerSubagentTool(parent, { client });
+    await parent.dispatch(
+      "spawn_subagent",
+      JSON.stringify({ task: "find all callers of foo()", type: "explore" }),
+    );
+    expect(seenSystems[0]).toMatch(/exploration subagent/);
+  });
+
+  it("type=verify caps the child loop at the verify budget (8)", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    const client = makeClient(makeToolCallResponses(50));
+    registerSubagentTool(parent, { client });
+    const out = await parent.dispatch(
+      "spawn_subagent",
+      JSON.stringify({ task: "verify foo", type: "verify" }),
+    );
+    const parsed = JSON.parse(out);
+    expect(parsed.tool_iters).toBe(8);
+  });
+
+  it("explicit max_iters overrides the type's default budget", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    const client = makeClient(makeToolCallResponses(50));
+    registerSubagentTool(parent, { client });
+    const out = await parent.dispatch(
+      "spawn_subagent",
+      JSON.stringify({ task: "verify foo", type: "verify", max_iters: 4 }),
+    );
+    const parsed = JSON.parse(out);
+    expect(parsed.tool_iters).toBe(4);
+  });
+
+  it("explicit system overrides the type's default prompt", async () => {
+    const seenSystems: string[] = [];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async (_url: any, init: any) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        const sys = (body.messages ?? []).find((m: any) => m.role === "system");
+        if (sys) seenSystems.push(sys.content);
+        return new Response(
+          JSON.stringify({
+            choices: [
+              { index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as any,
+    });
+    const parent = new ToolRegistry();
+    registerSubagentTool(parent, { client });
+    await parent.dispatch(
+      "spawn_subagent",
+      JSON.stringify({ task: "go", type: "explore", system: "I am a custom prompt." }),
+    );
+    expect(seenSystems[0]).toBe("I am a custom prompt.");
+  });
+
+  it("omitted type leaves the default persona and budget unchanged", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    const client = makeClient(makeToolCallResponses(50));
+    registerSubagentTool(parent, { client, maxToolIters: 5 });
+    const out = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "loop please" }));
+    const parsed = JSON.parse(out);
+    expect(parsed.tool_iters).toBe(5);
+  });
 });
 
 describe("forkRegistryExcluding", () => {

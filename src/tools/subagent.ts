@@ -10,6 +10,7 @@ import {
   TUI_FORMATTING_RULES,
 } from "../prompt-fragments.js";
 import { ToolRegistry } from "../tools.js";
+import { SUBAGENT_TYPE_NAMES, getSubagentType } from "./subagent-types.js";
 
 /** Side-channel — subagents run inside a tool-dispatch frame, can't go through parent's `LoopEvent` stream. */
 export interface SubagentEvent {
@@ -386,13 +387,25 @@ export function registerSubagentTool(
           type: "integer",
           minimum: MIN_MAX_ITERS,
           maximum: MAX_MAX_ITERS,
-          description: `Cap on the subagent's tool-call iterations. Default 16. Lower (e.g. 6-8) for narrow verify-style tasks; higher (e.g. 24) for broad exploration. Hard range: ${MIN_MAX_ITERS}-${MAX_MAX_ITERS}; out-of-range values are clamped to the nearest end.`,
+          description: `Cap on the subagent's tool-call iterations. Default 16 (or the type's default when 'type' is set). Hard range: ${MIN_MAX_ITERS}-${MAX_MAX_ITERS}; out-of-range values are clamped to the nearest end.`,
+        },
+        type: {
+          type: "string",
+          enum: [...SUBAGENT_TYPE_NAMES],
+          description:
+            "Optional persona shaping the system prompt and default iter budget. 'explore' = wide-net read-only investigation (20-iter budget, returns a distilled answer). 'verify' = narrow yes/no check with evidence (8-iter budget). Omit when supplying your own 'system' prompt or when the default generic persona fits. Caller-supplied 'system' / 'max_iters' override the type's defaults.",
         },
       },
       required: ["task"],
     },
     fn: async (
-      args: { task?: unknown; system?: unknown; model?: unknown; max_iters?: unknown },
+      args: {
+        task?: unknown;
+        system?: unknown;
+        model?: unknown;
+        max_iters?: unknown;
+        type?: unknown;
+      },
       ctx,
     ) => {
       const task = typeof args.task === "string" ? args.task.trim() : "";
@@ -401,10 +414,11 @@ export function registerSubagentTool(
           error: "spawn_subagent requires a non-empty 'task' argument.",
         });
       }
+      const typeSpec = getSubagentType(args.type);
       const system =
         typeof args.system === "string" && args.system.trim().length > 0
           ? args.system.trim()
-          : defaultSystem;
+          : (typeSpec?.system ?? defaultSystem);
       const model =
         typeof args.model === "string" && args.model.startsWith("deepseek-")
           ? args.model
@@ -416,7 +430,7 @@ export function registerSubagentTool(
         system,
         task,
         model,
-        maxToolIters: callerIters ?? maxToolIters,
+        maxToolIters: callerIters ?? typeSpec?.maxToolIters ?? maxToolIters,
         maxResultChars,
         sink,
         parentSignal: ctx?.signal,
