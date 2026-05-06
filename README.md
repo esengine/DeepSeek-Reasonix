@@ -46,6 +46,49 @@
 
 <br/>
 
+## Web search
+
+Reasonix includes `web_search` and `web_fetch` tools. By default it uses **Mojeek** (no setup required). You can switch to a **self-hosted SearXNG** instance for better coverage (93+ engines including Google, Bing, DuckDuckGo, Brave).
+
+### Switching engines (persists to disk)
+
+The `/web-search-engine` slash command writes your choice to `~/.reasonix/config.json` immediately — it survives restarts:
+
+```
+/web-search-engine mojeek              # default, no external deps
+/web-search-engine searxng             # SearXNG at http://localhost:8080
+/web-search-engine searxng http://192.168.1.100:8888  # custom endpoint
+```
+
+Equivalent `~/.reasonix/config.json`:
+
+```json
+{
+  "webSearchEngine": "searxng",
+  "webSearchEndpoint": "http://localhost:8080"
+}
+```
+
+The tool picks up the change on the next call — no restart needed.
+
+### Starting SearXNG
+
+```sh
+podman run -d --replace --name searxng -p 8080:8080 docker.io/searxng/searxng
+# or: docker run -d -p 8080:8080 searxng/searxng
+```
+
+Verify it's running:
+
+```sh
+curl http://localhost:8080/search?q=test
+# → HTML search results page
+```
+
+> **Note:** The endpoint must include the protocol (`http://`). `localhost:8080` alone will fail — the tool will show a clear error telling you to install SearXNG if the server is unreachable.
+
+<br/>
+
 ## Install
 
 ```bash
@@ -90,8 +133,10 @@ Click any card to read the full architecture writeup → [Pillar 1](./docs/ARCHI
 | Cost profile                      | **low per task** | premium           | subscription + use  | varies             |
 | DeepSeek prefix-cache             | **engineered**   | not applicable    | not applicable      | incidental         |
 | Embedded web dashboard            | yes              | —                 | n/a (IDE)           | —                  |
+| Configurable web search engine    | `/web-search-engine` | —             | —                   | —                  |
 | Persistent per-workspace sessions | yes              | partial           | n/a                 | —                  |
 | Plan mode · MCP · hooks · skills  | yes              | yes               | yes                 | partial            |
+| Web search (Mojeek + SearXNG)      | yes              | yes               | yes                 | yes                |
 | Open community development        | yes              | —                 | —                   | yes                |
 
 For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmarks/) — the numbers move with model pricing, so they live with the harness, not in the README.
