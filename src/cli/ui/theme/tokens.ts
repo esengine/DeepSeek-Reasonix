@@ -59,49 +59,32 @@ export type CardTone = keyof typeof CARD;
 /** DeepSeek prices in CNY; our internal table is USD divided by 7.2. Multiply back for display. */
 export const USD_TO_CNY = 7.2;
 
-export function formatCNY(usd: number, fractionDigits = 4): string {
-  const cny = usd * USD_TO_CNY;
-  return `¥${cny.toFixed(fractionDigits)}`;
+const SYMBOL: Record<string, string> = { USD: "$", CNY: "¥" };
+
+/** Format an amount already in `currency`. Undefined currency → CNY (matches pre-fix behavior). */
+export function formatBalance(
+  amount: number,
+  currency?: string,
+  opts?: { fractionDigits?: number; label?: boolean },
+): string {
+  const cur = currency ?? "CNY";
+  const sym = SYMBOL[cur];
+  const digits = opts?.fractionDigits ?? 2;
+  const body = sym ? `${sym}${amount.toFixed(digits)}` : `${cur} ${amount.toFixed(digits)}`;
+  return opts?.label ? `w ${body}` : body;
 }
 
-export function formatBalance(balance: { currency: string; total: number }): string {
-  const sym = balance.currency === "USD" ? "$" : balance.currency === "CNY" ? "¥" : "";
-  return sym
-    ? `${sym}${balance.total.toFixed(2)}`
-    : `${balance.currency} ${balance.total.toFixed(2)}`;
+/** Format an internal USD cost in the wallet's display currency. Undefined currency → CNY. */
+export function formatCost(costUsd: number, currency?: string, fractionDigits = 4): string {
+  const cur = currency ?? "CNY";
+  const amount = cur === "CNY" ? costUsd * USD_TO_CNY : costUsd;
+  return formatBalance(amount, cur, { fractionDigits });
 }
 
-export function formatBalanceLabel(balance: { currency: string; total: number }): string {
-  const sym = balance.currency === "USD" ? "$" : balance.currency === "CNY" ? "¥" : "";
-  const suf = sym ? "" : ` ${balance.currency}`;
-  return `w ${sym}${balance.total.toFixed(2)}${suf}`;
-}
-
-export function formatWalletDisplay(
-  balance: number | undefined,
-  balanceCurrency?: string,
-): string | null {
-  if (balance === undefined) return null;
-  const cur = balanceCurrency ?? "";
-  const sym = cur === "USD" ? "$" : cur === "CNY" ? "¥" : "";
-  if (sym) return `${sym}${balance.toFixed(2)}`;
-  if (cur) return `${cur} ${balance.toFixed(2)}`;
-  return `${balance.toFixed(2)}`;
-}
-
-export function balanceColorCny(cny: number): string {
+/** Threshold color for a wallet balance. USD is converted to CNY before the threshold check. */
+export function balanceColor(amount: number, currency?: string): string {
+  const cny = (currency ?? "CNY") === "USD" ? amount * USD_TO_CNY : amount;
   if (cny < 5) return TONE.err;
   if (cny < 20) return TONE.warn;
   return TONE.brand;
-}
-
-export function formatCost(costUsd: number, balanceCurrency?: string, fractionDigits = 4): string {
-  if (balanceCurrency === "USD") return `$${costUsd.toFixed(fractionDigits)}`;
-  const cny = costUsd * USD_TO_CNY;
-  return `¥${cny.toFixed(fractionDigits)}`;
-}
-
-export function balanceColorForBalance(balance: number, currency: string): string {
-  const cny = currency === "USD" ? balance * USD_TO_CNY : balance;
-  return balanceColorCny(cny);
 }

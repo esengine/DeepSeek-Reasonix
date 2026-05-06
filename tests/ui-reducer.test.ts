@@ -10,15 +10,7 @@ import type { AgentEvent } from "../src/cli/ui/state/events.js";
 import { parseEvent } from "../src/cli/ui/state/events.js";
 import { reduce } from "../src/cli/ui/state/reducer.js";
 import { type AgentState, type SessionInfo, initialState } from "../src/cli/ui/state/state.js";
-import {
-  USD_TO_CNY,
-  balanceColorCny,
-  balanceColorForBalance,
-  formatBalance,
-  formatBalanceLabel,
-  formatCost,
-  formatWalletDisplay,
-} from "../src/cli/ui/theme/tokens.js";
+import { USD_TO_CNY, balanceColor, formatBalance, formatCost } from "../src/cli/ui/theme/tokens.js";
 
 const session: SessionInfo = {
   id: "test-session",
@@ -244,26 +236,29 @@ describe("event schema", () => {
 });
 
 describe("formatBalance", () => {
-  it("formats USD balance with $ sign", () => {
-    expect(formatBalance({ currency: "USD", total: 0.91 })).toBe("$0.91");
+  it("USD → $0.91", () => {
+    expect(formatBalance(0.91, "USD")).toBe("$0.91");
   });
 
-  it("formats CNY balance with ¥ sign", () => {
-    expect(formatBalance({ currency: "CNY", total: 6.55 })).toBe("¥6.55");
+  it("CNY → ¥6.55", () => {
+    expect(formatBalance(6.55, "CNY")).toBe("¥6.55");
   });
 
-  it("formats unknown currency with ISO code suffix", () => {
-    expect(formatBalance({ currency: "EUR", total: 1.23 })).toBe("EUR 1.23");
-  });
-});
-
-describe("formatBalanceLabel", () => {
-  it("formats USD with 'w $' prefix (ChromeBar style)", () => {
-    expect(formatBalanceLabel({ currency: "USD", total: 0.91 })).toBe("w $0.91");
+  it("undefined currency defaults to CNY (matches pre-fix unconditional ¥)", () => {
+    expect(formatBalance(0.91)).toBe("¥0.91");
   });
 
-  it("formats CNY with 'w ¥' prefix (ChromeBar style)", () => {
-    expect(formatBalanceLabel({ currency: "CNY", total: 6.55 })).toBe("w ¥6.55");
+  it("unknown currency falls back to ISO-code prefix", () => {
+    expect(formatBalance(1.23, "EUR")).toBe("EUR 1.23");
+  });
+
+  it("label option produces ChromeBar 'w $0.91' style", () => {
+    expect(formatBalance(0.91, "USD", { label: true })).toBe("w $0.91");
+    expect(formatBalance(6.55, "CNY", { label: true })).toBe("w ¥6.55");
+  });
+
+  it("fractionDigits option overrides the 2-digit default", () => {
+    expect(formatBalance(0.0308, "USD", { fractionDigits: 4 })).toBe("$0.0308");
   });
 });
 
@@ -303,109 +298,39 @@ describe("balance currency in reducer", () => {
   });
 });
 
-// Every test below imports from tokens.ts. They fail when exports are missing.
+describe("balanceColor", () => {
+  // CNY thresholds: < ¥5 → err (red), ¥5-20 → warn (yellow), >= ¥20 → brand (blue).
+  // USD balances are multiplied by USD_TO_CNY before the threshold check.
 
-describe("balanceColorCny (StatusRow:12 - exported from tokens.ts)", () => {
-  // Thresholds: < ¥5 -> err (red), ¥5-20 -> warn (yellow), >= ¥20 -> brand (blue)
-  // Currently a private function in StatusRow.tsx.  The fix must export it from
-  // tokens.ts so both StatusRow and tests can import it.
-
-  it("returns err for < ¥5", () => {
-    expect(balanceColorCny(0)).toBe("#ff8b81"); // TONE.err
-    expect(balanceColorCny(3)).toBe("#ff8b81");
-    expect(balanceColorCny(4.99)).toBe("#ff8b81");
+  it("CNY → threshold checked directly", () => {
+    expect(balanceColor(3, "CNY")).toBe("#ff8b81"); // err
+    expect(balanceColor(8, "CNY")).toBe("#f0b07d"); // warn
+    expect(balanceColor(25, "CNY")).toBe("#79c0ff"); // brand
   });
 
-  it("returns warn for ¥5-20", () => {
-    expect(balanceColorCny(5)).toBe("#f0b07d"); // TONE.warn
-    expect(balanceColorCny(10)).toBe("#f0b07d");
-    expect(balanceColorCny(19.99)).toBe("#f0b07d");
+  it("USD → converted to CNY before threshold check ($0.91 ≈ ¥6.55 → warn)", () => {
+    expect(balanceColor(0.5, "USD")).toBe("#ff8b81"); // ≈ ¥3.60 → err
+    expect(balanceColor(0.91, "USD")).toBe("#f0b07d"); // ≈ ¥6.55 → warn
+    expect(balanceColor(3.0, "USD")).toBe("#79c0ff"); // ≈ ¥21.60 → brand
   });
 
-  it("returns brand for >= ¥20", () => {
-    expect(balanceColorCny(20)).toBe("#79c0ff"); // TONE.brand
-    expect(balanceColorCny(100)).toBe("#79c0ff");
-  });
-});
-
-describe("balanceColorForBalance (currency-aware - new in tokens.ts)", () => {
-  // USD balances must be converted to CNY before threshold check, otherwise
-  // $0.91 would show as red when it's actually ~¥6.55 (should be yellow).
-  // This is the bug on StatusRow:60 - balanceColor receives the raw API number.
-
-  it("USD $0.91 (~¥6.55) -> warn, NOT err", () => {
-    expect(balanceColorForBalance(0.91, "USD")).toBe("#f0b07d");
-  });
-
-  it("USD $0.50 (~¥3.60) -> err", () => {
-    expect(balanceColorForBalance(0.5, "USD")).toBe("#ff8b81");
-  });
-
-  it("USD $3.00 (~¥21.60) -> brand", () => {
-    expect(balanceColorForBalance(3.0, "USD")).toBe("#79c0ff");
-  });
-
-  it("CNY ¥3 -> err", () => {
-    expect(balanceColorForBalance(3, "CNY")).toBe("#ff8b81");
-  });
-
-  it("CNY ¥8 -> warn", () => {
-    expect(balanceColorForBalance(8, "CNY")).toBe("#f0b07d");
-  });
-
-  it("CNY ¥25 -> brand", () => {
-    expect(balanceColorForBalance(25, "CNY")).toBe("#79c0ff");
-  });
-
-  it("unknown currency: treats value as-is (no conversion)", () => {
-    expect(balanceColorForBalance(3, "EUR")).toBe("#ff8b81");
-    expect(balanceColorForBalance(10, "EUR")).toBe("#f0b07d");
-  });
-});
-
-describe("formatWalletDisplay (StatusRow:61, UsageCard:74,95 - new in tokens.ts)", () => {
-  // These three call sites currently hardcode `¥${balance.toFixed(2)}`.
-  // After fix they call formatWalletDisplay(balance, balanceCurrency).
-
-  it("USD balance -> $0.91", () => {
-    expect(formatWalletDisplay(0.91, "USD")).toBe("$0.91");
-  });
-
-  it("CNY balance -> ¥6.55", () => {
-    expect(formatWalletDisplay(6.55, "CNY")).toBe("¥6.55");
-  });
-
-  it("unknown currency: shows ISO code suffix", () => {
-    expect(formatWalletDisplay(1.23, "EUR")).toBe("EUR 1.23");
-  });
-
-  it("undefined currency (legacy): bare number, no symbol", () => {
-    expect(formatWalletDisplay(10.0, undefined)).toBe("10.00");
-  });
-
-  it("undefined balance -> null (hide wallet)", () => {
-    expect(formatWalletDisplay(undefined, "USD")).toBeNull();
+  it("undefined currency defaults to CNY (matches pre-fix behavior)", () => {
+    expect(balanceColor(8)).toBe("#f0b07d");
   });
 });
 
 describe("formatCost (turn/session — currency-aware)", () => {
-  it("USD wallet: cost in $ with no conversion", () => {
+  it("USD wallet: cost in $, no conversion", () => {
     expect(formatCost(0.0308, "USD")).toBe("$0.0308");
-  });
-
-  it("USD wallet: session cost in $", () => {
     expect(formatCost(0.064, "USD", 3)).toBe("$0.064");
   });
 
-  it("CNY wallet: cost in ¥ converted from USD", () => {
+  it("CNY wallet: USD cost multiplied to ¥", () => {
     expect(formatCost(0.0308, "CNY")).toBe("¥0.2218");
-  });
-
-  it("CNY wallet: session cost in ¥", () => {
     expect(formatCost(0.064, "CNY", 3)).toBe("¥0.461");
   });
 
-  it("no wallet (undefined): cost in ¥ (backward compat)", () => {
-    expect(formatCost(0.0308, undefined)).toBe("¥0.2218");
+  it("undefined currency defaults to CNY (backward compat)", () => {
+    expect(formatCost(0.0308)).toBe("¥0.2218");
   });
 });

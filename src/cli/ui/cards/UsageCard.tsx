@@ -4,7 +4,7 @@ import React from "react";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { UsageCard as UsageCardData } from "../state/cards.js";
-import { FG, TONE, formatCNY, formatWalletDisplay } from "../theme/tokens.js";
+import { FG, TONE, formatBalance, formatCost } from "../theme/tokens.js";
 
 const BAR_CELLS = 30;
 
@@ -32,7 +32,7 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
   const reasonRatio = card.tokens.reason / cap;
   const outputRatio = card.tokens.output / cap;
 
-  const headerMeta: string[] = [`turn ${card.turn}`, formatCNY(card.cost)];
+  const headerMeta: string[] = [`turn ${card.turn}`, formatCost(card.cost, card.balanceCurrency)];
   if (card.elapsedMs !== undefined) headerMeta.push(`${(card.elapsedMs / 1000).toFixed(1)}s`);
   return (
     <Card tone={FG.meta}>
@@ -66,12 +66,14 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
       </Box>
       <Box flexDirection="row" gap={1}>
         <Text color={FG.faint}>session</Text>
-        <Text bold color={FG.body}>{`⛁ ${formatCNY(card.sessionCost, 3)}`}</Text>
+        <Text bold color={FG.body}>
+          {`⛁ ${formatCost(card.sessionCost, card.balanceCurrency, 3)}`}
+        </Text>
         {card.balance !== undefined ? (
           <>
             <Text color={FG.faint}>· balance</Text>
             <Text bold color={TONE.brand}>
-              {formatWalletDisplay(card.balance, card.balanceCurrency)}
+              {formatBalance(card.balance, card.balanceCurrency)}
             </Text>
           </>
         ) : null}
@@ -91,11 +93,9 @@ function CompactUsageRow({ card }: { card: UsageCardData }): React.ReactElement 
       </Text>
       <Text color={FG.faint}>· cache</Text>
       <Text color={TONE.ok}>{`${(card.cacheHit * 100).toFixed(0)}%`}</Text>
-      <Text color={FG.faint}>{`· ${formatCNY(card.cost)}${elapsed}`}</Text>
+      <Text color={FG.faint}>{`· ${formatCost(card.cost, card.balanceCurrency)}${elapsed}`}</Text>
       {card.balance !== undefined ? (
-        <Text color={TONE.brand}>
-          {`· ${formatWalletDisplay(card.balance, card.balanceCurrency)}`}
-        </Text>
+        <Text color={TONE.brand}>{`· ${formatBalance(card.balance, card.balanceCurrency)}`}</Text>
       ) : null}
     </Box>
   );
