@@ -8,7 +8,8 @@ import { PlanStepList } from "./PlanStepList.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
 import { useReserveRows } from "./layout/viewport-budget.js";
-import { CARD, TONE } from "./theme/tokens.js";
+import { MarkdownView } from "./markdown-view.js";
+import { CARD, FG, TONE } from "./theme/tokens.js";
 
 export type PlanConfirmChoice = "approve" | "refine" | "revise" | "cancel";
 
@@ -21,9 +22,19 @@ export interface PlanConfirmProps {
   projectRoot?: string;
 }
 
+const PLAN_BODY_PREVIEW_LINES = 24;
+
 function PlanConfirmInner({ plan, steps, onChoose }: PlanConfirmProps) {
   const stepRows = steps?.length ?? 0;
-  useReserveRows("modal", { min: 10, max: Math.max(16, stepRows + 14) });
+  const hasSteps = stepRows > 0;
+  const planLines = plan.split("\n");
+  const truncatedBody = planLines.length > PLAN_BODY_PREVIEW_LINES;
+  const previewBody = truncatedBody ? planLines.slice(0, PLAN_BODY_PREVIEW_LINES).join("\n") : plan;
+  const previewRows = truncatedBody
+    ? PLAN_BODY_PREVIEW_LINES
+    : Math.min(planLines.length, PLAN_BODY_PREVIEW_LINES);
+  const reservedFor = hasSteps ? stepRows : previewRows;
+  useReserveRows("modal", { min: 10, max: Math.max(16, reservedFor + 14) });
 
   const hasOpenQuestions =
     /^#{1,6}\s*(open[-\s]?questions?|risks?|unknowns?|assumptions?|unclear)/im.test(plan) ||
@@ -45,9 +56,20 @@ function PlanConfirmInner({ plan, steps, onChoose }: PlanConfirmProps) {
           </Text>
         </Box>
       ) : null}
-      {steps && steps.length > 0 ? (
+      {hasSteps ? (
         <Box marginBottom={1} flexDirection="column">
-          <PlanStepList steps={steps} />
+          <PlanStepList steps={steps!} />
+        </Box>
+      ) : plan.trim().length > 0 ? (
+        <Box marginBottom={1} flexDirection="column">
+          <MarkdownView text={previewBody} />
+          {truncatedBody ? (
+            <Text color={FG.faint}>
+              {`… ${planLines.length - PLAN_BODY_PREVIEW_LINES} more line${
+                planLines.length - PLAN_BODY_PREVIEW_LINES === 1 ? "" : "s"
+              } above in scrollback`}
+            </Text>
+          ) : null}
         </Box>
       ) : null}
       <SingleSelect
