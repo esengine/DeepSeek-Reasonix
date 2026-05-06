@@ -1,12 +1,15 @@
 /** `/api/skills` — edits files only; loop reloads on /new or restart. `builtin` scope is read-only. */
 
 import {
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -67,10 +70,25 @@ function listSkills(dir: string, scope: "project" | "global"): SkillListEntry[] 
     for (const entry of readdirSync(dir)) {
       if (!SAFE_NAME.test(entry)) continue;
       const skillPath = join(dir, entry, SKILL_FILE);
-      if (!existsSync(skillPath)) continue;
       try {
-        const stat = statSync(skillPath);
-        const raw = readFileSync(skillPath, "utf8");
+        // Open once and reuse the fd so size/mtime/content all bind to
+        // the same inode — closes the exists→stat→read TOCTOU races.
+        const fd = openSync(skillPath, "r");
+        let stat: ReturnType<typeof fstatSync>;
+        let raw: string;
+        try {
+          stat = fstatSync(fd);
+          const buf = Buffer.alloc(stat.size);
+          let read = 0;
+          while (read < stat.size) {
+            const n = readSync(fd, buf, read, stat.size - read, read);
+            if (n <= 0) break;
+            read += n;
+          }
+          raw = buf.toString("utf8", 0, read);
+        } finally {
+          closeSync(fd);
+        }
         const item: SkillListEntry = {
           name: entry,
           scope,

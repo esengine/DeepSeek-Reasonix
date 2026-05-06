@@ -124,11 +124,19 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
     },
     fn: async (args: { path: string; head?: number; tail?: number; range?: string }) => {
       const abs = safePath(args.path);
-      const stat = await fs.stat(abs);
-      if (stat.isDirectory()) {
-        throw new Error(`not a file: ${args.path} (it's a directory)`);
+      // Open once and reuse the fd so the directory check and the read
+      // bind to the same inode — closes the stat→read TOCTOU race.
+      const fh = await fs.open(abs, "r");
+      let raw: Buffer;
+      try {
+        const stat = await fh.stat();
+        if (stat.isDirectory()) {
+          throw new Error(`not a file: ${args.path} (it's a directory)`);
+        }
+        raw = await fh.readFile();
+      } finally {
+        await fh.close();
       }
-      const raw = await fs.readFile(abs);
       if (raw.length > maxReadBytes) {
         const headBytes = raw.slice(0, maxReadBytes).toString("utf8");
         return `${headBytes}\n\n[…truncated ${raw.length - maxReadBytes} bytes — file is ${raw.length} B, cap ${maxReadBytes} B. Retry with head/tail/range for targeted view.]`;

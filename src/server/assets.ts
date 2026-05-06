@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,12 +33,26 @@ const ASSET_DIR = resolveAssetDir();
 const fileCache = new Map<string, { body: string; mtimeMs: number }>();
 
 function loadCachedFile(path: string): string {
-  const stat = statSync(path);
-  const cached = fileCache.get(path);
-  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.body;
-  const body = readFileSync(path, "utf8");
-  fileCache.set(path, { body, mtimeMs: stat.mtimeMs });
-  return body;
+  // Open once and reuse the fd so the mtime check and the read bind to
+  // the same inode — closes the stat→read TOCTOU race.
+  const fd = openSync(path, "r");
+  try {
+    const stat = fstatSync(fd);
+    const cached = fileCache.get(path);
+    if (cached && cached.mtimeMs === stat.mtimeMs) return cached.body;
+    const buf = Buffer.alloc(stat.size);
+    let read = 0;
+    while (read < stat.size) {
+      const n = readSync(fd, buf, read, stat.size - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
+    const body = buf.toString("utf8", 0, read);
+    fileCache.set(path, { body, mtimeMs: stat.mtimeMs });
+    return body;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function loadIndexTemplate(): string {
