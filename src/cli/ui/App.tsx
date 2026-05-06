@@ -14,7 +14,7 @@ import {
   snapshotBeforeEdits,
   toWholeFileEditBlock,
 } from "../../code/edit-blocks.js";
-import { clearPendingEdits, loadPendingEdits, savePendingEdits } from "../../code/pending-edits.js";
+import { clearPendingEdits, loadPendingEdits } from "../../code/pending-edits.js";
 import {
   clearPlanState,
   loadPlanState,
@@ -84,7 +84,7 @@ import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
-import { formatEditResults, partitionEdits } from "./edit-history.js";
+import { formatEditResults } from "./edit-history.js";
 import { loopEventToDashboard } from "./effects/loop-to-dashboard.js";
 import { appendGlobalMemory, appendProjectMemory, detectHashMemory } from "./hash-memory.js";
 import { applySlashResult } from "./hooks/apply-slash-result.js";
@@ -96,6 +96,7 @@ import {
 } from "./hooks/handle-stream-events.js";
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
+import { useCodeMode } from "./hooks/useCodeMode.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
 import { useQuit } from "./hooks/useQuit.js";
@@ -1423,72 +1424,14 @@ function AppInner({
     };
   }, [tools, codeMode, session, recordEdit, armUndoBanner, syncPendingCount, setEditMode]);
 
-  /**
-   * /apply callback — write pending edit blocks to disk, snapshot
-   * beforehand so /undo still works, report per-file results. With
-   * `indices` (1-based) only those blocks are applied; the rest stay
-   * pending so the user can iterate on them. Empty / undefined indices
-   * apply every pending block (the all-or-nothing original behavior).
-   */
-  const codeApply = useCallback(
-    (indices?: readonly number[]): string => {
-      if (!codeMode) return "not in code mode";
-      const blocks = pendingEdits.current;
-      if (blocks.length === 0) {
-        return "nothing pending — the model hasn't proposed edits since the last /apply or /discard.";
-      }
-      const useSubset = indices !== undefined && indices.length > 0;
-      const { selected, remaining } = useSubset
-        ? partitionEdits(blocks, indices)
-        : { selected: blocks, remaining: [] as EditBlock[] };
-      if (selected.length === 0) {
-        return "▸ no edits matched those indices — nothing applied. Use /apply with no args to commit them all.";
-      }
-      const snaps = snapshotBeforeEdits(selected, currentRootDir);
-      const results = applyEditBlocks(selected, currentRootDir);
-      const anyApplied = results.some((r) => r.status === "applied" || r.status === "created");
-      if (anyApplied) recordEdit("review-apply", selected, results, snaps);
-      pendingEdits.current = remaining;
-      if (remaining.length === 0) clearPendingEdits(session ?? null);
-      else savePendingEdits(session ?? null, remaining);
-      syncPendingCount();
-      const tail =
-        remaining.length > 0
-          ? `\n▸ ${remaining.length} edit block(s) still pending — /apply or /discard to clear them.`
-          : "";
-      return formatEditResults(results) + tail;
-    },
-    [codeMode, currentRootDir, session, syncPendingCount, recordEdit],
-  );
-
-  /**
-   * /discard callback — forget the pending edits without touching
-   * disk. With `indices` (1-based) only those blocks are dropped; the
-   * rest stay pending. Empty / undefined indices drop everything.
-   */
-  const codeDiscard = useCallback(
-    (indices?: readonly number[]): string => {
-      const blocks = pendingEdits.current;
-      if (blocks.length === 0) return "nothing pending to discard.";
-      const useSubset = indices !== undefined && indices.length > 0;
-      const { selected, remaining } = useSubset
-        ? partitionEdits(blocks, indices)
-        : { selected: blocks, remaining: [] as EditBlock[] };
-      if (selected.length === 0) {
-        return "▸ no edits matched those indices — nothing discarded.";
-      }
-      pendingEdits.current = remaining;
-      if (remaining.length === 0) clearPendingEdits(session ?? null);
-      else savePendingEdits(session ?? null, remaining);
-      syncPendingCount();
-      const tail =
-        remaining.length > 0
-          ? `  (${remaining.length} block(s) still pending)`
-          : ". Nothing was written to disk.";
-      return `▸ discarded ${selected.length} pending edit block(s)${tail}`;
-    },
-    [session, syncPendingCount],
-  );
+  const { codeApply, codeDiscard } = useCodeMode({
+    codeMode: !!codeMode,
+    pendingEdits,
+    currentRootDir,
+    session: session ?? null,
+    syncPendingCount,
+    recordEdit,
+  });
 
   const prefixHash = loop.prefix.fingerprint;
 
