@@ -23,7 +23,7 @@ export interface ApplySlashResultContext {
   activeLoopRef: MutableRefObject<ActiveLoopShape | null>;
   stopLoop: () => void;
   quitProcess: () => void;
-  promptHistory: MutableRefObject<string[]>;
+  pushHistory: (text: string) => void;
   /** The verbatim text the user typed; used for promptHistory bookkeeping. */
   text: string;
 }
@@ -77,6 +77,6 @@ export function applySlashResult(result: SlashResult, ctx: ApplySlashResultConte
   if (result.resubmit) {
     return { kind: "resubmit", text: result.resubmit };
   }
-  ctx.promptHistory.current.push(ctx.text);
+  ctx.pushHistory(ctx.text);
   return { kind: "consumed" };
 }

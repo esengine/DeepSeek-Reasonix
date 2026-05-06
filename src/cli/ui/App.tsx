@@ -96,6 +96,7 @@ import {
 } from "./hooks/handle-stream-events.js";
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
+import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useScrollback } from "./hooks/useScrollback.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
@@ -613,13 +614,10 @@ function AppInner({
   // so we abort the in-flight turn and let the effect below fire the
   // submit once busy clears.
   const [queuedSubmit, setQueuedSubmit] = useState<string | null>(null);
-  // Shell-style history of user prompts. ↑/↓ while idle walks it;
-  // submit pushes to the end. Cursor -1 = "live input", 0+ = "N turns
-  // back from newest". We don't persist history to disk — sessions
-  // already keep the message log, and cross-session bash-style recall
-  // would need per-project scoping we haven't designed.
-  const promptHistory = useRef<string[]>([]);
-  const historyCursor = useRef<number>(-1);
+  // ↑/↓ recall over a turn-local prompt history. We don't persist to
+  // disk — the session log already keeps the messages, and cross-
+  // session bash-style recall would need per-project scoping.
+  const { recallPrev, recallNext, pushHistory, resetCursor } = useInputRecall(setInput);
   // Disambiguates <Static> keys when a single turn yields multiple assistant_final events.
   const assistantIterCounter = useRef<number>(0);
   // Per-session @url fetch cache. Keyed by stripped URL; same URL
@@ -1349,26 +1347,6 @@ function AppInner({
     // buffer.
   });
 
-  // History recall callbacks passed into PromptInput. Walking the
-  // in-memory `promptHistory` list: ↑ moves backward through prior
-  // prompts (increments historyCursor); ↓ moves forward until we
-  // fall off the end, then resets to empty. No-op when the history
-  // is empty or we're already at the boundary.
-  const recallPrev = useCallback(() => {
-    const hist = promptHistory.current;
-    if (hist.length === 0) return;
-    const nextCursor = Math.min(historyCursor.current + 1, hist.length - 1);
-    historyCursor.current = nextCursor;
-    setInput(hist[hist.length - 1 - nextCursor] ?? "");
-  }, []);
-  const recallNext = useCallback(() => {
-    if (historyCursor.current < 0) return;
-    const hist = promptHistory.current;
-    const nextCursor = historyCursor.current - 1;
-    historyCursor.current = nextCursor;
-    setInput(nextCursor < 0 ? "" : (hist[hist.length - 1 - nextCursor] ?? ""));
-  }, []);
-
   // Edit-gate interceptor. Reroutes `edit_file` / `write_file` tool
   // calls through the review queue (in `review` mode) or the auto-apply
   // snapshot/banner path (in `auto` mode) so the model's tool usage
@@ -2037,7 +2015,7 @@ function AppInner({
       }
 
       setInput("");
-      historyCursor.current = -1;
+      resetCursor();
 
       // Y/N fast-path when edits are pending. One keystroke is all it
       // takes to commit or drop — matches the muscle memory of `git
@@ -2046,7 +2024,7 @@ function AppInner({
       // when nothing's waiting.
       if (codeMode && pendingEdits.current.length > 0 && (text === "y" || text === "n")) {
         log.pushInfo(text === "y" ? codeApply() : codeDiscard());
-        promptHistory.current.push(text);
+        pushHistory(text);
         return;
       }
 
@@ -2059,7 +2037,7 @@ function AppInner({
       if (hashParse?.kind === "memory" || hashParse?.kind === "memory-global") {
         const isGlobal = hashParse.kind === "memory-global";
         const memRoot = currentRootDir;
-        promptHistory.current.push(text);
+        pushHistory(text);
         try {
           const result = isGlobal
             ? appendGlobalMemory(hashParse.note)
@@ -2088,7 +2066,7 @@ function AppInner({
       const bangCmd = detectBangCommand(text);
       if (bangCmd !== null) {
         const bangRoot = currentRootDir;
-        promptHistory.current.push(text);
+        pushHistory(text);
         log.pushUser(text);
         setBusy(true);
         try {
@@ -2120,7 +2098,7 @@ function AppInner({
       if (mcpBrowseMatch) {
         const kind = mcpBrowseMatch[1] as "resource" | "prompt";
         const arg = mcpBrowseMatch[2]?.trim() ?? "";
-        promptHistory.current.push(text);
+        pushHistory(text);
         log.pushUser(text);
         await handleMcpBrowseSlash(kind, arg, liveMcpServers, log);
         return;
@@ -2196,16 +2174,16 @@ function AppInner({
         if (result.openSessionsPicker) {
           setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
           setPendingSessionsPicker(true);
-          promptHistory.current.push(text);
+          pushHistory(text);
           return;
         }
         if (result.openMcpHub) {
           setPendingMcpHub({ tab: result.openMcpHub.tab });
-          promptHistory.current.push(text);
+          pushHistory(text);
           return;
         }
         if (result.openArgPickerFor) {
-          promptHistory.current.push(text);
+          pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
           return;
         }
@@ -2219,7 +2197,7 @@ function AppInner({
           activeLoopRef,
           stopLoop,
           quitProcess,
-          promptHistory,
+          pushHistory,
           text,
         });
         if (outcome.kind === "resubmit") {
@@ -2250,7 +2228,7 @@ function AppInner({
       // Large pastes (stack traces, log dumps, file contents) get a
       // collapsed preview in scrollback; the model still receives the full
       // text below via modelInput.
-      promptHistory.current.push(text);
+      pushHistory(text);
       const pasteDisplay = formatLongPaste(text);
       const userId = log.pushUser(pasteDisplay.displayText);
       broadcastDashboardEvent({ kind: "user", id: userId, text });
@@ -2602,6 +2580,8 @@ function AppInner({
       log,
       agentStore.dispatch,
       mcpRuntime,
+      pushHistory,
+      resetCursor,
     ],
   );
 
