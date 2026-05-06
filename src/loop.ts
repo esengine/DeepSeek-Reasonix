@@ -30,6 +30,24 @@ const NEEDS_PRO_MARKER_RE = /^<<<NEEDS_PRO(?::\s*([^>]*))?>>>/;
 /** Buffer cap before flushing — must fit `<<<NEEDS_PRO: reason>>>` without premature flush. */
 const NEEDS_PRO_BUFFER_CHARS = 256;
 import { ContextManager } from "./context-manager.js";
+import { formatLoopError } from "./loop/errors.js";
+import {
+  fixToolCallPairing,
+  healLoadedMessages,
+  healLoadedMessagesByTokens,
+  stampMissingReasoningForThinkingMode,
+} from "./loop/healing.js";
+import {
+  looksLikeCompleteJson,
+  shrinkOversizedToolCallArgsByTokens,
+  shrinkOversizedToolResults,
+  shrinkOversizedToolResultsByTokens,
+} from "./loop/shrink.js";
+import {
+  isThinkingModeModel,
+  stripHallucinatedToolMarkup,
+  thinkingModeForModel,
+} from "./loop/thinking.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
 import { appendSessionMessage, loadSessionMessages, rewriteSession } from "./memory/session.js";
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
@@ -37,6 +55,21 @@ import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { countTokens } from "./tokenizer.js";
 import { ToolRegistry } from "./tools.js";
 import type { ChatMessage, ToolCall } from "./types.js";
+
+export {
+  fixToolCallPairing,
+  formatLoopError,
+  healLoadedMessages,
+  healLoadedMessagesByTokens,
+  isThinkingModeModel,
+  looksLikeCompleteJson,
+  shrinkOversizedToolCallArgsByTokens,
+  shrinkOversizedToolResults,
+  shrinkOversizedToolResultsByTokens,
+  stampMissingReasoningForThinkingMode,
+  stripHallucinatedToolMarkup,
+  thinkingModeForModel,
+};
 
 export type EventRole =
   | "assistant_delta"
@@ -1370,37 +1403,6 @@ export class CacheFirstLoop {
   }
 }
 
-/** True when the model emits reasoning_content and requires it round-tripped on follow-ups. */
-export function isThinkingModeModel(model: string): boolean {
-  if (model.includes("reasoner")) return true;
-  if (model === "deepseek-v4-flash" || model === "deepseek-v4-pro") return true;
-  return false;
-}
-
-/** Pins extra_body.thinking.type; `undefined` lets third-party endpoints skip the field. */
-export function thinkingModeForModel(model: string): "enabled" | "disabled" | undefined {
-  if (model === "deepseek-chat") return "disabled";
-  if (model.includes("reasoner")) return "enabled";
-  if (model === "deepseek-v4-flash" || model === "deepseek-v4-pro") return "enabled";
-  return undefined;
-}
-
-/** Strip hallucinated tool-call envelopes — `tools: undefined` doesn't always force prose. */
-export function stripHallucinatedToolMarkup(s: string): string {
-  let out = s;
-  // DeepSeek's DSML envelope (both the full-width "｜" character and
-  // the ASCII-only fallback we've seen — the full-width form is the
-  // one R1 emits in practice)
-  out = out.replace(/<｜DSML｜function_calls>[\s\S]*?<\/?｜DSML｜function_calls>/g, "");
-  out = out.replace(/<\|DSML\|function_calls>[\s\S]*?<\/?\|DSML\|function_calls>/g, "");
-  // Anthropic / generic XML-ish envelope
-  out = out.replace(/<function_calls>[\s\S]*?<\/function_calls>/g, "");
-  // Lone unpaired DSML opener left over after the closer was on a
-  // different line (seen when R1 truncates mid-call).
-  out = out.replace(/<｜DSML｜[\s\S]*$/g, "");
-  return out.trim();
-}
-
 function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
   const n = Number.parseInt(raw, 10);
@@ -1412,17 +1414,6 @@ function safeParseToolArgs(raw: string): unknown {
     return JSON.parse(raw);
   } catch {
     return raw;
-  }
-}
-
-/** UI progress feedback only — NOT a dispatch gate. */
-export function looksLikeCompleteJson(s: string): boolean {
-  if (!s || !s.trim()) return false;
-  try {
-    JSON.parse(s);
-    return true;
-  } catch {
-    return false;
   }
 }
 
@@ -1465,260 +1456,4 @@ function summarizeBranch(chosen: BranchSample, samples: BranchSample[]): BranchS
     uncertainties: samples.map((s) => s.planState.uncertainties.length),
     temperatures: samples.map((s) => s.temperature),
   };
-}
-
-/** Tool-role only — truncating user prompts would corrupt authored intent. */
-export function shrinkOversizedToolResults(
-  messages: ChatMessage[],
-  maxChars: number,
-): { messages: ChatMessage[]; healedCount: number; healedFrom: number } {
-  let healedCount = 0;
-  let healedFrom = 0;
-  const out = messages.map((msg) => {
-    if (msg.role !== "tool") return msg;
-    const content = typeof msg.content === "string" ? msg.content : "";
-    if (content.length <= maxChars) return msg;
-    healedCount += 1;
-    healedFrom += content.length;
-    return { ...msg, content: truncateForModel(content, maxChars) };
-  });
-  return { messages: out, healedCount, healedFrom };
-}
-
-/** Token-cap variant — char cap would let CJK slip past at 2× the intended token cost. */
-export function shrinkOversizedToolResultsByTokens(
-  messages: ChatMessage[],
-  maxTokens: number,
-): {
-  messages: ChatMessage[];
-  healedCount: number;
-  tokensSaved: number;
-  charsSaved: number;
-} {
-  let healedCount = 0;
-  let tokensSaved = 0;
-  let charsSaved = 0;
-  const out = messages.map((msg) => {
-    if (msg.role !== "tool") return msg;
-    const content = typeof msg.content === "string" ? msg.content : "";
-    // length ≤ maxTokens ⇒ tokens ≤ maxTokens — skip the per-message tokenize.
-    if (content.length <= maxTokens) return msg;
-    const beforeTokens = countTokens(content);
-    if (beforeTokens <= maxTokens) return msg;
-    const truncated = truncateForModelByTokens(content, maxTokens);
-    const afterTokens = countTokens(truncated);
-    healedCount += 1;
-    tokensSaved += Math.max(0, beforeTokens - afterTokens);
-    charsSaved += Math.max(0, content.length - truncated.length);
-    return { ...msg, content: truncated };
-  });
-  return { messages: out, healedCount, tokensSaved, charsSaved };
-}
-
-/** Caller must gate on paired tool_calls — in-flight calls would crash mid-turn. */
-export function shrinkOversizedToolCallArgsByTokens(
-  messages: ChatMessage[],
-  maxTokens: number,
-): {
-  messages: ChatMessage[];
-  healedCount: number;
-  tokensSaved: number;
-  charsSaved: number;
-} {
-  let healedCount = 0;
-  let tokensSaved = 0;
-  let charsSaved = 0;
-  const out = messages.map((msg) => {
-    if (msg.role !== "assistant" || !Array.isArray(msg.tool_calls)) return msg;
-    let changed = false;
-    const newCalls = msg.tool_calls.map((call) => {
-      const args = call.function?.arguments;
-      if (typeof args !== "string" || args.length <= maxTokens) return call;
-      const beforeTokens = countTokens(args);
-      if (beforeTokens <= maxTokens) return call;
-      const shrunk = shrinkJsonLongStrings(args);
-      const afterTokens = countTokens(shrunk);
-      // Many-short-strings payloads can come back marginally larger — only swap on real saving.
-      if (afterTokens >= beforeTokens) return call;
-      changed = true;
-      healedCount += 1;
-      tokensSaved += beforeTokens - afterTokens;
-      charsSaved += args.length - shrunk.length;
-      return { ...call, function: { ...call.function, arguments: shrunk } };
-    });
-    if (!changed) return msg;
-    return { ...msg, tool_calls: newCalls };
-  });
-  return { messages: out, healedCount, tokensSaved, charsSaved };
-}
-
-/** Keeps short keys/values (paths, ids) verbatim; only long string values get a marker. */
-function shrinkJsonLongStrings(jsonStr: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    const head = jsonStr.slice(0, 200);
-    return `${head}…[shrunk: ${jsonStr.length} chars, unparsed]`;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return jsonStr;
-  }
-  const LONG_THRESHOLD = 300;
-  const input = parsed as Record<string, unknown>;
-  const output: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(input)) {
-    if (typeof v === "string" && v.length > LONG_THRESHOLD) {
-      const newlines = v.match(/\n/g)?.length ?? 0;
-      output[k] =
-        `[…shrunk: ${v.length} chars, ${newlines} lines — tool already responded, see result]`;
-    } else {
-      output[k] = v;
-    }
-  }
-  return JSON.stringify(output);
-}
-
-/** Drops both unpaired assistant.tool_calls and stray tool messages — DeepSeek 400s on either. */
-export function fixToolCallPairing(messages: ChatMessage[]): {
-  messages: ChatMessage[];
-  droppedAssistantCalls: number;
-  droppedStrayTools: number;
-} {
-  const out: ChatMessage[] = [];
-  let droppedAssistantCalls = 0;
-  let droppedStrayTools = 0;
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]!;
-    if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-      const needed = new Set<string>();
-      for (const call of msg.tool_calls) {
-        if (call?.id) needed.add(call.id);
-      }
-      const candidates: ChatMessage[] = [];
-      let j = i + 1;
-      while (j < messages.length && needed.size > 0) {
-        const nxt = messages[j]!;
-        if (nxt.role !== "tool") break;
-        const id = nxt.tool_call_id ?? "";
-        if (!needed.has(id)) break;
-        needed.delete(id);
-        candidates.push(nxt);
-        j++;
-      }
-      if (needed.size === 0) {
-        out.push(msg);
-        for (const r of candidates) out.push(r);
-        i = j - 1;
-      } else {
-        droppedAssistantCalls += 1;
-        droppedStrayTools += candidates.length;
-        i = j - 1;
-      }
-      continue;
-    }
-    if (msg.role === "tool") {
-      droppedStrayTools += 1;
-      continue;
-    }
-    out.push(msg);
-  }
-  return { messages: out, droppedAssistantCalls, droppedStrayTools };
-}
-
-export function healLoadedMessages(
-  messages: ChatMessage[],
-  maxChars: number,
-): { messages: ChatMessage[]; healedCount: number; healedFrom: number } {
-  const shrunk = shrinkOversizedToolResults(messages, maxChars);
-  const paired = fixToolCallPairing(shrunk.messages);
-  const healedCount = shrunk.healedCount + paired.droppedAssistantCalls + paired.droppedStrayTools;
-  return { messages: paired.messages, healedCount, healedFrom: shrunk.healedFrom };
-}
-
-/** Back-fills "" on bare assistant turns; skipped on non-thinking to avoid prefix-cache churn. */
-export function stampMissingReasoningForThinkingMode(
-  messages: ChatMessage[],
-  model: string,
-): { messages: ChatMessage[]; stampedCount: number } {
-  if (!isThinkingModeModel(model)) {
-    return { messages, stampedCount: 0 };
-  }
-  let stampedCount = 0;
-  const out = messages.map((msg) => {
-    if (msg.role !== "assistant") return msg;
-    if (Object.hasOwn(msg, "reasoning_content")) return msg;
-    stampedCount += 1;
-    return { ...msg, reasoning_content: "" };
-  });
-  return { messages: out, stampedCount };
-}
-
-/** Token-cap variant — char cap would let CJK slip past at 2× the intended token cost. */
-export function healLoadedMessagesByTokens(
-  messages: ChatMessage[],
-  maxTokens: number,
-): {
-  messages: ChatMessage[];
-  healedCount: number;
-  tokensSaved: number;
-  charsSaved: number;
-} {
-  const shrunk = shrinkOversizedToolResultsByTokens(messages, maxTokens);
-  const paired = fixToolCallPairing(shrunk.messages);
-  const healedCount = shrunk.healedCount + paired.droppedAssistantCalls + paired.droppedStrayTools;
-  return {
-    messages: paired.messages,
-    healedCount,
-    tokensSaved: shrunk.tokensSaved,
-    charsSaved: shrunk.charsSaved,
-  };
-}
-
-/** Single text-layer DeepSeek-error formatter — 429/5xx never reach here (retry.ts swallows). */
-export function formatLoopError(err: Error): string {
-  const msg = err.message ?? "";
-  if (msg.includes("maximum context length")) {
-    const reqMatch = msg.match(/requested\s+(\d+)\s+tokens/);
-    const requested = reqMatch
-      ? `${Number(reqMatch[1]).toLocaleString()} tokens`
-      : "too many tokens";
-    return `Context overflow (DeepSeek 400): session history is ${requested}, past the model's prompt limit (V4: 1M tokens; legacy chat/reasoner: 131k). Usually a single tool result grew too big. Reasonix caps new tool results at 8k tokens and auto-heals oversized history on session load — a restart often clears it. If it still overflows, run /forget (delete the session) or /clear (drop the displayed history) to start fresh.`;
-  }
-
-  const m = /^DeepSeek (\d{3}):\s*([\s\S]*)$/.exec(msg);
-  if (!m) return msg;
-  const status = m[1] ?? "";
-  const body = m[2] ?? "";
-  const inner = extractDeepSeekErrorMessage(body);
-
-  if (status === "401") {
-    return `Authentication failed (DeepSeek 401): ${inner}. Your API key is rejected. Fix with \`reasonix setup\` or \`export DEEPSEEK_API_KEY=sk-...\`. Get one at https://platform.deepseek.com/api_keys.`;
-  }
-  if (status === "402") {
-    return `Out of balance (DeepSeek 402): ${inner}. Top up at https://platform.deepseek.com/top_up — the panel header shows your balance once it's non-zero.`;
-  }
-  if (status === "422") {
-    return `Invalid parameter (DeepSeek 422): ${inner}`;
-  }
-  if (status === "400") {
-    return `Bad request (DeepSeek 400): ${inner}`;
-  }
-  return msg;
-}
-
-function extractDeepSeekErrorMessage(body: string): string {
-  const trimmed = body.trim();
-  if (!trimmed) return "(no message)";
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (parsed && typeof parsed === "object") {
-      const obj = parsed as { error?: { message?: unknown }; message?: unknown };
-      if (obj.error && typeof obj.error.message === "string") return obj.error.message;
-      if (typeof obj.message === "string") return obj.message;
-    }
-  } catch {
-    /* not JSON — fall through */
-  }
-  return trimmed;
 }
