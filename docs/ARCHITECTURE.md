@@ -43,6 +43,29 @@ timestamps each turn — cache hit rate in practice: <20%.
 **Metric.** `prompt_cache_hit_tokens / (hit + miss)` exposed per-turn and
 aggregated per-session. Visible in the TUI's top-bar cache cell.
 
+#### Parallel tool dispatch
+
+Each tool declares `parallelSafe?: boolean` (default `false`). The loop
+dispatcher groups consecutive parallel-safe calls into chunks and races
+them via `Promise.allSettled`; the first non-parallel-safe call ends the
+chunk and runs alone (serial barrier — read-after-write order
+preserved). Tool-result yields and history append still land in declared
+order regardless of which call settles first, so the model sees the
+same shape it would under a fully serial dispatch.
+
+| Env var | Default | Effect |
+|---|---|---|
+| `REASONIX_PARALLEL_MAX` | `3` (hard cap `16`) | Max chunk size. |
+| `REASONIX_TOOL_DISPATCH=serial` | unset | Forces serial dispatch — escape hatch. |
+
+Built-in opt-ins: read-only filesystem (`read_file`, `list_directory`,
+`directory_tree`, `search_files`, `search_content`, `get_file_info`),
+web (`web_search`, `web_fetch`), `recall_memory`, `semantic_search`,
+isolated child loops (`run_skill`, `spawn_subagent`), in-memory job
+queries (`job_output`, `list_jobs`). Mutating / side-effecting tools
+stay default. MCP-bridged tools default `false` — third-party tools
+opt in only when the server explicitly declares parallel safety.
+
 ### Pillar 2 — R1 Thought Harvesting *(opt-in)*
 
 **Problem.** R1 / V4-thinking emits extensive `reasoning_content`. DeepSeek's
