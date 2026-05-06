@@ -107,7 +107,7 @@ import { CardStream } from "./layout/CardStream.js";
 import {
   ModeStatusBar,
   OngoingToolRow,
-  SubagentRow,
+  SubagentLiveStack,
   ThinkingRow,
   UndoBanner,
 } from "./layout/LiveRows.js";
@@ -398,7 +398,7 @@ function AppInner({
   // reads from a ref populated AFTER useSessionInfo loads balance, so the
   // subagent-end cost suffix renders in the live wallet's symbol.
   const walletCurrencyRef = useRef<string | undefined>(undefined);
-  const { activity: subagentActivity, sinkRef: subagentSinkRef } = useSubagent({
+  const { activities: subagentActivities, sinkRef: subagentSinkRef } = useSubagent({
     session,
     log,
     getWalletCurrency: () => walletCurrencyRef.current,
@@ -3076,8 +3076,8 @@ function AppInner({
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
-                subagentActivity ? (
-                  <SubagentRow activity={subagentActivity} />
+                subagentActivities.length > 0 ? (
+                  <SubagentLiveStack activities={subagentActivities} max={3} />
                 ) : null}
                 {!PLAIN_UI &&
                 !pendingShell &&

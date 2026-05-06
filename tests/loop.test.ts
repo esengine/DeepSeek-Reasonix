@@ -1425,4 +1425,211 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       expect(turn2Warns).toBe(1);
     });
   });
+
+  describe("parallel tool dispatch", () => {
+    function makeMultiToolResponse(calls: Array<{ name: string; args: string }>) {
+      return {
+        content: "",
+        tool_calls: calls.map((c, i) => ({
+          id: `call_${i}`,
+          type: "function",
+          function: { name: c.name, arguments: c.args },
+        })),
+      };
+    }
+
+    it("runs consecutive parallelSafe calls concurrently", async () => {
+      const client = makeClient([
+        makeMultiToolResponse([
+          { name: "slow_read", args: '{"k":1}' },
+          { name: "slow_read", args: '{"k":2}' },
+          { name: "slow_read", args: '{"k":3}' },
+        ]),
+        { content: "ok" },
+      ]);
+      const tools = new ToolRegistry();
+      tools.register({
+        name: "slow_read",
+        parallelSafe: true,
+        fn: async (args: { k: number }) => {
+          await new Promise((r) => setTimeout(r, 80));
+          return String(args.k);
+        },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+        tools,
+        stream: false,
+      });
+
+      const t0 = Date.now();
+      for await (const _ of loop.step("go")) {
+        // drain
+      }
+      const elapsed = Date.now() - t0;
+
+      expect(elapsed).toBeLessThan(220);
+    });
+
+    it("unsafe call splits the chunk into serial barriers", async () => {
+      const client = makeClient([
+        makeMultiToolResponse([
+          { name: "slow_read", args: '{"k":1}' },
+          { name: "slow_write", args: '{"k":2}' },
+          { name: "slow_read", args: '{"k":3}' },
+        ]),
+        { content: "ok" },
+      ]);
+      const tools = new ToolRegistry();
+      tools.register({
+        name: "slow_read",
+        parallelSafe: true,
+        fn: async () => {
+          await new Promise((r) => setTimeout(r, 80));
+          return "r";
+        },
+      });
+      tools.register({
+        name: "slow_write",
+        fn: async () => {
+          await new Promise((r) => setTimeout(r, 80));
+          return "w";
+        },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+        tools,
+        stream: false,
+      });
+
+      const t0 = Date.now();
+      for await (const _ of loop.step("go")) {
+        // drain
+      }
+      const elapsed = Date.now() - t0;
+
+      expect(elapsed).toBeGreaterThan(220);
+    });
+
+    it("tool yields land in declared order even when later calls finish first", async () => {
+      const client = makeClient([
+        makeMultiToolResponse([
+          { name: "delayed", args: '{"id":"a","ms":120}' },
+          { name: "delayed", args: '{"id":"b","ms":20}' },
+          { name: "delayed", args: '{"id":"c","ms":60}' },
+        ]),
+        { content: "ok" },
+      ]);
+      const tools = new ToolRegistry();
+      tools.register({
+        name: "delayed",
+        parallelSafe: true,
+        fn: async (args: { id: string; ms: number }) => {
+          await new Promise((r) => setTimeout(r, args.ms));
+          return args.id;
+        },
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+        tools,
+        stream: false,
+      });
+
+      const order: string[] = [];
+      for await (const ev of loop.step("go")) {
+        if (ev.role === "tool") order.push(ev.content);
+      }
+      expect(order).toEqual(["a", "b", "c"]);
+    });
+
+    it("REASONIX_TOOL_DISPATCH=serial forces serial dispatch", async () => {
+      const prev = process.env.REASONIX_TOOL_DISPATCH;
+      process.env.REASONIX_TOOL_DISPATCH = "serial";
+      try {
+        const client = makeClient([
+          makeMultiToolResponse([
+            { name: "slow_read", args: '{"k":1}' },
+            { name: "slow_read", args: '{"k":2}' },
+          ]),
+          { content: "ok" },
+        ]);
+        const tools = new ToolRegistry();
+        tools.register({
+          name: "slow_read",
+          parallelSafe: true,
+          fn: async () => {
+            await new Promise((r) => setTimeout(r, 80));
+            return "x";
+          },
+        });
+        const loop = new CacheFirstLoop({
+          client,
+          prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+          tools,
+          stream: false,
+        });
+
+        const t0 = Date.now();
+        for await (const _ of loop.step("go")) {
+          // drain
+        }
+        const elapsed = Date.now() - t0;
+
+        expect(elapsed).toBeGreaterThan(150);
+      } finally {
+        if (prev === undefined) {
+          // biome-ignore lint/performance/noDelete: env restore must remove the key, not stringify "undefined"
+          delete process.env.REASONIX_TOOL_DISPATCH;
+        } else process.env.REASONIX_TOOL_DISPATCH = prev;
+      }
+    });
+
+    it("REASONIX_PARALLEL_MAX caps the chunk size", async () => {
+      const prev = process.env.REASONIX_PARALLEL_MAX;
+      process.env.REASONIX_PARALLEL_MAX = "2";
+      try {
+        const client = makeClient([
+          makeMultiToolResponse([
+            { name: "slow_read", args: '{"k":1}' },
+            { name: "slow_read", args: '{"k":2}' },
+            { name: "slow_read", args: '{"k":3}' },
+            { name: "slow_read", args: '{"k":4}' },
+          ]),
+          { content: "ok" },
+        ]);
+        const tools = new ToolRegistry();
+        tools.register({
+          name: "slow_read",
+          parallelSafe: true,
+          fn: async () => {
+            await new Promise((r) => setTimeout(r, 80));
+            return "x";
+          },
+        });
+        const loop = new CacheFirstLoop({
+          client,
+          prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+          tools,
+          stream: false,
+        });
+
+        const t0 = Date.now();
+        for await (const _ of loop.step("go")) {
+          // drain
+        }
+        const elapsed = Date.now() - t0;
+
+        expect(elapsed).toBeGreaterThan(150);
+        expect(elapsed).toBeLessThan(280);
+      } finally {
+        if (prev === undefined) {
+          // biome-ignore lint/performance/noDelete: env restore must remove the key, not stringify "undefined"
+          delete process.env.REASONIX_PARALLEL_MAX;
+        } else process.env.REASONIX_PARALLEL_MAX = prev;
+      }
+    });
+  });
 });

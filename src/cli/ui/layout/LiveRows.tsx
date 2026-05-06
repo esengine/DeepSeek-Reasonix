@@ -11,6 +11,7 @@ import { PILL_MODEL, PILL_SECTION, Pill, modelBadgeFor } from "../primitives/Pil
 import { Spinner } from "../primitives/Spinner.js";
 import { CARD, FG, TONE } from "../theme/tokens.js";
 import { useElapsedSeconds, useSlowTick, useTick } from "../ticker.js";
+import type { SubagentActivity } from "../useSubagent.js";
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -159,20 +160,8 @@ function subagentTitle(skillName: string | undefined, task: string): string {
   return `Sub-agent · ${short || "anonymous"}`;
 }
 
-/** Live block for a running subagent — Card-styled, fixed row count for flicker-safety. */
-export function SubagentRow({
-  activity,
-}: {
-  activity: {
-    task: string;
-    iter: number;
-    elapsedMs: number;
-    skillName?: string;
-    model?: string;
-    phase?: "exploring" | "summarising";
-    lastInner: { glyph: string; color: string; label: string; meta?: string } | null;
-  };
-}) {
+/** Live block for a single in-flight subagent — rich layout, used when only one is running. */
+export function SubagentRow({ activity }: { activity: SubagentActivity }) {
   useTick();
   const seconds = (activity.elapsedMs / 1000).toFixed(1);
   const phase = subagentPhaseLabel(activity.phase, activity.iter, activity.elapsedMs);
@@ -219,6 +208,78 @@ export function SubagentRow({
         {phase}
       </Text>
     </Card>
+  );
+}
+
+/** 1 → rich; 2-max → compact rows; >max → compact + "+N more" fold. */
+export function SubagentLiveStack({
+  activities,
+  max = 3,
+}: {
+  activities: ReadonlyArray<SubagentActivity>;
+  max?: number;
+}) {
+  const tick = useTick();
+  if (activities.length === 0) return null;
+  if (activities.length === 1) return <SubagentRow activity={activities[0]!} />;
+  const visible = activities.slice(0, max);
+  const overflow = activities.length - visible.length;
+  const summarising = activities.filter((a) => a.phase === "summarising").length;
+  const metaParts = [`${activities.length} running`];
+  if (summarising > 0) metaParts.push(`${summarising} summarising`);
+  return (
+    <Card tone={CARD.subagent.color}>
+      <CardHeader
+        glyph="⌬"
+        tone={CARD.subagent.color}
+        title="subagents"
+        titleColor={PILL_SECTION.plan.fg}
+        titleBg={PILL_SECTION.plan.bg}
+        subtitle={metaParts.join(" · ")}
+        right={<Spinner kind="braille" color={CARD.subagent.color} />}
+      />
+      {visible.map((a, i) => (
+        <CompactSubagentLine key={a.runId} activity={a} tick={tick} index={i} />
+      ))}
+      {overflow > 0 ? <Text color={FG.faint}>{`  +${overflow} more running…`}</Text> : null}
+    </Card>
+  );
+}
+
+function CompactSubagentLine({
+  activity,
+  tick,
+  index,
+}: {
+  activity: SubagentActivity;
+  tick: number;
+  index: number;
+}) {
+  const summarising = activity.phase === "summarising";
+  const spinnerFrame = SPINNER_FRAMES[(tick + index) % SPINNER_FRAMES.length] ?? "·";
+  const glyph = summarising ? "▶" : spinnerFrame;
+  const glyphColor = summarising ? TONE.brand : CARD.subagent.color;
+  const seconds = (activity.elapsedMs / 1000).toFixed(1).padStart(5);
+  const title = activity.skillName ?? truncate(activity.task, 28);
+  const titlePadded = title.padEnd(28);
+  const last = activity.lastInner;
+  return (
+    <Box flexDirection="row">
+      <Text color={glyphColor} bold>
+        {`  ${glyph} `}
+      </Text>
+      <Text color={FG.body}>{titlePadded}</Text>
+      <Text color={FG.faint}>{`  iter ${String(activity.iter).padStart(2)} · ${seconds}s · `}</Text>
+      {last ? (
+        <>
+          <Text color={last.color}>{`${last.glyph} `}</Text>
+          <Text color={FG.body}>{truncate(last.label, 18)}</Text>
+          {last.meta ? <Text color={FG.faint}>{`  ${last.meta}`}</Text> : null}
+        </>
+      ) : (
+        <Text color={FG.faint}>queued…</Text>
+      )}
+    </Box>
   );
 }
 

@@ -40,6 +40,10 @@ export interface SubagentInnerSummary {
 }
 
 export interface SubagentActivity {
+  /** Stable per-spawn id; key for parallel-row rendering. */
+  runId: string;
+  /** Wall-clock start so the stack stays in launch order even when events arrive interleaved. */
+  startedAt: number;
   task: string;
   iter: number;
   elapsedMs: number;
@@ -57,8 +61,8 @@ export interface UseSubagentParams {
 }
 
 export interface UseSubagentResult {
-  /** Live state for an in-flight subagent, null when none is running. */
-  activity: SubagentActivity | null;
+  /** In-flight runs, oldest first. Empty when none active. */
+  activities: ReadonlyArray<SubagentActivity>;
   sinkRef: React.MutableRefObject<SubagentSink>;
 }
 
@@ -67,7 +71,7 @@ export function useSubagent({
   log,
   getWalletCurrency,
 }: UseSubagentParams): UseSubagentResult {
-  const [activity, setActivity] = useState<SubagentActivity | null>(null);
+  const [activities, setActivities] = useState<ReadonlyArray<SubagentActivity>>([]);
   const sinkRef = useRef<SubagentSink>({ current: null });
   // Subagent runs can outlive a balance refresh; the thunk lives in a ref so the
   // sink callback (installed once at mount) always reads the latest wallet currency.
@@ -79,81 +83,76 @@ export function useSubagent({
   useEffect(() => {
     sinkRef.current.current = (ev: SubagentEvent) => {
       if (ev.kind === "start") {
-        setActivity({
-          task: ev.task,
-          iter: ev.iter ?? 0,
-          elapsedMs: ev.elapsedMs ?? 0,
-          skillName: ev.skillName,
-          model: ev.model,
-          phase: "exploring",
-          lastInner: null,
-        });
-        return;
-      }
-      if (ev.kind === "progress") {
-        setActivity((prev) =>
-          prev
-            ? {
-                ...prev,
-                iter: ev.iter ?? prev.iter,
-                elapsedMs: ev.elapsedMs ?? prev.elapsedMs,
-              }
-            : {
-                task: ev.task,
-                iter: ev.iter ?? 0,
-                elapsedMs: ev.elapsedMs ?? 0,
-                skillName: ev.skillName,
-                model: ev.model,
-                phase: "exploring",
-                lastInner: null,
-              },
-        );
-        return;
-      }
-      if (ev.kind === "phase") {
-        setActivity((prev) => (prev ? { ...prev, phase: ev.phase } : prev));
-        return;
-      }
-      if (ev.kind === "inner" && ev.inner) {
-        const summary = summariseInner(ev.inner);
-        if (!summary) return;
-        setActivity((prev) => (prev ? { ...prev, lastInner: summary } : prev));
-        return;
-      }
-      // end
-      setActivity(null);
-      const seconds = ((ev.elapsedMs ?? 0) / 1000).toFixed(1);
-      // Inline cost: the one number most users look at. Saves a /stats round-trip.
-      const costTail =
-        ev.costUsd !== undefined && ev.costUsd > 0
-          ? ` · ${formatCost(ev.costUsd, getWalletCurrencyRef.current?.())}`
-          : "";
-      const summary = ev.error
-        ? `⌬ subagent "${ev.task}" failed after ${seconds}s · ${ev.iter ?? 0} tool call(s) — ${ev.error}`
-        : `⌬ subagent "${ev.task}" done in ${seconds}s · ${ev.iter ?? 0} tool call(s) · ${ev.turns ?? 0} turn(s)${costTail}`;
-      log.pushInfo(summary);
-      // Persist a subagent summary row to ~/.reasonix/usage.jsonl so
-      // `/stats` and `reasonix stats` surface it. Skipped on error —
-      // we only record what actually cost money and did work.
-      if (!ev.error && ev.usage && ev.model) {
-        appendUsage({
-          session: session ?? null,
-          model: ev.model,
-          usage: ev.usage,
-          kind: "subagent",
-          subagent: {
+        setActivities((prev) => {
+          if (prev.some((a) => a.runId === ev.runId)) return prev;
+          const next: SubagentActivity = {
+            runId: ev.runId,
+            startedAt: Date.now() - (ev.elapsedMs ?? 0),
+            task: ev.task,
+            iter: ev.iter ?? 0,
+            elapsedMs: ev.elapsedMs ?? 0,
             skillName: ev.skillName,
-            taskPreview: ev.task.slice(0, 60),
-            toolIters: ev.iter ?? 0,
-            durationMs: ev.elapsedMs ?? 0,
-          },
+            model: ev.model,
+            phase: "exploring",
+            lastInner: null,
+          };
+          return [...prev, next];
         });
+        return;
       }
+      if (ev.kind === "end") {
+        setActivities((prev) => prev.filter((a) => a.runId !== ev.runId));
+        const seconds = ((ev.elapsedMs ?? 0) / 1000).toFixed(1);
+        const costTail =
+          ev.costUsd !== undefined && ev.costUsd > 0
+            ? ` · ${formatCost(ev.costUsd, getWalletCurrencyRef.current?.())}`
+            : "";
+        const summary = ev.error
+          ? `⌬ subagent "${ev.task}" failed after ${seconds}s · ${ev.iter ?? 0} tool call(s) — ${ev.error}`
+          : `⌬ subagent "${ev.task}" done in ${seconds}s · ${ev.iter ?? 0} tool call(s) · ${ev.turns ?? 0} turn(s)${costTail}`;
+        log.pushInfo(summary);
+        if (!ev.error && ev.usage && ev.model) {
+          appendUsage({
+            session: session ?? null,
+            model: ev.model,
+            usage: ev.usage,
+            kind: "subagent",
+            subagent: {
+              skillName: ev.skillName,
+              taskPreview: ev.task.slice(0, 60),
+              toolIters: ev.iter ?? 0,
+              durationMs: ev.elapsedMs ?? 0,
+            },
+          });
+        }
+        return;
+      }
+      // progress / phase / inner — patch the matching row, ignore stragglers from runs we never saw `start` for.
+      setActivities((prev) =>
+        prev.map((a) => {
+          if (a.runId !== ev.runId) return a;
+          if (ev.kind === "progress") {
+            return {
+              ...a,
+              iter: ev.iter ?? a.iter,
+              elapsedMs: ev.elapsedMs ?? a.elapsedMs,
+            };
+          }
+          if (ev.kind === "phase") {
+            return { ...a, phase: ev.phase ?? a.phase };
+          }
+          if (ev.kind === "inner" && ev.inner) {
+            const summary = summariseInner(ev.inner);
+            return summary ? { ...a, lastInner: summary } : a;
+          }
+          return a;
+        }),
+      );
     };
     return () => {
       sinkRef.current.current = null;
     };
   }, [session, log]);
 
-  return { activity, sinkRef };
+  return { activities, sinkRef };
 }

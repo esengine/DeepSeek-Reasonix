@@ -386,6 +386,56 @@ export class CacheFirstLoop {
     return true;
   }
 
+  private async runOneToolCall(
+    call: ToolCall,
+    signal: AbortSignal,
+  ): Promise<{ preWarnings: LoopEvent[]; postWarnings: LoopEvent[]; result: string }> {
+    const name = call.function?.name ?? "";
+    const args = call.function?.arguments ?? "{}";
+    const parsedArgs = safeParseToolArgs(args);
+
+    const preReport = await runHooks({
+      hooks: this.hooks,
+      payload: {
+        event: "PreToolUse",
+        cwd: this.hookCwd,
+        toolName: name,
+        toolArgs: parsedArgs,
+      },
+    });
+    const preWarnings = [...hookWarnings(preReport.outcomes, this._turn)];
+
+    if (preReport.blocked) {
+      const blocking = preReport.outcomes[preReport.outcomes.length - 1];
+      const reason = (blocking?.stderr || blocking?.stdout || "blocked by PreToolUse hook").trim();
+      return {
+        preWarnings,
+        postWarnings: [],
+        result: `[hook block] ${blocking?.hook.command ?? "<unknown>"}\n${reason}`,
+      };
+    }
+
+    const result = await this.tools.dispatch(name, args, {
+      signal,
+      maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
+      confirmationGate: this.confirmationGate,
+    });
+
+    const postReport = await runHooks({
+      hooks: this.hooks,
+      payload: {
+        event: "PostToolUse",
+        cwd: this.hookCwd,
+        toolName: name,
+        toolArgs: parsedArgs,
+        toolResult: result,
+      },
+    });
+    const postWarnings = [...hookWarnings(postReport.outcomes, this._turn)];
+
+    return { preWarnings, postWarnings, result };
+  }
+
   private buildMessages(pendingUser: string | null): ChatMessage[] {
     // DeepSeek 400s on either unpaired tool_calls or stray tool entries — heal before sending.
     const healed = healLoadedMessages(this.log.toMessages(), DEFAULT_MAX_RESULT_CHARS);
@@ -1089,94 +1139,95 @@ export class CacheFirstLoop {
         return;
       }
 
-      for (const call of repairedCalls) {
-        const name = call.function?.name ?? "";
-        const args = call.function?.arguments ?? "{}";
-        // Announce the tool BEFORE awaiting it so the TUI can render a
-        // "running…" indicator. Without this, the window between
-        // assistant_final and the tool-result yield is silent from the
-        // UI's perspective — which makes long tool calls feel like the
-        // app has hung.
-        yield {
-          turn: this._turn,
-          role: "tool_start",
-          content: "",
-          toolName: name,
-          toolArgs: args,
-        };
+      const dispatchSerial =
+        (process.env.REASONIX_TOOL_DISPATCH ?? "auto").toLowerCase() === "serial";
+      const parallelMaxParsed = Number.parseInt(process.env.REASONIX_PARALLEL_MAX ?? "", 10);
+      const parallelMax =
+        Number.isFinite(parallelMaxParsed) && parallelMaxParsed >= 1
+          ? Math.min(parallelMaxParsed, 16)
+          : 3;
 
-        // PreToolUse hooks. A `block` decision (exit 2) skips dispatch
-        // and surfaces the hook's stderr as the tool result so the model
-        // sees a structured refusal instead of a silent omission. Non-
-        // block non-zero outcomes are warnings: the loop continues, the
-        // UI gets a yellow row.
-        const parsedArgs = safeParseToolArgs(args);
-        const preReport = await runHooks({
-          hooks: this.hooks,
-          payload: {
-            event: "PreToolUse",
-            cwd: this.hookCwd,
-            toolName: name,
-            toolArgs: parsedArgs,
-          },
-        });
-        for (const w of hookWarnings(preReport.outcomes, this._turn)) yield w;
-
-        let result: string;
-        if (preReport.blocked) {
-          const blocking = preReport.outcomes[preReport.outcomes.length - 1];
-          const reason = (
-            blocking?.stderr ||
-            blocking?.stdout ||
-            "blocked by PreToolUse hook"
-          ).trim();
-          result = `[hook block] ${blocking?.hook.command ?? "<unknown>"}\n${reason}`;
-        } else {
-          result = await this.tools.dispatch(name, args, {
-            signal,
-            maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
-            confirmationGate: this.confirmationGate,
-          });
-
-          // PostToolUse hooks — block is meaningless after the fact, so
-          // every non-pass outcome is a warning. Hooks here are the
-          // natural place for "after every edit, run the formatter."
-          const postReport = await runHooks({
-            hooks: this.hooks,
-            payload: {
-              event: "PostToolUse",
-              cwd: this.hookCwd,
-              toolName: name,
-              toolArgs: parsedArgs,
-              toolResult: result,
-            },
-          });
-          for (const w of hookWarnings(postReport.outcomes, this._turn)) yield w;
+      let callIdx = 0;
+      while (callIdx < repairedCalls.length) {
+        // Group consecutive parallel-safe calls; an unsafe call breaks
+        // the chunk and runs alone (serial barrier).
+        const chunk: ToolCall[] = [];
+        if (!dispatchSerial) {
+          while (
+            callIdx < repairedCalls.length &&
+            chunk.length < parallelMax &&
+            this.tools.isParallelSafe(repairedCalls[callIdx]?.function?.name ?? "")
+          ) {
+            chunk.push(repairedCalls[callIdx++]!);
+          }
+        }
+        if (chunk.length === 0) {
+          chunk.push(repairedCalls[callIdx++]!);
         }
 
-        this.appendAndPersist({
-          role: "tool",
-          tool_call_id: call.id ?? "",
-          name,
-          content: result,
-        });
-        // Cost-aware escalation: check for "flash is struggling" shapes
-        // (SEARCH-not-found, etc). If threshold hits here, surface a
-        // one-time warning so the user knows the next call upgraded.
-        if (this.noteToolFailureSignal(result)) {
+        // tool_start announces every call in the chunk BEFORE any
+        // dispatch awaits — TUI shows live indicators for each, and the
+        // gap between assistant_final and the first tool_result yield is
+        // never silent.
+        for (const call of chunk) {
           yield {
             turn: this._turn,
-            role: "warning",
-            content: `⇧ auto-escalating to ${ESCALATION_MODEL} for the rest of this turn — flash hit ${this._turnFailures.formatBreakdown()}. Next turn falls back to ${this.model} unless /pro is armed.`,
+            role: "tool_start",
+            content: "",
+            toolName: call.function?.name ?? "",
+            toolArgs: call.function?.arguments ?? "{}",
           };
         }
-        yield {
-          turn: this._turn,
-          role: "tool",
-          content: result,
-          toolName: name,
-          toolArgs: args,
-        };
+
+        // Race the chunk; collect outcomes in declared order so history
+        // append + tool yields are deterministic regardless of which
+        // call settles first.
+        const settled = await Promise.allSettled(chunk.map((c) => this.runOneToolCall(c, signal)));
+
+        for (let k = 0; k < chunk.length; k++) {
+          const call = chunk[k]!;
+          const name = call.function?.name ?? "";
+          const args = call.function?.arguments ?? "{}";
+          const s = settled[k]!;
+
+          let result: string;
+          let preWarnings: LoopEvent[] = [];
+          let postWarnings: LoopEvent[] = [];
+          if (s.status === "fulfilled") {
+            preWarnings = s.value.preWarnings;
+            postWarnings = s.value.postWarnings;
+            result = s.value.result;
+          } else {
+            const err = s.reason instanceof Error ? s.reason : new Error(String(s.reason));
+            result = JSON.stringify({ error: `${err.name}: ${err.message}` });
+          }
+
+          for (const w of preWarnings) yield w;
+          for (const w of postWarnings) yield w;
+
+          this.appendAndPersist({
+            role: "tool",
+            tool_call_id: call.id ?? "",
+            name,
+            content: result,
+          });
+
+          if (this.noteToolFailureSignal(result)) {
+            yield {
+              turn: this._turn,
+              role: "warning",
+              content: `⇧ auto-escalating to ${ESCALATION_MODEL} for the rest of this turn — flash hit ${this._turnFailures.formatBreakdown()}. Next turn falls back to ${this.model} unless /pro is armed.`,
+            };
+          }
+
+          yield {
+            turn: this._turn,
+            role: "tool",
+            content: result,
+            toolName: name,
+            toolArgs: args,
+          };
+        }
       }
     }
 

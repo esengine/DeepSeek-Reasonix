@@ -15,6 +15,8 @@ import { SUBAGENT_TYPE_NAMES, getSubagentType } from "./subagent-types.js";
 /** Side-channel — subagents run inside a tool-dispatch frame, can't go through parent's `LoopEvent` stream. */
 export interface SubagentEvent {
   kind: "start" | "progress" | "end" | "inner" | "phase";
+  /** Stable per-spawn id; lets the UI key parallel runs apart instead of overwriting one shared row. */
+  runId: string;
   task: string;
   skillName?: string;
   model?: string;
@@ -29,6 +31,12 @@ export interface SubagentEvent {
   inner?: import("../loop.js").LoopEvent;
   /** When kind === "phase": coarse status verb for the activity row. */
   phase?: "exploring" | "summarising";
+}
+
+let runIdCounter = 0;
+function nextRunId(): string {
+  runIdCounter++;
+  return `sub-${runIdCounter.toString(36)}`;
 }
 
 export interface SubagentSink {
@@ -117,9 +125,11 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   const skillName = opts.skillName;
 
   const startedAt = Date.now();
+  const runId = nextRunId();
   const taskPreview = opts.task.length > 30 ? `${opts.task.slice(0, 30)}…` : opts.task;
   sink?.current?.({
     kind: "start",
+    runId,
     task: taskPreview,
     skillName,
     model,
@@ -133,6 +143,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       const errorMessage = `subagent allow-list names tool(s) not registered in the parent: ${missing.join(", ")}. Fix the skill's \`allowed-tools\` frontmatter or check spelling.`;
       sink?.current?.({
         kind: "end",
+        runId,
         task: taskPreview,
         skillName,
         model,
@@ -212,7 +223,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   let summarisingEmitted = false;
   try {
     for await (const ev of childLoop.step(opts.task)) {
-      sink?.current?.({ kind: "inner", task: taskPreview, skillName, model, inner: ev });
+      sink?.current?.({ kind: "inner", runId, task: taskPreview, skillName, model, inner: ev });
 
       if (ev.role === "tool") {
         toolIter++;
@@ -220,6 +231,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         summarisingEmitted = false;
         sink?.current?.({
           kind: "progress",
+          runId,
           task: taskPreview,
           skillName,
           model,
@@ -233,6 +245,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         summarisingEmitted = true;
         sink?.current?.({
           kind: "phase",
+          runId,
           task: taskPreview,
           skillName,
           model,
@@ -281,6 +294,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
 
   sink?.current?.({
     kind: "end",
+    runId,
     task: taskPreview,
     skillName,
     model,
