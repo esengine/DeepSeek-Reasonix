@@ -294,6 +294,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
     description:
       "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this.",
     readOnly: true,
+    parallelSafe: true,
     parameters: {
       type: "object",
       properties: {
@@ -319,6 +320,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
     description:
       "Download a URL and return its visible text content (HTML pages get scripts/styles/nav stripped). Truncated at the tool-result cap. Use after web_search when a snippet isn't enough.",
     readOnly: true,
+    parallelSafe: true,
     parameters: {
       type: "object",
       properties: {

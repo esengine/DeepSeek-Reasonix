@@ -25,6 +25,7 @@ export async function registerSemanticSearchTool(
     description:
       "FIRST CHOICE for descriptive queries. Use this BEFORE search_content (grep) when the user describes WHAT code does ('where do we handle X', 'which file owns Y', 'how does Z work', 'find the logic that …'). Returns ranked snippets ordered by semantic relevance — finds the right file even when your description shares no words with the code. Falls back to search_content / search_files only for: exact identifiers, regex patterns, or counting occurrences of a known token. If your first instinct is grep on a paraphrased question, you are wrong — try semantic_search first.",
     readOnly: true,
+    parallelSafe: true,
     parameters: {
       type: "object",
       properties: {

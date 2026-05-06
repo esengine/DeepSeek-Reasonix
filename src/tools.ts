@@ -17,6 +17,8 @@ export interface ToolDefinition<A = any, R = any> {
   readOnly?: boolean;
   /** Per-args check; takes precedence over `readOnly`. e.g. `run_command` + allowlisted argv. */
   readOnlyCheck?: (args: A) => boolean;
+  /** Safe to dispatch concurrently with other parallel-safe calls in the same turn. Default false — opt-in only. */
+  parallelSafe?: boolean;
   fn: (args: A, ctx?: ToolCallContext) => R | Promise<R>;
 }
 
@@ -106,6 +108,11 @@ export class ToolRegistry {
   /** True if a registered tool's schema was flattened for the model. */
   wasFlattened(name: string): boolean {
     return Boolean(this._tools.get(name)?.flatSchema);
+  }
+
+  /** Unknown / unannotated tools default to false — third-party MCP tools must opt in. */
+  isParallelSafe(name: string): boolean {
+    return this._tools.get(name)?.parallelSafe === true;
   }
 
   specs(): ToolSpec[] {

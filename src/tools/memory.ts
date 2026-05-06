@@ -132,6 +132,7 @@ export function registerMemoryTools(
     description:
       "Read the full body of a memory file when its MEMORY.md one-liner (already in the system prompt) isn't enough detail. Most of the time the index suffices — only call this when the user's question genuinely requires the full context.",
     readOnly: true,
+    parallelSafe: true,
     parameters: {
       type: "object",
       properties: {

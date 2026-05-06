@@ -32,6 +32,7 @@ export function registerSkillTools(
     description:
       "Invoke a playbook from the Skills index pinned in the system prompt. Each entry is a self-contained instruction block. Pass `name` as the BARE skill identifier (e.g. 'explore'), NOT the `[🧬 subagent]` tag that appears after it in the index. Entries tagged `[🧬 subagent]` spawn an isolated subagent — only the final distilled answer comes back, the model's tool calls + reasoning during the run never enter your context. Plain skills are inlined: the body becomes a tool result you read and follow. For subagent skills, supply 'arguments' describing the concrete task — they'll be the only context the subagent has.",
     readOnly: true,
+    parallelSafe: true,
     parameters: {
       type: "object",
       properties: {

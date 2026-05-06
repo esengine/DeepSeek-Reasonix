@@ -362,6 +362,7 @@ export function registerSubagentTool(
 
   parentRegistry.register({
     name: SUBAGENT_TOOL_NAME,
+    parallelSafe: true,
     description:
       "Spawn an isolated subagent to handle a self-contained subtask in a fresh context, returning only its final answer. Use for: deep codebase exploration that would flood the main context, multi-step research where you only need the conclusion, or any focused subtask whose intermediate reasoning the user does not need to see. The subagent inherits all your tools (filesystem, shell, web, MCP, etc.) but runs in its own isolated message log — its tool calls and reasoning never enter your context. Only the final assistant message comes back as this tool's result. Keep tasks focused; the subagent has a stricter iter budget than you do.",
     parameters: {

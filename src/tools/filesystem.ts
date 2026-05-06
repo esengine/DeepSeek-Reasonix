@@ -102,6 +102,7 @@ export function registerFilesystemTools(
 
   registry.register({
     name: "read_file",
+    parallelSafe: true,
     description: `Read a file under the sandbox root. To save context, PREFER to scope the read instead of pulling the whole file:
   - head: N  → first N lines (imports, public API, small configs)
   - tail: N  → last N lines (recently-added code, log tails)
@@ -201,6 +202,7 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
 
   registry.register({
     name: "list_directory",
+    parallelSafe: true,
     description:
       "List entries in a directory under the sandbox root. Returns one line per entry, marking directories with a trailing slash. Not recursive — use directory_tree for that.",
     readOnly: true,
@@ -223,6 +225,7 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
 
   registry.register({
     name: "directory_tree",
+    parallelSafe: true,
     description: `Recursively list entries in a directory. Shows indented tree structure with directories marked '/'. Budget-aware by default:
   - maxDepth defaults to 2 (root + one level). A depth-4 tree on a real repo blew ~5K tokens in one call. If you truly need deeper, pass maxDepth:N explicitly.
   - Skips ${[...SKIP_DIR_NAMES].sort().join(", ")} unless include_deps:true. Traversing into node_modules / .git / dist is almost always token-waste.
@@ -312,6 +315,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
 
   registry.register({
     name: "search_files",
+    parallelSafe: true,
     description:
       "Find files whose NAME matches a substring or regex. Case-insensitive. Walks the directory recursively under the sandbox root. Returns one path per line. Skips dependency / VCS / build directories (node_modules, .git, dist, build, .next, target, .venv) by default.",
     readOnly: true,
@@ -341,6 +345,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
 
   registry.register({
     name: "search_content",
+    parallelSafe: true,
     description:
       "Recursively grep file CONTENTS for a substring or regex. This is the right tool for 'find all places that call X', 'where is Y referenced', 'what files contain Z'. Different from search_files (which matches FILE NAMES). Returns one match per line in 'path:line: text' format. Skips dependency / VCS / build directories (node_modules, .git, dist, build, .next, target, .venv) and binary files by default.",
     readOnly: true,
@@ -394,6 +399,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
 
   registry.register({
     name: "get_file_info",
+    parallelSafe: true,
     description:
       "Stat a path under the sandbox root. Returns type (file|directory|symlink), size in bytes, mtime in ISO-8601.",
     readOnly: true,

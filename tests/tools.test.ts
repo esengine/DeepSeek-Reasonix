@@ -291,4 +291,23 @@ describe("ToolRegistry", () => {
       expect(JSON.parse(out).error).toMatch(/interceptor failed — boom/);
     });
   });
+
+  describe("isParallelSafe", () => {
+    it("returns true when the tool opts in", () => {
+      const reg = new ToolRegistry();
+      reg.register({ name: "read_thing", parallelSafe: true, fn: () => "ok" });
+      expect(reg.isParallelSafe("read_thing")).toBe(true);
+    });
+
+    it("defaults to false on unannotated tools", () => {
+      const reg = new ToolRegistry();
+      reg.register({ name: "do_thing", fn: () => "ok" });
+      expect(reg.isParallelSafe("do_thing")).toBe(false);
+    });
+
+    it("returns false for unknown tools", () => {
+      const reg = new ToolRegistry();
+      expect(reg.isParallelSafe("nope")).toBe(false);
+    });
+  });
 });
