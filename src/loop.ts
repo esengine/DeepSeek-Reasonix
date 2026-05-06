@@ -48,7 +48,12 @@ import {
 import { TurnFailureTracker } from "./loop/turn-failure-tracker.js";
 import type { BranchSummary, LoopEvent } from "./loop/types.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
-import { appendSessionMessage, loadSessionMessages, rewriteSession } from "./memory/session.js";
+import {
+  appendSessionMessage,
+  loadSessionMessages,
+  loadSessionMeta,
+  rewriteSession,
+} from "./memory/session.js";
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { countTokens } from "./tokenizer.js";
@@ -240,6 +245,15 @@ export class CacheFirstLoop {
       const tokensSaved = shrunk.tokensSaved;
       for (const msg of messages) this.log.append(msg);
       this.resumedMessageCount = messages.length;
+      // Carry forward cumulative cost / turn count so the TUI's session
+      // total continues across resumes; otherwise each restart resets to $0.
+      if (messages.length > 0) {
+        const meta = loadSessionMeta(this.sessionName);
+        this.stats.seedCarryover({
+          totalCostUsd: meta.totalCostUsd,
+          turnCount: meta.turnCount,
+        });
+      }
       if (healedCount > 0) {
         // Persist healed log so the same break isn't re-noticed every restart.
         try {

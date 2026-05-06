@@ -96,6 +96,20 @@ export interface SessionSummary {
 
 export class SessionStats {
   readonly turns: TurnStats[] = [];
+  /** Cost from prior runs of a resumed session, restored from session meta. */
+  private _carryoverCost = 0;
+  /** Turn count from prior runs of a resumed session. */
+  private _carryoverTurns = 0;
+
+  /** Seed totals from a resumed session's persisted meta — only call once at construction. */
+  seedCarryover(opts: { totalCostUsd?: number; turnCount?: number }): void {
+    if (typeof opts.totalCostUsd === "number" && opts.totalCostUsd > 0) {
+      this._carryoverCost = opts.totalCostUsd;
+    }
+    if (typeof opts.turnCount === "number" && opts.turnCount > 0) {
+      this._carryoverTurns = opts.turnCount;
+    }
+  }
 
   record(turn: number, model: string, usage: Usage): TurnStats {
     const cost = costUsd(model, usage);
@@ -111,7 +125,7 @@ export class SessionStats {
   }
 
   get totalCost(): number {
-    return this.turns.reduce((sum, t) => sum + t.cost, 0);
+    return this._carryoverCost + this.turns.reduce((sum, t) => sum + t.cost, 0);
   }
 
   get totalClaudeEquivalent(): number {
@@ -145,7 +159,7 @@ export class SessionStats {
   summary(): SessionSummary {
     const last = this.turns[this.turns.length - 1];
     return {
-      turns: this.turns.length,
+      turns: this.turns.length + this._carryoverTurns,
       totalCostUsd: round(this.totalCost, 6),
       totalInputCostUsd: round(this.totalInputCost, 6),
       totalOutputCostUsd: round(this.totalOutputCost, 6),

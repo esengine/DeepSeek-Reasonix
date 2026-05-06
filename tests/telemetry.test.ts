@@ -162,3 +162,31 @@ describe("cacheSavingsUsd", () => {
     expect(proSave).toBeGreaterThan(flashSave);
   });
 });
+
+describe("SessionStats — issue #333 resume cost carryover", () => {
+  it("totalCost includes seeded carryover plus live turns", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ totalCostUsd: 0.05, turnCount: 3 });
+    s.record(4, "deepseek-chat", new Usage(1000, 100, 0, 800, 200));
+    expect(s.totalCost).toBeGreaterThan(0.05);
+    expect(s.summary().totalCostUsd).toBeGreaterThan(0.05);
+    expect(s.summary().turns).toBe(4);
+  });
+
+  it("seedCarryover ignores undefined / zero / negative inputs", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ totalCostUsd: 0, turnCount: 0 });
+    s.seedCarryover({ totalCostUsd: -1 });
+    expect(s.totalCost).toBe(0);
+    expect(s.summary().turns).toBe(0);
+  });
+
+  it("zero carryover keeps totalCost equal to live-turn sum (regression: no double-count for fresh sessions)", () => {
+    const s = new SessionStats();
+    s.record(1, "deepseek-chat", new Usage(1000, 100, 0, 800, 200));
+    const live = s.totalCost;
+    expect(live).toBeGreaterThan(0);
+    s.seedCarryover({});
+    expect(s.totalCost).toBe(live);
+  });
+});

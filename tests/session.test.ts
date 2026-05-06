@@ -351,4 +351,35 @@ describe("session persistence", () => {
       expect(findSessionsByPrefix("project")).toEqual(["project", "project-20260430T143200"]);
     });
   });
+
+  describe("issue #333 — resume seeds cost carryover from session meta", () => {
+    it("CacheFirstLoop on resume preloads totalCostUsd / turnCount into stats", () => {
+      appendSessionMessage("c333", { role: "user", content: "hi" });
+      appendSessionMessage("c333", { role: "assistant", content: "hello" });
+      patchSessionMeta("c333", { totalCostUsd: 0.0123, turnCount: 5 });
+
+      const client = new DeepSeekClient({ apiKey: "sk-test" });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "test" }),
+        session: "c333",
+      });
+
+      expect(loop.stats.totalCost).toBe(0.0123);
+      const summary = loop.stats.summary();
+      expect(summary.totalCostUsd).toBe(0.0123);
+      expect(summary.turns).toBe(5);
+    });
+
+    it("fresh session (no meta) leaves carryover at zero", () => {
+      const client = new DeepSeekClient({ apiKey: "sk-test" });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "test" }),
+        session: "fresh-c333",
+      });
+      expect(loop.stats.totalCost).toBe(0);
+      expect(loop.stats.summary().turns).toBe(0);
+    });
+  });
 });
