@@ -328,31 +328,29 @@ function FallbackTable({
 }): React.ReactElement {
   return (
     <Box flexDirection="column">
-      {headerCells.map((h, ci) => {
-        const label = `${padToCells(h, labelPad - 2)}: `;
-        const values = bodyCells.map((r) => r[ci] ?? "");
-        return (
-          // biome-ignore lint/suspicious/noArrayIndexKey: header cells positional
-          <Box key={`fk-${ci}`} flexDirection="column">
-            {values.map((v, ri) => {
-              const lines = wrapToCells(v, valueCells);
-              return lines.map((line, li) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: fallback table lines are positional
-                <Box key={`fv-${ri}-${li}`}>
-                  {li === 0 ? (
-                    <Text bold color={FG.sub}>
-                      {label}
-                    </Text>
-                  ) : (
-                    <Text>{padToCells("", labelPad)}</Text>
-                  )}
-                  <Text color={FG.body}>{line}</Text>
-                </Box>
-              ));
-            })}
-          </Box>
-        );
-      })}
+      {bodyCells.map((row, ri) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: body rows positional
+        <Box key={`fr-${ri}`} flexDirection="column">
+          {ri > 0 ? <Text> </Text> : null}
+          {headerCells.map((h, ci) => {
+            const label = `${padToCells(h, labelPad - 2)}: `;
+            const lines = wrapToCells(row[ci] ?? "", valueCells);
+            return lines.map((line, li) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: fallback table lines are positional
+              <Box key={`fc-${ri}-${ci}-${li}`}>
+                {li === 0 ? (
+                  <Text bold color={FG.sub}>
+                    {label}
+                  </Text>
+                ) : (
+                  <Text>{padToCells("", labelPad)}</Text>
+                )}
+                <Text color={FG.body}>{line}</Text>
+              </Box>
+            ));
+          })}
+        </Box>
+      ))}
     </Box>
   );
 }
