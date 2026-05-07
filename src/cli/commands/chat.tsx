@@ -11,6 +11,7 @@ import { loadDotenv } from "../../env.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
+import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { type McpClientHost, bridgeMcpTools } from "../../mcp/registry.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
 import { SseTransport } from "../../mcp/sse.js";
@@ -107,6 +108,7 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         : ctx.getRequestedCount() === 1 && ctx.getMcpPrefix()
           ? (ctx.getMcpPrefix() as string)
           : "";
+      if (spec.transport === "stdio") preflightStdioSpec(spec);
       const transport: McpTransport =
         spec.transport === "sse"
           ? new SseTransport({ url: spec.url })

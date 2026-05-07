@@ -11,6 +11,7 @@
  * `--branch`, etc. can be picked here in a few arrow-key presses.
  */
 
+import { mkdirSync, statSync } from "node:fs";
 import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 // biome-ignore lint/style/useImportType: JSX (jsx: "react") needs React as a value at runtime
@@ -287,6 +288,49 @@ function McpArgsStep({
   onError: (e: string | null) => void;
 }) {
   const [value, setValue] = useState("");
+  const [pendingCreate, setPendingCreate] = useState<string | null>(null);
+
+  useInput((input, key) => {
+    if (!pendingCreate) return;
+    const ch = input.toLowerCase();
+    if (ch === "y" || key.return) {
+      try {
+        mkdirSync(pendingCreate, { recursive: true });
+        const created = pendingCreate;
+        setPendingCreate(null);
+        setValue("");
+        onError(null);
+        onSubmit(created);
+      } catch (e) {
+        onError(`Couldn't create ${pendingCreate}: ${(e as Error).message}`);
+        setPendingCreate(null);
+      }
+    } else if (ch === "n" || key.escape) {
+      setPendingCreate(null);
+      onError(null);
+    }
+  });
+
+  if (pendingCreate) {
+    return (
+      <StepFrame title={`Configure ${entry.name}`} step={2} total={3}>
+        <Box flexDirection="column">
+          <Text>
+            Directory <Text bold>{pendingCreate}</Text> doesn't exist.
+          </Text>
+          <Box marginTop={1}>
+            <Text dimColor>[Y/Enter] create it (mkdir -p) · [N/Esc] enter a different path</Text>
+          </Box>
+          {error ? (
+            <Box marginTop={1}>
+              <Text color="red">{error}</Text>
+            </Box>
+          ) : null}
+        </Box>
+      </StepFrame>
+    );
+  }
+
   return (
     <StepFrame title={`Configure ${entry.name}`} step={2} total={3}>
       <Box flexDirection="column">
@@ -314,6 +358,17 @@ function McpArgsStep({
                 onError(`${entry.name} needs a value — got an empty string.`);
                 return;
               }
+              if (entry.name === "filesystem") {
+                const check = checkFilesystemPath(trimmed);
+                if (check.kind === "missing") {
+                  setPendingCreate(trimmed);
+                  return;
+                }
+                if (check.kind === "not-a-dir") {
+                  onError(`${trimmed} exists but is not a directory.`);
+                  return;
+                }
+              }
               onSubmit(trimmed);
               setValue("");
             }}
@@ -328,6 +383,14 @@ function McpArgsStep({
       </Box>
     </StepFrame>
   );
+}
+
+function checkFilesystemPath(p: string): { kind: "ok" | "missing" | "not-a-dir" } {
+  try {
+    return { kind: statSync(p).isDirectory() ? "ok" : "not-a-dir" };
+  } catch {
+    return { kind: "missing" };
+  }
 }
 
 function ReviewConfirm({ onConfirm }: { onConfirm: () => void }) {

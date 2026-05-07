@@ -11,6 +11,7 @@ import {
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import { McpClient } from "../../mcp/client.js";
+import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { bridgeMcpTools } from "../../mcp/registry.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
 import { SseTransport } from "../../mcp/sse.js";
@@ -103,6 +104,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
           : requestedSpecs.length === 1 && opts.mcpPrefix
             ? opts.mcpPrefix
             : "";
+        if (spec.transport === "stdio") preflightStdioSpec(spec);
         const transport: McpTransport =
           spec.transport === "sse"
             ? new SseTransport({ url: spec.url })

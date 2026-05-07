@@ -1,6 +1,7 @@
 import { McpClient } from "../../mcp/client.js";
 import { inspectMcpServer } from "../../mcp/inspect.js";
 import type { InspectionReport } from "../../mcp/inspect.js";
+import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
 import { SseTransport } from "../../mcp/sse.js";
 import { type McpTransport, StdioTransport } from "../../mcp/stdio.js";
@@ -15,6 +16,7 @@ export interface McpInspectOptions {
 
 export async function mcpInspectCommand(opts: McpInspectOptions): Promise<void> {
   const spec = parseMcpSpec(opts.spec);
+  if (spec.transport === "stdio") preflightStdioSpec(spec);
   const transport: McpTransport =
     spec.transport === "sse"
       ? new SseTransport({ url: spec.url })
