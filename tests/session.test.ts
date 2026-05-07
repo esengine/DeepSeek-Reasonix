@@ -382,4 +382,27 @@ describe("session persistence", () => {
       expect(loop.stats.summary().turns).toBe(0);
     });
   });
+
+  describe("issue #364 — resume seeds cache + lastPromptTokens from session meta", () => {
+    it("CacheFirstLoop on resume preloads cache totals + last prompt tokens", () => {
+      appendSessionMessage("c364", { role: "user", content: "hi" });
+      appendSessionMessage("c364", { role: "assistant", content: "hello" });
+      patchSessionMeta("c364", {
+        cacheHitTokens: 366976,
+        cacheMissTokens: 109,
+        lastPromptTokens: 367085,
+      });
+
+      const client = new DeepSeekClient({ apiKey: "sk-test" });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "test" }),
+        session: "c364",
+      });
+
+      const summary = loop.stats.summary();
+      expect(summary.cacheHitRatio).toBeCloseTo(366976 / (366976 + 109), 4);
+      expect(summary.lastPromptTokens).toBe(367085);
+    });
+  });
 });

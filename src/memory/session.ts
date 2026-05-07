@@ -50,6 +50,11 @@ export interface SessionMeta {
   workspace?: string;
   /** Wallet currency at last save — used to format `totalCostUsd` in the picker without re-fetching balance. */
   balanceCurrency?: string;
+  /** Cumulative cache hit / miss tokens across the session — survives resume so /status cache% isn't 0 on a fresh boot. */
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  /** Last turn's promptTokens — lets /status render the context bar before the next turn fires. */
+  lastPromptTokens?: number;
 }
 
 export function sessionsDir(): string {

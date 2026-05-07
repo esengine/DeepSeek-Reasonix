@@ -100,14 +100,33 @@ export class SessionStats {
   private _carryoverCost = 0;
   /** Turn count from prior runs of a resumed session. */
   private _carryoverTurns = 0;
+  private _carryoverCacheHit = 0;
+  private _carryoverCacheMiss = 0;
+  /** Last turn's promptTokens before exit — surfaced via summary() until the next live turn lands. */
+  private _carryoverLastPromptTokens = 0;
 
   /** Seed totals from a resumed session's persisted meta — only call once at construction. */
-  seedCarryover(opts: { totalCostUsd?: number; turnCount?: number }): void {
+  seedCarryover(opts: {
+    totalCostUsd?: number;
+    turnCount?: number;
+    cacheHitTokens?: number;
+    cacheMissTokens?: number;
+    lastPromptTokens?: number;
+  }): void {
     if (typeof opts.totalCostUsd === "number" && opts.totalCostUsd > 0) {
       this._carryoverCost = opts.totalCostUsd;
     }
     if (typeof opts.turnCount === "number" && opts.turnCount > 0) {
       this._carryoverTurns = opts.turnCount;
+    }
+    if (typeof opts.cacheHitTokens === "number" && opts.cacheHitTokens > 0) {
+      this._carryoverCacheHit = opts.cacheHitTokens;
+    }
+    if (typeof opts.cacheMissTokens === "number" && opts.cacheMissTokens > 0) {
+      this._carryoverCacheMiss = opts.cacheMissTokens;
+    }
+    if (typeof opts.lastPromptTokens === "number" && opts.lastPromptTokens > 0) {
+      this._carryoverLastPromptTokens = opts.lastPromptTokens;
     }
   }
 
@@ -146,8 +165,8 @@ export class SessionStats {
   }
 
   get aggregateCacheHitRatio(): number {
-    let hit = 0;
-    let miss = 0;
+    let hit = this._carryoverCacheHit;
+    let miss = this._carryoverCacheMiss;
     for (const t of this.turns) {
       hit += t.usage.promptCacheHitTokens;
       miss += t.usage.promptCacheMissTokens;
@@ -166,7 +185,7 @@ export class SessionStats {
       claudeEquivalentUsd: round(this.totalClaudeEquivalent, 6),
       savingsVsClaudePct: round(this.savingsVsClaude * 100, 2),
       cacheHitRatio: round(this.aggregateCacheHitRatio, 4),
-      lastPromptTokens: last?.usage.promptTokens ?? 0,
+      lastPromptTokens: last?.usage.promptTokens ?? this._carryoverLastPromptTokens,
       lastTurnCostUsd: round(last?.cost ?? 0, 6),
     };
   }

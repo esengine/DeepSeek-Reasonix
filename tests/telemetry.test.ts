@@ -190,3 +190,41 @@ describe("SessionStats — issue #333 resume cost carryover", () => {
     expect(s.totalCost).toBe(live);
   });
 });
+
+describe("SessionStats — issue #364 resume cache + context carryover", () => {
+  it("aggregateCacheHitRatio includes carryover so /status isn't 0% on a fresh resume", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ cacheHitTokens: 366976, cacheMissTokens: 109 });
+    // No live turns yet — ratio must come from the carryover alone.
+    expect(s.aggregateCacheHitRatio).toBeCloseTo(366976 / (366976 + 109), 4);
+    expect(s.summary().cacheHitRatio).toBeCloseTo(366976 / (366976 + 109), 4);
+  });
+
+  it("aggregateCacheHitRatio sums carryover + live turns", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ cacheHitTokens: 1000, cacheMissTokens: 0 });
+    s.record(1, "deepseek-chat", new Usage(2000, 100, 0, 0, 2000));
+    // 1000 hit (carryover) + 0 hit (live) over 1000 + 2000 = 1/3.
+    expect(s.aggregateCacheHitRatio).toBeCloseTo(1000 / 3000, 4);
+  });
+
+  it("summary.lastPromptTokens falls back to carryover before any live turn", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ lastPromptTokens: 367085 });
+    expect(s.summary().lastPromptTokens).toBe(367085);
+  });
+
+  it("live turn overrides carryover lastPromptTokens", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ lastPromptTokens: 100 });
+    s.record(1, "deepseek-chat", new Usage(500, 50, 0, 400, 100));
+    expect(s.summary().lastPromptTokens).toBe(500);
+  });
+
+  it("seedCarryover ignores zero / negative cache + context fields", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ cacheHitTokens: 0, cacheMissTokens: -5, lastPromptTokens: 0 });
+    expect(s.aggregateCacheHitRatio).toBe(0);
+    expect(s.summary().lastPromptTokens).toBe(0);
+  });
+});

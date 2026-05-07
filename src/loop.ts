@@ -252,6 +252,9 @@ export class CacheFirstLoop {
         this.stats.seedCarryover({
           totalCostUsd: meta.totalCostUsd,
           turnCount: meta.turnCount,
+          cacheHitTokens: meta.cacheHitTokens,
+          cacheMissTokens: meta.cacheMissTokens,
+          lastPromptTokens: meta.lastPromptTokens,
         });
       }
       if (healedCount > 0) {

@@ -2412,9 +2412,15 @@ function AppInner({
               const cost = (m.totalCostUsd ?? 0) + (ev.stats?.cost ?? 0);
               const turn = (m.turnCount ?? 0) + 1;
               const currency = walletCurrencyRef.current;
+              const u = ev.stats?.usage;
+              const cacheHitTokens = (m.cacheHitTokens ?? 0) + (u?.promptCacheHitTokens ?? 0);
+              const cacheMissTokens = (m.cacheMissTokens ?? 0) + (u?.promptCacheMissTokens ?? 0);
               patchSessionMeta(session, {
                 totalCostUsd: cost,
                 turnCount: turn,
+                cacheHitTokens,
+                cacheMissTokens,
+                ...(u?.promptTokens ? { lastPromptTokens: u.promptTokens } : {}),
                 ...(currency ? { balanceCurrency: currency } : {}),
               });
             }
