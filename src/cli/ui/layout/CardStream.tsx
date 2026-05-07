@@ -24,14 +24,19 @@ export function splitCardStream(
   cards: readonly Card[],
   suppressLive = false,
 ): { committed: Card[]; live: Card[] } {
-  const lastIdx = cards.length - 1;
-  const lastCard = lastIdx >= 0 ? (cards[lastIdx] as Card) : null;
-  const lastIsLive = !!lastCard && !isSettled(lastCard);
-  if (suppressLive && lastIsLive) {
-    return { committed: cards.slice(0, lastIdx), live: [] };
+  // Static appends in order and never re-renders prior items, so a card
+  // can only commit once it's settled AND every earlier card is too —
+  // otherwise reasoning(streaming=true) freezes mid-stream when a later
+  // streaming/tool card appears (issue: spinner survives reasoning.end).
+  const firstUnsettledIdx = cards.findIndex((c) => !isSettled(c));
+  if (firstUnsettledIdx === -1) {
+    return { committed: cards.slice(), live: [] };
   }
-  const committed: Card[] = lastIsLive ? cards.slice(0, lastIdx) : cards.slice();
-  const live: Card[] = lastIsLive && lastCard ? [lastCard] : [];
+  const committed: Card[] = cards.slice(0, firstUnsettledIdx);
+  const live: Card[] = cards.slice(firstUnsettledIdx);
+  if (suppressLive && live.length > 0 && !isSettled(live[live.length - 1]!)) {
+    return { committed, live: live.slice(0, -1) };
+  }
   return { committed, live };
 }
 
