@@ -1,8 +1,9 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
-import React from "react";
+import React, { useContext } from "react";
 import { clipToCells, wrapToCells } from "../../../frame/width.js";
 import { countTokens } from "../../../tokenizer.js";
+import { LiveExpandContext } from "../layout/LiveExpandContext.js";
 import { useReserveRows } from "../layout/viewport-budget.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
@@ -15,6 +16,8 @@ import { useSlowTick } from "../ticker.js";
 
 /** Streaming preview tail length — bounded live region so chunks don't thrash whole-card layout. */
 const STREAMING_PREVIEW_LINES = 4;
+/** Expanded mode shows up to this many lines so the card can't swallow the whole viewport. */
+const EXPANDED_MAX_LINES = 60;
 
 const MIN_ELAPSED_MS_FOR_RATE = 500;
 const MIN_TOKENS_FOR_RATE = 4;
@@ -43,9 +46,11 @@ const PILL_RATE = { bg: "#11141a", fg: "#8b949e" } as const;
 export function StreamingCard({ card }: { card: StreamingCardData }): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
+  const expanded = useContext(LiveExpandContext);
+  const reserveCap = expanded ? EXPANDED_MAX_LINES + 2 : STREAMING_PREVIEW_LINES + 2;
   useReserveRows("stream", {
     min: STREAMING_PREVIEW_LINES + 1,
-    max: STREAMING_PREVIEW_LINES + 2,
+    max: reserveCap,
   });
   // Re-render at 1Hz so the rate keeps updating even when chunks stall.
   // Frozen once `card.done` is true — settled cards render via Static.
@@ -83,7 +88,9 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   const lineCells = Math.max(20, cols - 4);
   const allLines = card.text.length > 0 ? card.text.split("\n") : [""];
   const visualLines = allLines.flatMap((l) => wrapToCells(l, lineCells));
-  const visible = visualLines.slice(-STREAMING_PREVIEW_LINES);
+  const cap = expanded ? EXPANDED_MAX_LINES : STREAMING_PREVIEW_LINES;
+  const visible = visualLines.slice(-cap);
+  const droppedAbove = Math.max(0, visualLines.length - visible.length);
   const aborted = !!card.aborted;
   const headColor = aborted ? TONE.err : TONE_ACTIVE.brand;
   const glyph = aborted ? "‹" : "◈";
@@ -94,6 +101,9 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
     !aborted && liveTokens >= MIN_TOKENS_FOR_RATE && liveTps !== null ? (
       <Pill label={`${liveTps} t/s`} {...PILL_RATE} bold={false} />
     ) : null;
+  const expandPill = !aborted ? (
+    <Pill label={expanded ? "expanded ⌃o" : "preview ⌃o"} {...PILL_RATE} bold={false} />
+  ) : null;
 
   return (
     <Card tone={headColor}>
@@ -104,13 +114,19 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
         right={
           <>
             {liveRatePill}
+            {expandPill}
             {aborted ? null : <Spinner kind="braille" color={TONE_ACTIVE.brand} />}
             {modelPill}
           </>
         }
       />
+      {expanded && droppedAbove > 0 ? (
+        <Text
+          color={FG.faint}
+        >{`⋯ ${droppedAbove} earlier line${droppedAbove === 1 ? "" : "s"} above`}</Text>
+      ) : null}
       {visible.map((line, i) => (
-        <Box key={`${card.id}:${allLines.length - visible.length + i}`} flexDirection="row">
+        <Box key={`${card.id}:${visualLines.length - visible.length + i}`} flexDirection="row">
           <Text color={aborted ? FG.meta : FG.body}>{clipToCells(line, lineCells)}</Text>
         </Box>
       ))}

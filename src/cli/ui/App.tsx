@@ -104,6 +104,7 @@ import { useScrollback } from "./hooks/useScrollback.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
+import { LiveExpandContext } from "./layout/LiveExpandContext.js";
 import {
   ModeStatusBar,
   OngoingToolRow,
@@ -299,6 +300,12 @@ function AppInner({
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // ctrl-o toggles full-tail view on the live streaming card.
+  // Auto-resets at the end of every turn so the next reply starts collapsed.
+  const [liveExpand, setLiveExpand] = useState(false);
+  useEffect(() => {
+    if (!isStreaming && liveExpand) setLiveExpand(false);
+  }, [isStreaming, liveExpand]);
   const [languageVersion, setLanguageVersion] = useState(0);
   useEffect(() => onLanguageChange(() => setLanguageVersion((v) => v + 1)), []);
   // Live MCP server list: initialized from the boot-time prop, then
@@ -1308,6 +1315,28 @@ function AppInner({
       !pendingRevision
     ) {
       toggleUndoPause();
+      return;
+    }
+    // Ctrl-O toggles full-tail view on the live streaming reply so a long
+    // plan / todo can be read while it's still being written. Resets at
+    // turn end so each new reply starts collapsed.
+    if (
+      key.ctrl &&
+      key.input === "o" &&
+      isStreaming &&
+      !pendingShell &&
+      !pendingPlan &&
+      !pendingReviseEditor &&
+      !pendingSessionsPicker &&
+      !pendingMcpHub &&
+      !stagedInput &&
+      !pendingEditReview &&
+      !walkthroughActive &&
+      !pendingChoice &&
+      !stagedChoiceCustom &&
+      !pendingRevision
+    ) {
+      setLiveExpand((v) => !v);
       return;
     }
     if (busy) return;
@@ -3079,7 +3108,9 @@ function AppInner({
           <Box flexDirection="row">
             <Box flexDirection="column" flexGrow={1}>
               <Box flexDirection="column">
-                <CardStream suppressLive={modalOpen} />
+                <LiveExpandContext.Provider value={liveExpand}>
+                  <CardStream suppressLive={modalOpen} />
+                </LiveExpandContext.Provider>
                 {/*
           Welcome card on the empty state. Visible only when nothing
           has happened yet (no past events, nothing in flight, no
