@@ -1,11 +1,21 @@
 /** Job state in a module-scoped Map keyed by project root so multi-root dashboards don't collide; CLI `reasonix index` runs independently. */
 
-import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
-import { loadIndexConfig } from "../../config.js";
+import {
+  type EmbeddingProvider,
+  type SemanticEmbeddingUserConfig,
+  loadIndexConfig,
+  loadSemanticEmbeddingUserConfig,
+  readConfig,
+  redactSemanticEmbeddingConfig,
+  resolveSemanticEmbeddingConfig,
+  saveSemanticEmbeddingConfig,
+} from "../../config.js";
 import {
   INDEX_DIR_NAME,
   buildIndex,
+  indexCompatible,
   indexExists,
   querySemantic,
 } from "../../index/semantic/builder.js";
@@ -15,15 +25,20 @@ import {
   pullOllamaModel,
   startOllamaDaemon,
 } from "../../index/semantic/ollama-launcher.js";
+import {
+  compareIndexIdentity,
+  readIndexMeta as readStoreIndexMeta,
+} from "../../index/semantic/store.js";
 import { registerSemanticSearchTool } from "../../index/semantic/tool.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
 
-const DEFAULT_EMBED_MODEL = process.env.REASONIX_EMBED_MODEL ?? "nomic-embed-text";
-
 interface JobRecord {
   startedAt: number;
-  phase: BuildProgress["phase"] | "error";
+  finishedAt?: number;
+  cancelledAt?: number;
+  phase: BuildProgress["phase"] | "error" | "cancelled";
+  lastPhase?: BuildProgress["phase"];
   filesScanned?: number;
   filesChanged?: number;
   filesSkipped?: number;
@@ -32,12 +47,8 @@ interface JobRecord {
   result?: BuildResult;
   error?: string;
   rebuild: boolean;
-  // AbortController so /api/semantic/stop can interrupt — buildIndex
-  // doesn't accept a signal yet, but the CLI's tool registers one and
-  // we can extend builder later. For now stop is a no-op signal that
-  // the SPA can show feedback for; the next phase boundary picks it
-  // up by checking `aborted` if/when builder gains a signal arg.
   aborted: boolean;
+  controller: AbortController;
 }
 
 const JOBS = new Map<string, JobRecord>();
@@ -63,23 +74,17 @@ export async function handleSemantic(
 ): Promise<ApiResult> {
   const sub = rest[0] ?? "";
 
-  if (sub === "" && method === "GET") {
-    return await getStatus(ctx);
-  }
-  if (sub === "start" && method === "POST") {
-    return await startJob(body, ctx);
-  }
-  if (sub === "stop" && method === "POST") {
-    return await stopJob(ctx);
-  }
+  if (sub === "" && method === "GET") return await getStatus(ctx);
+  if (sub === "config" && method === "GET") return getSemanticConfig(ctx);
+  if (sub === "config" && method === "POST") return saveSemanticConfigApi(body, ctx);
+  if (sub === "start" && method === "POST") return await startJob(body, ctx);
+  if (sub === "stop" && method === "POST") return await stopJob(ctx);
   if (sub === "ollama" && method === "POST") {
     const action = rest[1] ?? "";
-    if (action === "start") return await startDaemon();
-    if (action === "pull") return await startPull(body);
+    if (action === "start") return await startDaemon(ctx);
+    if (action === "pull") return await startPull(body, ctx);
   }
-  if (sub === "search" && method === "POST") {
-    return await runSearch(body, ctx);
-  }
+  if (sub === "search" && method === "POST") return await runSearch(body, ctx);
   return { status: 404, body: { error: "no such semantic endpoint" } };
 }
 
@@ -105,11 +110,12 @@ async function runSearch(rawBody: string, ctx: DashboardContext): Promise<ApiRes
       ? Math.max(0, Math.min(1, parsed.minScore))
       : 0.3;
   const startedAt = Date.now();
+  const embedding = resolveSemanticEmbeddingConfig(ctx.configPath);
   try {
     const hits = await querySemantic(root, query, {
       topK,
       minScore,
-      model: DEFAULT_EMBED_MODEL,
+      configPath: ctx.configPath,
     });
     if (hits === null) {
       return { status: 404, body: { error: "no semantic index for this project" } };
@@ -125,7 +131,8 @@ async function runSearch(rawBody: string, ctx: DashboardContext): Promise<ApiRes
           snippet: h.entry.text,
         })),
         elapsedMs: Date.now() - startedAt,
-        model: DEFAULT_EMBED_MODEL,
+        provider: embedding.provider,
+        model: embedding.model,
       },
     };
   } catch (err) {
@@ -145,27 +152,27 @@ async function getStatus(ctx: DashboardContext): Promise<ApiResult> {
       },
     };
   }
-  const model = DEFAULT_EMBED_MODEL;
-  const [hasIndex, ollama] = await Promise.all([
+  const config = loadSemanticEmbeddingUserConfig(ctx.configPath);
+  const configView = redactSemanticEmbeddingConfig(config);
+  const resolved = resolveSemanticEmbeddingConfig(ctx.configPath);
+  const [hasIndex, providerStatus, index] = await Promise.all([
     indexExists(root),
-    checkOllamaStatus(model).catch((err) => ({
-      binaryFound: false,
-      daemonRunning: false,
-      modelPulled: false,
-      modelName: model,
-      installedModels: [] as string[],
-      error: err instanceof Error ? err.message : String(err),
-    })),
+    getProviderStatusFromConfig(configView),
+    readIndexMeta(root, { provider: resolved.provider, model: resolved.model }),
   ]);
   const job = JOBS.get(root) ?? null;
-  const pull = PULLS.get(model) ?? null;
+  const pull =
+    providerStatus.kind === "ollama" ? (PULLS.get(providerStatus.modelName) ?? null) : null;
   return {
     status: 200,
     body: {
       attached: true,
       root,
-      index: hasIndex ? readIndexMeta(root) : { exists: false },
-      ollama,
+      provider: configView.provider,
+      providerConfig: configView,
+      providerStatus,
+      index: hasIndex ? index : { exists: false },
+      ollama: providerStatus.kind === "ollama" ? providerStatus : undefined,
       job: job ? snapshotJob(job) : null,
       pull: pull ? snapshotPull(pull) : null,
     },
@@ -174,33 +181,31 @@ async function getStatus(ctx: DashboardContext): Promise<ApiResult> {
 
 interface IndexMetaResponse {
   exists: true;
+  provider: EmbeddingProvider;
   chunks: number;
   files: number;
   dim: number;
   sizeBytes: number;
   lastBuiltMs: number;
   model: string;
+  builtWith: { provider: EmbeddingProvider; model: string };
+  current: { provider: EmbeddingProvider; model: string };
+  compatible: boolean;
+  mismatch: "provider" | "model" | null;
 }
 
-function readIndexMeta(root: string): IndexMetaResponse | { exists: false } {
+async function readIndexMeta(
+  root: string,
+  current: { provider: EmbeddingProvider; model: string },
+): Promise<IndexMetaResponse | { exists: false }> {
   const dir = join(root, INDEX_DIR_NAME);
-  const metaPath = join(dir, "index.meta.json");
   const dataPath = join(dir, "index.jsonl");
-  // Try-read both files unconditionally — the catch covers "file
-  // missing" without a path-based existsSync precheck (CodeQL flags
-  // the precheck as a stat→read race).
-  let meta: { dim?: number; model?: string; updatedAt?: string };
-  try {
-    meta = JSON.parse(readFileSync(metaPath, "utf8"));
-  } catch {
-    return { exists: false };
-  }
+  const diskMeta = await readStoreIndexMeta(dir);
+  if (!diskMeta) return { exists: false };
   let chunks = 0;
   const files = new Set<string>();
   let sizeBytes = 0;
   try {
-    // Bind size and content to the same fd so a concurrent rebuild
-    // can't grow the file between stat and read (CodeQL js/file-system-race).
     const fd = openSync(dataPath, "r");
     let raw: string;
     try {
@@ -221,23 +226,29 @@ function readIndexMeta(root: string): IndexMetaResponse | { exists: false } {
       if (!line.trim()) continue;
       chunks++;
       try {
-        const rec = JSON.parse(line) as { path?: string };
-        if (typeof rec.path === "string") files.add(rec.path);
+        const rec = JSON.parse(line) as { p?: string };
+        if (typeof rec.p === "string") files.add(rec.p);
       } catch {
         /* skip malformed */
       }
     }
   } catch {
-    /* fall through with partial counts */
+    /* partial counts allowed */
   }
+  const mismatch = compareIndexIdentity(diskMeta, current);
   return {
     exists: true,
+    provider: diskMeta.provider,
     chunks,
     files: files.size,
-    dim: meta.dim ?? 0,
+    dim: diskMeta.dim ?? 0,
     sizeBytes,
-    lastBuiltMs: meta.updatedAt ? Date.parse(meta.updatedAt) || 0 : 0,
-    model: meta.model ?? "",
+    lastBuiltMs: diskMeta.updatedAt ? Date.parse(diskMeta.updatedAt) || 0 : 0,
+    model: diskMeta.model ?? "",
+    builtWith: { provider: diskMeta.provider, model: diskMeta.model },
+    current,
+    compatible: mismatch === null,
+    mismatch,
   };
 }
 
@@ -250,15 +261,19 @@ function snapshotPull(p: PullRecord): unknown {
   };
 }
 
-async function startDaemon(): Promise<ApiResult> {
-  const r = await startOllamaDaemon({ timeoutMs: 15_000 }).catch((err: Error) => ({
-    ready: false,
-    pid: null,
-    error: err.message,
-  }));
-  if ("error" in r) {
-    return { status: 500, body: { ready: false, error: r.error } };
+async function startDaemon(ctx: DashboardContext): Promise<ApiResult> {
+  const resolved = resolveSemanticEmbeddingConfig(ctx.configPath);
+  if (resolved.provider !== "ollama") {
+    return { status: 409, body: { error: "ollama actions require provider=ollama" } };
   }
+  const r = await startOllamaDaemon({ baseUrl: resolved.baseUrl, timeoutMs: 15_000 }).catch(
+    (err: Error) => ({
+      ready: false,
+      pid: null,
+      error: err.message,
+    }),
+  );
+  if ("error" in r) return { status: 500, body: { ready: false, error: r.error } };
   return { status: r.ready ? 200 : 504, body: r };
 }
 
@@ -266,7 +281,11 @@ interface PullBody {
   model?: unknown;
 }
 
-async function startPull(body: string): Promise<ApiResult> {
+async function startPull(body: string, ctx: DashboardContext): Promise<ApiResult> {
+  const resolved = resolveSemanticEmbeddingConfig(ctx.configPath);
+  if (resolved.provider !== "ollama") {
+    return { status: 409, body: { error: "ollama actions require provider=ollama" } };
+  }
   let parsed: PullBody = {};
   if (body) {
     try {
@@ -275,8 +294,7 @@ async function startPull(body: string): Promise<ApiResult> {
       return { status: 400, body: { error: "invalid JSON body" } };
     }
   }
-  const model =
-    typeof parsed.model === "string" && parsed.model ? parsed.model : DEFAULT_EMBED_MODEL;
+  const model = typeof parsed.model === "string" && parsed.model ? parsed.model : resolved.model;
   const existing = PULLS.get(model);
   if (existing && existing.status === "pulling") {
     return {
@@ -291,11 +309,8 @@ async function startPull(body: string): Promise<ApiResult> {
     exitCode: null,
   };
   PULLS.set(model, rec);
-  // Fire-and-forget. Polling /api/semantic surfaces progress.
   void pullOllamaModel(model, {
     onLine: (line) => {
-      // Ollama prints animated progress lines (`pulling abc... 12%`);
-      // keeping the latest is enough for a status panel readout.
       if (line.trim().length > 0) rec.lastLine = line.trim();
     },
   })
@@ -316,7 +331,10 @@ async function startPull(body: string): Promise<ApiResult> {
 function snapshotJob(j: JobRecord): unknown {
   return {
     startedAt: j.startedAt,
+    finishedAt: j.finishedAt ?? null,
+    cancelledAt: j.cancelledAt ?? null,
     phase: j.phase,
+    lastPhase: j.lastPhase ?? null,
     rebuild: j.rebuild,
     filesScanned: j.filesScanned ?? null,
     filesChanged: j.filesChanged ?? null,
@@ -344,7 +362,10 @@ async function startJob(body: string, ctx: DashboardContext): Promise<ApiResult>
   const existing = JOBS.get(root);
   if (
     existing &&
-    (existing.phase === "scan" || existing.phase === "embed" || existing.phase === "write")
+    (existing.phase === "setup" ||
+      existing.phase === "scan" ||
+      existing.phase === "embed" ||
+      existing.phase === "write")
   ) {
     return {
       status: 409,
@@ -364,30 +385,43 @@ async function startJob(body: string, ctx: DashboardContext): Promise<ApiResult>
 
   const job: JobRecord = {
     startedAt: Date.now(),
-    phase: "scan",
+    phase: "setup",
+    lastPhase: "setup",
     rebuild,
     aborted: false,
+    controller: new AbortController(),
   };
   JOBS.set(root, job);
 
-  // Fire-and-forget — endpoint returns immediately so the SPA can
-  // poll /api/semantic for progress instead of blocking on a long
-  // request that might exceed the browser's idle timeout.
   void runIndex(root, job, ctx).catch((err) => {
     job.phase = "error";
+    job.finishedAt = Date.now();
     job.error = err instanceof Error ? err.message : String(err);
   });
 
-  return { status: 202, body: { started: true, job: snapshotJob(job) } };
+  const resolved = resolveSemanticEmbeddingConfig(ctx.configPath);
+  return {
+    status: 202,
+    body: {
+      started: true,
+      provider: resolved.provider,
+      model: resolved.model,
+      job: snapshotJob(job),
+    },
+  };
 }
 
 async function runIndex(root: string, job: JobRecord, ctx: DashboardContext): Promise<void> {
   try {
+    const resolved = resolveSemanticEmbeddingConfig(ctx.configPath);
     const result = await buildIndex(root, {
       rebuild: job.rebuild,
+      configPath: ctx.configPath,
+      signal: job.controller.signal,
       indexConfig: loadIndexConfig(ctx.configPath),
       onProgress: (p) => {
         job.phase = p.phase;
+        if (p.phase !== "done") job.lastPhase = p.phase;
         if (p.filesScanned !== undefined) job.filesScanned = p.filesScanned;
         if (p.filesChanged !== undefined) job.filesChanged = p.filesChanged;
         if (p.filesSkipped !== undefined) job.filesSkipped = p.filesSkipped;
@@ -396,45 +430,235 @@ async function runIndex(root: string, job: JobRecord, ctx: DashboardContext): Pr
       },
     });
     job.phase = "done";
+    job.finishedAt = Date.now();
     job.result = result;
-    // Index is on disk now — register `semantic_search` on the live
-    // tool registry AND push its spec into the prefix so the model
-    // sees the tool from the next turn (no session restart needed).
-    // Costs one cache-miss turn since the prefix shape changed; the
-    // whole flow only runs once per session because the registry's
-    // `register` is idempotent on tool name.
     if (ctx.tools && ctx.addToolToPrefix) {
       try {
-        const added = await registerSemanticSearchTool(ctx.tools, { root });
+        const added = await registerSemanticSearchTool(ctx.tools, { root, ...resolved });
         if (added) {
           const spec = ctx.tools.specs().find((s) => s.function.name === "semantic_search");
           if (spec) ctx.addToolToPrefix(spec);
         }
       } catch {
-        /* live-registration failure is non-fatal — the index still
-         * exists on disk; the next session start will pick it up via
-         * bootstrapSemanticSearchInCodeMode. */
+        /* non-fatal */
       }
     }
   } catch (err) {
+    if (isAbortError(err)) {
+      job.phase = "cancelled";
+      job.cancelledAt = Date.now();
+      job.finishedAt = job.cancelledAt;
+      job.error = undefined;
+      return;
+    }
     job.phase = "error";
+    job.finishedAt = Date.now();
     job.error = err instanceof Error ? err.message : String(err);
   }
 }
 
 async function stopJob(ctx: DashboardContext): Promise<ApiResult> {
   const root = getRoot(ctx);
-  if (!root) {
-    return { status: 400, body: { error: "no project root" } };
-  }
+  if (!root) return { status: 400, body: { error: "no project root" } };
   const job = JOBS.get(root);
-  if (!job || job.phase === "done" || job.phase === "error") {
+  if (!job || job.phase === "done" || job.phase === "error" || job.phase === "cancelled") {
     return { status: 404, body: { error: "no running job" } };
   }
   job.aborted = true;
-  // builder.ts doesn't honor an AbortSignal yet — flagging the job is
-  // best-effort. The SPA still surfaces "stopping…" so the user knows
-  // the request was received; the next done/error update lands when
-  // the build naturally terminates.
+  job.controller.abort(new Error("semantic indexing aborted"));
   return { status: 202, body: { stopping: true, job: snapshotJob(job) } };
+}
+
+function getSemanticConfig(ctx: DashboardContext): ApiResult {
+  return {
+    status: 200,
+    body: redactSemanticEmbeddingConfig(loadSemanticEmbeddingUserConfig(ctx.configPath)),
+  };
+}
+
+function saveSemanticConfigApi(rawBody: string, ctx: DashboardContext): ApiResult {
+  let parsed: {
+    provider?: unknown;
+    ollama?: { baseUrl?: unknown; model?: unknown };
+    openaiCompat?: {
+      baseUrl?: unknown;
+      apiKey?: unknown;
+      model?: unknown;
+      extraBody?: unknown;
+    };
+  };
+  try {
+    parsed = JSON.parse(rawBody || "{}");
+  } catch {
+    return { status: 400, body: { error: "body must be JSON" } };
+  }
+  const existing = loadSemanticEmbeddingUserConfig(ctx.configPath);
+  const next: SemanticEmbeddingUserConfig = {
+    provider: parsed.provider === "openai-compat" ? "openai-compat" : "ollama",
+    ollama: {
+      baseUrl:
+        typeof parsed.ollama?.baseUrl === "string"
+          ? parsed.ollama.baseUrl
+          : existing.ollama?.baseUrl,
+      model:
+        typeof parsed.ollama?.model === "string" ? parsed.ollama.model : existing.ollama?.model,
+    },
+    openaiCompat: {
+      baseUrl:
+        typeof parsed.openaiCompat?.baseUrl === "string"
+          ? parsed.openaiCompat.baseUrl
+          : existing.openaiCompat?.baseUrl,
+      apiKey:
+        typeof parsed.openaiCompat?.apiKey === "string"
+          ? parsed.openaiCompat.apiKey.trim() || existing.openaiCompat?.apiKey
+          : existing.openaiCompat?.apiKey,
+      model:
+        typeof parsed.openaiCompat?.model === "string"
+          ? parsed.openaiCompat.model
+          : existing.openaiCompat?.model,
+      extraBody:
+        parsed.openaiCompat?.extraBody === undefined
+          ? existing.openaiCompat?.extraBody
+          : (parsed.openaiCompat.extraBody as Record<string, unknown>),
+    },
+  };
+  try {
+    saveSemanticEmbeddingConfig(next, ctx.configPath);
+  } catch (err) {
+    return { status: 400, body: { error: (err as Error).message } };
+  }
+  ctx.audit?.({
+    ts: Date.now(),
+    action: "set-semantic-config",
+    payload: { provider: next.provider },
+  });
+  return {
+    status: 200,
+    body: {
+      changed: collectSemanticConfigChanges(existing, next),
+      config: redactSemanticEmbeddingConfig(loadSemanticEmbeddingUserConfig(ctx.configPath)),
+    },
+  };
+}
+
+function collectSemanticConfigChanges(
+  before: SemanticEmbeddingUserConfig,
+  after: SemanticEmbeddingUserConfig,
+): string[] {
+  const left = JSON.stringify(before);
+  const right = JSON.stringify(after);
+  if (left === right) return [];
+  return ["semantic"];
+}
+
+async function getProviderStatusFromConfig(
+  config: ReturnType<typeof redactSemanticEmbeddingConfig>,
+): Promise<
+  | {
+      kind: "ollama";
+      ready: boolean;
+      baseUrl: string;
+      binaryFound: boolean;
+      daemonRunning: boolean;
+      modelPulled: boolean;
+      modelName: string;
+      installedModels: string[];
+      error?: string;
+    }
+  | {
+      kind: "openai-compat";
+      ready: boolean;
+      baseUrl: string;
+      apiKeySet: boolean;
+      model: string;
+      extraBodyKeys: string[];
+    }
+> {
+  if (config.provider === "openai-compat") {
+    return {
+      kind: "openai-compat",
+      ready: Boolean(
+        config.openaiCompat.baseUrl && config.openaiCompat.apiKeySet && config.openaiCompat.model,
+      ),
+      baseUrl: config.openaiCompat.baseUrl,
+      apiKeySet: config.openaiCompat.apiKeySet,
+      model: config.openaiCompat.model,
+      extraBodyKeys: Object.keys(config.openaiCompat.extraBody),
+    };
+  }
+  const ollama = await checkOllamaStatus(config.ollama.model, config.ollama.baseUrl).catch(
+    (err) => ({
+      binaryFound: false,
+      daemonRunning: false,
+      modelPulled: false,
+      modelName: config.ollama.model,
+      installedModels: [] as string[],
+      error: err instanceof Error ? err.message : String(err),
+    }),
+  );
+  return {
+    kind: "ollama",
+    ready: ollama.binaryFound && ollama.daemonRunning && ollama.modelPulled,
+    baseUrl: config.ollama.baseUrl,
+    ...ollama,
+  };
+}
+
+async function getProviderStatus(
+  resolved: ReturnType<typeof resolveSemanticEmbeddingConfig>,
+): Promise<
+  | {
+      kind: "ollama";
+      ready: boolean;
+      baseUrl: string;
+      binaryFound: boolean;
+      daemonRunning: boolean;
+      modelPulled: boolean;
+      modelName: string;
+      installedModels: string[];
+      error?: string;
+    }
+  | {
+      kind: "openai-compat";
+      ready: boolean;
+      baseUrl: string;
+      apiKeySet: boolean;
+      model: string;
+      extraBodyKeys: string[];
+    }
+> {
+  if (resolved.provider === "openai-compat") {
+    return {
+      kind: "openai-compat",
+      ready: Boolean(resolved.baseUrl && resolved.apiKey && resolved.model),
+      baseUrl: resolved.baseUrl,
+      apiKeySet: Boolean(resolved.apiKey),
+      model: resolved.model,
+      extraBodyKeys: Object.keys(resolved.extraBody),
+    };
+  }
+  const ollama = await checkOllamaStatus(resolved.model, resolved.baseUrl).catch((err) => ({
+    binaryFound: false,
+    daemonRunning: false,
+    modelPulled: false,
+    modelName: resolved.model,
+    installedModels: [] as string[],
+    error: err instanceof Error ? err.message : String(err),
+  }));
+  return {
+    kind: "ollama",
+    ready: ollama.binaryFound && ollama.daemonRunning && ollama.modelPulled,
+    baseUrl: resolved.baseUrl,
+    ...ollama,
+  };
+}
+
+void readConfig;
+
+function isAbortError(err: unknown): boolean {
+  if (err instanceof Error) {
+    if (err.name === "AbortError") return true;
+    if (/aborted/i.test(err.message)) return true;
+  }
+  return false;
 }

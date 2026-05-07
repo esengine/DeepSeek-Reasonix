@@ -28,7 +28,8 @@ describe("/semantic status renderer", () => {
       join(dir, "index.meta.json"),
       JSON.stringify({
         version: 1,
-        model: "nomic-embed-text",
+        provider: "openai-compat",
+        model: "text-embedding-3-small",
         dim: 768,
         updatedAt: new Date().toISOString(),
       }),
@@ -47,6 +48,8 @@ describe("/semantic status renderer", () => {
     expect(out).toMatch(/enabled/);
     expect(out).toContain("3 chunks"); // 3 lines
     expect(out).toContain("2 files"); // a.ts + b.ts
+    expect(out).toContain("openai-compat");
+    expect(out).toContain("text-embedding-3-small");
   });
 
   it("reports 'no index built yet' with how-to-build hint when nothing is set up", async () => {

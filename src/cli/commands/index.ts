@@ -1,34 +1,37 @@
 /** `reasonix index` — progress writes go to stderr so stdout stays pipeable. */
 
 import { resolve } from "node:path";
-import { loadIndexConfig } from "../../config.js";
+import { loadIndexConfig, resolveSemanticEmbeddingConfig } from "../../config.js";
 import { buildIndex } from "../../index/semantic/builder.js";
 import type { BuildProgress, BuildResult, SkipBuckets } from "../../index/semantic/builder.js";
 import { t } from "../../index/semantic/i18n.js";
-import { ollamaPreflight } from "../../index/semantic/preflight.js";
+import { semanticPreflight } from "../../index/semantic/preflight.js";
 
 export interface IndexCommandOptions {
   rebuild?: boolean;
   model?: string;
   dir?: string;
-  /** Ollama base URL override. */
   ollamaUrl?: string;
-  /** Skip preflight prompts (yes to all). For scripts that already
-   *  know Ollama is set up. Default false. */
   yes?: boolean;
 }
 
 export async function indexCommand(opts: IndexCommandOptions = {}): Promise<void> {
   const root = resolve(opts.dir ?? process.cwd());
   const tty = process.stderr.isTTY === true && process.stdin.isTTY === true;
-  const model = opts.model ?? process.env.REASONIX_EMBED_MODEL ?? "nomic-embed-text";
+  const resolved = resolveSemanticEmbeddingConfig();
+  const embedding =
+    resolved.provider === "ollama"
+      ? {
+          ...resolved,
+          model: opts.model ?? resolved.model,
+          baseUrl: opts.ollamaUrl ?? resolved.baseUrl,
+        }
+      : {
+          ...resolved,
+          model: opts.model ?? resolved.model,
+        };
 
-  // Preflight: detect Ollama state and offer to fix what's missing.
-  // Runs before chunking so the user doesn't watch a scan finish only
-  // to hit "daemon not reachable" on the first embed call.
-  const preflightOk = await ollamaPreflight({
-    model,
-    baseUrl: opts.ollamaUrl,
+  const preflightOk = await semanticPreflight(embedding, {
     interactive: tty && !opts.yes,
     yesToAll: opts.yes ?? false,
   });
@@ -40,9 +43,8 @@ export async function indexCommand(opts: IndexCommandOptions = {}): Promise<void
   let result: BuildResult;
   try {
     result = await buildIndex(root, {
+      ...embedding,
       rebuild: opts.rebuild,
-      model,
-      baseUrl: opts.ollamaUrl,
       indexConfig: loadIndexConfig(),
       onProgress: (p) => writer.update(p),
     });
@@ -135,7 +137,6 @@ function makeNonTtyWriter(): ProgressWriter {
   };
 }
 
-/** Spinner ticks on its own setInterval so a hung embedder still shows liveness. */
 function makeTtyWriter(): ProgressWriter {
   let status = t("progressStarting");
   let lastLineLen = 0;
@@ -152,8 +153,6 @@ function makeTtyWriter(): ProgressWriter {
     lastLineLen = line.length;
   };
 
-  // Paint the initial frame immediately so the user sees text on
-  // line one — don't wait for the first interval tick.
   repaint();
   const interval = setInterval(repaint, SPINNER_INTERVAL_MS);
 
@@ -167,9 +166,6 @@ function makeTtyWriter(): ProgressWriter {
         const pct = total > 0 ? ((done / total) * 100).toFixed(0) : "0";
         status = t("progressEmbed", { done, total, pct });
       }
-      // Repaint immediately on event arrival so the new counter
-      // shows up before the next interval tick (avoids a 120ms lag
-      // on each progress update).
       repaint();
     },
     clear() {

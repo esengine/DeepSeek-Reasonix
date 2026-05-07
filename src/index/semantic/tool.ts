@@ -1,22 +1,25 @@
 import type { ToolRegistry } from "../../tools.js";
-import { indexExists, querySemantic } from "./builder.js";
-import type { EmbedOptions } from "./embedding.js";
+import { indexCompatible, indexExists, querySemantic } from "./builder.js";
 import type { SearchHit } from "./store.js";
 
-export interface SemanticToolOptions extends EmbedOptions {
-  /** Project root (sandbox dir). Index lives at `<root>/.reasonix/semantic/`. */
+type SemanticToolOptions = {
+  provider?: "ollama" | "openai-compat";
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  extraBody?: Record<string, unknown>;
+  timeoutMs?: number;
   root: string;
-  /** Default top-K when the model omits it. Default 8. */
   defaultTopK?: number;
-  /** Default min score. Default 0.3. */
   defaultMinScore?: number;
-}
+};
 
 export async function registerSemanticSearchTool(
   registry: ToolRegistry,
   opts: SemanticToolOptions,
 ): Promise<boolean> {
-  if (!(await indexExists(opts.root))) return false;
+  if (!(await indexCompatible(opts.root, { provider: opts.provider, model: opts.model })))
+    return false;
   const defaultTopK = opts.defaultTopK ?? 8;
   const defaultMinScore = opts.defaultMinScore ?? 0.3;
 
@@ -49,8 +52,11 @@ export async function registerSemanticSearchTool(
       const hits = await querySemantic(opts.root, args.query, {
         topK: args.topK ?? defaultTopK,
         minScore: args.minScore ?? defaultMinScore,
+        provider: opts.provider,
         baseUrl: opts.baseUrl,
+        apiKey: opts.apiKey,
         model: opts.model,
+        extraBody: opts.extraBody,
         signal: ctx?.signal,
       });
       if (hits === null) {
@@ -97,9 +103,9 @@ function indentBlock(text: string, prefix: string): string {
 export async function bootstrapSemanticSearchInCodeMode(
   registry: ToolRegistry,
   rootDir: string,
-  opts: EmbedOptions = {},
+  opts: Omit<SemanticToolOptions, "root" | "defaultTopK" | "defaultMinScore"> = {},
 ): Promise<{ enabled: boolean }> {
-  if (await indexExists(rootDir)) {
+  if (await indexCompatible(rootDir, { provider: opts.provider, model: opts.model })) {
     await registerSemanticSearchTool(registry, { ...opts, root: rootDir });
     return { enabled: true };
   }

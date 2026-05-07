@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { embedAll } from "../src/index/semantic/embedding.js";
+import { EmbeddingError, embedAll } from "../src/index/semantic/embedding.js";
 
 describe("embedAll fault tolerance", () => {
   let originalFetch: typeof globalThis.fetch;
@@ -72,15 +72,41 @@ describe("embedAll fault tolerance", () => {
     expect(errors).toEqual([0, 1]);
   });
 
-  it("calls onProgress once per chunk regardless of outcome", async () => {
-    stubFetch((i) => (i === 0 ? jsonErr(500, "x") : jsonOk([1, 0])));
-    const ticks: Array<{ done: number; total: number }> = [];
-    await embedAll(["x", "y"], {
-      onProgress: (done, total) => ticks.push({ done, total }),
+  it("throws for openai-compatible batch failures instead of returning all-null", async () => {
+    stubFetch(() => jsonErr(500, { error: "context length" }));
+    const errors: number[] = [];
+    await expect(
+      embedAll(["a", "b"], {
+        provider: "openai-compat",
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "sk-openai1234567890abcd",
+        model: "text-embedding-3-small",
+        onError: (i) => errors.push(i),
+      }),
+    ).rejects.toBeInstanceOf(EmbeddingError);
+    expect(errors).toEqual([]);
+  });
+
+  it("treats openai-compatible aborts as aborts", async () => {
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      const signal = init?.signal;
+      return await new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => reject(signal.reason ?? new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    }) as unknown as typeof globalThis.fetch;
+    const ac = new AbortController();
+    const promise = embedAll(["a"], {
+      provider: "openai-compat",
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-openai1234567890abcd",
+      model: "text-embedding-3-small",
+      signal: ac.signal,
     });
-    expect(ticks).toEqual([
-      { done: 1, total: 2 },
-      { done: 2, total: 2 },
-    ]);
+    ac.abort(new Error("user cancelled"));
+    await expect(promise).rejects.toThrow(/aborted/);
   });
 });

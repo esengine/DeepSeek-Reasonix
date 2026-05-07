@@ -2,13 +2,11 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type { EmbeddingProvider } from "../../config.js";
 import type { CodeChunk } from "./chunker.js";
 
 export interface IndexEntry extends CodeChunk {
-  /** L2-normalized embedding so cosine reduces to a dot product. */
   embedding: Float32Array;
-  /** mtime of the source file when this entry was indexed (ms epoch).
-   *  Lets the builder skip unchanged files on incremental rebuilds. */
   mtimeMs: number;
 }
 
@@ -17,21 +15,46 @@ export interface SearchHit {
   score: number;
 }
 
-export interface IndexMeta {
-  version: number;
-  /** Embedding model the index was built with — invalidates when changed. */
+export type IndexMismatch = "provider" | "model";
+
+export interface IndexIdentity {
+  provider: EmbeddingProvider;
   model: string;
-  /** Embedding dimensionality — sanity check on append. */
+}
+
+export interface IndexMeta extends IndexIdentity {
+  version: number;
   dim: number;
-  /** ISO timestamp of last write. */
   updatedAt: string;
 }
 
-/** Bumped when the JSONL line schema changes. Old indexes are rebuilt. */
 export const STORE_VERSION = 1;
 
 const META_FILE = "index.meta.json";
 const DATA_FILE = "index.jsonl";
+
+export async function readIndexMeta(indexDir: string): Promise<IndexMeta | null> {
+  try {
+    const raw = await fs.readFile(path.join(indexDir, META_FILE), "utf8");
+    return normalizeMeta(JSON.parse(raw) as Partial<IndexMeta>);
+  } catch {
+    return null;
+  }
+}
+
+export function compareIndexIdentity(
+  meta: IndexIdentity,
+  identity: IndexIdentity,
+): IndexMismatch | null {
+  if (meta.provider !== identity.provider) return "provider";
+  if (meta.model !== identity.model) return "model";
+  return null;
+}
+
+export async function wipeStoreFiles(indexDir: string): Promise<void> {
+  await fs.rm(path.join(indexDir, DATA_FILE), { force: true });
+  await fs.rm(path.join(indexDir, META_FILE), { force: true });
+}
 
 export class SemanticStore {
   private entries: IndexEntry[] = [];
@@ -39,42 +62,39 @@ export class SemanticStore {
   private dim = 0;
 
   constructor(
-    /** Directory the index files live in (e.g. `<project>/.reasonix/`). */
     public readonly indexDir: string,
-    /** Embedding model name written into meta and checked on load. */
-    public readonly model: string,
+    public readonly identity: IndexIdentity,
   ) {}
 
-  /** True when no entries are loaded — the index doesn't exist or is empty. */
+  get provider(): EmbeddingProvider {
+    return this.identity.provider;
+  }
+
+  get model(): string {
+    return this.identity.model;
+  }
+
   get empty(): boolean {
     return this.entries.length === 0;
   }
 
-  /** Total number of indexed chunks. */
   get size(): number {
     return this.entries.length;
   }
 
-  /** Read-only view, mostly for tests. */
   get all(): readonly IndexEntry[] {
     return this.entries;
   }
 
-  /** Last-known mtime per indexed file (ms epoch) for incremental rebuilds. */
   fileMtimes(): Map<string, number> {
     const out = new Map<string, number>();
     for (const [p, group] of this.byPath) {
-      // Every chunk from a given file shares the same mtime; first
-      // entry's value is authoritative.
       const first = group[0];
       if (first) out.set(p, first.mtimeMs);
     }
     return out;
   }
 
-  /** Append entries to in-memory state and to disk. Re-indexes the
-   * `byPath` map. Caller is responsible for L2-normalizing each
-   * embedding before calling — the search hot path assumes unit vectors. */
   async add(entries: readonly IndexEntry[]): Promise<void> {
     if (entries.length === 0) return;
     if (this.dim === 0) this.dim = entries[0]!.embedding.length;
@@ -96,7 +116,6 @@ export class SemanticStore {
     await this.writeMeta();
   }
 
-  /** Rewrites the JSONL — append-only handles adds, deletes need compaction. */
   async remove(paths: readonly string[]): Promise<number> {
     if (paths.length === 0) return 0;
     const drop = new Set(paths);
@@ -108,15 +127,11 @@ export class SemanticStore {
     return removed;
   }
 
-  /** `query` MUST be L2-normalized — search assumes unit vectors so cosine = dot. */
   search(query: Float32Array, topK = 8, minScore = 0): SearchHit[] {
     if (this.entries.length === 0) return [];
     if (query.length !== this.dim && this.dim !== 0) {
       throw new Error(`query dim ${query.length} ≠ index dim ${this.dim}`);
     }
-    // Use a small max-heap-ish structure: keep `topK + 1` entries,
-    // drop smallest each insert. For typical topK (≤16) this beats
-    // sorting the full list at small extra constant cost.
     const heap: SearchHit[] = [];
     for (const entry of this.entries) {
       const score = dot(query, entry.embedding);
@@ -126,7 +141,6 @@ export class SemanticStore {
         if (heap.length === topK) heap.sort((a, b) => a.score - b.score);
       } else if (score > heap[0]!.score) {
         heap[0] = { entry, score };
-        // Maintain partial order for the smallest at index 0.
         for (let i = 0; i < heap.length - 1; i++) {
           if (heap[i]!.score > heap[i + 1]!.score) {
             const tmp = heap[i]!;
@@ -139,7 +153,6 @@ export class SemanticStore {
     return heap.sort((a, b) => b.score - a.score);
   }
 
-  /** Temp-file + rename so Ctrl+C mid-write can't leave the index half-empty. */
   private async flush(): Promise<void> {
     await fs.mkdir(this.indexDir, { recursive: true });
     const tmp = path.join(this.indexDir, `${DATA_FILE}.tmp`);
@@ -153,6 +166,7 @@ export class SemanticStore {
   private async writeMeta(): Promise<void> {
     const meta: IndexMeta = {
       version: STORE_VERSION,
+      provider: this.provider,
       model: this.model,
       dim: this.dim,
       updatedAt: new Date().toISOString(),
@@ -164,29 +178,19 @@ export class SemanticStore {
     );
   }
 
-  /** Drop everything from disk + memory. Used by `--rebuild`. */
   async wipe(): Promise<void> {
     this.entries = [];
     this.byPath.clear();
     this.dim = 0;
-    await fs.rm(path.join(this.indexDir, DATA_FILE), { force: true });
-    await fs.rm(path.join(this.indexDir, META_FILE), { force: true });
+    await wipeStoreFiles(this.indexDir);
   }
 }
 
-/** Throws on model mismatch — embeddings would be incomparable; caller must wipe + rebuild. */
-export async function openStore(indexDir: string, model: string): Promise<SemanticStore> {
-  const store = new SemanticStore(indexDir, model);
+export async function openStore(indexDir: string, identity: IndexIdentity): Promise<SemanticStore> {
+  const store = new SemanticStore(indexDir, identity);
   const dataPath = path.join(indexDir, DATA_FILE);
-  const metaPath = path.join(indexDir, META_FILE);
 
-  let meta: IndexMeta | null = null;
-  try {
-    const raw = await fs.readFile(metaPath, "utf8");
-    meta = JSON.parse(raw) as IndexMeta;
-  } catch {
-    /* no meta yet — fresh store */
-  }
+  const meta = await readIndexMeta(indexDir);
 
   if (meta) {
     if (meta.version !== STORE_VERSION) {
@@ -194,9 +198,10 @@ export async function openStore(indexDir: string, model: string): Promise<Semant
         `Index format version ${meta.version} does not match current ${STORE_VERSION}. Run \`reasonix index --rebuild\`.`,
       );
     }
-    if (meta.model !== model) {
+    const mismatch = compareIndexIdentity(meta, identity);
+    if (mismatch !== null) {
       throw new Error(
-        `Index was built with model "${meta.model}" but current is "${model}". Run \`reasonix index --rebuild\`.`,
+        `Index was built with provider "${meta.provider}" model "${meta.model}" but current config is provider "${identity.provider}" model "${identity.model}". Run \`reasonix index --rebuild\`.`,
       );
     }
   }
@@ -212,15 +217,13 @@ export async function openStore(indexDir: string, model: string): Promise<Semant
     try {
       const entry = deserializeEntry(line);
       (store as unknown as { dim: number }).dim = entry.embedding.length;
-      // Bypass `add` to skip the per-line disk write on load.
       (store as unknown as { entries: IndexEntry[] }).entries.push(entry);
       const map = (store as unknown as { byPath: Map<string, IndexEntry[]> }).byPath;
       const list = map.get(entry.path);
       if (list) list.push(entry);
       else map.set(entry.path, [entry]);
     } catch {
-      // Malformed line — drop it but keep going. Same tolerance as
-      // session.ts shows for partially-flushed JSONL.
+      /* tolerate malformed line */
     }
   }
   return store;
@@ -234,14 +237,12 @@ export function normalize(v: Float32Array): Float32Array {
   return v;
 }
 
-/** Pure dot product of two same-length Float32Arrays. */
 function dot(a: Float32Array, b: Float32Array): number {
   let s = 0;
   for (let i = 0; i < a.length; i++) s += a[i]! * b[i]!;
   return s;
 }
 
-/** Embedding base64-encoded — ~33% smaller than the JSON-array form, round-trips losslessly. */
 function serializeEntry(e: IndexEntry): string {
   const buf = Buffer.from(e.embedding.buffer, e.embedding.byteOffset, e.embedding.byteLength);
   return JSON.stringify({
@@ -263,11 +264,9 @@ function deserializeEntry(line: string): IndexEntry {
     t: string;
     v: string;
   };
-  const bytes = Buffer.from(parsed.v, "base64");
-  // The float32 view shares memory with the buffer; copy so the
-  // entry is independent of the parser's transient buffer.
-  const f32 = new Float32Array(
-    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  const buf = Buffer.from(parsed.v, "base64");
+  const embedding = new Float32Array(
+    buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
   );
   return {
     path: parsed.p,
@@ -275,6 +274,16 @@ function deserializeEntry(line: string): IndexEntry {
     endLine: parsed.e,
     mtimeMs: parsed.m,
     text: parsed.t,
-    embedding: f32,
+    embedding: new Float32Array(embedding),
+  };
+}
+
+function normalizeMeta(meta: Partial<IndexMeta>): IndexMeta {
+  return {
+    version: typeof meta.version === "number" ? meta.version : STORE_VERSION,
+    provider: meta.provider === "openai-compat" ? "openai-compat" : "ollama",
+    model: typeof meta.model === "string" ? meta.model : "",
+    dim: typeof meta.dim === "number" ? meta.dim : 0,
+    updatedAt: typeof meta.updatedAt === "string" ? meta.updatedAt : new Date(0).toISOString(),
   };
 }

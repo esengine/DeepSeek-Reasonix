@@ -1,13 +1,50 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { t, useLang } from "../i18n/index.js";
 import { api } from "../lib/api.js";
 import { fmtBytes, fmtNum, fmtRelativeTime } from "../lib/format.js";
 import { html } from "../lib/html.js";
-import { t, useLang } from "../i18n/index.js";
+
+interface SemanticConfigView {
+  provider: "ollama" | "openai-compat";
+  ollama: {
+    baseUrl: string;
+    model: string;
+  };
+  openaiCompat: {
+    baseUrl: string;
+    apiKey: string;
+    apiKeySet: boolean;
+    model: string;
+    extraBody: Record<string, unknown>;
+  };
+}
 
 interface SemanticData {
   attached?: boolean;
   reason?: string;
   root?: string;
+  provider?: "ollama" | "openai-compat";
+  providerConfig?: SemanticConfigView;
+  providerStatus?:
+    | {
+        kind: "ollama";
+        ready: boolean;
+        baseUrl: string;
+        binaryFound?: boolean;
+        daemonRunning?: boolean;
+        modelPulled?: boolean;
+        modelName?: string;
+        installedModels?: string[];
+        error?: string;
+      }
+    | {
+        kind: "openai-compat";
+        ready: boolean;
+        baseUrl: string;
+        apiKeySet: boolean;
+        model: string;
+        extraBodyKeys: string[];
+      };
   index?: IndexInfo;
   job?: SemanticJob | null;
   pull?: { status: string; startedAt: number; lastLine?: string } | null;
@@ -23,17 +60,25 @@ interface SemanticData {
 
 interface IndexInfo {
   exists: boolean;
+  provider?: "ollama" | "openai-compat";
   chunks?: number;
   files?: number;
   dim?: number;
   sizeBytes?: number;
   lastBuiltMs?: number;
   model?: string;
+  builtWith?: { provider: "ollama" | "openai-compat"; model: string };
+  current?: { provider: "ollama" | "openai-compat"; model: string };
+  compatible?: boolean;
+  mismatch?: "provider" | "model" | null;
 }
 
 interface SemanticJob {
   phase: string;
   startedAt: number;
+  finishedAt?: number | null;
+  cancelledAt?: number | null;
+  lastPhase?: string | null;
   chunksTotal?: number;
   chunksDone?: number;
   filesScanned?: number;
@@ -50,17 +95,44 @@ interface SemanticJob {
   };
 }
 
+interface SemanticConfigDraft {
+  provider: "ollama" | "openai-compat";
+  ollama: {
+    baseUrl: string;
+    model: string;
+  };
+  openaiCompat: {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    extraBodyText: string;
+    apiKeySet: boolean;
+  };
+}
+
+export interface SemanticDraftValidation {
+  extraBody: Record<string, unknown>;
+  error: string | null;
+}
+
 export function SemanticPanel() {
   useLang();
   const [data, setData] = useState<SemanticData | null>(null);
+  const [draft, setDraft] = useState<SemanticConfigDraft | null>(null);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const draftDirtyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const r = await api<SemanticData>("/semantic");
-      setData(r);
+      const [semantic, config] = await Promise.all([
+        api<SemanticData>("/semantic"),
+        api<SemanticConfigView>("/semantic/config"),
+      ]);
+      setData(semantic);
+      setDraft((current) => (current && draftDirtyRef.current ? current : toConfigDraft(config)));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -69,7 +141,7 @@ export function SemanticPanel() {
   useEffect(() => {
     load();
     const phase = data?.job?.phase;
-    const running = phase === "scan" || phase === "embed" || phase === "write";
+    const running = isActiveSemanticPhase(phase);
     const pulling = data?.pull?.status === "pulling";
     const ms = running || pulling ? 1200 : 5000;
     const id = setInterval(load, ms);
@@ -78,10 +150,18 @@ export function SemanticPanel() {
 
   const start = useCallback(
     async (rebuild: boolean) => {
+      if (!draft) return;
       setBusy(true);
       setError(null);
       setInfo(null);
       try {
+        const validation = validateSemanticDraft(draft);
+        if (draftDirty) {
+          throw new Error(t("semantic.saveBeforeIndex"));
+        }
+        if (validation.error) {
+          throw new Error(validation.error);
+        }
         await api("/semantic/start", { method: "POST", body: { rebuild: !!rebuild } });
         setInfo(rebuild ? t("semantic.rebuildStarted") : t("semantic.incrementalStarted"));
         await load();
@@ -91,7 +171,7 @@ export function SemanticPanel() {
         setBusy(false);
       }
     },
-    [load],
+    [draft, draftDirty, load],
   );
 
   const stop = useCallback(async () => {
@@ -113,10 +193,11 @@ export function SemanticPanel() {
     setError(null);
     setInfo(t("semantic.startingDaemon"));
     try {
-      const r = await api<{ ready: boolean }>("/semantic/ollama/start", { method: "POST", body: {} });
-      setInfo(
-        r.ready ? t("semantic.daemonUp") : t("semantic.daemonTimeout"),
-      );
+      const r = await api<{ ready: boolean }>("/semantic/ollama/start", {
+        method: "POST",
+        body: {},
+      });
+      setInfo(r.ready ? t("semantic.daemonUp") : t("semantic.daemonTimeout"));
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -142,10 +223,45 @@ export function SemanticPanel() {
     [load],
   );
 
-  if (!data && !error)
+  const saveProviderConfig = useCallback(async () => {
+    if (!draft) return;
+    setBusy(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const extraBody = semanticValidation.extraBody;
+      await api("/semantic/config", {
+        method: "POST",
+        body: {
+          provider: draft.provider,
+          ollama: {
+            baseUrl: draft.ollama.baseUrl,
+            model: draft.ollama.model,
+          },
+          openaiCompat: {
+            baseUrl: draft.openaiCompat.baseUrl,
+            apiKey: draft.openaiCompat.apiKey,
+            model: draft.openaiCompat.model,
+            extraBody,
+          },
+        },
+      });
+      setDraftDirty(false);
+      draftDirtyRef.current = false;
+      setInfo(t("semantic.savedConfig", { count: 1 }));
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [draft, load]);
+
+  if (!data && !error) {
     return html`<div class="card" style="color:var(--fg-3)">${t("common.loading")}</div>`;
+  }
   if (error && !data) return html`<div class="card accent-err">${error}</div>`;
-  if (!data) return null;
+  if (!data || !draft) return null;
 
   if (!data.attached) {
     return html`
@@ -158,29 +274,36 @@ export function SemanticPanel() {
 
   const job = data.job;
   const phase = job?.phase;
-  const running = phase === "scan" || phase === "embed" || phase === "write";
+  const running = isActiveSemanticPhase(phase);
   const pull = data.pull;
   const pulling = pull?.status === "pulling";
-
-  const o = data.ollama ?? {};
-  const binaryFound = o.binaryFound === true;
-  const daemonRunning = o.daemonRunning === true;
-  const modelPulled = o.modelPulled === true;
-  const modelName = o.modelName ?? "nomic-embed-text";
-  const installedModels = o.installedModels ?? [];
-  const ready = binaryFound && daemonRunning && modelPulled;
+  const provider = data.providerStatus?.kind ?? draft.provider;
+  const ready = data.providerStatus?.ready === true;
+  const isOllama = provider === "ollama";
+  const ollama = data.providerStatus?.kind === "ollama" ? data.providerStatus : null;
+  const remote = data.providerStatus?.kind === "openai-compat" ? data.providerStatus : null;
+  const binaryFound = ollama?.binaryFound === true;
+  const daemonRunning = ollama?.daemonRunning === true;
+  const modelPulled = ollama?.modelPulled === true;
+  const modelName = isOllama
+    ? (ollama?.modelName ?? draft.ollama.model ?? "nomic-embed-text")
+    : draft.openaiCompat.model;
 
   const sectionH3 = (text: string) => html`
     <h3 style="margin:18px 0 8px;font-family:var(--font-mono);font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.1em">${text}</h3>
   `;
 
   const idx = data.index;
+  const indexReady = idx?.exists === true && idx.compatible !== false;
+  const indexMismatch = idx?.exists === true && idx.compatible === false;
+  const semanticValidation = validateSemanticDraft(draft);
+  const semanticDraftBlocked = draftDirty || semanticValidation.error !== null;
   return html`
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px;align-items:start">
       <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
         <div class="chips">
-          <span class=${`chip-f static ${idx?.exists ? "active" : ""}`}>
-            ${idx?.exists ? t("semantic.indexBuilt") : t("semantic.noIndex")}
+          <span class=${`chip-f static ${indexReady ? "active" : ""}`}>
+            ${indexReady ? t("semantic.indexBuilt") : t("semantic.noIndex")}
           </span>
           ${
             ready
@@ -188,13 +311,147 @@ export function SemanticPanel() {
               : html`<span class="chip-f static" style="border-color:var(--c-warn);color:var(--c-warn)">${t("semantic.setupNeeded")}</span>`
           }
         </div>
-        ${info ? html`<div><span class="pill info">${info}</span></div>` : null}
         ${error ? html`<div class="card accent-err">${error}</div>` : null}
 
-        ${idx?.exists ? html`<${SemanticSearchSection} />` : null}
+        <div class="card">
+          <div class="card-h"><span class="title">${t("semantic.provider")}</span></div>
+          <div class="form-row">
+            <span class="lbl">${t("semantic.providerType")}</span>
+            <select
+              class="input mono"
+              value=${draft.provider}
+              onInput=${(e: Event) => {
+                draftDirtyRef.current = true;
+                setDraftDirty(true);
+                setDraft({
+                  ...draft,
+                  provider: (e.target as HTMLSelectElement).value as "ollama" | "openai-compat",
+                });
+              }}
+            >
+              <option value="ollama">Ollama</option>
+              <option value="openai-compat">OpenAI-Compatible</option>
+            </select>
+          </div>
+          ${
+            draft.provider === "ollama"
+              ? html`
+                <div class="form-row">
+                  <span class="lbl">${t("semantic.model")}</span>
+                  <input
+                    class="input mono"
+                    type="text"
+                    value=${draft.ollama.model}
+                    onInput=${(e: Event) => {
+                      draftDirtyRef.current = true;
+                      setDraftDirty(true);
+                      setDraft({
+                        ...draft,
+                        ollama: { ...draft.ollama, model: (e.target as HTMLInputElement).value },
+                      });
+                    }}
+                  />
+                </div>
+              `
+              : html`
+                <div class="form-row">
+                  <span class="lbl">${t("semantic.apiUrl")}</span>
+                  <input
+                    class="input mono"
+                    type="text"
+                    placeholder="https://api.openai.com/v1/embeddings"
+                    value=${draft.openaiCompat.baseUrl}
+                    onInput=${(e: Event) => {
+                      draftDirtyRef.current = true;
+                      setDraftDirty(true);
+                      setDraft({
+                        ...draft,
+                        openaiCompat: {
+                          ...draft.openaiCompat,
+                          baseUrl: (e.target as HTMLInputElement).value,
+                        },
+                      });
+                    }}
+                  />
+                </div>
+                <div class="form-row">
+                  <span class="lbl">${t("semantic.apiKey")}</span>
+                  <input
+                    class="input mono"
+                    type="password"
+                    placeholder=${draft.openaiCompat.apiKeySet ? t("semantic.keepExistingKey") : "sk-..."}
+                    value=${draft.openaiCompat.apiKey}
+                    onInput=${(e: Event) => {
+                      draftDirtyRef.current = true;
+                      setDraftDirty(true);
+                      setDraft({
+                        ...draft,
+                        openaiCompat: {
+                          ...draft.openaiCompat,
+                          apiKey: (e.target as HTMLInputElement).value,
+                        },
+                      });
+                    }}
+                  />
+                </div>
+                <div class="form-row">
+                  <span class="lbl">${t("semantic.model")}</span>
+                  <input
+                    class="input mono"
+                    type="text"
+                    value=${draft.openaiCompat.model}
+                    onInput=${(e: Event) => {
+                      draftDirtyRef.current = true;
+                      setDraftDirty(true);
+                      setDraft({
+                        ...draft,
+                        openaiCompat: {
+                          ...draft.openaiCompat,
+                          model: (e.target as HTMLInputElement).value,
+                        },
+                      });
+                    }}
+                  />
+                </div>
+                <details style="margin-top:10px">
+                  <summary style="cursor:pointer;color:var(--fg-2);font-size:12px">${t("semantic.customRequestBody")}</summary>
+                  <div class="form-row" style="margin-top:10px">
+                    <span class="lbl">${t("semantic.customRequestBody")}</span>
+                    <textarea
+                      class="input mono"
+                      rows="6"
+                      value=${draft.openaiCompat.extraBodyText}
+                      onInput=${(e: Event) => {
+                        draftDirtyRef.current = true;
+                        setDraftDirty(true);
+                        setDraft({
+                          ...draft,
+                          openaiCompat: {
+                            ...draft.openaiCompat,
+                            extraBodyText: (e.target as HTMLTextAreaElement).value,
+                          },
+                        });
+                      }}
+                    ></textarea>
+                  </div>
+                </details>
+                ${
+                  semanticValidation.error
+                    ? html`<div style="color:var(--c-err);font-size:12px;margin-top:-2px">${semanticValidation.error}</div>`
+                    : null
+                }
+              `
+          }
+          <div style="display:flex;gap:6px;margin-top:10px">
+            <button class="btn primary" disabled=${busy || semanticValidation.error !== null} onClick=${saveProviderConfig}>${t("common.save")}</button>
+          </div>
+        </div>
+        ${info ? html`<div><span class="pill info">${info}</span></div>` : null}
+
+        ${indexReady ? html`<${SemanticSearchSection} />` : null}
 
         ${
-          !binaryFound
+          isOllama && !binaryFound
             ? html`
               <div class="card">
                 <div class="card-h"><span class="title">${t("semantic.installOllama")}</span></div>
@@ -211,7 +468,7 @@ export function SemanticPanel() {
             : null
         }
         ${
-          binaryFound && !daemonRunning
+          isOllama && binaryFound && !daemonRunning
             ? html`
               <div class="card">
                 <div class="card-h"><span class="title">${t("semantic.daemon")}</span></div>
@@ -227,7 +484,7 @@ export function SemanticPanel() {
             : null
         }
         ${
-          daemonRunning && !modelPulled
+          isOllama && daemonRunning && !modelPulled
             ? html`
               <div class="card">
                 <div class="card-h"><span class="title">${t("semantic.model")}</span></div>
@@ -254,6 +511,18 @@ export function SemanticPanel() {
             `
             : null
         }
+        ${
+          !isOllama
+            ? html`
+              <div class="card">
+                <div class="card-h"><span class="title">${t("semantic.remoteProvider")}</span></div>
+                <div class="card-b" style="font-size:13px;color:var(--fg-2)">
+                  ${t("semantic.remoteProviderDesc")}
+                </div>
+              </div>
+            `
+            : null
+        }
 
         ${
           job
@@ -272,7 +541,9 @@ export function SemanticPanel() {
             <span class="meta">
               ${
                 idx?.exists
-                  ? html`<span class="pill ok">${t("semantic.builtStatus")}</span>`
+                  ? idx.compatible === false
+                    ? html`<span class="pill warn">${t("semantic.incompatibleStatus")}</span>`
+                    : html`<span class="pill ok">${t("semantic.builtStatus")}</span>`
                   : html`<span class="pill">${t("system.none")}</span>`
               }
             </span>
@@ -280,50 +551,102 @@ export function SemanticPanel() {
           ${
             idx?.exists
               ? html`
+                <div class="rail-kv"><span class="k">${t("semantic.provider")}</span><span class="v">${idx.builtWith?.provider ?? idx.provider ?? provider}</span></div>
                 <div class="rail-kv"><span class="k">${t("semantic.chunks")}</span><span class="v">${fmtNum(idx.chunks)}</span></div>
                 <div class="rail-kv"><span class="k">${t("semantic.files")}</span><span class="v">${fmtNum(idx.files)}</span></div>
-                <div class="rail-kv"><span class="k">${t("semantic.model")}</span><span class="v" style="font-size:11px">${idx.model ?? modelName}</span></div>
+                <div class="rail-kv"><span class="k">${t("semantic.model")}</span><span class="v" style="font-size:11px">${idx.builtWith?.model ?? idx.model ?? modelName}</span></div>
                 <div class="rail-kv"><span class="k">${t("semantic.dim")}</span><span class="v">${fmtNum(idx.dim)}</span></div>
                 <div class="rail-kv"><span class="k">${t("semantic.size")}</span><span class="v">${fmtBytes(idx.sizeBytes)}</span></div>
                 <div class="rail-kv"><span class="k">${t("semantic.lastBuild")}</span><span class="v">${fmtRelativeTime(idx.lastBuiltMs ?? null)}</span></div>
+                ${
+                  idx.compatible === false
+                    ? html`
+                      <div class="rail-kv"><span class="k">${t("semantic.builtWith")}</span><span class="v" style="font-size:11px">${idx.builtWith?.provider} · ${idx.builtWith?.model}</span></div>
+                      <div class="rail-kv"><span class="k">${t("semantic.currentTarget")}</span><span class="v" style="font-size:11px">${idx.current?.provider} · ${idx.current?.model}</span></div>
+                      <div style="color:var(--c-warn);font-size:12px;padding-top:8px">${t("semantic.incompatibleHint")}</div>
+                    `
+                    : null
+                }
               `
-              : html`
-                <div style="color:var(--fg-3);font-size:12.5px;padding:6px 0">
-                  ${t("semantic.runIndexHint")}
-                </div>
-              `
+              : html`<div style="color:var(--fg-3);font-size:12.5px;padding:6px 0">${t("semantic.runIndexHint")}</div>`
           }
           <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-            <button class="primary" disabled=${busy || running || !ready} onClick=${() => start(false)}>${idx?.exists ? t("semantic.reIndex") : t("semantic.build")}</button>
+            <button class="primary" disabled=${busy || running || !ready || semanticDraftBlocked} onClick=${() => start(false)}>${indexReady ? t("semantic.reIndex") : t("semantic.build")}</button>
             ${
               idx?.exists
-                ? html`<button disabled=${busy || running || !ready} onClick=${() => start(true)}>${t("semantic.rebuild")}</button>`
+                ? html`<button disabled=${busy || running || !ready || semanticDraftBlocked} onClick=${() => start(true)}>${t("semantic.rebuild")}</button>`
                 : null
             }
-            ${running ? html`<button onClick=${stop} style="border-color:var(--c-err);color:var(--c-err)">${t("semantic.stop")}</button>` : null}
+            ${
+              running
+                ? html`<button onClick=${stop} style="border-color:var(--c-err);color:var(--c-err)">${t("semantic.stop")}</button>`
+                : null
+            }
           </div>
         </div>
 
         <div class="card">
-          <div class="card-h"><span class="title">${t("semantic.ollama")}</span></div>
-          <div class="rail-kv">
-            <span class="k">${t("semantic.binary")}</span>
-            <span class="v">${binaryFound ? html`<span class="pill ok">${t("semantic.found")}</span>` : html`<span class="pill err">${t("semantic.missing")}</span>`}</span>
-          </div>
-          <div class="rail-kv">
-            <span class="k">${t("semantic.daemonStatus")}</span>
-            <span class="v">${daemonRunning ? html`<span class="pill ok">${t("semantic.up")}</span>` : html`<span class="pill warn">${t("semantic.down")}</span>`}</span>
-          </div>
-          <div class="rail-kv">
-            <span class="k">${t("semantic.model")}</span>
-            <span class="v">${modelPulled ? html`<span class="pill ok">${t("semantic.pulled")}</span>` : html`<span class="pill warn">${t("semantic.missing")}</span>`}</span>
-          </div>
+          <div class="card-h"><span class="title">${isOllama ? t("semantic.ollama") : t("semantic.openaiCompat")}</span></div>
+          ${
+            isOllama
+              ? html`
+                <div class="rail-kv"><span class="k">${t("semantic.binary")}</span><span class="v">${binaryFound ? html`<span class="pill ok">${t("semantic.found")}</span>` : html`<span class="pill err">${t("semantic.missing")}</span>`}</span></div>
+                <div class="rail-kv"><span class="k">${t("semantic.daemonStatus")}</span><span class="v">${daemonRunning ? html`<span class="pill ok">${t("semantic.up")}</span>` : html`<span class="pill warn">${t("semantic.down")}</span>`}</span></div>
+                <div class="rail-kv"><span class="k">${t("semantic.model")}</span><span class="v">${modelPulled ? html`<span class="pill ok">${t("semantic.pulled")}</span>` : html`<span class="pill warn">${t("semantic.missing")}</span>`}</span></div>
+              `
+              : html`
+                <div class="rail-kv"><span class="k">${t("semantic.apiUrl")}</span><span class="v" style="font-size:11px;max-width:160px;overflow-wrap:anywhere;word-break:break-word;text-align:right">${remote?.baseUrl ?? draft.openaiCompat.baseUrl}</span></div>
+                <div class="rail-kv"><span class="k">${t("semantic.apiKey")}</span><span class="v">${remote?.apiKeySet ? html`<span class="pill ok">${t("semantic.found")}</span>` : html`<span class="pill warn">${t("semantic.missing")}</span>`}</span></div>
+                <div class="rail-kv"><span class="k">${t("semantic.model")}</span><span class="v" style="font-size:11px">${remote?.model ?? draft.openaiCompat.model}</span></div>
+                <div class="rail-kv"><span class="k">${t("semantic.extraBody")}</span><span class="v">${fmtNum(remote?.extraBodyKeys.length ?? 0)}</span></div>
+              `
+          }
         </div>
 
         <${SemanticExcludesCard} />
       </aside>
     </div>
   `;
+}
+
+function toConfigDraft(config: SemanticConfigView): SemanticConfigDraft {
+  return {
+    provider: config.provider,
+    ollama: {
+      baseUrl: config.ollama.baseUrl,
+      model: config.ollama.model,
+    },
+    openaiCompat: {
+      baseUrl: config.openaiCompat.baseUrl,
+      apiKey: "",
+      model: config.openaiCompat.model,
+      extraBodyText: JSON.stringify(config.openaiCompat.extraBody ?? {}, null, 2),
+      apiKeySet: config.openaiCompat.apiKeySet,
+    },
+  };
+}
+
+export function validateSemanticDraft(draft: SemanticConfigDraft): SemanticDraftValidation {
+  if (draft.provider !== "openai-compat") {
+    return { extraBody: {}, error: null };
+  }
+  const raw = draft.openaiCompat.extraBodyText.trim();
+  if (!raw) {
+    return { extraBody: {}, error: null };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return {
+      extraBody: {},
+      error: t("semantic.invalidCustomRequestBody", { error: (err as Error).message }),
+    };
+  }
+  if (!isPlainObject(parsed)) {
+    return { extraBody: {}, error: t("semantic.customRequestBodyMustBeObject") };
+  }
+  return { extraBody: parsed, error: null };
 }
 
 interface IndexConfig {
@@ -367,6 +690,7 @@ interface SearchHit {
 interface SearchResponse {
   hits: SearchHit[];
   elapsedMs: number;
+  provider?: string;
   model: string;
 }
 
@@ -422,13 +746,15 @@ function SemanticSearchSection() {
         hits || busy || error
           ? html`
             <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);margin:8px 0 6px;display:flex;align-items:center;gap:8px">
-              ${busy
-                ? html`<span>${t("semantic.searching")}</span>`
-                : error
-                ? html`<span style="color:var(--c-err)">${error}</span>`
-                : hits
-                ? html`<span>${t("semantic.results", { count: hits.length, s: hits.length === 1 ? "" : "s", ms: meta?.elapsedMs ?? 0, model: meta?.model ?? "" })}</span>`
-                : null}
+              ${
+                busy
+                  ? html`<span>${t("semantic.searching")}</span>`
+                  : error
+                    ? html`<span style="color:var(--c-err)">${error}</span>`
+                    : hits
+                      ? html`<span>${t("semantic.results", { count: hits.length, s: hits.length === 1 ? "" : "s", ms: meta?.elapsedMs ?? 0, model: meta?.model ?? "" })}</span>`
+                      : null
+              }
             </div>
             ${
               hits && hits.length > 0
@@ -449,8 +775,8 @@ function SemanticSearchSection() {
                   </div>
                 `
                 : hits && hits.length === 0 && !busy
-                ? html`<div class="card" style="color:var(--fg-3);font-size:12px">${t("semantic.noMatches")}</div>`
-                : null
+                  ? html`<div class="card" style="color:var(--fg-3);font-size:12px">${t("semantic.noMatches")}</div>`
+                  : null
             }
           `
           : null
@@ -570,11 +896,7 @@ function SemanticExcludesCard() {
       <div class="card-h">
         <span class="title">${t("semantic.indexConfig")}</span>
         <span class="meta">
-          <a
-            class="mono"
-            style="color:var(--c-brand);text-decoration:none;font-size:11px;cursor:pointer"
-            onClick=${reset}
-          >${t("semantic.reset")}</a>
+          <a class="mono" style="color:var(--c-brand);text-decoration:none;font-size:11px;cursor:pointer" onClick=${reset}>${t("semantic.reset")}</a>
         </span>
       </div>
       ${info ? html`<div style="margin-bottom:8px"><span class="pill ok">${info}</span></div>` : null}
@@ -606,11 +928,7 @@ function SemanticExcludesCard() {
         placeholder="**/*.test.ts"
       />
 
-      <div
-        class="checkbox-row"
-        style="margin-top:8px;cursor:pointer"
-        onClick=${() => setDraft({ ...draft, respectGitignore: !draft.respectGitignore })}
-      >
+      <div class="checkbox-row" style="margin-top:8px;cursor:pointer" onClick=${() => setDraft({ ...draft, respectGitignore: !draft.respectGitignore })}>
         <span class=${`box ${draft.respectGitignore ? "on" : ""}`}>${draft.respectGitignore ? "✓" : ""}</span>
         <span>${t("semantic.respectGitignore")}</span>
       </div>
@@ -623,17 +941,14 @@ function SemanticExcludesCard() {
           min="1024"
           step="1024"
           value=${draft.maxFileBytes}
-          onInput=${(e: Event) =>
-            setDraft({ ...draft, maxFileBytes: Number((e.target as HTMLInputElement).value) || 0 })}
+          onInput=${(e: Event) => setDraft({ ...draft, maxFileBytes: Number((e.target as HTMLInputElement).value) || 0 })}
           style="font-size:12px"
         />
         <span class="help">${t("semantic.skipLarger", { size: (draft.maxFileBytes / 1024 / 1024).toFixed(1) })}</span>
       </div>
 
       <div style="display:flex;gap:6px;margin-top:10px">
-        <button class="btn ghost" style="flex:1" disabled=${busy} onClick=${runPreview}>
-          <span class="g">⊕</span><span>${t("semantic.preview")}</span>
-        </button>
+        <button class="btn ghost" style="flex:1" disabled=${busy} onClick=${runPreview}><span class="g">⊕</span><span>${t("semantic.preview")}</span></button>
         <button class="btn primary" style="flex:1" disabled=${busy} onClick=${save}>${t("common.save")}</button>
       </div>
 
@@ -659,26 +974,24 @@ function ExcludesPreview({ preview }: { preview: PreviewData }) {
   ].filter((k) => (buckets[k] || 0) > 0);
   return html`
     <div class="excludes-preview">
-      <div class="summary">
-        ${t("semantic.previewSummary", { included: preview.filesIncluded, skipped: totalSkipped })}
-      </div>
+      <div class="summary">${t("semantic.previewSummary", { included: preview.filesIncluded, skipped: totalSkipped })}</div>
       ${
         reasons.length === 0
           ? html`<div style="color:var(--fg-3)">${t("semantic.nothingSkipped")}</div>`
           : reasons.map(
               (r) => html`
-                <details>
-                  <summary><strong>${r}: ${buckets[r]}</strong></summary>
-                  <ul>
-                    ${(samples[r] || []).map((p) => html`<li><code>${p}</code></li>`)}
-                    ${
-                      (buckets[r] || 0) > (samples[r] || []).length
-                        ? html`<li style="color:var(--fg-3)">…${(buckets[r] || 0) - (samples[r] || []).length} more</li>`
-                        : null
-                    }
-                  </ul>
-                </details>
-              `,
+              <details>
+                <summary><strong>${r}: ${buckets[r]}</strong></summary>
+                <ul>
+                  ${(samples[r] || []).map((p) => html`<li><code>${p}</code></li>`)}
+                  ${
+                    (buckets[r] || 0) > (samples[r] || []).length
+                      ? html`<li style="color:var(--fg-3)">…${(buckets[r] || 0) - (samples[r] || []).length} more</li>`
+                      : null
+                  }
+                </ul>
+              </details>
+            `,
             )
       }
       ${
@@ -723,10 +1036,7 @@ function ChipFormRow({
   };
   return html`
     <div class="form-row">
-      <span class="lbl">
-        ${label}
-        ${sub ? html`<span style="color:var(--fg-3);font-weight:400;text-transform:none;letter-spacing:0"> · ${sub}</span>` : null}
-      </span>
+      <span class="lbl">${label}${sub ? html`<span style="color:var(--fg-3);font-weight:400;text-transform:none;letter-spacing:0"> · ${sub}</span>` : null}</span>
       <div style="display:flex;flex-wrap:wrap;gap:4px">
         ${value.map(
           (e) => html`
@@ -758,30 +1068,38 @@ function ChipFormRow({
 function SemanticJobView({ job, running }: { job: SemanticJob; running: boolean }) {
   useLang();
   const phaseLabel =
-    ({
-      scan: t("semantic.phaseScan"),
-      embed: t("semantic.phaseEmbed"),
-      write: t("semantic.phaseWrite"),
-      done: t("semantic.phaseDone"),
-      error: t("semantic.phaseError"),
-    } as Record<string, string>)[job.phase] ?? job.phase;
+    (
+      {
+        setup: t("semantic.phaseSetup"),
+        scan: t("semantic.phaseScan"),
+        embed: t("semantic.phaseEmbed"),
+        write: t("semantic.phaseWrite"),
+        done: t("semantic.phaseDone"),
+        error: t("semantic.phaseError"),
+        cancelled: t("semantic.phaseCancelled"),
+      } as Record<string, string>
+    )[job.phase] ?? job.phase;
   const total = job.chunksTotal ?? 0;
   const doneN = job.chunksDone ?? 0;
   const ratio = total > 0 ? Math.min(1, doneN / total) : 0;
-  const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
+  const elapsedBase = job.finishedAt ?? Date.now();
+  const elapsedSeconds = (elapsedBase - job.startedAt) / 1000;
+  const elapsed = elapsedSeconds < 0.1 ? "<0.1s" : `${elapsedSeconds.toFixed(1)}s`;
+  const phaseSummary =
+    job.phase === "error" && job.lastPhase === "setup"
+      ? t("semantic.setupFailed")
+      : phaseLabel;
 
   return html`
     <div class="kv">
       <div><span class="kv-key">phase</span>
-        <span class=${`pill ${job.phase === "error" ? "pill-err" : running ? "pill-active" : "pill-dim"}`}>${phaseLabel}</span>
-        ${job.aborted ? html`<span class="pill warn" style="margin-left: 6px;">${t("semantic.stopping")}</span>` : null}
-        <span style="color:var(--fg-3);margin-left:8px">${elapsed}s</span>
+        <span class=${`pill ${job.phase === "error" ? "pill-err" : job.phase === "cancelled" ? "warn" : running ? "pill-active" : "pill-dim"}`}>${phaseSummary}</span>
+        ${job.aborted && running ? html`<span class="pill warn" style="margin-left: 6px;">${t("semantic.stopping")}</span>` : null}
+        <span style="color:var(--fg-3);margin-left:8px">${elapsed}</span>
       </div>
       ${
         job.filesScanned !== null && job.filesScanned !== undefined
-          ? html`<div><span class="kv-key">${t("semantic.files")}</span>${t("semantic.scanned", { count: job.filesScanned })}${
-              job.filesChanged != null ? ` · ${t("semantic.changed", { count: job.filesChanged })}` : ""
-            }${job.filesSkipped ? ` · ${t("semantic.skipped", { count: job.filesSkipped })}` : ""}</div>`
+          ? html`<div><span class="kv-key">${t("semantic.files")}</span>${t("semantic.scanned", { count: job.filesScanned })}${job.filesChanged != null ? ` · ${t("semantic.changed", { count: job.filesChanged })}` : ""}${job.filesSkipped ? ` · ${t("semantic.skipped", { count: job.filesSkipped })}` : ""}</div>`
           : null
       }
       ${
@@ -796,23 +1114,13 @@ function SemanticJobView({ job, running }: { job: SemanticJob; running: boolean 
           `
           : null
       }
-      ${
-        job.error
-          ? html`<div><span class="kv-key">${t("semantic.phaseError")}</span><span class="err">${job.error}</span></div>`
-          : null
-      }
+      ${job.error ? html`<div><span class="kv-key">${t("semantic.phaseError")}</span><span class="err">${job.error}</span></div>` : null}
       ${
         job.result
-          ? html`<div><span class="kv-key">${t("semantic.result")}</span>${t("semantic.added", { count: job.result.chunksAdded })} · ${t("semantic.removed", { count: job.result.chunksRemoved })}${
-              job.result.chunksSkipped ? ` · ${t("semantic.failed", { count: job.result.chunksSkipped })}` : ""
-            } · ${(job.result.durationMs / 1000).toFixed(1)}s</div>`
+          ? html`<div><span class="kv-key">${t("semantic.result")}</span>${t("semantic.added", { count: job.result.chunksAdded })} · ${t("semantic.removed", { count: job.result.chunksRemoved })}${job.result.chunksSkipped ? ` · ${t("semantic.failed", { count: job.result.chunksSkipped })}` : ""} · ${(job.result.durationMs / 1000).toFixed(1)}s</div>`
           : null
       }
-      ${
-        job.result?.skipBuckets
-          ? html`<${SkipBucketsView} buckets=${job.result.skipBuckets} />`
-          : null
-      }
+      ${job.result?.skipBuckets ? html`<${SkipBucketsView} buckets=${job.result.skipBuckets} />` : null}
     </div>
   `;
 }
@@ -835,4 +1143,14 @@ function SkipBucketsView({ buckets }: { buckets: Record<string, number> }) {
     .filter(([k]) => (buckets[k] || 0) > 0)
     .map(([k, label]) => `${label}: ${buckets[k]}`);
   return html`<div><span class="kv-key">${t("semantic.skipped")}</span>${t("semantic.skippedFiles", { total, details: parts.join(", ") })}</div>`;
+}
+
+function isActiveSemanticPhase(phase: string | undefined): boolean {
+  return phase === "setup" || phase === "scan" || phase === "embed" || phase === "write";
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }

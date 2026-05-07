@@ -1,33 +1,42 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { type ResolvedEmbeddingConfig, resolveSemanticEmbeddingConfig } from "../../config.js";
 import { type ResolvedIndexConfig, defaultIndexConfig } from "../config.js";
 import { walkChunks } from "./chunker.js";
 import type { CodeChunk, SkipReason } from "./chunker.js";
 import { embed, embedAll, probeOllama } from "./embedding.js";
 import type { EmbedOptions } from "./embedding.js";
-import { normalize, openStore } from "./store.js";
-import type { IndexEntry, SearchHit } from "./store.js";
+import {
+  compareIndexIdentity,
+  normalize,
+  openStore,
+  readIndexMeta,
+  wipeStoreFiles,
+} from "./store.js";
+import type { IndexEntry, IndexIdentity, IndexMismatch, SearchHit } from "./store.js";
 
-/** Default index dir relative to the project root. */
 export const INDEX_DIR_NAME = path.join(".reasonix", "semantic");
 
-export interface BuildOptions extends EmbedOptions {
-  /** Lines per window. Default 60. */
+type BuildOptions = {
+  provider?: "ollama" | "openai-compat";
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  extraBody?: Record<string, unknown>;
+  timeoutMs?: number;
+  signal?: AbortSignal;
   windowLines?: number;
-  /** Window overlap. Default 12. */
   overlap?: number;
-  /** Force a full rebuild (drop the existing index first). */
   rebuild?: boolean;
-  /** Resolved exclude/limit settings. Defaults to package defaults. */
   indexConfig?: ResolvedIndexConfig;
-  /** Progress callback for the CLI to render counters. */
   onProgress?: (info: BuildProgress) => void;
-}
+  configPath?: string;
+};
 
 export type SkipBuckets = Record<SkipReason, number>;
 
 export interface BuildProgress {
-  phase: "scan" | "embed" | "write" | "done";
+  phase: "setup" | "scan" | "embed" | "write" | "done";
   filesScanned?: number;
   chunksTotal?: number;
   chunksDone?: number;
@@ -41,10 +50,7 @@ export interface BuildResult {
   filesChanged: number;
   chunksAdded: number;
   chunksRemoved: number;
-  /** Chunks that failed to embed (Ollama 500, transient errors) and
-   *  were skipped. Reported in the success line so users notice. */
   chunksSkipped: number;
-  /** Per-reason file-skip tally from the walk. */
   skipBuckets: SkipBuckets;
   durationMs: number;
 }
@@ -62,29 +68,24 @@ function emptyBuckets(): SkipBuckets {
   };
 }
 
-/** Probes Ollama first so a missing daemon fails before any chunking work. */
 export async function buildIndex(root: string, opts: BuildOptions = {}): Promise<BuildResult> {
   const t0 = Date.now();
   const indexDir = path.join(root, INDEX_DIR_NAME);
+  const resolved = resolveBuildEmbeddingConfig(opts);
 
-  const probe = await probeOllama({ baseUrl: opts.baseUrl, signal: opts.signal });
-  if (!probe.ok) {
-    throw new Error(
-      `Ollama is not reachable: ${probe.error}. Install from https://ollama.com, then \`ollama serve\` and \`ollama pull ${opts.model ?? "nomic-embed-text"}\`.`,
-    );
-  }
+  opts.onProgress?.({ phase: "setup" });
+  throwIfAborted(opts.signal);
+  await probeEmbeddingProvider(resolved, opts.signal);
+  throwIfAborted(opts.signal);
 
-  const model = opts.model ?? process.env.REASONIX_EMBED_MODEL ?? "nomic-embed-text";
-  const store = await openStore(indexDir, model);
-  if (opts.rebuild) await store.wipe();
+  if (opts.rebuild) await wipeStoreFiles(indexDir);
+  const store = await openStore(indexDir, {
+    provider: resolved.provider,
+    model: resolved.model,
+  });
 
-  // Snapshot the index's per-file mtimes so we can detect (a) changed
-  // files (mtime moved) and (b) deleted files (path no longer exists
-  // on disk after the walk).
   const lastMtimes = store.fileMtimes();
   const seenPaths = new Set<string>();
-
-  // Buffer chunks per file — partial updates must drop+re-add atomically per file.
   const fileChunks = new Map<string, { chunks: CodeChunk[]; mtimeMs: number }>();
   let filesScanned = 0;
   let filesSkipped = 0;
@@ -97,6 +98,7 @@ export async function buildIndex(root: string, opts: BuildOptions = {}): Promise
       skipBuckets[reason]++;
     },
   })) {
+    throwIfAborted(opts.signal);
     seenPaths.add(chunk.path);
     let bucket = fileChunks.get(chunk.path);
     if (!bucket) {
@@ -112,7 +114,7 @@ export async function buildIndex(root: string, opts: BuildOptions = {}): Promise
       const last = lastMtimes.get(chunk.path);
       if (last !== undefined && last === mtimeMs && !opts.rebuild) {
         filesSkipped++;
-        continue; // Unchanged — skip embedding.
+        continue;
       }
       bucket = { chunks: [], mtimeMs };
       fileChunks.set(chunk.path, bucket);
@@ -121,15 +123,15 @@ export async function buildIndex(root: string, opts: BuildOptions = {}): Promise
     opts.onProgress?.({ phase: "scan", filesScanned });
   }
 
+  throwIfAborted(opts.signal);
   const deletedPaths: string[] = [];
   for (const oldPath of lastMtimes.keys()) {
     if (!seenPaths.has(oldPath)) deletedPaths.push(oldPath);
   }
-  // Evict old chunks before re-insert — otherwise the same range duplicates.
   const replacePaths = [...fileChunks.keys()].filter((p) => lastMtimes.has(p));
+  throwIfAborted(opts.signal);
   const removed = await store.remove([...deletedPaths, ...replacePaths]);
 
-  // Per-chunk embed errors are logged + null-slotted so one bad chunk doesn't kill a long build.
   let chunksAdded = 0;
   let chunksSkipped = 0;
   const filesChanged = fileChunks.size;
@@ -137,10 +139,12 @@ export async function buildIndex(root: string, opts: BuildOptions = {}): Promise
   for (const { chunks } of fileChunks.values()) chunksTotal += chunks.length;
   let chunksDone = 0;
   for (const [, bucket] of fileChunks) {
+    throwIfAborted(opts.signal);
     if (bucket.chunks.length === 0) continue;
     const texts = bucket.chunks.map((c) => c.text);
     const vectors = await embedAll(texts, {
-      ...opts,
+      ...resolved,
+      signal: opts.signal,
       onProgress: (done, total) => {
         opts.onProgress?.({
           phase: "embed",
@@ -156,15 +160,14 @@ export async function buildIndex(root: string, opts: BuildOptions = {}): Promise
         const c = bucket.chunks[idx];
         const where = c ? `${c.path}:${c.startLine}-${c.endLine}` : `chunk #${idx}`;
         const msg = err instanceof Error ? err.message : String(err);
-        // stderr only — non-fatal warnings shouldn't pollute stdout
-        // (which the rest of the CLI keeps clean for piping).
         process.stderr.write(`\n  ! skipped ${where}: ${msg}\n`);
       },
     });
+    throwIfAborted(opts.signal);
     const entries: IndexEntry[] = [];
     for (let i = 0; i < bucket.chunks.length; i++) {
       const vec = vectors[i];
-      if (!vec) continue; // skipped due to per-chunk error
+      if (!vec) continue;
       const c = bucket.chunks[i];
       if (!c) continue;
       normalize(vec);
@@ -177,10 +180,12 @@ export async function buildIndex(root: string, opts: BuildOptions = {}): Promise
         mtimeMs: bucket.mtimeMs,
       });
     }
+    throwIfAborted(opts.signal);
     if (entries.length > 0) await store.add(entries);
     chunksAdded += entries.length;
   }
 
+  throwIfAborted(opts.signal);
   opts.onProgress?.({
     phase: "done",
     filesScanned,
@@ -202,28 +207,36 @@ export async function buildIndex(root: string, opts: BuildOptions = {}): Promise
   };
 }
 
-export interface QueryOptions extends EmbedOptions {
+type QueryOptions = {
+  provider?: "ollama" | "openai-compat";
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  extraBody?: Record<string, unknown>;
+  timeoutMs?: number;
+  signal?: AbortSignal;
   topK?: number;
-  /** Drop hits below this cosine score. Default 0.3 — anything weaker is noise. */
   minScore?: number;
-}
+  configPath?: string;
+};
 
-/** Returns null when no index exists, so caller can fall back to grep with a hint. */
 export async function querySemantic(
   root: string,
   query: string,
   opts: QueryOptions = {},
 ): Promise<SearchHit[] | null> {
   const indexDir = path.join(root, INDEX_DIR_NAME);
-  const model = opts.model ?? process.env.REASONIX_EMBED_MODEL ?? "nomic-embed-text";
-  const store = await openStore(indexDir, model);
+  const resolved = resolveQueryEmbeddingConfig(opts);
+  const store = await openStore(indexDir, {
+    provider: resolved.provider,
+    model: resolved.model,
+  });
   if (store.empty) return null;
-  const qvec = await embed(query, opts);
+  const qvec = await embed(query, { ...resolved, signal: opts.signal });
   normalize(qvec);
   return store.search(qvec, opts.topK ?? 8, opts.minScore ?? 0.3);
 }
 
-/** Gates `semantic_search` registration — no index → no tool exposed. */
 export async function indexExists(root: string): Promise<boolean> {
   const meta = path.join(root, INDEX_DIR_NAME, "index.meta.json");
   try {
@@ -231,5 +244,76 @@ export async function indexExists(root: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+export async function indexCompatible(
+  root: string,
+  opts: { provider?: "ollama" | "openai-compat"; model?: string; configPath?: string } = {},
+): Promise<boolean> {
+  const meta = await readIndexMeta(path.join(root, INDEX_DIR_NAME));
+  if (!meta) return false;
+  return compareIndexIdentity(meta, resolveIndexIdentity(opts)) === null;
+}
+
+function resolveBuildEmbeddingConfig(opts: BuildOptions): ResolvedEmbeddingConfig {
+  if (opts.provider === "openai-compat") {
+    if (!opts.baseUrl || !opts.apiKey || !opts.model) {
+      throw new Error(
+        "OpenAI-compatible embeddings require baseUrl, apiKey, and model when passed directly.",
+      );
+    }
+    return {
+      provider: "openai-compat",
+      baseUrl: opts.baseUrl,
+      apiKey: opts.apiKey,
+      model: opts.model,
+      extraBody: opts.extraBody ?? {},
+      timeoutMs: opts.timeoutMs ?? 30_000,
+    };
+  }
+  if (opts.baseUrl || opts.model) {
+    return {
+      provider: "ollama",
+      baseUrl: opts.baseUrl ?? process.env.OLLAMA_URL ?? "http://localhost:11434",
+      model: opts.model ?? process.env.REASONIX_EMBED_MODEL ?? "nomic-embed-text",
+      timeoutMs: opts.timeoutMs ?? 30_000,
+    };
+  }
+  return resolveSemanticEmbeddingConfig(opts.configPath);
+}
+
+function resolveIndexIdentity(opts: {
+  provider?: "ollama" | "openai-compat";
+  model?: string;
+  configPath?: string;
+}): IndexIdentity {
+  if (opts.provider && opts.model) {
+    return { provider: opts.provider, model: opts.model };
+  }
+  const resolved = resolveSemanticEmbeddingConfig(opts.configPath);
+  return { provider: resolved.provider, model: resolved.model };
+}
+
+function resolveQueryEmbeddingConfig(opts: QueryOptions): ResolvedEmbeddingConfig {
+  return resolveBuildEmbeddingConfig(opts);
+}
+
+async function probeEmbeddingProvider(
+  config: ResolvedEmbeddingConfig,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (config.provider === "openai-compat") return;
+  const probe = await probeOllama({ baseUrl: config.baseUrl, signal });
+  if (!probe.ok) {
+    throw new Error(
+      `Ollama is not reachable: ${probe.error}. Install from https://ollama.com, then \`ollama serve\` and \`ollama pull ${config.model}\`.`,
+    );
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new Error("semantic indexing aborted");
   }
 }

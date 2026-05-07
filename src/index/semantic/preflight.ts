@@ -1,19 +1,14 @@
 import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
+import type { ResolvedEmbeddingConfig } from "../../config.js";
 import { t } from "./i18n.js";
 import { checkOllamaStatus, pullOllamaModel, startOllamaDaemon } from "./ollama-launcher.js";
 
 export interface PreflightOptions {
-  /** Embedding model to verify is pulled. */
   model: string;
-  /** Override Ollama base URL. */
   baseUrl?: string | undefined;
-  /** Allow interactive prompts (TTY only). When false, missing
-   *  daemon / model causes a hard failure with a remediation hint. */
   interactive: boolean;
-  /** Skip prompts and act on every offer. Implies non-interactive. */
   yesToAll: boolean;
-  /** Optional log sink. Defaults to stderr writes. */
   log?: (line: string) => void;
 }
 
@@ -45,8 +40,6 @@ export async function ollamaPreflight(opts: PreflightOptions): Promise<boolean> 
     log(t("daemonReady", { pid: started.pid ? ` (pid ${started.pid})` : "" }));
   }
 
-  // Re-check the pulled-models list after a fresh daemon start —
-  // the prior status snapshot was taken when the daemon was down.
   const after = status.daemonRunning ? status : await checkOllamaStatus(opts.model, opts.baseUrl);
 
   if (!after.modelPulled) {
@@ -60,9 +53,6 @@ export async function ollamaPreflight(opts: PreflightOptions): Promise<boolean> 
       return false;
     }
     log(t("modelPulling", { model: opts.model }));
-    // Strip ANSI CSI sequences from ollama's verbose pull output so
-    // our log stays readable. ESC built from char code so biome's
-    // noControlCharactersInRegex doesn't flag the literal.
     const ESC = String.fromCharCode(0x1b);
     const ANSI_CSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, "g");
     const code = await pullOllamaModel(opts.model, {
@@ -80,6 +70,18 @@ export async function ollamaPreflight(opts: PreflightOptions): Promise<boolean> 
   }
 
   return true;
+}
+
+export async function semanticPreflight(
+  config: ResolvedEmbeddingConfig,
+  opts: Omit<PreflightOptions, "model" | "baseUrl">,
+): Promise<boolean> {
+  if (config.provider === "openai-compat") return true;
+  return await ollamaPreflight({
+    ...opts,
+    model: config.model,
+    baseUrl: config.baseUrl,
+  });
 }
 
 export async function confirm(question: string, defaultYes: boolean): Promise<boolean> {

@@ -9,15 +9,22 @@ import {
   isPlausibleKey,
   loadApiKey,
   loadEditMode,
+  loadIndexConfig,
+  loadIndexUserConfig,
   loadProjectShellAllowed,
   loadReasoningEffort,
+  loadSemanticEmbeddingUserConfig,
   markEditModeHintShown,
   readConfig,
   redactKey,
+  redactSemanticEmbeddingConfig,
   removeProjectShellAllowed,
+  resolveSemanticEmbeddingConfig,
   saveApiKey,
   saveEditMode,
+  saveIndexConfig,
   saveReasoningEffort,
+  saveSemanticEmbeddingConfig,
   searchEnabled,
   writeConfig,
 } from "../src/config.js";
@@ -262,5 +269,82 @@ describe("config", () => {
     markEditModeHintShown(path);
     expect(editModeHintShown(path)).toBe(true);
     expect(loadEditMode(path)).toBe("auto");
+  });
+
+  it("round-trips semantic embedding config", () => {
+    saveSemanticEmbeddingConfig(
+      {
+        provider: "openai-compat",
+        openaiCompat: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "sk-openai1234567890abcd",
+          model: "text-embedding-3-small",
+          extraBody: { user: "reasonix" },
+        },
+      },
+      path,
+    );
+    const loaded = loadSemanticEmbeddingUserConfig(path);
+    expect(loaded.provider).toBe("openai-compat");
+    expect(loaded.openaiCompat?.baseUrl).toBe("https://api.openai.com/v1");
+    expect(loaded.openaiCompat?.extraBody).toEqual({ user: "reasonix" });
+  });
+
+  it("resolves ollama by default when semantic config is absent", () => {
+    const resolved = resolveSemanticEmbeddingConfig(path);
+    expect(resolved.provider).toBe("ollama");
+    expect(resolved.model).toBe("nomic-embed-text");
+  });
+
+  it("accepts semantic API URLs that already include /embeddings", () => {
+    saveSemanticEmbeddingConfig(
+      {
+        provider: "openai-compat",
+        openaiCompat: {
+          baseUrl: "https://api.openai.com/v1/embeddings",
+          apiKey: "sk-openai1234567890abcd",
+          model: "text-embedding-3-small",
+        },
+      },
+      path,
+    );
+    const resolved = resolveSemanticEmbeddingConfig(path);
+    expect(resolved.provider).toBe("openai-compat");
+    expect(resolved.baseUrl).toBe("https://api.openai.com/v1/embeddings");
+  });
+
+  it("redacts openai-compatible api keys in semantic config views", () => {
+    saveSemanticEmbeddingConfig(
+      {
+        provider: "openai-compat",
+        openaiCompat: {
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "sk-openai1234567890abcd",
+          model: "text-embedding-3-small",
+        },
+      },
+      path,
+    );
+    const view = redactSemanticEmbeddingConfig(loadSemanticEmbeddingUserConfig(path));
+    expect(view.openaiCompat.apiKeySet).toBe(true);
+    expect(view.openaiCompat.apiKey).not.toBe("sk-openai1234567890abcd");
+    expect(view.openaiCompat.apiKey).toContain("…");
+  });
+
+  it("rejects non-object semantic extraBody", () => {
+    expect(() =>
+      saveSemanticEmbeddingConfig(
+        {
+          provider: "openai-compat",
+          openaiCompat: {
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "sk-openai1234567890abcd",
+            model: "text-embedding-3-small",
+            extraBody: [] as unknown as Record<string, unknown>,
+          },
+        },
+        path,
+      ),
+    ).toThrow(/JSON object/);
   });
 });
