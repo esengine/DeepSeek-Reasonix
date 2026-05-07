@@ -433,6 +433,7 @@ function AppInner({
     undoBanner,
     recordEdit,
     armUndoBanner,
+    toggleUndoPause,
     codeUndo,
     codeHistory,
     codeShowEdit,
@@ -1254,7 +1255,7 @@ function AppInner({
         next === "yolo"
           ? "▸ edit mode: YOLO — edits AND shell commands auto-run. /undo still rolls back edits. Use carefully."
           : next === "auto"
-            ? "▸ edit mode: AUTO — edits apply immediately; press u within 5s to undo. Shell commands still ask."
+            ? "▸ edit mode: AUTO — edits apply immediately; press u within 5s to undo (space pauses the timer). Shell commands still ask."
             : "▸ edit mode: review — edits queue for /apply (or y) / /discard (or n)";
       log.pushInfo(message);
       return;
@@ -1285,6 +1286,28 @@ function AppInner({
     ) {
       const out = codeUndo([]);
       log.pushInfo(out);
+      return;
+    }
+    // Space toggles pause on the active undo countdown. Same gating as
+    // the `u` keybind so typing in the prompt isn't intercepted.
+    if (
+      codeMode &&
+      input.length === 0 &&
+      chKey === " " &&
+      undoBanner &&
+      !pendingShell &&
+      !pendingPlan &&
+      !pendingReviseEditor &&
+      !pendingSessionsPicker &&
+      !pendingMcpHub &&
+      !stagedInput &&
+      !pendingEditReview &&
+      !walkthroughActive &&
+      !pendingChoice &&
+      !stagedChoiceCustom &&
+      !pendingRevision
+    ) {
+      toggleUndoPause();
       return;
     }
     if (busy) return;

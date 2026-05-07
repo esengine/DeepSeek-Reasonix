@@ -2,6 +2,7 @@ import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { clipToCells, wrapToCells } from "../../../frame/width.js";
+import { countTokens } from "../../../tokenizer.js";
 import { useReserveRows } from "../layout/viewport-budget.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
@@ -10,9 +11,34 @@ import { PILL_MODEL, Pill, modelBadgeFor } from "../primitives/Pill.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { StreamingCard as StreamingCardData } from "../state/cards.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
+import { useSlowTick } from "../ticker.js";
 
 /** Streaming preview tail length — bounded live region so chunks don't thrash whole-card layout. */
 const STREAMING_PREVIEW_LINES = 4;
+
+const MIN_ELAPSED_MS_FOR_RATE = 500;
+const MIN_TOKENS_FOR_RATE = 4;
+
+function formatTokenCount(n: number): string {
+  if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(2)}k`;
+  return String(n);
+}
+
+function tokenRate(
+  text: string,
+  startTs: number,
+  endTs: number,
+): { tokens: number; tps: number | null } {
+  const tokens = countTokens(text);
+  const elapsedMs = endTs - startTs;
+  if (elapsedMs < MIN_ELAPSED_MS_FOR_RATE || tokens < MIN_TOKENS_FOR_RATE) {
+    return { tokens, tps: null };
+  }
+  return { tokens, tps: Math.round((tokens * 1000) / elapsedMs) };
+}
+
+const PILL_RATE = { bg: "#11141a", fg: "#8b949e" } as const;
 
 export function StreamingCard({ card }: { card: StreamingCardData }): React.ReactElement {
   const { stdout } = useStdout();
@@ -21,6 +47,9 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
     min: STREAMING_PREVIEW_LINES + 1,
     max: STREAMING_PREVIEW_LINES + 2,
   });
+  // Re-render at 1Hz so the rate keeps updating even when chunks stall.
+  // Frozen once `card.done` is true — settled cards render via Static.
+  useSlowTick();
 
   const modelBadge = card.model ? modelBadgeFor(card.model) : null;
   const modelPill = modelBadge ? (
@@ -28,9 +57,24 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   ) : null;
 
   if (card.done && !card.aborted) {
+    const { tokens, tps } = tokenRate(card.text, card.ts, card.endedAt ?? Date.now());
+    const ratePill =
+      tokens >= MIN_TOKENS_FOR_RATE && tps !== null ? (
+        <Pill label={`${formatTokenCount(tokens)} tok · ${tps} t/s`} {...PILL_RATE} bold={false} />
+      ) : null;
     return (
       <Card tone={TONE.ok}>
-        <CardHeader glyph="‹" tone={TONE.ok} title="reply" right={modelPill} />
+        <CardHeader
+          glyph="‹"
+          tone={TONE.ok}
+          title="reply"
+          right={
+            <>
+              {ratePill}
+              {modelPill}
+            </>
+          }
+        />
         <Markdown text={card.text} />
       </Card>
     );
@@ -45,6 +89,12 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   const glyph = aborted ? "‹" : "◈";
   const headLabel = aborted ? "aborted" : "writing…";
 
+  const { tokens: liveTokens, tps: liveTps } = tokenRate(card.text, card.ts, Date.now());
+  const liveRatePill =
+    !aborted && liveTokens >= MIN_TOKENS_FOR_RATE && liveTps !== null ? (
+      <Pill label={`${liveTps} t/s`} {...PILL_RATE} bold={false} />
+    ) : null;
+
   return (
     <Card tone={headColor}>
       <CardHeader
@@ -53,6 +103,7 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
         title={headLabel}
         right={
           <>
+            {liveRatePill}
             {aborted ? null : <Spinner kind="braille" color={TONE_ACTIVE.brand} />}
             {modelPill}
           </>

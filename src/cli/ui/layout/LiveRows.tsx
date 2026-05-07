@@ -113,17 +113,20 @@ function ModePill({
 export function UndoBanner({
   banner,
 }: {
-  banner: { results: ApplyResult[]; expiresAt: number };
+  banner: { results: ApplyResult[]; expiresAt: number; pausedRemainingMs: number | null };
 }) {
   useTick();
   const totalMs = 5000;
-  const remainingMs = Math.max(0, banner.expiresAt - Date.now());
+  const paused = banner.pausedRemainingMs !== null;
+  const remainingMs = paused
+    ? (banner.pausedRemainingMs ?? 0)
+    : Math.max(0, banner.expiresAt - Date.now());
   const remainingSec = Math.ceil(remainingMs / 1000);
   const ok = banner.results.filter((r) => r.status === "applied" || r.status === "created").length;
   const total = banner.results.length;
-  const urgent = remainingSec <= 1;
+  const urgent = !paused && remainingSec <= 1;
   const pct = (remainingMs / totalMs) * 100;
-  const tone = urgent ? TONE.err : TONE.accent;
+  const tone = paused ? TONE.warn : urgent ? TONE.err : TONE.accent;
   return (
     <Box marginY={1} paddingX={1}>
       <Text backgroundColor={TONE.accent} color="black" bold>
@@ -133,11 +136,15 @@ export function UndoBanner({
       <Text backgroundColor={TONE.brand} color="black" bold>
         {" u "}
       </Text>
-      <Text color={FG.faint}>{" to undo  "}</Text>
+      <Text color={FG.faint}>{paused ? " to undo · " : " to undo · "}</Text>
+      <Text backgroundColor={paused ? TONE.warn : FG.faint} color="black" bold>
+        {" space "}
+      </Text>
+      <Text color={FG.faint}>{paused ? " to resume  " : " to pause  "}</Text>
       <CharBar pct={pct} width={20} color={tone} showLabel={false} />
       <Text color={FG.faint}>{"  "}</Text>
-      <Text color={tone} bold={urgent}>
-        {`${remainingSec}s`}
+      <Text color={tone} bold={urgent || paused}>
+        {paused ? `${remainingSec}s · paused` : `${remainingSec}s`}
       </Text>
     </Box>
   );

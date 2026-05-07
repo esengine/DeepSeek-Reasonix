@@ -16,6 +16,8 @@ import {
 export interface UndoBannerState {
   results: ApplyResult[];
   expiresAt: number;
+  /** Set when the user paused the countdown; banner stays up until they resume or hit `u`. */
+  pausedRemainingMs: number | null;
 }
 
 export interface UseEditHistoryResult {
@@ -30,6 +32,8 @@ export interface UseEditHistoryResult {
   ) => void;
   /** Replaces the dismiss timer so multiple edits in one turn don't prematurely expire the window. */
   armUndoBanner: (results: ApplyResult[]) => void;
+  /** Pause / resume the active undo countdown. No-ops if the banner is already settled. */
+  toggleUndoPause: () => void;
   codeUndo: (args?: readonly string[]) => string;
   codeHistory: () => string;
   codeShowEdit: (args?: readonly string[]) => string;
@@ -77,12 +81,32 @@ export function useEditHistory(codeMode: { rootDir: string } | undefined): UseEd
   );
 
   const armUndoBanner = useCallback<UseEditHistoryResult["armUndoBanner"]>((results) => {
-    setUndoBanner({ results, expiresAt: Date.now() + 5000 });
+    setUndoBanner({ results, expiresAt: Date.now() + 5000, pausedRemainingMs: null });
     if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
     undoTimeoutRef.current = setTimeout(() => {
       setUndoBanner(null);
       undoTimeoutRef.current = null;
     }, 5000);
+  }, []);
+
+  const toggleUndoPause = useCallback<UseEditHistoryResult["toggleUndoPause"]>(() => {
+    setUndoBanner((prev) => {
+      if (!prev) return prev;
+      if (prev.pausedRemainingMs === null) {
+        const remaining = Math.max(0, prev.expiresAt - Date.now());
+        if (undoTimeoutRef.current) {
+          clearTimeout(undoTimeoutRef.current);
+          undoTimeoutRef.current = null;
+        }
+        return { ...prev, pausedRemainingMs: remaining };
+      }
+      const remaining = prev.pausedRemainingMs;
+      undoTimeoutRef.current = setTimeout(() => {
+        setUndoBanner(null);
+        undoTimeoutRef.current = null;
+      }, remaining);
+      return { ...prev, expiresAt: Date.now() + remaining, pausedRemainingMs: null };
+    });
   }, []);
 
   const codeUndo = useCallback<UseEditHistoryResult["codeUndo"]>(
@@ -266,6 +290,7 @@ export function useEditHistory(codeMode: { rootDir: string } | undefined): UseEd
     undoBanner,
     recordEdit,
     armUndoBanner,
+    toggleUndoPause,
     codeUndo,
     codeHistory,
     codeShowEdit,
