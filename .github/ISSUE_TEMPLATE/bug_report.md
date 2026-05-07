@@ -17,7 +17,9 @@ Steps or minimal code that reproduces it.
 - Reasonix version:
 - Node version:
 - OS:
-- DeepSeek model (e.g. `deepseek-chat`, `deepseek-reasoner`):
+- Shell (bash, zsh, fish, PowerShell, etc.):
+- Terminal emulator (kitty, WezTerm, Windows Terminal, etc.):
+- DeepSeek model (e.g. `deepseek-v4-flash`, `deepseek-v4-pro`):
 
 **Logs / transcript**
 If using the CLI, attach the relevant chunk of `--transcript`.
