@@ -1,4 +1,4 @@
-/** CacheFirstLoop integration - fake-fetch DeepSeekClient, non-streaming path. */
+/** CacheFirstLoop integration — fake-fetch DeepSeekClient, non-streaming path. */
 
 import { describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
@@ -256,7 +256,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
     }
     // Identical fixture calls also trip the storm breaker in 0.4.19+,
     // which emits its own warning. Filter for the iter-budget warning
-    // specifically - that's what this test guards (once-per-turn flag).
+    // specifically — that's what this test guards (once-per-turn flag).
     const iterBudgetWarnings = warnings.filter((w) => /tool calls used/.test(w));
     expect(iterBudgetWarnings).toHaveLength(1);
     expect(iterBudgetWarnings[0]).toMatch(/\d+\/4 tool calls used/);
@@ -275,7 +275,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       content: "",
       tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
     };
-    // Only one chaining response needed - abort should stop the loop
+    // Only one chaining response needed — abort should stop the loop
     // before any follow-up model call. A second response in the array
     // would indicate the loop made an unwanted extra API call.
     const fetchSpy = vi.fn() as unknown as typeof fetch;
@@ -292,7 +292,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       maxToolIters: 16,
     });
 
-    // Call abort AFTER the first tool event fires - simulates the user
+    // Call abort AFTER the first tool event fires — simulates the user
     // hitting Esc while the loop is exploring.
     const events: { role: string; content?: string; forcedSummary?: boolean }[] = [];
     let aborted = false;
@@ -354,7 +354,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       maxToolIters: 16,
     });
 
-    // Turn 1 - abort mid-flight.
+    // Turn 1 — abort mid-flight.
     let aborted = false;
     for await (const ev of loop.step("first")) {
       if (!aborted && ev.role === "tool") {
@@ -363,7 +363,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       }
     }
 
-    // Turn 2 - fresh user input; should reach the second model call
+    // Turn 2 — fresh user input; should reach the second model call
     // and yield its output. If the bug is back, we see iter-0 abort
     // again and never see "second turn ran cleanly".
     const turn2Events: { role: string; content?: string }[] = [];
@@ -390,7 +390,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       parameters: { type: "object", properties: {} },
       fn: async () => "ok",
     });
-    // Every tool-iter response says "call probe again" - infinite loop
+    // Every tool-iter response says "call probe again" — infinite loop
     // absent the iter cap. The (N+1)th response is the forced-summary
     // call (no tools, returns text).
     const chainingToolCall = {
@@ -406,7 +406,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const responses: FakeResponseShape[] = [
       chainingToolCall,
       chainingToolCall,
-      { content: "done - here's what I found." }, // summary call
+      { content: "done — here's what I found." }, // summary call
     ];
     const client = makeClient(responses);
     const loop = new CacheFirstLoop({
@@ -422,13 +422,13 @@ describe("CacheFirstLoop (non-streaming)", () => {
       events.push({ role: ev.role, content: ev.content });
     }
 
-    // Multiple assistant_final events are yielded (one per iter) - the
+    // Multiple assistant_final events are yielded (one per iter) — the
     // summary is the LAST one, carrying the "tool-call budget" prefix.
     const finals = events.filter((e) => e.role === "assistant_final");
     const summary = finals[finals.length - 1];
     expect(summary).toBeDefined();
     expect(summary!.content).toMatch(/tool-call budget/);
-    expect(summary!.content).toContain("done - here's what I found.");
+    expect(summary!.content).toContain("done — here's what I found.");
     // Last event is still `done`, preserving the contract used by run().
     expect(events[events.length - 1]!.role).toBe("done");
   });
@@ -450,7 +450,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       { content: "", tool_calls: [dupCall] },
       { content: "", tool_calls: [{ ...dupCall, id: "c2" }] },
       { content: "", tool_calls: [{ ...dupCall, id: "c3" }] },
-      { content: "got it - done." },
+      { content: "got it — done." },
     ];
     const client = makeClient(responses);
     const loop = new CacheFirstLoop({
@@ -476,7 +476,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const finals = events.filter((e) => e.role === "assistant_final");
     const final = finals[finals.length - 1];
     expect(final?.forcedSummary).toBeFalsy();
-    expect(final?.content).toBe("got it - done.");
+    expect(final?.content).toBe("got it — done.");
 
     const tail = loop.log.entries[loop.log.entries.length - 1];
     expect(tail?.role).toBe("assistant");
@@ -569,7 +569,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
 
     // A warning must fire about the context guard. Accept both the
     // auto-compact-saved-us variant and the nothing-to-compact variant
-    // - the message format shifted in 0.4.11 when we added the
+    // — the message format shifted in 0.4.11 when we added the
     // auto-compact attempt before forcing summary.
     const warn = events.find((e) => e.role === "warning");
     expect(warn).toBeDefined();
@@ -708,7 +708,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       fn: async () => "ok",
     });
     const responses: FakeResponseShape[] = [
-      // Iter 0: usage at 75% of 1M ctx - squarely in the aggressive band.
+      // Iter 0: usage at 75% of 1M ctx — squarely in the aggressive band.
       {
         content: "",
         tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
@@ -765,7 +765,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
     // Tool returns ~50k chars of realistic-shape log text; the default
     // token budget (8k) bounds the resulting log entry to a small
     // fraction of the raw size. (Using "A".repeat(N) would hit the
-    // tokenizer's BPE O(n²) path for repeated single-char inputs -
+    // tokenizer's BPE O(n²) path for repeated single-char inputs —
     // pathological enough to slow the suite by tens of seconds, and
     // not representative of real tool output.)
     const huge = "ERROR: repeated failure with some detail\n".repeat(1250);
@@ -795,12 +795,12 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const toolEntry = loop.log.toMessages().find((m) => m.role === "tool");
     expect(toolEntry).toBeDefined();
     const content = typeof toolEntry!.content === "string" ? toolEntry!.content : "";
-    // Well under the raw 50k - pre-clip fired before append.
+    // Well under the raw 50k — pre-clip fired before append.
     expect(content.length).toBeLessThan(40_000);
     expect(content).toMatch(/truncated/);
   });
 
-  it("buildMessages strips a dangling assistant-with-tool_calls tail - defensive against 'insufficient tool messages' 400", async () => {
+  it("buildMessages strips a dangling assistant-with-tool_calls tail — defensive against 'insufficient tool messages' 400", async () => {
     // Craft a log where the last entry is an assistant message with
     // tool_calls but no matching tool responses. This is the shape
     // that used to crash the forced-summary call with DeepSeek's
@@ -824,7 +824,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       events.push({ role: ev.role, content: ev.content });
     }
     expect(events.find((e) => e.role === "error")).toBeUndefined();
-    // The fake fetch echoes the messages it received - no unpaired
+    // The fake fetch echoes the messages it received — no unpaired
     // assistant+tool_calls should be in there.
     expect(events.find((e) => e.role === "assistant_final")?.content).toContain("summary text");
   });
@@ -1786,7 +1786,7 @@ describe("CacheFirstLoop - self-reported escalation via <<<NEEDS_PRO>>>", () => 
   it("does not escalate again when the model is already on pro", async () => {
     // Even if pro happens to echo the marker, no infinite-retry loop.
     const { fetch, seenModels } = modelCapturingFetch([
-      { content: "<<<NEEDS_PRO>>>" }, // on pro - should NOT trigger retry
+      { content: "<<<NEEDS_PRO>>>" }, // on pro — should NOT trigger retry
     ]);
     const loop = new CacheFirstLoop({
       client: new DeepSeekClient({ apiKey: "sk-test", fetch }),
@@ -1853,12 +1853,12 @@ describe("CacheFirstLoop - self-reported escalation via <<<NEEDS_PRO>>>", () => 
     for await (const _ev of loop.step("x")) {
       /* drain */
     }
-    // No retry - the marker never closed, so the content streams as-is.
+    // No retry — the marker never closed, so the content streams as-is.
     expect(seenModels).toEqual(["deepseek-v4-flash"]);
   });
 });
 
-describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
+describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
   it("yields tool_call_delta events carrying growing arg-char count", async () => {
     const client = new DeepSeekClient({
       apiKey: "sk-test",
@@ -1919,7 +1919,7 @@ describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
     // (yield `done`) instead of bubbling it up as a red error row.
     const client = new DeepSeekClient({
       apiKey: "sk-test",
-      // Slow fake fetch - never resolves on its own; only the abort
+      // Slow fake fetch — never resolves on its own; only the abort
       // signal terminates it.
       fetch: vi.fn(async (_url: any, init: any) => {
         const signal: AbortSignal | undefined = init?.signal;
@@ -1954,12 +1954,12 @@ describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
   });
 
   it.skip("defers sibling tool calls when change_workspace pops the confirmation modal", async () => {
-    // This test is skipped - change_workspace was removed (fb1b306).
+    // This test is skipped — change_workspace was removed (fb1b306).
     // The model emits TWO tool calls in one assistant message:
     // change_workspace + write_file. The workspace switch needs user
     // approval; the write must NOT execute against the OLD root before
     // the user confirms (silent data loss). Both still get tool
-    // results - the deferred one with a clear "skipped" payload - so
+    // results — the deferred one with a clear "skipped" payload — so
     // tool_call ↔ tool pairing stays valid for DeepSeek's next turn.
     const { registerWorkspaceTool } = await import("../src/tools/workspace.js");
 
@@ -2037,7 +2037,7 @@ describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
     const reg = new ToolRegistry();
     reg.register({
       name: "run_command",
-      description: "run a command - needs confirmation",
+      description: "run a command — needs confirmation",
       parameters: {
         type: "object",
         properties: { command: { type: "string" } },
@@ -2073,7 +2073,7 @@ describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
     };
     // Response 2: model sees the tool output and responds naturally
     const followUpResp: FakeResponseShape = {
-      content: "Command ran successfully - output was 'ok'.",
+      content: "Command ran successfully — output was 'ok'.",
       tool_calls: [],
     };
 
@@ -2096,7 +2096,7 @@ describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
       events.push({ role: ev.role, content: ev.content });
     }
 
-    // The tool result should be the normal command output - not a
+    // The tool result should be the normal command output — not a
     // NeedsConfirmationError string
     const toolEvents = events.filter((e) => e.role === "tool");
     expect(toolEvents).toHaveLength(1);
@@ -2105,7 +2105,7 @@ describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
     expect(toolEvents[0]?.content).not.toContain("user denied");
 
     // Two model calls: first generates the tool call, second responds to the
-    // output. The gate made the tool return real output synchronously - no
+    // output. The gate made the tool return real output synchronously — no
     // error, no NeedsConfirmationError, no synthetic retry.
     const finals = events.filter((e) => e.role === "assistant_final");
     expect(finals).toHaveLength(2);
@@ -2120,11 +2120,11 @@ describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
     // The gate runs purely against `loop.stats.totalCost`, which sums
     // the public `turns` array. Tests inject synthetic turns directly
     // instead of pumping fake API responses sized to land in the
-    // narrow 80%-100% window - keeps each case focused on the
+    // narrow 80%-100% window — keeps each case focused on the
     // gate's behavior without coupling to v4-flash token pricing.
     function injectCost(loop: CacheFirstLoop, costUsd: number): void {
       // SessionStats.turns is `readonly` at the type level (you can't
-      // reassign the field), but the array itself is mutable - the
+      // reassign the field), but the array itself is mutable — the
       // public API normally appends via recordTurn(). For tests we
       // bypass that path; the only fields the gate reads are summed
       // via `t.cost`, so the rest is filler.
@@ -2193,7 +2193,7 @@ describe("CacheFirstLoop (streaming) - tool_call_delta emission", () => {
         if (ev.role === "warning" && /budget/.test(ev.content)) turn1Warns++;
       }
       // Turn 2 starts at the same 0.85 spent (real turn cost is tiny
-      // with our fake fetch's default 100/20 token usage) - gate still
+      // with our fake fetch's default 100/20 token usage) — gate still
       // sees >80% but `_budgetWarned` is sticky, so no repeat.
       let turn2Warns = 0;
       for await (const ev of loop.step("b")) {
