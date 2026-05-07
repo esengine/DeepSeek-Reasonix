@@ -851,142 +851,278 @@ describe("CacheFirstLoop (non-streaming)", () => {
   });
 });
 
-describe("CacheFirstLoop - noteToolFailureSignal auto-escalation", () => {
+// ── Test helper: call the private noteToolFailureSignal method ──────────
+// PRIVATE-ACCESS JUSTIFICATION: noteToolFailureSignal is private, and the
+// counter state lives inside the private TurnFailureTracker (_turnFailures)
+// — there is no public getter for the current count / type breakdown, and
+// `escalatedThisTurn` only reflects the boolean outcome, not the tally
+// that produced it. The SEARCH-mismatch path is tested behaviorally through
+// step() below (driving real tool failures and asserting on escalatedThisTurn
+// + warning events). The repair-based path (scavenged/truncationsFixed/
+// stormsBroken) is also reachable through step() — step() calls
+// noteToolFailureSignal("", report) internally — but constructing specific
+// RepairReport inputs requires tool-call patterns that are deeply coupled
+// to repair-module internals (scavenge scanners, storm-threshold windows,
+// truncation JSON shapes). Testing the counting + threshold logic directly
+// with known inputs keeps these tests focused on the escalation gate rather
+// than the repair pipeline that feeds it. All private-field access is
+// consolidated behind this single helper so only one place needs updating
+// when the representation changes.
+function signalToolFailure(
+  loop: CacheFirstLoop,
+  options: {
+    /** Set the accumulated failure count before this call (default 0). */
+    count?: number;
+    /** Set the already-escalated flag before this call (default false). */
+    escalated?: boolean;
+    /** Disable autoEscalate for this loop (reconfigures the instance). */
+    disableAutoEscalate?: boolean;
+    /** A tool-result JSON string to scan for SEARCH-mismatch patterns. */
+    resultJson?: string;
+    /** A repair report whose counts contribute to the failure tally. */
+    repair?: RepairReport;
+  } = {},
+): { escalated: boolean; count: number; types: Record<string, number> } {
+  if (options.disableAutoEscalate) loop.configure({ autoEscalate: false });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const priv = loop as any;
+  const tracker = priv._turnFailures as { count: number; types: Record<string, number> };
+  if (options.count !== undefined) tracker.count = options.count;
+  if (options.escalated !== undefined) priv._escalateThisTurn = options.escalated;
+
+  const escalated: boolean = priv.noteToolFailureSignal(options.resultJson ?? "", options.repair);
+  return {
+    escalated,
+    count: tracker.count as number,
+    types: { ...tracker.types } as Record<string, number>,
+  };
+}
+
+describe("CacheFirstLoop - auto-escalation on tool failures", () => {
   const FAILURE_ESCALATION_THRESHOLD = 3;
 
-  it("returns false and does NOT escalate when failure count is below threshold", () => {
-    const client = makeClient([{ content: "ok" }]);
+  // ── Behavioral tests: drive real tool failures through step() ──────
+
+  it("auto-escalates when 3 SEARCH-mismatch tool failures accumulate", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "fail_tool",
+      description: "returns SEARCH-mismatch error shape",
+      parameters: { type: "object", properties: { n: { type: "integer" } }, required: [] },
+      fn: ({ n }: { n?: number }) =>
+        JSON.stringify({
+          error: `Error: search text not found in file_${n ?? 0}.ts`,
+        }),
+    });
+    // 3 tool calls, each with different args so the storm breaker
+    // sees distinct signatures and doesn't suppress any.
+    const call = (id: string, n: number) => ({
+      content: "",
+      tool_calls: [
+        {
+          id,
+          type: "function" as const,
+          function: { name: "fail_tool", arguments: JSON.stringify({ n }) },
+        },
+      ],
+    });
+    const client = makeClient([
+      call("c1", 1),
+      call("c2", 2),
+      call("c3", 3),
+      { content: "done after failures" },
+    ]);
     const loop = new CacheFirstLoop({
       client,
-      prefix: new ImmutablePrefix({ system: "s" }),
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
       stream: false,
     });
-    // Simulate accumulated failures at 1 (below threshold of 3).
-    (loop as any)._turnFailureCount = 1;
-    (loop as any)._escalateThisTurn = false;
-    const report: RepairReport = { scavenged: 0, truncationsFixed: 1, stormsBroken: 0, notes: [] };
-    const escalated = (loop as any).noteToolFailureSignal("", report);
-    expect(escalated).toBe(false);
-    expect((loop as any)._turnFailureCount).toBe(2); // bumped by 1, still below 3
-    expect((loop as any)._escalateThisTurn).toBe(false); // threshold not crossed
+
+    const warnings: string[] = [];
+    for await (const ev of loop.step("go")) {
+      if (ev.role === "warning") warnings.push(ev.content);
+    }
+
+    expect(loop.escalatedThisTurn).toBe(true);
+    expect(warnings.some((w) => /escalat/i.test(w))).toBe(true);
   });
 
-  it("returns true and sets _escalateThisTurn when failure count REACHES threshold", () => {
-    const client = makeClient([{ content: "ok" }]);
+  it("single SEARCH-mismatch below threshold does not auto-escalate", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "fail_tool",
+      description: "returns SEARCH-mismatch error shape",
+      parameters: { type: "object", properties: {}, required: [] },
+      fn: () => JSON.stringify({ error: "Error: search text not found in file.ts" }),
+    });
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          { id: "c1", type: "function", function: { name: "fail_tool", arguments: "{}" } },
+        ],
+      },
+      { content: "ok after one failure" },
+    ]);
     const loop = new CacheFirstLoop({
       client,
-      prefix: new ImmutablePrefix({ system: "s" }),
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
       stream: false,
     });
-    (loop as any)._turnFailureCount = 2;
-    (loop as any)._escalateThisTurn = false;
-    const report: RepairReport = { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] };
-    const escalated = (loop as any).noteToolFailureSignal("", report);
-    expect(escalated).toBe(true);
-    expect((loop as any)._escalateThisTurn).toBe(true);
+
+    const warnings: string[] = [];
+    for await (const ev of loop.step("go")) {
+      if (ev.role === "warning") warnings.push(ev.content);
+    }
+
+    expect(loop.escalatedThisTurn).toBe(false);
+    expect(warnings.some((w) => /escalat/i.test(w))).toBe(false);
   });
 
-  it("returns true and escalates on SEARCH mismatch error result", () => {
-    const client = makeClient([{ content: "ok" }]);
+  it("autoEscalate=false prevents auto-escalation despite accumulated failures", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "fail_tool",
+      description: "returns SEARCH-mismatch error shape",
+      parameters: { type: "object", properties: { n: { type: "integer" } }, required: [] },
+      fn: ({ n }: { n?: number }) =>
+        JSON.stringify({
+          error: `Error: search text not found in file_${n ?? 0}.ts`,
+        }),
+    });
+    const call = (id: string, n: number) => ({
+      content: "",
+      tool_calls: [
+        {
+          id,
+          type: "function" as const,
+          function: { name: "fail_tool", arguments: JSON.stringify({ n }) },
+        },
+      ],
+    });
+    const client = makeClient([call("c1", 1), call("c2", 2), call("c3", 3), { content: "done" }]);
     const loop = new CacheFirstLoop({
       client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    (loop as any)._turnFailureCount = 2;
-    (loop as any)._escalateThisTurn = false;
-    // Simulate an edit_file SEARCH-not-found result (no repair report needed).
-    const resultJson = JSON.stringify({
-      error: "Error: search text not found in file",
-    });
-    const escalated = (loop as any).noteToolFailureSignal(resultJson);
-    expect(escalated).toBe(true);
-    expect((loop as any)._escalateThisTurn).toBe(true);
-    expect((loop as any)._turnFailureTypes["search-mismatch"]).toBe(1);
-  });
-
-  it("does NOT escalate when autoEscalate is disabled", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
       stream: false,
       autoEscalate: false,
     });
-    (loop as any)._turnFailureCount = 5; // well above threshold
-    (loop as any)._escalateThisTurn = false;
-    const report: RepairReport = { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] };
-    const escalated = (loop as any).noteToolFailureSignal("", report);
-    expect(escalated).toBe(false);
-    expect((loop as any)._escalateThisTurn).toBe(false);
+
+    const warnings: string[] = [];
+    for await (const ev of loop.step("go")) {
+      if (ev.role === "warning") warnings.push(ev.content);
+    }
+
+    expect(loop.escalatedThisTurn).toBe(false);
+    expect(warnings.some((w) => /escalat/i.test(w))).toBe(false);
   });
 
-  it("does NOT escalate when already escalated this turn", () => {
+  // ── Unit tests: edge cases that need private state access ─────────
+
+  it("repair flavor counts accumulate proportionally per call", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({
       client,
       prefix: new ImmutablePrefix({ system: "s" }),
       stream: false,
     });
-    (loop as any)._turnFailureCount = 5;
-    (loop as any)._escalateThisTurn = true; // already escalated
-    const report: RepairReport = { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] };
-    const escalated = (loop as any).noteToolFailureSignal("", report);
-    expect(escalated).toBe(false); // no double-escalation
-  });
-
-  it("bumps failure count but returns false when result has error without 'search text not found'", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
+    const result = signalToolFailure(loop, {
+      repair: { scavenged: 2, truncationsFixed: 3, stormsBroken: 1, notes: [] },
     });
-    (loop as any)._turnFailureCount = 2;
-    (loop as any)._escalateThisTurn = false;
-    // Only has "error" but not the specific SEARCH-mismatch phrase.
-    const resultJson = JSON.stringify({ error: "some other error" });
-    const escalated = (loop as any).noteToolFailureSignal(resultJson);
-    expect((loop as any)._turnFailureCount).toBe(2); // not bumped
-    expect(escalated).toBe(false);
-  });
-
-  it("only bumps search-mismatch once per call with matching result", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    (loop as any)._turnFailureCount = 0;
-    const resultJson = JSON.stringify({
-      error: "Error: search text not found in path/to/file.ts",
-    });
-    (loop as any).noteToolFailureSignal(resultJson);
-    expect((loop as any)._turnFailureCount).toBe(1);
-    expect((loop as any)._turnFailureTypes["search-mismatch"]).toBe(1);
-  });
-
-  it("bumps failure count proportional to repair.scavenged / truncationsFixed / stormsBroken counts", () => {
-    const client = makeClient([{ content: "ok" }]);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-    });
-    (loop as any)._turnFailureCount = 0;
-    const report: RepairReport = {
-      scavenged: 2,
-      truncationsFixed: 3,
-      stormsBroken: 1,
-      notes: [],
-    };
-    (loop as any).noteToolFailureSignal("", report);
     // 2 (scavenged) + 3 (truncationsFixed) + 1 (stormsBroken) = 6
-    expect((loop as any)._turnFailureCount).toBe(6);
-    expect((loop as any)._turnFailureTypes.scavenged).toBe(2);
-    expect((loop as any)._turnFailureTypes.truncated).toBe(3);
-    expect((loop as any)._turnFailureTypes["repeat-loop"]).toBe(1);
+    expect(result.count).toBe(6);
+    expect(result.types.scavenged).toBe(2);
+    expect(result.types.truncated).toBe(3);
+    expect(result.types["repeat-loop"]).toBe(1);
+  });
+
+  it("SEARCH-mismatch error result bumps the search-mismatch flavor", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    const result = signalToolFailure(loop, {
+      resultJson: JSON.stringify({
+        error: "Error: search text not found in path/to/file.ts",
+      }),
+    });
+    expect(result.count).toBe(1);
+    expect(result.types["search-mismatch"]).toBe(1);
+  });
+
+  it("non-SEARCH error results do not bump the counter", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    const result = signalToolFailure(loop, {
+      count: 2,
+      resultJson: JSON.stringify({ error: "some other error" }),
+    });
+    // Neither bumped (the error string lacks "search text not found")
+    // nor escalated — the count stays at the preset value.
+    expect(result.count).toBe(2);
+    expect(result.escalated).toBe(false);
+  });
+
+  it("returns true and flips escalatedThisTurn when threshold is crossed", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    // One below threshold → should tip.
+    const result = signalToolFailure(loop, {
+      count: 2,
+      repair: { scavenged: 0, truncationsFixed: 1, stormsBroken: 0, notes: [] },
+    });
+    expect(result.escalated).toBe(true);
+    expect(result.count).toBe(3);
+    // Public getter also reflects the escalation.
+    expect(loop.escalatedThisTurn).toBe(true);
+  });
+
+  it("does not double-escalate when already escalated this turn", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    // Start one below threshold so the call WOULD cross and trigger
+    // escalation, but the already-escalated flag must block it.
+    const result = signalToolFailure(loop, {
+      count: 2,
+      escalated: true,
+      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
+    });
+    expect(result.escalated).toBe(false); // no double-escalation
+  });
+
+  it("does not escalate when autoEscalate is disabled", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    // Start one below threshold so the call WOULD cross and trigger
+    // escalation, but autoEscalate=false must block it.
+    const result = signalToolFailure(loop, {
+      count: 2,
+      disableAutoEscalate: true,
+      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
+    });
+    expect(result.escalated).toBe(false);
+    expect(loop.escalatedThisTurn).toBe(false);
   });
 });
 
@@ -1547,7 +1683,7 @@ describe("CacheFirstLoop - configure() method", () => {
 });
 
 describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () => {
-  it("setBudget(null) clears budget and re-arms warning", () => {
+  it("setBudget(null) clears budget", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({
       client,
@@ -1556,8 +1692,8 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     });
     loop.setBudget(null);
     expect(loop.budgetUsd).toBeNull();
-    // Should not have any sticky warning state
-    expect((loop as any)._budgetWarned).toBe(false);
+    // Re-arm of the 80%-warning latch is tested behaviorally in
+    // "setBudget re-arms the 80% warning when the cap moves" below.
   });
 
   it("setBudget(0) clears budget to null (same as null)", () => {
@@ -1571,7 +1707,7 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     expect(loop.budgetUsd).toBeNull();
   });
 
-  it("setBudget(positive) sets budget and re-arms warning", () => {
+  it("setBudget(positive) sets budget", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({
       client,
@@ -1580,7 +1716,8 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     });
     loop.setBudget(2.5);
     expect(loop.budgetUsd).toBe(2.5);
-    expect((loop as any)._budgetWarned).toBe(false);
+    // Re-arm of the 80%-warning latch is tested behaviorally in
+    // "setBudget re-arms the 80% warning when the cap moves" below.
   });
 
   it("clearLog empties messages and resets scratch", () => {
@@ -2194,7 +2331,7 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
       }
       // Turn 2 starts at the same 0.85 spent (real turn cost is tiny
       // with our fake fetch's default 100/20 token usage) — gate still
-      // sees >80% but `_budgetWarned` is sticky, so no repeat.
+      // sees >80% but the 80%-warning latch is sticky, so no repeat.
       let turn2Warns = 0;
       for await (const ev of loop.step("b")) {
         if (ev.role === "warning" && /budget/.test(ev.content)) turn2Warns++;
