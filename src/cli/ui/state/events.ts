@@ -122,6 +122,11 @@ const sessionUpdate = z.object({
   }),
 });
 
+const sessionModelChange = z.object({
+  type: z.literal("session.model.change"),
+  model: z.string().min(1),
+});
+
 const focusMove = z.object({
   type: z.literal("focus.move"),
   direction: z.enum(["next", "prev", "first", "last"]),
@@ -318,6 +323,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   networkChange,
   languageChange,
   sessionUpdate,
+  sessionModelChange,
   focusMove,
   focusSet,
   cardToggle,

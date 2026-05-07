@@ -53,6 +53,32 @@ describe("ui reducer", () => {
     expect(card.model).toBe("deepseek-chat");
   });
 
+  it("session.model.change updates the active model so the next card snapshots it (#372)", () => {
+    const s = run([
+      { type: "session.model.change", model: "deepseek-v4-pro" },
+      { type: "streaming.start", id: "s1" },
+    ]);
+    const card = s.cards[0] as StreamingCard;
+    expect(card.model).toBe("deepseek-v4-pro");
+    expect(s.session.model).toBe("deepseek-v4-pro");
+  });
+
+  it("session.model.change is a no-op when the model id is unchanged (referential identity preserved)", () => {
+    const before = run([{ type: "user.submit", text: "x" }]);
+    const after = reduce(before, { type: "session.model.change", model: "deepseek-chat" });
+    expect(after).toBe(before);
+  });
+
+  it("session.model.change does not relabel a card that was opened on the prior model", () => {
+    const s = run([
+      { type: "streaming.start", id: "s1" },
+      { type: "streaming.chunk", id: "s1", text: "answer on flash" },
+      { type: "session.model.change", model: "deepseek-v4-pro" },
+    ]);
+    const card = s.cards[0] as StreamingCard;
+    expect(card.model).toBe("deepseek-chat");
+  });
+
   it("streams response chunks into a single streaming card", () => {
     const s = run([
       { type: "streaming.start", id: "s1" },

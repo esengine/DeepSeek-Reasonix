@@ -11,6 +11,7 @@ const model: SlashHandler = (args, loop, ctx) => {
     return { info: t("handlers.model.modelUsage", { hint }) };
   }
   loop.configure({ model: id });
+  ctx.dispatch?.({ type: "session.model.change", model: id });
   if (known && known.length > 0 && !known.includes(id)) {
     return {
       info: t("handlers.model.modelNotInCatalog", { id, list: known.join(", ") }),
@@ -53,7 +54,7 @@ const harvest: SlashHandler = (args, loop) => {
   return { info: t("handlers.model.harvestOff") };
 };
 
-const preset: SlashHandler = (args, loop) => {
+const preset: SlashHandler = (args, loop, ctx) => {
   const name = (args[0] ?? "").toLowerCase();
   const applyAndPersist = (effort: "high" | "max") => {
     try {
@@ -62,8 +63,7 @@ const preset: SlashHandler = (args, loop) => {
       /* disk full / perms — runtime change still took effect */
     }
   };
-  if (name === "auto") {
-    const p = PRESETS.auto;
+  const apply = (p: (typeof PRESETS)[keyof typeof PRESETS]) => {
     loop.configure({
       model: p.model,
       autoEscalate: p.autoEscalate,
@@ -71,31 +71,19 @@ const preset: SlashHandler = (args, loop) => {
       harvest: p.harvest,
       branch: p.branch,
     });
+    ctx.dispatch?.({ type: "session.model.change", model: p.model });
     applyAndPersist(p.reasoningEffort);
+  };
+  if (name === "auto") {
+    apply(PRESETS.auto);
     return { info: t("handlers.model.presetAuto") };
   }
   if (name === "flash") {
-    const p = PRESETS.flash;
-    loop.configure({
-      model: p.model,
-      autoEscalate: p.autoEscalate,
-      reasoningEffort: p.reasoningEffort,
-      harvest: p.harvest,
-      branch: p.branch,
-    });
-    applyAndPersist(p.reasoningEffort);
+    apply(PRESETS.flash);
     return { info: t("handlers.model.presetFlash") };
   }
   if (name === "pro") {
-    const p = PRESETS.pro;
-    loop.configure({
-      model: p.model,
-      autoEscalate: p.autoEscalate,
-      reasoningEffort: p.reasoningEffort,
-      harvest: p.harvest,
-      branch: p.branch,
-    });
-    applyAndPersist(p.reasoningEffort);
+    apply(PRESETS.pro);
     return { info: t("handlers.model.presetPro") };
   }
   return { info: t("handlers.model.presetUsage") };

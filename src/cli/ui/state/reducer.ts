@@ -116,6 +116,11 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
     case "session.update":
       return { ...state, status: { ...state.status, ...event.patch } };
 
+    case "session.model.change":
+      return state.session.model === event.model
+        ? state
+        : { ...state, session: { ...state.session, model: event.model } };
+
     case "focus.move":
       return {
         ...state,
