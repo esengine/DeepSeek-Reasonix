@@ -1,7 +1,7 @@
 import type { SlashArgContext, SlashCommandSpec } from "./types.js";
 
 export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
-  { cmd: "help", summary: "show the full command reference" },
+  { cmd: "help", summary: "show the full command reference", aliases: ["?"] },
   { cmd: "status", summary: "current model, flags, context, session" },
   {
     cmd: "preset",
@@ -52,6 +52,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argsHint: "<EN|zh-CN>",
     summary: "switch the runtime language",
     argCompleter: ["EN", "zh-CN"],
+    aliases: ["lang"],
   },
   { cmd: "mcp", summary: "list MCP servers + tools attached to this session" },
   {
@@ -147,13 +148,17 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "show semantic_search status — built? Ollama installed? how to enable",
   },
   { cmd: "clear", summary: "clear visible scrollback only (log/context kept)" },
-  { cmd: "new", summary: "start a fresh conversation (clear context + scrollback)" },
+  {
+    cmd: "new",
+    summary: "start a fresh conversation (clear context + scrollback)",
+    aliases: ["reset"],
+  },
   {
     cmd: "loop",
     argsHint: "<5s..6h> <prompt>  ·  stop  ·  (no args = status)",
     summary: "auto-resubmit <prompt> every <interval> until you type something / Esc / /loop stop",
   },
-  { cmd: "exit", summary: "quit the TUI" },
+  { cmd: "exit", summary: "quit the TUI", aliases: ["quit", "q"] },
   // Code-mode only
   {
     cmd: "init",
@@ -253,8 +258,23 @@ export function suggestSlashCommands(prefix: string, codeMode = false): SlashCom
   const p = prefix.toLowerCase();
   return SLASH_COMMANDS.filter((c) => {
     if (c.contextual === "code" && !codeMode) return false;
-    return c.cmd.startsWith(p);
+    if (c.cmd.startsWith(p)) return true;
+    return c.aliases?.some((a) => a.startsWith(p)) ?? false;
   });
+}
+
+/** alias → canonical cmd map, derived from SLASH_COMMANDS at module init. */
+const ALIAS_TO_CMD: Readonly<Record<string, string>> = (() => {
+  const m: Record<string, string> = {};
+  for (const spec of SLASH_COMMANDS) {
+    if (!spec.aliases) continue;
+    for (const a of spec.aliases) m[a] = spec.cmd;
+  }
+  return m;
+})();
+
+export function resolveSlashAlias(name: string): string {
+  return ALIAS_TO_CMD[name] ?? name;
 }
 
 /** Picker fires only when arg tail has no internal whitespace; past that it's a usage hint. */
@@ -262,7 +282,7 @@ export function detectSlashArgContext(input: string, codeMode = false): SlashArg
   // `/cmd <rest>` — one space, rest captured up to end-of-buffer.
   const m = /^\/(\S+) ([\s\S]*)$/.exec(input);
   if (!m) return null;
-  const cmdName = m[1]!.toLowerCase();
+  const cmdName = resolveSlashAlias(m[1]!.toLowerCase());
   const tail = m[2] ?? "";
   const spec = SLASH_COMMANDS.find(
     (s) => s.cmd === cmdName && (s.contextual !== "code" || codeMode),

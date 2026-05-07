@@ -132,6 +132,8 @@ export interface SlashCommandSpec {
   argsHint?: string;
   /** First-arg picker source — file paths intentionally absent (use `@path` mentions instead). */
   argCompleter?: "models" | "mcp-resources" | "mcp-prompts" | readonly string[];
+  /** Alternate names — typing any of these resolves to `cmd` for dispatch / suggestion / arg-context. */
+  aliases?: readonly string[];
 }
 
 export interface SlashArgContext {

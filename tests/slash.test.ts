@@ -45,10 +45,25 @@ describe("parseSlash", () => {
 });
 
 describe("handleSlash", () => {
-  it("/exit requests exit", () => {
+  it("/exit requests exit (incl. /quit and /q aliases)", () => {
     const loop = makeLoop();
     expect(handleSlash("exit", [], loop).exit).toBe(true);
     expect(handleSlash("quit", [], loop).exit).toBe(true);
+    expect(handleSlash("q", [], loop).exit).toBe(true);
+  });
+
+  it("alias prefixes surface the canonical spec in suggestions", () => {
+    const matches = suggestSlashCommands("q");
+    expect(matches.map((s) => s.cmd)).toContain("exit");
+    expect(matches.find((s) => s.cmd === "exit")?.aliases).toEqual(["quit", "q"]);
+    expect(suggestSlashCommands("?").map((s) => s.cmd)).toContain("help");
+    expect(suggestSlashCommands("res").map((s) => s.cmd)).toContain("new");
+  });
+
+  it("detectSlashArgContext resolves an alias to its canonical spec", () => {
+    const ctx = detectSlashArgContext("/lang zh");
+    expect(ctx).not.toBeNull();
+    expect(ctx!.spec.cmd).toBe("language");
   });
 
   it("/clear requests history clear + surfaces an info line about what it does", () => {

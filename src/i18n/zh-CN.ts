@@ -345,7 +345,7 @@ export const zhCN: TranslationSchema = {
       helpClear: "  /clear                   仅清除显示的滚动回放（上下文保留 — 模型仍能看到）",
       helpLoop:
         "  /loop <interval> <prompt> 每 <interval> 自动重新提交 <prompt>（5秒..6小时）。/loop stop · 输入任何内容取消。",
-      helpExit: "  /exit                    退出",
+      helpExit: "  /exit                    退出（别名：/quit, /q）",
       helpShellTitle: "Shell 快捷方式：",
       helpShell: "  !<cmd>                   在沙箱根目录运行 <cmd>；输出进入对话",
       helpShellDetail: "                             以便模型在下一轮看到。无允许列表限制。",

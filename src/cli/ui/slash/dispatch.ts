@@ -1,4 +1,5 @@
 import type { CacheFirstLoop } from "../../../loop.js";
+import { resolveSlashAlias } from "./commands.js";
 import { handlers as adminHandlers } from "./handlers/admin.js";
 import { handlers as basicHandlers } from "./handlers/basic.js";
 import { handlers as dashboardHandlers } from "./handlers/dashboard.js";
@@ -45,7 +46,7 @@ export function handleSlash(
   loop: CacheFirstLoop,
   ctx: SlashContext = {},
 ): SlashResult {
-  const h = HANDLERS[cmd];
+  const h = HANDLERS[resolveSlashAlias(cmd)];
   if (h) return h(args, loop, ctx);
   return { unknown: true, info: `unknown command: /${cmd}  (try /help)` };
 }

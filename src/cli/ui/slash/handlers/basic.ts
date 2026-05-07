@@ -189,13 +189,10 @@ const loop: SlashHandler = (args, _loop, ctx) => {
 
 export const handlers: Record<string, SlashHandler> = {
   exit,
-  quit: exit,
   clear,
   new: resetLog,
-  reset: resetLog,
   keys,
   help,
-  "?": help,
   retry,
   loop,
 };

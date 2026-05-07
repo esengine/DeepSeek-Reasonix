@@ -365,7 +365,7 @@ export const EN: TranslationSchema = {
         "  /clear                   clear displayed scrollback only (context kept — model still sees it)",
       helpLoop:
         "  /loop <interval> <prompt> auto-resubmit <prompt> every <interval> (5s..6h). /loop stop · type anything to cancel.",
-      helpExit: "  /exit                    quit",
+      helpExit: "  /exit                    quit (aliases: /quit, /q)",
       helpShellTitle: "Shell shortcut:",
       helpShell: "  !<cmd>                   run <cmd> in the sandbox root; output goes into",
       helpShellDetail:

@@ -86,6 +86,7 @@ function SuggestionRow({ spec, isSelected }: { spec: SlashCommandSpec; isSelecte
   const key = `slash.${spec.cmd}.description`;
   const translated = t(key);
   const summary = translated === key ? spec.summary : translated;
+  const aliasHint = spec.aliases?.length ? ` · /${spec.aliases.join(" /")}` : "";
   return (
     <Box>
       <Text color={isSelected ? COLOR.primary : COLOR.info} bold={isSelected}>
@@ -99,6 +100,7 @@ function SuggestionRow({ spec, isSelected }: { spec: SlashCommandSpec; isSelecte
       <Text color={isSelected ? COLOR.user : COLOR.info} dimColor={!isSelected}>
         {summary}
       </Text>
+      {aliasHint ? <Text dimColor>{aliasHint}</Text> : null}
     </Box>
   );
 }

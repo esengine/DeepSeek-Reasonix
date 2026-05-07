@@ -25,5 +25,4 @@ export const handlers: Record<string, SlashHandler> = {
 
     return { info: t("slash.language.success") };
   },
-  lang: (args, loop, ctx) => handlers.language!(args, loop, ctx),
 };

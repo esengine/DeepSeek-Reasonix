@@ -15,6 +15,7 @@ export async function handleSlash(
     summary: c.summary,
     argsHint: c.argsHint,
     contextual: c.contextual,
+    aliases: c.aliases,
   }));
   return { status: 200, body: { commands, codeMode } };
 }
