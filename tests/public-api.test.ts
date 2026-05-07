@@ -280,6 +280,7 @@ const PUBLIC_API: readonly string[] = [
   "parseEditBlocks",
   "parseMcpSpec",
   "parseMojeekResults",
+  "parseSearxngHtmlResults",
   "parseTranscript",
   "prepareSpawn",
   "projectHash",

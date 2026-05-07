@@ -4,6 +4,7 @@ import {
   formatSearchResults,
   htmlToText,
   parseMojeekResults,
+  parseSearxngHtmlResults,
   registerWebTools,
   webFetch,
   webSearch,
@@ -108,6 +109,54 @@ describe("parseMojeekResults", () => {
     const items = parseMojeekResults(html);
     expect(items).toHaveLength(1);
     expect(items[0]?.snippet).toBe("");
+  });
+});
+
+describe("parseSearxngHtmlResults", () => {
+  const sampleHtml = `
+    <article class="result">
+      <h3><a href="https://example.com/rust">Rust programming language</a></h3>
+      <p>A systems language focused on safety and concurrency.</p>
+    </article>
+    <article class="result">
+      <h3><a href="https://example.com/go">Go by example</a></h3>
+      <p>Learn Go with annotated example programs.</p>
+    </article>
+  `;
+
+  it("extracts title/url/snippet from article.result markup", () => {
+    const items = parseSearxngHtmlResults(sampleHtml);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toEqual({
+      title: "Rust programming language",
+      url: "https://example.com/rust",
+      snippet: "A systems language focused on safety and concurrency.",
+    });
+    expect(items[1]).toEqual({
+      title: "Go by example",
+      url: "https://example.com/go",
+      snippet: "Learn Go with annotated example programs.",
+    });
+  });
+
+  it("falls back to h3 a[href] when no article.result exists", () => {
+    const html = `
+      <div>
+        <h3><a href="https://example.com/x">Title X</a></h3>
+        <p>Snippet for X.</p>
+      </div>
+    `;
+    const items = parseSearxngHtmlResults(html);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toEqual({
+      title: "Title X",
+      url: "https://example.com/x",
+      snippet: "Snippet for X.",
+    });
+  });
+
+  it("returns empty on markup with no recognizable results", () => {
+    expect(parseSearxngHtmlResults("<html><body>nothing here</body></html>")).toEqual([]);
   });
 });
 

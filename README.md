@@ -48,16 +48,16 @@
 
 ## Web search
 
-Reasonix includes `web_search` and `web_fetch` tools. By default it uses **Mojeek** (no setup required). You can switch to a **self-hosted SearXNG** instance for better coverage (93+ engines including Google, Bing, DuckDuckGo, Brave).
+Reasonix includes `web_search` and `web_fetch` tools. By default it uses **Mojeek** (no setup required). You can switch to a **self-hosted SearXNG** instance — a metasearch engine that aggregates whatever upstream engines your instance is configured for.
 
 ### Switching engines (persists to disk)
 
-The `/web-search-engine` slash command writes your choice to `~/.reasonix/config.json` immediately — it survives restarts:
+The `/search-engine` slash command (alias `/se`) writes your choice to `~/.reasonix/config.json` immediately — it survives restarts:
 
 ```
-/web-search-engine mojeek              # default, no external deps
-/web-search-engine searxng             # SearXNG at http://localhost:8080
-/web-search-engine searxng http://192.168.1.100:8888  # custom endpoint
+/search-engine mojeek              # default, no external deps
+/search-engine searxng             # SearXNG at http://localhost:8080
+/search-engine searxng http://192.168.1.100:8888  # custom endpoint
 ```
 
 Equivalent `~/.reasonix/config.json`:
@@ -133,7 +133,7 @@ Click any card to read the full architecture writeup → [Pillar 1](./docs/ARCHI
 | Cost profile                      | **low per task** | premium           | subscription + use  | varies             |
 | DeepSeek prefix-cache             | **engineered**   | not applicable    | not applicable      | incidental         |
 | Embedded web dashboard            | yes              | —                 | n/a (IDE)           | —                  |
-| Configurable web search engine    | `/web-search-engine` | —             | —                   | —                  |
+| Configurable web search engine    | `/search-engine` | —             | —                   | —                  |
 | Persistent per-workspace sessions | yes              | partial           | n/a                 | —                  |
 | Plan mode · MCP · hooks · skills  | yes              | yes               | yes                 | partial            |
 | Web search (Mojeek + SearXNG)      | yes              | yes               | yes                 | yes                |

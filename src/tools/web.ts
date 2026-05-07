@@ -1,6 +1,10 @@
 /** web_search uses Mojeek (DDG returns anti-bot 202 to unauthenticated POSTs); web_fetch sniffs HTML to text. */
 
 import { parse as parseHtml } from "node-html-parser";
+import {
+  webSearchEndpoint as loadWebSearchEndpoint,
+  webSearchEngine as loadWebSearchEngine,
+} from "../config.js";
 import type { ToolRegistry } from "../tools.js";
 
 export interface SearchResult {
@@ -82,11 +86,23 @@ async function searchMojeek(query: string, opts: WebSearchOptions = {}): Promise
   return results;
 }
 
+/** Parse + validate a SearXNG endpoint. Returns origin (protocol + host). */
+function normalizeSearxngEndpoint(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw.includes("://") ? raw : `http://${raw}`);
+  } catch {
+    throw new Error(`web_search: invalid SearXNG endpoint "${raw}"`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`web_search: SearXNG endpoint must be http(s), got ${url.protocol}`);
+  }
+  return url.origin;
+}
+
 async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
-  const raw = opts.endpoint ?? "http://localhost:8080";
-  // Ensure protocol prefix — users often type "localhost:8075" without http://
-  const baseUrl = (raw.includes("://") ? raw : `http://${raw}`).replace(/\/+$/, "");
+  const baseUrl = normalizeSearxngEndpoint(opts.endpoint ?? "http://localhost:8080");
 
   // JSON API is often blocked by SearXNG's default limiter; HTML always works.
   const url = `${baseUrl}/search?format=html&q=${encodeURIComponent(query)}`;
@@ -102,7 +118,7 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
       throw new Error(
-        `web_search: Cannot reach SearXNG server at ${raw}. Please install SearXNG (https://github.com/searxng/searxng) and start it (e.g. \`docker run -d -p 8080:8080 searxng/searxng\`), or switch to the default engine with /web-search-engine mojeek.`,
+        `web_search: Cannot reach SearXNG server at ${opts.endpoint ?? "http://localhost:8080"}. Please install SearXNG (https://github.com/searxng/searxng) and start it (e.g. \`docker run -d -p 8080:8080 searxng/searxng\`), or switch to the default engine with /search-engine mojeek.`,
       );
     }
     throw err;
@@ -119,6 +135,7 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
   return results;
 }
 
+/** Parse SearXNG HTML search results using node-html-parser. */
 export function parseSearxngHtmlResults(html: string): SearchResult[] {
   const root = parseHtml(html);
   const results: SearchResult[] = [];
@@ -150,7 +167,7 @@ export function parseSearxngHtmlResults(html: string): SearchResult[] {
     return results;
   }
 
-  // Some SearXNG themes don't use <article> — fall back to <h3><a> pairs.
+  // Fallback: <h3><a href> pairs directly
   for (const a of root.querySelectorAll("h3 a[href]")) {
     const href = a.getAttribute("href");
     if (!href || href.startsWith("#")) continue;
@@ -405,12 +422,8 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
       required: ["query"],
     },
     fn: async (args: { query: string; topK?: number }, ctx) => {
-      // Re-read config on each call so /web-search-engine takes effect immediately.
-      const { webSearchEngine: getEngine, webSearchEndpoint: getEndpoint } = await import(
-        "../config.js"
-      );
-      const engine = opts.webSearchEngine ?? getEngine();
-      const endpoint = opts.webSearchEndpoint ?? getEndpoint();
+      const engine = opts.webSearchEngine ?? loadWebSearchEngine();
+      const endpoint = opts.webSearchEndpoint ?? loadWebSearchEndpoint();
       const results = await webSearch(args.query, {
         topK: args.topK ?? defaultTopK,
         signal: ctx?.signal,

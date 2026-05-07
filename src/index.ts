@@ -117,6 +117,7 @@ export {
   formatSearchResults,
   htmlToText,
   parseMojeekResults,
+  parseSearxngHtmlResults,
   registerWebTools,
   webFetch,
   webSearch,

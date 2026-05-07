@@ -2,7 +2,7 @@ import { readConfig, webSearchEndpoint, webSearchEngine, writeConfig } from "../
 import type { SlashHandler } from "../dispatch.js";
 
 export const handlers: Record<string, SlashHandler> = {
-  "web-search-engine": (args, _loop, ctx) => {
+  "search-engine": (args, _loop, ctx) => {
     const engine = args[0];
     if (!engine || (engine !== "mojeek" && engine !== "searxng")) {
       return {
@@ -11,9 +11,11 @@ export const handlers: Record<string, SlashHandler> = {
           `SearXNG endpoint: ${webSearchEndpoint()}`,
           "",
           "Usage:",
-          "  /web-search-engine mojeek            use Mojeek (default, no external deps)",
-          "  /web-search-engine searxng            use SearXNG at default endpoint",
-          "  /web-search-engine searxng <url>      use SearXNG at custom endpoint",
+          "  /search-engine mojeek            use Mojeek (default, no external deps)",
+          "  /search-engine searxng            use SearXNG at default endpoint",
+          "  /search-engine searxng <url>      use SearXNG at custom endpoint",
+          "",
+          "Alias: /se",
           "",
           "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
           "Install it with:  docker run -d -p 8080:8080 searxng/searxng",
@@ -37,4 +39,5 @@ export const handlers: Record<string, SlashHandler> = {
       info: `✓ Web search engine set to "${engine}"${engine === "searxng" ? ` (${webSearchEndpoint()})` : ""}. Next assistant turn will pick up the change.`,
     };
   },
+  se: (args, loop, ctx) => handlers["search-engine"]!(args, loop, ctx),
 };
