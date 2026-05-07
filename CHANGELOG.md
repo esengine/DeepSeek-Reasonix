@@ -3,6 +3,68 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.3] — 2026-05-07
+
+**Headline:** the chat scroll rewrite lands. Ink 5.2 → 7.0.2 / React
+18.3 → 19.2, the cell-diff renderer is retired, and `reasonix code` /
+`reasonix chat` default to alt-screen with row-precision virtual
+scroll. PgUp / PgDn / mouse wheel scroll history; an empty prompt + ↑
+also scrolls (Ctrl+P / Ctrl+N still recalls prompt history). When
+scrolled away from bottom, the prompt hides and a `📖 reading
+history — End / PgDn to return` hint appears. Resize-ghost dividers
+and `<Static>`-related scroll-yank artifacts are gone with the
+renderer that produced them. `--no-alt-screen` keeps the legacy
+in-shell-scrollback behavior.
+
+`web_search` gains a configurable backend — Mojeek stays the default,
+but `/web-search-engine searxng <url>` switches to a self-hosted
+SearXNG instance for users whose network blocks Mojeek. And the MCP
+filesystem sandbox now fails with an actionable
+`mkdir -p '<path>'` hint instead of a raw Node stack when the
+configured directory doesn't exist; the wizard offers to create it
+inline at config time.
+
+**Features:**
+
+- feat(ui): row-precision virtual scroll on Ink 7 + React 19.
+  `<Static>` retired (incompatible with alt-screen reflow);
+  `React.memo(CardRenderer)` plus reference-stable cards in the
+  reducer skip the reconciler on unchanged history. `useChatScroll`
+  drives an outer `overflow=hidden` clip + inner `marginTop=-N`
+  slide; `useBoxMetrics` reports inner / outer heights so bounds
+  clamp and auto-pin to bottom on new content. `App` owns
+  PgUp/PgDn/End/wheel; PromptInput hands off ↑/↓ on empty buffer
+  when pinned + idle. Ticker migrated to Ink 7's shared
+  `useAnimation`. (PR #380)
+- feat(web): configurable `web_search` backend with SearXNG support.
+  `/web-search-engine` shows / switches the active engine; URL is
+  persisted to `~/.reasonix/config.json`. Mojeek remains the default;
+  the original Mojeek path is preserved as `searchMojeek()`. Protocol
+  auto-normalizes (`localhost:8080` → `http://...`); an unreachable
+  SearXNG endpoint surfaces an install hint instead of a raw fetch
+  error. (PR #338)
+
+**Bug fixes:**
+
+- fix(mcp): preflight the filesystem sandbox directory before
+  spawning `@modelcontextprotocol/server-filesystem`. Missing
+  directories now throw `MCP filesystem sandbox '<path>' does not
+  exist — create it with: mkdir -p '<path>'` instead of a raw Node
+  stack from inside `npx`'s child. The init wizard adds an inline
+  `[Y] create it (mkdir -p) / [N] enter a different path` confirm
+  step when the user types a path that doesn't exist, so bad config
+  never reaches disk. Spawn-time path deliberately does not
+  auto-mkdir — by then the user may not remember writing the
+  config. (#362, PR #379)
+- fix(readme): website URLs corrected from `/reasonix/` to
+  `/DeepSeek-Reasonix/`. (PR #375)
+
+**Chores:**
+
+- chore(issue-template): bug template now asks for shell + terminal,
+  and the model-id examples track the current DeepSeek model
+  lineup. (PR #378)
+
 ## [0.30.2] — 2026-05-07
 
 **Headline:** five user-visible polish items from the @dacec354 triage
