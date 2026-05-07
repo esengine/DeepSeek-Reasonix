@@ -3,6 +3,33 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.1] — 2026-05-07
+
+**Headline:** two TUI ghost-rendering fixes for issues that only showed
+up on the published binary. The CLI bundle now uses real Ink in
+production instead of the cell-diff renderer that source mode never
+exercised, eliminating a whole class of bugs invisible to `npx tsx`
+repros. The `submit_plan` approval picker no longer leaves a
+duplicated row behind when arrow-navigating choices — the live tool
+card above the modal is suppressed while the picker owns the screen.
+
+**Bug fixes:**
+
+- fix(renderer): drop the `tsup` `ink → ink-compat` alias and the
+  `noExternal` for `ink` / `ink-text-input`. The CLI bundle keeps
+  `from "ink"` external; `ink` and `ink-text-input` move to runtime
+  `dependencies` so npm install pulls the real package. The
+  cell-diff renderer is no longer on the user-facing path; it's
+  retained only for direct test imports. Same behavior as `npx tsx
+  src/cli/index.ts` mode — TUI bug repros from source mode are now
+  valid for the published binary again. (#346, PR #354)
+- fix(ui): `CardStream` accepts a `suppressLive` flag; `App.tsx`
+  computes a `modalOpen` flag from the union of pending modal states
+  and passes it through. While any picker / confirm modal owns the
+  screen, the unsettled live tool card above it stops repainting,
+  removing the rerender competition that left stale rows during
+  arrow-key navigation. (#352, PR #353 — thanks @ctharvey)
+
 ## [0.30.0] — 2026-05-06
 
 **Headline:** slash commands grow first-class aliases, and the
