@@ -98,6 +98,14 @@ npx reasonix code   # paste a DeepSeek API key on first run; persists after
 
 Requires Node ≥ 22. Tested on macOS · Linux · Windows (PowerShell · Git Bash · Windows Terminal). Get a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reasonix code --help` for flags.
 
+**Working in a different folder:** Reasonix scopes filesystem tools to the launch directory. To work elsewhere, pass `--dir`:
+
+```bash
+npx reasonix code --dir /path/to/project   # or use a relative path
+```
+
+Mid-session switching isn't supported by design (the message log + memory paths get tangled with stale roots). Quit and relaunch with a new `--dir` to retarget. `/status` always shows the current pinned workspace.
+
 <br/>
 
 ## What makes Reasonix different

@@ -3103,6 +3103,7 @@ function AppInner({
                 {!hasConversation && !busy && !isStreaming ? (
                   <WelcomeBanner
                     inCodeMode={!!codeMode}
+                    workspaceRoot={codeMode ? currentRootDir : undefined}
                     dashboardUrl={dashboardUrl}
                     languageVersion={languageVersion}
                   />

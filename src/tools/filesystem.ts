@@ -95,7 +95,9 @@ export function registerFilesystemTools(
     // Use relative() to catch any `..` segments that escape.
     const rel = pathMod.relative(normRoot, resolved);
     if (rel.startsWith("..") || pathMod.isAbsolute(rel)) {
-      throw new Error(`path escapes sandbox root (${normRoot}): ${raw}`);
+      throw new Error(
+        `path escapes sandbox root (${normRoot}): ${raw} — workspace is pinned at launch; quit and relaunch with \`reasonix code --dir <path>\` to work in a different folder`,
+      );
     }
     return resolved;
   };

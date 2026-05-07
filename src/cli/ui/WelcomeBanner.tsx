@@ -9,6 +9,8 @@ import { FG, TONE } from "./theme/tokens.js";
 export interface WelcomeBannerProps {
   /** True when running `reasonix code`. Surfaces code-mode hints. */
   inCodeMode?: boolean;
+  /** Pinned workspace root — only meaningful in code mode. Surfaced so first-time users see they can pass --dir at next launch. */
+  workspaceRoot?: string;
   /** Live URL of the embedded dashboard, or null when it isn't running. */
   dashboardUrl?: string | null;
   /** Bumped on language change; forces re-render so t() picks up new locale. */
@@ -19,6 +21,7 @@ const HINTS = ["/help", "/init", "/memory", "/cost"] as const;
 
 export function WelcomeBanner({
   inCodeMode,
+  workspaceRoot,
   dashboardUrl,
 }: WelcomeBannerProps): React.ReactElement {
   const tagline = inCodeMode ? t("ui.taglineCode") : t("ui.taglineChat");
@@ -65,6 +68,15 @@ export function WelcomeBanner({
           </Text>
         ))}
       </Box>
+
+      {inCodeMode && workspaceRoot ? (
+        <Box marginTop={1} flexDirection="row" gap={1}>
+          <Text color={TONE.brand}>{"▸ workspace"}</Text>
+          <Text color={FG.faint}>{"·"}</Text>
+          <Text color={FG.body}>{workspaceRoot}</Text>
+          <Text color={FG.faint}>{"  (relaunch with --dir <path> to switch)"}</Text>
+        </Box>
+      ) : null}
 
       {dashboardUrl ? (
         <Box marginTop={1} flexDirection="row" gap={1}>

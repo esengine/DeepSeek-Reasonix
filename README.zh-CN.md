@@ -52,6 +52,14 @@ npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 
 要求 Node ≥ 22。已在 macOS · Linux · Windows（PowerShell · Git Bash · Windows Terminal）测过。[去拿 DeepSeek API Key →](https://platform.deepseek.com/api_keys) · 完整 flag 看 `reasonix code --help`。
 
+**在其他目录工作：** Reasonix 把文件系统工具作用域绑定在启动目录。要在别的目录工作，传 `--dir`：
+
+```bash
+npx reasonix code --dir /path/to/project   # 也可以用相对路径
+```
+
+中途切换工作区是有意不支持的（消息日志和 memory 路径会和旧的根目录混在一起，状态错乱）。退出后用新的 `--dir` 重新启动来切换。`/status` 始终显示当前锁定的工作区。
+
 <br/>
 
 ## Reasonix 的不同之处

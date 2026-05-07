@@ -653,6 +653,7 @@ export const zhCN: TranslationSchema = {
       statusBudget: "  预算    ${spent} / ${cap}（{pct}%）{tag}",
       statusSession: '  会话    "{name}" · 日志中 {count} 条消息（恢复了 {resumed} 条）',
       statusSessionEphemeral: "  会话    （临时 — 无持久化）",
+      statusWorkspace: "  工作区  {path} · 启动时锁定（用 --dir <path> 重新启动以切换）",
       statusMcp: "  MCP     {servers} 个服务器，注册表中 {tools} 个工具",
       statusEdits: "  编辑    {count} 个待处理（/apply 提交，/discard 丢弃）",
       statusPlan: "  计划    开启 — 写入受限（submit_plan + 审批）",

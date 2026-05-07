@@ -710,6 +710,8 @@ export const EN: TranslationSchema = {
       statusBudget: "  budget  ${spent} / ${cap} ({pct}%){tag}",
       statusSession: '  session "{name}" · {count} messages in log (resumed {resumed})',
       statusSessionEphemeral: "  session (ephemeral — no persistence)",
+      statusWorkspace:
+        "  workspace {path} · pinned at launch (relaunch with --dir <path> to switch)",
       statusMcp: "  mcp     {servers} server(s), {tools} tool(s) in registry",
       statusEdits: "  edits   {count} pending (/apply to commit, /discard to drop)",
       statusPlan: "  plan    ON — writes gated (submit_plan + approval)",
