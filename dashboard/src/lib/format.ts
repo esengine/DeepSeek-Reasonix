@@ -4,6 +4,24 @@ export function fmtUsd(n: number | null | undefined): string {
   return `$${n.toFixed(n < 0.01 ? 6 : 4)}`;
 }
 
+/** Keep in sync with src/cli/ui/theme/tokens.ts USD_TO_CNY. */
+const USD_TO_CNY = 7.2;
+
+/** USD-internal cost rendered in the wallet's display currency. Undefined currency → CNY (matches CLI default). */
+export function fmtCost(
+  usd: number | null | undefined,
+  currency: string | null | undefined,
+  fractionDigits?: number,
+): string {
+  if (usd === null || usd === undefined) return "—";
+  const cur = currency ?? "CNY";
+  const amount = cur === "CNY" ? usd * USD_TO_CNY : usd;
+  if (amount === 0) return cur === "CNY" ? "¥0" : "$0";
+  const sym = cur === "CNY" ? "¥" : cur === "USD" ? "$" : `${cur} `;
+  const digits = fractionDigits ?? (Math.abs(amount) < 0.01 ? 6 : 4);
+  return `${sym}${amount.toFixed(digits)}`;
+}
+
 export function fmtPct(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
   return `${(n * 100).toFixed(1)}%`;

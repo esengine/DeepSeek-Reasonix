@@ -14,7 +14,7 @@ import {
 } from "../components/chat-internals.js";
 import { MODE, TOKEN, api } from "../lib/api.js";
 import { appBus, showToast } from "../lib/bus.js";
-import { fmtUsd } from "../lib/format.js";
+import { fmtCost, fmtUsd } from "../lib/format.js";
 import { html } from "../lib/html.js";
 import { t, useLang } from "../i18n/index.js";
 
@@ -791,6 +791,7 @@ function SideRail({ stats, budgetUsd, activePlan }: SideRailProps) {
   const showBudget = stats != null && typeof budgetUsd === "number" && budgetUsd > 0;
   const budgetPct = showBudget ? Math.min(120, (stats.totalCostUsd / budgetUsd) * 100) : 0;
   const budgetTone = budgetPct >= 100 ? "err" : budgetPct >= 80 ? "warn" : "";
+  const walletCurrency = stats?.balance?.[0]?.currency;
   return html`
     <aside class="chat-rail">
       ${activePlan ? html`<${ActivePlanCard} plan=${activePlan} />` : null}
@@ -801,7 +802,7 @@ function SideRail({ stats, budgetUsd, activePlan }: SideRailProps) {
               <div class="rh">${t("chat.railSession")}</div>
               <div class="rail-kv"><span class="k">${t("chat.railTurns")}</span><span class="v">${stats.turns.toLocaleString()}</span></div>
               <div class="rail-kv"><span class="k">${t("chat.railPromptTok")}</span><span class="v">${stats.lastPromptTokens.toLocaleString()}</span></div>
-              <div class="rail-kv"><span class="k">${t("chat.railCost")}</span><span class="v">${fmtUsd(stats.totalCostUsd)}</span></div>
+              <div class="rail-kv"><span class="k">${t("chat.railCost")}</span><span class="v">${fmtCost(stats.totalCostUsd, walletCurrency)}</span></div>
               <div class="progress-row" style="margin-top:8px">
                 <span class="lbl">${t("chat.railCacheHit")}</span>
                 <div class=${`progress ${cacheTone}`}><div class="progress-fill" style=${`width:${cachePct}%`}></div></div>
@@ -819,7 +820,7 @@ function SideRail({ stats, budgetUsd, activePlan }: SideRailProps) {
               <div class="progress-row">
                 <span class="lbl">${t("chat.railSpend")}</span>
                 <div class=${`progress ${budgetTone}`}><div class="progress-fill" style=${`width:${Math.min(100, budgetPct)}%`}></div></div>
-                <span class="v" style=${budgetTone === "err" ? "color:var(--c-err)" : budgetTone === "warn" ? "color:var(--c-warn)" : ""}>${fmtUsd(stats.totalCostUsd)} / ${fmtUsd(budgetUsd)}</span>
+                <span class="v" style=${budgetTone === "err" ? "color:var(--c-err)" : budgetTone === "warn" ? "color:var(--c-warn)" : ""}>${fmtCost(stats.totalCostUsd, walletCurrency)} / ${fmtCost(budgetUsd, walletCurrency)}</span>
               </div>
             </div>
           `
@@ -989,11 +990,11 @@ function ChatStatusBar({ stats, model }: ChatStatusBarProps) {
       </span>
       <span class="status-item">
         <span class="status-label">${t("chat.statusTurn")}</span>
-        <code>${fmtUsd(stats.lastTurnCostUsd)}</code>
+        <code>${fmtCost(stats.lastTurnCostUsd, balance?.currency)}</code>
       </span>
       <span class="status-item">
         <span class="status-label">${t("chat.statusSession")}</span>
-        <code>${fmtUsd(stats.totalCostUsd)}</code>
+        <code>${fmtCost(stats.totalCostUsd, balance?.currency)}</code>
         <span class="muted" style="font-size: 10px;">
           ${t("chat.statusTurns", { count: stats.turns, s: stats.turns === 1 ? "" : "s" })}
         </span>

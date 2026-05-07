@@ -1,4 +1,4 @@
-import { fmtCompactNum, fmtNum, fmtRelativeTime, fmtUsd } from "../lib/format.js";
+import { fmtCompactNum, fmtCost, fmtNum, fmtRelativeTime, fmtUsd } from "../lib/format.js";
 import { html } from "../lib/html.js";
 import { usePoll } from "../lib/use-poll.js";
 import { t, useLang } from "../i18n/index.js";
@@ -144,6 +144,7 @@ function currentSessionBlock(c: CockpitData) {
     `;
   }
   const s = c.currentSession;
+  const currency = c.balance?.currency;
   return html`
     <div class="cock-list cock-w-2">
       <div class="ch"><span class="ttl">${t("overview.currentSession")}</span></div>
@@ -153,7 +154,7 @@ function currentSessionBlock(c: CockpitData) {
       <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;font-family:var(--font-mono);font-size:11px">
         <div><span style="color:var(--fg-3)">${t("overview.promptTok")}</span><div style="color:var(--fg-0);font-size:13px;font-weight:600">${fmtNum(s.lastPromptTokens)}</div></div>
         <div><span style="color:var(--fg-3)">${t("overview.completionTok")}</span><div style="color:var(--fg-0);font-size:13px;font-weight:600">${fmtNum(s.completionTokens)}</div></div>
-        <div><span style="color:var(--fg-3)">${t("overview.cost")}</span><div style="color:var(--fg-0);font-size:13px;font-weight:600">${fmtUsd(s.totalCostUsd)}</div></div>
+        <div><span style="color:var(--fg-3)">${t("overview.cost")}</span><div style="color:var(--fg-0);font-size:13px;font-weight:600">${fmtCost(s.totalCostUsd, currency)}</div></div>
       </div>
     </div>
   `;
@@ -185,7 +186,7 @@ function costTrendSpark(c: CockpitData) {
   return html`
     <div class="chart cock-w-2">
       <div class="chart-h"><span class="title">${t("overview.costTrend")}</span></div>
-      <div class="chart-v">${fmtUsd(avg)}<span class="unit">${t("overview.dayAvg")}</span></div>
+      <div class="chart-v">${fmtCost(avg, c.balance?.currency)}<span class="unit">${t("overview.dayAvg")}</span></div>
       <div class="chart-spark">
         <svg viewBox=${`0 0 ${w} ${h}`} preserveAspectRatio="none">
           <polyline fill="none" stroke="var(--c-brand)" stroke-width="1.5" points=${points} />
