@@ -351,21 +351,58 @@ describe("registerShellTools — dispatch integration", () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "reasonix-shell-"));
   });
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+  afterEach(async () => {
+    for (let i = 0; i < 5; i++) {
+      try {
+        rmSync(tmp, { recursive: true, force: true });
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
   });
 
   it("registers run_command + background tools", () => {
     const registry = new ToolRegistry();
     registerShellTools(registry, { rootDir: tmp });
-    // run_command (sync) + run_background / job_output / stop_job /
-    // list_jobs (background family).
-    expect(registry.size).toBe(5);
+    // run_command (sync) + run_background / job_output / wait_for_job /
+    // stop_job / list_jobs (background family).
+    expect(registry.size).toBe(6);
     expect(registry.has("run_command")).toBe(true);
     expect(registry.has("run_background")).toBe(true);
     expect(registry.has("job_output")).toBe(true);
+    expect(registry.has("wait_for_job")).toBe(true);
     expect(registry.has("stop_job")).toBe(true);
     expect(registry.has("list_jobs")).toBe(true);
+  });
+
+  it("wait_for_job returns structured state when a job emits new output", async () => {
+    const registry = new ToolRegistry();
+    const jobs = new (await import("../src/tools/jobs.js")).JobRegistry();
+    registerShellTools(registry, { rootDir: tmp, jobs, extraAllowed: ["node"] });
+
+    try {
+      const started = await jobs.start(
+        `node -e "setTimeout(()=>console.log('ready'), 200); setTimeout(()=>{}, 10000)"`,
+        { cwd: tmp, waitSec: 0.1 },
+      );
+      const out = await registry.dispatch(
+        "wait_for_job",
+        JSON.stringify({ jobId: started.jobId, timeoutMs: 1500 }),
+      );
+      const parsed = JSON.parse(out) as {
+        jobId: number;
+        exited: boolean;
+        exitCode: number | null;
+        latestOutput: string;
+      };
+      expect(parsed.jobId).toBe(started.jobId);
+      expect(parsed.exited).toBe(false);
+      expect(parsed.exitCode).toBeNull();
+      expect(parsed.latestOutput).toContain("ready");
+    } finally {
+      await jobs.shutdown(1500);
+    }
   });
 
   it("auto-runs allowlisted commands and returns formatted output", async () => {

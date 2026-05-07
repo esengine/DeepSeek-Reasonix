@@ -214,6 +214,35 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   });
 
   registry.register({
+    name: "wait_for_job",
+    description:
+      "Block until a background job exits or produces new output, bounded by `timeoutMs`. Use this instead of polling `job_output` with identical args when you're intentionally waiting for state to change. Returns JSON with `exited`, `exitCode`, and `latestOutput`.",
+    readOnly: true,
+    parameters: {
+      type: "object",
+      properties: {
+        jobId: { type: "integer", description: "Job id returned by run_background." },
+        timeoutMs: {
+          type: "integer",
+          description:
+            "Max time to block before returning if nothing changes. Clamped to 0..30000. Default 5000.",
+        },
+      },
+      required: ["jobId"],
+    },
+    fn: async (args: { jobId: number; timeoutMs?: number }) => {
+      const out = await jobs.waitForJob(args.jobId, { timeoutMs: args.timeoutMs });
+      if (!out) return `job ${args.jobId}: not found (use list_jobs)`;
+      return {
+        jobId: args.jobId,
+        exited: out.exited,
+        exitCode: out.exitCode,
+        latestOutput: out.latestOutput,
+      };
+    },
+  });
+
+  registry.register({
     name: "stop_job",
     description:
       "Stop a background job started with `run_background`. SIGTERM first; SIGKILL after a short grace period if it doesn't exit cleanly. Returns the final output + exit code. Safe to call on an already-exited job.",
