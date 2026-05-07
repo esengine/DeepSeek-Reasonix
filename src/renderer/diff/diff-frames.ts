@@ -91,7 +91,7 @@ function moveTo(
   }
 
   if (cursor.x !== targetX) {
-    out.push({ type: "cursorMove", dx: targetX - cursor.x, dy: 0 });
+    out.push({ type: "cursorTo", col: targetX });
     cursor.x = targetX;
   }
 }

@@ -69,7 +69,7 @@ describe("diffFrames — empty diff", () => {
 });
 
 describe("diffFrames — single-cell change", () => {
-  it("emits cursorMove + stdout for one changed cell", () => {
+  it("positions cursor + writes stdout for one changed cell", () => {
     const p = pools();
     withPools(p, () => {
       const a = frame(5, 2);
@@ -77,10 +77,12 @@ describe("diffFrames — single-cell change", () => {
       const out = diffFrames(a, b, p);
       const stdout = out.filter((pp): pp is Patch & { type: "stdout" } => pp.type === "stdout");
       expect(stdout.map((p) => p.content)).toEqual(["x"]);
-      const cursorMoves = out.filter(
-        (pp): pp is Patch & { type: "cursorMove" } => pp.type === "cursorMove",
+      // Column targeting goes through CHA absolute (cursorTo) — relative CUF would
+      // accumulate drift across frames if any earlier write miscounted cell width.
+      const cursorTos = out.filter(
+        (pp): pp is Patch & { type: "cursorTo" } => pp.type === "cursorTo",
       );
-      expect(cursorMoves.some((m) => m.dx > 0 || m.dy > 0)).toBe(true);
+      expect(cursorTos.map((c) => c.col)).toContain(2);
     });
   });
 
@@ -94,10 +96,33 @@ describe("diffFrames — single-cell change", () => {
         s.writeCell(2, 0, cell(p, "c"));
       });
       const out = diffFrames(a, b, p);
-      const cursorMoves = out.filter((pp) => pp.type === "cursorMove");
-      // First write needs at most one cursor move; subsequent writes ride on
+      const positioningPatches = out.filter(
+        (pp) => pp.type === "cursorMove" || pp.type === "cursorTo",
+      );
+      // First write needs at most one position; subsequent writes ride on
       // the terminal's natural cursor advance, so no extra moves between.
-      expect(cursorMoves.length).toBeLessThanOrEqual(1);
+      expect(positioningPatches.length).toBeLessThanOrEqual(1);
+    });
+  });
+});
+
+describe("diffFrames — cursor positioning hardening (claude-code/issues/14208)", () => {
+  it("never emits relative CUF/CUB (column dx) for cell positioning — CHA only", () => {
+    const p = pools();
+    withPools(p, () => {
+      const a = frame(20, 5, (s) => {
+        for (const [x, ch] of "hello".split("").entries()) s.writeCell(x + 2, 1, cell(p, ch));
+        for (const [x, ch] of "world".split("").entries()) s.writeCell(x + 7, 3, cell(p, ch));
+      });
+      const b = frame(20, 5, (s) => {
+        for (const [x, ch] of "HELLO".split("").entries()) s.writeCell(x + 2, 1, cell(p, ch));
+        for (const [x, ch] of "WORLD".split("").entries()) s.writeCell(x + 7, 3, cell(p, ch));
+      });
+      const out = diffFrames(a, b, p);
+      const horizMoves = out.filter(
+        (pp): pp is Patch & { type: "cursorMove" } => pp.type === "cursorMove" && pp.dx !== 0,
+      );
+      expect(horizMoves).toEqual([]);
     });
   });
 });
