@@ -27,7 +27,13 @@ const CSI_TAIL_TO_FLAGS: ReadonlyArray<{ tail: string; flags: CsiKeyFlags }> = [
   // Forward-delete (the key labelled Delete on most keyboards).
   { tail: "[3~", flags: { delete: true } },
   // Shift+Tab — terminal sends `\x1b[Z` rather than tab-with-shift.
+  // `[1;2Z` is the modifier-encoded variant some Windows PowerShell
+  // hosts emit; `[27;2;9~` and `[9;2u` cover modifyOtherKeys / Kitty
+  // forms. Issue #373.
   { tail: "[Z", flags: { shift: true, tab: true } },
+  { tail: "[1;2Z", flags: { shift: true, tab: true } },
+  { tail: "[27;2;9~", flags: { shift: true, tab: true } },
+  { tail: "[9;2u", flags: { shift: true, tab: true } },
 ];
 
 function alreadyStructured(flags: CsiKeyFlags): boolean {

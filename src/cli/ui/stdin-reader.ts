@@ -62,17 +62,23 @@ const CSI_TAIL_MAP: ReadonlyArray<{ tail: string; ev: KeyEvent }> = [
   { tail: "6~", ev: { input: "", pageDown: true } },
   { tail: "3~", ev: { input: "", delete: true } },
   { tail: "Z", ev: { input: "", shift: true, tab: true } },
-  // modifyOtherKeys (xterm CSI > 4 ; 2 m) sequences for Enter with
-  // modifiers. Only fired when App.tsx has enabled the mode at
+  // Some Windows hosts (PowerShell 7.x conhost path) emit the
+  // modifier-encoded back-tab `\x1b[1;2Z` instead of bare `\x1b[Z`.
+  // Issue #373 — without this entry Shift+Tab is silently dropped.
+  { tail: "1;2Z", ev: { input: "", shift: true, tab: true } },
+  // modifyOtherKeys (xterm CSI > 4 ; 2 m) sequences for Enter / Tab
+  // with modifiers. Only fired when App.tsx has enabled the mode at
   // startup; otherwise Shift+Enter stays indistinguishable from Enter.
   // Modifier encoding: 2=shift, 3=alt, 4=alt+shift, 5=ctrl,
-  // 6=ctrl+shift, 7=ctrl+alt, 8=ctrl+alt+shift. Keycode 13 = Enter.
+  // 6=ctrl+shift, 7=ctrl+alt, 8=ctrl+alt+shift. Keycodes: 9=Tab, 13=Enter.
+  { tail: "27;2;9~", ev: { input: "", tab: true, shift: true } },
   { tail: "27;2;13~", ev: { input: "", return: true, shift: true } },
   { tail: "27;5;13~", ev: { input: "", return: true, ctrl: true } },
   { tail: "27;6;13~", ev: { input: "", return: true, ctrl: true, shift: true } },
   // Kitty keyboard protocol — same idea, different envelope:
   // `\x1b[<keycode>;<mod>u`. Some terminals (kitty, recent Windows
   // Terminal previews) prefer this shape. Harmless to map here too.
+  { tail: "9;2u", ev: { input: "", tab: true, shift: true } },
   { tail: "13;2u", ev: { input: "", return: true, shift: true } },
   { tail: "13;5u", ev: { input: "", return: true, ctrl: true } },
   { tail: "13;6u", ev: { input: "", return: true, ctrl: true, shift: true } },
