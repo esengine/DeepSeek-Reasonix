@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../src/tools.js";
 import { lineDiff, registerFilesystemTools } from "../src/tools/filesystem.js";
 import { compileNameFilter, displayRel } from "../src/tools/filesystem.js";
@@ -274,6 +274,32 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       );
       expect(out).toContain("node_modules/lib/marker.ts");
     });
+
+    it("honors AbortSignal during recursive search", async () => {
+      await fs.mkdir(join(root, "src", "nested"), { recursive: true });
+      await fs.writeFile(join(root, "src", "nested", "marker.ts"), "x");
+
+      const ctrl = new AbortController();
+      const originalReaddir = fs.readdir.bind(fs);
+      let readdirCalls = 0;
+      const spy = vi
+        .spyOn(fs, "readdir")
+        .mockImplementation(async (...args: Parameters<typeof fs.readdir>) => {
+          const result = await originalReaddir(...args);
+          readdirCalls++;
+          if (readdirCalls === 2) ctrl.abort();
+          return result;
+        });
+
+      try {
+        const out = await tools.dispatch("search_files", JSON.stringify({ pattern: "marker" }), {
+          signal: ctrl.signal,
+        });
+        expect(out).toMatch(/aborted/i);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 
   describe("search_content", () => {
@@ -384,6 +410,34 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       );
       expect(out).toMatch(/src\/cli\/ui\/App\.tsx:1:/);
       expect(out).not.toMatch(/src[\\]cli/);
+    });
+
+    it("honors AbortSignal during recursive content search", async () => {
+      await fs.mkdir(join(root, "src", "nested"), { recursive: true });
+      await fs.writeFile(join(root, "src", "nested", "deep.ts"), "export const z = 3;\n");
+
+      const ctrl = new AbortController();
+      const originalReaddir = fs.readdir.bind(fs);
+      let readdirCalls = 0;
+      const spy = vi
+        .spyOn(fs, "readdir")
+        .mockImplementation(async (...args: Parameters<typeof fs.readdir>) => {
+          const result = await originalReaddir(...args);
+          readdirCalls++;
+          if (readdirCalls === 2) ctrl.abort();
+          return result;
+        });
+
+      try {
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "export const" }),
+          { signal: ctrl.signal },
+        );
+        expect(out).toMatch(/aborted/i);
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     describe("glob filter", () => {

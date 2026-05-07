@@ -339,11 +339,11 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["pattern"],
     },
-    fn: async (args: { path?: string; pattern: string; include_deps?: boolean }) =>
+    fn: async (args: { path?: string; pattern: string; include_deps?: boolean }, toolCtx) =>
       searchFiles(
         { rootDir, maxListBytes, skipDirNames: SKIP_DIR_NAMES },
         safePath(args.path ?? "."),
-        args,
+        { ...args, signal: toolCtx?.signal },
       ),
   });
 
@@ -381,13 +381,16 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["pattern"],
     },
-    fn: async (args: {
-      pattern: string;
-      path?: string;
-      glob?: string;
-      case_sensitive?: boolean;
-      include_deps?: boolean;
-    }) =>
+    fn: async (
+      args: {
+        pattern: string;
+        path?: string;
+        glob?: string;
+        case_sensitive?: boolean;
+        include_deps?: boolean;
+      },
+      toolCtx,
+    ) =>
       searchContent(
         {
           rootDir,
@@ -397,7 +400,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
           nameMatch: compileNameFilter(typeof args.glob === "string" ? args.glob : null),
         },
         safePath(args.path ?? "."),
-        args,
+        { ...args, signal: toolCtx?.signal },
       ),
   });
 
