@@ -2994,6 +2994,21 @@ function AppInner({
     [],
   );
 
+  const modalOpen =
+    !!pendingShell ||
+    !!pendingPlan ||
+    !!pendingReviseEditor ||
+    !!pendingSessionsPicker ||
+    !!pendingMcpHub ||
+    !!stagedInput ||
+    !!pendingEditReview ||
+    walkthroughActive ||
+    !!pendingChoice ||
+    !!stagedChoiceCustom ||
+    !!pendingRevision ||
+    !!stagedCheckpointRevise ||
+    !!pendingCheckpoint;
+
   return (
     <>
       <TickerProvider
@@ -3027,7 +3042,7 @@ function AppInner({
           <Box flexDirection="row">
             <Box flexDirection="column" flexGrow={1}>
               <Box flexDirection="column">
-                <CardStream />
+                <CardStream suppressLive={modalOpen} />
                 {/*
           Welcome card on the empty state. Visible only when nothing
           has happened yet (no past events, nothing in flight, no

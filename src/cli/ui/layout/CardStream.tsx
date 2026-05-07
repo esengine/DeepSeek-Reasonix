@@ -20,13 +20,28 @@ function isSettled(card: Card): boolean {
   }
 }
 
-export function CardStream(): React.ReactElement {
-  const cards = useAgentState((s) => s.cards);
+export function splitCardStream(
+  cards: readonly Card[],
+  suppressLive = false,
+): { committed: Card[]; live: Card[] } {
   const lastIdx = cards.length - 1;
   const lastCard = lastIdx >= 0 ? (cards[lastIdx] as Card) : null;
   const lastIsLive = !!lastCard && !isSettled(lastCard);
+  if (suppressLive && lastIsLive) {
+    return { committed: cards.slice(0, lastIdx), live: [] };
+  }
   const committed: Card[] = lastIsLive ? cards.slice(0, lastIdx) : cards.slice();
   const live: Card[] = lastIsLive && lastCard ? [lastCard] : [];
+  return { committed, live };
+}
+
+export function CardStream({
+  suppressLive = false,
+}: {
+  suppressLive?: boolean;
+}): React.ReactElement {
+  const cards = useAgentState((s) => s.cards);
+  const { committed, live } = splitCardStream(cards, suppressLive);
   // Static items are emitted via bridge.emitStatic, which renders them in an
   // off-tree React reconciler — context from the live tree does NOT propagate.
   // The ActiveCardContext.Provider must therefore live inside the children
