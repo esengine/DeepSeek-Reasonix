@@ -762,11 +762,16 @@ export const zhCN: TranslationSchema = {
       listFrontmatter: "每个文件的 frontmatter 至少需要 `name` 和 `description`。",
       listInvoke: "使用 `/skill <name> [args]` 调用技能，或让模型调用 `run_skill`。",
       listHeader: "用户技能（{count}）：",
-      listFooter: "查看正文：/skill show <name>   运行：/skill <name> [args]",
+      listFooter: "查看：/skill show <name>   运行：/skill <name> [args]   新建：/skill new <name>",
+      listEmptyNewHint:
+        "用 `/skill new <name>` 在项目范围下生成一个空白模板 — 暂无在线市场，技能需要自己写。",
       showUsage: "用法：/skill show <name>",
       showNotFound: "未找到技能：{name}",
       runNotFound: "未找到技能：{name}  （尝试 /skill list）",
       runInfo: "▸ 正在运行技能：{name}{args}",
+      newUsage: "用法：/skill new <name> [--global]",
+      newCreated: "▸ 已创建技能：{name}\n  {path}\n  编辑后用 `/skill {name}` 调用",
+      newError: "▲ /skill new 失败：{reason}",
     },
   },
 };

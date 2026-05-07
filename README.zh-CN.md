@@ -60,6 +60,15 @@ npx reasonix code --dir /path/to/project   # 也可以用相对路径
 
 中途切换工作区是有意不支持的（消息日志和 memory 路径会和旧的根目录混在一起，状态错乱）。退出后用新的 `--dir` 重新启动来切换。`/status` 始终显示当前锁定的工作区。
 
+**写第一个 Skill：** Skills 是模型可以调用的 markdown 剧本（`/skill <name>`）。暂无在线市场 —— 自己写：
+
+```bash
+/skill new my-skill          # 在 <project>/.reasonix/skills/my-skill.md 生成模板
+/skill new my-skill --global # 或者放到 ~/.reasonix/skills，跨项目共用
+```
+
+编辑文件（`description:` frontmatter + 正文），然后 `/skill list` 就能看到。frontmatter 里加 `runAs: subagent` 会以独立 subagent 跑，而不是把正文内联进父 prompt。
+
 <br/>
 
 ## Reasonix 的不同之处

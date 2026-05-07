@@ -106,6 +106,15 @@ npx reasonix code --dir /path/to/project   # or use a relative path
 
 Mid-session switching isn't supported by design (the message log + memory paths get tangled with stale roots). Quit and relaunch with a new `--dir` to retarget. `/status` always shows the current pinned workspace.
 
+**Author your first skill:** Skills are markdown playbooks the model can invoke (`/skill <name>`). There's no remote registry yet — you author them directly:
+
+```bash
+/skill new my-skill          # scaffolds <project>/.reasonix/skills/my-skill.md
+/skill new my-skill --global # or under ~/.reasonix/skills for cross-project use
+```
+
+Edit the file (`description:` frontmatter + body), then `/skill list` to see it. Add `runAs: subagent` to the frontmatter to spawn an isolated subagent loop instead of inlining the body.
+
 <br/>
 
 ## What makes Reasonix different

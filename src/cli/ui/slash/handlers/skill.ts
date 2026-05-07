@@ -6,6 +6,17 @@ const skill: SlashHandler = (args, _loop, ctx) => {
   const store = new SkillStore({ projectRoot: ctx.codeRoot });
   const sub = (args[0] ?? "").toLowerCase();
 
+  if (sub === "new" || sub === "init") {
+    const name = args[1];
+    if (!name) return { info: t("handlers.skill.newUsage") };
+    const wantsGlobal = args.slice(2).includes("--global") || !ctx.codeRoot;
+    const result = store.create(name, wantsGlobal ? "global" : "project");
+    if ("error" in result) {
+      return { info: t("handlers.skill.newError", { reason: result.error }) };
+    }
+    return { info: t("handlers.skill.newCreated", { name, path: result.path }) };
+  }
+
   if (sub === "" || sub === "list" || sub === "ls") {
     const skills = store.list();
     if (skills.length === 0) {
@@ -17,7 +28,13 @@ const skill: SlashHandler = (args, _loop, ctx) => {
       if (!store.hasProjectScope()) {
         lines.push(t("handlers.skill.listProjectOnly"));
       }
-      lines.push("", t("handlers.skill.listFrontmatter"), t("handlers.skill.listInvoke"));
+      lines.push(
+        "",
+        t("handlers.skill.listFrontmatter"),
+        t("handlers.skill.listInvoke"),
+        "",
+        t("handlers.skill.listEmptyNewHint"),
+      );
       return { info: lines.join("\n") };
     }
     const lines = [t("handlers.skill.listHeader", { count: skills.length })];
