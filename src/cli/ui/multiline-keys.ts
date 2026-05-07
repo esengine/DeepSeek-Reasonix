@@ -28,8 +28,10 @@ export interface MultilineAction {
   /** When `true`, fire `onSubmit(submitValue ?? value)`. */
   submit: boolean;
   submitValue?: string;
-  /** Set when ↑/↓ hits a buffer boundary — parent handles history recall. */
+  /** Set on Ctrl+P / Ctrl+N — parent handles prompt-history recall. */
   historyHandoff?: "prev" | "next";
+  /** Set when ↑/↓ fires on an empty buffer — parent scrolls the chat history. */
+  chatScrollHandoff?: "up" | "down";
   /** Reducer is pure — hands raw paste to PromptInput which allocates a sentinel and inserts that. */
   pasteRequest?: { content: string };
 }
@@ -68,12 +70,11 @@ export function processMultilineKey(
     return cursor === value.length ? NOOP : { next: null, cursor: value.length, submit: false };
   }
 
-  // History recall is bound to Ctrl+P / Ctrl+N (bash readline
-  // convention) rather than ↑/↓. Reason: Windows Terminal + ConPTY
-  // translates mouse wheel events to ↑/↓ keystrokes for raw-mode
-  // child processes — indistinguishable at the byte level. If ↑/↓
-  // recalled history, every wheel-scroll would corrupt the prompt
-  // with a prior message. Ctrl+P/N is wheel-immune.
+  // Prompt-history recall is on Ctrl+P / Ctrl+N (bash readline
+  // convention). ↑/↓ on an empty buffer scrolls chat history because
+  // Windows Terminal + ConPTY translates mouse wheel events to ↑/↓ in
+  // raw mode — the only way to make wheel-up scroll chat is to map ↑
+  // to chat-scroll. Ctrl+P/N is wheel-immune.
   if (key.ctrl && key.input === "p") {
     return { ...NOOP, historyHandoff: "prev" };
   }
@@ -90,12 +91,12 @@ export function processMultilineKey(
     return { next: null, cursor: Math.min(value.length, cursor + 1), submit: false };
   }
   if (key.upArrow) {
-    if (value.length === 0) return { ...NOOP, historyHandoff: "prev" };
+    if (value.length === 0) return { ...NOOP, chatScrollHandoff: "up" };
     const moved = moveCursorUp(value, cursor);
     return moved === cursor ? NOOP : { next: null, cursor: moved, submit: false };
   }
   if (key.downArrow) {
-    if (value.length === 0) return { ...NOOP, historyHandoff: "next" };
+    if (value.length === 0) return { ...NOOP, chatScrollHandoff: "down" };
     const moved = moveCursorDown(value, cursor);
     return moved === cursor ? NOOP : { next: null, cursor: moved, submit: false };
   }

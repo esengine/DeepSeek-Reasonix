@@ -1,5 +1,4 @@
 import { Box } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useContext } from "react";
 
 /** Settled cards (in scrollback) drop the border + paddingX so history reads as flat lines. */

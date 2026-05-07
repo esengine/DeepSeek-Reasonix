@@ -1,7 +1,6 @@
 /** `/mcp` slash modal — single hub with two tabs: Live (attached servers) + Marketplace (registry). */
 
 import { Box, Text } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useState } from "react";
 import { McpBrowser } from "./McpBrowser.js";
 import { McpMarketplace } from "./McpMarketplace.js";

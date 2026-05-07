@@ -1,5 +1,4 @@
 import { Box, Text } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { FG } from "../theme/tokens.js";
 

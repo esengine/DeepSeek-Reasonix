@@ -1,5 +1,4 @@
 import { Box, Text } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useState } from "react";
 import { DenyContextInput } from "./DenyContextInput.js";
 import { SingleSelect } from "./Select.js";

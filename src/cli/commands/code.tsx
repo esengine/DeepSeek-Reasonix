@@ -66,6 +66,8 @@ export interface CodeOptions {
   systemAppend?: string;
   /** Path to a UTF-8 text file whose contents are appended to the code system prompt. */
   systemAppendFile?: string;
+  /** Default true. Pass false (CLI: `--no-alt-screen`) to keep chat output in shell scrollback. */
+  altScreen?: boolean;
 }
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
@@ -190,5 +192,6 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     forceResume: opts.forceResume,
     forceNew: opts.forceNew,
     noDashboard: opts.noDashboard,
+    altScreen: opts.altScreen,
   });
 }

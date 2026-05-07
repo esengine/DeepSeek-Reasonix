@@ -113,6 +113,7 @@ program
   .option("--harvest", t("ui.harvestHint"))
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
   .option("--no-dashboard", t("ui.noDashboard"))
+  .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
   .option("--system-append <prompt>", t("ui.systemAppendHint"))
   .option("--system-append-file <path>", t("ui.systemAppendFileHint"))
   .action(async (dir: string | undefined, opts) => {
@@ -128,6 +129,7 @@ program
       noDashboard: opts.dashboard === false,
       systemAppend: opts.systemAppend,
       systemAppendFile: opts.systemAppendFile,
+      altScreen: opts.altScreen !== false,
     });
   });
 
@@ -155,6 +157,7 @@ program
   .option("--mcp-prefix <str>", t("ui.mcpPrefixHint"))
   .option("--no-config", t("ui.noConfigHint"))
   .option("--no-dashboard", t("ui.noDashboard"))
+  .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
   .action(async (opts) => {
     const defaults = resolveDefaults({
       model: opts.model,
@@ -190,6 +193,7 @@ program
       forceResume: continueOpts.forceResume,
       forceNew: !!opts.new,
       noDashboard: opts.dashboard === false,
+      altScreen: opts.altScreen !== false,
     });
   });
 

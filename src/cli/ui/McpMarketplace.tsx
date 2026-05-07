@@ -1,7 +1,6 @@
 /** `/mcp browse` modal — registry marketplace inside the chat session. */
 
 import { Box, Text } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readConfig, writeConfig } from "../../config.js";
 import {

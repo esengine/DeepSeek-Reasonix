@@ -1,7 +1,6 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React as a runtime value (classic transform compiles JSX to React.createElement)
 import React, { useRef, useState } from "react";
-import { useCursor } from "../../renderer/index.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { useReserveRows } from "./layout/viewport-budget.js";
 import { type MultilineKey, lineAndColumn, processMultilineKey } from "./multiline-keys.js";
@@ -26,14 +25,12 @@ export interface PromptInputProps {
   onSubmit: (v: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  /**
-   * History recall. Fired when ↑/↓ hits a buffer boundary (empty
-   * buffer, or cursor already at the first/last line of a multi-line
-   * buffer). Parent walks its prompt history and swaps the value via
-   * `onChange`. Absent → keys are consumed silently.
-   */
+  /** Ctrl+P / Ctrl+N — parent walks its prompt history and swaps `value` via `onChange`. */
   onHistoryPrev?: () => void;
   onHistoryNext?: () => void;
+  /** ↑/↓ on an empty buffer — parent scrolls chat history. */
+  onChatScrollUp?: () => void;
+  onChatScrollDown?: () => void;
 }
 
 export function PromptInput({
@@ -44,10 +41,16 @@ export function PromptInput({
   placeholder,
   onHistoryPrev,
   onHistoryNext,
+  onChatScrollUp,
+  onChatScrollDown,
 }: PromptInputProps) {
   // Cap at 24 — collapseLinesForDisplay hides content past ~20 logical lines.
+  // Quantize spec.max to 4-row buckets so per-keystroke line-count changes
+  // don't churn viewport-budget; without this every single character that
+  // adds/removes a newline re-dispatches the allocator and reflows layout.
   const inputLineCount = value.length > 0 ? value.split("\n").length : 1;
-  useReserveRows("input", { min: 1, max: Math.min(inputLineCount + 3, 24) });
+  const reserveMax = Math.min(Math.ceil(inputLineCount / 4) * 4 + 3, 24);
+  useReserveRows("input", { min: 1, max: reserveMax });
 
   const [cursor, setCursor] = useState(value.length);
 
@@ -132,6 +135,8 @@ export function PromptInput({
     }
     if (action.historyHandoff === "prev") onHistoryPrev?.();
     if (action.historyHandoff === "next") onHistoryNext?.();
+    if (action.chatScrollHandoff === "up") onChatScrollUp?.();
+    if (action.chatScrollHandoff === "down") onChatScrollDown?.();
   }, !disabled);
 
   // ── Render ──────────────────────────────────────────────────────
@@ -153,8 +158,6 @@ export function PromptInput({
   const accentColor = disabled ? FG.faint : TONE.brand;
   const cursorVisible = true;
   const { line: cursorLine, col: cursorCol } = lineAndColumn(value, cursor);
-  // PromptInput paints its own cursor (`▌` / inverse char) — hide the real terminal cursor so it doesn't double up at the bottom of the screen.
-  useCursor({ col: 0, rowFromBottom: 0, visible: false });
 
   const renderItems = collapseLinesForDisplay(lines, cursorLine);
   const showHugeBufferHints = lines.length > 20;

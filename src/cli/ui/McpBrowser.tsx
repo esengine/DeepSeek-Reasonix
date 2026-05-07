@@ -1,7 +1,6 @@
 /** `/mcp` browser modal — keyboard-driven server list per design §24. */
 
 import { Box, Text } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useState } from "react";
 import { useKeystroke } from "./keystroke-context.js";
 import { toggleMcpDisabled } from "./mcp-disable.js";

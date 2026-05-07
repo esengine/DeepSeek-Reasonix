@@ -1,7 +1,6 @@
 /** `reasonix mcp browse` — Ink TUI for the MCP marketplace. Lazy-loads pages on scroll. */
 
 import { Box, Text, render, useApp, useInput } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readConfig, writeConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";

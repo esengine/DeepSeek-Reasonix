@@ -96,6 +96,7 @@ import {
 } from "./hooks/handle-stream-events.js";
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
+import { useChatScroll } from "./hooks/useChatScroll.js";
 import { useCodeMode } from "./hooks/useCodeMode.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
@@ -127,6 +128,7 @@ import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
+import { FG } from "./theme/tokens.js";
 import { TickerProvider } from "./ticker.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
 import { useEditHistory } from "./useEditHistory.js";
@@ -298,6 +300,7 @@ function AppInner({
     s.cards.some((c) => c.kind === "user" || c.kind === "streaming"),
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
+  const chatScroll = useChatScroll();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   // ctrl-o toggles full-tail view on the live streaming card.
@@ -366,39 +369,6 @@ function AppInner({
     };
   }, [stdout]);
 
-  // Resize-suppression state. While the user is dragging the
-  // terminal corner, OS emits a stream of resize events at high
-  // frequency. Each one would trigger Ink to re-render — and our
-  // per-tick animations (wordmark gradient, prompt bar flow,
-  // cursor blink) keep firing at 120 ms — both with stale
-  // `eraseLines(N)` counts because the previous frame's logical
-  // height is no longer the visible height after wrap reflows.
-  // Result: ghost copies of the StatsPanel pile up.
-  //
-  // Fix: detect resize bursts and freeze the global ticker while
-  // they're in flight. With the ticker frozen, no re-render fires
-  // from animations during the resize storm. Once the user stops
-  // dragging (no resize event for ~400 ms), the ticker resumes
-  // and one clean re-render kicks in. The hard-clear in chat.tsx's
-  // resize listener handles the single transition ghost.
-  const [isResizing, setIsResizing] = useState(false);
-  useEffect(() => {
-    if (!stdout || !stdout.isTTY) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const onResize = () => {
-      setIsResizing(true);
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        setIsResizing(false);
-        timer = null;
-      }, 400);
-    };
-    stdout.on("resize", onResize);
-    return () => {
-      stdout.off("resize", onResize);
-      if (timer) clearTimeout(timer);
-    };
-  }, [stdout]);
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
   // subagentRunner closure can read the ref. The wallet-currency thunk
@@ -610,6 +580,22 @@ function AppInner({
     options: ChoiceOption[];
     allowCustom: boolean;
   } | null>(null);
+  // Truthy when any pending modal owns the screen — gates global
+  // hotkeys (chat-scroll, etc.) so they don't fire behind a picker.
+  const modalOpen =
+    !!pendingShell ||
+    !!pendingPlan ||
+    !!pendingReviseEditor ||
+    !!pendingSessionsPicker ||
+    !!pendingMcpHub ||
+    !!stagedInput ||
+    !!pendingEditReview ||
+    walkthroughActive ||
+    !!pendingChoice ||
+    !!stagedChoiceCustom ||
+    !!pendingRevision ||
+    !!stagedCheckpointRevise ||
+    !!pendingCheckpoint;
   // Plan-mode indicator — displayed in the StatsPanel, mirrored onto
   // the ToolRegistry so dispatch enforces read-only. Toggled via the
   // `/plan` slash and PlanConfirm picker. Ephemeral — not persisted
@@ -1159,6 +1145,20 @@ function AppInner({
 
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
+
+  // PgUp / PgDn always scroll chat history; ↑/↓-on-empty-buffer also
+  // routes here via PromptInput's chatScrollHandoff. WT translates wheel
+  // events to ↑/↓ in raw mode, so this is what makes wheel-scroll work.
+  useKeystroke((ev) => {
+    if (ev.pageUp) chatScroll.scrollUp();
+    else if (ev.pageDown) chatScroll.scrollDown();
+    else if (ev.end) chatScroll.jumpToBottom();
+    // Wheel-translated ↑/↓ has nowhere to go when PromptInput can't
+    // process it: in reading mode (unmounted) or while busy (disabled).
+    // When pinned + idle, PromptInput owns arrows for cursor / handoff.
+    else if ((!chatScroll.pinned || busy) && ev.upArrow) chatScroll.scrollUp();
+    else if ((!chatScroll.pinned || busy) && ev.downArrow) chatScroll.scrollDown();
+  }, !modalOpen);
 
   // Esc during busy → forward to the loop as an abort signal. The loop
   // finishes the tool call in flight (we can't kill subprocess stdio
@@ -3060,56 +3060,24 @@ function AppInner({
     [],
   );
 
-  const modalOpen =
-    !!pendingShell ||
-    !!pendingPlan ||
-    !!pendingReviseEditor ||
-    !!pendingSessionsPicker ||
-    !!pendingMcpHub ||
-    !!stagedInput ||
-    !!pendingEditReview ||
-    walkthroughActive ||
-    !!pendingChoice ||
-    !!stagedChoiceCustom ||
-    !!pendingRevision ||
-    !!stagedCheckpointRevise ||
-    !!pendingCheckpoint;
+  // Suspend cosmetic animations during modal interactions and idle so
+  // a quiescent TUI is byte-stable. PLAIN_UI is the env-flag opt-out
+  // for fragile terminals.
+  const tickerSuspended = PLAIN_UI || modalOpen || (!busy && !isStreaming);
 
   return (
     <>
-      <TickerProvider
-        disabled={
-          PLAIN_UI ||
-          isResizing ||
-          !!pendingPlan ||
-          !!pendingReviseEditor ||
-          pendingSessionsPicker ||
-          !!pendingMcpHub ||
-          !!pendingShell ||
-          !!pendingEditReview ||
-          walkthroughActive ||
-          !!pendingChoice ||
-          !!stagedChoiceCustom ||
-          !!pendingRevision ||
-          !!stagedCheckpointRevise ||
-          !!pendingCheckpoint ||
-          // Idle gate: when nothing is actively happening, suspend the
-          // 8Hz/1Hz heartbeats. The cursor blink, gradient pulse, and
-          // spinner glyphs are pure cosmetics — running them at idle
-          // forces Ink to repaint the screen ~8x/sec, which erases any
-          // text selection the user has made in the terminal. With the
-          // ticker paused, an idle TUI is byte-stable and shift-drag /
-          // click-drag selections survive until something actually
-          // changes (incoming stream, key press, modal popup).
-          (!busy && !isStreaming)
-        }
-      >
+      <TickerProvider disabled={tickerSuspended}>
         <ViewportBudgetProvider>
-          <Box flexDirection="row">
+          <Box flexDirection="row" height={stdout?.rows ?? 24}>
             <Box flexDirection="column" flexGrow={1}>
-              <Box flexDirection="column">
+              <Box flexDirection="column" flexGrow={1}>
                 <LiveExpandContext.Provider value={liveExpand}>
-                  <CardStream suppressLive={modalOpen} />
+                  <CardStream
+                    suppressLive={modalOpen}
+                    scrollRows={chatScroll.scrollRows}
+                    onMaxScrollChange={chatScroll.setMaxScroll}
+                  />
                 </LiveExpandContext.Provider>
                 {/*
           Welcome card on the empty state. Visible only when nothing
@@ -3379,6 +3347,10 @@ function AppInner({
                   block={pendingEdits.current[0]!}
                   onChoose={handleWalkChoice}
                 />
+              ) : !chatScroll.pinned ? (
+                <Text color={FG.faint}>
+                  {" 📖 reading history — End / PgDn to return · ↓ to advance one line"}
+                </Text>
               ) : (
                 <>
                   {codeMode ? (
@@ -3400,6 +3372,8 @@ function AppInner({
                     disabled={busy}
                     onHistoryPrev={recallPrev}
                     onHistoryNext={recallNext}
+                    onChatScrollUp={chatScroll.scrollUp}
+                    onChatScrollDown={chatScroll.scrollDown}
                   />
                   {slashMatches !== null ? (
                     <SlashSuggestions matches={slashMatches} selectedIndex={slashSelected} />

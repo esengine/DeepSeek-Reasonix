@@ -1,7 +1,6 @@
 /** Modal-style picker for `submit_plan`: accept / refine / cancel. */
 
 import { Box, Text } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import type { PlanStep } from "../../tools/plan.js";
 import { PlanStepList } from "./PlanStepList.js";

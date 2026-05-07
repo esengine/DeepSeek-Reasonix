@@ -1,5 +1,4 @@
 import { Box, Text } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import type { Card } from "../state/cards.js";
 import { FG } from "../theme/tokens.js";
@@ -21,11 +20,14 @@ import { UsageCard } from "./UsageCard.js";
 import { UserCard } from "./UserCard.js";
 import { WarnCard } from "./WarnCard.js";
 
-export function CardRenderer({ card }: { card: Card }): React.ReactElement {
-  // No marginTop here — Card primitive owns inter-card spacing. Doubling it
-  // bakes 2 blank rows into every static-emitted block of bytes.
+// Memoized so the cards array re-rendering (every store update) only
+// reconciles cards whose object identity actually changed — the reducer
+// keeps prior cards reference-stable, so unchanged history skips work.
+export const CardRenderer = React.memo(function CardRenderer({
+  card,
+}: { card: Card }): React.ReactElement {
   return <Box flexDirection="column">{renderCard(card)}</Box>;
-}
+});
 
 function renderCard(card: Card): React.ReactElement {
   switch (card.kind) {

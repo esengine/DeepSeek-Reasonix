@@ -1,6 +1,5 @@
 /** Modal picker for `ask_choice` — options + optional "type my own" escape hatch. */
 
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import type { ChoiceOption } from "../../tools/choice.js";
 import { SingleSelect } from "./Select.js";
