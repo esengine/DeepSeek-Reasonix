@@ -7,7 +7,7 @@
   &nbsp;·&nbsp;
   <strong>简体中文</strong>
   &nbsp;·&nbsp;
-  <a href="https://esengine.github.io/reasonix/">官方网站</a>
+  <a href="https://esengine.github.io/DeepSeek-Reasonix/">官方网站</a>
   &nbsp;·&nbsp;
   <a href="./docs/ARCHITECTURE.md">架构文档</a>
   &nbsp;·&nbsp;
@@ -99,7 +99,7 @@ npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 
 - [**架构**](./docs/ARCHITECTURE.md) —— 四大支柱、缓存优先循环、思维提取、脚手架
 - [**基准测试**](./benchmarks/) —— τ-bench-lite harness、transcript、成本方法论
-- [**官方网站**](https://esengine.github.io/reasonix/) —— 入门、Dashboard 设计稿、TUI 设计稿
+- [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard 设计稿、TUI 设计稿
 - [**贡献指南**](./CONTRIBUTING.md) —— 注释规则、错误处理、用现成库不手写
 - [**行为准则**](./CODE_OF_CONDUCT.md) · [**安全策略**](./SECURITY.md)
 
@@ -115,7 +115,7 @@ npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 **正在征集意见的 Discussions：**
 
 - [#20 · CLI / TUI 设计](https://github.com/esengine/reasonix/discussions/20) —— 哪里坏了、哪里少东西、哪里你会怎么改？
-- [#21 · Dashboard 设计](https://github.com/esengine/reasonix/discussions/21) —— 对着[设计稿](https://esengine.github.io/reasonix/design/agent-dashboard.html)拍砖
+- [#21 · Dashboard 设计](https://github.com/esengine/reasonix/discussions/21) —— 对着[设计稿](https://esengine.github.io/DeepSeek-Reasonix/design/agent-dashboard.html)拍砖
 - [#22 · 未来功能愿望单](https://github.com/esengine/reasonix/discussions/22) —— 你希望 Reasonix 长出什么功能？
 
 **正在使用 Reasonix，愿意让更多人了解它？** 欢迎将相关博客、文章、截图、演讲或视频发布到 [**Show and tell**](https://github.com/esengine/reasonix/discussions/categories/show-and-tell)。项目没有营销预算，新用户主要通过社区口碑找到这里。持续参与传播的用户将获得下方这枚徽章，颁发后会展示在贡献者墙旁：
