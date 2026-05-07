@@ -3,7 +3,7 @@ import { Box, Text, useStdout } from "ink";
 import React, { useState } from "react";
 import type { SessionInfo } from "../../memory/session.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { FG, TONE, USD_TO_CNY } from "./theme/tokens.js";
+import { FG, TONE, formatCost } from "./theme/tokens.js";
 
 export type SessionPickerOutcome =
   | { kind: "open"; name: string }
@@ -16,6 +16,8 @@ export interface SessionPickerProps {
   sessions: ReadonlyArray<SessionInfo>;
   workspace: string;
   onChoose: (outcome: SessionPickerOutcome) => void;
+  /** Live wallet currency from App.tsx; falls back to each session's stored `meta.balanceCurrency` per row. */
+  walletCurrency?: string;
 }
 
 const PAGE_MARGIN = 6;
@@ -24,6 +26,7 @@ export function SessionPicker({
   sessions,
   workspace,
   onChoose,
+  walletCurrency,
 }: SessionPickerProps): React.ReactElement {
   const [focus, setFocus] = useState(0);
   const [renaming, setRenaming] = useState<{ from: string; buf: string } | null>(null);
@@ -101,7 +104,14 @@ export function SessionPicker({
           <Text color={FG.faint}>{" to start a new one"}</Text>
         </Box>
       ) : (
-        shown.map((s, i) => <SessionRow key={s.name} info={s} focused={start + i === focus} />)
+        shown.map((s, i) => (
+          <SessionRow
+            key={s.name}
+            info={s}
+            focused={start + i === focus}
+            walletCurrency={walletCurrency}
+          />
+        ))
       )}
       {hiddenBelow > 0 ? (
         <Box>
@@ -135,15 +145,19 @@ export function SessionPicker({
 function SessionRow({
   info,
   focused,
-}: { info: SessionInfo; focused: boolean }): React.ReactElement {
+  walletCurrency,
+}: {
+  info: SessionInfo;
+  focused: boolean;
+  walletCurrency?: string;
+}): React.ReactElement {
   const branch = info.meta.branch ?? "main";
   const summary =
     info.meta.summary ?? `${info.messageCount} message${info.messageCount === 1 ? "" : "s"}`;
   const turns = info.meta.turnCount ?? Math.ceil(info.messageCount / 2);
-  const costCny =
-    info.meta.totalCostUsd !== undefined
-      ? `¥${(info.meta.totalCostUsd * USD_TO_CNY).toFixed(2)}`
-      : "";
+  const currency = walletCurrency ?? info.meta.balanceCurrency;
+  const costLabel =
+    info.meta.totalCostUsd !== undefined ? formatCost(info.meta.totalCostUsd, currency, 2) : "";
   const time = relativeTime(info.mtime);
   return (
     <Box>
@@ -156,7 +170,7 @@ function SessionRow({
       <Box flexGrow={1} />
       <Text color={FG.faint}>{`${time.padStart(11)}   `}</Text>
       <Text color={FG.faint}>{`${turns} turns`}</Text>
-      {costCny ? <Text color={FG.faint}>{` · ${costCny}`}</Text> : null}
+      {costLabel ? <Text color={FG.faint}>{` · ${costLabel}`}</Text> : null}
     </Box>
   );
 }

@@ -2382,7 +2382,12 @@ function AppInner({
               const m = loadSessionMeta(session);
               const cost = (m.totalCostUsd ?? 0) + (ev.stats?.cost ?? 0);
               const turn = (m.turnCount ?? 0) + 1;
-              patchSessionMeta(session, { totalCostUsd: cost, turnCount: turn });
+              const currency = walletCurrencyRef.current;
+              patchSessionMeta(session, {
+                totalCostUsd: cost,
+                turnCount: turn,
+                ...(currency ? { balanceCurrency: currency } : {}),
+              });
             }
           } else if (ev.role === "tool_start") {
             handleToolStart(ev, {
@@ -3228,6 +3233,7 @@ function AppInner({
                 <SessionPicker
                   sessions={sessionsPickerList}
                   workspace={currentRootDir}
+                  walletCurrency={walletCurrencyRef.current}
                   onChoose={(outcome) => {
                     if (outcome.kind === "open") {
                       setPendingSessionsPicker(false);

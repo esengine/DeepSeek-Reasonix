@@ -48,6 +48,8 @@ export interface SessionMeta {
   turnCount?: number;
   /** Absolute path of the workspace root the session was created/used in. */
   workspace?: string;
+  /** Wallet currency at last save — used to format `totalCostUsd` in the picker without re-fetching balance. */
+  balanceCurrency?: string;
 }
 
 export function sessionsDir(): string {
