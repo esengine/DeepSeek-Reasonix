@@ -226,9 +226,15 @@ export class CacheFirstLoop {
       }
       return def.readOnly !== true;
     };
+    const isStormExempt = (call: ToolCall): boolean => {
+      const name = call.function?.name;
+      if (!name) return false;
+      return registry.get(name)?.stormExempt === true;
+    };
     this.repair = new ToolCallRepair({
       allowedToolNames: allowedNames,
       isMutating,
+      isStormExempt,
       stormThreshold: parsePositiveIntEnv(process.env.REASONIX_STORM_THRESHOLD),
       stormWindow: parsePositiveIntEnv(process.env.REASONIX_STORM_WINDOW),
     });

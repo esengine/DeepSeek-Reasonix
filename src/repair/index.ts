@@ -2,7 +2,7 @@
 
 import type { ToolCall } from "../types.js";
 import { scavengeToolCalls } from "./scavenge.js";
-import { type IsMutating, StormBreaker } from "./storm.js";
+import { type IsMutating, type IsStormExempt, StormBreaker } from "./storm.js";
 import { repairTruncatedJson } from "./truncation.js";
 
 export { analyzeSchema, flattenSchema, nestArguments } from "./flatten.js";
@@ -27,6 +27,8 @@ export interface ToolCallRepairOptions {
   maxScavenge?: number;
   /** Mutating calls clear the storm window so a post-edit verify-read isn't seen as a repeat. */
   isMutating?: IsMutating;
+  /** Cheap state-inspection calls that should never trip repeat-loop suppression. */
+  isStormExempt?: IsStormExempt;
 }
 
 export class ToolCallRepair {
@@ -35,7 +37,12 @@ export class ToolCallRepair {
 
   constructor(opts: ToolCallRepairOptions) {
     this.opts = opts;
-    this.storm = new StormBreaker(opts.stormWindow ?? 6, opts.stormThreshold ?? 3, opts.isMutating);
+    this.storm = new StormBreaker(
+      opts.stormWindow ?? 6,
+      opts.stormThreshold ?? 3,
+      opts.isMutating,
+      opts.isStormExempt,
+    );
   }
 
   /** Called at start of every user turn — fresh intent shouldn't inherit old repetition state. */

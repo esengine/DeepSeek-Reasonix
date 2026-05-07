@@ -2,6 +2,7 @@ import type { ToolCall } from "../types.js";
 
 /** Mutating calls clear prior read-only entries so a post-edit re-read isn't flagged as repeat. */
 export type IsMutating = (call: ToolCall) => boolean;
+export type IsStormExempt = (call: ToolCall) => boolean;
 
 interface RecentEntry {
   name: string;
@@ -14,17 +15,25 @@ export class StormBreaker {
   private readonly windowSize: number;
   private readonly threshold: number;
   private readonly isMutating: IsMutating | undefined;
+  private readonly isStormExempt: IsStormExempt | undefined;
   private readonly recent: RecentEntry[] = [];
 
-  constructor(windowSize = 6, threshold = 3, isMutating?: IsMutating) {
+  constructor(
+    windowSize = 6,
+    threshold = 3,
+    isMutating?: IsMutating,
+    isStormExempt?: IsStormExempt,
+  ) {
     this.windowSize = windowSize;
     this.threshold = threshold;
     this.isMutating = isMutating;
+    this.isStormExempt = isStormExempt;
   }
 
   inspect(call: ToolCall): { suppress: boolean; reason?: string } {
     const name = call.function?.name;
     if (!name) return { suppress: false };
+    if (this.isStormExempt?.(call)) return { suppress: false };
     const args = call.function?.arguments ?? "";
     const mutating = this.isMutating ? this.isMutating(call) : false;
     const readOnly = !mutating;

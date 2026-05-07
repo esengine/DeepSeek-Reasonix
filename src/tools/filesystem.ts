@@ -109,6 +109,7 @@ export function registerFilesystemTools(
   - range: "A-B"  → inclusive line range A..B, 1-indexed (e.g. "120-180" around an edit site)
 When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_LINES} lines, the tool auto-returns a head+tail preview with an "N lines omitted" marker rather than dumping everything. If you need the middle, re-call with a range. Prefer search_content to locate a symbol first, then read_file with a range around the hit — one scoped read beats three full-file reads.`,
     readOnly: true,
+    stormExempt: true,
     parameters: {
       type: "object",
       properties: {
@@ -206,6 +207,7 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
     description:
       "List entries in a directory under the sandbox root. Returns one line per entry, marking directories with a trailing slash. Not recursive — use directory_tree for that.",
     readOnly: true,
+    stormExempt: true,
     parameters: {
       type: "object",
       properties: {

@@ -187,6 +187,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       "Read the latest output of a background job started with `run_background`. By default returns the tail of the buffer (last 80 lines). Pass `since` (the `byteLength` from a previous call) to stream only new content incrementally. Tells you whether the job is still running, so you can stop polling when it's done.",
     readOnly: true,
     parallelSafe: true,
+    stormExempt: true,
     parameters: {
       type: "object",
       properties: {
@@ -237,6 +238,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       "List every background job started this session — running and exited — with id, command, pid, status. Use when you've lost track of which job_id corresponds to which process, or to see what's still alive.",
     readOnly: true,
     parallelSafe: true,
+    stormExempt: true,
     parameters: { type: "object", properties: {} },
     fn: async () => {
       const all = jobs.list();

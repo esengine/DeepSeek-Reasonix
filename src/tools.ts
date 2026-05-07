@@ -19,6 +19,8 @@ export interface ToolDefinition<A = any, R = any> {
   readOnlyCheck?: (args: A) => boolean;
   /** Safe to dispatch concurrently with other parallel-safe calls in the same turn. Default false — opt-in only. */
   parallelSafe?: boolean;
+  /** Excluded from repeat-loop storm accounting; use only for cheap, state-inspection tools. */
+  stormExempt?: boolean;
   fn: (args: A, ctx?: ToolCallContext) => R | Promise<R>;
 }
 

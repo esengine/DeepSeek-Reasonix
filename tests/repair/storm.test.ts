@@ -78,4 +78,26 @@ describe("StormBreaker", () => {
     sb.inspect(call("edit_file", "{}"));
     expect(sb.inspect(call("edit_file", "{}")).suppress).toBe(true);
   });
+
+  describe("stormExempt", () => {
+    it("exempt tools never trip the storm guard", () => {
+      const exempt = new Set(["read_file", "list_jobs"]);
+      const sb = new StormBreaker(6, 3, undefined, (c) => exempt.has(c.function?.name ?? ""));
+      // 10 identical calls to read_file — normally would trip at 3
+      for (let i = 0; i < 10; i++) {
+        expect(sb.inspect(call("read_file", '{"path":"/foo"}')).suppress).toBe(false);
+      }
+    });
+
+    it("non-exempt tools still trip after exempt reads", () => {
+      const exempt = new Set(["read_file"]);
+      const sb = new StormBreaker(3, 3, undefined, (c) => exempt.has(c.function?.name ?? ""));
+      sb.inspect(call("edit_file", "{}"));
+      sb.inspect(call("edit_file", "{}"));
+      sb.inspect(call("read_file", "{}"));
+      sb.inspect(call("read_file", "{}"));
+      sb.inspect(call("read_file", "{}"));
+      expect(sb.inspect(call("edit_file", "{}")).suppress).toBe(true);
+    });
+  });
 });
