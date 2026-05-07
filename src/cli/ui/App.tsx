@@ -1630,6 +1630,7 @@ function AppInner({
             autoEscalate: settings.autoEscalate,
             reasoningEffort: settings.reasoningEffort,
           });
+          agentStore.dispatch({ type: "session.model.change", model: settings.model });
           const canonical: "auto" | "flash" | "pro" =
             settings.model === "deepseek-v4-pro" ? "pro" : settings.autoEscalate ? "auto" : "flash";
           setPreset(canonical);
@@ -2262,7 +2263,7 @@ function AppInner({
 
       const flush = () => {
         if (!contentBuf.current && !reasoningBuf.current && !toolCallBuildBuf.current) return;
-        translator.flushBuffers(reasoningBuf.current, contentBuf.current);
+        translator.flushBuffers(reasoningBuf.current, contentBuf.current, loop.currentCallModel);
         streamRef.text += contentBuf.current;
         streamRef.reasoning += reasoningBuf.current;
         if (toolCallBuildBuf.current) {

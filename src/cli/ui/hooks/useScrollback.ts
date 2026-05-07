@@ -72,11 +72,11 @@ export interface Scrollback {
   ): void;
   endBranch(id: string, aborted?: boolean): void;
 
-  startReasoning(): string;
+  startReasoning(model?: string): string;
   appendReasoning(id: string, chunk: string): void;
   endReasoning(id: string, paragraphs: number, tokens: number, aborted?: boolean): void;
 
-  startStreaming(): string;
+  startStreaming(model?: string): string;
   appendStreaming(id: string, chunk: string): void;
   endStreaming(id: string, aborted?: boolean): void;
 
@@ -249,9 +249,9 @@ export function useScrollback(): Scrollback {
       endBranch(id, aborted) {
         dispatch({ type: "branch.end", id, aborted });
       },
-      startReasoning() {
+      startReasoning(model) {
         const id = nextId("r");
-        dispatch({ type: "reasoning.start", id });
+        dispatch({ type: "reasoning.start", id, ...(model ? { model } : {}) });
         return id;
       },
       appendReasoning(id, chunk) {
@@ -260,9 +260,9 @@ export function useScrollback(): Scrollback {
       endReasoning(id, paragraphs, tokens, aborted) {
         dispatch({ type: "reasoning.end", id, paragraphs, tokens, aborted });
       },
-      startStreaming() {
+      startStreaming(model) {
         const id = nextId("s");
-        dispatch({ type: "streaming.start", id });
+        dispatch({ type: "streaming.start", id, ...(model ? { model } : {}) });
         return id;
       },
       appendStreaming(id, chunk) {

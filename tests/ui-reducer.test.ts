@@ -53,6 +53,20 @@ describe("ui reducer", () => {
     expect(card.model).toBe("deepseek-chat");
   });
 
+  it("reasoning.start carrying an explicit model overrides the session snapshot (#403 /pro armed turn)", () => {
+    const s = run([{ type: "reasoning.start", id: "r1", model: "deepseek-v4-pro" }]);
+    const card = s.cards[0] as ReasoningCard;
+    expect(card.model).toBe("deepseek-v4-pro");
+    expect(s.session.model).toBe("deepseek-chat");
+  });
+
+  it("streaming.start carrying an explicit model overrides the session snapshot (#403 /pro armed turn)", () => {
+    const s = run([{ type: "streaming.start", id: "s1", model: "deepseek-v4-pro" }]);
+    const card = s.cards[0] as StreamingCard;
+    expect(card.model).toBe("deepseek-v4-pro");
+    expect(s.session.model).toBe("deepseek-chat");
+  });
+
   it("session.model.change updates the active model so the next card snapshots it (#372)", () => {
     const s = run([
       { type: "session.model.change", model: "deepseek-v4-pro" },

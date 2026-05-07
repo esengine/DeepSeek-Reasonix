@@ -397,6 +397,11 @@ export class CacheFirstLoop {
     return this._escalateThisTurn;
   }
 
+  /** UI surface — model id of the call about to run (or running) right now, including escalation. */
+  get currentCallModel(): string {
+    return this.modelForCurrentCall();
+  }
+
   private modelForCurrentCall(): string {
     return this._escalateThisTurn ? ESCALATION_MODEL : this.model;
   }

@@ -20,6 +20,7 @@ const turnThinking = z.object({
 const reasoningStart = z.object({
   type: z.literal("reasoning.start"),
   id: cardId,
+  model: z.string().min(1).optional(),
 });
 
 const reasoningChunk = z.object({
@@ -39,6 +40,7 @@ const reasoningEnd = z.object({
 const streamingStart = z.object({
   type: z.literal("streaming.start"),
   id: cardId,
+  model: z.string().min(1).optional(),
 });
 
 const streamingChunk = z.object({
