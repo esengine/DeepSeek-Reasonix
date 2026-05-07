@@ -3,6 +3,69 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.2] — 2026-05-07
+
+**Headline:** five user-visible polish items from the @dacec354 triage
+batch. The streaming reply now carries a live `42 t/s` throughput pill
+(plus a `1.2k tok · 42 t/s` summary on settled), and `ctrl-o` toggles a
+full-tail view so a long plan / todo can be read while it's still
+being written. The auto-mode undo banner gains a `space`-to-pause
+keybind for users who want a beat to think before the 5-second window
+expires. SessionPicker and the dashboard's session-cost displays both
+respect the user's wallet currency now — USD wallets see `$0.05`, CNY
+wallets see `¥0.36` end-to-end. And a long-standing scrollback bug
+that left the "reasoning…" spinner spinning forever after reasoning
+ended is fixed.
+
+**Features:**
+
+- feat(ui): live `42 t/s` pill on the streaming reply card; settled
+  card shows `1.2k tok · 42 t/s` summary. Computed via the bundled
+  DeepSeek tokenizer; gated below 4 tokens / 500 ms so the first
+  chunk doesn't print bogus rates. Re-renders ride the slow tick so
+  the rate keeps updating during chunk silence. (#334, PR #356)
+- feat(ui): `space` toggles pause / resume on the auto-mode 5-second
+  undo countdown. While paused the bar freezes at the captured
+  fraction, the badge swaps to `Ns · paused`, and pressing `space`
+  again resumes from where it stopped. The `u` and `space` keybinds
+  share the same modal-and-prompt-empty gating. (#337, PR #356)
+- feat(ui): `ctrl-o` toggles "expanded" mode on the live streaming
+  card. Expanded shows up to 60 visual lines (capped so the card
+  can't swallow the whole viewport) plus a `⋯ N earlier lines above`
+  hint when content overflows. Auto-resets to collapsed at turn end.
+  A `expanded ⌃o` / `preview ⌃o` pill in the card header advertises
+  the keybind. (#335, #337, PR #359)
+
+**Bug fixes:**
+
+- fix(ui): `splitCardStream` only treated the LAST card as live,
+  committing every earlier card to Ink's `<Static>`. When the model
+  streamed reasoning then content (or kicked off a tool card), the
+  reasoning card was no longer last — it got frozen into `<Static>`
+  while still `streaming: true`. `<Static>` doesn't re-render frozen
+  items, so when `reasoning.end` later set `streaming: false`, the
+  spinner kept spinning forever. The split now scans for the first
+  unsettled card and keeps everything from that index onward live;
+  a card only commits to `<Static>` once it's settled AND every
+  earlier card is too. (PR #358)
+- fix(ui): SessionPicker hardcoded `¥` and ran USD → CNY itself, so
+  USD-wallet users saw `¥X.XX` in the session list. `SessionMeta`
+  gains `balanceCurrency`; App.tsx writes the live wallet currency
+  alongside `totalCostUsd` on each turn save. Picker accepts a
+  `walletCurrency` prop and falls back to each row's stored
+  currency. Cost rendering routes through the shared `formatCost()`
+  helper. (#312, PR #357)
+- fix(dashboard): cost displays were hardcoded to `$` via `fmtUsd()`,
+  so a CNY-wallet user saw `session $0.5190` in the dashboard while
+  the same session read `¥0.024` in the CLI — both the symbol AND
+  the magnitude diverged because no conversion happened. Dashboard
+  now has its own `fmtCost(usd, currency)` mirroring the CLI's
+  conversion (CNY × 7.2). Overview current-session cost, cost-trend
+  day average, and the chat panel rail / status-bar costs all
+  thread the wallet currency from the cockpit balance. Claude-
+  equivalent comparisons in `usage.ts` stay USD by design — Claude's
+  API is USD-priced regardless of the user's wallet. (PR #360)
+
 ## [0.30.1] — 2026-05-07
 
 **Headline:** two TUI ghost-rendering fixes for issues that only showed
