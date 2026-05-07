@@ -72,6 +72,7 @@ import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { McpHub } from "./McpHub.js";
+import { ModelPicker } from "./ModelPicker.js";
 import { PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
@@ -525,6 +526,8 @@ function AppInner({
   const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>([]);
   /** Opens the unified McpHub modal — null when closed. `tab` selects the initial tab. */
   const [pendingMcpHub, setPendingMcpHub] = useState<{ tab: "live" | "marketplace" } | null>(null);
+  /** True while the ModelPicker is open mid-chat (triggered by bare `/model`). */
+  const [pendingModelPicker, setPendingModelPicker] = useState(false);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
   // returns "refine" or "approve", we defer the loop-resume and show
@@ -588,6 +591,7 @@ function AppInner({
     !!pendingReviseEditor ||
     !!pendingSessionsPicker ||
     !!pendingMcpHub ||
+    pendingModelPicker ||
     !!stagedInput ||
     !!pendingEditReview ||
     walkthroughActive ||
@@ -2152,6 +2156,11 @@ function AppInner({
           pushHistory(text);
           return;
         }
+        if (result.openModelPicker) {
+          setPendingModelPicker(true);
+          pushHistory(text);
+          return;
+        }
         if (result.openArgPickerFor) {
           pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
@@ -3274,6 +3283,20 @@ function AppInner({
                     }
                     if (outcome.kind === "quit") {
                       setPendingSessionsPicker(false);
+                    }
+                  }}
+                />
+              ) : pendingModelPicker ? (
+                <ModelPicker
+                  models={models}
+                  current={loop.model}
+                  onRefresh={refreshModels}
+                  onChoose={(outcome) => {
+                    setPendingModelPicker(false);
+                    if (outcome.kind === "select") {
+                      loop.configure({ model: outcome.id });
+                      agentStore.dispatch({ type: "session.model.change", model: outcome.id });
+                      log.pushInfo(`▸ model: ${outcome.id}`);
                     }
                   }}
                 />

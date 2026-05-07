@@ -7,8 +7,7 @@ const model: SlashHandler = (args, loop, ctx) => {
   const id = args[0];
   const known = ctx.models ?? null;
   if (!id) {
-    const hint = known && known.length > 0 ? known.join(" | ") : t("handlers.model.modelHint");
-    return { info: t("handlers.model.modelUsage", { hint }) };
+    return { openModelPicker: true };
   }
   loop.configure({ model: id });
   ctx.dispatch?.({ type: "session.model.change", model: id });
