@@ -3,6 +3,79 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.4] — 2026-05-07
+
+**Headline:** sweep of the user-reported bug + onboarding queue from
+the 0.30.2 / 0.30.3 launch day. Resume now restores the full session
+state (cache hit %, cost, last context bar — previously they all
+showed zero on a fresh boot until the first turn landed). The model
+pill on assistant cards reflects the model that actually answered
+after `/model` or `/preset` switches it. Bare `/model` opens an
+interactive picker — typed-id entry stays for power users.
+PowerShell users get Shift+Tab back via three additional encodings
+(modifier-encoded back-tab, modifyOtherKeys, Kitty keyboard). And a
+class of "junk text after exit" on Linux/fish (terminal-feature
+replies leaking into the parent shell) gets a defensive stdin drain
+in the exit path.
+
+`--dir` is now discoverable for beginners — surfaced in the welcome
+banner, the `/status` panel, the filesystem sandbox-escape error,
+and a Getting Started callout in both READMEs.
+
+**Bug fixes:**
+
+- fix(stats): persist cache totals + `lastPromptTokens` across
+  resume. `SessionMeta` only carried `totalCostUsd` / `turnCount`,
+  so on every resume `/status` showed 0 context + 0% cache hit until
+  the first turn actually fired (even though the prefix was already
+  cached, costing $0.01 per turn). Three new fields are persisted
+  per-turn and seeded into `SessionStats` on resume; the existing
+  carryover plumbing now covers cache + last context.
+  (#364, PR #384)
+- fix(ui): `/model <id>` and `/preset {auto,flash,pro}` now update
+  the active model in the agent store so the next assistant card
+  pill reflects the new selection. Previously `state.session.model`
+  was set once in `initialState()` and never mutated, so the pill
+  showed the launch-time model regardless of what actually answered
+  the turn. New `session.model.change` event; cards already opened
+  keep their captured model so mid-turn auto-escalation doesn't
+  retroactively relabel. (#372, PR #385)
+- fix(input): recognize three additional Shift+Tab encodings for
+  PowerShell hosts and modern terminals — `\x1b[1;2Z` (modifier-
+  encoded back-tab some PowerShell hosts emit), `\x1b[27;2;9~`
+  (modifyOtherKeys level 2, which we already enable on startup),
+  `\x1b[9;2u` (Kitty keyboard envelope). Without these the edit-
+  mode cycle was silently dropped on PowerShell.
+  `/mode` typed fallback continues to work. (#373, PR #386)
+- fix(tty): drain pending feature-detection replies on exit. Linux
+  reporters saw `^[]11;rgb:...^[\^[[33;1R^[[?62;1;4c` printed by
+  fish / bash after exiting reasonix — those bytes are responses to
+  OSC 11 / CPR / DA1 queries the runtime emits during startup that
+  sit in stdin's queue until exit. New `drainTtyResponses(50ms)`
+  reads-and-discards anything queued before control returns to the
+  parent shell. Layered on top of 0.30.3's alt-screen mitigation
+  (`--no-alt-screen` users get the fix too). (#365, PR #391)
+
+**Features:**
+
+- feat(ui): bare `/model` opens an interactive model picker — arrow-
+  key list, current model marked, `[r]` refreshes the catalog, esc
+  cancels. Seeds from the live DeepSeek catalog
+  (`useSessionInfo.listModels()`); falls back to the four known
+  DeepSeek ids when the catalog hasn't loaded yet so the picker
+  isn't empty on first open. The current id is always included even
+  when the API didn't return it. `/model <id>` typed entry stays
+  for power users. (#371, PR #387)
+- feat(ui): surface `--dir` / pinned workspace for first-time users.
+  WelcomeBanner shows the workspace + relaunch hint in code mode;
+  `/status` adds a `workspace <path> · pinned at launch` line; the
+  filesystem sandbox-escape error points at `reasonix code --dir
+  <path>` instead of just dropping a raw error; both READMEs gain a
+  Getting Started subsection on `--dir`. No new slash command —
+  mid-session retargeting is intentionally not supported (the
+  message log + memory paths get tangled with stale roots).
+  (#370, PR #389)
+
 ## [0.30.3] — 2026-05-07
 
 **Headline:** the chat scroll rewrite lands. Ink 5.2 → 7.0.2 / React
