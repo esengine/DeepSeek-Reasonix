@@ -1,6 +1,6 @@
+import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { inkCompat } from "../../renderer/index.js";
 import { type InlineSpan, type MdLine, markdownToLines } from "./markdown-lines.js";
 
 const FG_BODY = "#c9d1d9";
@@ -13,9 +13,6 @@ const TONE_WARN = "#f0b07d";
 const SURFACE_ELEV = "#161b22";
 
 export function MarkdownView({ text }: { text: string }): React.ReactElement {
-  // No useMemo: the renderer's Static-path uses a one-shot tree walker that
-  // doesn't set up a React dispatcher, so hook calls would throw. Parsing on
-  // every render is cheap (marked.lexer is allocation-light).
   return <MarkdownLines lines={markdownToLines(text)} />;
 }
 
@@ -25,35 +22,35 @@ export function MarkdownLines({
   lines: ReadonlyArray<MdLine>;
 }): React.ReactElement {
   return (
-    <inkCompat.Box flexDirection="column">
+    <Box flexDirection="column">
       {lines.map((line, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: lines are positional + stable per render
         <LineRow key={`md-${i}-${line.kind}`} line={line} />
       ))}
-    </inkCompat.Box>
+    </Box>
   );
 }
 
 function LineRow({ line }: { line: MdLine }): React.ReactElement | null {
   switch (line.kind) {
     case "blank":
-      return <inkCompat.Text> </inkCompat.Text>;
+      return <Text> </Text>;
     case "hr":
-      return <inkCompat.Text color={FG_FAINT}>──────</inkCompat.Text>;
+      return <Text color={FG_FAINT}>──────</Text>;
     case "heading":
       return (
-        <inkCompat.Box>
-          <inkCompat.Text bold color={FG_STRONG}>
+        <Box>
+          <Text bold color={FG_STRONG}>
             {`${"#".repeat(line.level)} `}
-          </inkCompat.Text>
+          </Text>
           <Spans spans={line.spans} bold strongColor />
-        </inkCompat.Box>
+        </Box>
       );
     case "paragraph":
       return (
-        <inkCompat.Box>
+        <Box>
           <Spans spans={line.spans} />
-        </inkCompat.Box>
+        </Box>
       );
     case "list": {
       const indent = " ".repeat(line.depth * 2);
@@ -68,20 +65,20 @@ function LineRow({ line }: { line: MdLine }): React.ReactElement | null {
       const markerColor =
         line.task === "done" ? TONE_OK : line.task === "todo" ? FG_FAINT : FG_META;
       return (
-        <inkCompat.Box>
-          <inkCompat.Text color={markerColor}>{`${indent}${marker} `}</inkCompat.Text>
+        <Box>
+          <Text color={markerColor}>{`${indent}${marker} `}</Text>
           <Spans spans={line.spans} dim={line.task === "done"} strike={line.task === "done"} />
-        </inkCompat.Box>
+        </Box>
       );
     }
     case "code":
       return <CodeBlock lang={line.lang} text={line.text} />;
     case "blockquote":
       return (
-        <inkCompat.Box>
-          <inkCompat.Text color={TONE_BRAND}>{"▎ "}</inkCompat.Text>
+        <Box>
+          <Text color={TONE_BRAND}>{"▎ "}</Text>
           <Spans spans={line.spans} italic />
-        </inkCompat.Box>
+        </Box>
       );
   }
 }
@@ -93,15 +90,15 @@ function spanKey(span: InlineSpan, i: number): string {
 function CodeBlock({ lang, text }: { lang: string; text: string }): React.ReactElement {
   const lines = text.split("\n");
   return (
-    <inkCompat.Box flexDirection="column">
-      {lang.length > 0 ? <inkCompat.Text color={FG_META}>{` ${lang}`}</inkCompat.Text> : null}
+    <Box flexDirection="column">
+      {lang.length > 0 ? <Text color={FG_META}>{` ${lang}`}</Text> : null}
       {lines.map((ln, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: code lines are positional + stable per render
-        <inkCompat.Text key={`code-${i}`} backgroundColor={SURFACE_ELEV}>
+        <Text key={`code-${i}`} backgroundColor={SURFACE_ELEV}>
           {` ${ln} `}
-        </inkCompat.Text>
+        </Text>
       ))}
-    </inkCompat.Box>
+    </Box>
   );
 }
 
@@ -115,7 +112,7 @@ interface SpansProps {
 }
 
 function Spans({ spans, bold, italic, dim, strike, strongColor }: SpansProps): React.ReactElement {
-  if (spans.length === 0) return <inkCompat.Text> </inkCompat.Text>;
+  if (spans.length === 0) return <Text> </Text>;
   return (
     <>
       {spans.map((span, i) => (
@@ -150,9 +147,9 @@ function SpanText({
 }): React.ReactElement {
   if (span.code) {
     return (
-      <inkCompat.Text color={FG_STRONG} backgroundColor={SURFACE_ELEV}>
+      <Text color={FG_STRONG} backgroundColor={SURFACE_ELEV}>
         {` ${span.text} `}
-      </inkCompat.Text>
+      </Text>
     );
   }
   const color = span.fileRef
@@ -163,7 +160,7 @@ function SpanText({
         ? FG_STRONG
         : FG_BODY;
   return (
-    <inkCompat.Text
+    <Text
       color={color}
       bold={!!(span.bold || ambientBold)}
       italic={!!(span.italic || ambientItalic)}
@@ -172,6 +169,6 @@ function SpanText({
       underline={!!(span.link || span.fileRef)}
     >
       {span.text}
-    </inkCompat.Text>
+    </Text>
   );
 }

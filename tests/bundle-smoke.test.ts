@@ -45,20 +45,11 @@ describe("bundled dist — tokenizer path resolution", () => {
   );
 
   (cliExists ? it : it.skip)(
-    'dist/cli/index.js bundle has zero `from "ink"` imports — alias is live',
+    'dist/cli/index.js keeps `from "ink"` external so users get the real package',
     async () => {
-      const { readFileSync, readdirSync } = await import("node:fs");
-      const dir = resolve("dist/cli");
-      const files = readdirSync(dir).filter((f) => f.endsWith(".js"));
-      const offenders: string[] = [];
-      for (const f of files) {
-        const text = readFileSync(resolve(dir, f), "utf8");
-        // The CLI is bundled with `ink → inkCompat` aliased; any literal
-        // `from "ink"` left in the output means the alias failed and the
-        // package is still external.
-        if (/from\s*"ink"/.test(text)) offenders.push(f);
-      }
-      expect(offenders).toEqual([]);
+      const { readFileSync } = await import("node:fs");
+      const text = readFileSync(CLI_BUNDLE, "utf8");
+      expect(/from\s*"ink"/.test(text)).toBe(true);
     },
   );
 
