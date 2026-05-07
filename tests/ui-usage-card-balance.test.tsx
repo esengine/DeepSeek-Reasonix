@@ -5,45 +5,12 @@
  * These tests import the REAL UsageCard component and render it through
  * Ink.  They FAIL today because UsageCard:74 and UsageCard:95 hardcode ¥.
  */
-import { EventEmitter } from "node:events";
 import { render } from "ink";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { UsageCard } from "../src/cli/ui/cards/UsageCard.js";
 import type { UsageCard as UsageCardData } from "../src/cli/ui/state/cards.js";
-
-function makeFakeStdin() {
-  const ee = new EventEmitter() as EventEmitter & Record<string, unknown>;
-  ee.isTTY = true;
-  ee.setEncoding = () => {};
-  ee.setRawMode = () => ee;
-  ee.resume = () => ee;
-  ee.pause = () => ee;
-  ee.ref = () => {};
-  ee.unref = () => {};
-  ee.read = () => null;
-  ee.isRawModeSupported = true;
-  return ee;
-}
-
-function makeFakeStdout() {
-  const chunks: string[] = [];
-  return {
-    columns: 120,
-    rows: 30,
-    isTTY: true,
-    write(chunk: string) {
-      chunks.push(chunk);
-      return true;
-    },
-    on() {},
-    off() {},
-    text(): string {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI SGR codes
-      return chunks.join("").replace(/\x1b\[[0-9;]*m/g, "");
-    },
-  };
-}
+import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 function baseCard(overrides: Partial<UsageCardData> = {}): UsageCardData {
   return {

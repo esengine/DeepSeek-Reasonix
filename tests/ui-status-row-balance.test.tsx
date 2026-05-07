@@ -6,13 +6,13 @@
  * Ink with a mock AgentStore.  They FAIL today because StatusRow:61
  * hardcodes ¥ and the state has no balanceCurrency field.
  */
-import { EventEmitter } from "node:events";
 import { render } from "ink";
 import React, { useEffect } from "react";
 import { describe, expect, it } from "vitest";
 import { StatusRow } from "../src/cli/ui/layout/StatusRow.js";
 import { AgentStoreProvider, useAgentStore } from "../src/cli/ui/state/provider.js";
 import type { AgentState, SessionInfo } from "../src/cli/ui/state/state.js";
+import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 const SESSION: SessionInfo = {
   id: "test-session",
@@ -20,39 +20,6 @@ const SESSION: SessionInfo = {
   workspace: "/tmp/repo",
   model: "deepseek-chat",
 };
-
-function makeFakeStdin() {
-  const ee = new EventEmitter() as EventEmitter & Record<string, unknown>;
-  ee.isTTY = true;
-  ee.setEncoding = () => {};
-  ee.setRawMode = () => ee;
-  ee.resume = () => ee;
-  ee.pause = () => ee;
-  ee.ref = () => {};
-  ee.unref = () => {};
-  ee.read = () => null;
-  ee.isRawModeSupported = true;
-  return ee;
-}
-
-function makeFakeStdout() {
-  const chunks: string[] = [];
-  return {
-    columns: 120,
-    rows: 30,
-    isTTY: true,
-    write(chunk: string) {
-      chunks.push(chunk);
-      return true;
-    },
-    on() {},
-    off() {},
-    text(): string {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI SGR codes
-      return chunks.join("").replace(/\x1b\[[0-9;]*m/g, "");
-    },
-  };
-}
 
 /** Dispatches arbitrary events on mount into the store created by AgentStoreProvider. */
 function EventInjector({

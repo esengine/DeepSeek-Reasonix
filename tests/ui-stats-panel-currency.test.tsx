@@ -1,42 +1,9 @@
-import { EventEmitter } from "node:events";
 import { render } from "ink";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { StatsPanel } from "../src/cli/ui/StatsPanel.js";
 import type { SessionSummary } from "../src/telemetry/stats.js";
-
-function makeFakeStdin() {
-  const ee = new EventEmitter() as EventEmitter & Record<string, unknown>;
-  ee.isTTY = true;
-  ee.setEncoding = () => {};
-  ee.setRawMode = () => ee;
-  ee.resume = () => ee;
-  ee.pause = () => ee;
-  ee.ref = () => {};
-  ee.unref = () => {};
-  ee.read = () => null;
-  ee.isRawModeSupported = true;
-  return ee;
-}
-
-function makeFakeStdout() {
-  const chunks: string[] = [];
-  return {
-    columns: 120,
-    rows: 30,
-    isTTY: true,
-    write(chunk: string) {
-      chunks.push(chunk);
-      return true;
-    },
-    on() {},
-    off() {},
-    text(): string {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI SGR codes
-      return chunks.join("").replace(/\x1b\[[0-9;]*m/g, "");
-    },
-  };
-}
+import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 const SUMMARY: SessionSummary = {
   turns: 5,
