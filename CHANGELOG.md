@@ -3,6 +3,58 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.1] — 2026-05-06
+
+**Headline:** four user-reported bugs from the 0.29.0 release window.
+The markdown renderer no longer turns English abbreviations like
+`e.g.` into broken hyperlinks (which on cmd.exe / non-OSC-8 terminals
+showed up as visible `]8;;file://e.g…` garbage and on the cell-diff
+side desynced the renderer's prev-frame model). The cell-diff
+renderer now defensively trail-clears any row whose content shrank
+between frames. Resumed sessions keep their cumulative session cost
+instead of resetting to `$0`. The Approve plan modal now shows the
+plan body inline when the model didn't supply structured steps.
+Wide markdown tables fall back to row-grouped key/value lines
+instead of the previous column-grouped output.
+
+**Bug fixes:**
+
+- fix(markdown): stop linkifying English abbreviations + drop OSC 8
+  escape emission. The `FILE_REF_RE` extension class was too loose
+  (`{1,6}`), so `e.g`, `i.e`, `a.m` matched as file paths; `osc8()`
+  baked OSC 8 escape bytes into Text content, which the cell-diff
+  renderer's wrapLine stripped of zero-width chars but kept the
+  printable body — producing visible `]8;;file://e.ge.g]8;;` garbage
+  on every terminal. Tightened the regex (now requires path-shape,
+  line-number suffix, or extension >= 2 chars) and removed the OSC 8
+  escape — file refs still stand out via color + underline. (#330,
+  PR #341)
+- fix(renderer): trail-clear rows that shrank between frames in the
+  cell-diff diff. The diff skipped cells where prev and next were
+  byte-equal (including trailing EMPTY cells), so any earlier ANSI
+  desync left stale chars in shrunken rows — manifested as the
+  shell-confirm modal showing `allow always` + `mand, ask again next
+  time` after Up/Down navigation. New `clearToEOL` patch type and a
+  per-row sweep after `diffEach`. (#330, PR #341)
+- fix(stats): carry session cost / turn count across resume. The
+  TUI's `$X session` figure reset to `$0` on every resume even
+  though the disk meta still held the cumulative `totalCostUsd`.
+  `SessionStats` gains `seedCarryover()`; `CacheFirstLoop` reads the
+  meta on resume and seeds the carryover when prior messages exist.
+  (#333, PR #342)
+- fix(plan): show the plan body in the Approve plan modal. When the
+  model called `submit_plan` with a markdown body but no structured
+  `steps`, the modal showed only the choice list — users had no way
+  to see what they were approving without scrolling back. The modal
+  now renders the body via `MarkdownView`, capped at 24 lines with
+  an overflow hint. (#336, PR #343)
+- fix(markdown): row-group the table fallback layout. When a table
+  was too wide for the viewport, the fallback flattened it as N
+  "Component:" lines, then N "What:" lines, then N "Manual TCs:"
+  lines — the reader couldn't tell which value belonged to which
+  row. Swapped to row-first iteration with a blank separator
+  between rows. (#340, PR #344)
+
 ## [0.29.0] — 2026-05-06
 
 **Headline:** tool dispatch is no longer strictly serial. When the model
