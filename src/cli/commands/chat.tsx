@@ -452,7 +452,9 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   if (runtime.size() === 0 && !opts.seedTools) {
     tools = undefined;
   }
-  const mcpSpecs = runtime.specs();
+  // Preserve configured specs even when startup leaves them unbridged
+  // so `/mcp` can still surface the configured-but-offline set.
+  const mcpSpecs = [...requestedSpecs];
   const mcpServers = runtime.summaries();
 
   // Register web search/fetch tools unless explicitly disabled. DDG
