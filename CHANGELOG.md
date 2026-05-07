@@ -3,6 +3,52 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.5] — 2026-05-07
+
+**Headline:** three contributor-led follow-ups from the #350 RFC plus
+the #366 onboarding piece. The repeat-loop storm guard now exempts
+obviously-safe inspector tools (`read_file`, `list_directory`,
+`job_output`, `list_jobs`) so a model intentionally re-reading state
+isn't flagged as stuck. A new `wait_for_job(jobId, timeoutMs?)` tool
+replaces N-iteration polling loops with a single blocking call —
+returns the moment the job exits or emits new output. And `/skill
+new <name>` finally provides the missing creation entry-point for
+user skills, scaffolding a stub with the right frontmatter so
+first-time users don't have to read the source to author a skill.
+
+**Features:**
+
+- feat(storm): add `stormExempt` flag on `ToolDefinition`, set on
+  `read_file`, `list_directory`, `job_output`, `list_jobs`. Cheap
+  state-inspection no longer trips the repeat-loop guard. Mutating
+  tools and unknown tools still go through the existing window-and-
+  threshold check. (#350, PR #388 by @ctharvey)
+- feat(jobs): new `wait_for_job(jobId, timeoutMs?)` shell tool —
+  blocks until the job exits or emits new output, bounded by
+  `timeoutMs` (default 5000, clamped to 0..30000). Returns
+  `{ exited, exitCode, latestOutput }`; `latestOutput` is the
+  delta since the call started, not the full buffer. Rides the
+  existing job registry's exit + output events; one call replaces
+  N polling iterations and is token-cheaper than the prior
+  re-call-job_output loop. (#350, PR #390 by @ctharvey)
+- feat(skills): `/skill new <name>` scaffolds a stub at
+  `<project>/.reasonix/skills/<name>.md` with minimal frontmatter
+  + a comment block listing the optional knobs (`runAs`,
+  `allowed-tools`, `model`). `/skill new <name> --global` writes
+  under `~/.reasonix/skills/` for cross-project use; auto-falls-
+  back to global when there's no project root. The empty
+  `/skill list` now ends with an explicit "no remote registry yet
+  — scaffold one with `/skill new <name>`" line so users don't
+  hunt for a marketplace that doesn't exist. (#366, PR #394)
+
+**Bug fixes:**
+
+- fix(skills): atomic create with `wx` flag — close the TOCTOU
+  race between `existsSync(...)` and `writeFileSync(...)` that
+  CodeQL flagged. The existence check IS the atomic write now;
+  `EEXIST` from a parallel writer surfaces as the same "skill
+  already exists" error instead of silently overwriting. (PR #394)
+
 ## [0.30.4] — 2026-05-07
 
 **Headline:** sweep of the user-reported bug + onboarding queue from
