@@ -147,11 +147,18 @@ export class SkillStore {
         : join(this.homeDir, ".reasonix", SKILLS_DIRNAME);
     const flat = join(root, `${name}.md`);
     const folder = join(root, name, SKILL_FILE);
-    if (existsSync(flat) || existsSync(folder)) {
-      return { error: `skill "${name}" already exists at ${existsSync(flat) ? flat : folder}` };
+    if (existsSync(folder)) {
+      return { error: `skill "${name}" already exists at ${folder}` };
     }
     mkdirSync(dirname(flat), { recursive: true });
-    writeFileSync(flat, skillStubBody(name), "utf8");
+    try {
+      writeFileSync(flat, skillStubBody(name), { encoding: "utf8", flag: "wx" });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        return { error: `skill "${name}" already exists at ${flat}` };
+      }
+      throw err;
+    }
     return { path: flat };
   }
 
