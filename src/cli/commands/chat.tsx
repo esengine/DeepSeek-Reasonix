@@ -31,6 +31,7 @@ import { registerWebTools } from "../../tools/web.js";
 import { App } from "../ui/App.js";
 import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
+import { drainTtyResponses } from "../ui/drain-tty.js";
 import { KeystrokeProvider } from "../ui/keystroke-context.js";
 import { formatMcpLifecycleEvent } from "../ui/mcp-lifecycle.js";
 import { formatMcpSlowToast } from "../ui/mcp-toast.js";
@@ -520,5 +521,8 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     await waitUntilExit();
   } finally {
     await runtime.closeAll();
+    // Eat any pending terminal-feature-detection responses (#365) so the
+    // parent shell doesn't print them as junk after exit.
+    await drainTtyResponses();
   }
 }
