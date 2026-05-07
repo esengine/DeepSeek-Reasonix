@@ -1,8 +1,23 @@
+import { EventEmitter } from "node:events";
 import { render } from "ink";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { StatsPanel } from "../src/cli/ui/StatsPanel.js";
 import type { SessionSummary } from "../src/telemetry/stats.js";
+
+function makeFakeStdin() {
+  const ee = new EventEmitter() as EventEmitter & Record<string, unknown>;
+  ee.isTTY = true;
+  ee.setEncoding = () => {};
+  ee.setRawMode = () => ee;
+  ee.resume = () => ee;
+  ee.pause = () => ee;
+  ee.ref = () => {};
+  ee.unref = () => {};
+  ee.read = () => null;
+  ee.isRawModeSupported = true;
+  return ee;
+}
 
 function makeFakeStdout() {
   const chunks: string[] = [];
@@ -38,8 +53,8 @@ const SUMMARY: SessionSummary = {
 function renderPanel(balance: { currency: string; total: number } | null): string {
   const stdout = makeFakeStdout();
   const { unmount } = render(React.createElement(StatsPanel, { summary: SUMMARY, balance }), {
-    stdout: stdout as any,
-    stdin: process.stdin as any,
+    stdout: stdout as never,
+    stdin: makeFakeStdin() as never,
   });
   unmount();
   return stdout.text();

@@ -1,8 +1,24 @@
+import { EventEmitter } from "node:events";
 import { render } from "ink";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { SessionPicker } from "../src/cli/ui/SessionPicker.js";
 import type { SessionInfo } from "../src/memory/session.js";
+
+// Ink 7 calls setRawMode on stdin; CI's process.stdin isn't a TTY → throws.
+function makeFakeStdin() {
+  const ee = new EventEmitter() as EventEmitter & Record<string, unknown>;
+  ee.isTTY = true;
+  ee.setEncoding = () => {};
+  ee.setRawMode = () => ee;
+  ee.resume = () => ee;
+  ee.pause = () => ee;
+  ee.ref = () => {};
+  ee.unref = () => {};
+  ee.read = () => null;
+  ee.isRawModeSupported = true;
+  return ee;
+}
 
 function makeFakeStdout() {
   const chunks: string[] = [];
@@ -50,7 +66,7 @@ function renderPicker(sessions: SessionInfo[], walletCurrency: string | undefine
       walletCurrency,
       onChoose: () => {},
     }),
-    { stdout: stdout as any, stdin: process.stdin as any },
+    { stdout: stdout as never, stdin: makeFakeStdin() as never },
   );
   unmount();
   return stdout.text();

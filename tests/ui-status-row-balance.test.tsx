@@ -6,6 +6,7 @@
  * Ink with a mock AgentStore.  They FAIL today because StatusRow:61
  * hardcodes ¥ and the state has no balanceCurrency field.
  */
+import { EventEmitter } from "node:events";
 import { render } from "ink";
 import React, { useEffect } from "react";
 import { describe, expect, it } from "vitest";
@@ -13,16 +14,26 @@ import { StatusRow } from "../src/cli/ui/layout/StatusRow.js";
 import { AgentStoreProvider, useAgentStore } from "../src/cli/ui/state/provider.js";
 import type { AgentState, SessionInfo } from "../src/cli/ui/state/state.js";
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
 const SESSION: SessionInfo = {
   id: "test-session",
   branch: "main",
   workspace: "/tmp/repo",
   model: "deepseek-chat",
 };
+
+function makeFakeStdin() {
+  const ee = new EventEmitter() as EventEmitter & Record<string, unknown>;
+  ee.isTTY = true;
+  ee.setEncoding = () => {};
+  ee.setRawMode = () => ee;
+  ee.resume = () => ee;
+  ee.pause = () => ee;
+  ee.ref = () => {};
+  ee.unref = () => {};
+  ee.read = () => null;
+  ee.isRawModeSupported = true;
+  return ee;
+}
 
 function makeFakeStdout() {
   const chunks: string[] = [];
@@ -36,9 +47,7 @@ function makeFakeStdout() {
     },
     on() {},
     off() {},
-    data: chunks,
     text(): string {
-      // Strip ANSI escape sequences so we can assert on readable text.
       // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI SGR codes
       return chunks.join("").replace(/\x1b\[[0-9;]*m/g, "");
     },
@@ -78,13 +87,13 @@ function StateInjector({
 /** Render <StatusRow /> through Ink with a fake stdout, return collected text. */
 async function renderStatusRow(overrides: Partial<AgentState["status"]>): Promise<string> {
   const stdout = makeFakeStdout();
-  const { unmount, waitUntilExit } = render(
+  const { unmount } = render(
     <AgentStoreProvider session={SESSION}>
       <StateInjector overrides={overrides}>
         <StatusRow />
       </StateInjector>
     </AgentStoreProvider>,
-    { stdout: stdout as any, stdin: process.stdin as any },
+    { stdout: stdout as never, stdin: makeFakeStdin() as never },
   );
   // Let the StateInjector effect fire and StatusRow re-render.
   await new Promise((r) => setTimeout(r, 50));
@@ -169,7 +178,7 @@ describe("StatusRow - wallet currency symbol", () => {
 
   it("full USD flow: turn.end + session.update renders all $ symbols", async () => {
     const stdout = makeFakeStdout();
-    const { unmount, waitUntilExit } = render(
+    const { unmount } = render(
       <AgentStoreProvider session={SESSION}>
         <EventInjector
           events={[
@@ -183,7 +192,7 @@ describe("StatusRow - wallet currency symbol", () => {
           <StatusRow />
         </EventInjector>
       </AgentStoreProvider>,
-      { stdout: stdout as any, stdin: process.stdin as any },
+      { stdout: stdout as never, stdin: makeFakeStdin() as never },
     );
     await new Promise((r) => setTimeout(r, 50));
     unmount();
@@ -195,7 +204,7 @@ describe("StatusRow - wallet currency symbol", () => {
 
   it("full CNY flow: turn.end + session.update renders all ¥ symbols", async () => {
     const stdout = makeFakeStdout();
-    const { unmount, waitUntilExit } = render(
+    const { unmount } = render(
       <AgentStoreProvider session={SESSION}>
         <EventInjector
           events={[
@@ -209,7 +218,7 @@ describe("StatusRow - wallet currency symbol", () => {
           <StatusRow />
         </EventInjector>
       </AgentStoreProvider>,
-      { stdout: stdout as any, stdin: process.stdin as any },
+      { stdout: stdout as never, stdin: makeFakeStdin() as never },
     );
     await new Promise((r) => setTimeout(r, 50));
     unmount();
