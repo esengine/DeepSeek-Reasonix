@@ -3,6 +3,46 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] — 2026-05-06
+
+**Headline:** slash commands grow first-class aliases, and the
+cell-diff renderer hardens column targeting against per-cell width
+miscounts. `/quit` and `/q` now resolve to `/exit` from a single
+declaration on the spec instead of ad-hoc handler mirrors; `/?` →
+`/help`, `/reset` → `/new`, `/lang` → `/language` follow the same
+path. The renderer's `moveTo()` now uses CHA absolute (`\x1b[N+1G`)
+for column targeting instead of CUF relative (`\x1b[NC`), making the
+diff stream immune to the cursor-drift class of bug Anthropic
+documented in `claude-code#14208`.
+
+**Features:**
+
+- feat(slash): `aliases?: readonly string[]` on `SlashCommandSpec`.
+  Adding a new alias is now a one-line edit to the canonical command
+  — dispatch, autocomplete, arg-context resolution, and the
+  dashboard `/api/slash` response all route through one
+  `resolveSlashAlias()` map built from `SLASH_COMMANDS` at module
+  init. Suggestion rows display aliases dimly (` · /quit /q`) so
+  they stay discoverable without doubling the autocomplete list.
+  Removes the per-handler alias mirrors that used to live in
+  `handlers/basic.ts` and `handlers/language.ts`. (#332, PR #347)
+
+**Bug fixes:**
+
+- fix(renderer): switch the X-axis branch of `moveTo()` from CUF
+  relative (`\x1b[NC`) to CHA absolute (`\x1b[N+1G`). Y-axis stays
+  on CUU/CUD since we don't track absolute terminal rows. Relative
+  column moves accumulate drift across frames whenever an earlier
+  write miscounts cell width — `▸` (U+25B8) rendered 2-cell on
+  fonts with East Asian fallback, ambiguous-width chars on
+  terminals that font-detect width, OSC8 hyperlinks parsed as
+  visible chars, etc. The next CUF lands at the wrong column,
+  ghost rows leak into adjacent hint lines, and the modal "shifts"
+  as users navigate. CHA targets the absolute column regardless of
+  what the terminal thinks — immune to the desync chain. Same fix
+  Anthropic shipped in claude-code per their issue #14208
+  post-mortem. (#346, PR #348)
+
 ## [0.29.1] — 2026-05-06
 
 **Headline:** four user-reported bugs from the 0.29.0 release window.
