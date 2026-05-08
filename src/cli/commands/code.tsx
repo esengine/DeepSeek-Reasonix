@@ -30,6 +30,7 @@ import { JobRegistry } from "../../tools/jobs.js";
 import { registerMemoryTools } from "../../tools/memory.js";
 import { registerPlanTool } from "../../tools/plan.js";
 import { registerShellTools } from "../../tools/shell.js";
+import { registerTodoTool } from "../../tools/todo.js";
 import { chatCommand } from "./chat.js";
 
 export interface CodeOptions {
@@ -118,6 +119,9 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   // menu into a submit_plan body. Keeping it always-registered
   // preserves the prefix cache across plan-mode toggles.
   registerChoiceTool(tools);
+  // `todo_write` — lightweight in-session task tracker, no approval gate.
+  // Independent of plan mode (readOnly=true so it stays callable in /plan).
+  registerTodoTool(tools);
   // `run_skill` is intentionally NOT registered here — App.tsx wires it
   // up with the subagent runner attached, so `runAs: subagent` skills
   // can spawn isolated child loops. Doing it here would mean the App's

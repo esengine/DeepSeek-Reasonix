@@ -125,6 +125,14 @@ function summarizeKnownTool(toolName: string, content: string): ToolSummary | nu
     }
     return { summary: clip(firstNonEmptyLine(content), MAX_SUMMARY_CHARS), isError: false };
   }
+  if (hasSuffix("todo_write")) {
+    if (/^todos cleared/.test(content)) return { summary: "todos cleared", isError: false };
+    const m = content.match(/^todos updated · (\d+) done · (\d+) in progress · (\d+) pending/);
+    if (m) {
+      return { summary: `${m[1]} done · ${m[2]} in progress · ${m[3]} pending`, isError: false };
+    }
+    return { summary: clip(firstNonEmptyLine(content), MAX_SUMMARY_CHARS), isError: false };
+  }
   if (hasSuffix("run_command") || hasSuffix("run_background")) {
     // Native shell tools prepend "exit 0:" / "exit N:" or the result
     // already mentions exit code. Try to surface it.

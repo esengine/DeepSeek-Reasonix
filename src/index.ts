@@ -83,6 +83,8 @@ export {
   registerPlanTool,
 } from "./tools/plan.js";
 export type { PlanStep, PlanStepRisk, PlanToolOptions, StepCompletion } from "./tools/plan.js";
+export { registerTodoTool } from "./tools/todo.js";
+export type { TodoItem, TodoStatus, TodoToolOptions } from "./tools/todo.js";
 export { forkRegistryExcluding, registerSubagentTool } from "./tools/subagent.js";
 export type {
   SubagentEvent,
