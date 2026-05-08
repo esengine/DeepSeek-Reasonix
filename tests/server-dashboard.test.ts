@@ -770,4 +770,316 @@ describe("dashboard server: modal mirroring (workspace / checkpoint / revision)"
     });
     expect(r.status).toBe(503);
   });
+
+  it("POST /api/modal/resolve dispatches picker pick / delete / install / uninstall", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolvePicker: (r) => calls.push(r) });
+    for (const action of ["pick", "delete", "install", "uninstall"] as const) {
+      const r = await call(`${base}api/modal/resolve`, {
+        method: "POST",
+        token: TOKEN,
+        tokenInHeader: true,
+        body: { kind: "picker", action, id: `row-${action}` },
+      });
+      expect(r.status).toBe(200);
+    }
+    expect(calls).toEqual([
+      { action: "pick", id: "row-pick" },
+      { action: "delete", id: "row-delete" },
+      { action: "install", id: "row-install" },
+      { action: "uninstall", id: "row-uninstall" },
+    ]);
+  });
+
+  it("POST /api/modal/resolve carries picker rename / new / refine text", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolvePicker: (r) => calls.push(r) });
+    const rename = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "rename", id: "abc", text: "new-name" },
+    });
+    expect(rename.status).toBe(200);
+    const newAction = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "new", text: "scratch" },
+    });
+    expect(newAction.status).toBe(200);
+    const refine = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "refine", query: "search-term" },
+    });
+    expect(refine.status).toBe(200);
+    expect(calls).toEqual([
+      { action: "rename", id: "abc", text: "new-name" },
+      { action: "new", text: "scratch" },
+      { action: "refine", query: "search-term" },
+    ]);
+  });
+
+  it("POST /api/modal/resolve accepts picker load-more and cancel without payload", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolvePicker: (r) => calls.push(r) });
+    const more = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "load-more" },
+    });
+    expect(more.status).toBe(200);
+    const cancel = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "cancel" },
+    });
+    expect(cancel.status).toBe(200);
+    expect(calls).toEqual([{ action: "load-more" }, { action: "cancel" }]);
+  });
+
+  it("POST /api/modal/resolve rejects picker pick without id and unknown action", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolvePicker: (r) => calls.push(r) });
+    const noId = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "pick" },
+    });
+    expect(noId.status).toBe(400);
+    const bogus = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "explode" },
+    });
+    expect(bogus.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("POST /api/modal/resolve returns 503 when picker resolver is not wired", async () => {
+    const base = await boot({});
+    const r = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "cancel" },
+    });
+    expect(r.status).toBe(503);
+  });
+
+  it("POST /api/modal/resolve dispatches viewer close", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolveViewer: (r) => calls.push(r) });
+    const r = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "viewer", action: "close" },
+    });
+    expect(r.status).toBe(200);
+    expect(calls).toEqual([{ action: "close" }]);
+  });
+
+  it("POST /api/modal/resolve rejects viewer actions other than close", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolveViewer: (r) => calls.push(r) });
+    const r = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "viewer", action: "next" },
+    });
+    expect(r.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("POST /api/modal/resolve returns 503 when viewer resolver is not wired", async () => {
+    const base = await boot({});
+    const r = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "viewer", action: "close" },
+    });
+    expect(r.status).toBe(503);
+  });
+});
+
+describe("dashboard server: D-1 settings + auto-loop surface", () => {
+  let dir: string;
+  let cfgPath: string;
+  let usagePath: string;
+  let handle: DashboardServerHandle | null = null;
+  const TOKEN = "f".repeat(64);
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "reasonix-d1-"));
+    cfgPath = join(dir, "config.json");
+    usagePath = join(dir, "usage.jsonl");
+  });
+
+  afterEach(async () => {
+    await handle?.close();
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function boot(extra: Partial<DashboardContext> = {}): Promise<string> {
+    handle = await startDashboardServer(
+      { mode: "attached", configPath: cfgPath, usageLogPath: usagePath, ...extra },
+      { token: TOKEN },
+    );
+    return handle.url.split("?")[0]!;
+  }
+
+  it("POST /api/settings routes proNext / budgetUsd / model to live callbacks", async () => {
+    const calls: Record<string, unknown[]> = {
+      proNext: [],
+      budgetUsd: [],
+      model: [],
+    };
+    const base = await boot({
+      setProNextLive: (v) => calls.proNext!.push(v),
+      setBudgetUsdLive: (v) => calls.budgetUsd!.push(v),
+      applyModelLive: (v) => calls.model!.push(v),
+    });
+    const r = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { proNext: true, budgetUsd: 2.5, model: "deepseek-v4-pro" },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.changed).toEqual(expect.arrayContaining(["proNext", "budgetUsd", "model"]));
+    expect(calls.proNext).toEqual([true]);
+    expect(calls.budgetUsd).toEqual([2.5]);
+    expect(calls.model).toEqual(["deepseek-v4-pro"]);
+  });
+
+  it("POST /api/settings rejects non-positive budgetUsd", async () => {
+    const base = await boot({ setBudgetUsdLive: () => undefined });
+    const negative = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { budgetUsd: -1 },
+    });
+    expect(negative.status).toBe(400);
+  });
+
+  it("POST /api/settings accepts null budgetUsd to clear the cap", async () => {
+    const budgetCalls: unknown[] = [];
+    const base = await boot({ setBudgetUsdLive: (v) => budgetCalls.push(v) });
+    const r = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { budgetUsd: null },
+    });
+    expect(r.status).toBe(200);
+    expect(budgetCalls).toEqual([null]);
+  });
+
+  it("GET /api/loop/status returns null when nothing is running", async () => {
+    const base = await boot({ getLoopRunStatus: () => null });
+    const r = await call(`${base}api/loop/status`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBeNull();
+  });
+
+  it("GET /api/loop/status returns the live status snapshot", async () => {
+    const snap = { prompt: "ping", intervalMs: 30_000, iter: 3, nextFireMs: 12_000 };
+    const base = await boot({ getLoopRunStatus: () => snap });
+    const r = await call(`${base}api/loop/status`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.status).toEqual(snap);
+  });
+
+  it("POST /api/loop/start forwards intervalMs and prompt", async () => {
+    const calls: Array<[number, string]> = [];
+    const base = await boot({ startAutoLoop: (ms, p) => calls.push([ms, p]) });
+    const r = await call(`${base}api/loop/start`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { intervalMs: 30_000, prompt: "check the deploy" },
+    });
+    expect(r.status).toBe(200);
+    expect(calls).toEqual([[30_000, "check the deploy"]]);
+  });
+
+  it("POST /api/loop/start rejects out-of-range interval and missing prompt", async () => {
+    const base = await boot({ startAutoLoop: () => undefined });
+    const tooFast = await call(`${base}api/loop/start`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { intervalMs: 1_000, prompt: "x" },
+    });
+    expect(tooFast.status).toBe(400);
+    const noPrompt = await call(`${base}api/loop/start`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { intervalMs: 30_000, prompt: "" },
+    });
+    expect(noPrompt.status).toBe(400);
+  });
+
+  it("POST /api/loop/stop calls the stop hook", async () => {
+    let stopped = 0;
+    const base = await boot({
+      stopAutoLoop: () => {
+        stopped++;
+      },
+    });
+    const r = await call(`${base}api/loop/stop`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+    });
+    expect(r.status).toBe(200);
+    expect(stopped).toBe(1);
+  });
+
+  it("GET /api/models returns the cached catalog + pricing + current model", async () => {
+    const base = await boot({ getModels: () => ["deepseek-v4-flash", "deepseek-v4-pro"] });
+    const r = await call(`${base}api/models`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.models).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
+    expect(r.body.pricing["deepseek-v4-flash"]).toBeDefined();
+    expect(r.body.pricing["deepseek-v4-flash"].output).toBeGreaterThan(0);
+  });
+
+  it("GET /api/models returns null catalog when getModels is not wired", async () => {
+    const base = await boot({});
+    const r = await call(`${base}api/models`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.models).toBeNull();
+    expect(r.body.pricing).toBeDefined();
+  });
+
+  it("returns 503 when loop callbacks are not wired", async () => {
+    const base = await boot({});
+    const status = await call(`${base}api/loop/status`, { token: TOKEN });
+    expect(status.status).toBe(503);
+    const start = await call(`${base}api/loop/start`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { intervalMs: 30_000, prompt: "x" },
+    });
+    expect(start.status).toBe(503);
+    const stop = await call(`${base}api/loop/stop`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+    });
+    expect(stop.status).toBe(503);
+  });
 });

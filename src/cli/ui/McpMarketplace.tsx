@@ -11,6 +11,7 @@ import {
   specStringFor,
 } from "../../mcp/registry-fetch.js";
 import type { RegistryEntry } from "../../mcp/registry-types.js";
+import { type PickerBroadcastPorts, usePickerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { COLOR } from "./theme.js";
 
@@ -26,6 +27,7 @@ export interface McpMarketplaceProps {
     removed: string[];
     failed: Array<{ spec: string; reason: string }>;
   }>;
+  pickerPorts?: PickerBroadcastPorts;
 }
 
 interface State {
@@ -36,6 +38,39 @@ interface State {
   status: string;
   /** specs currently in config.mcp[] — refreshed after install/uninstall. */
   installedSpecs: string[];
+}
+
+export function buildMarketplacePickerSnapshot(args: {
+  filtered: RegistryEntry[];
+  installedSpecs: string[];
+  query: string;
+  status: string;
+  hasMore: boolean;
+}) {
+  return {
+    pickerKind: "mcp-marketplace" as const,
+    title: `MCP marketplace · ${args.status}`,
+    query: args.query,
+    items: args.filtered.map((e) => {
+      const installedSpec = isInstalled(args.installedSpecs, e);
+      return {
+        id: e.name,
+        title: e.title || e.name,
+        subtitle: e.description?.slice(0, 200) ?? undefined,
+        badge: installedSpec
+          ? "installed"
+          : e.source === "official"
+            ? "official"
+            : e.source === "smithery"
+              ? "smithery"
+              : "local",
+        meta: e.popularity !== undefined ? `★ ${e.popularity.toLocaleString()}` : undefined,
+      };
+    }),
+    actions: ["install", "uninstall", "refine", "load-more", "cancel"] as const,
+    hasMore: args.hasMore,
+    hint: "type filter · ↑↓ pick · ⏎ install/toggle · PgDn load more · esc close",
+  };
 }
 
 function rankAndFilter(entries: RegistryEntry[], query: string): RegistryEntry[] {
@@ -65,7 +100,7 @@ function isInstalled(installedSpecs: string[], entry: RegistryEntry): string | n
   }
 }
 
-export function McpMarketplace({ onClose, postInfo, reloadMcp }: McpMarketplaceProps) {
+export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: McpMarketplaceProps) {
   const [state, setState] = useState<State>({
     handle: null,
     loading: true,
@@ -127,33 +162,30 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp }: McpMarketplaceP
     }
   }, [state.handle, state.loading]);
 
-  const installOrToggle = useCallback(
-    async (entry: RegistryEntry) => {
-      const installed = isInstalled(state.installedSpecs, entry);
-      if (installed) {
-        const cfg = readConfig();
-        const next = (cfg.mcp ?? []).filter((s) => s !== installed);
-        writeConfig({ ...cfg, mcp: next });
-        setState((s) => ({
-          ...s,
-          installedSpecs: next,
-          status: `uninstalled ${entry.name}`,
-        }));
-        if (reloadMcp) {
-          try {
-            await reloadMcp();
-            postInfo(`✓ uninstalled ${entry.name} — bridge dropped`);
-          } catch (err) {
-            postInfo(
-              `✓ uninstalled ${entry.name} — restart \`reasonix code\` to drop the bridge (reload failed: ${(err as Error).message})`,
-            );
-          }
-        } else {
-          postInfo(`✓ uninstalled ${entry.name} — restart \`reasonix code\` to drop the bridge`);
+  const doUninstall = useCallback(
+    async (entry: RegistryEntry, installed: string) => {
+      const cfg = readConfig();
+      const next = (cfg.mcp ?? []).filter((s) => s !== installed);
+      writeConfig({ ...cfg, mcp: next });
+      setState((s) => ({ ...s, installedSpecs: next, status: `uninstalled ${entry.name}` }));
+      if (reloadMcp) {
+        try {
+          await reloadMcp();
+          postInfo(`✓ uninstalled ${entry.name} — bridge dropped`);
+        } catch (err) {
+          postInfo(
+            `✓ uninstalled ${entry.name} — restart \`reasonix code\` to drop the bridge (reload failed: ${(err as Error).message})`,
+          );
         }
-        return;
+      } else {
+        postInfo(`✓ uninstalled ${entry.name} — restart \`reasonix code\` to drop the bridge`);
       }
+    },
+    [postInfo, reloadMcp],
+  );
 
+  const doInstall = useCallback(
+    async (entry: RegistryEntry) => {
       let install = entry.install;
       if (!install && entry.source === "smithery") {
         setState((s) => ({ ...s, loading: true, status: "fetching smithery detail…" }));
@@ -175,7 +207,6 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp }: McpMarketplaceP
         }));
         return;
       }
-
       try {
         const spec = specStringFor(entry.name, install);
         const cfg = readConfig();
@@ -215,7 +246,69 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp }: McpMarketplaceP
         setState((s) => ({ ...s, status: `install failed: ${(err as Error).message}` }));
       }
     },
-    [state.installedSpecs, postInfo, reloadMcp],
+    [postInfo, reloadMcp],
+  );
+
+  const installOrToggle = useCallback(
+    async (entry: RegistryEntry) => {
+      const installed = isInstalled(state.installedSpecs, entry);
+      if (installed) await doUninstall(entry, installed);
+      else await doInstall(entry);
+    },
+    [state.installedSpecs, doInstall, doUninstall],
+  );
+
+  const pickerSnapshot = useMemo(
+    () =>
+      buildMarketplacePickerSnapshot({
+        filtered,
+        installedSpecs: state.installedSpecs,
+        query: state.query,
+        status: state.status,
+        hasMore: state.handle?.cache.pagination.nextCursor != null,
+      }),
+    [filtered, state.installedSpecs, state.handle, state.query, state.status],
+  );
+
+  usePickerBroadcast(
+    !!pickerPorts,
+    { ...pickerSnapshot, actions: [...pickerSnapshot.actions] },
+    (res) => {
+      if (res.action === "cancel") return onClose();
+      if (res.action === "refine") {
+        setState((s) => ({ ...s, query: res.query, selected: 0 }));
+        return;
+      }
+      if (res.action === "load-more") {
+        void fetchMore();
+        return;
+      }
+      if (res.action === "install") {
+        const entry = state.handle?.cache.entries.find((e) => e.name === res.id);
+        if (!entry) return;
+        if (isInstalled(state.installedSpecs, entry)) {
+          setState((s) => ({ ...s, status: `already installed: ${entry.name}` }));
+          return;
+        }
+        void doInstall(entry);
+        return;
+      }
+      if (res.action === "uninstall") {
+        const entry = state.handle?.cache.entries.find((e) => e.name === res.id);
+        if (!entry) return;
+        const installed = isInstalled(state.installedSpecs, entry);
+        if (!installed) {
+          setState((s) => ({ ...s, status: `not installed: ${entry.name}` }));
+          return;
+        }
+        void doUninstall(entry, installed);
+      }
+    },
+    pickerPorts ?? {
+      broadcast: () => undefined,
+      resolverRef: { current: null },
+      snapshotRef: { current: null },
+    },
   );
 
   useKeystroke((ev) => {

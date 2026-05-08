@@ -37,6 +37,25 @@ export interface DashboardContext {
   applyPresetLive?: (name: string) => void;
   /** Side-channel to live loop — settings POST persists, this flips the running session. */
   applyEffortLive?: (effort: "high" | "max") => void;
+  /** Same model swap path /model <id> takes — live + persisted. */
+  applyModelLive?: (model: string) => void;
+  /** Cached model catalog. Null = in flight / failed; `[]` = API answered empty. */
+  getModels?: () => string[] | null;
+  /** One-shot v4-pro arming for the next turn. `armed=false` cancels a pending arm. */
+  setProNextLive?: (armed: boolean) => void;
+  /** Session USD cap; null disables. Re-arms the 80% warning latch. */
+  setBudgetUsdLive?: (usd: number | null) => void;
+  /** Auto-resubmit timer status — same shape `useLoopMode` exposes to slash handlers. */
+  getLoopRunStatus?: () => {
+    prompt: string;
+    intervalMs: number;
+    iter: number;
+    nextFireMs: number;
+  } | null;
+  /** Start the auto-resubmit timer. Same path the `/loop` slash takes. */
+  startAutoLoop?: (intervalMs: number, prompt: string) => void;
+  /** Clear the auto-resubmit timer. */
+  stopAutoLoop?: () => void;
   /** Endpoints don't write the audit log themselves so tests can swap the implementation. */
   audit?: (entry: AuditEntry) => void;
 
@@ -57,6 +76,10 @@ export interface DashboardContext {
   resolveEditReview?: (choice: "apply" | "reject" | "apply-rest-of-turn" | "flip-to-auto") => void;
   resolveCheckpointConfirm?: (choice: "continue" | "revise" | "stop", text?: string) => void;
   resolveReviseConfirm?: (choice: "accept" | "reject") => void;
+  /** Active picker (sessions / checkpoints / mcp marketplace / …) resolves into the live TUI component via a runtime ref. */
+  resolvePicker?: (resolution: PickerResolution) => void;
+  /** Active read-only viewer (replay-plan / …) — only `close` is meaningful since the viewer carries no selection state. */
+  resolveViewer?: (resolution: { action: "close" }) => void;
 
   reloadHooks?: () => number;
   reloadMcp?: () => Promise<number>;
@@ -73,6 +96,31 @@ export type ChoiceResolution =
   | { kind: "pick"; optionId: string }
   | { kind: "custom"; text: string }
   | { kind: "cancel" };
+
+/** Web-driven action against the picker that's currently up. `refine` and `load-more` keep the picker open; everything else closes it. */
+export type PickerResolution =
+  | { action: "pick"; id: string }
+  | { action: "delete"; id: string }
+  | { action: "rename"; id: string; text: string }
+  | { action: "new"; text?: string }
+  | { action: "install"; id: string }
+  | { action: "uninstall"; id: string }
+  | { action: "load-more" }
+  | { action: "refine"; query: string }
+  | { action: "cancel" };
+
+export type PickerAction = PickerResolution["action"];
+
+export interface PickerItem {
+  id: string;
+  title: string;
+  /** Secondary line — relative timestamp, branch, description. */
+  subtitle?: string;
+  /** Right-aligned tag — installed / active / source. */
+  badge?: string;
+  /** Trailing meta — file count, popularity, cost. */
+  meta?: string;
+}
 
 export interface DashboardStats {
   /** Total turns this session. */
@@ -141,6 +189,28 @@ export type ActiveModal =
         risk?: "low" | "med" | "high";
       }>;
       summary?: string;
+    }
+  | {
+      kind: "picker";
+      /** Discriminator for the underlying picker (sessions / checkpoints / mcp-marketplace / …). Drives empty-state copy + icon on the SPA. */
+      pickerKind: string;
+      title: string;
+      query?: string;
+      items: PickerItem[];
+      actions: PickerAction[];
+      hasMore?: boolean;
+      hint?: string;
+    }
+  | {
+      kind: "viewer";
+      /** Discriminator for the underlying viewer (replay-plan / …). */
+      viewerKind: string;
+      title: string;
+      /** Markdown / plain text body. */
+      body?: string;
+      /** Structured plan steps when viewerKind === "replay-plan". */
+      steps?: Array<{ id: string; title: string; status: "done" | "queued" }>;
+      meta?: string;
     };
 
 /** One row of the conversation as the SPA renders it. */

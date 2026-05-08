@@ -7,7 +7,14 @@ import {
   openEventSink,
 } from "../../adapters/event-sink-jsonl.js";
 import { type AtUrlExpansion, expandAtMentions, expandAtUrls } from "../../at-mentions.js";
-import { createCheckpoint } from "../../code/checkpoints.js";
+import {
+  type CheckpointMeta,
+  createCheckpoint,
+  deleteCheckpoint,
+  fmtAgo,
+  listCheckpoints,
+  restoreCheckpoint,
+} from "../../code/checkpoints.js";
 import {
   type EditBlock,
   applyEditBlocks,
@@ -51,6 +58,7 @@ import type {
   ActiveModal,
   DashboardEvent,
   DashboardMessage,
+  PickerResolution,
   SubmitResult,
 } from "../../server/context.js";
 import { type DashboardServerHandle, startDashboardServer } from "../../server/index.js";
@@ -69,6 +77,7 @@ import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
 import { webFetch } from "../../tools/web.js";
 import { openTranscriptFile } from "../../transcript/log.js";
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
+import { CheckpointPicker } from "./CheckpointPicker.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { McpHub } from "./McpHub.js";
@@ -85,6 +94,8 @@ import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
+import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broadcast.js";
+import { useViewerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { formatEditResults } from "./edit-history.js";
 import { loopEventToDashboard } from "./effects/loop-to-dashboard.js";
 import { appendGlobalMemory, appendProjectMemory, detectHashMemory } from "./hash-memory.js";
@@ -524,6 +535,9 @@ function AppInner({
   /** True while the SessionPicker is open mid-chat (triggered by `/sessions`). */
   const [pendingSessionsPicker, setPendingSessionsPicker] = useState(false);
   const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>([]);
+  /** True while the CheckpointPicker is open mid-chat (triggered by bare `/restore`). */
+  const [pendingCheckpointPicker, setPendingCheckpointPicker] = useState(false);
+  const [checkpointPickerList, setCheckpointPickerList] = useState<CheckpointMeta[]>([]);
   /** Opens the unified McpHub modal — null when closed. `tab` selects the initial tab. */
   const [pendingMcpHub, setPendingMcpHub] = useState<{ tab: "live" | "marketplace" } | null>(null);
   /** True while the ModelPicker is open mid-chat (triggered by bare `/model`). */
@@ -590,6 +604,7 @@ function AppInner({
     !!pendingPlan ||
     !!pendingReviseEditor ||
     !!pendingSessionsPicker ||
+    !!pendingCheckpointPicker ||
     !!pendingMcpHub ||
     pendingModelPicker ||
     !!stagedInput ||
@@ -664,6 +679,13 @@ function AppInner({
   // sync with the TUI. The Set is keyed by the subscriber function
   // itself; subscribeEvents returns an unsubscribe closure.
   const eventSubscribersRef = useRef<Set<(ev: DashboardEvent) => void>>(new Set());
+  /** Only one picker mounts at a time; snapshot feeds `getActiveModal` for late SSE clients. */
+  const activePickerResolverRef = useRef<((res: PickerResolution) => void) | null>(null);
+  const activePickerSnapshotRef = useRef<PickerSnapshot | null>(null);
+  /** Active read-only viewer (e.g. /replay plan archive). Same late-SSE concern, simpler resolver (close only). */
+  const activeViewerResolverRef = useRef<(() => void) | null>(null);
+  const activeViewerSnapshotRef = useRef<ViewerSnapshot | null>(null);
+  const [pendingReplayViewer, setPendingReplayViewer] = useState<ViewerSnapshot | null>(null);
   // Structured steps captured from the most recent `submit_plan` call.
   // Populated only when the model supplied `steps`; used by the
   // `mark_step_complete` handler to look up the step title and compute
@@ -888,6 +910,10 @@ function AppInner({
   // balance. useSessionInfo refreshes balance every few minutes; we
   // forward to the dashboard without re-minting startDashboard.
   const balanceRef = useRef<typeof balance>(null);
+  const modelsRef = useRef<string[] | null>(null);
+  useEffect(() => {
+    modelsRef.current = models;
+  }, [models]);
   useEffect(() => {
     balanceRef.current = balance;
     walletCurrencyRef.current = balance?.currency;
@@ -913,6 +939,28 @@ function AppInner({
       }
     }
   }, []);
+  const pickerPorts = useMemo(
+    () => ({
+      broadcast: broadcastDashboardEvent,
+      resolverRef: activePickerResolverRef,
+      snapshotRef: activePickerSnapshotRef,
+    }),
+    [broadcastDashboardEvent],
+  );
+  const viewerPorts = useMemo(
+    () => ({
+      broadcast: broadcastDashboardEvent,
+      resolverRef: activeViewerResolverRef,
+      snapshotRef: activeViewerSnapshotRef,
+    }),
+    [broadcastDashboardEvent],
+  );
+  useViewerBroadcast(
+    !!pendingReplayViewer,
+    pendingReplayViewer ?? { viewerKind: "replay-plan", title: "" },
+    () => setPendingReplayViewer(null),
+    viewerPorts,
+  );
 
   // Broadcast busy-state changes so the web Chat tab can disable its
   // submit button while a turn is in flight. Mirrors what the TUI's
@@ -1249,6 +1297,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
       !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
@@ -1283,6 +1332,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
       !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
@@ -1310,6 +1360,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
       !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
@@ -1332,6 +1383,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
       !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
@@ -1638,6 +1690,21 @@ function AppInner({
         applyEffortLive: (effort) => {
           loop.configure({ reasoningEffort: effort });
         },
+        applyModelLive: (model) => {
+          loop.configure({ model });
+          agentStore.dispatch({ type: "session.model.change", model });
+        },
+        getModels: () => modelsRef.current,
+        setProNextLive: (armed) => {
+          if (armed) loop.armProForNextTurn();
+          else loop.disarmPro();
+        },
+        setBudgetUsdLive: (usd) => {
+          loop.setBudget(usd);
+        },
+        getLoopRunStatus: () => getLoopStatus(),
+        startAutoLoop: (intervalMs, prompt) => startLoop(intervalMs, prompt),
+        stopAutoLoop: () => stopLoop(),
         // ---------- Chat bridge ----------
         getMessages: (): DashboardMessage[] =>
           cardsToDashboardMessages(agentStore.getState().cards),
@@ -1742,6 +1809,14 @@ function AppInner({
               ...(pendingRevision.summary ? { summary: pendingRevision.summary } : {}),
             };
           }
+          const picker = activePickerSnapshotRef.current;
+          if (picker) {
+            return { kind: "picker", ...picker };
+          }
+          const viewer = activeViewerSnapshotRef.current;
+          if (viewer) {
+            return { kind: "viewer", ...viewer };
+          }
           return null;
         },
         resolveShellConfirm: (choice) => {
@@ -1793,6 +1868,14 @@ function AppInner({
         resolveReviseConfirm: (choice) => {
           Promise.resolve(handleReviseConfirmRef.current(choice)).catch(() => undefined);
         },
+        resolvePicker: (resolution) => {
+          const fn = activePickerResolverRef.current;
+          if (fn) Promise.resolve(fn(resolution)).catch(() => undefined);
+        },
+        resolveViewer: () => {
+          const fn = activeViewerResolverRef.current;
+          if (fn) Promise.resolve(fn()).catch(() => undefined);
+        },
         // ---------- v0.14 mutation surface ----------
         reloadHooks: () => {
           const fresh = loadHooks({
@@ -1834,6 +1917,9 @@ function AppInner({
     pendingRevision,
     agentStore,
     mcpRuntime,
+    getLoopStatus,
+    startLoop,
+    stopLoop,
   ]);
 
   const stopDashboard = useCallback(async (): Promise<void> => {
@@ -2152,6 +2238,17 @@ function AppInner({
           pushHistory(text);
           return;
         }
+        if (result.openCheckpointPicker) {
+          if (!codeMode) {
+            log.pushInfo("▸ /restore is code-mode only");
+            pushHistory(text);
+            return;
+          }
+          setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
+          setPendingCheckpointPicker(true);
+          pushHistory(text);
+          return;
+        }
         if (result.openMcpHub) {
           setPendingMcpHub({ tab: result.openMcpHub.tab });
           pushHistory(text);
@@ -2166,6 +2263,22 @@ function AppInner({
           pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
           return;
+        }
+        if (result.replayPlan) {
+          const rp = result.replayPlan;
+          const titleSuffix = rp.summary ? ` — ${rp.summary}` : "";
+          const done = new Set(rp.completedStepIds);
+          setPendingReplayViewer({
+            viewerKind: "replay-plan",
+            title: `Replay #${rp.index}/${rp.total} · ${rp.relativeTime}${titleSuffix}`,
+            body: rp.body,
+            steps: rp.steps.map((s) => ({
+              id: s.id,
+              title: s.title,
+              status: done.has(s.id) ? "done" : "queued",
+            })),
+            meta: rp.archiveBasename,
+          });
         }
         const outcome = applySlashResult(result, {
           log,
@@ -3121,6 +3234,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3132,6 +3246,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3143,6 +3258,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3156,6 +3272,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3179,6 +3296,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3193,6 +3311,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview ? (
@@ -3245,11 +3364,56 @@ function AppInner({
                   completedStepIds={completedStepIdsRef.current}
                   onChoose={stableHandleCheckpointConfirm}
                 />
+              ) : pendingCheckpointPicker ? (
+                <CheckpointPicker
+                  checkpoints={checkpointPickerList}
+                  workspace={currentRootDir}
+                  pickerPorts={pickerPorts}
+                  onChoose={(outcome) => {
+                    if (outcome.kind === "quit") {
+                      setPendingCheckpointPicker(false);
+                      return;
+                    }
+                    if (outcome.kind === "restore") {
+                      const target = checkpointPickerList.find((c) => c.id === outcome.id);
+                      setPendingCheckpointPicker(false);
+                      if (!target) return;
+                      const result = restoreCheckpoint(currentRootDir, target.id);
+                      const lines = [
+                        `▸ restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
+                      ];
+                      if (result.restored.length > 0) {
+                        lines.push(
+                          `  wrote ${result.restored.length} file${result.restored.length === 1 ? "" : "s"}`,
+                        );
+                      }
+                      if (result.removed.length > 0) {
+                        lines.push(
+                          `  removed ${result.removed.length} file${result.removed.length === 1 ? "" : "s"}`,
+                        );
+                      }
+                      if (result.skipped.length > 0) {
+                        lines.push(
+                          `  skipped ${result.skipped.length} file${result.skipped.length === 1 ? "" : "s"}`,
+                        );
+                      }
+                      log.pushInfo(lines.join("\n"));
+                      return;
+                    }
+                    if (outcome.kind === "delete") {
+                      const target = checkpointPickerList.find((c) => c.id === outcome.id);
+                      if (!target) return;
+                      deleteCheckpoint(currentRootDir, target.id);
+                      setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
+                    }
+                  }}
+                />
               ) : pendingSessionsPicker ? (
                 <SessionPicker
                   sessions={sessionsPickerList}
                   workspace={currentRootDir}
                   walletCurrency={walletCurrencyRef.current}
+                  pickerPorts={pickerPorts}
                   onChoose={(outcome) => {
                     if (outcome.kind === "open") {
                       setPendingSessionsPicker(false);
@@ -3307,6 +3471,7 @@ function AppInner({
                   initialTab={pendingMcpHub.tab}
                   liveServers={liveMcpServers}
                   configPath={defaultConfigPath()}
+                  pickerPorts={pickerPorts}
                   onClose={() => setPendingMcpHub(null)}
                   postInfo={(text) => log.pushInfo(text)}
                   applyAppend={(target, addedTools) => {
