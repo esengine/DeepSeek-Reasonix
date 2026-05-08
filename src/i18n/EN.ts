@@ -321,6 +321,22 @@ export const EN: TranslationSchema = {
     selectFooter: "[↑↓] navigate · [Enter] confirm · [Esc] cancel",
     stepCounter: "Step {step}/{total} · ",
   },
+  hooks: {
+    head: "hook {tag} `{cmd}` {decision}{truncTag}",
+    headWithDetail: "hook {tag} `{cmd}` {decision}{truncTag}: {detail}",
+    truncated: " (output truncated at 256KB)",
+    decisionBlock: "block",
+    decisionWarn: "warn",
+    decisionTimeout: "timeout",
+    decisionError: "error",
+  },
+  summary: {
+    status: "summarizing what was gathered…",
+    hallucinatedFallback:
+      "(model emitted fake tool-call markup instead of a prose summary — try /retry with a narrower question, or /think to inspect R1's reasoning)",
+    failedAfterReason:
+      "{label} and the fallback summary call failed: {message}. Run /clear and retry with a narrower question, or raise --max-tool-iters.",
+  },
   loop: {
     budgetExhausted:
       "session budget exhausted — spent ${spent} ≥ cap ${cap}. Bump the cap with /budget <usd>, clear it with /budget off, or end the session.",

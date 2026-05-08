@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { t } from "./i18n/index.js";
 
 export type HookEvent = "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "Stop";
 
@@ -284,9 +285,15 @@ export function formatHookOutcomeMessage(outcome: HookOutcome): string {
     outcome.hook.command.length > 60
       ? `${outcome.hook.command.slice(0, 60)}…`
       : outcome.hook.command;
-  const truncTag = outcome.truncated ? " (output truncated at 256KB)" : "";
-  const head = `hook ${tag} \`${cmd}\` ${outcome.decision}${truncTag}`;
-  return detail ? `${head}: ${detail}` : head;
+  const truncTag = outcome.truncated ? t("hooks.truncated") : "";
+  const decision = t(`hooks.decision${capitalize(outcome.decision)}`);
+  return detail
+    ? t("hooks.headWithDetail", { tag, cmd, decision, truncTag, detail })
+    : t("hooks.head", { tag, cmd, decision, truncTag });
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export function decideOutcome(

@@ -124,6 +124,20 @@ export interface TranslationSchema {
       unsupported?: string;
     };
   };
+  hooks: {
+    head: string;
+    headWithDetail: string;
+    truncated: string;
+    decisionBlock: string;
+    decisionWarn: string;
+    decisionTimeout: string;
+    decisionError: string;
+  };
+  summary: {
+    status: string;
+    hallucinatedFallback: string;
+    failedAfterReason: string;
+  };
   loop: {
     budgetExhausted: string;
     budget80Pct: string;

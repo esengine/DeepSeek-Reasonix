@@ -314,6 +314,22 @@ export const zhCN: TranslationSchema = {
     selectFooter: "[↑↓] 移动 · [Enter] 确认 · [Esc] 取消",
     stepCounter: "步骤 {step}/{total} · ",
   },
+  hooks: {
+    head: "钩子 {tag} `{cmd}` {decision}{truncTag}",
+    headWithDetail: "钩子 {tag} `{cmd}` {decision}{truncTag}：{detail}",
+    truncated: "（输出在 256KB 处截断）",
+    decisionBlock: "拦截",
+    decisionWarn: "告警",
+    decisionTimeout: "超时",
+    decisionError: "错误",
+  },
+  summary: {
+    status: "正在总结已收集的内容…",
+    hallucinatedFallback:
+      "（模型生成了伪造的工具调用标记而非纯文本总结 — 试试 /retry 换个更窄的问题，或 /think 查看 R1 的推理）",
+    failedAfterReason:
+      "{label}，且回退的总结调用也失败：{message}。请运行 /clear 后用更窄的问题重试，或提高 --max-tool-iters。",
+  },
   loop: {
     budgetExhausted:
       "会话预算已用完 — 已花费 ${spent} ≥ 上限 ${cap}。用 /budget <usd> 提高上限，/budget off 清除上限，或结束会话。",
