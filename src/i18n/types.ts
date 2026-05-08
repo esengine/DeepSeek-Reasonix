@@ -133,6 +133,28 @@ export interface TranslationSchema {
     interrupted: string;
     loopStopped: string;
   };
+  errors: {
+    contextOverflow: string;
+    contextOverflowTooMany: string;
+    auth401: string;
+    balance402: string;
+    badparam422: string;
+    badrequest400: string;
+    deepseek5xxHead: string;
+    deepseek5xxReachable: string;
+    deepseek5xxUnreachable: string;
+    deepseek5xxActionNetwork: string;
+    deepseek5xxActionRetry: string;
+    innerNoMessage: string;
+    reasonAborted: string;
+    reasonContextGuard: string;
+    reasonStuck: string;
+    reasonBudget: string;
+    labelAborted: string;
+    labelContextGuard: string;
+    labelStuck: string;
+    labelBudget: string;
+  };
   handlers: {
     [group: string]: {
       [key: string]: string;

@@ -323,6 +323,36 @@ export const zhCN: TranslationSchema = {
     interrupted: "▸ 用户中断了执行。",
     loopStopped: "▸ 循环停止（在执行 {count} 次之后）。",
   },
+  errors: {
+    contextOverflow:
+      "上下文溢出（DeepSeek 400）：会话历史已达 {requested}，超出模型 prompt 上限（V4：1M tokens；旧版 chat/reasoner：131k）。通常是单个工具结果太大。Reasonix 默认将新工具结果限制在 8k tokens，并在会话加载时自动修复超大历史 — 重启常能清掉。如果仍然溢出，运行 /forget（删除会话）或 /clear（丢弃显示中的历史）从头开始。",
+    contextOverflowTooMany: "tokens 数量过多",
+    auth401:
+      "认证失败（DeepSeek 401）：{inner}。你的 API key 被拒绝。运行 `reasonix setup` 或 `export DEEPSEEK_API_KEY=sk-...` 修复。在 https://platform.deepseek.com/api_keys 获取 key。",
+    balance402:
+      "余额不足（DeepSeek 402）：{inner}。在 https://platform.deepseek.com/top_up 充值 — 余额非零时面板顶栏会显示。",
+    badparam422: "参数错误（DeepSeek 422）：{inner}",
+    badrequest400: "请求错误（DeepSeek 400）：{inner}",
+    deepseek5xxHead:
+      "DeepSeek 服务不可用（{status}） — 这是 DeepSeek 服务端问题，不是 Reasonix 故障。已按指数退避重试 4 次。",
+    deepseek5xxReachable:
+      " DeepSeek 主 API 健康检查通过，但 /chat/completions 在挂 — 他们那边部分服务异常。",
+    deepseek5xxUnreachable:
+      " 无法从你的网络访问 DeepSeek API — 可能是 DS 整体故障，也可能是本地网络问题。",
+    deepseek5xxActionNetwork:
+      " 建议：(1) 检查网络，(2) 等 30 秒后重试，(3) 查看状态页 https://status.deepseek.com。",
+    deepseek5xxActionRetry:
+      " 建议：(1) 等 30 秒后重试，(2) 用 /preset 切换模型，(3) 查看状态页 https://status.deepseek.com。",
+    innerNoMessage: "（无错误信息）",
+    reasonAborted: "[用户已中断（Esc） — 正在总结到目前为止的发现]",
+    reasonContextGuard: "[上下文额度即将耗尽 — 在下一次调用溢出之前先总结]",
+    reasonStuck: "[卡在重复的工具调用上 — 说明已尝试的方法以及阻塞点]",
+    reasonBudget: "[工具调用配额（{iterCap}）已用尽 — 基于已发现的内容强制总结]",
+    labelAborted: "用户中断",
+    labelContextGuard: "触发上下文保护（prompt > 80% 窗口）",
+    labelStuck: "卡死（重复工具调用被反风暴机制抑制）",
+    labelBudget: "工具调用配额（{iterCap}）已用尽",
+  },
   handlers: {
     basic: {
       clearInfo:

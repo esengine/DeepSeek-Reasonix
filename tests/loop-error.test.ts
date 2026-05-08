@@ -1,6 +1,7 @@
 /** Loop error decorator — context-overflow gets a user hint; everything else passes through. */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setLanguageRuntime } from "../src/i18n/index.js";
 import { formatLoopError, healLoadedMessages, stripHallucinatedToolMarkup } from "../src/loop.js";
 import type { ChatMessage } from "../src/types.js";
 
@@ -115,6 +116,31 @@ describe("formatLoopError", () => {
   it("tolerates an empty body on a 5xx — still produces the outage notice", () => {
     const out = formatLoopError(new Error("DeepSeek 500: "));
     expect(out).toMatch(/service unavailable \(500\)/);
+  });
+});
+
+describe("formatLoopError — zh-CN runtime switch", () => {
+  afterEach(() => {
+    setLanguageRuntime("EN");
+  });
+
+  it("503 outage notice translates when language is zh-CN", () => {
+    setLanguageRuntime("zh-CN");
+    const out = formatLoopError(new Error("DeepSeek 503: "));
+    expect(out).toContain("服务不可用");
+    expect(out).toContain("503");
+    expect(out).toContain("DeepSeek 服务端问题");
+    expect(out).toContain("status.deepseek.com");
+  });
+
+  it("401 auth error translates when language is zh-CN, preserves the inner DS message", () => {
+    setLanguageRuntime("zh-CN");
+    const out = formatLoopError(
+      new Error('DeepSeek 401: {"error":{"message":"Authentication Fails"}}'),
+    );
+    expect(out).toContain("认证失败");
+    expect(out).toContain("Authentication Fails");
+    expect(out).toContain("reasonix setup");
   });
 });
 

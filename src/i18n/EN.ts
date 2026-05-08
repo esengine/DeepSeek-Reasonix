@@ -331,6 +331,38 @@ export const EN: TranslationSchema = {
     interrupted: "▸ turn interrupted by user.",
     loopStopped: "▸ loop stopped (after {count} iter{s}).",
   },
+  errors: {
+    contextOverflow:
+      "Context overflow (DeepSeek 400): session history is {requested}, past the model's prompt limit (V4: 1M tokens; legacy chat/reasoner: 131k). Usually a single tool result grew too big. Reasonix caps new tool results at 8k tokens and auto-heals oversized history on session load — a restart often clears it. If it still overflows, run /forget (delete the session) or /clear (drop the displayed history) to start fresh.",
+    contextOverflowTooMany: "too many tokens",
+    auth401:
+      "Authentication failed (DeepSeek 401): {inner}. Your API key is rejected. Fix with `reasonix setup` or `export DEEPSEEK_API_KEY=sk-...`. Get one at https://platform.deepseek.com/api_keys.",
+    balance402:
+      "Out of balance (DeepSeek 402): {inner}. Top up at https://platform.deepseek.com/top_up — the panel header shows your balance once it's non-zero.",
+    badparam422: "Invalid parameter (DeepSeek 422): {inner}",
+    badrequest400: "Bad request (DeepSeek 400): {inner}",
+    deepseek5xxHead:
+      "DeepSeek service unavailable ({status}) — this is a DeepSeek-side problem, not Reasonix. Already retried 4× with backoff.",
+    deepseek5xxReachable:
+      " DeepSeek's main API answered our health check, but /chat/completions is failing — partial outage on their side.",
+    deepseek5xxUnreachable:
+      " DeepSeek API is unreachable from your network — could be a wider DS outage or a local network issue.",
+    deepseek5xxActionNetwork:
+      " Try: (1) check your network, (2) wait 30s and retry, (3) status page: https://status.deepseek.com.",
+    deepseek5xxActionRetry:
+      " Try: (1) wait 30s and retry, (2) /preset to switch model, (3) status page: https://status.deepseek.com.",
+    innerNoMessage: "(no message)",
+    reasonAborted: "[aborted by user (Esc) — summarizing what I found so far]",
+    reasonContextGuard:
+      "[context budget running low — summarizing before the next call would overflow]",
+    reasonStuck:
+      "[stuck on a repeated tool call — explaining what was tried and what's blocking progress]",
+    reasonBudget: "[tool-call budget ({iterCap}) reached — forcing summary from what I found]",
+    labelAborted: "aborted by user",
+    labelContextGuard: "context-guard triggered (prompt > 80% of window)",
+    labelStuck: "stuck (repeated tool call suppressed by storm-breaker)",
+    labelBudget: "tool-call budget ({iterCap}) reached",
+  },
   handlers: {
     basic: {
       clearInfo:
