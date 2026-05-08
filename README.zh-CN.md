@@ -52,6 +52,20 @@ npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 
 要求 Node ≥ 22。已在 macOS · Linux · Windows（PowerShell · Git Bash · Windows Terminal）测过。[去拿 DeepSeek API Key →](https://platform.deepseek.com/api_keys) · 完整 flag 看 `reasonix code --help`。
 
+`npx` 是推荐路径 —— 不用全局安装，每次都拿到最新版本。如果你天天用、想把 `reasonix` 装到 `PATH` 上，跑一次 `reasonix update` 就行，它会替你跑 `npm install -g`。
+
+### 子命令速查
+
+| 命令 | 适用场景 |
+|---|---|
+| `reasonix code [dir]` | 锁在某个项目根目录的编码 agent。**先用这个。** |
+| `reasonix chat` | 纯聊天 —— 不挂文件系统工具，只是带历史的对话。 |
+| `reasonix run "task"` | 一次性，把答案直接流到 stdout。适合 shell 管道。 |
+| `reasonix doctor` | 环境体检（Node 版本、API Key、MCP 接线）。 |
+| `reasonix update` | 升级 Reasonix 本身。 |
+
+其他子命令（`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`）见 `reasonix --help` 和 [CLI 参考](https://esengine.github.io/DeepSeek-Reasonix/#cli)。
+
 **在其他目录工作：** Reasonix 把文件系统工具作用域绑定在启动目录。要在别的目录工作，传 `--dir`：
 
 ```bash
