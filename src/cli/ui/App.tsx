@@ -2816,6 +2816,23 @@ function AppInner({
       let marker: string;
       if (staged.mode === "approve") {
         togglePlanMode(false);
+        // Materialize the approved plan as an "active" card so PlanLiveRow
+        // can dock it at the bottom — without this dispatch, no card with
+        // variant: "active" exists and the live strip stays empty.
+        const approvedSteps = planStepsRef.current;
+        if (approvedSteps && approvedSteps.length > 0) {
+          completedStepIdsRef.current = new Set();
+          log.showPlan({
+            title: planSummaryRef.current ?? "plan",
+            steps: approvedSteps.map((s) => ({
+              id: s.id,
+              title: s.title,
+              status: "queued" as const,
+            })),
+            variant: "active",
+          });
+          persistPlanState();
+        }
         if (trimmed) {
           synthetic = `The plan above has been approved. Implement it now. You are out of plan mode — use edit_file / write_file / run_command as needed.\n\nUser's additional instructions / answers to your open questions:\n\n${trimmed}\n\nFactor these in before the first edit. Stick to the plan unless you discover a concrete reason to deviate; if you do, tell me and wait for a response.`;
           marker = `▸ plan approved + instructions — ${trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed}`;
@@ -2867,7 +2884,7 @@ function AppInner({
         }
       }
     },
-    [stagedInput, togglePlanMode, persistPlanState, agentStore],
+    [stagedInput, togglePlanMode, persistPlanState, agentStore, log],
   );
   // Ref-mirror so startDashboard's resolvePlanConfirm closure can call
   // the latest function — handleStagedInputSubmit's deps churn on every
@@ -2938,9 +2955,14 @@ function AppInner({
             kind: request.kind,
           });
           break;
-        case "plan_proposed":
-          setPendingPlan((payload as { plan: string }).plan);
+        case "plan_proposed": {
+          const p = payload as { plan: string; steps?: PlanStep[]; summary?: string };
+          setPendingPlan(p.plan);
+          planStepsRef.current = p.steps ?? null;
+          planSummaryRef.current = p.summary ?? null;
+          planBodyRef.current = p.plan;
           break;
+        }
         case "plan_checkpoint": {
           const p = payload as {
             stepId: string;
@@ -2951,6 +2973,14 @@ function AppInner({
           // completed/total come from planStepsRef — don't have them via gate
           const completed = completedStepIdsRef.current.size;
           const total = planStepsRef.current?.length ?? 0;
+          // auto/yolo: user opted out of checkpoints — resolve "continue"
+          // without prompting. Per-step rollback snapshot still runs so
+          // /restore granularity is preserved.
+          if (editModeRef.current === "auto" || editModeRef.current === "yolo") {
+            handleAutoCheckpointContinueRef.current(p.stepId, p.title);
+            pauseGate.resolve(request.id, { type: "continue" });
+            break;
+          }
           setPendingCheckpoint({
             stepId: p.stepId,
             title: p.title,
@@ -3064,6 +3094,37 @@ function AppInner({
   useEffect(() => {
     handleCheckpointConfirmRef.current = handleCheckpointConfirm;
   }, [handleCheckpointConfirm]);
+
+  const handleAutoCheckpointContinue = useCallback(
+    (stepId: string, title?: string) => {
+      if (codeMode) {
+        const paths = touchedPaths();
+        if (paths.length > 0) {
+          try {
+            const cpName = title ? `${stepId} · ${title}` : stepId;
+            createCheckpoint({
+              rootDir: codeMode.rootDir,
+              name: cpName.slice(0, 60),
+              paths,
+              source: "auto-pre-restore",
+            });
+          } catch {
+            /* best-effort */
+          }
+        }
+      }
+      const completed = completedStepIdsRef.current.size;
+      const total = planStepsRef.current?.length ?? 0;
+      const label = title ? `${stepId} · ${title}` : stepId;
+      const counter = total > 0 ? ` (${completed}/${total})` : "";
+      log.pushInfo(t("app.continuingAfter", { label, counter }));
+    },
+    [codeMode, touchedPaths, log],
+  );
+  const handleAutoCheckpointContinueRef = useRef(handleAutoCheckpointContinue);
+  useEffect(() => {
+    handleAutoCheckpointContinueRef.current = handleAutoCheckpointContinue;
+  }, [handleAutoCheckpointContinue]);
   const stableHandleCheckpointConfirm = useCallback(
     (choice: "continue" | "revise" | "stop") => handleCheckpointConfirmRef.current(choice),
     [],
@@ -3153,9 +3214,21 @@ function AppInner({
       }
       planStepsRef.current = merged;
       persistPlanState();
+      // Replace the live active card so PlanLiveRow shows the new tail —
+      // existing card's stale ids would fail subsequent step completes.
+      agentStore.dispatch({ type: "plan.drop" });
+      log.showPlan({
+        title: planSummaryRef.current ?? "plan",
+        steps: merged.map((s) => ({
+          id: s.id,
+          title: s.title,
+          status: completed.has(s.id) ? ("done" as const) : ("queued" as const),
+        })),
+        variant: "active",
+      });
       if (gateId !== null) pauseGate.resolve(gateId, { type: "accepted" });
     },
-    [pendingRevision, persistPlanState],
+    [pendingRevision, persistPlanState, agentStore, log],
   );
 
   // Ref-wrap to keep PlanReviseConfirm's React.memo from re-rendering.
