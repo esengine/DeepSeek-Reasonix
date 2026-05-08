@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../lib/api.js";
 import {
   type BudgetState,
@@ -8,6 +8,13 @@ import {
   deriveBudgetState,
 } from "../lib/budget.js";
 import { html } from "../lib/html.js";
+import {
+  INTERVAL_PRESETS_MS,
+  type IntervalUnit,
+  type LoopRunStatus,
+  formatRemaining,
+  parseCustomInterval,
+} from "../lib/loop-control.js";
 import { type DashboardLang, getLang, setLang, t, useLang } from "../i18n/index.js";
 
 interface SettingsData {
@@ -245,6 +252,139 @@ function BudgetSection({ state, saving, onSetCap, onClear }: BudgetSectionProps)
   `;
 }
 
+interface LoopSectionProps {
+  status: LoopRunStatus | null;
+  /** ms remaining until next fire — ticks down client-side between status polls. */
+  remainingMs: number;
+  /** Last-turn cost in USD; used as a hint for "each iteration costs ~". */
+  avgIterCostUsd: number | null;
+  busy: boolean;
+  onStart: (intervalMs: number, prompt: string) => void;
+  onStop: () => void;
+}
+
+function LoopSection({
+  status,
+  remainingMs,
+  avgIterCostUsd,
+  busy,
+  onStart,
+  onStop,
+}: LoopSectionProps) {
+  const [intervalMs, setIntervalMs] = useState<number>(INTERVAL_PRESETS_MS[1]!.ms);
+  const [prompt, setPrompt] = useState("");
+  const [customValue, setCustomValue] = useState("");
+  const [customUnit, setCustomUnit] = useState<IntervalUnit>("m");
+
+  if (status) {
+    return html`
+      <div class="card" style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="color:var(--c-warn);font-family:var(--font-mono);font-size:11px">⟳ ${t("settings.loopRunning")}</span>
+          <span style="color:var(--fg-3);font-size:11px">
+            ${t("settings.loopIter", { iter: status.iter })} · ${t("settings.loopFiresIn", { remaining: formatRemaining(remainingMs) })}
+          </span>
+        </div>
+        <div style="background:var(--bg-elev-2);border:1px solid var(--bd);border-radius:var(--r);padding:8px 10px;font-family:var(--font-mono);font-size:12px;color:var(--fg-1);white-space:pre-wrap;max-height:120px;overflow-y:auto">${status.prompt}</div>
+        <div>
+          <button class="btn danger" disabled=${busy} onClick=${onStop}>${t("settings.loopStop")}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const customMs = parseCustomInterval(customValue, customUnit);
+  const canStart = !busy && intervalMs > 0 && prompt.trim().length > 0;
+
+  return html`
+    <div class="card" style="display:flex;flex-direction:column;gap:10px">
+      <div style="color:var(--fg-3);font-size:11px">
+        ${t("settings.loopIdleHint")}
+        ${
+          typeof avgIterCostUsd === "number" && avgIterCostUsd > 0
+            ? html` ${t("settings.loopCostHint", { cost: `$${avgIterCostUsd.toFixed(4)}` })}`
+            : null
+        }
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span style="color:var(--fg-3);font-size:11px">${t("settings.loopInterval")}</span>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          ${INTERVAL_PRESETS_MS.map(
+            (p) => html`
+              <button
+                key=${p.ms}
+                class=${`btn ${intervalMs === p.ms && customValue === "" ? "primary" : ""}`}
+                style="font-family:var(--font-mono)"
+                disabled=${busy}
+                onClick=${() => {
+                  setIntervalMs(p.ms);
+                  setCustomValue("");
+                }}
+              >${p.label}</button>
+            `,
+          )}
+          <span style="display:inline-flex;align-items:center;gap:4px;margin-left:auto">
+            <span style="color:var(--fg-3);font-size:11px">${t("settings.loopCustom")}</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value=${customValue}
+              onInput=${(e: Event) => {
+                const raw = (e.target as HTMLInputElement).value;
+                setCustomValue(raw);
+                const ms = parseCustomInterval(raw, customUnit);
+                if (ms !== null) setIntervalMs(ms);
+              }}
+              style="width:64px;font-family:var(--font-mono)"
+              disabled=${busy}
+            />
+            <select
+              value=${customUnit}
+              onChange=${(e: Event) => {
+                const next = (e.target as HTMLSelectElement).value as IntervalUnit;
+                setCustomUnit(next);
+                if (customValue) {
+                  const ms = parseCustomInterval(customValue, next);
+                  if (ms !== null) setIntervalMs(ms);
+                }
+              }}
+              disabled=${busy}
+            >
+              <option value="s">s</option>
+              <option value="m">m</option>
+              <option value="h">h</option>
+            </select>
+          </span>
+        </div>
+        ${
+          customValue && customMs === null
+            ? html`<span style="color:var(--c-err);font-size:11px">${t("settings.loopRangeError")}</span>`
+            : null
+        }
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span style="color:var(--fg-3);font-size:11px">${t("settings.loopPrompt")}</span>
+        <textarea
+          rows="3"
+          placeholder=${t("settings.loopPromptPlaceholder")}
+          value=${prompt}
+          onInput=${(e: Event) => setPrompt((e.target as HTMLTextAreaElement).value)}
+          style="width:100%;font-family:var(--font-mono);resize:vertical"
+          disabled=${busy}
+        ></textarea>
+      </div>
+      <div>
+        <button
+          class="btn primary"
+          disabled=${!canStart}
+          onClick=${() => onStart(intervalMs, prompt.trim())}
+        >${t("settings.loopStart")}</button>
+      </div>
+    </div>
+  `;
+}
+
 export function SettingsPanel() {
   useLang();
   const [data, setData] = useState<SettingsData | null>(null);
@@ -253,6 +393,12 @@ export function SettingsPanel() {
   const [saved, setSaved] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsData>>({});
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [loopStatus, setLoopStatus] = useState<LoopRunStatus | null>(null);
+  const [loopAvgCost, setLoopAvgCost] = useState<number | null>(null);
+  const [loopBusy, setLoopBusy] = useState(false);
+  /** Wall-clock time of the last status sync — used to interpolate the countdown. */
+  const lastStatusSyncRef = useRef<number>(0);
+  const [now, setNow] = useState<number>(() => Date.now());
 
   const load = useCallback(async () => {
     try {
@@ -271,6 +417,68 @@ export function SettingsPanel() {
       .then(setCatalog)
       .catch(() => undefined);
   }, []);
+
+  const refreshLoop = useCallback(async () => {
+    try {
+      const r = await api<{ status: LoopRunStatus | null }>("/loop/status");
+      setLoopStatus(r.status);
+      lastStatusSyncRef.current = Date.now();
+    } catch {
+      /* ignore — status is best-effort */
+    }
+    try {
+      const r = await api<{ stats?: { lastTurnCostUsd?: number } }>("/overview");
+      setLoopAvgCost(r.stats?.lastTurnCostUsd ?? null);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    refreshLoop();
+    const id = setInterval(() => {
+      if (!cancelled) refreshLoop();
+    }, 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [refreshLoop]);
+  useEffect(() => {
+    if (!loopStatus) return;
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, [loopStatus]);
+
+  const remainingMs = loopStatus
+    ? Math.max(0, loopStatus.nextFireMs - (now - lastStatusSyncRef.current))
+    : 0;
+
+  const startLoop = useCallback(
+    async (intervalMs: number, prompt: string) => {
+      setLoopBusy(true);
+      try {
+        await api("/loop/start", { method: "POST", body: { intervalMs, prompt } });
+        await refreshLoop();
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setLoopBusy(false);
+      }
+    },
+    [refreshLoop],
+  );
+  const stopLoop = useCallback(async () => {
+    setLoopBusy(true);
+    try {
+      await api("/loop/stop", { method: "POST" });
+      await refreshLoop();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoopBusy(false);
+    }
+  }, [refreshLoop]);
 
   const save = useCallback(
     async (fields: Partial<SettingsData>) => {
@@ -448,6 +656,16 @@ export function SettingsPanel() {
         saving=${saving}
         onSetCap=${(usd: number) => save({ budgetUsd: usd })}
         onClear=${() => save({ budgetUsd: null })}
+      />
+
+      ${sectionH3(t("settings.sectionLoop"))}
+      <${LoopSection}
+        status=${loopStatus}
+        remainingMs=${remainingMs}
+        avgIterCostUsd=${loopAvgCost}
+        busy=${loopBusy}
+        onStart=${startLoop}
+        onStop=${stopLoop}
       />
 
       ${sectionH3(t("settings.sectionRuntime"))}
