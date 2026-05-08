@@ -45,11 +45,18 @@ describe("bundled dist — tokenizer path resolution", () => {
   );
 
   (cliExists ? it : it.skip)(
-    'dist/cli/index.js keeps `from "ink"` external so users get the real package',
+    'dist/cli/* keeps `from "ink"` external so users get the real package',
     async () => {
-      const { readFileSync } = await import("node:fs");
-      const text = readFileSync(CLI_BUNDLE, "utf8");
-      expect(/from\s*"ink"/.test(text)).toBe(true);
+      const { readdirSync, readFileSync } = await import("node:fs");
+      const distDir = resolve("dist/cli");
+      const jsFiles = readdirSync(distDir).filter((f) => f.endsWith(".js"));
+      const inkImporters = jsFiles.filter((f) =>
+        /from\s*"ink"/.test(readFileSync(resolve(distDir, f), "utf8")),
+      );
+      expect(
+        inkImporters.length,
+        `expected at least one dist/cli/*.js to import "ink" (found ${jsFiles.length} JS files)`,
+      ).toBeGreaterThan(0);
     },
   );
 

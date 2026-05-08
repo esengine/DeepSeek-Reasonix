@@ -1,7 +1,3 @@
-import { markPhase } from "./startup-profile.js";
-
-markPhase("cli_module_loaded");
-
 import { Command } from "commander";
 import { readConfig } from "../config.js";
 import { t } from "../i18n/index.js";
@@ -9,7 +5,10 @@ import { VERSION } from "../index.js";
 import { listSessions } from "../memory/session.js";
 import { applyMemoryStack } from "../memory/user.js";
 import { ESCALATION_CONTRACT } from "../prompt-fragments.js";
-import { chatCommand } from "./commands/chat.js";
+import { resolveContinueFlag, resolveDefaults } from "./resolve.js";
+import { markPhase } from "./startup-profile.js";
+
+markPhase("cli_module_loaded");
 
 const DEFAULT_SYSTEM = `You are Reasonix, a helpful DeepSeek-powered assistant. Be concise and accurate. Use tools when available.
 
@@ -32,24 +31,6 @@ Your training data has a cutoff. When an answer's correctness depends on somethi
 The signal isn't a topic list — it's: "if I'm wrong about this, is it because reality moved on?". If yes, ground the answer in fresh evidence; if no (definitions, mechanisms, well-established APIs), answer from memory.
 
 ${ESCALATION_CONTRACT}`;
-import { codeCommand } from "./commands/code.js";
-import { commitCommand } from "./commands/commit.js";
-import { diffCommand } from "./commands/diff.js";
-import { doctorCommand } from "./commands/doctor.js";
-import { eventsCommand } from "./commands/events.js";
-import { indexCommand } from "./commands/index.js";
-import { mcpBrowseCommand } from "./commands/mcp-browse.js";
-import { formatMcpInspectFailure, mcpInspectCommand } from "./commands/mcp-inspect.js";
-import { mcpInstallCommand, mcpListCommand, mcpSearchCommand } from "./commands/mcp.js";
-import { pruneSessionsCommand } from "./commands/prune-sessions.js";
-import { replayCommand } from "./commands/replay.js";
-import { runCommand } from "./commands/run.js";
-import { sessionsCommand } from "./commands/sessions.js";
-import { setupCommand } from "./commands/setup.js";
-import { statsCommand } from "./commands/stats.js";
-import { updateCommand } from "./commands/update.js";
-import { versionCommand } from "./commands/version.js";
-import { resolveContinueFlag, resolveDefaults } from "./resolve.js";
 
 /** Lenient: malformed → undefined (no cap) so a bad flag doesn't abort launch. */
 function parseBudgetFlag(raw: number | undefined): number | undefined {
@@ -78,6 +59,7 @@ program
 program.action(async (opts: { continue?: boolean }) => {
   const cfg = readConfig();
   if (!cfg.setupCompleted) {
+    const { setupCommand } = await import("./commands/setup.js");
     await setupCommand({});
     return;
   }
@@ -88,6 +70,7 @@ program.action(async (opts: { continue?: boolean }) => {
     () => listSessions()[0],
     (msg) => process.stderr.write(`${msg}\n`),
   );
+  const { chatCommand } = await import("./commands/chat.js");
   await chatCommand({
     model: defaults.model,
     system: applyMemoryStack(DEFAULT_SYSTEM, process.cwd()),
@@ -101,6 +84,7 @@ program
   .command("setup")
   .description(t("cli.setup"))
   .action(async () => {
+    const { setupCommand } = await import("./commands/setup.js");
     await setupCommand({});
   });
 
@@ -118,6 +102,7 @@ program
   .option("--system-append <prompt>", t("ui.systemAppendHint"))
   .option("--system-append-file <path>", t("ui.systemAppendFileHint"))
   .action(async (dir: string | undefined, opts) => {
+    const { codeCommand } = await import("./commands/code.js");
     await codeCommand({
       dir,
       model: opts.model,
@@ -176,6 +161,7 @@ program
           () => listSessions()[0],
           (msg) => process.stderr.write(`${msg}\n`),
         );
+    const { chatCommand } = await import("./commands/chat.js");
     await chatCommand({
       model: defaults.model,
       system: applyMemoryStack(opts.system, process.cwd()),
@@ -214,6 +200,7 @@ program
       preset: opts.preset,
       noConfig: opts.config === false,
     });
+    const { runCommand } = await import("./commands/run.js");
     await runCommand({
       task,
       model: defaults.model,
@@ -228,7 +215,8 @@ program
 program
   .command("stats [transcript]")
   .description(t("cli.stats"))
-  .action((transcript: string | undefined) => {
+  .action(async (transcript: string | undefined) => {
+    const { statsCommand } = await import("./commands/stats.js");
     statsCommand({ transcript });
   });
 
@@ -236,6 +224,7 @@ program
   .command("doctor")
   .description(t("cli.doctor"))
   .action(async () => {
+    const { doctorCommand } = await import("./commands/doctor.js");
     await doctorCommand();
   });
 
@@ -245,6 +234,7 @@ program
   .option("-m, --model <id>", t("ui.modelOverrideFlash"))
   .option("-y, --yes", t("ui.skipConfirmHint"))
   .action(async (opts) => {
+    const { commitCommand } = await import("./commands/commit.js");
     await commitCommand({ model: opts.model, yes: !!opts.yes });
   });
 
@@ -252,7 +242,8 @@ program
   .command("sessions [name]")
   .description(t("cli.sessions"))
   .option("-v, --verbose", t("ui.verboseHint"))
-  .action((name: string | undefined, opts) => {
+  .action(async (name: string | undefined, opts) => {
+    const { sessionsCommand } = await import("./commands/sessions.js");
     sessionsCommand({ name, verbose: !!opts.verbose });
   });
 
@@ -261,7 +252,8 @@ program
   .description(t("cli.pruneSessions"))
   .option("--days <n>", t("ui.pruneDaysHint"), (v) => Number.parseInt(v, 10))
   .option("--dry-run", t("ui.pruneDryRunHint"))
-  .action((opts) => {
+  .action(async (opts) => {
+    const { pruneSessionsCommand } = await import("./commands/prune-sessions.js");
     pruneSessionsCommand({ days: opts.days, dryRun: !!opts.dryRun });
   });
 
@@ -273,7 +265,8 @@ program
   .option("--tail <n>", t("ui.eventTailHint"), (v) => Number.parseInt(v, 10))
   .option("--json", t("ui.jsonHint"))
   .option("--projection", t("ui.projectionHint"))
-  .action((name: string, opts) => {
+  .action(async (name: string, opts) => {
+    const { eventsCommand } = await import("./commands/events.js");
     eventsCommand({
       name,
       type: opts.type,
@@ -291,6 +284,7 @@ program
   .option("--head <n>", t("ui.headHint"), (v) => Number.parseInt(v, 10))
   .option("--tail <n>", t("ui.tailHint"), (v) => Number.parseInt(v, 10))
   .action(async (transcript: string, opts) => {
+    const { replayCommand } = await import("./commands/replay.js");
     await replayCommand({
       path: transcript,
       print: !!opts.print,
@@ -308,6 +302,7 @@ program
   .option("--label-a <label>", t("ui.labelAHint"))
   .option("--label-b <label>", t("ui.labelBHint"))
   .action(async (a: string, b: string, opts) => {
+    const { diffCommand } = await import("./commands/diff.js");
     await diffCommand({
       a,
       b,
@@ -332,6 +327,7 @@ mcp
   .option("--all", t("ui.mcpAllHint"))
   .action(async (opts) => {
     try {
+      const { mcpListCommand } = await import("./commands/mcp.js");
       await mcpListCommand({
         json: !!opts.json,
         local: !!opts.local,
@@ -355,6 +351,7 @@ mcp
   .option("--max-pages <n>", t("ui.mcpMaxPagesHint"), (v) => Number.parseInt(v, 10))
   .action(async (query: string, opts) => {
     try {
+      const { mcpSearchCommand } = await import("./commands/mcp.js");
       await mcpSearchCommand(query, {
         json: !!opts.json,
         refresh: !!opts.refresh,
@@ -375,6 +372,7 @@ mcp
   .option("--max-pages <n>", t("ui.mcpMaxPagesHint"), (v) => Number.parseInt(v, 10))
   .action(async (name: string, opts) => {
     try {
+      const { mcpInstallCommand } = await import("./commands/mcp.js");
       await mcpInstallCommand(name, {
         refresh: !!opts.refresh,
         maxPages:
@@ -391,6 +389,7 @@ mcp
   .description(t("ui.mcpBrowseDescription"))
   .action(async () => {
     try {
+      const { mcpBrowseCommand } = await import("./commands/mcp-browse.js");
       await mcpBrowseCommand();
     } catch (err) {
       process.stderr.write(`mcp browse failed: ${(err as Error).message}\n`);
@@ -403,6 +402,9 @@ mcp
   .description(t("ui.mcpInspectDescription"))
   .option("--json", t("ui.jsonHintReport"))
   .action(async (spec: string, opts) => {
+    const { formatMcpInspectFailure, mcpInspectCommand } = await import(
+      "./commands/mcp-inspect.js"
+    );
     try {
       await mcpInspectCommand({ spec, json: !!opts.json });
     } catch (err) {
@@ -411,13 +413,20 @@ mcp
     }
   });
 
-program.command("version").description(t("cli.version")).action(versionCommand);
+program
+  .command("version")
+  .description(t("cli.version"))
+  .action(async () => {
+    const { versionCommand } = await import("./commands/version.js");
+    versionCommand();
+  });
 
 program
   .command("update")
   .description(t("cli.update"))
   .option("--dry-run", t("ui.dryRunHint"))
   .action(async (opts: { dryRun?: boolean }) => {
+    const { updateCommand } = await import("./commands/update.js");
     await updateCommand({ dryRun: !!opts.dryRun });
   });
 
@@ -437,6 +446,7 @@ program
       ollamaUrl?: string;
       yes?: boolean;
     }) => {
+      const { indexCommand } = await import("./commands/index.js");
       await indexCommand(opts);
     },
   );
