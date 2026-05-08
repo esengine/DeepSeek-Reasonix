@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { api } from "../lib/api.js";
+import {
+  type BudgetState,
+  QUICK_CAPS_USD,
+  budgetTone,
+  bumpSuggestions,
+  deriveBudgetState,
+} from "../lib/budget.js";
 import { html } from "../lib/html.js";
 import { type DashboardLang, getLang, setLang, t, useLang } from "../i18n/index.js";
 
@@ -13,6 +20,165 @@ interface SettingsData {
   editMode?: string;
   proNext?: boolean;
   budgetUsd?: number | null;
+  /** Cumulative session spend (USD); null when no session is attached. */
+  sessionSpendUsd?: number | null;
+}
+
+function fmtUsd2(n: number): string {
+  return `$${n.toFixed(n < 1 ? 4 : 2)}`;
+}
+
+function BudgetGauge({ state }: { state: BudgetState }) {
+  if (state.kind === "off") return null;
+  const tone = budgetTone(state);
+  const fill = Math.min(100, state.pct);
+  const valueColor =
+    tone === "err"
+      ? "color:var(--c-err)"
+      : tone === "warn"
+        ? "color:var(--c-warn)"
+        : "color:var(--fg-1)";
+  return html`
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px">
+        <span style=${valueColor}>
+          <strong style="font-family:var(--font-mono)">${fmtUsd2(state.spent)}</strong>
+          <span style="color:var(--fg-3)"> ${t("settings.budgetOf")} </span>
+          <strong style="font-family:var(--font-mono)">${fmtUsd2(state.cap)}</strong>
+        </span>
+        <span style=${`font-family:var(--font-mono);font-size:11px;${valueColor}`}>${state.pct.toFixed(1)}%</span>
+      </div>
+      <div class=${`progress ${tone}`}><div class="progress-fill" style=${`width:${fill}%`}></div></div>
+      <span style="color:var(--fg-3);font-size:11px">
+        ${
+          state.kind === "exhausted"
+            ? t("settings.budgetRefusing")
+            : state.kind === "warn"
+              ? t("settings.budgetWarnLine")
+              : t("settings.budgetIdleLine")
+        }
+      </span>
+    </div>
+  `;
+}
+
+interface BudgetSectionProps {
+  state: BudgetState;
+  saving: boolean;
+  onSetCap: (usd: number) => void;
+  onClear: () => void;
+}
+
+function BudgetSection({ state, saving, onSetCap, onClear }: BudgetSectionProps) {
+  const [custom, setCustom] = useState("");
+  const submitCustom = () => {
+    const n = Number.parseFloat(custom);
+    if (Number.isFinite(n) && n > 0) {
+      onSetCap(n);
+      setCustom("");
+    }
+  };
+
+  const quickButtons = (caps: ReadonlyArray<number>) =>
+    caps.map(
+      (c) => html`
+        <button
+          key=${c}
+          class="btn"
+          style="font-family:var(--font-mono)"
+          disabled=${saving}
+          onClick=${() => onSetCap(c)}
+        >$${c}</button>
+      `,
+    );
+
+  const customField = html`
+    <span style="display:inline-flex;align-items:center;gap:4px;margin-left:auto">
+      <span style="color:var(--fg-3);font-size:11px">${t("settings.budgetCustom")}</span>
+      <input
+        type="number"
+        min="0.01"
+        step="0.01"
+        value=${custom}
+        placeholder="0.00"
+        onInput=${(e: Event) => setCustom((e.target as HTMLInputElement).value)}
+        onKeyDown=${(e: KeyboardEvent) => {
+          if (e.key === "Enter") submitCustom();
+        }}
+        style="width:72px;font-family:var(--font-mono)"
+        disabled=${saving}
+      />
+      <button
+        class="btn primary"
+        disabled=${saving || !(Number.parseFloat(custom) > 0)}
+        onClick=${submitCustom}
+      >→</button>
+    </span>
+  `;
+
+  return html`
+    <div class="card" style="display:flex;flex-direction:column;gap:12px">
+      <${BudgetGauge} state=${state} />
+
+      ${
+        state.kind === "off"
+          ? html`
+              <div>
+                <div style="color:var(--fg-3);font-size:11px;margin-bottom:6px">${t("settings.budgetSetCap")}</div>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  ${quickButtons(QUICK_CAPS_USD)}
+                  ${customField}
+                </div>
+              </div>
+            `
+          : state.kind === "warn" || state.kind === "exhausted"
+            ? html`
+                <div>
+                  <div style="color:var(--fg-3);font-size:11px;margin-bottom:6px">${t("settings.budgetBumpHint")}</div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                    ${bumpSuggestions(state.cap).map(
+                      (next) => html`
+                        <button
+                          key=${next}
+                          class="btn primary"
+                          style="font-family:var(--font-mono)"
+                          disabled=${saving}
+                          onClick=${() => onSetCap(next)}
+                        >→ $${next % 1 === 0 ? next : next.toFixed(2)}</button>
+                      `,
+                    )}
+                    ${customField}
+                  </div>
+                  <div style="margin-top:8px">
+                    <button class="btn" disabled=${saving} onClick=${onClear}>${t("settings.budgetClear")}</button>
+                  </div>
+                </div>
+              `
+            : html`
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  ${bumpSuggestions(state.cap).map(
+                    (next) => html`
+                      <button
+                        key=${next}
+                        class="btn"
+                        style="font-family:var(--font-mono)"
+                        disabled=${saving}
+                        onClick=${() => onSetCap(next)}
+                      >→ $${next % 1 === 0 ? next : next.toFixed(2)}</button>
+                    `,
+                  )}
+                  ${customField}
+                  <button
+                    class="btn"
+                    style="margin-left:8px"
+                    disabled=${saving}
+                    onClick=${onClear}
+                  >${t("settings.budgetClear")}</button>
+                </div>
+              `
+      }
+    </div>
+  `;
 }
 
 export function SettingsPanel() {
@@ -205,6 +371,14 @@ export function SettingsPanel() {
           t("settings.proNextNote"),
         )}
       </div>
+
+      ${sectionH3(t("settings.sectionBudget"))}
+      <${BudgetSection}
+        state=${deriveBudgetState(v.budgetUsd, v.sessionSpendUsd)}
+        saving=${saving}
+        onSetCap=${(usd: number) => save({ budgetUsd: usd })}
+        onClear=${() => save({ budgetUsd: null })}
+      />
 
       ${sectionH3(t("settings.sectionRuntime"))}
       <div class="card">

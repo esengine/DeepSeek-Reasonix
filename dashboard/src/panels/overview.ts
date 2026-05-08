@@ -1,3 +1,4 @@
+import { budgetTone, deriveBudgetState } from "../lib/budget.js";
 import { fmtCompactNum, fmtCost, fmtNum, fmtRelativeTime, fmtUsd } from "../lib/format.js";
 import { html } from "../lib/html.js";
 import { usePoll } from "../lib/use-poll.js";
@@ -65,6 +66,9 @@ interface OverviewData {
   toolCount?: number;
   cwd?: string;
   cockpit?: CockpitData;
+  budgetUsd?: number | null;
+  /** Cumulative session spend in USD — set when a session is attached. */
+  sessionSpendUsd?: number | null;
 }
 
 function kpi(label: string, value: unknown, delta?: unknown, deltaTone?: "up" | "down" | "flat") {
@@ -105,6 +109,25 @@ function balanceKpi(c: CockpitData) {
   if (!c.balance) return kpi(t("overview.balance"), "—", "open in TUI", "flat");
   const symbol = c.balance.currency === "CNY" ? "¥" : c.balance.currency === "USD" ? "$" : "";
   return kpi(t("overview.balance"), `${symbol}${c.balance.total}`, c.balance.currency, "flat");
+}
+
+function budgetKpi(o: OverviewData) {
+  const state = deriveBudgetState(o.budgetUsd, o.cockpit?.currentSession?.totalCostUsd ?? null);
+  if (state.kind === "off") return null;
+  const tone = budgetTone(state);
+  const valueColor =
+    tone === "err"
+      ? "color:var(--c-err)"
+      : tone === "warn"
+        ? "color:var(--c-warn)"
+        : "";
+  return html`
+    <div class="kpi cock-w-1">
+      <div class="label">${t("overview.budget")}</div>
+      <div class="value" style=${valueColor}>${fmtUsd(state.spent)} / ${fmtUsd(state.cap)}</div>
+      <div class=${`progress ${tone}`} style="margin-top:4px"><div class="progress-fill" style=${`width:${Math.min(100, state.pct)}%`}></div></div>
+    </div>
+  `;
 }
 
 function tokens7dKpi(c: CockpitData) {
@@ -285,6 +308,7 @@ export function OverviewPanel() {
         ${tokens7dKpi(c)}
         ${cacheHitKpi(c)}
         ${toolCallsKpi(c)}
+        ${budgetKpi(o)}
 
         ${currentSessionBlock(c)}
         ${costTrendSpark(c)}

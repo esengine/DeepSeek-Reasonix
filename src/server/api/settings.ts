@@ -58,6 +58,7 @@ export async function handleSettings(
         model: live?.model ?? null,
         proNext: live?.proArmed ?? false,
         budgetUsd: live?.budgetUsd ?? null,
+        sessionSpendUsd: ctx.getStats?.()?.totalCostUsd ?? null,
         // Hint to the SPA which fields require restart.
         appliesAt: {
           apiKey: "next-session",
