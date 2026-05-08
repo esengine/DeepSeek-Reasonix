@@ -345,6 +345,26 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/only available inside .reasonix code/);
   });
 
+  it("/restore with no arg opens the checkpoint picker in code mode", () => {
+    const r = handleSlash("restore", [], makeLoop(), { codeRoot: "/tmp" });
+    expect(r.openCheckpointPicker).toBe(true);
+    expect(r.info).toBeUndefined();
+  });
+
+  it("/restore <name> in code mode still resolves directly (skips picker)", () => {
+    const r = handleSlash("restore", ["nonexistent"], makeLoop(), { codeRoot: "/tmp" });
+    expect(r.openCheckpointPicker).toBeUndefined();
+    expect(r.info).toMatch(/no.*match|not found/i);
+  });
+
+  it("/restore outside code mode is unavailable regardless of args", () => {
+    const noArg = handleSlash("restore", [], makeLoop());
+    expect(noArg.openCheckpointPicker).toBeUndefined();
+    expect(noArg.info).toMatch(/only available inside .reasonix code/);
+    const withArg = handleSlash("restore", ["abc"], makeLoop());
+    expect(withArg.info).toMatch(/only available inside .reasonix code/);
+  });
+
   it("/undo in code mode invokes the callback", () => {
     const r = handleSlash("undo", [], makeLoop(), {
       codeUndo: () => "▸ restored 2 file(s)",

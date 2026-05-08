@@ -205,7 +205,7 @@ const restore: SlashHandler = (args, _loop, ctx) => {
   }
   const target = args.join(" ").trim();
   if (!target) {
-    return { info: t("handlers.edits.restoreUsage") };
+    return { openCheckpointPicker: true };
   }
   const found = findCheckpoint(ctx.codeRoot, target);
   if (!found) {

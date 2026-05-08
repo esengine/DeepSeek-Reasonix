@@ -7,7 +7,14 @@ import {
   openEventSink,
 } from "../../adapters/event-sink-jsonl.js";
 import { type AtUrlExpansion, expandAtMentions, expandAtUrls } from "../../at-mentions.js";
-import { createCheckpoint } from "../../code/checkpoints.js";
+import {
+  type CheckpointMeta,
+  createCheckpoint,
+  deleteCheckpoint,
+  fmtAgo,
+  listCheckpoints,
+  restoreCheckpoint,
+} from "../../code/checkpoints.js";
 import {
   type EditBlock,
   applyEditBlocks,
@@ -70,6 +77,7 @@ import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
 import { webFetch } from "../../tools/web.js";
 import { openTranscriptFile } from "../../transcript/log.js";
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
+import { CheckpointPicker } from "./CheckpointPicker.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { McpHub } from "./McpHub.js";
@@ -526,6 +534,9 @@ function AppInner({
   /** True while the SessionPicker is open mid-chat (triggered by `/sessions`). */
   const [pendingSessionsPicker, setPendingSessionsPicker] = useState(false);
   const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>([]);
+  /** True while the CheckpointPicker is open mid-chat (triggered by bare `/restore`). */
+  const [pendingCheckpointPicker, setPendingCheckpointPicker] = useState(false);
+  const [checkpointPickerList, setCheckpointPickerList] = useState<CheckpointMeta[]>([]);
   /** Opens the unified McpHub modal — null when closed. `tab` selects the initial tab. */
   const [pendingMcpHub, setPendingMcpHub] = useState<{ tab: "live" | "marketplace" } | null>(null);
   /** True while the ModelPicker is open mid-chat (triggered by bare `/model`). */
@@ -592,6 +603,7 @@ function AppInner({
     !!pendingPlan ||
     !!pendingReviseEditor ||
     !!pendingSessionsPicker ||
+    !!pendingCheckpointPicker ||
     !!pendingMcpHub ||
     pendingModelPicker ||
     !!stagedInput ||
@@ -1262,6 +1274,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
       !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
@@ -1296,6 +1309,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
       !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
@@ -1323,6 +1337,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
       !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
@@ -1345,6 +1360,7 @@ function AppInner({
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
       !pendingMcpHub &&
       !stagedInput &&
       !pendingEditReview &&
@@ -2170,6 +2186,17 @@ function AppInner({
         if (result.openSessionsPicker) {
           setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
           setPendingSessionsPicker(true);
+          pushHistory(text);
+          return;
+        }
+        if (result.openCheckpointPicker) {
+          if (!codeMode) {
+            log.pushInfo("▸ /restore is code-mode only");
+            pushHistory(text);
+            return;
+          }
+          setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
+          setPendingCheckpointPicker(true);
           pushHistory(text);
           return;
         }
@@ -3142,6 +3169,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3153,6 +3181,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3164,6 +3193,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3177,6 +3207,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3200,6 +3231,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview &&
@@ -3214,6 +3246,7 @@ function AppInner({
                 !pendingPlan &&
                 !pendingReviseEditor &&
                 !pendingSessionsPicker &&
+                !pendingCheckpointPicker &&
                 !pendingMcpHub &&
                 !stagedInput &&
                 !pendingEditReview ? (
@@ -3265,6 +3298,50 @@ function AppInner({
                   steps={planStepsRef.current ?? undefined}
                   completedStepIds={completedStepIdsRef.current}
                   onChoose={stableHandleCheckpointConfirm}
+                />
+              ) : pendingCheckpointPicker ? (
+                <CheckpointPicker
+                  checkpoints={checkpointPickerList}
+                  workspace={currentRootDir}
+                  pickerPorts={pickerPorts}
+                  onChoose={(outcome) => {
+                    if (outcome.kind === "quit") {
+                      setPendingCheckpointPicker(false);
+                      return;
+                    }
+                    if (outcome.kind === "restore") {
+                      const target = checkpointPickerList.find((c) => c.id === outcome.id);
+                      setPendingCheckpointPicker(false);
+                      if (!target) return;
+                      const result = restoreCheckpoint(currentRootDir, target.id);
+                      const lines = [
+                        `▸ restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
+                      ];
+                      if (result.restored.length > 0) {
+                        lines.push(
+                          `  wrote ${result.restored.length} file${result.restored.length === 1 ? "" : "s"}`,
+                        );
+                      }
+                      if (result.removed.length > 0) {
+                        lines.push(
+                          `  removed ${result.removed.length} file${result.removed.length === 1 ? "" : "s"}`,
+                        );
+                      }
+                      if (result.skipped.length > 0) {
+                        lines.push(
+                          `  skipped ${result.skipped.length} file${result.skipped.length === 1 ? "" : "s"}`,
+                        );
+                      }
+                      log.pushInfo(lines.join("\n"));
+                      return;
+                    }
+                    if (outcome.kind === "delete") {
+                      const target = checkpointPickerList.find((c) => c.id === outcome.id);
+                      if (!target) return;
+                      deleteCheckpoint(currentRootDir, target.id);
+                      setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
+                    }
+                  }}
                 />
               ) : pendingSessionsPicker ? (
                 <SessionPicker

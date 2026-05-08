@@ -10,6 +10,8 @@ export interface SlashResult {
   info?: string;
   /** Open the SessionPicker modal mid-chat — used by `/sessions` slash. */
   openSessionsPicker?: boolean;
+  /** Open the CheckpointPicker modal — bare `/restore` (no name argument). */
+  openCheckpointPicker?: boolean;
   /** Open the ModelPicker modal — bare `/model` (no id) opens it. */
   openModelPicker?: boolean;
   /** Open the unified MCP hub — `/mcp` defaults to "live", `/mcp browse` to "marketplace". */
