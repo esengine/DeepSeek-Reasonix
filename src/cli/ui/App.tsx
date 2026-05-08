@@ -910,6 +910,10 @@ function AppInner({
   // balance. useSessionInfo refreshes balance every few minutes; we
   // forward to the dashboard without re-minting startDashboard.
   const balanceRef = useRef<typeof balance>(null);
+  const modelsRef = useRef<string[] | null>(null);
+  useEffect(() => {
+    modelsRef.current = models;
+  }, [models]);
   useEffect(() => {
     balanceRef.current = balance;
     walletCurrencyRef.current = balance?.currency;
@@ -1690,6 +1694,7 @@ function AppInner({
           loop.configure({ model });
           agentStore.dispatch({ type: "session.model.change", model });
         },
+        getModels: () => modelsRef.current,
         setProNextLive: (armed) => {
           if (armed) loop.armProForNextTurn();
           else loop.disarmPro();

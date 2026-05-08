@@ -9,6 +9,7 @@ import { handleMcp } from "./api/mcp.js";
 import { handleMemory } from "./api/memory.js";
 import { handleMessages } from "./api/messages.js";
 import { handleModal } from "./api/modal.js";
+import { handleModels } from "./api/models.js";
 import { handleOverview } from "./api/overview.js";
 import { handlePermissions } from "./api/permissions.js";
 import { handlePlans } from "./api/plans.js";
@@ -84,6 +85,8 @@ export async function handleApi(
         return await handleFiles(method, rest, body, ctx);
       case "loop":
         return await handleLoop(method, rest, body, ctx);
+      case "models":
+        return await handleModels(method, rest, body, ctx);
       default:
         return { status: 404, body: { error: `no such endpoint: /${head}` } };
     }

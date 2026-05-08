@@ -39,6 +39,8 @@ export interface DashboardContext {
   applyEffortLive?: (effort: "high" | "max") => void;
   /** Same model swap path /model <id> takes — live + persisted. */
   applyModelLive?: (model: string) => void;
+  /** Cached model catalog. Null = in flight / failed; `[]` = API answered empty. */
+  getModels?: () => string[] | null;
   /** One-shot v4-pro arming for the next turn. `armed=false` cancels a pending arm. */
   setProNextLive?: (armed: boolean) => void;
   /** Session USD cap; null disables. Re-arms the 80% warning latch. */

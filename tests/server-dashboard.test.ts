@@ -1001,6 +1001,23 @@ describe("dashboard server: D-1 settings + auto-loop surface", () => {
     expect(stopped).toBe(1);
   });
 
+  it("GET /api/models returns the cached catalog + pricing + current model", async () => {
+    const base = await boot({ getModels: () => ["deepseek-v4-flash", "deepseek-v4-pro"] });
+    const r = await call(`${base}api/models`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.models).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
+    expect(r.body.pricing["deepseek-v4-flash"]).toBeDefined();
+    expect(r.body.pricing["deepseek-v4-flash"].output).toBeGreaterThan(0);
+  });
+
+  it("GET /api/models returns null catalog when getModels is not wired", async () => {
+    const base = await boot({});
+    const r = await call(`${base}api/models`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.models).toBeNull();
+    expect(r.body.pricing).toBeDefined();
+  });
+
   it("returns 503 when loop callbacks are not wired", async () => {
     const base = await boot({});
     const status = await call(`${base}api/loop/status`, { token: TOKEN });

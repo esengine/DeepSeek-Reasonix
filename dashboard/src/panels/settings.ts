@@ -28,6 +28,70 @@ function fmtUsd2(n: number): string {
   return `$${n.toFixed(n < 1 ? 4 : 2)}`;
 }
 
+interface ModelPriceEntry {
+  inputCacheHit: number;
+  inputCacheMiss: number;
+  output: number;
+}
+
+interface ModelCatalog {
+  models: string[] | null;
+  current: string | null;
+  pricing: Record<string, ModelPriceEntry>;
+}
+
+function formatPricing(p: ModelPriceEntry | undefined): string | null {
+  if (!p) return null;
+  return t("settings.modelPricingLine", {
+    hit: p.inputCacheHit.toFixed(3),
+    miss: p.inputCacheMiss.toFixed(3),
+    out: p.output.toFixed(3),
+  });
+}
+
+function ModelRow({
+  current,
+  catalog,
+  saving,
+  onPick,
+}: {
+  current: string;
+  catalog: ModelCatalog | null;
+  saving: boolean;
+  onPick: (model: string) => void;
+}) {
+  const list = catalog?.models ?? null;
+  const ready = list && list.length > 0;
+  if (!ready) {
+    // Fallback: catalog hasn't loaded (or API failed). Read-only — same as before D-4.
+    return html`<code class="mono">${current ?? "—"}</code>`;
+  }
+  // Ensure the live model is selectable even if the catalog hasn't reported it
+  // yet (preset overrides, custom IDs).
+  const options = list.includes(current) ? list : [current, ...list];
+  const price = catalog?.pricing[current];
+  return html`
+    <span style="display:inline-flex;flex-direction:column;gap:4px">
+      <select
+        value=${current}
+        onChange=${(e: Event) => {
+          const next = (e.target as HTMLSelectElement).value;
+          if (next && next !== current) onPick(next);
+        }}
+        disabled=${saving}
+        style="font-family:var(--font-mono);min-width:200px"
+      >
+        ${options.map((m) => html`<option key=${m} value=${m}>${m}</option>`)}
+      </select>
+      ${
+        price
+          ? html`<span style="color:var(--fg-3);font-size:11px;font-family:var(--font-mono)">${formatPricing(price)}</span>`
+          : null
+      }
+    </span>
+  `;
+}
+
 function BudgetGauge({ state }: { state: BudgetState }) {
   if (state.kind === "off") return null;
   const tone = budgetTone(state);
@@ -188,6 +252,7 @@ export function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<SettingsData>>({});
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -201,6 +266,11 @@ export function SettingsPanel() {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    api<ModelCatalog>("/models")
+      .then(setCatalog)
+      .catch(() => undefined);
+  }, []);
 
   const save = useCallback(
     async (fields: Partial<SettingsData>) => {
@@ -384,7 +454,13 @@ export function SettingsPanel() {
       <div class="card">
         ${fieldRow(
           t("settings.activeModel"),
-          html`<code class="mono">${v.model ?? "—"}</code>`,
+          html`<${ModelRow}
+            current=${v.model ?? "—"}
+            catalog=${catalog}
+            saving=${saving}
+            onPick=${(m: string) => save({ model: m })}
+          />`,
+          t("settings.appliesNextTurn"),
         )}
         ${fieldRow(
           t("settings.editMode"),

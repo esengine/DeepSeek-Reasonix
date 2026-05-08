@@ -77,6 +77,7 @@ export const en = {
     budgetRefusing: "cap exhausted — next turn refused until bumped or cleared",
     sectionRuntime: "Runtime",
     activeModel: "active model",
+    modelPricingLine: "${hit} hit · ${miss} miss · ${out} out  per 1M tok",
     editMode: "edit mode",
     editModeNote: "switch from the Chat tab header",
     sectionLanguage: "Language",

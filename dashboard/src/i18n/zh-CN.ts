@@ -77,6 +77,7 @@ export const zhCN = {
     budgetRefusing: "已超出上限 — 提高或清除后才会继续",
     sectionRuntime: "运行时",
     activeModel: "当前模型",
+    modelPricingLine: "${hit} 命中 · ${miss} 未命中 · ${out} 输出  / 100 万 tok",
     editMode: "编辑模式",
     editModeNote: "在对话标签页头部切换",
     sectionLanguage: "语言",
