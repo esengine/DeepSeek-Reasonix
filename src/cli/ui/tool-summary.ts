@@ -118,6 +118,13 @@ function summarizeKnownTool(toolName: string, content: string): ToolSummary | nu
     const bytes = formatBytes(content.length);
     return { summary: `wrote ${lines} · ${bytes}`, isError: false };
   }
+  if (hasSuffix("multi_edit")) {
+    const m = content.match(/applied (\d+) edits? to (\S+)/);
+    if (m) {
+      return { summary: `${m[1]} edit${m[1] === "1" ? "" : "s"} · ${m[2]}`, isError: false };
+    }
+    return { summary: clip(firstNonEmptyLine(content), MAX_SUMMARY_CHARS), isError: false };
+  }
   if (hasSuffix("run_command") || hasSuffix("run_background")) {
     // Native shell tools prepend "exit 0:" / "exit N:" or the result
     // already mentions exit code. Try to surface it.

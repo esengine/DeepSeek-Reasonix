@@ -5,7 +5,7 @@ import * as pathMod from "node:path";
 import picomatch from "picomatch";
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
 import type { ToolRegistry } from "../tools.js";
-import { applyEdit } from "./fs/edit.js";
+import { applyEdit, applyMultiEdit } from "./fs/edit.js";
 import { searchContent, searchFiles } from "./fs/search.js";
 
 export { lineDiff } from "./fs/edit.js";
@@ -466,6 +466,33 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
     },
     fn: async (args: { path: string; search: string; replace: string }) =>
       applyEdit(rootDir, safePath(args.path), args),
+  });
+
+  registry.register({
+    name: "multi_edit",
+    description:
+      "Apply N SEARCH/REPLACE edits to ONE file in a single atomic call. Edits run sequentially against an in-memory buffer (so a later edit can match text inserted by an earlier one), then the file is written once. If ANY edit fails (search not found, ambiguous match, empty search), NO edits are written — the file stays untouched. Same per-edit rules as edit_file: `search` is exact text (whitespace sensitive, no regex) and must be unique at the moment that edit applies. Use this for renames and other multi-site refactors instead of N edit_file round-trips.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        edits: {
+          type: "array",
+          description: "Edits to apply in order. Length ≥ 1.",
+          items: {
+            type: "object",
+            properties: {
+              search: { type: "string", description: "Exact text to find (must be unique)." },
+              replace: { type: "string", description: "Text to substitute in place of `search`." },
+            },
+            required: ["search", "replace"],
+          },
+        },
+      },
+      required: ["path", "edits"],
+    },
+    fn: async (args: { path: string; edits: Array<{ search: string; replace: string }> }) =>
+      applyMultiEdit(rootDir, safePath(args.path), args.edits),
   });
 
   registry.register({

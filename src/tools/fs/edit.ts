@@ -37,6 +37,54 @@ export async function applyEdit(
   return `${header}\n${diff}`;
 }
 
+export async function applyMultiEdit(
+  rootDir: string,
+  abs: string,
+  edits: ReadonlyArray<{ search: string; replace: string }>,
+): Promise<string> {
+  if (edits.length === 0) {
+    throw new Error("multi_edit: edits must contain at least one entry");
+  }
+  const before = await fs.readFile(abs, "utf8");
+  const le = before.includes("\r\n") ? "\r\n" : "\n";
+  const rel = displayRel(rootDir, abs);
+
+  let buf = before;
+  const hunks: string[] = [];
+  let totalDelta = 0;
+
+  for (let i = 0; i < edits.length; i++) {
+    const e = edits[i]!;
+    if (e.search.length === 0) {
+      throw new Error(`multi_edit: edit #${i + 1} search cannot be empty (no edits applied)`);
+    }
+    const adaptedSearch = e.search.replace(/\r?\n/g, le);
+    const adaptedReplace = e.replace.replace(/\r?\n/g, le);
+    const firstIdx = buf.indexOf(adaptedSearch);
+    if (firstIdx < 0) {
+      throw new Error(
+        `multi_edit: edit #${i + 1} search text not found in ${rel} — no edits applied (multi_edit is atomic)`,
+      );
+    }
+    const nextIdx = buf.indexOf(adaptedSearch, firstIdx + 1);
+    if (nextIdx >= 0) {
+      throw new Error(
+        `multi_edit: edit #${i + 1} search text appears multiple times in ${rel} — include more context to disambiguate (no edits applied)`,
+      );
+    }
+    const startLine = buf.slice(0, firstIdx).split(/\r?\n/).length;
+    buf = buf.slice(0, firstIdx) + adaptedReplace + buf.slice(firstIdx + adaptedSearch.length);
+    hunks.push(renderEditDiff(adaptedSearch, adaptedReplace, startLine));
+    totalDelta += adaptedReplace.length - adaptedSearch.length;
+  }
+
+  await fs.writeFile(abs, buf, "utf8");
+  const sign = totalDelta >= 0 ? "+" : "";
+  const noun = edits.length === 1 ? "edit" : "edits";
+  const header = `multi_edit: applied ${edits.length} ${noun} to ${rel} (${sign}${totalDelta} chars)`;
+  return `${header}\n${hunks.join("\n")}`;
+}
+
 function renderEditDiff(search: string, replace: string, startLine: number): string {
   const a = search.split(/\r?\n/);
   const b = replace.split(/\r?\n/);

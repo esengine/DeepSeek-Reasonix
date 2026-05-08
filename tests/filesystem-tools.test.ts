@@ -736,15 +736,107 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
   });
 
   describe("allowWriting=false (read-only mode)", () => {
-    it("skips registering write_file / edit_file / create_directory / move_file", async () => {
+    it("skips registering write_file / edit_file / multi_edit / create_directory / move_file", async () => {
       const ro = new ToolRegistry();
       registerFilesystemTools(ro, { rootDir: root, allowWriting: false });
       expect(ro.has("read_file")).toBe(true);
       expect(ro.has("list_directory")).toBe(true);
       expect(ro.has("write_file")).toBe(false);
       expect(ro.has("edit_file")).toBe(false);
+      expect(ro.has("multi_edit")).toBe(false);
       expect(ro.has("create_directory")).toBe(false);
       expect(ro.has("move_file")).toBe(false);
+    });
+  });
+
+  describe("multi_edit (atomic batch SEARCH/REPLACE)", () => {
+    it("applies multiple edits in one call", async () => {
+      await fs.writeFile(join(root, "a.txt"), "alpha\nbeta\ngamma\n");
+      const out = await tools.dispatch(
+        "multi_edit",
+        JSON.stringify({
+          path: "a.txt",
+          edits: [
+            { search: "alpha", replace: "ALPHA" },
+            { search: "gamma", replace: "GAMMA" },
+          ],
+        }),
+      );
+      expect(out).toMatch(/applied 2 edits/);
+      const disk = await fs.readFile(join(root, "a.txt"), "utf8");
+      expect(disk).toBe("ALPHA\nbeta\nGAMMA\n");
+    });
+
+    it("applies edits sequentially — edit 2 can match text inserted by edit 1", async () => {
+      await fs.writeFile(join(root, "a.txt"), "x\n");
+      const out = await tools.dispatch(
+        "multi_edit",
+        JSON.stringify({
+          path: "a.txt",
+          edits: [
+            { search: "x", replace: "x\nINSERTED" },
+            { search: "INSERTED", replace: "REPLACED" },
+          ],
+        }),
+      );
+      expect(out).toMatch(/applied 2 edits/);
+      const disk = await fs.readFile(join(root, "a.txt"), "utf8");
+      expect(disk).toBe("x\nREPLACED\n");
+    });
+
+    it("is atomic: a failing edit leaves the file untouched", async () => {
+      await fs.writeFile(join(root, "a.txt"), "alpha\nbeta\ngamma\n");
+      const out = await tools.dispatch(
+        "multi_edit",
+        JSON.stringify({
+          path: "a.txt",
+          edits: [
+            { search: "alpha", replace: "ALPHA" },
+            { search: "MISSING", replace: "x" },
+          ],
+        }),
+      );
+      expect(out).toMatch(/edit #2/);
+      expect(out).toMatch(/no edits applied/);
+      const disk = await fs.readFile(join(root, "a.txt"), "utf8");
+      expect(disk).toBe("alpha\nbeta\ngamma\n");
+    });
+
+    it("refuses an empty edits array", async () => {
+      await fs.writeFile(join(root, "a.txt"), "x");
+      const out = await tools.dispatch("multi_edit", JSON.stringify({ path: "a.txt", edits: [] }));
+      expect(out).toMatch(/at least one entry/);
+    });
+
+    it("refuses a duplicate match (same as edit_file)", async () => {
+      await fs.writeFile(join(root, "a.txt"), "cat cat\n");
+      const out = await tools.dispatch(
+        "multi_edit",
+        JSON.stringify({
+          path: "a.txt",
+          edits: [{ search: "cat", replace: "dog" }],
+        }),
+      );
+      expect(out).toMatch(/multiple times/);
+      const disk = await fs.readFile(join(root, "a.txt"), "utf8");
+      expect(disk).toBe("cat cat\n");
+    });
+
+    it("matches LF search against a CRLF file and preserves CRLF", async () => {
+      await fs.writeFile(join(root, "a.txt"), "one\r\ntwo\r\nthree\r\n");
+      const out = await tools.dispatch(
+        "multi_edit",
+        JSON.stringify({
+          path: "a.txt",
+          edits: [
+            { search: "one", replace: "ONE" },
+            { search: "three", replace: "THREE" },
+          ],
+        }),
+      );
+      expect(out).toMatch(/applied 2 edits/);
+      const disk = await fs.readFile(join(root, "a.txt"), "utf8");
+      expect(disk).toBe("ONE\r\ntwo\r\nTHREE\r\n");
     });
   });
 });
