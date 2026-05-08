@@ -63,7 +63,7 @@ import type {
   PickerResolution,
   SubmitResult,
 } from "../../server/context.js";
-import { type DashboardServerHandle, startDashboardServer } from "../../server/index.js";
+import type { DashboardServerHandle } from "../../server/index.js";
 import { loadSlashUsage, recordSlashUse } from "../../slash-usage.js";
 import {
   DEEPSEEK_CONTEXT_TOKENS,
@@ -275,6 +275,7 @@ interface StreamingState {
 }
 
 export function App(props: AppProps): React.ReactElement {
+  markPhase("app_render_start");
   const session = useAgentSession({
     sessionId: props.session,
     model: props.model,
@@ -306,6 +307,7 @@ function AppInner({
   noDashboard,
   onSwitchSession,
 }: AppProps) {
+  markPhase("app_inner_start");
   const log = useScrollback();
   const agentStore = useAgentStore();
   const hasConversation = useAgentState((s) =>
@@ -1643,6 +1645,7 @@ function AppInner({
     if (dashboardRef.current) return dashboardRef.current.url;
     if (dashboardStartingRef.current) return dashboardStartingRef.current;
     const startup = (async () => {
+      const { startDashboardServer } = await import("../../server/index.js");
       const handle = await startDashboardServer({
         mode: "attached",
         configPath: defaultConfigPath(),
