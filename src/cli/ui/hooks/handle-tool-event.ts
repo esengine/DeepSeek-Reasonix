@@ -14,7 +14,6 @@ export interface ToolEventContext {
     SetStateAction<{ progress: number; total?: number; message?: string } | null>
   >;
   toolStartedAtRef: MutableRefObject<number | null>;
-  toolHistoryRef: MutableRefObject<Array<{ toolName: string; text: string }>>;
   setPendingShell: Dispatch<
     SetStateAction<{ id: number; command: string; kind: "run_command" | "run_background" } | null>
   >;
@@ -41,16 +40,7 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
   ctx.setToolProgress(null);
   ctx.translator.toolEnd(ev.content);
 
-  // mark_step_complete gets its own pretty scrollback row below — suppress
-  // the raw tool row here so we don't show the same JSON blob twice.
-  const isStepProgressTool = ev.toolName === "mark_step_complete";
   ctx.toolStartedAtRef.current = null;
-  if (!isStepProgressTool) {
-    ctx.toolHistoryRef.current.push({
-      toolName: ev.toolName ?? "?",
-      text: ev.content,
-    });
-  }
 
   if (ev.toolName === "mark_step_complete") {
     try {

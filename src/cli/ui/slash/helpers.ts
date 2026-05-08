@@ -52,33 +52,6 @@ export function appendSection(
   lines.push(`  ${label.trim()}    ${names.length}  [${head}${more}]`);
 }
 
-export function formatToolList(history: Array<{ toolName: string; text: string }>): string {
-  const total = history.length;
-  const header = `Tool calls in this session (${total}, most recent first):`;
-  // Show the 10 most recent. Older ones are rarely what the user
-  // wants — and the help footer tells them how to reach any entry
-  // by index if they do.
-  const shown = Math.min(total, 10);
-  const lines: string[] = [header];
-  for (let i = 0; i < shown; i++) {
-    const entry = history[total - 1 - i];
-    if (!entry) continue;
-    const idx = i + 1; // 1-based from most recent
-    const flat = entry.text.replace(/\s+/g, " ").trim();
-    const preview = flat.length > 80 ? `${flat.slice(0, 80)}…` : flat;
-    const name = entry.toolName.length > 24 ? `${entry.toolName.slice(0, 23)}…` : entry.toolName;
-    lines.push(
-      `  #${String(idx).padStart(2)}  ${name.padEnd(24)}  ${String(entry.text.length).padStart(6)} chars  ${preview}`,
-    );
-  }
-  if (total > shown) {
-    lines.push(`  … (${total - shown} earlier, reach with /tool N)`);
-  }
-  lines.push("");
-  lines.push("View full output: /tool N   (N=1 → most recent)");
-  return lines.join("\n");
-}
-
 /** Binary-K to match DeepSeek docs; do NOT reuse for non-token counts. */
 export function compactNum(n: number): string {
   if (n < 1024) return String(n);

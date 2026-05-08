@@ -62,7 +62,6 @@ export interface SlashContext {
   codeShowEdit?: (args: readonly string[]) => string;
   codeRoot?: string;
   pendingEditCount?: number;
-  toolHistory?: () => Array<{ toolName: string; text: string }>;
   mcpServers?: McpServerSummary[];
   /** Absent → tests context; `/memory` MUST reply "root unknown" rather than silently reading wrong dir. */
   memoryRoot?: string;

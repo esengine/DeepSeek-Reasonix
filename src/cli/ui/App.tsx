@@ -670,14 +670,6 @@ function AppInner({
   // synced in a useEffect once handleSubmit is defined.
   const handleSubmitRef = useRef<((raw: string) => Promise<void>) | null>(null);
   const busyRef = useRef<boolean>(false);
-  // Full untruncated tool results, in arrival order. ToolCard clips
-  // output at 400 chars for display; `/tool N` reads from this ref to
-  // show the real thing. Not persisted — a
-  // resumed session replays the log (which has the same content in
-  // `tool` messages) but we don't repopulate this ref on resume
-  // because the user wouldn't expect `/tool` to reach back across
-  // process boundaries.
-  const toolHistoryRef = useRef<Array<{ toolName: string; text: string }>>([]);
   // Embedded dashboard server handle. Set when /dashboard boots; null
   // otherwise. Mutations to this ref happen inside the start/stop
   // callbacks; the slash handler uses getDashboardUrl() to surface
@@ -2184,7 +2176,6 @@ function AppInner({
           codeShowEdit: codeMode ? codeShowEdit : undefined,
           codeRoot: codeMode ? currentRootDir : undefined,
           pendingEditCount: codeMode ? pendingEdits.current.length : undefined,
-          toolHistory: () => toolHistoryRef.current,
           memoryRoot: currentRootDir,
           planMode,
           setPlanMode: codeMode ? togglePlanMode : undefined,
@@ -2597,7 +2588,6 @@ function AppInner({
               setOngoingTool,
               setToolProgress,
               toolStartedAtRef,
-              toolHistoryRef,
               setPendingShell,
               setPendingPlan,
               setPendingRevision,
