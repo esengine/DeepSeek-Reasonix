@@ -125,13 +125,26 @@ export interface TranslationSchema {
     };
   };
   loop: {
-    budgetWarning: string;
-    budgetRefusal: string;
-    contextWarning: string;
-    escalationWarning: string;
-    toolFailure: string;
-    interrupted: string;
-    loopStopped: string;
+    budgetExhausted: string;
+    budget80Pct: string;
+    proArmed: string;
+    abortedAtIter: string;
+    toolUploadStatus: string;
+    toolBudgetWarning: string;
+    preflightFoldStatus: string;
+    preflightFolded: string;
+    preflightNoFold: string;
+    flashEscalation: string;
+    harvestStatus: string;
+    autoEscalation: string;
+    repeatToolCallWarning: string;
+    stormStuck: string;
+    stormSuppressed: string;
+    compactingHistoryStatus: string;
+    aggressiveTag: string;
+    foldedHistory: string;
+    aggressivelyFoldedHistory: string;
+    forcingSummary: string;
   };
   errors: {
     contextOverflow: string;

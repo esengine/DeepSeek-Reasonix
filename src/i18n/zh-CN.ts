@@ -315,13 +315,35 @@ export const zhCN: TranslationSchema = {
     stepCounter: "步骤 {step}/{total} · ",
   },
   loop: {
-    budgetWarning: "▲ 会话预算达到 80% ($${used} / $${cap})",
-    budgetRefusal: "▲ 会话预算达到 100% ($${used} / $${cap}) — 拒绝执行。通过 /budget 提高或清除。",
-    contextWarning: "▲ 上下文窗口压力：{ratio}% ({tokens} / {cap})",
-    escalationWarning: "⇧ flash 请求升级 — {reason}",
-    toolFailure: "▸ 工具 {name} 失败：{reason}",
-    interrupted: "▸ 用户中断了执行。",
-    loopStopped: "▸ 循环停止（在执行 {count} 次之后）。",
+    budgetExhausted:
+      "会话预算已用完 — 已花费 ${spent} ≥ 上限 ${cap}。用 /budget <usd> 提高上限，/budget off 清除上限，或结束会话。",
+    budget80Pct: "▲ 预算已用 80% — ${spent} / ${cap}。下一两轮可能就触顶。",
+    proArmed: "⇧ /pro 已装备 — 本轮使用 deepseek-v4-pro（一次性 · 本轮后自动解除）",
+    abortedAtIter:
+      "在第 {iter}/{cap} 次工具调用处中断 — 未生成总结即停止（按 ↑ + Enter 或 /retry 恢复）",
+    toolUploadStatus: "工具结果已上传 · 模型在生成下一条响应前思考中…",
+    toolBudgetWarning: "已用 {iter}/{cap} 次工具调用 — 接近上限。按 Esc 立即强制总结。",
+    preflightFoldStatus: "预检：上下文接近上限，尝试折叠…",
+    preflightFolded:
+      "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）— 已折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。发送中。",
+    preflightNoFold:
+      "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）且没有可折叠的内容 — DeepSeek 大概率会返回 400。请运行 /clear 或 /new 重新开始。",
+    flashEscalation: "⇧ flash 请求升级 — 本轮改用 {model}{reasonSuffix}",
+    harvestStatus: "正在从推理过程提取计划状态…",
+    autoEscalation:
+      "⇧ 本轮剩余调用自动升级到 {model} — flash 命中 {breakdown}。下一轮回退到 {fallback}，除非已装备 /pro。",
+    repeatToolCallWarning: "拦截到重复工具调用 — 让模型察觉问题并换种方式重试。",
+    stormStuck:
+      "已停止卡死的重试循环 — 模型在自纠提示后仍以相同参数重复调用同一工具。请尝试 /retry、换种说法，或排查底层阻塞。",
+    stormSuppressed: "已抑制 {count} 次重复工具调用 — 同一名称 + 参数触发 3 次以上。",
+    compactingHistoryStatus: "正在压缩历史{aggressiveTag}…",
+    aggressiveTag: "（激进）",
+    foldedHistory:
+      "上下文 {before}/{ctxMax}（{pct}%）— 已折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。继续。",
+    aggressivelyFoldedHistory:
+      "上下文 {before}/{ctxMax}（{pct}%）— 已激进折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。继续。",
+    forcingSummary:
+      "上下文 {before}/{ctxMax}（{pct}%）— 基于已收集到的内容强制总结。请运行 /compact、/clear 或 /new 重置。",
   },
   errors: {
     contextOverflow:

@@ -322,14 +322,37 @@ export const EN: TranslationSchema = {
     stepCounter: "Step {step}/{total} · ",
   },
   loop: {
-    budgetWarning: "▲ session budget reached 80% ($${used} / $${cap})",
-    budgetRefusal:
-      "▲ session budget reached 100% ($${used} / $${cap}) — turn refused. Bump or clear via /budget.",
-    contextWarning: "▲ context window pressure: {ratio}% ({tokens} / {cap})",
-    escalationWarning: "⇧ flash requested escalation — {reason}",
-    toolFailure: "▸ tool {name} failed: {reason}",
-    interrupted: "▸ turn interrupted by user.",
-    loopStopped: "▸ loop stopped (after {count} iter{s}).",
+    budgetExhausted:
+      "session budget exhausted — spent ${spent} ≥ cap ${cap}. Bump the cap with /budget <usd>, clear it with /budget off, or end the session.",
+    budget80Pct: "▲ budget 80% used — ${spent} of ${cap}. Next turn or two likely trips the cap.",
+    proArmed: "⇧ /pro armed — this turn runs on deepseek-v4-pro (one-shot · disarms after turn)",
+    abortedAtIter:
+      "aborted at iter {iter}/{cap} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
+    toolUploadStatus: "tool result uploaded · model thinking before next response…",
+    toolBudgetWarning:
+      "{iter}/{cap} tool calls used — approaching budget. Press Esc to force a summary now.",
+    preflightFoldStatus: "preflight: context near full, attempting fold…",
+    preflightFolded:
+      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Sending.",
+    preflightNoFold:
+      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) and nothing left to fold — DeepSeek will likely 400. Run /clear or /new to start fresh.",
+    flashEscalation: "⇧ flash requested escalation — retrying this turn on {model}{reasonSuffix}",
+    harvestStatus: "extracting plan state from reasoning…",
+    autoEscalation:
+      "⇧ auto-escalating to {model} for the rest of this turn — flash hit {breakdown}. Next turn falls back to {fallback} unless /pro is armed.",
+    repeatToolCallWarning:
+      "Caught a repeated tool call — let the model see the issue and retry with a different approach.",
+    stormStuck:
+      "Stopped a stuck retry loop — the model kept calling the same tool with identical args after a self-correction nudge. Try /retry, rephrase, or rule out the underlying blocker.",
+    stormSuppressed: "Suppressed {count} repeated tool call(s) — same name + args fired 3+ times.",
+    compactingHistoryStatus: "compacting history{aggressiveTag}…",
+    aggressiveTag: " (aggressive)",
+    foldedHistory:
+      "context {before}/{ctxMax} ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Continuing.",
+    aggressivelyFoldedHistory:
+      "context {before}/{ctxMax} ({pct}%) — aggressively folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Continuing.",
+    forcingSummary:
+      "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
   },
   errors: {
     contextOverflow:

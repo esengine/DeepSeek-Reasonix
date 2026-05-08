@@ -17,6 +17,7 @@ import {
 } from "./mcp/registry.js";
 
 import { ContextManager } from "./context-manager.js";
+import { t } from "./i18n/index.js";
 import { summarizeBranch } from "./loop/branch.js";
 import { formatLoopError, is5xxError, probeDeepSeekReachable } from "./loop/errors.js";
 import {
@@ -513,7 +514,10 @@ export class CacheFirstLoop {
           turn: this._turn,
           role: "error",
           content: "",
-          error: `session budget exhausted — spent $${spent.toFixed(4)} ≥ cap $${this.budgetUsd.toFixed(2)}. Bump the cap with /budget <usd>, clear it with /budget off, or end the session.`,
+          error: t("loop.budgetExhausted", {
+            spent: spent.toFixed(4),
+            cap: this.budgetUsd.toFixed(2),
+          }),
         };
         return;
       }
@@ -522,7 +526,10 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
-          content: `▲ budget 80% used — $${spent.toFixed(4)} of $${this.budgetUsd.toFixed(2)}. Next turn or two likely trips the cap.`,
+          content: t("loop.budget80Pct", {
+            spent: spent.toFixed(4),
+            cap: this.budgetUsd.toFixed(2),
+          }),
         };
       }
     }
@@ -567,7 +574,7 @@ export class CacheFirstLoop {
       yield {
         turn: this._turn,
         role: "warning",
-        content: "⇧ /pro armed — this turn runs on deepseek-v4-pro (one-shot · disarms after turn)",
+        content: t("loop.proArmed"),
       };
     }
     let pendingUser: string | null = userInput;
@@ -596,7 +603,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
-          content: `aborted at iter ${iter}/${this.maxToolIters} — stopped without producing a summary (press ↑ + Enter or /retry to resume)`,
+          content: t("loop.abortedAtIter", { iter, cap: this.maxToolIters }),
         };
         const stoppedMsg =
           "[aborted by user (Esc) — no summary produced. Ask again or /retry when ready; prior tool output is still in the log.]";
@@ -642,7 +649,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "status",
-          content: "tool result uploaded · model thinking before next response…",
+          content: t("loop.toolUploadStatus"),
         };
       }
       if (!warnedForIterBudget && iter >= warnAt) {
@@ -650,7 +657,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
-          content: `${iter}/${this.maxToolIters} tool calls used — approaching budget. Press Esc to force a summary now.`,
+          content: t("loop.toolBudgetWarning", { iter, cap: this.maxToolIters }),
         };
       }
       let messages = this.buildMessages(pendingUser);
@@ -668,16 +675,21 @@ export class CacheFirstLoop {
           yield {
             turn: this._turn,
             role: "status",
-            content: "preflight: context near full, attempting fold…",
+            content: t("loop.preflightFoldStatus"),
           };
           const result = await this.context.fold(this.model);
           if (result.folded) {
             yield {
               turn: this._turn,
               role: "warning",
-              content: `preflight: request ~${estimate.toLocaleString()}/${ctxMax.toLocaleString()} tokens (${Math.round(
-                (estimate / ctxMax) * 100,
-              )}%) — folded ${result.beforeMessages} messages → ${result.afterMessages} (summary ${result.summaryChars} chars). Sending.`,
+              content: t("loop.preflightFolded", {
+                estimate: estimate.toLocaleString(),
+                ctxMax: ctxMax.toLocaleString(),
+                pct: Math.round((estimate / ctxMax) * 100),
+                beforeMessages: result.beforeMessages,
+                afterMessages: result.afterMessages,
+                summaryChars: result.summaryChars,
+              }),
             };
             // Rebuild with the folded log so we send the smaller payload.
             messages = this.buildMessages(pendingUser);
@@ -685,9 +697,11 @@ export class CacheFirstLoop {
             yield {
               turn: this._turn,
               role: "warning",
-              content: `preflight: request ~${estimate.toLocaleString()}/${ctxMax.toLocaleString()} tokens (${Math.round(
-                (estimate / ctxMax) * 100,
-              )}%) and nothing left to fold — DeepSeek will likely 400. Run /clear or /new to start fresh.`,
+              content: t("loop.preflightNoFold", {
+                estimate: estimate.toLocaleString(),
+                ctxMax: ctxMax.toLocaleString(),
+                pct: Math.round((estimate / ctxMax) * 100),
+              }),
             };
           }
         }
@@ -983,7 +997,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
-          content: `⇧ flash requested escalation — retrying this turn on ${ESCALATION_MODEL}${reasonSuffix}`,
+          content: t("loop.flashEscalation", { model: ESCALATION_MODEL, reasonSuffix }),
         };
         // Reset per-iter state. We don't record stats for the rejected
         // flash call (cost is small — a ~20-token lead-in that we broke
@@ -1028,7 +1042,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "status",
-          content: "extracting plan state from reasoning…",
+          content: t("loop.harvestStatus"),
         };
       }
       const planState = preHarvestedPlanState
@@ -1070,7 +1084,11 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
-          content: `⇧ auto-escalating to ${ESCALATION_MODEL} for the rest of this turn — flash hit ${this._turnFailures.formatBreakdown()}. Next turn falls back to ${this.model} unless /pro is armed.`,
+          content: t("loop.autoEscalation", {
+            model: ESCALATION_MODEL,
+            breakdown: this._turnFailures.formatBreakdown(),
+            fallback: this.model,
+          }),
         };
       }
 
@@ -1103,8 +1121,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
-          content:
-            "Caught a repeated tool call — let the model see the issue and retry with a different approach.",
+          content: t("loop.repeatToolCallWarning"),
         };
         continue;
       }
@@ -1112,8 +1129,8 @@ export class CacheFirstLoop {
       if (report.stormsBroken > 0) {
         const noteTail = report.notes.length ? ` — ${report.notes[report.notes.length - 1]}` : "";
         const phrase = allSuppressed
-          ? "Stopped a stuck retry loop — the model kept calling the same tool with identical args after a self-correction nudge. Try /retry, rephrase, or rule out the underlying blocker."
-          : `Suppressed ${report.stormsBroken} repeated tool call(s) — same name + args fired 3+ times.`;
+          ? t("loop.stormStuck")
+          : t("loop.stormSuppressed", { count: report.stormsBroken });
         yield {
           turn: this._turn,
           role: "warning",
@@ -1137,20 +1154,28 @@ export class CacheFirstLoop {
         this._foldedThisTurn = true;
         const before = decision.promptTokens;
         const ctxMax = decision.ctxMax;
-        const aggressiveTag = decision.aggressive ? " (aggressive)" : "";
+        const aggressiveTag = decision.aggressive ? t("loop.aggressiveTag") : "";
         yield {
           turn: this._turn,
           role: "status",
-          content: `compacting history${aggressiveTag}…`,
+          content: t("loop.compactingHistoryStatus", { aggressiveTag }),
         };
         const result = await this.compactHistory({ keepRecentTokens: decision.tailBudget });
         if (result.folded) {
           yield {
             turn: this._turn,
             role: "warning",
-            content: `context ${before.toLocaleString()}/${ctxMax.toLocaleString()} (${Math.round(
-              (before / ctxMax) * 100,
-            )}%) — ${decision.aggressive ? "aggressively folded" : "folded"} ${result.beforeMessages} messages → ${result.afterMessages} (summary ${result.summaryChars} chars). Continuing.`,
+            content: t(
+              decision.aggressive ? "loop.aggressivelyFoldedHistory" : "loop.foldedHistory",
+              {
+                before: before.toLocaleString(),
+                ctxMax: ctxMax.toLocaleString(),
+                pct: Math.round((before / ctxMax) * 100),
+                beforeMessages: result.beforeMessages,
+                afterMessages: result.afterMessages,
+                summaryChars: result.summaryChars,
+              },
+            ),
           };
         }
       } else if (decision.kind === "exit-with-summary") {
@@ -1159,9 +1184,11 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
-          content: `context ${before.toLocaleString()}/${ctxMax.toLocaleString()} (${Math.round(
-            (before / ctxMax) * 100,
-          )}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.`,
+          content: t("loop.forcingSummary", {
+            before: before.toLocaleString(),
+            ctxMax: ctxMax.toLocaleString(),
+            pct: Math.round((before / ctxMax) * 100),
+          }),
         };
         this.context.trimTrailingToolCalls();
         yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "context-guard" });
@@ -1245,7 +1272,11 @@ export class CacheFirstLoop {
             yield {
               turn: this._turn,
               role: "warning",
-              content: `⇧ auto-escalating to ${ESCALATION_MODEL} for the rest of this turn — flash hit ${this._turnFailures.formatBreakdown()}. Next turn falls back to ${this.model} unless /pro is armed.`,
+              content: t("loop.autoEscalation", {
+                model: ESCALATION_MODEL,
+                breakdown: this._turnFailures.formatBreakdown(),
+                fallback: this.model,
+              }),
             };
           }
 
