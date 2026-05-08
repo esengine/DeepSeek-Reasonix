@@ -512,6 +512,11 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       exitOnCtrlC: true,
       // patchConsole:false — winpty/MINTTY redraw-glitch source.
       patchConsole: false,
+      incrementalRendering: true,
+      // Default true — alt-screen is the only mode without scrollback-
+      // reflow ghosting. `--no-alt-screen` opts back into scrollback mode
+      // for users who need chat output preserved in shell history on exit.
+      alternateScreen: opts.altScreen !== false,
     },
   );
   try {
