@@ -405,6 +405,64 @@ describe("handleSlash", () => {
     });
   });
 
+  describe("/cwd", () => {
+    it("registry exposes /cwd as a code-mode command with `sandbox` alias", () => {
+      const spec = SLASH_COMMANDS.find((c) => c.cmd === "cwd");
+      expect(spec).toBeDefined();
+      expect(spec?.contextual).toBe("code");
+      expect(spec?.aliases).toContain("sandbox");
+    });
+
+    it("returns code-only message when switchCwd is not provided", () => {
+      const r = handleSlash("cwd", ["./somewhere"], makeLoop());
+      expect(r.info).toMatch(/only available inside/);
+    });
+
+    it("shows usage when called without arguments", () => {
+      const r = handleSlash("cwd", [], makeLoop(), {
+        codeRoot: "/proj",
+        switchCwd: () => ({ ok: true, info: "" }),
+      });
+      expect(r.info).toMatch(/usage:/);
+      expect(r.info).toMatch(/\/proj/);
+    });
+
+    it("calls switchCwd and surfaces its info string", () => {
+      const calls: string[] = [];
+      const r = handleSlash("cwd", ["../sibling"], makeLoop(), {
+        switchCwd: (path) => {
+          calls.push(path);
+          return { ok: true, info: `▸ moved to ${path}` };
+        },
+      });
+      expect(calls).toEqual(["../sibling"]);
+      expect(r.info).toBe("▸ moved to ../sibling");
+    });
+
+    it("strips outer quotes from the path argument", () => {
+      const calls: string[] = [];
+      const r = handleSlash("cwd", ['"path with spaces"'], makeLoop(), {
+        switchCwd: (path) => {
+          calls.push(path);
+          return { ok: true, info: "ok" };
+        },
+      });
+      expect(calls).toEqual(["path with spaces"]);
+      expect(r.info).toBe("ok");
+    });
+
+    it("`sandbox` alias resolves to the same handler", () => {
+      const calls: string[] = [];
+      handleSlash("sandbox", ["/x"], makeLoop(), {
+        switchCwd: (p) => {
+          calls.push(p);
+          return { ok: true, info: "" };
+        },
+      });
+      expect(calls).toEqual(["/x"]);
+    });
+  });
+
   it("SLASH_COMMANDS registry contains every handler switch case", () => {
     // Spot-check a handful so the registry doesn't silently drift
     // from `handleSlash`. If a new case lands in handleSlash, it

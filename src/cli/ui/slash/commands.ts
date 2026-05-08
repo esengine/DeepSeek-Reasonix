@@ -181,6 +181,15 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "roll back files to a named checkpoint (see /checkpoint list)",
     contextual: "code",
   },
+  {
+    cmd: "cwd",
+    group: "code",
+    argsHint: "<path>",
+    summary:
+      "switch the workspace root mid-session — re-points fs / shell / memory tools, reloads project hooks, refreshes the at-mention walker",
+    contextual: "code",
+    aliases: ["sandbox"],
+  },
 
   {
     cmd: "jobs",

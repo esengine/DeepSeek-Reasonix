@@ -524,6 +524,10 @@ export const zhCN: TranslationSchema = {
       restoreWrote: "  · 写回了 {count} 个文件",
       restoreRemoved: "  · 移除了 {count} 个文件（检查点时不存在）",
       restoreSkipped: "  ✗ 跳过了 {count} 个文件：",
+      cwdCodeOnly: "/cwd 仅在 `reasonix code` 中可用。",
+      cwdUsage:
+        "用法：/cwd <path>   （当前根目录：{current}）。重新指向 filesystem / shell / memory 工具到 <path>。",
+      cwdUsageNoCurrent: "用法：/cwd <path>   将工作区根目录切换到 <path>。",
     },
     model: {
       modelHint: "尝试 deepseek-v4-flash 或 deepseek-v4-pro — 运行 /models 获取实时列表",

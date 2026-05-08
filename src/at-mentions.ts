@@ -274,15 +274,25 @@ export function rankPickerCandidates(
   for (const e of entries) {
     const lower = e.path.toLowerCase();
     const hit = lower.indexOf(needle);
-    if (hit < 0) continue;
-    const slash = lower.lastIndexOf("/");
-    const base = slash >= 0 ? lower.slice(slash + 1) : lower;
-    let score = 2;
-    if (base.startsWith(needle)) score = 0;
-    else if (lower.startsWith(needle)) score = 1;
+    if (hit >= 0) {
+      const slash = lower.lastIndexOf("/");
+      const base = slash >= 0 ? lower.slice(slash + 1) : lower;
+      let cls = 2;
+      if (base.startsWith(needle)) cls = 0;
+      else if (lower.startsWith(needle)) cls = 1;
+      scored.push({
+        path: e.path,
+        score: cls * 10_000 + Math.min(hit, 9999),
+        mtimeMs: e.mtimeMs,
+        recent: recent.has(e.path),
+      });
+      continue;
+    }
+    const fuzzy = fuzzySubseqScore(needle, lower);
+    if (fuzzy === null) continue;
     scored.push({
       path: e.path,
-      score: score * 10_000 + hit,
+      score: 30_000 + fuzzy,
       mtimeMs: e.mtimeMs,
       recent: recent.has(e.path),
     });
@@ -294,6 +304,29 @@ export function rankPickerCandidates(
     return b.mtimeMs - a.mtimeMs;
   });
   return scored.slice(0, limit).map((s) => s.path);
+}
+
+function fuzzySubseqScore(needle: string, target: string): number | null {
+  if (needle.length === 0) return 0;
+  const slashIdx = target.lastIndexOf("/");
+  const basenameStart = slashIdx >= 0 ? slashIdx + 1 : 0;
+  let qi = 0;
+  let lastMatchIdx = -2;
+  let consecutive = 0;
+  let basenameMatches = 0;
+  let totalGap = 0;
+  for (let ti = 0; ti < target.length && qi < needle.length; ti++) {
+    if (target[ti] !== needle[qi]) continue;
+    if (ti === lastMatchIdx + 1) consecutive++;
+    else if (lastMatchIdx >= 0) totalGap += ti - lastMatchIdx - 1;
+    if (ti >= basenameStart) basenameMatches++;
+    lastMatchIdx = ti;
+    qi++;
+  }
+  if (qi < needle.length) return null;
+  const quality = Math.max(0, totalGap - consecutive * 10 - basenameMatches * 5);
+  const lengthPenalty = Math.floor(target.length / 4);
+  return quality + lengthPenalty;
 }
 
 /** Word-boundary anchor rejects `@` embedded in emails / social handles; trailing `.` stripped before lookup. */

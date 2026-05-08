@@ -311,6 +311,40 @@ describe("rankPickerCandidates", () => {
     expect(r[2]).toBe("b.ts");
   });
 
+  it("fuzzy-subsequence-matches when no substring hits — typed acronyms find the file", () => {
+    // `atmnt` isn't a substring of any path, but is a subsequence of
+    // `at-mentions`. Today's prefix-only ranker would drop it; fuzzy
+    // fallback should surface both at-mentions paths.
+    const r = rankPickerCandidates(files, "atmnt");
+    expect(r).toContain("src/at-mentions.ts");
+    expect(r).toContain("tests/at-mentions.test.ts");
+  });
+
+  it("substring hits still rank above fuzzy-subsequence hits", () => {
+    // `loop` is a substring of "src/loop.ts" (class 2) and
+    // "tests/loop.test.ts" (class 2). It's a subsequence of a few
+    // others (e.g. "src/cli/ui/PromptInput.tsx" has l-o-..-p? actually
+    // no `l` then `o` then `o` then `p` — "PromptInput" is P-r-o-m-p-t,
+    // no subsequence). Use a query that matches both substring and
+    // subsequence to verify substring wins:
+    //   `app` → substring hit on "src/cli/ui/App.tsx" (case-insensitive)
+    //         + subseq match on "src/at-mentions.ts" (a-..-p? no `p`).
+    // Simpler: just ensure all results for `loop` are substring hits
+    // (the only two such files), and nothing fuzzy snuck above.
+    const r = rankPickerCandidates(files, "loop");
+    expect(r[0]).toMatch(/loop/);
+    expect(r[1]).toMatch(/loop/);
+  });
+
+  it("clusters of consecutive subsequence chars rank above scattered ones", () => {
+    const candidates = [
+      "src/a/b/c/d/e/things.ts", // `thgs` scattered as subseq with gaps
+      "src/things.ts", // `thgs` as cleaner subseq, no path noise
+    ];
+    const r = rankPickerCandidates(candidates, "thgs");
+    expect(r[0]).toBe("src/things.ts");
+  });
+
   it("tie-breaks query matches by recently-used, then mtime", () => {
     const entries = [
       { path: "src/alpha.ts", mtimeMs: 100 },

@@ -95,6 +95,8 @@ export interface SlashContext {
   setPlanMode?: (on: boolean) => void;
 
   reloadHooks?: () => number;
+  /** Switch the workspace root mid-session — re-targets filesystem/shell/memory tools, hooks, at-mention walker. Code mode only. */
+  switchCwd?: (newPath: string) => { ok: boolean; info: string };
   /** Diff config.mcp[] vs live bridges → add/close clients accordingly. Wired from chat.tsx mcpRuntime. */
   reloadMcp?: () => Promise<{
     added: string[];

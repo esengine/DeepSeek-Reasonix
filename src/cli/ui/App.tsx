@@ -1,4 +1,5 @@
-import type { WriteStream } from "node:fs";
+import { type WriteStream, statSync } from "node:fs";
+import { resolve } from "node:path";
 import { Box, Text, useStdout } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -405,9 +406,9 @@ function AppInner({
   // the workspace mid-session; the prop `codeMode.rootDir` stays as
   // the original launch root so it can't accidentally drift (it's
   // used purely for "is this a code-mode session?" checks now).
-  // Initial-only — no setter exists, so this is effectively a const captured
-  // at first mount. Kept as state for future `/cwd` mid-session retargeting.
-  const [currentRootDir] = useState<string>(() => codeMode?.rootDir ?? process.cwd());
+  const [currentRootDir, setCurrentRootDir] = useState<string>(
+    () => codeMode?.rootDir ?? process.cwd(),
+  );
   // Loaded user hooks (project + global settings.json). Stays mutable
   // so `/hooks reload` and `/cwd` can rescan disk without
   // reconstructing the loop. The loop holds a parallel reference for
@@ -2209,6 +2210,25 @@ function AppInner({
             setHookList(fresh);
             return fresh.length;
           },
+          switchCwd: codeMode?.reregisterTools
+            ? (newPath: string) => {
+                const resolved = resolve(newPath);
+                let stat: ReturnType<typeof statSync>;
+                try {
+                  stat = statSync(resolved);
+                } catch (err) {
+                  return { ok: false, info: `/cwd: ${(err as Error).message}` };
+                }
+                if (!stat.isDirectory()) {
+                  return { ok: false, info: `/cwd: ${resolved} is not a directory` };
+                }
+                codeMode.reregisterTools?.(resolved);
+                setCurrentRootDir(resolved);
+                const fresh = loadHooks({ projectRoot: resolved });
+                setHookList(fresh);
+                return { ok: true, info: `▸ workspace switched to ${resolved}` };
+              }
+            : undefined,
           reloadMcp: mcpRuntime
             ? async () => {
                 const r = await mcpRuntime.reloadFromConfig(loop);

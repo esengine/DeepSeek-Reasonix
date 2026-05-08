@@ -554,6 +554,10 @@ export const EN: TranslationSchema = {
       restoreWrote: "  · wrote back {count} file{s}",
       restoreRemoved: "  · removed {count} file{s} (didn't exist at checkpoint time)",
       restoreSkipped: "  ✗ {count} file{s} skipped:",
+      cwdCodeOnly: "/cwd is only available inside `reasonix code`.",
+      cwdUsage:
+        "usage: /cwd <path>   (current root: {current}). Re-points filesystem / shell / memory tools to <path>.",
+      cwdUsageNoCurrent: "usage: /cwd <path>   re-points the workspace root to <path>.",
     },
     model: {
       modelHint: "try deepseek-v4-flash or deepseek-v4-pro — run /models to fetch the live list",
