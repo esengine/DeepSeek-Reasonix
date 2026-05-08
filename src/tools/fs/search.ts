@@ -74,16 +74,14 @@ export async function searchContent(
     pattern: string;
     case_sensitive?: boolean;
     include_deps?: boolean;
+    context?: number;
     signal?: AbortSignal;
   },
 ): Promise<string> {
   throwIfAborted(args.signal);
   const caseSensitive = args.case_sensitive === true;
   const includeDeps = args.include_deps === true;
-  // Try the pattern as a regex first (lets the model say `\bdispatch\(`
-  // for a word-bounded match); fall back to literal substring on
-  // invalid regex. No `g` flag — we test once per line, so global
-  // statefulness (lastIndex tracking) would just be noise.
+  const ctxLines = Math.max(0, Math.min(20, Math.floor(args.context ?? 0)));
   let re: RegExp | null = null;
   try {
     re = new RegExp(args.pattern, caseSensitive ? "" : "i");
@@ -95,6 +93,17 @@ export async function searchContent(
   let totalBytes = 0;
   let scanned = 0;
   let truncated = false;
+
+  const pushLine = (out: string): boolean => {
+    if (totalBytes + out.length + 1 > ctx.maxListBytes) {
+      matches.push(`[… truncated at ${ctx.maxListBytes} bytes — refine pattern or path …]`);
+      truncated = true;
+      return false;
+    }
+    matches.push(out);
+    totalBytes += out.length + 1;
+    return true;
+  };
 
   const walk = async (dir: string): Promise<void> => {
     if (truncated) return;
@@ -117,8 +126,6 @@ export async function searchContent(
       const full = pathMod.join(dir, e.name);
       if (ctx.nameMatch && !ctx.nameMatch(e.name, displayRel(ctx.rootDir, full))) continue;
       if (ctx.isBinaryByName(e.name)) continue;
-      // Open once and reuse the fd so the size check and read bind to the
-      // same inode — avoids the stat→readFile TOCTOU race CodeQL flags.
       let fh: import("node:fs/promises").FileHandle;
       try {
         fh = await fs.open(full, "r");
@@ -129,9 +136,6 @@ export async function searchContent(
       try {
         throwIfAborted(args.signal);
         const st = await fh.stat();
-        // Per-file size cap so a 50MB log doesn't dominate the search.
-        // Anything legitimately interesting fits in 2 MB; bigger files
-        // are usually data dumps or generated bundles.
         if (st.size > 2 * 1024 * 1024) {
           await fh.close();
           continue;
@@ -143,30 +147,48 @@ export async function searchContent(
       }
       await fh.close();
       throwIfAborted(args.signal);
-      // Content-based binary sniff: NUL byte in the first 8KB. Catches
-      // binaries with .json or .txt extensions (yes, this happens).
       const firstNul = raw.indexOf(0);
       if (firstNul !== -1 && firstNul < 8 * 1024) continue;
       const text = raw.toString("utf8");
       const rel = displayRel(ctx.rootDir, full);
       const lines = text.split(/\r?\n/);
+      const hits: number[] = [];
       for (let li = 0; li < lines.length; li++) {
         throwIfAborted(args.signal);
         const line = lines[li]!;
         const lineForCheck = caseSensitive ? line : line.toLowerCase();
         const hit = re ? re.test(line) : lineForCheck.includes(needle);
-        if (!hit) continue;
-        const display = line.length > 200 ? `${line.slice(0, 200)}…` : line;
-        const out = `${rel}:${li + 1}: ${display}`;
-        if (totalBytes + out.length + 1 > ctx.maxListBytes) {
-          matches.push(`[… truncated at ${ctx.maxListBytes} bytes — refine pattern or path …]`);
-          truncated = true;
-          return;
-        }
-        matches.push(out);
-        totalBytes += out.length + 1;
+        if (hit) hits.push(li);
       }
       scanned++;
+      if (hits.length === 0) continue;
+      if (ctxLines === 0) {
+        for (const li of hits) {
+          if (truncated) return;
+          const line = lines[li]!;
+          const display = line.length > 200 ? `${line.slice(0, 200)}…` : line;
+          if (!pushLine(`${rel}:${li + 1}: ${display}`)) return;
+        }
+        continue;
+      }
+      const hitSet = new Set(hits);
+      let prevWindowEnd = -2;
+      for (const li of hits) {
+        if (truncated) return;
+        const winStart = Math.max(0, li - ctxLines);
+        const winEnd = Math.min(lines.length - 1, li + ctxLines);
+        if (winStart > prevWindowEnd + 1 && prevWindowEnd >= 0) {
+          if (!pushLine("--")) return;
+        }
+        const realStart = winStart > prevWindowEnd + 1 ? winStart : prevWindowEnd + 1;
+        for (let i = realStart; i <= winEnd; i++) {
+          const line = lines[i]!;
+          const display = line.length > 200 ? `${line.slice(0, 200)}…` : line;
+          const sep = hitSet.has(i) ? ":" : "-";
+          if (!pushLine(`${rel}:${i + 1}${sep} ${display}`)) return;
+        }
+        prevWindowEnd = winEnd;
+      }
     }
   };
   await walk(startAbs);

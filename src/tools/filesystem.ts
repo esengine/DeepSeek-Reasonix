@@ -6,6 +6,7 @@ import picomatch from "picomatch";
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
 import type { ToolRegistry } from "../tools.js";
 import { applyEdit, applyMultiEdit } from "./fs/edit.js";
+import { globFiles } from "./fs/glob.js";
 import { searchContent, searchFiles } from "./fs/search.js";
 
 export { lineDiff } from "./fs/edit.js";
@@ -378,6 +379,11 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
           description:
             "When true, also search inside node_modules / .git / dist / build / etc. Off by default — most exploration questions are about the user's own code.",
         },
+        context: {
+          type: "integer",
+          description:
+            "Lines of context to show around each match (both before and after). Default 0 (just the matching line). Capped at 20. Output uses ripgrep style: `:` after the line number on the matching line, `-` on context lines, `--` separating non-adjacent windows.",
+        },
       },
       required: ["pattern"],
     },
@@ -388,6 +394,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
         glob?: string;
         case_sensitive?: boolean;
         include_deps?: boolean;
+        context?: number;
       },
       toolCtx,
     ) =>
@@ -402,6 +409,58 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
         safePath(args.path ?? "."),
         { ...args, signal: toolCtx?.signal },
       ),
+  });
+
+  registry.register({
+    name: "glob",
+    parallelSafe: true,
+    description:
+      "List files matching a glob pattern, sorted by mtime (most-recently-modified first) by default. Use this for 'what changed lately', 'find all *.test.ts', 'all configs under src/'. Glob syntax matches the cross-tool standard: `*` (any chars in one segment), `**` (any segments), `?` (one char), `{a,b}` (alternation). Pattern matches against the path RELATIVE to the search root (e.g. 'src/**/*.ts' from project root). Skips node_modules / .git / dist / build / etc by default. Default limit 200; raise via `limit` (max 1000). Different from `search_files` (substring on basename) and `search_content` (matches inside file contents).",
+    readOnly: true,
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: {
+          type: "string",
+          description: "Glob pattern, e.g. 'src/**/*.ts', '**/*.{md,mdx}', 'tests/*.test.ts'.",
+        },
+        path: {
+          type: "string",
+          description:
+            "Base directory to walk (default: sandbox root). The pattern matches relative to this path.",
+        },
+        sort_by: {
+          type: "string",
+          enum: ["mtime", "name"],
+          description:
+            "Sort order. 'mtime' (default) shows most-recently-modified first — useful for 'what did I change today'. 'name' is alphabetical.",
+        },
+        include_deps: {
+          type: "boolean",
+          description:
+            "When true, also walk node_modules / .git / dist / build / etc. Off by default.",
+        },
+        limit: {
+          type: "integer",
+          description: "Cap on returned matches. Default 200; clamped to [1, 1000].",
+        },
+      },
+      required: ["pattern"],
+    },
+    fn: async (
+      args: {
+        pattern: string;
+        path?: string;
+        sort_by?: "mtime" | "name";
+        include_deps?: boolean;
+        limit?: number;
+      },
+      toolCtx,
+    ) =>
+      globFiles({ rootDir, skipDirNames: SKIP_DIR_NAMES }, safePath(args.path ?? "."), {
+        ...args,
+        signal: toolCtx?.signal,
+      }),
   });
 
   registry.register({
@@ -471,28 +530,40 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
   registry.register({
     name: "multi_edit",
     description:
-      "Apply N SEARCH/REPLACE edits to ONE file in a single atomic call. Edits run sequentially against an in-memory buffer (so a later edit can match text inserted by an earlier one), then the file is written once. If ANY edit fails (search not found, ambiguous match, empty search), NO edits are written — the file stays untouched. Same per-edit rules as edit_file: `search` is exact text (whitespace sensitive, no regex) and must be unique at the moment that edit applies. Use this for renames and other multi-site refactors instead of N edit_file round-trips.",
+      "Apply N SEARCH/REPLACE edits across ONE OR MORE files in a single atomic call. Edits run sequentially in array order; for edits that touch the same file, a later edit can match text inserted by an earlier one. If ANY edit fails (search not found, ambiguous match, empty search, file unreadable), NO files are written — atomic at the validation layer. Same per-edit rules as edit_file: `search` is exact text (whitespace sensitive, no regex) and must be unique in its target file at the moment that edit applies. Use this for renames spanning multiple files, cross-file refactors, or any batch where you'd otherwise loop edit_file.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string" },
         edits: {
           type: "array",
-          description: "Edits to apply in order. Length ≥ 1.",
+          description: "Edits to apply in order. Length ≥ 1. Each edit names its own target file.",
           items: {
             type: "object",
             properties: {
-              search: { type: "string", description: "Exact text to find (must be unique)." },
+              path: {
+                type: "string",
+                description: "File the edit targets (sandbox-relative or absolute).",
+              },
+              search: {
+                type: "string",
+                description: "Exact text to find (must be unique in the file).",
+              },
               replace: { type: "string", description: "Text to substitute in place of `search`." },
             },
-            required: ["search", "replace"],
+            required: ["path", "search", "replace"],
           },
         },
       },
-      required: ["path", "edits"],
+      required: ["edits"],
     },
-    fn: async (args: { path: string; edits: Array<{ search: string; replace: string }> }) =>
-      applyMultiEdit(rootDir, safePath(args.path), args.edits),
+    fn: async (args: { edits: Array<{ path: string; search: string; replace: string }> }) => {
+      const resolved = (args.edits ?? []).map((e) => ({
+        abs: safePath(e?.path),
+        search: e?.search,
+        replace: e?.replace,
+      }));
+      return applyMultiEdit(rootDir, resolved);
+    },
   });
 
   registry.register({
