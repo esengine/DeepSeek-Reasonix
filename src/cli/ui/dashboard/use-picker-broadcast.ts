@@ -17,6 +17,46 @@ export interface PickerSnapshot {
   hint?: string;
 }
 
+export interface ViewerSnapshot {
+  viewerKind: string;
+  title: string;
+  body?: string;
+  steps?: Array<{ id: string; title: string; status: "done" | "queued" }>;
+  meta?: string;
+}
+
+export interface ViewerBroadcastPorts {
+  broadcast: (ev: DashboardEvent) => void;
+  resolverRef: MutableRefObject<(() => void) | null>;
+  snapshotRef: MutableRefObject<ViewerSnapshot | null>;
+}
+
+/** Read-only sibling of `usePickerBroadcast` — viewer modals carry no selection so only `close` flows back. */
+export function useViewerBroadcast(
+  active: boolean,
+  snapshot: ViewerSnapshot,
+  onClose: () => void,
+  ports: ViewerBroadcastPorts,
+): void {
+  const { broadcast, resolverRef, snapshotRef } = ports;
+
+  useEffect(() => {
+    if (!active) return;
+    return () => {
+      broadcast({ kind: "modal-down", modalKind: "viewer" });
+      if (resolverRef.current) resolverRef.current = null;
+      if (snapshotRef.current) snapshotRef.current = null;
+    };
+  }, [active, broadcast, resolverRef, snapshotRef]);
+
+  useEffect(() => {
+    if (!active) return;
+    snapshotRef.current = snapshot;
+    resolverRef.current = onClose;
+    broadcast({ kind: "modal-up", modal: { kind: "viewer", ...snapshot } });
+  }, [active, snapshot, onClose, broadcast, resolverRef, snapshotRef]);
+}
+
 export interface PickerBroadcastPorts {
   broadcast: (ev: DashboardEvent) => void;
   resolverRef: MutableRefObject<((res: PickerResolution) => void) | null>;

@@ -59,6 +59,8 @@ export interface DashboardContext {
   resolveReviseConfirm?: (choice: "accept" | "reject") => void;
   /** Active picker (sessions / checkpoints / mcp marketplace / …) resolves into the live TUI component via a runtime ref. */
   resolvePicker?: (resolution: PickerResolution) => void;
+  /** Active read-only viewer (replay-plan / …) — only `close` is meaningful since the viewer carries no selection state. */
+  resolveViewer?: (resolution: { action: "close" }) => void;
 
   reloadHooks?: () => number;
   reloadMcp?: () => Promise<number>;
@@ -179,6 +181,17 @@ export type ActiveModal =
       actions: PickerAction[];
       hasMore?: boolean;
       hint?: string;
+    }
+  | {
+      kind: "viewer";
+      /** Discriminator for the underlying viewer (replay-plan / …). */
+      viewerKind: string;
+      title: string;
+      /** Markdown / plain text body. */
+      body?: string;
+      /** Structured plan steps when viewerKind === "replay-plan". */
+      steps?: Array<{ id: string; title: string; status: "done" | "queued" }>;
+      meta?: string;
     };
 
 /** One row of the conversation as the SPA renders it. */

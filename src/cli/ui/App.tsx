@@ -94,7 +94,8 @@ import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
-import type { PickerSnapshot } from "./dashboard/use-picker-broadcast.js";
+import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broadcast.js";
+import { useViewerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { formatEditResults } from "./edit-history.js";
 import { loopEventToDashboard } from "./effects/loop-to-dashboard.js";
 import { appendGlobalMemory, appendProjectMemory, detectHashMemory } from "./hash-memory.js";
@@ -681,6 +682,10 @@ function AppInner({
   /** Only one picker mounts at a time; snapshot feeds `getActiveModal` for late SSE clients. */
   const activePickerResolverRef = useRef<((res: PickerResolution) => void) | null>(null);
   const activePickerSnapshotRef = useRef<PickerSnapshot | null>(null);
+  /** Active read-only viewer (e.g. /replay plan archive). Same late-SSE concern, simpler resolver (close only). */
+  const activeViewerResolverRef = useRef<(() => void) | null>(null);
+  const activeViewerSnapshotRef = useRef<ViewerSnapshot | null>(null);
+  const [pendingReplayViewer, setPendingReplayViewer] = useState<ViewerSnapshot | null>(null);
   // Structured steps captured from the most recent `submit_plan` call.
   // Populated only when the model supplied `steps`; used by the
   // `mark_step_complete` handler to look up the step title and compute
@@ -937,6 +942,20 @@ function AppInner({
       snapshotRef: activePickerSnapshotRef,
     }),
     [broadcastDashboardEvent],
+  );
+  const viewerPorts = useMemo(
+    () => ({
+      broadcast: broadcastDashboardEvent,
+      resolverRef: activeViewerResolverRef,
+      snapshotRef: activeViewerSnapshotRef,
+    }),
+    [broadcastDashboardEvent],
+  );
+  useViewerBroadcast(
+    !!pendingReplayViewer,
+    pendingReplayViewer ?? { viewerKind: "replay-plan", title: "" },
+    () => setPendingReplayViewer(null),
+    viewerPorts,
   );
 
   // Broadcast busy-state changes so the web Chat tab can disable its
@@ -1775,6 +1794,10 @@ function AppInner({
           if (picker) {
             return { kind: "picker", ...picker };
           }
+          const viewer = activeViewerSnapshotRef.current;
+          if (viewer) {
+            return { kind: "viewer", ...viewer };
+          }
           return null;
         },
         resolveShellConfirm: (choice) => {
@@ -1829,6 +1852,10 @@ function AppInner({
         resolvePicker: (resolution) => {
           const fn = activePickerResolverRef.current;
           if (fn) Promise.resolve(fn(resolution)).catch(() => undefined);
+        },
+        resolveViewer: () => {
+          const fn = activeViewerResolverRef.current;
+          if (fn) Promise.resolve(fn()).catch(() => undefined);
         },
         // ---------- v0.14 mutation surface ----------
         reloadHooks: () => {
@@ -2214,6 +2241,22 @@ function AppInner({
           pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
           return;
+        }
+        if (result.replayPlan) {
+          const rp = result.replayPlan;
+          const titleSuffix = rp.summary ? ` — ${rp.summary}` : "";
+          const done = new Set(rp.completedStepIds);
+          setPendingReplayViewer({
+            viewerKind: "replay-plan",
+            title: `Replay #${rp.index}/${rp.total} · ${rp.relativeTime}${titleSuffix}`,
+            body: rp.body,
+            steps: rp.steps.map((s) => ({
+              id: s.id,
+              title: s.title,
+              status: done.has(s.id) ? "done" : "queued",
+            })),
+            meta: rp.archiveBasename,
+          });
         }
         const outcome = applySlashResult(result, {
           log,

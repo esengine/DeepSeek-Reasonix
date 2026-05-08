@@ -164,6 +164,16 @@ export async function handleModal(
       ctx.resolvePicker(resolution);
       return { status: 200, body: { resolved: true } };
     }
+    if (kind === "viewer") {
+      if (!ctx.resolveViewer) {
+        return { status: 503, body: { error: "viewer modal resolution not wired" } };
+      }
+      if (parsed.action !== "close") {
+        return { status: 400, body: { error: "viewer action must be close" } };
+      }
+      ctx.resolveViewer({ action: "close" });
+      return { status: 200, body: { resolved: true } };
+    }
     return { status: 400, body: { error: `unknown modal kind: ${String(kind)}` } };
   }
 

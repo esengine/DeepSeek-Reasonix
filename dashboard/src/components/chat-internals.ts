@@ -133,6 +133,20 @@ export interface PickerModalSpec {
   hint?: string;
 }
 
+export interface ViewerStep {
+  id: string;
+  title: string;
+  status: "done" | "queued";
+}
+
+export interface ViewerModalSpec {
+  viewerKind: string;
+  title: string;
+  body?: string;
+  steps?: ViewerStep[];
+  meta?: string;
+}
+
 interface DiffEntry {
   kind: "context" | "ins" | "del";
   text: string;
@@ -813,6 +827,49 @@ export function PickerModal({
               </div>
             `
       }
+    <//>
+  `;
+}
+
+export function ViewerModal({
+  modal,
+  onResolve,
+}: {
+  modal: ViewerModalSpec;
+  onResolve: OnResolve;
+}) {
+  useLang();
+  return html`
+    <${ModalCard}
+      accent="#67e8f9"
+      icon="◇"
+      title=${modal.title}
+      subtitle=${modal.meta}
+    >
+      ${
+        modal.steps && modal.steps.length > 0
+          ? html`
+            <ol class="modal-viewer-steps">
+              ${modal.steps.map(
+                (s: ViewerStep) => html`
+                  <li key=${s.id} class=${`modal-viewer-step modal-viewer-step-${s.status}`}>
+                    <span class="modal-viewer-step-mark">${s.status === "done" ? "✓" : "·"}</span>
+                    <span class="modal-viewer-step-title">${s.title}</span>
+                  </li>
+                `,
+              )}
+            </ol>
+          `
+          : null
+      }
+      ${
+        modal.body
+          ? html`<div class="md modal-viewer-body" dangerouslySetInnerHTML=${{ __html: marked.parse(modal.body) }}></div>`
+          : null
+      }
+      <div class="modal-actions">
+        <button onClick=${() => onResolve("viewer", { action: "close" })}>${t("modal.viewerClose")}</button>
+      </div>
     <//>
   `;
 }

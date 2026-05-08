@@ -516,5 +516,6 @@ export const zhCN = {
     pickerRename: "重命名…",
     pickerNew: "新建…",
     pickerNewPlaceholder: "名称（留空使用默认）",
+    viewerClose: "关闭",
   },
 };

@@ -516,5 +516,6 @@ export const en = {
     pickerRename: "Rename…",
     pickerNew: "New…",
     pickerNewPlaceholder: "Name (leave blank for default)",
+    viewerClose: "Close",
   },
 };

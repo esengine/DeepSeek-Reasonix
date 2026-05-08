@@ -2122,6 +2122,52 @@ input:focus, textarea:focus, select:focus { border-color: var(--c-brand); }
   font-size: 13px;
 }
 
+.modal-viewer-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-viewer-step {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm, 4px);
+  background: var(--bg-elev-2);
+  align-items: baseline;
+}
+
+.modal-viewer-step-mark {
+  text-align: center;
+  font-weight: 600;
+  color: var(--fg-2);
+}
+
+.modal-viewer-step-done .modal-viewer-step-mark {
+  color: #86efac;
+}
+
+.modal-viewer-step-title {
+  color: var(--fg-1);
+  font-size: 13px;
+}
+
+.modal-viewer-step-done .modal-viewer-step-title {
+  color: var(--fg-2);
+}
+
+.modal-viewer-body {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--fg-1);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
 /* Side-by-side diff for the edit-review modal — left is "before" (red
  * tint), right is "after" (green tint), context rows render unchanged.
  * Lines hljs-highlight per the file's language. */

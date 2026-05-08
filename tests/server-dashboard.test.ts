@@ -826,4 +826,41 @@ describe("dashboard server: modal mirroring (workspace / checkpoint / revision)"
     });
     expect(r.status).toBe(503);
   });
+
+  it("POST /api/modal/resolve dispatches viewer close", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolveViewer: (r) => calls.push(r) });
+    const r = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "viewer", action: "close" },
+    });
+    expect(r.status).toBe(200);
+    expect(calls).toEqual([{ action: "close" }]);
+  });
+
+  it("POST /api/modal/resolve rejects viewer actions other than close", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolveViewer: (r) => calls.push(r) });
+    const r = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "viewer", action: "next" },
+    });
+    expect(r.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("POST /api/modal/resolve returns 503 when viewer resolver is not wired", async () => {
+    const base = await boot({});
+    const r = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "viewer", action: "close" },
+    });
+    expect(r.status).toBe(503);
+  });
 });

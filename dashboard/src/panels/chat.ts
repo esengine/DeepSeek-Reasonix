@@ -10,6 +10,7 @@ import {
   PlanModal,
   RevisionModal,
   ShellModal,
+  ViewerModal,
   WorkspaceModal,
   parseToolArgs,
 } from "../components/chat-internals.js";
@@ -687,7 +688,9 @@ export function ChatPanel() {
                         ? html`<${RevisionModal} modal=${modal} onResolve=${resolveModal} />`
                         : modal.kind === "picker"
                           ? html`<${PickerModal} modal=${modal} onResolve=${resolveModal} />`
-                          : null
+                          : modal.kind === "viewer"
+                            ? html`<${ViewerModal} modal=${modal} onResolve=${resolveModal} />`
+                            : null
           : null
       }
 
