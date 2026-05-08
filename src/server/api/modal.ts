@@ -1,12 +1,43 @@
 /** GET snapshots the active modal so a fresh client paints what's already up; POST routes resolution into the same handlers the TUI uses. */
 
-import type { DashboardContext } from "../context.js";
+import type { DashboardContext, PickerResolution } from "../context.js";
 import type { ApiResult } from "../router.js";
 
 interface ResolveBody {
   kind?: unknown;
   choice?: unknown;
   text?: unknown;
+  action?: unknown;
+  id?: unknown;
+  query?: unknown;
+}
+
+function parsePickerResolution(body: ResolveBody): PickerResolution | { error: string } {
+  const { action, id, text, query } = body;
+  if (typeof action !== "string") return { error: "picker action required" };
+  switch (action) {
+    case "pick":
+    case "delete":
+    case "install":
+    case "uninstall":
+      if (typeof id !== "string" || !id) return { error: `picker ${action} requires id` };
+      return { action, id };
+    case "rename":
+      if (typeof id !== "string" || !id) return { error: "picker rename requires id" };
+      if (typeof text !== "string") return { error: "picker rename requires text" };
+      return { action: "rename", id, text };
+    case "new":
+      return typeof text === "string" && text ? { action: "new", text } : { action: "new" };
+    case "load-more":
+      return { action: "load-more" };
+    case "refine":
+      if (typeof query !== "string") return { error: "picker refine requires query" };
+      return { action: "refine", query };
+    case "cancel":
+      return { action: "cancel" };
+    default:
+      return { error: `unknown picker action: ${action}` };
+  }
 }
 
 function parseBody(raw: string): ResolveBody {
@@ -33,7 +64,8 @@ export async function handleModal(
   }
 
   if (method === "POST" && rest[0] === "resolve") {
-    const { kind, choice, text } = parseBody(body);
+    const parsed = parseBody(body);
+    const { kind, choice, text } = parsed;
     if (kind === "shell") {
       if (!ctx.resolveShellConfirm) {
         return { status: 503, body: { error: "shell modal resolution not wired" } };
@@ -119,6 +151,17 @@ export async function handleModal(
         return { status: 400, body: { error: "revision choice must be accept / reject" } };
       }
       ctx.resolveReviseConfirm(choice);
+      return { status: 200, body: { resolved: true } };
+    }
+    if (kind === "picker") {
+      if (!ctx.resolvePicker) {
+        return { status: 503, body: { error: "picker modal resolution not wired" } };
+      }
+      const resolution = parsePickerResolution(parsed);
+      if ("error" in resolution) {
+        return { status: 400, body: { error: resolution.error } };
+      }
+      ctx.resolvePicker(resolution);
       return { status: 200, body: { resolved: true } };
     }
     return { status: 400, body: { error: `unknown modal kind: ${String(kind)}` } };

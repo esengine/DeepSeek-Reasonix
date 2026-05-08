@@ -57,6 +57,8 @@ export interface DashboardContext {
   resolveEditReview?: (choice: "apply" | "reject" | "apply-rest-of-turn" | "flip-to-auto") => void;
   resolveCheckpointConfirm?: (choice: "continue" | "revise" | "stop", text?: string) => void;
   resolveReviseConfirm?: (choice: "accept" | "reject") => void;
+  /** Active picker (sessions / checkpoints / mcp marketplace / …) resolves into the live TUI component via a runtime ref. */
+  resolvePicker?: (resolution: PickerResolution) => void;
 
   reloadHooks?: () => number;
   reloadMcp?: () => Promise<number>;
@@ -73,6 +75,31 @@ export type ChoiceResolution =
   | { kind: "pick"; optionId: string }
   | { kind: "custom"; text: string }
   | { kind: "cancel" };
+
+/** Web-driven action against the picker that's currently up. `refine` and `load-more` keep the picker open; everything else closes it. */
+export type PickerResolution =
+  | { action: "pick"; id: string }
+  | { action: "delete"; id: string }
+  | { action: "rename"; id: string; text: string }
+  | { action: "new"; text?: string }
+  | { action: "install"; id: string }
+  | { action: "uninstall"; id: string }
+  | { action: "load-more" }
+  | { action: "refine"; query: string }
+  | { action: "cancel" };
+
+export type PickerAction = PickerResolution["action"];
+
+export interface PickerItem {
+  id: string;
+  title: string;
+  /** Secondary line — relative timestamp, branch, description. */
+  subtitle?: string;
+  /** Right-aligned tag — installed / active / source. */
+  badge?: string;
+  /** Trailing meta — file count, popularity, cost. */
+  meta?: string;
+}
 
 export interface DashboardStats {
   /** Total turns this session. */
@@ -141,6 +168,17 @@ export type ActiveModal =
         risk?: "low" | "med" | "high";
       }>;
       summary?: string;
+    }
+  | {
+      kind: "picker";
+      /** Discriminator for the underlying picker (sessions / checkpoints / mcp-marketplace / …). Drives empty-state copy + icon on the SPA. */
+      pickerKind: string;
+      title: string;
+      query?: string;
+      items: PickerItem[];
+      actions: PickerAction[];
+      hasMore?: boolean;
+      hint?: string;
     };
 
 /** One row of the conversation as the SPA renders it. */

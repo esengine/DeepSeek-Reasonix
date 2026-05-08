@@ -6,6 +6,7 @@ import {
   ChoiceModal,
   EditReviewModal,
   type OnResolve,
+  PickerModal,
   PlanModal,
   RevisionModal,
   ShellModal,
@@ -684,7 +685,9 @@ export function ChatPanel() {
                       ? html`<${CheckpointModal} modal=${modal} onResolve=${resolveModal} />`
                       : modal.kind === "revision"
                         ? html`<${RevisionModal} modal=${modal} onResolve=${resolveModal} />`
-                        : null
+                        : modal.kind === "picker"
+                          ? html`<${PickerModal} modal=${modal} onResolve=${resolveModal} />`
+                          : null
           : null
       }
 

@@ -51,6 +51,7 @@ import type {
   ActiveModal,
   DashboardEvent,
   DashboardMessage,
+  PickerResolution,
   SubmitResult,
 } from "../../server/context.js";
 import { type DashboardServerHandle, startDashboardServer } from "../../server/index.js";
@@ -85,6 +86,7 @@ import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
+import type { PickerSnapshot } from "./dashboard/use-picker-broadcast.js";
 import { formatEditResults } from "./edit-history.js";
 import { loopEventToDashboard } from "./effects/loop-to-dashboard.js";
 import { appendGlobalMemory, appendProjectMemory, detectHashMemory } from "./hash-memory.js";
@@ -664,6 +666,9 @@ function AppInner({
   // sync with the TUI. The Set is keyed by the subscriber function
   // itself; subscribeEvents returns an unsubscribe closure.
   const eventSubscribersRef = useRef<Set<(ev: DashboardEvent) => void>>(new Set());
+  /** Only one picker mounts at a time; snapshot feeds `getActiveModal` for late SSE clients. */
+  const activePickerResolverRef = useRef<((res: PickerResolution) => void) | null>(null);
+  const activePickerSnapshotRef = useRef<PickerSnapshot | null>(null);
   // Structured steps captured from the most recent `submit_plan` call.
   // Populated only when the model supplied `steps`; used by the
   // `mark_step_complete` handler to look up the step title and compute
@@ -1742,6 +1747,10 @@ function AppInner({
               ...(pendingRevision.summary ? { summary: pendingRevision.summary } : {}),
             };
           }
+          const picker = activePickerSnapshotRef.current;
+          if (picker) {
+            return { kind: "picker", ...picker };
+          }
           return null;
         },
         resolveShellConfirm: (choice) => {
@@ -1792,6 +1801,10 @@ function AppInner({
         },
         resolveReviseConfirm: (choice) => {
           Promise.resolve(handleReviseConfirmRef.current(choice)).catch(() => undefined);
+        },
+        resolvePicker: (resolution) => {
+          const fn = activePickerResolverRef.current;
+          if (fn) Promise.resolve(fn(resolution)).catch(() => undefined);
         },
         // ---------- v0.14 mutation surface ----------
         reloadHooks: () => {

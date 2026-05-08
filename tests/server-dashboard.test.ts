@@ -724,4 +724,106 @@ describe("dashboard server: modal mirroring (workspace / checkpoint / revision)"
     });
     expect(r.status).toBe(503);
   });
+
+  it("POST /api/modal/resolve dispatches picker pick / delete / install / uninstall", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolvePicker: (r) => calls.push(r) });
+    for (const action of ["pick", "delete", "install", "uninstall"] as const) {
+      const r = await call(`${base}api/modal/resolve`, {
+        method: "POST",
+        token: TOKEN,
+        tokenInHeader: true,
+        body: { kind: "picker", action, id: `row-${action}` },
+      });
+      expect(r.status).toBe(200);
+    }
+    expect(calls).toEqual([
+      { action: "pick", id: "row-pick" },
+      { action: "delete", id: "row-delete" },
+      { action: "install", id: "row-install" },
+      { action: "uninstall", id: "row-uninstall" },
+    ]);
+  });
+
+  it("POST /api/modal/resolve carries picker rename / new / refine text", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolvePicker: (r) => calls.push(r) });
+    const rename = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "rename", id: "abc", text: "new-name" },
+    });
+    expect(rename.status).toBe(200);
+    const newAction = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "new", text: "scratch" },
+    });
+    expect(newAction.status).toBe(200);
+    const refine = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "refine", query: "search-term" },
+    });
+    expect(refine.status).toBe(200);
+    expect(calls).toEqual([
+      { action: "rename", id: "abc", text: "new-name" },
+      { action: "new", text: "scratch" },
+      { action: "refine", query: "search-term" },
+    ]);
+  });
+
+  it("POST /api/modal/resolve accepts picker load-more and cancel without payload", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolvePicker: (r) => calls.push(r) });
+    const more = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "load-more" },
+    });
+    expect(more.status).toBe(200);
+    const cancel = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "cancel" },
+    });
+    expect(cancel.status).toBe(200);
+    expect(calls).toEqual([{ action: "load-more" }, { action: "cancel" }]);
+  });
+
+  it("POST /api/modal/resolve rejects picker pick without id and unknown action", async () => {
+    const calls: unknown[] = [];
+    const base = await boot({ resolvePicker: (r) => calls.push(r) });
+    const noId = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "pick" },
+    });
+    expect(noId.status).toBe(400);
+    const bogus = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "explode" },
+    });
+    expect(bogus.status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("POST /api/modal/resolve returns 503 when picker resolver is not wired", async () => {
+    const base = await boot({});
+    const r = await call(`${base}api/modal/resolve`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { kind: "picker", action: "cancel" },
+    });
+    expect(r.status).toBe(503);
+  });
 });

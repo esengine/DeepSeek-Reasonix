@@ -104,6 +104,35 @@ interface RevisionSpec {
   remainingSteps: RevisionStep[];
 }
 
+export type PickerActionName =
+  | "pick"
+  | "delete"
+  | "rename"
+  | "new"
+  | "install"
+  | "uninstall"
+  | "load-more"
+  | "refine"
+  | "cancel";
+
+export interface PickerItemSpec {
+  id: string;
+  title: string;
+  subtitle?: string;
+  badge?: string;
+  meta?: string;
+}
+
+export interface PickerModalSpec {
+  pickerKind: string;
+  title: string;
+  query?: string;
+  items: PickerItemSpec[];
+  actions: PickerActionName[];
+  hasMore?: boolean;
+  hint?: string;
+}
+
 interface DiffEntry {
   kind: "context" | "ins" | "del";
   text: string;
@@ -612,6 +641,177 @@ export function CheckpointModal({ modal, onResolve }: { modal: CheckpointSpec; o
             <button class="danger" onClick=${() => onResolve("checkpoint", "stop")}>${t("modal.stopBtn")}</button>
           </div>
         `
+      }
+    <//>
+  `;
+}
+
+export function PickerModal({
+  modal,
+  onResolve,
+}: {
+  modal: PickerModalSpec;
+  onResolve: OnResolve;
+}) {
+  useLang();
+  const [selectedId, setSelectedId] = useState<string | null>(modal.items[0]?.id ?? null);
+  const [query, setQuery] = useState(modal.query ?? "");
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [newText, setNewText] = useState("");
+
+  const has = (a: PickerActionName) => modal.actions.includes(a);
+  const selected = modal.items.find((i) => i.id === selectedId) ?? null;
+
+  const submitRefine = (next: string) => {
+    setQuery(next);
+    if (has("refine")) onResolve("picker", { action: "refine", query: next });
+  };
+
+  const startRename = (id: string) => {
+    const item = modal.items.find((i) => i.id === id);
+    if (!item) return;
+    setRenameTarget(id);
+    setRenameText(item.title);
+  };
+
+  const sendRename = () => {
+    if (!renameTarget || !renameText.trim()) return;
+    onResolve("picker", { action: "rename", id: renameTarget, text: renameText });
+    setRenameTarget(null);
+    setRenameText("");
+  };
+
+  const sendNew = () => {
+    onResolve("picker", newText.trim() ? { action: "new", text: newText } : { action: "new" });
+    setShowNew(false);
+    setNewText("");
+  };
+
+  return html`
+    <${ModalCard}
+      accent="#fcd34d"
+      icon="≡"
+      title=${modal.title}
+      subtitle=${modal.hint}
+    >
+      ${
+        has("refine")
+          ? html`<input
+              class="modal-picker-search"
+              type="search"
+              placeholder=${t("modal.pickerFilter")}
+              value=${query}
+              onInput=${(e: Event) => submitRefine((e.target as HTMLInputElement).value)}
+            />`
+          : null
+      }
+      <div class="modal-picker-list">
+        ${
+          modal.items.length === 0
+            ? html`<div class="modal-picker-empty">${t("modal.pickerEmpty")}</div>`
+            : modal.items.map(
+                (it) => html`
+                  <button
+                    key=${it.id}
+                    class=${`modal-picker-row${it.id === selectedId ? " selected" : ""}`}
+                    onClick=${() => setSelectedId(it.id)}
+                    onDblClick=${() => has("pick") && onResolve("picker", { action: "pick", id: it.id })}
+                  >
+                    <span class="modal-picker-title">${it.title}</span>
+                    ${it.badge ? html`<span class="modal-picker-badge">${it.badge}</span>` : null}
+                    ${it.subtitle ? html`<span class="modal-picker-subtitle">${it.subtitle}</span>` : null}
+                    ${it.meta ? html`<span class="modal-picker-meta">${it.meta}</span>` : null}
+                  </button>
+                `,
+              )
+        }
+      </div>
+      ${
+        modal.hasMore && has("load-more")
+          ? html`<button
+              class="modal-picker-more"
+              onClick=${() => onResolve("picker", { action: "load-more" })}
+            >${t("modal.pickerLoadMore")}</button>`
+          : null
+      }
+      ${
+        renameTarget
+          ? html`
+            <div class="modal-picker-form">
+              <input
+                type="text"
+                value=${renameText}
+                onInput=${(e: Event) => setRenameText((e.target as HTMLInputElement).value)}
+              />
+              <div class="modal-actions">
+                <button class="primary" onClick=${sendRename} disabled=${!renameText.trim()}>${t("common.save")}</button>
+                <button onClick=${() => setRenameTarget(null)}>${t("common.back")}</button>
+              </div>
+            </div>
+          `
+          : showNew
+            ? html`
+              <div class="modal-picker-form">
+                <input
+                  type="text"
+                  placeholder=${t("modal.pickerNewPlaceholder")}
+                  value=${newText}
+                  onInput=${(e: Event) => setNewText((e.target as HTMLInputElement).value)}
+                />
+                <div class="modal-actions">
+                  <button class="primary" onClick=${sendNew}>${t("common.add")}</button>
+                  <button onClick=${() => setShowNew(false)}>${t("common.back")}</button>
+                </div>
+              </div>
+            `
+            : html`
+              <div class="modal-actions">
+                ${
+                  has("pick") && selected
+                    ? html`<button
+                        class="primary"
+                        onClick=${() => onResolve("picker", { action: "pick", id: selected.id })}
+                      >${t("modal.pickerPick")}</button>`
+                    : null
+                }
+                ${
+                  has("install") && selected
+                    ? html`<button
+                        class="primary"
+                        onClick=${() => onResolve("picker", { action: "install", id: selected.id })}
+                      >${t("modal.pickerInstall")}</button>`
+                    : null
+                }
+                ${
+                  has("uninstall") && selected
+                    ? html`<button
+                        onClick=${() => onResolve("picker", { action: "uninstall", id: selected.id })}
+                      >${t("modal.pickerUninstall")}</button>`
+                    : null
+                }
+                ${
+                  has("rename") && selected
+                    ? html`<button onClick=${() => startRename(selected.id)}>${t("modal.pickerRename")}</button>`
+                    : null
+                }
+                ${
+                  has("delete") && selected
+                    ? html`<button
+                        class="danger"
+                        onClick=${() => onResolve("picker", { action: "delete", id: selected.id })}
+                      >${t("common.delete")}</button>`
+                    : null
+                }
+                ${
+                  has("new")
+                    ? html`<button onClick=${() => setShowNew(true)}>${t("modal.pickerNew")}</button>`
+                    : null
+                }
+                <button onClick=${() => onResolve("picker", { action: "cancel" })}>${t("modal.cancel")}</button>
+              </div>
+            `
       }
     <//>
   `;

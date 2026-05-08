@@ -2019,6 +2019,109 @@ input:focus, textarea:focus, select:focus { border-color: var(--c-brand); }
   max-height: 200px;
 }
 
+.modal-picker-search {
+  width: 100%;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  color: var(--fg-1);
+  padding: 6px 10px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.modal-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  background: var(--bg-elev-2);
+  padding: 4px;
+  margin-bottom: 8px;
+}
+
+.modal-picker-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm, 4px);
+  color: var(--fg-1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.modal-picker-row:hover {
+  background: var(--bg-elev-3, var(--bg-elev-2));
+}
+
+.modal-picker-row.selected {
+  border-color: var(--accent, #fcd34d);
+  background: var(--bg-elev-3, var(--bg-elev-2));
+}
+
+.modal-picker-title {
+  grid-column: 1;
+  font-weight: 500;
+}
+
+.modal-picker-badge {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--fg-2);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-elev-1, var(--bg-elev-2));
+}
+
+.modal-picker-subtitle {
+  grid-column: 1 / 3;
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
+.modal-picker-meta {
+  grid-column: 1 / 3;
+  font-size: 11px;
+  color: var(--fg-3, var(--fg-2));
+}
+
+.modal-picker-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+.modal-picker-more {
+  align-self: center;
+  margin: 0 auto 8px;
+  font-size: 12px;
+}
+
+.modal-picker-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.modal-picker-form input {
+  width: 100%;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  color: var(--fg-1);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
 /* Side-by-side diff for the edit-review modal — left is "before" (red
  * tint), right is "after" (green tint), context rows render unchanged.
  * Lines hljs-highlight per the file's language. */
