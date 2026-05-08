@@ -11,6 +11,8 @@ interface SettingsData {
   search?: boolean;
   model?: string;
   editMode?: string;
+  proNext?: boolean;
+  budgetUsd?: number | null;
 }
 
 export function SettingsPanel() {
@@ -186,6 +188,21 @@ export function SettingsPanel() {
             >${v.search ? t("common.on") : t("common.off")}</button>
           `,
           t("settings.webSearchNote"),
+        )}
+      </div>
+
+      ${sectionH3(t("settings.sectionCompute"))}
+      <div class="card">
+        ${fieldRow(
+          t("settings.proNext"),
+          html`
+            <button
+              class=${`btn ${v.proNext ? "primary" : ""}`}
+              onClick=${() => save({ proNext: !v.proNext })}
+              disabled=${saving}
+            >${v.proNext ? t("settings.proArmed") : t("settings.proArm")}</button>
+          `,
+          t("settings.proNextNote"),
         )}
       </div>
 
