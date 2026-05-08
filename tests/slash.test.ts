@@ -494,6 +494,7 @@ describe("handleSlash", () => {
       "preset",
       "model",
       "language",
+      "branch",
       "theme",
       "mcp",
       "memory",

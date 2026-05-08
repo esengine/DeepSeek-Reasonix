@@ -43,6 +43,22 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: ["EN", "zh-CN"],
     aliases: ["lang"],
   },
+  {
+    cmd: "theme",
+    group: "setup",
+    argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
+    summary: "show or persist the terminal theme preference. Bare opens picker.",
+    argCompleter: [
+      "auto",
+      "default",
+      "dark",
+      "light",
+      "tokyo-night",
+      "github-dark",
+      "github-light",
+      "high-contrast",
+    ],
+  },
 
   { cmd: "status", group: "info", summary: "current model, flags, context, session" },
   {
