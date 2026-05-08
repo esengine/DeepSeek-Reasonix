@@ -393,6 +393,7 @@ export function SemanticPanel() {
                       });
                     }}
                   />
+                  <div style="color:var(--fg-3);font-size:12px">${t("semantic.apiKeyStoredNote")}</div>
                 </div>
                 <div class="form-row">
                   <span class="lbl">${t("semantic.model")}</span>

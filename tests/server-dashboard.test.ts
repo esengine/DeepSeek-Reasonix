@@ -230,44 +230,48 @@ describe("dashboard server: endpoints", () => {
   });
 
   it("GET /api/semantic reports incompatible on-disk index against current config", async () => {
-    const semanticDir = join(PROJ, ".reasonix", "semantic");
-    rmSync(PROJ, { recursive: true, force: true });
-    await mkdir(semanticDir, { recursive: true });
-    await writeFile(
-      cfgPath,
-      JSON.stringify({
-        semantic: {
-          provider: "openai-compat",
-          openaiCompat: {
-            baseUrl: "https://api.example.com/v1/embeddings",
-            apiKey: "sk-openai1234567890abcd",
-            model: "bge-m3",
+    const proj = mkdtempSync(join(tmpdir(), "reasonix-dash-sem-"));
+    try {
+      const semanticDir = join(proj, ".reasonix", "semantic");
+      await mkdir(semanticDir, { recursive: true });
+      await writeFile(
+        cfgPath,
+        JSON.stringify({
+          semantic: {
+            provider: "openai-compat",
+            openaiCompat: {
+              baseUrl: "https://api.example.com/v1/embeddings",
+              apiKey: "sk-openai1234567890abcd",
+              model: "bge-m3",
+            },
           },
-        },
-      }),
-      "utf8",
-    );
-    await writeFile(
-      join(semanticDir, "index.meta.json"),
-      JSON.stringify({
-        version: 1,
-        provider: "ollama",
-        model: "nomic-embed-text",
-        dim: 768,
-        updatedAt: new Date().toISOString(),
-      }),
-      "utf8",
-    );
-    await writeFile(join(semanticDir, "index.jsonl"), "", "utf8");
+        }),
+        "utf8",
+      );
+      await writeFile(
+        join(semanticDir, "index.meta.json"),
+        JSON.stringify({
+          version: 1,
+          provider: "ollama",
+          model: "nomic-embed-text",
+          dim: 768,
+          updatedAt: new Date().toISOString(),
+        }),
+        "utf8",
+      );
+      await writeFile(join(semanticDir, "index.jsonl"), "", "utf8");
 
-    const base = await boot({ getCurrentCwd: () => PROJ });
-    const r = await call(`${base}api/semantic`, { token: TOKEN });
-    expect(r.status).toBe(200);
-    expect(r.body.index.exists).toBe(true);
-    expect(r.body.index.compatible).toBe(false);
-    expect(r.body.index.mismatch).toBe("provider");
-    expect(r.body.index.builtWith.provider).toBe("ollama");
-    expect(r.body.index.current.provider).toBe("openai-compat");
+      const base = await boot({ getCurrentCwd: () => proj });
+      const r = await call(`${base}api/semantic`, { token: TOKEN });
+      expect(r.status).toBe(200);
+      expect(r.body.index.exists).toBe(true);
+      expect(r.body.index.compatible).toBe(false);
+      expect(r.body.index.mismatch).toBe("provider");
+      expect(r.body.index.builtWith.provider).toBe("ollama");
+      expect(r.body.index.current.provider).toBe("openai-compat");
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
   });
 
   it("GET /api/tools enumerates registered tools when attached", async () => {

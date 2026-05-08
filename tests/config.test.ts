@@ -319,6 +319,37 @@ describe("config", () => {
   it("resolves ollama by default when semantic config is absent", () => {
     const resolved = resolveSemanticEmbeddingConfig(path);
     expect(resolved.provider).toBe("ollama");
+    expect(resolved.baseUrl).toBe("http://localhost:11434");
+    expect(resolved.model).toBe("nomic-embed-text");
+  });
+
+  it("resolves ollama defaults from an existing empty config file", () => {
+    writeConfig({}, path);
+    const resolved = resolveSemanticEmbeddingConfig(path);
+    expect(resolved.provider).toBe("ollama");
+    expect(resolved.baseUrl).toBe("http://localhost:11434");
+    expect(resolved.model).toBe("nomic-embed-text");
+  });
+
+  it("resolves ollama defaults when semantic.provider is missing", () => {
+    writeConfig(
+      {
+        semantic: {
+          ollama: {
+            model: "",
+          },
+          openaiCompat: {
+            baseUrl: "https://api.example.com/v1/embeddings",
+            apiKey: "sk-openai1234567890abcd",
+            model: "bge-m3",
+          },
+        },
+      },
+      path,
+    );
+    const resolved = resolveSemanticEmbeddingConfig(path);
+    expect(resolved.provider).toBe("ollama");
+    expect(resolved.baseUrl).toBe("http://localhost:11434");
     expect(resolved.model).toBe("nomic-embed-text");
   });
 

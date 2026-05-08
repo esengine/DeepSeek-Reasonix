@@ -439,6 +439,7 @@ export const en = {
     openaiCompat: "openai-compatible",
     apiUrl: "API URL",
     apiKey: "API key",
+    apiKeyStoredNote: "API key is stored in ~/.reasonix/config.json — do not share that file.",
     customRequestBody: "custom request body",
     invalidCustomRequestBody: "Custom request body must be valid JSON: {error}",
     customRequestBodyMustBeObject: "Custom request body must be a JSON object.",
