@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from "ink";
+import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React as a runtime value (classic transform)
 import React from "react";
 import type { ApplyResult } from "../../../code/edit-blocks.js";
@@ -80,17 +80,7 @@ export function ModeStatusBar({
 }
 
 function ModeBarFrame({ children }: { children: React.ReactNode }) {
-  const { stdout } = useStdout();
-  const cols = stdout?.columns ?? 80;
-  const ruleWidth = Math.max(20, cols - 2);
-  return (
-    <Box flexDirection="column">
-      <Box paddingX={1}>
-        <Text color={FG.faint}>{"╌".repeat(ruleWidth)}</Text>
-      </Box>
-      <Box paddingX={1}>{children}</Box>
-    </Box>
-  );
+  return <Box paddingX={1}>{children}</Box>;
 }
 
 function ModePill({

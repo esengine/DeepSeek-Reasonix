@@ -24,7 +24,6 @@ export function MarkdownLines({
   return (
     <Box flexDirection="column">
       {lines.map((line, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: lines are positional + stable per render
         <LineRow key={`md-${i}-${line.kind}`} line={line} />
       ))}
     </Box>

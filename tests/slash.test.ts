@@ -137,12 +137,12 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/\/models/);
   });
 
-  it("/model with no arg and loaded list hints at available ids", () => {
+  it("/model with no arg opens the interactive picker (#371)", () => {
     const loop = makeLoop();
     const r = handleSlash("model", [], loop, {
       models: ["deepseek-chat", "deepseek-reasoner"],
     });
-    expect(r.info).toMatch(/deepseek-chat \| deepseek-reasoner/);
+    expect(r.openModelPicker).toBe(true);
   });
 
   it("/models renders the fetched catalog and marks the current one", () => {

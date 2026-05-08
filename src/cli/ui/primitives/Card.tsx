@@ -1,8 +1,7 @@
 import { Box } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useContext } from "react";
 
-/** Settled cards (in scrollback) drop the border + paddingX so history reads as flat lines. */
+/** Settled cards (in scrollback) drop border + padding + margin so history collapses to flat lines. */
 export const ActiveCardContext = React.createContext(true);
 
 export interface CardProps {
@@ -24,11 +23,7 @@ const STRIPE_BORDER = {
 export function Card({ tone, children }: CardProps): React.ReactElement {
   const active = useContext(ActiveCardContext);
   if (!active) {
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        {children}
-      </Box>
-    );
+    return <Box flexDirection="column">{children}</Box>;
   }
   return (
     <Box

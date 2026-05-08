@@ -43,6 +43,22 @@ describe("StdinReader — CSI sequences (well-behaved)", () => {
     expect(events).toEqual([{ input: "", shift: true, tab: true }]);
   });
 
+  it("parses Shift+Tab from modifier-encoded `\\x1b[1;2Z` (PowerShell variant, #373)", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[1;2Z");
+    expect(events).toEqual([{ input: "", shift: true, tab: true }]);
+  });
+
+  it("parses Shift+Tab from modifyOtherKeys `\\x1b[27;2;9~` and Kitty `\\x1b[9;2u` (#373)", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[27;2;9~");
+    reader.feed("\x1b[9;2u");
+    expect(events).toEqual([
+      { input: "", shift: true, tab: true },
+      { input: "", shift: true, tab: true },
+    ]);
+  });
+
   it("parses SS3 arrow forms (`\\x1bO<letter>`)", () => {
     const { reader, events } = setup();
     reader.feed("\x1bOA");

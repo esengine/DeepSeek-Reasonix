@@ -1,3 +1,4 @@
+import { render } from "ink-testing-library";
 import { type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
@@ -83,31 +84,16 @@ describe("Markdown component", () => {
 });
 
 describe("Markdown — issue #340 table fallback row grouping", () => {
-  it("renders fallback as row-grouped key/value pairs (column 1 row 1 before column 1 row 2)", async () => {
-    const { mount } = await import("../src/renderer/reconciler/mount.js");
-    const { CharPool } = await import("../src/renderer/pools/char-pool.js");
-    const { StylePool } = await import("../src/renderer/pools/style-pool.js");
-    const { HyperlinkPool } = await import("../src/renderer/pools/hyperlink-pool.js");
+  it("renders fallback as row-grouped key/value pairs (column 1 row 1 before column 1 row 2)", () => {
     const md = [
       "| Component | What | Manual TCs |",
       "| - | - | - |",
       "| Login form | Yup validation | AUTH-01 → AUTH-07 |",
       "| Scheduler | Renders events | SCH-01 → SCH-15 |",
     ].join("\n");
-    const chunks: string[] = [];
-    const handle = mount(React.createElement(Markdown, { text: md, width: 30 }), {
-      viewportWidth: 30,
-      viewportHeight: 30,
-      pools: { char: new CharPool(), style: new StylePool(), hyperlink: new HyperlinkPool() },
-      write: (s: string) => {
-        chunks.push(s);
-      },
-    });
-    await new Promise((r) => setTimeout(r, 100));
-    const visible = chunks
-      .join("")
-      .replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[a-zA-Z]`, "g"), "");
-    handle.destroy();
+    const { lastFrame, unmount } = render(React.createElement(Markdown, { text: md, width: 30 }));
+    const visible = lastFrame() ?? "";
+    unmount();
     const tcIdx1 = visible.indexOf("AUTH-01");
     const compIdx2 = visible.indexOf("Scheduler");
     expect(tcIdx1).toBeGreaterThan(-1);
@@ -117,28 +103,15 @@ describe("Markdown — issue #340 table fallback row grouping", () => {
 });
 
 describe("Markdown — issue #330 file-ref over-match regression", () => {
-  it("English abbreviations 'e.g' / 'i.e' are NOT treated as file refs", async () => {
-    const { mount } = await import("../src/renderer/reconciler/mount.js");
-    const { CharPool } = await import("../src/renderer/pools/char-pool.js");
-    const { StylePool } = await import("../src/renderer/pools/style-pool.js");
-    const { HyperlinkPool } = await import("../src/renderer/pools/hyperlink-pool.js");
-    async function bytesFor(text: string): Promise<string> {
-      const chunks: string[] = [];
-      const handle = mount(React.createElement(Markdown, { text }), {
-        viewportWidth: 80,
-        viewportHeight: 10,
-        pools: { char: new CharPool(), style: new StylePool(), hyperlink: new HyperlinkPool() },
-        write: (s: string) => {
-          chunks.push(s);
-        },
-      });
-      await new Promise((r) => setTimeout(r, 100));
-      const out = chunks.join("");
-      handle.destroy();
+  it("English abbreviations 'e.g' / 'i.e' are NOT treated as file refs", () => {
+    function bytesFor(text: string): string {
+      const { lastFrame, unmount } = render(React.createElement(Markdown, { text }));
+      const out = lastFrame() ?? "";
+      unmount();
       return out;
     }
     for (const sample of ["use e.g. like this", "i.e. like that", "(e.g. Google)"]) {
-      const out = await bytesFor(sample);
+      const out = bytesFor(sample);
       expect(out.includes("]8;;")).toBe(false);
       expect(out.includes("file://e.g")).toBe(false);
       expect(out.includes("file://i.e")).toBe(false);

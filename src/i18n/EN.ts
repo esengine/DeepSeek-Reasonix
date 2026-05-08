@@ -710,6 +710,8 @@ export const EN: TranslationSchema = {
       statusBudget: "  budget  ${spent} / ${cap} ({pct}%){tag}",
       statusSession: '  session "{name}" · {count} messages in log (resumed {resumed})',
       statusSessionEphemeral: "  session (ephemeral — no persistence)",
+      statusWorkspace:
+        "  workspace {path} · pinned at launch (relaunch with --dir <path> to switch)",
       statusMcp: "  mcp     {servers} server(s), {tools} tool(s) in registry",
       statusEdits: "  edits   {count} pending (/apply to commit, /discard to drop)",
       statusPlan: "  plan    ON — writes gated (submit_plan + approval)",
@@ -825,11 +827,16 @@ export const EN: TranslationSchema = {
       listInvoke:
         "Invoke a skill with `/skill <name> [args]` or by asking the model to call `run_skill`.",
       listHeader: "User skills ({count}):",
-      listFooter: "View body: /skill show <name>   Run: /skill <name> [args]",
+      listFooter: "View: /skill show <name>   Run: /skill <name> [args]   New: /skill new <name>",
+      listEmptyNewHint:
+        "Scaffold one with: /skill new <name>  (project scope) — there's no remote registry yet; you author skills directly.",
       showUsage: "usage: /skill show <name>",
       showNotFound: "no skill found: {name}",
       runNotFound: "no skill found: {name}  (try /skill list)",
       runInfo: "▸ running skill: {name}{args}",
+      newUsage: "usage: /skill new <name> [--global]",
+      newCreated: "▸ created skill: {name}\n  {path}\n  edit it, then `/skill {name}` to invoke",
+      newError: "▲ /skill new failed: {reason}",
     },
   },
 };

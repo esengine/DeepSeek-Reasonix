@@ -1,10 +1,35 @@
 import { describe, expect, it } from "vitest";
+import { INLINE_PASTE_THRESHOLD, shouldInlinePaste } from "../src/cli/ui/PromptInput.js";
 import {
   DEFAULT_PASTE_CHAR_THRESHOLD,
   DEFAULT_PASTE_HEAD_LINES,
   DEFAULT_PASTE_LINE_THRESHOLD,
   formatLongPaste,
 } from "../src/cli/ui/paste-collapse.js";
+
+describe("shouldInlinePaste — short single-line pastes render verbatim (#397)", () => {
+  it("a single word inlines", () => {
+    expect(shouldInlinePaste("hello")).toBe(true);
+  });
+
+  it("a number inlines", () => {
+    expect(shouldInlinePaste("42")).toBe(true);
+  });
+
+  it("a sentence-length string still inlines", () => {
+    expect(shouldInlinePaste("the quick brown fox jumps over the lazy dog")).toBe(true);
+  });
+
+  it("anything containing a newline becomes a sentinel chip", () => {
+    expect(shouldInlinePaste("line1\nline2")).toBe(false);
+    expect(shouldInlinePaste("hi\n")).toBe(false);
+  });
+
+  it("a single-line paste past the threshold becomes a sentinel chip", () => {
+    expect(shouldInlinePaste("x".repeat(INLINE_PASTE_THRESHOLD))).toBe(true);
+    expect(shouldInlinePaste("x".repeat(INLINE_PASTE_THRESHOLD + 1))).toBe(false);
+  });
+});
 
 describe("formatLongPaste", () => {
   it("passes through short input verbatim", () => {

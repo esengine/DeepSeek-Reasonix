@@ -158,6 +158,7 @@ You have TWO tools for running shell commands, and picking the right one is non-
 
 After \`run_background\`, tools available to you:
 - \`job_output(jobId, tailLines?)\` — read recent logs to verify startup / debug errors.
+- \`wait_for_job(jobId, timeoutMs?)\` — block until the job exits or emits new output. Prefer this over repeating identical \`job_output\` calls while you're intentionally waiting.
 - \`list_jobs\` — see every job this session (running + exited).
 - \`stop_job(jobId)\` — SIGTERM → SIGKILL after grace. Stop before switching port / config.
 

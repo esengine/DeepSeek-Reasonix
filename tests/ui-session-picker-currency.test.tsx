@@ -3,25 +3,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 import { SessionPicker } from "../src/cli/ui/SessionPicker.js";
 import type { SessionInfo } from "../src/memory/session.js";
-
-function makeFakeStdout() {
-  const chunks: string[] = [];
-  return {
-    columns: 120,
-    rows: 30,
-    isTTY: true,
-    write(chunk: string) {
-      chunks.push(chunk);
-      return true;
-    },
-    on() {},
-    off() {},
-    text(): string {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI SGR codes
-      return chunks.join("").replace(/\x1b\[[0-9;]*m/g, "");
-    },
-  };
-}
+import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 function makeSession(currencyHint?: string): SessionInfo {
   return {
@@ -50,7 +32,7 @@ function renderPicker(sessions: SessionInfo[], walletCurrency: string | undefine
       walletCurrency,
       onChoose: () => {},
     }),
-    { stdout: stdout as any, stdin: process.stdin as any },
+    { stdout: stdout as never, stdin: makeFakeStdin() as never },
   );
   unmount();
   return stdout.text();

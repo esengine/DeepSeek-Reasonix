@@ -20,6 +20,7 @@ const turnThinking = z.object({
 const reasoningStart = z.object({
   type: z.literal("reasoning.start"),
   id: cardId,
+  model: z.string().min(1).optional(),
 });
 
 const reasoningChunk = z.object({
@@ -39,6 +40,7 @@ const reasoningEnd = z.object({
 const streamingStart = z.object({
   type: z.literal("streaming.start"),
   id: cardId,
+  model: z.string().min(1).optional(),
 });
 
 const streamingChunk = z.object({
@@ -120,6 +122,11 @@ const sessionUpdate = z.object({
     balanceCurrency: z.string().optional(),
     cacheHit: z.number().optional(),
   }),
+});
+
+const sessionModelChange = z.object({
+  type: z.literal("session.model.change"),
+  model: z.string().min(1),
 });
 
 const focusMove = z.object({
@@ -318,6 +325,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   networkChange,
   languageChange,
   sessionUpdate,
+  sessionModelChange,
   focusMove,
   focusSet,
   cardToggle,

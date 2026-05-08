@@ -98,6 +98,37 @@ npx reasonix code   # paste a DeepSeek API key on first run; persists after
 
 Requires Node ≥ 22. Tested on macOS · Linux · Windows (PowerShell · Git Bash · Windows Terminal). Get a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reasonix code --help` for flags.
 
+`npx` is the recommended path — no global install, always picks up the latest version. If you'll use Reasonix daily and want `reasonix` on your `PATH`, run `reasonix update` once and it'll do the `npm install -g` for you.
+
+### Subcommand cheatsheet
+
+| Command | When to use |
+|---|---|
+| `reasonix code [dir]` | Coding agent rooted at a project. **Start here.** |
+| `reasonix chat` | Plain chat — no filesystem tools, just a conversation with persisted history. |
+| `reasonix run "task"` | One-shot, streams the answer to stdout. Good for shell pipes. |
+| `reasonix doctor` | Environment health check (Node version, API key, MCP wiring). |
+| `reasonix update` | Upgrade Reasonix itself. |
+
+Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`) are listed in `reasonix --help` and on the [CLI reference](https://esengine.github.io/DeepSeek-Reasonix/#cli).
+
+**Working in a different folder:** Reasonix scopes filesystem tools to the launch directory. To work elsewhere, pass `--dir`:
+
+```bash
+npx reasonix code --dir /path/to/project   # or use a relative path
+```
+
+Mid-session switching isn't supported by design (the message log + memory paths get tangled with stale roots). Quit and relaunch with a new `--dir` to retarget. `/status` always shows the current pinned workspace.
+
+**Author your first skill:** Skills are markdown playbooks the model can invoke (`/skill <name>`). There's no remote registry yet — you author them directly:
+
+```bash
+/skill new my-skill          # scaffolds <project>/.reasonix/skills/my-skill.md
+/skill new my-skill --global # or under ~/.reasonix/skills for cross-project use
+```
+
+Edit the file (`description:` frontmatter + body), then `/skill list` to see it. Add `runAs: subagent` to the frontmatter to spawn an isolated subagent loop instead of inlining the body.
+
 <br/>
 
 ## What makes Reasonix different

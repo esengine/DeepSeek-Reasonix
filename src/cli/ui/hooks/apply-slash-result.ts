@@ -32,9 +32,7 @@ export function applySlashResult(result: SlashResult, ctx: ApplySlashResultConte
     return { kind: "consumed" };
   }
   if (result.clear) {
-    // 2J + 3J + H: nuke viewport AND scrollback (visible buffer + the
-    // off-screen lines). Then reset state.cards so React doesn't
-    // immediately repaint everything that was just wiped.
+    // 2J + 3J + H: visible buffer + scrollback + cursor home.
     ctx.stdoutWrite("\x1b[2J\x1b[3J\x1b[H");
     ctx.log.reset();
     if (result.info) ctx.log.pushInfo(result.info);

@@ -27,6 +27,16 @@ describe("recoverCsiTail — ESC-stripped fallbacks (Windows ConPTY)", () => {
   it("recovers Shift+Tab tail", () => {
     expect(recoverCsiTail("[Z")).toEqual({ shift: true, tab: true });
   });
+
+  it("recovers Shift+Tab from PowerShell-style `[1;2Z` (#373)", () => {
+    expect(recoverCsiTail("[1;2Z")).toEqual({ shift: true, tab: true });
+    expect(recoverCsiTail("\x1b[1;2Z")).toEqual({ shift: true, tab: true });
+  });
+
+  it("recovers Shift+Tab from modifyOtherKeys `[27;2;9~` and Kitty `[9;2u` (#373)", () => {
+    expect(recoverCsiTail("[27;2;9~")).toEqual({ shift: true, tab: true });
+    expect(recoverCsiTail("[9;2u")).toEqual({ shift: true, tab: true });
+  });
 });
 
 describe("recoverCsiTail — full CSI sequences (well-behaved terminals)", () => {

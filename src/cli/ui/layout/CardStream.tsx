@@ -1,13 +1,62 @@
-import { Static } from "ink";
+import { Box, type DOMElement, Text, useBoxMetrics } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { CardRenderer } from "../cards/CardRenderer.js";
-import { ActiveCardContext } from "../primitives/Card.js";
 import type { Card } from "../state/cards.js";
 import { useAgentState } from "../state/provider.js";
+import { FG } from "../theme/tokens.js";
 
-/** Settled = no future event can mutate it; safe to commit via Ink's Static. */
-function isSettled(card: Card): boolean {
+/**
+ * Row-precision virtual scroll: outer Box clips with overflow="hidden",
+ * inner Box holds all cards and slides up via negative marginTop. Yoga
+ * computes inner height from card layout; useBoxMetrics reports it back
+ * so App can clamp scroll bounds. New cards arriving while the user is
+ * scrolled up sit below the visible window — bytes outside outer bounds
+ * aren't written, so terminal text selection survives streaming activity.
+ */
+export function CardStream({
+  scrollRows,
+  onMaxScrollChange,
+  suppressLive = false,
+}: {
+  scrollRows: number;
+  onMaxScrollChange: (rows: number) => void;
+  suppressLive?: boolean;
+}): React.ReactElement {
+  const cards = useAgentState((s) => s.cards);
+  // useBoxMetrics types its ref as RefObject<DOMElement> (non-null); the
+  // null! assertion satisfies the signature — Ink populates the ref on
+  // mount before the metrics hook reads it.
+  const outerRef = useRef<DOMElement>(null!);
+  const innerRef = useRef<DOMElement>(null!);
+  const outer = useBoxMetrics(outerRef);
+  const inner = useBoxMetrics(innerRef);
+  const maxScroll = Math.max(0, inner.height - outer.height);
+
+  useEffect(() => {
+    onMaxScrollChange(maxScroll);
+  }, [maxScroll, onMaxScrollChange]);
+
+  let visible = cards;
+  if (suppressLive && cards.length > 0 && !isFullySettled(cards[cards.length - 1]!)) {
+    visible = cards.slice(0, -1);
+  }
+
+  return (
+    <>
+      {scrollRows > 0 ? <Text color={FG.faint}>{" ↑ earlier — PgUp / wheel / ↑"}</Text> : null}
+      <Box ref={outerRef} flexDirection="column" flexGrow={1} overflow="hidden">
+        <Box ref={innerRef} flexDirection="column" marginTop={-scrollRows} flexShrink={0}>
+          {visible.map((card) => (
+            <CardRenderer key={card.id} card={card} />
+          ))}
+        </Box>
+      </Box>
+    </>
+  );
+}
+
+function isFullySettled(card: Card): boolean {
   switch (card.kind) {
     case "streaming":
     case "tool":
@@ -15,54 +64,12 @@ function isSettled(card: Card): boolean {
       return card.done || !!card.aborted;
     case "reasoning":
       return !card.streaming || !!card.aborted;
+    case "task":
+    case "subagent":
+      return card.status !== "running";
+    case "plan":
+      return card.steps.every((s) => s.status === "done" || s.status === "skipped");
     default:
       return true;
   }
-}
-
-export function splitCardStream(
-  cards: readonly Card[],
-  suppressLive = false,
-): { committed: Card[]; live: Card[] } {
-  // Static appends in order and never re-renders prior items, so a card
-  // can only commit once it's settled AND every earlier card is too —
-  // otherwise reasoning(streaming=true) freezes mid-stream when a later
-  // streaming/tool card appears (issue: spinner survives reasoning.end).
-  const firstUnsettledIdx = cards.findIndex((c) => !isSettled(c));
-  if (firstUnsettledIdx === -1) {
-    return { committed: cards.slice(), live: [] };
-  }
-  const committed: Card[] = cards.slice(0, firstUnsettledIdx);
-  const live: Card[] = cards.slice(firstUnsettledIdx);
-  if (suppressLive && live.length > 0 && !isSettled(live[live.length - 1]!)) {
-    return { committed, live: live.slice(0, -1) };
-  }
-  return { committed, live };
-}
-
-export function CardStream({
-  suppressLive = false,
-}: {
-  suppressLive?: boolean;
-}): React.ReactElement {
-  const cards = useAgentState((s) => s.cards);
-  const { committed, live } = splitCardStream(cards, suppressLive);
-  // Static items are emitted via bridge.emitStatic, which renders them in an
-  // off-tree React reconciler — context from the live tree does NOT propagate.
-  // The ActiveCardContext.Provider must therefore live inside the children
-  // function so it travels with the rendered subtree.
-  return (
-    <>
-      <Static items={committed}>
-        {(card) => (
-          <ActiveCardContext.Provider value={false} key={card.id}>
-            <CardRenderer card={card} />
-          </ActiveCardContext.Provider>
-        )}
-      </Static>
-      {live.map((card) => (
-        <CardRenderer key={card.id} card={card} />
-      ))}
-    </>
-  );
 }

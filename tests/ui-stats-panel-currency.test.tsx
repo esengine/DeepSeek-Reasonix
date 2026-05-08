@@ -3,25 +3,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 import { StatsPanel } from "../src/cli/ui/StatsPanel.js";
 import type { SessionSummary } from "../src/telemetry/stats.js";
-
-function makeFakeStdout() {
-  const chunks: string[] = [];
-  return {
-    columns: 120,
-    rows: 30,
-    isTTY: true,
-    write(chunk: string) {
-      chunks.push(chunk);
-      return true;
-    },
-    on() {},
-    off() {},
-    text(): string {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI SGR codes
-      return chunks.join("").replace(/\x1b\[[0-9;]*m/g, "");
-    },
-  };
-}
+import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 const SUMMARY: SessionSummary = {
   turns: 5,
@@ -38,8 +20,8 @@ const SUMMARY: SessionSummary = {
 function renderPanel(balance: { currency: string; total: number } | null): string {
   const stdout = makeFakeStdout();
   const { unmount } = render(React.createElement(StatsPanel, { summary: SUMMARY, balance }), {
-    stdout: stdout as any,
-    stdin: process.stdin as any,
+    stdout: stdout as never,
+    stdin: makeFakeStdin() as never,
   });
   unmount();
   return stdout.text();

@@ -1,15 +1,12 @@
 import { Text } from "ink";
+// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { useTick } from "../ticker.js";
 
 const FRAMES = {
   circle: ["◐", "◓", "◑", "◒"] as const,
   braille: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"] as const,
 };
-
-const CADENCE_MS = {
-  circle: 200,
-  braille: 80,
-} as const;
 
 export interface SpinnerProps {
   kind?: keyof typeof FRAMES;
@@ -19,12 +16,8 @@ export interface SpinnerProps {
 
 export function Spinner({ kind = "circle", color, bold }: SpinnerProps): React.ReactElement {
   const frames = FRAMES[kind];
-  const [frame, setFrame] = React.useState(0);
-
-  React.useEffect(() => {
-    const id = setInterval(() => setFrame((f) => (f + 1) % frames.length), CADENCE_MS[kind]);
-    return () => clearInterval(id);
-  }, [kind, frames.length]);
+  const tick = useTick();
+  const frame = tick % frames.length;
 
   return (
     <Text bold={bold} color={color}>

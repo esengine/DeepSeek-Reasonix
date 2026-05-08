@@ -127,7 +127,6 @@ function ListItem({
             // biome-ignore lint/suspicious/noArrayIndexKey: list-item children are positional and stable per render
             return <List key={`l-${i}`} token={tok as Tokens.List} depth={depth + 1} />;
           }
-          // biome-ignore lint/suspicious/noArrayIndexKey: list-item children are positional and stable per render
           return <BlockToken key={`b-${i}-${tok.type}`} token={tok} />;
         })}
       </Box>

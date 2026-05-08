@@ -10,6 +10,11 @@ export interface SearchContext {
   nameMatch: ((name: string, rel: string) => boolean) | null;
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw new DOMException("search aborted by user", "AbortError");
+}
+
 function displayRel(rootDir: string, full: string): string {
   return pathMod.relative(rootDir, full).replaceAll("\\", "/");
 }
@@ -17,8 +22,9 @@ function displayRel(rootDir: string, full: string): string {
 export async function searchFiles(
   ctx: Pick<SearchContext, "rootDir" | "maxListBytes" | "skipDirNames">,
   startAbs: string,
-  args: { pattern: string; include_deps?: boolean },
+  args: { pattern: string; include_deps?: boolean; signal?: AbortSignal },
 ): Promise<string> {
+  throwIfAborted(args.signal);
   const needle = args.pattern.toLowerCase();
   const includeDeps = args.include_deps === true;
   let re: RegExp | null = null;
@@ -30,6 +36,7 @@ export async function searchFiles(
   const matches: string[] = [];
   let totalBytes = 0;
   const walk = async (dir: string): Promise<void> => {
+    throwIfAborted(args.signal);
     let entries: import("node:fs").Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
@@ -37,6 +44,7 @@ export async function searchFiles(
       return;
     }
     for (const e of entries) {
+      throwIfAborted(args.signal);
       const full = pathMod.join(dir, e.name);
       const lower = e.name.toLowerCase();
       const hit = re ? re.test(e.name) : lower.includes(needle);
@@ -66,8 +74,10 @@ export async function searchContent(
     pattern: string;
     case_sensitive?: boolean;
     include_deps?: boolean;
+    signal?: AbortSignal;
   },
 ): Promise<string> {
+  throwIfAborted(args.signal);
   const caseSensitive = args.case_sensitive === true;
   const includeDeps = args.include_deps === true;
   // Try the pattern as a regex first (lets the model say `\bdispatch\(`
@@ -88,6 +98,7 @@ export async function searchContent(
 
   const walk = async (dir: string): Promise<void> => {
     if (truncated) return;
+    throwIfAborted(args.signal);
     let entries: import("node:fs").Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
@@ -96,6 +107,7 @@ export async function searchContent(
     }
     for (const e of entries) {
       if (truncated) return;
+      throwIfAborted(args.signal);
       if (e.isDirectory()) {
         if (!includeDeps && ctx.skipDirNames.has(e.name)) continue;
         await walk(pathMod.join(dir, e.name));
@@ -115,6 +127,7 @@ export async function searchContent(
       }
       let raw: Buffer;
       try {
+        throwIfAborted(args.signal);
         const st = await fh.stat();
         // Per-file size cap so a 50MB log doesn't dominate the search.
         // Anything legitimately interesting fits in 2 MB; bigger files
@@ -129,6 +142,7 @@ export async function searchContent(
         continue;
       }
       await fh.close();
+      throwIfAborted(args.signal);
       // Content-based binary sniff: NUL byte in the first 8KB. Catches
       // binaries with .json or .txt extensions (yes, this happens).
       const firstNul = raw.indexOf(0);
@@ -137,6 +151,7 @@ export async function searchContent(
       const rel = displayRel(ctx.rootDir, full);
       const lines = text.split(/\r?\n/);
       for (let li = 0; li < lines.length; li++) {
+        throwIfAborted(args.signal);
         const line = lines[li]!;
         const lineForCheck = caseSensitive ? line : line.toLowerCase();
         const hit = re ? re.test(line) : lineForCheck.includes(needle);

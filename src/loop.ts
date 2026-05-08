@@ -226,9 +226,15 @@ export class CacheFirstLoop {
       }
       return def.readOnly !== true;
     };
+    const isStormExempt = (call: ToolCall): boolean => {
+      const name = call.function?.name;
+      if (!name) return false;
+      return registry.get(name)?.stormExempt === true;
+    };
     this.repair = new ToolCallRepair({
       allowedToolNames: allowedNames,
       isMutating,
+      isStormExempt,
       stormThreshold: parsePositiveIntEnv(process.env.REASONIX_STORM_THRESHOLD),
       stormWindow: parsePositiveIntEnv(process.env.REASONIX_STORM_WINDOW),
     });
@@ -252,6 +258,9 @@ export class CacheFirstLoop {
         this.stats.seedCarryover({
           totalCostUsd: meta.totalCostUsd,
           turnCount: meta.turnCount,
+          cacheHitTokens: meta.cacheHitTokens,
+          cacheMissTokens: meta.cacheMissTokens,
+          lastPromptTokens: meta.lastPromptTokens,
         });
       }
       if (healedCount > 0) {
@@ -386,6 +395,11 @@ export class CacheFirstLoop {
   /** UI surface — true while the current turn is running on pro (armed or auto-escalated). */
   get escalatedThisTurn(): boolean {
     return this._escalateThisTurn;
+  }
+
+  /** UI surface — model id of the call about to run (or running) right now, including escalation. */
+  get currentCallModel(): string {
+    return this.modelForCurrentCall();
   }
 
   private modelForCurrentCall(): string {

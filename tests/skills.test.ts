@@ -147,6 +147,45 @@ describe("SkillStore", () => {
     const list = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true }).list();
     expect(list.map((s) => s.name)).toEqual(["ok"]);
   });
+
+  describe("create() — /skill new scaffold (#366)", () => {
+    it("writes a project-scope stub when projectRoot is set", () => {
+      const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+      const r = store.create("frontend-writer", "project");
+      expect("path" in r).toBe(true);
+      const list = store.list();
+      const made = list.find((s) => s.name === "frontend-writer");
+      expect(made?.scope).toBe("project");
+      expect(made?.description).toMatch(/one-liner/i);
+    });
+
+    it("falls back to global scope when projectRoot is absent", () => {
+      const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+      const r = store.create("global-skill", "global");
+      expect("path" in r).toBe(true);
+      const list = store.list();
+      expect(list.find((s) => s.name === "global-skill")?.scope).toBe("global");
+    });
+
+    it("refuses to overwrite an existing skill", () => {
+      const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+      store.create("dup", "project");
+      const second = store.create("dup", "project");
+      expect("error" in second).toBe(true);
+    });
+
+    it("rejects invalid skill names", () => {
+      const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+      const r = store.create("../etc/passwd", "project");
+      expect("error" in r).toBe(true);
+    });
+
+    it("refuses project scope when no projectRoot is configured", () => {
+      const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+      const r = store.create("nope", "project");
+      expect("error" in r).toBe(true);
+    });
+  });
 });
 
 describe("applySkillsIndex", () => {

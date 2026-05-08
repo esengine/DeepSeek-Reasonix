@@ -132,6 +132,9 @@ const status: SlashHandler = (_args, loop, ctx) => {
           : "";
   const dashUrl = ctx.getDashboardUrl?.();
   const dashLine = dashUrl ? t("handlers.observability.statusDash", { url: dashUrl }) : "";
+  const workspaceLine = ctx.codeRoot
+    ? t("handlers.observability.statusWorkspace", { path: ctx.codeRoot })
+    : "";
   const lines = [
     t("handlers.observability.statusModel", { model: loop.model }),
     t("handlers.observability.statusFlags", {
@@ -145,6 +148,7 @@ const status: SlashHandler = (_args, loop, ctx) => {
     mcpLine,
     sessionLine,
   ];
+  if (workspaceLine) lines.push(workspaceLine);
   if (budgetLine) lines.push(budgetLine);
   if (pendingLine) lines.push(pendingLine);
   if (planLine) lines.push(planLine);

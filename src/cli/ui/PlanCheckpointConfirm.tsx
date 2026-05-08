@@ -1,7 +1,6 @@
 /** Modal picker for `PlanCheckpointError`: continue / revise / stop. */
 
 import { Box } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import type { PlanStep } from "../../tools/plan.js";
 import { PlanStepList, type StepStatus } from "./PlanStepList.js";

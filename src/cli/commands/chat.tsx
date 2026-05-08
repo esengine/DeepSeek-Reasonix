@@ -31,6 +31,7 @@ import { registerWebTools } from "../../tools/web.js";
 import { App } from "../ui/App.js";
 import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
+import { drainTtyResponses } from "../ui/drain-tty.js";
 import { KeystrokeProvider } from "../ui/keystroke-context.js";
 import { formatMcpLifecycleEvent } from "../ui/mcp-lifecycle.js";
 import { formatMcpSlowToast } from "../ui/mcp-toast.js";
@@ -308,6 +309,13 @@ export interface ChatOptions {
    * URL is visible in the status bar.
    */
   noDashboard?: boolean;
+  /**
+   * Render into the terminal's alternate screen buffer. Default true —
+   * alt-screen avoids the scrollback-mode resize/wrap ghost class. Pass
+   * false (CLI: `--no-alt-screen`) when the chat output needs to remain
+   * in shell scrollback after exit.
+   */
+  altScreen?: boolean;
 }
 
 interface RootProps extends ChatOptions {
@@ -444,7 +452,9 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   if (runtime.size() === 0 && !opts.seedTools) {
     tools = undefined;
   }
-  const mcpSpecs = runtime.specs();
+  // Preserve configured specs even when startup leaves them unbridged
+  // so `/mcp` can still surface the configured-but-offline set.
+  const mcpSpecs = [...requestedSpecs];
   const mcpServers = runtime.summaries();
 
   // Register web search/fetch tools unless explicitly disabled. DDG
@@ -486,17 +496,6 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const showPicker =
     !opts.session && !opts.forceResume && listSessionsForWorkspace(launchWorkspace).length > 0;
 
-  // No startup clear, no resize listener. Earlier attempts wrote
-  // various combinations of \x1b[2J / \x1b[3J / cursor-home to
-  // present a 'clean canvas' on launch and to neutralize Ink's
-  // eraseLines miscount on resize, but on xterm.js-based terminals
-  // (VSCode integrated terminal in particular) those sequences
-  // interfere with scrollback in ways that make wheel-up scroll
-  // dead. Letting Ink mount directly leaves the user's previous
-  // shell prompt visible above (scrolling up just works) and
-  // accepts the resize-ghost / launch-noise tradeoffs as known
-  // limitations — `/clear` is the manual reset.
-
   const { waitUntilExit } = render(
     <Root
       initialKey={initialKey}
@@ -509,12 +508,23 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       {...opts}
       session={resolvedSession}
     />,
-    // patchConsole:false — winpty/MINTTY redraw-glitch source.
-    { exitOnCtrlC: true, patchConsole: false },
+    {
+      exitOnCtrlC: true,
+      // patchConsole:false — winpty/MINTTY redraw-glitch source.
+      patchConsole: false,
+      incrementalRendering: true,
+      // Default true — alt-screen is the only mode without scrollback-
+      // reflow ghosting. `--no-alt-screen` opts back into scrollback mode
+      // for users who need chat output preserved in shell history on exit.
+      alternateScreen: opts.altScreen !== false,
+    },
   );
   try {
     await waitUntilExit();
   } finally {
     await runtime.closeAll();
+    // Eat any pending terminal-feature-detection responses (#365) so the
+    // parent shell doesn't print them as junk after exit.
+    await drainTtyResponses();
   }
 }

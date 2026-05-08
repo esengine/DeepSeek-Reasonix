@@ -1,8 +1,8 @@
 /** Project scope wins over global. Only names+descriptions enter the prefix; bodies load lazily into the append-only log. */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { NEGATIVE_CLAIM_RULE, TUI_FORMATTING_RULES } from "./prompt-fragments.js";
 
 export const SKILLS_DIRNAME = "skills";
@@ -133,6 +133,35 @@ export class SkillStore {
     return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  /** Scaffold a new skill stub at the chosen scope. Refuses to overwrite. */
+  create(name: string, scope: "project" | "global"): { path: string } | { error: string } {
+    if (!isValidSkillName(name)) {
+      return { error: `invalid skill name: "${name}" — use letters, digits, _, -, .` };
+    }
+    if (scope === "project" && !this.projectRoot) {
+      return { error: "project scope requires a workspace — run from `reasonix code`" };
+    }
+    const root =
+      scope === "project"
+        ? join(this.projectRoot ?? "", ".reasonix", SKILLS_DIRNAME)
+        : join(this.homeDir, ".reasonix", SKILLS_DIRNAME);
+    const flat = join(root, `${name}.md`);
+    const folder = join(root, name, SKILL_FILE);
+    if (existsSync(folder)) {
+      return { error: `skill "${name}" already exists at ${folder}` };
+    }
+    mkdirSync(dirname(flat), { recursive: true });
+    try {
+      writeFileSync(flat, skillStubBody(name), { encoding: "utf8", flag: "wx" });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        return { error: `skill "${name}" already exists at ${flat}` };
+      }
+      throw err;
+    }
+    return { path: flat };
+  }
+
   /** Resolve one skill by name. Returns `null` if not found or malformed. */
   read(name: string): Skill | null {
     if (!isValidSkillName(name)) return null;
@@ -195,6 +224,24 @@ export class SkillStore {
 /** Unknown values default to the safe (non-spawning) `inline` mode. */
 function parseRunAs(raw: string | undefined): SkillRunAs {
   return raw?.trim() === "subagent" ? "subagent" : "inline";
+}
+
+/** Stub markdown for `/skill new` — minimal frontmatter + scaffolding the user fills in. */
+function skillStubBody(name: string): string {
+  return `---
+name: ${name}
+description: One-liner — what does this skill do?
+---
+
+# ${name}
+
+Replace this body with the playbook the model should follow when this skill is invoked.
+
+Tips:
+- Reference tools by name (run_command, edit_file, search_content, ...)
+- Add \`runAs: subagent\` to frontmatter to spawn an isolated subagent loop
+- Add \`allowed-tools: read_file, search_content\` to scope a subagent's tools
+`;
 }
 
 /** Subagent tag goes AFTER the name in brackets — leading-marker tags get copied into `name` arg verbatim. */

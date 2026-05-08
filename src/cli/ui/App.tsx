@@ -72,6 +72,7 @@ import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { McpHub } from "./McpHub.js";
+import { ModelPicker } from "./ModelPicker.js";
 import { PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
@@ -96,6 +97,7 @@ import {
 } from "./hooks/handle-stream-events.js";
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
+import { useChatScroll } from "./hooks/useChatScroll.js";
 import { useCodeMode } from "./hooks/useCodeMode.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
@@ -127,6 +129,7 @@ import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
+import { FG } from "./theme/tokens.js";
 import { TickerProvider } from "./ticker.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
 import { useEditHistory } from "./useEditHistory.js";
@@ -298,6 +301,7 @@ function AppInner({
     s.cards.some((c) => c.kind === "user" || c.kind === "streaming"),
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
+  const chatScroll = useChatScroll();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   // ctrl-o toggles full-tail view on the live streaming card.
@@ -366,39 +370,6 @@ function AppInner({
     };
   }, [stdout]);
 
-  // Resize-suppression state. While the user is dragging the
-  // terminal corner, OS emits a stream of resize events at high
-  // frequency. Each one would trigger Ink to re-render — and our
-  // per-tick animations (wordmark gradient, prompt bar flow,
-  // cursor blink) keep firing at 120 ms — both with stale
-  // `eraseLines(N)` counts because the previous frame's logical
-  // height is no longer the visible height after wrap reflows.
-  // Result: ghost copies of the StatsPanel pile up.
-  //
-  // Fix: detect resize bursts and freeze the global ticker while
-  // they're in flight. With the ticker frozen, no re-render fires
-  // from animations during the resize storm. Once the user stops
-  // dragging (no resize event for ~400 ms), the ticker resumes
-  // and one clean re-render kicks in. The hard-clear in chat.tsx's
-  // resize listener handles the single transition ghost.
-  const [isResizing, setIsResizing] = useState(false);
-  useEffect(() => {
-    if (!stdout || !stdout.isTTY) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const onResize = () => {
-      setIsResizing(true);
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        setIsResizing(false);
-        timer = null;
-      }, 400);
-    };
-    stdout.on("resize", onResize);
-    return () => {
-      stdout.off("resize", onResize);
-      if (timer) clearTimeout(timer);
-    };
-  }, [stdout]);
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
   // subagentRunner closure can read the ref. The wallet-currency thunk
@@ -555,6 +526,8 @@ function AppInner({
   const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>([]);
   /** Opens the unified McpHub modal — null when closed. `tab` selects the initial tab. */
   const [pendingMcpHub, setPendingMcpHub] = useState<{ tab: "live" | "marketplace" } | null>(null);
+  /** True while the ModelPicker is open mid-chat (triggered by bare `/model`). */
+  const [pendingModelPicker, setPendingModelPicker] = useState(false);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
   // returns "refine" or "approve", we defer the loop-resume and show
@@ -610,6 +583,23 @@ function AppInner({
     options: ChoiceOption[];
     allowCustom: boolean;
   } | null>(null);
+  // Truthy when any pending modal owns the screen — gates global
+  // hotkeys (chat-scroll, etc.) so they don't fire behind a picker.
+  const modalOpen =
+    !!pendingShell ||
+    !!pendingPlan ||
+    !!pendingReviseEditor ||
+    !!pendingSessionsPicker ||
+    !!pendingMcpHub ||
+    pendingModelPicker ||
+    !!stagedInput ||
+    !!pendingEditReview ||
+    walkthroughActive ||
+    !!pendingChoice ||
+    !!stagedChoiceCustom ||
+    !!pendingRevision ||
+    !!stagedCheckpointRevise ||
+    !!pendingCheckpoint;
   // Plan-mode indicator — displayed in the StatsPanel, mirrored onto
   // the ToolRegistry so dispatch enforces read-only. Toggled via the
   // `/plan` slash and PlanConfirm picker. Ephemeral — not persisted
@@ -1160,6 +1150,20 @@ function AppInner({
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
 
+  // PgUp / PgDn always scroll chat history; ↑/↓-on-empty-buffer also
+  // routes here via PromptInput's chatScrollHandoff. WT translates wheel
+  // events to ↑/↓ in raw mode, so this is what makes wheel-scroll work.
+  useKeystroke((ev) => {
+    if (ev.pageUp) chatScroll.scrollUp();
+    else if (ev.pageDown) chatScroll.scrollDown();
+    else if (ev.end) chatScroll.jumpToBottom();
+    // Wheel-translated ↑/↓ has nowhere to go when PromptInput can't
+    // process it: in reading mode (unmounted) or while busy (disabled).
+    // When pinned + idle, PromptInput owns arrows for cursor / handoff.
+    else if ((!chatScroll.pinned || busy) && ev.upArrow) chatScroll.scrollUp();
+    else if ((!chatScroll.pinned || busy) && ev.downArrow) chatScroll.scrollDown();
+  }, !modalOpen);
+
   // Esc during busy → forward to the loop as an abort signal. The loop
   // finishes the tool call in flight (we can't kill subprocess stdio
   // mid-write), then diverts to its no-tools summary path so the user
@@ -1626,6 +1630,7 @@ function AppInner({
             autoEscalate: settings.autoEscalate,
             reasoningEffort: settings.reasoningEffort,
           });
+          agentStore.dispatch({ type: "session.model.change", model: settings.model });
           const canonical: "auto" | "flash" | "pro" =
             settings.model === "deepseek-v4-pro" ? "pro" : settings.autoEscalate ? "auto" : "flash";
           setPreset(canonical);
@@ -2152,6 +2157,11 @@ function AppInner({
           pushHistory(text);
           return;
         }
+        if (result.openModelPicker) {
+          setPendingModelPicker(true);
+          pushHistory(text);
+          return;
+        }
         if (result.openArgPickerFor) {
           pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
@@ -2253,7 +2263,7 @@ function AppInner({
 
       const flush = () => {
         if (!contentBuf.current && !reasoningBuf.current && !toolCallBuildBuf.current) return;
-        translator.flushBuffers(reasoningBuf.current, contentBuf.current);
+        translator.flushBuffers(reasoningBuf.current, contentBuf.current, loop.currentCallModel);
         streamRef.text += contentBuf.current;
         streamRef.reasoning += reasoningBuf.current;
         if (toolCallBuildBuf.current) {
@@ -2412,9 +2422,15 @@ function AppInner({
               const cost = (m.totalCostUsd ?? 0) + (ev.stats?.cost ?? 0);
               const turn = (m.turnCount ?? 0) + 1;
               const currency = walletCurrencyRef.current;
+              const u = ev.stats?.usage;
+              const cacheHitTokens = (m.cacheHitTokens ?? 0) + (u?.promptCacheHitTokens ?? 0);
+              const cacheMissTokens = (m.cacheMissTokens ?? 0) + (u?.promptCacheMissTokens ?? 0);
               patchSessionMeta(session, {
                 totalCostUsd: cost,
                 turnCount: turn,
+                cacheHitTokens,
+                cacheMissTokens,
+                ...(u?.promptTokens ? { lastPromptTokens: u.promptTokens } : {}),
                 ...(currency ? { balanceCurrency: currency } : {}),
               });
             }
@@ -3060,56 +3076,24 @@ function AppInner({
     [],
   );
 
-  const modalOpen =
-    !!pendingShell ||
-    !!pendingPlan ||
-    !!pendingReviseEditor ||
-    !!pendingSessionsPicker ||
-    !!pendingMcpHub ||
-    !!stagedInput ||
-    !!pendingEditReview ||
-    walkthroughActive ||
-    !!pendingChoice ||
-    !!stagedChoiceCustom ||
-    !!pendingRevision ||
-    !!stagedCheckpointRevise ||
-    !!pendingCheckpoint;
+  // Suspend cosmetic animations during modal interactions and idle so
+  // a quiescent TUI is byte-stable. PLAIN_UI is the env-flag opt-out
+  // for fragile terminals.
+  const tickerSuspended = PLAIN_UI || modalOpen || (!busy && !isStreaming);
 
   return (
     <>
-      <TickerProvider
-        disabled={
-          PLAIN_UI ||
-          isResizing ||
-          !!pendingPlan ||
-          !!pendingReviseEditor ||
-          pendingSessionsPicker ||
-          !!pendingMcpHub ||
-          !!pendingShell ||
-          !!pendingEditReview ||
-          walkthroughActive ||
-          !!pendingChoice ||
-          !!stagedChoiceCustom ||
-          !!pendingRevision ||
-          !!stagedCheckpointRevise ||
-          !!pendingCheckpoint ||
-          // Idle gate: when nothing is actively happening, suspend the
-          // 8Hz/1Hz heartbeats. The cursor blink, gradient pulse, and
-          // spinner glyphs are pure cosmetics — running them at idle
-          // forces Ink to repaint the screen ~8x/sec, which erases any
-          // text selection the user has made in the terminal. With the
-          // ticker paused, an idle TUI is byte-stable and shift-drag /
-          // click-drag selections survive until something actually
-          // changes (incoming stream, key press, modal popup).
-          (!busy && !isStreaming)
-        }
-      >
+      <TickerProvider disabled={tickerSuspended}>
         <ViewportBudgetProvider>
-          <Box flexDirection="row">
+          <Box flexDirection="row" height={stdout?.rows ?? 24}>
             <Box flexDirection="column" flexGrow={1}>
-              <Box flexDirection="column">
+              <Box flexDirection="column" flexGrow={1}>
                 <LiveExpandContext.Provider value={liveExpand}>
-                  <CardStream suppressLive={modalOpen} />
+                  <CardStream
+                    suppressLive={modalOpen}
+                    scrollRows={chatScroll.scrollRows}
+                    onMaxScrollChange={chatScroll.setMaxScroll}
+                  />
                 </LiveExpandContext.Provider>
                 {/*
           Welcome card on the empty state. Visible only when nothing
@@ -3120,6 +3104,7 @@ function AppInner({
                 {!hasConversation && !busy && !isStreaming ? (
                   <WelcomeBanner
                     inCodeMode={!!codeMode}
+                    workspaceRoot={codeMode ? currentRootDir : undefined}
                     dashboardUrl={dashboardUrl}
                     languageVersion={languageVersion}
                   />
@@ -3303,6 +3288,20 @@ function AppInner({
                     }
                   }}
                 />
+              ) : pendingModelPicker ? (
+                <ModelPicker
+                  models={models}
+                  current={loop.model}
+                  onRefresh={refreshModels}
+                  onChoose={(outcome) => {
+                    setPendingModelPicker(false);
+                    if (outcome.kind === "select") {
+                      loop.configure({ model: outcome.id });
+                      agentStore.dispatch({ type: "session.model.change", model: outcome.id });
+                      log.pushInfo(`▸ model: ${outcome.id}`);
+                    }
+                  }}
+                />
               ) : pendingMcpHub ? (
                 <McpHub
                   initialTab={pendingMcpHub.tab}
@@ -3379,6 +3378,10 @@ function AppInner({
                   block={pendingEdits.current[0]!}
                   onChoose={handleWalkChoice}
                 />
+              ) : !chatScroll.pinned ? (
+                <Text color={FG.faint}>
+                  {" 📖 reading history — End / PgDn to return · ↓ to advance one line"}
+                </Text>
               ) : (
                 <>
                   {codeMode ? (
@@ -3400,6 +3403,8 @@ function AppInner({
                     disabled={busy}
                     onHistoryPrev={recallPrev}
                     onHistoryNext={recallNext}
+                    onChatScrollUp={chatScroll.scrollUp}
+                    onChatScrollDown={chatScroll.scrollDown}
                   />
                   {slashMatches !== null ? (
                     <SlashSuggestions matches={slashMatches} selectedIndex={slashSelected} />

@@ -9,13 +9,13 @@ export class TurnTranslator {
 
   constructor(private readonly log: Scrollback) {}
 
-  flushBuffers(reasoningChunk: string, contentChunk: string): void {
+  flushBuffers(reasoningChunk: string, contentChunk: string, model?: string): void {
     if (reasoningChunk) {
-      if (!this.reasoningCardId) this.reasoningCardId = this.log.startReasoning();
+      if (!this.reasoningCardId) this.reasoningCardId = this.log.startReasoning(model);
       this.log.appendReasoning(this.reasoningCardId, reasoningChunk);
     }
     if (contentChunk) {
-      if (!this.streamingCardId) this.streamingCardId = this.log.startStreaming();
+      if (!this.streamingCardId) this.streamingCardId = this.log.startStreaming(model);
       this.log.appendStreaming(this.streamingCardId, contentChunk);
     }
   }

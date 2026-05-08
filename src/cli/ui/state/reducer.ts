@@ -25,7 +25,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       );
 
     case "reasoning.start":
-      return appendCard(state, makeReasoningCard(event.id, state.session.model));
+      return appendCard(state, makeReasoningCard(event.id, event.model ?? state.session.model));
 
     case "reasoning.chunk":
       return mutateCard(state, event.id, "reasoning", (c) => ({ ...c, text: c.text + event.text }));
@@ -41,7 +41,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       }));
 
     case "streaming.start":
-      return appendCard(state, makeStreamingCard(event.id, state.session.model));
+      return appendCard(state, makeStreamingCard(event.id, event.model ?? state.session.model));
 
     case "streaming.chunk":
       return mutateCard(state, event.id, "streaming", (c) => ({ ...c, text: c.text + event.text }));
@@ -115,6 +115,11 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
 
     case "session.update":
       return { ...state, status: { ...state.status, ...event.patch } };
+
+    case "session.model.change":
+      return state.session.model === event.model
+        ? state
+        : { ...state, session: { ...state.session, model: event.model } };
 
     case "focus.move":
       return {

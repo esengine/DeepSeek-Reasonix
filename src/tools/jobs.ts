@@ -162,6 +162,7 @@ export class JobRegistry {
         signalReady: () => {},
         closedPromise: Promise.resolve(),
         signalClosed: () => {},
+        outputWaiters: new Set(),
       };
       this.jobs.set(id, job);
       return {
@@ -197,6 +198,7 @@ export class JobRegistry {
       signalReady: readyResolve,
       closedPromise,
       signalClosed: closedResolve,
+      outputWaiters: new Set(),
     };
     this.jobs.set(id, job);
 
@@ -232,6 +234,11 @@ export class JobRegistry {
             break;
           }
         }
+      }
+      if (job.outputWaiters.size > 0) {
+        const waiters = [...job.outputWaiters];
+        job.outputWaiters.clear();
+        for (const wake of waiters) wake();
       }
     };
     child.stdout?.on("data", onData);
@@ -297,6 +304,43 @@ export class JobRegistry {
       command: job.command,
       pid: job.pid,
       spawnError: job.spawnError,
+    };
+  }
+
+  async waitForJob(id: number, opts: { timeoutMs?: number } = {}): Promise<JobWaitResult | null> {
+    const job = this.jobs.get(id);
+    if (!job) return null;
+    if (!job.running) {
+      return {
+        exited: true,
+        exitCode: job.exitCode,
+        latestOutput: job.output,
+      };
+    }
+
+    const timeoutMs = Math.max(0, Math.min(30_000, opts.timeoutMs ?? 5_000));
+    const startOutput = job.output;
+    let wakeOutput: (() => void) | null = null;
+    const outputPromise = new Promise<void>((resolve) => {
+      wakeOutput = resolve;
+      job.outputWaiters.add(resolve);
+    });
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    await Promise.race([
+      job.closedPromise,
+      outputPromise,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (wakeOutput) job.outputWaiters.delete(wakeOutput);
+
+    return {
+      exited: !job.running,
+      exitCode: job.exitCode,
+      latestOutput: latestOutputSince(startOutput, job.output),
     };
   }
 
@@ -402,6 +446,8 @@ interface InternalJob extends JobRecord {
   /** Resolves only on close/error — never on ready-signal. Used by stop() to wait for actual exit. */
   closedPromise: Promise<void>;
   signalClosed: () => void;
+  /** One-shot waiters for "some new output arrived". Cleared after every wake. */
+  outputWaiters: Set<() => void>;
 }
 
 export interface JobReadResult {
@@ -413,6 +459,12 @@ export interface JobReadResult {
   command: string;
   pid: number | null;
   spawnError?: string;
+}
+
+export interface JobWaitResult {
+  exited: boolean;
+  exitCode: number | null;
+  latestOutput: string;
 }
 
 function snapshot(job: InternalJob): JobRecord {
@@ -427,4 +479,10 @@ function snapshot(job: InternalJob): JobRecord {
     running: job.running,
     spawnError: job.spawnError,
   };
+}
+
+function latestOutputSince(before: string, after: string): string {
+  if (!before) return after;
+  if (after.startsWith(before)) return after.slice(before.length);
+  return after;
 }
