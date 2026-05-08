@@ -404,6 +404,7 @@ export const zhCN = {
     filterPlaceholder: "筛选计划",
     active: "进行中",
     done: "已完成",
+    idle: "未开始",
     steps: "步骤",
     pickHint: "选择左侧的计划。",
     noTitle: "（无标题）",
