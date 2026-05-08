@@ -1,21 +1,17 @@
 /**
  * First-run / re-configure wizard.
  *
- * Walks a new user through: API key → preset pick → MCP server pick →
- * per-server args → save. Saved output lives in `~/.reasonix/config.json`
- * so the next `reasonix chat` starts with everything already wired.
- *
- * The wizard is the antidote to "too many CLI flags" — a new user should
- * never have to read `--help` to get MCP + a sensible model combo
- * working. Everything a user could set via `--mcp`, `--harvest`,
- * `--branch`, etc. can be picked here in a few arrow-key presses.
+ * Walks a new user through: language → API key → preset pick → MCP server
+ * pick → per-server args → save. Saved output lives in
+ * `~/.reasonix/config.json` so the next `reasonix chat` starts with
+ * everything already wired.
  */
 
 import { mkdirSync, statSync } from "node:fs";
 import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 // biome-ignore lint/style/useImportType: JSX (jsx: "react") needs React as a value at runtime
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   type PresetName,
   type ReasonixConfig,
@@ -25,6 +21,16 @@ import {
   redactKey,
   writeConfig,
 } from "../../config.js";
+import {
+  detectSystemLanguage,
+  getLanguage,
+  getSupportedLanguages,
+  notifyLanguageChange,
+  onLanguageChange,
+  setLanguage,
+  t,
+} from "../../i18n/index.js";
+import type { LanguageCode } from "../../i18n/types.js";
 import { type CatalogEntry, MCP_CATALOG } from "../../mcp/catalog.js";
 import { MultiSelect, type SelectItem, SingleSelect } from "./Select.js";
 import { PRESET_DESCRIPTIONS } from "./presets.js";
@@ -43,22 +49,31 @@ export interface WizardProps {
   };
 }
 
-type Step = "apiKey" | "preset" | "mcp" | "mcpArgs" | "review" | "saved";
+type Step = "language" | "apiKey" | "preset" | "mcp" | "mcpArgs" | "review" | "saved";
 
 interface WizardData {
+  language: LanguageCode;
   apiKey: string;
   preset: PresetName;
-  selectedCatalog: string[]; // entries from MCP_CATALOG by `name`
-  /** Captured user inputs per catalog entry that has `userArgs` (e.g. fs dir). */
+  selectedCatalog: string[];
   catalogArgs: Record<string, string>;
 }
 
 const CATALOG_BY_NAME = new Map(MCP_CATALOG.map((e) => [e.name, e]));
 
+const LANGUAGE_LABELS: Record<LanguageCode, string> = {
+  EN: "English",
+  "zh-CN": "简体中文",
+};
+
 export function Wizard({ onComplete, onCancel, existingApiKey, initial }: WizardProps) {
   const { exit } = useApp();
-  const [step, setStep] = useState<Step>(existingApiKey ? "preset" : "apiKey");
+  const [, setLanguageVersion] = useState(0);
+  useEffect(() => onLanguageChange(() => setLanguageVersion((v) => v + 1)), []);
+
+  const [step, setStep] = useState<Step>("language");
   const [data, setData] = useState<WizardData>({
+    language: getLanguage(),
     apiKey: existingApiKey ?? "",
     preset: initial?.preset ?? "auto",
     selectedCatalog: deriveInitialCatalog(initial?.mcp ?? []),
@@ -66,11 +81,23 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
   });
   const [error, setError] = useState<string | null>(null);
 
-  // Global Esc → cancel. Disabled once we've started saving to avoid
-  // ejecting out of a half-written state.
   useInput((_input, key) => {
     if (key.escape && step !== "saved" && onCancel) onCancel();
   });
+
+  if (step === "language") {
+    return (
+      <LanguageStep
+        initialValue={data.language}
+        onSubmit={(lang) => {
+          setLanguage(lang);
+          notifyLanguageChange();
+          setData((d) => ({ ...d, language: lang }));
+          setStep(existingApiKey ? "preset" : "apiKey");
+        }}
+      />
+    );
+  }
 
   if (step === "apiKey") {
     return (
@@ -88,7 +115,7 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
 
   if (step === "preset") {
     return (
-      <StepFrame title="Pick a preset" step={1} total={3}>
+      <StepFrame title={t("wizard.presetTitle")} step={1} total={3}>
         <SingleSelect<PresetName>
           items={presetItems()}
           initialValue={data.preset}
@@ -98,7 +125,7 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
           }}
         />
         <Box marginTop={1}>
-          <Text dimColor>[↑↓] navigate · [Enter] confirm · [Esc] cancel</Text>
+          <Text dimColor>{t("wizard.selectFooter")}</Text>
         </Box>
       </StepFrame>
     );
@@ -106,17 +133,16 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
 
   if (step === "mcp") {
     return (
-      <StepFrame title="Which MCP servers should Reasonix wire up for you?" step={2} total={3}>
+      <StepFrame title={t("wizard.mcpTitle")} step={2} total={3}>
         <MultiSelect
           items={mcpItems()}
           initialSelected={data.selectedCatalog}
           onSubmit={(selected) => {
             setData((d) => ({ ...d, selectedCatalog: selected }));
-            // Only advance to the args step if any selected entry needs args.
             const needsArgs = selected.some((name) => CATALOG_BY_NAME.get(name)?.userArgs);
             setStep(needsArgs ? "mcpArgs" : "review");
           }}
-          footer="[↑↓] navigate  ·  [Space] toggle  ·  [Enter] confirm  ·  [Esc] cancel  ·  empty = skip"
+          footer={t("wizard.mcpFooterMulti")}
         />
       </StepFrame>
     );
@@ -152,13 +178,21 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
   if (step === "review") {
     const specs = data.selectedCatalog.map((name) => buildSpec(name, data.catalogArgs));
     return (
-      <StepFrame title="Ready to save" step={3} total={3}>
+      <StepFrame title={t("wizard.reviewTitle")} step={3} total={3}>
         <Box flexDirection="column">
-          <SummaryLine label="API key" value={redactKey(data.apiKey)} />
-          <SummaryLine label="Preset" value={data.preset} />
           <SummaryLine
-            label="MCP"
-            value={specs.length === 0 ? "(none)" : `${specs.length} server(s)`}
+            label={t("wizard.reviewLabelLanguage")}
+            value={LANGUAGE_LABELS[data.language]}
+          />
+          <SummaryLine label={t("wizard.reviewLabelApiKey")} value={redactKey(data.apiKey)} />
+          <SummaryLine label={t("wizard.reviewLabelPreset")} value={data.preset} />
+          <SummaryLine
+            label={t("wizard.reviewLabelMcp")}
+            value={
+              specs.length === 0
+                ? t("wizard.reviewMcpNone")
+                : t("wizard.reviewMcpServers", { count: specs.length })
+            }
           />
           {specs.map((spec, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: review-only render, order fixed
@@ -167,7 +201,7 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
             </Box>
           ))}
           <Box marginTop={1}>
-            <Text>Saves to {defaultConfigPath()}</Text>
+            <Text>{t("wizard.reviewSavesTo", { path: defaultConfigPath() })}</Text>
           </Box>
           {error ? (
             <Box marginTop={1}>
@@ -175,7 +209,7 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
             </Box>
           ) : null}
           <Box marginTop={1}>
-            <Text dimColor>[Enter] save · [Esc] cancel</Text>
+            <Text dimColor>{t("wizard.reviewFooter")}</Text>
           </Box>
         </Box>
         <ReviewConfirm
@@ -196,7 +230,7 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
               setStep("saved");
               onComplete(next);
             } catch (e) {
-              setError(`Could not save config: ${(e as Error).message}`);
+              setError(t("wizard.reviewSaveError", { message: (e as Error).message }));
             }
           }}
         />
@@ -204,17 +238,16 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
     );
   }
 
-  // saved
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
       <Text bold color="green">
-        ▸ Saved.
+        {t("wizard.savedTitle")}
       </Text>
       <Box marginTop={1}>
-        <Text>Run `reasonix` any time to start chatting — your settings are remembered.</Text>
+        <Text>{t("ui.welcome")}</Text>
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>[Enter] to exit</Text>
+        <Text dimColor>{t("wizard.savedFooter")}</Text>
       </Box>
       <ExitOnEnter onExit={exit} />
     </Box>
@@ -222,6 +255,38 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
 }
 
 // ---------- step components ----------
+
+function LanguageStep({
+  initialValue,
+  onSubmit,
+}: {
+  initialValue: LanguageCode;
+  onSubmit: (lang: LanguageCode) => void;
+}) {
+  const items: SelectItem<LanguageCode>[] = getSupportedLanguages().map((code) => ({
+    value: code,
+    label: LANGUAGE_LABELS[code],
+    hint: code === detectSystemLanguage() ? "(detected)" : undefined,
+  }));
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Text bold color="cyan">
+        {t("wizard.languageTitle")}
+      </Text>
+      <Box marginTop={1}>
+        <Text dimColor>{t("wizard.languageSubtitle")}</Text>
+      </Box>
+      <Box marginTop={1}>
+        <SingleSelect<LanguageCode>
+          items={items}
+          initialValue={initialValue}
+          onSubmit={onSubmit}
+          footer={t("wizard.selectFooter")}
+        />
+      </Box>
+    </Box>
+  );
+}
 
 function ApiKeyStep({
   onSubmit,
@@ -236,16 +301,16 @@ function ApiKeyStep({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
       <Text bold color="cyan">
-        Welcome to Reasonix.
+        {t("wizard.welcomeTitle")}
       </Text>
       <Box marginTop={1}>
-        <Text>Paste your DeepSeek API key to get started.</Text>
+        <Text>{t("wizard.apiKeyPrompt")}</Text>
       </Box>
-      <Text dimColor>Get one at: https://platform.deepseek.com/api_keys</Text>
-      <Text dimColor>Saved locally to {defaultConfigPath()}</Text>
+      <Text dimColor>{t("wizard.apiKeyGetOne")}</Text>
+      <Text dimColor>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
       <Box marginTop={1}>
         <Text bold color="cyan">
-          {"key › "}
+          {t("wizard.apiKeyInputLabel")}
         </Text>
         <TextInput
           value={value}
@@ -253,7 +318,7 @@ function ApiKeyStep({
           onSubmit={(raw) => {
             const trimmed = raw.trim();
             if (!isPlausibleKey(trimmed)) {
-              onError("Doesn't look like a DeepSeek key. They start with 'sk-' and are 30+ chars.");
+              onError(t("wizard.apiKeyInvalid"));
               setValue("");
               return;
             }
@@ -269,7 +334,7 @@ function ApiKeyStep({
         </Box>
       ) : value ? (
         <Box marginTop={1}>
-          <Text dimColor>preview: {redactKey(value)}</Text>
+          <Text dimColor>{t("wizard.apiKeyPreview", { redacted: redactKey(value) })}</Text>
         </Box>
       ) : null}
     </Box>
@@ -302,7 +367,12 @@ function McpArgsStep({
         onError(null);
         onSubmit(created);
       } catch (e) {
-        onError(`Couldn't create ${pendingCreate}: ${(e as Error).message}`);
+        onError(
+          t("wizard.mcpArgsDirCreateFailed", {
+            path: pendingCreate,
+            message: (e as Error).message,
+          }),
+        );
         setPendingCreate(null);
       }
     } else if (ch === "n" || key.escape) {
@@ -313,13 +383,11 @@ function McpArgsStep({
 
   if (pendingCreate) {
     return (
-      <StepFrame title={`Configure ${entry.name}`} step={2} total={3}>
+      <StepFrame title={t("wizard.mcpArgsTitle", { name: entry.name })} step={2} total={3}>
         <Box flexDirection="column">
-          <Text>
-            Directory <Text bold>{pendingCreate}</Text> doesn't exist.
-          </Text>
+          <Text>{t("wizard.mcpArgsDirMissing", { path: pendingCreate })}</Text>
           <Box marginTop={1}>
-            <Text dimColor>[Y/Enter] create it (mkdir -p) · [N/Esc] enter a different path</Text>
+            <Text dimColor>{t("wizard.mcpArgsDirCreateHint")}</Text>
           </Box>
           {error ? (
             <Box marginTop={1}>
@@ -332,7 +400,7 @@ function McpArgsStep({
   }
 
   return (
-    <StepFrame title={`Configure ${entry.name}`} step={2} total={3}>
+    <StepFrame title={t("wizard.mcpArgsTitle", { name: entry.name })} step={2} total={3}>
       <Box flexDirection="column">
         <Text>{entry.summary}</Text>
         {entry.note ? (
@@ -341,7 +409,7 @@ function McpArgsStep({
           </Box>
         ) : null}
         <Box marginTop={1}>
-          <Text>Required parameter: </Text>
+          <Text>{t("wizard.mcpArgsRequiredParam")}</Text>
           <Text bold>{entry.userArgs}</Text>
         </Box>
         <Box marginTop={1}>
@@ -355,7 +423,7 @@ function McpArgsStep({
             onSubmit={(raw) => {
               const trimmed = raw.trim();
               if (!trimmed) {
-                onError(`${entry.name} needs a value — got an empty string.`);
+                onError(t("wizard.mcpArgsEmpty", { name: entry.name }));
                 return;
               }
               if (entry.name === "filesystem") {
@@ -365,7 +433,7 @@ function McpArgsStep({
                   return;
                 }
                 if (check.kind === "not-a-dir") {
-                  onError(`${trimmed} exists but is not a directory.`);
+                  onError(t("wizard.mcpArgsNotADir", { path: trimmed }));
                   return;
                 }
               }
@@ -407,8 +475,6 @@ function ExitOnEnter({ onExit }: { onExit: () => void }) {
   return null;
 }
 
-// ---------- small bits ----------
-
 function StepFrame({
   title,
   step,
@@ -423,9 +489,7 @@ function StepFrame({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
       <Box>
-        <Text dimColor>
-          Step {step}/{total} ·{" "}
-        </Text>
+        <Text dimColor>{t("wizard.stepCounter", { step, total })}</Text>
         <Text bold color="cyan">
           {title}
         </Text>
@@ -446,8 +510,6 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ---------- data helpers ----------
-
 function presetItems(): SelectItem<PresetName>[] {
   return (["auto", "flash", "pro"] as const).map((name) => ({
     value: name as PresetName,
@@ -459,7 +521,7 @@ function presetItems(): SelectItem<PresetName>[] {
 function mcpItems(): SelectItem<string>[] {
   return MCP_CATALOG.map((entry) => {
     const hintParts: string[] = [entry.summary];
-    if (entry.userArgs) hintParts.push(`(you'll provide ${entry.userArgs})`);
+    if (entry.userArgs) hintParts.push(t("wizard.mcpUserArgsHint", { arg: entry.userArgs }));
     if (entry.note) hintParts.push(entry.note);
     return {
       value: entry.name,
@@ -476,9 +538,6 @@ function placeholderFor(entry: CatalogEntry): string {
 }
 
 function deriveInitialCatalog(existingSpecs: string[]): string[] {
-  // Best-effort recovery: if the user previously picked catalog entries,
-  // the spec strings look like `name=npx -y <pkg> ...`. Match by package
-  // so reconfigure pre-checks the same boxes.
   const packageToName = new Map(MCP_CATALOG.map((e) => [e.package, e.name]));
   const out: string[] = [];
   for (const spec of existingSpecs) {
@@ -499,7 +558,7 @@ function deriveInitialCatalog(existingSpecs: string[]): string[] {
  */
 export function buildSpec(name: string, argsByName: Record<string, string>): string {
   const entry = CATALOG_BY_NAME.get(name);
-  if (!entry) return name; // shouldn't happen; fall back gracefully
+  if (!entry) return name;
   const userArg = entry.userArgs ? argsByName[name] : undefined;
   const tail = userArg ? ` ${quoteIfNeeded(userArg)}` : "";
   return `${entry.name}=npx -y ${entry.package}${tail}`;

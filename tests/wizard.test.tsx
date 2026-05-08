@@ -1,7 +1,10 @@
 /** Wizard data-transform — buildSpec → parseMcpSpec round-trip; bugs here = silent config-save failures. */
 
-import { describe, expect, it } from "vitest";
-import { buildSpec } from "../src/cli/ui/Wizard.js";
+import { render } from "ink-testing-library";
+import React from "react";
+import { afterEach, describe, expect, it } from "vitest";
+import { Wizard, buildSpec } from "../src/cli/ui/Wizard.js";
+import { setLanguageRuntime } from "../src/i18n/index.js";
 import { parseMcpSpec } from "../src/mcp/spec.js";
 
 describe("Wizard.buildSpec → parseMcpSpec round-trip", () => {
@@ -35,5 +38,30 @@ describe("Wizard.buildSpec → parseMcpSpec round-trip", () => {
     // sees an unfamiliar name on re-run, we degrade gracefully rather
     // than throwing.
     expect(buildSpec("not-in-catalog", {})).toBe("not-in-catalog");
+  });
+});
+
+describe("Wizard — first-launch language picker", () => {
+  afterEach(() => {
+    setLanguageRuntime("EN");
+  });
+
+  it("shows the language step first, with both supported languages", () => {
+    const { lastFrame, unmount } = render(<Wizard onComplete={() => {}} />);
+    const out = lastFrame() ?? "";
+    expect(out).toContain("Choose your language");
+    expect(out).toContain("English");
+    expect(out).toContain("简体中文");
+    unmount();
+  });
+
+  it("shows the title in zh-CN when runtime language is set to zh-CN", () => {
+    setLanguageRuntime("zh-CN");
+    const { lastFrame, unmount } = render(<Wizard onComplete={() => {}} />);
+    const out = lastFrame() ?? "";
+    expect(out).toContain("选择语言");
+    expect(out).toContain("English");
+    expect(out).toContain("简体中文");
+    unmount();
   });
 });
