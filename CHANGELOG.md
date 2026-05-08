@@ -3,6 +3,131 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] — 2026-05-08
+
+**Headline:** the slash surface lost weight. Eleven redundant
+commands gone (`/clear`, `/keys`, `/models`, `/effort`, `/rename`,
+`/forget`, `/think`, `/tool`, `/apply-plan`, `/semantic`,
+`/resume`), the unified preset+model picker replaces three
+near-identical commands, and the two heaviest features almost
+nobody opted into — `/harvest` (Pillar-2 plan-state extraction)
+and `/branch` (parallel-sample selector) — are deleted along with
+their backing modules, events, transcript fields, and CLI flags.
+The four-pillar architecture collapses to three. The slash registry
+now carries a `group` tag (chat / setup / info / session / extend
+/ code / jobs / advanced) and bare-`/` suggestions render those
+groups with advanced rows hidden behind a `+ N advanced · type to
+search` footer. A new `~/.reasonix/slash-usage.json` counter
+sorts frequent commands first within a prefix.
+
+The other half of the release is plan-mode UX. PlanLiveRow had
+nothing to dock — a code path that should have materialized an
+"active" plan card on approval was missing, so the bottom strip
+stayed empty after `/plan`. Fixed. And the per-step "Checkpoint —
+step done" picker fired in auto/yolo too, defeating the whole
+point of those modes; auto/yolo now resolve "continue" without
+prompting while still creating per-step rollback snapshots so
+`/restore` granularity stays intact. Plus a long-standing
+`@`-mention bug: typing `@docs/` produced an empty `not-file`
+placeholder. It now expands to a recursive `<directory>` listing
+respecting the project's gitignore, and symlinked source files
+finally appear in the `@`-picker.
+
+**Features:**
+
+- feat(semantic): OpenAI-compatible embedding provider. Configure
+  custom API URL / key / model / request body for embeddings,
+  replacing the Ollama-only setup. Dashboard semantic panel adds
+  a provider dropdown with "OpenAI-Compatible" alongside Ollama,
+  clearer status messages, and detailed indexing-job phases
+  (scanning / embedding / writing). Community contribution from
+  @kabaka9527. (#424)
+
+- feat(slash): unified preset+model picker. `ModelPicker` shows the
+  three presets at the top with cost/headline copy and the model
+  catalog below; cursor lands on the active row (auto-detects which
+  preset matches the loop's current model + effort + autoEscalate).
+  Both `/preset` (no arg) and `/model` (no arg) open it. (#453)
+
+- feat(slash): grouped suggestions + usage telemetry.
+  `SlashCommandSpec` gains a `group` field; suggestion palette
+  renders section headers on bare `/` with advanced rows hidden
+  behind a footer. New `~/.reasonix/slash-usage.json` counter
+  (read-modify-write, atomic rename) feeds `suggestSlashCommands`
+  so frequent commands sort first; `slash.invoked` events emit to
+  events.jsonl for cross-session analysis. `/help` walks the same
+  grouped registry so there's one source of truth. (#453)
+
+**Bug fixes:**
+
+- fix(plan): dock active plan card. `case "plan_proposed"` had
+  been dropping the gate payload's `steps`/`summary`, and the
+  approve path never dispatched `plan.show` — so no card with
+  `variant: "active"` ever existed and `isActivePlanInFlight`
+  returned null. PlanLiveRow now docks correctly after approval,
+  and the dock tracks tail rewrites on revise-accept. (#454)
+
+- fix(plan): auto/yolo skip the per-step checkpoint picker. The
+  "Checkpoint — step done" picker fired after every
+  `mark_step_complete` regardless of edit mode — shell and
+  edit-gate already self-skip in auto/yolo, but plan checkpoints
+  kept stopping the model. The gate handler now checks
+  `editModeRef` and resolves "continue" without UI; per-step
+  rollback snapshot still runs so `/restore` granularity is
+  preserved. `review` mode is unchanged. (#454)
+
+- fix(at-mentions): `@<dir>` expands to a recursive listing.
+  Was treated as a `not-file` skip, leaving the model with an
+  empty placeholder. Walks the project root with the existing
+  gitignore layers, filters to entries under the directory, and
+  inlines a `<directory path="..." entries="N">` block capped at
+  `DEFAULT_AT_DIR_MAX_ENTRIES` (200). `@docs/` and `@docs`
+  resolve identically. (#455, closes #451)
+
+- fix(at-mentions): symlinks-to-files appear in the `@`-picker.
+  `Dirent.isFile()` returns false for symlinks, so symlinked
+  source files never showed up in completions. Both
+  `listFilesWithStatsSync` and `listFilesWithStatsAsync` now stat
+  through symlinks; symlinks-to-files come back, symlinks-to-dirs
+  stay dropped (cycle risk), broken links stay dropped (nothing
+  to point at). (#455, closes #451)
+
+**Removals — slash commands:**
+
+- `/clear` (merged into `/new` as alias — was the most common
+  source of "what's the difference?" confusion)
+- `/models` (picker covers it)
+- `/keys` (folded into `/help`)
+- `/resume` (sessions picker has switch action)
+- `/semantic` (folded into `/doctor`)
+- `/effort` (preset locks effort)
+- `/rename` and `/forget` (sessions picker actions)
+- `/apply-plan` (plan picker handles the fallback path)
+- `/think` and `/tool` (debug-only; events.jsonl records both)
+- `/mcp browse` entry (handler still routes `["browse"]`)
+
+**Removals — features:**
+
+- `/harvest` (Pillar-2 plan-state extraction): `src/harvest.ts`,
+  `--harvest` CLI flag, `harvestedTurns` transcript field.
+- `/branch` (parallel-sample selector): `src/consistency.ts`,
+  `src/loop/branch.ts`, `BranchCard`,
+  `branch_start/progress/done` events, `--branch` CLI flag.
+- `benchmarks/harvest/` deleted; `ARCHITECTURE.md` collapses from
+  four pillars to three; README + zh-CN + `dashboard/PARITY.md`
+  updated.
+
+**Removals — public API:**
+
+- `src/index.ts` drops `harvest`, `runBranches`,
+  `aggregateBranchUsage`, `defaultSelector`, `emptyPlanState`,
+  `isPlanStateEmpty`, and the `TypedPlanState`, `HarvestOptions`,
+  `BranchSample`, `BranchSummary`, `BranchProgress`,
+  `BranchOptions`, `BranchResult`, `BranchSelector` types.
+  Consumers depending on these break intentionally — they were
+  experimental from the start and never met the cache-first
+  cost target this project gates on.
+
 ## [0.31.0] — 2026-05-08
 
 **Headline:** a Mac user reported a DeepSeek 503 day where Reasonix
