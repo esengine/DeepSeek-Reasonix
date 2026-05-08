@@ -41,7 +41,7 @@ import {
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
 import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
-import { onLanguageChange } from "../../i18n/index.js";
+import { onLanguageChange, t } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import type { LoopEvent } from "../../loop.js";
 import {
@@ -1123,15 +1123,11 @@ function AppInner({
     if (sessionBannerShown.current) return;
     sessionBannerShown.current = true;
     if (!session) {
-      log.pushInfo("▸ ephemeral chat (no session persistence) — drop --no-session to enable");
+      log.pushInfo(t("ui.ephemeralSession"));
     } else if (loop.resumedMessageCount > 0) {
-      log.pushInfo(
-        `▸ resumed session "${session}" with ${loop.resumedMessageCount} prior messages · /forget to start over · /sessions to list`,
-      );
+      log.pushInfo(t("ui.resumedSession", { name: session, count: loop.resumedMessageCount }));
     } else {
-      log.pushInfo(
-        `▸ session "${session}" (new) — auto-saved as you chat · /forget to delete · /sessions to list`,
-      );
+      log.pushInfo(t("ui.newSession", { name: session }));
     }
     // Restore any pending edit queue from a prior run that was
     // interrupted before /apply or /discard. The checkpoint file sits
@@ -1142,9 +1138,7 @@ function AppInner({
       if (restored && restored.length > 0) {
         pendingEdits.current = restored;
         syncPendingCount();
-        log.pushInfo(
-          `▸ restored ${restored.length} pending edit block(s) from an interrupted prior run — /apply to commit or /discard to drop.`,
-        );
+        log.pushInfo(t("ui.restoredEdits", { count: restored.length }));
       }
     }
     // Restore structured plan state from a prior run. plan.json sits
@@ -1167,7 +1161,7 @@ function AppInner({
         const done = new Set(restoredPlan.completedStepIds);
         const summary = restoredPlan.summary ? ` — ${restoredPlan.summary}` : "";
         log.showPlan({
-          title: `Resumed plan · ${when}${summary}`,
+          title: t("ui.resumedPlan", { when, summary }),
           steps: restoredPlan.steps.map((s) => ({
             id: s.id,
             title: s.title,
@@ -1183,14 +1177,7 @@ function AppInner({
     // per install; the config flag suppresses re-display on every
     // relaunch. Skips chat mode — those shortcuts don't apply there.
     if (codeMode && !editModeHintShown()) {
-      log.pushInfo(
-        "▸ TIP: edit-gate keybindings\n" +
-          "    y / n       accept or drop pending edits\n" +
-          "    Shift+Tab   switch review ↔ AUTO (persisted; AUTO applies instantly)\n" +
-          "    u           undo the last auto-applied batch (within the 5s banner)\n" +
-          "  Current mode is shown in the bottom status bar. Run /keys anytime for the full list.\n" +
-          "  (This tip shows once — suppressed after.)",
-      );
+      log.pushInfo(t("ui.tipEditBindings"));
       markEditModeHintShown();
     }
   }, [session, loop, codeMode, syncPendingCount, log]);
@@ -1280,8 +1267,8 @@ function AppInner({
       const remaining = pendingEdits.current.length;
       log.pushInfo(
         remaining > 0
-          ? `▸ walk cancelled — ${remaining} block(s) still pending.`
-          : "▸ walk cancelled.",
+          ? t("app.walkCancelledRemaining", { count: remaining })
+          : t("app.walkCancelled"),
       );
       return;
     }
@@ -1313,10 +1300,10 @@ function AppInner({
       setEditMode(next);
       const message =
         next === "yolo"
-          ? "▸ edit mode: YOLO — edits AND shell commands auto-run. /undo still rolls back edits. Use carefully."
+          ? t("app.editModeYolo")
           : next === "auto"
-            ? "▸ edit mode: AUTO — edits apply immediately; press u within 5s to undo (space pauses the timer). Shell commands still ask."
-            : "▸ edit mode: review — edits queue for /apply (or y) / /discard (or n)";
+            ? t("app.editModeAuto")
+            : t("app.editModeReview");
       log.pushInfo(message);
       return;
     }
@@ -1564,17 +1551,17 @@ function AppInner({
 
       if (choice === "reject") {
         const context = denyContext ? ` because: ${denyContext}` : "";
-        log.pushInfo(`▸ rejected edit to ${block.path}${context}`);
+        log.pushInfo(t("app.rejectedEdit", { path: block.path, context }));
         return `User rejected this edit to ${block.path}${context}. Don't retry the same SEARCH/REPLACE — either try a different approach or ask the user what they want instead.`;
       }
       if (choice === "apply-rest-of-turn") {
         turnEditPolicyRef.current = "apply-all";
-        log.pushInfo("▸ auto-approving remaining edits for this turn");
+        log.pushInfo(t("app.autoApprovingRest"));
         return applyNow();
       }
       if (choice === "flip-to-auto") {
         setEditMode("auto");
-        log.pushInfo("▸ flipped to AUTO mode for the rest of the session (persisted)");
+        log.pushInfo(t("app.flippedAutoSession"));
         return applyNow();
       }
       // "apply"
@@ -1932,7 +1919,7 @@ function AppInner({
     } catch {
       /* swallow — server going down is best-effort */
     }
-    log.pushInfo("▸ dashboard stopped.");
+    log.pushInfo(t("app.dashboardStopped"));
   }, [log]);
 
   const getDashboardUrl = useCallback((): string | null => {
@@ -1961,9 +1948,7 @@ function AppInner({
       // web UI is unreachable — port already in use, permission
       // denied, etc. Don't block the TUI; everything else keeps working.
       const reason = err instanceof Error ? err.message : String(err);
-      log.pushInfo(
-        `▲ dashboard auto-start failed (${reason}) — try /dashboard, or pass --no-dashboard to silence`,
-      );
+      log.pushInfo(t("ui.dashboardAutoStartFailed", { reason }));
     });
   }, [noDashboard, startDashboard, log]);
 
@@ -2005,7 +1990,7 @@ function AppInner({
         setEditMode("auto");
         saveEditMode("auto");
         log.pushInfo(codeApply([1]));
-        log.pushInfo("▸ flipped to AUTO mode — future edits will apply immediately. Walk exited.");
+        log.pushInfo(t("app.flippedAutoWalk"));
         setWalkthroughActive(false);
         return;
       }
@@ -2103,11 +2088,11 @@ function AppInner({
           const result = isGlobal
             ? appendGlobalMemory(hashParse.note)
             : appendProjectMemory(memRoot, hashParse.note);
-          const verb = result.created ? "created" : "appended to";
-          const scopeTag = isGlobal ? "global" : "project";
-          log.pushInfo(`▸ noted (${scopeTag}) — ${verb} ${result.path}`);
+          const verb = result.created ? t("app.notedVerbCreated") : t("app.notedVerbAppended");
+          const scopeTag = isGlobal ? t("app.notedScopeGlobal") : t("app.notedScopeProject");
+          log.pushInfo(t("app.notedMemory", { scope: scopeTag, verb, path: result.path }));
         } catch (err) {
-          log.pushWarning("# memory write failed", (err as Error).message);
+          log.pushWarning(t("app.memoryWriteFailed"), (err as Error).message);
         }
         return;
       }
@@ -2143,7 +2128,7 @@ function AppInner({
             content: formatBangUserMessage(bangCmd, formatted),
           });
         } catch (err) {
-          log.pushWarning("! command failed", (err as Error).message);
+          log.pushWarning(t("app.commandFailed"), (err as Error).message);
         } finally {
           setBusy(false);
         }
@@ -2240,7 +2225,7 @@ function AppInner({
         }
         if (result.openCheckpointPicker) {
           if (!codeMode) {
-            log.pushInfo("▸ /restore is code-mode only");
+            log.pushInfo(t("app.restoreCodeOnly"));
             pushHistory(text);
             return;
           }
@@ -2313,7 +2298,7 @@ function AppInner({
         });
         for (const o of promptReport.outcomes) {
           if (o.decision === "pass") continue;
-          log.pushWarning("UserPromptSubmit hook", formatHookOutcomeMessage(o));
+          log.pushWarning(t("app.hookUserPromptSubmit"), formatHookOutcomeMessage(o));
         }
         if (promptReport.blocked) return;
       }
@@ -2408,7 +2393,7 @@ function AppInner({
           const parts: string[] = [];
           if (inlined.length > 0) parts.push(`inlined ${inlined.join(", ")}`);
           if (skipped.length > 0) parts.push(`skipped ${skipped.join(", ")}`);
-          if (parts.length > 0) log.pushInfo(`▸ @mentions: ${parts.join("; ")}`);
+          if (parts.length > 0) log.pushInfo(t("app.atMentions", { parts: parts.join("; ") }));
         }
       }
       // Expand `@http(s)://...` URL mentions. Available in any mode (chat
@@ -2437,12 +2422,12 @@ function AppInner({
             const parts: string[] = [];
             if (inlined.length > 0) parts.push(`inlined ${inlined.join("; ")}`);
             if (skipped.length > 0) parts.push(`skipped ${skipped.join("; ")}`);
-            if (parts.length > 0) log.pushInfo(`▸ @url: ${parts.join("; ")}`);
+            if (parts.length > 0) log.pushInfo(t("app.atUrl", { parts: parts.join("; ") }));
           }
         } catch (err) {
           // expandAtUrls itself only throws on misconfiguration (no
           // fetcher). Per-URL failures are surfaced via the skip path.
-          log.pushWarning("@url expansion failed", (err as Error).message);
+          log.pushWarning(t("app.atUrlFailed"), (err as Error).message);
         }
       }
 
@@ -2601,7 +2586,7 @@ function AppInner({
           });
           for (const o of stopReport.outcomes) {
             if (o.decision === "pass") continue;
-            log.pushWarning("Stop hook", formatHookOutcomeMessage(o));
+            log.pushWarning(t("app.hookStop"), formatHookOutcomeMessage(o));
           }
         }
       } finally {
@@ -2713,15 +2698,17 @@ function AppInner({
 
       if (choice === "deny") {
         const context = denyContext ? ` because: ${denyContext}` : "";
-        log.pushInfo(`▸ denied: ${cmd}${context}`);
+        log.pushInfo(t("app.denied", { cmd, context }));
         pauseGate.resolve(id, { type: "deny", denyContext });
       } else if (choice === "always_allow") {
         const prefix = derivePrefix(cmd);
-        log.pushInfo(`▸ always allowed "${prefix}" for ${currentRootDir}`);
+        log.pushInfo(t("app.alwaysAllowed", { prefix, dir: currentRootDir }));
         pauseGate.resolve(id, { type: "always_allow", prefix });
       } else {
         log.pushInfo(
-          kind === "run_background" ? `▸ starting (background): ${cmd}` : `▸ running: ${cmd}`,
+          kind === "run_background"
+            ? t("app.startingBackground", { cmd })
+            : t("app.runningCommand", { cmd }),
         );
         pauseGate.resolve(id, { type: "run_once" });
       }
@@ -3061,7 +3048,11 @@ function AppInner({
               source: "auto-pre-restore",
             });
             log.pushInfo(
-              `⛁ checkpoint saved · ${meta.id} · ${meta.fileCount} file${meta.fileCount === 1 ? "" : "s"} · /restore ${meta.id} to roll back this step`,
+              t("app.checkpointSaved", {
+                id: meta.id,
+                count: meta.fileCount,
+                s: meta.fileCount === 1 ? "" : "s",
+              }),
             );
           } catch {
             /* best-effort */
@@ -3077,8 +3068,8 @@ function AppInner({
       const counter = snap.total > 0 ? ` (${snap.completed}/${snap.total})` : "";
       log.pushInfo(
         choice === "continue"
-          ? `▸ continuing after ${label}${counter}`
-          : `▸ plan stopped at ${label}${counter}`,
+          ? t("app.continuingAfter", { label, counter })
+          : t("app.planStoppedAt", { label, counter }),
       );
     },
     [pendingCheckpoint, codeMode, touchedPaths, log],
@@ -3109,8 +3100,11 @@ function AppInner({
         );
       }
       const marker = trimmed
-        ? `▸ revising after ${label} — ${trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed}`
-        : `▸ continuing after ${label}`;
+        ? t("app.revisingAfter", {
+            label,
+            feedback: trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed,
+          })
+        : t("app.continuingAfter", { label, counter: "" });
       log.pushInfo(marker);
     },
     [log],
