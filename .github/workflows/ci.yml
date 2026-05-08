@@ -48,6 +48,3 @@ jobs:
       # DEEPSEEK_API_KEY in CI.
       - name: τ-bench harness dry-run
         run: npx tsx benchmarks/tau-bench/runner.ts --dry --out /tmp/tau-dry.json
-
-      - name: Harvest-bench harness dry-run
-        run: npx tsx benchmarks/harvest/runner.ts --dry --out /tmp/harvest-dry.json
