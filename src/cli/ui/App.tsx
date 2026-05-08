@@ -918,6 +918,14 @@ function AppInner({
       }
     }
   }, []);
+  const pickerPorts = useMemo(
+    () => ({
+      broadcast: broadcastDashboardEvent,
+      resolverRef: activePickerResolverRef,
+      snapshotRef: activePickerSnapshotRef,
+    }),
+    [broadcastDashboardEvent],
+  );
 
   // Broadcast busy-state changes so the web Chat tab can disable its
   // submit button while a turn is in flight. Mirrors what the TUI's
@@ -3263,6 +3271,7 @@ function AppInner({
                   sessions={sessionsPickerList}
                   workspace={currentRootDir}
                   walletCurrency={walletCurrencyRef.current}
+                  pickerPorts={pickerPorts}
                   onChoose={(outcome) => {
                     if (outcome.kind === "open") {
                       setPendingSessionsPicker(false);
