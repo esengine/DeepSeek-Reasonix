@@ -205,6 +205,14 @@ export interface AppProps {
      * with file/shell tools still pointing at the original root.
      */
     reregisterTools?: (rootDir: string) => void;
+    /**
+     * Async tail of the `/cwd` swap — re-probes the new directory for a
+     * compatible semantic index, registers `semantic_search` against it
+     * if found, unregisters the stale binding otherwise. Kept separate
+     * from `reregisterTools` so the sync FS/shell/memory re-registration
+     * isn't blocked on disk I/O.
+     */
+    reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
   };
   /**
    * When `true`, suppress the auto-launch of the embedded web dashboard
@@ -2234,6 +2242,23 @@ function AppInner({
                 setCurrentRootDir(resolved);
                 const fresh = loadHooks({ projectRoot: resolved });
                 setHookList(fresh);
+                const reBootstrap = codeMode.reBootstrapSemantic;
+                if (reBootstrap) {
+                  void reBootstrap(resolved).then(
+                    (r) => {
+                      log.pushInfo(
+                        r.enabled
+                          ? `▸ semantic_search re-pointed at ${resolved}`
+                          : `▸ semantic_search disabled (no compatible index in ${resolved})`,
+                      );
+                    },
+                    (err) => {
+                      log.pushInfo(
+                        `▸ semantic_search re-bootstrap failed: ${(err as Error).message}`,
+                      );
+                    },
+                  );
+                }
                 return { ok: true, info: `▸ workspace switched to ${resolved}` };
               }
             : undefined,

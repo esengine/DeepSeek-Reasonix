@@ -297,6 +297,8 @@ export interface ChatOptions {
      * then falls back to non-tool updates only).
      */
     reregisterTools?: (rootDir: string) => void;
+    /** Async tail of `/cwd` — re-probe the new dir for a semantic index. */
+    reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
   };
   /** Skip the session picker — assume "Resume" (backwards-compatible auto-continue). */
   forceResume?: boolean;

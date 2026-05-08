@@ -461,6 +461,24 @@ describe("handleSlash", () => {
       });
       expect(calls).toEqual(["/x"]);
     });
+
+    it("the slash result returns immediately even when switchCwd kicks off async work", () => {
+      let resolved = false;
+      const r = handleSlash("cwd", ["/somewhere"], makeLoop(), {
+        switchCwd: () => {
+          // Real implementation fires `void reBootstrapSemantic(...)` in
+          // the background and returns sync. The slash dispatch must NOT
+          // wait on that — postInfo carries the eventual result.
+          queueMicrotask(() => {
+            resolved = true;
+          });
+          return { ok: true, info: "▸ workspace switched" };
+        },
+      });
+      expect(r.info).toBe("▸ workspace switched");
+      // The async work hasn't drained yet — the slash returned synchronously.
+      expect(resolved).toBe(false);
+    });
   });
 
   it("SLASH_COMMANDS registry contains every handler switch case", () => {

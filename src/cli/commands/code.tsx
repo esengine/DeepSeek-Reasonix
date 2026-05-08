@@ -109,6 +109,16 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     // per-project memory store; the global scope is shared across runs.
     registerMemoryTools(tools, { projectRoot: root });
   };
+  // Async tail to `registerRootedTools`. Kept separate because the FS /
+  // shell / memory re-registration above is sync and must happen before
+  // the next tool dispatch, while semantic-index probing reads disk and
+  // can race ahead in the background. On `/cwd`, App.tsx fires this
+  // after the sync swap and surfaces the result via postInfo.
+  const reBootstrapSemantic = async (root: string): Promise<{ enabled: boolean }> => {
+    const result = await bootstrapSemanticSearchInCodeMode(tools, root);
+    if (!result.enabled) tools.unregister("semantic_search");
+    return result;
+  };
   registerRootedTools(rootDir);
   // `submit_plan` is always in the spec list so the prefix cache stays
   // stable across plan-mode toggles (Pillar 1). The tool itself is a
@@ -135,7 +145,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   // happens via the explicit `reasonix index` command — never
   // by surprise on launch.
   markPhase("semantic_bootstrap_start");
-  const semantic = await bootstrapSemanticSearchInCodeMode(tools, rootDir);
+  const semantic = await reBootstrapSemantic(rootDir);
   markPhase(
     semantic.enabled ? "semantic_bootstrap_done_enabled" : "semantic_bootstrap_done_skipped",
   );
@@ -187,7 +197,12 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     transcript: opts.transcript,
     session,
     seedTools: tools,
-    codeMode: { rootDir, jobs, reregisterTools: registerRootedTools },
+    codeMode: {
+      rootDir,
+      jobs,
+      reregisterTools: registerRootedTools,
+      reBootstrapSemantic,
+    },
     mcp: readConfig().mcp,
     forceResume: opts.forceResume,
     forceNew: opts.forceNew,
