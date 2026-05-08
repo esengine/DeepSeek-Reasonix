@@ -19,6 +19,13 @@ import { FG, SURFACE, TONE } from "./theme/tokens.js";
 
 /** Raw-stdin keystroke bus → multiline reducer; one logical line per Box row, viewport-clipped. */
 
+/** Pastes shorter than this AND single-line render verbatim; longer ones become a `[paste #N · …]` sentinel chip (#397). */
+export const INLINE_PASTE_THRESHOLD = 200;
+
+export function shouldInlinePaste(content: string): boolean {
+  return !content.includes("\n") && content.length <= INLINE_PASTE_THRESHOLD;
+}
+
 export interface PromptInputProps {
   value: string;
   onChange: (v: string) => void;
@@ -74,15 +81,19 @@ export function PromptInput({
   const registerPaste = (content: string) => {
     const v = lastLocalValueRef.current;
     const c = cursorRef.current;
-    const id = nextPasteIdRef.current % PASTE_SENTINEL_RANGE;
-    nextPasteIdRef.current = id + 1;
-    pastesRef.current.set(id, makePasteEntry(id, content));
-    const sentinel = encodePasteSentinel(id);
-    const next = v.slice(0, c) + sentinel + v.slice(c);
+    const insertion = shouldInlinePaste(content)
+      ? content
+      : (() => {
+          const id = nextPasteIdRef.current % PASTE_SENTINEL_RANGE;
+          nextPasteIdRef.current = id + 1;
+          pastesRef.current.set(id, makePasteEntry(id, content));
+          return encodePasteSentinel(id);
+        })();
+    const next = v.slice(0, c) + insertion + v.slice(c);
     lastLocalValueRef.current = next;
-    cursorRef.current = c + 1;
+    cursorRef.current = c + insertion.length;
     onChange(next);
-    setCursor(c + 1);
+    setCursor(c + insertion.length);
   };
 
   useKeystroke((ev) => {
