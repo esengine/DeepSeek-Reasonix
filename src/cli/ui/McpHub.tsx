@@ -4,6 +4,7 @@ import { Box, Text } from "ink";
 import React, { useState } from "react";
 import { McpBrowser } from "./McpBrowser.js";
 import { McpMarketplace } from "./McpMarketplace.js";
+import type { PickerBroadcastPorts } from "./dashboard/use-picker-broadcast.js";
 import { useKeystroke } from "./keystroke-context.js";
 import type { ApplyAppend } from "./mcp-reconnect-kickoff.js";
 import type { McpServerSummary } from "./slash/types.js";
@@ -23,6 +24,8 @@ export interface McpHubProps {
     removed: string[];
     failed: Array<{ spec: string; reason: string }>;
   }>;
+  /** Forwarded to the marketplace tab so the web dashboard can drive install / uninstall / refine / load-more. */
+  pickerPorts?: PickerBroadcastPorts;
 }
 
 export function McpHub({
@@ -33,6 +36,7 @@ export function McpHub({
   postInfo,
   applyAppend,
   reloadMcp,
+  pickerPorts,
 }: McpHubProps) {
   const [tab, setTab] = useState<McpHubTab>(initialTab);
 
@@ -64,7 +68,12 @@ export function McpHub({
           applyAppend={applyAppend}
         />
       ) : (
-        <McpMarketplace onClose={onClose} postInfo={postInfo} reloadMcp={reloadMcp} />
+        <McpMarketplace
+          onClose={onClose}
+          postInfo={postInfo}
+          reloadMcp={reloadMcp}
+          pickerPorts={pickerPorts}
+        />
       )}
     </Box>
   );

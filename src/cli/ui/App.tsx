@@ -3406,6 +3406,7 @@ function AppInner({
                   initialTab={pendingMcpHub.tab}
                   liveServers={liveMcpServers}
                   configPath={defaultConfigPath()}
+                  pickerPorts={pickerPorts}
                   onClose={() => setPendingMcpHub(null)}
                   postInfo={(text) => log.pushInfo(text)}
                   applyAppend={(target, addedTools) => {
