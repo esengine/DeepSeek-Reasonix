@@ -83,7 +83,7 @@ describe("formatLoopError", () => {
     expect(out).toMatch(/service unavailable \(503\)/);
     expect(out).toMatch(/DeepSeek-side problem, not Reasonix/);
     expect(out).toMatch(/Already retried 4×/);
-    expect(out).toMatch(/status\.deepseek\.com/);
+    expect(out).toContain("status.deepseek.com");
     expect(out).not.toMatch(/main API answered/);
     expect(out).not.toMatch(/unreachable from your network/);
   });
