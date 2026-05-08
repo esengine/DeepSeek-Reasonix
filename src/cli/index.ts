@@ -1,3 +1,7 @@
+import { markPhase } from "./startup-profile.js";
+
+markPhase("cli_module_loaded");
+
 import { Command } from "commander";
 import { readConfig } from "../config.js";
 import { t } from "../i18n/index.js";

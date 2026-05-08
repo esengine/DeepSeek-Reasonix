@@ -31,6 +31,7 @@ import { registerMemoryTools } from "../../tools/memory.js";
 import { registerPlanTool } from "../../tools/plan.js";
 import { registerShellTools } from "../../tools/shell.js";
 import { registerTodoTool } from "../../tools/todo.js";
+import { markPhase } from "../startup-profile.js";
 import { chatCommand } from "./chat.js";
 
 export interface CodeOptions {
@@ -63,6 +64,7 @@ export interface CodeOptions {
 }
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
+  markPhase("code_command_enter");
   const { codeSystemPrompt } = await import("../../code/prompt.js");
   const rootDir = resolve(opts.dir ?? process.cwd());
   // Per-directory session so switching projects doesn't mix histories.
@@ -132,7 +134,11 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   // on-disk index already exists, skips entirely otherwise. Setup
   // happens via the explicit `reasonix index` command — never
   // by surprise on launch.
+  markPhase("semantic_bootstrap_start");
   const semantic = await bootstrapSemanticSearchInCodeMode(tools, rootDir);
+  markPhase(
+    semantic.enabled ? "semantic_bootstrap_done_enabled" : "semantic_bootstrap_done_skipped",
+  );
 
   process.stderr.write(
     `▸ reasonix code: rooted at ${rootDir}, session "${session ?? "(ephemeral)"}" · ${tools.size} native tool(s)${

@@ -28,6 +28,7 @@ import { ToolRegistry } from "../../tools.js";
 import { registerChoiceTool } from "../../tools/choice.js";
 import { registerMemoryTools } from "../../tools/memory.js";
 import { registerWebTools } from "../../tools/web.js";
+import { markPhase } from "../startup-profile.js";
 import { App } from "../ui/App.js";
 import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
@@ -417,8 +418,10 @@ function Root({
 }
 
 export async function chatCommand(opts: ChatOptions): Promise<void> {
+  markPhase("chat_command_enter");
   loadDotenv();
   const initialKey = loadApiKey();
+  markPhase("config_loaded");
 
   const requestedSpecs = opts.mcp ?? [];
   // Shared progress sink: the bridge's onProgress callback writes
@@ -441,9 +444,15 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   });
 
   const failedSpecs: Array<{ spec: string; reason: string }> = [];
+  if (requestedSpecs.length > 0) markPhase("mcp_launch");
   for (const raw of requestedSpecs) {
     const result = await runtime.addSpec(raw);
     if (!result.ok) failedSpecs.push({ spec: raw, reason: result.reason });
+  }
+  if (requestedSpecs.length > 0) {
+    markPhase(
+      `mcp_connected_${requestedSpecs.length - failedSpecs.length}_of_${requestedSpecs.length}`,
+    );
   }
   if (runtime.size() === 0 && !opts.seedTools) {
     tools = undefined;
@@ -492,6 +501,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const showPicker =
     !opts.session && !opts.forceResume && listSessionsForWorkspace(launchWorkspace).length > 0;
 
+  markPhase("ink_render_call");
   const { waitUntilExit } = render(
     <Root
       initialKey={initialKey}

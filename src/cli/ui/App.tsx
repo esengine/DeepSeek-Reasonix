@@ -79,6 +79,7 @@ import { registerSkillTools } from "../../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
 import { webFetch } from "../../tools/web.js";
 import { openTranscriptFile } from "../../transcript/log.js";
+import { dumpStartupProfile, markPhase } from "../startup-profile.js";
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { CheckpointPicker } from "./CheckpointPicker.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
@@ -325,6 +326,10 @@ function AppInner({
   }, [isStreaming, liveExpand]);
   const [languageVersion, setLanguageVersion] = useState(0);
   useEffect(() => onLanguageChange(() => setLanguageVersion((v) => v + 1)), []);
+  useEffect(() => {
+    markPhase("first_paint");
+    dumpStartupProfile();
+  }, []);
   // Live MCP server list: initialized from the boot-time prop, then
   // updated immutably when append-drift adds tools mid-session.
   const [liveMcpServers, setLiveMcpServers] = useState<McpServerSummary[]>(() => mcpServers ?? []);
