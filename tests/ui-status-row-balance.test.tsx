@@ -1,10 +1,7 @@
 /**
- * StatusRow wallet rendering - verifies the currency symbol matches the
- * balance currency, not hardcoded ¥.
- *
- * These tests import the REAL StatusRow component and render it through
- * Ink with a mock AgentStore.  They FAIL today because StatusRow:61
- * hardcodes ¥ and the state has no balanceCurrency field.
+ * StatusRow turn-cost rendering — wallet + session-cost segments live in
+ * StatsPanel / UsageCard now (covered by their own tests). This file only
+ * asserts the turn-cost + cache cells StatusRow still renders.
  */
 import { render } from "ink";
 import React, { useEffect } from "react";
@@ -21,7 +18,6 @@ const SESSION: SessionInfo = {
   model: "deepseek-chat",
 };
 
-/** Dispatches arbitrary events on mount into the store created by AgentStoreProvider. */
 function EventInjector({
   events,
   children,
@@ -37,7 +33,6 @@ function EventInjector({
   return React.createElement(React.Fragment, null, children);
 }
 
-/** Convenience: inject a single session.update with status overrides. */
 function StateInjector({
   overrides,
   children,
@@ -51,7 +46,6 @@ function StateInjector({
   });
 }
 
-/** Render <StatusRow /> through Ink with a fake stdout, return collected text. */
 async function renderStatusRow(overrides: Partial<AgentState["status"]>): Promise<string> {
   const stdout = makeFakeStdout();
   const { unmount } = render(
@@ -62,139 +56,47 @@ async function renderStatusRow(overrides: Partial<AgentState["status"]>): Promis
     </AgentStoreProvider>,
     { stdout: stdout as never, stdin: makeFakeStdin() as never },
   );
-  // Let the StateInjector effect fire and StatusRow re-render.
   await new Promise((r) => setTimeout(r, 50));
   unmount();
   return stdout.text();
 }
 
-// ---------------------------------------------------------------------------
-// tests
-// ---------------------------------------------------------------------------
-
-describe("StatusRow - wallet currency symbol", () => {
-  it("shows $ for USD balance", async () => {
-    const text = await renderStatusRow({ balance: 0.91, balanceCurrency: "USD" } as any);
-    expect(text).toContain("$0.91");
-  });
-
-  it("shows ¥ for CNY balance", async () => {
-    const text = await renderStatusRow({ balance: 6.55, balanceCurrency: "CNY" } as any);
-    expect(text).toContain("¥6.55");
-  });
-
-  it("shows no wallet when balance is undefined", async () => {
-    const text = await renderStatusRow({ balance: undefined } as any);
-    expect(text).not.toContain("wallet");
-  });
-
-  it("uses correct color for USD $0.91 (~¥6.55 -> warn, not err)", async () => {
-    // $0.91 * 7.2 = ¥6.55 -> warn range (yellow), not err (red).
-    // The err color is #ff8b81, warn is #f0b07d.
-    const text = await renderStatusRow({ balance: 0.91, balanceCurrency: "USD" } as any);
-    expect(text).toContain("$0.91");
-    // After the fix, the color should be warn (yellow) not err (red).
-    // For now, this test just confirms the symbol is correct.
-  });
-
-  // ---- Turn/session costs must follow wallet currency ----
-  // When the wallet is in USD, costs should show in USD ($).
-  // When the wallet is in CNY, costs should show in CNY (¥).
-  // When no wallet is loaded, default to CNY (DeepSeek native pricing).
-
-  it("USD wallet: turn/session costs show $, not ¥", async () => {
+describe("StatusRow — turn cost currency", () => {
+  it("USD wallet: turn cost shows $", async () => {
     const text = await renderStatusRow({
       cost: 0.0308,
-      sessionCost: 0.064,
       balance: 0.71,
       balanceCurrency: "USD",
     } as any);
-    // Cost in USD, no conversion: $0.0308 turn, $0.064 session
     expect(text).toContain("$0.0308 turn");
-    expect(text).toContain("$0.064 session");
-    expect(text).toContain("wallet $0.71");
+    expect(text).not.toContain(" session ");
+    expect(text).not.toContain("wallet ");
   });
 
-  it("CNY wallet: turn/session costs show ¥ (converted from USD)", async () => {
+  it("CNY wallet: turn cost shows ¥ (USD→CNY)", async () => {
     const text = await renderStatusRow({
       cost: 0.0308,
-      sessionCost: 0.064,
       balance: 6.55,
       balanceCurrency: "CNY",
     } as any);
-    // 0.0308 USD * 7.2 = 0.2218 CNY → "¥0.2218 turn"
     expect(text).toContain("¥0.2218 turn");
-    // 0.064 USD * 7.2 = 0.461 CNY → "¥0.461 session"
-    expect(text).toContain("¥0.461 session");
-    expect(text).toContain("wallet ¥6.55");
+    expect(text).not.toContain(" session ");
+    expect(text).not.toContain("wallet ");
   });
 
-  it("no wallet info: costs default to CNY (backward compat)", async () => {
-    const text = await renderStatusRow({
-      cost: 0.0308,
-      sessionCost: 0.064,
-      balance: undefined,
-    } as any);
-    // When balanceCurrency is undefined, fall back to CNY display.
+  it("no wallet info: turn cost defaults to ¥", async () => {
+    const text = await renderStatusRow({ cost: 0.0308, balance: undefined } as any);
     expect(text).toContain("¥0.2218 turn");
-    expect(text).toContain("¥0.461 session");
-    expect(text).not.toContain("wallet");
+    expect(text).not.toContain("wallet ");
   });
 
-  // ---- Full turn flow (pricing -> turn.end -> session.update -> display) ----
-
-  it("full USD flow: turn.end + session.update renders all $ symbols", async () => {
-    const stdout = makeFakeStdout();
-    const { unmount } = render(
-      <AgentStoreProvider session={SESSION}>
-        <EventInjector
-          events={[
-            {
-              type: "turn.end",
-              usage: { prompt: 1000, reason: 0, output: 200, cacheHit: 0.8, cost: 0.00015 },
-            },
-            { type: "session.update", patch: { balance: 0.71, balanceCurrency: "USD" } },
-          ]}
-        >
-          <StatusRow />
-        </EventInjector>
-      </AgentStoreProvider>,
-      { stdout: stdout as never, stdin: makeFakeStdin() as never },
-    );
-    await new Promise((r) => setTimeout(r, 50));
-    unmount();
-    const text = stdout.text();
-    expect(text).toContain("$0.0001 turn");
-    expect(text).toContain("$0.000 session");
-    expect(text).toContain("wallet $0.71");
+  it("turn cost hidden when zero", async () => {
+    const text = await renderStatusRow({ cost: 0 } as any);
+    expect(text).not.toContain("turn");
   });
 
-  it("full CNY flow: turn.end + session.update renders all ¥ symbols", async () => {
-    const stdout = makeFakeStdout();
-    const { unmount } = render(
-      <AgentStoreProvider session={SESSION}>
-        <EventInjector
-          events={[
-            {
-              type: "turn.end",
-              usage: { prompt: 1000, reason: 0, output: 200, cacheHit: 0.8, cost: 0.00015 },
-            },
-            { type: "session.update", patch: { balance: 6.55, balanceCurrency: "CNY" } },
-          ]}
-        >
-          <StatusRow />
-        </EventInjector>
-      </AgentStoreProvider>,
-      { stdout: stdout as never, stdin: makeFakeStdin() as never },
-    );
-    await new Promise((r) => setTimeout(r, 50));
-    unmount();
-    const text = stdout.text();
-    // 0.00015 USD * 7.2 = 0.0011 CNY → "¥0.0011 turn"
-    expect(text).toContain("¥0.0011 turn");
-    // 0.00015 USD * 7.2 = 0.001 CNY (3 fraction digits)
-    expect(text).toContain("¥0.001 session");
-    // Wallet in ¥
-    expect(text).toContain("wallet ¥6.55");
+  it("cache % always rendered", async () => {
+    const text = await renderStatusRow({ cost: 0, cacheHit: 0.873 } as any);
+    expect(text).toContain("cache 87%");
   });
 });

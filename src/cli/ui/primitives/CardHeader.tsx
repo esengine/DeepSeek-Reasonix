@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
-import React from "react";
+import React, { useContext } from "react";
 import { FG } from "../theme/tokens.js";
+import { ActiveCardContext } from "./Card.js";
 
 export type MetaItem = string | { text: string; color: string };
 
@@ -30,6 +31,9 @@ export function CardHeader({
   meta,
   right,
 }: CardHeaderProps): React.ReactElement {
+  const active = useContext(ActiveCardContext);
+  // Settled scrollback drops faint string meta + spinners; colored badges (rejected, retry) stay.
+  const visibleMeta = active ? meta : meta?.filter((item) => typeof item !== "string");
   return (
     <Box flexDirection="row" gap={1}>
       <Text color={tone}>{glyph}</Text>
@@ -43,7 +47,7 @@ export function CardHeader({
         </Text>
       )}
       {subtitle ? <Text color={FG.body}>{subtitle}</Text> : null}
-      {meta?.map((item, i) => {
+      {visibleMeta?.map((item, i) => {
         const isStr = typeof item === "string";
         const text = isStr ? item : item.text;
         const color = isStr ? FG.faint : item.color;
@@ -55,7 +59,7 @@ export function CardHeader({
           </React.Fragment>
         );
       })}
-      {right}
+      {active ? right : null}
     </Box>
   );
 }

@@ -4,7 +4,7 @@ import React from "react";
 import { Countdown } from "../primitives/Countdown.js";
 import { useAgentState } from "../state/provider.js";
 import type { Mode, NetworkState, StatusBar } from "../state/state.js";
-import { FG, TONE, balanceColor, formatBalance, formatCost } from "../theme/tokens.js";
+import { FG, TONE, formatCost } from "../theme/tokens.js";
 
 const RULE_PAD = 4;
 const RULE_MIN = 20;
@@ -42,19 +42,6 @@ export function StatusRow(): React.ReactElement {
             </Text>
             <Text bold color={FG.body}>
               {`${formatCost(status.cost, status.balanceCurrency)} turn`}
-            </Text>
-          </>
-        )}
-        <Sep />
-        <Text
-          color={FG.sub}
-        >{`${formatCost(status.sessionCost, status.balanceCurrency, 3)} session`}</Text>
-        {status.balance !== undefined && (
-          <>
-            <Sep />
-            <Text color={FG.faint}>{"wallet "}</Text>
-            <Text bold color={balanceColor(status.balance, status.balanceCurrency)}>
-              {formatBalance(status.balance, status.balanceCurrency)}
             </Text>
           </>
         )}
