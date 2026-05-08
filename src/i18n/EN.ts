@@ -284,15 +284,159 @@ export const EN: TranslationSchema = {
       argsHint: "<id> [lines]",
     },
   },
+  wizard: {
+    languageTitle: "Choose your language",
+    languageSubtitle: "Detected from your system locale. Switch later via /language.",
+    welcomeTitle: "Welcome to Reasonix.",
+    apiKeyPrompt: "Paste your DeepSeek API key to get started.",
+    apiKeyGetOne: "Get one at: https://platform.deepseek.com/api_keys",
+    apiKeySavedLocally: "Saved locally to {path}",
+    apiKeyInputLabel: "key › ",
+    apiKeyInvalid: "Doesn't look like a DeepSeek key. They start with 'sk-' and are 30+ chars.",
+    apiKeyPreview: "preview: {redacted}",
+    presetTitle: "Pick a preset",
+    mcpTitle: "Which MCP servers should Reasonix wire up for you?",
+    mcpUserArgsHint: "(you'll provide {arg})",
+    mcpFooterMulti:
+      "[↑↓] navigate  ·  [Space] toggle  ·  [Enter] confirm  ·  [Esc] cancel  ·  empty = skip",
+    mcpArgsTitle: "Configure {name}",
+    mcpArgsDirMissing: "Directory {path} doesn't exist.",
+    mcpArgsDirCreateHint: "[Y/Enter] create it (mkdir -p) · [N/Esc] enter a different path",
+    mcpArgsDirCreateFailed: "Couldn't create {path}: {message}",
+    mcpArgsRequiredParam: "Required parameter: ",
+    mcpArgsEmpty: "{name} needs a value — got an empty string.",
+    mcpArgsNotADir: "{path} exists but is not a directory.",
+    reviewTitle: "Ready to save",
+    reviewLabelApiKey: "API key",
+    reviewLabelLanguage: "Language",
+    reviewLabelPreset: "Preset",
+    reviewLabelMcp: "MCP",
+    reviewMcpNone: "(none)",
+    reviewMcpServers: "{count} server(s)",
+    reviewSavesTo: "Saves to {path}",
+    reviewSaveError: "Could not save config: {message}",
+    reviewFooter: "[Enter] save · [Esc] cancel",
+    savedTitle: "▸ Saved.",
+    savedFooter: "[Enter] to exit",
+    selectFooter: "[↑↓] navigate · [Enter] confirm · [Esc] cancel",
+    stepCounter: "Step {step}/{total} · ",
+  },
+  app: {
+    walkCancelledRemaining: "▸ walk cancelled — {count} block(s) still pending.",
+    walkCancelled: "▸ walk cancelled.",
+    editModeYolo:
+      "▸ edit mode: YOLO — edits AND shell commands auto-run. /undo still rolls back edits. Use carefully.",
+    editModeAuto:
+      "▸ edit mode: AUTO — edits apply immediately; press u within 5s to undo (space pauses the timer). Shell commands still ask.",
+    editModeReview: "▸ edit mode: review — edits queue for /apply (or y) / /discard (or n)",
+    rejectedEdit: "▸ rejected edit to {path}{context}",
+    autoApprovingRest: "▸ auto-approving remaining edits for this turn",
+    flippedAutoSession: "▸ flipped to AUTO mode for the rest of the session (persisted)",
+    flippedAutoWalk: "▸ flipped to AUTO mode — future edits will apply immediately. Walk exited.",
+    dashboardStopped: "▸ dashboard stopped.",
+    notedMemory: "▸ noted ({scope}) — {verb} {path}",
+    notedScopeProject: "project",
+    notedScopeGlobal: "global",
+    notedVerbCreated: "created",
+    notedVerbAppended: "appended to",
+    memoryWriteFailed: "# memory write failed",
+    commandFailed: "! command failed",
+    restoreCodeOnly: "▸ /restore is code-mode only",
+    hookUserPromptSubmit: "UserPromptSubmit hook",
+    hookStop: "Stop hook",
+    atMentions: "▸ @mentions: {parts}",
+    atUrl: "▸ @url: {parts}",
+    atUrlFailed: "@url expansion failed",
+    denied: "▸ denied: {cmd}{context}",
+    alwaysAllowed: '▸ always allowed "{prefix}" for {dir}',
+    runningCommand: "▸ running: {cmd}",
+    startingBackground: "▸ starting (background): {cmd}",
+    checkpointSaved:
+      "⛁ checkpoint saved · {id} · {count} file{s} · /restore {id} to roll back this step",
+    continuingAfter: "▸ continuing after {label}{counter}",
+    planStoppedAt: "▸ plan stopped at {label}{counter}",
+    revisingAfter: "▸ revising after {label} — {feedback}",
+  },
+  hooks: {
+    head: "hook {tag} `{cmd}` {decision}{truncTag}",
+    headWithDetail: "hook {tag} `{cmd}` {decision}{truncTag}: {detail}",
+    truncated: " (output truncated at 256KB)",
+    decisionBlock: "block",
+    decisionWarn: "warn",
+    decisionTimeout: "timeout",
+    decisionError: "error",
+  },
+  summary: {
+    status: "summarizing what was gathered…",
+    hallucinatedFallback:
+      "(model emitted fake tool-call markup instead of a prose summary — try /retry with a narrower question, or /think to inspect R1's reasoning)",
+    failedAfterReason:
+      "{label} and the fallback summary call failed: {message}. Run /clear and retry with a narrower question, or raise --max-tool-iters.",
+  },
   loop: {
-    budgetWarning: "▲ session budget reached 80% ($${used} / $${cap})",
-    budgetRefusal:
-      "▲ session budget reached 100% ($${used} / $${cap}) — turn refused. Bump or clear via /budget.",
-    contextWarning: "▲ context window pressure: {ratio}% ({tokens} / {cap})",
-    escalationWarning: "⇧ flash requested escalation — {reason}",
-    toolFailure: "▸ tool {name} failed: {reason}",
-    interrupted: "▸ turn interrupted by user.",
-    loopStopped: "▸ loop stopped (after {count} iter{s}).",
+    budgetExhausted:
+      "session budget exhausted — spent ${spent} ≥ cap ${cap}. Bump the cap with /budget <usd>, clear it with /budget off, or end the session.",
+    budget80Pct: "▲ budget 80% used — ${spent} of ${cap}. Next turn or two likely trips the cap.",
+    proArmed: "⇧ /pro armed — this turn runs on deepseek-v4-pro (one-shot · disarms after turn)",
+    abortedAtIter:
+      "aborted at iter {iter}/{cap} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
+    toolUploadStatus: "tool result uploaded · model thinking before next response…",
+    toolBudgetWarning:
+      "{iter}/{cap} tool calls used — approaching budget. Press Esc to force a summary now.",
+    preflightFoldStatus: "preflight: context near full, attempting fold…",
+    preflightFolded:
+      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Sending.",
+    preflightNoFold:
+      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) and nothing left to fold — DeepSeek will likely 400. Run /clear or /new to start fresh.",
+    flashEscalation: "⇧ flash requested escalation — retrying this turn on {model}{reasonSuffix}",
+    harvestStatus: "extracting plan state from reasoning…",
+    autoEscalation:
+      "⇧ auto-escalating to {model} for the rest of this turn — flash hit {breakdown}. Next turn falls back to {fallback} unless /pro is armed.",
+    repeatToolCallWarning:
+      "Caught a repeated tool call — let the model see the issue and retry with a different approach.",
+    stormStuck:
+      "Stopped a stuck retry loop — the model kept calling the same tool with identical args after a self-correction nudge. Try /retry, rephrase, or rule out the underlying blocker.",
+    stormSuppressed: "Suppressed {count} repeated tool call(s) — same name + args fired 3+ times.",
+    compactingHistoryStatus: "compacting history{aggressiveTag}…",
+    aggressiveTag: " (aggressive)",
+    foldedHistory:
+      "context {before}/{ctxMax} ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Continuing.",
+    aggressivelyFoldedHistory:
+      "context {before}/{ctxMax} ({pct}%) — aggressively folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Continuing.",
+    forcingSummary:
+      "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
+  },
+  errors: {
+    contextOverflow:
+      "Context overflow (DeepSeek 400): session history is {requested}, past the model's prompt limit (V4: 1M tokens; legacy chat/reasoner: 131k). Usually a single tool result grew too big. Reasonix caps new tool results at 8k tokens and auto-heals oversized history on session load — a restart often clears it. If it still overflows, run /forget (delete the session) or /clear (drop the displayed history) to start fresh.",
+    contextOverflowTooMany: "too many tokens",
+    auth401:
+      "Authentication failed (DeepSeek 401): {inner}. Your API key is rejected. Fix with `reasonix setup` or `export DEEPSEEK_API_KEY=sk-...`. Get one at https://platform.deepseek.com/api_keys.",
+    balance402:
+      "Out of balance (DeepSeek 402): {inner}. Top up at https://platform.deepseek.com/top_up — the panel header shows your balance once it's non-zero.",
+    badparam422: "Invalid parameter (DeepSeek 422): {inner}",
+    badrequest400: "Bad request (DeepSeek 400): {inner}",
+    deepseek5xxHead:
+      "DeepSeek service unavailable ({status}) — this is a DeepSeek-side problem, not Reasonix. Already retried 4× with backoff.",
+    deepseek5xxReachable:
+      " DeepSeek's main API answered our health check, but /chat/completions is failing — partial outage on their side.",
+    deepseek5xxUnreachable:
+      " DeepSeek API is unreachable from your network — could be a wider DS outage or a local network issue.",
+    deepseek5xxActionNetwork:
+      " Try: (1) check your network, (2) wait 30s and retry, (3) status page: https://status.deepseek.com.",
+    deepseek5xxActionRetry:
+      " Try: (1) wait 30s and retry, (2) /preset to switch model, (3) status page: https://status.deepseek.com.",
+    innerNoMessage: "(no message)",
+    reasonAborted: "[aborted by user (Esc) — summarizing what I found so far]",
+    reasonContextGuard:
+      "[context budget running low — summarizing before the next call would overflow]",
+    reasonStuck:
+      "[stuck on a repeated tool call — explaining what was tried and what's blocking progress]",
+    reasonBudget: "[tool-call budget ({iterCap}) reached — forcing summary from what I found]",
+    labelAborted: "aborted by user",
+    labelContextGuard: "context-guard triggered (prompt > 80% of window)",
+    labelStuck: "stuck (repeated tool call suppressed by storm-breaker)",
+    labelBudget: "tool-call budget ({iterCap}) reached",
   },
   handlers: {
     basic: {
@@ -736,6 +880,10 @@ export const EN: TranslationSchema = {
         "no archived plans yet for this session — `/replay` lights up once a plan completes (auto-archives when every step is done).",
       replayInvalidIndex:
         "invalid index — `/replay` takes 1..{max} (newest = 1). Use `/plans` to see the list.",
+      archivedRow: "  ✓ {when}  {total} step{s} · {completion}  {label}",
+      completionComplete: "complete",
+      stopAborted:
+        "▸ plan stopped — model aborted; type a follow-up to continue or start a new task.",
     },
     jobs: {
       codeOnly: "/jobs is only available inside `reasonix code`.",
@@ -807,6 +955,12 @@ export const EN: TranslationSchema = {
       fallbackServers: "MCP servers ({count}):",
       fallbackTools: "Tools in registry ({count}):",
       fallbackChange: "To change this set, exit and run `reasonix setup`.",
+      usageDisableEnable:
+        "usage: /mcp {action} <name>  ·  pick a name shown in /mcp (anonymous servers can't be named-toggled).",
+      usageReconnect: "usage: /mcp reconnect <name>  ·  pick a name shown in /mcp.",
+      unknownServer: 'unknown MCP server "{name}". Known: {list}.',
+      noneList: "(none)",
+      reconnectNoTui: "/mcp reconnect requires the interactive TUI (postInfo not wired).",
     },
     init: {
       codeOnly:
@@ -816,6 +970,27 @@ export const EN: TranslationSchema = {
       existsEdit: "  Or edit it by hand — it's just markdown. The current file is",
       existsPinned: "  pinned into the system prompt every launch as-is.",
       info: "▸ /init — model will scan the project and synthesize REASONIX.md.\n  The result lands as a pending edit; review with /apply or /walk.",
+    },
+    semantic: {
+      codeOnly: "/semantic is only available inside `reasonix code` (needs a project root).",
+      checking: "▸ checking semantic_search status…",
+    },
+    webSearchEngine: {
+      currentEngine: "Current web search engine: {engine}",
+      endpoint: "SearXNG endpoint: {url}",
+      usageHeader: "Usage:",
+      usageMojeek: "  /search-engine mojeek            use Mojeek (default, no external deps)",
+      usageSearxng: "  /search-engine searxng            use SearXNG at default endpoint",
+      usageSearxngUrl: "  /search-engine searxng <url>      use SearXNG at custom endpoint",
+      alias: "Alias: /se",
+      searxngInfo:
+        "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
+      searxngInstall: "Install it with:  docker run -d -p 8080:8080 searxng/searxng",
+      switched: 'Switched web search engine to "{engine}".{note}',
+      switchedSearxngNote: " Make sure SearXNG is running at {endpoint}.",
+      confirmed:
+        '✓ Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
+      confirmedDetail: " ({endpoint})",
     },
     skill: {
       listEmpty: "no skills found. Reasonix reads skills from:",

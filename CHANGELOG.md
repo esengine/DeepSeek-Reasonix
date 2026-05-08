@@ -3,6 +3,127 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] — 2026-05-08
+
+**Headline:** a Mac user reported a DeepSeek 503 day where Reasonix
+showed a wall of raw `DeepSeek 503: <html>...` and they couldn't tell
+if our agent had crashed or the upstream API was down. Two threads of
+work fell out of that single bug: a friendly outage notice with a
+1.5s reachability probe to `/user/balance` (so we can say "DS main
+API answered, but /chat/completions is failing — their problem") and
+a full sweep of every hardcoded English string a Chinese user could
+hit. ~150 strings across 8 files moved into the `loop.*` / `errors.*`
+/ `app.*` / `hooks.*` / `summary.*` / `wizard.*` namespaces with
+zh-CN translations. The setup wizard now opens with a language picker
+defaulting to `detectSystemLanguage()` — for the case where
+`Intl.DateTimeFormat().resolvedOptions().locale` returns the wrong
+locale and a user shouldn't have to discover `/language` after
+finishing setup in English.
+
+The other half of the release is dashboard parity work — picker
+modals (sessions / checkpoint / MCP marketplace), viewer modal for
+`/replay`, plus cockpit / budget gauge / model picker / loop control
+panel / `/pro` one-shot — closing buckets B-E of the #369 web-parity
+tracker.
+
+**Features:**
+
+- feat(loop): friendly DeepSeek 5xx error with reachability probe.
+  When the chat endpoint returns 5xx (after retry.ts has already
+  retried 4× with backoff), `formatLoopError` now spawns a 1.5s
+  `/user/balance` probe and renders one of three messages: no probe
+  (generic outage notice), reachable (main API up but /chat dying),
+  unreachable (DS or your network is down). All three say "this is
+  a DeepSeek-side problem, not Reasonix" and link
+  https://status.deepseek.com. Removes the misleading file header in
+  `loop/errors.ts` that claimed retry.ts swallowed all 5xx — it
+  doesn't, and never did. (#440)
+- feat(wizard): first-launch language picker + full i18n. New
+  `language` step before `apiKey`, cursor defaults to
+  `detectSystemLanguage()` marked `(detected)`. Selection saves
+  immediately so all later wizard screens render in the chosen
+  language. Re-running `reasonix setup` opens at the same step with
+  the cursor on the saved language so Enter is a no-op. The wizard's
+  ~30 hardcoded strings (welcome, prompts, validation errors, MCP
+  catalog hints, review labels, save errors, saved screen) all moved
+  to a new `wizard.*` namespace with zh-CN. (#442)
+- feat(dashboard): picker modal protocol for web parity. New
+  `picker` modal kind drives sessions, checkpoint, and MCP
+  marketplace pickers from the same protocol. Closes the gap where
+  TUI-only modals stayed inaccessible from `/dashboard`. (#417,
+  #418, #419, #420)
+- feat(dashboard): viewer modal kind for `/replay`. Loads an archived
+  plan into a read-only time-travel snapshot, mirrors the TUI replay
+  experience. (#421)
+- feat(dashboard): cockpit tile + budget gauge + 14-day cost trend.
+  At-a-glance current-session telemetry on the overview panel. (#431)
+- feat(dashboard): editable model picker in settings + `/pro`
+  one-shot panel + loop control (start / stop / countdown). The
+  settings tab is now the single place to flip model preset, arm
+  `/pro` for the next turn, or start an autonomous loop without
+  switching to the TUI. (#430, #432, #433)
+- feat(dashboard): server surface for `/pro` / `/budget` / `/model`
+  / `/loop`. POST endpoints under `/api/cockpit/*` carry the
+  mutations the panels above need. (#429)
+
+**i18n sweep:**
+
+- i18n(loop/errors): localize DeepSeek error messages — context
+  overflow, 401/402/422/400, 5xx (with the new reachability probe
+  variants), reason prefixes for budget/aborted/context-guard/stuck.
+  20 keys + zh-CN. (#444)
+- i18n(loop): 14 user-facing yields in `step()` — budget exhausted /
+  80% warning, /pro armed, aborted-at-iter, tool-budget warning,
+  preflight fold/no-fold, flash + auto escalation, storm-broken,
+  history compaction (regular + aggressive), forcing-summary. The
+  `loop.*` namespace had 7 dead keys defined but never wired —
+  removed and replaced with 20 that match the actual yield shapes.
+  (#445)
+- i18n(hooks/summary): hook outcome formatter (`hook PreToolUse/Bash
+  \`cmd\` block (output truncated at 256KB)`) and the force-summary
+  status / hallucinated-fallback / failed-fallback strings now go
+  through `t()`. New `hooks.*` and `summary.*` namespaces. (#446)
+- i18n(app): ~26 hardcoded strings in `App.tsx` plus seven existing
+  `ui.*` keys that had been declared but never called (same dead-key
+  pattern as `loop.*`). New `app.*` namespace covers walk modal,
+  edit-mode cycle (review/auto/yolo), edit gate, dashboard stopped,
+  hash-memory note, bash-mode failures, hook header rows,
+  @mentions / @url, shell confirm, checkpoint saved, plan
+  continue / stop / revise. (#447)
+- i18n(slash): four lagging slash handlers — `web-search-engine.ts`
+  was 0% localized, plus `mcp.ts` / `plans.ts` / `semantic.ts` had
+  small gaps. ~22 new keys. (#448)
+- i18n(dashboard): translate the plan `idle` status pill — the
+  `active` / `done` pills already used `t()` but the third branch
+  was hardcoded English. (#443)
+
+**Bug fixes:**
+
+- fix(search): honor abort during recursive fs scans — Esc during a
+  large `search` tool call now exits promptly instead of finishing
+  the walk. (#400)
+- fix(ui): refresh model badge on dashboard preset change and /pro
+  turns — the header pill stayed stale across server-side
+  preset/pro switches. (#403)
+- fix(permissions): match Windows project keys case-insensitively —
+  the project allowlist hashed `C:\Foo` differently from `c:\foo`,
+  causing entries to "disappear" depending on which case the cwd
+  carried. (#402)
+- fix(prompt): inline short single-line pastes verbatim — the long-
+  paste collapser was firing on tiny one-liners and burying them
+  behind a "(N chars pasted)" placeholder. (#397)
+
+**Tests / refactor / docs:**
+
+- test(mcp): cover startup summary states (#396)
+- chore: improve loop.ts tests (#271)
+- refactor(ui): quiet chat-screen chrome — fewer always-on rows on
+  the welcome card so the prompt stays close to the top. (#411)
+- docs(readme): canonical install + subcommand cheatsheet (#408)
+- docs(issues): split off display/rendering template, collect
+  terminal host info inline. (#412)
+- docs(dashboard): PARITY.md audit — bucket E of #369. (#439)
+
 ## [0.30.5] — 2026-05-07
 
 **Headline:** three contributor-led follow-ups from the #350 RFC plus

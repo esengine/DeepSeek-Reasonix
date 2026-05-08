@@ -418,6 +418,7 @@ export const en = {
     filterPlaceholder: "filter plans",
     active: "active",
     done: "done",
+    idle: "idle",
     steps: "steps",
     pickHint: "Pick a plan on the left.",
     noTitle: "(no title)",

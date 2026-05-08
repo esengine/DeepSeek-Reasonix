@@ -29,7 +29,7 @@ interface PlansData {
 function statusPill(p: ArchivedPlan) {
   if (p.completionRatio >= 1) return html`<span class="pill ok">${t("plans.done")}</span>`;
   if (p.completionRatio > 0) return html`<span class="pill info">${t("plans.active")}</span>`;
-  return html`<span class="pill">idle</span>`;
+  return html`<span class="pill">${t("plans.idle")}</span>`;
 }
 
 export function PlansPanel() {

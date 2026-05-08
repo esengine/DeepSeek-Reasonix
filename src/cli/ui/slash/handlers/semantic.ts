@@ -3,6 +3,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { EmbeddingProvider } from "@/config.js";
+import { t as tMain } from "@/i18n/index.js";
 import { probeOllama } from "@/index/semantic/embedding.js";
 import { t } from "@/index/semantic/i18n.js";
 import { findOllamaBinary } from "@/index/semantic/ollama-launcher.js";
@@ -11,15 +12,13 @@ import type { SlashHandler } from "../dispatch.js";
 const semantic: SlashHandler = (_args, _loop, ctx) => {
   const root = ctx.codeRoot;
   if (!root) {
-    return {
-      info: "/semantic is only available inside `reasonix code` (needs a project root).",
-    };
+    return { info: tMain("handlers.semantic.codeOnly") };
   }
   void (async () => {
     const status = await renderSemanticStatus(root);
     ctx.postInfo?.(status);
   })();
-  return { info: "▸ checking semantic_search status…" };
+  return { info: tMain("handlers.semantic.checking") };
 };
 
 export async function renderSemanticStatus(rootDir: string): Promise<string> {

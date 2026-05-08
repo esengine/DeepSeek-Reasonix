@@ -1,4 +1,5 @@
 import { type DeepSeekClient, Usage } from "../client.js";
+import { t } from "../i18n/index.js";
 import type { TurnStats } from "../telemetry/stats.js";
 import type { ChatMessage } from "../types.js";
 import { errorLabelFor, reasonPrefixFor } from "./errors.js";
@@ -24,7 +25,7 @@ export async function* forceSummaryAfterIterLimit(
 ): AsyncGenerator<LoopEvent> {
   try {
     // Status bridges the silence — summary call is non-streaming, 30-60s typical.
-    yield { turn: ctx.turn, role: "status", content: "summarizing what was gathered…" };
+    yield { turn: ctx.turn, role: "status", content: t("summary.status") };
     const messages = ctx.buildMessages();
     // Passing `tools: undefined` was supposed to force a text response,
     // but R1 can still hallucinate tool-call markup (e.g. DSML
@@ -50,9 +51,7 @@ export async function* forceSummaryAfterIterLimit(
     });
     const rawContent = resp.content?.trim() ?? "";
     const cleaned = stripHallucinatedToolMarkup(rawContent);
-    const summary =
-      cleaned ||
-      "(model emitted fake tool-call markup instead of a prose summary — try /retry with a narrower question, or /think to inspect R1's reasoning)";
+    const summary = cleaned || t("summary.hallucinatedFallback");
     const reasonPrefix = reasonPrefixFor(opts.reason, ctx.maxToolIters);
     const annotated = `${reasonPrefix}\n\n${summary}`;
     // Record under the actual model used (flash), so per-turn cost reflects reality.
@@ -72,7 +71,7 @@ export async function* forceSummaryAfterIterLimit(
       turn: ctx.turn,
       role: "error",
       content: "",
-      error: `${label} and the fallback summary call failed: ${(err as Error).message}. Run /clear and retry with a narrower question, or raise --max-tool-iters.`,
+      error: t("summary.failedAfterReason", { label, message: (err as Error).message }),
     };
     yield { turn: ctx.turn, role: "done", content: "" };
   }
