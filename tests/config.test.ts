@@ -215,6 +215,32 @@ describe("config", () => {
     expect(clearProjectShellAllowed("/empty", path)).toBe(0);
   });
 
+  it.runIf(process.platform === "win32")(
+    "matches project keys case-insensitively on Windows so cross-shell rootDir casing doesn't lose entries (#402)",
+    () => {
+      addProjectShellAllowed("F:\\Reasonix", "gh", path);
+      expect(loadProjectShellAllowed("f:\\reasonix", path)).toContain("gh");
+      expect(loadProjectShellAllowed("F:\\REASONIX", path)).toContain("gh");
+      // Mutations through any-cased rootDir consolidate onto the original key.
+      addProjectShellAllowed("f:\\reasonix", "deploy", path);
+      expect(loadProjectShellAllowed("F:\\Reasonix", path)).toEqual(["gh", "deploy"]);
+      expect(Object.keys(readConfig(path).projects ?? {})).toEqual(["F:\\Reasonix"]);
+      expect(removeProjectShellAllowed("f:\\REASONIX", "gh", path)).toBe(true);
+      expect(loadProjectShellAllowed("F:\\Reasonix", path)).toEqual(["deploy"]);
+      expect(clearProjectShellAllowed("F:\\REASONIX", path)).toBe(1);
+      expect(loadProjectShellAllowed("F:\\Reasonix", path)).toEqual([]);
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "keeps project key matching case-sensitive on non-Windows platforms",
+    () => {
+      addProjectShellAllowed("/home/foo/repo", "gh", path);
+      expect(loadProjectShellAllowed("/home/foo/repo", path)).toContain("gh");
+      expect(loadProjectShellAllowed("/home/FOO/repo", path)).toEqual([]);
+    },
+  );
+
   it("loadEditMode defaults to 'review' when unset", () => {
     expect(loadEditMode(path)).toBe("review");
   });

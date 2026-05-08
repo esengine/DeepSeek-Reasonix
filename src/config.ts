@@ -115,12 +115,27 @@ export function saveApiKey(key: string, path: string = defaultConfigPath()): voi
   writeConfig(cfg, path);
 }
 
+/** Windows: case-insensitive — NTFS treats `F:\Foo` and `f:\foo` as one directory (#402). */
+function findProjectKey(cfg: ReasonixConfig, rootDir: string): string | undefined {
+  const projects = cfg.projects;
+  if (!projects) return undefined;
+  if (Object.hasOwn(projects, rootDir)) return rootDir;
+  if (process.platform !== "win32") return undefined;
+  const lower = rootDir.toLowerCase();
+  for (const k of Object.keys(projects)) {
+    if (k.toLowerCase() === lower) return k;
+  }
+  return undefined;
+}
+
 export function loadProjectShellAllowed(
   rootDir: string,
   path: string = defaultConfigPath(),
 ): string[] {
   const cfg = readConfig(path);
-  return cfg.projects?.[rootDir]?.shellAllowed ?? [];
+  const key = findProjectKey(cfg, rootDir);
+  if (key === undefined) return [];
+  return cfg.projects?.[key]?.shellAllowed ?? [];
 }
 
 export function addProjectShellAllowed(
@@ -132,10 +147,11 @@ export function addProjectShellAllowed(
   if (!trimmed) return;
   const cfg = readConfig(path);
   if (!cfg.projects) cfg.projects = {};
-  if (!cfg.projects[rootDir]) cfg.projects[rootDir] = {};
-  const existing = cfg.projects[rootDir].shellAllowed ?? [];
+  const key = findProjectKey(cfg, rootDir) ?? rootDir;
+  if (!cfg.projects[key]) cfg.projects[key] = {};
+  const existing = cfg.projects[key].shellAllowed ?? [];
   if (existing.includes(trimmed)) return;
-  cfg.projects[rootDir].shellAllowed = [...existing, trimmed];
+  cfg.projects[key].shellAllowed = [...existing, trimmed];
   writeConfig(cfg, path);
 }
 
@@ -148,12 +164,14 @@ export function removeProjectShellAllowed(
   const trimmed = prefix.trim();
   if (!trimmed) return false;
   const cfg = readConfig(path);
-  const existing = cfg.projects?.[rootDir]?.shellAllowed ?? [];
+  const key = findProjectKey(cfg, rootDir);
+  if (key === undefined) return false;
+  const existing = cfg.projects?.[key]?.shellAllowed ?? [];
   if (!existing.includes(trimmed)) return false;
   const next = existing.filter((p) => p !== trimmed);
   if (!cfg.projects) cfg.projects = {};
-  if (!cfg.projects[rootDir]) cfg.projects[rootDir] = {};
-  cfg.projects[rootDir].shellAllowed = next;
+  if (!cfg.projects[key]) cfg.projects[key] = {};
+  cfg.projects[key].shellAllowed = next;
   writeConfig(cfg, path);
   return true;
 }
@@ -163,11 +181,13 @@ export function clearProjectShellAllowed(
   path: string = defaultConfigPath(),
 ): number {
   const cfg = readConfig(path);
-  const existing = cfg.projects?.[rootDir]?.shellAllowed ?? [];
+  const key = findProjectKey(cfg, rootDir);
+  if (key === undefined) return 0;
+  const existing = cfg.projects?.[key]?.shellAllowed ?? [];
   if (existing.length === 0) return 0;
   if (!cfg.projects) cfg.projects = {};
-  if (!cfg.projects[rootDir]) cfg.projects[rootDir] = {};
-  cfg.projects[rootDir].shellAllowed = [];
+  if (!cfg.projects[key]) cfg.projects[key] = {};
+  cfg.projects[key].shellAllowed = [];
   writeConfig(cfg, path);
   return existing.length;
 }
