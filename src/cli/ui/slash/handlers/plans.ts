@@ -40,10 +40,16 @@ const plans: SlashHandler = (_args, loop) => {
     const when = relativeTime(a.completedAt);
     const total = a.steps.length;
     const done = a.completedStepIds.length;
-    const completion = done >= total ? "complete" : `${done}/${total}`;
+    const completion = done >= total ? t("handlers.plans.completionComplete") : `${done}/${total}`;
     const label = a.summary ?? a.path.split(/[\\/]/).pop() ?? a.path;
     lines.push(
-      `  ✓ ${when.padEnd(10)}  ${total} step${total === 1 ? "" : "s"} · ${completion}  ${label}`,
+      t("handlers.plans.archivedRow", {
+        when: when.padEnd(10),
+        total,
+        s: total === 1 ? "" : "s",
+        completion,
+        label,
+      }),
     );
   }
   return { info: lines.join("\n") };
@@ -83,9 +89,7 @@ const replay: SlashHandler = (args, loop) => {
 
 const stop: SlashHandler = (_args, loop) => {
   loop.abort();
-  return {
-    info: "▸ plan stopped — model aborted; type a follow-up to continue or start a new task.",
-  };
+  return { info: t("handlers.plans.stopAborted") };
 };
 
 export const handlers: Record<string, SlashHandler> = {

@@ -880,6 +880,10 @@ export const EN: TranslationSchema = {
         "no archived plans yet for this session — `/replay` lights up once a plan completes (auto-archives when every step is done).",
       replayInvalidIndex:
         "invalid index — `/replay` takes 1..{max} (newest = 1). Use `/plans` to see the list.",
+      archivedRow: "  ✓ {when}  {total} step{s} · {completion}  {label}",
+      completionComplete: "complete",
+      stopAborted:
+        "▸ plan stopped — model aborted; type a follow-up to continue or start a new task.",
     },
     jobs: {
       codeOnly: "/jobs is only available inside `reasonix code`.",
@@ -951,6 +955,12 @@ export const EN: TranslationSchema = {
       fallbackServers: "MCP servers ({count}):",
       fallbackTools: "Tools in registry ({count}):",
       fallbackChange: "To change this set, exit and run `reasonix setup`.",
+      usageDisableEnable:
+        "usage: /mcp {action} <name>  ·  pick a name shown in /mcp (anonymous servers can't be named-toggled).",
+      usageReconnect: "usage: /mcp reconnect <name>  ·  pick a name shown in /mcp.",
+      unknownServer: 'unknown MCP server "{name}". Known: {list}.',
+      noneList: "(none)",
+      reconnectNoTui: "/mcp reconnect requires the interactive TUI (postInfo not wired).",
     },
     init: {
       codeOnly:
@@ -960,6 +970,27 @@ export const EN: TranslationSchema = {
       existsEdit: "  Or edit it by hand — it's just markdown. The current file is",
       existsPinned: "  pinned into the system prompt every launch as-is.",
       info: "▸ /init — model will scan the project and synthesize REASONIX.md.\n  The result lands as a pending edit; review with /apply or /walk.",
+    },
+    semantic: {
+      codeOnly: "/semantic is only available inside `reasonix code` (needs a project root).",
+      checking: "▸ checking semantic_search status…",
+    },
+    webSearchEngine: {
+      currentEngine: "Current web search engine: {engine}",
+      endpoint: "SearXNG endpoint: {url}",
+      usageHeader: "Usage:",
+      usageMojeek: "  /search-engine mojeek            use Mojeek (default, no external deps)",
+      usageSearxng: "  /search-engine searxng            use SearXNG at default endpoint",
+      usageSearxngUrl: "  /search-engine searxng <url>      use SearXNG at custom endpoint",
+      alias: "Alias: /se",
+      searxngInfo:
+        "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
+      searxngInstall: "Install it with:  docker run -d -p 8080:8080 searxng/searxng",
+      switched: 'Switched web search engine to "{engine}".{note}',
+      switchedSearxngNote: " Make sure SearXNG is running at {endpoint}.",
+      confirmed:
+        '✓ Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
+      confirmedDetail: " ({endpoint})",
     },
     skill: {
       listEmpty: "no skills found. Reasonix reads skills from:",

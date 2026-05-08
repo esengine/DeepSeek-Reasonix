@@ -1,4 +1,5 @@
 import { readConfig, webSearchEndpoint, webSearchEngine, writeConfig } from "../../../../config.js";
+import { t } from "../../../../i18n/index.js";
 import type { SlashHandler } from "../dispatch.js";
 
 export const handlers: Record<string, SlashHandler> = {
@@ -7,18 +8,18 @@ export const handlers: Record<string, SlashHandler> = {
     if (!engine || (engine !== "mojeek" && engine !== "searxng")) {
       return {
         info: [
-          `Current web search engine: ${webSearchEngine()}`,
-          `SearXNG endpoint: ${webSearchEndpoint()}`,
+          t("handlers.webSearchEngine.currentEngine", { engine: webSearchEngine() }),
+          t("handlers.webSearchEngine.endpoint", { url: webSearchEndpoint() }),
           "",
-          "Usage:",
-          "  /search-engine mojeek            use Mojeek (default, no external deps)",
-          "  /search-engine searxng            use SearXNG at default endpoint",
-          "  /search-engine searxng <url>      use SearXNG at custom endpoint",
+          t("handlers.webSearchEngine.usageHeader"),
+          t("handlers.webSearchEngine.usageMojeek"),
+          t("handlers.webSearchEngine.usageSearxng"),
+          t("handlers.webSearchEngine.usageSearxngUrl"),
           "",
-          "Alias: /se",
+          t("handlers.webSearchEngine.alias"),
           "",
-          "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
-          "Install it with:  docker run -d -p 8080:8080 searxng/searxng",
+          t("handlers.webSearchEngine.searxngInfo"),
+          t("handlers.webSearchEngine.searxngInstall"),
         ].join("\n"),
       };
     }
@@ -31,13 +32,17 @@ export const handlers: Record<string, SlashHandler> = {
     }
     writeConfig(cfg);
 
-    ctx.postInfo?.(
-      `Switched web search engine to "${engine}". ${engine === "searxng" ? `Make sure SearXNG is running at ${webSearchEndpoint()}.` : ""}`,
-    );
+    const note =
+      engine === "searxng"
+        ? t("handlers.webSearchEngine.switchedSearxngNote", { endpoint: webSearchEndpoint() })
+        : "";
+    ctx.postInfo?.(t("handlers.webSearchEngine.switched", { engine, note }));
 
-    return {
-      info: `✓ Web search engine set to "${engine}"${engine === "searxng" ? ` (${webSearchEndpoint()})` : ""}. Next assistant turn will pick up the change.`,
-    };
+    const detail =
+      engine === "searxng"
+        ? t("handlers.webSearchEngine.confirmedDetail", { endpoint: webSearchEndpoint() })
+        : "";
+    return { info: t("handlers.webSearchEngine.confirmed", { engine, detail }) };
   },
   se: (args, loop, ctx) => handlers["search-engine"]!(args, loop, ctx),
 };

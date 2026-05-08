@@ -814,6 +814,9 @@ export const zhCN: TranslationSchema = {
         "此会话尚无归档计划 — `/replay` 在计划完成后启用（每个步骤完成时自动归档）。",
       replayInvalidIndex:
         "无效索引 — `/replay` 接受 1..{max}（最新 = 1）。使用 `/plans` 查看列表。",
+      archivedRow: "  ✓ {when}  {total}步 · {completion}  {label}",
+      completionComplete: "已完成",
+      stopAborted: "▸ 计划已停止 — 模型已中止；输入后续内容继续，或开始新任务。",
     },
     jobs: {
       codeOnly: "/jobs 仅在 `reasonix code` 中可用。",
@@ -882,6 +885,12 @@ export const zhCN: TranslationSchema = {
       fallbackServers: "MCP 服务器（{count}）：",
       fallbackTools: "注册表中的工具（{count}）：",
       fallbackChange: "要更改此设置，请退出并运行 `reasonix setup`。",
+      usageDisableEnable:
+        "用法：/mcp {action} <name>  ·  从 /mcp 列表中挑一个名字（匿名服务器无法按名切换）。",
+      usageReconnect: "用法：/mcp reconnect <name>  ·  从 /mcp 列表中挑一个名字。",
+      unknownServer: '未知 MCP 服务器 "{name}"。已知：{list}。',
+      noneList: "（无）",
+      reconnectNoTui: "/mcp reconnect 需要交互式 TUI（postInfo 未连接）。",
     },
     init: {
       codeOnly:
@@ -891,6 +900,25 @@ export const zhCN: TranslationSchema = {
       existsEdit: "  或手动编辑 — 它只是 markdown。当前文件已",
       existsPinned: "  固定到每次启动的系统提示词中。",
       info: "▸ /init — 模型将扫描项目并合成 REASONIX.md。\n  结果将作为待处理的编辑；使用 /apply 或 /walk 审查。",
+    },
+    semantic: {
+      codeOnly: "/semantic 仅在 `reasonix code` 中可用（需要项目根目录）。",
+      checking: "▸ 正在检查 semantic_search 状态…",
+    },
+    webSearchEngine: {
+      currentEngine: "当前网页搜索引擎：{engine}",
+      endpoint: "SearXNG 端点：{url}",
+      usageHeader: "用法：",
+      usageMojeek: "  /search-engine mojeek            使用 Mojeek（默认，无外部依赖）",
+      usageSearxng: "  /search-engine searxng            使用 SearXNG 默认端点",
+      usageSearxngUrl: "  /search-engine searxng <url>      使用 SearXNG 自定义端点",
+      alias: "别名：/se",
+      searxngInfo: "SearXNG 是一个自托管的元搜索引擎（https://github.com/searxng/searxng）。",
+      searxngInstall: "安装命令：  docker run -d -p 8080:8080 searxng/searxng",
+      switched: '已切换网页搜索引擎为 "{engine}"。{note}',
+      switchedSearxngNote: " 请确保 SearXNG 在 {endpoint} 运行。",
+      confirmed: '✓ 网页搜索引擎已设为 "{engine}"{detail}。下一轮模型调用将生效。',
+      confirmedDetail: "（{endpoint}）",
     },
     skill: {
       listEmpty: "未找到技能。Reasonix 从以下位置读取技能：",

@@ -85,17 +85,15 @@ function toggleDisabled(
 ): { info: string } {
   const name = rawName?.trim();
   if (!name) {
-    return {
-      info: `usage: /mcp ${action} <name>  ·  pick a name shown in /mcp (anonymous servers can't be named-toggled).`,
-    };
+    return { info: t("handlers.mcp.usageDisableEnable", { action }) };
   }
   const known = new Set<string>([
     ...ctx.servers.map((s) => s.label),
     ...ctx.specs.map((spec) => parseLabelFromSpec(spec)).filter((n): n is string => n !== null),
   ]);
   if (!known.has(name)) {
-    const list = [...known].sort().join(", ") || "(none)";
-    return { info: `unknown MCP server "${name}". Known: ${list}.` };
+    const list = [...known].sort().join(", ") || t("handlers.mcp.noneList");
+    return { info: t("handlers.mcp.unknownServer", { name, list }) };
   }
   return { info: toggleMcpDisabled(action, name) };
 }
@@ -113,20 +111,19 @@ function triggerReconnect(
 ): { info: string } {
   const name = rawName?.trim();
   if (!name) {
-    return {
-      info: "usage: /mcp reconnect <name>  ·  pick a name shown in /mcp.",
-    };
+    return { info: t("handlers.mcp.usageReconnect") };
   }
   const target = servers.find((s) => s.label === name);
   if (!target) {
-    const list = servers
-      .map((s) => s.label)
-      .sort()
-      .join(", ");
-    return { info: `unknown MCP server "${name}". Known: ${list || "(none)"}.` };
+    const list =
+      servers
+        .map((s) => s.label)
+        .sort()
+        .join(", ") || t("handlers.mcp.noneList");
+    return { info: t("handlers.mcp.unknownServer", { name, list }) };
   }
   if (!postInfo) {
-    return { info: "/mcp reconnect requires the interactive TUI (postInfo not wired)." };
+    return { info: t("handlers.mcp.reconnectNoTui") };
   }
   // Append-drift accepted automatically: server added new tools, we register them
   // and call addTool on the prefix (cache miss only on the appended chunks per the
