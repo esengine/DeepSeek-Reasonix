@@ -87,15 +87,11 @@ npx reasonix code --dir /path/to/project   # 也可以用相对路径
 
 ## Reasonix 的不同之处
 
-整个循环围绕四根支柱组织。每一根解决的都是通用 agent 框架根本看不见的问题 —— 因为它们是为另一种缓存机制设计的。
-
-<p align="center">
-  <a href="./docs/ARCHITECTURE.md"><img src="docs/assets/pillars.zh-CN.svg" alt="Reasonix 四大支柱 — 缓存优先循环、R1 思维提取、工具调用修复、成本控制" width="880"/></a>
-</p>
+整个循环围绕三根支柱组织。每一根解决的都是通用 agent 框架根本看不见的问题 —— 因为它们是为另一种缓存机制设计的。
 
 <sub align="center">
 
-各支柱完整说明 → [Pillar 1](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) · [Pillar 2](./docs/ARCHITECTURE.md#pillar-2--r1-thought-harvesting-opt-in) · [Pillar 3](./docs/ARCHITECTURE.md#pillar-3--tool-call-repair) · [Pillar 4](./docs/ARCHITECTURE.md#pillar-4--cost-control-v06)
+各支柱完整说明 → [Pillar 1 — 缓存优先循环](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) · [Pillar 2 — 工具调用修复](./docs/ARCHITECTURE.md#pillar-2--tool-call-repair) · [Pillar 3 — 成本控制](./docs/ARCHITECTURE.md#pillar-3--cost-control-v06)
 
 </sub>
 

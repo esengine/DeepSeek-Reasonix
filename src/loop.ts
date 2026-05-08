@@ -1,13 +1,6 @@
 import { type DeepSeekClient, Usage } from "./client.js";
-import {
-  type BranchOptions,
-  type BranchSample,
-  aggregateBranchUsage,
-  runBranches,
-} from "./consistency.js";
 import type { PauseGate } from "./core/pause-gate.js";
 import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
-import { type HarvestOptions, type TypedPlanState, emptyPlanState, harvest } from "./harvest.js";
 import { type HookPayload, type ResolvedHook, runHooks } from "./hooks.js";
 import {
   DEFAULT_MAX_RESULT_CHARS,
@@ -18,7 +11,6 @@ import {
 
 import { ContextManager } from "./context-manager.js";
 import { t } from "./i18n/index.js";
-import { summarizeBranch } from "./loop/branch.js";
 import { formatLoopError, is5xxError, probeDeepSeekReachable } from "./loop/errors.js";
 import {
   NEEDS_PRO_BUFFER_CHARS,
@@ -47,7 +39,7 @@ import {
   thinkingModeForModel,
 } from "./loop/thinking.js";
 import { TurnFailureTracker } from "./loop/turn-failure-tracker.js";
-import type { BranchSummary, LoopEvent } from "./loop/types.js";
+import type { LoopEvent } from "./loop/types.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
 import {
   appendSessionMessage,
@@ -77,7 +69,7 @@ export {
   stripHallucinatedToolMarkup,
   thinkingModeForModel,
 };
-export type { BranchProgress, BranchSummary, EventRole, LoopEvent } from "./loop/types.js";
+export type { EventRole, LoopEvent } from "./loop/types.js";
 
 export interface CacheFirstLoopOptions {
   client: DeepSeekClient;
@@ -86,9 +78,6 @@ export interface CacheFirstLoopOptions {
   model?: string;
   maxToolIters?: number;
   stream?: boolean;
-  harvest?: boolean | HarvestOptions;
-  /** Branching disables streaming (need all samples) and force-enables harvest (selector input). */
-  branch?: number | BranchOptions;
   reasoningEffort?: "high" | "max";
   autoEscalate?: boolean;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
@@ -104,8 +93,6 @@ export interface CacheFirstLoopOptions {
 
 export interface ReconfigurableOptions {
   model?: string;
-  harvest?: boolean | HarvestOptions;
-  branch?: number | BranchOptions;
   stream?: boolean;
   /** V4 thinking mode only; deepseek-chat ignores. */
   reasoningEffort?: "high" | "max";
@@ -124,13 +111,9 @@ export class CacheFirstLoop {
   readonly repair: ToolCallRepair;
 
   // Mutable via configure() — slash commands in the TUI / library callers tweak
-  // these mid-session so users don't have to restart to try harvest or branch.
+  // these mid-session so users don't have to restart.
   model: string;
   stream: boolean;
-  harvestEnabled: boolean;
-  harvestOptions: HarvestOptions;
-  branchEnabled: boolean;
-  branchOptions: BranchOptions;
   reasoningEffort: "high" | "max";
   autoEscalate = true;
   budgetUsd: number | null;
@@ -178,30 +161,8 @@ export class CacheFirstLoop {
     this.hookCwd = opts.hookCwd ?? process.cwd();
     this.confirmationGate = opts.confirmationGate ?? defaultPauseGate;
 
-    // Resolve branch config first (since it forces harvest on).
-    if (typeof opts.branch === "number") {
-      this.branchOptions = { budget: opts.branch };
-    } else if (opts.branch && typeof opts.branch === "object") {
-      this.branchOptions = opts.branch;
-    } else {
-      this.branchOptions = {};
-    }
-    this.branchEnabled = (this.branchOptions.budget ?? 1) > 1;
-
-    // Branching requires harvest for its default selector to work.
-    const harvestForced = this.branchEnabled;
-    this.harvestEnabled =
-      harvestForced ||
-      opts.harvest === true ||
-      (typeof opts.harvest === "object" && opts.harvest !== null);
-    this.harvestOptions =
-      typeof opts.harvest === "object" && opts.harvest !== null
-        ? opts.harvest
-        : (this.branchOptions.harvestOptions ?? {});
-
-    // Streaming is incompatible with branching (need all samples to select).
     this._streamPreference = opts.stream ?? true;
-    this.stream = this.branchEnabled ? false : this._streamPreference;
+    this.stream = this._streamPreference;
 
     const allowedNames = new Set([...this.prefix.toolSpecs.map((s) => s.function.name)]);
     // Storm breaker clears its window on mutating calls so read → edit → verify isn't a storm.
@@ -344,35 +305,12 @@ export class CacheFirstLoop {
 
   configure(opts: ReconfigurableOptions): void {
     if (opts.model !== undefined) this.model = opts.model;
-    if (opts.stream !== undefined) this._streamPreference = opts.stream;
+    if (opts.stream !== undefined) {
+      this._streamPreference = opts.stream;
+      this.stream = opts.stream;
+    }
     if (opts.reasoningEffort !== undefined) this.reasoningEffort = opts.reasoningEffort;
     if (opts.autoEscalate !== undefined) this.autoEscalate = opts.autoEscalate;
-
-    if (opts.branch !== undefined) {
-      if (typeof opts.branch === "number") {
-        this.branchOptions = { budget: opts.branch };
-      } else if (opts.branch && typeof opts.branch === "object") {
-        this.branchOptions = opts.branch;
-      } else {
-        this.branchOptions = {};
-      }
-      this.branchEnabled = (this.branchOptions.budget ?? 1) > 1;
-    }
-
-    if (opts.harvest !== undefined) {
-      const want =
-        opts.harvest === true || (typeof opts.harvest === "object" && opts.harvest !== null);
-      this.harvestEnabled = want || this.branchEnabled;
-      if (typeof opts.harvest === "object" && opts.harvest !== null) {
-        this.harvestOptions = opts.harvest;
-      }
-    } else if (this.branchEnabled) {
-      // branch turned on without explicit harvest → force it on
-      this.harvestEnabled = true;
-    }
-
-    // Branching always forces non-streaming; otherwise honor preference.
-    this.stream = this.branchEnabled ? false : this._streamPreference;
   }
 
   /** `null` disables the cap; any change re-arms the 80% warning. */
@@ -712,103 +650,8 @@ export class CacheFirstLoop {
       let toolCalls: ToolCall[] = [];
       let usage: TurnStats["usage"] | null = null;
 
-      let branchSummary: BranchSummary | undefined;
-      let preHarvestedPlanState: TypedPlanState | undefined;
-
       try {
-        if (this.branchEnabled) {
-          const budget = this.branchOptions.budget ?? 1;
-          yield {
-            turn: this._turn,
-            role: "branch_start",
-            content: "",
-            branchProgress: {
-              completed: 0,
-              total: budget,
-              latestIndex: -1,
-              latestTemperature: -1,
-              latestUncertainties: -1,
-            },
-          };
-
-          // Queue samples as they complete so we can yield progress events
-          // in resolution order (not launch order).
-          const queue: BranchSample[] = [];
-          let waiter: ((s: BranchSample) => void) | null = null;
-
-          const onSampleDone = (sample: BranchSample) => {
-            if (waiter) {
-              const w = waiter;
-              waiter = null;
-              w(sample);
-            } else {
-              queue.push(sample);
-            }
-          };
-
-          const callModel = this.modelForCurrentCall();
-          const branchPromise = runBranches(
-            this.client,
-            {
-              model: callModel,
-              messages,
-              tools: toolSpecs.length ? toolSpecs : undefined,
-              signal,
-              thinking: thinkingModeForModel(callModel),
-              reasoningEffort: this.reasoningEffort,
-            },
-            {
-              ...this.branchOptions,
-              harvestOptions: this.harvestOptions,
-              onSampleDone,
-            },
-          );
-
-          for (let k = 0; k < budget; k++) {
-            const sample: BranchSample =
-              queue.shift() ??
-              (await new Promise<BranchSample>((resolve) => {
-                waiter = resolve;
-              }));
-            yield {
-              turn: this._turn,
-              role: "branch_progress",
-              content: "",
-              branchProgress: {
-                completed: k + 1,
-                total: budget,
-                latestIndex: sample.index,
-                latestTemperature: sample.temperature,
-                latestUncertainties: sample.planState.uncertainties.length,
-              },
-            };
-          }
-
-          const result = await branchPromise;
-          assistantContent = result.chosen.response.content;
-          reasoningContent = result.chosen.response.reasoningContent ?? "";
-          toolCalls = result.chosen.response.toolCalls;
-
-          // Cost accounting: sum usage across ALL samples, not just the winner.
-          // (We paid for all three.) Harvest-call tokens are not tracked; they
-          // amount to rounding error compared to the main R1 calls.
-          const agg = aggregateBranchUsage(result.samples);
-          usage = new Usage(
-            agg.promptTokens,
-            agg.completionTokens,
-            agg.totalTokens,
-            agg.promptCacheHitTokens,
-            agg.promptCacheMissTokens,
-          );
-          preHarvestedPlanState = result.chosen.planState;
-          branchSummary = summarizeBranch(result.chosen, result.samples);
-          yield {
-            turn: this._turn,
-            role: "branch_done",
-            content: "",
-            branch: branchSummary,
-          };
-        } else if (this.stream) {
+        if (this.stream) {
           const callBuf: Map<number, ToolCall> = new Map();
           // Indices whose accumulated args have parsed as valid JSON at
           // least once. Purely informational — we don't dispatch until
@@ -1007,8 +850,6 @@ export class CacheFirstLoop {
         reasoningContent = "";
         toolCalls = [];
         usage = null;
-        branchSummary = undefined;
-        preHarvestedPlanState = undefined;
         // Redo this iter on pro — `iter--` cancels the `iter++` the
         // for loop runs on `continue`.
         iter--;
@@ -1030,26 +871,6 @@ export class CacheFirstLoop {
       }
 
       this.scratch.reasoning = reasoningContent || null;
-      // Harvest is a second API round-trip (cheap model, but still
-      // 1-10s) that was previously silent. Bridge the gap with a
-      // status indicator so the TUI shows *something* instead of
-      // "reasoning finished, now staring at the wall."
-      if (
-        !preHarvestedPlanState &&
-        this.harvestEnabled &&
-        (reasoningContent?.trim().length ?? 0) >= 40
-      ) {
-        yield {
-          turn: this._turn,
-          role: "status",
-          content: t("loop.harvestStatus"),
-        };
-      }
-      const planState = preHarvestedPlanState
-        ? preHarvestedPlanState
-        : this.harvestEnabled
-          ? await harvest(reasoningContent || null, this.client, this.harvestOptions, signal)
-          : emptyPlanState();
 
       const { calls: repairedCalls, report } = this.repair.process(
         toolCalls,
@@ -1071,9 +892,7 @@ export class CacheFirstLoop {
         role: "assistant_final",
         content: assistantContent,
         stats: turnStats,
-        planState,
         repair: report,
-        branch: branchSummary,
       };
 
       // Cost-aware escalation: repair fires (scavenge / truncation /

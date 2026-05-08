@@ -67,11 +67,6 @@ function printReplay(opts: ReplayOptions): void {
   } else if (stats.prefixHashes.length > 1) {
     console.log("  (prefix churned — cache-hostile session)");
   }
-  if (stats.harvestedTurns > 0) {
-    console.log(`harvest (Pillar 2): ${stats.harvestedTurns} turn(s) produced plan state`);
-    console.log(`  subgoals:          ${stats.totalSubgoals}`);
-    console.log(`  uncertainties:     ${stats.totalUncertainties}`);
-  }
 }
 
 function sliceRecords(records: TranscriptRecord[], opts: ReplayOptions): TranscriptRecord[] {
@@ -98,21 +93,6 @@ function renderRecord(rec: TranscriptRecord): void {
           })()
         : "";
     console.log(`${turn} AGENT:${cost}${cache} ${oneLine(rec.content)}`);
-    if (rec.planState) {
-      const ps = rec.planState;
-      if (ps.subgoals.length)
-        console.log(`   ‹ subgoals     (${ps.subgoals.length}): ${ps.subgoals.join(" · ")}`);
-      if (ps.hypotheses.length)
-        console.log(`   ‹ hypotheses   (${ps.hypotheses.length}): ${ps.hypotheses.join(" · ")}`);
-      if (ps.uncertainties.length)
-        console.log(
-          `   ‹ uncertainties(${ps.uncertainties.length}): ${ps.uncertainties.join(" · ")}`,
-        );
-      if (ps.rejectedPaths.length)
-        console.log(
-          `   ‹ rejected     (${ps.rejectedPaths.length}): ${ps.rejectedPaths.join(" · ")}`,
-        );
-    }
   } else if (rec.role === "tool") {
     const args = rec.args ? ` args=${oneLine(rec.args, 80)}` : "";
     console.log(`${turn} TOOL ${rec.tool ?? "?"}:${args} → ${oneLine(rec.content, 120)}`);

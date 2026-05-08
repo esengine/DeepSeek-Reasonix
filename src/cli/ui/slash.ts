@@ -5,6 +5,7 @@
 // modules under ./slash/.
 export {
   SLASH_COMMANDS,
+  countAdvancedCommands,
   detectSlashArgContext,
   parseSlash,
   suggestSlashCommands,
@@ -16,5 +17,6 @@ export type {
   SlashArgContext,
   SlashCommandSpec,
   SlashContext,
+  SlashGroup,
   SlashResult,
 } from "./slash/types.js";

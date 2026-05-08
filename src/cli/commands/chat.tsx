@@ -263,8 +263,6 @@ export interface ChatOptions {
   model: string;
   system: string;
   transcript?: string;
-  harvest?: boolean;
-  branch?: number;
   /**
    * Soft USD cap on session spend. Undefined → no cap (default).
    * The loop warns once at 80% and refuses to start a new turn at
@@ -403,8 +401,6 @@ function Root({
         model={appProps.model}
         system={appProps.system}
         transcript={appProps.transcript}
-        harvest={appProps.harvest}
-        branch={appProps.branch}
         budgetUsd={appProps.budgetUsd}
         session={activeSession}
         tools={tools}

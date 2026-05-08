@@ -79,18 +79,6 @@ const plan: SlashHandler = (args, _loop, ctx) => {
   return { info: t("handlers.edits.planOff") };
 };
 
-const applyPlan: SlashHandler = (_args, _loop, ctx) => {
-  if (!ctx.setPlanMode) {
-    return { info: t("handlers.edits.applyPlanCodeOnly") };
-  }
-  ctx.setPlanMode(false);
-  ctx.clearPendingPlan?.();
-  return {
-    info: t("handlers.edits.applyPlanInfo"),
-    resubmit: t("handlers.edits.applyPlanResubmit"),
-  };
-};
-
 const mode: SlashHandler = (args, _loop, ctx) => {
   if (!ctx.setEditMode) {
     return { info: t("handlers.edits.modeCodeOnly") };
@@ -259,8 +247,6 @@ export const handlers: Record<string, SlashHandler> = {
   apply,
   discard,
   plan,
-  "apply-plan": applyPlan,
-  applyplan: applyPlan,
   mode,
   commit,
   walk,

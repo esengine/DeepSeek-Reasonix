@@ -46,15 +46,6 @@ export interface CodeOptions {
   /** Skip the session picker — always wipe prior messages and start fresh. */
   forceNew?: boolean;
   /**
-   * Opt into Pillar 2 harvesting (extracts a typed plan state from R1
-   * reasoning via an extra V3 call). Default OFF in code mode — the
-   * displayed subgoals/hypotheses/rejectedPaths have no programmatic
-   * consumer, only `uncertainties.length` feeds branching, and the
-   * extra V3 call adds ~10-15% per-turn cost. Users who want the
-   * reasoning surfaced explicitly can pass `--harvest`.
-   */
-  harvest?: boolean;
-  /**
    * Soft USD spend cap. Off by default. Same semantics as `chat`:
    * warns at 80%, refuses next turn at 100%. Mid-session adjustable
    * via `/budget <usd>` slash command.
@@ -177,7 +168,6 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
 
   await chatCommand({
     model: opts.model ?? "deepseek-v4-flash",
-    harvest: opts.harvest ?? false,
     budgetUsd: opts.budgetUsd,
     system: codeSystemPrompt(rootDir, {
       hasSemanticSearch: semantic.enabled,

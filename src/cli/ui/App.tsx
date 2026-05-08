@@ -37,6 +37,7 @@ import {
   loadReasoningEffort,
   markEditModeHintShown,
   saveEditMode,
+  saveReasoningEffort,
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
@@ -62,6 +63,7 @@ import type {
   SubmitResult,
 } from "../../server/context.js";
 import { type DashboardServerHandle, startDashboardServer } from "../../server/index.js";
+import { loadSlashUsage, recordSlashUse } from "../../slash-usage.js";
 import {
   DEEPSEEK_CONTEXT_TOKENS,
   DEFAULT_CONTEXT_TOKENS,
@@ -134,7 +136,7 @@ import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
 import { replaceMcpServerSummary } from "./mcp-server-list.js";
 import { formatLongPaste } from "./paste-collapse.js";
-import { resolvePreset } from "./presets.js";
+import { PRESETS, resolvePreset } from "./presets.js";
 import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
@@ -151,8 +153,6 @@ export interface AppProps {
   model: string;
   system: string;
   transcript?: string;
-  harvest?: boolean;
-  branch?: number;
   /** Soft USD spend cap; undefined → no cap. See CacheFirstLoopOptions.budgetUsd. */
   budgetUsd?: number;
   session?: string;
@@ -293,8 +293,6 @@ function AppInner({
   model,
   system,
   transcript,
-  harvest,
-  branch,
   budgetUsd,
   session,
   tools,
@@ -315,6 +313,9 @@ function AppInner({
   const chatScroll = useChatScroll();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [slashUsage, setSlashUsage] = useState<Readonly<Record<string, number>>>(() =>
+    loadSlashUsage(),
+  );
   // ctrl-o toggles full-tail view on the live streaming card.
   // Auto-resets at the end of every turn so the next reply starts collapsed.
   const [liveExpand, setLiveExpand] = useState(false);
@@ -819,8 +820,6 @@ function AppInner({
       prefix,
       tools,
       model,
-      harvest,
-      branch,
       budgetUsd,
       session,
       hooks: hookList,
@@ -832,7 +831,7 @@ function AppInner({
     });
     loopRef.current = l;
     return l;
-  }, [model, system, harvest, branch, budgetUsd, session, tools, codeMode]);
+  }, [model, system, budgetUsd, session, tools, codeMode]);
 
   useEffect(() => {
     if (!session || !tools) return;
@@ -1079,6 +1078,8 @@ function AppInner({
     slashMatches,
     slashSelected,
     setSlashSelected,
+    slashGroupMode,
+    slashAdvancedHidden,
     atPicker,
     atMatches,
     atSelected,
@@ -1097,6 +1098,7 @@ function AppInner({
     rootDir: currentRootDir,
     models,
     mcpServers: liveMcpServers,
+    slashUsage,
   });
 
   // Wire the shared progressSink so the bridge's onProgress → us.
@@ -1598,11 +1600,6 @@ function AppInner({
     },
     [tools],
   );
-
-  /** Clear the pending-plan picker state; safe to call unconditionally. */
-  const clearPendingPlan = useCallback(() => {
-    setPendingPlan(null);
-  }, []);
 
   const {
     startLoop,
@@ -2152,6 +2149,14 @@ function AppInner({
 
       const slash = parseSlash(text);
       if (slash) {
+        const sink = eventSinkRef.current;
+        const eventizer = eventizerRef.current;
+        if (sink && eventizer) {
+          sink.append(
+            eventizer.emitSlashInvoked(loop.currentTurn, slash.cmd, slash.args.join(" ")),
+          );
+        }
+        setSlashUsage(recordSlashUse(slash.cmd));
         const result = handleSlash(slash.cmd, slash.args, loop, {
           mcpSpecs,
           mcpServers: liveMcpServers,
@@ -2166,7 +2171,6 @@ function AppInner({
           memoryRoot: currentRootDir,
           planMode,
           setPlanMode: codeMode ? togglePlanMode : undefined,
-          clearPendingPlan: codeMode ? clearPendingPlan : undefined,
           editMode: codeMode ? editMode : undefined,
           setEditMode: codeMode ? setEditMode : undefined,
           touchedFiles: codeMode
@@ -2324,7 +2328,6 @@ function AppInner({
       const contentBuf = { current: "" };
       const reasoningBuf = { current: "" };
       const translator = new TurnTranslator(log);
-      let branchCardId: string | null = null;
       // Coalesces tool_call_delta events into one re-render per flush tick.
       const toolCallBuildBuf: {
         current: {
@@ -2478,19 +2481,6 @@ function AppInner({
                 readyCount: ev.toolCallReadyCount,
               };
             }
-          } else if (ev.role === "branch_start") {
-            if (ev.branchProgress) {
-              branchCardId = log.startBranch(ev.branchProgress.total);
-            }
-          } else if (ev.role === "branch_progress") {
-            if (branchCardId && ev.branchProgress) {
-              log.updateBranch(branchCardId, ev.branchProgress);
-            }
-          } else if (ev.role === "branch_done") {
-            if (branchCardId) {
-              log.endBranch(branchCardId);
-              branchCardId = null;
-            }
           } else if (ev.role === "assistant_final") {
             handleAssistantFinal(ev, {
               flush,
@@ -2596,10 +2586,6 @@ function AppInner({
         // this, stranded done=false cards stick in CardStream's live tail.
         if (abortedThisTurn.current) {
           translator.abort();
-          if (branchCardId) {
-            log.endBranch(branchCardId, true);
-            branchCardId = null;
-          }
         }
         setOngoingTool(null);
         setToolProgress(null);
@@ -2615,7 +2601,6 @@ function AppInner({
     },
     [
       busy,
-      clearPendingPlan,
       codeApply,
       codeDiscard,
       codeHistory,
@@ -3450,6 +3435,8 @@ function AppInner({
                 <ModelPicker
                   models={models}
                   current={loop.model}
+                  currentEffort={loop.reasoningEffort}
+                  currentAutoEscalate={loop.autoEscalate}
                   onRefresh={refreshModels}
                   onChoose={(outcome) => {
                     setPendingModelPicker(false);
@@ -3457,6 +3444,22 @@ function AppInner({
                       loop.configure({ model: outcome.id });
                       agentStore.dispatch({ type: "session.model.change", model: outcome.id });
                       log.pushInfo(`▸ model: ${outcome.id}`);
+                      return;
+                    }
+                    if (outcome.kind === "preset") {
+                      const p = PRESETS[outcome.name];
+                      loop.configure({
+                        model: p.model,
+                        autoEscalate: p.autoEscalate,
+                        reasoningEffort: p.reasoningEffort,
+                      });
+                      agentStore.dispatch({ type: "session.model.change", model: p.model });
+                      try {
+                        saveReasoningEffort(p.reasoningEffort);
+                      } catch {
+                        /* disk full / perms — runtime change still took effect */
+                      }
+                      log.pushInfo(`▸ preset: ${outcome.name} · ${p.model}`);
                     }
                   }}
                 />
@@ -3566,7 +3569,12 @@ function AppInner({
                     onChatScrollDown={chatScroll.scrollDown}
                   />
                   {slashMatches !== null ? (
-                    <SlashSuggestions matches={slashMatches} selectedIndex={slashSelected} />
+                    <SlashSuggestions
+                      matches={slashMatches}
+                      selectedIndex={slashSelected}
+                      groupMode={slashGroupMode}
+                      advancedHidden={slashAdvancedHidden}
+                    />
                   ) : null}
                   {atMatches !== null ? (
                     <AtMentionSuggestions

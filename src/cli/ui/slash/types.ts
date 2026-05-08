@@ -94,8 +94,6 @@ export interface SlashContext {
   dispatch?: (event: import("../state/events.js").AgentEvent) => void;
   setPlanMode?: (on: boolean) => void;
 
-  /** `/apply-plan` clears the picker so its own `resubmit` doesn't double-fire approval. */
-  clearPendingPlan?: () => void;
   reloadHooks?: () => number;
   /** Diff config.mcp[] vs live bridges → add/close clients accordingly. Wired from chat.tsx mcpRuntime. */
   reloadMcp?: () => Promise<{
@@ -128,10 +126,22 @@ export interface SlashContext {
   getDashboardUrl?: () => string | null;
 }
 
+export type SlashGroup =
+  | "chat"
+  | "setup"
+  | "info"
+  | "session"
+  | "extend"
+  | "code"
+  | "jobs"
+  | "advanced";
+
 export interface SlashCommandSpec {
   cmd: string;
   summary: string;
   contextual?: "code";
+  /** Visual category in the suggestions palette + /help. `advanced` collapses by default. */
+  group: SlashGroup;
   /** If the command takes args, hint text shown after the name. */
   argsHint?: string;
   /** First-arg picker source — file paths intentionally absent (use `@path` mentions instead). */

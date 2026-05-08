@@ -2,7 +2,6 @@ import { Box, Text } from "ink";
 import React from "react";
 import type { Card } from "../state/cards.js";
 import { FG } from "../theme/tokens.js";
-import { BranchCard } from "./BranchCard.js";
 import { CtxCard } from "./CtxCard.js";
 import { DiffCard } from "./DiffCard.js";
 import { DoctorCard } from "./DoctorCard.js";
@@ -63,8 +62,6 @@ function renderCard(card: Card): React.ReactElement {
       return <CtxCard card={card} />;
     case "doctor":
       return <DoctorCard card={card} />;
-    case "branch":
-      return <BranchCard card={card} />;
     default:
       return <FallbackCard card={card} />;
   }

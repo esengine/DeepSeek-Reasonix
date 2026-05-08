@@ -1,7 +1,6 @@
 /** Transcripts are receipts (cost/usage/prefix); sessions are memory (ChatMessages). Don't conflate. */
 
 import { type WriteStream, createWriteStream, readFileSync } from "node:fs";
-import type { TypedPlanState } from "../harvest.js";
 import type { LoopEvent } from "../loop.js";
 import type { RawUsage } from "../types.js";
 
@@ -26,8 +25,6 @@ export interface TranscriptRecord {
   model?: string;
   /** Lets diff attribute cache-hit delta to log stability vs prompt change. */
   prefixHash?: string;
-  /** Absent means "no data", not "empty plan". */
-  planState?: TypedPlanState;
   /** Optional error message (role === "error"). */
   error?: string;
 }
@@ -65,16 +62,6 @@ export function recordFromLoopEvent(
   if (ev.toolName !== undefined) rec.tool = ev.toolName;
   if (ev.toolArgs !== undefined) rec.args = ev.toolArgs;
   if (ev.error !== undefined) rec.error = ev.error;
-  // Only persist non-empty plan state — empty harvest output is indistinguishable
-  // from "harvest was off" for replay purposes, and saves transcript bytes.
-  if (ev.planState && !isPlanStateEmptyShape(ev.planState)) {
-    rec.planState = {
-      subgoals: [...ev.planState.subgoals],
-      hypotheses: [...ev.planState.hypotheses],
-      uncertainties: [...ev.planState.uncertainties],
-      rejectedPaths: [...ev.planState.rejectedPaths],
-    };
-  }
   if (ev.stats) {
     rec.usage = {
       prompt_tokens: ev.stats.usage.promptTokens,
@@ -123,15 +110,6 @@ export function openTranscriptFile(path: string, meta: TranscriptMeta): WriteStr
 export function readTranscript(path: string): ReadTranscriptResult {
   const raw = readFileSync(path, "utf8");
   return parseTranscript(raw);
-}
-
-function isPlanStateEmptyShape(s: TypedPlanState): boolean {
-  return (
-    s.subgoals.length === 0 &&
-    s.hypotheses.length === 0 &&
-    s.uncertainties.length === 0 &&
-    s.rejectedPaths.length === 0
-  );
 }
 
 export function parseTranscript(raw: string): ReadTranscriptResult {

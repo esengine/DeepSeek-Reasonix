@@ -66,17 +66,6 @@ describe("handleSlash", () => {
     expect(ctx!.spec.cmd).toBe("language");
   });
 
-  it("/clear requests history clear + surfaces an info line about what it does", () => {
-    const r = handleSlash("clear", [], makeLoop());
-    expect(r.clear).toBe(true);
-    // Clear should also explain that context is NOT dropped — users
-    // keep confusing this with /new. 0.7.1 bumped the action from a
-    // React-state-only clear to a real terminal wipe (CSI 2J+3J),
-    // so the info line says "terminal cleared" now.
-    expect(r.info).toMatch(/terminal cleared/);
-    expect(r.info).toMatch(/\/new/);
-  });
-
   it("/new drops in-memory context AND clears scrollback", () => {
     const loop = makeLoop();
     loop.log.append({ role: "user", content: "message 1" });
@@ -89,36 +78,28 @@ describe("handleSlash", () => {
     expect(loop.log.length).toBe(0);
   });
 
-  it("/reset is an alias for /new (muscle memory)", () => {
-    const loop = makeLoop();
-    loop.log.append({ role: "user", content: "hi" });
-    const r = handleSlash("reset", [], loop);
-    expect(r.clear).toBe(true);
-    expect(loop.log.length).toBe(0);
-  });
-
-  it("/help distinguishes /clear (visual-only) from /new (drops context)", () => {
-    const r = handleSlash("help", [], makeLoop());
-    expect(r.info).toMatch(/\/new/);
-    // Wording explicitly notes context is kept on /clear.
-    expect(r.info).toMatch(/clear displayed scrollback only/);
+  it("/reset and /clear are aliases for /new (single fresh-start command)", () => {
+    for (const name of ["reset", "clear"]) {
+      const loop = makeLoop();
+      loop.log.append({ role: "user", content: "hi" });
+      const r = handleSlash(name, [], loop);
+      expect(r.clear).toBe(true);
+      expect(loop.log.length).toBe(0);
+    }
   });
 
   it("/help returns a multi-line message", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/status/);
-    expect(r.info).toMatch(/\/harvest/);
-    expect(r.info).toMatch(/\/branch/);
+    expect(r.info).toMatch(/\/preset/);
+    expect(r.info).toMatch(/\/compact/);
   });
 
   it("/status reflects current loop config", () => {
     const loop = makeLoop();
     const r = handleSlash("status", [], loop);
-    // New format: indented table with labeled rows ("model", "flags",
-    // "ctx", "mcp", "session"). Harvest/branch live on the flags row.
     expect(r.info).toMatch(/model\s+deepseek-/);
-    expect(r.info).toMatch(/harvest=off/);
-    expect(r.info).toMatch(/branch=off/);
+    expect(r.info).toMatch(/effort=max/);
   });
 
   it("/model switches the model", () => {
@@ -134,10 +115,9 @@ describe("handleSlash", () => {
     });
     expect(loop.model).toBe("deepseek-made-up");
     expect(r.info).toMatch(/not in the fetched catalog/);
-    expect(r.info).toMatch(/\/models/);
   });
 
-  it("/model with no arg opens the interactive picker (#371)", () => {
+  it("/model with no arg opens the unified picker (#371)", () => {
     const loop = makeLoop();
     const r = handleSlash("model", [], loop, {
       models: ["deepseek-chat", "deepseek-reasoner"],
@@ -145,96 +125,9 @@ describe("handleSlash", () => {
     expect(r.openModelPicker).toBe(true);
   });
 
-  it("/models renders the fetched catalog and marks the current one", () => {
-    const loop = makeLoop();
-    loop.configure({ model: "deepseek-reasoner" });
-    const r = handleSlash("models", [], loop, {
-      models: ["deepseek-chat", "deepseek-reasoner"],
-    });
-    expect(r.info).toMatch(/deepseek-chat/);
-    expect(r.info).toMatch(/▸ deepseek-reasoner\s+\(current\)/);
-    expect(r.info).toMatch(/\/model <id>/);
-  });
-
-  it("/models triggers a refresh and reports fetching when the list hasn't loaded yet", () => {
-    const loop = makeLoop();
-    const refresh = vi.fn();
-    const r = handleSlash("models", [], loop, { models: null, refreshModels: refresh });
-    expect(refresh).toHaveBeenCalledOnce();
-    expect(r.info).toMatch(/fetching \/models/);
-  });
-
-  it("/harvest on/off toggles", () => {
-    const loop = makeLoop();
-    handleSlash("harvest", ["on"], loop);
-    expect(loop.harvestEnabled).toBe(true);
-    handleSlash("harvest", ["off"], loop);
-    expect(loop.harvestEnabled).toBe(false);
-  });
-
-  it("/harvest with no arg toggles the current state", () => {
-    const loop = makeLoop();
-    expect(loop.harvestEnabled).toBe(false);
-    handleSlash("harvest", [], loop);
-    expect(loop.harvestEnabled).toBe(true);
-    handleSlash("harvest", [], loop);
-    expect(loop.harvestEnabled).toBe(false);
-  });
-
-  it("/branch N enables branching and force-enables harvest + disables stream", () => {
-    const loop = makeLoop();
-    expect(loop.stream).toBe(true);
-    expect(loop.harvestEnabled).toBe(false);
-    handleSlash("branch", ["3"], loop);
-    expect(loop.branchOptions.budget).toBe(3);
-    expect(loop.branchEnabled).toBe(true);
-    expect(loop.harvestEnabled).toBe(true);
-    expect(loop.stream).toBe(false);
-  });
-
-  it("/branch off disables branching and restores stream preference", () => {
-    const loop = makeLoop();
-    handleSlash("branch", ["3"], loop);
-    handleSlash("branch", ["off"], loop);
-    expect(loop.branchEnabled).toBe(false);
-    expect(loop.stream).toBe(true);
-  });
-
-  it("/branch rejects invalid N", () => {
-    const loop = makeLoop();
-    const r = handleSlash("branch", ["abc"], loop);
-    expect(r.info).toMatch(/usage/);
-    expect(loop.branchEnabled).toBe(false);
-  });
-
-  it("/effort <high|max> flips the reasoningEffort cap", () => {
-    const loop = makeLoop();
-    expect(loop.reasoningEffort).toBe("max");
-    handleSlash("effort", ["high"], loop);
-    expect(loop.reasoningEffort).toBe("high");
-    handleSlash("effort", ["max"], loop);
-    expect(loop.reasoningEffort).toBe("max");
-  });
-
-  it("/effort with no arg reports the current value, doesn't change it", () => {
-    const loop = makeLoop();
-    const r = handleSlash("effort", [], loop);
-    expect(r.info).toMatch(/reasoning_effort → max/);
-    expect(loop.reasoningEffort).toBe("max");
-  });
-
-  it("/effort rejects unknown values", () => {
-    const loop = makeLoop();
-    const r = handleSlash("effort", ["low"], loop);
-    expect(r.info).toMatch(/usage: \/effort <high\|max>/);
-    expect(loop.reasoningEffort).toBe("max");
-  });
-
-  it("/branch caps at 8", () => {
-    const loop = makeLoop();
-    const r = handleSlash("branch", ["99"], loop);
-    expect(r.info).toMatch(/capped/);
-    expect(loop.branchEnabled).toBe(false);
+  it("/preset with no arg opens the unified picker", () => {
+    const r = handleSlash("preset", [], makeLoop());
+    expect(r.openModelPicker).toBe(true);
   });
 
   it("unknown commands return an unknown flag with hint", () => {
@@ -285,16 +178,13 @@ describe("handleSlash", () => {
     expect(posted).toMatch(/nothing to fold|folded/);
   });
 
-  it("/preset auto = v4-flash + auto-escalate, no harvest, no branch", () => {
+  it("/preset auto = v4-flash with auto-escalate", () => {
     const loop = makeLoop();
     handleSlash("model", ["deepseek-v4-pro"], loop);
-    handleSlash("harvest", ["on"], loop);
-    handleSlash("branch", ["3"], loop);
     handleSlash("preset", ["auto"], loop);
     expect(loop.model).toBe("deepseek-v4-flash");
     expect(loop.reasoningEffort).toBe("max");
-    expect(loop.harvestEnabled).toBe(false);
-    expect(loop.branchEnabled).toBe(false);
+    expect(loop.autoEscalate).toBe(true);
   });
 
   it("/preset flash = v4-flash, no auto-escalate", () => {
@@ -302,18 +192,15 @@ describe("handleSlash", () => {
     handleSlash("preset", ["flash"], loop);
     expect(loop.model).toBe("deepseek-v4-flash");
     expect(loop.reasoningEffort).toBe("max");
-    expect(loop.harvestEnabled).toBe(false);
-    expect(loop.branchEnabled).toBe(false);
+    expect(loop.autoEscalate).toBe(false);
   });
 
-  it("/preset pro = v4-pro pinned, no harvest, no branch", () => {
+  it("/preset pro = v4-pro pinned", () => {
     const loop = makeLoop();
     handleSlash("preset", ["pro"], loop);
     expect(loop.model).toBe("deepseek-v4-pro");
     expect(loop.reasoningEffort).toBe("max");
-    expect(loop.harvestEnabled).toBe(false);
-    // Branch is NEVER auto-enabled by a preset — manual /branch only.
-    expect(loop.branchEnabled).toBe(false);
+    expect(loop.autoEscalate).toBe(false);
   });
 
   it("/preset with bad name returns usage", () => {
@@ -332,7 +219,6 @@ describe("handleSlash", () => {
   it("/help mentions sessions", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/sessions/);
-    expect(r.info).toMatch(/\/forget/);
   });
 
   it("/help mentions /mcp", () => {
@@ -418,24 +304,6 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/\/discard/);
   });
 
-  it("/think says no reasoning cached when scratch is empty", () => {
-    const r = handleSlash("think", [], makeLoop());
-    expect(r.info).toMatch(/no reasoning cached/);
-  });
-
-  it("/think dumps the full reasoning when scratch has content", () => {
-    const loop = makeLoop();
-    loop.scratch.reasoning = "lots of R1 deliberation here over many sentences";
-    const r = handleSlash("think", [], loop);
-    expect(r.info).toMatch(/full thinking/);
-    expect(r.info).toContain("lots of R1 deliberation");
-  });
-
-  it("/help mentions /think", () => {
-    const r = handleSlash("help", [], makeLoop());
-    expect(r.info).toMatch(/\/think/);
-  });
-
   it("/retry returns info + resubmit when there's a prior user message", () => {
     const loop = makeLoop();
     loop.log.append({ role: "user", content: "hello" });
@@ -458,112 +326,6 @@ describe("handleSlash", () => {
   it("/help mentions /retry", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/retry/);
-  });
-
-  it("/tool with no history says none yet", () => {
-    const r = handleSlash("tool", [], makeLoop());
-    expect(r.info).toMatch(/no tool calls yet/);
-  });
-
-  it("/tool with history lists entries, most recent first", () => {
-    const r = handleSlash("tool", [], makeLoop(), {
-      toolHistory: () => [
-        { toolName: "fs_read_file", text: "old content" },
-        { toolName: "fs_list_directory", text: "newer content" },
-      ],
-    });
-    expect(r.info).toMatch(/Tool calls in this session \(2/);
-    // Most recent is #1 — the list must order so fs_list_directory
-    // (newer) appears before fs_read_file (older).
-    const idxNewer = r.info!.indexOf("fs_list_directory");
-    const idxOlder = r.info!.indexOf("fs_read_file");
-    expect(idxNewer).toBeGreaterThan(-1);
-    expect(idxOlder).toBeGreaterThan(idxNewer);
-  });
-
-  it("/tool N dumps the Nth-most-recent tool output in full", () => {
-    const big = "X".repeat(2000);
-    const r = handleSlash("tool", ["1"], makeLoop(), {
-      toolHistory: () => [
-        { toolName: "fs_read_file", text: "older" },
-        { toolName: "fs_list_directory", text: big },
-      ],
-    });
-    expect(r.info).toMatch(/tool<fs_list_directory>/);
-    expect(r.info).toMatch(/2000 chars/);
-    // Full 2000 X's included — not truncated.
-    expect(r.info).toContain(big);
-  });
-
-  it("/tool 2 reaches one call back from the most recent", () => {
-    const r = handleSlash("tool", ["2"], makeLoop(), {
-      toolHistory: () => [
-        { toolName: "fs_read_file", text: "target" },
-        { toolName: "fs_list_directory", text: "most recent" },
-      ],
-    });
-    expect(r.info).toMatch(/tool<fs_read_file>/);
-    expect(r.info).toContain("target");
-  });
-
-  it("/tool N past history length reports bounds", () => {
-    const r = handleSlash("tool", ["5"], makeLoop(), {
-      toolHistory: () => [{ toolName: "fs_read_file", text: "one" }],
-    });
-    expect(r.info).toMatch(/only 1 tool call/);
-  });
-
-  it("/tool with non-numeric arg returns usage", () => {
-    const r = handleSlash("tool", ["huh"], makeLoop(), {
-      toolHistory: () => [{ toolName: "fs_read_file", text: "one" }],
-    });
-    expect(r.info).toMatch(/usage: \/tool/);
-  });
-
-  it("/tool list trims the display to 10 most recent but hints at older", () => {
-    const many = Array.from({ length: 15 }, (_, i) => ({
-      toolName: `t${i}`,
-      text: `call-${i}`,
-    }));
-    const r = handleSlash("tool", [], makeLoop(), { toolHistory: () => many });
-    // Most recent (#1 = t14) and 10th back (#10 = t5) should be shown.
-    expect(r.info).toContain("t14");
-    expect(r.info).toContain("t5");
-    // t4 would be #11 — beyond the first-page cutoff.
-    expect(r.info).toMatch(/5 earlier.*reach with \/tool N/);
-  });
-
-  it("/help mentions /tool", () => {
-    const r = handleSlash("help", [], makeLoop());
-    expect(r.info).toMatch(/\/tool/);
-  });
-
-  describe("/keys", () => {
-    it("lists the major keyboard shortcuts", () => {
-      const r = handleSlash("keys", [], makeLoop());
-      expect(r.info).toMatch(/Enter\s+submit/);
-      expect(r.info).toMatch(/Shift\+Enter/);
-      expect(r.info).toMatch(/Ctrl\+J/);
-      expect(r.info).toMatch(/Esc\s+abort/);
-    });
-
-    it("documents the three prompt prefixes", () => {
-      const r = handleSlash("keys", [], makeLoop());
-      expect(r.info).toMatch(/\/<name>/);
-      expect(r.info).toMatch(/@<path>/);
-      expect(r.info).toMatch(/!<cmd>/);
-    });
-
-    it("mentions the pickers", () => {
-      const r = handleSlash("keys", [], makeLoop());
-      expect(r.info).toMatch(/[Pp]icker/);
-      expect(r.info).toMatch(/Tab/);
-    });
-  });
-
-  it("/help mentions /keys", () => {
-    const r = handleSlash("help", [], makeLoop());
-    expect(r.info).toMatch(/\/keys/);
   });
 
   describe("detectSlashArgContext", () => {
@@ -654,33 +416,28 @@ describe("handleSlash", () => {
       "status",
       "preset",
       "model",
-      "branch",
       "mcp",
-      "tool",
       "memory",
-      "think",
       "retry",
       "compact",
       "sessions",
-      "clear",
+      "new",
       "exit",
       "apply",
       "discard",
       "undo",
       "commit",
       "plan",
-      "apply-plan",
-      "keys",
     ]) {
       expect(names, `registry missing /${required}`).toContain(required);
     }
   });
 
   it("suggestSlashCommands filters by prefix", () => {
-    expect(suggestSlashCommands("h").map((s) => s.cmd)).toEqual(["help", "harvest", "hooks"]);
+    expect(suggestSlashCommands("h").map((s) => s.cmd)).toEqual(["help", "hooks"]);
     // Case-insensitive.
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
-    // Empty prefix returns everything (non-contextual).
+    // Empty prefix returns the curated non-advanced list.
     expect(suggestSlashCommands("").length).toBeGreaterThan(5);
   });
 
@@ -1048,13 +805,6 @@ describe("handleSlash", () => {
     expect(r.openSessionsPicker).toBe(true);
   });
 
-  it("/forget on a session-less loop says nothing to forget", () => {
-    const loop = makeLoop();
-    expect(loop.sessionName).toBeNull();
-    const r = handleSlash("forget", [], loop);
-    expect(r.info).toMatch(/nothing to forget/);
-  });
-
   describe("/plans + /replay", () => {
     let tempHome: string;
     let originalHome: string | undefined;
@@ -1249,7 +999,7 @@ describe("handleSlash", () => {
     });
   });
 
-  describe("/plan + /apply-plan", () => {
+  describe("/plan", () => {
     it("/plan replies 'only in code mode' when setPlanMode callback is missing", () => {
       const r = handleSlash("plan", [], makeLoop());
       expect(r.info).toMatch(/only available inside `reasonix code`/);
@@ -1299,37 +1049,6 @@ describe("handleSlash", () => {
       // constraint, not the only path.
       expect(r.info).toMatch(/stronger/);
       expect(r.info).toMatch(/submit_plan/);
-    });
-
-    it("/apply-plan replies 'only in code mode' when setPlanMode is missing", () => {
-      const r = handleSlash("apply-plan", [], makeLoop());
-      expect(r.info).toMatch(/only available inside `reasonix code`/);
-    });
-
-    it("/apply-plan flips plan mode off, clears pending, and resubmits the implement-now synthetic", () => {
-      const setCalls: boolean[] = [];
-      const clearCalls: number[] = [];
-      const r = handleSlash("apply-plan", [], makeLoop(), {
-        setPlanMode: (on) => setCalls.push(on),
-        clearPendingPlan: () => {
-          clearCalls.push(1);
-        },
-      });
-      expect(setCalls).toEqual([false]);
-      expect(clearCalls).toEqual([1]);
-      expect(r.info).toMatch(/plan approved/);
-      expect(r.resubmit).toMatch(/Implement it now/);
-      expect(r.resubmit).toMatch(/out of plan mode/);
-    });
-
-    it("/apply-plan works without a clearPendingPlan callback (only setPlanMode required)", () => {
-      const setCalls: boolean[] = [];
-      const r = handleSlash("apply-plan", [], makeLoop(), {
-        setPlanMode: (on) => setCalls.push(on),
-        // clearPendingPlan omitted — /apply-plan must still work
-      });
-      expect(setCalls).toEqual([false]);
-      expect(r.resubmit).toMatch(/Implement it now/);
     });
 
     it("/status surfaces plan mode when it's on", () => {

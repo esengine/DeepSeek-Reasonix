@@ -74,7 +74,6 @@ describe("loopEventToDashboard", () => {
   });
 
   it("returns null for unrecognized roles", () => {
-    expect(loopEventToDashboard(ev({ role: "branch_start" }), ctx)).toBeNull();
     expect(loopEventToDashboard(ev({ role: "assistant_final" }), ctx)).toBeNull();
     expect(loopEventToDashboard(ev({ role: "tool_call_delta" }), ctx)).toBeNull();
   });

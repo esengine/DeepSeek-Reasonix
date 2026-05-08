@@ -1,17 +1,8 @@
-/**
- * Shared renderer for a single TranscriptRecord. Used by ReplayApp and
- * DiffApp — both need the same visual grammar (user cyan, assistant green,
- * tool yellow, error red, cache badge colored by threshold) so transcripts
- * look consistent wherever they're displayed.
- *
- * Kept small on purpose: no streaming/branch/planState paths (those are
- * live-chat concerns and never appear in replayed transcripts).
- */
+/** Shared renderer for a single TranscriptRecord — used by ReplayApp and DiffApp. */
 
 import { Box, Text } from "ink";
 import React from "react";
 import type { TranscriptRecord } from "../../transcript/log.js";
-import { PlanStateBlock } from "./PlanStateBlock.js";
 
 export interface RecordViewProps {
   rec: TranscriptRecord;
@@ -58,7 +49,6 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
           ) : null}
           {rec.usage ? <CacheBadge usage={rec.usage} /> : null}
         </Box>
-        {rec.planState ? <PlanStateBlock planState={rec.planState} /> : null}
         {rec.content ? (
           <Text>{rec.content}</Text>
         ) : (

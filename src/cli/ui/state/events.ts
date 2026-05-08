@@ -213,28 +213,6 @@ const planDrop = z.object({
   type: z.literal("plan.drop"),
 });
 
-const branchStart = z.object({
-  type: z.literal("branch.start"),
-  id: cardId,
-  total: z.number().int().positive(),
-});
-
-const branchProgress = z.object({
-  type: z.literal("branch.progress"),
-  id: cardId,
-  completed: z.number().int().nonnegative(),
-  total: z.number().int().positive(),
-  latestIndex: z.number().int().nonnegative(),
-  latestTemperature: z.number(),
-  latestUncertainties: z.number().int().nonnegative(),
-});
-
-const branchEnd = z.object({
-  type: z.literal("branch.end"),
-  id: cardId,
-  aborted: z.boolean().optional(),
-});
-
 const usageShow = z.object({
   type: z.literal("usage.show"),
   id: cardId,
@@ -344,9 +322,6 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   ctxShow,
   doctorShow,
   usageShow,
-  branchStart,
-  branchProgress,
-  branchEnd,
 ]);
 
 export type AgentEvent = z.infer<typeof AgentEventSchema>;

@@ -7,12 +7,16 @@ import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 function renderPicker(props: {
   models: ReadonlyArray<string> | null;
   current: string;
+  currentEffort?: "high" | "max";
+  currentAutoEscalate?: boolean;
 }): string {
   const stdout = makeFakeStdout();
   const { unmount } = render(
     React.createElement(ModelPicker, {
       models: props.models,
       current: props.current,
+      currentEffort: props.currentEffort ?? "max",
+      currentAutoEscalate: props.currentAutoEscalate ?? true,
       onChoose: () => {},
     }),
     { stdout: stdout as never, stdin: makeFakeStdin() as never },
@@ -32,10 +36,33 @@ describe("ModelPicker (#371)", () => {
     expect(text).toContain("deepseek-reasoner");
   });
 
-  it("marks the current model with a `current` tag", () => {
+  it("lists the three presets above the model list", () => {
+    const text = renderPicker({
+      models: ["deepseek-v4-flash"],
+      current: "deepseek-v4-flash",
+    });
+    expect(text).toContain("PRESETS");
+    expect(text).toContain("auto");
+    expect(text).toContain("flash");
+    expect(text).toContain("pro");
+  });
+
+  it("marks the active preset with `current` when loop config matches", () => {
+    const text = renderPicker({
+      models: ["deepseek-v4-flash"],
+      current: "deepseek-v4-flash",
+      currentEffort: "max",
+      currentAutoEscalate: true,
+    });
+    expect(text).toMatch(/auto[\s\S]*current/);
+  });
+
+  it("falls back to model `current` tag when loop config doesn't match any preset", () => {
     const text = renderPicker({
       models: ["deepseek-v4-flash", "deepseek-v4-pro"],
       current: "deepseek-v4-pro",
+      currentEffort: "high",
+      currentAutoEscalate: true,
     });
     expect(text).toMatch(/deepseek-v4-pro[\s\S]*current/);
   });

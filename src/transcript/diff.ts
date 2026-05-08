@@ -216,42 +216,6 @@ export function renderSummaryTable(report: DiffReport, _opts: RenderOptions = {}
     ),
   );
   lines.push(statRow("prefix hashes", a.stats.prefixHashes.length, b.stats.prefixHashes.length));
-  // Harvest row only when at least one side has plan state.
-  if (a.stats.harvestedTurns > 0 || b.stats.harvestedTurns > 0) {
-    lines.push(
-      row(
-        [
-          "harvest turns",
-          `${a.stats.harvestedTurns}`,
-          `${b.stats.harvestedTurns}`,
-          signed(b.stats.harvestedTurns - a.stats.harvestedTurns),
-        ],
-        [20, 14, 14, 14],
-      ),
-    );
-    lines.push(
-      row(
-        [
-          "  subgoals",
-          `${a.stats.totalSubgoals}`,
-          `${b.stats.totalSubgoals}`,
-          signed(b.stats.totalSubgoals - a.stats.totalSubgoals),
-        ],
-        [20, 14, 14, 14],
-      ),
-    );
-    lines.push(
-      row(
-        [
-          "  uncertainties",
-          `${a.stats.totalUncertainties}`,
-          `${b.stats.totalUncertainties}`,
-          signed(b.stats.totalUncertainties - a.stats.totalUncertainties),
-        ],
-        [20, 14, 14, 14],
-      ),
-    );
-  }
   lines.push("");
 
   // Prefix stability story — the headline finding when comparing bench modes.
@@ -329,17 +293,6 @@ export function renderMarkdown(report: DiffReport): string {
   out.push(
     `| prefix hashes | ${a.stats.prefixHashes.length} | ${b.stats.prefixHashes.length} | — |`,
   );
-  if (a.stats.harvestedTurns > 0 || b.stats.harvestedTurns > 0) {
-    out.push(
-      `| harvest turns | ${a.stats.harvestedTurns} | ${b.stats.harvestedTurns} | ${signed(b.stats.harvestedTurns - a.stats.harvestedTurns)} |`,
-    );
-    out.push(
-      `| harvest subgoals | ${a.stats.totalSubgoals} | ${b.stats.totalSubgoals} | ${signed(b.stats.totalSubgoals - a.stats.totalSubgoals)} |`,
-    );
-    out.push(
-      `| harvest uncertainties | ${a.stats.totalUncertainties} | ${b.stats.totalUncertainties} | ${signed(b.stats.totalUncertainties - a.stats.totalUncertainties)} |`,
-    );
-  }
   out.push("");
 
   out.push("## Turn-by-turn");

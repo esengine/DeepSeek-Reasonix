@@ -47,11 +47,7 @@ describe("canonicalPresetName", () => {
 });
 
 describe("preset invariants", () => {
-  it("keeps branch and harvest fixed across all presets", () => {
-    for (const [name, preset] of Object.entries(PRESETS)) {
-      expect(preset.harvest).toBe(false);
-      expect(preset.branch).toBe(1);
-      expect(["auto", "flash", "pro"]).toContain(name);
-    }
+  it("only exposes auto / flash / pro names", () => {
+    expect(Object.keys(PRESETS).sort()).toEqual(["auto", "flash", "pro"]);
   });
 });

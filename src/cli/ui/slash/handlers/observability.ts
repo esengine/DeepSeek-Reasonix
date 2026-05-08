@@ -7,42 +7,7 @@ import {
 import { countTokens } from "@/tokenizer.js";
 import { computeCtxBreakdown } from "../../ctx-breakdown.js";
 import type { SlashHandler } from "../dispatch.js";
-import { compactNum, formatToolList } from "../helpers.js";
-
-const think: SlashHandler = (_args, loop) => {
-  const raw = loop.scratch.reasoning;
-  if (!raw || !raw.trim()) {
-    return { info: t("handlers.observability.thinkEmpty") };
-  }
-  return {
-    info: `${t("handlers.observability.thinkInfo", { count: raw.length })}\n\n${raw.trim()}`,
-  };
-};
-
-const tool: SlashHandler = (args, _loop, ctx) => {
-  const history = ctx.toolHistory?.() ?? [];
-  if (history.length === 0) {
-    return { info: t("handlers.observability.toolEmpty") };
-  }
-  const raw = (args[0] ?? "").toLowerCase();
-  if (raw === "" || raw === "list" || raw === "ls") {
-    return { info: formatToolList(history) };
-  }
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 1) {
-    return { info: t("handlers.observability.toolUsage") };
-  }
-  if (n > history.length) {
-    return { info: t("handlers.observability.toolOob", { count: history.length, n }) };
-  }
-  const entry = history[history.length - n];
-  if (!entry) {
-    return { info: t("handlers.observability.toolNotFound", { n }) };
-  }
-  return {
-    info: `${t("handlers.observability.toolInfo", { name: entry.toolName, n, chars: entry.text.length })}\n\n${entry.text}`,
-  };
-};
+import { compactNum } from "../helpers.js";
 
 const context: SlashHandler = (_args, loop) => {
   const breakdown = computeCtxBreakdown(loop);
@@ -61,7 +26,6 @@ const context: SlashHandler = (_args, loop) => {
 };
 
 const status: SlashHandler = (_args, loop, ctx) => {
-  const branchBudget = loop.branchOptions.budget ?? 1;
   const ctxMax = DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS;
   const summary = loop.stats.summary();
   const lastPromptTokens = summary.lastPromptTokens;
@@ -138,8 +102,6 @@ const status: SlashHandler = (_args, loop, ctx) => {
   const lines = [
     t("handlers.observability.statusModel", { model: loop.model }),
     t("handlers.observability.statusFlags", {
-      harvest: loop.harvestEnabled ? "on" : "off",
-      branch: branchBudget > 1 ? branchBudget : "off",
       stream: loop.stream ? "on" : "off",
       effort: loop.reasoningEffort,
     }),
@@ -264,9 +226,6 @@ function estimateCost(userText: string, loop: import("@/loop.js").CacheFirstLoop
 }
 
 export const handlers: Record<string, SlashHandler> = {
-  think,
-  reasoning: think,
-  tool,
   context,
   status,
   compact,

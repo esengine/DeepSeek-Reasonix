@@ -1,13 +1,10 @@
 import { t } from "@/i18n/index.js";
 import { formatDuration, formatLoopStatus, parseLoopCommand } from "../../loop.js";
+import { SLASH_COMMANDS } from "../commands.js";
 import type { SlashHandler } from "../dispatch.js";
+import type { SlashCommandSpec, SlashGroup } from "../types.js";
 
 const exit: SlashHandler = () => ({ exit: true });
-
-const clear: SlashHandler = () => ({
-  clear: true,
-  info: t("handlers.basic.clearInfo"),
-});
 
 const resetLog: SlashHandler = (_args, loop) => {
   const { dropped } = loop.clearLog();
@@ -17,95 +14,45 @@ const resetLog: SlashHandler = (_args, loop) => {
   };
 };
 
-const keys: SlashHandler = () => ({
-  info: [
-    t("handlers.basic.keysTitle"),
-    "",
-    t("handlers.basic.keysEnter"),
-    t("handlers.basic.keysNewline"),
-    t("handlers.basic.keysContinue"),
-    t("handlers.basic.keysArrow"),
-    t("handlers.basic.keysPage"),
-    t("handlers.basic.keysHomeEnd"),
-    t("handlers.basic.keysClearLine"),
-    t("handlers.basic.keysDeleteWord"),
-    t("handlers.basic.keysBackspace"),
-    t("handlers.basic.keysEsc"),
-    t("handlers.basic.keysEditYn"),
-    t("handlers.basic.keysEditTab"),
-    t("handlers.basic.keysEditUndo"),
-    "",
-    t("handlers.basic.keysPromptTitle"),
-    t("handlers.basic.keysSlash"),
-    t("handlers.basic.keysAtFile"),
-    t("handlers.basic.keysAtFilePicker"),
-    t("handlers.basic.keysAtUrl"),
-    t("handlers.basic.keysAtUrlCache"),
-    t("handlers.basic.keysBang"),
-    t("handlers.basic.keysBangDetail"),
-    t("handlers.basic.keysHash"),
-    t("handlers.basic.keysHashGlobal"),
-    t("handlers.basic.keysHashBoth"),
-    t("handlers.basic.keysHashEscape"),
-    "",
-    t("handlers.basic.keysPickersTitle"),
-    t("handlers.basic.keysPickerNav"),
-    t("handlers.basic.keysPickerTab"),
-    t("handlers.basic.keysPickerEnter"),
-    "",
-    t("handlers.basic.keysMcpTitle"),
-    t("handlers.basic.keysMcpServers"),
-    t("handlers.basic.keysMcpResource"),
-    t("handlers.basic.keysMcpPrompt"),
-    "",
-    t("handlers.basic.keysUseful"),
-  ].join("\n"),
-});
+const GROUP_ORDER: ReadonlyArray<SlashGroup> = [
+  "chat",
+  "setup",
+  "info",
+  "session",
+  "extend",
+  "code",
+  "jobs",
+  "advanced",
+];
 
-const help: SlashHandler = () => ({
-  info: [
-    t("handlers.basic.helpTitle"),
-    t("handlers.basic.helpHelp"),
-    t("handlers.basic.helpKeys"),
-    t("handlers.basic.helpStatus"),
-    t("handlers.basic.helpPreset"),
-    t("handlers.basic.helpModel"),
-    t("handlers.basic.helpPro"),
-    t("handlers.basic.helpHarvest"),
-    t("handlers.basic.helpBranch"),
-    t("handlers.basic.helpEffort"),
-    t("handlers.basic.helpMcp"),
-    t("handlers.basic.helpResource"),
-    t("handlers.basic.helpPrompt"),
-    t("handlers.basic.helpCompact"),
-    t("handlers.basic.helpThink"),
-    t("handlers.basic.helpTool"),
-    t("handlers.basic.helpCost"),
-    t("handlers.basic.helpMemory"),
-    t("handlers.basic.helpMemorySub"),
-    t("handlers.basic.helpSkill"),
-    t("handlers.basic.helpSkillSub"),
-    t("handlers.basic.helpRetry"),
-    t("handlers.basic.helpApply"),
-    t("handlers.basic.helpDiscard"),
-    t("handlers.basic.helpWalk"),
-    t("handlers.basic.helpUndo"),
-    t("handlers.basic.helpHistory"),
-    t("handlers.basic.helpShow"),
-    t("handlers.basic.helpCommit"),
-    t("handlers.basic.helpPlan"),
-    t("handlers.basic.helpApplyPlan"),
-    t("handlers.basic.helpMode"),
-    t("handlers.basic.helpJobs"),
-    t("handlers.basic.helpKill"),
-    t("handlers.basic.helpLogs"),
-    t("handlers.basic.helpSessions"),
-    t("handlers.basic.helpForget"),
-    t("handlers.basic.helpNew"),
-    t("handlers.basic.helpClear"),
-    t("handlers.basic.helpLoop"),
-    t("handlers.basic.helpExit"),
-    "",
+const GROUP_HEADER: Record<SlashGroup, string> = {
+  chat: "CHAT  ·  daily turn ops",
+  setup: "SETUP  ·  model + cost",
+  info: "INFO  ·  current state",
+  session: "SESSION  ·  saved sessions",
+  extend: "EXTEND  ·  MCP, memory, skills",
+  code: "CODE  ·  edits + plans (code mode)",
+  jobs: "JOBS  ·  background processes (code mode)",
+  advanced: "ADVANCED  ·  rare or set-and-forget",
+};
+
+function renderRow(spec: SlashCommandSpec): string {
+  const name = `/${spec.cmd}${spec.argsHint ? ` ${spec.argsHint}` : ""}`;
+  const desc = t(`slash.${spec.cmd}.description`);
+  const summary = desc === `slash.${spec.cmd}.description` ? spec.summary : desc;
+  return `  ${name.padEnd(28)}  ${summary}`;
+}
+
+const help: SlashHandler = () => {
+  const lines: string[] = [t("handlers.basic.helpTitle"), ""];
+  for (const group of GROUP_ORDER) {
+    const rows = SLASH_COMMANDS.filter((c) => c.group === group);
+    if (rows.length === 0) continue;
+    lines.push(`  ${GROUP_HEADER[group]}`);
+    for (const r of rows) lines.push(renderRow(r));
+    lines.push("");
+  }
+  lines.push(
     t("handlers.basic.helpShellTitle"),
     t("handlers.basic.helpShell"),
     t("handlers.basic.helpShellDetail"),
@@ -137,14 +84,9 @@ const help: SlashHandler = () => ({
     t("handlers.basic.helpSessionsTitle"),
     t("handlers.basic.helpSessionCustom"),
     t("handlers.basic.helpSessionNone"),
-    "",
-    t("handlers.basic.helpLimitationTitle"),
-    t("handlers.basic.helpLimitation1"),
-    t("handlers.basic.helpLimitation2"),
-    t("handlers.basic.helpLimitation3"),
-    t("handlers.basic.helpLimitation4"),
-  ].join("\n"),
-});
+  );
+  return { info: lines.join("\n") };
+};
 
 const retry: SlashHandler = (_args, loop) => {
   const prev = loop.retryLastUser();
@@ -189,9 +131,7 @@ const loop: SlashHandler = (args, _loop, ctx) => {
 
 export const handlers: Record<string, SlashHandler> = {
   exit,
-  clear,
   new: resetLog,
-  keys,
   help,
   retry,
   loop,

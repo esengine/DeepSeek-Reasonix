@@ -64,21 +64,16 @@ export const zhCN: TranslationSchema = {
     resumeHint: "强制恢复指定会话（即使空闲）",
     newHint: "强制创建新会话（忽略 --session / --continue）",
     transcriptHint: "JSONL 转录稿的写入路径",
-    harvestHint: "启用 Pillar-2 计划状态提取（每轮额外消耗 1 次 flash 调用）",
     budgetHint: "会话美元上限 — 80% 时警告，100% 时拒绝下一轮",
     modelIdHint: "DeepSeek 模型 ID（例如 deepseek-v4-flash）",
     systemPromptHint: "覆盖默认系统提示词",
     presetHint: "模型组合 — auto|flash|pro",
-    harvestOptInHint: "启用 Pillar-2 计划状态提取",
-    branchHint: "每轮运行 N 个并行采样（N>=2，仅手动）",
     sessionNameHint: "会话名称（默认：'default'）",
     ephemeralHint: "禁用本次运行的会话持久化",
     mcpSpecHint: "MCP 服务器规格（可重复）",
     mcpPrefixHint: "用此字符串为 MCP 工具名添加前缀",
     noConfigHint: "本次运行忽略 ~/.reasonix/config.json",
     presetHintShort: "模型组合 — auto|flash|pro",
-    harvestHintShort: "Pillar-2 计划状态提取",
-    branchHintShort: "每轮并行采样数（N>=2）",
     budgetHintShort: "会话美元上限",
     transcriptHintShort: "JSONL 转录稿路径",
     mcpSpecHintShort: "MCP 服务器规格（可重复）",
@@ -136,12 +131,6 @@ export const zhCN: TranslationSchema = {
       success: "语言已切换为简体中文。",
       unsupported: "不支持的语言代码：{code}。支持的语言：{supported}。",
     },
-    harvest: { description: "切换 Pillar-2 计划状态提取", argsHint: "[on|off]" },
-    branch: { description: "每轮运行 N 个并行采样（N>=2）", argsHint: "<N|off>" },
-    effort: {
-      description: "reasoning_effort 上限 — max 为默认（智能体级），high 更便宜/更快",
-      argsHint: "<high|max>",
-    },
     pro: {
       description: "仅为下一轮启用 v4-pro（一次性 · 自动解除）",
       argsHint: "[off]",
@@ -159,7 +148,6 @@ export const zhCN: TranslationSchema = {
       description: "浏览 + 获取 MCP 提示（无参数 → 列出名称；<name> → 渲染提示）",
       argsHint: "[name]",
     },
-    tool: { description: "转储第 N 个工具调用的完整输出（1=最近）", argsHint: "[N]" },
     memory: {
       description: "显示 / 管理固定记忆（REASONIX.md + ~/.reasonix/memory）",
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
@@ -191,7 +179,6 @@ export const zhCN: TranslationSchema = {
     doctor: {
       description: "健康检查（api / config / api-reach / index / hooks / project）",
     },
-    think: { description: "转储最近一轮的完整 R1 推理（仅推理模型）" },
     context: { description: "显示上下文窗口分解（系统 / 工具 / 日志 / 输入）" },
     retry: { description: "截断并重发您的最后一条消息（重新采样）" },
     compact: {
@@ -205,12 +192,6 @@ export const zhCN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "列出已保存的会话（当前标记为 ▸）" },
-    rename: { description: "重命名磁盘上的当前会话", argsHint: "<new-name>" },
-    resume: {
-      description: "显示恢复已保存会话的启动命令",
-      argsHint: "<name>",
-    },
-    forget: { description: "从磁盘删除当前会话" },
     setup: { description: "提醒您退出并运行 `reasonix setup`" },
     semantic: {
       description: "显示 semantic_search 状态 — 已构建？Ollama 已安装？如何启用",
@@ -259,9 +240,6 @@ export const zhCN: TranslationSchema = {
     plan: {
       description: "切换只读计划模式（写入被弹回直到 submit_plan + 审批）",
       argsHint: "[on|off]",
-    },
-    "apply-plan": {
-      description: "强制批准待处理 / 文本中的计划（如果错过了选择器时的回退）",
     },
     mode: {
       description:
@@ -428,63 +406,8 @@ export const zhCN: TranslationSchema = {
   },
   handlers: {
     basic: {
-      clearInfo:
-        "▸ 终端已清除（视口 + 滚动回放）。上下文（消息日志）完好无损 — 下一轮仍能看到所有内容。使用 /new 全新开始，或 /forget 删除整个会话。",
       newInfo: "▸ 新对话 — 已从上下文中丢弃 {count} 条消息。同一会话，全新开始。",
       helpTitle: "命令：",
-      helpHelp: "  /help                    显示此消息",
-      helpKeys: "  /keys                    键盘快捷键 + 提示前缀 (!, @, /)",
-      helpStatus: "  /status                  显示当前设置",
-      helpPreset: "  /preset <auto|flash|pro> 模型组合 — 见下文",
-      helpModel: "  /model <id>              deepseek-v4-flash 或 deepseek-v4-pro",
-      helpPro: "  /pro [off]               为下一轮启用 v4-pro（一次性，自动解除）",
-      helpHarvest: "  /harvest [on|off]        Pillar 2：结构化计划状态提取（可选 — 额外收费）",
-      helpBranch: "  /branch <N|off>          运行 N 个并行采样（N>=2）— 仅手动，N 倍成本",
-      helpEffort:
-        "  /effort <high|max>       reasoning_effort 上限（max=完整思考，high=更便宜/更快）",
-      helpMcp: "  /mcp                     列出附加到此会话的 MCP 服务器 + 工具",
-      helpResource:
-        "  /resource [uri]          浏览 + 读取 MCP 资源（无参数 → 列出 URI；<uri> → 获取）",
-      helpPrompt:
-        "  /prompt [name]           浏览 + 获取 MCP 提示（无参数 → 列出名称；<name> → 渲染）",
-      helpCompact: "  /compact                 折叠旧轮次为摘要（cache-safe，50% 自动触发）",
-      helpThink: "  /think                   转储最近一轮的完整 R1 推理（仅推理模型）",
-      helpTool: "  /tool [N]                列出工具调用（或转储第 N 个的完整输出，1=最近）",
-      helpCost: "  /cost [text]             空 → 上一轮花费；带文本 → 估算发送成本",
-      helpMemory: "  /memory [sub]            显示固定记忆（REASONIX.md + ~/.reasonix/memory）。",
-      helpMemorySub:
-        "                            子命令：list | show <name> | forget <name> | clear <scope> confirm",
-      helpSkill:
-        "  /skill [sub]             列出 / 运行用户技能（project/.reasonix/skills + ~/.reasonix/skills）。",
-      helpSkillSub:
-        "                            子命令：list | show <name> | <name> [args]（将技能体注入为用户轮次）",
-      helpRetry: "  /retry                   截断并重发您的最后一条消息（模型重新采样）",
-      helpApply:
-        "  /apply [N|1,3|1-4]       （代码模式）提交待处理的编辑块（无参数 → 全部；索引 → 子集）",
-      helpDiscard:
-        "  /discard [N|1,3|1-4]     （代码模式）丢弃待处理的编辑（无参数 → 全部；索引 → 子集）",
-      helpWalk:
-        "  /walk                    （代码模式）逐块逐步处理待处理的编辑（每块 y/n，a 应用剩余，A 切换 AUTO）",
-      helpUndo: "  /undo                    （代码模式）回滚最近未撤消的编辑批处理",
-      helpHistory: "  /history                 （代码模式）列出此会话的每个编辑批处理",
-      helpShow: "  /show [id]               （代码模式）转储存储的编辑差异（省略 id 时为最新）",
-      helpCommit: '  /commit "msg"            （代码模式）git add -A && git commit -m "msg"',
-      helpPlan:
-        "  /plan [on|off]           （代码模式）切换只读计划模式；写入需经 submit_plan + 审批",
-      helpApplyPlan: "  /apply-plan              （代码模式）强制批准待处理/文本中的计划（回退）",
-      helpMode:
-        "  /mode [review|auto|yolo] （代码模式）review = 排队 · auto = 应用+撤消横幅 · yolo = 应用+自动 shell。Shift+Tab 循环切换。",
-      helpJobs:
-        "  /jobs                    （代码模式）列出后台进程（run_background）— 运行中和已退出",
-      helpKill: "  /kill <id>               （代码模式）按 ID 停止后台作业（SIGTERM → SIGKILL）",
-      helpLogs: "  /logs <id> [lines]       （代码模式）跟踪后台作业输出（默认最后 80 行）",
-      helpSessions: "  /sessions                列出已保存的会话（当前标记为 ▸）",
-      helpForget: "  /forget                  从磁盘删除当前会话",
-      helpNew: "  /new                     全新开始：丢弃所有上下文 + 清除滚动回放",
-      helpClear: "  /clear                   仅清除显示的滚动回放（上下文保留 — 模型仍能看到）",
-      helpLoop:
-        "  /loop <interval> <prompt> 每 <interval> 自动重新提交 <prompt>（5秒..6小时）。/loop stop · 输入任何内容取消。",
-      helpExit: "  /exit                    退出（别名：/quit, /q）",
       helpShellTitle: "Shell 快捷方式：",
       helpShell: "  !<cmd>                   在沙箱根目录运行 <cmd>；输出进入对话",
       helpShellDetail: "                             以便模型在下一轮看到。无允许列表限制。",
@@ -516,50 +439,6 @@ export const zhCN: TranslationSchema = {
       helpSessionsTitle: "会话（默认自动启用，命名为 'default'）：",
       helpSessionCustom: "  reasonix chat --session <name>   使用不同的命名会话",
       helpSessionNone: "  reasonix chat --no-session       禁用本次运行的持久化",
-      helpLimitationTitle: "已知限制：",
-      helpLimitation1: "  在会话中途调整终端大小可能会在滚动回放中堆叠幽灵标题帧",
-      helpLimitation2: "  （Ink 库的活动区域清除未考虑新宽度下的行重排）。",
-      helpLimitation3: "  滚动历史不受影响；该瑕疵纯属视觉问题，",
-      helpLimitation4: "  下次 /clear 时清除。",
-      keysTitle: "键盘和提示快捷键：",
-      keysEnter: "  Enter                  提交当前提示",
-      keysNewline: "  Shift+Enter  /  Ctrl+J  插入换行（多行提示）",
-      keysContinue: "  \\<Enter>               bash 风格的行继续",
-      keysArrow: "  ← → ↑ ↓                移动光标 / 在缓冲区边界召回历史",
-      keysPage: "  PageUp / PageDown      跳转到整个缓冲区的顶部/底部（大段粘贴后很有用）",
-      keysHomeEnd: "  Ctrl+A / Ctrl+E        跳转到当前行的开头/结尾",
-      keysClearLine: "  Ctrl+U                 清除整个输入缓冲区",
-      keysDeleteWord: "  Ctrl+W                 删除光标前的单词",
-      keysBackspace: "  Backspace              向左删除；Delete   删除光标下的字符",
-      keysEsc: "  Esc                    中止正在进行的轮次",
-      keysEditYn: "  y / n                  接受/拒绝待处理的编辑（代码模式）",
-      keysEditTab: "  Shift+Tab              循环编辑门控：review ↔ AUTO（代码模式，持久化到配置）",
-      keysEditUndo: "  u                      撤消最近未撤消的编辑批处理（会话范围，非仅横幅）",
-      keysPromptTitle: "提示前缀：",
-      keysSlash: "  /<name>                斜杠命令；Tab/Enter 从建议列表中选择",
-      keysAtFile: "  @<path>                将文件内联到 [Referenced files] 下（代码模式）。",
-      keysAtFilePicker:
-        "                           尾部 `@…` 打开文件选择器；↑/↓ 导航，Tab/Enter 选择。",
-      keysAtUrl: "  @https://...           获取 URL，剥离 HTML，内联到 [Referenced URLs] 下。",
-      keysAtUrlCache: "                           每会话缓存 — 相同 URL 获取两次只取一次。",
-      keysBang: "  !<cmd>                 在沙箱根目录运行 <cmd>；输出进入上下文",
-      keysBangDetail: "                           以便模型在下一轮看到。无允许列表限制。",
-      keysHash:
-        "  #<note>                将 <note> 追加到 <project>/REASONIX.md（可提交，团队共享）。",
-      keysHashGlobal:
-        "  #g <note>              将 <note> 追加到 ~/.reasonix/REASONIX.md（全局，不提交）。",
-      keysHashBoth: "                           两者都固定到每个未来会话的不可变前缀中。",
-      keysHashEscape:
-        "                           使用 `\\#literal` 如果您确实想发送 `#` 标题给模型。",
-      keysPickersTitle: "选择器（斜杠 + @提及）：",
-      keysPickerNav: "  ↑ / ↓                  导航建议列表",
-      keysPickerTab: "  Tab                    插入高亮项目但不提交",
-      keysPickerEnter: "  Enter                  插入并（斜杠）运行，（@）继续编辑",
-      keysMcpTitle: "MCP 探索：",
-      keysMcpServers: "  /mcp                   服务器 + 工具/资源/提示计数",
-      keysMcpResource: "  /resource [uri]        浏览并读取 MCP 服务器暴露的资源",
-      keysMcpPrompt: "  /prompt [name]         浏览并获取 MCP 服务器暴露的提示",
-      keysUseful: "常用斜杠命令：/help · /context · /stats · /compact · /new · /exit",
       retryNone: "没有可重试的内容 — 此会话日志中没有先前的用户消息。",
       retryInfo: '▸ 重试中："{preview}"',
       loopTuiOnly: "/loop 仅在交互式 TUI 中可用（不在 run/replay 中）。",
@@ -613,10 +492,6 @@ export const zhCN: TranslationSchema = {
       planOn:
         "▸ 计划模式开启 — 写入工具被限制；模型必须先调用 `submit_plan` 才能执行任何操作。（模型也可以在计划模式关闭时自主调用 submit_plan 处理大型任务 — 此开关是更强的显式约束。）输入 /plan off 退出。",
       planOff: "▸ 计划模式关闭 — 写入工具再次可用。模型仍可为大型任务自主提出计划。",
-      applyPlanCodeOnly: "/apply-plan 仅在 `reasonix code` 中可用。",
-      applyPlanInfo: "▸ 计划已批准 — 正在执行",
-      applyPlanResubmit:
-        "上方的计划已被批准。立即执行。您已退出计划模式 — 根据需要使用 edit_file / write_file / run_command。除非发现具体原因，否则请遵循计划；如果确实需要偏离，请告知并等待回复后再进行。",
       modeCodeOnly: "/mode 仅在 `reasonix code` 中可用。",
       modeUsage: "用法：/mode <review|auto|yolo>   （Shift+Tab 也可循环）",
       modeYolo:
@@ -656,29 +531,10 @@ export const zhCN: TranslationSchema = {
       modelNotInCatalog:
         "model → {id}   （⚠ 不在获取的目录中：{list}。如果这是错误的，下次调用将返回 400 — 运行 /models 刷新。）",
       modelSet: "model → {id}",
-      modelsFetching:
-        "正在从 DeepSeek 获取 /models… 稍后再运行 /models。如果持续为空，您的 API 密钥可能缺少权限或网络被阻止。",
-      modelsEmpty:
-        "DeepSeek /models 返回了空列表。再试 /models，或在 api-docs.deepseek.com 检查您的账户状态。",
-      modelsHeader: "可用模型（DeepSeek /models · 共 {count} 个）：",
-      modelsCurrent: "▸ {id}  （当前）",
-      modelsSwitch: "切换方式：/model <id>",
-      harvestOn:
-        "harvest → 开启  （Pillar-2 计划状态提取 · 每轮额外 1 次廉价 flash 调用 · 仅手动选择；无预设会开启它）",
-      harvestOff: "harvest → 关闭",
       presetAuto: "preset → auto  （v4-flash → v4-pro 在困难轮次切换 · 默认）",
       presetFlash: "preset → flash  （始终使用 v4-flash · 最便宜 · /pro 仍可临时提升一轮）",
       presetPro: "preset → pro  （始终使用 v4-pro · 约 3 倍 flash · 用于困难的多轮工作）",
       presetUsage: "用法：/preset <auto|flash|pro>",
-      branchOff: "branch → 关闭",
-      branchUsage: "用法：/branch <N>   （N>=2，或 'off'）",
-      branchCapped: "branch 预算上限为 8，防止成本失控",
-      branchSet:
-        "branch → {n}  （每轮运行 {n} 个并行采样 · {n} 倍每轮成本 · 禁用流式 · 仅手动，无预设启用分支）",
-      effortStatus:
-        "reasoning_effort → {effort}  （使用 /effort high 更便宜/更快，/effort max 为智能体级默认 · 跨重启持久化）",
-      effortUsage: "用法：/effort <high|max>",
-      effortSet: "reasoning_effort → {effort}（已持久化）",
       proNothingArmed: "未启用 — /pro 不带参数将为下一轮启用 pro",
       proDisarmed: "▸ /pro 已解除 — 下一轮回退到当前预设",
       proUsage:
@@ -695,19 +551,6 @@ export const zhCN: TranslationSchema = {
         "▲ budget → ${cap} 但已花费 ${spent}。下一轮将被拒绝 — 提高上限以继续，或结束会话。",
       budgetSet:
         "budget → ${cap}  （迄今：${spent} · 80% 时警告，100% 时拒绝下一轮 · /budget off 清除）",
-    },
-    sessions: {
-      forgetNoSession: "不在会话中 — 无内容可遗忘",
-      forgetInfo: '▸ 已删除会话 "{name}" — 当前屏幕仍显示对话，但下次启动将全新开始',
-      forgetFailed: '无法删除会话 "{name}"（已消失？）',
-      renameUsage: "用法：/rename <new-name>",
-      renameNoSession: "不在会话中 — 无内容可重命名",
-      renameFailed: '无法重命名 — "{name}" 已存在或清理后与当前会话 ID 相同',
-      renameInfo: '▸ 会话已重命名为 → "{name}"。重启 TUI 以使用新名称。',
-      resumeUsage: "用法：/resume <session-name>  — 使用 /sessions 列出",
-      resumeNotFound: '没有名为 "{name}" 的会话 — 使用 /sessions 列出',
-      resumeInfo:
-        '▸ 要恢复 "{name}"，请退出并运行：reasonix chat --session {name}\n  （会话中切换需要重启，以便消息日志可以干净地回退）',
     },
     permissions: {
       mutateCodeOnly:
@@ -759,15 +602,6 @@ export const zhCN: TranslationSchema = {
       starting: "▸ 正在启动仪表板服务器…",
     },
     observability: {
-      thinkEmpty:
-        "未缓存推理内容。`/think` 显示最近一轮的完整思考模式思维 — 仅思考模式模型（deepseek-v4-flash / -v4-pro / -reasoner）产生它，且仅在轮次完成后。",
-      thinkInfo: "↳ 完整思考（{count} 字符）：",
-      toolEmpty:
-        "此会话中尚无工具调用。`/tool` 在模型实际使用工具后列出它们；`/tool N` 转储第 N 个最近的完整（未截断）输出。",
-      toolUsage: "用法：/tool [N]   （无参数 → 列表；N=1 → 最近的完整结果，N=2 → 上一个，…）",
-      toolOob: "历史中仅有 {count} 次工具调用 — 请求了 #{n}。尝试不带参数的 /tool 查看列表。",
-      toolNotFound: "无法读取工具调用 #{n}",
-      toolInfo: "↳ tool<{name}> #{n}（{chars} 字符）：",
       contextInfo: "上下文：~{total} / {max}（{pct}%）· 系统 {sys} · 工具 {tools} · 日志 {log}",
       compactStarting: "▸ 正在折叠旧轮次为摘要…",
       compactNoop: "▸ 无需折叠 — 日志已足够小，或最近轮次本身已超过预算。",
@@ -783,8 +617,7 @@ export const zhCN: TranslationSchema = {
       costLikely: "  可能（{pct}% 会话缓存命中）：{input} 输入 + ~{output} 输出 ≈ {total}",
       costLikelyCold: "  可能：在缓存填充前与最坏情况相同（无已完成的轮次）",
       statusModel: "  模型    {model}",
-      statusFlags:
-        "  标志    harvest={harvest} · branch={branch} · stream={stream} · effort={effort}",
+      statusFlags: "  标志    stream={stream} · effort={effort}",
       statusCtx: "  上下文  {bar} {used}/{max}（{pct}%）",
       statusCtxNone: "  上下文  尚无轮次",
       statusCost: "  成本    ${cost} · 缓存 {bar} {pct}% · 轮次 {turns}",
@@ -900,10 +733,6 @@ export const zhCN: TranslationSchema = {
       existsEdit: "  或手动编辑 — 它只是 markdown。当前文件已",
       existsPinned: "  固定到每次启动的系统提示词中。",
       info: "▸ /init — 模型将扫描项目并合成 REASONIX.md。\n  结果将作为待处理的编辑；使用 /apply 或 /walk 审查。",
-    },
-    semantic: {
-      codeOnly: "/semantic 仅在 `reasonix code` 中可用（需要项目根目录）。",
-      checking: "▸ 正在检查 semantic_search 状态…",
     },
     webSearchEngine: {
       currentEngine: "当前网页搜索引擎：{engine}",

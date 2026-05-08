@@ -111,37 +111,4 @@ describe("transcript writer / reader round-trip", () => {
     const { records } = parseTranscript(raw);
     expect(records).toHaveLength(2);
   });
-
-  it("round-trips planState from LoopEvent to transcript", () => {
-    const assistantEv: LoopEvent = {
-      turn: 1,
-      role: "assistant_final",
-      content: "The answer is 42.",
-      planState: {
-        subgoals: ["compute x", "verify via alt path"],
-        hypotheses: ["x could be between 40 and 50"],
-        uncertainties: ["precision of intermediate rounding"],
-        rejectedPaths: ["brute-force enumeration"],
-      },
-    };
-    const rec = recordFromLoopEvent(assistantEv, {
-      model: "deepseek-reasoner",
-      prefixHash: "stable",
-    });
-    expect(rec.planState).toBeDefined();
-    expect(rec.planState?.subgoals).toEqual(["compute x", "verify via alt path"]);
-    expect(rec.planState?.uncertainties).toHaveLength(1);
-    expect(rec.planState?.rejectedPaths[0]).toBe("brute-force enumeration");
-  });
-
-  it("omits empty planState from the record (no bytes wasted when harvest was off)", () => {
-    const assistantEv: LoopEvent = {
-      turn: 1,
-      role: "assistant_final",
-      content: "short reply",
-      planState: { subgoals: [], hypotheses: [], uncertainties: [], rejectedPaths: [] },
-    };
-    const rec = recordFromLoopEvent(assistantEv, { model: "deepseek-chat", prefixHash: "x" });
-    expect(rec.planState).toBeUndefined();
-  });
 });

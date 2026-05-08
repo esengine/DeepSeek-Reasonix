@@ -49,12 +49,6 @@ export interface ReplayStats extends SessionSummary {
   userTurns: number;
   /** Count of tool-role records (tool calls executed). */
   toolCalls: number;
-  /** Count of assistant_final records that carry a non-empty planState (harvest signal). */
-  harvestedTurns: number;
-  /** Sum of uncertainties across all harvested turns — a proxy for "how much did R1 hedge?" */
-  totalUncertainties: number;
-  /** Sum of subgoals across all harvested turns. */
-  totalSubgoals: number;
 }
 
 export function replayFromFile(path: string): { parsed: ReadTranscriptResult; stats: ReplayStats } {
@@ -68,9 +62,6 @@ export function computeReplayStats(records: TranscriptRecord[]): ReplayStats {
   const prefixHashes = new Set<string>();
   let userTurns = 0;
   let toolCalls = 0;
-  let harvestedTurns = 0;
-  let totalUncertainties = 0;
-  let totalSubgoals = 0;
 
   for (const rec of records) {
     if (rec.role === "user") userTurns++;
@@ -78,11 +69,6 @@ export function computeReplayStats(records: TranscriptRecord[]): ReplayStats {
     else if (rec.role === "assistant_final") {
       if (rec.model) models.add(rec.model);
       if (rec.prefixHash) prefixHashes.add(rec.prefixHash);
-      if (rec.planState) {
-        harvestedTurns++;
-        totalUncertainties += rec.planState.uncertainties.length;
-        totalSubgoals += rec.planState.subgoals.length;
-      }
       if (rec.usage && rec.model) {
         const u = new Usage(
           rec.usage.prompt_tokens ?? 0,
@@ -111,9 +97,6 @@ export function computeReplayStats(records: TranscriptRecord[]): ReplayStats {
     prefixHashes: [...prefixHashes],
     userTurns,
     toolCalls,
-    harvestedTurns,
-    totalUncertainties,
-    totalSubgoals,
     ...summarizeTurns(turns),
   };
 }

@@ -195,55 +195,6 @@ describe("renderers", () => {
     expect(md).toMatch(/## Turn-by-turn/);
     expect(md).toMatch(/cache hit/);
   });
-
-  it("omits the harvest row when neither side has plan state (zero visual noise for no-harvest runs)", () => {
-    const a = [mkAssistant(1, "ok")];
-    const b = [mkAssistant(1, "ok")];
-    const report = diffTranscripts(
-      { label: "A", parsed: mkParsed(a) },
-      { label: "B", parsed: mkParsed(b) },
-    );
-    expect(renderSummaryTable(report)).not.toMatch(/harvest/);
-    expect(renderMarkdown(report)).not.toMatch(/harvest/);
-  });
-
-  it("includes the harvest row when at least one side has plan state", () => {
-    const harvestedA: TranscriptRecord = {
-      ts: "t",
-      turn: 1,
-      role: "assistant_final",
-      content: "with harvest",
-      model: "deepseek-reasoner",
-      prefixHash: "stable",
-      usage: {
-        prompt_tokens: 100,
-        completion_tokens: 10,
-        total_tokens: 110,
-        prompt_cache_hit_tokens: 90,
-        prompt_cache_miss_tokens: 10,
-      },
-      cost: 0.0001,
-      planState: {
-        subgoals: ["s1", "s2"],
-        hypotheses: [],
-        uncertainties: ["u1"],
-        rejectedPaths: [],
-      },
-    };
-    const bareB = mkAssistant(1, "without harvest");
-    const report = diffTranscripts(
-      { label: "A", parsed: mkParsed([harvestedA]) },
-      { label: "B", parsed: mkParsed([bareB]) },
-    );
-    const table = renderSummaryTable(report);
-    expect(table).toMatch(/harvest turns/);
-    expect(table).toMatch(/subgoals/);
-    expect(table).toMatch(/uncertainties/);
-
-    const md = renderMarkdown(report);
-    expect(md).toMatch(/harvest turns/);
-    expect(md).toMatch(/harvest subgoals/);
-  });
 });
 
 describe("divergence navigation (TUI)", () => {

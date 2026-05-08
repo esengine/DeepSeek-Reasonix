@@ -37,42 +37,32 @@ describe("resolveDefaults", () => {
     }
   });
 
-  it("empty flags + empty config → hard-coded smart preset (flash + max)", () => {
+  it("empty flags + empty config → auto preset (flash + max)", () => {
     const r = resolveDefaults({});
     expect(r.model).toBe("deepseek-v4-flash");
     expect(r.reasoningEffort).toBe("max");
-    expect(r.harvest).toBe(false);
-    expect(r.branch).toBeUndefined();
     expect(r.mcp).toEqual([]);
     expect(r.session).toBe("default");
   });
 
-  it("config.preset 'fast' drops effort to high (still flash, no harvest)", () => {
+  it("config.preset 'fast' drops effort to high (still flash)", () => {
     writeConfig({ preset: "fast" }, join(home, ".reasonix", "config.json"));
     const r = resolveDefaults({});
     expect(r.model).toBe("deepseek-v4-flash");
     expect(r.reasoningEffort).toBe("high");
-    expect(r.harvest).toBe(false);
-    expect(r.branch).toBeUndefined();
   });
 
-  it("--preset max overrides config.preset=fast → pro + max, no branch", () => {
+  it("--preset max overrides config.preset=fast → pro + max", () => {
     writeConfig({ preset: "fast" }, join(home, ".reasonix", "config.json"));
     const r = resolveDefaults({ preset: "max" });
     expect(r.model).toBe("deepseek-v4-pro");
     expect(r.reasoningEffort).toBe("max");
-    expect(r.harvest).toBe(false);
-    // branch is NEVER part of a preset — only /branch or --branch turns it on.
-    expect(r.branch).toBeUndefined();
   });
 
   it("--model wins even when --preset is set", () => {
     const r = resolveDefaults({ preset: "max", model: "deepseek-v4-flash" });
     expect(r.model).toBe("deepseek-v4-flash");
-    // preset still controls effort/harvest/branch
     expect(r.reasoningEffort).toBe("max");
-    expect(r.harvest).toBe(false);
-    expect(r.branch).toBeUndefined();
   });
 
   it("--mcp overrides config.mcp wholesale (no merging)", () => {
@@ -112,15 +102,6 @@ describe("resolveDefaults", () => {
     writeConfig({ session: null }, join(home, ".reasonix", "config.json"));
     const r = resolveDefaults({});
     expect(r.session).toBeUndefined();
-  });
-
-  it("--branch 5 wins; --branch 1 means 'off'", () => {
-    expect(resolveDefaults({ branch: 5 }).branch).toBe(5);
-    expect(resolveDefaults({ branch: 1 }).branch).toBeUndefined();
-  });
-
-  it("--branch 99 caps at 8", () => {
-    expect(resolveDefaults({ branch: 99 }).branch).toBe(8);
   });
 });
 

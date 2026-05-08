@@ -51,8 +51,6 @@ into one row.
 | `/models` | list available models | chat-box |
 | `/pro` | arm v4-pro for next turn | **panel** · Settings → Compute (D-2 #435) |
 | `/budget` | session USD cap | **panel** · Settings → Budget + cockpit tile (D-3 #436) |
-| `/branch` | parallel sample count | chat-box · *deletion-bound* |
-| `/harvest` | Pillar-2 plan-state extraction | chat-box · *deletion-bound* |
 | `/loop` | auto-resubmit on interval | **panel** · Settings → Loop (D-5 #438) |
 
 ## Memory & project

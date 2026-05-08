@@ -59,19 +59,6 @@ export interface Scrollback {
     topTools: ReadonlyArray<{ name: string; tokens: number; turn: number }>;
   }): string;
 
-  startBranch(total: number): string;
-  updateBranch(
-    id: string,
-    p: {
-      completed: number;
-      total: number;
-      latestIndex: number;
-      latestTemperature: number;
-      latestUncertainties: number;
-    },
-  ): void;
-  endBranch(id: string, aborted?: boolean): void;
-
   startReasoning(model?: string): string;
   appendReasoning(id: string, chunk: string): void;
   endReasoning(id: string, paragraphs: number, tokens: number, aborted?: boolean): void;
@@ -237,17 +224,6 @@ export function useScrollback(): Scrollback {
         const id = nextId("ctx");
         dispatch({ type: "ctx.show", id, ...args, topTools: [...args.topTools] });
         return id;
-      },
-      startBranch(total) {
-        const id = nextId("branch");
-        dispatch({ type: "branch.start", id, total });
-        return id;
-      },
-      updateBranch(id, p) {
-        dispatch({ type: "branch.progress", id, ...p });
-      },
-      endBranch(id, aborted) {
-        dispatch({ type: "branch.end", id, aborted });
       },
       startReasoning(model) {
         const id = nextId("r");

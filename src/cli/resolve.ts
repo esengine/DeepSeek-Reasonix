@@ -6,17 +6,12 @@ import { resolvePreset } from "./ui/presets.js";
 export interface ResolvedDefaults {
   model: string;
   reasoningEffort: "high" | "max";
-  harvest: boolean;
-  branch: number | undefined;
   mcp: string[];
   session: string | undefined;
 }
 
 export interface RawCliFlags {
   model?: string;
-  harvest?: boolean;
-  /** From `commander`; already parseInt'd. */
-  branch?: number;
   mcp?: string[];
   /** Commander's `--no-session` surfaces as `false`; `--session X` as a string. */
   session?: string | false;
@@ -33,9 +28,6 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
 
   const model = flags.model ?? presetSettings.model;
   const reasoningEffort = presetSettings.reasoningEffort;
-  const harvest = flags.harvest === true ? true : presetSettings.harvest;
-  const branchFromFlag = normalizeBranch(flags.branch);
-  const branch = branchFromFlag ?? (presetSettings.branch > 1 ? presetSettings.branch : undefined);
 
   // `--mcp` accumulator is [] when absent. Treat empty from flags as
   // "user didn't pass" → fall through to config. Users who explicitly
@@ -44,7 +36,7 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
 
   const session = resolveSession(flags.session, cfg.session);
 
-  return { model, reasoningEffort, harvest, branch, mcp, session };
+  return { model, reasoningEffort, mcp, session };
 }
 
 function pickPreset(
@@ -67,12 +59,6 @@ function isPresetName(s: string): s is PresetName {
     s === "smart" ||
     s === "max"
   );
-}
-
-function normalizeBranch(raw: number | undefined): number | undefined {
-  if (raw === undefined) return undefined;
-  if (!Number.isFinite(raw) || raw <= 1) return undefined;
-  return Math.min(raw, 8);
 }
 
 function resolveSession(

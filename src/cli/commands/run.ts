@@ -27,10 +27,6 @@ export interface RunOptions {
   task: string;
   model: string;
   system: string;
-  /** Opt into Pillar 2 plan-state harvesting. Adds a cheap V3 call per turn. */
-  harvest?: boolean;
-  /** Self-consistency budget. > 1 runs N parallel samples and picks the best. */
-  branch?: number;
   budgetUsd?: number;
   /** JSONL transcript path — lets `reasonix replay` / `diff` audit this run. */
   transcript?: string;
@@ -156,8 +152,6 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     prefix,
     tools,
     model: opts.model,
-    harvest: opts.harvest,
-    branch: opts.branch,
     budgetUsd: opts.budgetUsd,
   });
   const prefixHash = prefix.fingerprint;

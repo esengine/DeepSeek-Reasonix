@@ -258,36 +258,6 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         balanceCurrency: event.balanceCurrency,
         elapsedMs: event.elapsedMs,
       });
-
-    case "branch.start":
-      return appendCard(state, {
-        kind: "branch",
-        id: event.id,
-        ts: Date.now(),
-        completed: 0,
-        total: event.total,
-        latestIndex: 0,
-        latestTemperature: 0,
-        latestUncertainties: 0,
-        done: false,
-      });
-
-    case "branch.progress":
-      return mutateCard(state, event.id, "branch", (c) => ({
-        ...c,
-        completed: event.completed,
-        total: event.total,
-        latestIndex: event.latestIndex,
-        latestTemperature: event.latestTemperature,
-        latestUncertainties: event.latestUncertainties,
-      }));
-
-    case "branch.end":
-      return mutateCard(state, event.id, "branch", (c) => ({
-        ...c,
-        done: true,
-        ...(event.aborted ? { aborted: true } : {}),
-      }));
   }
 }
 

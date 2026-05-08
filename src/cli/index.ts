@@ -87,8 +87,6 @@ program.action(async (opts: { continue?: boolean }) => {
   await chatCommand({
     model: defaults.model,
     system: applyMemoryStack(DEFAULT_SYSTEM, process.cwd()),
-    harvest: defaults.harvest,
-    branch: defaults.branch,
     session: continueOpts.session,
     mcp: defaults.mcp,
     forceResume: continueOpts.forceResume,
@@ -110,7 +108,6 @@ program
   .option("-r, --resume", t("ui.resumeHint"))
   .option("-n, --new", t("ui.newHint"))
   .option("--transcript <path>", t("ui.transcriptHint"))
-  .option("--harvest", t("ui.harvestHint"))
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
   .option("--no-dashboard", t("ui.noDashboard"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
@@ -124,7 +121,6 @@ program
       transcript: opts.transcript,
       forceResume: !!opts.resume,
       forceNew: !!opts.new,
-      harvest: !!opts.harvest,
       budgetUsd: parseBudgetFlag(opts.budget),
       noDashboard: opts.dashboard === false,
       systemAppend: opts.systemAppend,
@@ -140,8 +136,6 @@ program
   .option("-s, --system <prompt>", t("ui.systemPromptHint"), DEFAULT_SYSTEM)
   .option("--transcript <path>", t("ui.transcriptHint"))
   .option("--preset <name>", t("ui.presetHint"))
-  .option("--harvest", t("ui.harvestOptInHint"))
-  .option("--branch <n>", t("ui.branchHint"), (v) => Number.parseInt(v, 10))
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
   .option("--session <name>", t("ui.sessionNameHint"))
   .option("--no-session", t("ui.ephemeralHint"))
@@ -161,8 +155,6 @@ program
   .action(async (opts) => {
     const defaults = resolveDefaults({
       model: opts.model,
-      harvest: opts.harvest,
-      branch: opts.branch,
       mcp: opts.mcp as string[],
       session: opts.session,
       preset: opts.preset,
@@ -184,8 +176,6 @@ program
       model: defaults.model,
       system: applyMemoryStack(opts.system, process.cwd()),
       transcript: opts.transcript,
-      harvest: defaults.harvest,
-      branch: defaults.branch,
       budgetUsd: parseBudgetFlag(opts.budget),
       session: continueOpts.session,
       mcp: defaults.mcp,
@@ -203,8 +193,6 @@ program
   .option("-m, --model <id>", t("ui.modelIdHint"))
   .option("-s, --system <prompt>", t("ui.systemPromptHint"), DEFAULT_SYSTEM)
   .option("--preset <name>", t("ui.presetHintShort"))
-  .option("--harvest", t("ui.harvestHintShort"))
-  .option("--branch <n>", t("ui.branchHintShort"), (v) => Number.parseInt(v, 10))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
   .option("--transcript <path>", t("ui.transcriptHintShort"))
   .option(
@@ -218,8 +206,6 @@ program
   .action(async (task: string, opts) => {
     const defaults = resolveDefaults({
       model: opts.model,
-      harvest: opts.harvest,
-      branch: opts.branch,
       mcp: opts.mcp as string[],
       preset: opts.preset,
       noConfig: opts.config === false,
@@ -228,8 +214,6 @@ program
       task,
       model: defaults.model,
       system: applyMemoryStack(opts.system, process.cwd()),
-      harvest: defaults.harvest,
-      branch: defaults.branch,
       budgetUsd: parseBudgetFlag(opts.budget),
       transcript: opts.transcript,
       mcp: defaults.mcp,

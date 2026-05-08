@@ -72,57 +72,6 @@ describe("computeReplayStats", () => {
     expect(stats.totalCostUsd).toBe(0);
     expect(stats.cacheHitRatio).toBe(0);
   });
-
-  it("counts harvest signal across turns with planState", () => {
-    const recs: TranscriptRecord[] = [
-      {
-        ts: "t",
-        turn: 1,
-        role: "assistant_final",
-        content: "a",
-        planState: {
-          subgoals: ["s1", "s2"],
-          hypotheses: ["h1"],
-          uncertainties: ["u1"],
-          rejectedPaths: [],
-        },
-      },
-      {
-        ts: "t",
-        turn: 2,
-        role: "assistant_final",
-        content: "b",
-        planState: {
-          subgoals: ["s3"],
-          hypotheses: [],
-          uncertainties: ["u2", "u3"],
-          rejectedPaths: ["r1"],
-        },
-      },
-      {
-        ts: "t",
-        turn: 3,
-        role: "assistant_final",
-        content: "c",
-        // no planState — harvest was off or produced empty
-      },
-    ];
-    const stats = computeReplayStats(recs);
-    expect(stats.harvestedTurns).toBe(2);
-    expect(stats.totalSubgoals).toBe(3);
-    expect(stats.totalUncertainties).toBe(3);
-  });
-
-  it("reports zero harvest signal for transcripts without planState", () => {
-    const recs: TranscriptRecord[] = [
-      mkAssistant(1, 100, 900, 50, 0.0003),
-      mkAssistant(2, 100, 900, 50, 0.0003),
-    ];
-    const stats = computeReplayStats(recs);
-    expect(stats.harvestedTurns).toBe(0);
-    expect(stats.totalSubgoals).toBe(0);
-    expect(stats.totalUncertainties).toBe(0);
-  });
 });
 
 describe("groupRecordsByTurn (replay nav)", () => {

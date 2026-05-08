@@ -66,27 +66,7 @@ queries (`job_output`, `list_jobs`). Mutating / side-effecting tools
 stay default. MCP-bridged tools default `false` — third-party tools
 opt in only when the server explicitly declares parallel safety.
 
-### Pillar 2 — R1 Thought Harvesting *(opt-in)*
-
-**Problem.** R1 / V4-thinking emits extensive `reasoning_content`. DeepSeek's
-own docs recommend *not* feeding it back to the next turn. Most frameworks
-display it to the user and discard. The planning signal inside is lost.
-
-**Solution.** A two-stage process:
-
-```
-R1 output → Harvester (v4-flash, thinking off) → TypedPlanState
-                                                  ├─ subgoals: string[]
-                                                  ├─ hypotheses: string[]
-                                                  ├─ uncertainties: string[]
-                                                  └─ rejectedPaths: string[]
-```
-
-The harvester is a cheap flash call with a strict JSON schema. Output is
-validated at runtime. **Not enabled in any preset** (see Pillar 4) — the
-additional round-trip rarely pays back, so it's `/harvest on` opt-in.
-
-### Pillar 3 — Tool-Call Repair
+### Pillar 2 — Tool-Call Repair
 
 **Problem.** Empirical DeepSeek failure modes:
 - Tool-call JSON emitted inside `<think>`, missing from the final message.
@@ -106,7 +86,7 @@ additional round-trip rarely pays back, so it's `/harvest on` opt-in.
 4. **`storm`** — identical `(tool, args)` tuple within a sliding window →
    suppress the call, inject a reflection turn.
 
-### Pillar 4 — Cost Control *(v0.6)*
+### Pillar 3 — Cost Control *(v0.6)*
 
 **Problem.** Coding agents that default to the frontier model (v4-pro, ~12×
 flash cost) and accumulate full tool results in context are $150-$250/month
@@ -118,17 +98,13 @@ tuning in the common case:
 
 #### 4.1 Tiered defaults (flash-first)
 
-The three presets now trade only **model tier** and **reasoning effort**:
+The three presets trade **model tier** and **reasoning effort**:
 
-| Preset | Model | Effort | Harvest | Branch | Cost |
-|---|---|---|---|---|---:|
-| `fast` | `v4-flash` | `high` | off | 1 | 1× |
-| `smart` (default) | `v4-flash` | `max` | off | 1 | ~1.5× |
-| `max` | `v4-pro` | `max` | off | 1 | ~12× |
-
-**Branching and harvest are never in a preset.** Both multiply cost and
-rarely pay back; `/branch N` and `/harvest on` are pure opt-ins. A user can
-run for weeks without ever touching them.
+| Preset | Model | Effort | Cost |
+|---|---|---|---:|
+| `flash` | `v4-flash` | `max` | 1× |
+| `auto` (default) | `v4-flash` → `v4-pro` on hard turns | `max` | 1–3× |
+| `pro` | `v4-pro` | `max` | ~12× |
 
 All auxiliary calls — `forceSummaryAfterIterLimit`, subagent spawns,
 truncation repair retries — hard-code `v4-flash + effort=high` regardless
@@ -176,9 +152,8 @@ Per-turn and session cost are colored in the StatsPanel:
 ```
 src/
 ├── client.ts               # DeepSeek client (fetch + SSE)
-├── loop.ts                 # Pillar 1 + 4 — CacheFirstLoop
-├── harvest.ts              # Pillar 2 — flash-backed plan-state extraction
-├── repair/                 # Pillar 3 pipeline
+├── loop.ts                 # Pillar 1 + 3 — CacheFirstLoop
+├── repair/                 # Pillar 2 pipeline
 │   ├── index.ts
 │   ├── scavenge.ts
 │   ├── flatten.ts
@@ -243,23 +218,24 @@ means editing one handler file and one registry line.
 
 ## Design evolution
 
-- **v0.0.x** — Pillar 1 end-to-end, Pillar 3 complete, Ink TUI scaffold.
+- **v0.0.x** — Pillar 1 end-to-end, repair pipeline complete, Ink TUI scaffold.
 - **v0.1** — τ-bench numbers published, streaming polish, transcript replay.
-- **v0.2** — Self-consistency / branch-budget sampling driven by plan state.
 - **v0.3** — MCP client (stdio + SSE), session persistence.
 - **v0.4.x** — `reasonix code` with SEARCH/REPLACE edits, review/auto
   gate, background jobs, hooks.
 - **v0.5.x** — V4 model support, skills, memory, subagents, actionable
   error messages.
-- **v0.6** *(current)* —
-  - **Pillar 4 cost control** (flash-first defaults, auto-compaction,
-    `/pro` one-shot, failure-triggered escalation, cost badges).
+- **v0.6** —
+  - **Cost control** (flash-first defaults, auto-compaction, `/pro` one-shot,
+    failure-triggered escalation, cost badges).
   - `deepseek-chat` / `deepseek-reasoner` scheduled for deprecation —
     all user-facing surfaces updated to `v4-flash` / `v4-pro`.
-  - `branch` + `harvest` removed from every preset; manual opt-in only.
   - Shared prompt fragments (`TUI_FORMATTING_RULES`, `NEGATIVE_CLAIM_RULE`).
   - UI refactor: App.tsx split into 6 hooks/components, slash.ts split
     into 13 per-topic modules.
+- **v0.31** *(current)* — `branch` + `harvest` features removed entirely
+  (the parallel-sample selector and Pillar 2 plan-state extractor); both
+  rarely paid for themselves and bloated the slash surface.
 
 ## Explicit non-goals
 

@@ -66,21 +66,16 @@ export const EN: TranslationSchema = {
     resumeHint: "force-resume the named session (even if idle)",
     newHint: "force a fresh session (ignore --session / --continue)",
     transcriptHint: "path to write the JSONL transcript",
-    harvestHint: "opt into Pillar-2 plan-state extraction (costs +1 flash call per turn)",
     budgetHint: "session USD cap — warns at 80%, refuses next turn at 100%",
     modelIdHint: "DeepSeek model id (e.g. deepseek-v4-flash)",
     systemPromptHint: "override the default system prompt",
     presetHint: "model bundle — auto|flash|pro",
-    harvestOptInHint: "opt into Pillar-2 plan-state extraction",
-    branchHint: "run N parallel samples per turn (N>=2, manual only)",
     sessionNameHint: "session name (default: 'default')",
     ephemeralHint: "disable session persistence for this run",
     mcpSpecHint: "MCP server spec (repeatable)",
     mcpPrefixHint: "prefix MCP tool names with this string",
     noConfigHint: "ignore ~/.reasonix/config.json for this run",
     presetHintShort: "model bundle — auto|flash|pro",
-    harvestHintShort: "Pillar-2 plan-state extraction",
-    branchHintShort: "parallel samples per turn (N>=2)",
     budgetHintShort: "session USD cap",
     transcriptHintShort: "JSONL transcript path",
     mcpSpecHintShort: "MCP server spec (repeatable)",
@@ -138,12 +133,6 @@ export const EN: TranslationSchema = {
       success: "Language switched to English.",
       unsupported: "Unsupported language code: {code}. Supported: {supported}.",
     },
-    harvest: { description: "toggle Pillar-2 plan-state extraction", argsHint: "[on|off]" },
-    branch: { description: "run N parallel samples per turn (N>=2)", argsHint: "<N|off>" },
-    effort: {
-      description: "reasoning_effort cap — max is default (agent-class), high is cheaper/faster",
-      argsHint: "<high|max>",
-    },
     pro: {
       description: "arm v4-pro for the NEXT turn only (one-shot · auto-disarms after turn)",
       argsHint: "[off]",
@@ -162,7 +151,6 @@ export const EN: TranslationSchema = {
       description: "browse + fetch MCP prompts (no arg → list names; <name> → render prompt)",
       argsHint: "[name]",
     },
-    tool: { description: "dump full output of the Nth tool call (1=latest)", argsHint: "[N]" },
     memory: {
       description: "show / manage pinned memory (REASONIX.md + ~/.reasonix/memory)",
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
@@ -195,7 +183,6 @@ export const EN: TranslationSchema = {
       argsHint: "[text]",
     },
     doctor: { description: "health check (api / config / api-reach / index / hooks / project)" },
-    think: { description: "dump the last turn's full R1 reasoning (reasoner only)" },
     context: { description: "show context-window breakdown (system / tools / log / input)" },
     retry: { description: "truncate & resend your last message (fresh sample)" },
     compact: {
@@ -210,12 +197,6 @@ export const EN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "list saved sessions (current marked with ▸)" },
-    rename: { description: "rename the current session on disk", argsHint: "<new-name>" },
-    resume: {
-      description: "show the launch command to resume a saved session",
-      argsHint: "<name>",
-    },
-    forget: { description: "delete the current session from disk" },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
       description: "show semantic_search status — built? Ollama installed? how to enable",
@@ -265,9 +246,6 @@ export const EN: TranslationSchema = {
     plan: {
       description: "toggle read-only plan mode (writes bounced until submit_plan + approval)",
       argsHint: "[on|off]",
-    },
-    "apply-plan": {
-      description: "force-approve a pending / in-text plan (fallback if picker was missed)",
     },
     mode: {
       description:
@@ -440,76 +418,9 @@ export const EN: TranslationSchema = {
   },
   handlers: {
     basic: {
-      clearInfo:
-        "▸ terminal cleared (viewport + scrollback). Context (message log) is intact — next turn still sees everything. Use /new to start fresh, or /forget to delete the session entirely.",
       newInfo:
         "▸ new conversation — dropped {count} message(s) from context. Same session, fresh slate.",
       helpTitle: "Commands:",
-      helpHelp: "  /help                    this message",
-      helpKeys: "  /keys                    keyboard shortcuts + prompt prefixes (!, @, /)",
-      helpStatus: "  /status                  show current settings",
-      helpPreset: "  /preset <auto|flash|pro> model bundle — see below",
-      helpModel: "  /model <id>              deepseek-v4-flash or deepseek-v4-pro",
-      helpPro: "  /pro [off]               arm v4-pro for NEXT turn only (one-shot, auto-disarms)",
-      helpHarvest:
-        "  /harvest [on|off]        Pillar 2: structured plan-state extraction (OPT-IN — costs extra)",
-      helpBranch: "  /branch <N|off>          run N parallel samples (N>=2) — MANUAL ONLY, N× cost",
-      helpEffort:
-        "  /effort <high|max>       reasoning_effort cap (max=full thinking, high=cheaper/faster)",
-      helpMcp: "  /mcp                     list MCP servers + tools attached to this session",
-      helpResource:
-        "  /resource [uri]          browse + read MCP resources (no arg → list URIs; <uri> → fetch)",
-      helpPrompt:
-        "  /prompt [name]           browse + fetch MCP prompts (no arg → list names; <name> → render)",
-      helpCompact:
-        "  /compact                 fold older turns into a summary (cache-safe; auto-fires at 50% ctx)",
-      helpThink:
-        "  /think                   dump the most recent turn's full R1 reasoning (reasoner only)",
-      helpTool:
-        "  /tool [N]                list tool calls (or dump full output of #N, 1=most recent)",
-      helpCost:
-        "  /cost [text]             bare → last turn's spend; with text → estimate cost of sending it next",
-      helpMemory:
-        "  /memory [sub]            show pinned memory (REASONIX.md + ~/.reasonix/memory).",
-      helpMemorySub:
-        "                            subs: list | show <name> | forget <name> | clear <scope> confirm",
-      helpSkill:
-        "  /skill [sub]             list / run user skills (project/.reasonix/skills + ~/.reasonix/skills).",
-      helpSkillSub:
-        "                            subs: list | show <name> | <name> [args] (injects skill body as user turn)",
-      helpRetry:
-        "  /retry                   truncate & resend your last message (fresh sample from the model)",
-      helpApply:
-        "  /apply [N|1,3|1-4]       (code mode) commit pending edit blocks (no arg → all; index → subset)",
-      helpDiscard:
-        "  /discard [N|1,3|1-4]     (code mode) drop pending edits (no arg → all; index → subset)",
-      helpWalk:
-        "  /walk                    (code mode) step through pending edits one block at a time (y/n per block, a apply rest, A flip AUTO)",
-      helpUndo: "  /undo                    (code mode) roll back the latest non-undone edit batch",
-      helpHistory: "  /history                 (code mode) list every edit batch this session",
-      helpShow:
-        "  /show [id]               (code mode) dump a stored edit diff (newest when id omitted)",
-      helpCommit: '  /commit "msg"            (code mode) git add -A && git commit -m "msg"',
-      helpPlan:
-        "  /plan [on|off]           (code mode) toggle read-only plan mode; writes gated behind submit_plan + your approval",
-      helpApplyPlan:
-        "  /apply-plan              (code mode) force-approve pending/in-text plan (fallback)",
-      helpMode:
-        "  /mode [review|auto|yolo] (code mode) review = queue · auto = apply+undo banner · yolo = apply+auto-shell. Shift+Tab cycles all three.",
-      helpJobs:
-        "  /jobs                    (code mode) list background processes (run_background) — running and exited",
-      helpKill:
-        "  /kill <id>               (code mode) stop a background job by id (SIGTERM → SIGKILL)",
-      helpLogs:
-        "  /logs <id> [lines]       (code mode) tail a background job's output (default 80 lines)",
-      helpSessions: "  /sessions                list saved sessions (current is marked with ▸)",
-      helpForget: "  /forget                  delete the current session from disk",
-      helpNew: "  /new                     start fresh: drop all context + clear scrollback",
-      helpClear:
-        "  /clear                   clear displayed scrollback only (context kept — model still sees it)",
-      helpLoop:
-        "  /loop <interval> <prompt> auto-resubmit <prompt> every <interval> (5s..6h). /loop stop · type anything to cancel.",
-      helpExit: "  /exit                    quit (aliases: /quit, /q)",
       helpShellTitle: "Shell shortcut:",
       helpShell: "  !<cmd>                   run <cmd> in the sandbox root; output goes into",
       helpShellDetail:
@@ -550,59 +461,6 @@ export const EN: TranslationSchema = {
       helpSessionsTitle: "Sessions (auto-enabled by default, named 'default'):",
       helpSessionCustom: "  reasonix chat --session <name>   use a different named session",
       helpSessionNone: "  reasonix chat --no-session       disable persistence for this run",
-      helpLimitationTitle: "Known limitation:",
-      helpLimitation1: "  Resizing the terminal mid-session may stack ghost header frames in",
-      helpLimitation2: "  scrollback (Ink library's live-region clear doesn't account for line",
-      helpLimitation3: "  re-wrapping at the new width). Scroll-up history is unaffected; the",
-      helpLimitation4: "  artifact is purely visual and clears the next time you /clear.",
-      keysTitle: "Keyboard & prompt shortcuts:",
-      keysEnter: "  Enter                  submit the current prompt",
-      keysNewline: "  Shift+Enter  /  Ctrl+J  insert a newline (multi-line prompt)",
-      keysContinue: "  \\<Enter>               bash-style line continuation",
-      keysArrow: "  ← → ↑ ↓                move cursor / recall history at buffer boundary",
-      keysPage:
-        "  PageUp / PageDown      jump to top / bottom of the WHOLE buffer (handy after a big paste)",
-      keysHomeEnd: "  Ctrl+A / Ctrl+E        jump to start / end of the CURRENT line",
-      keysClearLine: "  Ctrl+U                 clear the entire input buffer",
-      keysDeleteWord: "  Ctrl+W                 delete the word before the cursor",
-      keysBackspace: "  Backspace              delete left;  Delete   delete under cursor",
-      keysEsc: "  Esc                    abort the in-flight turn",
-      keysEditYn: "  y / n                  accept / reject pending edits (code mode)",
-      keysEditTab:
-        "  Shift+Tab              cycle edit gate: review ↔ AUTO (code mode, persists to config)",
-      keysEditUndo:
-        "  u                      undo the latest non-undone edit batch (session-wide, not just banner)",
-      keysPromptTitle: "Prompt prefixes:",
-      keysSlash: "  /<name>                slash command; Tab/Enter picks from the suggestion list",
-      keysAtFile: "  @<path>                inline a file under [Referenced files] (code mode).",
-      keysAtFilePicker:
-        "                           Trailing `@…` opens a file picker; ↑/↓ navigate, Tab/Enter pick.",
-      keysAtUrl:
-        "  @https://...           fetch the URL, strip HTML, inline under [Referenced URLs].",
-      keysAtUrlCache:
-        "                           Cached per session — same URL twice fetches once.",
-      keysBang:
-        "  !<cmd>                 run <cmd> as shell in the sandbox root; output goes into context",
-      keysBangDetail:
-        "                           so the model sees it next turn. No allowlist gate.",
-      keysHash:
-        "  #<note>                append <note> to <project>/REASONIX.md (committable, team-shared).",
-      keysHashGlobal:
-        "  #g <note>              append <note> to ~/.reasonix/REASONIX.md (global, never committed).",
-      keysHashBoth:
-        "                           Both pin into the immutable prefix every future session.",
-      keysHashEscape:
-        "                           Use `\\#literal` if you actually want a `#` heading sent to the model.",
-      keysPickersTitle: "Pickers (slash + @-mention):",
-      keysPickerNav: "  ↑ / ↓                  navigate the suggestion list",
-      keysPickerTab: "  Tab                    insert the highlighted item without submitting",
-      keysPickerEnter: "  Enter                  insert and (slash) run it, (@) keep editing",
-      keysMcpTitle: "MCP exploration:",
-      keysMcpServers: "  /mcp                   servers + tool/resource/prompt counts",
-      keysMcpResource:
-        "  /resource [uri]        browse & read resources exposed by your MCP servers",
-      keysMcpPrompt: "  /prompt [name]         browse & fetch prompts exposed by your MCP servers",
-      keysUseful: "Useful slashes: /help · /context · /stats · /compact · /new · /exit",
       retryNone: "nothing to retry — no prior user message in this session's log.",
       retryInfo: '▸ retrying: "{preview}"',
       loopTuiOnly: "/loop is only available in the interactive TUI (not in run/replay).",
@@ -662,10 +520,6 @@ export const EN: TranslationSchema = {
         "▸ plan mode ON — write tools are gated; the model MUST call `submit_plan` before anything executes. (The model can also call submit_plan on its own for big tasks even when plan mode is off — this toggle is the stronger, explicit constraint.) Type /plan off to leave.",
       planOff:
         "▸ plan mode OFF — write tools are live again. Model can still propose plans autonomously for large tasks.",
-      applyPlanCodeOnly: "/apply-plan is only available inside `reasonix code`.",
-      applyPlanInfo: "▸ plan approved — implementing",
-      applyPlanResubmit:
-        "The plan above has been approved. Implement it now. You are out of plan mode — use edit_file / write_file / run_command as needed. Stick to the plan unless you discover a concrete reason to deviate; if you do, tell me and wait for a response before making that deviation.",
       modeCodeOnly: "/mode is only available inside `reasonix code`.",
       modeUsage: "usage: /mode <review|auto|yolo>   (Shift+Tab also cycles)",
       modeYolo:
@@ -707,29 +561,10 @@ export const EN: TranslationSchema = {
       modelNotInCatalog:
         "model → {id}   (⚠ not in the fetched catalog: {list}. If this is wrong the next call will 400 — run /models to refresh.)",
       modelSet: "model → {id}",
-      modelsFetching:
-        "fetching /models from DeepSeek… run /models again in a moment. If it stays empty, your API key may lack permission or the network is blocked.",
-      modelsEmpty:
-        "DeepSeek /models returned an empty list. Try /models again, or check your account status at api-docs.deepseek.com.",
-      modelsHeader: "Available models (DeepSeek /models · {count} total):",
-      modelsCurrent: "▸ {id}  (current)",
-      modelsSwitch: "Switch with: /model <id>",
-      harvestOn:
-        "harvest → on  (Pillar-2 plan-state extraction · +1 cheap flash call per turn · opt-in only; no preset turns it on)",
-      harvestOff: "harvest → off",
       presetAuto: "preset → auto  (v4-flash → v4-pro on hard turns · default)",
       presetFlash: "preset → flash  (v4-flash always · cheapest · /pro still bumps one turn)",
       presetPro: "preset → pro  (v4-pro always · ~3× flash · for hard multi-turn work)",
       presetUsage: "usage: /preset <auto|flash|pro>",
-      branchOff: "branch → off",
-      branchUsage: "usage: /branch <N>   (N>=2, or 'off')",
-      branchCapped: "branch budget capped at 8 to prevent runaway cost",
-      branchSet:
-        "branch → {n}  (runs {n} parallel samples per turn · {n}× per-turn cost · streaming disabled · manual only, no preset enables branching)",
-      effortStatus:
-        "reasoning_effort → {effort}  (use /effort high for cheaper/faster, /effort max for the agent-class default · persisted across relaunches)",
-      effortUsage: "usage: /effort <high|max>",
-      effortSet: "reasoning_effort → {effort} (persisted)",
       proNothingArmed: "nothing armed — /pro with no args will arm pro for your next turn",
       proDisarmed: "▸ /pro disarmed — next turn falls back to the current preset",
       proUsage:
@@ -747,21 +582,6 @@ export const EN: TranslationSchema = {
         "▲ budget → ${cap} but already spent ${spent}. Next turn will be refused — bump the cap higher to keep going, or end the session.",
       budgetSet:
         "budget → ${cap}  (so far: ${spent} · warns at 80%, refuses next turn at 100% · /budget off to clear)",
-    },
-    sessions: {
-      forgetNoSession: "not in a session — nothing to forget",
-      forgetInfo:
-        '▸ deleted session "{name}" — current screen still shows the conversation, but next launch starts fresh',
-      forgetFailed: 'could not delete session "{name}" (already gone?)',
-      renameUsage: "usage: /rename <new-name>",
-      renameNoSession: "not in a session — nothing to rename",
-      renameFailed:
-        'could not rename — "{name}" already exists or sanitises to the same id as the current session',
-      renameInfo: '▸ renamed session → "{name}". Restart the TUI to pick it up under its new name.',
-      resumeUsage: "usage: /resume <session-name>  — list with /sessions",
-      resumeNotFound: 'no session named "{name}" — list with /sessions',
-      resumeInfo:
-        '▸ to resume "{name}", quit and run: reasonix chat --session {name}\n  (mid-session swap requires a restart so the message log can rewind cleanly)',
     },
     permissions: {
       mutateCodeOnly:
@@ -818,17 +638,6 @@ export const EN: TranslationSchema = {
       starting: "▸ starting dashboard server…",
     },
     observability: {
-      thinkEmpty:
-        "no reasoning cached. `/think` shows the full thinking-mode thought for the most recent turn — only thinking-mode models (deepseek-v4-flash / -v4-pro / -reasoner) produce it, and only once the turn completes.",
-      thinkInfo: "↳ full thinking ({count} chars):",
-      toolEmpty:
-        "no tool calls yet in this session. `/tool` lists them once the model has actually used a tool; `/tool N` dumps the full (untruncated) output of the Nth-most-recent.",
-      toolUsage:
-        "usage: /tool [N]   (no arg → list; N=1 → most recent result in full, N=2 → previous, …)",
-      toolOob:
-        "only {count} tool call(s) in history — asked for #{n}. Try /tool with no arg to see the list.",
-      toolNotFound: "could not read tool call #{n}",
-      toolInfo: "↳ tool<{name}> #{n} ({chars} chars):",
       contextInfo: "context: ~{total} of {max} ({pct}%) · system {sys} · tools {tools} · log {log}",
       compactStarting: "▸ folding older turns into a summary…",
       compactNoop: "▸ nothing to fold — log already small or recent turns alone exceed the budget.",
@@ -845,8 +654,7 @@ export const EN: TranslationSchema = {
       costLikely: "  likely ({pct}% session cache hit): {input} input + ~{output} output ≈ {total}",
       costLikelyCold: "  likely: matches worst case until cache fills (no completed turns yet)",
       statusModel: "  model   {model}",
-      statusFlags:
-        "  flags   harvest={harvest} · branch={branch} · stream={stream} · effort={effort}",
+      statusFlags: "  flags   stream={stream} · effort={effort}",
       statusCtx: "  ctx     {bar} {used}/{max} ({pct}%)",
       statusCtxNone: "  ctx     no turns yet",
       statusCost: "  cost    ${cost} · cache {bar} {pct}% · turns {turns}",
@@ -970,10 +778,6 @@ export const EN: TranslationSchema = {
       existsEdit: "  Or edit it by hand — it's just markdown. The current file is",
       existsPinned: "  pinned into the system prompt every launch as-is.",
       info: "▸ /init — model will scan the project and synthesize REASONIX.md.\n  The result lands as a pending edit; review with /apply or /walk.",
-    },
-    semantic: {
-      codeOnly: "/semantic is only available inside `reasonix code` (needs a project root).",
-      checking: "▸ checking semantic_search status…",
     },
     webSearchEngine: {
       currentEngine: "Current web search engine: {engine}",

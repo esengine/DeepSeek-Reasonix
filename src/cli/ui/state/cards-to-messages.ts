@@ -52,16 +52,6 @@ export function cardsToDashboardMessages(cards: ReadonlyArray<Card>): DashboardM
       case "ctx":
         out.push({ id: card.id, role: "info", text: card.text });
         break;
-      case "branch":
-        // Boot snapshot only sees finished branches — drop transient progress.
-        if (card.done) {
-          out.push({
-            id: card.id,
-            role: "info",
-            text: `▸ branched ${card.completed} of ${card.total} samples`,
-          });
-        }
-        break;
       case "plan": {
         const done = card.steps.filter((s) => s.status === "done").length;
         const tag =

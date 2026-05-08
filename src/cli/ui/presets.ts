@@ -1,48 +1,27 @@
-/** Preset table — branch and harvest stay off here so users never get ambushed into N× cost without opting in. */
-
 import type { PresetName } from "../../config.js";
 
 export interface PresetSettings {
   model: string;
   reasoningEffort: "high" | "max";
   autoEscalate: boolean;
-  /** Pillar-2 harvest. Always false in presets — opt-in via /harvest. */
-  harvest: boolean;
-  /** Branch budget. Always 1 in presets — opt-in via /branch. */
-  branch: number;
 }
 
 /** Old names `fast`/`smart`/`max` aliased via `resolvePreset` so legacy configs still load. */
 export const PRESETS: Record<"auto" | "flash" | "pro", PresetSettings> = {
-  // auto — flash baseline + auto-escalate to pro when the model emits
-  // <<<NEEDS_PRO>>> OR after 3+ tool failure signals in one turn.
-  // The default: cheap when easy, smart when hard.
   auto: {
     model: "deepseek-v4-flash",
     reasoningEffort: "max",
     autoEscalate: true,
-    harvest: false,
-    branch: 1,
   },
-  // flash — always flash, never escalate. `/pro` still arms a single
-  // manual turn; auto-promotion is the thing this disables. Use when
-  // you want predictable cost per turn.
   flash: {
     model: "deepseek-v4-flash",
     reasoningEffort: "max",
     autoEscalate: false,
-    harvest: false,
-    branch: 1,
   },
-  // pro — always pro. Hard pin; the model never downgrades. Use for
-  // multi-turn architecture work where flash is just going to keep
-  // escalating anyway and the back-and-forth wastes turns.
   pro: {
     model: "deepseek-v4-pro",
     reasoningEffort: "max",
     autoEscalate: false,
-    harvest: false,
-    branch: 1,
   },
 };
 

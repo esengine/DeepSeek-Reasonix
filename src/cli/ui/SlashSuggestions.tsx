@@ -2,40 +2,34 @@ import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig.jsx = "react" needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../i18n/index.js";
-import type { SlashCommandSpec } from "./slash.js";
+import type { SlashCommandSpec, SlashGroup } from "./slash.js";
 import { COLOR, GLYPH } from "./theme.js";
 
 export interface SlashSuggestionsProps {
-  /**
-   * Current matching suggestions, computed by the parent. `null` means
-   * "not in slash-prefix mode" — render nothing. Empty array means "in
-   * slash mode but no matches" — render the "no matches" hint.
-   */
   matches: SlashCommandSpec[] | null;
-  /** Index (within `matches`) of the currently highlighted row. */
   selectedIndex: number;
+  /** True when input is a bare `/` — render section headers + advanced footer. */
+  groupMode?: boolean;
+  /** Count of hidden `advanced` commands; rendered as a footer hint when groupMode is true. */
+  advancedHidden?: number;
 }
 
-/**
- * Slash-command palette. Rendered below the input box while the user
- * is typing a `/…` prefix. Visual grammar matches the design doc's
- * picker style:
- *
- *      / suggestions                                   esc cancel
- *      ▸ /checkpoint   [name]    snapshot the workspace
- *        /restore      <name>    roll back files to a checkpoint
- *        /diff                   cumulative diff vs session start
- *      [↑↓] navigate · [Tab/⏎] pick
- *
- * Cmd tokens render in accent violet (one consistent color for "this
- * is a command"), descriptions in dim info color. The selected row
- * gets a leading ▸ + bold cmd; non-selected rows get a 2-space pad in
- * the same column so the cmd column stays aligned. No solid-bg pill —
- * the bracket-text pattern from the chrome carries through here.
- */
+const GROUP_LABEL: Record<SlashGroup, string> = {
+  chat: "CHAT",
+  setup: "SETUP",
+  info: "INFO",
+  session: "SESSION",
+  extend: "EXTEND",
+  code: "CODE",
+  jobs: "JOBS",
+  advanced: "ADVANCED",
+};
+
 export function SlashSuggestions({
   matches,
   selectedIndex,
+  groupMode,
+  advancedHidden,
 }: SlashSuggestionsProps): React.ReactElement | null {
   if (matches === null) return null;
   if (matches.length === 0) {
@@ -50,16 +44,15 @@ export function SlashSuggestions({
       </Box>
     );
   }
-  // Limit rows so the suggestion list never dwarfs the rest of the
-  // UI. Keep the currently-selected row in view by sliding the
-  // window when the selection is near either edge.
-  const MAX = 8;
+  const MAX = groupMode ? 24 : 8;
   const total = matches.length;
   const windowStart =
     total <= MAX ? 0 : Math.max(0, Math.min(selectedIndex - Math.floor(MAX / 2), total - MAX));
   const shown = matches.slice(windowStart, windowStart + MAX);
   const hiddenAbove = windowStart;
   const hiddenBelow = total - windowStart - shown.length;
+  let lastGroup: SlashGroup | null = null;
+  if (windowStart > 0) lastGroup = matches[windowStart - 1]?.group ?? null;
   return (
     <Box flexDirection="column" paddingX={1} marginTop={1}>
       <Box>
@@ -69,10 +62,27 @@ export function SlashSuggestions({
         <Text dimColor>{`${total} command${total === 1 ? "" : "s"}`}</Text>
         {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
       </Box>
-      {shown.map((spec, i) => (
-        <SuggestionRow key={spec.cmd} spec={spec} isSelected={windowStart + i === selectedIndex} />
-      ))}
+      {shown.map((spec, i) => {
+        const idx = windowStart + i;
+        const showHeader = groupMode && spec.group !== lastGroup;
+        lastGroup = spec.group;
+        return (
+          <React.Fragment key={spec.cmd}>
+            {showHeader ? (
+              <Box marginTop={idx === 0 ? 0 : 1}>
+                <Text dimColor>{`  ${GROUP_LABEL[spec.group]}`}</Text>
+              </Box>
+            ) : null}
+            <SuggestionRow spec={spec} isSelected={idx === selectedIndex} />
+          </React.Fragment>
+        );
+      })}
       {hiddenBelow > 0 ? <Text dimColor>{`   ↓ ${hiddenBelow} below`}</Text> : null}
+      {groupMode && advancedHidden && advancedHidden > 0 ? (
+        <Box marginTop={1}>
+          <Text dimColor>{`  + ${advancedHidden} advanced  ·  type a letter to search`}</Text>
+        </Box>
+      ) : null}
       <Box marginTop={0}>
         <Text dimColor>{"  ↑↓ navigate · Tab / ⏎ pick · esc cancel"}</Text>
       </Box>

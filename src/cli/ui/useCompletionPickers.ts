@@ -9,6 +9,7 @@ import {
   type McpServerSummary,
   type SlashArgContext,
   type SlashCommandSpec,
+  countAdvancedCommands,
   detectSlashArgContext,
   suggestSlashCommands,
 } from "./slash.js";
@@ -21,6 +22,8 @@ export interface UseCompletionPickersParams {
   rootDir: string;
   models: string[] | null;
   mcpServers: McpServerSummary[] | undefined;
+  /** Cross-session slash invocation counts — used to sort suggestions by frequency. */
+  slashUsage?: Readonly<Record<string, number>>;
 }
 
 export interface UseCompletionPickersResult {
@@ -28,6 +31,10 @@ export interface UseCompletionPickersResult {
   slashMatches: SlashCommandSpec[] | null;
   slashSelected: number;
   setSlashSelected: React.Dispatch<React.SetStateAction<number>>;
+  /** True when the input is exactly `/` — palette renders group headers. */
+  slashGroupMode: boolean;
+  /** Count of advanced commands hidden behind the "type to search" footer hint. */
+  slashAdvancedHidden: number;
 
   // ── @-mention picker ──
   atPicker: ReturnType<typeof detectAtPicker>;
@@ -53,13 +60,19 @@ export function useCompletionPickers({
   rootDir,
   models,
   mcpServers,
+  slashUsage,
 }: UseCompletionPickersParams): UseCompletionPickersResult {
   // ── slash-name picker ──
   const [slashSelected, setSlashSelected] = useState(0);
   const slashMatches = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ")) return null;
-    return suggestSlashCommands(input.slice(1), !!codeMode);
-  }, [input, codeMode]);
+    return suggestSlashCommands(input.slice(1), !!codeMode, slashUsage);
+  }, [input, codeMode, slashUsage]);
+  const slashGroupMode = input === "/";
+  const slashAdvancedHidden = useMemo(
+    () => (slashGroupMode ? countAdvancedCommands(!!codeMode) : 0),
+    [slashGroupMode, codeMode],
+  );
   useEffect(() => {
     setSlashSelected((prev) => {
       if (!slashMatches || slashMatches.length === 0) return 0;
@@ -212,6 +225,8 @@ export function useCompletionPickers({
     slashMatches,
     slashSelected,
     setSlashSelected,
+    slashGroupMode,
+    slashAdvancedHidden,
     atPicker,
     atMatches,
     atSelected,

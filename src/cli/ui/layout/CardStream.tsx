@@ -60,7 +60,6 @@ function isFullySettled(card: Card): boolean {
   switch (card.kind) {
     case "streaming":
     case "tool":
-    case "branch":
       return card.done || !!card.aborted;
     case "reasoning":
       return !card.streaming || !!card.aborted;

@@ -179,17 +179,6 @@ export interface LiveCard extends CardBase {
   readonly meta?: string;
 }
 
-export interface BranchCard extends CardBase {
-  readonly kind: "branch";
-  completed: number;
-  total: number;
-  latestIndex: number;
-  latestTemperature: number;
-  latestUncertainties: number;
-  done: boolean;
-  aborted?: boolean;
-}
-
 export interface CtxCard extends CardBase {
   readonly kind: "ctx";
   readonly text: string;
@@ -219,7 +208,6 @@ export type Card =
   | SearchCard
   | LiveCard
   | CtxCard
-  | BranchCard
   | DoctorCard;
 
 export interface DoctorCheckEntry {

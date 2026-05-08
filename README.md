@@ -133,15 +133,11 @@ Edit the file (`description:` frontmatter + body), then `/skill list` to see it.
 
 ## What makes Reasonix different
 
-The loop is organized around four pillars. Each one solves a problem generic agent frameworks don't even see — because they were designed for a different cache mechanic.
-
-<p align="center">
-  <a href="./docs/ARCHITECTURE.md"><img src="docs/assets/pillars.svg" alt="Reasonix four pillars — Cache-first loop, R1 thought harvesting, Tool-call repair, Cost control" width="880"/></a>
-</p>
+The loop is organized around three pillars. Each one solves a problem generic agent frameworks don't even see — because they were designed for a different cache mechanic.
 
 <sub align="center">
 
-Click any card to read the full architecture writeup → [Pillar 1](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) · [Pillar 2](./docs/ARCHITECTURE.md#pillar-2--r1-thought-harvesting-opt-in) · [Pillar 3](./docs/ARCHITECTURE.md#pillar-3--tool-call-repair) · [Pillar 4](./docs/ARCHITECTURE.md#pillar-4--cost-control-v06)
+Click through to the full architecture writeup → [Pillar 1 — Cache-first loop](./docs/ARCHITECTURE.md#pillar-1--cache-first-loop) · [Pillar 2 — Tool-call repair](./docs/ARCHITECTURE.md#pillar-2--tool-call-repair) · [Pillar 3 — Cost control](./docs/ARCHITECTURE.md#pillar-3--cost-control-v06)
 
 </sub>
 
@@ -176,7 +172,7 @@ For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmar
 
 ## Documentation
 
-- [**Architecture**](./docs/ARCHITECTURE.md) — the four pillars, cache-first loop, harvesting, scaffolds
+- [**Architecture**](./docs/ARCHITECTURE.md) — three pillars: cache-first loop, tool-call repair, cost control
 - [**Benchmarks**](./benchmarks/) — τ-bench-lite harness, transcripts, cost methodology
 - [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard mockup, TUI mockup
 - [**Contributing**](./CONTRIBUTING.md) — comment policy, error-handling rules, library-over-hand-rolled
