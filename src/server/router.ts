@@ -4,6 +4,7 @@ import { handleFiles } from "./api/files.js";
 import { handleHealth } from "./api/health.js";
 import { handleHooks } from "./api/hooks.js";
 import { handleIndexConfig } from "./api/index-config.js";
+import { handleLoop } from "./api/loop.js";
 import { handleMcp } from "./api/mcp.js";
 import { handleMemory } from "./api/memory.js";
 import { handleMessages } from "./api/messages.js";
@@ -81,6 +82,8 @@ export async function handleApi(
         return await handleSlash(method, rest, body, ctx);
       case "files":
         return await handleFiles(method, rest, body, ctx);
+      case "loop":
+        return await handleLoop(method, rest, body, ctx);
       default:
         return { status: 404, body: { error: `no such endpoint: /${head}` } };
     }

@@ -1686,6 +1686,20 @@ function AppInner({
         applyEffortLive: (effort) => {
           loop.configure({ reasoningEffort: effort });
         },
+        applyModelLive: (model) => {
+          loop.configure({ model });
+          agentStore.dispatch({ type: "session.model.change", model });
+        },
+        setProNextLive: (armed) => {
+          if (armed) loop.armProForNextTurn();
+          else loop.disarmPro();
+        },
+        setBudgetUsdLive: (usd) => {
+          loop.setBudget(usd);
+        },
+        getLoopRunStatus: () => getLoopStatus(),
+        startAutoLoop: (intervalMs, prompt) => startLoop(intervalMs, prompt),
+        stopAutoLoop: () => stopLoop(),
         // ---------- Chat bridge ----------
         getMessages: (): DashboardMessage[] =>
           cardsToDashboardMessages(agentStore.getState().cards),
@@ -1898,6 +1912,9 @@ function AppInner({
     pendingRevision,
     agentStore,
     mcpRuntime,
+    getLoopStatus,
+    startLoop,
+    stopLoop,
   ]);
 
   const stopDashboard = useCallback(async (): Promise<void> => {

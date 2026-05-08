@@ -37,6 +37,23 @@ export interface DashboardContext {
   applyPresetLive?: (name: string) => void;
   /** Side-channel to live loop — settings POST persists, this flips the running session. */
   applyEffortLive?: (effort: "high" | "max") => void;
+  /** Same model swap path /model <id> takes — live + persisted. */
+  applyModelLive?: (model: string) => void;
+  /** One-shot v4-pro arming for the next turn. `armed=false` cancels a pending arm. */
+  setProNextLive?: (armed: boolean) => void;
+  /** Session USD cap; null disables. Re-arms the 80% warning latch. */
+  setBudgetUsdLive?: (usd: number | null) => void;
+  /** Auto-resubmit timer status — same shape `useLoopMode` exposes to slash handlers. */
+  getLoopRunStatus?: () => {
+    prompt: string;
+    intervalMs: number;
+    iter: number;
+    nextFireMs: number;
+  } | null;
+  /** Start the auto-resubmit timer. Same path the `/loop` slash takes. */
+  startAutoLoop?: (intervalMs: number, prompt: string) => void;
+  /** Clear the auto-resubmit timer. */
+  stopAutoLoop?: () => void;
   /** Endpoints don't write the audit log themselves so tests can swap the implementation. */
   audit?: (entry: AuditEntry) => void;
 

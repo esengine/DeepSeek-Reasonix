@@ -864,3 +864,159 @@ describe("dashboard server: modal mirroring (workspace / checkpoint / revision)"
     expect(r.status).toBe(503);
   });
 });
+
+describe("dashboard server: D-1 settings + auto-loop surface", () => {
+  let dir: string;
+  let cfgPath: string;
+  let usagePath: string;
+  let handle: DashboardServerHandle | null = null;
+  const TOKEN = "f".repeat(64);
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "reasonix-d1-"));
+    cfgPath = join(dir, "config.json");
+    usagePath = join(dir, "usage.jsonl");
+  });
+
+  afterEach(async () => {
+    await handle?.close();
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function boot(extra: Partial<DashboardContext> = {}): Promise<string> {
+    handle = await startDashboardServer(
+      { mode: "attached", configPath: cfgPath, usageLogPath: usagePath, ...extra },
+      { token: TOKEN },
+    );
+    return handle.url.split("?")[0]!;
+  }
+
+  it("POST /api/settings routes proNext / budgetUsd / model to live callbacks", async () => {
+    const calls: Record<string, unknown[]> = {
+      proNext: [],
+      budgetUsd: [],
+      model: [],
+    };
+    const base = await boot({
+      setProNextLive: (v) => calls.proNext!.push(v),
+      setBudgetUsdLive: (v) => calls.budgetUsd!.push(v),
+      applyModelLive: (v) => calls.model!.push(v),
+    });
+    const r = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { proNext: true, budgetUsd: 2.5, model: "deepseek-v4-pro" },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.changed).toEqual(expect.arrayContaining(["proNext", "budgetUsd", "model"]));
+    expect(calls.proNext).toEqual([true]);
+    expect(calls.budgetUsd).toEqual([2.5]);
+    expect(calls.model).toEqual(["deepseek-v4-pro"]);
+  });
+
+  it("POST /api/settings rejects non-positive budgetUsd", async () => {
+    const base = await boot({ setBudgetUsdLive: () => undefined });
+    const negative = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { budgetUsd: -1 },
+    });
+    expect(negative.status).toBe(400);
+  });
+
+  it("POST /api/settings accepts null budgetUsd to clear the cap", async () => {
+    const budgetCalls: unknown[] = [];
+    const base = await boot({ setBudgetUsdLive: (v) => budgetCalls.push(v) });
+    const r = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { budgetUsd: null },
+    });
+    expect(r.status).toBe(200);
+    expect(budgetCalls).toEqual([null]);
+  });
+
+  it("GET /api/loop/status returns null when nothing is running", async () => {
+    const base = await boot({ getLoopRunStatus: () => null });
+    const r = await call(`${base}api/loop/status`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.status).toBeNull();
+  });
+
+  it("GET /api/loop/status returns the live status snapshot", async () => {
+    const snap = { prompt: "ping", intervalMs: 30_000, iter: 3, nextFireMs: 12_000 };
+    const base = await boot({ getLoopRunStatus: () => snap });
+    const r = await call(`${base}api/loop/status`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.status).toEqual(snap);
+  });
+
+  it("POST /api/loop/start forwards intervalMs and prompt", async () => {
+    const calls: Array<[number, string]> = [];
+    const base = await boot({ startAutoLoop: (ms, p) => calls.push([ms, p]) });
+    const r = await call(`${base}api/loop/start`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { intervalMs: 30_000, prompt: "check the deploy" },
+    });
+    expect(r.status).toBe(200);
+    expect(calls).toEqual([[30_000, "check the deploy"]]);
+  });
+
+  it("POST /api/loop/start rejects out-of-range interval and missing prompt", async () => {
+    const base = await boot({ startAutoLoop: () => undefined });
+    const tooFast = await call(`${base}api/loop/start`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { intervalMs: 1_000, prompt: "x" },
+    });
+    expect(tooFast.status).toBe(400);
+    const noPrompt = await call(`${base}api/loop/start`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { intervalMs: 30_000, prompt: "" },
+    });
+    expect(noPrompt.status).toBe(400);
+  });
+
+  it("POST /api/loop/stop calls the stop hook", async () => {
+    let stopped = 0;
+    const base = await boot({
+      stopAutoLoop: () => {
+        stopped++;
+      },
+    });
+    const r = await call(`${base}api/loop/stop`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+    });
+    expect(r.status).toBe(200);
+    expect(stopped).toBe(1);
+  });
+
+  it("returns 503 when loop callbacks are not wired", async () => {
+    const base = await boot({});
+    const status = await call(`${base}api/loop/status`, { token: TOKEN });
+    expect(status.status).toBe(503);
+    const start = await call(`${base}api/loop/start`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { intervalMs: 30_000, prompt: "x" },
+    });
+    expect(start.status).toBe(503);
+    const stop = await call(`${base}api/loop/stop`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+    });
+    expect(stop.status).toBe(503);
+  });
+});

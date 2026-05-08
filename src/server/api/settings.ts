@@ -13,6 +13,9 @@ interface SettingsBody {
   preset?: unknown;
   reasoningEffort?: unknown;
   search?: unknown;
+  model?: unknown;
+  proNext?: unknown;
+  budgetUsd?: unknown;
 }
 
 function parseBody(raw: string): SettingsBody {
@@ -39,6 +42,7 @@ export async function handleSettings(
 ): Promise<ApiResult> {
   if (method === "GET") {
     const cfg = readConfig(ctx.configPath);
+    const live = ctx.loop;
     return {
       status: 200,
       body: {
@@ -51,7 +55,9 @@ export async function handleSettings(
         search: cfg.search !== false,
         editMode: cfg.editMode ?? "review",
         session: cfg.session ?? null,
-        model: ctx.loop?.model ?? null,
+        model: live?.model ?? null,
+        proNext: live?.proArmed ?? false,
+        budgetUsd: live?.budgetUsd ?? null,
         // Hint to the SPA which fields require restart.
         appliesAt: {
           apiKey: "next-session",
@@ -59,6 +65,9 @@ export async function handleSettings(
           preset: "next-session",
           reasoningEffort: "next-turn",
           search: "next-session",
+          model: "next-turn",
+          proNext: "next-turn",
+          budgetUsd: "live",
         },
       },
     };
@@ -127,6 +136,43 @@ export async function handleSettings(
       cfg.search = fields.search;
       changed.push("search");
     }
+    let modelPendingLive: string | null = null;
+    let proNextPending: boolean | null = null;
+    let budgetPending: number | null | undefined;
+    if (fields.model !== undefined) {
+      if (typeof fields.model !== "string" || !fields.model.trim()) {
+        return { status: 400, body: { error: "model must be a non-empty string" } };
+      }
+      // Model is live-only (not in ReasonixConfig). Same as /model <id> slash — disk
+      // pickup goes through preset / startup flag, not direct cfg.model.
+      modelPendingLive = fields.model.trim();
+      changed.push("model");
+    }
+    if (fields.proNext !== undefined) {
+      if (typeof fields.proNext !== "boolean") {
+        return { status: 400, body: { error: "proNext must be a boolean" } };
+      }
+      // Not persisted: arming is per-turn ephemeral. Live-only side effect.
+      proNextPending = fields.proNext;
+      changed.push("proNext");
+    }
+    if (fields.budgetUsd !== undefined) {
+      if (fields.budgetUsd === null) {
+        budgetPending = null;
+      } else if (
+        typeof fields.budgetUsd === "number" &&
+        fields.budgetUsd > 0 &&
+        Number.isFinite(fields.budgetUsd)
+      ) {
+        budgetPending = fields.budgetUsd;
+      } else {
+        return {
+          status: 400,
+          body: { error: "budgetUsd must be null or a positive finite number" },
+        };
+      }
+      changed.push("budgetUsd");
+    }
 
     if (changed.length > 0) {
       writeConfig(cfg, ctx.configPath);
@@ -137,6 +183,9 @@ export async function handleSettings(
       if (langPending) setLanguage(langPending);
       if (presetPendingLive) ctx.applyPresetLive?.(presetPendingLive);
       if (effortPendingLive) ctx.applyEffortLive?.(effortPendingLive);
+      if (modelPendingLive) ctx.applyModelLive?.(modelPendingLive);
+      if (proNextPending !== null) ctx.setProNextLive?.(proNextPending);
+      if (budgetPending !== undefined) ctx.setBudgetUsdLive?.(budgetPending);
       ctx.audit?.({ ts: Date.now(), action: "set-settings", payload: { fields: changed } });
     }
     return { status: 200, body: { changed } };
