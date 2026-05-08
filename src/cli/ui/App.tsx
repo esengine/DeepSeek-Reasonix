@@ -2389,7 +2389,13 @@ function AppInner({
           modelInput = expanded.text;
           const inlined = expanded.expansions
             .filter((ex) => ex.ok)
-            .map((ex) => `${ex.path} (${(ex.bytes ?? 0).toLocaleString()} bytes)`);
+            .map((ex) => {
+              if (ex.isDirectory) {
+                const trunc = ex.truncated ? "+" : "";
+                return `${ex.path}/ (${ex.entries ?? 0}${trunc} entries)`;
+              }
+              return `${ex.path} (${(ex.bytes ?? 0).toLocaleString()} bytes)`;
+            });
           const skipped = expanded.expansions
             .filter((ex) => !ex.ok)
             .map((ex) => `${ex.path} (${ex.skip})`);

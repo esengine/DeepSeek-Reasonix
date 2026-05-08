@@ -13,6 +13,9 @@ import {
 /** Caps match tool-result dispatch truncation (0.5.2). */
 export const DEFAULT_AT_MENTION_MAX_BYTES = 64 * 1024;
 
+/** Cap on entries returned for a `@<dir>` listing. ~200 paths × ~50 chars ≈ 10 KB — fits inside DEFAULT_AT_MENTION_MAX_BYTES with room for the rest of the prompt. */
+export const DEFAULT_AT_DIR_MAX_ENTRIES = 200;
+
 /** Universally-uninteresting build / VCS dirs. Framework-specific dirs (Pods, target, …) live in .gitignore. */
 export const DEFAULT_PICKER_IGNORE_DIRS: readonly string[] = [
   "node_modules",
@@ -91,6 +94,19 @@ export function listFilesWithStatsSync(root: string, opts: ListFilesOptions = {}
           /* stat failed (permission / EAGAIN) — keep the entry with mtime=0 */
         }
         out.push({ path: relPath, mtimeMs });
+      } else if (ent.isSymbolicLink()) {
+        // Dirent.isFile() returns false for symlinks even when they point at
+        // regular files — stat the target to recover them. Symlinks-to-dirs
+        // are not followed (cycle risk).
+        let target: ReturnType<typeof statSync> | null = null;
+        try {
+          target = statSync(absPath);
+        } catch {
+          continue;
+        }
+        if (!target.isFile()) continue;
+        if (ignoredByLayers(effectiveLayers, absPath, false)) continue;
+        out.push({ path: relPath, mtimeMs: target.mtimeMs });
       }
     }
   };
@@ -146,7 +162,9 @@ export async function listFilesWithStatsAsync(
           if (out.length >= maxResults) return;
         }
         await walk(absPath, relPath, effectiveLayers);
-      } else if (ent.isFile()) {
+      } else if (ent.isFile() || ent.isSymbolicLink()) {
+        // Symlinks land in the same batch — statBatch resolves them and drops
+        // any whose target isn't a regular file (broken or symlink-to-dir).
         fileEnts.push(ent);
       }
     }
@@ -176,15 +194,20 @@ async function statBatch(
   const stats = await Promise.all(
     accepted.map((e) =>
       stat(join(dirAbs, e.name))
-        .then((s) => s.mtimeMs)
-        .catch(() => 0),
+        .then((s) => ({ mtimeMs: s.mtimeMs, isFile: s.isFile() }))
+        .catch(() => null),
     ),
   );
   for (let i = 0; i < accepted.length; i++) {
     const ent = accepted[i]!;
+    const s = stats[i];
+    if (ent.isSymbolicLink()) {
+      // Drop broken symlinks and symlinks-to-dirs (latter would cycle).
+      if (!s || !s.isFile) continue;
+    }
     out.push({
       path: dirRel ? `${dirRel}/${ent.name}` : ent.name,
-      mtimeMs: stats[i] ?? 0,
+      mtimeMs: s?.mtimeMs ?? 0,
     });
   }
 }
@@ -283,8 +306,14 @@ export interface AtMentionExpansion {
   path: string;
   /** True if the content was inlined. False = skipped (reason in `skip`). */
   ok: boolean;
-  /** Bytes read (only for ok=true). */
+  /** Bytes read (only for ok=true and isDirectory=false). */
   bytes?: number;
+  /** True when the mention resolved to a directory (ok=true). Block uses `<directory>` instead of `<file>`. */
+  isDirectory?: boolean;
+  /** Number of files listed when isDirectory=true. */
+  entries?: number;
+  /** True iff the directory listing was clipped at maxDirEntries. */
+  truncated?: boolean;
   /** Why the mention was skipped. Set when ok=false. */
   skip?: "missing" | "not-file" | "too-large" | "escape" | "read-error";
 }
@@ -292,9 +321,19 @@ export interface AtMentionExpansion {
 export interface AtMentionOptions {
   /** Max file size in bytes before a mention is skipped. */
   maxBytes?: number;
+  /** Cap on entries returned for a `@<dir>` listing. Default {@link DEFAULT_AT_DIR_MAX_ENTRIES}. */
+  maxDirEntries?: number;
   fs?: {
     exists: (path: string) => boolean;
     isFile: (path: string) => boolean;
+    /** Optional — when omitted, directories are skipped as `not-file`. */
+    isDir?: (path: string) => boolean;
+    /** Optional — receives the directory's absolute path and the project root, returns relative paths and a truncated flag. */
+    listDir?: (
+      dirAbs: string,
+      root: string,
+      max: number,
+    ) => { files: string[]; truncated: boolean };
     size: (path: string) => number;
     read: (path: string) => string;
   };
@@ -306,11 +345,13 @@ export function expandAtMentions(
   opts: AtMentionOptions = {},
 ): { text: string; expansions: AtMentionExpansion[] } {
   const maxBytes = opts.maxBytes ?? DEFAULT_AT_MENTION_MAX_BYTES;
+  const maxDirEntries = Math.max(1, opts.maxDirEntries ?? DEFAULT_AT_DIR_MAX_ENTRIES);
   const fs = opts.fs ?? defaultFs;
   const root = resolve(rootDir);
   // De-dupe by token so `@file.ts` referenced twice inlines once.
   const seen = new Map<string, AtMentionExpansion>();
   const expansions: AtMentionExpansion[] = [];
+  const dirListings = new Map<string, string[]>();
 
   for (const match of text.matchAll(AT_MENTION_PATTERN)) {
     const rawPath = match[1] ?? "";
@@ -319,11 +360,13 @@ export function expandAtMentions(
     // regex is O(n²) on dot-heavy non-matches per CodeQL js/polynomial-redos.
     let cleaned = rawPath;
     while (cleaned.endsWith(".")) cleaned = cleaned.slice(0, -1);
+    // Strip a single trailing slash so `@docs/` and `@docs` resolve identically.
+    if (cleaned.endsWith("/") || cleaned.endsWith("\\")) cleaned = cleaned.slice(0, -1);
     if (!cleaned) continue;
     const token = `@${cleaned}`;
     if (seen.has(token)) continue;
 
-    const expansion = resolveMention(cleaned, root, maxBytes, fs);
+    const expansion = resolveMention(cleaned, root, maxBytes, maxDirEntries, fs, dirListings);
     seen.set(token, expansion);
     expansions.push(expansion);
   }
@@ -335,7 +378,14 @@ export function expandAtMentions(
   // both what's here and what's missing.
   const blocks: string[] = [];
   for (const ex of expansions) {
-    if (ex.ok) {
+    if (ex.ok && ex.isDirectory) {
+      const files = dirListings.get(ex.path) ?? [];
+      const truncAttr = ex.truncated ? ' truncated="true"' : "";
+      const body = files.length > 0 ? `\n${files.join("\n")}\n` : "\n";
+      blocks.push(
+        `<directory path="${ex.path}" entries="${ex.entries ?? files.length}"${truncAttr}>${body}</directory>`,
+      );
+    } else if (ex.ok) {
       const content = readSafe(root, ex.path, fs);
       blocks.push(`<file path="${ex.path}">\n${content}\n</file>`);
     } else {
@@ -350,7 +400,9 @@ function resolveMention(
   rawPath: string,
   root: string,
   maxBytes: number,
+  maxDirEntries: number,
   fs: NonNullable<AtMentionOptions["fs"]>,
+  dirListings: Map<string, string[]>,
 ): AtMentionExpansion {
   // Reject absolute paths — `@/etc/passwd` should not inline.
   if (isAbsolute(rawPath)) {
@@ -365,14 +417,28 @@ function resolveMention(
   if (!fs.exists(resolved)) {
     return { token: `@${rawPath}`, path: rawPath, ok: false, skip: "missing" };
   }
-  if (!fs.isFile(resolved)) {
-    return { token: `@${rawPath}`, path: rawPath, ok: false, skip: "not-file" };
+  if (fs.isFile(resolved)) {
+    const size = fs.size(resolved);
+    if (size > maxBytes) {
+      return { token: `@${rawPath}`, path: rawPath, ok: false, skip: "too-large", bytes: size };
+    }
+    return { token: `@${rawPath}`, path: rawPath, ok: true, bytes: size };
   }
-  const size = fs.size(resolved);
-  if (size > maxBytes) {
-    return { token: `@${rawPath}`, path: rawPath, ok: false, skip: "too-large", bytes: size };
+  // Not a file — try the directory branch. listDir is optional; without it,
+  // fall back to the legacy not-file skip so test fixtures don't break.
+  if (fs.isDir?.(resolved) && fs.listDir) {
+    const { files, truncated } = fs.listDir(resolved, root, maxDirEntries);
+    dirListings.set(rawPath, files);
+    return {
+      token: `@${rawPath}`,
+      path: rawPath,
+      ok: true,
+      isDirectory: true,
+      entries: files.length,
+      truncated,
+    };
   }
-  return { token: `@${rawPath}`, path: rawPath, ok: true, bytes: size };
+  return { token: `@${rawPath}`, path: rawPath, ok: false, skip: "not-file" };
 }
 
 function readSafe(root: string, rawPath: string, fs: NonNullable<AtMentionOptions["fs"]>): string {
@@ -392,6 +458,27 @@ const defaultFs: NonNullable<AtMentionOptions["fs"]> = {
     } catch {
       return false;
     }
+  },
+  isDir: (p) => {
+    try {
+      return statSync(p).isDirectory();
+    } catch {
+      return false;
+    }
+  },
+  listDir: (dirAbs, root, max) => {
+    // Walk from project root and filter to entries under dirAbs so the
+    // listing inherits the parent .gitignore layers. Walking dirAbs alone
+    // would miss the project-root rules above it.
+    const dirRel = relative(root, dirAbs).split(/[\\/]/).join("/");
+    const walkCap = Math.max(max * 4, 5000);
+    const all = listFilesSync(root, { maxResults: walkCap });
+    const prefix = dirRel ? `${dirRel}/` : "";
+    const filtered = dirRel ? all.filter((f) => f === dirRel || f.startsWith(prefix)) : all;
+    return {
+      files: filtered.slice(0, max),
+      truncated: filtered.length > max,
+    };
   },
   size: (p) => {
     try {

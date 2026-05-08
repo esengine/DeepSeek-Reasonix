@@ -59,6 +59,7 @@ const PUBLIC_API: readonly string[] = [
   "ChoiceRequestedError",
   "ChoiceToolOptions",
   "CodeSystemPromptOptions",
+  "DEFAULT_AT_DIR_MAX_ENTRIES",
   "DEFAULT_AT_MENTION_MAX_BYTES",
   "DEFAULT_MAX_RESULT_CHARS",
   "DEFAULT_MAX_RESULT_TOKENS",
