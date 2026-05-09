@@ -185,8 +185,37 @@ export function ChatPanel() {
     };
   }, []);
 
+  // SSE reconnect drops missed deltas / finals / modals — server only
+  // snapshots `busy-change` on (re)connect. Pull /messages + /modal to
+  // recover canonical state, otherwise UI wedges on the last seen state (#521).
+  const refetchCanonicalState = useCallback(async () => {
+    try {
+      const data = await api<MessagesResponse>("/messages");
+      setMessages(data.messages ?? []);
+      setBusy(Boolean(data.busy));
+      setStreaming(null);
+      setActiveTool(null);
+    } catch {
+      /* keep current state — next event or next reconnect will retry */
+    }
+    try {
+      const m = await api<ModalEnvelope>("/modal");
+      setModal(m.modal ?? null);
+    } catch {
+      /* modal endpoint optional in standalone */
+    }
+  }, []);
+
   useEffect(() => {
     const es = new EventSource(`/api/events?token=${TOKEN}`);
+    let firstOpen = true;
+    es.onopen = () => {
+      if (firstOpen) {
+        firstOpen = false;
+        return;
+      }
+      void refetchCanonicalState();
+    };
     es.onmessage = (ev) => {
       let dash;
       try {
@@ -266,12 +295,13 @@ export function ChatPanel() {
     };
     es.onerror = () => {
       // Auto-reconnect by default; surface a brief banner on persistent
-      // failure but don't tear down — EventSource retries in the background.
+      // failure but don't tear down — EventSource retries in the
+      // background. The next `onopen` will resync canonical state.
       setError(t("chat.eventStreamError"));
       setTimeout(() => setError(null), 3000);
     };
     return () => es.close();
-  }, []);
+  }, [refetchCanonicalState]);
 
   const send = useCallback(async () => {
     const text = input.trim();
