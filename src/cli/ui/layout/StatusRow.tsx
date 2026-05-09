@@ -4,10 +4,11 @@ import React from "react";
 import { Countdown } from "../primitives/Countdown.js";
 import { useAgentState } from "../state/provider.js";
 import type { Mode, NetworkState, StatusBar } from "../state/state.js";
-import { FG, TONE, formatCost } from "../theme/tokens.js";
+import { FG, TONE, balanceColor, formatBalance, formatCost } from "../theme/tokens.js";
 
 const RULE_PAD = 4;
 const RULE_MIN = 20;
+const WALLET_MIN_COLS = 90;
 
 export function StatusRow(): React.ReactElement {
   const status = useAgentState((s) => s.status);
@@ -16,6 +17,9 @@ export function StatusRow(): React.ReactElement {
   const cols = stdout?.columns ?? 80;
   const ruleWidth = Math.max(RULE_MIN, cols - RULE_PAD);
   const hasTurn = status.cost > 0;
+  const hasSession = status.sessionCost > 0;
+  const hasBalance = typeof status.balance === "number";
+  const showWallet = cols >= WALLET_MIN_COLS && (hasSession || hasBalance);
 
   return (
     <Box flexDirection="column">
@@ -47,8 +51,44 @@ export function StatusRow(): React.ReactElement {
         )}
         <Sep />
         <Text color={TONE.accent}>{`cache ${Math.round(status.cacheHit * 100)}%`}</Text>
+        {showWallet && (
+          <WalletPill
+            sessionCostUsd={status.sessionCost}
+            balance={status.balance}
+            currency={status.balanceCurrency}
+          />
+        )}
       </Box>
     </Box>
+  );
+}
+
+function WalletPill({
+  sessionCostUsd,
+  balance,
+  currency,
+}: {
+  sessionCostUsd: number;
+  balance?: number;
+  currency?: string;
+}): React.ReactElement {
+  const showSpent = sessionCostUsd > 0;
+  const showBalance = typeof balance === "number";
+  return (
+    <>
+      <Sep />
+      <Text color={FG.meta}>{"⛁ "}</Text>
+      {showSpent && (
+        <Text color={FG.body}>{`${formatCost(sessionCostUsd, currency, 2)} spent`}</Text>
+      )}
+      {showSpent && showBalance && <Text color={FG.meta}>{"  /  "}</Text>}
+      {showBalance && (
+        <Text bold color={balanceColor(balance, currency)}>
+          {formatBalance(balance, currency, { fractionDigits: 2 })}
+        </Text>
+      )}
+      {showBalance && <Text color={FG.faint}>{" left"}</Text>}
+    </>
   );
 }
 

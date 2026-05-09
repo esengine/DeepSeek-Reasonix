@@ -163,7 +163,7 @@ export function PromptInput({
   // a just-cleared buffer and read as residual typed input on dim-poor terminals.
   const effectivePlaceholder = disabled
     ? (placeholder ?? "…waiting for response…")
-    : (placeholder ?? "type a message · slash for commands · at-sign for files");
+    : (placeholder ?? "ask anything  ·  slash for commands  ·  at-sign for files");
 
   const lines = value.length > 0 ? value.split("\n") : [""];
   const accentColor = disabled ? FG.faint : TONE.brand;
@@ -295,15 +295,35 @@ export function PromptInput({
       ) : null}
       {!disabled ? (
         <Box marginTop={1}>
-          <Text color={FG.faint}>
-            {"  ⏎ send  ·  shift/alt+⏎ newline  ·  ↑↓ history  ·  esc abort  ·  ctrl-c quit"}
-          </Text>
+          <HintRow />
         </Box>
       ) : (
         <Box marginTop={1}>
           <Text color={FG.faint}>{"  esc to stop"}</Text>
         </Box>
       )}
+    </Box>
+  );
+}
+
+function HintRow(): React.ReactElement {
+  const items: Array<{ key: string; sep: string }> = [
+    { key: "⏎", sep: "send" },
+    { key: "⇧⏎", sep: "newline" },
+    { key: "↑↓", sep: "history" },
+    { key: "esc", sep: "abort" },
+    { key: "^C", sep: "quit" },
+  ];
+  return (
+    <Box flexDirection="row">
+      <Text>{"  "}</Text>
+      {items.map((item, i) => (
+        <React.Fragment key={item.key}>
+          {i > 0 && <Text color={FG.faint}>{"  ·  "}</Text>}
+          <Text color={FG.meta}>{item.key}</Text>
+          <Text color={FG.faint}>{` ${item.sep}`}</Text>
+        </React.Fragment>
+      ))}
     </Box>
   );
 }
