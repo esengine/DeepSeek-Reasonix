@@ -3,6 +3,16 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.1] — 2026-05-09
+
+**Fixes:**
+
+- fix(slash): the slash-suggestion picker sorts by usage frequency, but
+  the Enter-time substitution recomputed the list without that sort,
+  so the shared selection index dereferenced a differently-ordered
+  list — the highlighted row and the command that ran could disagree.
+  Both calls now share the same ordering. (#547)
+
 ## [0.36.0] — 2026-05-09
 
 **Headline:** terminal-compatibility + interaction-loss fixes from
