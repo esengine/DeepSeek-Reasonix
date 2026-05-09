@@ -1195,16 +1195,14 @@ function AppInner({
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
 
-  // PgUp / PgDn always scroll chat history; ↑/↓-on-empty-buffer also
-  // routes here via PromptInput's chatScrollHandoff. WT translates wheel
-  // events to ↑/↓ in raw mode, so this is what makes wheel-scroll work.
+  // PgUp / PgDn always scroll chat history. ↑/↓ also reaches here when
+  // PromptInput can't act on it: while busy (disabled) or once chat is
+  // unpinned (user already scrolling). When pinned + idle, PromptInput
+  // owns arrows — empty buffer recalls history, otherwise cursor motion.
   useKeystroke((ev) => {
     if (ev.pageUp) chatScroll.scrollUp();
     else if (ev.pageDown) chatScroll.scrollDown();
     else if (ev.end) chatScroll.jumpToBottom();
-    // Wheel-translated ↑/↓ has nowhere to go when PromptInput can't
-    // process it: in reading mode (unmounted) or while busy (disabled).
-    // When pinned + idle, PromptInput owns arrows for cursor / handoff.
     else if ((!chatScroll.pinned || busy) && ev.upArrow) chatScroll.scrollUp();
     else if ((!chatScroll.pinned || busy) && ev.downArrow) chatScroll.scrollDown();
   }, !modalOpen);
@@ -3687,8 +3685,6 @@ function AppInner({
                     disabled={busy}
                     onHistoryPrev={recallPrev}
                     onHistoryNext={recallNext}
-                    onChatScrollUp={chatScroll.scrollUp}
-                    onChatScrollDown={chatScroll.scrollDown}
                   />
                   {slashMatches !== null ? (
                     <SlashSuggestions

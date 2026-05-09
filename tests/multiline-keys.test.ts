@@ -148,21 +148,16 @@ describe("processMultilineKey — cursor motion", () => {
     expect(processMultilineKey("abc", 3, key({ rightArrow: true })).cursor).toBe(3);
   });
 
-  it("↑/↓ on a single-line non-empty buffer is a NOOP (no history recall)", () => {
-    // 0.7.10: history recall moved to Ctrl+P/N because mouse wheel
-    // on Windows ConPTY translates to ↑/↓ events, indistinguishable
-    // from keyboard. Wheel scrolling was clobbering the prompt with
-    // recalled history. Now ↑/↓ does nothing on a single-line
-    // buffer; users press Ctrl+P / Ctrl+N for history.
+  it("↑/↓ on a single-line non-empty buffer is a NOOP", () => {
     const up = processMultilineKey("hello", 3, key({ upArrow: true }));
     expect(up).toEqual({ next: null, cursor: null, submit: false });
     const down = processMultilineKey("hello", 3, key({ downArrow: true }));
     expect(down).toEqual({ next: null, cursor: null, submit: false });
   });
 
-  it("↑/↓ on an empty buffer hands off to chat scroll (wheel-routed)", () => {
-    expect(processMultilineKey("", 0, key({ upArrow: true })).chatScrollHandoff).toBe("up");
-    expect(processMultilineKey("", 0, key({ downArrow: true })).chatScrollHandoff).toBe("down");
+  it("↑/↓ on an empty buffer hands off to history recall (universal CLI convention)", () => {
+    expect(processMultilineKey("", 0, key({ upArrow: true })).historyHandoff).toBe("prev");
+    expect(processMultilineKey("", 0, key({ downArrow: true })).historyHandoff).toBe("next");
   });
 
   it("Ctrl+P / Ctrl+N hand off to history recall (bash readline binding)", () => {
@@ -197,13 +192,13 @@ describe("processMultilineKey — cursor motion", () => {
     expect(result).toEqual({ next: null, cursor: null, submit: false });
   });
 
-  it("raw `\\x1b[A` escape sequence is rewritten into upArrow (chat-scroll handoff on empty buffer)", () => {
+  it("raw `\\x1b[A` escape sequence is rewritten into upArrow (history handoff on empty buffer)", () => {
     const result = processMultilineKey("", 0, { input: "\x1b[A" });
-    expect(result.chatScrollHandoff).toBe("up");
+    expect(result.historyHandoff).toBe("prev");
   });
 
   it("raw `\\x1b[B` becomes downArrow; `\\x1b[C` rightArrow; `\\x1b[D` leftArrow", () => {
-    expect(processMultilineKey("", 0, { input: "\x1b[B" }).chatScrollHandoff).toBe("down");
+    expect(processMultilineKey("", 0, { input: "\x1b[B" }).historyHandoff).toBe("next");
     expect(processMultilineKey("abc", 0, { input: "\x1b[C" }).cursor).toBe(1);
     expect(processMultilineKey("abc", 2, { input: "\x1b[D" }).cursor).toBe(1);
   });
@@ -216,8 +211,8 @@ describe("processMultilineKey — cursor motion", () => {
     // newline boundary.
     expect(processMultilineKey("ab\ncd", 2, { input: "[C" }).cursor).toBe(3);
     expect(processMultilineKey("ab\ncd", 3, { input: "[D" }).cursor).toBe(2);
-    expect(processMultilineKey("", 0, { input: "[A" }).chatScrollHandoff).toBe("up");
-    expect(processMultilineKey("", 0, { input: "[B" }).chatScrollHandoff).toBe("down");
+    expect(processMultilineKey("", 0, { input: "[A" }).historyHandoff).toBe("prev");
+    expect(processMultilineKey("", 0, { input: "[B" }).historyHandoff).toBe("next");
   });
 
   it("↑ moves cursor to the previous line, preserving column when possible", () => {

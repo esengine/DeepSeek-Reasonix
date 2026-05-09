@@ -32,12 +32,9 @@ export interface PromptInputProps {
   onSubmit: (v: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  /** Ctrl+P / Ctrl+N — parent walks its prompt history and swaps `value` via `onChange`. */
+  /** ↑/↓ on an empty buffer or Ctrl+P / Ctrl+N — parent walks history and swaps `value` via `onChange`. */
   onHistoryPrev?: () => void;
   onHistoryNext?: () => void;
-  /** ↑/↓ on an empty buffer — parent scrolls chat history. */
-  onChatScrollUp?: () => void;
-  onChatScrollDown?: () => void;
 }
 
 export function PromptInput({
@@ -48,8 +45,6 @@ export function PromptInput({
   placeholder,
   onHistoryPrev,
   onHistoryNext,
-  onChatScrollUp,
-  onChatScrollDown,
 }: PromptInputProps) {
   // Cap at 24 — collapseLinesForDisplay hides content past ~20 logical lines.
   // Quantize spec.max to 4-row buckets so per-keystroke line-count changes
@@ -146,8 +141,6 @@ export function PromptInput({
     }
     if (action.historyHandoff === "prev") onHistoryPrev?.();
     if (action.historyHandoff === "next") onHistoryNext?.();
-    if (action.chatScrollHandoff === "up") onChatScrollUp?.();
-    if (action.chatScrollHandoff === "down") onChatScrollDown?.();
   }, !disabled);
 
   // ── Render ──────────────────────────────────────────────────────

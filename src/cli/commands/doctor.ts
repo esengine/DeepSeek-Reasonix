@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { DeepSeekClient } from "../../client.js";
 import { defaultConfigPath, readConfig, resolveSemanticEmbeddingConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";
@@ -10,6 +10,7 @@ import { loadHooks } from "../../hooks.js";
 import { indexExists } from "../../index/semantic/builder.js";
 import { checkOllamaStatus } from "../../index/semantic/ollama-launcher.js";
 import { listSessions } from "../../memory/session.js";
+import { resolveDataPath } from "../../tokenizer.js";
 import { VERSION } from "../../version.js";
 
 export type DoctorLevel = "ok" | "warn" | "fail";
@@ -169,32 +170,20 @@ async function checkApiReach(): Promise<Check> {
 }
 
 async function checkTokenizer(): Promise<Check> {
-  // The tokenizer file is the gzipped vocab shipped under data/. We
-  // resolve relative to the package's dist/ rather than process.cwd()
-  // — the same logic the runtime uses when loading on first count.
-  const candidates = [
-    join(
-      dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")),
-      "..",
-      "..",
-      "..",
-      "data",
-      "deepseek-tokenizer.json.gz",
-    ),
-    join(process.cwd(), "data", "deepseek-tokenizer.json.gz"),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) {
-      try {
-        const stat = statSync(p);
-        return {
-          label: "tokenizer    ",
-          level: "ok",
-          detail: `${p} (${fmtBytes(stat.size)})`,
-        };
-      } catch {
-        /* try next */
-      }
+  // Reuse the runtime's resolver so the doctor never disagrees with what
+  // the tokenizer actually loads — three candidates including a global
+  // npm install probe via createRequire.
+  const path = resolveDataPath();
+  if (existsSync(path)) {
+    try {
+      const stat = statSync(path);
+      return {
+        label: "tokenizer    ",
+        level: "ok",
+        detail: `${path} (${fmtBytes(stat.size)})`,
+      };
+    } catch {
+      /* fall through to warn */
     }
   }
   return {
