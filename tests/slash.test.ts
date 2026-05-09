@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SLASH_COMMANDS,
+  SLASH_GROUP_ORDER,
   detectSlashArgContext,
   handleSlash,
+  orderSlashCommandsByGroup,
   parseSlash,
   suggestSlashCommands,
 } from "../src/cli/ui/slash.js";
@@ -517,6 +519,43 @@ describe("handleSlash", () => {
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
     // Empty prefix returns the curated non-advanced list.
     expect(suggestSlashCommands("").length).toBeGreaterThan(5);
+  });
+
+  it("orders slash suggestions by fixed internal functional domains", () => {
+    const groups = suggestSlashCommands("", true).map((s) => s.group);
+    const groupRanks = groups.map((group) => SLASH_GROUP_ORDER.indexOf(group));
+    expect(groupRanks).toEqual([...groupRanks].sort((a, b) => a - b));
+    expect(groups.slice(0, 3)).toEqual(["setup", "setup", "setup"]);
+  });
+
+  it("keeps same-domain command order stable after grouping", () => {
+    const codeCommands = suggestSlashCommands("", true)
+      .filter((s) => s.group === "code")
+      .map((s) => s.cmd);
+    expect(codeCommands).toEqual([
+      "init",
+      "apply",
+      "discard",
+      "walk",
+      "undo",
+      "history",
+      "show",
+      "commit",
+      "mode",
+      "plan",
+      "checkpoint",
+      "restore",
+      "cwd",
+    ]);
+  });
+
+  it("falls back unrecognized slash command domains to UNKNOWN at the end", () => {
+    const ordered = orderSlashCommandsByGroup([
+      { cmd: "known", summary: "known", group: "chat" },
+      { cmd: "mystery", summary: "mystery", group: "mystery" as never },
+      { cmd: "setup", summary: "setup", group: "setup" },
+    ]).map((s) => s.cmd);
+    expect(ordered).toEqual(["setup", "known", "mystery"]);
   });
 
   describe("/update", () => {

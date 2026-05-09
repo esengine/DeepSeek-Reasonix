@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { suggestSlashCommands } from "../src/cli/ui/slash.js";
+import { SLASH_GROUP_ORDER, suggestSlashCommands } from "../src/cli/ui/slash.js";
 import { loadSlashUsage, recordSlashUse, slashUsagePath } from "../src/slash-usage.js";
 
 let dir: string;
@@ -85,5 +85,13 @@ describe("suggestSlashCommands frequency sort", () => {
   it("ignores counts for commands outside the filter set", () => {
     const sorted = suggestSlashCommands("h", false, { status: 9999 }).map((s) => s.cmd);
     expect(sorted).toEqual(["help", "hooks"]);
+  });
+  it("keeps bare browse suggestions grouped even when counts are passed", () => {
+    const groups = suggestSlashCommands("", true, { help: 9999, compact: 9998 }).map(
+      (s) => s.group,
+    );
+    const groupRanks = groups.map((group) => SLASH_GROUP_ORDER.indexOf(group));
+    expect(groupRanks).toEqual([...groupRanks].sort((a, b) => a - b));
+    expect(groups.slice(0, 3)).toEqual(["setup", "setup", "setup"]);
   });
 });

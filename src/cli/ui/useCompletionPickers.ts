@@ -15,6 +15,7 @@ import {
   type SlashCommandSpec,
   countAdvancedCommands,
   detectSlashArgContext,
+  orderSlashCommandsByGroup,
   suggestSlashCommands,
 } from "./slash.js";
 
@@ -93,7 +94,7 @@ export function useCompletionPickers({
   const [slashSelected, setSlashSelected] = useState(0);
   const slashMatches = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ")) return null;
-    return suggestSlashCommands(input.slice(1), !!codeMode, slashUsage);
+    return orderSlashCommandsByGroup(suggestSlashCommands(input.slice(1), !!codeMode, slashUsage));
   }, [input, codeMode, slashUsage]);
   const slashGroupMode = input === "/";
   const slashAdvancedHidden = useMemo(

@@ -139,20 +139,21 @@ export interface SlashContext {
 }
 
 export type SlashGroup =
-  | "chat"
   | "setup"
   | "info"
-  | "session"
+  | "chat"
   | "extend"
+  | "session"
   | "code"
   | "jobs"
-  | "advanced";
+  | "advanced"
+  | "unknown";
 
 export interface SlashCommandSpec {
   cmd: string;
   summary: string;
   contextual?: "code";
-  /** Visual category in the suggestions palette + /help. `advanced` collapses by default. */
+  /** Internal functional domain for suggestions + /help. `advanced` collapses by default; unrecognized values fall back to `unknown`. */
   group: SlashGroup;
   /** If the command takes args, hint text shown after the name. */
   argsHint?: string;

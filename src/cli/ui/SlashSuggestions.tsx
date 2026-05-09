@@ -1,9 +1,14 @@
-import { Box, Text } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig.jsx = "react" needs React in value scope for JSX compilation
+import { Box, Text, useStdout } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
+import { SLASH_GROUP_LABEL, getSlashCommandGroup, orderSlashCommandsByGroup } from "./slash.js";
 import type { SlashCommandSpec, SlashGroup } from "./slash.js";
 import { GLYPH, useColor } from "./theme.js";
+
+const GROUP_MODE_MAX_ROWS = 24;
+const SEARCH_MODE_MAX_ROWS = 8;
+const COMMAND_NAME_CELLS = 14;
+const ARGS_CELLS = 14;
 
 export interface SlashSuggestionsProps {
   matches: SlashCommandSpec[] | null;
@@ -14,17 +19,6 @@ export interface SlashSuggestionsProps {
   advancedHidden?: number;
 }
 
-const GROUP_LABEL: Record<SlashGroup, string> = {
-  chat: "CHAT",
-  setup: "SETUP",
-  info: "INFO",
-  session: "SESSION",
-  extend: "EXTEND",
-  code: "CODE",
-  jobs: "JOBS",
-  advanced: "ADVANCED",
-};
-
 export function SlashSuggestions({
   matches,
   selectedIndex,
@@ -32,6 +26,9 @@ export function SlashSuggestions({
   advancedHidden,
 }: SlashSuggestionsProps): React.ReactElement | null {
   const color = useColor();
+  const { stdout } = useStdout();
+  const cols = stdout?.columns ?? 80;
+  const [rememberedWindowStart, setRememberedWindowStart] = React.useState(0);
 
   if (matches === null) return null;
   if (matches.length === 0) {
@@ -46,17 +43,26 @@ export function SlashSuggestions({
       </Box>
     );
   }
-  const MAX = groupMode ? 24 : 8;
-  const total = matches.length;
-  const windowStart =
-    total <= MAX ? 0 : Math.max(0, Math.min(selectedIndex - Math.floor(MAX / 2), total - MAX));
-  const shown = matches.slice(windowStart, windowStart + MAX);
+  const orderedMatches = React.useMemo(() => orderSlashCommandsByGroup(matches), [matches]);
+  const orderedSelectedIndex = Math.max(0, Math.min(selectedIndex, orderedMatches.length - 1));
+  const maxRows = groupMode ? GROUP_MODE_MAX_ROWS : SEARCH_MODE_MAX_ROWS;
+  const total = orderedMatches.length;
+  const windowStart = computeWindowStart(
+    orderedMatches,
+    maxRows,
+    orderedSelectedIndex,
+    rememberedWindowStart,
+    groupMode,
+  );
+  React.useEffect(() => {
+    setRememberedWindowStart(windowStart);
+  }, [windowStart]);
+  const items = buildVisibleItems(orderedMatches, windowStart, maxRows, groupMode);
+  const shownCommands = items.filter((item) => item.kind === "command");
   const hiddenAbove = windowStart;
-  const hiddenBelow = total - windowStart - shown.length;
-  let lastGroup: SlashGroup | null = null;
-  if (windowStart > 0) lastGroup = matches[windowStart - 1]?.group ?? null;
+  const hiddenBelow = total - windowStart - shownCommands.length;
   return (
-    <Box flexDirection="column" paddingX={1} marginTop={1}>
+    <Box flexDirection="column" paddingX={1} marginTop={1} flexShrink={0} flexWrap="nowrap">
       <Box>
         <Text color={color.accent} bold>
           {"/ "}
@@ -64,19 +70,17 @@ export function SlashSuggestions({
         <Text dimColor>{`${total} command${total === 1 ? "" : "s"}`}</Text>
         {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
       </Box>
-      {shown.map((spec, i) => {
-        const idx = windowStart + i;
-        const showHeader = groupMode && spec.group !== lastGroup;
-        lastGroup = spec.group;
+      {items.map((item) => {
+        if (item.kind === "group") {
+          return <GroupHeader key={`group:${item.group}:${item.beforeIndex}`} group={item.group} />;
+        }
         return (
-          <React.Fragment key={spec.cmd}>
-            {showHeader ? (
-              <Box marginTop={idx === 0 ? 0 : 1}>
-                <Text dimColor>{`  ${GROUP_LABEL[spec.group]}`}</Text>
-              </Box>
-            ) : null}
-            <SuggestionRow spec={spec} isSelected={idx === selectedIndex} />
-          </React.Fragment>
+          <SuggestionRow
+            key={`cmd:${item.spec.group}:${item.spec.cmd}`}
+            spec={item.spec}
+            isSelected={item.index === orderedSelectedIndex}
+            columns={cols}
+          />
         );
       })}
       {hiddenBelow > 0 ? <Text dimColor>{`   ↓ ${hiddenBelow} below`}</Text> : null}
@@ -92,7 +96,78 @@ export function SlashSuggestions({
   );
 }
 
-function SuggestionRow({ spec, isSelected }: { spec: SlashCommandSpec; isSelected: boolean }) {
+export function computeWindowStart(
+  matches: readonly SlashCommandSpec[],
+  maxRows: number,
+  selectedIndex: number,
+  currentWindowStart: number,
+  groupMode = false,
+): number {
+  if (matches.length <= 0) return 0;
+  const maxWindowStart = Math.max(0, matches.length - 1);
+  let start = Math.max(0, Math.min(currentWindowStart, maxWindowStart));
+  const clampedSelectedIndex = Math.max(0, Math.min(selectedIndex, matches.length - 1));
+  if (clampedSelectedIndex < start) start = clampedSelectedIndex;
+  while (start < clampedSelectedIndex) {
+    const visibleCommandIndexes = buildVisibleItems(matches, start, maxRows, groupMode)
+      .filter((item) => item.kind === "command")
+      .map((item) => item.index);
+    if (visibleCommandIndexes.includes(clampedSelectedIndex)) break;
+    start += 1;
+  }
+  return Math.min(start, maxWindowStart);
+}
+
+type VisibleSuggestionItem =
+  | { kind: "group"; group: SlashGroup; beforeIndex: number }
+  | { kind: "command"; spec: SlashCommandSpec; index: number };
+
+export function buildVisibleItems(
+  matches: readonly SlashCommandSpec[],
+  windowStart: number,
+  maxRows: number,
+  groupMode = false,
+): VisibleSuggestionItem[] {
+  const out: VisibleSuggestionItem[] = [];
+  for (let idx = windowStart; idx < matches.length && out.length < maxRows; idx += 1) {
+    const spec = matches[idx]!;
+    if (groupMode && shouldShowGroupHeader(matches, idx)) {
+      if (out.length >= maxRows) break;
+      out.push({ kind: "group", group: getSlashCommandGroup(spec), beforeIndex: idx });
+    }
+    if (out.length >= maxRows) break;
+    out.push({ kind: "command", spec, index: idx });
+  }
+  return out;
+}
+
+function shouldShowGroupHeader(matches: readonly SlashCommandSpec[], idx: number): boolean {
+  if (idx === 0) return true;
+  const current = matches[idx];
+  const previous = matches[idx - 1];
+  if (!current || !previous) return true;
+  return getSlashCommandGroup(current) !== getSlashCommandGroup(previous);
+}
+
+function GroupHeader({ group }: { group: SlashGroup }): React.ReactElement {
+  return (
+    <Box flexShrink={0} height={1} flexWrap="nowrap">
+      <Text dimColor wrap="truncate">
+        {`  ${SLASH_GROUP_LABEL[group]}`}
+      </Text>
+    </Box>
+  );
+}
+
+function SuggestionRow({
+  spec,
+  isSelected,
+  columns,
+}: {
+  spec: SlashCommandSpec;
+  isSelected: boolean;
+  columns: number;
+}) {
   const color = useColor();
   const name = `/${spec.cmd}`;
   const argsSuffix = spec.argsHint ? spec.argsHint : "";
@@ -100,20 +175,35 @@ function SuggestionRow({ spec, isSelected }: { spec: SlashCommandSpec; isSelecte
   const translated = t(key);
   const summary = translated === key ? spec.summary : translated;
   const aliasHint = spec.aliases?.length ? ` · /${spec.aliases.join(" /")}` : "";
+  const reservedCells = 2 + COMMAND_NAME_CELLS + ARGS_CELLS + 2 + 2;
+  const summaryBudget = Math.max(8, columns - reservedCells);
+  const summaryText = truncateCells(`${summary}${aliasHint}`, summaryBudget);
   return (
-    <Box>
-      <Text color={isSelected ? color.primary : color.info} bold={isSelected}>
+    <Box flexDirection="row" flexWrap="nowrap" flexShrink={0} height={1} minHeight={1}>
+      <Text color={isSelected ? color.primary : color.info} bold={isSelected} wrap="truncate">
         {isSelected ? `${GLYPH.cur} ` : "  "}
       </Text>
-      <Text color={color.accent} bold={isSelected}>
-        {name.padEnd(14)}
+      <Text color={color.accent} bold={isSelected} wrap="truncate">
+        {padOrTrim(name, COMMAND_NAME_CELLS)}
       </Text>
-      <Text dimColor>{argsSuffix.padEnd(14)}</Text>
-      <Text>{"  "}</Text>
-      <Text color={isSelected ? color.user : color.info} dimColor={!isSelected}>
-        {summary}
+      <Text dimColor wrap="truncate">
+        {padOrTrim(argsSuffix, ARGS_CELLS)}
       </Text>
-      {aliasHint ? <Text dimColor>{aliasHint}</Text> : null}
+      <Text wrap="truncate">{"  "}</Text>
+      <Text color={isSelected ? color.user : color.info} dimColor={!isSelected} wrap="truncate">
+        {summaryText}
+      </Text>
     </Box>
   );
+}
+
+function padOrTrim(value: string, cells: number): string {
+  const trimmed = truncateCells(value, cells);
+  return trimmed.padEnd(cells);
+}
+
+function truncateCells(value: string, maxCells: number): string {
+  if (value.length <= maxCells) return value;
+  if (maxCells <= 1) return value.slice(0, Math.max(0, maxCells));
+  return `${value.slice(0, maxCells - 1)}…`;
 }

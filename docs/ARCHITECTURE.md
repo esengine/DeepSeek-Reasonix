@@ -214,7 +214,12 @@ src/
 Files kept small by design: the largest module under `cli/ui/` is 2K
 lines (App.tsx), every handler under `slash/handlers/` is ≤200 lines,
 every hook under `cli/ui/` is ≤310 lines. Adding a new slash command
-means editing one handler file and one registry line.
+means editing one handler file and one registry line. Declare its internal
+functional domain in the registry's `group` field; help and slash browsing
+are grouped by the centralized `SLASH_GROUP_ORDER` (`SETUP`, `INFO`,
+`CHAT`, `EXTEND`, `SESSION`, then code/jobs/advanced, with `UNKNOWN` last for
+unrecognized groups), so each category header appears once and commands keep
+their registry order within the category.
 
 ## Design evolution
 

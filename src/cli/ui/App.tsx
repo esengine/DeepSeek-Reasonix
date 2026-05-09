@@ -145,7 +145,13 @@ import { replaceMcpServerSummary } from "./mcp-server-list.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
-import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
+import {
+  type McpServerSummary,
+  handleSlash,
+  orderSlashCommandsByGroup,
+  parseSlash,
+  suggestSlashCommands,
+} from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
@@ -2097,7 +2103,7 @@ function AppInner({
       // input when they know what they want).
       if (text.startsWith("/") && !text.includes(" ")) {
         const typed = text.slice(1).toLowerCase();
-        const matches = suggestSlashCommands(typed, !!codeMode);
+        const matches = orderSlashCommandsByGroup(suggestSlashCommands(typed, !!codeMode));
         const exact = matches.find((m) => m.cmd === typed);
         if (!exact && matches.length > 0) {
           const chosen = matches[slashSelected] ?? matches[0];

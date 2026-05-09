@@ -1,6 +1,12 @@
 import { t, tObj } from "@/i18n/index.js";
 import { formatDuration, formatLoopStatus, parseLoopCommand } from "../../loop.js";
-import { SLASH_COMMANDS } from "../commands.js";
+import {
+  SLASH_COMMANDS,
+  SLASH_GROUP_LABEL,
+  SLASH_GROUP_ORDER,
+  getSlashCommandGroup,
+  orderSlashCommandsByGroup,
+} from "../commands.js";
 import type { SlashHandler } from "../dispatch.js";
 import type { SlashCommandSpec, SlashGroup } from "../types.js";
 
@@ -14,27 +20,21 @@ const resetLog: SlashHandler = (_args, loop) => {
   };
 };
 
-const GROUP_ORDER: ReadonlyArray<SlashGroup> = [
-  "chat",
-  "setup",
-  "info",
-  "session",
-  "extend",
-  "code",
-  "jobs",
-  "advanced",
-];
-
-const GROUP_HEADER: Record<SlashGroup, string> = {
-  chat: "CHAT  ·  daily turn ops",
-  setup: "SETUP  ·  model + cost",
-  info: "INFO  ·  current state",
-  session: "SESSION  ·  saved sessions",
-  extend: "EXTEND  ·  MCP, memory, skills",
-  code: "CODE  ·  edits + plans (code mode)",
-  jobs: "JOBS  ·  background processes (code mode)",
-  advanced: "ADVANCED  ·  rare or set-and-forget",
+const GROUP_DETAIL: Record<SlashGroup, string> = {
+  setup: "model + cost",
+  info: "current state",
+  chat: "daily turn ops",
+  extend: "MCP, memory, skills",
+  session: "saved sessions",
+  code: "edits + plans (code mode)",
+  jobs: "background processes (code mode)",
+  advanced: "rare or set-and-forget",
+  unknown: "uncategorized commands",
 };
+
+function groupHeader(group: SlashGroup): string {
+  return `${SLASH_GROUP_LABEL[group]}  ·  ${GROUP_DETAIL[group]}`;
+}
 
 function renderRow(spec: SlashCommandSpec): string {
   const name = `/${spec.cmd}${spec.argsHint ? ` ${spec.argsHint}` : ""}`;
@@ -45,10 +45,16 @@ function renderRow(spec: SlashCommandSpec): string {
 
 const help: SlashHandler = () => {
   const lines: string[] = [t("handlers.basic.helpTitle"), ""];
-  for (const group of GROUP_ORDER) {
-    const rows = SLASH_COMMANDS.filter((c) => c.group === group);
+  const rowsByGroup = new Map<SlashGroup, SlashCommandSpec[]>();
+  for (const group of SLASH_GROUP_ORDER) rowsByGroup.set(group, []);
+  for (const command of orderSlashCommandsByGroup(SLASH_COMMANDS)) {
+    const group = getSlashCommandGroup(command);
+    rowsByGroup.get(group)!.push(command);
+  }
+  for (const group of SLASH_GROUP_ORDER) {
+    const rows = rowsByGroup.get(group) ?? [];
     if (rows.length === 0) continue;
-    lines.push(`  ${GROUP_HEADER[group]}`);
+    lines.push(`  ${groupHeader(group)}`);
     for (const r of rows) lines.push(renderRow(r));
     lines.push("");
   }

@@ -1,4 +1,55 @@
-import type { SlashArgContext, SlashCommandSpec } from "./types.js";
+import type { SlashArgContext, SlashCommandSpec, SlashGroup } from "./types.js";
+
+export const SLASH_GROUP_ORDER = [
+  "setup",
+  "info",
+  "chat",
+  "extend",
+  "session",
+  "code",
+  "jobs",
+  "advanced",
+  "unknown",
+] as const satisfies readonly SlashGroup[];
+
+export const SLASH_GROUP_LABEL: Record<SlashGroup, string> = {
+  setup: "SETUP",
+  info: "INFO",
+  chat: "CHAT",
+  extend: "EXTEND",
+  session: "SESSION",
+  code: "CODE",
+  jobs: "JOBS",
+  advanced: "ADVANCED",
+  unknown: "UNKNOWN",
+};
+
+const SLASH_GROUP_RANK = new Map<SlashGroup, number>(
+  SLASH_GROUP_ORDER.map((group, index) => [group, index]),
+);
+
+export function getSlashCommandGroup(spec: Pick<SlashCommandSpec, "group">): SlashGroup {
+  const group = spec.group;
+  if (typeof group === "string" && SLASH_GROUP_RANK.has(group as SlashGroup)) {
+    return group as SlashGroup;
+  }
+  return "unknown";
+}
+
+export function orderSlashCommandsByGroup<T extends Pick<SlashCommandSpec, "group">>(
+  commands: readonly T[],
+): T[] {
+  return commands
+    .map((command, index) => ({ command, index, group: getSlashCommandGroup(command) }))
+    .sort((a, b) => {
+      const groupDiff =
+        (SLASH_GROUP_RANK.get(a.group) ?? Number.POSITIVE_INFINITY) -
+        (SLASH_GROUP_RANK.get(b.group) ?? Number.POSITIVE_INFINITY);
+      if (groupDiff !== 0) return groupDiff;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.command);
+}
 
 export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   { cmd: "help", group: "chat", summary: "show the full command reference", aliases: ["?"] },
@@ -21,6 +72,14 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "abort the current model turn (typed alternative to Esc)",
   },
 
+  {
+    cmd: "language",
+    group: "setup",
+    argsHint: "<EN|zh-CN>",
+    summary: "switch the runtime language",
+    argCompleter: ["EN", "zh-CN"],
+    aliases: ["lang"],
+  },
   {
     cmd: "preset",
     group: "setup",
@@ -321,24 +380,28 @@ export function suggestSlashCommands(
 ): SlashCommandSpec[] {
   const p = prefix.toLowerCase();
   const matches = SLASH_COMMANDS.filter((c) => {
+    // Empty prefix = browsing the menu — show the full release command surface except
+    // advanced rows, which remain collapsed behind the footer hint.
+    if (p === "") return getSlashCommandGroup(c) !== "advanced";
     if (c.contextual === "code" && !codeMode) return false;
     // Empty prefix = browsing the menu — advanced stays hidden until a letter is typed.
     if (p === "" && c.group === "advanced") return false;
     if (c.cmd.startsWith(p)) return true;
     return c.aliases?.some((a) => a.startsWith(p)) ?? false;
   });
+  if (p === "") return orderSlashCommandsByGroup(matches);
   if (!counts) return matches;
   const indexOf = new Map(matches.map((s, i) => [s.cmd, i]));
   return [...matches].sort((a, b) => {
-    const diff = (counts[b.cmd] ?? 0) - (counts[a.cmd] ?? 0);
-    if (diff !== 0) return diff;
+    const countDiff = (counts[b.cmd] ?? 0) - (counts[a.cmd] ?? 0);
+    if (countDiff !== 0) return countDiff;
     return (indexOf.get(a.cmd) ?? 0) - (indexOf.get(b.cmd) ?? 0);
   });
 }
 
 export function countAdvancedCommands(codeMode: boolean): number {
   return SLASH_COMMANDS.filter(
-    (c) => c.group === "advanced" && (c.contextual !== "code" || codeMode),
+    (c) => getSlashCommandGroup(c) === "advanced" && (c.contextual !== "code" || codeMode),
   ).length;
 }
 
