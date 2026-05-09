@@ -2100,7 +2100,7 @@ function AppInner({
       // input when they know what they want).
       if (text.startsWith("/") && !text.includes(" ")) {
         const typed = text.slice(1).toLowerCase();
-        const matches = suggestSlashCommands(typed, !!codeMode);
+        const matches = suggestSlashCommands(typed, !!codeMode, slashUsage);
         const exact = matches.find((m) => m.cmd === typed);
         if (!exact && matches.length > 0) {
           const chosen = matches[slashSelected] ?? matches[0];
@@ -2723,6 +2723,7 @@ function AppInner({
       planMode,
       session,
       slashSelected,
+      slashUsage,
       atState,
       atSelected,
       pickAtMention,
