@@ -3,6 +3,34 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.1] — 2026-05-09
+
+**Headline:** the bottom status row now shows the wallet. Both
+`status.balance` and `status.sessionCost` were already being
+populated by the reducer (refreshed on every submit), and a
+`balanceColor()` helper with red/orange thresholds had been sitting
+unused in the theme — but `StatusRow` only ever rendered the
+per-turn cost and cache-hit pills. Pure plumbing gap; users had
+to type `/cost` to see the running spend or remaining DeepSeek
+balance. Plus a small polish pass on the prompt input footer.
+
+**UI:**
+
+- feat(ui): wallet pill on the status row. New segment renders
+  right of the cache pill: `⛁ ¥1.20 spent  /  ¥45.32 left`. Spent
+  shows when `sessionCost > 0`, balance shows when known; the
+  separator only renders when both are present. Balance is colored
+  via `balanceColor()` (red <¥5, orange <¥20, brand otherwise).
+  Hidden on terminals narrower than 90 cols so the row doesn't
+  wrap. (#473)
+
+- feat(ui): friendlier prompt input. Placeholder reads "ask
+  anything · slash for commands · at-sign for files" instead of
+  "type a message". Hint footer extracted into a `HintRow`
+  component with keycap/label spacing — keys (⏎ ⇧⏎ ↑↓ esc ^C) in
+  `FG.meta`, labels in `FG.faint`. Replaces `shift/alt+⏎` with
+  `⇧⏎` and `ctrl-c` with `^C`. (#473)
+
 ## [0.33.0] — 2026-05-09
 
 **Headline:** the filesystem toolbelt grew a hand. Three new tools —
