@@ -28,7 +28,7 @@ export interface MultilineAction {
   /** When `true`, fire `onSubmit(submitValue ?? value)`. */
   submit: boolean;
   submitValue?: string;
-  /** Set on ↑/↓ at a buffer boundary or Ctrl+P / Ctrl+N — parent recalls prompt history. */
+  /** Set on Ctrl+P / Ctrl+N when no in-buffer cursor move applies — parent recalls prompt history. */
   historyHandoff?: "prev" | "next";
   /** Reducer is pure — hands raw paste to PromptInput which allocates a sentinel and inserts that. */
   pasteRequest?: { content: string };

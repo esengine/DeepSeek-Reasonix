@@ -670,9 +670,9 @@ function AppInner({
   // so we abort the in-flight turn and let the effect below fire the
   // submit once busy clears.
   const [queuedSubmit, setQueuedSubmit] = useState<string | null>(null);
-  // ↑/↓ recall over a turn-local prompt history. We don't persist to
-  // disk — the session log already keeps the messages, and cross-
-  // session bash-style recall would need per-project scoping.
+  // Ctrl+P/Ctrl+N recall over a turn-local prompt history. We don't
+  // persist to disk — the session log already keeps the messages, and
+  // cross-session bash-style recall would need per-project scoping.
   const { recallPrev, recallNext, pushHistory, resetCursor } = useInputRecall(setInput);
   // Disambiguates <Static> keys when a single turn yields multiple assistant_final events.
   const assistantIterCounter = useRef<number>(0);
@@ -1244,9 +1244,10 @@ function AppInner({
   // gets an answer instead of a hard stop. Only listens while busy so
   // we don't accidentally hijack Esc in other contexts.
   //
-  // Also handles ↑/↓ shell-style history while idle. We don't use
-  // ink-text-input's (absent) history support; parent-level useInput
-  // is simpler and lets us own the cursor semantics.
+  // Prompt history (Ctrl+P/Ctrl+N) is handed off from PromptInput via
+  // recallPrev/recallNext below — parent-level useInput is simpler
+  // than ink-text-input's (absent) history support and lets us own
+  // the cursor semantics.
   useKeystroke((ev) => {
     // PromptInput consumes its own keystrokes via useKeystroke too,
     // so events fan out to both this handler and PromptInput's. The
