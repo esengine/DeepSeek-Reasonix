@@ -598,7 +598,7 @@ async function getProviderStatusFromConfig(
   );
   return {
     kind: "ollama",
-    ready: ollama.binaryFound && ollama.daemonRunning && ollama.modelPulled,
+    ready: ollama.daemonRunning && ollama.modelPulled,
     baseUrl: config.ollama.baseUrl,
     ...ollama,
   };
@@ -647,7 +647,7 @@ async function getProviderStatus(
   }));
   return {
     kind: "ollama",
-    ready: ollama.binaryFound && ollama.daemonRunning && ollama.modelPulled,
+    ready: ollama.daemonRunning && ollama.modelPulled,
     baseUrl: resolved.baseUrl,
     ...ollama,
   };
