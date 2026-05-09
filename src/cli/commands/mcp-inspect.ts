@@ -42,9 +42,21 @@ export function formatMcpInspectFailure(err: unknown): string {
   const message = error.message;
   const code = (error as NodeJS.ErrnoException).code;
 
+  // --- Spawn / process errors ---
+
   if (code === "ENOENT") {
     const command = message.match(/^spawn\s+([^\s]+)\s+ENOENT$/)?.[1] ?? "the command";
     return `${message} — try: install or verify \`${command}\`, then check the MCP spec's command spelling`;
+  }
+
+  if (code === "EACCES") {
+    const command = message.match(/^spawn\s+([^\s]+)\s+EACCES$/)?.[1] ?? "the binary";
+    return `${message} — try: \`chmod +x ${command}\` or check the file's execute permission`;
+  }
+
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    const host = message.match(/(https?:\/\/[^\s/]+)/i)?.[1] ?? "the host";
+    return `${message} — try: confirm ${host} is reachable, check your network and DNS settings`;
   }
 
   if (code === "ECONNREFUSED") {
@@ -52,12 +64,56 @@ export function formatMcpInspectFailure(err: unknown): string {
     return `${message} — try: confirm ${target ?? "the MCP server"} is running and the host/port match the spec`;
   }
 
-  if (/^MCP request initialize \(id=\d+\) timed out after \d+ms$/.test(message)) {
-    return `${message} — try: confirm the target speaks MCP and completes the handshake before the request timeout`;
+  if (code === "ECONNRESET") {
+    return `${message} — try: the MCP server closed the connection unexpectedly. Check if it crashed or timed out`;
   }
+
+  if (code === "ERR_INVALID_URL") {
+    return `${message} — try: use a valid URL format, e.g. \`http://localhost:8080\` or \`name=npx -y @modelcontextprotocol/server-name\``;
+  }
+
+  // --- MCP request / handshake errors ---
+
+  if (/^MCP request initialize \(id=\d+\) timed out after \d+ms$/.test(message)) {
+    return `${message} — try: confirm the target speaks MCP server protocol (startup banner on stderr may show progress)`;
+  }
+
+  if (/^MCP SSE POST .+ failed: \d+/.test(message)) {
+    const url = message.match(/POST\s+(\S+)/)?.[1] ?? "";
+    const status = message.match(/failed:\s+(\d+)/)?.[1] ?? "";
+    const statusNum = Number.parseInt(status, 10);
+    if (statusNum === 404) {
+      return `${message} — try: the endpoint does not support POST. Check the MCP server's session management URL`;
+    }
+    if (statusNum === 405) {
+      return `${message} — try: the endpoint does not accept POST requests. Check if the URL points to an MCP SSE endpoint`;
+    }
+    return `${message} — try: check if the MCP server at ${url} is healthy and reachable`;
+  }
+
+  if (/^SSE connect to .+ failed/.test(message)) {
+    const url = message.match(/connect to\s+(\S+)/)?.[1] ?? "";
+    return `${message} — try: confirm the SSE endpoint at ${url} is serving an MCP endpoint event`;
+  }
+
+  // --- Spec / config errors ---
 
   if (/^(empty MCP spec|MCP spec ".*" has name but no command)/.test(message)) {
     return `${message} — try: pass \`name=command args\` or an http(s):// URL`;
+  }
+
+  if (/^MCP spec ".*" requires a URL for/.test(message)) {
+    return `${message} — try: append an http(s):// URL at the end of the spec string`;
+  }
+
+  // --- Generic transport errors ---
+
+  if (/^transport error:/.test(message)) {
+    return `${message} — try: check that the command is installed and can start without errors`;
+  }
+
+  if (/^MCP transport is closed/.test(message)) {
+    return `${message} — try: the server closed before inspection completed. Check for startup errors on stderr`;
   }
 
   return message;
