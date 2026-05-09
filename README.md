@@ -112,6 +112,23 @@ Requires Node ≥ 22. Tested on macOS · Linux · Windows (PowerShell · Git Bas
 
 Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`) are listed in `reasonix --help` and on the [CLI reference](https://esengine.github.io/DeepSeek-Reasonix/#cli).
 
+#### When to pick `chat` over `code`
+
+`code` is the default — it's the only mode that can read, write, or edit files, run shell commands, or apply SEARCH/REPLACE blocks. `chat` strips all of that down to a plain conversation; reach for it when you want a thinking-partner shell without granting filesystem or shell access.
+
+| What you get | `reasonix code` | `reasonix chat` |
+|---|---|---|
+| Native filesystem tools (read · write · `edit_file`) | ✓ | — |
+| SEARCH/REPLACE edit blocks → `/apply` review | ✓ | — |
+| Shell tool (with confirm gate, `/mode yolo` to skip) | ✓ | — |
+| Plan mode · `submit_plan` · `/todo` · `/skill new` · `/mcp add` scaffolding | ✓ | — |
+| Memory tools (`remember` / `recall_memory`) | project + global | global only |
+| Web search · `ask_choice` · MCP servers from config | ✓ | ✓ |
+| Coding-focused system prompt (SEARCH/REPLACE, repo etiquette) | ✓ | generic |
+| Session scope | per-directory (`code-<basename>`) | shared default |
+
+`chat` still picks up MCP servers from `~/.reasonix/config.json`, so if all you want is a chat shell with one or two MCP integrations, it's the lighter entrypoint. Otherwise `code` is what every screenshot, benchmark, and slash-command example in the docs assumes.
+
 **Working in a different folder:** Reasonix scopes filesystem tools to the launch directory. To work elsewhere, pass `--dir`:
 
 ```bash

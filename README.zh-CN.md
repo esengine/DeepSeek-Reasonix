@@ -66,6 +66,23 @@ npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 
 其他子命令（`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`）见 `reasonix --help` 和 [CLI 参考](https://esengine.github.io/DeepSeek-Reasonix/#cli)。
 
+#### 什么时候用 `chat` 而不是 `code`
+
+`code` 是默认入口 —— 只有它能读写、编辑文件、跑 shell 命令、解析 SEARCH/REPLACE 块。`chat` 把这些全砍掉，只剩一个纯对话外壳；当你只想找模型对一对思路、又不想授予文件系统或 shell 权限时用它。
+
+| 你拿到什么 | `reasonix code` | `reasonix chat` |
+|---|---|---|
+| 原生文件系统工具（read · write · `edit_file`） | ✓ | — |
+| SEARCH/REPLACE 编辑块 → `/apply` 审核 | ✓ | — |
+| Shell 工具（带 confirm gate，`/mode yolo` 跳过） | ✓ | — |
+| Plan 模式 · `submit_plan` · `/todo` · `/skill new` · `/mcp add` 脚手架 | ✓ | — |
+| 记忆工具（`remember` / `recall_memory`） | 项目 + 全局 | 仅全局 |
+| Web 搜索 · `ask_choice` · 从配置加载的 MCP 服务 | ✓ | ✓ |
+| 编码导向系统提示词（SEARCH/REPLACE、仓库礼仪） | ✓ | 通用 |
+| Session 作用域 | 按目录（`code-<basename>`） | 共享默认 |
+
+`chat` 同样会从 `~/.reasonix/config.json` 读取 MCP 服务器，所以如果你只是想要一个聊天外壳挂一两个 MCP 集成，它是更轻量的入口。其他场景下，文档里所有截图、基准测试、slash 命令例子默认都是 `code`。
+
 **在其他目录工作：** Reasonix 把文件系统工具作用域绑定在启动目录。要在别的目录工作，传 `--dir`：
 
 ```bash
