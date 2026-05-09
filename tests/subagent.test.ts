@@ -288,7 +288,8 @@ describe("registerSubagentTool", () => {
       "spawn_subagent",
       JSON.stringify({ task: "go", system: "You are a custom subagent." }),
     );
-    expect(seenSystems[0]).toBe("You are a custom subagent.");
+    expect(seenSystems[0]).toContain("You are a custom subagent.");
+    expect(seenSystems[0]).toMatch(/Tool budget: you have \d+ tool calls/);
   });
 
   it("falls back to the default model when the model arg is invalid", async () => {
@@ -526,7 +527,8 @@ describe("registerSubagentTool", () => {
       "spawn_subagent",
       JSON.stringify({ task: "go", type: "explore", system: "I am a custom prompt." }),
     );
-    expect(seenSystems[0]).toBe("I am a custom prompt.");
+    expect(seenSystems[0]).toContain("I am a custom prompt.");
+    expect(seenSystems[0]).toMatch(/Tool budget: you have 20 tool calls/);
   });
 
   it("omitted type leaves the default persona and budget unchanged", async () => {
@@ -537,6 +539,40 @@ describe("registerSubagentTool", () => {
     const out = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "loop please" }));
     const parsed = JSON.parse(out);
     expect(parsed.tool_iters).toBe(5);
+  });
+
+  it("appends a remaining-budget hint to tool results within 3 iters of the cap", async () => {
+    // Drive 5 tool calls then a stop. The augmenter should append a hint
+    // starting at iter 2 (remaining=3) through iter 5 (remaining=0).
+    const responses = [...makeToolCallResponses(5), { content: "done" }];
+    const innerFetch = fakeFetch(responses);
+    const seenToolResults: string[] = [];
+    const fetchSpy = vi.fn(async (url: any, init: any) => {
+      const body = init?.body ? JSON.parse(init.body) : {};
+      for (const m of body.messages ?? []) {
+        if (m.role === "tool") seenToolResults.push(m.content);
+      }
+      return innerFetch(url, init);
+    });
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: fetchSpy as any,
+    });
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    registerSubagentTool(parent, { client, maxToolIters: 5 });
+    await parent.dispatch("spawn_subagent", JSON.stringify({ task: "go" }));
+    expect(seenToolResults.length).toBeGreaterThanOrEqual(5);
+    // Each tool result is sent on every subsequent turn — dedupe by
+    // taking the first occurrence of each unique result.
+    const unique = Array.from(new Set(seenToolResults));
+    expect(unique).toHaveLength(5);
+    expect(unique[0]).not.toMatch(/budget:/);
+    expect(unique[0]).toBe("noop-result");
+    expect(unique[1]).toMatch(/\[budget: 3 of 5 tool calls left/);
+    expect(unique[2]).toMatch(/\[budget: 2 of 5 tool calls left/);
+    expect(unique[3]).toMatch(/\[budget: 1 of 5 tool call left/);
+    expect(unique[4]).toMatch(/\[budget: 0 of 5 tool calls left — finalize NOW/);
   });
 });
 

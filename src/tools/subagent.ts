@@ -101,6 +101,12 @@ const DEFAULT_MAX_RESULT_CHARS = 8000;
 const DEFAULT_MAX_ITERS = 16;
 const MIN_MAX_ITERS = 1;
 const MAX_MAX_ITERS = 32;
+/** Iters-from-cap at which we start appending a remaining-budget hint to tool results. */
+const BUDGET_WARN_THRESHOLD = 3;
+
+function budgetParagraph(maxToolIters: number): string {
+  return `Tool budget: you have ${maxToolIters} tool call${maxToolIters === 1 ? "" : "s"} for this task. The cap is enforced from outside — the call after #${maxToolIters} is refused. Pace yourself: if you can't fully resolve the task within the budget, stop early and return what you have plus what's missing, rather than burning the budget on one branch.`;
+}
 // Subagents default to flash — their work is read-and-synthesize
 // (explore, research), which doesn't need the 12× pro tier. Skill
 // frontmatter `model: deepseek-v4-pro` is the opt-in override for
@@ -176,8 +182,23 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         NEVER_INHERITED_TOOLS,
       )
     : forkRegistryExcluding(opts.parentRegistry, NEVER_INHERITED_TOOLS);
+  // Budget telemetry: count dispatches and append a remaining-iters hint
+  // when the child is within BUDGET_WARN_THRESHOLD of the cap, so the
+  // model can choose to wrap up rather than open another rabbit hole.
+  let dispatchCount = 0;
+  childTools.setResultAugmenter((_name, _args, result) => {
+    dispatchCount++;
+    const remaining = maxToolIters - dispatchCount;
+    if (remaining <= 0) {
+      return `${result}\n\n[budget: 0 of ${maxToolIters} tool calls left — finalize NOW; the next tool call will be refused]`;
+    }
+    if (remaining <= BUDGET_WARN_THRESHOLD) {
+      return `${result}\n\n[budget: ${remaining} of ${maxToolIters} tool call${remaining === 1 ? "" : "s"} left — wrap up soon]`;
+    }
+    return result;
+  });
   const childPrefix = new ImmutablePrefix({
-    system: opts.system,
+    system: `${opts.system}\n\n${budgetParagraph(maxToolIters)}`,
     toolSpecs: childTools.specs(),
   });
   const childLoop = new CacheFirstLoop({
