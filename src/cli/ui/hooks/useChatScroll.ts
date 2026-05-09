@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Rows advanced per PgUp / PgDn / arrow / wheel — small for smooth feel. */
 export const SCROLL_PAGE_ROWS = 3;
+const COALESCE_MS = 16;
 
 export interface ChatScrollState {
   /** How many rows of content are above the visible viewport. */
@@ -21,6 +22,41 @@ export function useChatScroll(): ChatScrollState {
   const [scrollRows, setScrollRows] = useState(0);
   const [pinned, setPinned] = useState(true);
   const [maxScroll, setMaxScrollState] = useState(0);
+  const maxScrollRef = useRef(0);
+
+  const pendingDelta = useRef(0);
+  const flushTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const flush = useCallback(() => {
+    flushTimer.current = null;
+    const d = pendingDelta.current;
+    pendingDelta.current = 0;
+    if (d === 0) return;
+    if (d < 0) setPinned(false);
+    setScrollRows((o) => {
+      const next = Math.max(0, Math.min(maxScrollRef.current, o + d));
+      if (next >= maxScrollRef.current) setPinned(true);
+      return next;
+    });
+  }, []);
+
+  const schedule = useCallback(
+    (delta: number) => {
+      pendingDelta.current += delta;
+      if (flushTimer.current !== null) return;
+      flushTimer.current = setTimeout(flush, COALESCE_MS);
+    },
+    [flush],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (flushTimer.current !== null) {
+        clearTimeout(flushTimer.current);
+        flushTimer.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (pinned) setScrollRows(maxScroll);
@@ -30,22 +66,22 @@ export function useChatScroll(): ChatScrollState {
     if (scrollRows > maxScroll) setScrollRows(maxScroll);
   }, [scrollRows, maxScroll]);
 
-  const scrollUp = useCallback(() => {
-    setPinned(false);
-    setScrollRows((o) => Math.max(0, o - SCROLL_PAGE_ROWS));
+  const scrollUp = useCallback(() => schedule(-SCROLL_PAGE_ROWS), [schedule]);
+  const scrollDown = useCallback(() => schedule(SCROLL_PAGE_ROWS), [schedule]);
+
+  const jumpToBottom = useCallback(() => {
+    pendingDelta.current = 0;
+    if (flushTimer.current !== null) {
+      clearTimeout(flushTimer.current);
+      flushTimer.current = null;
+    }
+    setPinned(true);
   }, []);
 
-  const scrollDown = useCallback(() => {
-    setScrollRows((o) => {
-      const next = Math.min(maxScroll, o + SCROLL_PAGE_ROWS);
-      if (next >= maxScroll) setPinned(true);
-      return next;
-    });
-  }, [maxScroll]);
-
-  const jumpToBottom = useCallback(() => setPinned(true), []);
-
-  const setMaxScroll = useCallback((rows: number) => setMaxScrollState(rows), []);
+  const setMaxScroll = useCallback((rows: number) => {
+    maxScrollRef.current = rows;
+    setMaxScrollState(rows);
+  }, []);
 
   return { scrollRows, pinned, scrollUp, scrollDown, jumpToBottom, setMaxScroll };
 }
