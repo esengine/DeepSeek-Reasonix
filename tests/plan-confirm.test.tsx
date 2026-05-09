@@ -45,4 +45,28 @@ describe("PlanConfirm — issue #336 plan body must be visible", () => {
     expect(out).toContain("line 1");
     expect(out).toMatch(/more line.*scrollback/);
   });
+
+  it("surfaces the open-questions block even when steps are present (issue #477)", () => {
+    const plan = [
+      "## Summary",
+      "swap backend",
+      "",
+      "## Open Questions",
+      "- which adapter wins on tie?",
+      "- keep deprecated env var?",
+    ].join("\n");
+    const steps = [{ id: "s1", title: "do thing" }];
+    const out = bytesFor(plan, steps);
+    expect(out).toContain("which adapter wins on tie?");
+    expect(out).toContain("keep deprecated env var?");
+    expect(out).toContain("do thing");
+  });
+
+  it("surfaces the open-questions block even when the body is past the truncation cap", () => {
+    const filler = Array.from({ length: 30 }, (_, i) => `body line ${i + 1}`).join("\n");
+    const plan = `## Summary\n${filler}\n\n## Risks\n- migration runs hot\n- breaking config`;
+    const out = bytesFor(plan);
+    expect(out).toContain("migration runs hot");
+    expect(out).toContain("breaking config");
+  });
 });

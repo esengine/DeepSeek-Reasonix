@@ -47,12 +47,20 @@ export type ToolInterceptor = (
   args: Record<string, unknown>,
 ) => string | null | undefined | Promise<string | null | undefined>;
 
+/** Final-stage post-processor — runs on every dispatch return (success and error paths) so callers can append context like a remaining-budget hint. Whatever it returns becomes the dispatch result. */
+export type ToolResultAugmenter = (
+  name: string,
+  args: Record<string, unknown>,
+  result: string,
+) => string;
+
 export class ToolRegistry {
   private readonly _tools = new Map<string, InternalTool>();
   private readonly _autoFlatten: boolean;
   private _planMode = false;
   private _interceptor: ToolInterceptor | null = null;
   private _auditListener: ToolCallAuditListener | null = null;
+  private _resultAugmenter: ToolResultAugmenter | null = null;
 
   constructor(opts: ToolRegistryOptions = {}) {
     this._autoFlatten = opts.autoFlatten !== false;
@@ -75,6 +83,11 @@ export class ToolRegistry {
 
   setAuditListener(fn: ToolCallAuditListener | null): void {
     this._auditListener = fn;
+  }
+
+  /** Final-stage post-processor; replaces previous augmenter when called twice. Pass null to clear. */
+  setResultAugmenter(fn: ToolResultAugmenter | null): void {
+    this._resultAugmenter = fn;
   }
 
   register<A, R>(def: ToolDefinition<A, R>): this {
@@ -192,6 +205,7 @@ export class ToolRegistry {
       }
     }
 
+    let finalResult: string;
     try {
       try {
         this._auditListener?.({ name, args });
@@ -219,7 +233,7 @@ export class ToolRegistry {
       if (opts.maxResultChars !== undefined) {
         clipped = truncateForModel(clipped, opts.maxResultChars);
       }
-      return clipped;
+      finalResult = clipped;
     } catch (err) {
       const e = err as Error & { toToolResult?: () => unknown };
       // Errors may opt into a richer tool-result shape by implementing
@@ -229,15 +243,23 @@ export class ToolRegistry {
       // but keeping payloads structured is cleaner for UI parsing).
       if (typeof e.toToolResult === "function") {
         try {
-          return JSON.stringify(e.toToolResult());
+          finalResult = JSON.stringify(e.toToolResult());
         } catch {
-          /* fall through to the default shape */
+          finalResult = JSON.stringify({ error: `${e.name}: ${e.message}` });
         }
+      } else {
+        finalResult = JSON.stringify({ error: `${e.name}: ${e.message}` });
       }
-      return JSON.stringify({
-        error: `${e.name}: ${e.message}`,
-      });
     }
+
+    if (this._resultAugmenter) {
+      try {
+        return this._resultAugmenter(name, args, finalResult);
+      } catch {
+        /* augmenter must never break the tool result */
+      }
+    }
+    return finalResult;
   }
 }
 

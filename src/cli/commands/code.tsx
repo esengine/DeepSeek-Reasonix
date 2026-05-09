@@ -29,6 +29,7 @@ import { registerFilesystemTools } from "../../tools/filesystem.js";
 import { JobRegistry } from "../../tools/jobs.js";
 import { registerMemoryTools } from "../../tools/memory.js";
 import { registerPlanTool } from "../../tools/plan.js";
+import { registerScaffoldTools } from "../../tools/scaffold.js";
 import { registerShellTools } from "../../tools/shell.js";
 import { registerTodoTool } from "../../tools/todo.js";
 import { markPhase } from "../startup-profile.js";
@@ -134,6 +135,11 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   // `todo_write` — lightweight in-session task tracker, no approval gate.
   // Independent of plan mode (readOnly=true so it stays callable in /plan).
   registerTodoTool(tools);
+  // `create_skill` / `add_mcp_server` — let the model scaffold from chat.
+  // Both writes go through the same paths the wizard / `/skill new` use,
+  // so the on-disk shape stays one source of truth. New servers take
+  // effect on next launch (no live client churn).
+  registerScaffoldTools(tools, { projectRoot: rootDir });
   // `run_skill` is intentionally NOT registered here — App.tsx wires it
   // up with the subagent runner attached, so `runAs: subagent` skills
   // can spawn isolated child loops. Doing it here would mean the App's

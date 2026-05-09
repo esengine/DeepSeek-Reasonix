@@ -142,6 +142,7 @@ import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
 import { replaceMcpServerSummary } from "./mcp-server-list.js";
 import { formatLongPaste } from "./paste-collapse.js";
+import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
 import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
@@ -587,6 +588,8 @@ function AppInner({
   const [stagedInput, setStagedInput] = useState<{
     plan: string;
     mode: "refine" | "approve" | "reject";
+    /** Open-questions / risks block extracted from the plan; surfaced in PlanRefineInput on refine. */
+    questions?: string;
   } | null>(null);
   // Mid-execution pause from mark_step_complete — model finished a step
   // and the loop waits for user to pick Continue / Revise / Stop.
@@ -2828,7 +2831,8 @@ function AppInner({
 
       if (choice === "refine" || choice === "approve") {
         if (pendingPlan) {
-          setStagedInput({ plan: pendingPlan, mode: choice });
+          const questions = extractOpenQuestionsSection(pendingPlan) ?? undefined;
+          setStagedInput({ plan: pendingPlan, mode: choice, questions });
           setPendingPlan(null);
         } else if (choice === "approve") {
           setStagedInput({ plan: "", mode: "approve" });
@@ -2848,7 +2852,8 @@ function AppInner({
       // the user can tell the model *why* — symmetric with the deny-tool
       // "press Tab to add reason" pattern. Empty Enter still cancels cleanly.
       if (pendingPlan) {
-        setStagedInput({ plan: pendingPlan, mode: "reject" });
+        const questions = extractOpenQuestionsSection(pendingPlan) ?? undefined;
+        setStagedInput({ plan: pendingPlan, mode: "reject", questions });
         setPendingPlan(null);
       }
     },
@@ -2952,8 +2957,8 @@ function AppInner({
           marker = `▸ refining — ${trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed}`;
         } else {
           synthetic =
-            "The plan needs refinement, but the user didn't give specifics. Ask them one or two concrete questions — scope, approach, file boundaries, or the risks you flagged — then wait for their answer before submitting an updated plan.";
-          marker = "▸ refining — asking the model to clarify";
+            "The plan needs refinement. The user saw your open questions / risks block and chose not to answer specifics. Pick the safest default for each open question, call those defaults out explicitly in the new plan, and submit the refined submit_plan. Do not re-ask — the user already saw the questions.";
+          marker = "▸ refining — using safe defaults";
         }
       }
 
@@ -3460,6 +3465,7 @@ function AppInner({
               {stagedInput ? (
                 <PlanRefineInput
                   mode={stagedInput.mode}
+                  questions={stagedInput.questions}
                   onSubmit={handleStagedInputSubmit}
                   onCancel={handleStagedInputCancel}
                 />

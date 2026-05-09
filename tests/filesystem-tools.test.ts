@@ -93,6 +93,67 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).not.toContain("line 200");
     });
 
+    it("auto-preview embeds a top-level export outline for TS-shaped files", async () => {
+      const filler = (n: number) => Array.from({ length: n }, () => "  // filler").join("\n");
+      const src = [
+        'import { foo } from "./foo";',
+        'import { bar } from "./bar";',
+        "",
+        "export interface AppProps {",
+        "  id: string;",
+        "}",
+        "",
+        filler(120),
+        "export function AppInner(props: AppProps) {",
+        "  return null;",
+        "}",
+        filler(80),
+        "export const handleSubmit = () => {};",
+        filler(38),
+        "export default AppInner;",
+      ].join("\n");
+      await fs.writeFile(join(root, "App.tsx"), src);
+      const out = await tools.dispatch("read_file", JSON.stringify({ path: "App.tsx" }));
+      expect(out).toMatch(/\[outline: 3 top-level exports\]/);
+      expect(out).toMatch(/L\s*4\s+export interface AppProps/);
+      expect(out).toMatch(/L128\s+export function AppInner/);
+      expect(out).toMatch(/L211\s+export const handleSubmit/);
+    });
+
+    it("auto-preview omits the outline when no top-level exports are present", async () => {
+      const src = Array.from({ length: 220 }, (_, i) => `line ${i + 1}`).join("\n");
+      await fs.writeFile(join(root, "plain.txt"), src);
+      const out = await tools.dispatch("read_file", JSON.stringify({ path: "plain.txt" }));
+      expect(out).toMatch(/auto-preview: /);
+      expect(out).not.toMatch(/\[outline:/);
+    });
+
+    it("auto-preview outline elides the middle when more than 30 exports", async () => {
+      // Spread the 35 exports out so head/tail slices don't mask the elision.
+      const lines: string[] = [];
+      const exportPositions: number[] = [];
+      for (let i = 0; i < 35; i++) {
+        for (let f = 0; f < 6; f++) lines.push(`// filler block ${i}-${f}`);
+        exportPositions.push(lines.length + 1);
+        lines.push(`export const sym${String(i + 1).padStart(2, "0")} = ${i + 1};`);
+      }
+      for (let i = 0; i < 60; i++) lines.push(`// trailer ${i}`);
+      await fs.writeFile(join(root, "many.ts"), lines.join("\n"));
+      const out = await tools.dispatch("read_file", JSON.stringify({ path: "many.ts" }));
+      const outlineMatch = /\[outline: 35 top-level exports\]([\s\S]*?)\n\n/.exec(out);
+      expect(outlineMatch).not.toBeNull();
+      const outlineBlock = outlineMatch![1]!;
+      expect(outlineBlock).toMatch(/export const sym01/);
+      expect(outlineBlock).toMatch(/export const sym25/);
+      expect(outlineBlock).not.toMatch(/export const sym26/);
+      expect(outlineBlock).not.toMatch(/export const sym30/);
+      expect(outlineBlock).toMatch(/export const sym31/);
+      expect(outlineBlock).toMatch(/export const sym35/);
+      const gapStart = exportPositions[24]!;
+      const gapEnd = exportPositions[30]!;
+      expect(outlineBlock).toContain(`[… 5 more exports between L${gapStart} and L${gapEnd} …]`);
+    });
+
     it("returns full content when file is at or below the auto-preview threshold", async () => {
       const out = await tools.dispatch("read_file", JSON.stringify({ path: "hello.txt" }));
       expect(out).toBe("line 1\nline 2\nline 3");
@@ -499,6 +560,71 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
         expect(out).toContain("src/beta.tsx:");
         expect(out).not.toContain("alpha.ts:");
         expect(out).not.toContain("gamma.tsx:");
+      });
+    });
+
+    describe("per-file cap and histogram fallback", () => {
+      it("caps a single file's printed hits at 30 and footers the overflow", async () => {
+        const lines = Array.from({ length: 47 }, () => "TARGETSTRING here");
+        await fs.writeFile(join(root, "many.ts"), lines.join("\n"));
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TARGETSTRING", glob: "many.ts" }),
+        );
+        const hitLines = out.split("\n").filter((l) => /^many\.ts:\d+:/.test(l));
+        expect(hitLines).toHaveLength(30);
+        expect(out).toMatch(/\[many\.ts: 17 more matches in this file/);
+      });
+
+      it("does not emit the cap footer when hits fit under the cap", async () => {
+        const lines = Array.from({ length: 5 }, () => "TARGETSTRING here");
+        await fs.writeFile(join(root, "few.ts"), lines.join("\n"));
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TARGETSTRING", glob: "few.ts" }),
+        );
+        expect(out).not.toMatch(/more matches in this file/);
+      });
+
+      it("summary_only:true returns histogram with no line content", async () => {
+        await fs.writeFile(
+          join(root, "a.ts"),
+          ["MARK one", "noise", "MARK two", "MARK three"].join("\n"),
+        );
+        await fs.writeFile(join(root, "b.ts"), ["MARK only"].join("\n"));
+        const out = await tools.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "MARK", summary_only: true, glob: "*.ts" }),
+        );
+        expect(out).toContain("a.ts: 3 matches");
+        expect(out).toContain("b.ts: 1 match");
+        expect(out).not.toMatch(/MARK one/);
+        expect(out).not.toMatch(/MARK two/);
+      });
+
+      it("flips remaining files to summary mode once 80% of the byte budget is spent", async () => {
+        const tiny = new ToolRegistry();
+        registerFilesystemTools(tiny, { rootDir: root, maxListBytes: 4096 });
+        const dir = join(root, "histtest");
+        await fs.mkdir(dir, { recursive: true });
+        // Per-file output ≈ 8 hits × ~75 bytes ≈ 600 bytes. 5 files → 3000 bytes
+        // (~73%); 6 → ~88%, so the flip lands somewhere in the back half of
+        // the alphabetical walk.
+        const fileNames = "abcdefghij".split("");
+        const hitLine = `TARGET ${"y".repeat(50)}`;
+        for (const name of fileNames) {
+          const lines = Array.from({ length: 8 }, () => hitLine);
+          await fs.writeFile(join(dir, `${name}.ts`), lines.join("\n"));
+        }
+        const out = await tiny.dispatch(
+          "search_content",
+          JSON.stringify({ pattern: "TARGET", path: "histtest" }),
+        );
+        expect(out).toMatch(/switching to summary mode — byte budget at \d+%/);
+        const histogramLines = out
+          .split("\n")
+          .filter((l) => /^histtest\/[a-j]\.ts: \d+ match/.test(l));
+        expect(histogramLines.length).toBeGreaterThan(0);
       });
     });
   });

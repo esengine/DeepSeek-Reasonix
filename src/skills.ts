@@ -135,6 +135,15 @@ export class SkillStore {
 
   /** Scaffold a new skill stub at the chosen scope. Refuses to overwrite. */
   create(name: string, scope: "project" | "global"): { path: string } | { error: string } {
+    return this.createWithContent(name, scope, skillStubBody(name));
+  }
+
+  /** Like `create` but writes caller-supplied file contents instead of the stub — used by the scaffold tool. */
+  createWithContent(
+    name: string,
+    scope: "project" | "global",
+    content: string,
+  ): { path: string } | { error: string } {
     if (!isValidSkillName(name)) {
       return { error: `invalid skill name: "${name}" — use letters, digits, _, -, .` };
     }
@@ -152,7 +161,7 @@ export class SkillStore {
     }
     mkdirSync(dirname(flat), { recursive: true });
     try {
-      writeFileSync(flat, skillStubBody(name), { encoding: "utf8", flag: "wx" });
+      writeFileSync(flat, content, { encoding: "utf8", flag: "wx" });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {
         return { error: `skill "${name}" already exists at ${flat}` };

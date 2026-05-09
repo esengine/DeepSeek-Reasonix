@@ -2,6 +2,7 @@
 
 import { Box } from "ink";
 import React from "react";
+import { t } from "../../i18n/index.js";
 import type { PlanStep } from "../../tools/plan.js";
 import { PlanStepList, type StepStatus } from "./PlanStepList.js";
 import { SingleSelect } from "./Select.js";
@@ -40,7 +41,7 @@ function PlanCheckpointConfirmInner({
   const statuses = buildStatusMap(steps, completedStepIds, stepId, isLast);
   const subtitle = counter ? `${counter}  ·  ${label}` : label;
   return (
-    <ApprovalCard tone="ok" glyph="⛁" title="Checkpoint — step done" metaRight={subtitle}>
+    <ApprovalCard tone="ok" glyph="⛁" title={t("planFlow.checkpoint.title")} metaRight={subtitle}>
       {steps && steps.length > 0 ? (
         <Box marginBottom={1} flexDirection="column">
           <PlanStepList steps={steps} statuses={statuses} focusStepId={stepId} />
@@ -51,18 +52,18 @@ function PlanCheckpointConfirmInner({
         items={[
           {
             value: "continue",
-            label: "Continue — run the next step",
-            hint: "Model resumes with the next step.",
+            label: t("planFlow.checkpoint.continue"),
+            hint: t("planFlow.checkpoint.continueHint"),
           },
           {
             value: "revise",
-            label: "Revise — give feedback before the next step",
-            hint: "Stay paused, type guidance; model adjusts the remaining plan.",
+            label: t("planFlow.checkpoint.revise"),
+            hint: t("planFlow.checkpoint.reviseHint"),
           },
           {
             value: "stop",
-            label: "Stop — end the plan here",
-            hint: "Model summarizes what was done and ends.",
+            label: t("planFlow.checkpoint.stop"),
+            hint: t("planFlow.checkpoint.stopHint"),
           },
         ]}
         onSubmit={(v) => onChoose(v as CheckpointChoice)}
