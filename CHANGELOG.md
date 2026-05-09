@@ -3,6 +3,96 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] — 2026-05-09
+
+**Headline:** two big UX shifts in the composer. The `@`-mention picker
+is rebuilt as a streaming file browser — `@` alone shows the immediate
+directory listing, anything you type fires a cancelable walk that
+streams matches in as it finds them, with a `searching… N scanned`
+footer. Fixes the unusable-on-large-repos behavior reported by
+@xlingyun8-maker (5000 files would evict 90% before ranking, picker
+showed nothing). The mouse wheel now scrolls chat history regardless of
+where the cursor is, via SGR mouse tracking — wheel events route
+through `mouseScrollUp/Down` instead of being mistranslated as ↑/↓ by
+Windows Terminal / ConPTY.
+
+The supporting cast: a structured `TipCard` variant replaces the
+multi-line text crammed into a step-progress card (the existing
+edit-gate hint reported as ugly), a real `/keys` command with the full
+keyboard + mouse + copy-paste reference (was a dangling reference in
+the edit-gate tip footer for months), and a one-time mouse/clipboard
+tip on first launch so users don't think the prompt is broken when
+right-click stops doing the terminal's native paste.
+
+Critical bug fix at the bottom: dashboard was silently overwriting
+CLI-side `/language` changes by pushing localStorage back to the
+server on every page load.
+
+**Features:**
+
+- feat(at-picker): rebuild as file browser with streaming search.
+  Empty / trailing-slash queries (`@`, `@some/dir/`) browse one
+  directory level via a single `readdir` — folders selectable, drill
+  with Tab. Any non-slash filter (`@foo`, `@auth/log`) kicks off a
+  cancelable streaming walk across the full tree, matches batch into
+  the popup as the walker finds them, footer shows scan progress
+  in flight. Drops the 500-file walker cap; cancellation bounds work
+  instead. New public API: `walkFilesStream` (streaming + abort),
+  `listDirectory` (single-level browse), `parseAtQuery` (dir/filter
+  split with trailing-slash awareness). `expandAtUrls` + helpers
+  split into `at-mentions-url.ts` to keep `at-mentions.ts` under the
+  800-line ceiling. (#479, closes #478)
+
+- fix(scroll): route mouse wheel via SGR mouse tracking. Enable
+  DECSET 1006 + 1000 at startup so the terminal reports wheel events
+  as `\x1b[<btn;col;row;M` mouse sequences instead of translating
+  them to ↑/↓ key presses. The chat-scroll handler routes the
+  resulting `mouseScrollUp/Down` events to scrollback, bypassing the
+  arrow-key path entirely. ↑/↓ keys retain their existing PromptInput
+  bindings (history recall on empty buffer, cursor motion otherwise).
+  The SGR mouse parser already lived in `stdin-reader.ts`; this just
+  turns on the terminal-side feature. Cost: terminal-native drag-to-
+  select needs a modifier (Shift on Windows Terminal / Alacritty /
+  WezTerm, Option on iTerm2) — same convention as tmux, Claude Code,
+  Cursor's terminal. (#479)
+
+- feat(ui): structured TipCard variant for onboarding hints. The
+  edit-gate one-time tip rendered as raw multi-line text inside a
+  `stepProgress` LiveCard — `✓` glyph (success semantic, wrong for
+  educational content) plus a manually-inlined `▸ TIP:` prefix,
+  columns aligned with hand-counted spaces that wrap badly on narrow
+  terminals. Replaces with a dedicated `TipCard` kind: single `ⓘ`
+  glyph in accent color, topic + "shown once" badge in a justified
+  header row, each row gets its own `<Text>` with column alignment
+  driven by `string-width` (CJK-correct), footer separated from body
+  by a blank row, no border. (#480)
+
+- feat(ui): `/keys` reference + first-run mouse/clipboard tip.
+  `/keys` was already referenced in the edit-gate tip's footer ("Run
+  /keys anytime for the full list") but no handler existed; typing
+  `/keys` hit the unknown-command branch. Adds a multi-section
+  TipCard with the full keyboard / mouse / copy-paste / edit-gate
+  reference. Adds a first-run mouse + clipboard tip mirroring the
+  edit-gate pattern (suppressed thereafter via a
+  `mouseClipboardHintShown` flag) so users don't think the prompt
+  is broken when right-click stops doing the terminal's native
+  paste. TipCard now supports multiple sections; existing single-
+  section tips are unchanged. New i18n helper `tObj<T>(path)` for
+  structured translation entries. (#481)
+
+**Bug fixes:**
+
+- fix(dashboard): stop pushing localStorage lang back to server on
+  init. The dashboard's `initLangFromServer()` had a one-way sync
+  rule: when localStorage's lang differed from server config AND
+  localStorage was tagged "explicit", it POSTed localStorage's value
+  back, silently clobbering CLI-side `/language` changes whenever the
+  dashboard tab next loaded (including auto-restored tabs from
+  previous browser sessions). Server config is the single source of
+  truth now; localStorage stays as a render-cache to avoid first-paint
+  flicker but is never pushed back. Removes `EXPLICIT_KEY` /
+  `isExplicit` / `markExplicit` entirely. (#483)
+
 ## [0.33.2] — 2026-05-09
 
 **Headline:** two bug fixes for #468 reported by @dacec354.
