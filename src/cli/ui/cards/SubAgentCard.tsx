@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useContext } from "react";
+import { t } from "../../../i18n/index.js";
 import { ActiveCardContext, Card as CardWrap } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import { Spinner } from "../primitives/Spinner.js";
@@ -16,28 +17,28 @@ export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactE
     failed: tone.err,
   };
   const headColor = statusColor[card.status];
-  const headGlyph = card.status === "failed" ? "✖" : "⌬";
+  const headGlyph = card.status === "failed" ? "\u2717" : "\u232c";
   const runningChildren = card.children.filter((c) => !isChildDone(c)).length;
   const isRunning = card.status === "running";
   const inLive = useContext(ActiveCardContext);
   const headerMeta = isRunning
     ? runningChildren > 0
-      ? [`${runningChildren} running`]
-      : ["working"]
+      ? [`${runningChildren} ${t("editMode.runningLabel")}`]
+      : [t("editMode.workingLabel")]
     : [{ text: card.status, color: headColor }];
   return (
     <CardWrap tone={headColor}>
       <CardHeader
         glyph={headGlyph}
         tone={headColor}
-        title="subagent"
+        title={t("cardTitles.subagent")}
         titleColor={tone.violet}
         subtitle={card.task}
         meta={headerMeta}
       />
-      {card.name ? <Text color={fg.faint}>{`agent · ${card.name}`}</Text> : null}
+      {card.name ? <Text color={fg.faint}>{`${t("cardLabels.agent")} · ${card.name}`}</Text> : null}
       {card.tools && card.tools.length > 0 && (
-        <Text color={fg.faint}>{`tools · ${card.tools.join(", ")}`}</Text>
+        <Text color={fg.faint}>{`${t("cardLabels.tools")} · ${card.tools.join(", ")}`}</Text>
       )}
       {card.children.map((child) => (
         <Box key={child.id} flexDirection="row" gap={1}>
@@ -108,7 +109,7 @@ function childVisual(
         statusGlyph: done ? doneGlyph(doneColor) : runningGlyph(CARD.reasoning.color),
         kindGlyph: "◆",
         kindColor: CARD.reasoning.color,
-        text: `reasoning · ${card.paragraphs} ¶`,
+        text: t("cardLabels.reasoningLabel", { count: card.paragraphs }),
       };
     }
     case "tool": {
@@ -125,7 +126,7 @@ function childVisual(
         statusGlyph: card.done ? doneGlyph(doneColor) : runningGlyph(CARD.streaming.color),
         kindGlyph: "◈",
         kindColor: CARD.streaming.color,
-        text: card.done ? "response" : "writing …",
+        text: card.done ? t("cardLabels.response") : t("cardLabels.writing"),
       };
     case "diff":
       return {

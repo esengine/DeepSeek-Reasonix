@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { SearchCard as SearchCardData, SearchHit } from "../state/cards.js";
@@ -9,9 +10,7 @@ import { FG, TONE } from "../theme/tokens.js";
 export function SearchCard({ card }: { card: SearchCardData }): React.ReactElement {
   const fileCount = new Set(card.hits.map((h) => h.file)).size;
   const elapsed = `${(card.elapsedMs / 1000).toFixed(2)}s`;
-  const stats = `${card.hits.length} hit${card.hits.length === 1 ? "" : "s"} · ${fileCount} file${
-    fileCount === 1 ? "" : "s"
-  }`;
+  const stats = t("cardLabels.hits", { count: card.hits.length, files: fileCount });
 
   const grouped = groupByFile(card.hits.slice(0, 10));
 
@@ -20,7 +19,7 @@ export function SearchCard({ card }: { card: SearchCardData }): React.ReactEleme
       <CardHeader
         glyph="⊙"
         tone={TONE.info}
-        title="search"
+        title={t("cardTitles.search")}
         subtitle={`"${card.query}"`}
         meta={[stats, elapsed]}
       />
@@ -38,7 +37,7 @@ export function SearchCard({ card }: { card: SearchCardData }): React.ReactEleme
         </Box>
       ))}
       {card.hits.length > 10 ? (
-        <Text color={FG.faint}>{`⋮ +${card.hits.length - 10} more hits`}</Text>
+        <Text color={FG.faint}>{t("cardLabels.moreHits", { count: card.hits.length - 10 })}</Text>
       ) : null}
     </Card>
   );

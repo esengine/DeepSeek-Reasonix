@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { UsageCard as UsageCardData } from "../state/cards.js";
@@ -32,13 +33,13 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
   const reasonRatio = card.tokens.reason / cap;
   const outputRatio = card.tokens.output / cap;
 
-  const headerMeta: string[] = [`turn ${card.turn}`, formatCost(card.cost, card.balanceCurrency)];
+  const headerMeta: string[] = [`${t("cardLabels.turn")} ${card.turn}`, formatCost(card.cost, card.balanceCurrency)];
   if (card.elapsedMs !== undefined) headerMeta.push(`${(card.elapsedMs / 1000).toFixed(1)}s`);
   return (
     <Card tone={FG.meta}>
-      <CardHeader glyph="Σ" tone={FG.meta} title="usage" meta={headerMeta} />
+      <CardHeader glyph="Σ" tone={FG.meta} title={t("cardTitles.usage")} meta={headerMeta} />
       <Box flexDirection="row" gap={1}>
-        <Text color={FG.sub}>prompt</Text>
+        <Text color={FG.sub}>{t("cardLabels.prompt")}</Text>
         {bar(promptRatio, TONE.brand)}
         <Text bold color={FG.body}>
           {card.tokens.prompt.toLocaleString()}
@@ -46,32 +47,32 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
         <Text color={FG.faint}>{`/ 1M · ${(promptRatio * 100).toFixed(1)}%`}</Text>
       </Box>
       <Box flexDirection="row" gap={1}>
-        <Text color={FG.sub}>reason</Text>
+        <Text color={FG.sub}>{t("cardLabels.reason")}</Text>
         {bar(reasonRatio, TONE.accent)}
         <Text bold color={FG.body}>
           {card.tokens.reason.toLocaleString()}
         </Text>
       </Box>
       <Box flexDirection="row" gap={1}>
-        <Text color={FG.sub}>output</Text>
+        <Text color={FG.sub}>{t("cardLabels.output")}</Text>
         {bar(outputRatio, TONE.brand)}
         <Text bold color={FG.body}>
           {card.tokens.output.toLocaleString()}
         </Text>
       </Box>
       <Box flexDirection="row" gap={1}>
-        <Text color={FG.sub}>cache </Text>
+        <Text color={FG.sub}>{t("cardLabels.cache")} </Text>
         {bar(card.cacheHit, TONE.ok)}
         <Text bold color={TONE.ok}>{`${(card.cacheHit * 100).toFixed(1)}%`}</Text>
       </Box>
       <Box flexDirection="row" gap={1}>
-        <Text color={FG.faint}>session</Text>
+        <Text color={FG.faint}>{t("cardLabels.session")}</Text>
         <Text bold color={FG.body}>
           {`⛁ ${formatCost(card.sessionCost, card.balanceCurrency, 3)}`}
         </Text>
         {card.balance !== undefined ? (
           <>
-            <Text color={FG.faint}>· balance</Text>
+            <Text color={FG.faint}>{`· ${t("cardLabels.balance")}`}</Text>
             <Text bold color={TONE.brand}>
               {formatBalance(card.balance, card.balanceCurrency)}
             </Text>
@@ -87,11 +88,11 @@ function CompactUsageRow({ card }: { card: UsageCardData }): React.ReactElement 
   return (
     <Box flexDirection="row" gap={1} marginTop={1}>
       <Text color={FG.meta}>Σ</Text>
-      <Text color={FG.faint}>{`turn ${card.turn}`}</Text>
+      <Text color={FG.faint}>{`${t("cardLabels.turn")} ${card.turn}`}</Text>
       <Text color={FG.meta}>
-        {`· ${compactNum(card.tokens.prompt)} prompt · ${compactNum(card.tokens.output)} out`}
+        {`· ${compactNum(card.tokens.prompt)} ${t("cardLabels.prompt")} · ${compactNum(card.tokens.output)} ${t("cardLabels.output")}`}
       </Text>
-      <Text color={FG.faint}>· cache</Text>
+      <Text color={FG.faint}>{`· ${t("cardLabels.cache")}`}</Text>
       <Text color={TONE.ok}>{`${(card.cacheHit * 100).toFixed(0)}%`}</Text>
       <Text color={FG.faint}>{`· ${formatCost(card.cost, card.balanceCurrency)}${elapsed}`}</Text>
       {card.balance !== undefined ? (

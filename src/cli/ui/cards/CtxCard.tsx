@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { CtxCard as CtxCardData } from "../state/cards.js";
@@ -33,22 +34,22 @@ export function CtxCard({ card }: { card: CtxCardData }): React.ReactElement {
       <CardHeader
         glyph="⌘"
         tone={TONE.brand}
-        title="context"
+        title={t("cardTitles.context")}
         meta={[`${used.toLocaleString()} / ${cap.toLocaleString()} (${usedPct.toFixed(1)}%)`]}
       />
-      {row("system", card.systemTokens, card.systemTokens / cap, TONE.brand)}
-      {row("tools", card.toolsTokens, card.toolsTokens / cap, TONE.warn)}
-      {row("log", card.logTokens, card.logTokens / cap, TONE.ok)}
-      {row("input", card.inputTokens, card.inputTokens / cap, TONE.accent)}
+      {row(t("cardLabels.system"), card.systemTokens, card.systemTokens / cap, TONE.brand)}
+      {row(t("cardLabels.tools"), card.toolsTokens, card.toolsTokens / cap, TONE.warn)}
+      {row(t("cardLabels.log"), card.logTokens, card.logTokens / cap, TONE.ok)}
+      {row(t("cardLabels.input"), card.inputTokens, card.inputTokens / cap, TONE.accent)}
       {card.topTools.length > 0 ? (
         <>
           <Text color={FG.faint}>
-            {`top tools · ${card.toolsCount} total · ${card.logMessages} log msgs`}
+            {`${t("cardLabels.topTools")} · ${card.toolsCount} ${t("cardLabels.tools")} · ${card.logMessages} ${t("cardLabels.logMsgs")}`}
           </Text>
           {card.topTools.slice(0, 5).map((t) => (
             <Box key={`${t.turn}-${t.name}`} flexDirection="row" gap={1}>
               <Text color={FG.sub}>{t.name}</Text>
-              <Text color={FG.faint}>{`· turn ${t.turn} · ${t.tokens.toLocaleString()}`}</Text>
+              <Text color={FG.faint}>{`· ${t("cardLabels.turn")} ${t.turn} · ${t.tokens.toLocaleString()}`}</Text>
             </Box>
           ))}
         </>

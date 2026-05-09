@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { clipToCells, wrapToCells } from "../../../frame/width.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
@@ -47,7 +48,7 @@ function ReasoningHeader({ card }: { card: ReasoningCardData }): React.ReactElem
   const streamingActive = card.streaming && !card.aborted;
   const headColor = card.aborted ? TONE.err : streamingActive ? TONE_ACTIVE.accent : TONE.accent;
   const glyph = streamingActive ? "◇" : "◆";
-  const title = streamingActive ? "reasoning…" : card.aborted ? "reasoning (aborted)" : "reasoning";
+  const title = streamingActive ? t("cardTitles.reasoningEllipsis") : card.aborted ? t("cardTitles.reasoningAborted") : t("cardTitles.reasoning");
   const meta: MetaItem[] = [];
   const m = headerMeta(card);
   if (m) meta.push(m);
@@ -76,12 +77,12 @@ function ReasoningHeader({ card }: { card: ReasoningCardData }): React.ReactElem
 
 function headerMeta(card: ReasoningCardData): string {
   if (card.streaming) {
-    return card.tokens > 0 ? `${card.tokens.toLocaleString()} tok` : "";
+    return card.tokens > 0 ? `${card.tokens.toLocaleString()} ${t("cardLabels.tok")}` : "";
   }
   const parts: string[] = [];
-  if (card.tokens > 0) parts.push(`${card.tokens.toLocaleString()} tok`);
-  if (card.paragraphs > 0) parts.push(`${card.paragraphs} ¶`);
-  return parts.join(" · ");
+  if (card.tokens > 0) parts.push(`${card.tokens.toLocaleString()} ${t("cardLabels.tok")}`);
+  if (card.paragraphs > 0) parts.push(`${card.paragraphs} ${t("cardLabels.pilcrow")}`);
+  return parts.join(" \u00b7 ");
 }
 
 function headerDuration(card: ReasoningCardData): string {

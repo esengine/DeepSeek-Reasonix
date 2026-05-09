@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { clipToCells } from "../../../frame/width.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
@@ -46,7 +47,7 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
     meta.push({ text: `↻ ${card.retry.attempt}/${card.retry.max}`, color: TONE.warn });
   }
   if (card.rejected) {
-    meta.push({ text: "rejected", color: TONE.err });
+    meta.push({ text: t("cardLabels.rejected"), color: TONE.err });
   }
   for (const part of metaTrail(card)) meta.push(part);
 
@@ -71,7 +72,7 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
           <>
             {hidden > 0 ? (
               <Text color={FG.faint}>
-                {`⋮ ${hidden} earlier line${hidden === 1 ? "" : "s"} (use /tool to read full)`}
+                {t("cardLabels.earlierLines", { count: hidden })}
               </Text>
             ) : null}
             {visible.map((line, i) => (
@@ -145,8 +146,8 @@ function headerColorFor(s: ToolStatus): string {
 function metaTrail(card: ToolCardData): string[] {
   const parts: string[] = [];
   const inputBytes = largestStringInputBytes(card.args);
-  if (inputBytes !== null) parts.push(`${formatBytes(inputBytes)} in`);
-  if (card.elapsedMs > 0) parts.push(`${(card.elapsedMs / 1000).toFixed(2)}s`);
+  if (inputBytes !== null) parts.push(t("cardLabels.bytesIn", { bytes: formatBytes(inputBytes) }));
+  if (card.elapsedMs > 0) parts.push(t("cardLabels.elapsedSec", { secs: (card.elapsedMs / 1000).toFixed(2) }));
   if (
     card.done &&
     !card.rejected &&
@@ -154,7 +155,7 @@ function metaTrail(card: ToolCardData): string[] {
     card.exitCode !== undefined &&
     card.exitCode !== 0
   ) {
-    parts.push(`exit ${card.exitCode}`);
+    parts.push(t("cardLabels.exit", { code: card.exitCode }));
   }
   return parts;
 }
