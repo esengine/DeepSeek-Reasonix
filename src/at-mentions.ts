@@ -120,18 +120,65 @@ export async function listFilesWithStatsAsync(
   root: string,
   opts: ListFilesOptions = {},
 ): Promise<FileWithStats[]> {
-  const maxResults = Math.max(1, opts.maxResults ?? 2000);
-  const ignoreDirs = new Set(opts.ignoreDirs ?? DEFAULT_PICKER_IGNORE_DIRS);
-  const rootAbs = resolve(root);
-  const respectGi = opts.respectGitignore !== false;
   const out: FileWithStats[] = [];
+  const maxResults = Math.max(1, opts.maxResults ?? 2000);
+  await walkFilesStream(root, {
+    ...opts,
+    onEntry: (e) => {
+      out.push(e);
+      return out.length < maxResults;
+    },
+  });
+  return out;
+}
+
+export interface StreamWalkOptions {
+  ignoreDirs?: readonly string[];
+  respectGitignore?: boolean;
+  signal?: AbortSignal;
+  /** Called per file entry. Return false to halt the walk. */
+  onEntry: (entry: FileWithStats) => boolean | undefined;
+  /** Called periodically with the running file-count. */
+  onProgress?: (scanned: number) => void;
+  /** Default 100ms — minimum gap between onProgress calls. */
+  progressIntervalMs?: number;
+}
+
+/** Cancelable, streaming walker. Drives `listFilesWithStatsAsync` and the picker's search-mode walk. */
+export async function walkFilesStream(
+  root: string,
+  opts: StreamWalkOptions,
+): Promise<{ scanned: number; cancelled: boolean }> {
+  const ignoreDirs = new Set(opts.ignoreDirs ?? DEFAULT_PICKER_IGNORE_DIRS);
+  const respectGi = opts.respectGitignore !== false;
+  const rootAbs = resolve(root);
+  const progressGap = Math.max(0, opts.progressIntervalMs ?? 100);
+  let scanned = 0;
+  let halted = false;
+  let lastProgress = 0;
+
+  const reportProgress = (force: boolean) => {
+    if (!opts.onProgress) return;
+    const now = Date.now();
+    if (force || now - lastProgress >= progressGap) {
+      lastProgress = now;
+      opts.onProgress(scanned);
+    }
+  };
+
+  const emit = (entry: FileWithStats) => {
+    scanned++;
+    if (halted) return;
+    if (opts.onEntry(entry) === false) halted = true;
+    reportProgress(false);
+  };
 
   const walk = async (
     dirAbs: string,
     dirRel: string,
     layers: readonly GitignoreLayer[],
   ): Promise<void> => {
-    if (out.length >= maxResults) return;
+    if (halted || opts.signal?.aborted) return;
     let effectiveLayers = layers;
     if (respectGi) {
       const ig = await loadGitignoreAt(dirAbs);
@@ -144,53 +191,41 @@ export async function listFilesWithStatsAsync(
       return;
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
-    // Stats batched per directory to amortize syscall overhead. Recursion stays
-    // sequential so the merged DFS order matches the sync walker's contract.
     const fileEnts: Dirent[] = [];
     for (const ent of entries) {
-      if (out.length >= maxResults) break;
-      const relPath = dirRel ? `${dirRel}/${ent.name}` : ent.name;
+      if (halted || opts.signal?.aborted) break;
       const absPath = join(dirAbs, ent.name);
       if (ent.isDirectory()) {
         if (ent.name.startsWith(".") || ignoreDirs.has(ent.name)) continue;
         if (ignoredByLayers(effectiveLayers, absPath, true)) continue;
-        // Drain pending file stats from THIS directory before
-        // descending so the output order stays DFS-alphabetical.
         if (fileEnts.length > 0) {
-          await statBatch(fileEnts, dirAbs, dirRel, out, maxResults, effectiveLayers);
+          await flushFiles(fileEnts, dirAbs, dirRel, effectiveLayers, emit);
           fileEnts.length = 0;
-          if (out.length >= maxResults) return;
+          if (halted || opts.signal?.aborted) return;
         }
-        await walk(absPath, relPath, effectiveLayers);
+        await walk(absPath, dirRel ? `${dirRel}/${ent.name}` : ent.name, effectiveLayers);
       } else if (ent.isFile() || ent.isSymbolicLink()) {
-        // Symlinks land in the same batch — statBatch resolves them and drops
-        // any whose target isn't a regular file (broken or symlink-to-dir).
         fileEnts.push(ent);
       }
     }
-    if (fileEnts.length > 0 && out.length < maxResults) {
-      await statBatch(fileEnts, dirAbs, dirRel, out, maxResults, effectiveLayers);
+    if (fileEnts.length > 0 && !halted && !opts.signal?.aborted) {
+      await flushFiles(fileEnts, dirAbs, dirRel, effectiveLayers, emit);
     }
   };
 
   await walk(rootAbs, "", []);
-  return out;
+  reportProgress(true);
+  return { scanned, cancelled: !!opts.signal?.aborted };
 }
 
-async function statBatch(
+async function flushFiles(
   ents: readonly Dirent[],
   dirAbs: string,
   dirRel: string,
-  out: FileWithStats[],
-  maxResults: number,
   layers: readonly GitignoreLayer[],
+  emit: (e: FileWithStats) => void,
 ): Promise<void> {
-  const accepted: Dirent[] = [];
-  for (const e of ents) {
-    if (out.length + accepted.length >= maxResults) break;
-    if (ignoredByLayers(layers, join(dirAbs, e.name), false)) continue;
-    accepted.push(e);
-  }
+  const accepted = ents.filter((e) => !ignoredByLayers(layers, join(dirAbs, e.name), false));
   const stats = await Promise.all(
     accepted.map((e) =>
       stat(join(dirAbs, e.name))
@@ -201,15 +236,125 @@ async function statBatch(
   for (let i = 0; i < accepted.length; i++) {
     const ent = accepted[i]!;
     const s = stats[i];
-    if (ent.isSymbolicLink()) {
-      // Drop broken symlinks and symlinks-to-dirs (latter would cycle).
-      if (!s || !s.isFile) continue;
-    }
-    out.push({
+    if (ent.isSymbolicLink() && (!s || !s.isFile)) continue;
+    emit({
       path: dirRel ? `${dirRel}/${ent.name}` : ent.name,
       mtimeMs: s?.mtimeMs ?? 0,
     });
   }
+}
+
+export interface DirEntry {
+  name: string;
+  /** Relative-to-root path (forward slashes). For dirs, no trailing slash. */
+  path: string;
+  isDir: boolean;
+  /** 0 for directories (no stat), real mtime for files. */
+  mtimeMs: number;
+}
+
+export interface ListDirectoryOptions {
+  ignoreDirs?: readonly string[];
+  respectGitignore?: boolean;
+}
+
+/** One-level browse for the @-picker. Folders first then files, alpha within each group. Resolves outside-root to []. */
+export async function listDirectory(
+  root: string,
+  relDir: string,
+  opts: ListDirectoryOptions = {},
+): Promise<DirEntry[]> {
+  const ignoreDirs = new Set(opts.ignoreDirs ?? DEFAULT_PICKER_IGNORE_DIRS);
+  const respectGi = opts.respectGitignore !== false;
+  const rootAbs = resolve(root);
+  const dirAbs = resolve(rootAbs, relDir);
+  const rel = relative(rootAbs, dirAbs);
+  if (rel.startsWith("..") || isAbsolute(rel)) return [];
+
+  const layers: GitignoreLayer[] = [];
+  if (respectGi) {
+    const segs = rel ? rel.split(/[\\/]/) : [];
+    let cursor = rootAbs;
+    const ig = await loadGitignoreAt(cursor);
+    if (ig) layers.push({ dirAbs: cursor, ig });
+    for (const seg of segs) {
+      cursor = join(cursor, seg);
+      const igSeg = await loadGitignoreAt(cursor);
+      if (igSeg) layers.push({ dirAbs: cursor, ig: igSeg });
+    }
+  }
+
+  let raw: Dirent[];
+  try {
+    raw = await readdir(dirAbs, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const dirRel = rel.split(/[\\/]/).join("/");
+  const dirs: DirEntry[] = [];
+  const files: Dirent[] = [];
+  for (const ent of raw) {
+    const absPath = join(dirAbs, ent.name);
+    if (ent.isDirectory()) {
+      if (ent.name.startsWith(".") || ignoreDirs.has(ent.name)) continue;
+      if (ignoredByLayers(layers, absPath, true)) continue;
+      dirs.push({
+        name: ent.name,
+        path: dirRel ? `${dirRel}/${ent.name}` : ent.name,
+        isDir: true,
+        mtimeMs: 0,
+      });
+    } else if (ent.isFile() || ent.isSymbolicLink()) {
+      if (ignoredByLayers(layers, absPath, false)) continue;
+      files.push(ent);
+    }
+  }
+  const stats = await Promise.all(
+    files.map((e) =>
+      stat(join(dirAbs, e.name))
+        .then((s) => ({ mtimeMs: s.mtimeMs, isFile: s.isFile() }))
+        .catch(() => null),
+    ),
+  );
+  const fileEntries: DirEntry[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const ent = files[i]!;
+    const s = stats[i];
+    if (ent.isSymbolicLink() && (!s || !s.isFile)) continue;
+    fileEntries.push({
+      name: ent.name,
+      path: dirRel ? `${dirRel}/${ent.name}` : ent.name,
+      isDir: false,
+      mtimeMs: s?.mtimeMs ?? 0,
+    });
+  }
+  dirs.sort((a, b) => a.name.localeCompare(b.name));
+  fileEntries.sort((a, b) => a.name.localeCompare(b.name));
+  return [...dirs, ...fileEntries];
+}
+
+export interface ParsedAtQuery {
+  /** Directory portion (rel from root, no trailing slash). Empty = root. */
+  dir: string;
+  /** Filter portion — chars after the last slash. Empty if query ended in `/`. */
+  filter: string;
+  /** True if the query ended in `/` — caller knows to browse `dir`. */
+  trailingSlash: boolean;
+}
+
+/** Split `src/auth/log` → `{dir: "src/auth", filter: "log"}`; trailing slash sets `trailingSlash` and clears filter. */
+export function parseAtQuery(query: string): ParsedAtQuery {
+  const normalized = query.replace(/\\/g, "/");
+  const trailingSlash = normalized.endsWith("/");
+  const trimmed = trailingSlash ? normalized.slice(0, -1) : normalized;
+  const lastSlash = trimmed.lastIndexOf("/");
+  if (trailingSlash) return { dir: trimmed, filter: "", trailingSlash: true };
+  if (lastSlash < 0) return { dir: "", filter: trimmed, trailingSlash: false };
+  return {
+    dir: trimmed.slice(0, lastSlash),
+    filter: trimmed.slice(lastSlash + 1),
+    trailingSlash: false,
+  };
 }
 
 /** Trailing-token only, anchored at end-of-input — distinct from `AT_MENTION_PATTERN` which scans all. */
@@ -523,164 +668,10 @@ const defaultFs: NonNullable<AtMentionOptions["fs"]> = {
   read: (p) => readFileSync(p, "utf8"),
 };
 
-// @url mentions — async sibling of @path. Matches `@http(s)://...` after a
-// word boundary, fetches each URL once per session (in-memory cache), and
-// appends a "Referenced URLs" block under the prompt the model sees. Uses
-// the same web-fetch + HTML-strip pipeline as the model's `web_fetch` tool
-// so a `@url` reference and a model-issued fetch produce identical content.
-
-/** Trailing punctuation stripped separately — URLs legitimately contain `,` `.` `)` in query strings. */
-export const AT_URL_PATTERN = /(?<=^|\s)@(https?:\/\/\S+)/g;
-
-/** Default cap on inlined URL body (chars). Matches DEFAULT_AT_MENTION_MAX_BYTES order-of-magnitude. */
-export const DEFAULT_AT_URL_MAX_CHARS = 32_000;
-
-export interface AtUrlExpansion {
-  /** The raw `@url` token as it appeared in the text. */
-  token: string;
-  /** Absolute URL (after trailing-punctuation strip). */
-  url: string;
-  /** True if content was inlined. False = skipped (reason in `skip`). */
-  ok: boolean;
-  /** Page title when extractable from `<title>`. */
-  title?: string;
-  /** Char count of the (post-truncation) inlined body. */
-  chars?: number;
-  /** True iff the original page exceeded `maxChars` and was clipped. */
-  truncated?: boolean;
-  /** Why the mention was skipped — set when ok=false. */
-  skip?: "fetch-error" | "non-text" | "timeout" | "blocked";
-  /** Free-form error message attached to skip outcomes. */
-  error?: string;
-}
-
-export interface AtUrlOptions {
-  /** Max chars of inlined body per URL. Default DEFAULT_AT_URL_MAX_CHARS. */
-  maxChars?: number;
-  /** Per-URL fetch timeout in ms. */
-  timeoutMs?: number;
-  fetcher?: (
-    url: string,
-    opts: { maxChars?: number; timeoutMs?: number; signal?: AbortSignal },
-  ) => Promise<{ url: string; title?: string; text: string; truncated: boolean }>;
-  cache?: Map<string, AtUrlExpansion & { body?: string }>;
-  /** Forward Esc/abort to the fetcher. */
-  signal?: AbortSignal;
-}
-
-export async function expandAtUrls(
-  text: string,
-  opts: AtUrlOptions = {},
-): Promise<{ text: string; expansions: AtUrlExpansion[] }> {
-  const maxChars = opts.maxChars ?? DEFAULT_AT_URL_MAX_CHARS;
-  const fetcher = opts.fetcher;
-  if (!fetcher) {
-    throw new Error("expandAtUrls: fetcher option is required (wire src/tools/web.ts:webFetch)");
-  }
-
-  // De-dupe by URL so the same `@https://x.com` referenced twice fetches once.
-  const seen = new Map<string, AtUrlExpansion>();
-  const bodies = new Map<string, string>();
-  const order: string[] = [];
-
-  for (const match of text.matchAll(AT_URL_PATTERN)) {
-    const rawUrl = match[1] ?? "";
-    const url = stripUrlTail(rawUrl);
-    if (!url) continue;
-    if (seen.has(url)) continue;
-
-    const cached = opts.cache?.get(url);
-    if (cached) {
-      seen.set(url, cached);
-      if (cached.body) bodies.set(url, cached.body);
-      order.push(url);
-      continue;
-    }
-
-    let expansion: AtUrlExpansion;
-    let body = "";
-    try {
-      const page = await fetcher(url, {
-        maxChars,
-        timeoutMs: opts.timeoutMs,
-        signal: opts.signal,
-      });
-      body = page.text;
-      expansion = {
-        token: `@${url}`,
-        url,
-        ok: true,
-        title: page.title,
-        chars: body.length,
-        truncated: page.truncated,
-      };
-    } catch (err) {
-      const message = (err as Error).message ?? String(err);
-      // Tag a few common shapes so the UI can hint at causes.
-      let skip: AtUrlExpansion["skip"] = "fetch-error";
-      if (/aborted|timeout/i.test(message)) skip = "timeout";
-      else if (/40\d|forbidden|access denied|captcha/i.test(message)) skip = "blocked";
-      expansion = {
-        token: `@${url}`,
-        url,
-        ok: false,
-        skip,
-        error: message,
-      };
-    }
-    seen.set(url, expansion);
-    if (body) bodies.set(url, body);
-    if (opts.cache) opts.cache.set(url, { ...expansion, body });
-    order.push(url);
-  }
-
-  if (seen.size === 0) return { text, expansions: [] };
-
-  const expansions = order.map((u) => seen.get(u)!).filter(Boolean);
-  const blocks: string[] = [];
-  for (const ex of expansions) {
-    if (ex.ok) {
-      const titleAttr = ex.title ? ` title="${escapeAttr(ex.title)}"` : "";
-      const truncTag = ex.truncated ? ' truncated="true"' : "";
-      const body = bodies.get(ex.url) ?? "";
-      blocks.push(`<url href="${ex.url}"${titleAttr}${truncTag}>\n${body}\n</url>`);
-    } else {
-      const reasonAttr = ex.skip ?? "fetch-error";
-      blocks.push(`<url href="${ex.url}" skipped="${reasonAttr}" />`);
-    }
-  }
-  const augmented = `${text}\n\n[Referenced URLs]\n${blocks.join("\n\n")}`;
-  return { text: augmented, expansions };
-}
-
-/** Only strips `.,;:!?` and unmatched close-brackets — internal path / query punctuation preserved. */
-export function stripUrlTail(raw: string): string {
-  let s = raw;
-  while (s.length > 0) {
-    const last = s[s.length - 1]!;
-    if (".,;:!?".includes(last)) {
-      s = s.slice(0, -1);
-      continue;
-    }
-    if (")]}>".includes(last)) {
-      // Only strip if the matching open bracket isn't elsewhere in the
-      // URL — avoids butchering legitimate `(thing)` query fragments.
-      const open = ({ ")": "(", "]": "[", "}": "{", ">": "<" } as const)[
-        last as ")" | "]" | "}" | ">"
-      ];
-      if (!s.includes(open)) {
-        s = s.slice(0, -1);
-        continue;
-      }
-    }
-    break;
-  }
-  return s;
-}
-
-function escapeAttr(s: string): string {
-  return s
-    .replace(/"/g, "&quot;")
-    .replace(/[\r\n]+/g, " ")
-    .trim();
-}
+export {
+  AT_URL_PATTERN,
+  DEFAULT_AT_URL_MAX_CHARS,
+  expandAtUrls,
+  stripUrlTail,
+} from "./at-mentions-url.js";
+export type { AtUrlExpansion, AtUrlOptions } from "./at-mentions-url.js";

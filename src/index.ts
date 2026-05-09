@@ -19,18 +19,25 @@ export {
   DEFAULT_PICKER_IGNORE_DIRS,
   detectAtPicker,
   expandAtMentions,
+  listDirectory,
   listFilesSync,
   listFilesWithStatsAsync,
   listFilesWithStatsSync,
+  parseAtQuery,
   rankPickerCandidates,
+  walkFilesStream,
 } from "./at-mentions.js";
 export type {
   AtMentionExpansion,
   AtMentionOptions,
+  DirEntry,
   FileWithStats,
+  ListDirectoryOptions,
   ListFilesOptions,
+  ParsedAtQuery,
   PickerCandidate,
   RankPickerOptions,
+  StreamWalkOptions,
 } from "./at-mentions.js";
 export type {
   CacheFirstLoopOptions,

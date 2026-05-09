@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
+  type DirEntry,
   type FileWithStats,
+  type ParsedAtQuery,
   detectAtPicker,
-  listFilesWithStatsAsync,
+  listDirectory,
+  parseAtQuery,
   rankPickerCandidates,
+  walkFilesStream,
 } from "../../at-mentions.js";
 import {
   type McpServerSummary,
@@ -26,6 +30,26 @@ export interface UseCompletionPickersParams {
   slashUsage?: Readonly<Record<string, number>>;
 }
 
+export interface AtPickerEntry {
+  /** Basename — what the row leads with. */
+  label: string;
+  /** Path the picker substitutes into the buffer (no leading @). */
+  insertPath: string;
+  /** Dim suffix shown after the label ("src/auth/" for "src/auth/login.ts" search hits). Empty in browse mode. */
+  dirSuffix: string;
+  isDir: boolean;
+}
+
+export type AtPickerState =
+  | { kind: "browse"; baseDir: string; entries: readonly AtPickerEntry[]; loading: boolean }
+  | {
+      kind: "search";
+      filter: string;
+      entries: readonly AtPickerEntry[];
+      scanned: number;
+      searching: boolean;
+    };
+
 export interface UseCompletionPickersResult {
   // ── slash-name picker ──
   slashMatches: SlashCommandSpec[] | null;
@@ -37,11 +61,10 @@ export interface UseCompletionPickersResult {
   slashAdvancedHidden: number;
 
   // ── @-mention picker ──
-  atPicker: ReturnType<typeof detectAtPicker>;
-  atMatches: readonly string[] | null;
+  atState: AtPickerState | null;
   atSelected: number;
   setAtSelected: React.Dispatch<React.SetStateAction<number>>;
-  pickAtMention: (chosenPath: string) => void;
+  pickAtMention: (entry: AtPickerEntry, action: "commit" | "drill") => void;
   recordRecentFile: (path: string) => void;
 
   // ── slash-arg picker ──
@@ -51,6 +74,10 @@ export interface UseCompletionPickersResult {
   setSlashArgSelected: React.Dispatch<React.SetStateAction<number>>;
   pickSlashArg: (chosen: string) => void;
 }
+
+const SEARCH_DEBOUNCE_MS = 80;
+const SEARCH_FLUSH_MS = 50;
+const SEARCH_RESULT_CAP = 200;
 
 /** Picker priority: @ > slash-arg > slash-name. Detection already disambiguates by buffer shape. */
 export function useCompletionPickers({
@@ -83,36 +110,6 @@ export function useCompletionPickers({
 
   // ── @-mention picker ──
   const [atSelected, setAtSelected] = useState(0);
-  // Walk the code root asynchronously after first paint. Earlier
-  // versions used `listFilesWithStatsSync` inside `useMemo`, which
-  // blocked mount for 100-300ms on Windows monorepos (one statSync
-  // per file × 500 files). Async + parallel-stat-per-directory
-  // takes the cost off the critical path; the picker stays empty
-  // for the brief window before the walk completes (typically
-  // <200ms), and fills in atomically once Promise.all resolves.
-  // Files created mid-session via tool edits still won't appear
-  // until restart — rare; the user can type the full path.
-  const [atFiles, setAtFiles] = useState<readonly FileWithStats[]>([]);
-  useEffect(() => {
-    if (!codeMode) {
-      setAtFiles([]);
-      return;
-    }
-    let cancelled = false;
-    listFilesWithStatsAsync(rootDir, { maxResults: 500 })
-      .then((files) => {
-        if (!cancelled) setAtFiles(files);
-      })
-      .catch(() => {
-        if (!cancelled) setAtFiles([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [codeMode, rootDir]);
-  // LRU of files touched by recent tool calls. Seeds the picker with
-  // "stuff I just looked at" at the top, so a user typing `@` in the
-  // same file they were just discussing gets it instantly.
   const recentFilesRef = useRef<string[]>([]);
   const recordRecentFile = useCallback((p: string) => {
     const list = recentFilesRef.current;
@@ -121,32 +118,67 @@ export function useCompletionPickers({
     list.unshift(p);
     if (list.length > 20) list.length = 20;
   }, []);
+
   const atPicker = useMemo(() => {
     if (!codeMode) return null;
-    // Slash prefix wins — avoids the picker confusingly surfacing on
-    // `/@wat`-style edge inputs.
     if (slashMatches !== null) return null;
     return detectAtPicker(input);
   }, [codeMode, input, slashMatches]);
-  const atMatches = useMemo<readonly string[] | null>(() => {
-    if (!atPicker) return null;
-    return rankPickerCandidates(atFiles, atPicker.query, {
-      limit: 40,
-      recentlyUsed: recentFilesRef.current,
-    });
-  }, [atPicker, atFiles]);
+
+  const parsed = useMemo<ParsedAtQuery | null>(
+    () => (atPicker ? parseAtQuery(atPicker.query) : null),
+    [atPicker],
+  );
+
+  const atMode: "browse" | "search" | null = parsed
+    ? parsed.trailingSlash || parsed.filter === ""
+      ? "browse"
+      : "search"
+    : null;
+
+  const browseDir = parsed && atMode === "browse" ? parsed.dir : "";
+  const browse = useBrowseListing(rootDir, atMode === "browse" ? browseDir : null);
+  const search = useStreamingSearch(
+    rootDir,
+    atMode === "search" && parsed ? parsed.filter : null,
+    recentFilesRef,
+  );
+
+  const atState = useMemo<AtPickerState | null>(() => {
+    if (!parsed) return null;
+    if (atMode === "browse") {
+      return {
+        kind: "browse",
+        baseDir: browseDir,
+        entries: browse.entries,
+        loading: browse.loading,
+      };
+    }
+    return {
+      kind: "search",
+      filter: parsed.filter,
+      entries: search.entries,
+      scanned: search.scanned,
+      searching: search.searching,
+    };
+  }, [parsed, atMode, browseDir, browse, search]);
+
   useEffect(() => {
     setAtSelected((prev) => {
-      if (!atMatches || atMatches.length === 0) return 0;
-      if (prev >= atMatches.length) return atMatches.length - 1;
+      const len = atState?.entries.length ?? 0;
+      if (len === 0) return 0;
+      if (prev >= len) return len - 1;
       return prev;
     });
-  }, [atMatches]);
+  }, [atState]);
+
   const pickAtMention = useCallback(
-    (chosenPath: string) => {
+    (entry: AtPickerEntry, action: "commit" | "drill") => {
       if (!atPicker) return;
       const before = input.slice(0, atPicker.atOffset);
-      setInput(`${before}@${chosenPath} `);
+      const tail =
+        action === "drill" && entry.isDir ? `${entry.insertPath}/` : `${entry.insertPath} `;
+      setInput(`${before}@${tail}`);
     },
     [atPicker, input, setInput],
   );
@@ -163,10 +195,6 @@ export function useCompletionPickers({
     const completer = slashArgContext.spec.argCompleter;
     const partial = slashArgContext.partial;
     const needle = partial.toLowerCase();
-    // Once the partial is an EXACT match for a valid completion, hide
-    // the picker so Enter submits the command instead of re-picking
-    // the same value in an infinite loop. Case-insensitive — users
-    // may type `/preset FAST` and still mean the same thing.
     if (Array.isArray(completer)) {
       if (partial && completer.some((v) => v.toLowerCase() === needle)) return null;
       if (!partial) return completer.slice();
@@ -179,7 +207,6 @@ export function useCompletionPickers({
       return all.filter((m) => m.toLowerCase().includes(needle)).slice(0, 40);
     }
     if (completer === "mcp-resources") {
-      // Aggregate URIs across every server's cached inspection.
       const uris: string[] = [];
       const servers = mcpServers ?? [];
       for (const s of servers) {
@@ -214,8 +241,6 @@ export function useCompletionPickers({
     (chosen: string) => {
       if (!slashArgContext) return;
       const before = input.slice(0, slashArgContext.partialOffset);
-      // No trailing space — enum picks take no further args, so the
-      // user presses Enter once more to run the command.
       setInput(`${before}${chosen}`);
     },
     [slashArgContext, input, setInput],
@@ -227,8 +252,7 @@ export function useCompletionPickers({
     setSlashSelected,
     slashGroupMode,
     slashAdvancedHidden,
-    atPicker,
-    atMatches,
+    atState,
     atSelected,
     setAtSelected,
     pickAtMention,
@@ -239,4 +263,128 @@ export function useCompletionPickers({
     setSlashArgSelected,
     pickSlashArg,
   };
+}
+
+function useBrowseListing(rootDir: string, dir: string | null) {
+  const [entries, setEntries] = useState<readonly AtPickerEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (dir === null) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    listDirectory(rootDir, dir).then(
+      (raw) => {
+        if (cancelled) return;
+        setEntries(raw.map(toBrowseEntry));
+        setLoading(false);
+      },
+      () => {
+        if (cancelled) return;
+        setEntries([]);
+        setLoading(false);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rootDir, dir]);
+  return { entries, loading };
+}
+
+function toBrowseEntry(d: DirEntry): AtPickerEntry {
+  return { label: d.name, insertPath: d.path, dirSuffix: "", isDir: d.isDir };
+}
+
+function useStreamingSearch(
+  rootDir: string,
+  filter: string | null,
+  recentFilesRef: React.RefObject<string[]>,
+) {
+  const [, bumpRender] = useReducer((x: number) => x + 1, 0);
+  const hitsRef = useRef<FileWithStats[]>([]);
+  const scannedRef = useRef(0);
+  const searchingRef = useRef(false);
+  const rankedRef = useRef<readonly AtPickerEntry[]>([]);
+
+  useEffect(() => {
+    if (filter === null) {
+      hitsRef.current = [];
+      scannedRef.current = 0;
+      searchingRef.current = false;
+      rankedRef.current = [];
+      bumpRender();
+      return;
+    }
+    hitsRef.current = [];
+    scannedRef.current = 0;
+    searchingRef.current = true;
+    rankedRef.current = [];
+    bumpRender();
+
+    const ac = new AbortController();
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleFlush = () => {
+      if (flushTimer) return;
+      flushTimer = setTimeout(() => {
+        flushTimer = null;
+        rankedRef.current = rankSearchHits(hitsRef.current, filter, recentFilesRef.current ?? []);
+        bumpRender();
+      }, SEARCH_FLUSH_MS);
+    };
+
+    const debounce = setTimeout(() => {
+      walkFilesStream(rootDir, {
+        signal: ac.signal,
+        onEntry: (e) => {
+          hitsRef.current.push(e);
+          if (hitsRef.current.length >= SEARCH_RESULT_CAP * 8) return false;
+          scheduleFlush();
+        },
+        onProgress: (n) => {
+          scannedRef.current = n;
+          scheduleFlush();
+        },
+      }).then(() => {
+        searchingRef.current = false;
+        rankedRef.current = rankSearchHits(hitsRef.current, filter, recentFilesRef.current ?? []);
+        bumpRender();
+      });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(debounce);
+      if (flushTimer) clearTimeout(flushTimer);
+      ac.abort();
+    };
+  }, [rootDir, filter, recentFilesRef]);
+
+  return {
+    entries: rankedRef.current,
+    scanned: scannedRef.current,
+    searching: searchingRef.current,
+  };
+}
+
+function rankSearchHits(
+  hits: readonly FileWithStats[],
+  filter: string,
+  recent: readonly string[],
+): readonly AtPickerEntry[] {
+  const ranked = rankPickerCandidates(hits, filter, {
+    limit: SEARCH_RESULT_CAP,
+    recentlyUsed: recent,
+  });
+  return ranked.map((path) => {
+    const slash = path.lastIndexOf("/");
+    return {
+      label: slash >= 0 ? path.slice(slash + 1) : path,
+      insertPath: path,
+      dirSuffix: slash >= 0 ? `${path.slice(0, slash)}/` : "",
+      isDir: false,
+    };
+  });
 }

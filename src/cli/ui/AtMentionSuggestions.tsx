@@ -2,102 +2,145 @@ import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig.jsx = "react" needs React in value scope for JSX compilation
 import React from "react";
 import { GLYPH, useColor } from "./theme.js";
+import type { AtPickerEntry, AtPickerState } from "./useCompletionPickers.js";
 
 export interface AtMentionSuggestionsProps {
-  /**
-   * Current matching file paths, ranked by the picker. `null` means
-   * "not in @-prefix mode" — render nothing. Empty array means "in @
-   * mode but no files match that partial" — render a hint.
-   */
-  matches: readonly string[] | null;
-  /** Index (within `matches`) of the currently highlighted row. */
+  state: AtPickerState | null;
   selectedIndex: number;
-  /** The partial query the user typed after `@`. Shown in the hint row. */
-  query: string;
 }
 
-/**
- * `@`-mention picker. Rendered below the input box while the user is
- * typing an `@…` prefix in code mode. Visual grammar matches the
- * design's file picker:
- *
- *      @ files matching "auth"                              esc
- *      ▸ login.ts          src/auth/
- *        refresh.ts        src/auth/
- *        validators.ts     src/auth/
- *        auth.test.ts      tests/
- *      [↑↓] navigate · Tab / ⏎ insert as @path · file content inlined
- *
- * Basename in primary cyan (the user's eye lands here first), dir
- * suffix in dim info color. No solid-bg pill on the selected row —
- * leading ▸ + bold + brighter color does the same job without the
- * loud bg block. Mirrors {@link SlashSuggestions}.
- */
+const ROW_WINDOW = 8;
+
 export function AtMentionSuggestions({
-  matches,
+  state,
   selectedIndex,
-  query,
 }: AtMentionSuggestionsProps): React.ReactElement | null {
   const color = useColor();
+  if (!state) return null;
 
-  if (matches === null) return null;
-  if (matches.length === 0) {
-    return (
-      <Box paddingX={1} marginTop={1}>
-        <Text color={color.warn} bold>
-          {GLYPH.warn}
-        </Text>
-        <Text> </Text>
-        <Text color={color.warn}>{`no files match "@${query}"`}</Text>
-        <Text dimColor>{" — keep typing or Backspace; paths resolve from the code root"}</Text>
-      </Box>
-    );
-  }
-  const MAX = 8;
-  const total = matches.length;
+  const isBrowse = state.kind === "browse";
+  const entries = state.entries;
+  const total = entries.length;
   const windowStart =
-    total <= MAX ? 0 : Math.max(0, Math.min(selectedIndex - Math.floor(MAX / 2), total - MAX));
-  const shown = matches.slice(windowStart, windowStart + MAX);
+    total <= ROW_WINDOW
+      ? 0
+      : Math.max(0, Math.min(selectedIndex - Math.floor(ROW_WINDOW / 2), total - ROW_WINDOW));
+  const shown = entries.slice(windowStart, windowStart + ROW_WINDOW);
   const hiddenAbove = windowStart;
   const hiddenBelow = total - windowStart - shown.length;
+
   return (
     <Box flexDirection="column" paddingX={1} marginTop={1}>
-      <Box>
-        <Text color={color.primary} bold>
-          {"@ "}
-        </Text>
-        <Text dimColor>
-          {query
-            ? `${total} match${total === 1 ? "" : "es"} for "${query}"`
-            : `${total} file${total === 1 ? "" : "s"}`}
-        </Text>
-        {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
-      </Box>
-      {shown.map((path, i) => (
-        <FileRow key={path} path={path} isSelected={windowStart + i === selectedIndex} />
+      <HeaderRow state={state} hiddenAbove={hiddenAbove} />
+      {total === 0 ? <EmptyRow state={state} color={color} /> : null}
+      {shown.map((entry, i) => (
+        <EntryRow
+          key={`${entry.insertPath}:${entry.isDir ? "d" : "f"}`}
+          entry={entry}
+          isSelected={windowStart + i === selectedIndex}
+        />
       ))}
       {hiddenBelow > 0 ? <Text dimColor>{`   ↓ ${hiddenBelow} below`}</Text> : null}
-      <Box marginTop={0}>
-        <Text dimColor>{"  ↑↓ navigate · Tab / ⏎ insert as @path · esc cancel"}</Text>
-      </Box>
+      <FooterRow isBrowse={isBrowse} hasFolder={shown.some((e) => e.isDir)} />
     </Box>
   );
 }
 
-function FileRow({ path, isSelected }: { path: string; isSelected: boolean }) {
+function HeaderRow({
+  state,
+  hiddenAbove,
+}: {
+  state: AtPickerState;
+  hiddenAbove: number;
+}) {
   const color = useColor();
-  const slash = path.lastIndexOf("/");
-  const dir = slash >= 0 ? `${path.slice(0, slash)}/` : "";
-  const base = slash >= 0 ? path.slice(slash + 1) : path;
+  const total = state.entries.length;
+  const lead = (
+    <Text color={color.primary} bold>
+      {"@ "}
+    </Text>
+  );
+  if (state.kind === "browse") {
+    const where = state.baseDir === "" ? "/" : `${state.baseDir}/`;
+    const counter = state.loading ? "loading…" : `${total} ${total === 1 ? "entry" : "entries"}`;
+    return (
+      <Box>
+        {lead}
+        <Text dimColor>{`${where}  ${counter}`}</Text>
+        {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
+      </Box>
+    );
+  }
+  const status = state.searching
+    ? `searching… ${state.scanned} scanned · ${total} ${total === 1 ? "match" : "matches"}`
+    : `${total} ${total === 1 ? "match" : "matches"} for "${state.filter}"`;
+  return (
+    <Box>
+      {lead}
+      <Text dimColor>{status}</Text>
+      {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
+    </Box>
+  );
+}
+
+function EmptyRow({ state, color }: { state: AtPickerState; color: ReturnType<typeof useColor> }) {
+  if (state.kind === "browse") {
+    if (state.loading) return null;
+    return (
+      <Box>
+        <Text color={color.warn} bold>
+          {GLYPH.warn}
+        </Text>
+        <Text> </Text>
+        <Text color={color.warn}>empty directory</Text>
+      </Box>
+    );
+  }
+  if (state.searching) {
+    return (
+      <Box>
+        <Text dimColor>scanning the tree…</Text>
+      </Box>
+    );
+  }
+  return (
+    <Box>
+      <Text color={color.warn} bold>
+        {GLYPH.warn}
+      </Text>
+      <Text> </Text>
+      <Text color={color.warn}>{`no files match "${state.filter}"`}</Text>
+    </Box>
+  );
+}
+
+function EntryRow({ entry, isSelected }: { entry: AtPickerEntry; isSelected: boolean }) {
+  const color = useColor();
+  const cursor = isSelected ? `${GLYPH.cur} ` : "  ";
+  const labelColor = entry.isDir ? color.accent : color.primary;
+  const labelText = entry.isDir ? `${entry.label}/` : entry.label;
   return (
     <Box>
       <Text color={isSelected ? color.primary : color.info} bold={isSelected}>
-        {isSelected ? `${GLYPH.cur} ` : "  "}
+        {cursor}
       </Text>
-      <Text color={color.primary} bold={isSelected}>
-        {base.padEnd(20)}
+      <Text color={labelColor} bold={isSelected}>
+        {labelText.padEnd(20)}
       </Text>
-      {dir ? <Text dimColor>{`  ${dir}`}</Text> : null}
+      {entry.dirSuffix ? <Text dimColor>{`  ${entry.dirSuffix}`}</Text> : null}
+    </Box>
+  );
+}
+
+function FooterRow({ isBrowse, hasFolder }: { isBrowse: boolean; hasFolder: boolean }) {
+  const hint = isBrowse
+    ? hasFolder
+      ? "↑↓ navigate · Tab drill into folder · ⏎ insert · esc cancel"
+      : "↑↓ navigate · Tab / ⏎ insert as @path · esc cancel"
+    : "↑↓ navigate · Tab / ⏎ insert as @path · esc cancel";
+  return (
+    <Box marginTop={0}>
+      <Text dimColor>{`  ${hint}`}</Text>
     </Box>
   );
 }

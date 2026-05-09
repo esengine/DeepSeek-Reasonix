@@ -12,10 +12,13 @@ import {
   detectAtPicker,
   expandAtMentions,
   expandAtUrls,
+  listDirectory,
   listFilesSync,
   listFilesWithStatsAsync,
+  parseAtQuery,
   rankPickerCandidates,
   stripUrlTail,
+  walkFilesStream,
 } from "../src/at-mentions.js";
 
 describe("AT_MENTION_PATTERN", () => {
@@ -728,5 +731,158 @@ describe("expandAtUrls", () => {
     const out = await expandAtUrls("@https://x.com", { fetcher });
     expect(out.text).toContain('title="Weird &quot;quoted&quot; title"');
     expect(out.text).not.toContain('"\n');
+  });
+});
+
+describe("parseAtQuery", () => {
+  it("empty input is the root browse", () => {
+    expect(parseAtQuery("")).toEqual({ dir: "", filter: "", trailingSlash: false });
+  });
+
+  it("bare token is a root-level filter", () => {
+    expect(parseAtQuery("auth")).toEqual({ dir: "", filter: "auth", trailingSlash: false });
+  });
+
+  it("trailing slash flips on browse-this-dir mode", () => {
+    expect(parseAtQuery("src/")).toEqual({ dir: "src", filter: "", trailingSlash: true });
+  });
+
+  it("query inside a path splits on the last slash", () => {
+    expect(parseAtQuery("src/auth/log")).toEqual({
+      dir: "src/auth",
+      filter: "log",
+      trailingSlash: false,
+    });
+  });
+
+  it("backslashes normalize to forward slashes", () => {
+    expect(parseAtQuery("src\\auth")).toEqual({
+      dir: "src",
+      filter: "auth",
+      trailingSlash: false,
+    });
+  });
+});
+
+describe("listDirectory", () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "reasonix-listdir-"));
+    mkdirSync(join(root, "src", "auth"), { recursive: true });
+    mkdirSync(join(root, "tests"), { recursive: true });
+    mkdirSync(join(root, "node_modules"), { recursive: true });
+    mkdirSync(join(root, ".git"), { recursive: true });
+    writeFileSync(join(root, "README.md"), "x");
+    writeFileSync(join(root, "package.json"), "{}");
+    writeFileSync(join(root, "src", "index.ts"), "x");
+    writeFileSync(join(root, "src", "loop.ts"), "x");
+    writeFileSync(join(root, "src", "auth", "login.ts"), "x");
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it("lists immediate children only — dirs before files, alpha within group", async () => {
+    const entries = await listDirectory(root, "");
+    const labels = entries.map((e) => `${e.name}${e.isDir ? "/" : ""}`);
+    expect(labels).toEqual(["src/", "tests/", "package.json", "README.md"]);
+  });
+
+  it("drills into a subdir without scanning siblings", async () => {
+    const entries = await listDirectory(root, "src");
+    const names = entries.map((e) => e.name);
+    expect(names).toEqual(["auth", "index.ts", "loop.ts"]);
+    expect(entries.find((e) => e.name === "auth")?.isDir).toBe(true);
+  });
+
+  it("paths returned for subdir entries are root-relative", async () => {
+    const entries = await listDirectory(root, "src");
+    const auth = entries.find((e) => e.name === "auth");
+    expect(auth?.path).toBe("src/auth");
+    const idx = entries.find((e) => e.name === "index.ts");
+    expect(idx?.path).toBe("src/index.ts");
+  });
+
+  it("escapes outside the root resolve to empty", async () => {
+    const out = await listDirectory(root, "../..");
+    expect(out).toEqual([]);
+  });
+
+  it("missing dir resolves to empty (not a throw)", async () => {
+    const out = await listDirectory(root, "does-not-exist");
+    expect(out).toEqual([]);
+  });
+
+  it("respects .gitignore in the dir being listed", async () => {
+    writeFileSync(join(root, ".gitignore"), "secret.txt\n");
+    writeFileSync(join(root, "secret.txt"), "x");
+    writeFileSync(join(root, "ok.txt"), "x");
+    const entries = await listDirectory(root, "");
+    const names = entries.map((e) => e.name);
+    expect(names).toContain("ok.txt");
+    expect(names).not.toContain("secret.txt");
+  });
+});
+
+describe("walkFilesStream", () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "reasonix-stream-"));
+    mkdirSync(join(root, "a"), { recursive: true });
+    mkdirSync(join(root, "b", "c"), { recursive: true });
+    mkdirSync(join(root, "node_modules", "junk"), { recursive: true });
+    writeFileSync(join(root, "a", "1.ts"), "x");
+    writeFileSync(join(root, "a", "2.ts"), "x");
+    writeFileSync(join(root, "b", "3.ts"), "x");
+    writeFileSync(join(root, "b", "c", "4.ts"), "x");
+    writeFileSync(join(root, "node_modules", "junk", "skip.ts"), "x");
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it("emits each file via onEntry exactly once", async () => {
+    const seen: string[] = [];
+    await walkFilesStream(root, { onEntry: (e) => void seen.push(e.path) });
+    expect(seen.sort()).toEqual(["a/1.ts", "a/2.ts", "b/3.ts", "b/c/4.ts"]);
+  });
+
+  it("returning false from onEntry halts the walk", async () => {
+    const seen: string[] = [];
+    await walkFilesStream(root, {
+      onEntry: (e) => {
+        seen.push(e.path);
+        return seen.length < 2;
+      },
+    });
+    expect(seen.length).toBe(2);
+  });
+
+  it("AbortSignal halts the walk", async () => {
+    const ac = new AbortController();
+    const seen: string[] = [];
+    const result = await walkFilesStream(root, {
+      signal: ac.signal,
+      onEntry: (e) => {
+        seen.push(e.path);
+        if (seen.length === 1) ac.abort();
+      },
+    });
+    expect(result.cancelled).toBe(true);
+    expect(seen.length).toBeLessThanOrEqual(4);
+  });
+
+  it("default ignoreDirs blocks node_modules", async () => {
+    const seen: string[] = [];
+    await walkFilesStream(root, { onEntry: (e) => void seen.push(e.path) });
+    expect(seen.find((p) => p.includes("node_modules"))).toBeUndefined();
+  });
+
+  it("onProgress fires at end with the total scanned count", async () => {
+    let last = 0;
+    await walkFilesStream(root, {
+      onEntry: () => {},
+      onProgress: (n) => {
+        last = n;
+      },
+      progressIntervalMs: 0,
+    });
+    expect(last).toBe(4);
   });
 });
