@@ -1,7 +1,19 @@
 import { spawn } from "node:child_process";
-import { VERSION, compareVersions, getLatestVersion, isNpxInstall } from "../../version.js";
+import {
+  type InstallSource,
+  VERSION,
+  compareVersions,
+  detectInstallSource,
+  detectNpmInstallPrefix,
+  getLatestVersion,
+} from "../../version.js";
 
-export type UpdateAction = "up-to-date" | "newer-local" | "npx-hint" | "run-npm-install";
+export type UpdateAction =
+  | "up-to-date"
+  | "newer-local"
+  | "npx-hint"
+  | "manual-hint"
+  | "run-install";
 
 export interface UpdatePlan {
   action: UpdateAction;
@@ -13,9 +25,17 @@ export interface UpdatePlan {
 export interface PlanUpdateInput {
   current: string;
   latest: string;
-  /** Overrides `isNpxInstall()` (tests). */
-  npx?: boolean;
+  installSource: InstallSource;
+  /** Pin npm to this prefix so nvm/fnm can't redirect the install. */
+  npmPrefix?: string | null;
 }
+
+export const MANUAL_UPDATE_COMMANDS: readonly string[] = [
+  "npm install -g reasonix@latest",
+  "bun add -g reasonix",
+  "pnpm add -g reasonix@latest",
+  "yarn global add reasonix@latest",
+];
 
 /** Pure decision — split out so tests don't need to spawn child processes or hit the network. */
 export function planUpdate(input: PlanUpdateInput): UpdatePlan {
@@ -29,7 +49,7 @@ export function planUpdate(input: PlanUpdateInput): UpdatePlan {
   if (diff === 0) {
     return { action: "up-to-date", message: `reasonix ${input.current} is up to date.` };
   }
-  if (input.npx) {
+  if (input.installSource === "npx") {
     return {
       action: "npx-hint",
       message: [
@@ -40,20 +60,51 @@ export function planUpdate(input: PlanUpdateInput): UpdatePlan {
       ].join("\n"),
     };
   }
+  if (input.installSource === "unknown") {
+    return {
+      action: "manual-hint",
+      message: [
+        `reasonix ${input.latest} is available, but the install source could not be determined automatically.`,
+        "run one of these manually based on how you installed reasonix:",
+        ...MANUAL_UPDATE_COMMANDS.map((c) => `  ${c}`),
+      ].join("\n"),
+    };
+  }
+  const command = buildUpdateCommand(input.installSource, input.npmPrefix ?? null);
   return {
-    action: "run-npm-install",
-    message: `upgrading reasonix ${input.current} → ${input.latest}`,
-    command: ["npm", "install", "-g", "reasonix@latest"],
+    action: "run-install",
+    message: `upgrading reasonix ${input.current} → ${input.latest} (via ${input.installSource})`,
+    command,
   };
 }
 
+function buildUpdateCommand(
+  source: Exclude<InstallSource, "npx" | "unknown">,
+  npmPrefix: string | null,
+): string[] {
+  switch (source) {
+    case "npm":
+      return npmPrefix
+        ? ["npm", "--prefix", npmPrefix, "install", "-g", "reasonix@latest"]
+        : ["npm", "install", "-g", "reasonix@latest"];
+    case "bun":
+      return ["bun", "add", "-g", "reasonix"];
+    case "pnpm":
+      return ["pnpm", "add", "-g", "reasonix@latest"];
+    case "yarn":
+      return ["yarn", "global", "add", "reasonix@latest"];
+  }
+}
+
 export interface UpdateCommandOptions {
-  /** Skip spawning npm; print the decision only. */
+  /** Skip spawning the package manager; print the decision only. */
   dryRun?: boolean;
   /** Test seam: override the registry lookup. Returns null = offline. */
   fetchLatest?: () => Promise<string | null>;
-  /** Test seam: override the npx detector. */
-  isNpx?: () => boolean;
+  /** Test seam: override the install-source detector. */
+  detectSource?: () => InstallSource;
+  /** Test seam: override the npm prefix detector. */
+  detectPrefix?: () => string | null;
   /** Test seam: override the spawner. Must return exit code. */
   spawnInstall?: (argv: string[]) => Promise<number>;
   /** Test seam: stdout writer. */
@@ -82,7 +133,8 @@ export async function updateCommand(opts: UpdateCommandOptions = {}): Promise<vo
   const write = opts.write ?? ((m: string) => process.stdout.write(m));
   const exit = opts.exit ?? ((c: number) => process.exit(c));
   const fetchLatest = opts.fetchLatest ?? (() => getLatestVersion({ force: true }));
-  const isNpx = opts.isNpx ?? isNpxInstall;
+  const detectSource = opts.detectSource ?? (() => detectInstallSource());
+  const detectPrefix = opts.detectPrefix ?? (() => detectNpmInstallPrefix());
   const doSpawn = opts.spawnInstall ?? defaultSpawn;
 
   write(`current: reasonix ${VERSION}\n`);
@@ -94,10 +146,16 @@ export async function updateCommand(opts: UpdateCommandOptions = {}): Promise<vo
   }
   write(`latest:  reasonix ${latest}\n`);
 
-  const plan = planUpdate({ current: VERSION, latest, npx: isNpx() });
+  const installSource = detectSource();
+  const npmPrefix = installSource === "npm" ? detectPrefix() : null;
+  const plan = planUpdate({ current: VERSION, latest, installSource, npmPrefix });
   write(`\n${plan.message}\n`);
 
-  if (plan.action !== "run-npm-install" || !plan.command) return;
+  if (plan.action === "manual-hint") {
+    exit(1);
+    return;
+  }
+  if (plan.action !== "run-install" || !plan.command) return;
   if (opts.dryRun) {
     write(`(dry run) would run: ${plan.command.join(" ")}\n`);
     return;
@@ -105,7 +163,7 @@ export async function updateCommand(opts: UpdateCommandOptions = {}): Promise<vo
   write(`\nrunning: ${plan.command.join(" ")}\n`);
   const code = await doSpawn(plan.command);
   if (code !== 0) {
-    write(`\nnpm exited with code ${code}. upgrade did not complete.\n`);
+    write(`\n${plan.command[0]} exited with code ${code}. upgrade did not complete.\n`);
     exit(code);
   }
 }

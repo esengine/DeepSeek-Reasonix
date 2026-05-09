@@ -8,7 +8,7 @@ export interface UseInputRecallResult {
   resetCursor: () => void;
 }
 
-/** Bash-style ↑/↓ recall over a turn-local prompt history. Cursor is `useRef` so toggles don't re-render. */
+/** Bash-style Ctrl+P/Ctrl+N recall over a turn-local prompt history. Cursor is `useRef` so toggles don't re-render. */
 export function useInputRecall(setInput: (s: string) => void): UseInputRecallResult {
   const promptHistory = useRef<string[]>([]);
   const historyCursor = useRef<number>(-1);

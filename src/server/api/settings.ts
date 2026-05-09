@@ -99,7 +99,7 @@ export async function handleSettings(
     }
     if (fields.apiKey !== undefined) {
       if (typeof fields.apiKey !== "string" || !isPlausibleKey(fields.apiKey)) {
-        return { status: 400, body: { error: "apiKey must be a plausible sk- token" } };
+        return { status: 400, body: { error: "apiKey must be 16+ chars with no whitespace" } };
       }
       cfg.apiKey = fields.apiKey.trim();
       changed.push("apiKey");

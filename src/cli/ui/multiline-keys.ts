@@ -1,4 +1,4 @@
-/** Pure keystroke→action reducer; arrow keys at buffer boundary defer to the parent for history recall. */
+/** Pure keystroke→action reducer; ↑/↓ NOOP (chat-scroll), Ctrl+P/N do per-line cursor + history. */
 
 export interface MultilineKey {
   input: string;
@@ -28,7 +28,7 @@ export interface MultilineAction {
   /** When `true`, fire `onSubmit(submitValue ?? value)`. */
   submit: boolean;
   submitValue?: string;
-  /** Set on ↑/↓ at a buffer boundary or Ctrl+P / Ctrl+N — parent recalls prompt history. */
+  /** Set on Ctrl+P / Ctrl+N when no in-buffer cursor move applies — parent recalls prompt history. */
   historyHandoff?: "prev" | "next";
   /** Reducer is pure — hands raw paste to PromptInput which allocates a sentinel and inserts that. */
   pasteRequest?: { content: string };
@@ -56,11 +56,9 @@ export function processMultilineKey(
     return NOOP;
   }
 
-  // Buffer-wide navigation. Per-line motion (↑/↓ / Ctrl+A / Ctrl+E)
-  // is already covered; PageUp/PageDown are the missing "jump to
-  // top / bottom of the WHOLE buffer" pair, useful after pasting a
-  // 500-line blob where ↑×500 is absurd. Repurposed from the
-  // previous NOOP behavior (PageUp/Down had no binding).
+  // PageUp/PageDown jump to start/end of the WHOLE buffer — useful
+  // after pasting a 500-line blob. Per-line motion lives on Ctrl+P /
+  // Ctrl+N now (↑/↓ are owned by chat scroll at the App level).
   if (key.pageUp) {
     return cursor === 0 ? NOOP : { next: null, cursor: 0, submit: false };
   }
@@ -68,15 +66,25 @@ export function processMultilineKey(
     return cursor === value.length ? NOOP : { next: null, cursor: value.length, submit: false };
   }
 
-  // ↑/↓ on an empty buffer recalls prompt history (universal CLI
-  // convention — bash, zsh, fish all do this). Ctrl+P / Ctrl+N is the
-  // wheel-immune fallback for Windows ConPTY users whose terminal
-  // translates mouse-wheel events to arrow keys; bind it on every
-  // platform so the muscle memory works the same everywhere.
+  // ↑/↓ are NOT consumed here — they belong to chat-scroll at the App
+  // level. Ctrl+P / Ctrl+N take over what ↑/↓ used to do here:
+  //   • multi-line buffer → cursor up/down within the buffer
+  //   • single-line / empty → hand off to prompt history (readline parity)
+  // This pairing lets us drop xterm mouse tracking; the terminal's own
+  // wheel→↑/↓ translation in alt-screen mode then scrolls chat for free
+  // and native drag-select / right-click stay intact.
   if (key.ctrl && key.input === "p") {
+    if (value.includes("\n")) {
+      const moved = moveCursorUp(value, cursor);
+      if (moved !== cursor) return { next: null, cursor: moved, submit: false };
+    }
     return { ...NOOP, historyHandoff: "prev" };
   }
   if (key.ctrl && key.input === "n") {
+    if (value.includes("\n")) {
+      const moved = moveCursorDown(value, cursor);
+      if (moved !== cursor) return { next: null, cursor: moved, submit: false };
+    }
     return { ...NOOP, historyHandoff: "next" };
   }
 
@@ -86,15 +94,8 @@ export function processMultilineKey(
   if (key.rightArrow) {
     return { next: null, cursor: Math.min(value.length, cursor + 1), submit: false };
   }
-  if (key.upArrow) {
-    if (value.length === 0) return { ...NOOP, historyHandoff: "prev" };
-    const moved = moveCursorUp(value, cursor);
-    return moved === cursor ? NOOP : { next: null, cursor: moved, submit: false };
-  }
-  if (key.downArrow) {
-    if (value.length === 0) return { ...NOOP, historyHandoff: "next" };
-    const moved = moveCursorDown(value, cursor);
-    return moved === cursor ? NOOP : { next: null, cursor: moved, submit: false };
+  if (key.upArrow || key.downArrow) {
+    return NOOP;
   }
 
   // Emacs-style line jumps. Home/End come through our own stdin reader

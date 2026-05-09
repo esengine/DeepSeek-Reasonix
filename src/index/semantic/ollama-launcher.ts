@@ -1,11 +1,13 @@
 /** Daemon spawn is detached + unref'd so it outlives the CLI; non-TTY shells error instead of prompting. */
 
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { probeOllama } from "./embedding.js";
 
 export interface OllamaStatus {
-  /** `ollama` binary present on PATH. */
+  /** `ollama` binary resolvable on PATH or at the Windows installer path. */
   binaryFound: boolean;
   /** HTTP daemon reachable at the configured base URL. */
   daemonRunning: boolean;
@@ -17,13 +19,22 @@ export interface OllamaStatus {
   installedModels: string[];
 }
 
-/** Defers to `which`/`where` so we don't reimplement Windows App-installer resolution rules. */
+/** Falls back to the Windows installer path because PATH refresh is per-shell — daemon may be up while the dashboard process inherited a stale PATH. */
 export function findOllamaBinary(): string | null {
   const cmd = process.platform === "win32" ? "where" : "which";
   const out = spawnSync(cmd, ["ollama"], { encoding: "utf8" });
-  if (out.status !== 0) return null;
-  const first = out.stdout.split(/\r?\n/).find((l) => l.trim().length > 0);
-  return first ? first.trim() : null;
+  if (out.status === 0) {
+    const first = out.stdout.split(/\r?\n/).find((l) => l.trim().length > 0);
+    if (first) return first.trim();
+  }
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA;
+    if (local) {
+      const candidate = join(local, "Programs", "Ollama", "ollama.exe");
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
 }
 
 /** Treats `<model>` and `<model>:latest` as the same — Ollama appends `:latest` to plain pulls. */
@@ -50,7 +61,7 @@ export async function startOllamaDaemon(
   opts: { baseUrl?: string; timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<{ ready: boolean; pid: number | null }> {
   const timeoutMs = opts.timeoutMs ?? 15_000;
-  const child = spawn("ollama", ["serve"], {
+  const child = spawn(findOllamaBinary() ?? "ollama", ["serve"], {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
@@ -74,7 +85,7 @@ export async function pullOllamaModel(
   opts: { onLine?: (line: string, stream: "stdout" | "stderr") => void; signal?: AbortSignal } = {},
 ): Promise<number> {
   return new Promise<number>((resolve) => {
-    const child = spawn("ollama", ["pull", modelName], {
+    const child = spawn(findOllamaBinary() ?? "ollama", ["pull", modelName], {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

@@ -6,7 +6,8 @@ import { useThemeTokens } from "../theme/context.js";
 import { StatusRow } from "./StatusRow.js";
 
 const PLACEHOLDER = "type a message · / for commands · @ to attach a file";
-const HINT = "⏎ send  ·  shift/alt+⏎ newline  ·  ↑↓ history  ·  esc abort  ·  ctrl-c quit";
+const HINT =
+  "⏎ send  ·  shift/alt+⏎ newline  ·  ↑↓ scroll  ·  ^P/^N history  ·  esc abort  ·  ctrl-c quit";
 const ABORTED_HINT = "turn aborted by user · esc again to clear · ⏎ to ask a follow-up";
 
 export function Composer(): React.ReactElement {

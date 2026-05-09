@@ -4,7 +4,12 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { DeepSeekClient } from "../../client.js";
-import { defaultConfigPath, readConfig, resolveSemanticEmbeddingConfig } from "../../config.js";
+import {
+  defaultConfigPath,
+  loadBaseUrl,
+  readConfig,
+  resolveSemanticEmbeddingConfig,
+} from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { loadHooks } from "../../hooks.js";
 import { indexExists } from "../../index/semantic/builder.js";
@@ -128,7 +133,7 @@ async function checkApiReach(): Promise<Check> {
     };
   }
   try {
-    const client = new DeepSeekClient({ apiKey: key });
+    const client = new DeepSeekClient({ apiKey: key, baseUrl: loadBaseUrl() });
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 8_000);
     let balance: Awaited<ReturnType<DeepSeekClient["getBalance"]>>;

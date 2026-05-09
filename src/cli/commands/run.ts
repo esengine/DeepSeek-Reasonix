@@ -5,6 +5,7 @@ import {
   defaultConfigPath,
   isPlausibleKey,
   loadApiKey,
+  loadBaseUrl,
   readConfig,
   saveApiKey,
 } from "../../config.js";
@@ -57,7 +58,7 @@ async function ensureApiKey(): Promise<string> {
       const answer = (await rl.question("API key › ")).trim();
       if (!answer) continue;
       if (!isPlausibleKey(answer)) {
-        process.stdout.write("Invalid format. Keys start with 'sk-' and are 30+ chars.\n");
+        process.stdout.write("Key looks too short. Paste the full token (16+ chars, no spaces).\n");
         continue;
       }
       saveApiKey(answer);
@@ -142,7 +143,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     if (successCount === 0) tools = undefined;
   }
 
-  const client = new DeepSeekClient();
+  const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
   const prefix = new ImmutablePrefix({
     system: opts.system,
     toolSpecs: tools?.specs(),

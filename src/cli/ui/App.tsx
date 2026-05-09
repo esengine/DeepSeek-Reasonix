@@ -34,6 +34,7 @@ import {
   type PresetName,
   defaultConfigPath,
   editModeHintShown,
+  loadBaseUrl,
   loadEditMode,
   loadReasoningEffort,
   loadTheme,
@@ -236,17 +237,17 @@ export interface AppProps {
 /**
  * Throttle interval in ms. We flush streaming deltas at most this often to
  * avoid re-rendering the whole UI on every single token from DeepSeek.
- * 33ms ≈ 30Hz, matches the cadence users feel as smooth in modern terminals
- * (Windows Terminal, WezTerm, iTerm2, Alacritty, Ghostty). Override via
- * `REASONIX_FLUSH_MS` if you're on a fragile terminal (winpty/MINTTY) that
- * leaves repaint artifacts at higher refresh rates — bumping back to 100
- * trades smoothness for stability.
+ * 50ms ≈ 20Hz — still visually smooth (Windows Terminal, WezTerm, iTerm2,
+ * Alacritty, Ghostty all comfortable here) and leaves the terminal
+ * enough stdout slack to repaint native drag-select highlights without
+ * fighting our streaming writes. Bump higher via `REASONIX_FLUSH_MS`
+ * for fragile terminals (winpty/MINTTY); drop to 33 for max smoothness.
  */
 const FLUSH_INTERVAL_MS = (() => {
   const raw = process.env.REASONIX_FLUSH_MS;
-  if (!raw) return 33;
+  if (!raw) return 50;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 16 || parsed > 1000) return 33;
+  if (!Number.isFinite(parsed) || parsed < 16 || parsed > 1000) return 50;
   return Math.round(parsed);
 })();
 
@@ -398,20 +399,16 @@ function AppInner({
   //     SGR fall through silently — Shift+Enter just stays
   //     indistinguishable from Enter, no regression.
   //
-  //   • SGR mouse tracking (DECSET 1006 + 1000) — terminal reports
-  //     wheel + button presses as `\x1b[<btn;col;row;M` instead of
-  //     translating the wheel to ↑/↓ key sequences. Lets the chat
-  //     scroll-handler route `mouseScrollUp/Down` independently of
-  //     PromptInput's arrow-key bindings (history / cursor). Cost:
-  //     terminal-native drag-to-select needs a modifier (Shift on
-  //     Windows Terminal / Alacritty / WezTerm, Option on iTerm2).
+  // Mouse tracking is intentionally NOT enabled: terminals translate
+  // the wheel to ↑/↓ in the alt-screen buffer, App-level ↑/↓ scrolls
+  // chat, and Ctrl+P / Ctrl+N own the prompt's history + multi-line
+  // cursor moves. Skipping mouse mode keeps native drag-to-select +
+  // right-click paste working in every terminal.
   useEffect(() => {
     if (!stdout || !stdout.isTTY) return;
     stdout.write("\u001b[?2004h");
     stdout.write("\u001b[>4;2m");
-    stdout.write("\u001b[?1006h\u001b[?1000h");
     return () => {
-      stdout.write("\u001b[?1000l\u001b[?1006l");
       stdout.write("\u001b[?2004l");
       stdout.write("\u001b[>4m");
     };
@@ -673,9 +670,9 @@ function AppInner({
   // so we abort the in-flight turn and let the effect below fire the
   // submit once busy clears.
   const [queuedSubmit, setQueuedSubmit] = useState<string | null>(null);
-  // ↑/↓ recall over a turn-local prompt history. We don't persist to
-  // disk — the session log already keeps the messages, and cross-
-  // session bash-style recall would need per-project scoping.
+  // Ctrl+P/Ctrl+N recall over a turn-local prompt history. We don't
+  // persist to disk — the session log already keeps the messages, and
+  // cross-session bash-style recall would need per-project scoping.
   const { recallPrev, recallNext, pushHistory, resetCursor } = useInputRecall(setInput);
   // Disambiguates <Static> keys when a single turn yields multiple assistant_final events.
   const assistantIterCounter = useRef<number>(0);
@@ -805,7 +802,7 @@ function AppInner({
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentRootDir — see comment above
   const loop = useMemo(() => {
     if (loopRef.current) return loopRef.current;
-    const client = new DeepSeekClient();
+    const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
     // Register run_skill HERE (not in code.tsx / chat.tsx) because
     // subagent-runAs skills need the client + parent registry to
     // spawn child loops. Wiring lives in App.tsx so the same code
@@ -1229,19 +1226,29 @@ function AppInner({
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
 
-  // PgUp / PgDn always scroll chat history. ↑/↓ also reaches here when
-  // PromptInput can't act on it: while busy (disabled) or once chat is
-  // unpinned (user already scrolling). When pinned + idle, PromptInput
-  // owns arrows — empty buffer recalls history, otherwise cursor motion.
-  // Mouse wheel routes through mouseScrollUp/Down (SGR mouse mode) and
-  // bypasses the arrow-key path entirely so the wheel always scrolls
-  // scrollback regardless of buffer state.
+  // ↑/↓/PgUp/PgDn always scroll chat. The terminal translates the
+  // mouse wheel to ↑/↓ in alt-screen mode so the wheel scrolls chat
+  // for free without us enabling mouse tracking. Prompt history +
+  // multi-line cursor moves live on Ctrl+P / Ctrl+N (see
+  // multiline-keys.ts); leftover mouseScrollUp/Down events from a
+  // terminal that ignores DECRST 1000 still route correctly.
+  //
+  // Pickers (slash / @-mention / slash-arg / shell-confirm) own ↑/↓
+  // for their own list nav — when any of them is open we skip the
+  // arrow path here so the user doesn't see the chat scroll AND the
+  // picker selection move on the same keypress. PgUp/PgDn/End still
+  // scroll regardless because pickers don't claim those.
   useKeystroke((ev) => {
+    const pickerOwnsArrows =
+      (atState?.entries.length ?? 0) > 0 ||
+      (slashMatches?.length ?? 0) > 0 ||
+      (slashArgMatches?.length ?? 0) > 0 ||
+      pendingShell != null;
     if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollUp();
     else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollDown();
     else if (ev.end) chatScroll.jumpToBottom();
-    else if ((!chatScroll.pinned || busy) && ev.upArrow) chatScroll.scrollUp();
-    else if ((!chatScroll.pinned || busy) && ev.downArrow) chatScroll.scrollDown();
+    else if (!pickerOwnsArrows && ev.upArrow) chatScroll.scrollUp();
+    else if (!pickerOwnsArrows && ev.downArrow) chatScroll.scrollDown();
   }, !modalOpen);
 
   // Esc during busy → forward to the loop as an abort signal. The loop
@@ -1250,9 +1257,10 @@ function AppInner({
   // gets an answer instead of a hard stop. Only listens while busy so
   // we don't accidentally hijack Esc in other contexts.
   //
-  // Also handles ↑/↓ shell-style history while idle. We don't use
-  // ink-text-input's (absent) history support; parent-level useInput
-  // is simpler and lets us own the cursor semantics.
+  // Prompt history (Ctrl+P/Ctrl+N) is handed off from PromptInput via
+  // recallPrev/recallNext below — parent-level useInput is simpler
+  // than ink-text-input's (absent) history support and lets us own
+  // the cursor semantics.
   useKeystroke((ev) => {
     // PromptInput consumes its own keystrokes via useKeystroke too,
     // so events fan out to both this handler and PromptInput's. The
@@ -1497,14 +1505,11 @@ function AppInner({
       }
     }
 
-    // History recall (↑/↓) used to live here guarded by `input.length
-    // === 0`. It now runs inside PromptInput — the child detects
-    // when a buffer-edge arrow key has nowhere left to go (empty
-    // buffer, or cursor at first/last line of a multi-line draft)
-    // and calls back into `recallPrev` / `recallNext` below. That
-    // lets users escape into history from a multi-line draft by
-    // pressing ↑ at the first line without first emptying the
-    // buffer.
+    // Prompt history is now Ctrl+P / Ctrl+N (PromptInput → multiline
+    // keys → historyHandoff → recallPrev / recallNext below). ↑/↓ are
+    // reserved for chat scroll — without that move, native drag-select
+    // and right-click paste don't work on most terminals because we'd
+    // have to keep xterm mouse tracking on to grab the wheel.
   });
 
   // Edit-gate interceptor. Reroutes `edit_file` / `write_file` tool

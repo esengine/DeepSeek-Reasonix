@@ -32,7 +32,7 @@ export interface PromptInputProps {
   onSubmit: (v: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  /** ↑/↓ on an empty buffer or Ctrl+P / Ctrl+N — parent walks history and swaps `value` via `onChange`. */
+  /** Ctrl+P / Ctrl+N hand off here when no in-buffer cursor move applies — parent walks history and swaps `value` via `onChange`. */
   onHistoryPrev?: () => void;
   onHistoryNext?: () => void;
 }
@@ -303,7 +303,8 @@ function HintRow(): React.ReactElement {
   const items: Array<{ key: string; sep: string }> = [
     { key: "⏎", sep: "send" },
     { key: "⇧⏎", sep: "newline" },
-    { key: "↑↓", sep: "history" },
+    { key: "↑↓", sep: "scroll" },
+    { key: "^P/^N", sep: "history" },
     { key: "esc", sep: "abort" },
     { key: "^C", sep: "quit" },
   ];

@@ -8,6 +8,8 @@ import {
   LATEST_CACHE_TTL_MS,
   VERSION,
   compareVersions,
+  detectInstallSource,
+  detectNpmInstallPrefix,
   getLatestVersion,
   isNpxInstall,
 } from "../src/version.js";
@@ -75,6 +77,102 @@ describe("isNpxInstall", () => {
     // biome-ignore lint/performance/noDelete: cover the no-env case
     delete process.env.npm_config_user_agent;
     expect(isNpxInstall()).toBe(false);
+  });
+});
+
+describe("detectInstallSource", () => {
+  it("identifies npm via lib/node_modules/reasonix", () => {
+    expect(detectInstallSource("/usr/local/lib/node_modules/reasonix/dist/cli/index.js")).toBe(
+      "npm",
+    );
+  });
+
+  it("identifies npm via Windows %APPDATA%/npm path", () => {
+    expect(
+      detectInstallSource(
+        "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\reasonix\\dist\\cli\\index.js",
+      ),
+    ).toBe("npm");
+  });
+
+  it("identifies npm via nvm path", () => {
+    expect(
+      detectInstallSource(
+        "/Users/me/.nvm/versions/node/v22.11.0/lib/node_modules/reasonix/dist/cli/index.js",
+      ),
+    ).toBe("npm");
+  });
+
+  it("identifies bun via .bun install dir", () => {
+    expect(
+      detectInstallSource("/Users/me/.bun/install/global/node_modules/reasonix/dist/cli/index.js"),
+    ).toBe("bun");
+  });
+
+  it("identifies bun via Windows .bun path", () => {
+    expect(
+      detectInstallSource(
+        "C:\\Users\\me\\.bun\\install\\global\\node_modules\\reasonix\\dist\\cli\\index.js",
+      ),
+    ).toBe("bun");
+  });
+
+  it("identifies pnpm via pnpm/global", () => {
+    expect(
+      detectInstallSource(
+        "/Users/me/.local/share/pnpm/global/5/node_modules/reasonix/dist/cli/index.js",
+      ),
+    ).toBe("pnpm");
+  });
+
+  it("identifies yarn via yarn/global", () => {
+    expect(
+      detectInstallSource("/Users/me/.config/yarn/global/node_modules/reasonix/dist/cli/index.js"),
+    ).toBe("yarn");
+  });
+
+  it("identifies npx via _npx fragment", () => {
+    expect(detectInstallSource("/Users/me/.npm/_npx/abc/node_modules/.bin/reasonix")).toBe("npx");
+  });
+
+  it("returns unknown for paths that match no known pattern", () => {
+    expect(detectInstallSource("/opt/custom/bin/reasonix")).toBe("unknown");
+  });
+
+  it("returns unknown for empty path", () => {
+    expect(detectInstallSource("")).toBe("unknown");
+  });
+});
+
+describe("detectNpmInstallPrefix", () => {
+  it("extracts the prefix from a POSIX lib/node_modules path", () => {
+    expect(detectNpmInstallPrefix("/usr/local/lib/node_modules/reasonix/dist/cli/index.js")).toBe(
+      "/usr/local",
+    );
+  });
+
+  it("extracts the prefix from an nvm-style path", () => {
+    expect(
+      detectNpmInstallPrefix(
+        "/Users/me/.nvm/versions/node/v22.11.0/lib/node_modules/reasonix/dist/cli/index.js",
+      ),
+    ).toBe("/Users/me/.nvm/versions/node/v22.11.0");
+  });
+
+  it("extracts the prefix from a Windows %APPDATA%/npm path", () => {
+    expect(
+      detectNpmInstallPrefix(
+        "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\reasonix\\dist\\cli\\index.js",
+      ),
+    ).toBe("C:/Users/me/AppData/Roaming/npm");
+  });
+
+  it("returns null when no reasonix node_modules segment is present", () => {
+    expect(detectNpmInstallPrefix("/opt/custom/bin/reasonix")).toBeNull();
+  });
+
+  it("returns null for empty path", () => {
+    expect(detectNpmInstallPrefix("")).toBeNull();
   });
 });
 

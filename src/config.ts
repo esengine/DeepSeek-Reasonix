@@ -151,6 +151,23 @@ export function loadApiKey(path: string = defaultConfigPath()): string | undefin
   return readConfig(path).apiKey;
 }
 
+/** env > config > undefined. Client falls back to api.deepseek.com when undefined. */
+export function loadBaseUrl(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.DEEPSEEK_BASE_URL) return process.env.DEEPSEEK_BASE_URL;
+  return readConfig(path).baseUrl;
+}
+
+export function saveBaseUrl(url: string, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  const trimmed = url.trim();
+  if (trimmed) {
+    cfg.baseUrl = trimmed;
+  } else {
+    cfg.baseUrl = undefined;
+  }
+  writeConfig(cfg, path);
+}
+
 export function searchEnabled(path: string = defaultConfigPath()): boolean {
   const env = process.env.REASONIX_SEARCH;
   if (env === "off" || env === "false" || env === "0") return false;
@@ -410,9 +427,11 @@ export function markMouseClipboardHintShown(path: string = defaultConfigPath()):
   writeConfig(cfg, path);
 }
 
+/** Self-hosted DeepSeek-compatible endpoints may issue any token shape, so we only typo-guard here — the real auth check is the first API call against `baseUrl`. */
 export function isPlausibleKey(key: string): boolean {
   const trimmed = key.trim();
-  return /^sk-[A-Za-z0-9_-]{16,}$/.test(trimmed);
+  if (trimmed.length < 16) return false;
+  return !/\s/.test(trimmed);
 }
 
 /** Mask a key for display: `sk-abcd...wxyz`. */
