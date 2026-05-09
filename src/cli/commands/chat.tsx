@@ -529,7 +529,12 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       exitOnCtrlC: true,
       // patchConsole:false — winpty/MINTTY redraw-glitch source.
       patchConsole: false,
-      incrementalRendering: true,
+      // incrementalRendering:false — Ink's diff drifts when stringWidth
+      // misjudges CJK / emoji ZWJ width or when async terminal-event
+      // bytes interleave mid-render, leaving residual rows. Full-frame
+      // redraws cost more stdout bytes per flush but eliminate the
+      // ghost class.
+      incrementalRendering: false,
       // Default true — alt-screen is the only mode without scrollback-
       // reflow ghosting. `--no-alt-screen` opts back into scrollback mode
       // for users who need chat output preserved in shell history on exit.
