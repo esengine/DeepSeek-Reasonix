@@ -6,28 +6,74 @@ import { VERSION } from "../src/version.js";
 
 describe("planUpdate", () => {
   it("up-to-date when current === latest", () => {
-    const plan = planUpdate({ current: "0.4.22", latest: "0.4.22" });
+    const plan = planUpdate({ current: "0.4.22", latest: "0.4.22", installSource: "npm" });
     expect(plan.action).toBe("up-to-date");
     expect(plan.command).toBeUndefined();
   });
 
   it("newer-local when current > latest (dev build)", () => {
-    const plan = planUpdate({ current: "0.5.0", latest: "0.4.22" });
+    const plan = planUpdate({ current: "0.5.0", latest: "0.4.22", installSource: "npm" });
     expect(plan.action).toBe("newer-local");
     expect(plan.command).toBeUndefined();
   });
 
   it("npx-hint when current < latest and running via npx", () => {
-    const plan = planUpdate({ current: "0.4.21", latest: "0.4.22", npx: true });
+    const plan = planUpdate({ current: "0.4.21", latest: "0.4.22", installSource: "npx" });
     expect(plan.action).toBe("npx-hint");
     expect(plan.command).toBeUndefined();
     expect(plan.message).toContain("npx");
   });
 
-  it("run-npm-install when current < latest and not npx", () => {
-    const plan = planUpdate({ current: "0.4.21", latest: "0.4.22", npx: false });
-    expect(plan.action).toBe("run-npm-install");
+  it("emits npm install -g for npm-installed binaries", () => {
+    const plan = planUpdate({ current: "0.4.21", latest: "0.4.22", installSource: "npm" });
+    expect(plan.action).toBe("run-install");
     expect(plan.command).toEqual(["npm", "install", "-g", "reasonix@latest"]);
+  });
+
+  it("pins npm to the install prefix when one was extracted (nvm/fnm robustness)", () => {
+    const plan = planUpdate({
+      current: "0.4.21",
+      latest: "0.4.22",
+      installSource: "npm",
+      npmPrefix: "/Users/me/.nvm/versions/node/v22.11.0",
+    });
+    expect(plan.command).toEqual([
+      "npm",
+      "--prefix",
+      "/Users/me/.nvm/versions/node/v22.11.0",
+      "install",
+      "-g",
+      "reasonix@latest",
+    ]);
+  });
+
+  it("emits bun add -g for bun-installed binaries", () => {
+    const plan = planUpdate({ current: "0.4.21", latest: "0.4.22", installSource: "bun" });
+    expect(plan.action).toBe("run-install");
+    expect(plan.command).toEqual(["bun", "add", "-g", "reasonix"]);
+    expect(plan.message).toContain("bun");
+  });
+
+  it("emits pnpm add -g for pnpm-installed binaries", () => {
+    const plan = planUpdate({ current: "0.4.21", latest: "0.4.22", installSource: "pnpm" });
+    expect(plan.action).toBe("run-install");
+    expect(plan.command).toEqual(["pnpm", "add", "-g", "reasonix@latest"]);
+  });
+
+  it("emits yarn global add for yarn-installed binaries", () => {
+    const plan = planUpdate({ current: "0.4.21", latest: "0.4.22", installSource: "yarn" });
+    expect(plan.action).toBe("run-install");
+    expect(plan.command).toEqual(["yarn", "global", "add", "reasonix@latest"]);
+  });
+
+  it("returns manual-hint when source cannot be detected — no silent npm fallback", () => {
+    const plan = planUpdate({ current: "0.4.21", latest: "0.4.22", installSource: "unknown" });
+    expect(plan.action).toBe("manual-hint");
+    expect(plan.command).toBeUndefined();
+    expect(plan.message).toContain("npm install -g reasonix@latest");
+    expect(plan.message).toContain("bun add -g reasonix");
+    expect(plan.message).toContain("pnpm add -g reasonix@latest");
+    expect(plan.message).toContain("yarn global add reasonix@latest");
   });
 });
 
@@ -59,7 +105,8 @@ describe("updateCommand", () => {
     const h = harness();
     await updateCommand({
       fetchLatest: async () => VERSION,
-      isNpx: () => false,
+      detectSource: () => "npm",
+      detectPrefix: () => null,
       write: h.write,
       exit: h.exit,
       spawnInstall: h.spawnInstall,
@@ -73,7 +120,8 @@ describe("updateCommand", () => {
     const h = harness();
     await updateCommand({
       fetchLatest: async () => "99.99.99",
-      isNpx: () => true,
+      detectSource: () => "npx",
+      detectPrefix: () => null,
       write: h.write,
       exit: h.exit,
       spawnInstall: h.spawnInstall,
@@ -84,11 +132,12 @@ describe("updateCommand", () => {
     expect(h.spawnCalls).toHaveLength(0);
   });
 
-  it("spawns npm install -g when global install is behind latest", async () => {
+  it("spawns npm install -g when npm-installed and behind latest", async () => {
     const h = harness();
     await updateCommand({
       fetchLatest: async () => "99.99.99",
-      isNpx: () => false,
+      detectSource: () => "npm",
+      detectPrefix: () => null,
       write: h.write,
       exit: h.exit,
       spawnInstall: h.spawnInstall,
@@ -97,11 +146,43 @@ describe("updateCommand", () => {
     expect(h.exitCode).toBeUndefined();
   });
 
+  it("spawns bun add -g when bun-installed", async () => {
+    const h = harness();
+    await updateCommand({
+      fetchLatest: async () => "99.99.99",
+      detectSource: () => "bun",
+      detectPrefix: () => null,
+      write: h.write,
+      exit: h.exit,
+      spawnInstall: h.spawnInstall,
+    });
+    expect(h.spawnCalls).toEqual([["bun", "add", "-g", "reasonix"]]);
+  });
+
+  it("refuses with manual hint and exits 1 when source cannot be detected", async () => {
+    const h = harness();
+    await updateCommand({
+      fetchLatest: async () => "99.99.99",
+      detectSource: () => "unknown",
+      detectPrefix: () => null,
+      write: h.write,
+      exit: h.exit,
+      spawnInstall: h.spawnInstall,
+    });
+    const joined = h.output.join("");
+    expect(joined).toContain("could not be determined");
+    expect(joined).toContain("npm install -g reasonix@latest");
+    expect(joined).toContain("bun add -g reasonix");
+    expect(h.spawnCalls).toHaveLength(0);
+    expect(h.exitCode).toBe(1);
+  });
+
   it("--dry-run prints the command but does not spawn", async () => {
     const h = harness();
     await updateCommand({
       fetchLatest: async () => "99.99.99",
-      isNpx: () => false,
+      detectSource: () => "npm",
+      detectPrefix: () => null,
       dryRun: true,
       write: h.write,
       exit: h.exit,
@@ -115,7 +196,8 @@ describe("updateCommand", () => {
     const h = harness();
     await updateCommand({
       fetchLatest: async () => null,
-      isNpx: () => false,
+      detectSource: () => "npm",
+      detectPrefix: () => null,
       write: h.write,
       exit: h.exit,
       spawnInstall: h.spawnInstall,
@@ -124,11 +206,12 @@ describe("updateCommand", () => {
     expect(h.exitCode).toBe(1);
   });
 
-  it("surfaces non-zero npm exit via the exit seam", async () => {
+  it("surfaces non-zero installer exit via the exit seam", async () => {
     const h = harness();
     await updateCommand({
       fetchLatest: async () => "99.99.99",
-      isNpx: () => false,
+      detectSource: () => "npm",
+      detectPrefix: () => null,
       write: h.write,
       exit: h.exit,
       spawnInstall: async () => 127,

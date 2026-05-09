@@ -7,9 +7,15 @@ import {
 } from "@/hooks.js";
 import { t } from "@/i18n/index.js";
 import { aggregateUsage, defaultUsageLogPath, readUsageLog } from "@/telemetry/usage.js";
-import { VERSION, compareVersions, isNpxInstall } from "@/version.js";
+import {
+  VERSION,
+  compareVersions,
+  detectInstallSource,
+  detectNpmInstallPrefix,
+} from "@/version.js";
 import { runDoctorChecks } from "../../../commands/doctor.js";
 import { renderDashboard } from "../../../commands/stats.js";
+import { MANUAL_UPDATE_COMMANDS, planUpdate } from "../../../commands/update.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const doctor: SlashHandler = (_args, _loop, ctx) => {
@@ -97,24 +103,28 @@ const update: SlashHandler = (_args, _loop, ctx) => {
     return { info: lines.join("\n") };
   }
   lines.push(t("handlers.admin.updateLatest", { version: latest }));
-  const diff = compareVersions(VERSION, latest);
-  if (diff >= 0) {
+  if (compareVersions(VERSION, latest) >= 0) {
     lines.push("", t("handlers.admin.updateUpToDate"));
     return { info: lines.join("\n") };
   }
-  if (isNpxInstall()) {
+  const installSource = detectInstallSource();
+  const npmPrefix = installSource === "npm" ? detectNpmInstallPrefix() : null;
+  const plan = planUpdate({ current: VERSION, latest, installSource, npmPrefix });
+  if (plan.action === "npx-hint") {
     lines.push("", t("handlers.admin.updateNpxHint"), t("handlers.admin.updateNpxForce"));
-  } else {
-    lines.push(
-      "",
-      t("handlers.admin.updateUpgradeHint"),
-      t("handlers.admin.updateUpgradeCmd1"),
-      t("handlers.admin.updateUpgradeCmd2"),
-      "",
-      t("handlers.admin.updateInSessionDisabled"),
-      t("handlers.admin.updateInSessionDisabled2"),
-    );
+    return { info: lines.join("\n") };
   }
+  lines.push("", t("handlers.admin.updateUpgradeHint"), t("handlers.admin.updateUpgradeCmd1"));
+  if (plan.action === "run-install" && plan.command) {
+    lines.push(t("handlers.admin.updateUpgradeCmd2", { command: plan.command.join(" ") }));
+  } else {
+    lines.push(...MANUAL_UPDATE_COMMANDS.map((c) => `  ${c}`));
+  }
+  lines.push(
+    "",
+    t("handlers.admin.updateInSessionDisabled"),
+    t("handlers.admin.updateInSessionDisabled2"),
+  );
   return { info: lines.join("\n") };
 };
 

@@ -657,8 +657,9 @@ export const EN: TranslationSchema = {
       updateUpgradeHint: "to upgrade, exit this session and run:",
       updateUpgradeCmd1:
         "  reasonix update           (interactive, dry-run supported via --dry-run)",
-      updateUpgradeCmd2: "  npm install -g reasonix@latest   (direct)",
-      updateInSessionDisabled: "in-session install is deliberately disabled — the npm spawn would",
+      updateUpgradeCmd2: "  {command}   (direct)",
+      updateInSessionDisabled:
+        "in-session install is deliberately disabled — the install spawn would",
       updateInSessionDisabled2:
         "corrupt this TUI's rendering and Windows can lock the running binary.",
       statsNoData: "no usage data yet.",

@@ -297,10 +297,12 @@ export {
   LATEST_FETCH_TIMEOUT_MS,
   VERSION,
   compareVersions,
+  detectInstallSource,
+  detectNpmInstallPrefix,
   getLatestVersion,
   isNpxInstall,
 } from "./version.js";
-export type { GetLatestVersionOptions } from "./version.js";
+export type { GetLatestVersionOptions, InstallSource } from "./version.js";
 
 export {
   HOOK_EVENTS,

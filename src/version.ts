@@ -136,12 +136,37 @@ export function compareVersions(a: string, b: string): number {
   return aPre < bPre ? -1 : aPre > bPre ? 1 : 0;
 }
 
-/** False negatives are safe — `npm i -g` works for npx users too. */
+export type InstallSource = "npm" | "bun" | "pnpm" | "yarn" | "npx" | "unknown";
+
+/** Each manager owns a unique global path segment, so argv[1] tells us who installed us. */
+export function detectInstallSource(bin?: string): InstallSource {
+  const raw = bin ?? process.argv[1] ?? "";
+  if (!raw) return "unknown";
+  const norm = raw.replace(/\\/g, "/").toLowerCase();
+  if (/\/_npx\//.test(norm)) return "npx";
+  if (/\/\.pnpm\//.test(norm) && /dlx/i.test(norm)) return "npx";
+  const ua = (process.env.npm_config_user_agent ?? "").toLowerCase();
+  if (ua.includes("npx/")) return "npx";
+  if (/\/\.bun\//.test(norm) || /\/bun\/install\//.test(norm)) return "bun";
+  if (/\/pnpm\/global\//.test(norm) || /\/pnpm\/[^/]+\/node_modules\//.test(norm)) return "pnpm";
+  if (/\/yarn\/global\//.test(norm) || /\/\.yarn\/global\//.test(norm)) return "yarn";
+  if (/\/node_modules\/reasonix(\b|\/)/.test(norm)) return "npm";
+  return "unknown";
+}
+
+/** Returns null when no path is given. Callers must check installSource first. */
 export function isNpxInstall(): boolean {
-  const bin = process.argv[1] ?? "";
-  if (/[/\\]_npx[/\\]/.test(bin)) return true;
-  if (/[/\\]\.pnpm[/\\]/.test(bin) && /dlx/i.test(bin)) return true;
-  const ua = process.env.npm_config_user_agent ?? "";
-  if (ua.includes("npx/")) return true;
-  return false;
+  return detectInstallSource() === "npx";
+}
+
+/** Pin npm to the install location via --prefix so `nvm use` doesn't redirect the install elsewhere. */
+export function detectNpmInstallPrefix(bin?: string): string | null {
+  const raw = bin ?? process.argv[1] ?? "";
+  if (!raw) return null;
+  const norm = raw.replace(/\\/g, "/");
+  const posix = norm.match(/^(.+?)\/lib\/node_modules\/reasonix(?:\/|$)/i);
+  if (posix) return posix[1] ?? null;
+  const win = norm.match(/^(.+?)\/node_modules\/reasonix(?:\/|$)/i);
+  if (win) return win[1] ?? null;
+  return null;
 }
