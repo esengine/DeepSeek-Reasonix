@@ -54,6 +54,15 @@ endpoints with non-standard key prefixes accepted.
 
 **Fixes:**
 
+- fix(slash): hoist hooks above early returns. SlashSuggestions had
+  `useColor` / `useStdout` / `useState` before two early-return
+  branches and `useEffect` after, so when matches flipped between
+  non-empty and null/empty across renders React saw a different hook
+  count and threw "Rendered more hooks than during the previous
+  render", killing the entire TUI mid-session. Triggered by everyday
+  slash editing (typo → backspace → typing again). Hoisted the
+  effect + windowStart math above the returns. (#538)
+
 - fix(tui): wheel scroll on cloud / web / SSH terminals via DECSET
   1007. Old code relied on the implicit "terminal translates
   wheel→↑/↓ in alt-screen" behavior — only on by default in xterm /
