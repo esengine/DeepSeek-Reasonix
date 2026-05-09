@@ -14,6 +14,7 @@ import { SearchCard } from "./SearchCard.js";
 import { StreamingCard } from "./StreamingCard.js";
 import { SubAgentCard } from "./SubAgentCard.js";
 import { TaskCard } from "./TaskCard.js";
+import { TipCard } from "./TipCard.js";
 import { ToolCard } from "./ToolCard.js";
 import { UsageCard } from "./UsageCard.js";
 import { UserCard } from "./UserCard.js";
@@ -58,6 +59,8 @@ function renderCard(card: Card): React.ReactElement {
       return <SearchCard card={card} />;
     case "live":
       return <LiveCard card={card} />;
+    case "tip":
+      return <TipCard card={card} />;
     case "ctx":
       return <CtxCard card={card} />;
     case "doctor":

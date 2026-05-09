@@ -59,8 +59,16 @@ export const EN: TranslationSchema = {
     restoredEdits:
       "▸ restored {count} pending edit block(s) from an interrupted prior run — /apply to commit or /discard to drop.",
     resumedPlan: "Resumed plan · {when}{summary}",
-    tipEditBindings:
-      "▸ TIP: edit-gate keybindings\n    y / n       accept or drop pending edits\n    Shift+Tab   switch review ↔ AUTO (persisted; AUTO applies instantly)\n    u           undo the last auto-applied batch (within the 5s banner)\n  Current mode is shown in the bottom status bar. Run /keys anytime for the full list.\n  (This tip shows once — suppressed after.)",
+    tipEditBindings: {
+      topic: "edit-gate keybindings",
+      rows: [
+        { key: "y / n", text: "accept or drop pending edits" },
+        { key: "Shift+Tab", text: "switch review ↔ AUTO (persisted; AUTO applies instantly)" },
+        { key: "u", text: "undo the last auto-applied batch (within the 5s banner)" },
+      ],
+      footer: "Current mode shown in the bottom status bar · /keys for the full reference",
+    },
+    tipShownOnce: "shown once",
     modelOverride: "override the default model",
     noSession: "disable session persistence for this run",
     resumeHint: "force-resume the named session (even if idle)",

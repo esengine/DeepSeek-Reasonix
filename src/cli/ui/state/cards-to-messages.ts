@@ -52,6 +52,14 @@ export function cardsToDashboardMessages(cards: ReadonlyArray<Card>): DashboardM
       case "ctx":
         out.push({ id: card.id, role: "info", text: card.text });
         break;
+      case "tip": {
+        const body = card.rows.map((r) => `${r.key}\t${r.text}`).join("\n");
+        const text = card.footer
+          ? `${card.topic}\n${body}\n${card.footer}`
+          : `${card.topic}\n${body}`;
+        out.push({ id: card.id, role: "info", text });
+        break;
+      }
       case "plan": {
         const done = card.steps.filter((s) => s.status === "done").length;
         const tag =

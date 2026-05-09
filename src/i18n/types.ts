@@ -53,7 +53,12 @@ export interface TranslationSchema {
     ephemeralSession: string;
     restoredEdits: string;
     resumedPlan: string;
-    tipEditBindings: string;
+    tipEditBindings: {
+      topic: string;
+      rows: ReadonlyArray<{ key: string; text: string }>;
+      footer: string;
+    };
+    tipShownOnce: string;
     modelOverride: string;
     noSession: string;
     resumeHint: string;

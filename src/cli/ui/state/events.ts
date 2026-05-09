@@ -283,6 +283,16 @@ const liveShow = z.object({
   meta: z.string().optional(),
 });
 
+const tipShow = z.object({
+  type: z.literal("tip.show"),
+  id: cardId,
+  ts: ts,
+  topic: z.string(),
+  rows: z.array(z.object({ key: z.string(), text: z.string() })),
+  footer: z.string().optional(),
+  oneTime: z.boolean(),
+});
+
 export const AgentEventSchema = z.discriminatedUnion("type", [
   userSubmit,
   turnStart,
@@ -315,6 +325,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   toastShow,
   toastHide,
   liveShow,
+  tipShow,
   sessionReset,
   planShow,
   planStepComplete,

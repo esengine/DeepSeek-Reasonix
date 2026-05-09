@@ -173,6 +173,17 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         meta: event.meta,
       });
 
+    case "tip.show":
+      return appendCard(state, {
+        kind: "tip",
+        id: event.id,
+        ts: event.ts,
+        topic: event.topic,
+        rows: event.rows,
+        footer: event.footer,
+        oneTime: event.oneTime,
+      });
+
     case "session.reset":
       return { ...state, cards: [], focusedCardId: null, toasts: [] };
 

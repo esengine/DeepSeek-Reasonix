@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { DoctorCheckEntry, PlanStep } from "../state/cards.js";
+import type { DoctorCheckEntry, PlanStep, TipRow } from "../state/cards.js";
 import { useDispatch } from "../state/provider.js";
 
 let seq = 0;
@@ -22,6 +22,13 @@ export interface Scrollback {
     text: string,
     tone?: "info" | "ok" | "warn" | "err" | "ghost" | "brand" | "accent",
   ): string;
+  /** Structured onboarding-tip card — replaces multi-line TIP strings stuffed into pushInfo. */
+  pushTip(args: {
+    topic: string;
+    rows: ReadonlyArray<TipRow>;
+    footer?: string;
+    oneTime?: boolean;
+  }): string;
   /** Emits a `ctxPressure` live card when usedTokens crosses 80% (warn) or 95% (err) of ctxMax. */
   pushCtxPressureIfHigh(usedTokens: number, ctxMax: number): void;
   pushStepProgress(stepIndex: number, total: number, title: string, elapsedMs?: number): string;
@@ -136,6 +143,19 @@ export function useScrollback(): Scrollback {
           variant: "stepProgress",
           tone,
           text,
+        });
+        return id;
+      },
+      pushTip({ topic, rows, footer, oneTime = true }) {
+        const id = nextId("tip");
+        dispatch({
+          type: "tip.show",
+          id,
+          ts: Date.now(),
+          topic,
+          rows: rows.map((r) => ({ key: r.key, text: r.text })),
+          footer,
+          oneTime,
         });
         return id;
       },

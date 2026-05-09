@@ -57,8 +57,16 @@ export const zhCN: TranslationSchema = {
     restoredEdits:
       "▸ 从中断的运行中恢复了 {count} 个待处理的编辑块 — /apply 提交或 /discard 放弃。",
     resumedPlan: "已恢复计划 · {when}{summary}",
-    tipEditBindings:
-      "▸ 提示：编辑门控快捷键\n    y / n       接受或放弃待处理的编辑\n    Shift+Tab   切换 预览 ↔ 自动 (持久化；自动模式立即应用)\n    u           撤消上次自动应用的批处理 (在 5 秒横幅内)\n  当前模式显示在底部状态栏。随时运行 /keys 查看完整列表。\n  (此提示仅显示一次 — 之后将隐藏。)",
+    tipEditBindings: {
+      topic: "编辑门控快捷键",
+      rows: [
+        { key: "y / n", text: "接受或放弃待处理的编辑" },
+        { key: "Shift+Tab", text: "切换 预览 ↔ 自动（持久化；自动模式立即应用）" },
+        { key: "u", text: "撤销上次自动应用的批处理（5 秒横幅内）" },
+      ],
+      footer: "当前模式显示在底部状态栏 · /keys 查看完整快捷键参考",
+    },
+    tipShownOnce: "仅显示一次",
     modelOverride: "覆盖默认模型",
     noSession: "禁用本次运行的会话持久化",
     resumeHint: "强制恢复指定会话（即使空闲）",

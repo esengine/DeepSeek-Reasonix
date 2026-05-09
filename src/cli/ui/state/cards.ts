@@ -192,6 +192,19 @@ export interface CtxCard extends CardBase {
   readonly topTools: ReadonlyArray<{ name: string; tokens: number; turn: number }>;
 }
 
+export interface TipRow {
+  readonly key: string;
+  readonly text: string;
+}
+
+export interface TipCard extends CardBase {
+  readonly kind: "tip";
+  readonly topic: string;
+  readonly rows: ReadonlyArray<TipRow>;
+  readonly footer?: string;
+  readonly oneTime: boolean;
+}
+
 export type Card =
   | UserCard
   | ReasoningCard
@@ -208,7 +221,8 @@ export type Card =
   | SearchCard
   | LiveCard
   | CtxCard
-  | DoctorCard;
+  | DoctorCard
+  | TipCard;
 
 export interface DoctorCheckEntry {
   readonly label: string;

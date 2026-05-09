@@ -56,6 +56,24 @@ export function getSupportedLanguages(): LanguageCode[] {
   return Object.keys(translations) as LanguageCode[];
 }
 
+/** Returns a structured (non-string) translation entry — for tables / row objects passed to TipCard etc. */
+export function tObj<T>(path: string): T {
+  const parts = path.split(".");
+  let val: unknown = translations[currentLang] || translations.EN;
+  for (const part of parts) {
+    val = (val as Record<string, unknown> | undefined)?.[part];
+    if (val === undefined) break;
+  }
+  if (val === undefined && currentLang !== "EN") {
+    val = translations.EN;
+    for (const part of parts) {
+      val = (val as Record<string, unknown> | undefined)?.[part];
+      if (val === undefined) break;
+    }
+  }
+  return val as T;
+}
+
 /** Simple t() — nested keys (e.g. "common.error") + param replacement (e.g. "{code}"). */
 export function t(path: string, params?: Record<string, string | number>): string {
   const parts = path.split(".");

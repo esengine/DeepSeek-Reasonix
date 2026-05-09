@@ -45,7 +45,7 @@ import {
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
 import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
-import { onLanguageChange, t } from "../../i18n/index.js";
+import { onLanguageChange, t, tObj } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import type { LoopEvent } from "../../loop.js";
 import {
@@ -1202,7 +1202,12 @@ function AppInner({
     // per install; the config flag suppresses re-display on every
     // relaunch. Skips chat mode — those shortcuts don't apply there.
     if (codeMode && !editModeHintShown()) {
-      log.pushInfo(t("ui.tipEditBindings"));
+      const tip = tObj<{
+        topic: string;
+        rows: ReadonlyArray<{ key: string; text: string }>;
+        footer: string;
+      }>("ui.tipEditBindings");
+      log.pushTip({ topic: tip.topic, rows: tip.rows, footer: tip.footer });
       markEditModeHintShown();
     }
   }, [session, loop, codeMode, syncPendingCount, log]);
