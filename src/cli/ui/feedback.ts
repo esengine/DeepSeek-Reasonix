@@ -1,5 +1,7 @@
 /** Pre-fills the GitHub new-issue body with version + platform + terminal + Node + locale + model. No transcripts, paths, or secrets. */
 
+import { compareVersions } from "../../version.js";
+
 export interface FeedbackDiagnosticInput {
   version: string;
   latestVersion?: string | null;
@@ -65,7 +67,9 @@ export function buildFeedbackDiagnostic(input: FeedbackDiagnosticInput): string 
 
 function formatVersion(installed: string, latest: string | null | undefined): string {
   if (!latest) return installed;
-  if (latest === installed) return `${installed} (latest)`;
+  const cmp = compareVersions(installed, latest);
+  if (cmp === 0) return `${installed} (latest)`;
+  if (cmp > 0) return installed;
   return `${installed} (latest: ${latest})`;
 }
 

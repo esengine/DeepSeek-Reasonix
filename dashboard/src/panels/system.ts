@@ -1,6 +1,7 @@
 import { fmtBytes, fmtNum } from "../lib/format.js";
 import { html } from "../lib/html.js";
 import { usePoll } from "../lib/use-poll.js";
+import { compareVersions } from "../lib/version.js";
 import { t, useLang } from "../i18n/index.js";
 
 interface HealthData {
@@ -22,7 +23,7 @@ export function SystemPanel() {
   if (error) return html`<div class="card accent-err">${t("common.loadingFailed", { name: "health", error: error.message })}</div>`;
   if (!data) return null;
   const h = data;
-  const upToDate = h.latestVersion ? h.latestVersion === h.version : null;
+  const upToDate = h.latestVersion ? compareVersions(h.version, h.latestVersion) >= 0 : null;
 
   return html`
     <div style="display:flex;flex-direction:column;gap:14px">

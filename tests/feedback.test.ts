@@ -71,6 +71,17 @@ describe("buildFeedbackDiagnostic", () => {
     expect(out).toContain("**Reasonix**: 0.34.1 (latest: 0.35.0)");
   });
 
+  it("does not flag installed > cached-latest as out-of-date (issue #510)", () => {
+    const out = buildFeedbackDiagnostic({
+      ...FIXTURE,
+      version: "0.35.0",
+      latestVersion: "0.31.0",
+    });
+    expect(out).toContain("**Reasonix**: 0.35.0");
+    expect(out).not.toContain("(latest: 0.31.0)");
+    expect(out).not.toContain("(latest)");
+  });
+
   it("omits optional fields cleanly when absent", () => {
     const out = buildFeedbackDiagnostic({
       version: "0.34.1",

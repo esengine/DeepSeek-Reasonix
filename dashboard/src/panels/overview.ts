@@ -2,6 +2,7 @@ import { budgetTone, deriveBudgetState } from "../lib/budget.js";
 import { fmtCompactNum, fmtCost, fmtNum, fmtRelativeTime, fmtUsd } from "../lib/format.js";
 import { html } from "../lib/html.js";
 import { usePoll } from "../lib/use-poll.js";
+import { compareVersions } from "../lib/version.js";
 import { t, useLang } from "../i18n/index.js";
 
 interface CockpitKpi {
@@ -280,7 +281,8 @@ export function OverviewPanel() {
     recentPlans: null,
     toolActivity: null,
   };
-  const upToDate = o.latestVersion ? o.latestVersion === o.version : null;
+  const upToDate =
+    o.latestVersion && o.version ? compareVersions(o.version, o.latestVersion) >= 0 : null;
   const versionDelta =
     upToDate === null ? t("overview.checking") : upToDate ? t("overview.latest") : `latest: ${o.latestVersion}`;
   const versionTone: "up" | "down" | "flat" = upToDate === false ? "down" : "flat";
