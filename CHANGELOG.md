@@ -3,6 +3,35 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.2] — 2026-05-09
+
+**Headline:** two bug fixes for #468 reported by @dacec354.
+
+**Bug fixes:**
+
+- fix(ui): ↑/↓ on an empty buffer recalls prompt history again. The
+  binding was unbound from arrows back in 9254d3a because Windows
+  Terminal + ConPTY can translate mouse-wheel events to ↑/↓
+  keystrokes (wheel-up was clobbering the prompt with a recalled
+  message); history moved to Ctrl+P / Ctrl+N. That was right for
+  legacy ConPTY but broke the universal CLI convention for
+  everyone else (bash / zsh / fish all bind ↑ to history). Restored
+  ↑/↓ on empty buffer = history; Ctrl+P / Ctrl+N stays as the
+  wheel-immune fallback. Dead `chatScrollHandoff` plumbing dropped.
+  (#475, closes part 1 of #468)
+
+- fix(doctor): tokenizer check now finds the file. The runtime
+  resolver in `tokenizer.ts` had three candidates including a
+  `createRequire("reasonix/package.json")` probe and worked
+  reliably; the doctor had its own copy of the path math that
+  walked `dist/cli/commands/doctor.js → ../../../data/`. After the
+  lazy-import refactor in #467 the doctor compiles to
+  `dist/cli/doctor-HASH.js` (one level shallower), so three `..`
+  walked above the package root and reported "tokenizer not
+  found" even when the npm tarball had it. Reuse the runtime
+  resolver so the two paths can never disagree. (#475, closes part
+  2 of #468)
+
 ## [0.33.1] — 2026-05-09
 
 **Headline:** the bottom status row now shows the wallet. Both
