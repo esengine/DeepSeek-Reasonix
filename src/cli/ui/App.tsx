@@ -1232,10 +1232,23 @@ function AppInner({
   // multi-line cursor moves live on Ctrl+P / Ctrl+N (see
   // multiline-keys.ts); leftover mouseScrollUp/Down events from a
   // terminal that ignores DECRST 1000 still route correctly.
+  //
+  // Pickers (slash / @-mention / slash-arg / shell-confirm) own ↑/↓
+  // for their own list nav — when any of them is open we skip the
+  // arrow path here so the user doesn't see the chat scroll AND the
+  // picker selection move on the same keypress. PgUp/PgDn/End still
+  // scroll regardless because pickers don't claim those.
   useKeystroke((ev) => {
-    if (ev.pageUp || ev.mouseScrollUp || ev.upArrow) chatScroll.scrollUp();
-    else if (ev.pageDown || ev.mouseScrollDown || ev.downArrow) chatScroll.scrollDown();
+    const pickerOwnsArrows =
+      (atState?.entries.length ?? 0) > 0 ||
+      (slashMatches?.length ?? 0) > 0 ||
+      (slashArgMatches?.length ?? 0) > 0 ||
+      pendingShell != null;
+    if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollUp();
+    else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollDown();
     else if (ev.end) chatScroll.jumpToBottom();
+    else if (!pickerOwnsArrows && ev.upArrow) chatScroll.scrollUp();
+    else if (!pickerOwnsArrows && ev.downArrow) chatScroll.scrollDown();
   }, !modalOpen);
 
   // Esc during busy → forward to the loop as an abort signal. The loop
