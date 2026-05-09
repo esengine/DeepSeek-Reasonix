@@ -3,6 +3,135 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] — 2026-05-09
+
+**Headline:** the agent gains the ability to extend itself from chat,
+and bug reporting collapses from a multi-tab scavenger hunt into one
+slash. `create_skill` and `add_mcp_server` are first-class tools — "add
+a skill that runs typecheck before commits" or "wire up a postgres MCP
+server" now works as a normal chat request, with structured args
+(description / `runAs` / `allowed-tools` / `model` for skills; transport
++ command + args + catalog hydrate for MCP) so the model never writes
+raw YAML or hand-crafts a `name=…` spec. Both reuse the same
+persistence paths the wizard / `/skill new` already use, so on-disk
+shape stays one source of truth.
+
+`/feedback` opens GitHub's new-issue page with an 11-field diagnostic
+block (version + latest-version compare + platform + terminal env
+markers including WT_SESSION/TMUX/SSH/WSL + cols×rows + theme + edit /
+plan mode + MCP count + session) **pre-filled in the textarea via
+`?body=`** — clipboard stays as belt-and-suspenders. The status row
+shows a `v<VERSION> · ⚑ /feedback` chip at cols ≥ 100 for
+discoverability. Diagnostic block is locked by a test that pins the
+exact field set so future additions can't sneak in unannounced.
+
+Plan mode finally surfaces the open-questions block it was already
+flagging. The banner detected `Open Questions` / `Risks` / `Unknowns`
+headings since 0.30, but the actual questions were swallowed by either
+the step list or the 24-line body cap. Now the extracted block renders
+under the banner regardless, and refines pre-fill the questions above
+the input. Whole plan flow (PlanConfirm / PlanRefineInput /
+PlanCheckpointConfirm / PlanStepList) moves through `t()` — the i18n
+gap the issue called out is closed.
+
+Read tooling gets sharper: `read_file` auto-preview now embeds a
+top-level export outline so callers can pick a `range` without a
+follow-up grep, and `search_content` adds a per-file cap + a histogram
+fallback so a single high-frequency hit can't drown the result. The
+subagent loop now sees its own iter budget and gets a near-cap
+countdown.
+
+Plus: dashboard typography pass (sidebar 240→260px column, body
+12.5→15px, section headers tightened), cache-hit percentages now show
+1-decimal precision across CLI + dashboard, Usage panel chart fully
+i18n'd, `spawn_subagent` tool result body finally renders as markdown
+instead of literal `**`/`##`/code-fences in the JSON envelope.
+
+**Features:**
+
+- feat(tools): `create_skill` + `add_mcp_server` — let the model
+  scaffold from chat. `create_skill` pre-fills frontmatter
+  (`description` / `runAs` / `allowed-tools` / `model`) from structured
+  args; `add_mcp_server` builds `name=…` specs for stdio / sse /
+  streamable-http with `from_catalog` shortcut for bundled entries,
+  runs the existing preflight, refuses name collisions. Both register
+  alongside native filesystem / shell tools in `reasonix code`.
+  (#498, closes #494)
+
+- feat(ui): `/feedback` + version badge in the status row. Slash
+  collects an 11-field diagnostic (terminal env / size / theme / edit
+  + plan mode / MCP / model + effort / version-vs-latest / session),
+  opens GitHub's new-issue URL with the body pre-filled via
+  `?body=<urlencoded>`, falls back to clipboard. StatusRow shows
+  `v<VERSION>` at cols ≥ 70 and adds a `· ⚑ /feedback` hint at
+  cols ≥ 100. Field set is locked by test. (#501, closes #499)
+
+- feat(tools): `read_file` auto-preview embeds a top-level export
+  outline. When the file is > 200 lines and no `head` / `tail` /
+  `range` was given, the elision marker now also lists function /
+  class / const / interface / type / enum names with their line
+  numbers (capped at 30 entries with elision). Callers can pick a
+  meaningful `range` without a follow-up `search_content`. (#490,
+  closes #487)
+
+- feat(search): `search_content` per-file cap + histogram fallback.
+  When a single file dominates the result (typical: a generated lock
+  file or a long log), the new per-file cap clips its share and the
+  histogram footer shows the per-file distribution so callers can
+  re-query against a specific file instead of widening the cast. (#495,
+  closes #489)
+
+- feat(subagent): tell the child its iter budget; warn near the cap.
+  The child loop now sees its `maxToolIters` budget in the system
+  prompt (replaces the static "Cap at 6-8 tool calls" prose), and the
+  parent injects a remaining-iter hint into tool results once budget
+  is tight (`[budget: 3 of 20 tool calls left — wrap up soon]`).
+  Stops the explore-burns-17-iters-then-truncates-mid-thought failure
+  mode. (#493, closes #488)
+
+**Fixes:**
+
+- fix(plan): surface the open-questions block under the banner; i18n
+  the plan flow. The `Open Questions` / `Risks` / `Unknowns`
+  detection regex already fired but the block was swallowed by the
+  step list or the 24-line body cap. Extract via
+  `extractOpenQuestionsSection` and render under the banner regardless
+  of `steps` / cap; thread the questions into `PlanRefineInput`
+  above the input on `mode === "refine"`. Move `PlanConfirm` /
+  `PlanRefineInput` / `PlanCheckpointConfirm` / `PlanStepList` strings
+  through `t()` under a new `planFlow` namespace in EN + zh-CN.
+  Replace the blank-refine synthetic that asks the model to re-derive
+  questions with one that tells it to pick safe defaults. (#497,
+  closes #477)
+
+- fix(ui): render `spawn_subagent` tool result body as markdown.
+  `formatSubagentResult` returns a JSON envelope with the child's
+  final answer in `output`; `ToolCard` rendered the JSON-stringified
+  body as raw `<Text>`, so `## headers`, `**bold**`, fenced code
+  blocks all leaked through as literal characters. Special-case
+  `card.name === "spawn_subagent"`: parse the envelope, pass `output`
+  through the same `Markdown` component the streaming reply uses;
+  fall back to the line-tail loop on parse failures and `success:
+  false`. (#496, closes #491)
+
+- fix(dashboard): bump doc-chrome typography; widen sidebar column.
+  Sidebar 240 → 260px (so 2–3 word section labels fit without
+  mid-word wraps), section headers 10 → 12px with tracking 0.14em →
+  0.08em, links 12.5 → 14px with `line-height: 1.4` and
+  `overflow-wrap: anywhere`, body copy 12.5 → 15px, `.swatch .hex` /
+  `.scale-row .lbl` 10.5 → 11.5px. Mirrored verbatim into
+  `docs/design/agent-dashboard.html`. (#500, closes #461)
+
+- fix(ui): improve cache hit percentage display + Usage chart i18n.
+  Cache-hit ratio now shows 1-decimal precision (85.6% rather than
+  86%) across the dashboard sidebar, the Stats panel, and `/status`.
+  Usage panel chart axes (`USD` / `turns` / `time`) and series labels
+  (`cost` / `cache saved` / `turns`) move through `t()` — they were
+  hardcoded English. Adds the missing `colWindow` header (was an
+  empty `<th>`), promotes numeric columns to right-aligned tabular
+  numerals at the header level, not just the body. Thanks
+  @kabaka9527. (#503)
+
 ## [0.34.1] — 2026-05-09
 
 **Headline:** scroll lag fix for long sessions. `useChatScroll` was
