@@ -39,7 +39,10 @@ export function ErrorCard({ card }: { card: ErrorCardData }): React.ReactElement
           <Text color={FG.meta}>{t("cardLabels.stackTrace")}</Text>
           {stackHidden > 0 ? (
             <Text color={FG.faint}>
-              {t("cardLabels.earlierStackLines", { count: stackHidden })}
+              {t(
+                stackHidden === 1 ? "cardLabels.earlierStackLine" : "cardLabels.earlierStackLines",
+                { count: stackHidden },
+              )}
             </Text>
           ) : null}
           {stackVisible.map((line, i) => (

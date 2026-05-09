@@ -10,7 +10,10 @@ import { FG, TONE } from "../theme/tokens.js";
 export function SearchCard({ card }: { card: SearchCardData }): React.ReactElement {
   const fileCount = new Set(card.hits.map((h) => h.file)).size;
   const elapsed = `${(card.elapsedMs / 1000).toFixed(2)}s`;
-  const stats = t("cardLabels.hits", { count: card.hits.length, files: fileCount });
+  const stats = t(card.hits.length === 1 ? "cardLabels.hitSingular" : "cardLabels.hitsPlural", {
+    count: card.hits.length,
+    files: fileCount,
+  });
 
   const grouped = groupByFile(card.hits.slice(0, 10));
 
@@ -37,7 +40,14 @@ export function SearchCard({ card }: { card: SearchCardData }): React.ReactEleme
         </Box>
       ))}
       {card.hits.length > 10 ? (
-        <Text color={FG.faint}>{t("cardLabels.moreHits", { count: card.hits.length - 10 })}</Text>
+        <Text color={FG.faint}>
+          {t(
+            card.hits.length - 10 === 1
+              ? "cardLabels.moreHitSingular"
+              : "cardLabels.moreHitsPlural",
+            { count: card.hits.length - 10 },
+          )}
+        </Text>
       ) : null}
     </Card>
   );

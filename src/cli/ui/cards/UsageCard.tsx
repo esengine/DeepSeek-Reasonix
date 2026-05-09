@@ -33,7 +33,10 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
   const reasonRatio = card.tokens.reason / cap;
   const outputRatio = card.tokens.output / cap;
 
-  const headerMeta: string[] = [`${t("cardLabels.turn")} ${card.turn}`, formatCost(card.cost, card.balanceCurrency)];
+  const headerMeta: string[] = [
+    `${t("cardLabels.turn")} ${card.turn}`,
+    formatCost(card.cost, card.balanceCurrency),
+  ];
   if (card.elapsedMs !== undefined) headerMeta.push(`${(card.elapsedMs / 1000).toFixed(1)}s`);
   return (
     <Card tone={FG.meta}>

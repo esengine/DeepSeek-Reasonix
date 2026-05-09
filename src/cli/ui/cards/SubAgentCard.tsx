@@ -23,8 +23,8 @@ export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactE
   const inLive = useContext(ActiveCardContext);
   const headerMeta = isRunning
     ? runningChildren > 0
-      ? [`${runningChildren} ${t("editMode.runningLabel")}`]
-      : [t("editMode.workingLabel")]
+      ? [`${runningChildren} ${t("cardLabels.runningLabel")}`]
+      : [t("cardLabels.workingLabel")]
     : [{ text: card.status, color: headColor }];
   return (
     <CardWrap tone={headColor}>

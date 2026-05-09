@@ -1,8 +1,8 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useContext } from "react";
-import { t } from "../../../i18n/index.js";
 import { clipToCells, wrapToCells } from "../../../frame/width.js";
+import { t } from "../../../i18n/index.js";
 import { countTokens } from "../../../tokenizer.js";
 import { LiveExpandContext } from "../layout/LiveExpandContext.js";
 import { useReserveRows } from "../layout/viewport-budget.js";
@@ -122,9 +122,11 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
         }
       />
       {expanded && droppedAbove > 0 ? (
-        <Text
-          color={FG.faint}
-        >{t("cardLabels.earlierLines", { count: droppedAbove })}</Text>
+        <Text color={FG.faint}>
+          {t(droppedAbove === 1 ? "cardLabels.earlierLine" : "cardLabels.earlierLines", {
+            count: droppedAbove,
+          })}
+        </Text>
       ) : null}
       {visible.map((line, i) => (
         <Box key={`${card.id}:${visualLines.length - visible.length + i}`} flexDirection="row">

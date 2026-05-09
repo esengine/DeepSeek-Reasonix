@@ -1,8 +1,8 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { t } from "../../../i18n/index.js";
 import { clipToCells } from "../../../frame/width.js";
+import { t } from "../../../i18n/index.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
@@ -72,7 +72,9 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
           <>
             {hidden > 0 ? (
               <Text color={FG.faint}>
-                {t("cardLabels.earlierLines", { count: hidden })}
+                {t(hidden === 1 ? "cardLabels.earlierLine" : "cardLabels.earlierLines", {
+                  count: hidden,
+                })}
               </Text>
             ) : null}
             {visible.map((line, i) => (
@@ -147,7 +149,8 @@ function metaTrail(card: ToolCardData): string[] {
   const parts: string[] = [];
   const inputBytes = largestStringInputBytes(card.args);
   if (inputBytes !== null) parts.push(t("cardLabels.bytesIn", { bytes: formatBytes(inputBytes) }));
-  if (card.elapsedMs > 0) parts.push(t("cardLabels.elapsedSec", { secs: (card.elapsedMs / 1000).toFixed(2) }));
+  if (card.elapsedMs > 0)
+    parts.push(t("cardLabels.elapsedSec", { secs: (card.elapsedMs / 1000).toFixed(2) }));
   if (
     card.done &&
     !card.rejected &&

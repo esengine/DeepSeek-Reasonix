@@ -46,10 +46,12 @@ export function CtxCard({ card }: { card: CtxCardData }): React.ReactElement {
           <Text color={FG.faint}>
             {`${t("cardLabels.topTools")} · ${card.toolsCount} ${t("cardLabels.tools")} · ${card.logMessages} ${t("cardLabels.logMsgs")}`}
           </Text>
-          {card.topTools.slice(0, 5).map((t) => (
-            <Box key={`${t.turn}-${t.name}`} flexDirection="row" gap={1}>
-              <Text color={FG.sub}>{t.name}</Text>
-              <Text color={FG.faint}>{`· ${t("cardLabels.turn")} ${t.turn} · ${t.tokens.toLocaleString()}`}</Text>
+          {card.topTools.slice(0, 5).map((tool) => (
+            <Box key={`${tool.turn}-${tool.name}`} flexDirection="row" gap={1}>
+              <Text color={FG.sub}>{tool.name}</Text>
+              <Text
+                color={FG.faint}
+              >{`· ${t("cardLabels.turn")} ${tool.turn} · ${tool.tokens.toLocaleString()}`}</Text>
             </Box>
           ))}
         </>
