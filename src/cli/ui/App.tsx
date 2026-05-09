@@ -232,6 +232,14 @@ export interface AppProps {
   noDashboard?: boolean;
   /** Mid-chat session swap — Root remounts App with the new session via key. */
   onSwitchSession?: (name: string | undefined) => void;
+  /**
+   * Enable DECSET 1007 (alternate-scroll) so the wheel scrolls chat
+   * on web/cloud/SSH terminals — terminal translates wheel events to
+   * ↑/↓ key sequences in alt-screen, no full mouse tracking, native
+   * drag-select + right-click unaffected. Default true. Pass false
+   * (CLI: `--no-mouse`) to suppress entirely.
+   */
+  mouse?: boolean;
 }
 
 /**
@@ -324,6 +332,7 @@ function AppInner({
   codeMode,
   noDashboard,
   onSwitchSession,
+  mouse = true,
 }: AppProps) {
   markPhase("app_inner_start");
   const log = useScrollback();
@@ -383,36 +392,34 @@ function AppInner({
   // H genuinely nukes viewport AND scrollback, which is what `/clear`
   // means to a shell user.
   const { stdout } = useStdout();
-  // Terminal input modes we opt into at startup, all paired with
-  // disable-on-unmount so the user's shell doesn't inherit them:
+  // Bracketed paste + modifyOtherKeys + alternate-scroll. All three
+  // are opt-in per session and reset on unmount.
   //
-  //   • Bracketed paste (DECSET 2004) — terminal wraps pasted text
-  //     with \x1b[200~ … \x1b[201~ markers so a multi-chunk paste
-  //     can't be misread as keystrokes (the trailing \n in a paste
-  //     would otherwise fire submit).
-  //
-  //   • modifyOtherKeys level 2 (CSI > 4 ; 2 m) — terminal encodes
-  //     modifier-bearing keypresses (Shift+Enter, Ctrl+Enter, etc.)
-  //     as `\x1b[27;<mod>;<key>~` instead of the bare ASCII byte. Our
-  //     stdin-reader recognises `27;2;13~` as Shift+Enter and
-  //     `27;5;13~` as Ctrl+Enter. Terminals that don't understand the
-  //     SGR fall through silently — Shift+Enter just stays
-  //     indistinguishable from Enter, no regression.
-  //
-  // Mouse tracking is intentionally NOT enabled: terminals translate
-  // the wheel to ↑/↓ in the alt-screen buffer, App-level ↑/↓ scrolls
-  // chat, and Ctrl+P / Ctrl+N own the prompt's history + multi-line
-  // cursor moves. Skipping mouse mode keeps native drag-to-select +
-  // right-click paste working in every terminal.
+  //   • DECSET 2004 — bracketed paste markers so multi-chunk pastes
+  //     don't fire submit on the trailing \n.
+  //   • CSI > 4 ; 2 m — modifyOtherKeys level 2 so Shift+Enter /
+  //     Ctrl+Enter encode as `\x1b[27;<mod>;<key>~` instead of bare
+  //     CR; stdin-reader recognises them. Silent fallback otherwise.
+  //   • DECSET 1007 — alternate-scroll: in alt-screen the terminal
+  //     translates wheel events to ↑/↓ key sequences instead of
+  //     swallowing them. Lets us route wheel to chat-scroll without
+  //     enabling full mouse tracking, so terminal-native drag-select
+  //     and right-click stay 100% intact (no Shift modifier needed).
+  //     Supported by xterm/iTerm/Windows Terminal/Alacritty/Kitty and
+  //     xterm.js 4.x+ (covers code-server, VS Code web, modern cloud
+  //     shells). Pre-1007 terminals fall through silently — wheel is
+  //     dead but everything else works.
   useEffect(() => {
     if (!stdout || !stdout.isTTY) return;
     stdout.write("\u001b[?2004h");
     stdout.write("\u001b[>4;2m");
+    if (mouse) stdout.write("\u001b[?1007h");
     return () => {
+      if (mouse) stdout.write("\u001b[?1007l");
       stdout.write("\u001b[?2004l");
       stdout.write("\u001b[>4m");
     };
-  }, [stdout]);
+  }, [stdout, mouse]);
 
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
@@ -1226,18 +1233,12 @@ function AppInner({
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
 
-  // ↑/↓/PgUp/PgDn always scroll chat. The terminal translates the
-  // mouse wheel to ↑/↓ in alt-screen mode so the wheel scrolls chat
-  // for free without us enabling mouse tracking. Prompt history +
-  // multi-line cursor moves live on Ctrl+P / Ctrl+N (see
-  // multiline-keys.ts); leftover mouseScrollUp/Down events from a
-  // terminal that ignores DECRST 1000 still route correctly.
-  //
-  // Pickers (slash / @-mention / slash-arg / shell-confirm) own ↑/↓
-  // for their own list nav — when any of them is open we skip the
-  // arrow path here so the user doesn't see the chat scroll AND the
-  // picker selection move on the same keypress. PgUp/PgDn/End still
-  // scroll regardless because pickers don't claim those.
+  // ↑/↓/PgUp/PgDn always scroll chat; wheel arrives as ↑/↓ via
+  // DECSET 1007 alternate-scroll so it joins the same path. Pickers
+  // (slash / @-mention / slash-arg / shell-confirm) own ↑/↓ — when
+  // any of them is open we skip the arrow path so chat doesn't scroll
+  // alongside picker navigation; PgUp/PgDn/End still scroll. Prompt
+  // history + multi-line cursor moves live on Ctrl+P / Ctrl+N.
   useKeystroke((ev) => {
     const pickerOwnsArrows =
       (atState?.entries.length ?? 0) > 0 ||

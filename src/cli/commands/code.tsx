@@ -62,6 +62,8 @@ export interface CodeOptions {
   systemAppendFile?: string;
   /** Default true. Pass false (CLI: `--no-alt-screen`) to keep chat output in shell scrollback. */
   altScreen?: boolean;
+  /** Default true. Pass false (CLI: `--no-mouse`) to keep terminal-native drag-select unmodified. */
+  mouse?: boolean;
 }
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
@@ -214,5 +216,6 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     forceNew: opts.forceNew,
     noDashboard: opts.noDashboard,
     altScreen: opts.altScreen,
+    mouse: opts.mouse,
   });
 }

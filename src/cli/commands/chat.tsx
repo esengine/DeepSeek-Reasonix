@@ -317,6 +317,14 @@ export interface ChatOptions {
    * in shell scrollback after exit.
    */
   altScreen?: boolean;
+  /**
+   * Enable DECSET 1007 (alternate-scroll) so the wheel scrolls chat on
+   * web/cloud/SSH terminals — terminal translates wheel events to ↑/↓
+   * key sequences in alt-screen, no full mouse tracking, native
+   * drag-select + right-click unaffected. Default true. Pass false
+   * (CLI: `--no-mouse`) to suppress entirely.
+   */
+  mouse?: boolean;
 }
 
 interface RootProps extends ChatOptions {
@@ -413,6 +421,7 @@ function Root({
         progressSink={progressSink}
         codeMode={appProps.codeMode}
         noDashboard={appProps.noDashboard}
+        mouse={appProps.mouse}
         onSwitchSession={setActiveSession}
       />
     </KeystrokeProvider>

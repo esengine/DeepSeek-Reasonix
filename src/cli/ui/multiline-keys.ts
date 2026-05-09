@@ -66,13 +66,10 @@ export function processMultilineKey(
     return cursor === value.length ? NOOP : { next: null, cursor: value.length, submit: false };
   }
 
-  // ↑/↓ are NOT consumed here — they belong to chat-scroll at the App
-  // level. Ctrl+P / Ctrl+N take over what ↑/↓ used to do here:
+  // ↑/↓ belong to chat-scroll at the App level. Ctrl+P / Ctrl+N take
+  // over what ↑/↓ used to do here:
   //   • multi-line buffer → cursor up/down within the buffer
   //   • single-line / empty → hand off to prompt history (readline parity)
-  // This pairing lets us drop xterm mouse tracking; the terminal's own
-  // wheel→↑/↓ translation in alt-screen mode then scrolls chat for free
-  // and native drag-select / right-click stay intact.
   if (key.ctrl && key.input === "p") {
     if (value.includes("\n")) {
       const moved = moveCursorUp(value, cursor);

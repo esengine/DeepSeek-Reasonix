@@ -80,7 +80,7 @@ export const zhCN: TranslationSchema = {
               key: "右键",
               text: "终端原生菜单（Windows Terminal 等的复制 / 粘贴）",
             },
-            { key: "滚轮", text: "滚动聊天（终端把滚轮翻译成 ↑ / ↓）" },
+            { key: "滚轮", text: "滚动聊天记录（Web / 云端 / SSH 终端也能用）" },
             {
               key: "↑ / ↓",
               text: "滚动聊天 · 输入框历史 + 多行光标用 Ctrl+P / Ctrl+N",
@@ -98,7 +98,7 @@ export const zhCN: TranslationSchema = {
           rows: [
             { key: "Enter", text: "提交输入" },
             { key: "Shift+Enter", text: "在输入框中插入换行" },
-            { key: "↑ / ↓", text: "滚动聊天记录（始终 — 滚轮也通过终端映射到 ↑/↓）" },
+            { key: "↑ / ↓", text: "滚动聊天记录（鼠标滚轮也走这条路径）" },
             {
               key: "Ctrl+P / Ctrl+N",
               text: "上一条 / 下一条输入历史 · 多行草稿中按行移动光标",
@@ -117,8 +117,8 @@ export const zhCN: TranslationSchema = {
         {
           title: "鼠标",
           rows: [
-            { key: "滚轮", text: "滚动聊天记录（终端翻译为 ↑/↓）" },
-            { key: "拖动", text: "原生选中文本 — 直接复制" },
+            { key: "滚轮", text: "滚动聊天记录（Web / 云端 / SSH 终端也能用）" },
+            { key: "拖动", text: "原生选中文本 — 直接复制，不需要修饰键" },
             { key: "右键", text: "终端原生（Windows Terminal 等的粘贴菜单）" },
           ],
         },
@@ -147,7 +147,7 @@ export const zhCN: TranslationSchema = {
         },
       ],
       footer:
-        "鼠标追踪已关闭 — 拖动选中、右键、滚轮都按终端原生方式工作。滚轮发送 ↑/↓，应用用它来滚动聊天。",
+        "通过 DECSET 1007（alternate-scroll），终端把滚轮翻译成 ↑/↓ 发给应用 — 大多数终端（含 Web / 云端 / SSH）都能滚，且不影响终端原生选区。直接拖动选中文本无需 Shift。传入 --no-mouse 可关闭。",
     },
     tipShownOnce: "仅显示一次",
     modelOverride: "覆盖默认模型",

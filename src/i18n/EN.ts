@@ -80,12 +80,12 @@ export const EN: TranslationSchema = {
       sections: [
         {
           rows: [
-            { key: "drag", text: "select text directly — terminal-native, no modifier needed" },
+            { key: "drag", text: "select text — terminal-native, no modifier needed" },
             {
               key: "right-click",
               text: "your terminal's native menu (paste / copy on Windows Terminal etc.)",
             },
-            { key: "wheel", text: "scrolls chat history (terminal translates wheel to ↑/↓)" },
+            { key: "wheel", text: "scrolls chat history (works on web/cloud/SSH terminals too)" },
             {
               key: "↑ / ↓",
               text: "scroll chat · use Ctrl+P / Ctrl+N for prompt history + multi-line cursor",
@@ -103,10 +103,7 @@ export const EN: TranslationSchema = {
           rows: [
             { key: "Enter", text: "submit the prompt" },
             { key: "Shift+Enter", text: "insert a newline in the prompt" },
-            {
-              key: "↑ / ↓",
-              text: "scroll chat history (always — wheel maps to ↑/↓ via the terminal)",
-            },
+            { key: "↑ / ↓", text: "scroll chat history (mouse wheel routes here too)" },
             {
               key: "Ctrl+P / Ctrl+N",
               text: "previous / next prompt history · cursor up / down in a multi-line draft",
@@ -125,8 +122,8 @@ export const EN: TranslationSchema = {
         {
           title: "mouse",
           rows: [
-            { key: "wheel", text: "scrolls chat history (terminal translates to ↑/↓)" },
-            { key: "drag", text: "selects text natively — direct copy works" },
+            { key: "wheel", text: "scrolls chat history (works on web/cloud/SSH terminals too)" },
+            { key: "drag", text: "selects text natively — direct copy works, no modifier" },
             { key: "right-click", text: "terminal-native (paste menu on Windows Terminal etc.)" },
           ],
         },
@@ -155,7 +152,7 @@ export const EN: TranslationSchema = {
         },
       ],
       footer:
-        "Mouse tracking is OFF — drag-to-select, right-click, and the wheel all behave the way your terminal natively does. Wheel sends ↑/↓ which the app uses for chat scroll.",
+        "Wheel→↑/↓ via DECSET 1007 (alternate-scroll) — wheel scrolls chat on most terminals (web/cloud/SSH included) without disturbing native selection. Drag to select stays modifier-free. Pass --no-mouse to opt out.",
     },
     tipShownOnce: "shown once",
     modelOverride: "override the default model",

@@ -99,6 +99,7 @@ program
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
   .option("--no-dashboard", t("ui.noDashboard"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
+  .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
   .option("--system-append <prompt>", t("ui.systemAppendHint"))
   .option("--system-append-file <path>", t("ui.systemAppendFileHint"))
   .action(async (dir: string | undefined, opts) => {
@@ -115,6 +116,7 @@ program
       systemAppend: opts.systemAppend,
       systemAppendFile: opts.systemAppendFile,
       altScreen: opts.altScreen !== false,
+      mouse: opts.mouse !== false,
     });
   });
 
@@ -141,6 +143,7 @@ program
   .option("--no-config", t("ui.noConfigHint"))
   .option("--no-dashboard", t("ui.noDashboard"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
+  .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
   .action(async (opts) => {
     const defaults = resolveDefaults({
       model: opts.model,
@@ -174,6 +177,7 @@ program
       forceNew: !!opts.new,
       noDashboard: opts.dashboard === false,
       altScreen: opts.altScreen !== false,
+      mouse: opts.mouse !== false,
     });
   });
 
