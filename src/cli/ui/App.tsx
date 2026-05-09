@@ -116,6 +116,7 @@ import {
   handleWarningEvent,
 } from "./hooks/handle-stream-events.js";
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
+import { useActivityLabel } from "./hooks/useActivityPhase.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
 import { useChatScroll } from "./hooks/useChatScroll.js";
 import { useCodeMode } from "./hooks/useCodeMode.js";
@@ -341,6 +342,7 @@ function AppInner({
     s.cards.some((c) => c.kind === "user" || c.kind === "streaming"),
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
+  const activityLabel = useActivityLabel();
   const chatScroll = useChatScroll();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3423,14 +3425,7 @@ function AppInner({
                 !pendingCheckpoint ? (
                   <UndoBanner banner={undoBanner} />
                 ) : null}
-                {/*
-          Belt-and-suspenders fallback: if we're busy but NONE of the
-          specific indicators (streaming, ongoingTool, statusLine) is
-          visible, something is still happening — show a generic
-          "processing…" so the user never stares at a silent ticker
-          without a label. Catches micro-gaps between events that the
-          targeted status lines don't cover.
-        */}
+                {/* Activity row when no targeted indicator is visible — phase label from useActivityLabel. */}
                 {!PLAIN_UI &&
                 !pendingShell &&
                 !pendingPlan &&
@@ -3444,7 +3439,7 @@ function AppInner({
                 !isStreaming &&
                 !ongoingTool &&
                 !statusLine ? (
-                  <ThinkingRow text="processing…" />
+                  <ThinkingRow text={activityLabel} />
                 ) : null}
                 {!PLAIN_UI &&
                 !pendingShell &&
