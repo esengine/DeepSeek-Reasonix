@@ -237,17 +237,17 @@ export interface AppProps {
 /**
  * Throttle interval in ms. We flush streaming deltas at most this often to
  * avoid re-rendering the whole UI on every single token from DeepSeek.
- * 33ms ≈ 30Hz, matches the cadence users feel as smooth in modern terminals
- * (Windows Terminal, WezTerm, iTerm2, Alacritty, Ghostty). Override via
- * `REASONIX_FLUSH_MS` if you're on a fragile terminal (winpty/MINTTY) that
- * leaves repaint artifacts at higher refresh rates — bumping back to 100
- * trades smoothness for stability.
+ * 50ms ≈ 20Hz — still visually smooth (Windows Terminal, WezTerm, iTerm2,
+ * Alacritty, Ghostty all comfortable here) and leaves the terminal
+ * enough stdout slack to repaint native drag-select highlights without
+ * fighting our streaming writes. Bump higher via `REASONIX_FLUSH_MS`
+ * for fragile terminals (winpty/MINTTY); drop to 33 for max smoothness.
  */
 const FLUSH_INTERVAL_MS = (() => {
   const raw = process.env.REASONIX_FLUSH_MS;
-  if (!raw) return 33;
+  if (!raw) return 50;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 16 || parsed > 1000) return 33;
+  if (!Number.isFinite(parsed) || parsed < 16 || parsed > 1000) return 50;
   return Math.round(parsed);
 })();
 
