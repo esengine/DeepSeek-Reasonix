@@ -2,6 +2,7 @@ import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { clipToCells } from "../../../frame/width.js";
+import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
 import { Spinner } from "../primitives/Spinner.js";
@@ -25,6 +26,9 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const cols = stdout?.columns ?? 80;
   const lineCells = Math.max(20, cols - 4);
   const argsLabel = formatArgsSummary(card.args);
+
+  const subagentMarkdown = unwrapSubagentMarkdown(card);
+
   const allLines = card.output.length > 0 ? card.output.split("\n") : [];
   const tail = tailLinesFor(card.name);
   const truncated = allLines.length > tail;
@@ -35,7 +39,7 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const errColor = card.exitCode && card.exitCode !== 0 ? TONE.err : FG.sub;
   // Rejected calls show a single trailing badge — the verbose JSON error body
   // is already conveyed by the badge, so dropping the body keeps the card tight.
-  const showBody = !card.rejected && visible.length > 0;
+  const showBody = !card.rejected && (subagentMarkdown !== null || visible.length > 0);
 
   const meta: MetaItem[] = [];
   if (card.retry) {
@@ -60,26 +64,44 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
           ) : undefined
         }
       />
-      {showBody && (
-        <>
-          {hidden > 0 ? (
-            <Text color={FG.faint}>
-              {`⋮ ${hidden} earlier line${hidden === 1 ? "" : "s"} (use /tool to read full)`}
-            </Text>
-          ) : null}
-          {visible.map((line, i) => (
-            <Text
-              key={`${card.id}:${hidden + i}`}
-              color={errColor}
-              dimColor={!card.exitCode || card.exitCode === 0}
-            >
-              {clipToCells(line, lineCells) || " "}
-            </Text>
-          ))}
-        </>
-      )}
+      {showBody &&
+        (subagentMarkdown !== null ? (
+          <Markdown text={subagentMarkdown} width={lineCells} />
+        ) : (
+          <>
+            {hidden > 0 ? (
+              <Text color={FG.faint}>
+                {`⋮ ${hidden} earlier line${hidden === 1 ? "" : "s"} (use /tool to read full)`}
+              </Text>
+            ) : null}
+            {visible.map((line, i) => (
+              <Text
+                key={`${card.id}:${hidden + i}`}
+                color={errColor}
+                dimColor={!card.exitCode || card.exitCode === 0}
+              >
+                {clipToCells(line, lineCells) || " "}
+              </Text>
+            ))}
+          </>
+        ))}
     </Card>
   );
+}
+
+function unwrapSubagentMarkdown(card: ToolCardData): string | null {
+  if (card.name !== "spawn_subagent") return null;
+  if (card.output.length === 0) return null;
+  try {
+    const parsed = JSON.parse(card.output) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const obj = parsed as Record<string, unknown>;
+    if (obj.success !== true) return null;
+    if (typeof obj.output !== "string") return null;
+    return obj.output;
+  } catch {
+    return null;
+  }
 }
 
 type ToolStatus = "running" | "ok" | "rejected" | "error" | "aborted";
