@@ -88,7 +88,7 @@ function ChromeRow({
       ? { label: "⇧ pro", color: COLOR.warn }
       : null;
   const projectName = rootDir ? basename(rootDir) : null;
-  const cachePct = Math.round(summary.cacheHitRatio * 100);
+  const cachePct = (summary.cacheHitRatio * 100).toFixed(1);
   const cacheColor =
     summary.cacheHitRatio >= 0.7 ? COLOR.ok : summary.cacheHitRatio >= 0.4 ? COLOR.warn : COLOR.err;
   const balanceLabel = balance

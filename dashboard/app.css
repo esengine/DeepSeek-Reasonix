@@ -311,12 +311,13 @@ main { padding: 32px 40px 60px 32px; min-width: 0; }
 .pill.acc  { color: var(--c-accent); background: rgba(210,168,255,.10); }
 
 /* Table */
-.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: auto; }
 .tbl th, .tbl td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--bd); }
 .tbl th { font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; color: var(--fg-3); text-transform: uppercase; letter-spacing: .08em; background: var(--bg-elev); }
+.tbl th.num, .tbl td.num { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
 .tbl td { color: var(--fg-1); }
 .tbl tbody tr:hover { background: var(--bg-hover); }
-.tbl td.num { font-family: var(--font-mono); text-align: right; color: var(--fg-0); font-variant-numeric: tabular-nums; }
+.tbl td.num { color: var(--fg-0); }
 .tbl td.dim { color: var(--fg-3); }
 .tbl td.path { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
 

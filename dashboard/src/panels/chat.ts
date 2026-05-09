@@ -792,7 +792,7 @@ interface SideRailProps {
 function SideRail({ stats, budgetUsd, activePlan }: SideRailProps) {
   useLang();
   if (!stats && !activePlan) return html`<aside class="chat-rail"></aside>`;
-  const cachePct = stats ? Math.round(stats.cacheHitRatio * 100) : 0;
+  const cachePct = stats ? stats.cacheHitRatio * 100 : 0;
   const cacheTone = cachePct >= 80 ? "ok" : cachePct >= 50 ? "" : "warn";
   const showBudget = stats != null && typeof budgetUsd === "number" && budgetUsd > 0;
   const budgetPct = showBudget ? Math.min(120, (stats.totalCostUsd / budgetUsd) * 100) : 0;
@@ -812,7 +812,7 @@ function SideRail({ stats, budgetUsd, activePlan }: SideRailProps) {
               <div class="progress-row" style="margin-top:8px">
                 <span class="lbl">${t("chat.railCacheHit")}</span>
                 <div class=${`progress ${cacheTone}`}><div class="progress-fill" style=${`width:${cachePct}%`}></div></div>
-                <span class="v">${cachePct}%</span>
+                <span class="v">${cachePct.toFixed(1)}%</span>
               </div>
             </div>
           `

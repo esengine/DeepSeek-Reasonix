@@ -5,6 +5,10 @@ import { html } from "../lib/html.js";
 import { usePoll } from "../lib/use-poll.js";
 import { t, useLang } from "../i18n/index.js";
 
+function formatCacheHitPct(ratio: number): string {
+  return `${(ratio * 100).toFixed(1)}%`;
+}
+
 type UPlotInstance = {
   destroy(): void;
   setSize(opts: { width: number; height: number }): void;
@@ -36,6 +40,7 @@ interface UsageDay {
 function UsageChart({ days }: { days: UsageDay[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<UPlotInstance | null>(null);
+  useLang();
 
   useEffect(() => {
     let cancelled = false;
@@ -64,7 +69,7 @@ function UsageChart({ days }: { days: UsageDay[] }) {
           { stroke: "#94a3b8", grid: { stroke: "rgba(148, 163, 184, 0.08)" } },
           {
             scale: "y",
-            label: "USD",
+            label: t("usage.axisUsd"),
             stroke: "#94a3b8",
             grid: { stroke: "rgba(148, 163, 184, 0.08)" },
             values: (_u: unknown, v: number[]) => v.map((n) => `$${n.toFixed(4)}`),
@@ -72,17 +77,22 @@ function UsageChart({ days }: { days: UsageDay[] }) {
           {
             scale: "turns",
             side: 1,
-            label: "turns",
+            label: t("usage.axisTurns"),
             stroke: "#94a3b8",
             grid: { show: false },
           },
         ],
         series: [
-          {},
-          { label: "cost", stroke: "#67e8f9", width: 2, fill: "rgba(103, 232, 249, 0.10)" },
-          { label: "cache saved", stroke: "#5eead4", width: 2, dash: [4, 4] },
+          { label: t("usage.axisTime") },
           {
-            label: "turns",
+            label: t("usage.seriesCost"),
+            stroke: "#67e8f9",
+            width: 2,
+            fill: "rgba(103, 232, 249, 0.10)",
+          },
+          { label: t("usage.seriesCacheSaved"), stroke: "#5eead4", width: 2, dash: [4, 4] },
+          {
+            label: t("usage.seriesTurns"),
             stroke: "#c4b5fd",
             scale: "turns",
             width: 1.5,
@@ -203,13 +213,13 @@ export function UsagePanel() {
                 <table class="tbl">
                   <thead>
                     <tr>
-                      <th></th>
-                      <th>${t("usage.colTurns")}</th>
-                      <th>${t("usage.colCacheHit")}</th>
-                      <th>${t("usage.colCost")}</th>
-                      <th>${t("usage.colCacheSaved")}</th>
-                      <th>${t("usage.colVsClaude")}</th>
-                      <th>${t("usage.colSaved")}</th>
+                      <th>${t("usage.colWindow")}</th>
+                      <th class="num">${t("usage.colTurns")}</th>
+                      <th class="num">${t("usage.colCacheHit")}</th>
+                      <th class="num">${t("usage.colCost")}</th>
+                      <th class="num">${t("usage.colCacheSaved")}</th>
+                      <th class="num">${t("usage.colVsClaude")}</th>
+                      <th class="num">${t("usage.colSaved")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -224,7 +234,7 @@ export function UsagePanel() {
                         <tr>
                           <td class="dim">${b.label}</td>
                           <td class="num">${fmtNum(b.turns)}</td>
-                          <td class="num">${b.turns > 0 ? fmtPct(hitRatio) : "—"}</td>
+                          <td class="num">${b.turns > 0 ? formatCacheHitPct(hitRatio) : "—"}</td>
                           <td class="num">${b.turns > 0 ? fmtUsd(b.costUsd) : "—"}</td>
                           <td class="num">${b.turns > 0 && b.cacheSavingsUsd > 0 ? fmtUsd(b.cacheSavingsUsd) : "—"}</td>
                           <td class="num">${b.turns > 0 ? fmtUsd(b.claudeEquivUsd) : "—"}</td>

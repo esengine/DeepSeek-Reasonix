@@ -45,10 +45,10 @@ const status: SlashHandler = (_args, loop, ctx) => {
   const cacheLine =
     summary.turns > 3
       ? (() => {
-          const cachePct = Math.round(summary.cacheHitRatio * 100);
+          const cachePct = (summary.cacheHitRatio * 100).toFixed(1);
           return t("handlers.observability.statusCost", {
             cost: cost.toFixed(4),
-            bar: renderTinyBar(cachePct, 12),
+            bar: renderTinyBar(Number(cachePct), 12),
             pct: cachePct,
             turns: summary.turns,
           });
