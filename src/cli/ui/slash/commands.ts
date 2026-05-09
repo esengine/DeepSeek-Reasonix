@@ -297,14 +297,6 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: ["off", "1", "5", "10", "20", "50"],
   },
   {
-    cmd: "language",
-    group: "advanced",
-    argsHint: "<EN|zh-CN>",
-    summary: "switch the runtime language",
-    argCompleter: ["EN", "zh-CN"],
-    aliases: ["lang"],
-  },
-  {
     cmd: "theme",
     group: "advanced",
     argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light]",
@@ -380,12 +372,10 @@ export function suggestSlashCommands(
 ): SlashCommandSpec[] {
   const p = prefix.toLowerCase();
   const matches = SLASH_COMMANDS.filter((c) => {
+    if (c.contextual === "code" && !codeMode) return false;
     // Empty prefix = browsing the menu — show the full release command surface except
     // advanced rows, which remain collapsed behind the footer hint.
     if (p === "") return getSlashCommandGroup(c) !== "advanced";
-    if (c.contextual === "code" && !codeMode) return false;
-    // Empty prefix = browsing the menu — advanced stays hidden until a letter is typed.
-    if (p === "" && c.group === "advanced") return false;
     if (c.cmd.startsWith(p)) return true;
     return c.aliases?.some((a) => a.startsWith(p)) ?? false;
   });
