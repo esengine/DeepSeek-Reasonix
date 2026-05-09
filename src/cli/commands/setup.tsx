@@ -30,7 +30,7 @@ export async function setupCommand(_opts: SetupOptions = {}): Promise<void> {
   const { waitUntilExit, unmount } = render(
     <Wizard
       existingApiKey={existingKey}
-      initial={{ preset: existing.preset, mcp: existing.mcp }}
+      initial={{ preset: existing.preset, mcp: existing.mcp, theme: existing.theme }}
       onComplete={() => {
         // Ink handles its own enter-to-exit inside the "saved" step; we
         // just wait for the app to exit naturally.

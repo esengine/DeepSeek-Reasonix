@@ -1,8 +1,8 @@
 /**
  * First-run / re-configure wizard.
  *
- * Walks a new user through: language → API key → preset pick → MCP server
- * pick → per-server args → save. Saved output lives in
+ * Walks a new user through: language → theme → API key → preset pick → MCP
+ * server pick → per-server args → save. Saved output lives in
  * `~/.reasonix/config.json` so the next `reasonix chat` starts with
  * everything already wired.
  */
@@ -17,8 +17,10 @@ import {
   type ReasonixConfig,
   defaultConfigPath,
   isPlausibleKey,
+  loadTheme,
   readConfig,
   redactKey,
+  resolveThemePreference,
   writeConfig,
 } from "../../config.js";
 import {
@@ -34,6 +36,8 @@ import type { LanguageCode } from "../../i18n/types.js";
 import { type CatalogEntry, MCP_CATALOG } from "../../mcp/catalog.js";
 import { MultiSelect, type SelectItem, SingleSelect } from "./Select.js";
 import { PRESET_DESCRIPTIONS } from "./presets.js";
+import { ThemeProvider, useTheme } from "./theme/context.js";
+import { type ThemeName, listThemeNames } from "./theme/tokens.js";
 
 export interface WizardProps {
   /** Called once the config has been saved. */
@@ -46,13 +50,15 @@ export interface WizardProps {
   initial?: {
     preset?: PresetName;
     mcp?: string[];
+    theme?: ThemeName | "auto";
   };
 }
 
-type Step = "language" | "apiKey" | "preset" | "mcp" | "mcpArgs" | "review" | "saved";
+type Step = "language" | "theme" | "apiKey" | "preset" | "mcp" | "mcpArgs" | "review" | "saved";
 
 interface WizardData {
   language: LanguageCode;
+  theme: ThemeName;
   apiKey: string;
   preset: PresetName;
   selectedCatalog: string[];
@@ -71,185 +77,296 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
   const [, setLanguageVersion] = useState(0);
   useEffect(() => onLanguageChange(() => setLanguageVersion((v) => v + 1)), []);
 
+  const [previewTheme, setPreviewTheme] = useState<ThemeName>(() =>
+    resolveThemePreference(initial?.theme ?? loadTheme(), process.env.REASONIX_THEME),
+  );
+
   const [step, setStep] = useState<Step>("language");
-  const [data, setData] = useState<WizardData>({
+  const [data, setData] = useState<WizardData>(() => ({
     language: getLanguage(),
+    theme: resolveThemePreference(initial?.theme ?? loadTheme(), process.env.REASONIX_THEME),
     apiKey: existingApiKey ?? "",
     preset: initial?.preset ?? "auto",
     selectedCatalog: deriveInitialCatalog(initial?.mcp ?? []),
     catalogArgs: {},
-  });
+  }));
   const [error, setError] = useState<string | null>(null);
 
   useInput((_input, key) => {
     if (key.escape && step !== "saved" && onCancel) onCancel();
   });
 
-  if (step === "language") {
-    return (
-      <LanguageStep
-        initialValue={data.language}
-        onSubmit={(lang) => {
-          setLanguage(lang);
-          notifyLanguageChange();
-          setData((d) => ({ ...d, language: lang }));
-          setStep(existingApiKey ? "preset" : "apiKey");
-        }}
-      />
-    );
-  }
-
-  if (step === "apiKey") {
-    return (
-      <ApiKeyStep
-        onSubmit={(key) => {
-          setData((d) => ({ ...d, apiKey: key }));
-          setError(null);
-          setStep("preset");
-        }}
-        error={error}
-        onError={setError}
-      />
-    );
-  }
-
-  if (step === "preset") {
-    return (
-      <StepFrame title={t("wizard.presetTitle")} step={1} total={3}>
-        <SingleSelect<PresetName>
-          items={presetItems()}
-          initialValue={data.preset}
-          onSubmit={(preset) => {
-            setData((d) => ({ ...d, preset }));
-            setStep("mcp");
+  const content = (() => {
+    if (step === "language") {
+      return (
+        <LanguageStep
+          initialValue={data.language}
+          onSubmit={(lang) => {
+            setLanguage(lang);
+            notifyLanguageChange();
+            setData((d) => ({ ...d, language: lang }));
+            setStep("theme");
           }}
         />
-        <Box marginTop={1}>
-          <Text dimColor>{t("wizard.selectFooter")}</Text>
-        </Box>
-      </StepFrame>
-    );
-  }
-
-  if (step === "mcp") {
-    return (
-      <StepFrame title={t("wizard.mcpTitle")} step={2} total={3}>
-        <MultiSelect
-          items={mcpItems()}
-          initialSelected={data.selectedCatalog}
-          onSubmit={(selected) => {
-            setData((d) => ({ ...d, selectedCatalog: selected }));
-            const needsArgs = selected.some((name) => CATALOG_BY_NAME.get(name)?.userArgs);
-            setStep(needsArgs ? "mcpArgs" : "review");
-          }}
-          footer={t("wizard.mcpFooterMulti")}
-        />
-      </StepFrame>
-    );
-  }
-
-  if (step === "mcpArgs") {
-    const pending = data.selectedCatalog.filter((name) => {
-      const entry = CATALOG_BY_NAME.get(name);
-      return entry?.userArgs && !data.catalogArgs[name];
-    });
-    if (pending.length === 0) {
-      setStep("review");
-      return null;
+      );
     }
-    const currentName = pending[0]!;
-    const entry = CATALOG_BY_NAME.get(currentName)!;
-    return (
-      <McpArgsStep
-        entry={entry}
-        error={error}
-        onSubmit={(value) => {
-          setData((d) => ({
-            ...d,
-            catalogArgs: { ...d.catalogArgs, [currentName]: value },
-          }));
-          setError(null);
-        }}
-        onError={setError}
-      />
-    );
-  }
 
-  if (step === "review") {
-    const specs = data.selectedCatalog.map((name) => buildSpec(name, data.catalogArgs));
-    return (
-      <StepFrame title={t("wizard.reviewTitle")} step={3} total={3}>
-        <Box flexDirection="column">
-          <SummaryLine
-            label={t("wizard.reviewLabelLanguage")}
-            value={LANGUAGE_LABELS[data.language]}
-          />
-          <SummaryLine label={t("wizard.reviewLabelApiKey")} value={redactKey(data.apiKey)} />
-          <SummaryLine label={t("wizard.reviewLabelPreset")} value={data.preset} />
-          <SummaryLine
-            label={t("wizard.reviewLabelMcp")}
-            value={
-              specs.length === 0
-                ? t("wizard.reviewMcpNone")
-                : t("wizard.reviewMcpServers", { count: specs.length })
-            }
-          />
-          {specs.map((spec, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: review-only render, order fixed
-            <Box key={i} paddingLeft={14}>
-              <Text dimColor>· {spec}</Text>
-            </Box>
-          ))}
-          <Box marginTop={1}>
-            <Text>{t("wizard.reviewSavesTo", { path: defaultConfigPath() })}</Text>
-          </Box>
-          {error ? (
-            <Box marginTop={1}>
-              <Text color="red">{error}</Text>
-            </Box>
-          ) : null}
-          <Box marginTop={1}>
-            <Text dimColor>{t("wizard.reviewFooter")}</Text>
-          </Box>
-        </Box>
-        <ReviewConfirm
-          onConfirm={() => {
-            try {
-              const specsNow = data.selectedCatalog.map((name) =>
-                buildSpec(name, data.catalogArgs),
-              );
-              const prev = readConfig();
-              const next: ReasonixConfig = {
-                ...prev,
-                apiKey: data.apiKey,
-                preset: data.preset,
-                mcp: specsNow,
-                setupCompleted: true,
-              };
-              writeConfig(next);
-              setStep("saved");
-              onComplete(next);
-            } catch (e) {
-              setError(t("wizard.reviewSaveError", { message: (e as Error).message }));
-            }
+    if (step === "theme") {
+      return (
+        <ThemeStep
+          initialValue={data.theme}
+          onPreview={setPreviewTheme}
+          onSubmit={(theme) => {
+            setData((d) => ({ ...d, theme }));
+            setStep(existingApiKey ? "preset" : "apiKey");
           }}
         />
-      </StepFrame>
+      );
+    }
+
+    if (step === "apiKey") {
+      return (
+        <ApiKeyStep
+          onSubmit={(key) => {
+            setData((d) => ({ ...d, apiKey: key }));
+            setError(null);
+            setStep("preset");
+          }}
+          error={error}
+          onError={setError}
+        />
+      );
+    }
+
+    if (step === "preset") {
+      return (
+        <StepFrame title={t("wizard.presetTitle")} step={1} total={3}>
+          <SingleSelect<PresetName>
+            items={presetItems()}
+            initialValue={data.preset}
+            onSubmit={(preset) => {
+              setData((d) => ({ ...d, preset }));
+              setStep("mcp");
+            }}
+          />
+          <Box marginTop={1}>
+            <Text dimColor>{t("wizard.selectFooter")}</Text>
+          </Box>
+        </StepFrame>
+      );
+    }
+
+    if (step === "mcp") {
+      return (
+        <StepFrame title={t("wizard.mcpTitle")} step={2} total={3}>
+          <MultiSelect
+            items={mcpItems()}
+            initialSelected={data.selectedCatalog}
+            onSubmit={(selected) => {
+              setData((d) => ({ ...d, selectedCatalog: selected }));
+              const needsArgs = selected.some((name) => CATALOG_BY_NAME.get(name)?.userArgs);
+              setStep(needsArgs ? "mcpArgs" : "review");
+            }}
+            footer={t("wizard.mcpFooterMulti")}
+          />
+        </StepFrame>
+      );
+    }
+
+    if (step === "mcpArgs") {
+      const pending = data.selectedCatalog.filter((name) => {
+        const entry = CATALOG_BY_NAME.get(name);
+        return entry?.userArgs && !data.catalogArgs[name];
+      });
+      if (pending.length === 0) {
+        setStep("review");
+        return null;
+      }
+      const currentName = pending[0]!;
+      const entry = CATALOG_BY_NAME.get(currentName)!;
+      return (
+        <McpArgsStep
+          entry={entry}
+          error={error}
+          onSubmit={(value) => {
+            setData((d) => ({
+              ...d,
+              catalogArgs: { ...d.catalogArgs, [currentName]: value },
+            }));
+            setError(null);
+          }}
+          onError={setError}
+        />
+      );
+    }
+
+    if (step === "review") {
+      const specs = data.selectedCatalog.map((name) => buildSpec(name, data.catalogArgs));
+      return (
+        <StepFrame title={t("wizard.reviewTitle")} step={3} total={3}>
+          <Box flexDirection="column">
+            <SummaryLine
+              label={t("wizard.reviewLabelLanguage")}
+              value={LANGUAGE_LABELS[data.language]}
+            />
+            <SummaryLine label={t("wizard.reviewLabelApiKey")} value={redactKey(data.apiKey)} />
+            <SummaryLine label={t("wizard.reviewLabelTheme")} value={data.theme} />
+            <SummaryLine label={t("wizard.reviewLabelPreset")} value={data.preset} />
+            <SummaryLine
+              label={t("wizard.reviewLabelMcp")}
+              value={
+                specs.length === 0
+                  ? t("wizard.reviewMcpNone")
+                  : t("wizard.reviewMcpServers", { count: specs.length })
+              }
+            />
+            {specs.map((spec, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: review-only render, order fixed
+              <Box key={i} paddingLeft={14}>
+                <Text dimColor>· {spec}</Text>
+              </Box>
+            ))}
+            <Box marginTop={1}>
+              <Text>{t("wizard.reviewSavesTo", { path: defaultConfigPath() })}</Text>
+            </Box>
+            {error ? (
+              <Box marginTop={1}>
+                <Text color="red">{error}</Text>
+              </Box>
+            ) : null}
+            <Box marginTop={1}>
+              <Text dimColor>{t("wizard.reviewFooter")}</Text>
+            </Box>
+          </Box>
+          <ReviewConfirm
+            onConfirm={() => {
+              try {
+                const specsNow = data.selectedCatalog.map((name) =>
+                  buildSpec(name, data.catalogArgs),
+                );
+                const prev = readConfig();
+                const next: ReasonixConfig = {
+                  ...prev,
+                  apiKey: data.apiKey,
+                  preset: data.preset,
+                  theme: data.theme,
+                  mcp: specsNow,
+                  setupCompleted: true,
+                };
+                writeConfig(next);
+                setStep("saved");
+                onComplete(next);
+              } catch (e) {
+                setError(t("wizard.reviewSaveError", { message: (e as Error).message }));
+              }
+            }}
+          />
+        </StepFrame>
+      );
+    }
+
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
+        <Text bold color="green">
+          {t("wizard.savedTitle")}
+        </Text>
+        <Box marginTop={1}>
+          <Text>{t("ui.welcome")}</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text dimColor>{t("wizard.savedFooter")}</Text>
+        </Box>
+        <ExitOnEnter onExit={exit} />
+      </Box>
     );
-  }
+  })();
+
+  return <ThemeProvider name={previewTheme}>{content}</ThemeProvider>;
+}
+
+const THEME_NAMES = listThemeNames();
+
+function ThemeStep({
+  initialValue,
+  onPreview,
+  onSubmit,
+}: {
+  initialValue: ThemeName;
+  onPreview: (theme: ThemeName) => void;
+  onSubmit: (theme: ThemeName) => void;
+}) {
+  const initialIndex = Math.max(0, THEME_NAMES.indexOf(initialValue));
+  const [index, setIndex] = useState(initialIndex);
+  const theme = useTheme();
+
+  useInput((_input, key) => {
+    if (key.upArrow) {
+      const next = (index - 1 + THEME_NAMES.length) % THEME_NAMES.length;
+      setIndex(next);
+      onPreview(THEME_NAMES[next]!);
+    } else if (key.downArrow) {
+      const next = (index + 1) % THEME_NAMES.length;
+      setIndex(next);
+      onPreview(THEME_NAMES[next]!);
+    } else if (key.return) {
+      onSubmit(THEME_NAMES[index]!);
+    }
+  });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
-      <Text bold color="green">
-        {t("wizard.savedTitle")}
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.tone.brand} paddingX={1}>
+      <Text bold color={theme.tone.brand}>
+        {t("wizard.themeTitle")}
       </Text>
       <Box marginTop={1}>
-        <Text>{t("ui.welcome")}</Text>
+        <Text dimColor>{t("wizard.themeSubtitle")}</Text>
+      </Box>
+      <Box marginTop={1} flexDirection="column">
+        {THEME_NAMES.map((name, i) => (
+          <Box key={name}>
+            <Text color={i === index ? theme.tone.brand : undefined}>
+              {i === index ? "▸ " : "  "}
+            </Text>
+            <Text bold={i === index} color={i === index ? theme.fg.strong : theme.fg.body}>
+              {name}
+            </Text>
+            <Text color={theme.fg.meta}>{" — "}</Text>
+            <Text color={theme.fg.meta}>{t(`wizard.themeCaption.${name}`)}</Text>
+          </Box>
+        ))}
+      </Box>
+      <Box
+        marginTop={1}
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={theme.fg.faint}
+        paddingX={1}
+      >
+        <Text color={theme.fg.meta}>{t("wizard.themeSampleHeading")}</Text>
+        <Box marginTop={1}>
+          <Text color={theme.tone.accent}>{"◆ "}</Text>
+          <Text color={theme.tone.accent}>Reasoning</Text>
+        </Box>
+        <Box>
+          <Text color={theme.tone.info}>{"▣ "}</Text>
+          <Text color={theme.fg.body}>{"fs.readFile("}</Text>
+          <Text color={theme.tone.ok}>{'"main.ts"'}</Text>
+          <Text color={theme.fg.body}>{")"}</Text>
+        </Box>
+        <Box>
+          <Text color={theme.fg.meta}>~/project/main.ts:42</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color={theme.tone.ok}>ok</Text>
+          <Text color={theme.fg.faint}>{" · "}</Text>
+          <Text color={theme.tone.warn}>warn</Text>
+          <Text color={theme.fg.faint}>{" · "}</Text>
+          <Text color={theme.tone.err}>err</Text>
+        </Box>
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>{t("wizard.savedFooter")}</Text>
+        <Text dimColor>{t("wizard.themeFooter")}</Text>
       </Box>
-      <ExitOnEnter onExit={exit} />
     </Box>
   );
 }

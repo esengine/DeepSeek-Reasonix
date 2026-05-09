@@ -260,10 +260,16 @@ export interface TranslationSchema {
     mcpArgsRequiredParam: string;
     mcpArgsEmpty: string;
     mcpArgsNotADir: string;
+    themeTitle: string;
+    themeSubtitle: string;
+    themeSampleHeading: string;
+    themeFooter: string;
+    themeCaption: Record<string, string>;
     reviewTitle: string;
     reviewLabelApiKey: string;
     reviewLabelLanguage: string;
     reviewLabelPreset: string;
+    reviewLabelTheme: string;
     reviewLabelMcp: string;
     reviewMcpNone: string;
     reviewMcpServers: string;
