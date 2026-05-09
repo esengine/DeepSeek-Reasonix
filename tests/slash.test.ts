@@ -1171,16 +1171,16 @@ describe("handleSlash", () => {
       rmSync(tempHome, { recursive: true, force: true });
     });
 
-    it("shows current theme status and available choices", () => {
+    it("opens the theme picker when no argument is given", () => {
       const r = handleSlash("theme", [], makeLoop());
-      expect(r.info).toMatch(/theme: github-dark/);
-      expect(r.info).toMatch(/configured: unset/);
-      expect(r.info).toMatch(/tokyo-night/);
+      expect(r.openThemePicker).toBe(true);
+      expect(r.info).toBeUndefined();
     });
 
     it("persists a registered theme", () => {
       const r = handleSlash("theme", ["tokyo-night"], makeLoop());
       expect(r.info).toMatch(/theme saved: tokyo-night/);
+      expect(r.openThemePicker).toBeUndefined();
       expect(loadTheme()).toBe("tokyo-night");
     });
 

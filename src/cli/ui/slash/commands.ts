@@ -264,8 +264,8 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "theme",
     group: "advanced",
-    argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light]",
-    summary: "show or persist the terminal theme preference",
+    argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
+    summary: "pick or persist the terminal theme preference. Bare opens picker.",
     argCompleter: [
       "auto",
       "default",
@@ -274,6 +274,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
       "tokyo-night",
       "github-dark",
       "github-light",
+      "high-contrast",
     ],
   },
   {

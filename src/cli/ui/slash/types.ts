@@ -14,6 +14,8 @@ export interface SlashResult {
   openCheckpointPicker?: boolean;
   /** Open the ModelPicker modal — bare `/model` (no id) opens it. */
   openModelPicker?: boolean;
+  /** Open the ThemePicker modal — bare `/theme` opens it. */
+  openThemePicker?: boolean;
   /** Open the unified MCP hub — `/mcp` defaults to "live", `/mcp browse` to "marketplace". */
   openMcpHub?: { tab: "live" | "marketplace" };
   /** Open the arg-completer picker for this command (e.g. `/language` → language picker). */
