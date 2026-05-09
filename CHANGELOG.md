@@ -3,6 +3,137 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.0] — 2026-05-09
+
+**Headline:** terminal-compatibility + interaction-loss fixes from
+0.35.0 field reports. Mouse wheel now scrolls chat on cloud / web /
+SSH terminals (xterm.js, code-server, Cloud Shell, mobile SSH apps,
+tmux without `mouse on`) via DECSET 1007 alternate-scroll, with
+native drag-to-select restored on Konsole and friends — no Shift
+bypass needed because we're not enabling full mouse tracking.
+Render ghosting on CJK / emoji-heavy output goes away (Ink
+incrementalRendering off so each frame is a single full-screen redraw
+inside the BSU/ESU envelope). Pasting a multi-line block stops firing
+one agent call per line on hosts where bracketed-paste markers get
+stripped — the parser now wraps unbracketed multi-line chunks in
+synthetic markers so the existing accumulator delivers exactly one
+paste event. Plan-mode Refine finally pipes the user's typed feedback
+to the model instead of dropping it on the floor (PlanVerdict was
+missing a feedback field, the rich `synthetic` text was built and
+discarded). Web dashboard recovers canonical state on SSE reconnect
+so a missed end-of-turn event no longer wedges the page on busy=true
+forever.
+
+Plus a setup-wizard theme-picker step with live preview, "did you
+mean /…?" suggestions on slash typos, install-source-aware
+`reasonix update` (no more forced `npm install -g` for bun/pnpm
+users), zh-CN coverage extended to the card components, Windows PATH
+normalized before `spawn`, slash-popover windowing stabilized, semver
+compare on the dashboard up-to-date check, and self-hosted DeepSeek
+endpoints with non-standard key prefixes accepted.
+
+**Features:**
+
+- feat(ui): nearest-slash-command suggestion on typos. Slash typos
+  produce an inline "did you mean `/<closest>`?" hint instead of
+  silently dropping. (#302)
+
+- feat(wizard): theme-picker step with live preview during setup.
+  Previously users had to learn `/theme` after the fact and try
+  themes blind. (#518)
+
+- feat(update): `reasonix update` respects the install source
+  (npm / yarn / pnpm / bun) instead of always forcing `npm install
+  -g`. Stops bun-installed users from getting a stale global from a
+  different package manager. (#511)
+
+- feat(i18n): card component labels route through zh-CN. Final TUI
+  surface (status / context / streaming / tool / search / reasoning
+  / sub-agent / usage cards) localized — closes the English-residue
+  gap from prior i18n passes. (#526)
+
+**Fixes:**
+
+- fix(tui): wheel scroll on cloud / web / SSH terminals via DECSET
+  1007. Old code relied on the implicit "terminal translates
+  wheel→↑/↓ in alt-screen" behavior — only on by default in xterm /
+  iTerm / Windows Terminal / Alacritty / Kitty. Web/cloud terminals
+  ship with it off, leaving the wheel as a dead key. Explicit DECSET
+  1007 alternate-scroll routes wheel through the existing ↑/↓ chat-
+  scroll handler without enabling full mouse tracking, so native
+  drag-select + right-click stay 100% intact (no Shift bypass).
+  Paired with `incrementalRendering: false` to drop render ghosting
+  on CJK / emoji-heavy output. `--no-mouse` opts out. (#529, partial
+  mitigation for #412, fixes #519, #531)
+
+- fix(tui): rescue unbracketed pastes so multi-line content stops
+  firing N submits. Bracketed-paste markers (DECSET 2004) don't
+  reach the parser on every host — multiplexers strip them, some
+  web-SSH gateways drop them, certain Windows pipes never forward
+  them. Without them, each `\r` in a paste fires an Enter event
+  and the loop submits the partial buffer per line. Heuristic at
+  the parser entry wraps multi-line chunks in synthetic paste
+  markers when 2+ line breaks (or 1 break with text on both sides)
+  are present and no ESC bytes appear. Bare `\r` and `\r\n` stay
+  typed-Enter; "abc\r" stays type-then-Enter. (#536, closes #522)
+
+- fix(plan): pipe user feedback through the Refine / Approve /
+  Cancel gate. PlanVerdict didn't carry a `feedback` field, so
+  the rich text typed in PlanRefineInput was built into a
+  `synthetic` string and never sent. Model received bare "user
+  requested refinement" tool error and proposed a near-identical
+  plan, looking like the suggestion was ignored. PlanVerdict now
+  matches CheckpointVerdict's shape and surfaces feedback as the
+  tool result string. (#534, closes #533)
+
+- fix(dashboard): resync canonical state on SSE reconnect. The
+  `/api/events` stream snapshots only `busy-change` on (re)connect.
+  When the connection dropped during a long task — proxy timeout,
+  browser background-tab throttle, Node event loop blocked past
+  the 25s ping window during heavy work — every assistant_delta /
+  assistant_final / tool / modal event fired during the disconnect
+  window was lost. If the disconnect happened before
+  `busy-change(false)`, the UI wedged on busy forever. EventSource
+  `onopen` now refetches `/api/messages` + `/api/modal` on every
+  reconnect. (#532, closes #521)
+
+- fix(tui): drop xterm mouse tracking — restore native copy/paste,
+  rebind keys. Multiple users reported they couldn't copy text or
+  scroll with SGR mouse-tracking modes enabled. ↑/↓ always scroll
+  chat now; Ctrl+P / Ctrl+N take over what ↑/↓ used to do in
+  PromptInput (cursor up/down inside multi-line draft, falls back
+  to prompt history). Pickers still own ↑/↓ while open. Superseded
+  by #529's DECSET 1007 approach but the rebinding stands. (#514)
+
+- fix(shell): normalize Windows PATH env before spawn. PowerShell
+  passed PATH with trailing semicolons that broke `where` and
+  downstream tool resolution on certain Windows builds. (#525,
+  closes #520)
+
+- fix(slash): stabilize suggestions windowing + isolate status row
+  layout. Slash-suggestion popover was reflowing on every typed
+  character; status row width changes were leaking up into the
+  composer. (#516)
+
+- fix(config): honor `config.baseUrl` + accept self-hosted key
+  formats. Self-hosted DeepSeek-compatible endpoints with non-
+  standard key prefixes were rejected by client-side validation.
+  (#513)
+
+- fix(dashboard): use semver compare for up-to-date check. Lexical
+  string compare flagged 0.35.0 as older than 0.5.10. (#512)
+
+- fix(semantic): unblock Build when daemon is up but binary lookup
+  fails. Build path was throwing on daemon start when the embedding
+  binary wasn't where the registry expected it. (#507)
+
+**Performance:**
+
+- perf(tui): streaming flush rate tuned to 60Hz default. Earlier
+  landed at 20Hz to suppress repaint glitches on fragile terminals
+  then raised to 60Hz once frame pacing was proven stable.
+  `REASONIX_FLUSH_MS` overrides for hosts that need it. (#515, #517)
+
 ## [0.35.0] — 2026-05-09
 
 **Headline:** the agent gains the ability to extend itself from chat,
