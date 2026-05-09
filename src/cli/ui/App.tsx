@@ -394,11 +394,21 @@ function AppInner({
   //     `27;5;13~` as Ctrl+Enter. Terminals that don't understand the
   //     SGR fall through silently — Shift+Enter just stays
   //     indistinguishable from Enter, no regression.
+  //
+  //   • SGR mouse tracking (DECSET 1006 + 1000) — terminal reports
+  //     wheel + button presses as `\x1b[<btn;col;row;M` instead of
+  //     translating the wheel to ↑/↓ key sequences. Lets the chat
+  //     scroll-handler route `mouseScrollUp/Down` independently of
+  //     PromptInput's arrow-key bindings (history / cursor). Cost:
+  //     terminal-native drag-to-select needs a modifier (Shift on
+  //     Windows Terminal / Alacritty / WezTerm, Option on iTerm2).
   useEffect(() => {
     if (!stdout || !stdout.isTTY) return;
     stdout.write("\u001b[?2004h");
     stdout.write("\u001b[>4;2m");
+    stdout.write("\u001b[?1006h\u001b[?1000h");
     return () => {
+      stdout.write("\u001b[?1000l\u001b[?1006l");
       stdout.write("\u001b[?2004l");
       stdout.write("\u001b[>4m");
     };
@@ -1204,9 +1214,12 @@ function AppInner({
   // PromptInput can't act on it: while busy (disabled) or once chat is
   // unpinned (user already scrolling). When pinned + idle, PromptInput
   // owns arrows — empty buffer recalls history, otherwise cursor motion.
+  // Mouse wheel routes through mouseScrollUp/Down (SGR mouse mode) and
+  // bypasses the arrow-key path entirely so the wheel always scrolls
+  // scrollback regardless of buffer state.
   useKeystroke((ev) => {
-    if (ev.pageUp) chatScroll.scrollUp();
-    else if (ev.pageDown) chatScroll.scrollDown();
+    if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollUp();
+    else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollDown();
     else if (ev.end) chatScroll.jumpToBottom();
     else if ((!chatScroll.pinned || busy) && ev.upArrow) chatScroll.scrollUp();
     else if ((!chatScroll.pinned || busy) && ev.downArrow) chatScroll.scrollDown();
