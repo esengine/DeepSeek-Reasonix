@@ -362,6 +362,48 @@ describe("registerPlanTool + submit_plan", () => {
       { id: "step-2", title: "also good", action: "do other thing" },
     ]);
   });
+
+  it("surfaces refine feedback in the tool error so the model sees what to fix (#533)", async () => {
+    const reg = new ToolRegistry();
+    registerPlanTool(reg);
+    const gate = new AutoGate({ type: "refine", feedback: "use sqlite, not postgres" });
+    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan" }), {
+      confirmationGate: gate,
+    });
+    expect(JSON.parse(out).error).toMatch(/user requested refinement: use sqlite, not postgres/);
+  });
+
+  it("falls back to bare 'user requested refinement' when no feedback is supplied", async () => {
+    const reg = new ToolRegistry();
+    registerPlanTool(reg);
+    const gate = new AutoGate({ type: "refine" });
+    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan" }), {
+      confirmationGate: gate,
+    });
+    expect(JSON.parse(out).error).toMatch(/user requested refinement$/);
+  });
+
+  it("surfaces approve feedback as additional instructions in the tool result", async () => {
+    const reg = new ToolRegistry();
+    registerPlanTool(reg);
+    const gate = new AutoGate({ type: "approve", feedback: "skip the migration step for now" });
+    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan" }), {
+      confirmationGate: gate,
+    });
+    expect(out).toBe(
+      "plan approved. user's additional instructions: skip the migration step for now",
+    );
+  });
+
+  it("surfaces cancel feedback in the tool error so the model knows the why", async () => {
+    const reg = new ToolRegistry();
+    registerPlanTool(reg);
+    const gate = new AutoGate({ type: "cancel", feedback: "out of scope for this branch" });
+    const out = await reg.dispatch("submit_plan", JSON.stringify({ plan: "# Plan" }), {
+      confirmationGate: gate,
+    });
+    expect(JSON.parse(out).error).toMatch(/plan cancelled: out of scope for this branch/);
+  });
 });
 
 describe("registerPlanTool + mark_step_complete", () => {

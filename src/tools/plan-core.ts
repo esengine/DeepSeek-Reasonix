@@ -109,9 +109,14 @@ function registerSubmitPlan(registry: ToolRegistry, opts: PlanToolOptions): void
         kind: "plan_proposed",
         payload: { plan, steps, summary },
       });
-      if (verdict.type === "approve") return "plan approved";
-      if (verdict.type === "refine") throw new Error("user requested refinement");
-      throw new Error("plan cancelled");
+      const fb = verdict.feedback?.trim();
+      if (verdict.type === "approve") {
+        return fb ? `plan approved. user's additional instructions: ${fb}` : "plan approved";
+      }
+      if (verdict.type === "refine") {
+        throw new Error(fb ? `user requested refinement: ${fb}` : "user requested refinement");
+      }
+      throw new Error(fb ? `plan cancelled: ${fb}` : "plan cancelled");
     },
   });
 }

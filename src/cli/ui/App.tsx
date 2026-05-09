@@ -2909,8 +2909,8 @@ function AppInner({
       }
       if (!staged) return;
       const trimmed = feedback.trim();
+      const tail = trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed;
 
-      let synthetic: string;
       let marker: string;
       if (staged.mode === "approve") {
         togglePlanMode(false);
@@ -2931,14 +2931,9 @@ function AppInner({
           });
           persistPlanState();
         }
-        if (trimmed) {
-          synthetic = `The plan above has been approved. Implement it now. You are out of plan mode — use edit_file / write_file / run_command as needed.\n\nUser's additional instructions / answers to your open questions:\n\n${trimmed}\n\nFactor these in before the first edit. Stick to the plan unless you discover a concrete reason to deviate; if you do, tell me and wait for a response.`;
-          marker = `▸ plan approved + instructions — ${trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed}`;
-        } else {
-          synthetic =
-            "The plan above has been approved. Implement it now. You are out of plan mode — use edit_file / write_file / run_command as needed. If the plan listed open questions and I didn't answer them, default to the safest interpretation and call them out in your first reply. Don't fabricate preferences — if a question is truly unanswerable without me, stop and ask.";
-          marker = "▸ plan approved — implementing";
-        }
+        marker = trimmed
+          ? `▸ plan approved + instructions — ${tail}`
+          : "▸ plan approved — implementing";
       } else if (staged.mode === "reject") {
         // Drop the structured plan state — the user said this path is wrong,
         // no point keeping it around for resume.
@@ -2949,36 +2944,25 @@ function AppInner({
         persistPlanState();
         togglePlanMode(false);
         agentStore.dispatch({ type: "plan.drop" });
-        if (trimmed) {
-          synthetic = `The plan was rejected. User's reason / what they actually want:\n\n${trimmed}\n\nDrop the proposed plan entirely. Use this guidance to understand what the user is after — ask follow-up questions if anything is still unclear, otherwise propose a different plan that addresses it.`;
-          marker = `▸ plan rejected — ${trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed}`;
-        } else {
-          synthetic =
-            "The plan was cancelled. Drop it entirely. Ask me what I actually want before proposing another plan or making any changes.";
-          marker = "▸ plan cancelled";
-        }
+        marker = trimmed ? `▸ plan rejected — ${tail}` : "▸ plan cancelled";
       } else {
-        // refine
-        if (trimmed) {
-          synthetic = `The plan needs refinement. User feedback / answers:\n\n${trimmed}\n\nStay in plan mode — address the feedback (explore more if needed), then submit an improved submit_plan call. Don't propose a near-identical plan unless you explain why the feedback doesn't apply.`;
-          marker = `▸ refining — ${trimmed.length > 50 ? `${trimmed.slice(0, 50)}…` : trimmed}`;
-        } else {
-          synthetic =
-            "The plan needs refinement. The user saw your open questions / risks block and chose not to answer specifics. Pick the safest default for each open question, call those defaults out explicitly in the new plan, and submit the refined submit_plan. Do not re-ask — the user already saw the questions.";
-          marker = "▸ refining — using safe defaults";
-        }
+        marker = trimmed ? `▸ refining — ${tail}` : "▸ refining — using safe defaults";
       }
+      log.pushInfo(marker);
 
       // Resolve the PauseGate so the blocked submit_plan tool function
-      // can return and the model sees the verdict without a synthetic message.
+      // returns. The user's typed feedback rides on the verdict so the
+      // model sees it as the tool result — without this, refine looked
+      // identical to "user requested refinement" with no payload (#533).
       const gateId = pendingGateIdRef.current;
       if (gateId !== null) {
+        const fb = trimmed || undefined;
         if (staged.mode === "approve") {
-          pauseGate.resolve(gateId, { type: "approve" });
+          pauseGate.resolve(gateId, { type: "approve", feedback: fb });
         } else if (staged.mode === "reject") {
-          pauseGate.resolve(gateId, { type: "cancel" });
+          pauseGate.resolve(gateId, { type: "cancel", feedback: fb });
         } else {
-          pauseGate.resolve(gateId, { type: "refine" });
+          pauseGate.resolve(gateId, { type: "refine", feedback: fb });
         }
       }
     },

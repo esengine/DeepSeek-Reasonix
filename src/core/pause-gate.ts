@@ -7,7 +7,10 @@ export type ConfirmationChoice =
   | { type: "run_once" }
   | { type: "always_allow"; prefix: string };
 
-export type PlanVerdict = { type: "approve" } | { type: "refine" } | { type: "cancel" };
+export type PlanVerdict =
+  | { type: "approve"; feedback?: string }
+  | { type: "refine"; feedback?: string }
+  | { type: "cancel"; feedback?: string };
 
 export type CheckpointVerdict =
   | { type: "continue" }
