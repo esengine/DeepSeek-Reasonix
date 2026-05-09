@@ -29,6 +29,7 @@
 
 import { Box, Text } from "ink";
 import React from "react";
+import { t } from "../../i18n/index.js";
 import type { PlanStep, PlanStepRisk } from "../../tools/plan.js";
 import { CharBar } from "./char-bar.js";
 import { COLOR, GLYPH } from "./theme.js";
@@ -103,8 +104,15 @@ function PlanStepListInner({ steps, statuses, focusStepId }: PlanStepListProps) 
       <Box>
         <Text dimColor>
           {showProgress
-            ? `${doneCount}/${total} done (${pct}%) · ${total} step${total === 1 ? "" : "s"}`
-            : `${total} step${total === 1 ? "" : "s"}`}
+            ? t(
+                total === 1
+                  ? "planFlow.stepList.counterDoneSingular"
+                  : "planFlow.stepList.counterDone",
+                { done: doneCount, total, pct },
+              )
+            : t(total === 1 ? "planFlow.stepList.counterSingular" : "planFlow.stepList.counter", {
+                total,
+              })}
         </Text>
       </Box>
       <Box flexDirection="column">

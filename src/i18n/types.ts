@@ -275,4 +275,46 @@ export interface TranslationSchema {
     selectFooter: string;
     stepCounter: string;
   };
+  planFlow: {
+    approveCardTitle: string;
+    approveCardMetaRight: string;
+    openQuestionsBanner: string;
+    openQuestionsHeader: string;
+    truncatedBodyMore: string;
+    truncatedBodyMorePlural: string;
+    picker: {
+      accept: string;
+      acceptHint: string;
+      refine: string;
+      refineHint: string;
+      revise: string;
+      reviseHint: string;
+      reject: string;
+      rejectHint: string;
+    };
+    refineFooter: string;
+    refineQuestionsHeading: string;
+    modes: {
+      approve: { title: string; hint: string; blankHint: string };
+      refine: { title: string; hint: string; blankHint: string };
+      reject: { title: string; hint: string; blankHint: string };
+      "checkpoint-revise": { title: string; hint: string; blankHint: string };
+      "choice-custom": { title: string; hint: string; blankHint: string };
+    };
+    checkpoint: {
+      title: string;
+      continue: string;
+      continueHint: string;
+      revise: string;
+      reviseHint: string;
+      stop: string;
+      stopHint: string;
+    };
+    stepList: {
+      counter: string;
+      counterSingular: string;
+      counterDone: string;
+      counterDoneSingular: string;
+    };
+  };
 }

@@ -392,6 +392,70 @@ export const EN: TranslationSchema = {
     selectFooter: "[↑↓] navigate · [Enter] confirm · [Esc] cancel",
     stepCounter: "Step {step}/{total} · ",
   },
+  planFlow: {
+    approveCardTitle: "Approve plan",
+    approveCardMetaRight: "awaiting",
+    openQuestionsBanner:
+      "▲ the plan flags open questions or risks — pick {refine} to write concrete answers before the model moves on.",
+    openQuestionsHeader: "Open questions / risks",
+    truncatedBodyMore: "… {n} more line above in scrollback",
+    truncatedBodyMorePlural: "… {n} more lines above in scrollback",
+    picker: {
+      accept: "accept",
+      acceptHint: "run it now, in order",
+      refine: "refine",
+      refineHint: "give the agent more guidance, draft a new plan",
+      revise: "revise",
+      reviseHint: "edit the plan inline before running (skip / reorder steps)",
+      reject: "reject",
+      rejectHint: "discard, agent will retry from scratch",
+    },
+    refineFooter: "⏎ send  ·  esc return to picker",
+    refineQuestionsHeading: "Answer these or describe the change you want:",
+    modes: {
+      approve: {
+        title: "approving — any last instructions?",
+        hint: "Answer questions the plan raised, add constraints, or just press Enter to approve as-is.",
+        blankHint: " (Enter with blank = approve without extra instructions.)",
+      },
+      refine: {
+        title: "refining — what should the model change?",
+        hint: "Describe what's wrong or missing, or answer questions the plan raised.",
+        blankHint: " (Enter with blank = let the model pick safe defaults for any open questions.)",
+      },
+      reject: {
+        title: "rejecting — tell the model why (optional)",
+        hint: "Say what the model got wrong about your goal, or what you actually want instead.",
+        blankHint:
+          " (Enter with blank = cancel without explanation; the model will ask what you want.)",
+      },
+      "checkpoint-revise": {
+        title: "revising — what should change before the next step?",
+        hint: "Scope change, skip steps, alternative approach — the model adjusts the remaining plan.",
+        blankHint: " (Enter with blank = continue with the current plan.)",
+      },
+      "choice-custom": {
+        title: "custom answer — type whatever fits",
+        hint: "Free-form reply. The model reads it verbatim and proceeds — no need to match the listed options.",
+        blankHint: " (Enter with blank = ask the model what you actually want.)",
+      },
+    },
+    checkpoint: {
+      title: "Checkpoint — step done",
+      continue: "Continue — run the next step",
+      continueHint: "Model resumes with the next step.",
+      revise: "Revise — give feedback before the next step",
+      reviseHint: "Stay paused, type guidance; model adjusts the remaining plan.",
+      stop: "Stop — end the plan here",
+      stopHint: "Model summarizes what was done and ends.",
+    },
+    stepList: {
+      counter: "{total} steps",
+      counterSingular: "{total} step",
+      counterDone: "{done}/{total} done ({pct}%) · {total} steps",
+      counterDoneSingular: "{done}/{total} done ({pct}%) · {total} step",
+    },
+  },
   app: {
     walkCancelledRemaining: "▸ walk cancelled — {count} block(s) still pending.",
     walkCancelled: "▸ walk cancelled.",

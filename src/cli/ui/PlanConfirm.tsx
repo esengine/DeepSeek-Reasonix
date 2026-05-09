@@ -2,12 +2,14 @@
 
 import { Box, Text } from "ink";
 import React from "react";
+import { t } from "../../i18n/index.js";
 import type { PlanStep } from "../../tools/plan.js";
 import { PlanStepList } from "./PlanStepList.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
 import { useReserveRows } from "./layout/viewport-budget.js";
 import { MarkdownView } from "./markdown-view.js";
+import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { CARD, FG, TONE } from "./theme/tokens.js";
 
 export type PlanConfirmChoice = "approve" | "refine" | "revise" | "cancel";
@@ -26,6 +28,7 @@ const PLAN_BODY_PREVIEW_LINES = 24;
 function PlanConfirmInner({ plan, steps, onChoose }: PlanConfirmProps) {
   const stepRows = steps?.length ?? 0;
   const hasSteps = stepRows > 0;
+  const openQuestions = extractOpenQuestionsSection(plan);
   const planLines = plan.split("\n");
   const truncatedBody = planLines.length > PLAN_BODY_PREVIEW_LINES;
   const previewBody = truncatedBody ? planLines.slice(0, PLAN_BODY_PREVIEW_LINES).join("\n") : plan;
@@ -33,26 +36,34 @@ function PlanConfirmInner({ plan, steps, onChoose }: PlanConfirmProps) {
     ? PLAN_BODY_PREVIEW_LINES
     : Math.min(planLines.length, PLAN_BODY_PREVIEW_LINES);
   const reservedFor = hasSteps ? stepRows : previewRows;
-  useReserveRows("modal", { min: 10, max: Math.max(16, reservedFor + 14) });
+  const oqRows = openQuestions ? openQuestions.split("\n").length : 0;
+  useReserveRows("modal", { min: 10, max: Math.max(16, reservedFor + oqRows + 14) });
 
-  const hasOpenQuestions =
-    /^#{1,6}\s*(open[-\s]?questions?|risks?|unknowns?|assumptions?|unclear)/im.test(plan) ||
-    /^#{1,6}\s*(待确认|开放问题|风险|未知|假设|不确定)/im.test(plan);
+  const refineLabel = t("planFlow.picker.refine");
+  const bannerTemplate = t("planFlow.openQuestionsBanner");
+  const [bannerBefore, bannerAfter] = bannerTemplate.split("{refine}");
 
   return (
     <ApprovalCard
       tone="accent"
       glyph="⊞"
-      title="Approve plan"
-      metaRight="awaiting"
+      title={t("planFlow.approveCardTitle")}
+      metaRight={t("planFlow.approveCardMetaRight")}
       metaRightColor={CARD.plan.color}
     >
-      {hasOpenQuestions ? (
-        <Box marginBottom={1}>
+      {openQuestions ? (
+        <Box marginBottom={1} flexDirection="column">
           <Text color={TONE.warn}>
-            ▲ the plan flags open questions or risks — pick <Text bold>refine</Text> to write
-            concrete answers before the model moves on.
+            {bannerBefore ?? ""}
+            <Text bold>{refineLabel}</Text>
+            {bannerAfter ?? ""}
           </Text>
+          <Box marginTop={1} flexDirection="column">
+            <Text color={TONE.warn} bold>
+              {t("planFlow.openQuestionsHeader")}
+            </Text>
+            <MarkdownView text={openQuestions} />
+          </Box>
         </Box>
       ) : null}
       {hasSteps ? (
@@ -64,35 +75,38 @@ function PlanConfirmInner({ plan, steps, onChoose }: PlanConfirmProps) {
           <MarkdownView text={previewBody} />
           {truncatedBody ? (
             <Text color={FG.faint}>
-              {`… ${planLines.length - PLAN_BODY_PREVIEW_LINES} more line${
-                planLines.length - PLAN_BODY_PREVIEW_LINES === 1 ? "" : "s"
-              } above in scrollback`}
+              {t(
+                planLines.length - PLAN_BODY_PREVIEW_LINES === 1
+                  ? "planFlow.truncatedBodyMore"
+                  : "planFlow.truncatedBodyMorePlural",
+                { n: planLines.length - PLAN_BODY_PREVIEW_LINES },
+              )}
             </Text>
           ) : null}
         </Box>
       ) : null}
       <SingleSelect
-        initialValue={hasOpenQuestions ? "refine" : "approve"}
+        initialValue={openQuestions ? "refine" : "approve"}
         items={[
           {
             value: "approve",
-            label: "accept",
-            hint: "run it now, in order",
+            label: t("planFlow.picker.accept"),
+            hint: t("planFlow.picker.acceptHint"),
           },
           {
             value: "refine",
-            label: "refine",
-            hint: "give the agent more guidance, draft a new plan",
+            label: refineLabel,
+            hint: t("planFlow.picker.refineHint"),
           },
           {
             value: "revise",
-            label: "revise",
-            hint: "edit the plan inline before running (skip / reorder steps)",
+            label: t("planFlow.picker.revise"),
+            hint: t("planFlow.picker.reviseHint"),
           },
           {
             value: "cancel",
-            label: "reject",
-            hint: "discard, agent will retry from scratch",
+            label: t("planFlow.picker.reject"),
+            hint: t("planFlow.picker.rejectHint"),
           },
         ]}
         onSubmit={(v) => onChoose(v as PlanConfirmChoice)}
