@@ -351,7 +351,7 @@ export const zhCN: TranslationSchema = {
     apiKeyGetOne: "在此获取：https://platform.deepseek.com/api_keys",
     apiKeySavedLocally: "保存在本地：{path}",
     apiKeyInputLabel: "key › ",
-    apiKeyInvalid: "这看起来不像 DeepSeek 的 key。它们以 'sk-' 开头，30 字符以上。",
+    apiKeyInvalid: "key 长度不足——请粘贴完整 token（16+ 字符，不含空格）。",
     apiKeyPreview: "预览：{redacted}",
     presetTitle: "选择预设",
     mcpTitle: "Reasonix 要为你接入哪些 MCP 服务器？",

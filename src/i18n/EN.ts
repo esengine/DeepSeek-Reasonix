@@ -363,7 +363,7 @@ export const EN: TranslationSchema = {
     apiKeyGetOne: "Get one at: https://platform.deepseek.com/api_keys",
     apiKeySavedLocally: "Saved locally to {path}",
     apiKeyInputLabel: "key › ",
-    apiKeyInvalid: "Doesn't look like a DeepSeek key. They start with 'sk-' and are 30+ chars.",
+    apiKeyInvalid: "Key looks too short — paste the full token (16+ chars, no spaces).",
     apiKeyPreview: "preview: {redacted}",
     presetTitle: "Pick a preset",
     mcpTitle: "Which MCP servers should Reasonix wire up for you?",

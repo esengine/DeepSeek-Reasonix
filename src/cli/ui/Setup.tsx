@@ -20,7 +20,7 @@ export function Setup({ onReady }: SetupProps) {
       return;
     }
     if (!isPlausibleKey(trimmed)) {
-      setError("Doesn't look like a DeepSeek key. They start with 'sk-' and are 30+ chars.");
+      setError("Key looks too short — paste the full token (16+ chars, no spaces).");
       setValue("");
       return;
     }

@@ -34,6 +34,7 @@ import {
   type PresetName,
   defaultConfigPath,
   editModeHintShown,
+  loadBaseUrl,
   loadEditMode,
   loadReasoningEffort,
   loadTheme,
@@ -805,7 +806,7 @@ function AppInner({
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentRootDir — see comment above
   const loop = useMemo(() => {
     if (loopRef.current) return loopRef.current;
-    const client = new DeepSeekClient();
+    const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
     // Register run_skill HERE (not in code.tsx / chat.tsx) because
     // subagent-runAs skills need the client + parent registry to
     // spawn child loops. Wiring lives in App.tsx so the same code

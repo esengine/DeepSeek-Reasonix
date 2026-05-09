@@ -8,6 +8,7 @@ import {
   editModeHintShown,
   isPlausibleKey,
   loadApiKey,
+  loadBaseUrl,
   loadEditMode,
   loadIndexConfig,
   loadIndexUserConfig,
@@ -23,6 +24,7 @@ import {
   resolveSemanticEmbeddingConfig,
   resolveThemePreference,
   saveApiKey,
+  saveBaseUrl,
   saveEditMode,
   saveIndexConfig,
   saveReasoningEffort,
@@ -37,6 +39,7 @@ describe("config", () => {
   let path: string;
   const originalEnv = process.env.DEEPSEEK_API_KEY;
   const originalSearch = process.env.REASONIX_SEARCH;
+  const originalBaseUrl = process.env.DEEPSEEK_BASE_URL;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "reasonix-test-"));
@@ -45,6 +48,8 @@ describe("config", () => {
     delete process.env.DEEPSEEK_API_KEY;
     // biome-ignore lint/performance/noDelete: same reason
     delete process.env.REASONIX_SEARCH;
+    // biome-ignore lint/performance/noDelete: same reason
+    delete process.env.DEEPSEEK_BASE_URL;
   });
 
   afterEach(() => {
@@ -60,6 +65,12 @@ describe("config", () => {
       delete process.env.REASONIX_SEARCH;
     } else {
       process.env.REASONIX_SEARCH = originalSearch;
+    }
+    if (originalBaseUrl === undefined) {
+      // biome-ignore lint/performance/noDelete: same reason
+      delete process.env.DEEPSEEK_BASE_URL;
+    } else {
+      process.env.DEEPSEEK_BASE_URL = originalBaseUrl;
     }
   });
 
@@ -92,16 +103,48 @@ describe("config", () => {
     expect(loadApiKey(path)).toBeUndefined();
   });
 
-  it("isPlausibleKey accepts valid sk- keys", () => {
+  it("isPlausibleKey accepts DeepSeek-shaped keys", () => {
     expect(isPlausibleKey("sk-1234567890abcdef")).toBe(true);
     expect(isPlausibleKey("sk-abcDEF_123-456789012")).toBe(true);
   });
 
-  it("isPlausibleKey rejects bad input", () => {
+  it("isPlausibleKey accepts non-sk tokens for self-hosted endpoints (issue #502)", () => {
+    expect(isPlausibleKey("token-1234567890abcdef")).toBe(true);
+    expect(isPlausibleKey("c8f5a3e2d1b9876543210fedcba98765")).toBe(true);
+    expect(isPlausibleKey("Bearer_self_hosted_token_value_123")).toBe(true);
+  });
+
+  it("isPlausibleKey rejects empty / too-short / whitespace inputs", () => {
     expect(isPlausibleKey("")).toBe(false);
     expect(isPlausibleKey("hello")).toBe(false);
     expect(isPlausibleKey("sk-short")).toBe(false);
-    expect(isPlausibleKey("token-1234567890abcdef")).toBe(false);
+    expect(isPlausibleKey("has whitespace in the middle")).toBe(false);
+  });
+
+  it("loadBaseUrl prefers env var over config", () => {
+    saveBaseUrl("https://from-config.example.com", path);
+    process.env.DEEPSEEK_BASE_URL = "https://from-env.example.com";
+    try {
+      expect(loadBaseUrl(path)).toBe("https://from-env.example.com");
+    } finally {
+      // biome-ignore lint/performance/noDelete: restore exact env state
+      delete process.env.DEEPSEEK_BASE_URL;
+    }
+  });
+
+  it("loadBaseUrl falls back to config when env unset", () => {
+    saveBaseUrl("https://self-hosted.example.com", path);
+    expect(loadBaseUrl(path)).toBe("https://self-hosted.example.com");
+  });
+
+  it("loadBaseUrl returns undefined when nothing set", () => {
+    expect(loadBaseUrl(path)).toBeUndefined();
+  });
+
+  it("saveBaseUrl with empty string clears the field", () => {
+    saveBaseUrl("https://self-hosted.example.com", path);
+    saveBaseUrl("", path);
+    expect(loadBaseUrl(path)).toBeUndefined();
   });
 
   it("redactKey hides the middle", () => {

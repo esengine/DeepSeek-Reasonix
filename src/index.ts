@@ -276,9 +276,11 @@ export {
   defaultConfigPath,
   isPlausibleKey,
   loadApiKey,
+  loadBaseUrl,
   readConfig,
   redactKey,
   saveApiKey,
+  saveBaseUrl,
   writeConfig,
 } from "./config.js";
 export type { ReasonixConfig } from "./config.js";
