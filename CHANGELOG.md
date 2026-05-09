@@ -3,6 +3,28 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.1] — 2026-05-09
+
+**Headline:** scroll lag fix for long sessions. `useChatScroll` was
+calling `setScrollRows` synchronously on every PgUp / PgDn / arrow /
+wheel tick, so a single mouse-wheel gesture (10–30 events on Windows)
+triggered 10–30 full Yoga layout passes over the entire `CardStream`
+subtree. Layout cost scales linearly with card count — that's why the
+lag worsened the longer the session ran. Coalesce deltas into a ref
+and flush once per ~16ms; one scroll burst now produces one render
+regardless of event volume. `End` (`jumpToBottom`) cancels any
+pending delta so it stays instant. Reported in #482 by @GyroChen.
+
+The deeper fix — pre-rendering cards to a row buffer so Yoga isn't on
+the scroll/streaming hot path at all — is tracked separately and
+covers the streaming-redraw lag too.
+
+**Fixes:**
+
+- `chat-scroll`: coalesce wheel/key events into one render per ~16ms
+  frame; long-session scroll no longer scales O(history) (#485, closes
+  #482)
+
 ## [0.34.0] — 2026-05-09
 
 **Headline:** two big UX shifts in the composer. The `@`-mention picker
