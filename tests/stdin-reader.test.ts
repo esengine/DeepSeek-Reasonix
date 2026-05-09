@@ -175,8 +175,11 @@ describe("StdinReader — single-byte keys", () => {
 
   it("printable run breaks at a CSI / control byte", () => {
     const { reader, events } = setup();
-    reader.feed("ab\rcd");
-    expect(events).toEqual([{ input: "ab" }, { input: "", return: true }, { input: "cd" }]);
+    // \t splits the printable run cleanly. \r / \n now route through the
+    // heuristic paste rescue when surrounded by text (#522), so they
+    // don't exercise the printable-coalescer split path anymore.
+    reader.feed("ab\tcd");
+    expect(events).toEqual([{ input: "ab" }, { input: "", tab: true }, { input: "cd" }]);
   });
 });
 
@@ -218,6 +221,75 @@ describe("StdinReader — bracketed paste", () => {
     const { reader, events } = setup();
     reader.feed("ab[Ccd");
     expect(events).toEqual([{ input: "ab" }, { input: "", rightArrow: true }, { input: "cd" }]);
+  });
+});
+
+describe("StdinReader — heuristic paste rescue (#522)", () => {
+  it("treats a multi-line chunk without paste markers as a single paste event", () => {
+    // Multiplexers / web-SSH gateways strip DECSET 2004 brackets; raw
+    // multi-line content used to fire one Enter per \r and submit N times.
+    const { reader, events } = setup();
+    reader.feed("first line\rsecond line\rthird line");
+    expect(events).toEqual([{ input: "first line\rsecond line\rthird line", paste: true }]);
+  });
+
+  it("treats a single-break chunk with text on both sides as a paste", () => {
+    const { reader, events } = setup();
+    reader.feed("hello\rworld");
+    expect(events).toEqual([{ input: "hello\rworld", paste: true }]);
+  });
+
+  it("leaves a bare Enter alone (\\r submits as before)", () => {
+    const { reader, events } = setup();
+    reader.feed("\r");
+    expect(events).toEqual([{ input: "", return: true }]);
+  });
+
+  it("leaves a bare CRLF alone (\\r\\n is one terminal-converted Enter, not paste)", () => {
+    const { reader, events } = setup();
+    reader.feed("\r\n");
+    // \r → return; \n → ctrl+j. Neither flagged as paste.
+    expect(events).toEqual([
+      { input: "", return: true },
+      { input: "j", ctrl: true },
+    ]);
+  });
+
+  it("leaves typed-then-Enter alone (`abc\\r` is not flagged as paste)", () => {
+    const { reader, events } = setup();
+    reader.feed("abc\r");
+    expect(events).toEqual([{ input: "abc" }, { input: "", return: true }]);
+  });
+
+  it("leaves Enter-then-typed alone (`\\rabc` is not flagged as paste)", () => {
+    const { reader, events } = setup();
+    reader.feed("\rabc");
+    expect(events).toEqual([{ input: "", return: true }, { input: "abc" }]);
+  });
+
+  it("does not interfere when the chunk already contains a real bracketed paste", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[200~one\ntwo\x1b[201~");
+    expect(events).toEqual([{ input: "one\ntwo", paste: true }]);
+  });
+
+  it("does not wrap chunks containing ESC (could be an arrow / control sequence)", () => {
+    const { reader, events } = setup();
+    // Text + arrow sequence — historically would interleave; never a paste.
+    reader.feed("a\x1b[Ab\x1b[A");
+    expect(events).toEqual([
+      { input: "a" },
+      { input: "", upArrow: true },
+      { input: "b" },
+      { input: "", upArrow: true },
+    ]);
+  });
+
+  it("normalizes \\r\\n line endings inside the heuristic so Windows pastes still get one event", () => {
+    const { reader, events } = setup();
+    reader.feed("first\r\nsecond\r\nthird");
+    // Whole chunk wrapped → paste accumulator delivers verbatim
+    expect(events).toEqual([{ input: "first\r\nsecond\r\nthird", paste: true }]);
   });
 });
 

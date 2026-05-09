@@ -121,6 +121,32 @@ function lookupCsi(tail: string): KeyEvent | null {
   return null;
 }
 
+/** Heuristic paste-burst detector — wraps raw multi-line chunks when the terminal didn't (#522). */
+export function looksLikeUnbracketedPaste(chunk: string): boolean {
+  if (chunk.length < 2) return false;
+  if (chunk.includes(PASTE_START) || chunk.includes(PASTE_START_BARE)) return false;
+  if (chunk.includes(PASTE_END) || chunk.includes(PASTE_END_BARE)) return false;
+  // ESC anywhere = real keypress / control sequence, not a paste burst.
+  if (chunk.includes("\x1b")) return false;
+  // \r\n is one terminal-converted Enter, not two breaks — fold first.
+  const norm = chunk.replace(/\r\n/g, "\n");
+  if (norm === "\r" || norm === "\n") return false;
+  let breaks = 0;
+  let firstBreakIdx = -1;
+  for (let i = 0; i < norm.length; i++) {
+    const c = norm[i];
+    if (c === "\r" || c === "\n") {
+      if (firstBreakIdx < 0) firstBreakIdx = i;
+      breaks++;
+    }
+  }
+  if (breaks >= 2) return true;
+  // 1 break with non-empty text on BOTH sides — paste burst. ("abc\r"
+  // alone stays as type-then-Enter so a fast typist still submits.)
+  if (breaks === 1) return firstBreakIdx > 0 && firstBreakIdx < norm.length - 1;
+  return false;
+}
+
 export class StdinReader {
   private subscribers = new Set<Subscriber>();
   private state: "idle" | "esc" | "csi" | "ss3" | "paste" = "idle";
@@ -226,8 +252,15 @@ export class StdinReader {
     }, ESC_TIMEOUT_MS);
   }
 
-  private handleChunk(chunk: string): void {
+  private handleChunk(rawChunk: string): void {
     this.cancelEscTimer();
+    // Paste rescue when DECSET 2004 markers don't arrive (multiplexers
+    // strip them, some Windows pipes too) — otherwise each \r in a
+    // multi-line paste fires Enter and the loop submits N prompts (#522).
+    const chunk =
+      this.state === "idle" && looksLikeUnbracketedPaste(rawChunk)
+        ? PASTE_START + rawChunk + PASTE_END
+        : rawChunk;
     let i = 0;
     while (i < chunk.length) {
       // ── paste accumulator ──
