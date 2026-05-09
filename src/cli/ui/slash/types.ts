@@ -134,6 +134,8 @@ export interface SlashContext {
   stopDashboard?: () => Promise<void>;
   /** Snapshot the dashboard's URL when running, null otherwise. */
   getDashboardUrl?: () => string | null;
+  /** Current session id — included in `/feedback`'s diagnostic block when present. */
+  sessionId?: string;
 }
 
 export type SlashGroup =

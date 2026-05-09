@@ -1,11 +1,16 @@
-import { t } from "@/i18n/index.js";
+import { release } from "node:os";
+import { getLanguage, t } from "@/i18n/index.js";
 import {
   DEEPSEEK_CONTEXT_TOKENS,
   DEEPSEEK_PRICING,
   DEFAULT_CONTEXT_TOKENS,
 } from "@/telemetry/stats.js";
 import { countTokens } from "@/tokenizer.js";
+import { VERSION } from "@/version.js";
+import { writeClipboard } from "../../clipboard.js";
 import { computeCtxBreakdown } from "../../ctx-breakdown.js";
+import { FEEDBACK_ISSUE_URL, buildFeedbackDiagnostic } from "../../feedback.js";
+import { openUrl } from "../../open-url.js";
 import type { SlashHandler } from "../dispatch.js";
 import { compactNum } from "../helpers.js";
 
@@ -225,9 +230,34 @@ function estimateCost(userText: string, loop: import("@/loop.js").CacheFirstLoop
   return { info: lines.join("\n") };
 }
 
+const feedback: SlashHandler = (_args, loop, ctx) => {
+  const diagnostic = buildFeedbackDiagnostic({
+    version: VERSION,
+    platform: process.platform,
+    osRelease: release(),
+    termProgram: process.env.TERM_PROGRAM,
+    term: process.env.TERM,
+    nodeVersion: process.version,
+    locale: getLanguage(),
+    model: loop.model,
+    sessionId: ctx.sessionId,
+  });
+  writeClipboard(diagnostic);
+  const opened = openUrl(FEEDBACK_ISSUE_URL);
+  const lines = [
+    opened.opened
+      ? "▸ issue page opened — diagnostic info copied to clipboard, paste into the body."
+      : `▸ couldn't open the browser (${opened.reason ?? "unknown"}). Diagnostic info is on your clipboard; the URL is ${FEEDBACK_ISSUE_URL}`,
+    "",
+    diagnostic,
+  ];
+  return { info: lines.join("\n") };
+};
+
 export const handlers: Record<string, SlashHandler> = {
   context,
   status,
   compact,
   cost,
+  feedback,
 };

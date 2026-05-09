@@ -2241,6 +2241,7 @@ function AppInner({
           startDashboard,
           stopDashboard,
           getDashboardUrl,
+          sessionId: session,
           jobs: codeMode?.jobs,
           postInfo: (text: string) => log.pushInfo(text),
           postDoctor: (checks) => log.showDoctor(checks),
