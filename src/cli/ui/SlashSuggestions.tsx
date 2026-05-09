@@ -40,6 +40,23 @@ export function SlashSuggestions({
   const cols = stdout?.columns ?? 80;
   const [rememberedWindowStart, setRememberedWindowStart] = React.useState(0);
 
+  // All hooks must run on every render; the early-return branches below
+  // would otherwise change hook count between renders → "Rendered more
+  // hooks than during the previous render" crash when matches flips
+  // between null/empty and non-empty.
+  const maxRows = groupMode ? GROUP_MODE_MAX_ROWS : SEARCH_MODE_MAX_ROWS;
+  const safeMatches = matches ?? [];
+  const windowStart = computeWindowStart(
+    safeMatches,
+    maxRows,
+    selectedIndex,
+    rememberedWindowStart,
+    groupMode,
+  );
+  React.useEffect(() => {
+    setRememberedWindowStart(windowStart);
+  }, [windowStart]);
+
   if (matches === null) return null;
   if (matches.length === 0) {
     return (
@@ -53,18 +70,7 @@ export function SlashSuggestions({
       </Box>
     );
   }
-  const maxRows = groupMode ? GROUP_MODE_MAX_ROWS : SEARCH_MODE_MAX_ROWS;
   const total = matches.length;
-  const windowStart = computeWindowStart(
-    matches,
-    maxRows,
-    selectedIndex,
-    rememberedWindowStart,
-    groupMode,
-  );
-  React.useEffect(() => {
-    setRememberedWindowStart(windowStart);
-  }, [windowStart]);
   const items = buildVisibleItems(matches, windowStart, maxRows, groupMode);
   const shownCommands = items.filter((item) => item.kind === "command");
   const hiddenAbove = windowStart;

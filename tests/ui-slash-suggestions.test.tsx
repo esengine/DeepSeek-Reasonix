@@ -173,4 +173,42 @@ describe("SlashSuggestions", () => {
       );
     expect(visibleBodyRows.length).toBeLessThanOrEqual(24);
   });
+
+  it("survives matches null → non-empty → null transitions without a hook-order crash", () => {
+    // Reproducer for the "Rendered more hooks than during the previous
+    // render" crash: useEffect used to live AFTER the early returns, so
+    // the hook count flipped between 3 and 4 across renders.
+    const commands = makeCommands(5);
+    const { rerender, unmount } = render(
+      React.createElement(SlashSuggestions, {
+        matches: commands,
+        selectedIndex: 0,
+        groupMode: true,
+      }),
+    );
+    expect(() => {
+      rerender(
+        React.createElement(SlashSuggestions, {
+          matches: null,
+          selectedIndex: 0,
+          groupMode: true,
+        }),
+      );
+      rerender(
+        React.createElement(SlashSuggestions, {
+          matches: [],
+          selectedIndex: 0,
+          groupMode: true,
+        }),
+      );
+      rerender(
+        React.createElement(SlashSuggestions, {
+          matches: commands,
+          selectedIndex: 1,
+          groupMode: true,
+        }),
+      );
+    }).not.toThrow();
+    unmount();
+  });
 });
