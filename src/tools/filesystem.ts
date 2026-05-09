@@ -29,6 +29,50 @@ const DEFAULT_MAX_LIST_BYTES = 256 * 1024;
 const DEFAULT_AUTO_PREVIEW_LINES = 200;
 const AUTO_PREVIEW_HEAD_LINES = 80;
 const AUTO_PREVIEW_TAIL_LINES = 40;
+const OUTLINE_MAX_ENTRIES = 30;
+const OUTLINE_TAIL_KEEP = 5;
+
+type OutlineEntry = { line: number; kind: string; name: string };
+
+const TS_EXPORT_RE =
+  /^export\s+(?:default\s+)?(?:async\s+)?(function|class|const|let|var|interface|type|enum)\s+\*?\s*(\w+)/;
+
+function extractTsExportOutline(lines: readonly string[]): OutlineEntry[] {
+  const out: OutlineEntry[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.startsWith("export ")) continue;
+    const m = TS_EXPORT_RE.exec(line);
+    if (!m) continue;
+    out.push({ line: i + 1, kind: m[1]!, name: m[2]! });
+  }
+  return out;
+}
+
+function formatOutline(entries: readonly OutlineEntry[]): string {
+  const total = entries.length;
+  if (total === 0) return "";
+  const lastEntry = entries[total - 1]!;
+  const width = String(lastEntry.line).length;
+  const fmt = (e: OutlineEntry) =>
+    `  L${String(e.line).padStart(width, " ")}  export ${e.kind} ${e.name}`;
+  const header = `[outline: ${total} top-level export${total === 1 ? "" : "s"}]`;
+  if (total <= OUTLINE_MAX_ENTRIES) {
+    return [header, ...entries.map(fmt)].join("\n");
+  }
+  const headCount = OUTLINE_MAX_ENTRIES - OUTLINE_TAIL_KEEP;
+  const headEntries = entries.slice(0, headCount);
+  const tailEntries = entries.slice(-OUTLINE_TAIL_KEEP);
+  const omitted = total - OUTLINE_MAX_ENTRIES;
+  const gapStart = headEntries[headEntries.length - 1]!.line;
+  const gapEnd = tailEntries[0]!.line;
+  return [
+    header,
+    ...headEntries.map(fmt),
+    `  [… ${omitted} more export${omitted === 1 ? "" : "s"} between L${gapStart} and L${gapEnd} …]`,
+    ...tailEntries.map(fmt),
+  ].join("\n");
+}
 
 /** Skipped unless `include_deps:true` — shared with the semantic indexer via DEFAULT_INDEX_EXCLUDES. */
 const SKIP_DIR_NAMES: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.dirs);
@@ -110,7 +154,7 @@ export function registerFilesystemTools(
   - head: N  → first N lines (imports, public API, small configs)
   - tail: N  → last N lines (recently-added code, log tails)
   - range: "A-B"  → inclusive line range A..B, 1-indexed (e.g. "120-180" around an edit site)
-When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_LINES} lines, the tool auto-returns a head+tail preview with an "N lines omitted" marker rather than dumping everything. If you need the middle, re-call with a range. Prefer search_content to locate a symbol first, then read_file with a range around the hit — one scoped read beats three full-file reads.`,
+When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_LINES} lines, the tool auto-returns a head+tail preview with an "N lines omitted" marker, plus a top-level export outline (function / class / const / interface / type / enum names with line numbers, capped at ${OUTLINE_MAX_ENTRIES}) so you can pick a smart range without a follow-up grep. If you need the middle, re-call with a range. Prefer search_content to locate a symbol first only when the outline doesn't have what you want — one scoped read beats three full-file reads.`,
     readOnly: true,
     stormExempt: true,
     parameters: {
@@ -195,12 +239,17 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
       const head = lines.slice(0, AUTO_PREVIEW_HEAD_LINES).join("\n");
       const tail = lines.slice(totalLines - AUTO_PREVIEW_TAIL_LINES).join("\n");
       const omitted = totalLines - AUTO_PREVIEW_HEAD_LINES - AUTO_PREVIEW_TAIL_LINES;
-      return [
+      const outline = formatOutline(extractTsExportOutline(lines));
+      const parts: string[] = [
         `[auto-preview: head ${AUTO_PREVIEW_HEAD_LINES} + tail ${AUTO_PREVIEW_TAIL_LINES} of ${totalLines} lines]`,
         head,
+      ];
+      if (outline) parts.push("", outline);
+      parts.push(
         `\n[… ${omitted} lines omitted — call read_file again with range:"A-B" (1-indexed) or head / tail to get the middle]\n`,
         tail,
-      ].join("\n");
+      );
+      return parts.join("\n");
     },
   });
 
