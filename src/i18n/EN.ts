@@ -80,14 +80,15 @@ export const EN: TranslationSchema = {
       sections: [
         {
           rows: [
-            { key: "wheel", text: "scrolls the chat history above" },
+            { key: "drag", text: "select text directly — terminal-native, no modifier needed" },
             {
               key: "right-click",
-              text: "captured by the app — use Ctrl+V (Win/Linux) or Cmd+V (macOS) to paste",
+              text: "your terminal's native menu (paste / copy on Windows Terminal etc.)",
             },
+            { key: "wheel", text: "scrolls chat history (terminal translates wheel to ↑/↓)" },
             {
-              key: "Shift + drag",
-              text: "selects text natively (Option on iTerm2, Shift on Win Term / Alacritty / WezTerm)",
+              key: "↑ / ↓",
+              text: "scroll chat · use Ctrl+P / Ctrl+N for prompt history + multi-line cursor",
             },
           ],
         },
@@ -102,7 +103,14 @@ export const EN: TranslationSchema = {
           rows: [
             { key: "Enter", text: "submit the prompt" },
             { key: "Shift+Enter", text: "insert a newline in the prompt" },
-            { key: "Ctrl+P / Ctrl+N", text: "recall previous / next prompt from history" },
+            {
+              key: "↑ / ↓",
+              text: "scroll chat history (always — wheel maps to ↑/↓ via the terminal)",
+            },
+            {
+              key: "Ctrl+P / Ctrl+N",
+              text: "previous / next prompt history · cursor up / down in a multi-line draft",
+            },
             { key: "Ctrl+A / Ctrl+E", text: "jump to start / end of the current line" },
             { key: "Ctrl+W", text: "delete the word before the cursor" },
             { key: "Ctrl+U", text: "clear the entire prompt buffer" },
@@ -110,10 +118,6 @@ export const EN: TranslationSchema = {
             { key: "Shift+Tab", text: "edit-gate: toggle review ↔ AUTO mode" },
             { key: "Esc", text: "dismiss picker · abort the running model turn" },
             { key: "Ctrl+C", text: "abort the running model turn (NOT copy — see clipboard)" },
-            {
-              key: "↑ / ↓",
-              text: "scroll chat history (PromptInput cursor when buffer non-empty)",
-            },
             { key: "PgUp / PgDn", text: "scroll chat history a page at a time" },
             { key: "End", text: "jump chat to the most recent line" },
           ],
@@ -121,18 +125,18 @@ export const EN: TranslationSchema = {
         {
           title: "mouse",
           rows: [
-            { key: "wheel", text: "scrolls the chat history" },
-            { key: "right-click", text: "captured by the app — use Ctrl+V / Cmd+V to paste" },
-            { key: "left-click", text: "captured (no action yet — reserved for future use)" },
+            { key: "wheel", text: "scrolls chat history (terminal translates to ↑/↓)" },
+            { key: "drag", text: "selects text natively — direct copy works" },
+            { key: "right-click", text: "terminal-native (paste menu on Windows Terminal etc.)" },
           ],
         },
         {
           title: "copy / paste",
           rows: [
-            { key: "select text", text: "hold Shift while dragging (Option on iTerm2)" },
+            { key: "select text", text: "drag to select — terminal-native (no modifier needed)" },
             {
               key: "copy",
-              text: "Ctrl+Shift+C (Win/Linux) · Cmd+C (macOS) — terminal-native after selection",
+              text: "Ctrl+Shift+C (Win/Linux) · Cmd+C (macOS) — or auto-copy-on-select if your terminal does it",
             },
             { key: "paste", text: "Ctrl+V or Ctrl+Shift+V (Win/Linux) · Cmd+V (macOS)" },
             {
@@ -151,7 +155,7 @@ export const EN: TranslationSchema = {
         },
       ],
       footer:
-        "Mouse tracking is on so the wheel scrolls chat instead of moving the cursor — that's why right-click no longer does the terminal's native paste.",
+        "Mouse tracking is OFF — drag-to-select, right-click, and the wheel all behave the way your terminal natively does. Wheel sends ↑/↓ which the app uses for chat scroll.",
     },
     tipShownOnce: "shown once",
     modelOverride: "override the default model",

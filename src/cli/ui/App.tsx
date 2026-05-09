@@ -399,20 +399,16 @@ function AppInner({
   //     SGR fall through silently — Shift+Enter just stays
   //     indistinguishable from Enter, no regression.
   //
-  //   • SGR mouse tracking (DECSET 1006 + 1000) — terminal reports
-  //     wheel + button presses as `\x1b[<btn;col;row;M` instead of
-  //     translating the wheel to ↑/↓ key sequences. Lets the chat
-  //     scroll-handler route `mouseScrollUp/Down` independently of
-  //     PromptInput's arrow-key bindings (history / cursor). Cost:
-  //     terminal-native drag-to-select needs a modifier (Shift on
-  //     Windows Terminal / Alacritty / WezTerm, Option on iTerm2).
+  // Mouse tracking is intentionally NOT enabled: terminals translate
+  // the wheel to ↑/↓ in the alt-screen buffer, App-level ↑/↓ scrolls
+  // chat, and Ctrl+P / Ctrl+N own the prompt's history + multi-line
+  // cursor moves. Skipping mouse mode keeps native drag-to-select +
+  // right-click paste working in every terminal.
   useEffect(() => {
     if (!stdout || !stdout.isTTY) return;
     stdout.write("\u001b[?2004h");
     stdout.write("\u001b[>4;2m");
-    stdout.write("\u001b[?1006h\u001b[?1000h");
     return () => {
-      stdout.write("\u001b[?1000l\u001b[?1006l");
       stdout.write("\u001b[?2004l");
       stdout.write("\u001b[>4m");
     };
@@ -1230,19 +1226,16 @@ function AppInner({
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
 
-  // PgUp / PgDn always scroll chat history. ↑/↓ also reaches here when
-  // PromptInput can't act on it: while busy (disabled) or once chat is
-  // unpinned (user already scrolling). When pinned + idle, PromptInput
-  // owns arrows — empty buffer recalls history, otherwise cursor motion.
-  // Mouse wheel routes through mouseScrollUp/Down (SGR mouse mode) and
-  // bypasses the arrow-key path entirely so the wheel always scrolls
-  // scrollback regardless of buffer state.
+  // ↑/↓/PgUp/PgDn always scroll chat. The terminal translates the
+  // mouse wheel to ↑/↓ in alt-screen mode so the wheel scrolls chat
+  // for free without us enabling mouse tracking. Prompt history +
+  // multi-line cursor moves live on Ctrl+P / Ctrl+N (see
+  // multiline-keys.ts); leftover mouseScrollUp/Down events from a
+  // terminal that ignores DECRST 1000 still route correctly.
   useKeystroke((ev) => {
-    if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollUp();
-    else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollDown();
+    if (ev.pageUp || ev.mouseScrollUp || ev.upArrow) chatScroll.scrollUp();
+    else if (ev.pageDown || ev.mouseScrollDown || ev.downArrow) chatScroll.scrollDown();
     else if (ev.end) chatScroll.jumpToBottom();
-    else if ((!chatScroll.pinned || busy) && ev.upArrow) chatScroll.scrollUp();
-    else if ((!chatScroll.pinned || busy) && ev.downArrow) chatScroll.scrollDown();
   }, !modalOpen);
 
   // Esc during busy → forward to the loop as an abort signal. The loop
@@ -1498,14 +1491,11 @@ function AppInner({
       }
     }
 
-    // History recall (↑/↓) used to live here guarded by `input.length
-    // === 0`. It now runs inside PromptInput — the child detects
-    // when a buffer-edge arrow key has nowhere left to go (empty
-    // buffer, or cursor at first/last line of a multi-line draft)
-    // and calls back into `recallPrev` / `recallNext` below. That
-    // lets users escape into history from a multi-line draft by
-    // pressing ↑ at the first line without first emptying the
-    // buffer.
+    // Prompt history is now Ctrl+P / Ctrl+N (PromptInput → multiline
+    // keys → historyHandoff → recallPrev / recallNext below). ↑/↓ are
+    // reserved for chat scroll — without that move, native drag-select
+    // and right-click paste don't work on most terminals because we'd
+    // have to keep xterm mouse tracking on to grab the wheel.
   });
 
   // Edit-gate interceptor. Reroutes `edit_file` / `write_file` tool

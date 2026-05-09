@@ -75,14 +75,15 @@ export const zhCN: TranslationSchema = {
       sections: [
         {
           rows: [
-            { key: "滚轮", text: "滚动上方的聊天记录" },
+            { key: "拖动", text: "直接选中文本 — 终端原生，不需要按 Shift" },
             {
               key: "右键",
-              text: "已被应用接管 — 用 Ctrl+V（Win/Linux）或 Cmd+V（macOS）粘贴",
+              text: "终端原生菜单（Windows Terminal 等的复制 / 粘贴）",
             },
+            { key: "滚轮", text: "滚动聊天（终端把滚轮翻译成 ↑ / ↓）" },
             {
-              key: "Shift + 拖动",
-              text: "原生选中文本（iTerm2 用 Option，Win Term / Alacritty / WezTerm 用 Shift）",
+              key: "↑ / ↓",
+              text: "滚动聊天 · 输入框历史 + 多行光标用 Ctrl+P / Ctrl+N",
             },
           ],
         },
@@ -97,7 +98,11 @@ export const zhCN: TranslationSchema = {
           rows: [
             { key: "Enter", text: "提交输入" },
             { key: "Shift+Enter", text: "在输入框中插入换行" },
-            { key: "Ctrl+P / Ctrl+N", text: "调出上一条 / 下一条历史提示" },
+            { key: "↑ / ↓", text: "滚动聊天记录（始终 — 滚轮也通过终端映射到 ↑/↓）" },
+            {
+              key: "Ctrl+P / Ctrl+N",
+              text: "上一条 / 下一条输入历史 · 多行草稿中按行移动光标",
+            },
             { key: "Ctrl+A / Ctrl+E", text: "跳到当前行的开头 / 结尾" },
             { key: "Ctrl+W", text: "删除光标前的一个词" },
             { key: "Ctrl+U", text: "清空整个输入缓冲区" },
@@ -105,7 +110,6 @@ export const zhCN: TranslationSchema = {
             { key: "Shift+Tab", text: "编辑门控：切换 预览 ↔ 自动 模式" },
             { key: "Esc", text: "关闭弹出选择器 · 中止当前模型回合" },
             { key: "Ctrl+C", text: "中止当前模型回合（不是复制 — 见剪贴板段）" },
-            { key: "↑ / ↓", text: "滚动聊天记录（缓冲区非空时为光标移动）" },
             { key: "PgUp / PgDn", text: "整页滚动聊天记录" },
             { key: "End", text: "跳到聊天的最新一行" },
           ],
@@ -113,18 +117,18 @@ export const zhCN: TranslationSchema = {
         {
           title: "鼠标",
           rows: [
-            { key: "滚轮", text: "滚动聊天记录" },
-            { key: "右键", text: "被应用接管 — 用 Ctrl+V / Cmd+V 粘贴" },
-            { key: "左键", text: "被接管（暂无动作 — 预留给后续功能）" },
+            { key: "滚轮", text: "滚动聊天记录（终端翻译为 ↑/↓）" },
+            { key: "拖动", text: "原生选中文本 — 直接复制" },
+            { key: "右键", text: "终端原生（Windows Terminal 等的粘贴菜单）" },
           ],
         },
         {
           title: "复制 / 粘贴",
           rows: [
-            { key: "选中文字", text: "拖动时按住 Shift（iTerm2 用 Option）" },
+            { key: "选中文字", text: "直接拖动 — 终端原生（不需要任何修饰键）" },
             {
               key: "复制",
-              text: "Ctrl+Shift+C（Win/Linux）· Cmd+C（macOS）— 选中后由终端原生处理",
+              text: "Ctrl+Shift+C（Win/Linux）· Cmd+C（macOS）— 或选中即复制（看终端设置）",
             },
             { key: "粘贴", text: "Ctrl+V 或 Ctrl+Shift+V（Win/Linux）· Cmd+V（macOS）" },
             {
@@ -143,7 +147,7 @@ export const zhCN: TranslationSchema = {
         },
       ],
       footer:
-        "鼠标追踪已开启，滚轮用来滚动聊天而不是移动光标 — 这也是右键不再触发终端原生粘贴的原因。",
+        "鼠标追踪已关闭 — 拖动选中、右键、滚轮都按终端原生方式工作。滚轮发送 ↑/↓，应用用它来滚动聊天。",
     },
     tipShownOnce: "仅显示一次",
     modelOverride: "覆盖默认模型",

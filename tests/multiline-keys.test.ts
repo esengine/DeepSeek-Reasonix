@@ -148,19 +148,23 @@ describe("processMultilineKey — cursor motion", () => {
     expect(processMultilineKey("abc", 3, key({ rightArrow: true })).cursor).toBe(3);
   });
 
-  it("↑/↓ on a single-line non-empty buffer is a NOOP", () => {
-    const up = processMultilineKey("hello", 3, key({ upArrow: true }));
-    expect(up).toEqual({ next: null, cursor: null, submit: false });
-    const down = processMultilineKey("hello", 3, key({ downArrow: true }));
-    expect(down).toEqual({ next: null, cursor: null, submit: false });
+  it("↑/↓ are NOOP — reserved for chat scroll at the App level", () => {
+    expect(processMultilineKey("hello", 3, key({ upArrow: true }))).toEqual({
+      next: null,
+      cursor: null,
+      submit: false,
+    });
+    expect(processMultilineKey("hello", 3, key({ downArrow: true }))).toEqual({
+      next: null,
+      cursor: null,
+      submit: false,
+    });
+    expect(processMultilineKey("", 0, key({ upArrow: true })).historyHandoff).toBeUndefined();
+    expect(processMultilineKey("", 0, key({ downArrow: true })).historyHandoff).toBeUndefined();
+    expect(processMultilineKey("hello\nworld", 9, key({ upArrow: true })).cursor).toBeNull();
   });
 
-  it("↑/↓ on an empty buffer hands off to history recall (universal CLI convention)", () => {
-    expect(processMultilineKey("", 0, key({ upArrow: true })).historyHandoff).toBe("prev");
-    expect(processMultilineKey("", 0, key({ downArrow: true })).historyHandoff).toBe("next");
-  });
-
-  it("Ctrl+P / Ctrl+N hand off to history recall (bash readline binding)", () => {
+  it("Ctrl+P / Ctrl+N on single-line / empty buffer hand off to history recall", () => {
     expect(processMultilineKey("", 0, key({ ctrl: true, input: "p" }))).toEqual({
       next: null,
       cursor: null,
@@ -173,37 +177,75 @@ describe("processMultilineKey — cursor motion", () => {
       submit: false,
       historyHandoff: "next",
     });
-    // Also from a non-empty buffer — Ctrl+P/N is unambiguous, no
-    // need for buffer-state gating like the old ↑/↓ binding.
     expect(processMultilineKey("hello", 3, key({ ctrl: true, input: "p" })).historyHandoff).toBe(
       "prev",
     );
+    expect(processMultilineKey("hello", 3, key({ ctrl: true, input: "n" })).historyHandoff).toBe(
+      "next",
+    );
   });
 
-  it("↑ at line 0 of a multi-line buffer is a NOOP (no auto history handoff)", () => {
+  it("Ctrl+P moves cursor to the previous line in a multi-line buffer (readline parity)", () => {
+    //  line 0: "hello" (cols 0-5)
+    //  line 1: "world" (cols 0-5)
+    //  cursor at col 3 on line 1 = index 9
+    const v = "hello\nworld";
+    const up = processMultilineKey(v, 9, key({ ctrl: true, input: "p" }));
+    expect(up.cursor).toBe(3);
+    expect(up.historyHandoff).toBeUndefined();
+  });
+
+  it("Ctrl+P clamps column when the previous line is shorter", () => {
+    const v = "hi\nworld";
+    const up = processMultilineKey(v, 7, key({ ctrl: true, input: "p" }));
+    expect(up.cursor).toBe(2);
+  });
+
+  it("Ctrl+N moves cursor to the next line, preserving column", () => {
+    const v = "hello\nworld";
+    const down = processMultilineKey(v, 2, key({ ctrl: true, input: "n" }));
+    expect(down.cursor).toBe(8);
+  });
+
+  it("Ctrl+N clamps column when the next line is shorter", () => {
+    const v = "world\nhi";
+    const down = processMultilineKey(v, 4, key({ ctrl: true, input: "n" }));
+    expect(down.cursor).toBe(8);
+  });
+
+  it("Ctrl+P at line 0 of a multi-line buffer falls back to history (no cursor move available)", () => {
     const v = "first\nsecond";
-    const result = processMultilineKey(v, 3, key({ upArrow: true }));
-    expect(result).toEqual({ next: null, cursor: null, submit: false });
+    const up = processMultilineKey(v, 3, key({ ctrl: true, input: "p" }));
+    expect(up.historyHandoff).toBe("prev");
+    expect(up.cursor).toBeNull();
   });
 
-  it("↓ at last line is a NOOP", () => {
+  it("Ctrl+N at last line of a multi-line buffer falls back to history", () => {
     const v = "first\nsecond";
-    const result = processMultilineKey(v, 8, key({ downArrow: true }));
-    expect(result).toEqual({ next: null, cursor: null, submit: false });
+    const down = processMultilineKey(v, 8, key({ ctrl: true, input: "n" }));
+    expect(down.historyHandoff).toBe("next");
+    expect(down.cursor).toBeNull();
   });
 
-  it("raw `\\x1b[A` escape sequence is rewritten into upArrow (history handoff on empty buffer)", () => {
-    const result = processMultilineKey("", 0, { input: "\x1b[A" });
-    expect(result.historyHandoff).toBe("prev");
+  it("raw `\\x1b[A` / `\\x1b[B` escape sequences are NOOP (chat-scroll handled at App level)", () => {
+    expect(processMultilineKey("", 0, { input: "\x1b[A" })).toEqual({
+      next: null,
+      cursor: null,
+      submit: false,
+    });
+    expect(processMultilineKey("", 0, { input: "\x1b[B" })).toEqual({
+      next: null,
+      cursor: null,
+      submit: false,
+    });
   });
 
-  it("raw `\\x1b[B` becomes downArrow; `\\x1b[C` rightArrow; `\\x1b[D` leftArrow", () => {
-    expect(processMultilineKey("", 0, { input: "\x1b[B" }).historyHandoff).toBe("next");
+  it("raw `\\x1b[C` rightArrow / `\\x1b[D` leftArrow still move the cursor", () => {
     expect(processMultilineKey("abc", 0, { input: "\x1b[C" }).cursor).toBe(1);
     expect(processMultilineKey("abc", 2, { input: "\x1b[D" }).cursor).toBe(1);
   });
 
-  it("ESC-stripped arrow fallbacks (`[C`, `[D`, `[A`, `[B`) — Windows ConPTY case", () => {
+  it("ESC-stripped arrow fallbacks (`[C`, `[D`) — Windows ConPTY case", () => {
     // PowerShell + ConPTY consumes the leading \x1b and routes the
     // remaining `[C` through useInput as plain text. Without the
     // ESC-less fallback, pressing right-arrow at end of a line would
@@ -211,42 +253,6 @@ describe("processMultilineKey — cursor motion", () => {
     // newline boundary.
     expect(processMultilineKey("ab\ncd", 2, { input: "[C" }).cursor).toBe(3);
     expect(processMultilineKey("ab\ncd", 3, { input: "[D" }).cursor).toBe(2);
-    expect(processMultilineKey("", 0, { input: "[A" }).historyHandoff).toBe("prev");
-    expect(processMultilineKey("", 0, { input: "[B" }).historyHandoff).toBe("next");
-  });
-
-  it("↑ moves cursor to the previous line, preserving column when possible", () => {
-    //  line 0: "hello" (cols 0-5)
-    //  line 1: "world" (cols 0-5)
-    //  cursor at col 3 on line 1 = index 5 (for "\n") + 3 + 1 = 9
-    const v = "hello\nworld";
-    const up = processMultilineKey(v, 9, key({ upArrow: true }));
-    // target: line 0 col 3 → index 3
-    expect(up.cursor).toBe(3);
-  });
-
-  it("↑ clamps column when the previous line is shorter", () => {
-    const v = "hi\nworld";
-    // cursor at line 1 col 4 = index 3 + 4 = 7
-    const up = processMultilineKey(v, 7, key({ upArrow: true }));
-    // target: line 0 col min(4, 2) = 2 → index 2
-    expect(up.cursor).toBe(2);
-  });
-
-  it("↓ moves cursor to the next line, preserving column", () => {
-    const v = "hello\nworld";
-    // cursor at line 0 col 2 = index 2
-    const down = processMultilineKey(v, 2, key({ downArrow: true }));
-    // target: line 1 col 2 → index 6 + 2 = 8
-    expect(down.cursor).toBe(8);
-  });
-
-  it("↓ clamps column when the next line is shorter", () => {
-    const v = "world\nhi";
-    // cursor at line 0 col 4 = index 4
-    const down = processMultilineKey(v, 4, key({ downArrow: true }));
-    // target: line 1 col min(4, 2) = 2 → index 6 + 2 = 8
-    expect(down.cursor).toBe(8);
   });
 
   it("Ctrl+A jumps to start of current line, Ctrl+E to end", () => {
