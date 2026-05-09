@@ -3,6 +3,108 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] — 2026-05-09
+
+**Headline:** the filesystem toolbelt grew a hand. Three new tools —
+`multi_edit` for atomic multi-site SEARCH/REPLACE in one file (or
+across files in one call), `todo_write` for lightweight in-session
+intent tracking, and `glob` for mtime-sorted file walks with
+picomatch syntax — close the gaps where the model was either
+round-tripping eight `edit_file` calls or losing its plan to a
+context fold. `search_content` also gains `-C N` context lines.
+
+The other half is cold-start surgery (#464). Stage 1 adds a zero-cost
+profiler gated behind `REASONIX_PROFILE_STARTUP=1`. Stage 2 lazy-
+imports every per-command module and the dashboard server, paying
+for the chat UI only when `reasonix code` actually runs. `reasonix
+version` and `reasonix --help` drop ~290ms (~440ms → ~140ms);
+`reasonix code` is unchanged on the hot path. Critical bug fix at
+the bottom: a long-session OOM where every tool result was retained
+indefinitely in a useRef array left behind when `/tool` was deleted.
+
+**Features:**
+
+- feat(tools): `multi_edit` — atomic batch SEARCH/REPLACE. N edits
+  apply sequentially against an in-memory buffer with one write at
+  the end; any failure (empty edits, search not found, ambiguous
+  match) leaves the file untouched. Edit N+1 can match text inserted
+  by edit N (composable refactors). Cuts the round-trip cost of
+  multi-site rewrites and removes the half-applied-edit failure mode
+  of looping `edit_file`. (#458)
+
+- feat(tools): `multi_edit` cross-file mode. Same atomicity guarantee
+  extended across files: dry-run all targets, then write. One failure
+  rolls the whole batch back. (#462)
+
+- feat(tools): `todo_write` — in-session task tracker. Replace-set
+  semantics (full list every call), no approval gate, no file writes.
+  Each item is `{ content, status, activeForm }` with `status: pending
+  | in_progress | completed`. Validated: at most one `in_progress` at
+  a time. Empty list signals work-done. Sits between `submit_plan`
+  (heavy: approval + checkpoints) and prose lists (lost on history
+  fold). Stays callable in plan mode (`readOnly: true`). (#460)
+
+- feat(tools): `glob` — mtime-sorted file walks. Picomatch syntax
+  (`**/`, `*.{ts,tsx}`); defaults to `sort: "mtime"` so "what did I
+  touch lately" works without arguments. `sort: "name"` for
+  deterministic listings. Skips deps by default, capped at 200 (1000
+  max) with overflow notice. (#462)
+
+- feat(tools): `search_content` gains `context: N`. Semantics match
+  `grep -C N`; output uses ripgrep convention (`:` after match line,
+  `-` after context). (#462)
+
+**Performance:**
+
+- perf(cli): `REASONIX_PROFILE_STARTUP=1` cold-start profiler. Marks
+  at `cli_module_loaded`, `chat_command_enter`, `config_loaded`,
+  `mcp_launch`, `mcp_connected_M_of_N`, `code_command_enter`,
+  `semantic_bootstrap_start`/`_done_*`, `ink_render_complete`. Single
+  env-var read when off; dumps to stderr at first paint when on.
+  Stage 1 of #464. (#466)
+
+- perf(cli): lazy-import every per-command module. Each
+  `reasonix <subcommand>` only loads its own command's chunk. tsup
+  splits, Node loads on first invocation. `reasonix version` and
+  `reasonix --help` drop ~290ms (~440ms → ~140ms); `reasonix code`
+  hot path unchanged (within noise). Stage 2 of #464. (#467)
+
+- perf(cli): lazy-import dashboard server. ~4200 LOC of HTTP / static
+  asset code (`startDashboardServer`) moved to a dynamic
+  `await import()` inside the App startup IIFE — only loads when the
+  user actually opens the dashboard. Two new App marks
+  (`app_render_start`, `app_inner_start`) clarify the first-paint
+  delta. (#469)
+
+**Bug fixes:**
+
+- fix(ui): drop dead `toolHistoryRef` leak. `/tool` was removed in
+  #453 but its supporting plumbing stayed behind: every tool result
+  was being pushed into a useRef array with no consumer reading it,
+  so long sessions retained the full text of every Read / Grep /
+  Bash call indefinitely. Reported by @trytsomile as a
+  `FATAL ERROR: Ineffective mark-compacts near heap limit` crash
+  after ~2.6h on v0.31.0 (V8's 4GB ceiling). 48 lines deleted across
+  4 files; `state.cards[].output` (which actually drives scrollback
+  rendering) is untouched. (#471, closes #465)
+
+- fix(/cwd): re-bootstrap `semantic_search` on workspace swap.
+  FS / shell / memory tools re-registered against the new root, but
+  `semantic_search` kept pointing at the old one — queries silently
+  hit the previous project's index, or the tool stayed registered
+  when the new directory had no index. Split the async re-bootstrap
+  out of the sync `reregisterTools` callback; App.tsx fires
+  `void reBootstrapSemantic(root).then(postInfo)` so the slash
+  dispatch returns synchronously. Tail of #459. (#470)
+
+- fix(ux): fuzzy `@`-mention ranking. The picker's substring-only
+  ranker rejected typo'd subsequences — `@atmnt` returned nothing for
+  `at-mentions.ts`. Adds a fuzzy-subsequence fallback that triggers
+  only when the substring lookup misses; substring hits still win
+  (classes 0/1/2 cap at 29_999, subseq starts at 30_000). Also adds
+  the `/cwd` slash for in-session workspace swap. Parts 1+2 of #459.
+  (#463)
+
 ## [0.32.0] — 2026-05-08
 
 **Headline:** the slash surface lost weight. Eleven redundant
