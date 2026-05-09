@@ -5,10 +5,6 @@ import { html } from "../lib/html.js";
 import { usePoll } from "../lib/use-poll.js";
 import { t, useLang } from "../i18n/index.js";
 
-function formatCacheHitPct(ratio: number): string {
-  return `${(ratio * 100).toFixed(1)}%`;
-}
-
 type UPlotInstance = {
   destroy(): void;
   setSize(opts: { width: number; height: number }): void;
@@ -234,7 +230,7 @@ export function UsagePanel() {
                         <tr>
                           <td class="dim">${b.label}</td>
                           <td class="num">${fmtNum(b.turns)}</td>
-                          <td class="num">${b.turns > 0 ? formatCacheHitPct(hitRatio) : "—"}</td>
+                          <td class="num">${b.turns > 0 ? fmtPct(hitRatio) : "—"}</td>
                           <td class="num">${b.turns > 0 ? fmtUsd(b.costUsd) : "—"}</td>
                           <td class="num">${b.turns > 0 && b.cacheSavingsUsd > 0 ? fmtUsd(b.cacheSavingsUsd) : "—"}</td>
                           <td class="num">${b.turns > 0 ? fmtUsd(b.claudeEquivUsd) : "—"}</td>
