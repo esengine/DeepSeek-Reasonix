@@ -11,6 +11,7 @@ const RULE_PAD = 4;
 const RULE_MIN = 20;
 const WALLET_MIN_COLS = 90;
 const VERSION_MIN_COLS = 70;
+const FEEDBACK_HINT_MIN_COLS = 100;
 
 export function StatusRow(): React.ReactElement {
   const status = useAgentState((s) => s.status);
@@ -64,6 +65,13 @@ export function StatusRow(): React.ReactElement {
           <>
             <Sep />
             <Text color={FG.faint}>{`v${VERSION}`}</Text>
+            {cols >= FEEDBACK_HINT_MIN_COLS && (
+              <>
+                <Text color={FG.faint}>{"  ·  "}</Text>
+                <Text color={FG.meta}>{"⚑ "}</Text>
+                <Text color={FG.sub}>{"/feedback"}</Text>
+              </>
+            )}
           </>
         )}
       </Box>

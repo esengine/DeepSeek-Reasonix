@@ -9,7 +9,7 @@ import { countTokens } from "@/tokenizer.js";
 import { VERSION } from "@/version.js";
 import { writeClipboard } from "../../clipboard.js";
 import { computeCtxBreakdown } from "../../ctx-breakdown.js";
-import { FEEDBACK_ISSUE_URL, buildFeedbackDiagnostic } from "../../feedback.js";
+import { buildFeedbackDiagnostic, buildFeedbackIssueUrl } from "../../feedback.js";
 import { openUrl } from "../../open-url.js";
 import type { SlashHandler } from "../dispatch.js";
 import { compactNum } from "../helpers.js";
@@ -242,12 +242,16 @@ const feedback: SlashHandler = (_args, loop, ctx) => {
     model: loop.model,
     sessionId: ctx.sessionId,
   });
+  // Clipboard is the belt-and-suspenders: GitHub's new-issue page accepts
+  // `?body=…` and we use that, but if the URL ever fails to open the
+  // user can paste from clipboard against any tracker.
   writeClipboard(diagnostic);
-  const opened = openUrl(FEEDBACK_ISSUE_URL);
+  const url = buildFeedbackIssueUrl(diagnostic);
+  const opened = openUrl(url);
   const lines = [
     opened.opened
-      ? "▸ issue page opened — diagnostic info copied to clipboard, paste into the body."
-      : `▸ couldn't open the browser (${opened.reason ?? "unknown"}). Diagnostic info is on your clipboard; the URL is ${FEEDBACK_ISSUE_URL}`,
+      ? "▸ issue page opened with the diagnostic block pre-filled. Just describe what you were doing and submit."
+      : `▸ couldn't open the browser (${opened.reason ?? "unknown"}). Diagnostic info is on your clipboard; open this URL manually: ${url}`,
     "",
     diagnostic,
   ];

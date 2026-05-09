@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFeedbackDiagnostic } from "../src/cli/ui/feedback.js";
+import { buildFeedbackDiagnostic, buildFeedbackIssueUrl } from "../src/cli/ui/feedback.js";
 
 const FIXTURE = {
   version: "0.34.1",
@@ -62,5 +62,24 @@ describe("buildFeedbackDiagnostic", () => {
     expect(out).not.toMatch(/sk-[a-zA-Z0-9]/);
     expect(out).not.toMatch(/[a-zA-Z]:\\|\/home\/|\/Users\//);
     expect(out).not.toMatch(/<\|user\|>|<\|assistant\|>|tool_call/);
+  });
+});
+
+describe("buildFeedbackIssueUrl", () => {
+  it("encodes the diagnostic into the body query param so the issue page opens pre-filled", () => {
+    const diagnostic = buildFeedbackDiagnostic(FIXTURE);
+    const url = buildFeedbackIssueUrl(diagnostic);
+    expect(url.startsWith("https://github.com/esengine/DeepSeek-Reasonix/issues/new?body=")).toBe(
+      true,
+    );
+    const decoded = decodeURIComponent(url.split("?body=")[1] ?? "");
+    expect(decoded).toBe(diagnostic);
+  });
+
+  it("caps body length so a runaway diagnostic can't blow past GitHub's URL limit", () => {
+    const huge = `${"x".repeat(20000)}`;
+    const url = buildFeedbackIssueUrl(huge);
+    expect(url.length).toBeLessThan(20000);
+    expect(url).toMatch(/^https:\/\/github\.com\/esengine\/DeepSeek-Reasonix\/issues\/new\?body=/);
   });
 });

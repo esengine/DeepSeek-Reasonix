@@ -12,7 +12,21 @@ export interface FeedbackDiagnosticInput {
   sessionId?: string;
 }
 
-export const FEEDBACK_ISSUE_URL = "https://github.com/esengine/DeepSeek-Reasonix/issues/new";
+const FEEDBACK_ISSUE_BASE = "https://github.com/esengine/DeepSeek-Reasonix/issues/new";
+
+/** Bare URL used as a fallback when query-pre-fill isn't possible (only really if the body somehow blew past URL limits). */
+export const FEEDBACK_ISSUE_URL = FEEDBACK_ISSUE_BASE;
+
+/** GitHub safely accepts ~7000 chars in the body query param — well above our ~300-char diagnostic, but cap defensively. */
+const FEEDBACK_BODY_QUERY_LIMIT = 6000;
+
+export function buildFeedbackIssueUrl(diagnostic: string): string {
+  const trimmed =
+    diagnostic.length > FEEDBACK_BODY_QUERY_LIMIT
+      ? diagnostic.slice(0, FEEDBACK_BODY_QUERY_LIMIT)
+      : diagnostic;
+  return `${FEEDBACK_ISSUE_BASE}?body=${encodeURIComponent(trimmed)}`;
+}
 
 export function buildFeedbackDiagnostic(input: FeedbackDiagnosticInput): string {
   const termLine = formatTerminal(input.termProgram, input.term);
