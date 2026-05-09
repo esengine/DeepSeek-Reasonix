@@ -352,7 +352,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
     name: "search_content",
     parallelSafe: true,
     description:
-      "Recursively grep file CONTENTS for a substring or regex. This is the right tool for 'find all places that call X', 'where is Y referenced', 'what files contain Z'. Different from search_files (which matches FILE NAMES). Returns one match per line in 'path:line: text' format. Skips dependency / VCS / build directories (node_modules, .git, dist, build, .next, target, .venv) and binary files by default.",
+      "Recursively grep file CONTENTS for a substring or regex. This is the right tool for 'find all places that call X', 'where is Y referenced', 'what files contain Z'. Different from search_files (which matches FILE NAMES). Returns one match per line in 'path:line: text' format. Per-file hits are capped at 30 (a footer reports any extras); when the byte budget is mostly spent the remaining files switch to a 'rel: N matches' histogram so distribution stays visible instead of one popular file drowning the rest. Pass `summary_only:true` to skip line content entirely and get just the histogram. Skips dependency / VCS / build directories (node_modules, .git, dist, build, .next, target, .venv) and binary files by default.",
     readOnly: true,
     parameters: {
       type: "object",
@@ -384,6 +384,11 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
           description:
             "Lines of context to show around each match (both before and after). Default 0 (just the matching line). Capped at 20. Output uses ripgrep style: `:` after the line number on the matching line, `-` on context lines, `--` separating non-adjacent windows.",
         },
+        summary_only: {
+          type: "boolean",
+          description:
+            "When true, skip line content and return one 'rel: N matches' line per matching file. Use for 'where does this exist at all' questions before drilling in with a targeted read_file.",
+        },
       },
       required: ["pattern"],
     },
@@ -395,6 +400,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
         case_sensitive?: boolean;
         include_deps?: boolean;
         context?: number;
+        summary_only?: boolean;
       },
       toolCtx,
     ) =>
