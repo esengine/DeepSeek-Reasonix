@@ -16,7 +16,6 @@ const TO_BACKEND = new Map(LANG_REGISTRY);
 const FROM_BACKEND = new Map(LANG_REGISTRY.map(([d, b]) => [b, d]));
 
 const STORAGE_KEY = "rx.lang";
-const EXPLICIT_KEY = "rx.langExplicit";
 const listeners: Listener[] = [];
 let currentLang: DashboardLang = loadFromStorage() ?? "en";
 
@@ -30,22 +29,6 @@ function loadFromStorage(): DashboardLang | null {
   return null;
 }
 
-function isExplicit(): boolean {
-  try {
-    return localStorage.getItem(EXPLICIT_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function markExplicit(): void {
-  try {
-    localStorage.setItem(EXPLICIT_KEY, "1");
-  } catch {
-    /* ignore */
-  }
-}
-
 function toBackendLang(lang: DashboardLang): string {
   return TO_BACKEND.get(lang) ?? lang;
 }
@@ -54,23 +37,12 @@ function fromBackendLang(raw: string): DashboardLang {
   return (FROM_BACKEND.get(raw) as DashboardLang) ?? "en";
 }
 
-/** Fetch lang from backend on startup. */
+/** Adopt server lang on startup; localStorage is render-cache only, never pushed back. */
 export async function initLangFromServer(): Promise<void> {
   try {
-    const stored = loadFromStorage();
     const res = await api<{ lang?: string }>("/settings");
     const serverLang = res.lang ? fromBackendLang(res.lang) : null;
-
-    if (!serverLang || stored === serverLang) return;
-
-    if (isExplicit() && stored) {
-      // User explicitly chose a language — push to server.
-      api("/settings", { method: "POST", body: { lang: toBackendLang(stored) } })
-        .catch((err) => console.error("[reasonix dashboard] lang sync:", err));
-      return;
-    }
-
-    // No explicit choice yet (first visit or cleared storage) — adopt server value.
+    if (!serverLang || serverLang === currentLang) return;
     currentLang = serverLang;
     try {
       localStorage.setItem(STORAGE_KEY, serverLang);
@@ -79,7 +51,7 @@ export async function initLangFromServer(): Promise<void> {
     }
     for (const cb of listeners) cb();
   } catch {
-    /* offline — keep localStorage value */
+    /* offline — keep last-known value rendering */
   }
 }
 
@@ -90,7 +62,6 @@ export function getLang(): DashboardLang {
 export function setLang(lang: DashboardLang): void {
   if (!SUPPORTED.has(lang)) return;
   currentLang = lang;
-  markExplicit();
   try {
     localStorage.setItem(STORAGE_KEY, lang);
   } catch {
