@@ -11,6 +11,7 @@ import { StatusRow } from "../src/cli/ui/layout/StatusRow.js";
 import type { SlashCommandSpec } from "../src/cli/ui/slash.js";
 import { AgentStoreProvider, useAgentStore } from "../src/cli/ui/state/provider.js";
 import type { AgentState, SessionInfo } from "../src/cli/ui/state/state.js";
+import { VERSION } from "../src/version.js";
 import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 const SESSION: SessionInfo = {
@@ -151,7 +152,7 @@ describe("StatusRow + SlashSuggestions composition", () => {
     expect(statusLine).toBeDefined();
     expect(statusLine).toContain("auto");
     expect(statusLine).toContain("default · main");
-    expect(statusLine).toContain("v0.35.0");
+    expect(statusLine).toContain(`v${VERSION}`);
     expect(statusLine).toContain("/feedback");
     expect(statusLine).not.toContain("SETUP");
     expect(statusLine).not.toContain("commands");
