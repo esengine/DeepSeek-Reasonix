@@ -8,11 +8,7 @@ import { FG } from "../theme/tokens.js";
 
 /**
  * Row-precision virtual scroll: outer Box clips with overflow="hidden",
- * inner Box holds all cards and slides up via negative marginTop. Yoga
- * computes inner height from card layout; useBoxMetrics reports it back
- * so App can clamp scroll bounds. New cards arriving while the user is
- * scrolled up sit below the visible window — bytes outside outer bounds
- * aren't written, so terminal text selection survives streaming activity.
+ * inner Box holds all cards and slides up via negative marginTop.
  */
 export function CardStream({
   scrollRows,
@@ -24,9 +20,6 @@ export function CardStream({
   suppressLive?: boolean;
 }): React.ReactElement {
   const cards = useAgentState((s) => s.cards);
-  // useBoxMetrics types its ref as RefObject<DOMElement> (non-null); the
-  // null! assertion satisfies the signature — Ink populates the ref on
-  // mount before the metrics hook reads it.
   const outerRef = useRef<DOMElement>(null!);
   const innerRef = useRef<DOMElement>(null!);
   const outer = useBoxMetrics(outerRef);
@@ -44,7 +37,10 @@ export function CardStream({
 
   return (
     <>
-      {scrollRows > 0 ? <Text color={FG.faint}>{" ↑ earlier — PgUp / wheel / ↑"}</Text> : null}
+      {/* Always reserve the row — making it conditional ties outer.height to scrollRows and closes a setState loop with pinned mode. */}
+      <Box height={1} flexShrink={0}>
+        {scrollRows > 0 ? <Text color={FG.faint}>{" ↑ earlier — PgUp / wheel / ↑"}</Text> : null}
+      </Box>
       <Box ref={outerRef} flexDirection="column" flexGrow={1} overflow="hidden">
         <Box ref={innerRef} flexDirection="column" marginTop={-scrollRows} flexShrink={0}>
           {visible.map((card) => (
