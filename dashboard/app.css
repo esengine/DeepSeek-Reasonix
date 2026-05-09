@@ -85,7 +85,7 @@ a:hover { text-decoration: underline; }
 /* ── Doc chrome ─────────────────────────────────────────────────────────── */
 .page {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   max-width: 1320px;
   margin: 0 auto;
   min-height: 100vh;
@@ -94,18 +94,19 @@ a:hover { text-decoration: underline; }
   position: sticky; top: 0; align-self: start;
   height: 100vh; overflow-y: auto;
   border-right: 1px solid var(--bd);
-  padding: 28px 18px;
+  padding: 28px 16px;
   background: var(--bg);
 }
-.toc h1 { font-size: 14px; font-weight: 700; margin: 0 0 4px; color: var(--fg-0); letter-spacing: .03em; font-family: var(--font-mono); }
+.toc h1 { font-size: 15px; font-weight: 700; margin: 0 0 4px; color: var(--fg-0); letter-spacing: .03em; font-family: var(--font-mono); }
 .toc h1 .dot { color: var(--c-brand); margin-right: 8px; }
-.toc .sub { font-size: 11px; color: var(--fg-3); margin: 0 0 18px; letter-spacing: .04em; }
-.toc-section { font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: var(--fg-4); margin: 22px 0 6px; font-weight: 700; }
+.toc .sub { font-size: 12px; color: var(--fg-3); margin: 0 0 18px; letter-spacing: .04em; }
+.toc-section { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--fg-4); margin: 22px 0 6px; font-weight: 700; }
 .toc-section:first-of-type { margin-top: 0; }
 .toc ul { list-style: none; padding: 0; margin: 0; }
 .toc li a {
-  display: block; padding: 3px 8px; margin: 1px 0;
-  color: var(--fg-2); font-size: 12.5px; border-radius: var(--r);
+  display: block; padding: 4px 10px; margin: 1px 0;
+  color: var(--fg-2); font-size: 14px; line-height: 1.4;
+  border-radius: var(--r); overflow-wrap: anywhere;
 }
 .toc li a:hover { color: var(--fg-0); background: var(--bg-elev); text-decoration: none; }
 
@@ -118,7 +119,7 @@ main { padding: 32px 40px 60px 32px; min-width: 0; }
 }
 .section > h2 .num { color: var(--fg-4); margin-right: 10px; font-weight: 500; }
 .section > .lede {
-  color: var(--fg-2); margin: 0 0 22px; font-size: 13px; max-width: 700px; line-height: 1.6;
+  color: var(--fg-2); margin: 0 0 22px; font-size: 15px; max-width: 720px; line-height: 1.6;
 }
 .subsec { margin-bottom: 22px; }
 .subsec > h3 {
@@ -126,8 +127,8 @@ main { padding: 32px 40px 60px 32px; min-width: 0; }
   margin: 24px 0 4px; letter-spacing: .04em; text-transform: uppercase;
   font-family: var(--font-mono);
 }
-.subsec > h3 .desc { color: var(--fg-3); font-weight: 400; margin-left: 10px; font-size: 12px; text-transform: none; letter-spacing: 0; }
-.subsec > p { color: var(--fg-3); font-size: 12.5px; margin: 0 0 12px; max-width: 720px; line-height: 1.6; }
+.subsec > h3 .desc { color: var(--fg-3); font-weight: 400; margin-left: 10px; font-size: 13px; text-transform: none; letter-spacing: 0; }
+.subsec > p { color: var(--fg-3); font-size: 15px; margin: 0 0 12px; max-width: 720px; line-height: 1.6; }
 
 /* "Mock" — a faux-window frame to display dashboard pieces inside the design doc */
 .mock {
@@ -155,11 +156,11 @@ main { padding: 32px 40px 60px 32px; min-width: 0; }
 .swatch .chip { width: 22px; height: 22px; border-radius: var(--r); flex-shrink: 0; border: 1px solid rgba(255,255,255,.04); }
 .swatch .meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .swatch .name { color: var(--fg-1); font-size: 11.5px; }
-.swatch .hex { color: var(--fg-3); font-size: 10.5px; }
+.swatch .hex { color: var(--fg-3); font-size: 11.5px; }
 
 .scale-row { display: flex; align-items: baseline; gap: 16px; padding: 6px 0; border-bottom: 1px dashed #181b22; }
 .scale-row:last-child { border-bottom: none; }
-.scale-row .lbl { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-3); width: 70px; flex-shrink: 0; }
+.scale-row .lbl { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-3); width: 76px; flex-shrink: 0; }
 .scale-row .ex { color: var(--fg-1); }
 
 .glyph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
