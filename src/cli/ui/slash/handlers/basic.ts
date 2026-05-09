@@ -1,4 +1,4 @@
-import { t } from "@/i18n/index.js";
+import { t, tObj } from "@/i18n/index.js";
 import { formatDuration, formatLoopStatus, parseLoopCommand } from "../../loop.js";
 import { SLASH_COMMANDS } from "../commands.js";
 import type { SlashHandler } from "../dispatch.js";
@@ -129,10 +129,25 @@ const loop: SlashHandler = (args, _loop, ctx) => {
   };
 };
 
+const keys: SlashHandler = (_args, _loop, ctx) => {
+  if (!ctx.postKeys) return { info: t("handlers.basic.keysNeedsTui") };
+  const ref = tObj<{
+    topic: string;
+    sections: ReadonlyArray<{
+      title?: string;
+      rows: ReadonlyArray<{ key: string; text: string }>;
+    }>;
+    footer: string;
+  }>("ui.keysReference");
+  ctx.postKeys({ topic: ref.topic, sections: ref.sections, footer: ref.footer });
+  return {};
+};
+
 export const handlers: Record<string, SlashHandler> = {
   exit,
   new: resetLog,
   help,
   retry,
   loop,
+  keys,
 };

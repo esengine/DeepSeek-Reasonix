@@ -90,6 +90,15 @@ export interface SlashContext {
     balanceCurrency?: string;
     elapsedMs?: number;
   }) => void;
+  /** Push the keyboard + mouse + copy/paste reference TipCard (multi-section). Used by `/keys`. */
+  postKeys?: (args: {
+    topic: string;
+    sections: ReadonlyArray<{
+      title?: string;
+      rows: ReadonlyArray<{ key: string; text: string }>;
+    }>;
+    footer?: string;
+  }) => void;
   dispatch?: (event: import("../state/events.js").AgentEvent) => void;
   setPlanMode?: (on: boolean) => void;
 

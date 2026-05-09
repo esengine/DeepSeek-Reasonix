@@ -288,7 +288,12 @@ const tipShow = z.object({
   id: cardId,
   ts: ts,
   topic: z.string(),
-  rows: z.array(z.object({ key: z.string(), text: z.string() })),
+  sections: z.array(
+    z.object({
+      title: z.string().optional(),
+      rows: z.array(z.object({ key: z.string(), text: z.string() })),
+    }),
+  ),
   footer: z.string().optional(),
   oneTime: z.boolean(),
 });

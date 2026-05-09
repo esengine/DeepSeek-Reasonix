@@ -59,12 +59,91 @@ export const zhCN: TranslationSchema = {
     resumedPlan: "已恢复计划 · {when}{summary}",
     tipEditBindings: {
       topic: "编辑门控快捷键",
-      rows: [
-        { key: "y / n", text: "接受或放弃待处理的编辑" },
-        { key: "Shift+Tab", text: "切换 预览 ↔ 自动（持久化；自动模式立即应用）" },
-        { key: "u", text: "撤销上次自动应用的批处理（5 秒横幅内）" },
+      sections: [
+        {
+          rows: [
+            { key: "y / n", text: "接受或放弃待处理的编辑" },
+            { key: "Shift+Tab", text: "切换 预览 ↔ 自动（持久化；自动模式立即应用）" },
+            { key: "u", text: "撤销上次自动应用的批处理（5 秒横幅内）" },
+          ],
+        },
       ],
       footer: "当前模式显示在底部状态栏 · /keys 查看完整快捷键参考",
+    },
+    tipMouseClipboard: {
+      topic: "鼠标 + 剪贴板",
+      sections: [
+        {
+          rows: [
+            { key: "滚轮", text: "滚动上方的聊天记录" },
+            {
+              key: "右键",
+              text: "已被应用接管 — 用 Ctrl+V（Win/Linux）或 Cmd+V（macOS）粘贴",
+            },
+            {
+              key: "Shift + 拖动",
+              text: "原生选中文本（iTerm2 用 Option，Win Term / Alacritty / WezTerm 用 Shift）",
+            },
+          ],
+        },
+      ],
+      footer: "运行 /keys 查看完整键盘 + 鼠标参考",
+    },
+    keysReference: {
+      topic: "Reasonix 键盘 + 鼠标参考",
+      sections: [
+        {
+          title: "键盘",
+          rows: [
+            { key: "Enter", text: "提交输入" },
+            { key: "Shift+Enter", text: "在输入框中插入换行" },
+            { key: "Ctrl+P / Ctrl+N", text: "调出上一条 / 下一条历史提示" },
+            { key: "Ctrl+A / Ctrl+E", text: "跳到当前行的开头 / 结尾" },
+            { key: "Ctrl+W", text: "删除光标前的一个词" },
+            { key: "Ctrl+U", text: "清空整个输入缓冲区" },
+            { key: "Tab", text: "补全 @-mention · 进入文件夹 · 接受 slash 命令" },
+            { key: "Shift+Tab", text: "编辑门控：切换 预览 ↔ 自动 模式" },
+            { key: "Esc", text: "关闭弹出选择器 · 中止当前模型回合" },
+            { key: "Ctrl+C", text: "中止当前模型回合（不是复制 — 见剪贴板段）" },
+            { key: "↑ / ↓", text: "滚动聊天记录（缓冲区非空时为光标移动）" },
+            { key: "PgUp / PgDn", text: "整页滚动聊天记录" },
+            { key: "End", text: "跳到聊天的最新一行" },
+          ],
+        },
+        {
+          title: "鼠标",
+          rows: [
+            { key: "滚轮", text: "滚动聊天记录" },
+            { key: "右键", text: "被应用接管 — 用 Ctrl+V / Cmd+V 粘贴" },
+            { key: "左键", text: "被接管（暂无动作 — 预留给后续功能）" },
+          ],
+        },
+        {
+          title: "复制 / 粘贴",
+          rows: [
+            { key: "选中文字", text: "拖动时按住 Shift（iTerm2 用 Option）" },
+            {
+              key: "复制",
+              text: "Ctrl+Shift+C（Win/Linux）· Cmd+C（macOS）— 选中后由终端原生处理",
+            },
+            { key: "粘贴", text: "Ctrl+V 或 Ctrl+Shift+V（Win/Linux）· Cmd+V（macOS）" },
+            {
+              key: "bracketed paste",
+              text: "多行粘贴整体进入 — 中间换行不会触发提交",
+            },
+          ],
+        },
+        {
+          title: "编辑门控（仅 code 模式）",
+          rows: [
+            { key: "y / n", text: "在预览模态中接受或放弃待处理的编辑" },
+            { key: "Shift+Tab", text: "切换 预览 ↔ 自动（持久化）" },
+            { key: "u", text: "撤销上次自动应用的批处理（5 秒横幅内）" },
+          ],
+        },
+      ],
+      footer:
+        "鼠标追踪已开启，滚轮用来滚动聊天而不是移动光标 — 这也是右键不再触发终端原生粘贴的原因。",
     },
     tipShownOnce: "仅显示一次",
     modelOverride: "覆盖默认模型",
@@ -193,7 +272,7 @@ export const zhCN: TranslationSchema = {
       description: "缩小日志中过大的工具结果和工具调用参数；上限为 tokens，默认 4000",
       argsHint: "[tokens]",
     },
-    keys: { description: "显示所有键盘快捷键和提示前缀" },
+    keys: { description: "键盘 + 鼠标 + 复制粘贴参考" },
     plans: { description: "列出此会话的活跃 + 归档计划（最新在前）" },
     replay: {
       description: "加载归档计划为只读的时间旅行快照（默认：最新）",
@@ -456,6 +535,7 @@ export const zhCN: TranslationSchema = {
         "没有活动的循环。使用 `/loop <interval> <prompt>` 启动一个（例如 /loop 30s npm test）。\n取消方式：/loop stop · Esc · /clear /new · 任何用户输入的提示。",
       loopStarted:
         '▸ 循环已启动 — 每 {duration} 重新提交 "{prompt}"。输入任何内容（或 /loop stop）取消。',
+      keysNeedsTui: "/keys 需要 TUI 上下文（postKeys 已连接）。",
     },
     admin: {
       doctorNeedsTui: "/doctor 需要 TUI 上下文（postDoctor 已连接）。",

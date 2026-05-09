@@ -197,10 +197,16 @@ export interface TipRow {
   readonly text: string;
 }
 
+export interface TipSection {
+  /** Subsection heading (rendered above its rows). Omit for single-section tips. */
+  readonly title?: string;
+  readonly rows: ReadonlyArray<TipRow>;
+}
+
 export interface TipCard extends CardBase {
   readonly kind: "tip";
   readonly topic: string;
-  readonly rows: ReadonlyArray<TipRow>;
+  readonly sections: ReadonlyArray<TipSection>;
   readonly footer?: string;
   readonly oneTime: boolean;
 }

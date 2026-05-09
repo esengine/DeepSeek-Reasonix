@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { DoctorCheckEntry, PlanStep, TipRow } from "../state/cards.js";
+import type { DoctorCheckEntry, PlanStep, TipSection } from "../state/cards.js";
 import { useDispatch } from "../state/provider.js";
 
 let seq = 0;
@@ -25,7 +25,7 @@ export interface Scrollback {
   /** Structured onboarding-tip card — replaces multi-line TIP strings stuffed into pushInfo. */
   pushTip(args: {
     topic: string;
-    rows: ReadonlyArray<TipRow>;
+    sections: ReadonlyArray<TipSection>;
     footer?: string;
     oneTime?: boolean;
   }): string;
@@ -146,14 +146,17 @@ export function useScrollback(): Scrollback {
         });
         return id;
       },
-      pushTip({ topic, rows, footer, oneTime = true }) {
+      pushTip({ topic, sections, footer, oneTime = true }) {
         const id = nextId("tip");
         dispatch({
           type: "tip.show",
           id,
           ts: Date.now(),
           topic,
-          rows: rows.map((r) => ({ key: r.key, text: r.text })),
+          sections: sections.map((s) => ({
+            title: s.title,
+            rows: s.rows.map((r) => ({ key: r.key, text: r.text })),
+          })),
           footer,
           oneTime,
         });

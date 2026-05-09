@@ -38,6 +38,8 @@ import {
   loadReasoningEffort,
   loadTheme,
   markEditModeHintShown,
+  markMouseClipboardHintShown,
+  mouseClipboardHintShown,
   resolveThemePreference,
   saveEditMode,
   saveReasoningEffort,
@@ -1204,11 +1206,20 @@ function AppInner({
     if (codeMode && !editModeHintShown()) {
       const tip = tObj<{
         topic: string;
-        rows: ReadonlyArray<{ key: string; text: string }>;
+        sections: ReadonlyArray<{ rows: ReadonlyArray<{ key: string; text: string }> }>;
         footer: string;
       }>("ui.tipEditBindings");
-      log.pushTip({ topic: tip.topic, rows: tip.rows, footer: tip.footer });
+      log.pushTip({ topic: tip.topic, sections: tip.sections, footer: tip.footer });
       markEditModeHintShown();
+    }
+    if (!mouseClipboardHintShown()) {
+      const tip = tObj<{
+        topic: string;
+        sections: ReadonlyArray<{ rows: ReadonlyArray<{ key: string; text: string }> }>;
+        footer: string;
+      }>("ui.tipMouseClipboard");
+      log.pushTip({ topic: tip.topic, sections: tip.sections, footer: tip.footer });
+      markMouseClipboardHintShown();
     }
   }, [session, loop, codeMode, syncPendingCount, log]);
 
@@ -2231,6 +2242,13 @@ function AppInner({
           postInfo: (text: string) => log.pushInfo(text),
           postDoctor: (checks) => log.showDoctor(checks),
           postUsage: (args) => log.showUsageVerbose(args),
+          postKeys: (args) =>
+            log.pushTip({
+              topic: args.topic,
+              sections: args.sections,
+              footer: args.footer,
+              oneTime: false,
+            }),
           dispatch: agentStore.dispatch,
           reloadHooks: () => {
             const fresh = loadHooks({ projectRoot: codeMode ? currentRootDir : undefined });

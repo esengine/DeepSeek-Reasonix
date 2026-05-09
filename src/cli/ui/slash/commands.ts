@@ -60,6 +60,11 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     group: "info",
     summary: "health check (api / config / api-reach / index / hooks / project)",
   },
+  {
+    cmd: "keys",
+    group: "info",
+    summary: "keyboard + mouse + copy/paste reference",
+  },
 
   { cmd: "sessions", group: "session", summary: "list saved sessions (current marked with ▸)" },
 

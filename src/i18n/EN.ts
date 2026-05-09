@@ -61,12 +61,97 @@ export const EN: TranslationSchema = {
     resumedPlan: "Resumed plan · {when}{summary}",
     tipEditBindings: {
       topic: "edit-gate keybindings",
-      rows: [
-        { key: "y / n", text: "accept or drop pending edits" },
-        { key: "Shift+Tab", text: "switch review ↔ AUTO (persisted; AUTO applies instantly)" },
-        { key: "u", text: "undo the last auto-applied batch (within the 5s banner)" },
+      sections: [
+        {
+          rows: [
+            { key: "y / n", text: "accept or drop pending edits" },
+            {
+              key: "Shift+Tab",
+              text: "switch review ↔ AUTO (persisted; AUTO applies instantly)",
+            },
+            { key: "u", text: "undo the last auto-applied batch (within the 5s banner)" },
+          ],
+        },
       ],
       footer: "Current mode shown in the bottom status bar · /keys for the full reference",
+    },
+    tipMouseClipboard: {
+      topic: "mouse + clipboard",
+      sections: [
+        {
+          rows: [
+            { key: "wheel", text: "scrolls the chat history above" },
+            {
+              key: "right-click",
+              text: "captured by the app — use Ctrl+V (Win/Linux) or Cmd+V (macOS) to paste",
+            },
+            {
+              key: "Shift + drag",
+              text: "selects text natively (Option on iTerm2, Shift on Win Term / Alacritty / WezTerm)",
+            },
+          ],
+        },
+      ],
+      footer: "Run /keys for the full keyboard + mouse reference",
+    },
+    keysReference: {
+      topic: "Reasonix keys + mouse reference",
+      sections: [
+        {
+          title: "keyboard",
+          rows: [
+            { key: "Enter", text: "submit the prompt" },
+            { key: "Shift+Enter", text: "insert a newline in the prompt" },
+            { key: "Ctrl+P / Ctrl+N", text: "recall previous / next prompt from history" },
+            { key: "Ctrl+A / Ctrl+E", text: "jump to start / end of the current line" },
+            { key: "Ctrl+W", text: "delete the word before the cursor" },
+            { key: "Ctrl+U", text: "clear the entire prompt buffer" },
+            { key: "Tab", text: "complete @-mention · drill folder · accept slash command" },
+            { key: "Shift+Tab", text: "edit-gate: toggle review ↔ AUTO mode" },
+            { key: "Esc", text: "dismiss picker · abort the running model turn" },
+            { key: "Ctrl+C", text: "abort the running model turn (NOT copy — see clipboard)" },
+            {
+              key: "↑ / ↓",
+              text: "scroll chat history (PromptInput cursor when buffer non-empty)",
+            },
+            { key: "PgUp / PgDn", text: "scroll chat history a page at a time" },
+            { key: "End", text: "jump chat to the most recent line" },
+          ],
+        },
+        {
+          title: "mouse",
+          rows: [
+            { key: "wheel", text: "scrolls the chat history" },
+            { key: "right-click", text: "captured by the app — use Ctrl+V / Cmd+V to paste" },
+            { key: "left-click", text: "captured (no action yet — reserved for future use)" },
+          ],
+        },
+        {
+          title: "copy / paste",
+          rows: [
+            { key: "select text", text: "hold Shift while dragging (Option on iTerm2)" },
+            {
+              key: "copy",
+              text: "Ctrl+Shift+C (Win/Linux) · Cmd+C (macOS) — terminal-native after selection",
+            },
+            { key: "paste", text: "Ctrl+V or Ctrl+Shift+V (Win/Linux) · Cmd+V (macOS)" },
+            {
+              key: "bracketed paste",
+              text: "multi-line pastes stay one block — no auto-submit on intermediate newlines",
+            },
+          ],
+        },
+        {
+          title: "edit-gate (code mode)",
+          rows: [
+            { key: "y / n", text: "accept or drop pending edits in the review modal" },
+            { key: "Shift+Tab", text: "toggle review ↔ AUTO (persisted across sessions)" },
+            { key: "u", text: "undo the last auto-applied batch (within the 5s banner)" },
+          ],
+        },
+      ],
+      footer:
+        "Mouse tracking is on so the wheel scrolls chat instead of moving the cursor — that's why right-click no longer does the terminal's native paste.",
     },
     tipShownOnce: "shown once",
     modelOverride: "override the default model",
@@ -198,7 +283,7 @@ export const EN: TranslationSchema = {
         "shrink oversized tool results AND tool-call args (edit_file search/replace) in the log; cap in tokens, default 4000",
       argsHint: "[tokens]",
     },
-    keys: { description: "show all keyboard shortcuts and prompt prefixes" },
+    keys: { description: "keyboard + mouse + copy/paste reference" },
     plans: { description: "list this session's active + archived plans, newest first" },
     replay: {
       description: "load an archived plan as a read-only Time Travel snapshot (default: newest)",
@@ -478,6 +563,7 @@ export const EN: TranslationSchema = {
         "no active loop. Start one with `/loop <interval> <prompt>` (e.g. /loop 30s npm test).\nCancels on: /loop stop · Esc · /clear /new · any user-typed prompt.",
       loopStarted:
         '▸ loop started — re-submitting "{prompt}" every {duration}. Type anything (or /loop stop) to cancel.',
+      keysNeedsTui: "/keys needs a TUI context (postKeys wired).",
     },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",

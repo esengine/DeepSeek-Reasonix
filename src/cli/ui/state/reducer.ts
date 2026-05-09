@@ -179,7 +179,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         id: event.id,
         ts: event.ts,
         topic: event.topic,
-        rows: event.rows,
+        sections: event.sections,
         footer: event.footer,
         oneTime: event.oneTime,
       });

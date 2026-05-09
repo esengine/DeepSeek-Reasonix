@@ -53,7 +53,11 @@ export function cardsToDashboardMessages(cards: ReadonlyArray<Card>): DashboardM
         out.push({ id: card.id, role: "info", text: card.text });
         break;
       case "tip": {
-        const body = card.rows.map((r) => `${r.key}\t${r.text}`).join("\n");
+        const sectionTexts = card.sections.map((sec) => {
+          const body = sec.rows.map((r) => `${r.key}\t${r.text}`).join("\n");
+          return sec.title ? `[${sec.title}]\n${body}` : body;
+        });
+        const body = sectionTexts.join("\n\n");
         const text = card.footer
           ? `${card.topic}\n${body}\n${card.footer}`
           : `${card.topic}\n${body}`;

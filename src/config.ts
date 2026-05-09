@@ -81,6 +81,7 @@ export interface ReasonixConfig {
   preset?: PresetName;
   editMode?: EditMode;
   editModeHintShown?: boolean;
+  mouseClipboardHintShown?: boolean;
   reasoningEffort?: ReasoningEffort;
   theme?: ThemeName | "auto";
   /** Stored as `--mcp`-format strings so one parser handles both flag and config. */
@@ -271,6 +272,11 @@ export function editModeHintShown(path: string = defaultConfigPath()): boolean {
   return readConfig(path).editModeHintShown === true;
 }
 
+/** True when the mouse-tracking + clipboard tip has been shown. */
+export function mouseClipboardHintShown(path: string = defaultConfigPath()): boolean {
+  return readConfig(path).mouseClipboardHintShown === true;
+}
+
 /** Unknown / missing fall back to "max" so hand-edited bad config can't silently override the default. */
 export function loadReasoningEffort(path: string = defaultConfigPath()): ReasoningEffort {
   const v = readConfig(path).reasoningEffort;
@@ -393,6 +399,14 @@ export function markEditModeHintShown(path: string = defaultConfigPath()): void 
   const cfg = readConfig(path);
   if (cfg.editModeHintShown === true) return;
   cfg.editModeHintShown = true;
+  writeConfig(cfg, path);
+}
+
+/** Mark the mouse + clipboard tip as shown. */
+export function markMouseClipboardHintShown(path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  if (cfg.mouseClipboardHintShown === true) return;
+  cfg.mouseClipboardHintShown = true;
   writeConfig(cfg, path);
 }
 

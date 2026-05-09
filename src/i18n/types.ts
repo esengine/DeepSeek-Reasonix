@@ -55,7 +55,26 @@ export interface TranslationSchema {
     resumedPlan: string;
     tipEditBindings: {
       topic: string;
-      rows: ReadonlyArray<{ key: string; text: string }>;
+      sections: ReadonlyArray<{
+        title?: string;
+        rows: ReadonlyArray<{ key: string; text: string }>;
+      }>;
+      footer: string;
+    };
+    tipMouseClipboard: {
+      topic: string;
+      sections: ReadonlyArray<{
+        title?: string;
+        rows: ReadonlyArray<{ key: string; text: string }>;
+      }>;
+      footer: string;
+    };
+    keysReference: {
+      topic: string;
+      sections: ReadonlyArray<{
+        title: string;
+        rows: ReadonlyArray<{ key: string; text: string }>;
+      }>;
       footer: string;
     };
     tipShownOnce: string;
