@@ -1,6 +1,7 @@
 /** web_search uses Mojeek (DDG returns anti-bot 202 to unauthenticated POSTs); web_fetch sniffs HTML to text. */
 
 import { parse as parseHtml } from "node-html-parser";
+import { t } from "../i18n/index.js";
 import {
   webSearchEndpoint as loadWebSearchEndpoint,
   webSearchEngine as loadWebSearchEngine,
@@ -71,16 +72,16 @@ async function searchMojeek(query: string, opts: WebSearchOptions = {}): Promise
     signal: opts.signal,
     redirect: "follow",
   });
-  if (!resp.ok) throw new Error(`web_search ${resp.status}`);
+  if (!resp.ok) throw new Error(t("webErrors.status", { status: resp.status }));
   const html = await resp.text();
   const results = parseMojeekResults(html).slice(0, topK);
   if (results.length === 0) {
     if (/no results found|did not match any documents/i.test(html)) return [];
     if (/captcha|verify you are human|access denied|forbidden/i.test(html)) {
-      throw new Error("web_search: Mojeek anti-bot page — rate-limited or blocked");
+      throw new Error(t("webErrors.mojeekBlocked"));
     }
     throw new Error(
-      `web_search: 0 results but response doesn't look like a real empty page (${html.length} chars, first 120: ${html.slice(0, 120).replace(/\s+/g, " ")})`,
+      t("webErrors.mojeekNoResults", { chars: html.length, preview: html.slice(0, 120).replace(/\s+/g, " ") }),
     );
   }
   return results;
@@ -92,10 +93,10 @@ function normalizeSearxngEndpoint(raw: string): string {
   try {
     url = new URL(raw.includes("://") ? raw : `http://${raw}`);
   } catch {
-    throw new Error(`web_search: invalid SearXNG endpoint "${raw}"`);
+    throw new Error(t("webErrors.invalidEndpoint", { endpoint: raw }));
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`web_search: SearXNG endpoint must be http(s), got ${url.protocol}`);
+    throw new Error(t("webErrors.endpointMustBeHttp", { protocol: url.protocol }));
   }
   return url.origin;
 }
@@ -118,18 +119,18 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
       throw new Error(
-        `web_search: Cannot reach SearXNG server at ${opts.endpoint ?? "http://localhost:8080"}. Please install SearXNG (https://github.com/searxng/searxng) and start it (e.g. \`docker run -d -p 8080:8080 searxng/searxng\`), or switch to the default engine with /search-engine mojeek.`,
+        t("webErrors.cannotReach", { endpoint: opts.endpoint ?? "http://localhost:8080" }),
       );
     }
     throw err;
   }
-  if (!resp.ok) throw new Error(`web_search ${resp.status}`);
+  if (!resp.ok) throw new Error(t("webErrors.status", { status: resp.status }));
   const html = await resp.text();
   const results = parseSearxngHtmlResults(html).slice(0, topK);
   if (results.length === 0) {
     if (/no results found|did not match any documents/i.test(html)) return [];
     throw new Error(
-      `web_search: 0 results but SearXNG response doesn't look like an empty results page (${html.length} chars)`,
+      t("webErrors.searxngNoResults", { chars: html.length }),
     );
   }
   return results;
@@ -238,14 +239,14 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", cancel);
   }
-  if (!resp.ok) throw new Error(`web_fetch ${resp.status} for ${url}`);
+  if (!resp.ok) throw new Error(t("webErrors.fetchStatus", { status: resp.status, url }));
   const contentType = resp.headers.get("content-type") ?? "";
   // Pre-check Content-Length when the server provides it. Cheaper to
   // refuse upfront than to start streaming a 1GB ISO.
   const declaredLen = Number(resp.headers.get("content-length") ?? "");
   if (Number.isFinite(declaredLen) && declaredLen > FETCH_MAX_BYTES) {
     throw new Error(
-      `web_fetch refused: content-length ${declaredLen} bytes exceeds ${FETCH_MAX_BYTES}-byte cap (${url})`,
+      t("webErrors.fetchTooLarge", { len: declaredLen, cap: FETCH_MAX_BYTES, url }),
     );
   }
   const raw = await readBodyCapped(resp, FETCH_MAX_BYTES);
@@ -277,7 +278,7 @@ async function readBodyCapped(resp: Response, maxBytes: number): Promise<string>
           /* already torn down */
         }
         throw new Error(
-          `web_fetch refused: response body exceeded ${maxBytes}-byte cap (${total} bytes seen)`,
+          t("webErrors.fetchBodyTooLarge", { cap: maxBytes, seen: total }),
         );
       }
       out += decoder.decode(value, { stream: true });
@@ -449,7 +450,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
     },
     fn: async (args: { url: string }, ctx) => {
       if (!/^https?:\/\//i.test(args.url)) {
-        throw new Error("web_fetch: url must start with http:// or https://");
+        throw new Error(t("webErrors.fetchInvalidUrl"));
       }
       const page = await webFetch(args.url, { maxChars: maxFetchChars, signal: ctx?.signal });
       const header = page.title ? `${page.title}\n${page.url}` : page.url;

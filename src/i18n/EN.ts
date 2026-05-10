@@ -1176,6 +1176,32 @@ export const EN: TranslationSchema = {
     msg: "msg",
     turnLabel: "turn",
   },
+  startup: {
+    codeRooted: "\u25b8 reasonix code: rooted at ",
+    session: 'session "',
+    ephemeral: "(ephemeral)",
+    nativeTools: " native tool(s)",
+    semanticOn: " \u00b7 semantic_search on",
+  },
+  doctorErrors: {
+    unreadable: "{path} unreadable \u2014 {message}",
+    cannotList: "cannot list \u2014 {message}",
+    parseFailed: "couldn't parse settings.json \u2014 {message}",
+    probeFailed: "probe failed \u2014 {message}",
+  },
+  webErrors: {
+    status: "web_search {status}",
+    mojeekBlocked: "web_search: Mojeek anti-bot page \u2014 rate-limited or blocked",
+    mojeekNoResults: "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview})",
+    invalidEndpoint: 'web_search: invalid SearXNG endpoint "{endpoint}"',
+    endpointMustBeHttp: "web_search: SearXNG endpoint must be http(s), got {protocol}",
+    cannotReach: "web_search: Cannot reach SearXNG server at {endpoint}. Please install SearXNG (https://github.com/searxng/searxng) and start it (e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to the default engine with /search-engine mojeek.",
+    searxngNoResults: "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars)",
+    fetchStatus: "web_fetch {status} for {url}",
+    fetchTooLarge: "web_fetch refused: content-length {len} bytes exceeds {cap}-byte cap ({url})",
+    fetchBodyTooLarge: "web_fetch refused: response body exceeded {cap}-byte cap ({seen} bytes seen)",
+    fetchInvalidUrl: "web_fetch: url must start with http:// or https://",
+  },
   choiceConfirm: {
     customLabel: "Let me type my own answer",
     customDesc:

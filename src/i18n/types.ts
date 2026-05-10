@@ -480,6 +480,32 @@ export interface TranslationSchema {
     msg: string;
     turnLabel: string;
   };
+  startup: {
+    codeRooted: string;
+    session: string;
+    ephemeral: string;
+    nativeTools: string;
+    semanticOn: string;
+  };
+  doctorErrors: {
+    unreadable: string;
+    cannotList: string;
+    parseFailed: string;
+    probeFailed: string;
+  };
+  webErrors: {
+    status: string;
+    mojeekBlocked: string;
+    mojeekNoResults: string;
+    invalidEndpoint: string;
+    endpointMustBeHttp: string;
+    cannotReach: string;
+    searxngNoResults: string;
+    fetchStatus: string;
+    fetchTooLarge: string;
+    fetchBodyTooLarge: string;
+    fetchInvalidUrl: string;
+  };
   choiceConfirm: {
     customLabel: string;
     customDesc: string;
