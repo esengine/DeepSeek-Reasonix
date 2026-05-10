@@ -128,6 +128,7 @@ import { useScrollback } from "./hooks/useScrollback.js";
 import { useTerminalSetup } from "./hooks/useTerminalSetup.js";
 import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
+import { useWorkspaceRoot } from "./hooks/useWorkspaceRoot.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
 import { LiveExpandContext } from "./layout/LiveExpandContext.js";
@@ -424,15 +425,8 @@ function AppInner({
     log,
     getWalletCurrency: () => walletCurrencyRef.current,
   });
-  // Live working directory for every rootDir-dependent surface:
-  // hook cwd, memory root, project shell allowlist root, `@file`
-  // mention root, `applyEditBlocks` base, run_command cwd, project-
-  // settings hook loader. `/cwd <path>` mutates this state to swap
-  // the workspace mid-session; the prop `codeMode.rootDir` stays as
-  // the original launch root so it can't accidentally drift (it's
-  // used purely for "is this a code-mode session?" checks now).
-  const [currentRootDir, setCurrentRootDir] = useState<string>(
-    () => codeMode?.rootDir ?? process.cwd(),
+  const { currentRootDir, setCurrentRootDir, currentRootDirRef } = useWorkspaceRoot(
+    codeMode?.rootDir,
   );
   // Loaded user hooks (project + global settings.json). Stays mutable
   // so `/hooks reload` and `/cwd` can rescan disk without
@@ -476,7 +470,6 @@ function AppInner({
   // captured once at startDashboard time; without ref-mirrors the
   // returned values would freeze at boot. Same pattern as editModeRef.
   const planModeRef = useRef<boolean>(false);
-  const currentRootDirRef = useRef<string>("");
   const latestVersionRef = useRef<string | null>(null);
   // Current per-edit confirmation prompt (review mode, tool-call path).
   // Non-null → EditConfirm modal renders, interceptor is suspended on
@@ -879,9 +872,6 @@ function AppInner({
   useEffect(() => {
     planModeRef.current = planMode;
   }, [planMode]);
-  useEffect(() => {
-    currentRootDirRef.current = currentRootDir;
-  }, [currentRootDir]);
 
   useEffect(() => {
     latestVersionRef.current = latestVersion ?? null;
@@ -1882,6 +1872,7 @@ function AppInner({
     pendingEdits,
     editModeRef,
     setEditMode,
+    currentRootDirRef,
   ]);
 
   const stopDashboard = useCallback(async (): Promise<void> => {
@@ -2670,6 +2661,7 @@ function AppInner({
       setEditMode,
       pendingEdits,
       syncPendingCount,
+      setCurrentRootDir,
       setOngoingTool,
       setToolProgress,
       setStatusLine,
