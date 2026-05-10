@@ -1,4 +1,5 @@
 import { marked } from "marked";
+import { memo } from "preact/compat";
 import { useState } from "preact/hooks";
 import { html } from "../lib/html.js";
 import { t, useLang } from "../i18n/index.js";
@@ -300,7 +301,11 @@ export function ToolCard({ msg }: ToolCardProps) {
   `;
 }
 
-export function ChatMessage({ msg, streaming }: ChatMessageProps) {
+// memo() short-circuits re-renders when shallow props are unchanged.
+// Historical messages keep stable msg references across deltas, so the
+// O(N) marked.parse + hljs work that used to fire per assistant_delta
+// now only runs on truly new messages and the live streaming bubble.
+export const ChatMessage = memo(function ChatMessage({ msg, streaming }: ChatMessageProps) {
   const role = msg.role;
   const glyph = ROLE_GLYPH[role as ChatRole] ?? "·";
   if (role === "tool") {
@@ -321,7 +326,7 @@ export function ChatMessage({ msg, streaming }: ChatMessageProps) {
       </div>
     </div>
   `;
-}
+});
 
 //
 // Each component renders a card matching the TUI's ModalCard accent

@@ -185,6 +185,26 @@ export function ChatPanel() {
     };
   }, []);
 
+  // rAF-coalesce assistant_delta events. A streaming turn fires ~20
+  // deltas/sec — committing each to React state forces a parent
+  // re-render per delta, which used to thrash the chat feed. Now the
+  // accumulated text lives in a ref and we flush at most once per
+  // frame, capping the streaming-bubble re-render rate at the display
+  // refresh rate. assistant_final cancels the pending flush.
+  const streamBufRef = useRef<StreamingState | null>(null);
+  const streamRafRef = useRef<number | null>(null);
+  const flushStreaming = useCallback(() => {
+    streamRafRef.current = null;
+    if (streamBufRef.current) setStreaming(streamBufRef.current);
+  }, []);
+  const cancelStreamingRaf = useCallback(() => {
+    if (streamRafRef.current !== null) {
+      cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = null;
+    }
+    streamBufRef.current = null;
+  }, []);
+
   // SSE reconnect drops missed deltas / finals / modals — server only
   // snapshots `busy-change` on (re)connect. Pull /messages + /modal to
   // recover canonical state, otherwise UI wedges on the last seen state (#521).
@@ -193,6 +213,7 @@ export function ChatPanel() {
       const data = await api<MessagesResponse>("/messages");
       setMessages(data.messages ?? []);
       setBusy(Boolean(data.busy));
+      cancelStreamingRaf();
       setStreaming(null);
       setActiveTool(null);
     } catch {
@@ -204,7 +225,7 @@ export function ChatPanel() {
     } catch {
       /* modal endpoint optional in standalone */
     }
-  }, []);
+  }, [cancelStreamingRaf]);
 
   useEffect(() => {
     const es = new EventSource(`/api/events?token=${TOKEN}`);
@@ -233,14 +254,20 @@ export function ChatPanel() {
         return;
       }
       if (dash.kind === "assistant_delta") {
-        setStreaming((cur) => {
-          const text = (cur?.text ?? "") + (dash.contentDelta ?? "");
-          const reasoning = (cur?.reasoning ?? "") + (dash.reasoningDelta ?? "");
-          return { id: dash.id, text, reasoning };
-        });
+        const cur = streamBufRef.current;
+        const baseId = cur?.id === dash.id ? cur : null;
+        streamBufRef.current = {
+          id: dash.id,
+          text: (baseId?.text ?? "") + (dash.contentDelta ?? ""),
+          reasoning: (baseId?.reasoning ?? "") + (dash.reasoningDelta ?? ""),
+        };
+        if (streamRafRef.current === null) {
+          streamRafRef.current = requestAnimationFrame(flushStreaming);
+        }
         return;
       }
       if (dash.kind === "assistant_final") {
+        cancelStreamingRaf();
         setStreaming(null);
         setMessages((prev) => [
           ...prev,
@@ -300,8 +327,11 @@ export function ChatPanel() {
       setError(t("chat.eventStreamError"));
       setTimeout(() => setError(null), 3000);
     };
-    return () => es.close();
-  }, [refetchCanonicalState]);
+    return () => {
+      es.close();
+      cancelStreamingRaf();
+    };
+  }, [refetchCanonicalState, cancelStreamingRaf]);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -737,7 +767,7 @@ export function ChatPanel() {
                       <${ChatMessage}
                         key=${m.id}
                         msg=${m}
-                        streaming=${streaming && streaming.id === m.id}
+                        streaming=${Boolean(streaming && streaming.id === m.id)}
                       />
                     `,
                   )
