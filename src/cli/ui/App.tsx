@@ -125,6 +125,7 @@ import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
 import { useQuit } from "./hooks/useQuit.js";
 import { useScrollback } from "./hooks/useScrollback.js";
+import { useTerminalSetup } from "./hooks/useTerminalSetup.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
@@ -413,40 +414,8 @@ function AppInner({
     total?: number;
     message?: string;
   } | null>(null);
-  // stdout handle for `/clear`-style hard screen wipes. Clearing the
-  // store alone leaves the terminal scrollback intact — the user keeps
-  // seeing prior turns until they scroll past them. Writing CSI 2J + 3J +
-  // H genuinely nukes viewport AND scrollback, which is what `/clear`
-  // means to a shell user.
   const { stdout } = useStdout();
-  // Bracketed paste + modifyOtherKeys + alternate-scroll. All three
-  // are opt-in per session and reset on unmount.
-  //
-  //   • DECSET 2004 — bracketed paste markers so multi-chunk pastes
-  //     don't fire submit on the trailing \n.
-  //   • CSI > 4 ; 2 m — modifyOtherKeys level 2 so Shift+Enter /
-  //     Ctrl+Enter encode as `\x1b[27;<mod>;<key>~` instead of bare
-  //     CR; stdin-reader recognises them. Silent fallback otherwise.
-  //   • DECSET 1007 — alternate-scroll: in alt-screen the terminal
-  //     translates wheel events to ↑/↓ key sequences instead of
-  //     swallowing them. Lets us route wheel to chat-scroll without
-  //     enabling full mouse tracking, so terminal-native drag-select
-  //     and right-click stay 100% intact (no Shift modifier needed).
-  //     Supported by xterm/iTerm/Windows Terminal/Alacritty/Kitty and
-  //     xterm.js 4.x+ (covers code-server, VS Code web, modern cloud
-  //     shells). Pre-1007 terminals fall through silently — wheel is
-  //     dead but everything else works.
-  useEffect(() => {
-    if (!stdout || !stdout.isTTY) return;
-    stdout.write("\u001b[?2004h");
-    stdout.write("\u001b[>4;2m");
-    if (mouse) stdout.write("\u001b[?1007h");
-    return () => {
-      if (mouse) stdout.write("\u001b[?1007l");
-      stdout.write("\u001b[?2004l");
-      stdout.write("\u001b[>4m");
-    };
-  }, [stdout, mouse]);
+  useTerminalSetup(mouse);
 
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
