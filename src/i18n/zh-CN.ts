@@ -281,6 +281,10 @@ export const zhCN: TranslationSchema = {
       argsHint: "[tokens]",
     },
     keys: { description: "键盘 + 鼠标 + 复制粘贴参考" },
+    cwd: {
+      description: "切换工作区根目录 — 重新指向文件/Shell/记忆工具，重载项目 hooks，刷新 @ 引用遍历器",
+      argsHint: "<path>",
+    },
     stop: { description: "中止当前模型回合（按 Esc 的替代方式）" },
     feedback: { description: "打开 GitHub Issue，诊断信息已复制到剪贴板" },
     theme: {
