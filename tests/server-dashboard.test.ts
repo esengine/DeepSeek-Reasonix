@@ -355,6 +355,48 @@ describe("dashboard server: endpoints", () => {
     }
   });
 
+  it("POST /api/skills rejects content missing a description frontmatter line (#583)", async () => {
+    const proj = mkdtempSync(join(tmpdir(), "reasonix-dash-skills-desc-"));
+    try {
+      const audited: Array<{ action: string }> = [];
+      const base = await boot({
+        getCurrentCwd: () => proj,
+        audit: (e) => audited.push({ action: e.action }),
+      });
+      const target = join(proj, ".reasonix", "skills", "silent-fail", "SKILL.md");
+
+      const noFrontmatter = await call(`${base}api/skills/project/silent-fail`, {
+        method: "POST",
+        token: TOKEN,
+        tokenInHeader: true,
+        body: { body: "# just a body, no frontmatter\n" },
+      });
+      expect(noFrontmatter.status).toBe(400);
+      expect(noFrontmatter.body.error).toMatch(/description/);
+
+      const blankDesc = await call(`${base}api/skills/project/silent-fail`, {
+        method: "POST",
+        token: TOKEN,
+        tokenInHeader: true,
+        body: { body: "---\nname: silent-fail\ndescription:   \n---\nbody\n" },
+      });
+      expect(blankDesc.status).toBe(400);
+      expect(existsSync(target)).toBe(false);
+
+      const ok = await call(`${base}api/skills/project/silent-fail`, {
+        method: "POST",
+        token: TOKEN,
+        tokenInHeader: true,
+        body: { body: "---\ndescription: does the thing\n---\nbody\n" },
+      });
+      expect(ok.status).toBe(200);
+      expect(existsSync(target)).toBe(true);
+      expect(audited.map((e) => e.action)).toEqual(["save-skill"]);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+
   it("GET /api/permissions lists builtin always; project list when cwd is set", async () => {
     addProjectShellAllowed(PROJ, "npm run build", cfgPath);
     const base = await boot({ getCurrentCwd: () => PROJ, getEditMode: () => "review" });

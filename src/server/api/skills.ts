@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { SKILLS_DIRNAME, SKILL_FILE } from "../../skills.js";
+import { SKILLS_DIRNAME, SKILL_FILE, validateSkillFrontmatter } from "../../skills.js";
 import { readUsageLog } from "../../telemetry/usage.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
@@ -247,6 +247,10 @@ export async function handleSkills(
     const { body: contents } = parseBody(body);
     if (typeof contents !== "string") {
       return { status: 400, body: { error: "body (string) required" } };
+    }
+    const fm = validateSkillFrontmatter(contents);
+    if ("error" in fm) {
+      return { status: 400, body: { error: fm.error } };
     }
     const target = resolved ?? defaultSkillPath(dir, name);
     mkdirSync(dirname(target.path), { recursive: true });

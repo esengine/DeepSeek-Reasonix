@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SkillStore, applySkillsIndex } from "../src/skills.js";
+import { SkillStore, applySkillsIndex, validateSkillFrontmatter } from "../src/skills.js";
 
 const BASE = "You are a test assistant.";
 
@@ -240,12 +240,13 @@ describe("applySkillsIndex", () => {
     expect(out).toContain("- hello — global hello");
   });
 
-  it("omits skills with blank descriptions from the pinned index", () => {
+  it("surfaces skills with blank descriptions using a placeholder so the model can name + flag them (#583)", () => {
     writeSkillDir(projectRoot, "global", "has-desc", { description: "I have one" }, "body", home);
     writeSkillDir(projectRoot, "global", "no-desc", {}, "body", home);
     const out = applySkillsIndex(BASE, { homeDir: home, projectRoot, disableBuiltins: true });
-    expect(out).toContain("- has-desc —");
-    expect(out).not.toContain("- no-desc");
+    expect(out).toContain("- has-desc — I have one");
+    expect(out).toContain("- no-desc");
+    expect(out).toContain('"description:"');
   });
 
   it("is byte-stable across two calls with the same filesystem state", () => {
@@ -282,6 +283,28 @@ describe("applySkillsIndex", () => {
     // the model copied the marker verbatim and run_skill failed lookup.
     expect(out).not.toMatch(/- 🧬 lookup\b/);
     expect(out).not.toContain("- 🧬 fmt");
+  });
+});
+
+describe("validateSkillFrontmatter (#583 install gate)", () => {
+  it("accepts content with a non-empty description line", () => {
+    const result = validateSkillFrontmatter("---\ndescription: does a thing\n---\nbody\n");
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("rejects content with no frontmatter at all", () => {
+    const result = validateSkillFrontmatter("# just a body\n");
+    expect("error" in result && result.error).toMatch(/description/);
+  });
+
+  it("rejects frontmatter that omits description", () => {
+    const result = validateSkillFrontmatter("---\nname: foo\n---\nbody\n");
+    expect("error" in result && result.error).toMatch(/description/);
+  });
+
+  it("rejects frontmatter where description is whitespace-only", () => {
+    const result = validateSkillFrontmatter("---\ndescription:    \n---\nbody\n");
+    expect("error" in result && result.error).toMatch(/description/);
   });
 });
 

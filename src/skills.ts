@@ -44,6 +44,19 @@ export interface SkillStoreOptions {
   disableBuiltins?: boolean;
 }
 
+/** Reject skill files that would silently disappear from the prefix index — `description:` is what `applySkillsIndex` keys on. */
+export function validateSkillFrontmatter(raw: string): { ok: true } | { error: string } {
+  const { data } = parseFrontmatter(raw);
+  const desc = (data.description ?? "").trim();
+  if (!desc) {
+    return {
+      error:
+        'skill frontmatter is missing a non-empty "description:" line — without it the skill will not appear in the model\'s skills index',
+    };
+  }
+  return { ok: true };
+}
+
 function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
   const lines = raw.split(/\r?\n/);
   if (lines[0] !== "---") return { data: {}, body: raw };
@@ -262,12 +275,17 @@ function skillIndexLine(s: Pick<Skill, "name" | "description" | "runAs">): strin
   return clipped ? `- ${s.name}${tag} — ${clipped}` : `- ${s.name}${tag}`;
 }
 
+const MISSING_DESCRIPTION_PLACEHOLDER =
+  '(no description — frontmatter is missing a "description:" line; tell the user to add one)';
+
 /** Bodies stay out — prefix must stay short + cacheable; bodies load on demand. */
 export function applySkillsIndex(basePrompt: string, opts: SkillStoreOptions = {}): string {
   const store = new SkillStore(opts);
-  const skills = store.list().filter((s) => s.description);
+  const skills = store.list();
   if (skills.length === 0) return basePrompt;
-  const lines = skills.map(skillIndexLine);
+  const lines = skills.map((s) =>
+    skillIndexLine(s.description ? s : { ...s, description: MISSING_DESCRIPTION_PLACEHOLDER }),
+  );
   const joined = lines.join("\n");
   const truncated =
     joined.length > SKILLS_INDEX_MAX_CHARS
