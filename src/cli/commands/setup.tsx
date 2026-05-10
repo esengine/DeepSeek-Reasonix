@@ -20,9 +20,11 @@ export interface SetupOptions {
    * step when missing.
    */
   skipKeyStep?: boolean;
+  /** Show the API-key step even when a saved/env key already exists. */
+  forceKeyStep?: boolean;
 }
 
-export async function setupCommand(_opts: SetupOptions = {}): Promise<void> {
+export async function setupCommand(opts: SetupOptions = {}): Promise<void> {
   loadDotenv();
   const existingKey = loadApiKey();
   const existing = readConfig();
@@ -31,6 +33,7 @@ export async function setupCommand(_opts: SetupOptions = {}): Promise<void> {
     <Wizard
       existingApiKey={existingKey}
       initial={{ preset: existing.preset, mcp: existing.mcp, theme: existing.theme }}
+      forceApiKeyStep={opts.forceKeyStep}
       onComplete={() => {
         // Ink handles its own enter-to-exit inside the "saved" step; we
         // just wait for the app to exit naturally.

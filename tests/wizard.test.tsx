@@ -3,7 +3,7 @@
 import { render } from "ink-testing-library";
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { Wizard, buildSpec } from "../src/cli/ui/Wizard.js";
+import { Wizard, buildSpec, validateDeepSeekApiKey } from "../src/cli/ui/Wizard.js";
 import { setLanguageRuntime } from "../src/i18n/index.js";
 import { parseMcpSpec } from "../src/mcp/spec.js";
 
@@ -63,5 +63,31 @@ describe("Wizard — first-launch language picker", () => {
     expect(out).toContain("English");
     expect(out).toContain("简体中文");
     unmount();
+  });
+});
+
+describe("Wizard API-key validation", () => {
+  it("accepts a key when DeepSeek auth check succeeds", async () => {
+    const fetcher = async () => new Response(JSON.stringify({ data: [] }), { status: 200 });
+
+    await expect(
+      validateDeepSeekApiKey("sk-valid1234567890", { fetch: fetcher as typeof fetch }),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("rejects a key when DeepSeek returns 401", async () => {
+    const fetcher = async () => new Response("unauthorized", { status: 401 });
+
+    await expect(
+      validateDeepSeekApiKey("sk-invalid12345678", { fetch: fetcher as typeof fetch }),
+    ).resolves.toEqual({ ok: false, reason: "rejected" });
+  });
+
+  it("keeps setup on the API-key step when validation cannot complete", async () => {
+    const fetcher = async () => new Response("maintenance", { status: 503 });
+
+    await expect(
+      validateDeepSeekApiKey("sk-valid1234567890", { fetch: fetcher as typeof fetch }),
+    ).resolves.toMatchObject({ ok: false, reason: "failed", message: "DeepSeek 503" });
   });
 });

@@ -62,7 +62,7 @@ program.action(async (opts: { continue?: boolean }) => {
   const cfg = readConfig();
   if (!cfg.setupCompleted) {
     const { setupCommand } = await import("./commands/setup.js");
-    await setupCommand({});
+    await setupCommand({ forceKeyStep: true });
     return;
   }
   const defaults = resolveDefaults({});
@@ -87,7 +87,7 @@ program
   .description(t("cli.setup"))
   .action(async () => {
     const { setupCommand } = await import("./commands/setup.js");
-    await setupCommand({});
+    await setupCommand({ forceKeyStep: true });
   });
 
 program

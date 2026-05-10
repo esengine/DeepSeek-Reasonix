@@ -248,6 +248,9 @@ export interface TranslationSchema {
     apiKeySavedLocally: string;
     apiKeyInputLabel: string;
     apiKeyInvalid: string;
+    apiKeyChecking: string;
+    apiKeyRejected: string;
+    apiKeyCheckFailed: string;
     apiKeyPreview: string;
     presetTitle: string;
     mcpTitle: string;

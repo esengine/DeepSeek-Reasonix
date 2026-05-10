@@ -17,6 +17,7 @@ import {
   type ReasonixConfig,
   defaultConfigPath,
   isPlausibleKey,
+  loadBaseUrl,
   loadTheme,
   readConfig,
   redactKey,
@@ -46,6 +47,10 @@ export interface WizardProps {
   onCancel?: () => void;
   /** Skip the API-key step if a key already exists (env or config). */
   existingApiKey?: string;
+  /** Force the API-key step so `reasonix setup` can replace a saved key. */
+  forceApiKeyStep?: boolean;
+  /** Verifies the submitted key before the wizard can continue. */
+  validateApiKey?: (apiKey: string) => Promise<ApiKeyValidationResult>;
   /** Pre-fill selections when re-running (reconfigure flow). */
   initial?: {
     preset?: PresetName;
@@ -53,6 +58,10 @@ export interface WizardProps {
     theme?: ThemeName | "auto";
   };
 }
+
+export type ApiKeyValidationResult =
+  | { ok: true }
+  | { ok: false; reason: "rejected" | "failed"; message?: string };
 
 type Step = "language" | "theme" | "apiKey" | "preset" | "mcp" | "mcpArgs" | "review" | "saved";
 
@@ -72,7 +81,14 @@ const LANGUAGE_LABELS: Record<LanguageCode, string> = {
   "zh-CN": "简体中文",
 };
 
-export function Wizard({ onComplete, onCancel, existingApiKey, initial }: WizardProps) {
+export function Wizard({
+  onComplete,
+  onCancel,
+  existingApiKey,
+  forceApiKeyStep = false,
+  validateApiKey = validateDeepSeekApiKey,
+  initial,
+}: WizardProps) {
   const { exit } = useApp();
   const [, setLanguageVersion] = useState(0);
   useEffect(() => onLanguageChange(() => setLanguageVersion((v) => v + 1)), []);
@@ -118,7 +134,7 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
           onPreview={setPreviewTheme}
           onSubmit={(theme) => {
             setData((d) => ({ ...d, theme }));
-            setStep(existingApiKey ? "preset" : "apiKey");
+            setStep(existingApiKey && !forceApiKeyStep ? "preset" : "apiKey");
           }}
         />
       );
@@ -127,6 +143,8 @@ export function Wizard({ onComplete, onCancel, existingApiKey, initial }: Wizard
     if (step === "apiKey") {
       return (
         <ApiKeyStep
+          initialValue={data.apiKey}
+          validateApiKey={validateApiKey}
           onSubmit={(key) => {
             setData((d) => ({ ...d, apiKey: key }));
             setError(null);
@@ -406,15 +424,20 @@ function LanguageStep({
 }
 
 function ApiKeyStep({
+  initialValue,
+  validateApiKey,
   onSubmit,
   error,
   onError,
 }: {
+  initialValue?: string;
+  validateApiKey: (apiKey: string) => Promise<ApiKeyValidationResult>;
   onSubmit: (key: string) => void;
   error: string | null;
   onError: (e: string | null) => void;
 }) {
   const [value, setValue] = useState("");
+  const [checking, setChecking] = useState(false);
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
       <Text bold color="cyan">
@@ -425,6 +448,9 @@ function ApiKeyStep({
       </Box>
       <Text dimColor>{t("wizard.apiKeyGetOne")}</Text>
       <Text dimColor>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
+      {initialValue ? (
+        <Text dimColor>{t("wizard.apiKeyPreview", { redacted: redactKey(initialValue) })}</Text>
+      ) : null}
       <Box marginTop={1}>
         <Text bold color="cyan">
           {t("wizard.apiKeyInputLabel")}
@@ -433,19 +459,37 @@ function ApiKeyStep({
           value={value}
           onChange={setValue}
           onSubmit={(raw) => {
-            const trimmed = raw.trim();
+            const trimmed = raw.trim() || initialValue?.trim() || "";
             if (!isPlausibleKey(trimmed)) {
               onError(t("wizard.apiKeyInvalid"));
               setValue("");
               return;
             }
-            onSubmit(trimmed);
+            setChecking(true);
+            onError(null);
+            void validateApiKey(trimmed).then((result) => {
+              setChecking(false);
+              if (!result.ok) {
+                onError(
+                  result.reason === "rejected"
+                    ? t("wizard.apiKeyRejected")
+                    : t("wizard.apiKeyCheckFailed", { message: result.message ?? "unknown" }),
+                );
+                setValue("");
+                return;
+              }
+              onSubmit(trimmed);
+            });
           }}
           mask="•"
           placeholder="sk-..."
         />
       </Box>
-      {error ? (
+      {checking ? (
+        <Box marginTop={1}>
+          <Text color="yellow">{t("wizard.apiKeyChecking")}</Text>
+        </Box>
+      ) : error ? (
         <Box marginTop={1}>
           <Text color="red">{error}</Text>
         </Box>
@@ -456,6 +500,36 @@ function ApiKeyStep({
       ) : null}
     </Box>
   );
+}
+
+export async function validateDeepSeekApiKey(
+  apiKey: string,
+  opts: {
+    baseUrl?: string;
+    timeoutMs?: number;
+    fetch?: typeof fetch;
+  } = {},
+): Promise<ApiKeyValidationResult> {
+  const fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
+  let baseUrl = opts.baseUrl ?? loadBaseUrl() ?? "https://api.deepseek.com";
+  while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 10_000);
+  try {
+    const resp = await fetchImpl(`${baseUrl}/user/balance`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: ctrl.signal,
+    });
+    if (resp.ok) return { ok: true };
+    if (resp.status === 401 || resp.status === 403) return { ok: false, reason: "rejected" };
+    return { ok: false, reason: "failed", message: `DeepSeek ${resp.status}` };
+  } catch (e) {
+    return { ok: false, reason: "failed", message: (e as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function McpArgsStep({

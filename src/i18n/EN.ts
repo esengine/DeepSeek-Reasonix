@@ -365,6 +365,11 @@ export const EN: TranslationSchema = {
     apiKeySavedLocally: "Saved locally to {path}",
     apiKeyInputLabel: "key › ",
     apiKeyInvalid: "Key looks too short — paste the full token (16+ chars, no spaces).",
+    apiKeyChecking: "Checking API key…",
+    apiKeyRejected:
+      "DeepSeek rejected this API key. Paste a valid key, or press Esc to cancel setup.",
+    apiKeyCheckFailed:
+      "Could not verify this API key right now ({message}). Check your network or try again.",
     apiKeyPreview: "preview: {redacted}",
     themeTitle: "Choose a theme",
     themeSubtitle: "Preview updates live as you navigate. Change later with /theme.",
