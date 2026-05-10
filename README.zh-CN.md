@@ -157,6 +157,7 @@ npx reasonix code --dir /path/to/project
 ## 文档
 
 - [**架构**](./docs/ARCHITECTURE.md) —— 四大支柱、缓存优先循环、思维提取、脚手架
+- [**CLI 参考**](./docs/CLI-REFERENCE.md) —— 每个 shell 子命令、每个 slash 命令、每个快捷键
 - [**基准测试**](./benchmarks/) —— τ-bench-lite harness、transcript、成本方法论
 - [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard 设计稿、TUI 设计稿
 - [**贡献指南**](./CONTRIBUTING.md) —— 注释规则、错误处理、用现成库不手写

@@ -162,6 +162,7 @@ For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmar
 ## Documentation
 
 - [**Architecture**](./docs/ARCHITECTURE.md) — three pillars: cache-first loop, tool-call repair, cost control
+- [**CLI Reference**](./docs/CLI-REFERENCE.md) — every shell subcommand, every slash command, every keybinding
 - [**Benchmarks**](./benchmarks/) — τ-bench-lite harness, transcripts, cost methodology
 - [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard mockup, TUI mockup
 - [**Contributing**](./CONTRIBUTING.md) — comment policy, error-handling rules, library-over-hand-rolled
