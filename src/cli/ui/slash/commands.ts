@@ -262,22 +262,6 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: ["off", "1", "5", "10", "20", "50"],
   },
   {
-    cmd: "theme",
-    group: "advanced",
-    argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
-    summary: "pick or persist the terminal theme preference. Bare opens picker.",
-    argCompleter: [
-      "auto",
-      "default",
-      "dark",
-      "light",
-      "tokyo-night",
-      "github-dark",
-      "github-light",
-      "high-contrast",
-    ],
-  },
-  {
     cmd: "search-engine",
     group: "advanced",
     argsHint: "<mojeek|searxng> [<endpoint>]",
