@@ -3339,7 +3339,7 @@ function AppInner({
           modal up). Removes the "what do I type?" friction without
           surviving past the first turn.
         */}
-                  {!hasConversation && !busy && !isStreaming ? (
+                  {!hasConversation && !busy && !isStreaming && slashMatches === null ? (
                     <WelcomeBanner
                       inCodeMode={!!codeMode}
                       workspaceRoot={codeMode ? currentRootDir : undefined}
