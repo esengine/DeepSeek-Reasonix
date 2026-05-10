@@ -169,6 +169,7 @@
       "Open a discussion or drop into <code>good first issue</code>. Every avatar on the contributors wall started somewhere.",
     "cta.disc": "Discussions →",
     "cta.arch": "Architecture deep dive",
+    "cta.cli": "CLI reference",
   };
 
   var zh = {
@@ -340,6 +341,7 @@
       "去开个 discussion，或者从 <code>good first issue</code> 入坑——贡献者墙上每一张头像都是这么开始的。",
     "cta.disc": "讨论区 →",
     "cta.arch": "架构深度文档",
+    "cta.cli": "CLI 参考",
   };
 
   var DICT = { en: en, zh: zh };
