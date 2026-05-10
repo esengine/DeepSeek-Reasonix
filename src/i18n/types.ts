@@ -364,6 +364,45 @@ export interface TranslationSchema {
     hintAbort: string;
     hintQuit: string;
     abortedHint: string;
+    hintClear: string;
+  };
+  shellConfirm: {
+    title: string;
+    bgTitle: string;
+    subtitle: string;
+    bgSubtitle: string;
+    denyTitle: string;
+    optional: string;
+    denyFooter: string;
+    awaiting: string;
+    pickFooter: string;
+    allowOnce: string;
+    allowOnceDesc: string;
+    allowAlways: string;
+    allowAlwaysDesc: string;
+    deny: string;
+    denyDesc: string;
+  };
+  editConfirm: {
+    footer: string;
+    newTag: string;
+    editTag: string;
+    linesCount: string;
+    viewingRange: string;
+    denyFooter: string;
+    oldLabel: string;
+    newLabel: string;
+    sideBySide: string;
+    linesAbove: string;
+    linesAbovePlural: string;
+    linesBelow: string;
+    linesBelowPlural: string;
+  };
+  choiceConfirm: {
+    customLabel: string;
+    customDesc: string;
+    cancelLabel: string;
+    cancelDesc: string;
   };
   shellConfirm: {
     title: string;
