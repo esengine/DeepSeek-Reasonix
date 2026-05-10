@@ -977,6 +977,7 @@ export const zhCN: TranslationSchema = {
     waitingForResponse: "…等待响应…",
     hintSend: "发送",
     hintNewline: "换行",
+    hintClear: "清空",
     hintScroll: "滚动",
     hintHistory: "历史",
     hintAbort: "中止",

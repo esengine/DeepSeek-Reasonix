@@ -355,6 +355,7 @@ export interface TranslationSchema {
     waitingForResponse: string;
     hintSend: string;
     hintNewline: string;
+    hintClear: string;
     hintScroll: string;
     hintHistory: string;
     hintAbort: string;
