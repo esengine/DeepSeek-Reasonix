@@ -1002,7 +1002,7 @@ export const zhCN: TranslationSchema = {
   shellConfirm: {
     title: "Shell 命令",
     bgTitle: "后台进程",
-    subtitle: "模型想要执行一条 Shell 命令",
+    subtitle: "模型请求执行 Shell 命令",
     bgSubtitle: "长时间运行 — 批准后持续运行，/kill 可停止",
     denyTitle: "拒绝 — 提供原因",
     optional: "可选",
@@ -1098,7 +1098,7 @@ export const zhCN: TranslationSchema = {
     modePlan: "计划",
     modeYolo: "自由",
     modeAuto: "自动",
-    modeReview: "审核",
+    modeReview: "审查",
     pro: "⇧ 专业",
     budget: "  预算  ",
   },
@@ -1110,7 +1110,7 @@ export const zhCN: TranslationSchema = {
   ctxBreakdown: {
     title: "▣ 上下文",
     compactHint: "  /compact 折叠（超过 50% 自动触发）· /new 清空日志",
-    topTools: "  按成本排序的 Top 工具结果（{count} 个）：",
+    topTools: "  常用工具（按成本排序，{count} 个）：",
     msg: "条",
     turnLabel: "轮",
   },
