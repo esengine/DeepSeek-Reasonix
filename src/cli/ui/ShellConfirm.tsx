@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import React, { useState } from "react";
+import { t } from "../../i18n/index.js";
 import { DenyContextInput } from "./DenyContextInput.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
@@ -21,9 +22,7 @@ export function ShellConfirm({ command, allowPrefix, kind, onChoose }: ShellConf
   useReserveRows("modal", { min: 8, max: 14 });
 
   const isBackground = kind === "run_background";
-  const subtitle = isBackground
-    ? "long-running process — keeps running after approval, /kill to stop"
-    : "model wants to run a shell command";
+  const subtitle = isBackground ? t("shellConfirm.bgSubtitle") : t("shellConfirm.subtitle");
 
   const [phase, setPhase] = useState<"pick" | "deny">("pick");
 
@@ -32,9 +31,9 @@ export function ShellConfirm({ command, allowPrefix, kind, onChoose }: ShellConf
       <ApprovalCard
         tone="error"
         glyph="✗"
-        title="Deny — provide context"
-        metaRight="optional"
-        footerHint="type context  ·  ⏎ submit with reason  ·  esc skip (deny without reason)"
+        title={t("shellConfirm.denyTitle")}
+        metaRight={t("shellConfirm.optional")}
+        footerHint={t("shellConfirm.denyFooter")}
       >
         <DenyContextInput
           onSubmit={(context) => onChoose("deny", context || undefined)}
@@ -48,9 +47,9 @@ export function ShellConfirm({ command, allowPrefix, kind, onChoose }: ShellConf
     <ApprovalCard
       tone="warn"
       glyph={isBackground ? "⏱" : "?"}
-      title={isBackground ? "Background process" : "Shell command"}
-      metaRight="awaiting"
-      footerHint="↑↓ pick  ·  ⏎ confirm  ·  Tab add context  ·  esc cancel"
+      title={isBackground ? t("shellConfirm.bgTitle") : t("shellConfirm.title")}
+      metaRight={t("shellConfirm.awaiting")}
+      footerHint={t("shellConfirm.pickFooter")}
     >
       <Box marginBottom={1}>
         <Text color={FG.faint}>{subtitle}</Text>
@@ -68,18 +67,18 @@ export function ShellConfirm({ command, allowPrefix, kind, onChoose }: ShellConf
         items={[
           {
             value: "run_once",
-            label: "allow once",
-            hint: "run this command, ask again next time",
+            label: t("shellConfirm.allowOnce"),
+            hint: t("shellConfirm.allowOnceDesc"),
           },
           {
             value: "always_allow",
-            label: "allow always",
-            hint: `remember \`${allowPrefix}\` for this project`,
+            label: t("shellConfirm.allowAlways"),
+            hint: t("shellConfirm.allowAlwaysDesc", { prefix: allowPrefix }),
           },
           {
             value: "deny",
-            label: "deny",
-            hint: "press Tab to add context telling the model why",
+            label: t("shellConfirm.deny"),
+            hint: t("shellConfirm.denyDesc"),
           },
         ]}
         onSubmit={(v) => {

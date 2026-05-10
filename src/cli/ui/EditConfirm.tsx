@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import React, { useMemo, useState } from "react";
 import { formatEditBlockSplit } from "../../code/diff-preview.js";
 import type { EditBlock } from "../../code/edit-blocks.js";
+import { t } from "../../i18n/index.js";
 import { DenyContextInput } from "./DenyContextInput.js";
 import { SplitDiff } from "./SplitDiff.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
@@ -17,9 +18,6 @@ export interface EditConfirmProps {
 
 const MODAL_OVERHEAD_ROWS = 18;
 const MIN_DIFF_ROWS = 8;
-
-const REVIEW_FOOTER =
-  "[y/Enter] apply  ·  [n] reject with reason  ·  [a] apply rest  ·  [A] flip AUTO  ·  [↑↓/Space] scroll  ·  [Esc] abort";
 
 export function EditConfirm({ block, onChoose }: EditConfirmProps) {
   const rows = useTotalRows();
@@ -91,7 +89,7 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
   const isNew = block.search === "";
   const removed = isNew ? 0 : (block.search.match(/\n/g)?.length ?? 0) + 1;
   const added = block.replace === "" ? 0 : (block.replace.match(/\n/g)?.length ?? 0) + 1;
-  const tag = isNew ? "NEW" : "EDIT";
+  const tag = isNew ? t("editConfirm.newTag") : t("editConfirm.editTag");
   const tone = isNew ? "ok" : "warn";
   const glyph = isNew ? "✚" : "✎";
 
@@ -101,10 +99,14 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
   const totalLines = allRows.length;
   const showScrollHud = hiddenAbove + hiddenBelow > 0;
 
-  const metaParts = [`-${removed} +${added} lines`];
+  const metaParts = [t("editConfirm.linesCount", { removed, added })];
   if (showScrollHud) {
     metaParts.push(
-      `viewing ${effectiveScroll + 1}-${effectiveScroll + visibleRows.length}/${totalLines}`,
+      t("editConfirm.viewingRange", {
+        start: effectiveScroll + 1,
+        end: effectiveScroll + visibleRows.length,
+        total: totalLines,
+      }),
     );
   }
 
@@ -113,9 +115,9 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
       <ApprovalCard
         tone="error"
         glyph="✗"
-        title="Deny — provide context"
-        metaRight="optional"
-        footerHint="⏎ submit  ·  esc skip (deny without reason)"
+        title={t("shellConfirm.denyTitle")}
+        metaRight={t("shellConfirm.optional")}
+        footerHint={t("editConfirm.denyFooter")}
       >
         <DenyContextInput
           onSubmit={(context) => onChoose("reject", context)}
@@ -131,30 +133,32 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
       glyph={glyph}
       title={`${tag}  ${block.path}`}
       metaRight={metaParts.join("  ·  ")}
-      footerHint={REVIEW_FOOTER}
+      footerHint={t("editConfirm.footer")}
     >
       {hiddenAbove > 0 ? (
-        <Text
-          dimColor
-        >{`  ↑ ${hiddenAbove} line${hiddenAbove === 1 ? "" : "s"} above  (↑/k or PgUp)`}</Text>
+        <Text dimColor>
+          {t(hiddenAbove === 1 ? "editConfirm.linesAbove" : "editConfirm.linesAbovePlural", {
+            count: hiddenAbove,
+          })}
+        </Text>
       ) : null}
       <SplitDiff rows={visibleRows} />
       <Box>
         <Text color="#fbc8c8" backgroundColor="#2a1212">
-          {"  - old  "}
+          {t("editConfirm.oldLabel")}
         </Text>
         <Text>{"  "}</Text>
         <Text color="#bef0c8" backgroundColor="#0c2718">
-          {"  + new  "}
+          {t("editConfirm.newLabel")}
         </Text>
-        <Text dimColor>
-          {"   side-by-side · removed lines on the left, added on the right · paired by offset"}
-        </Text>
+        <Text dimColor>{t("editConfirm.sideBySide")}</Text>
       </Box>
       {hiddenBelow > 0 ? (
-        <Text
-          dimColor
-        >{`  ↓ ${hiddenBelow} line${hiddenBelow === 1 ? "" : "s"} below  (↓/j or Space/PgDn)`}</Text>
+        <Text dimColor>
+          {t(hiddenBelow === 1 ? "editConfirm.linesBelow" : "editConfirm.linesBelowPlural", {
+            count: hiddenBelow,
+          })}
+        </Text>
       ) : null}
     </ApprovalCard>
   );

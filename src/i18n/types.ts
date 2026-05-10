@@ -360,6 +360,45 @@ export interface TranslationSchema {
     hintAbort: string;
     hintQuit: string;
     abortedHint: string;
+    hintClear: string;
+  };
+  shellConfirm: {
+    title: string;
+    bgTitle: string;
+    subtitle: string;
+    bgSubtitle: string;
+    denyTitle: string;
+    optional: string;
+    denyFooter: string;
+    awaiting: string;
+    pickFooter: string;
+    allowOnce: string;
+    allowOnceDesc: string;
+    allowAlways: string;
+    allowAlwaysDesc: string;
+    deny: string;
+    denyDesc: string;
+  };
+  editConfirm: {
+    footer: string;
+    newTag: string;
+    editTag: string;
+    linesCount: string;
+    viewingRange: string;
+    denyFooter: string;
+    oldLabel: string;
+    newLabel: string;
+    sideBySide: string;
+    linesAbove: string;
+    linesAbovePlural: string;
+    linesBelow: string;
+    linesBelowPlural: string;
+  };
+  choiceConfirm: {
+    customLabel: string;
+    customDesc: string;
+    cancelLabel: string;
+    cancelDesc: string;
   };
   cardTitles: {
     usage: string;
@@ -410,5 +449,27 @@ export interface TranslationSchema {
     reasoningLabel: string;
     runningLabel: string;
     workingLabel: string;
+    defaultFooter: string;
+    applyAction: string;
+    skipAction: string;
+    rejectAction: string;
+    levelOk: string;
+    levelWarn: string;
+    levelFail: string;
+    checksLabel: string;
+    passed: string;
+    warnTag: string;
+    failTag: string;
+    stepLabel: string;
+    done: string;
+    inProgress: string;
+    upcoming: string;
+    resumed: string;
+    archive: string;
+    more: string;
+    categoryUser: string;
+    categoryFeedback: string;
+    categoryProject: string;
+    categoryReference: string;
   };
 }

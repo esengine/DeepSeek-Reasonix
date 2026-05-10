@@ -1,5 +1,6 @@
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
@@ -13,7 +14,7 @@ export function UserCard({ card }: { card: UserCardData }): React.ReactElement {
       <CardHeader
         glyph="›"
         tone={TONE.accent}
-        title="you"
+        title={t("cardTitles.you")}
         titleColor={FG.sub}
         meta={[formatRelativeTime(card.ts)]}
       />

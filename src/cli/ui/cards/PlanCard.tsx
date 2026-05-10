@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { PlanCard as PlanCardData, PlanStep } from "../state/cards.js";
@@ -29,8 +30,12 @@ export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
   };
   const doneCount = card.steps.filter((s) => s.status === "done").length;
   const variantTag =
-    card.variant === "resumed" ? "resumed · " : card.variant === "replay" ? "⏪ archive · " : "";
-  const progress = `${variantTag}${doneCount}/${card.steps.length} done`;
+    card.variant === "resumed"
+      ? t("cardLabels.resumed")
+      : card.variant === "replay"
+        ? t("cardLabels.archive")
+        : "";
+  const progress = `${variantTag}${doneCount}/${card.steps.length} ${t("cardLabels.done")}`;
   const hasRunning = card.steps.some((s) => s.status === "running");
   const cardTone = hasRunning ? toneActive.accent : tone.accent;
 
@@ -42,7 +47,7 @@ export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
       {window.hiddenBefore > 0 ? (
         <Box flexDirection="row" gap={1}>
           <Text color={tone.ok}>✓</Text>
-          <Text color={fg.faint}>{`⋯ ${window.hiddenBefore} done`}</Text>
+          <Text color={fg.faint}>{`⋯ ${window.hiddenBefore} ${t("cardLabels.done")}`}</Text>
         </Box>
       ) : null}
       {window.steps.map((step) => {
@@ -54,14 +59,14 @@ export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
             <Text bold={isActive} color={titleColor}>
               {`${step.indexLabel}. ${step.title}`}
             </Text>
-            {isActive ? <Text color={toneActive.brand}>← in progress</Text> : null}
+            {isActive ? <Text color={toneActive.brand}>{t("cardLabels.inProgress")}</Text> : null}
           </Box>
         );
       })}
       {window.hiddenAfter > 0 ? (
         <Box flexDirection="row" gap={1}>
           <Text color={fg.faint}>○</Text>
-          <Text color={fg.faint}>{`⋯ ${window.hiddenAfter} upcoming`}</Text>
+          <Text color={fg.faint}>{`⋯ ${window.hiddenAfter} ${t("cardLabels.upcoming")}`}</Text>
         </Box>
       ) : null}
     </Card>
