@@ -45,11 +45,7 @@ export function useChatScroll(): ChatScrollState {
     });
   }, []);
 
-  /** Leading-edge schedule: first call applies immediately so the user
-   * sees the wheel respond on the first tick (no 16 ms wait before any
-   * visual feedback). Further calls inside the COALESCE_MS window batch
-   * into pendingDelta and land in one trailing flush, so a fast scroll
-   * still produces only one re-render per window. */
+  /** Leading-edge: first tick flushes immediately, rest coalesce into one trailing flush. */
   const schedule = useCallback(
     (delta: number) => {
       if (flushTimer.current === null) {
