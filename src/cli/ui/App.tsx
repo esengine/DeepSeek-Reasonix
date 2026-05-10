@@ -48,7 +48,7 @@ import {
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
 import { formatHookOutcomeMessage, runHooks } from "../../hooks.js";
-import { onLanguageChange, t, tObj } from "../../i18n/index.js";
+import { t, tObj } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import type { LoopEvent } from "../../loop.js";
 import {
@@ -123,6 +123,7 @@ import { useCodeMode } from "./hooks/useCodeMode.js";
 import { useEditGate } from "./hooks/useEditGate.js";
 import { useHookList } from "./hooks/useHookList.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
+import { useLanguageReload } from "./hooks/useLanguageReload.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
 import { usePresetMode } from "./hooks/usePresetMode.js";
 import { useQuit } from "./hooks/useQuit.js";
@@ -385,8 +386,7 @@ function AppInner({
   useEffect(() => {
     if (!isStreaming && liveExpand) setLiveExpand(false);
   }, [isStreaming, liveExpand]);
-  const [languageVersion, setLanguageVersion] = useState(0);
-  useEffect(() => onLanguageChange(() => setLanguageVersion((v) => v + 1)), []);
+  const languageVersion = useLanguageReload();
   useEffect(() => {
     markPhase("first_paint");
     dumpStartupProfile();
