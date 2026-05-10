@@ -34,8 +34,6 @@ const TONE_PALETTE = {
   info: { color: CARD.tool.color, glyph: "?" },
 } as const;
 
-const DEFAULT_FOOTER = t("cardLabels.defaultFooter");
-
 export function ApprovalCard({
   tone,
   glyph,
@@ -43,8 +41,9 @@ export function ApprovalCard({
   metaRight,
   metaRightColor,
   children,
-  footerHint = DEFAULT_FOOTER,
+  footerHint,
 }: ApprovalCardProps): React.ReactElement {
+  const effectiveFooter = footerHint ?? t("cardLabels.defaultFooter");
   const palette = TONE_PALETTE[tone];
   const headerGlyph = glyph ?? palette.glyph;
   const { stdout } = useStdout();
@@ -76,7 +75,7 @@ export function ApprovalCard({
         <Text color={FG.faint}>{"─".repeat(ruleWidth)}</Text>
       </Box>
       <Box paddingX={2}>
-        <Text color={FG.faint}>{footerHint}</Text>
+        <Text color={FG.faint}>{effectiveFooter}</Text>
       </Box>
     </Box>
   );
