@@ -5,6 +5,55 @@ import type { SubagentEvent, SubagentSink } from "../../tools/subagent.js";
 import type { Scrollback } from "./hooks/useScrollback.js";
 import { CARD, TONE, formatCost } from "./theme/tokens.js";
 
+/** Identity-preserving — returns prev unchanged when no row would change. */
+export function reduceSubagentInnerEvent(
+  prev: ReadonlyArray<SubagentActivity>,
+  ev: SubagentEvent,
+): ReadonlyArray<SubagentActivity> {
+  if (ev.kind === "inner") {
+    if (!ev.inner) return prev;
+    const summary = summariseInner(ev.inner);
+    if (!summary) return prev;
+    return mapMatchingRun(prev, ev.runId, (a) => ({ ...a, lastInner: summary }));
+  }
+  if (ev.kind === "progress") {
+    return mapMatchingRun(prev, ev.runId, (a) => {
+      const iter = ev.iter ?? a.iter;
+      const elapsedMs = ev.elapsedMs ?? a.elapsedMs;
+      if (iter === a.iter && elapsedMs === a.elapsedMs) return a;
+      return { ...a, iter, elapsedMs };
+    });
+  }
+  if (ev.kind === "phase") {
+    return mapMatchingRun(prev, ev.runId, (a) => {
+      const phase = ev.phase ?? a.phase;
+      if (phase === a.phase) return a;
+      return { ...a, phase };
+    });
+  }
+  return prev;
+}
+
+function mapMatchingRun(
+  prev: ReadonlyArray<SubagentActivity>,
+  runId: string,
+  fn: (a: SubagentActivity) => SubagentActivity,
+): ReadonlyArray<SubagentActivity> {
+  let idx = -1;
+  for (let i = 0; i < prev.length; i++) {
+    if (prev[i]!.runId === runId) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) return prev;
+  const updated = fn(prev[idx]!);
+  if (updated === prev[idx]) return prev;
+  const next = prev.slice();
+  next[idx] = updated;
+  return next;
+}
+
 function summariseInner(ev: LoopEvent): SubagentInnerSummary | null {
   if (ev.role === "tool_start") {
     return {
@@ -127,27 +176,7 @@ export function useSubagent({
         }
         return;
       }
-      // progress / phase / inner — patch the matching row, ignore stragglers from runs we never saw `start` for.
-      setActivities((prev) =>
-        prev.map((a) => {
-          if (a.runId !== ev.runId) return a;
-          if (ev.kind === "progress") {
-            return {
-              ...a,
-              iter: ev.iter ?? a.iter,
-              elapsedMs: ev.elapsedMs ?? a.elapsedMs,
-            };
-          }
-          if (ev.kind === "phase") {
-            return { ...a, phase: ev.phase ?? a.phase };
-          }
-          if (ev.kind === "inner" && ev.inner) {
-            const summary = summariseInner(ev.inner);
-            return summary ? { ...a, lastInner: summary } : a;
-          }
-          return a;
-        }),
-      );
+      setActivities((prev) => reduceSubagentInnerEvent(prev, ev));
     };
     return () => {
       sinkRef.current.current = null;

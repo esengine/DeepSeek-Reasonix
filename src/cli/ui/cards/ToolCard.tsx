@@ -1,5 +1,4 @@
 import { Box, Text, useStdout } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
@@ -29,7 +28,10 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const lineCells = Math.max(20, cols - 4);
   const argsLabel = formatArgsSummary(card.args);
 
-  const subagentMarkdown = unwrapSubagentMarkdown(card);
+  const subagentMarkdown = React.useMemo(
+    () => unwrapSubagentMarkdown(card.name, card.output),
+    [card.name, card.output],
+  );
 
   const allLines = card.output.length > 0 ? card.output.split("\n") : [];
   const tail = tailLinesFor(card.name);
@@ -94,11 +96,11 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   );
 }
 
-function unwrapSubagentMarkdown(card: ToolCardData): string | null {
-  if (card.name !== "spawn_subagent") return null;
-  if (card.output.length === 0) return null;
+function unwrapSubagentMarkdown(name: string, output: string): string | null {
+  if (name !== "spawn_subagent") return null;
+  if (output.length === 0) return null;
   try {
-    const parsed = JSON.parse(card.output) as unknown;
+    const parsed = JSON.parse(output) as unknown;
     if (!parsed || typeof parsed !== "object") return null;
     const obj = parsed as Record<string, unknown>;
     if (obj.success !== true) return null;
