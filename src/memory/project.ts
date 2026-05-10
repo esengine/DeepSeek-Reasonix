@@ -1,10 +1,33 @@
 /** REASONIX.md pinned into ImmutablePrefix.system; edits invalidate the prefix-cache fingerprint. */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const PROJECT_MEMORY_FILE = "REASONIX.md";
 export const PROJECT_MEMORY_MAX_CHARS = 8000;
+
+/** Marker filenames that signal a foreign agent-platform workspace. */
+const FOREIGN_PLATFORM_FILE_MARKERS = ["SOUL.md", "AGENT.md", "PERSONA.md"] as const;
+
+/** Returns the marker(s) that flagged rootDir as a foreign agent-platform data dir; null on a normal coding project. */
+export function detectForeignAgentPlatform(rootDir: string): string[] | null {
+  const hits: string[] = [];
+  for (const name of FOREIGN_PLATFORM_FILE_MARKERS) {
+    if (existsSync(join(rootDir, name))) hits.push(name);
+  }
+  if (isDir(join(rootDir, "skills")) && isDir(join(rootDir, "memories"))) {
+    hits.push("skills/ + memories/");
+  }
+  return hits.length > 0 ? hits : null;
+}
+
+function isDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 export interface ProjectMemory {
   /** Absolute path the memory was read from. */

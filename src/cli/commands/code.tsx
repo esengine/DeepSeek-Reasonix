@@ -22,6 +22,7 @@ import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { loadEditMode, loadProjectShellAllowed, readConfig } from "../../config.js";
 import { bootstrapSemanticSearchInCodeMode } from "../../index/semantic/tool.js";
+import { detectForeignAgentPlatform } from "../../memory/project.js";
 import { sanitizeName } from "../../memory/session.js";
 import { ToolRegistry } from "../../tools.js";
 import { registerChoiceTool } from "../../tools/choice.js";
@@ -163,6 +164,13 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
       semantic.enabled ? " · semantic_search on" : ""
     }\n`,
   );
+
+  const foreign = detectForeignAgentPlatform(rootDir);
+  if (foreign) {
+    process.stderr.write(
+      `⚠ workspace contains another agent platform's files (${foreign.join(", ")}). Reasonix Code may read them as project content; relaunch with --dir <your-project> if that's not what you want.\n`,
+    );
+  }
 
   // Belt-and-suspenders cleanup: even though spawn(detached:false)
   // should tie child processes to the parent's lifetime, Windows cmd.exe

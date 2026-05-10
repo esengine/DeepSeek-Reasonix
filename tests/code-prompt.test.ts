@@ -52,6 +52,16 @@ describe("codeSystemPrompt", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/dependency.*build.*VCS|skip/i);
   });
 
+  it("locks identity to this prompt — workspace files don't redefine the assistant", () => {
+    // Issue #550: a Hermes / persona-platform data dir at the workspace
+    // root used to make the model claim it was a sub-profile of that
+    // host product. Names a few specific markers so the rule is
+    // unambiguous on the model side.
+    expect(CODE_SYSTEM_PROMPT).toMatch(/Identity is fixed by this prompt/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/SOUL\.md/);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/not a sub-profile/);
+  });
+
   describe("semantic_search routing fragment", () => {
     it("is absent by default (no index registered)", () => {
       const out = codeSystemPrompt(root);

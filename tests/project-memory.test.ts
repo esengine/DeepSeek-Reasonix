@@ -1,6 +1,6 @@
 /** REASONIX.md project-memory loader — filesystem-backed tests in a temp dir. */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import {
   PROJECT_MEMORY_FILE,
   PROJECT_MEMORY_MAX_CHARS,
   applyProjectMemory,
+  detectForeignAgentPlatform,
   memoryEnabled,
   readProjectMemory,
 } from "../src/memory/project.js";
@@ -116,6 +117,46 @@ describe("project-memory", () => {
       const a = applyProjectMemory(BASE, root);
       const b = applyProjectMemory(BASE, root);
       expect(a).toBe(b);
+    });
+  });
+
+  describe("detectForeignAgentPlatform", () => {
+    it("returns null for a normal project root", () => {
+      writeFileSync(join(root, "package.json"), "{}", "utf8");
+      expect(detectForeignAgentPlatform(root)).toBeNull();
+    });
+
+    it("flags a SOUL.md sibling", () => {
+      writeFileSync(join(root, "SOUL.md"), "# persona\n", "utf8");
+      expect(detectForeignAgentPlatform(root)).toEqual(["SOUL.md"]);
+    });
+
+    it("flags an AGENT.md sibling", () => {
+      writeFileSync(join(root, "AGENT.md"), "# agent\n", "utf8");
+      expect(detectForeignAgentPlatform(root)).toEqual(["AGENT.md"]);
+    });
+
+    it("flags a skills/ + memories/ pair (typical agent-platform data dir)", () => {
+      mkdirSync(join(root, "skills"));
+      mkdirSync(join(root, "memories"));
+      expect(detectForeignAgentPlatform(root)).toEqual(["skills/ + memories/"]);
+    });
+
+    it("does NOT flag a lone skills/ directory (common in coding repos)", () => {
+      mkdirSync(join(root, "skills"));
+      expect(detectForeignAgentPlatform(root)).toBeNull();
+    });
+
+    it("returns every marker that hit, in order", () => {
+      writeFileSync(join(root, "SOUL.md"), "x", "utf8");
+      writeFileSync(join(root, "PERSONA.md"), "y", "utf8");
+      mkdirSync(join(root, "skills"));
+      mkdirSync(join(root, "memories"));
+      expect(detectForeignAgentPlatform(root)).toEqual([
+        "SOUL.md",
+        "PERSONA.md",
+        "skills/ + memories/",
+      ]);
     });
   });
 
