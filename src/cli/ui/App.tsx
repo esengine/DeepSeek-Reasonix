@@ -1250,8 +1250,8 @@ function AppInner({
       (slashMatches?.length ?? 0) > 0 ||
       (slashArgMatches?.length ?? 0) > 0 ||
       pendingShell != null;
-    if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollUp();
-    else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollDown();
+    if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollPageUp();
+    else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollPageDown();
     else if (ev.end) chatScroll.jumpToBottom();
     else if (!pickerOwnsArrows && ev.upArrow) chatScroll.scrollUp();
     else if (!pickerOwnsArrows && ev.downArrow) chatScroll.scrollDown();
