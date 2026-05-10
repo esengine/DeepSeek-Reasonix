@@ -520,6 +520,7 @@ export interface TranslationSchema {
     reasoningEllipsis: string;
     error: string;
     doctor: string;
+    you: string;
   };
   cardLabels: {
     prompt: string;

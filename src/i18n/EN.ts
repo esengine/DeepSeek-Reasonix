@@ -1222,6 +1222,7 @@ export const EN: TranslationSchema = {
     reasoningEllipsis: "reasoning\u2026",
     error: "error",
     doctor: "doctor",
+    you: "you",
   },
   cardLabels: {
     prompt: "prompt",

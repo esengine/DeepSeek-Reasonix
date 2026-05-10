@@ -1158,6 +1158,7 @@ export const zhCN: TranslationSchema = {
     reasoningEllipsis: "推理中…",
     error: "错误",
     doctor: "环境诊断",
+    you: "你",
   },
   cardLabels: {
     prompt: "提示",
