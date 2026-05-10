@@ -124,6 +124,7 @@ import { useEditGate } from "./hooks/useEditGate.js";
 import { useHookList } from "./hooks/useHookList.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
+import { usePresetMode } from "./hooks/usePresetMode.js";
 import { useQuit } from "./hooks/useQuit.js";
 import { useScrollback } from "./hooks/useScrollback.js";
 import { useTerminalSetup } from "./hooks/useTerminalSetup.js";
@@ -456,10 +457,8 @@ function AppInner({
     editModeRef,
     modeFlash,
   } = useEditGate(!!codeMode);
-  const [preset, setPreset] = useState<"auto" | "flash" | "pro">(() => {
-    if (model === "deepseek-v4-pro") return "pro";
-    return "auto";
-  });
+  const { preset, setPreset, proArmed, setProArmed, turnOnPro, setTurnOnPro } =
+    usePresetMode(model);
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -598,14 +597,6 @@ function AppInner({
   // `/plan` slash and PlanConfirm picker. Ephemeral — not persisted
   // across launches (you explicitly opt in per session).
   const [planMode, setPlanMode] = useState<boolean>(false);
-  // /pro armed — next turn will run on v4-pro. Mirrored here (rather
-  // than reading loop.proArmed directly) so state transitions trigger
-  // a StatsPanel re-render that picks up the new badge.
-  const [proArmed, setProArmed] = useState(false);
-  // True while the CURRENT running turn is on v4-pro because of either
-  // /pro arming or auto-escalation. Set on turn-start if armed consumed
-  // OR any "⇧ pro" warning fires, cleared at turn-end.
-  const [turnOnPro, setTurnOnPro] = useState(false);
   // Text waiting to be submitted AFTER the current turn finishes.
   // Set by ShellConfirm's onChoose when the user approves faster than
   // the model's "awaiting confirmation" response. We can't call
@@ -1863,6 +1854,7 @@ function AppInner({
     setEditMode,
     currentRootDirRef,
     reloadHooks,
+    setPreset,
   ]);
 
   const stopDashboard = useCallback(async (): Promise<void> => {
@@ -2656,6 +2648,8 @@ function AppInner({
       refreshLatestVersion,
       refreshModels,
       proArmed,
+      setProArmed,
+      setTurnOnPro,
       persistPlanState,
       stdout,
       stopLoop,
