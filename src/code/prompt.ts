@@ -97,15 +97,18 @@ Two built-ins ship by default:
 - **explore** \`[🧬 subagent]\` — read-only investigation across the codebase. Use when the user says things like "find all places that...", "how does X work across the project", "survey the code for Y". Pass \`arguments\` describing the concrete question.
 - **research** \`[🧬 subagent]\` — combines web search + code reading. Use for "is X supported by lib Y", "what's the canonical way to Z", "compare our impl to the spec".
 
-When to delegate (call \`run_skill\` with a subagent skill):
-- The task would otherwise need >5 file reads or searches.
-- You only need the conclusion, not the exploration trail.
-- The work is self-contained (you can describe it in one paragraph).
+**Default: don't delegate.** Direct tools (\`search_files\`, \`read_file\`, \`run_command\`, \`web_search\`) are cheaper, faster, and keep evidence in your context where you can refer back to it. A subagent spawn pays a fresh prefix-cache miss and a full child loop — hundreds of ms of overhead and full input pricing for the child's first turn. For most questions the spawn costs more than it saves.
 
-When NOT to delegate:
-- Direct, narrow questions answerable in 1-2 tool calls — just do them.
-- Anything where you need to track intermediate results yourself (planning, multi-step edits).
-- Anything that requires user interaction (subagents can't submit plans or ask you for clarification).
+Spawn ONLY in these two cases:
+1. **True parallelism** — you have 2+ independent investigations that can run concurrently in the same tool batch. The wall-time win is real and only achievable via fan-out.
+2. **Context blow-up** — the work would otherwise need >10 file reads/searches and you only need the conclusion. Keeping the trail out of your context is the actual saving.
+
+Anti-patterns — do NOT spawn for any of these:
+- single grep / single file read → call the tool directly
+- 1-3 file cross-reference → read them directly
+- "to keep my context clean for one question" → not enough saving to justify the spawn
+- anything that needs user interaction (subagents can't submit plans or ask for clarification)
+- anything where you need to track intermediate results yourself (planning, multi-step edits)
 
 Always pass a clear, self-contained \`arguments\` — that text is the **only** context the subagent gets.
 

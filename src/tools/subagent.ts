@@ -125,6 +125,24 @@ const SUBAGENT_TOOL_NAME = "spawn_subagent";
 /** spawn_subagent excluded → depth=1 hard cap; submit_plan excluded → no picker mid-parent-turn. */
 const NEVER_INHERITED_TOOLS = new Set<string>([SUBAGENT_TOOL_NAME, "submit_plan"]);
 
+/** Per-session spawn count past which the soft hint fires on every subsequent return. */
+const SOFT_HINT_AFTER_SPAWNS = 1;
+/** Per-session count past which the strong hint fires (asks the model to justify the next spawn). */
+const STRONG_HINT_AFTER_SPAWNS = 4;
+/** Per-session cumulative subagent token total past which the strong hint also fires. */
+const STRONG_HINT_TOKEN_THRESHOLD = 50_000;
+
+/** null → first spawn of the session, no hint. Pure for testability. */
+export function subagentBudgetHint(spawnCount: number, totalTokens: number): string | null {
+  if (spawnCount > STRONG_HINT_AFTER_SPAWNS || totalTokens >= STRONG_HINT_TOKEN_THRESHOLD) {
+    return `[budget: this session has now spawned ${spawnCount} subagents totalling ${totalTokens} tokens. Each spawn pays a fresh prefix-cache miss plus a full child loop — confirm the next spawn is genuinely needed (parallel fan-out or >10-read context blow-up) before calling spawn_subagent again. If you can answer with direct tools, do that instead.]`;
+  }
+  if (spawnCount > SOFT_HINT_AFTER_SPAWNS) {
+    return `[note: this session has spawned ${spawnCount} subagents totalling ${totalTokens} tokens; confirm this one is worth it.]`;
+  }
+  return null;
+}
+
 /** Errors captured in the result shape, never thrown — caller decides how to surface. */
 export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<SubagentResult> {
   const model = opts.model ?? DEFAULT_SUBAGENT_MODEL;
@@ -398,12 +416,16 @@ export function registerSubagentTool(
   const maxToolIters = opts.maxToolIters ?? DEFAULT_MAX_ITERS;
   const maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
   const sink = opts.sink;
+  // Per-session counters survive across spawn calls because registerSubagentTool
+  // runs once per parent registry — closure scope is the session scope.
+  let sessionSpawnCount = 0;
+  let sessionSpawnTokens = 0;
 
   parentRegistry.register({
     name: SUBAGENT_TOOL_NAME,
     parallelSafe: true,
     description:
-      "Spawn an isolated subagent to handle a self-contained subtask in a fresh context, returning only its final answer. Use for: deep codebase exploration that would flood the main context, multi-step research where you only need the conclusion, or any focused subtask whose intermediate reasoning the user does not need to see. The subagent inherits all your tools (filesystem, shell, web, MCP, etc.) but runs in its own isolated message log — its tool calls and reasoning never enter your context. Only the final assistant message comes back as this tool's result. Keep tasks focused; the subagent has a stricter iter budget than you do.",
+      "Spawn an isolated subagent to handle a self-contained subtask in a fresh context, returning only its final answer. **Prefer direct tools.** Spawn primarily for parallel fan-out (2+ independent investigations issued in one tool batch) or when the work would otherwise need >10 file reads/searches whose trail you don't need to keep. Single greps, 1-3 file cross-references, and 'keep my context clean for one question' are NOT good reasons to spawn — direct tools are cheaper and let you reference the evidence later. Each spawn pays a fresh prefix-cache miss plus a full child loop. The subagent inherits your tools but runs in its own isolated message log; only the final assistant message comes back. Keep tasks focused; the subagent has a stricter iter budget than you do.",
     parameters: {
       type: "object",
       properties: {
@@ -475,7 +497,11 @@ export function registerSubagentTool(
         sink,
         parentSignal: ctx?.signal,
       });
-      return formatSubagentResult(result);
+      sessionSpawnCount++;
+      sessionSpawnTokens += result.usage.totalTokens;
+      const formatted = formatSubagentResult(result);
+      const hint = subagentBudgetHint(sessionSpawnCount, sessionSpawnTokens);
+      return hint ? `${formatted}\n${hint}` : formatted;
     },
   });
 

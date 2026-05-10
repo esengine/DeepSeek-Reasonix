@@ -10,6 +10,7 @@ import {
   forkRegistryWithAllowList,
   registerSubagentTool,
   spawnSubagent,
+  subagentBudgetHint,
 } from "../src/tools/subagent.js";
 
 interface FakeResponseShape {
@@ -573,6 +574,49 @@ describe("registerSubagentTool", () => {
     expect(unique[2]).toMatch(/\[budget: 2 of 5 tool calls left/);
     expect(unique[3]).toMatch(/\[budget: 1 of 5 tool call left/);
     expect(unique[4]).toMatch(/\[budget: 0 of 5 tool calls left — finalize NOW/);
+  });
+});
+
+describe("subagentBudgetHint", () => {
+  it("stays silent on the first spawn of a session", () => {
+    expect(subagentBudgetHint(1, 120)).toBeNull();
+  });
+
+  it("emits the soft note from the second spawn through the fourth", () => {
+    expect(subagentBudgetHint(2, 240)).toMatch(/\[note: this session has spawned 2 subagents/);
+    expect(subagentBudgetHint(4, 480)).toMatch(/\[note: this session has spawned 4 subagents/);
+  });
+
+  it("escalates to the strong budget hint past five spawns", () => {
+    const out = subagentBudgetHint(5, 600);
+    expect(out).toMatch(/\[budget: this session has now spawned 5 subagents/);
+    expect(out).toMatch(/parallel fan-out or >10-read context blow-up/);
+  });
+
+  it("escalates to the strong hint when cumulative tokens cross 50k even at low spawn count", () => {
+    const out = subagentBudgetHint(2, 60_000);
+    expect(out).toMatch(
+      /\[budget: this session has now spawned 2 subagents totalling 60000 tokens/,
+    );
+  });
+});
+
+describe("registerSubagentTool — per-session budget feedback", () => {
+  it("appends nothing on the first spawn, the soft note on the second, and the strong hint on the fifth", async () => {
+    const parent = new ToolRegistry();
+    const client = makeClient([{ content: "answer" }]);
+    registerSubagentTool(parent, { client });
+
+    const outs: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      outs.push(await parent.dispatch("spawn_subagent", JSON.stringify({ task: `q${i}` })));
+    }
+
+    expect(outs[0]).not.toMatch(/\[(note|budget):/);
+    expect(outs[1]).toMatch(/\[note: this session has spawned 2 subagents/);
+    expect(outs[2]).toMatch(/\[note: this session has spawned 3 subagents/);
+    expect(outs[3]).toMatch(/\[note: this session has spawned 4 subagents/);
+    expect(outs[4]).toMatch(/\[budget: this session has now spawned 5 subagents/);
   });
 });
 
