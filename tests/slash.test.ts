@@ -517,7 +517,7 @@ describe("handleSlash", () => {
     // Case-insensitive.
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
     // Empty prefix returns the full non-advanced release list, including code commands.
-    expect(suggestSlashCommands("", true)).toHaveLength(37);
+    expect(suggestSlashCommands("", true)).toHaveLength(38);
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("logs");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("language");
     expect(suggestSlashCommands("lan").map((s) => s.cmd)).toContain("language");
@@ -1170,16 +1170,16 @@ describe("handleSlash", () => {
       rmSync(tempHome, { recursive: true, force: true });
     });
 
-    it("shows current theme status and available choices", () => {
+    it("opens the theme picker when no argument is given", () => {
       const r = handleSlash("theme", [], makeLoop());
-      expect(r.info).toMatch(/theme: github-dark/);
-      expect(r.info).toMatch(/configured: unset/);
-      expect(r.info).toMatch(/tokyo-night/);
+      expect(r.openThemePicker).toBe(true);
+      expect(r.info).toBeUndefined();
     });
 
     it("persists a registered theme", () => {
       const r = handleSlash("theme", ["tokyo-night"], makeLoop());
       expect(r.info).toMatch(/theme saved: tokyo-night/);
+      expect(r.openThemePicker).toBeUndefined();
       expect(loadTheme()).toBe("tokyo-night");
     });
 

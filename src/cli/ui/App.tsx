@@ -44,6 +44,7 @@ import {
   resolveThemePreference,
   saveEditMode,
   saveReasoningEffort,
+  saveTheme,
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
@@ -101,6 +102,7 @@ import { SessionPicker } from "./SessionPicker.js";
 import { ShellConfirm, type ShellConfirmChoice, derivePrefix } from "./ShellConfirm.js";
 import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
+import { ThemePicker } from "./ThemePicker.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
 import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broadcast.js";
@@ -153,7 +155,7 @@ import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
 import { ThemeProvider } from "./theme/context.js";
-import { FG } from "./theme/tokens.js";
+import { FG, type ThemeName } from "./theme/tokens.js";
 import { TickerProvider } from "./ticker.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
 import { useEditHistory } from "./useEditHistory.js";
@@ -310,15 +312,22 @@ export function App(props: AppProps): React.ReactElement {
     () => (props.session ? hydrateCardsFromMessages(loadSessionMessages(props.session)) : []),
     [props.session],
   );
-  const themeName = resolveThemePreference(loadTheme(), process.env.REASONIX_THEME);
+  const [themeName, setThemeName] = React.useState<ThemeName>(() =>
+    resolveThemePreference(loadTheme(), process.env.REASONIX_THEME),
+  );
   return (
     <ThemeProvider name={themeName}>
       <AgentStoreProvider session={session} initialCards={initialCards}>
-        <AppInner {...props} />
+        <AppInner {...props} themeName={themeName} setThemeName={setThemeName} />
       </AgentStoreProvider>
     </ThemeProvider>
   );
 }
+
+type AppInnerProps = AppProps & {
+  themeName: ThemeName;
+  setThemeName: React.Dispatch<React.SetStateAction<ThemeName>>;
+};
 
 function AppInner({
   model,
@@ -335,7 +344,9 @@ function AppInner({
   noDashboard,
   onSwitchSession,
   mouse = true,
-}: AppProps) {
+  themeName,
+  setThemeName,
+}: AppInnerProps) {
   markPhase("app_inner_start");
   const log = useScrollback();
   const agentStore = useAgentStore();
@@ -585,6 +596,8 @@ function AppInner({
   const [pendingMcpHub, setPendingMcpHub] = useState<{ tab: "live" | "marketplace" } | null>(null);
   /** True while the ModelPicker is open mid-chat (triggered by bare `/model`). */
   const [pendingModelPicker, setPendingModelPicker] = useState(false);
+  /** True while the ThemePicker is open mid-chat (triggered by bare `/theme`). */
+  const [pendingThemePicker, setPendingThemePicker] = useState(false);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
   // returns "refine" or "approve", we defer the loop-resume and show
@@ -652,6 +665,7 @@ function AppInner({
     !!pendingCheckpointPicker ||
     !!pendingMcpHub ||
     pendingModelPicker ||
+    pendingThemePicker ||
     !!stagedInput ||
     !!pendingEditReview ||
     walkthroughActive ||
@@ -2338,6 +2352,11 @@ function AppInner({
           pushHistory(text);
           return;
         }
+        if (result.openThemePicker) {
+          setPendingThemePicker(true);
+          pushHistory(text);
+          return;
+        }
         if (result.openArgPickerFor) {
           pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
@@ -3607,6 +3626,22 @@ function AppInner({
                       if (outcome.kind === "quit") {
                         setPendingSessionsPicker(false);
                       }
+                    }}
+                  />
+                ) : pendingThemePicker ? (
+                  <ThemePicker
+                    currentPreference={loadTheme() ?? "auto"}
+                    activeTheme={themeName}
+                    onChoose={(outcome) => {
+                      setPendingThemePicker(false);
+                      if (outcome.kind === "quit") return;
+                      saveTheme(outcome.value);
+                      const active = resolveThemePreference(
+                        outcome.value,
+                        process.env.REASONIX_THEME,
+                      );
+                      setThemeName(active);
+                      log.pushInfo(`▸ theme saved: ${outcome.value}\n  active now: ${active}`);
                     }}
                   />
                 ) : pendingModelPicker ? (

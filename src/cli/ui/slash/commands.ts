@@ -43,6 +43,22 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: ["EN", "zh-CN"],
     aliases: ["lang"],
   },
+  {
+    cmd: "theme",
+    group: "setup",
+    argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
+    summary: "show or persist the terminal theme preference. Bare opens picker.",
+    argCompleter: [
+      "auto",
+      "default",
+      "dark",
+      "light",
+      "tokyo-night",
+      "github-dark",
+      "github-light",
+      "high-contrast",
+    ],
+  },
 
   { cmd: "status", group: "info", summary: "current model, flags, context, session" },
   {
@@ -244,21 +260,6 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary:
       "session USD cap — warns at 80%, refuses next turn at 100%. Off by default. /budget alone shows status",
     argCompleter: ["off", "1", "5", "10", "20", "50"],
-  },
-  {
-    cmd: "theme",
-    group: "advanced",
-    argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light]",
-    summary: "show or persist the terminal theme preference",
-    argCompleter: [
-      "auto",
-      "default",
-      "dark",
-      "light",
-      "tokyo-night",
-      "github-dark",
-      "github-light",
-    ],
   },
   {
     cmd: "search-engine",

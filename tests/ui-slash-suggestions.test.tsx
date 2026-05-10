@@ -64,7 +64,7 @@ function hiddenAboveCount(frame: string): number {
 }
 
 describe("SlashSuggestions", () => {
-  it("renders the bare slash release command surface as 37 total commands", () => {
+  it("renders the bare slash release command surface as 38 total commands", () => {
     const matches = suggestSlashCommands("", true);
     const names = matches.map((spec) => spec.cmd);
     const { lastFrame, unmount } = render(
@@ -73,11 +73,11 @@ describe("SlashSuggestions", () => {
     const frame = lastFrame() ?? "";
     unmount();
 
-    expect(matches).toHaveLength(37);
+    expect(matches).toHaveLength(38);
     expect(names).toContain("language");
-    expect(countAdvancedCommands(true)).toBe(12);
-    expect(frame).toContain("37 commands");
-    expect(frame).toContain("+ 12 advanced");
+    expect(countAdvancedCommands(true)).toBe(11);
+    expect(frame).toContain("38 commands");
+    expect(frame).toContain("+ 11 advanced");
   });
 
   it("surfaces /language for typed language prefixes", () => {
