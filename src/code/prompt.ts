@@ -82,7 +82,7 @@ Call shape: \`{ todos: [{ content, activeForm, status }, ...] }\` — \`content\
 # Plan mode (/plan)
 
 The user can ALSO enter "plan mode" via /plan, which is a stronger, explicit constraint:
-- Write tools (edit_file, multi_edit, write_file, create_directory, move_file) and non-allowlisted run_command calls are BOUNCED at dispatch — you'll get a tool result like "unavailable in plan mode". Don't retry them.
+- Write tools (edit_file, multi_edit, write_file, create_directory, move_file, copy_file, delete_file, delete_directory) and non-allowlisted run_command calls are BOUNCED at dispatch — you'll get a tool result like "unavailable in plan mode". Don't retry them.
 - Read tools (read_file, list_directory, search_files, directory_tree, get_file_info) and allowlisted read-only / test shell commands still work — use them to investigate.
 - You MUST call submit_plan before anything will execute. Approve exits plan mode; Refine stays in; Cancel exits without implementing.
 

@@ -656,5 +656,82 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
     },
   });
 
+  registry.register({
+    name: "delete_file",
+    description:
+      "Delete one file under the sandbox root. Refuses directories — use delete_directory for those. Errors if the path doesn't exist.",
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    },
+    fn: async (args: { path: string }) => {
+      const abs = safePath(args.path);
+      const st = await fs.lstat(abs);
+      if (st.isDirectory()) {
+        throw new Error(
+          `delete_file: ${args.path} is a directory — use delete_directory to remove it`,
+        );
+      }
+      await fs.unlink(abs);
+      return `deleted ${displayRel(rootDir, abs)}`;
+    },
+  });
+
+  registry.register({
+    name: "delete_directory",
+    description:
+      "Recursively delete a directory under the sandbox root. Pass `recursive:false` to refuse non-empty directories. Errors if the path doesn't exist.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        recursive: {
+          type: "boolean",
+          description:
+            "When true (default) deletes the directory and all its contents. When false, only removes empty directories — non-empty refuses with an error.",
+        },
+      },
+      required: ["path"],
+    },
+    fn: async (args: { path: string; recursive?: boolean }) => {
+      const abs = safePath(args.path);
+      const st = await fs.lstat(abs);
+      if (!st.isDirectory()) {
+        throw new Error(`delete_directory: ${args.path} is a file — use delete_file to remove it`);
+      }
+      const recursive = args.recursive !== false;
+      // `fs.rm({recursive:false})` rejects every directory regardless of contents;
+      // `fs.rmdir` is the empty-only variant we want when the caller said no recursion.
+      if (recursive) {
+        await fs.rm(abs, { recursive: true, force: false });
+      } else {
+        await fs.rmdir(abs);
+      }
+      return `deleted ${displayRel(rootDir, abs)}/${recursive ? " (recursive)" : ""}`;
+    },
+  });
+
+  registry.register({
+    name: "copy_file",
+    description:
+      "Copy a file or directory under the sandbox root. Both source and destination resolve under the sandbox. Parent directories of the destination are created as needed. Refuses to overwrite an existing destination — delete it first if you want to replace it.",
+    parameters: {
+      type: "object",
+      properties: {
+        source: { type: "string" },
+        destination: { type: "string" },
+      },
+      required: ["source", "destination"],
+    },
+    fn: async (args: { source: string; destination: string }) => {
+      const src = safePath(args.source);
+      const dst = safePath(args.destination);
+      await fs.mkdir(pathMod.dirname(dst), { recursive: true });
+      await fs.cp(src, dst, { recursive: true, force: false, errorOnExist: true });
+      return `copied ${displayRel(rootDir, src)} → ${displayRel(rootDir, dst)}`;
+    },
+  });
+
   return registry;
 }

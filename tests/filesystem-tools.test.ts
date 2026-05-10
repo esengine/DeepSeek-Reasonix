@@ -862,7 +862,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
   });
 
   describe("allowWriting=false (read-only mode)", () => {
-    it("skips registering write_file / edit_file / multi_edit / create_directory / move_file", async () => {
+    it("skips registering write_file / edit_file / multi_edit / create_directory / move_file / delete_file / delete_directory / copy_file", async () => {
       const ro = new ToolRegistry();
       registerFilesystemTools(ro, { rootDir: root, allowWriting: false });
       expect(ro.has("read_file")).toBe(true);
@@ -873,6 +873,113 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(ro.has("multi_edit")).toBe(false);
       expect(ro.has("create_directory")).toBe(false);
       expect(ro.has("move_file")).toBe(false);
+      expect(ro.has("delete_file")).toBe(false);
+      expect(ro.has("delete_directory")).toBe(false);
+      expect(ro.has("copy_file")).toBe(false);
+    });
+  });
+
+  describe("delete_file / delete_directory / copy_file", () => {
+    it("delete_file removes a regular file", async () => {
+      const out = await tools.dispatch("delete_file", JSON.stringify({ path: "hello.txt" }));
+      expect(out).toMatch(/deleted/);
+      await expect(fs.stat(join(root, "hello.txt"))).rejects.toThrow();
+    });
+
+    it("delete_file refuses a directory and points at delete_directory", async () => {
+      const out = await tools.dispatch("delete_file", JSON.stringify({ path: "src" }));
+      expect(out).toMatch(/is a directory/);
+      expect(out).toMatch(/delete_directory/);
+      const st = await fs.stat(join(root, "src"));
+      expect(st.isDirectory()).toBe(true);
+    });
+
+    it("delete_file errors on a missing path", async () => {
+      const out = await tools.dispatch("delete_file", JSON.stringify({ path: "no-such-file.txt" }));
+      expect(out).toMatch(/error/i);
+    });
+
+    it("delete_directory removes recursively by default", async () => {
+      const out = await tools.dispatch("delete_directory", JSON.stringify({ path: "src" }));
+      expect(out).toMatch(/recursive/);
+      await expect(fs.stat(join(root, "src"))).rejects.toThrow();
+    });
+
+    it("delete_directory with recursive:false removes empty dirs but refuses non-empty", async () => {
+      await fs.mkdir(join(root, "empty"));
+      const okOut = await tools.dispatch(
+        "delete_directory",
+        JSON.stringify({ path: "empty", recursive: false }),
+      );
+      expect(okOut).toMatch(/deleted/);
+      const failOut = await tools.dispatch(
+        "delete_directory",
+        JSON.stringify({ path: "src", recursive: false }),
+      );
+      expect(failOut).toMatch(/error/i);
+      const st = await fs.stat(join(root, "src"));
+      expect(st.isDirectory()).toBe(true);
+    });
+
+    it("delete_directory refuses a regular file and points at delete_file", async () => {
+      const out = await tools.dispatch("delete_directory", JSON.stringify({ path: "hello.txt" }));
+      expect(out).toMatch(/is a file/);
+      expect(out).toMatch(/delete_file/);
+    });
+
+    it("copy_file copies a regular file", async () => {
+      const out = await tools.dispatch(
+        "copy_file",
+        JSON.stringify({ source: "hello.txt", destination: "copy.txt" }),
+      );
+      expect(out).toMatch(/copied/);
+      const original = await fs.readFile(join(root, "hello.txt"), "utf8");
+      const copy = await fs.readFile(join(root, "copy.txt"), "utf8");
+      expect(copy).toBe(original);
+    });
+
+    it("copy_file recursively copies a directory", async () => {
+      await tools.dispatch(
+        "copy_file",
+        JSON.stringify({ source: "src", destination: "src-backup" }),
+      );
+      const indexCopy = await fs.readFile(join(root, "src-backup", "index.ts"), "utf8");
+      expect(indexCopy).toContain("export const x = 1;");
+      const utilCopy = await fs.readFile(join(root, "src-backup", "util.ts"), "utf8");
+      expect(utilCopy).toContain("export const y = 2;");
+    });
+
+    it("copy_file creates parent directories of the destination", async () => {
+      await tools.dispatch(
+        "copy_file",
+        JSON.stringify({ source: "hello.txt", destination: "archive/copy.txt" }),
+      );
+      const copy = await fs.readFile(join(root, "archive", "copy.txt"), "utf8");
+      expect(copy).toContain("line 1");
+    });
+
+    it("copy_file refuses to overwrite an existing destination", async () => {
+      await fs.writeFile(join(root, "occupied.txt"), "preserve me");
+      const out = await tools.dispatch(
+        "copy_file",
+        JSON.stringify({ source: "hello.txt", destination: "occupied.txt" }),
+      );
+      expect(out).toMatch(/error/i);
+      const survived = await fs.readFile(join(root, "occupied.txt"), "utf8");
+      expect(survived).toBe("preserve me");
+    });
+
+    it("delete_file refuses paths outside the sandbox", async () => {
+      const out = await tools.dispatch("delete_file", JSON.stringify({ path: "../escape.txt" }));
+      expect(out).toMatch(/error/i);
+    });
+
+    it("copy_file refuses sources outside the sandbox", async () => {
+      const out = await tools.dispatch(
+        "copy_file",
+        JSON.stringify({ source: "../escape.txt", destination: "ok.txt" }),
+      );
+      expect(out).toMatch(/error/i);
     });
   });
 
