@@ -62,6 +62,51 @@ interface RuntimeContext {
   progressSink: { current: ((info: ProgressInfo) => void) | null };
 }
 
+export type McpLifecycleNotice =
+  | { kind: "handshake"; name: string }
+  | {
+      kind: "connected";
+      name: string;
+      tools: number;
+      resources: number;
+      prompts: number;
+      ms: number;
+    }
+  | { kind: "disabled"; name: string }
+  | { kind: "failed"; name: string; reason: string }
+  | { kind: "slow"; serverName: string; p95Ms: number; sampleSize: number };
+
+export type McpLifecycleSink = (notice: McpLifecycleNotice) => void;
+
+const stderrLifecycleSink: McpLifecycleSink = (n) => {
+  if (n.kind === "slow") {
+    process.stderr.write(
+      `${formatMcpSlowToast({ name: n.serverName, p95Ms: n.p95Ms, sampleSize: n.sampleSize })}\n`,
+    );
+    return;
+  }
+  if (n.kind === "failed") {
+    process.stderr.write(
+      `${formatMcpLifecycleEvent({ state: "failed", name: n.name, reason: n.reason })}\n  → run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).\n`,
+    );
+    return;
+  }
+  if (n.kind === "connected") {
+    process.stderr.write(
+      `${formatMcpLifecycleEvent({
+        state: "connected",
+        name: n.name,
+        tools: n.tools,
+        resources: n.resources,
+        prompts: n.prompts,
+        ms: n.ms,
+      })}\n`,
+    );
+    return;
+  }
+  process.stderr.write(`${formatMcpLifecycleEvent({ state: n.kind, name: n.name })}\n`);
+};
+
 export interface McpRuntime {
   size(): number;
   specs(): string[];
@@ -78,11 +123,14 @@ export interface McpRuntime {
     summaries: McpServerSummary[];
   }>;
   closeAll(): Promise<void>;
+  /** Replace the sink that lifecycle events flow through — App.tsx swaps this in on mount so toasts land in the alt-screen UI instead of corrupting it via stderr. */
+  setLifecycleSink(sink: McpLifecycleSink): void;
 }
 
 function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
   const records = new Map<string, SpecRecord>();
   const insertionOrder: string[] = [];
+  let sink: McpLifecycleSink = stderrLifecycleSink;
 
   async function addSpec(
     raw: string,
@@ -100,10 +148,10 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       const spec = parseMcpSpec(raw);
       label = spec.name ?? "anon";
       if (spec.name && disabledNames.has(spec.name)) {
-        process.stderr.write(`${formatMcpLifecycleEvent({ state: "disabled", name: label })}\n`);
+        sink({ kind: "disabled", name: label });
         return { ok: false, reason: "disabled by user" };
       }
-      process.stderr.write(`${formatMcpLifecycleEvent({ state: "handshake", name: label })}\n`);
+      sink({ kind: "handshake", name: label });
       const t0 = Date.now();
       const namePrefix = spec.name
         ? `${spec.name}_`
@@ -127,9 +175,12 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         host,
         onProgress: (info) => ctx.progressSink.current?.(info),
         onSlow: (info) =>
-          process.stderr.write(
-            `${formatMcpSlowToast({ name: info.serverName, p95Ms: info.p95Ms, sampleSize: info.sampleSize })}\n`,
-          ),
+          sink({
+            kind: "slow",
+            serverName: info.serverName,
+            p95Ms: info.p95Ms,
+            sampleSize: info.sampleSize,
+          }),
       });
       let report: InspectionReport;
       try {
@@ -148,16 +199,14 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       const ms = Date.now() - t0;
       const resourceCount = report.resources.supported ? report.resources.items.length : 0;
       const promptCount = report.prompts.supported ? report.prompts.items.length : 0;
-      process.stderr.write(
-        `${formatMcpLifecycleEvent({
-          state: "connected",
-          name: label,
-          tools: bridge.registeredNames.length,
-          resources: resourceCount,
-          prompts: promptCount,
-          ms,
-        })}\n`,
-      );
+      sink({
+        kind: "connected",
+        name: label,
+        tools: bridge.registeredNames.length,
+        resources: resourceCount,
+        prompts: promptCount,
+        ms,
+      });
       const summary = buildMcpServerSummary({
         label,
         spec: raw,
@@ -186,9 +235,7 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     } catch (err) {
       await mcp?.close().catch(() => undefined);
       const reason = (err as Error).message;
-      process.stderr.write(
-        `${formatMcpLifecycleEvent({ state: "failed", name: label, reason })}\n  → run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).\n`,
-      );
+      sink({ kind: "failed", name: label, reason });
       return { ok: false, reason };
     }
   }
@@ -249,6 +296,9 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     records.clear();
     insertionOrder.length = 0;
   }
+  function setLifecycleSink(s: McpLifecycleSink): void {
+    sink = s;
+  }
   return {
     size: () => records.size,
     specs,
@@ -257,6 +307,7 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     removeSpec,
     reloadFromConfig,
     closeAll,
+    setLifecycleSink,
   };
 }
 
@@ -454,24 +505,10 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     progressSink,
   });
 
-  const failedSpecs: Array<{ spec: string; reason: string }> = [];
-  if (requestedSpecs.length > 0) markPhase("mcp_launch");
-  for (const raw of requestedSpecs) {
-    const result = await runtime.addSpec(raw);
-    if (!result.ok) failedSpecs.push({ spec: raw, reason: result.reason });
-  }
-  if (requestedSpecs.length > 0) {
-    markPhase(
-      `mcp_connected_${requestedSpecs.length - failedSpecs.length}_of_${requestedSpecs.length}`,
-    );
-  }
-  if (runtime.size() === 0 && !opts.seedTools) {
-    tools = undefined;
-  }
-  // Preserve configured specs even when startup leaves them unbridged
-  // so `/mcp` can still surface the configured-but-offline set.
+  // MCP bridging deferred to App.tsx mount — handshakes are 100ms–2s each
+  // and we don't want the alt-screen UI to block on the slowest one.
   const mcpSpecs = [...requestedSpecs];
-  const mcpServers = runtime.summaries();
+  const mcpServers: McpServerSummary[] = [];
 
   // Register web search/fetch tools unless explicitly disabled. DDG
   // backs them with no key required; the model invokes them whenever

@@ -149,7 +149,9 @@ import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
+import { formatMcpLifecycleEvent } from "./mcp-lifecycle.js";
 import { replaceMcpServerSummary } from "./mcp-server-list.js";
+import { formatMcpSlowToast } from "./mcp-toast.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
@@ -843,6 +845,52 @@ function AppInner({
   useEffect(() => {
     loop.hooks = hookList;
   }, [loop, hookList]);
+
+  // Deferred MCP bridge — fire addSpec for each requested server in the
+  // background instead of blocking startup, route lifecycle events to
+  // the in-app log so they don't corrupt alt-screen via stderr.
+  const mcpBridgeStartedRef = useRef(false);
+  useEffect(() => {
+    if (mcpBridgeStartedRef.current) return;
+    if (!mcpRuntime || !mcpSpecs || mcpSpecs.length === 0) return;
+    mcpBridgeStartedRef.current = true;
+    mcpRuntime.setLifecycleSink((notice) => {
+      if (notice.kind === "handshake") {
+        log.pushInfo(formatMcpLifecycleEvent({ state: "handshake", name: notice.name }));
+      } else if (notice.kind === "connected") {
+        log.pushInfo(
+          formatMcpLifecycleEvent({
+            state: "connected",
+            name: notice.name,
+            tools: notice.tools,
+            resources: notice.resources,
+            prompts: notice.prompts,
+            ms: notice.ms,
+          }),
+        );
+      } else if (notice.kind === "disabled") {
+        log.pushInfo(formatMcpLifecycleEvent({ state: "disabled", name: notice.name }));
+      } else if (notice.kind === "failed") {
+        log.pushWarning(
+          `MCP · ${notice.name} failed`,
+          `${notice.reason}\n→ run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).`,
+        );
+      } else if (notice.kind === "slow") {
+        log.pushInfo(
+          formatMcpSlowToast({
+            name: notice.serverName,
+            p95Ms: notice.p95Ms,
+            sampleSize: notice.sampleSize,
+          }),
+        );
+      }
+    });
+    for (const spec of mcpSpecs) {
+      void mcpRuntime.addSpec(spec, loop).then(() => {
+        setLiveMcpServers(mcpRuntime.summaries());
+      });
+    }
+  }, [mcpRuntime, mcpSpecs, loop, log]);
 
   // Ambient session info (balance, model catalog, latest published
   // version) — three independent mount-time fetches behind one hook

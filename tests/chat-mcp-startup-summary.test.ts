@@ -216,18 +216,15 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
     vi.restoreAllMocks();
   });
 
-  it("passes live bridged servers into the initial MCP props", async () => {
+  it("passes mcpSpecs through with empty initial mcpServers — bridging is deferred to App mount", async () => {
     const props = await captureStartupState();
 
     expect(props.mcpSpecs).toEqual(["fs=npx -y @scope/fs /tmp"]);
-    expect(props.mcpServers).toHaveLength(1);
-    expect(props.mcpServers[0]).toMatchObject({
-      label: "fs",
-      spec: "fs=npx -y @scope/fs /tmp",
-    });
+    expect(props.mcpServers).toEqual([]);
+    expect(mocks.bridgeMcpToolsMock).not.toHaveBeenCalled();
   });
 
-  it("preserves disabled startup specs for marketplace fallback even with no live servers", async () => {
+  it("preserves disabled startup specs for marketplace fallback — App.tsx skips them on mount", async () => {
     const props = await captureStartupState({
       readConfig: { mcpDisabled: ["fs"] },
     });
@@ -237,12 +234,13 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
     expect(mocks.bridgeMcpToolsMock).not.toHaveBeenCalled();
   });
 
-  it("preserves unbridged startup specs when startup fails before a live summary exists", async () => {
+  it("never blocks chatCommand on bridge failure — App.tsx surfaces the lifecycle error post-mount", async () => {
     const props = await captureStartupState({
       initializeError: new Error("spawn failed"),
     });
 
     expect(props.mcpSpecs).toEqual(["fs=npx -y @scope/fs /tmp"]);
     expect(props.mcpServers).toEqual([]);
+    expect(mocks.initializeMock).not.toHaveBeenCalled();
   });
 });
