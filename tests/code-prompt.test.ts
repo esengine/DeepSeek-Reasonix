@@ -62,6 +62,36 @@ describe("codeSystemPrompt", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/not a sub-profile/);
   });
 
+  describe("audit-mode rails (#610)", () => {
+    it("warns against theorizing on auto-preview output instead of reading the dispatch site", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/Auto-preview is for locating, not auditing/);
+      expect(CODE_SYSTEM_PROMPT).toMatch(/range:"A-B"/);
+    });
+
+    it("requires a flag-to-consumer trace before claiming runtime behavior", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/Flag → consumer trace/);
+      expect(CODE_SYSTEM_PROMPT).toMatch(/parallelSafe\?: boolean/);
+    });
+
+    it("forbids fabricated percentages without a measurement", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/No fabricated percentages/);
+      expect(CODE_SYSTEM_PROMPT).toMatch(/40-60% tokens/);
+    });
+
+    it("requires accounting for schema cost before proposing a new tool", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/Schema cost is real/);
+      expect(CODE_SYSTEM_PROMPT).toMatch(/tighten prompt \/ existing tool/);
+    });
+
+    it("treats MEMORY.md feedback as part of the design space", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/MEMORY\.md is part of the design space/);
+    });
+
+    it("flags promoting user-facing features to model tools as a category error", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/User-facing ≠ model-facing/);
+    });
+  });
+
   describe("semantic_search routing fragment", () => {
     it("is absent by default (no index registered)", () => {
       const out = codeSystemPrompt(root);
