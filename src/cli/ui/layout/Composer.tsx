@@ -1,14 +1,10 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { useAgentState } from "../state/provider.js";
 import { useThemeTokens } from "../theme/context.js";
 import { StatusRow } from "./StatusRow.js";
-
-const PLACEHOLDER = "type a message · / for commands · @ to attach a file";
-const HINT =
-  "⏎ send  ·  shift/alt+⏎ newline  ·  ↑↓ scroll  ·  ^P/^N history  ·  esc abort  ·  ctrl-c quit";
-const ABORTED_HINT = "turn aborted by user · esc again to clear · ⏎ to ask a follow-up";
 
 export function Composer(): React.ReactElement {
   const composer = useAgentState((s) => s.composer);
@@ -23,7 +19,7 @@ export function Composer(): React.ReactElement {
           {composer.shell ? "$" : "›"}{" "}
         </Text>
         {composer.value.length === 0 ? (
-          <Text color={fg.meta}>{PLACEHOLDER}</Text>
+          <Text color={fg.meta}>{t("composer.placeholder")}</Text>
         ) : (
           <Text color={fg.body}>{composer.value}</Text>
         )}
@@ -31,7 +27,7 @@ export function Composer(): React.ReactElement {
       <Box height={1} />
       <Text color={fg.faint}>
         {"  "}
-        {composer.abortedHint ? ABORTED_HINT : HINT}
+        {composer.abortedHint ? t("composer.abortedHint") : t("composer.hint")}
       </Text>
     </Box>
   );

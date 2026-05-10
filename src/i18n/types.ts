@@ -323,6 +323,44 @@ export interface TranslationSchema {
       counterDoneSingular: string;
     };
   };
+  statusBar: {
+    turn: string;
+    cache: string;
+    spent: string;
+    left: string;
+    slow: string;
+    disconnect: string;
+    reconnecting: string;
+    approvingIn: string;
+    escToInterrupt: string;
+    recordingGlyph: string;
+    mb: string;
+    evt: string;
+  };
+  editMode: {
+    plan: string;
+    yolo: string;
+    auto: string;
+    review: string;
+    writesGated: string;
+    editsShellAuto: string;
+    editsLandNow: string;
+    queuedApplyDiscard: string;
+    editsQueued: string;
+    shiftTabFlip: string;
+    queuedDots: string;
+  };
+  composer: {
+    placeholder: string;
+    waitingForResponse: string;
+    hintSend: string;
+    hintNewline: string;
+    hintScroll: string;
+    hintHistory: string;
+    hintAbort: string;
+    hintQuit: string;
+    abortedHint: string;
+  };
   cardTitles: {
     usage: string;
     context: string;

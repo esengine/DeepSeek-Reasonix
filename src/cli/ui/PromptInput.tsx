@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React as a runtime value (classic transform compiles JSX to React.createElement)
 import React, { useRef, useState } from "react";
+import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { useReserveRows } from "./layout/viewport-budget.js";
 import { type MultilineKey, lineAndColumn, processMultilineKey } from "./multiline-keys.js";
@@ -155,8 +156,8 @@ export function PromptInput({
   // Hint avoids literal `/` and `@` glyphs — they render in the same row as
   // a just-cleared buffer and read as residual typed input on dim-poor terminals.
   const effectivePlaceholder = disabled
-    ? (placeholder ?? "…waiting for response…")
-    : (placeholder ?? "ask anything  ·  slash for commands  ·  at-sign for files");
+    ? (placeholder ?? t("composer.waitingForResponse"))
+    : (placeholder ?? t("composer.placeholder"));
 
   const lines = value.length > 0 ? value.split("\n") : [""];
   const accentColor = disabled ? FG.faint : TONE.brand;
@@ -300,22 +301,22 @@ export function PromptInput({
 }
 
 function HintRow(): React.ReactElement {
-  const items: Array<{ key: string; sep: string }> = [
-    { key: "⏎", sep: "send" },
-    { key: "⇧⏎", sep: "newline" },
-    { key: "↑↓", sep: "scroll" },
-    { key: "^P/^N", sep: "history" },
-    { key: "esc", sep: "abort" },
-    { key: "^C", sep: "quit" },
+  const items: Array<{ key: string; tKey: string }> = [
+    { key: "\u23ce", tKey: "composer.hintSend" },
+    { key: "\u21e7\u23ce", tKey: "composer.hintNewline" },
+    { key: "\u2191\u2193", tKey: "composer.hintScroll" },
+    { key: "^P/^N", tKey: "composer.hintHistory" },
+    { key: "esc", tKey: "composer.hintAbort" },
+    { key: "^C", tKey: "composer.hintQuit" },
   ];
   return (
     <Box flexDirection="row">
       <Text>{"  "}</Text>
       {items.map((item, i) => (
         <React.Fragment key={item.key}>
-          {i > 0 && <Text color={FG.faint}>{"  ·  "}</Text>}
+          {i > 0 && <Text color={FG.faint}>{"  \u00b7  "}</Text>}
           <Text color={FG.meta}>{item.key}</Text>
-          <Text color={FG.faint}>{` ${item.sep}`}</Text>
+          <Text color={FG.faint}>{` ${t(item.tKey)}`}</Text>
         </React.Fragment>
       ))}
     </Box>

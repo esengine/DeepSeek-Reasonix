@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { VERSION } from "../../../version.js";
 import { Countdown } from "../primitives/Countdown.js";
 import { useAgentState } from "../state/provider.js";
@@ -50,7 +51,7 @@ export function StatusRow(): React.ReactElement {
               {"▸ "}
             </Text>
             <Text bold color={FG.body} wrap="truncate">
-              {`${formatCost(status.cost, status.balanceCurrency)} turn`}
+              {`${formatCost(status.cost, status.balanceCurrency)} ${t("statusBar.turn")}`}
             </Text>
           </>
         )}
@@ -58,7 +59,7 @@ export function StatusRow(): React.ReactElement {
         <Text
           color={TONE.accent}
           wrap="truncate"
-        >{`cache ${Math.round(status.cacheHit * 100)}%`}</Text>
+        >{`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}</Text>
         {showWallet && (
           <WalletPill
             sessionCostUsd={status.sessionCost}
@@ -111,7 +112,7 @@ function WalletPill({
         <Text
           color={FG.body}
           wrap="truncate"
-        >{`${formatCost(sessionCostUsd, currency, 2)} spent`}</Text>
+        >{`${formatCost(sessionCostUsd, currency, 2)} ${t("statusBar.spent")}`}</Text>
       )}
       {showSpent && showBalance && (
         <Text color={FG.meta} wrap="truncate">
@@ -125,7 +126,7 @@ function WalletPill({
       )}
       {showBalance && (
         <Text color={FG.faint} wrap="truncate">
-          {" left"}
+          {t("statusBar.left")}
         </Text>
       )}
     </>
@@ -160,7 +161,7 @@ function ModePill({
         <Text color={dot.color} wrap="truncate">
           {dot.glyph}
         </Text>
-        <Text color={dot.color} wrap="truncate">{` ${mode} · slow${tail}`}</Text>
+        <Text color={dot.color} wrap="truncate">{` ${mode} · ${t("statusBar.slow")}${tail}`}</Text>
       </Box>
     );
   }
@@ -171,7 +172,7 @@ function ModePill({
         <Text color={dot.color} wrap="truncate">
           {dot.glyph}
         </Text>
-        <Text color={dot.color} wrap="truncate">{` disconnect${tail}`}</Text>
+        <Text color={dot.color} wrap="truncate">{` ${t("statusBar.disconnect")}${tail}`}</Text>
       </Box>
     );
   }
@@ -181,7 +182,7 @@ function ModePill({
         {dot.glyph}
       </Text>
       <Text color={dot.color} wrap="truncate">
-        {" reconnecting…"}
+        {` ${t("statusBar.reconnecting")}`}
       </Text>
     </Box>
   );
@@ -203,11 +204,11 @@ function CountdownRow({
       </Text>
       <Text color={FG.sub} wrap="truncate">{` ${mode}   ·   `}</Text>
       <Text color={TONE.warn} wrap="truncate">
-        {"approving in "}
+        {t("statusBar.approvingIn")}
       </Text>
       <Countdown endsAt={endsAt} />
       <Text color={TONE.warn} wrap="truncate">
-        {"s · esc to interrupt"}
+        {t("statusBar.escToInterrupt")}
       </Text>
     </Box>
   );
@@ -218,9 +219,12 @@ function RecordingPill({ rec }: { rec: NonNullable<StatusBar["recording"]> }): R
   return (
     <Box flexDirection="row" height={1} flexWrap="nowrap">
       <Text bold color={TONE.err} wrap="truncate">
-        {"●REC"}
+        {t("statusBar.recordingGlyph")}
       </Text>
-      <Text color={TONE.err} wrap="truncate">{` ${sizeMb} MB · ${rec.events} evt`}</Text>
+      <Text
+        color={TONE.err}
+        wrap="truncate"
+      >{` ${sizeMb}${t("statusBar.mb")} · ${rec.events}${t("statusBar.evt")}`}</Text>
     </Box>
   );
 }

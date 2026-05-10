@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import type { ApplyResult } from "../../../code/edit-blocks.js";
 import type { EditMode } from "../../../config.js";
+import { t } from "../../../i18n/index.js";
 import type { JobRegistry } from "../../../tools/jobs.js";
 import { CharBar } from "../char-bar.js";
 import { Card } from "../primitives/Card.js";
@@ -56,26 +57,31 @@ export function ModeStatusBar({
   if (planMode) {
     return (
       <ModeBarFrame>
-        <ModePill label="PLAN MODE" color={TONE.err} flash={flash} />
-        <Text color={FG.faint}>{"   writes gated · /plan off to leave"}</Text>
+        <ModePill label={t("editMode.plan")} color={TONE.err} flash={flash} />
+        <Text color={FG.faint}>{t("editMode.writesGated")}</Text>
         {jobsTag}
       </ModeBarFrame>
     );
   }
-  const label = editMode === "yolo" ? "YOLO" : editMode === "auto" ? "AUTO" : "REVIEW";
+  const label =
+    editMode === "yolo"
+      ? t("editMode.yolo")
+      : editMode === "auto"
+        ? t("editMode.auto")
+        : t("editMode.review");
   const pillColor = editMode === "yolo" ? TONE.err : editMode === "auto" ? TONE.accent : TONE.brand;
   const mid =
     editMode === "yolo"
-      ? "edits + shell auto · /undo to roll back"
+      ? t("editMode.editsShellAuto")
       : editMode === "auto"
-        ? "edits land now · u to undo"
+        ? t("editMode.editsLandNow")
         : pendingCount > 0
-          ? `${pendingCount} queued · y apply · n discard`
-          : "edits queued · y apply · n discard";
+          ? t("editMode.queuedApplyDiscard", { count: pendingCount })
+          : t("editMode.editsQueued");
   return (
     <ModeBarFrame>
       <ModePill label={label} color={pillColor} flash={flash} />
-      <Text color={FG.faint}>{`   ${mid} · Shift+Tab to flip`}</Text>
+      <Text color={FG.faint}>{t("editMode.shiftTabFlip", { mid })}</Text>
       {jobsTag}
     </ModeBarFrame>
   );
@@ -199,7 +205,7 @@ export function SubagentRow({ activity }: { activity: SubagentActivity }) {
             {last.meta ? <Text color={FG.faint}>{`   ${last.meta}`}</Text> : null}
           </>
         ) : (
-          <Text color={FG.faint}>queued…</Text>
+          <Text color={FG.faint}>{t("editMode.queuedDots")}</Text>
         )}
       </Text>
       <Text color={TONE.brand}>
@@ -276,7 +282,7 @@ function CompactSubagentLine({
           {last.meta ? <Text color={FG.faint}>{`  ${last.meta}`}</Text> : null}
         </>
       ) : (
-        <Text color={FG.faint}>queued…</Text>
+        <Text color={FG.faint}>{t("editMode.queuedDots")}</Text>
       )}
     </Box>
   );
