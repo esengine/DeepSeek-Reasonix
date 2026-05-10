@@ -132,6 +132,10 @@ export const EN: TranslationSchema = {
           rows: [
             { key: "select text", text: "drag to select — terminal-native (no modifier needed)" },
             {
+              key: "/copy",
+              text: "vim/tmux-style copy mode — works in SSH/mosh/tmux where drag-select can't extend past the viewport",
+            },
+            {
               key: "copy",
               text: "Ctrl+Shift+C (Win/Linux) · Cmd+C (macOS) — or auto-copy-on-select if your terminal does it",
             },
@@ -214,6 +218,9 @@ export const EN: TranslationSchema = {
   },
   slash: {
     help: { description: "show the full command reference" },
+    copy: {
+      description: "open vim/tmux-style copy mode — j/k navigate, v select, y yank to clipboard",
+    },
     status: { description: "current model, flags, context, session" },
     preset: {
       description: "model bundle — auto escalates flash → pro, flash/pro lock",
@@ -1284,5 +1291,18 @@ export const EN: TranslationSchema = {
     categoryFeedback: "feedback",
     categoryProject: "project",
     categoryReference: "reference",
+  },
+  copyMode: {
+    title: "── COPY MODE ──",
+    help: "j/k or ↑/↓ move · v select · y yank · g/G top/bottom · q quit",
+    statusBar: "line {cur}/{total} · selection: {sel}",
+    statusYanked: "yanked {size} chars (osc52={osc52})",
+    statusEmpty: "nothing selected",
+    empty: "(no chat content yet — say something to the model first)",
+    labelUser: "you",
+    labelAssistant: "assistant",
+    labelReasoning: "reasoning",
+    yankedToast: "▸ copied {size} chars to clipboard (osc52)",
+    yankedToastFile: "▸ copied {size} chars · file: {path}",
   },
 };

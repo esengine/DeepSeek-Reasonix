@@ -127,6 +127,10 @@ export const zhCN: TranslationSchema = {
           rows: [
             { key: "选中文字", text: "直接拖动 — 终端原生（不需要任何修饰键）" },
             {
+              key: "/copy",
+              text: "vim/tmux 风格复制模式 — SSH / mosh / tmux 下拖选越过可视区无效时用这个",
+            },
+            {
               key: "复制",
               text: "Ctrl+Shift+C（Win/Linux）· Cmd+C（macOS）— 或选中即复制（看终端设置）",
             },
@@ -209,6 +213,9 @@ export const zhCN: TranslationSchema = {
   },
   slash: {
     help: { description: "显示完整命令参考" },
+    copy: {
+      description: "进入 vim/tmux 风格复制模式 — j/k 移动、v 起选区、y 复制到剪贴板",
+    },
     status: { description: "当前模型、标志、上下文、会话" },
     preset: {
       description: "模型组合 — 自动在 flash → pro 之间切换，或锁定 flash/pro",
@@ -1220,5 +1227,18 @@ export const zhCN: TranslationSchema = {
     categoryFeedback: "反馈",
     categoryProject: "项目",
     categoryReference: "参考",
+  },
+  copyMode: {
+    title: "── 复制模式 ──",
+    help: "j/k 或 ↑/↓ 移动 · v 起选区 · y 复制 · g/G 顶/底 · q 退出",
+    statusBar: "第 {cur}/{total} 行 · 选区：{sel}",
+    statusYanked: "已复制 {size} 字符（osc52={osc52}）",
+    statusEmpty: "未选中内容",
+    empty: "（还没有聊天内容 — 先和模型说点什么）",
+    labelUser: "你",
+    labelAssistant: "助手",
+    labelReasoning: "推理",
+    yankedToast: "▸ 已复制 {size} 字符到剪贴板 (osc52)",
+    yankedToastFile: "▸ 已复制 {size} 字符 · 文件：{path}",
   },
 };

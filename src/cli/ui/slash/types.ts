@@ -18,6 +18,8 @@ export interface SlashResult {
   openThemePicker?: boolean;
   /** Open the unified MCP hub — `/mcp` defaults to "live", `/mcp browse` to "marketplace". */
   openMcpHub?: { tab: "live" | "marketplace" };
+  /** Open the vim/tmux-style copy mode — yank chat text to clipboard via OSC 52. */
+  openCopyMode?: boolean;
   /** Open the arg-completer picker for this command (e.g. `/language` → language picker). */
   openArgPickerFor?: string;
   /** Exit the app. */

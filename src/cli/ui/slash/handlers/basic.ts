@@ -146,6 +146,8 @@ const keys: SlashHandler = (_args, _loop, ctx) => {
   return {};
 };
 
+const copy: SlashHandler = () => ({ openCopyMode: true });
+
 export const handlers: Record<string, SlashHandler> = {
   exit,
   new: resetLog,
@@ -153,4 +155,5 @@ export const handlers: Record<string, SlashHandler> = {
   retry,
   loop,
   keys,
+  copy,
 };

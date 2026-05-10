@@ -130,6 +130,11 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "keyboard + mouse + copy/paste reference",
   },
   {
+    cmd: "copy",
+    group: "chat",
+    summary: "vim/tmux-style copy mode — j/k navigate, v select, y yank to clipboard",
+  },
+  {
     cmd: "feedback",
     group: "info",
     summary: "open a GitHub issue with diagnostic info copied to clipboard",

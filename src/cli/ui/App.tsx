@@ -105,6 +105,7 @@ import { SlashSuggestions } from "./SlashSuggestions.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
+import { CopyMode } from "./copy-mode/CopyMode.js";
 import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broadcast.js";
 import { useViewerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { formatEditResults } from "./edit-history.js";
@@ -526,6 +527,7 @@ function AppInner({
   const [pendingModelPicker, setPendingModelPicker] = useState(false);
   /** True while the ThemePicker is open mid-chat (triggered by bare `/theme`). */
   const [pendingThemePicker, setPendingThemePicker] = useState(false);
+  const [pendingCopyMode, setPendingCopyMode] = useState(false);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
   // returns "refine" or "approve", we defer the loop-resume and show
@@ -594,6 +596,7 @@ function AppInner({
     !!pendingMcpHub ||
     pendingModelPicker ||
     pendingThemePicker ||
+    pendingCopyMode ||
     !!stagedInput ||
     !!pendingEditReview ||
     walkthroughActive ||
@@ -2297,6 +2300,11 @@ function AppInner({
           pushHistory(text);
           return;
         }
+        if (result.openCopyMode) {
+          setPendingCopyMode(true);
+          pushHistory(text);
+          return;
+        }
         if (result.openArgPickerFor) {
           pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
@@ -3579,6 +3587,23 @@ function AppInner({
                       );
                       setThemeName(active);
                       log.pushInfo(`▸ theme saved: ${outcome.value}\n  active now: ${active}`);
+                    }}
+                  />
+                ) : pendingCopyMode ? (
+                  <CopyMode
+                    cards={agentStore.getState().cards}
+                    onClose={(yanked) => {
+                      setPendingCopyMode(false);
+                      if (yanked) {
+                        const path = yanked.filePath;
+                        const info = yanked.osc52
+                          ? t("copyMode.yankedToast", { size: yanked.size })
+                          : t("copyMode.yankedToastFile", {
+                              size: yanked.size,
+                              path: path ?? "—",
+                            });
+                        log.pushInfo(info);
+                      }
                     }}
                   />
                 ) : pendingModelPicker ? (
