@@ -61,6 +61,14 @@ as flash when asked.
   the resolved session model through. The public `CODE_SYSTEM_PROMPT`
   const is preserved for backward compat. (#582, #592)
 
+- fix(ui): pressing `/` on the empty home screen left the bordered
+  WelcomeBanner mounted while `SlashSuggestions` rendered below — both
+  occupied the same flex column so the frame buffer interleaved them
+  and the welcome card border drew through the menu rows. The empty-
+  state guard now also requires `slashMatches === null`, so the
+  welcome card yields the moment the menu opens and returns when it
+  closes. (#594)
+
 - fix(ui): wheel-up felt laggy because `schedule()` was trailing-edge —
   every tick paid a 16 ms timer before any visual feedback, and on
   top of Ink reconcile + Yoga layout a single tick cost 30-50 ms
