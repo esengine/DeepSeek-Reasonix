@@ -68,6 +68,11 @@ describe("codeSystemPrompt", () => {
       expect(CODE_SYSTEM_PROMPT).toMatch(/range:"A-B"/);
     });
 
+    it("covers doc freshness and architectural-state claims, not just runtime behavior", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/runtime behavior, current architectural state/);
+      expect(CODE_SYSTEM_PROMPT).toMatch(/whether a plan doc is still accurate/);
+    });
+
     it("requires a flag-to-consumer trace before claiming runtime behavior", () => {
       expect(CODE_SYSTEM_PROMPT).toMatch(/Flag → consumer trace/);
       expect(CODE_SYSTEM_PROMPT).toMatch(/parallelSafe\?: boolean/);
