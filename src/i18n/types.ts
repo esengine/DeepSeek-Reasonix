@@ -364,7 +364,6 @@ export interface TranslationSchema {
     hintAbort: string;
     hintQuit: string;
     abortedHint: string;
-    hintClear: string;
   };
   shellConfirm: {
     title: string;
@@ -505,126 +504,6 @@ export interface TranslationSchema {
     fetchTooLarge: string;
     fetchBodyTooLarge: string;
     fetchInvalidUrl: string;
-  };
-  choiceConfirm: {
-    customLabel: string;
-    customDesc: string;
-    cancelLabel: string;
-    cancelDesc: string;
-  };
-  shellConfirm: {
-    title: string;
-    bgTitle: string;
-    subtitle: string;
-    bgSubtitle: string;
-    denyTitle: string;
-    optional: string;
-    denyFooter: string;
-    awaiting: string;
-    pickFooter: string;
-    allowOnce: string;
-    allowOnceDesc: string;
-    allowAlways: string;
-    allowAlwaysDesc: string;
-    deny: string;
-    denyDesc: string;
-  };
-  editConfirm: {
-    footer: string;
-    newTag: string;
-    editTag: string;
-    linesCount: string;
-    viewingRange: string;
-    denyFooter: string;
-    oldLabel: string;
-    newLabel: string;
-    sideBySide: string;
-    linesAbove: string;
-    linesAbovePlural: string;
-    linesBelow: string;
-    linesBelowPlural: string;
-  };
-  sessionPicker: {
-    header: string;
-    title: string;
-    messages: string;
-    messagesPlural: string;
-    turns: string;
-    pickerHint: string;
-    empty: string;
-    emptyNew: string;
-    renamePrompt: string;
-    renameHint: string;
-    emptyHint: string;
-    justNow: string;
-    minAgo: string;
-    yesterday: string;
-    hoursAgo: string;
-    daysAgo: string;
-  };
-  modelPicker: {
-    header: string;
-    loading: string;
-    catalogEmpty: string;
-    modelsAvailable: string;
-    presetsHeader: string;
-    modelsHeader: string;
-    pickerFooter: string;
-    currentLabel: string;
-  };
-  slashSuggestions: {
-    noMatch: string;
-    backspaceHint: string;
-    commandCount: string;
-    commandCountPlural: string;
-    aboveLabel: string;
-    belowLabel: string;
-    advancedHint: string;
-    footerHint: string;
-    groupChat: string;
-    groupSetup: string;
-    groupInfo: string;
-    groupSession: string;
-    groupExtend: string;
-    groupCode: string;
-    groupJobs: string;
-    groupAdvanced: string;
-  };
-  atMentions: {
-    loading: string;
-    entrySingular: string;
-    entryPlural: string;
-    searching: string;
-    scanned: string;
-    match: string;
-    matches: string;
-    forFilter: string;
-    noMatch: string;
-    emptyDir: string;
-    scanning: string;
-    footerBrowse: string;
-    footerBrowseSearch: string;
-    footerInsert: string;
-  };
-  statsPanel: {
-    modePlan: string;
-    modeYolo: string;
-    modeAuto: string;
-    modeReview: string;
-    pro: string;
-    budget: string;
-  };
-  welcomeBanner: {
-    workspace: string;
-    relaunchHint: string;
-    dashboard: string;
-  };
-  ctxBreakdown: {
-    title: string;
-    compactHint: string;
-    topTools: string;
-    msg: string;
-    turnLabel: string;
   };
   choiceConfirm: {
     customLabel: string;

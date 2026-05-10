@@ -1,11 +1,11 @@
 /** web_search uses Mojeek (DDG returns anti-bot 202 to unauthenticated POSTs); web_fetch sniffs HTML to text. */
 
 import { parse as parseHtml } from "node-html-parser";
-import { t } from "../i18n/index.js";
 import {
   webSearchEndpoint as loadWebSearchEndpoint,
   webSearchEngine as loadWebSearchEngine,
 } from "../config.js";
+import { t } from "../i18n/index.js";
 import type { ToolRegistry } from "../tools.js";
 
 export interface SearchResult {
@@ -81,7 +81,10 @@ async function searchMojeek(query: string, opts: WebSearchOptions = {}): Promise
       throw new Error(t("webErrors.mojeekBlocked"));
     }
     throw new Error(
-      t("webErrors.mojeekNoResults", { chars: html.length, preview: html.slice(0, 120).replace(/\s+/g, " ") }),
+      t("webErrors.mojeekNoResults", {
+        chars: html.length,
+        preview: html.slice(0, 120).replace(/\s+/g, " "),
+      }),
     );
   }
   return results;
@@ -129,9 +132,7 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
   const results = parseSearxngHtmlResults(html).slice(0, topK);
   if (results.length === 0) {
     if (/no results found|did not match any documents/i.test(html)) return [];
-    throw new Error(
-      t("webErrors.searxngNoResults", { chars: html.length }),
-    );
+    throw new Error(t("webErrors.searxngNoResults", { chars: html.length }));
   }
   return results;
 }
@@ -245,9 +246,7 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
   // refuse upfront than to start streaming a 1GB ISO.
   const declaredLen = Number(resp.headers.get("content-length") ?? "");
   if (Number.isFinite(declaredLen) && declaredLen > FETCH_MAX_BYTES) {
-    throw new Error(
-      t("webErrors.fetchTooLarge", { len: declaredLen, cap: FETCH_MAX_BYTES, url }),
-    );
+    throw new Error(t("webErrors.fetchTooLarge", { len: declaredLen, cap: FETCH_MAX_BYTES, url }));
   }
   const raw = await readBodyCapped(resp, FETCH_MAX_BYTES);
   const title = extractTitle(raw);
@@ -277,9 +276,7 @@ async function readBodyCapped(resp: Response, maxBytes: number): Promise<string>
         } catch {
           /* already torn down */
         }
-        throw new Error(
-          t("webErrors.fetchBodyTooLarge", { cap: maxBytes, seen: total }),
-        );
+        throw new Error(t("webErrors.fetchBodyTooLarge", { cap: maxBytes, seen: total }));
       }
       out += decoder.decode(value, { stream: true });
     }

@@ -20,8 +20,8 @@
 
 import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import { t } from "../../i18n/index.js";
 import { loadEditMode, loadProjectShellAllowed, readConfig } from "../../config.js";
+import { t } from "../../i18n/index.js";
 import { bootstrapSemanticSearchInCodeMode } from "../../index/semantic/tool.js";
 import { detectForeignAgentPlatform } from "../../memory/project.js";
 import { sanitizeName } from "../../memory/session.js";
