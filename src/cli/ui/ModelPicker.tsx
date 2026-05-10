@@ -1,5 +1,6 @@
 import { Box, Text, useStdout } from "ink";
 import React, { useState } from "react";
+import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { PRESETS, PRESET_DESCRIPTIONS } from "./presets.js";
 import { PILL_MODEL, Pill, modelBadgeFor } from "./primitives/Pill.js";
@@ -84,20 +85,20 @@ export function ModelPicker({
     <Box flexDirection="column" marginY={1}>
       <Box>
         <Text bold color={TONE.brand}>
-          {" ◈ REASONIX · pick a setup "}
+          {t("modelPicker.header")}
         </Text>
         <Text color={FG.meta}>
           {loading
-            ? "  ·  loading catalog…"
+            ? t("modelPicker.loading")
             : empty
-              ? "  ·  catalog empty — using known fallbacks"
-              : `  ·  ${modelList.length} models available`}
+              ? t("modelPicker.catalogEmpty")
+              : t("modelPicker.modelsAvailable", { count: modelList.length })}
         </Text>
       </Box>
       <Box height={1} />
       {hiddenAbove > 0 ? (
         <Box>
-          <Text color={FG.faint}>{`     … ${hiddenAbove} earlier`}</Text>
+          <Text color={FG.faint}>{`     … ${hiddenAbove}`}</Text>
         </Box>
       ) : null}
       {shown.map((row, i) => {
@@ -109,8 +110,8 @@ export function ModelPicker({
           <Box key={`hdr-${row.kind}`} marginTop={idx === 0 ? 0 : 1}>
             <Text color={FG.meta}>
               {row.kind === "preset"
-                ? "    PRESETS  ·  recommended — model + effort + auto-escalate"
-                : "    MODELS  ·  raw pick — auto-escalate stays as-is"}
+                ? t("modelPicker.presetsHeader")
+                : t("modelPicker.modelsHeader")}
             </Text>
           </Box>
         ) : null;
@@ -139,11 +140,11 @@ export function ModelPicker({
       })}
       {hiddenBelow > 0 ? (
         <Box>
-          <Text color={FG.faint}>{`     … ${hiddenBelow} more`}</Text>
+          <Text color={FG.faint}>{t("cardLabels.more", { count: hiddenBelow })}</Text>
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text color={FG.faint}>{"  ↑↓ pick  ·  ⏎ confirm  ·  [r] refresh  ·  esc cancel"}</Text>
+        <Text color={FG.faint}>{t("modelPicker.pickerFooter")}</Text>
       </Box>
     </Box>
   );
@@ -167,7 +168,7 @@ function PresetRow({
       </Text>
       <Text color={focused ? FG.body : FG.meta}>{desc.headline.padEnd(28)}</Text>
       <Text color={FG.meta}>{`  ${desc.cost}`}</Text>
-      {active ? <Text color={TONE.brand}>{"  · current"}</Text> : null}
+      {active ? <Text color={TONE.brand}>{t("modelPicker.currentLabel")}</Text> : null}
     </Box>
   );
 }
@@ -190,7 +191,7 @@ function ModelRow({
       </Text>
       <Text> </Text>
       <Pill label={badge.label} {...PILL_MODEL[badge.kind]} bold={false} />
-      {active ? <Text color={TONE.brand}>{"  · current"}</Text> : null}
+      {active ? <Text color={TONE.brand}>{t("modelPicker.currentLabel")}</Text> : null}
     </Box>
   );
 }

@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig.jsx = "react" needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../i18n/index.js";
 import { GLYPH, useColor } from "./theme.js";
 import type { AtPickerEntry, AtPickerState } from "./useCompletionPickers.js";
 
@@ -62,7 +63,9 @@ function HeaderRow({
   );
   if (state.kind === "browse") {
     const where = state.baseDir === "" ? "/" : `${state.baseDir}/`;
-    const counter = state.loading ? "loading…" : `${total} ${total === 1 ? "entry" : "entries"}`;
+    const counter = state.loading
+      ? t("atMentions.loading")
+      : t(total === 1 ? "atMentions.entrySingular" : "atMentions.entryPlural", { count: total });
     return (
       <Box>
         {lead}
@@ -72,8 +75,8 @@ function HeaderRow({
     );
   }
   const status = state.searching
-    ? `searching… ${state.scanned} scanned · ${total} ${total === 1 ? "match" : "matches"}`
-    : `${total} ${total === 1 ? "match" : "matches"} for "${state.filter}"`;
+    ? `${t("atMentions.searching")} ${state.scanned} ${t("atMentions.scanned")} · ${total} ${total === 1 ? t("atMentions.match") : t("atMentions.matches")}`
+    : `${total} ${total === 1 ? t("atMentions.match") : t("atMentions.matches")} ${t("atMentions.forFilter", { filter: state.filter })}`;
   return (
     <Box>
       {lead}
@@ -92,14 +95,14 @@ function EmptyRow({ state, color }: { state: AtPickerState; color: ReturnType<ty
           {GLYPH.warn}
         </Text>
         <Text> </Text>
-        <Text color={color.warn}>empty directory</Text>
+        <Text color={color.warn}>{t("atMentions.emptyDir")}</Text>
       </Box>
     );
   }
   if (state.searching) {
     return (
       <Box>
-        <Text dimColor>scanning the tree…</Text>
+        <Text dimColor>{t("atMentions.scanning")}</Text>
       </Box>
     );
   }
@@ -109,7 +112,7 @@ function EmptyRow({ state, color }: { state: AtPickerState; color: ReturnType<ty
         {GLYPH.warn}
       </Text>
       <Text> </Text>
-      <Text color={color.warn}>{`no files match "${state.filter}"`}</Text>
+      <Text color={color.warn}>{t("atMentions.noMatch", { filter: state.filter })}</Text>
     </Box>
   );
 }
@@ -133,14 +136,10 @@ function EntryRow({ entry, isSelected }: { entry: AtPickerEntry; isSelected: boo
 }
 
 function FooterRow({ isBrowse, hasFolder }: { isBrowse: boolean; hasFolder: boolean }) {
-  const hint = isBrowse
-    ? hasFolder
-      ? "↑↓ navigate · Tab drill into folder · ⏎ insert · esc cancel"
-      : "↑↓ navigate · Tab / ⏎ insert as @path · esc cancel"
-    : "↑↓ navigate · Tab / ⏎ insert as @path · esc cancel";
+  const hintKey = isBrowse && hasFolder ? "atMentions.footerBrowse" : "atMentions.footerInsert";
   return (
     <Box marginTop={0}>
-      <Text dimColor>{`  ${hint}`}</Text>
+      <Text dimColor>{`  ${t(hintKey)}`}</Text>
     </Box>
   );
 }
