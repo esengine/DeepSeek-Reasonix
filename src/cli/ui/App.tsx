@@ -150,6 +150,7 @@ import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } 
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
+import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
 import { ThemeProvider } from "./theme/context.js";
 import { FG } from "./theme/tokens.js";
@@ -3359,419 +3360,421 @@ function AppInner({
     <>
       <TickerProvider disabled={tickerSuspended}>
         <ViewportBudgetProvider>
-          <Box flexDirection="row" height={stdout?.rows ?? 24}>
-            <Box flexDirection="column" flexGrow={1}>
+          <InflightProvider inflight={loop.inflight}>
+            <Box flexDirection="row" height={stdout?.rows ?? 24}>
               <Box flexDirection="column" flexGrow={1}>
-                <LiveExpandContext.Provider value={liveExpand}>
-                  <CardStream
-                    suppressLive={modalOpen}
-                    scrollRows={chatScroll.scrollRows}
-                    onMaxScrollChange={chatScroll.setMaxScroll}
-                  />
-                </LiveExpandContext.Provider>
-                {/*
+                <Box flexDirection="column" flexGrow={1}>
+                  <LiveExpandContext.Provider value={liveExpand}>
+                    <CardStream
+                      suppressLive={modalOpen}
+                      scrollRows={chatScroll.scrollRows}
+                      onMaxScrollChange={chatScroll.setMaxScroll}
+                    />
+                  </LiveExpandContext.Provider>
+                  {/*
           Welcome card on the empty state. Visible only when nothing
           has happened yet (no past events, nothing in flight, no
           modal up). Removes the "what do I type?" friction without
           surviving past the first turn.
         */}
-                {!hasConversation && !busy && !isStreaming ? (
-                  <WelcomeBanner
-                    inCodeMode={!!codeMode}
-                    workspaceRoot={codeMode ? currentRootDir : undefined}
-                    dashboardUrl={dashboardUrl}
-                    languageVersion={languageVersion}
-                  />
-                ) : null}
-                {/*
+                  {!hasConversation && !busy && !isStreaming ? (
+                    <WelcomeBanner
+                      inCodeMode={!!codeMode}
+                      workspaceRoot={codeMode ? currentRootDir : undefined}
+                      dashboardUrl={dashboardUrl}
+                      languageVersion={languageVersion}
+                    />
+                  ) : null}
+                  {/*
           Live rows are hidden while the ShellConfirm modal is up — the
           model's concurrent "please confirm" stream is noise the user
           doesn't need, and the picker shouldn't fight it for visual
           attention. They come back naturally once the user chooses and
           the next turn begins.
         */}
-                {!PLAIN_UI &&
-                !pendingShell &&
-                !pendingPlan &&
-                !pendingReviseEditor &&
-                !pendingSessionsPicker &&
-                !pendingCheckpointPicker &&
-                !pendingMcpHub &&
-                !stagedInput &&
-                !pendingEditReview &&
-                ongoingTool ? (
-                  <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
-                ) : null}
-                {!PLAIN_UI &&
-                !pendingShell &&
-                !pendingPlan &&
-                !pendingReviseEditor &&
-                !pendingSessionsPicker &&
-                !pendingCheckpointPicker &&
-                !pendingMcpHub &&
-                !stagedInput &&
-                !pendingEditReview &&
-                subagentActivities.length > 0 ? (
-                  <SubagentLiveStack activities={subagentActivities} max={3} />
-                ) : null}
-                {!PLAIN_UI &&
-                !pendingShell &&
-                !pendingPlan &&
-                !pendingReviseEditor &&
-                !pendingSessionsPicker &&
-                !pendingCheckpointPicker &&
-                !pendingMcpHub &&
-                !stagedInput &&
-                !pendingEditReview &&
-                !ongoingTool &&
-                statusLine ? (
-                  <ThinkingRow text={statusLine} />
-                ) : null}
-                {!PLAIN_UI &&
-                undoBanner &&
-                !pendingShell &&
-                !pendingPlan &&
-                !pendingReviseEditor &&
-                !pendingSessionsPicker &&
-                !pendingCheckpointPicker &&
-                !pendingMcpHub &&
-                !stagedInput &&
-                !pendingEditReview &&
-                !pendingChoice &&
-                !stagedChoiceCustom &&
-                !pendingRevision &&
-                !stagedCheckpointRevise &&
-                !pendingCheckpoint ? (
-                  <UndoBanner banner={undoBanner} />
-                ) : null}
-                {/* Activity row when no targeted indicator is visible — phase label from useActivityLabel. */}
-                {!PLAIN_UI &&
-                !pendingShell &&
-                !pendingPlan &&
-                !pendingReviseEditor &&
-                !pendingSessionsPicker &&
-                !pendingCheckpointPicker &&
-                !pendingMcpHub &&
-                !stagedInput &&
-                !pendingEditReview &&
-                busy &&
-                !isStreaming &&
-                !ongoingTool &&
-                !statusLine ? (
-                  <ThinkingRow text={activityLabel} />
-                ) : null}
-                {!PLAIN_UI &&
-                !pendingShell &&
-                !pendingPlan &&
-                !pendingReviseEditor &&
-                !pendingSessionsPicker &&
-                !pendingCheckpointPicker &&
-                !pendingMcpHub &&
-                !stagedInput &&
-                !pendingEditReview ? (
-                  <PlanLiveRow />
-                ) : null}
-                <ToastRail />
-              </Box>
-              {stagedInput ? (
-                <PlanRefineInput
-                  mode={stagedInput.mode}
-                  questions={stagedInput.questions}
-                  onSubmit={handleStagedInputSubmit}
-                  onCancel={handleStagedInputCancel}
-                />
-              ) : stagedChoiceCustom ? (
-                <PlanRefineInput
-                  mode="choice-custom"
-                  onSubmit={handleChoiceCustomSubmit}
-                  onCancel={handleChoiceCustomCancel}
-                />
-              ) : stagedCheckpointRevise ? (
-                <PlanRefineInput
-                  mode="checkpoint-revise"
-                  onSubmit={(text) => handleCheckpointReviseSubmit(text, stagedCheckpointRevise)}
-                  onCancel={handleCheckpointReviseCancel}
-                />
-              ) : pendingChoice ? (
-                <ChoiceConfirm
-                  question={pendingChoice.question}
-                  options={pendingChoice.options}
-                  allowCustom={pendingChoice.allowCustom}
-                  onChoose={stableHandleChoiceConfirm}
-                />
-              ) : pendingRevision ? (
-                <PlanReviseConfirm
-                  reason={pendingRevision.reason}
-                  oldRemaining={(planStepsRef.current ?? []).filter(
-                    (s) => !completedStepIdsRef.current.has(s.id),
-                  )}
-                  newRemaining={pendingRevision.remainingSteps}
-                  summary={pendingRevision.summary}
-                  onChoose={stableHandleReviseConfirm}
-                />
-              ) : pendingCheckpoint ? (
-                <PlanCheckpointConfirm
-                  stepId={pendingCheckpoint.stepId}
-                  title={pendingCheckpoint.title}
-                  completed={pendingCheckpoint.completed}
-                  total={pendingCheckpoint.total}
-                  steps={planStepsRef.current ?? undefined}
-                  completedStepIds={completedStepIdsRef.current}
-                  onChoose={stableHandleCheckpointConfirm}
-                />
-              ) : pendingCheckpointPicker ? (
-                <CheckpointPicker
-                  checkpoints={checkpointPickerList}
-                  workspace={currentRootDir}
-                  pickerPorts={pickerPorts}
-                  onChoose={(outcome) => {
-                    if (outcome.kind === "quit") {
-                      setPendingCheckpointPicker(false);
-                      return;
-                    }
-                    if (outcome.kind === "restore") {
-                      const target = checkpointPickerList.find((c) => c.id === outcome.id);
-                      setPendingCheckpointPicker(false);
-                      if (!target) return;
-                      const result = restoreCheckpoint(currentRootDir, target.id);
-                      const lines = [
-                        `▸ restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
-                      ];
-                      if (result.restored.length > 0) {
-                        lines.push(
-                          `  wrote ${result.restored.length} file${result.restored.length === 1 ? "" : "s"}`,
-                        );
-                      }
-                      if (result.removed.length > 0) {
-                        lines.push(
-                          `  removed ${result.removed.length} file${result.removed.length === 1 ? "" : "s"}`,
-                        );
-                      }
-                      if (result.skipped.length > 0) {
-                        lines.push(
-                          `  skipped ${result.skipped.length} file${result.skipped.length === 1 ? "" : "s"}`,
-                        );
-                      }
-                      log.pushInfo(lines.join("\n"));
-                      return;
-                    }
-                    if (outcome.kind === "delete") {
-                      const target = checkpointPickerList.find((c) => c.id === outcome.id);
-                      if (!target) return;
-                      deleteCheckpoint(currentRootDir, target.id);
-                      setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
-                    }
-                  }}
-                />
-              ) : pendingSessionsPicker ? (
-                <SessionPicker
-                  sessions={sessionsPickerList}
-                  workspace={currentRootDir}
-                  walletCurrency={walletCurrencyRef.current}
-                  pickerPorts={pickerPorts}
-                  onChoose={(outcome) => {
-                    if (outcome.kind === "open") {
-                      setPendingSessionsPicker(false);
-                      if (onSwitchSession) {
-                        onSwitchSession(outcome.name);
-                      } else {
-                        log.pushInfo(
-                          `▸ to switch to "${outcome.name}", quit and run: reasonix chat --session ${outcome.name}`,
-                        );
-                      }
-                      return;
-                    }
-                    if (outcome.kind === "new") {
-                      setPendingSessionsPicker(false);
-                      if (onSwitchSession) {
-                        onSwitchSession(undefined);
-                      } else {
-                        log.pushInfo(
-                          "▸ to start a fresh session, quit and run: reasonix chat (no --session flag)",
-                        );
-                      }
-                      return;
-                    }
-                    if (outcome.kind === "delete") {
-                      deleteSession(outcome.name);
-                      setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
-                      return;
-                    }
-                    if (outcome.kind === "rename") {
-                      renameSession(outcome.name, outcome.newName);
-                      setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
-                      return;
-                    }
-                    if (outcome.kind === "quit") {
-                      setPendingSessionsPicker(false);
-                    }
-                  }}
-                />
-              ) : pendingModelPicker ? (
-                <ModelPicker
-                  models={models}
-                  current={loop.model}
-                  currentEffort={loop.reasoningEffort}
-                  currentAutoEscalate={loop.autoEscalate}
-                  onRefresh={refreshModels}
-                  onChoose={(outcome) => {
-                    setPendingModelPicker(false);
-                    if (outcome.kind === "select") {
-                      loop.configure({ model: outcome.id });
-                      agentStore.dispatch({ type: "session.model.change", model: outcome.id });
-                      log.pushInfo(`▸ model: ${outcome.id}`);
-                      return;
-                    }
-                    if (outcome.kind === "preset") {
-                      const p = PRESETS[outcome.name];
-                      loop.configure({
-                        model: p.model,
-                        autoEscalate: p.autoEscalate,
-                        reasoningEffort: p.reasoningEffort,
-                      });
-                      agentStore.dispatch({ type: "session.model.change", model: p.model });
-                      try {
-                        saveReasoningEffort(p.reasoningEffort);
-                      } catch {
-                        /* disk full / perms — runtime change still took effect */
-                      }
-                      log.pushInfo(`▸ preset: ${outcome.name} · ${p.model}`);
-                    }
-                  }}
-                />
-              ) : pendingMcpHub ? (
-                <McpHub
-                  initialTab={pendingMcpHub.tab}
-                  liveServers={liveMcpServers}
-                  configPath={defaultConfigPath()}
-                  pickerPorts={pickerPorts}
-                  onClose={() => setPendingMcpHub(null)}
-                  postInfo={(text) => log.pushInfo(text)}
-                  applyAppend={(target, addedTools) => {
-                    const updated = applyMcpAppend(loop, target, addedTools);
-                    setLiveMcpServers((prev) => replaceMcpServerSummary(prev, target, updated));
-                    return updated;
-                  }}
-                  reloadMcp={
-                    mcpRuntime
-                      ? async () => {
-                          const r = await mcpRuntime.reloadFromConfig(loop);
-                          setLiveMcpServers(r.summaries);
-                          return r;
-                        }
-                      : undefined
-                  }
-                />
-              ) : pendingPlan ? (
-                <PlanConfirm
-                  plan={pendingPlan}
-                  steps={planStepsRef.current ?? undefined}
-                  summary={planSummaryRef.current ?? undefined}
-                  onChoose={stableHandlePlanConfirm}
-                  projectRoot={currentRootDir}
-                />
-              ) : pendingReviseEditor ? (
-                <PlanReviseEditor
-                  steps={planStepsRef.current ?? []}
-                  completedStepIds={completedStepIdsRef.current}
-                  onAccept={(revised, skippedIds) => {
-                    planStepsRef.current = revised;
-                    for (const id of skippedIds) completedStepIdsRef.current.add(id);
-                    persistPlanState();
-                    const planText = pendingReviseEditor;
-                    setPendingReviseEditor(null);
-                    setPendingPlan(planText);
-                  }}
-                  onCancel={() => {
-                    const planText = pendingReviseEditor;
-                    setPendingReviseEditor(null);
-                    setPendingPlan(planText);
-                  }}
-                />
-              ) : pendingShell ? (
-                <ShellConfirm
-                  command={pendingShell.command}
-                  allowPrefix={derivePrefix(pendingShell.command)}
-                  kind={pendingShell.kind}
-                  onChoose={handleShellConfirm}
-                />
-              ) : pendingEditReview ? (
-                <EditConfirm
-                  block={pendingEditReview}
-                  onChoose={(choice, denyContext) => {
-                    const resolve = editReviewResolveRef.current;
-                    if (resolve) {
-                      editReviewResolveRef.current = null;
-                      resolve({ choice, denyContext });
-                    }
-                  }}
-                />
-              ) : walkthroughActive && pendingEdits.current.length > 0 ? (
-                <EditConfirm
-                  // pendingTick re-keys the modal so each apply/discard
-                  // forces a remount with the NEW first block. Without it,
-                  // EditConfirm's internal scroll state would persist
-                  // across blocks, which is the wrong UX.
-                  key={`walk-${pendingTick}`}
-                  block={pendingEdits.current[0]!}
-                  onChoose={handleWalkChoice}
-                />
-              ) : !chatScroll.pinned ? (
-                <Text color={FG.faint}>
-                  {" 📖 reading history — End / PgDn to return · ↓ to advance one line"}
-                </Text>
-              ) : (
-                <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                  <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                    {codeMode ? (
-                      <ModeStatusBar
-                        editMode={editMode}
-                        pendingCount={pendingCount}
-                        flash={modeFlash}
-                        planMode={planMode}
-                        undoArmed={!!undoBanner || hasUndoable()}
-                        jobs={codeMode.jobs}
-                      />
-                    ) : null}
-                    {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
-                    <StatusRow />
-                    <PromptInput
-                      value={input}
-                      onChange={setInput}
-                      onSubmit={handleSubmit}
-                      disabled={busy}
-                      onHistoryPrev={recallPrev}
-                      onHistoryNext={recallNext}
-                    />
-                  </Box>
-                  <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                    {slashMatches !== null ? (
-                      <SlashSuggestions
-                        key={`slash-suggestions:${slashGroupMode ? "group" : "search"}`}
-                        matches={slashMatches}
-                        selectedIndex={slashSelected}
-                        groupMode={slashGroupMode}
-                        advancedHidden={slashAdvancedHidden}
-                      />
-                    ) : null}
-                    {atState !== null ? (
-                      <AtMentionSuggestions state={atState} selectedIndex={atSelected} />
-                    ) : null}
-                  </Box>
-                  {slashArgContext ? (
-                    <SlashArgPicker
-                      matches={slashArgMatches}
-                      selectedIndex={slashArgSelected}
-                      spec={slashArgContext.spec}
-                      kind={slashArgContext.kind}
-                      partial={slashArgContext.partial}
-                    />
+                  {!PLAIN_UI &&
+                  !pendingShell &&
+                  !pendingPlan &&
+                  !pendingReviseEditor &&
+                  !pendingSessionsPicker &&
+                  !pendingCheckpointPicker &&
+                  !pendingMcpHub &&
+                  !stagedInput &&
+                  !pendingEditReview &&
+                  ongoingTool ? (
+                    <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
                   ) : null}
-                  {/* CtxFooter retired — UsageCard auto-emits per turn covers the same data */}
+                  {!PLAIN_UI &&
+                  !pendingShell &&
+                  !pendingPlan &&
+                  !pendingReviseEditor &&
+                  !pendingSessionsPicker &&
+                  !pendingCheckpointPicker &&
+                  !pendingMcpHub &&
+                  !stagedInput &&
+                  !pendingEditReview &&
+                  subagentActivities.length > 0 ? (
+                    <SubagentLiveStack activities={subagentActivities} max={3} />
+                  ) : null}
+                  {!PLAIN_UI &&
+                  !pendingShell &&
+                  !pendingPlan &&
+                  !pendingReviseEditor &&
+                  !pendingSessionsPicker &&
+                  !pendingCheckpointPicker &&
+                  !pendingMcpHub &&
+                  !stagedInput &&
+                  !pendingEditReview &&
+                  !ongoingTool &&
+                  statusLine ? (
+                    <ThinkingRow text={statusLine} />
+                  ) : null}
+                  {!PLAIN_UI &&
+                  undoBanner &&
+                  !pendingShell &&
+                  !pendingPlan &&
+                  !pendingReviseEditor &&
+                  !pendingSessionsPicker &&
+                  !pendingCheckpointPicker &&
+                  !pendingMcpHub &&
+                  !stagedInput &&
+                  !pendingEditReview &&
+                  !pendingChoice &&
+                  !stagedChoiceCustom &&
+                  !pendingRevision &&
+                  !stagedCheckpointRevise &&
+                  !pendingCheckpoint ? (
+                    <UndoBanner banner={undoBanner} />
+                  ) : null}
+                  {/* Activity row when no targeted indicator is visible — phase label from useActivityLabel. */}
+                  {!PLAIN_UI &&
+                  !pendingShell &&
+                  !pendingPlan &&
+                  !pendingReviseEditor &&
+                  !pendingSessionsPicker &&
+                  !pendingCheckpointPicker &&
+                  !pendingMcpHub &&
+                  !stagedInput &&
+                  !pendingEditReview &&
+                  busy &&
+                  !isStreaming &&
+                  !ongoingTool &&
+                  !statusLine ? (
+                    <ThinkingRow text={activityLabel} />
+                  ) : null}
+                  {!PLAIN_UI &&
+                  !pendingShell &&
+                  !pendingPlan &&
+                  !pendingReviseEditor &&
+                  !pendingSessionsPicker &&
+                  !pendingCheckpointPicker &&
+                  !pendingMcpHub &&
+                  !stagedInput &&
+                  !pendingEditReview ? (
+                    <PlanLiveRow />
+                  ) : null}
+                  <ToastRail />
                 </Box>
-              )}
+                {stagedInput ? (
+                  <PlanRefineInput
+                    mode={stagedInput.mode}
+                    questions={stagedInput.questions}
+                    onSubmit={handleStagedInputSubmit}
+                    onCancel={handleStagedInputCancel}
+                  />
+                ) : stagedChoiceCustom ? (
+                  <PlanRefineInput
+                    mode="choice-custom"
+                    onSubmit={handleChoiceCustomSubmit}
+                    onCancel={handleChoiceCustomCancel}
+                  />
+                ) : stagedCheckpointRevise ? (
+                  <PlanRefineInput
+                    mode="checkpoint-revise"
+                    onSubmit={(text) => handleCheckpointReviseSubmit(text, stagedCheckpointRevise)}
+                    onCancel={handleCheckpointReviseCancel}
+                  />
+                ) : pendingChoice ? (
+                  <ChoiceConfirm
+                    question={pendingChoice.question}
+                    options={pendingChoice.options}
+                    allowCustom={pendingChoice.allowCustom}
+                    onChoose={stableHandleChoiceConfirm}
+                  />
+                ) : pendingRevision ? (
+                  <PlanReviseConfirm
+                    reason={pendingRevision.reason}
+                    oldRemaining={(planStepsRef.current ?? []).filter(
+                      (s) => !completedStepIdsRef.current.has(s.id),
+                    )}
+                    newRemaining={pendingRevision.remainingSteps}
+                    summary={pendingRevision.summary}
+                    onChoose={stableHandleReviseConfirm}
+                  />
+                ) : pendingCheckpoint ? (
+                  <PlanCheckpointConfirm
+                    stepId={pendingCheckpoint.stepId}
+                    title={pendingCheckpoint.title}
+                    completed={pendingCheckpoint.completed}
+                    total={pendingCheckpoint.total}
+                    steps={planStepsRef.current ?? undefined}
+                    completedStepIds={completedStepIdsRef.current}
+                    onChoose={stableHandleCheckpointConfirm}
+                  />
+                ) : pendingCheckpointPicker ? (
+                  <CheckpointPicker
+                    checkpoints={checkpointPickerList}
+                    workspace={currentRootDir}
+                    pickerPorts={pickerPorts}
+                    onChoose={(outcome) => {
+                      if (outcome.kind === "quit") {
+                        setPendingCheckpointPicker(false);
+                        return;
+                      }
+                      if (outcome.kind === "restore") {
+                        const target = checkpointPickerList.find((c) => c.id === outcome.id);
+                        setPendingCheckpointPicker(false);
+                        if (!target) return;
+                        const result = restoreCheckpoint(currentRootDir, target.id);
+                        const lines = [
+                          `▸ restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
+                        ];
+                        if (result.restored.length > 0) {
+                          lines.push(
+                            `  wrote ${result.restored.length} file${result.restored.length === 1 ? "" : "s"}`,
+                          );
+                        }
+                        if (result.removed.length > 0) {
+                          lines.push(
+                            `  removed ${result.removed.length} file${result.removed.length === 1 ? "" : "s"}`,
+                          );
+                        }
+                        if (result.skipped.length > 0) {
+                          lines.push(
+                            `  skipped ${result.skipped.length} file${result.skipped.length === 1 ? "" : "s"}`,
+                          );
+                        }
+                        log.pushInfo(lines.join("\n"));
+                        return;
+                      }
+                      if (outcome.kind === "delete") {
+                        const target = checkpointPickerList.find((c) => c.id === outcome.id);
+                        if (!target) return;
+                        deleteCheckpoint(currentRootDir, target.id);
+                        setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
+                      }
+                    }}
+                  />
+                ) : pendingSessionsPicker ? (
+                  <SessionPicker
+                    sessions={sessionsPickerList}
+                    workspace={currentRootDir}
+                    walletCurrency={walletCurrencyRef.current}
+                    pickerPorts={pickerPorts}
+                    onChoose={(outcome) => {
+                      if (outcome.kind === "open") {
+                        setPendingSessionsPicker(false);
+                        if (onSwitchSession) {
+                          onSwitchSession(outcome.name);
+                        } else {
+                          log.pushInfo(
+                            `▸ to switch to "${outcome.name}", quit and run: reasonix chat --session ${outcome.name}`,
+                          );
+                        }
+                        return;
+                      }
+                      if (outcome.kind === "new") {
+                        setPendingSessionsPicker(false);
+                        if (onSwitchSession) {
+                          onSwitchSession(undefined);
+                        } else {
+                          log.pushInfo(
+                            "▸ to start a fresh session, quit and run: reasonix chat (no --session flag)",
+                          );
+                        }
+                        return;
+                      }
+                      if (outcome.kind === "delete") {
+                        deleteSession(outcome.name);
+                        setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
+                        return;
+                      }
+                      if (outcome.kind === "rename") {
+                        renameSession(outcome.name, outcome.newName);
+                        setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
+                        return;
+                      }
+                      if (outcome.kind === "quit") {
+                        setPendingSessionsPicker(false);
+                      }
+                    }}
+                  />
+                ) : pendingModelPicker ? (
+                  <ModelPicker
+                    models={models}
+                    current={loop.model}
+                    currentEffort={loop.reasoningEffort}
+                    currentAutoEscalate={loop.autoEscalate}
+                    onRefresh={refreshModels}
+                    onChoose={(outcome) => {
+                      setPendingModelPicker(false);
+                      if (outcome.kind === "select") {
+                        loop.configure({ model: outcome.id });
+                        agentStore.dispatch({ type: "session.model.change", model: outcome.id });
+                        log.pushInfo(`▸ model: ${outcome.id}`);
+                        return;
+                      }
+                      if (outcome.kind === "preset") {
+                        const p = PRESETS[outcome.name];
+                        loop.configure({
+                          model: p.model,
+                          autoEscalate: p.autoEscalate,
+                          reasoningEffort: p.reasoningEffort,
+                        });
+                        agentStore.dispatch({ type: "session.model.change", model: p.model });
+                        try {
+                          saveReasoningEffort(p.reasoningEffort);
+                        } catch {
+                          /* disk full / perms — runtime change still took effect */
+                        }
+                        log.pushInfo(`▸ preset: ${outcome.name} · ${p.model}`);
+                      }
+                    }}
+                  />
+                ) : pendingMcpHub ? (
+                  <McpHub
+                    initialTab={pendingMcpHub.tab}
+                    liveServers={liveMcpServers}
+                    configPath={defaultConfigPath()}
+                    pickerPorts={pickerPorts}
+                    onClose={() => setPendingMcpHub(null)}
+                    postInfo={(text) => log.pushInfo(text)}
+                    applyAppend={(target, addedTools) => {
+                      const updated = applyMcpAppend(loop, target, addedTools);
+                      setLiveMcpServers((prev) => replaceMcpServerSummary(prev, target, updated));
+                      return updated;
+                    }}
+                    reloadMcp={
+                      mcpRuntime
+                        ? async () => {
+                            const r = await mcpRuntime.reloadFromConfig(loop);
+                            setLiveMcpServers(r.summaries);
+                            return r;
+                          }
+                        : undefined
+                    }
+                  />
+                ) : pendingPlan ? (
+                  <PlanConfirm
+                    plan={pendingPlan}
+                    steps={planStepsRef.current ?? undefined}
+                    summary={planSummaryRef.current ?? undefined}
+                    onChoose={stableHandlePlanConfirm}
+                    projectRoot={currentRootDir}
+                  />
+                ) : pendingReviseEditor ? (
+                  <PlanReviseEditor
+                    steps={planStepsRef.current ?? []}
+                    completedStepIds={completedStepIdsRef.current}
+                    onAccept={(revised, skippedIds) => {
+                      planStepsRef.current = revised;
+                      for (const id of skippedIds) completedStepIdsRef.current.add(id);
+                      persistPlanState();
+                      const planText = pendingReviseEditor;
+                      setPendingReviseEditor(null);
+                      setPendingPlan(planText);
+                    }}
+                    onCancel={() => {
+                      const planText = pendingReviseEditor;
+                      setPendingReviseEditor(null);
+                      setPendingPlan(planText);
+                    }}
+                  />
+                ) : pendingShell ? (
+                  <ShellConfirm
+                    command={pendingShell.command}
+                    allowPrefix={derivePrefix(pendingShell.command)}
+                    kind={pendingShell.kind}
+                    onChoose={handleShellConfirm}
+                  />
+                ) : pendingEditReview ? (
+                  <EditConfirm
+                    block={pendingEditReview}
+                    onChoose={(choice, denyContext) => {
+                      const resolve = editReviewResolveRef.current;
+                      if (resolve) {
+                        editReviewResolveRef.current = null;
+                        resolve({ choice, denyContext });
+                      }
+                    }}
+                  />
+                ) : walkthroughActive && pendingEdits.current.length > 0 ? (
+                  <EditConfirm
+                    // pendingTick re-keys the modal so each apply/discard
+                    // forces a remount with the NEW first block. Without it,
+                    // EditConfirm's internal scroll state would persist
+                    // across blocks, which is the wrong UX.
+                    key={`walk-${pendingTick}`}
+                    block={pendingEdits.current[0]!}
+                    onChoose={handleWalkChoice}
+                  />
+                ) : !chatScroll.pinned ? (
+                  <Text color={FG.faint}>
+                    {" 📖 reading history — End / PgDn to return · ↓ to advance one line"}
+                  </Text>
+                ) : (
+                  <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+                    <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+                      {codeMode ? (
+                        <ModeStatusBar
+                          editMode={editMode}
+                          pendingCount={pendingCount}
+                          flash={modeFlash}
+                          planMode={planMode}
+                          undoArmed={!!undoBanner || hasUndoable()}
+                          jobs={codeMode.jobs}
+                        />
+                      ) : null}
+                      {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
+                      <StatusRow />
+                      <PromptInput
+                        value={input}
+                        onChange={setInput}
+                        onSubmit={handleSubmit}
+                        disabled={busy}
+                        onHistoryPrev={recallPrev}
+                        onHistoryNext={recallNext}
+                      />
+                    </Box>
+                    <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+                      {slashMatches !== null ? (
+                        <SlashSuggestions
+                          key={`slash-suggestions:${slashGroupMode ? "group" : "search"}`}
+                          matches={slashMatches}
+                          selectedIndex={slashSelected}
+                          groupMode={slashGroupMode}
+                          advancedHidden={slashAdvancedHidden}
+                        />
+                      ) : null}
+                      {atState !== null ? (
+                        <AtMentionSuggestions state={atState} selectedIndex={atSelected} />
+                      ) : null}
+                    </Box>
+                    {slashArgContext ? (
+                      <SlashArgPicker
+                        matches={slashArgMatches}
+                        selectedIndex={slashArgSelected}
+                        spec={slashArgContext.spec}
+                        kind={slashArgContext.kind}
+                        partial={slashArgContext.partial}
+                      />
+                    ) : null}
+                    {/* CtxFooter retired — UsageCard auto-emits per turn covers the same data */}
+                  </Box>
+                )}
+              </Box>
             </Box>
-          </Box>
+          </InflightProvider>
         </ViewportBudgetProvider>
       </TickerProvider>
     </>

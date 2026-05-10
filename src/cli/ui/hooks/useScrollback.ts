@@ -74,7 +74,8 @@ export interface Scrollback {
   appendStreaming(id: string, chunk: string): void;
   endStreaming(id: string, aborted?: boolean): void;
 
-  startTool(name: string, args: unknown): string;
+  /** `presetId` overrides the auto-generated card id — pass the loop's callId so the inflight set's key matches the card's id. */
+  startTool(name: string, args: unknown, presetId?: string): string;
   appendToolOutput(id: string, chunk: string): void;
   endTool(
     id: string,
@@ -270,8 +271,8 @@ export function useScrollback(): Scrollback {
       endStreaming(id, aborted) {
         dispatch({ type: "streaming.end", id, aborted });
       },
-      startTool(name, args) {
-        const id = nextId("tool");
+      startTool(name, args, presetId) {
+        const id = presetId ?? nextId("tool");
         dispatch({ type: "tool.start", id, name, args });
         return id;
       },

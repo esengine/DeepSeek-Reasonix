@@ -20,9 +20,11 @@ export class TurnTranslator {
     }
   }
 
-  toolStart(name: string, args: unknown): void {
+  toolStart(name: string, args: unknown, callId?: string): void {
     this.toolStartedAt = Date.now();
-    this.toolCardId = this.log.startTool(name, args);
+    // callId from the loop event is the inflight-set key — using it as
+    // the card id lets the UI derive `running` from `loop.inflight.has(card.id)`.
+    this.toolCardId = this.log.startTool(name, args, callId);
   }
 
   toolEnd(output: string): void {

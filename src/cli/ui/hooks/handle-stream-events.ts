@@ -27,7 +27,7 @@ export function handleToolStart(ev: LoopEvent, ctx: ToolStartContext): void {
   ctx.setOngoingTool({ name: ev.toolName ?? "?", args: ev.toolArgs });
   ctx.setToolProgress(null);
   ctx.toolStartedAtRef.current = Date.now();
-  ctx.translator.toolStart(ev.toolName ?? "?", parseJsonOrRaw(ev.toolArgs));
+  ctx.translator.toolStart(ev.toolName ?? "?", parseJsonOrRaw(ev.toolArgs), ev.callId);
   // Feed the `@` picker's recency LRU from any path-shaped field in the
   // tool args. Picker surfaces these next time `@` is typed, even if mtime
   // is stale.

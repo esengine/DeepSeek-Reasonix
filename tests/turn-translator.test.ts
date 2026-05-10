@@ -107,7 +107,7 @@ describe("TurnTranslator", () => {
     t.toolEnd("ok 250 lines");
     const startCall = calls.find((c) => c.method === "startTool");
     const endCall = calls.find((c) => c.method === "endTool");
-    expect(startCall?.args).toEqual(["read_file", { path: "src/x.ts" }]);
+    expect(startCall?.args).toEqual(["read_file", { path: "src/x.ts" }, undefined]);
     expect(endCall?.args[0]).toBe("tool-1");
     const endInfo = endCall?.args[1] as { output: string; elapsedMs: number };
     expect(endInfo.output).toBe("ok 250 lines");

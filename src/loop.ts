@@ -10,6 +10,7 @@ import {
 } from "./mcp/registry.js";
 
 import { ContextManager } from "./context-manager.js";
+import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
 import { formatLoopError, is5xxError, probeDeepSeekReachable } from "./loop/errors.js";
 import {
@@ -134,6 +135,8 @@ export class CacheFirstLoop {
   private _streamPreference: boolean;
   /** Threaded through HTTP + every tool dispatch so Esc cancels in-flight work, not after. */
   private _turnAbort: AbortController = new AbortController();
+  /** Authoritative running-id set — UI cards consult this instead of trusting end-event delivery. Insert at dispatch entry, delete in finally. */
+  private readonly _inflight = new InflightSet();
 
   private _proArmedForNextTurn = false;
   private _escalateThisTurn = false;
@@ -141,6 +144,11 @@ export class CacheFirstLoop {
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
   private context!: ContextManager;
+
+  /** Subscribe API so UI hooks can derive `running` from finally-guaranteed insertions. */
+  get inflight(): InflightSet {
+    return this._inflight;
+  }
 
   get currentTurn(): number {
     return this._turn;
@@ -300,6 +308,7 @@ export class CacheFirstLoop {
       }
     }
     this.scratch.reset();
+    this._inflight.clear();
     return { dropped };
   }
 
@@ -360,48 +369,67 @@ export class CacheFirstLoop {
     const name = call.function?.name ?? "";
     const args = call.function?.arguments ?? "{}";
     const parsedArgs = safeParseToolArgs(args);
+    this._inflight.add(this.inflightIdFor(call));
+    try {
+      const preReport = await runHooks({
+        hooks: this.hooks,
+        payload: {
+          event: "PreToolUse",
+          cwd: this.hookCwd,
+          toolName: name,
+          toolArgs: parsedArgs,
+        },
+      });
+      const preWarnings = [...hookWarnings(preReport.outcomes, this._turn)];
 
-    const preReport = await runHooks({
-      hooks: this.hooks,
-      payload: {
-        event: "PreToolUse",
-        cwd: this.hookCwd,
-        toolName: name,
-        toolArgs: parsedArgs,
-      },
-    });
-    const preWarnings = [...hookWarnings(preReport.outcomes, this._turn)];
+      if (preReport.blocked) {
+        const blocking = preReport.outcomes[preReport.outcomes.length - 1];
+        const reason = (
+          blocking?.stderr ||
+          blocking?.stdout ||
+          "blocked by PreToolUse hook"
+        ).trim();
+        return {
+          preWarnings,
+          postWarnings: [],
+          result: `[hook block] ${blocking?.hook.command ?? "<unknown>"}\n${reason}`,
+        };
+      }
 
-    if (preReport.blocked) {
-      const blocking = preReport.outcomes[preReport.outcomes.length - 1];
-      const reason = (blocking?.stderr || blocking?.stdout || "blocked by PreToolUse hook").trim();
-      return {
-        preWarnings,
-        postWarnings: [],
-        result: `[hook block] ${blocking?.hook.command ?? "<unknown>"}\n${reason}`,
-      };
+      const result = await this.tools.dispatch(name, args, {
+        signal,
+        maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
+        confirmationGate: this.confirmationGate,
+      });
+
+      const postReport = await runHooks({
+        hooks: this.hooks,
+        payload: {
+          event: "PostToolUse",
+          cwd: this.hookCwd,
+          toolName: name,
+          toolArgs: parsedArgs,
+          toolResult: result,
+        },
+      });
+      const postWarnings = [...hookWarnings(postReport.outcomes, this._turn)];
+
+      return { preWarnings, postWarnings, result };
+    } finally {
+      this._inflight.delete(this.inflightIdFor(call));
     }
-
-    const result = await this.tools.dispatch(name, args, {
-      signal,
-      maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
-      confirmationGate: this.confirmationGate,
-    });
-
-    const postReport = await runHooks({
-      hooks: this.hooks,
-      payload: {
-        event: "PostToolUse",
-        cwd: this.hookCwd,
-        toolName: name,
-        toolArgs: parsedArgs,
-        toolResult: result,
-      },
-    });
-    const postWarnings = [...hookWarnings(postReport.outcomes, this._turn)];
-
-    return { preWarnings, postWarnings, result };
   }
+
+  /** Stable per-call id used as the inflight key AND threaded into tool_start / tool events so the UI matches them up. */
+  private inflightIdFor(call: ToolCall): string {
+    if (call.id) return call.id;
+    const fallback = (call as { _inflightFallback?: string })._inflightFallback;
+    if (fallback) return fallback;
+    const generated = `inflight-${++this._inflightCounter}`;
+    (call as { _inflightFallback?: string })._inflightFallback = generated;
+    return generated;
+  }
+  private _inflightCounter = 0;
 
   private buildMessages(pendingUser: string | null): ChatMessage[] {
     // DeepSeek 400s on either unpaired tool_calls or stray tool entries — heal before sending.
@@ -1043,14 +1071,19 @@ export class CacheFirstLoop {
         // tool_start announces every call in the chunk BEFORE any
         // dispatch awaits — TUI shows live indicators for each, and the
         // gap between assistant_final and the first tool_result yield is
-        // never silent.
+        // never silent. Pre-add to the inflight set so the spinner is
+        // already correct on the very first card render — runOneToolCall's
+        // own add is then idempotent and its finally is the cleanup contract.
         for (const call of chunk) {
+          const callId = this.inflightIdFor(call);
+          this._inflight.add(callId);
           yield {
             turn: this._turn,
             role: "tool_start",
             content: "",
             toolName: call.function?.name ?? "",
             toolArgs: call.function?.arguments ?? "{}",
+            callId,
           };
         }
 
@@ -1105,6 +1138,7 @@ export class CacheFirstLoop {
             content: result,
             toolName: name,
             toolArgs: args,
+            callId: this.inflightIdFor(call),
           };
         }
       }

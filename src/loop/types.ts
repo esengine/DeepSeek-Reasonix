@@ -29,6 +29,8 @@ export interface LoopEvent {
   toolCallIndex?: number;
   /** Count of tool calls whose args have parsed as valid JSON (UI progress, not dispatch gate). */
   toolCallReadyCount?: number;
+  /** Stable id for tool_start / tool pairs — also the inflight-set key. UI uses this as the card id so it can derive `running` from `loop.inflight.has(callId)` instead of trusting end-event delivery. */
+  callId?: string;
   stats?: TurnStats;
   repair?: RepairReport;
   error?: string;

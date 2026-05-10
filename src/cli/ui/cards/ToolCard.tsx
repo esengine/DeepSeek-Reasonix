@@ -8,6 +8,7 @@ import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { ToolCard as ToolCardData } from "../state/cards.js";
+import { useIsInflight } from "../state/inflight-context.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 
 const READ_TAIL = 2;
@@ -35,7 +36,8 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const truncated = allLines.length > tail;
   const visible = truncated ? allLines.slice(-tail) : allLines;
   const hidden = truncated ? allLines.length - visible.length : 0;
-  const status = toolStatus(card);
+  const isInflight = useIsInflight(card.id);
+  const status = toolStatus(card, isInflight);
   const headColor = headerColorFor(status);
   const errColor = card.exitCode && card.exitCode !== 0 ? TONE.err : FG.sub;
   // Rejected calls show a single trailing badge — the verbose JSON error body
@@ -109,10 +111,13 @@ function unwrapSubagentMarkdown(card: ToolCardData): string | null {
 
 type ToolStatus = "running" | "ok" | "rejected" | "error" | "aborted";
 
-function toolStatus(card: ToolCardData): ToolStatus {
+function toolStatus(card: ToolCardData, isInflight: boolean): ToolStatus {
+  // Running is derived from the loop's inflight set so a missed `tool` event
+  // can't strand the spinner forever — finally in runOneToolCall guarantees
+  // the id leaves the set on every exit path.
+  if (isInflight) return "running";
   if (card.rejected) return "rejected";
   if (card.aborted) return "aborted";
-  if (!card.done) return "running";
   if (card.exitCode !== undefined && card.exitCode !== 0) return "error";
   return "ok";
 }
