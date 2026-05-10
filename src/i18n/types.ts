@@ -398,6 +398,68 @@ export interface TranslationSchema {
     linesBelow: string;
     linesBelowPlural: string;
   };
+  sessionPicker: {
+    header: string;
+    title: string;
+    messages: string;
+    messagesPlural: string;
+    turns: string;
+    pickerHint: string;
+    empty: string;
+    emptyNew: string;
+    renamePrompt: string;
+    renameHint: string;
+    emptyHint: string;
+    justNow: string;
+    minAgo: string;
+    yesterday: string;
+    hoursAgo: string;
+    daysAgo: string;
+  };
+  modelPicker: {
+    header: string;
+    loading: string;
+    catalogEmpty: string;
+    modelsAvailable: string;
+    presetsHeader: string;
+    modelsHeader: string;
+    pickerFooter: string;
+    currentLabel: string;
+  };
+  slashSuggestions: {
+    noMatch: string;
+    backspaceHint: string;
+    commandCount: string;
+    commandCountPlural: string;
+    aboveLabel: string;
+    belowLabel: string;
+    advancedHint: string;
+    footerHint: string;
+    groupChat: string;
+    groupSetup: string;
+    groupInfo: string;
+    groupSession: string;
+    groupExtend: string;
+    groupCode: string;
+    groupJobs: string;
+    groupAdvanced: string;
+  };
+  atMentions: {
+    loading: string;
+    entrySingular: string;
+    entryPlural: string;
+    searching: string;
+    scanned: string;
+    match: string;
+    matches: string;
+    forFilter: string;
+    noMatch: string;
+    emptyDir: string;
+    scanning: string;
+    footerBrowse: string;
+    footerBrowseSearch: string;
+    footerInsert: string;
+  };
   choiceConfirm: {
     customLabel: string;
     customDesc: string;
