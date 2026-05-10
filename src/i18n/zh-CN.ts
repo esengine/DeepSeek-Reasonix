@@ -277,6 +277,12 @@ export const zhCN: TranslationSchema = {
       argsHint: "[tokens]",
     },
     keys: { description: "键盘 + 鼠标 + 复制粘贴参考" },
+    stop: { description: "中止当前模型回合（按 Esc 的替代方式）" },
+    feedback: { description: "打开 GitHub Issue，诊断信息已复制到剪贴板" },
+    theme: {
+      description: "显示或持久化终端主题偏好。无参数时打开选择器",
+      argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
+    },
     plans: { description: "列出此会话的活跃 + 归档计划（最新在前）" },
     replay: {
       description: "加载归档计划为只读的时间旅行快照（默认：最新）",
