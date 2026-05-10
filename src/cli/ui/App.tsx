@@ -47,7 +47,7 @@ import {
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
-import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
+import { formatHookOutcomeMessage, runHooks } from "../../hooks.js";
 import { onLanguageChange, t, tObj } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import type { LoopEvent } from "../../loop.js";
@@ -121,6 +121,7 @@ import { useActivityLabel } from "./hooks/useActivityPhase.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
 import { useCodeMode } from "./hooks/useCodeMode.js";
 import { useEditGate } from "./hooks/useEditGate.js";
+import { useHookList } from "./hooks/useHookList.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
 import { useQuit } from "./hooks/useQuit.js";
@@ -428,13 +429,7 @@ function AppInner({
   const { currentRootDir, setCurrentRootDir, currentRootDirRef } = useWorkspaceRoot(
     codeMode?.rootDir,
   );
-  // Loaded user hooks (project + global settings.json). Stays mutable
-  // so `/hooks reload` and `/cwd` can rescan disk without
-  // reconstructing the loop. The loop holds a parallel reference for
-  // its tool-event dispatch; we keep them in sync via the effect below.
-  const [hookList, setHookList] = useState<ResolvedHook[]>(() =>
-    loadHooks({ projectRoot: codeMode?.rootDir }),
-  );
+  const { hookList, reloadHooks } = useHookList(codeMode?.rootDir);
   // Session-scoped edit history + undo banner + /undo, /history, /show
   // handlers. Kept in a custom hook so App.tsx only sees the small API
   // it needs — append an edit, arm the banner, answer the slash
@@ -1826,13 +1821,7 @@ function AppInner({
           if (fn) Promise.resolve(fn()).catch(() => undefined);
         },
         // ---------- v0.14 mutation surface ----------
-        reloadHooks: () => {
-          const fresh = loadHooks({
-            projectRoot: codeMode ? currentRootDirRef.current : undefined,
-          });
-          setHookList(fresh);
-          return fresh.length;
-        },
+        reloadHooks: () => reloadHooks(codeMode ? currentRootDirRef.current : undefined),
         addToolToPrefix: (spec) => loop.prefix.addTool(spec),
         reloadMcp: mcpRuntime
           ? async () => {
@@ -1873,6 +1862,7 @@ function AppInner({
     editModeRef,
     setEditMode,
     currentRootDirRef,
+    reloadHooks,
   ]);
 
   const stopDashboard = useCallback(async (): Promise<void> => {
@@ -2179,11 +2169,7 @@ function AppInner({
               oneTime: false,
             }),
           dispatch: agentStore.dispatch,
-          reloadHooks: () => {
-            const fresh = loadHooks({ projectRoot: codeMode ? currentRootDir : undefined });
-            setHookList(fresh);
-            return fresh.length;
-          },
+          reloadHooks: () => reloadHooks(codeMode ? currentRootDir : undefined),
           switchCwd: codeMode?.reregisterTools
             ? (newPath: string) => {
                 const resolved = resolve(newPath);
@@ -2198,8 +2184,7 @@ function AppInner({
                 }
                 codeMode.reregisterTools?.(resolved);
                 setCurrentRootDir(resolved);
-                const fresh = loadHooks({ projectRoot: resolved });
-                setHookList(fresh);
+                reloadHooks(resolved);
                 const reBootstrap = codeMode.reBootstrapSemantic;
                 if (reBootstrap) {
                   void reBootstrap(resolved).then(
@@ -2662,6 +2647,7 @@ function AppInner({
       pendingEdits,
       syncPendingCount,
       setCurrentRootDir,
+      reloadHooks,
       setOngoingTool,
       setToolProgress,
       setStatusLine,
