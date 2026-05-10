@@ -3,6 +3,36 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.0] — 2026-05-10
+
+**Headline:** new `/copy` slash command — a vim/tmux-style copy mode
+that gives users a keyboard path to yank chat text from the alt-screen
+buffer, where terminal drag-select can't extend past the visible
+viewport. Plus a long-overdue `docs/CLI-REFERENCE.md` covering every
+shell subcommand, every slash, and every keybinding, linked from both
+READMEs and the website footer.
+
+**Features:**
+
+- feat(ui): `/copy` enters a frozen-snapshot copy mode. `j`/`k` (or
+  arrows) move the cursor by line; `v` toggles a selection anchor;
+  `y`/`Enter` yanks via the existing OSC 52 path (with the temp-file
+  fallback for >75 KB or terminals that don't honour OSC 52); `g`/`G`
+  jump to top/bottom; `q`/`Esc` exits without yanking. Snapshot spans
+  user / streaming / reasoning cards — tool / diff / etc. are skipped;
+  headers are navigable but excluded from yank, so cross-card
+  selections come out clean. Solves the SSH / mosh / tmux drag-select
+  pain where alt-screen has nothing scrollable above the viewport for
+  the terminal to extend the selection into. (#614, #616)
+
+**Docs:**
+
+- docs: `docs/CLI-REFERENCE.md` mirrors `/help` + `/keys` so the surface
+  is greppable from the repo, indexable on the website, and printable
+  for offline reference. Linked from `README.md`, `README.zh-CN.md`,
+  `docs/index.html` (footer), and `docs/configuration.html` (outro CTA),
+  with EN + zh strings in both website i18n dictionaries. (#616)
+
 ## [0.37.0] — 2026-05-10
 
 **Headline:** boot splash + zh-CN status bar, MCP-handshake stall on
