@@ -284,19 +284,17 @@ export const EN: TranslationSchema = {
     context: { description: "show context-window breakdown (system / tools / log / input)" },
     retry: { description: "truncate & resend your last message (fresh sample)" },
     compact: {
-      description: "narrow oversized tool results + tool-call args in the log; cap at tokens, default 4000",
+      description:
+        "narrow oversized tool results + tool-call args in the log; cap at tokens, default 4000",
       argsHint: "[tokens]",
     },
     cwd: {
-      description: "switch the workspace root mid-session — re-points fs / shell / memory tools, reloads project hooks, refreshes the at-mention walker",
+      description:
+        "switch the workspace root mid-session — re-points fs / shell / memory tools, reloads project hooks, refreshes the at-mention walker",
       argsHint: "<path>",
     },
     stop: { description: "abort the current model turn (typed alternative to Esc)" },
     feedback: { description: "open a GitHub issue with diagnostic info copied to clipboard" },
-    theme: {
-      description: "show or persist the terminal theme preference. Bare opens picker",
-      argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
-    },
     keys: { description: "keyboard + mouse + copy/paste reference" },
     plans: { description: "list this session's active + archived plans, newest first" },
     replay: {
@@ -1049,7 +1047,6 @@ export const EN: TranslationSchema = {
     hintAbort: "abort",
     hintQuit: "quit",
     abortedHint: "turn aborted by user \u00b7 esc again to clear \u00b7 \u23ce to ask a follow-up",
-    hintClear: "clear",
   },
   shellConfirm: {
     title: "Shell command",

@@ -361,7 +361,6 @@ export interface TranslationSchema {
     hintAbort: string;
     hintQuit: string;
     abortedHint: string;
-    hintClear: string;
   };
   shellConfirm: {
     title: string;
