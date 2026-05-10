@@ -35,7 +35,6 @@ import {
   defaultConfigPath,
   editModeHintShown,
   loadBaseUrl,
-  loadEditMode,
   loadReasoningEffort,
   loadTheme,
   markEditModeHintShown,
@@ -121,6 +120,7 @@ import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useActivityLabel } from "./hooks/useActivityPhase.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
 import { useCodeMode } from "./hooks/useCodeMode.js";
+import { useEditGate } from "./hooks/useEditGate.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
 import { useQuit } from "./hooks/useQuit.js";
@@ -457,41 +457,20 @@ function AppInner({
     hasUndoable,
     touchedPaths,
   } = useEditHistory(codeMode);
-  // Pending edit blocks awaiting `/apply` or `/discard`. We do NOT
-  // auto-apply — v0.4.1 showed that "model proposed, so apply" turns
-  // analysis into unintended edits. The user explicitly confirms now.
-  const pendingEdits = useRef<EditBlock[]>([]);
-  // Reactive mirror of `pendingEdits.current.length`. Refs don't trigger
-  // re-renders, but the bottom mode-status bar needs to show the queue
-  // size live — this keeps the number in sync whenever the queue grows
-  // (interceptor / text-SEARCH parse / checkpoint restore) or clears
-  // (/apply / /discard / /new).
-  const [pendingCount, setPendingCount] = useState(0);
-  const syncPendingCount = useCallback(() => {
-    setPendingCount(pendingEdits.current.length);
-    // Bump the tick so the /walk modal re-evaluates "first remaining
-    // block" after each per-block apply/discard. Without this the
-    // EditConfirm render would keep the OLD block reference and never
-    // advance.
-    setPendingTick((t) => t + 1);
-  }, []);
-  // Edit-gate mode. `review` (default) queues edits into pendingEdits;
-  // `auto` applies them immediately and exposes an undo banner. Shift+
-  // Tab cycles, `/mode <review|auto>` sets explicitly. Persisted so
-  // toggling once survives a relaunch.
-  const [editMode, setEditMode] = useState<EditMode>(() => (codeMode ? loadEditMode() : "review"));
+  const {
+    pendingEdits,
+    pendingCount,
+    pendingTick,
+    syncPendingCount,
+    editMode,
+    setEditMode,
+    editModeRef,
+    modeFlash,
+  } = useEditGate(!!codeMode);
   const [preset, setPreset] = useState<"auto" | "flash" | "pro">(() => {
     if (model === "deepseek-v4-pro") return "pro";
     return "auto";
   });
-  // Interceptor closure reads the live mode through this ref — so we
-  // install the registry hook once (in useEffect below) and avoid tearing
-  // down + reattaching it every time the user cycles modes.
-  const editModeRef = useRef<EditMode>(editMode);
-  useEffect(() => {
-    editModeRef.current = editMode;
-    if (codeMode) saveEditMode(editMode);
-  }, [editMode, codeMode]);
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -510,11 +489,6 @@ function AppInner({
   // which is the AUTO-mode tool-call interceptor. Walkthrough is
   // user-initiated against the QUEUED pending list, not mid-stream.
   const [walkthroughActive, setWalkthroughActive] = useState(false);
-  // Bumped every time codeApply/codeDiscard mutates pendingEdits so the
-  // walkthrough render can re-pick "block 0 of the current queue" via
-  // a useMemo dep. Without this, walkthroughActive alone wouldn't
-  // re-render after a partial apply.
-  const [pendingTick, setPendingTick] = useState(0);
   /** Result from the EditConfirm modal: choice plus optional deny context. */
   interface EditReviewResult {
     choice: EditReviewChoice;
@@ -525,22 +499,6 @@ function AppInner({
   // in the SAME turn skip the modal and land like AUTO. Resets to "ask"
   // at handleSubmit entry so the next user turn starts fresh.
   const turnEditPolicyRef = useRef<"ask" | "apply-all">("ask");
-  // Visual highlight on the bottom mode bar for ~1.2s after Shift+Tab /
-  // /mode flips the mode — a soft "yes, it changed" signal so the user
-  // doesn't have to scan the header to confirm the toggle landed.
-  const [modeFlash, setModeFlash] = useState(false);
-  const modeFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevEditModeRef = useRef<EditMode>(editMode);
-  useEffect(() => {
-    if (prevEditModeRef.current === editMode) return;
-    prevEditModeRef.current = editMode;
-    setModeFlash(true);
-    if (modeFlashTimeoutRef.current) clearTimeout(modeFlashTimeoutRef.current);
-    modeFlashTimeoutRef.current = setTimeout(() => {
-      setModeFlash(false);
-      modeFlashTimeoutRef.current = null;
-    }, 1200);
-  }, [editMode]);
   // Shell command the model asked to run that wasn't on the auto-run
   // allowlist. Non-null renders the ShellConfirm modal and disables
   // the prompt input; the user picks Run once / Always allow in this
@@ -1068,7 +1026,7 @@ function AppInner({
     return () => {
       broadcastDashboardEvent({ kind: "modal-down", modalKind: "edit-review" });
     };
-  }, [pendingEditReview, broadcastDashboardEvent]);
+  }, [pendingEditReview, broadcastDashboardEvent, pendingEdits]);
 
   useEffect(() => {
     if (!pendingRevision) return;
@@ -1200,7 +1158,7 @@ function AppInner({
       log.pushTip({ topic: tip.topic, sections: tip.sections, footer: tip.footer });
       markMouseClipboardHintShown();
     }
-  }, [session, loop, codeMode, syncPendingCount, log]);
+  }, [session, loop, codeMode, syncPendingCount, log, pendingEdits]);
 
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
@@ -1642,7 +1600,7 @@ function AppInner({
     }
     setWalkthroughActive(true);
     return `▸ walking ${pendingEdits.current.length} edit block(s) — y apply · n reject · a apply rest · A flip to AUTO · Esc cancels (keeps remaining queued).`;
-  }, [codeMode]);
+  }, [codeMode, pendingEdits]);
 
   // Embedded dashboard server lifecycle. Boot is async (server has to
   // bind a port + read static assets); the slash handler kicks this
@@ -1921,6 +1879,9 @@ function AppInner({
     getLoopStatus,
     startLoop,
     stopLoop,
+    pendingEdits,
+    editModeRef,
+    setEditMode,
   ]);
 
   const stopDashboard = useCallback(async (): Promise<void> => {
@@ -2014,7 +1975,7 @@ function AppInner({
       // the new first block thanks to pendingTick.
       if (pendingEdits.current.length === 0) setWalkthroughActive(false);
     },
-    [codeApply, codeDiscard, log],
+    [codeApply, codeDiscard, log, pendingEdits, setEditMode],
   );
 
   const handleSubmit = useCallback(
@@ -2705,6 +2666,9 @@ function AppInner({
       armUndoBanner,
       sealCurrentEntry,
       editMode,
+      editModeRef,
+      setEditMode,
+      pendingEdits,
       syncPendingCount,
       setOngoingTool,
       setToolProgress,
@@ -3023,8 +2987,7 @@ function AppInner({
   }, [handleShellConfirm]);
   // Listen for pause requests from tool functions (via PauseGate).
   // Dispatches to the correct modal based on request.kind.
-  // Note: stable deps (none) — codeMode changes don't re-trigger,
-  // the listener checks nothing from closure except setState setters.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setters + editModeRef are stable; the listener installs once per mount and reads only refs/setters from closure
   useEffect(() => {
     return pauseGate.on((request) => {
       const payload = request.payload as Record<string, unknown>;
