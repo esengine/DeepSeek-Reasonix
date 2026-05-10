@@ -1114,10 +1114,9 @@ export const zhCN: TranslationSchema = {
     turnLabel: "轮",
   },
   startup: {
-    codeRooted: "▸ reasonix code：根目录 ",
-    session: '会话 "',
+    codeRooted:
+      '▸ reasonix code：根目录 {rootDir}，会话 "{session}" · {tools} 个原生工具{semantic}',
     ephemeral: "（临时）",
-    nativeTools: " 个原生工具",
     semanticOn: " · 语义搜索已开启",
   },
   doctorErrors: {

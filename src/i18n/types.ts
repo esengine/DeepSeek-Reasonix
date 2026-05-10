@@ -481,9 +481,7 @@ export interface TranslationSchema {
   };
   startup: {
     codeRooted: string;
-    session: string;
     ephemeral: string;
-    nativeTools: string;
     semanticOn: string;
   };
   doctorErrors: {

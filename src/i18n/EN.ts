@@ -1176,10 +1176,9 @@ export const EN: TranslationSchema = {
     turnLabel: "turn",
   },
   startup: {
-    codeRooted: "\u25b8 reasonix code: rooted at ",
-    session: 'session "',
+    codeRooted:
+      '\u25b8 reasonix code: rooted at {rootDir}, session "{session}" \u00b7 {tools} native tool(s){semantic}',
     ephemeral: "(ephemeral)",
-    nativeTools: " native tool(s)",
     semanticOn: " \u00b7 semantic_search on",
   },
   doctorErrors: {

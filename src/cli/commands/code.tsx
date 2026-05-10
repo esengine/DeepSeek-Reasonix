@@ -161,9 +161,12 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   );
 
   process.stderr.write(
-    `${t("startup.codeRooted")}${rootDir}${t("startup.session")}${session ?? t("startup.ephemeral")}" · ${tools.size}${t("startup.nativeTools")}${
-      semantic.enabled ? t("startup.semanticOn") : ""
-    }\n`,
+    `${t("startup.codeRooted", {
+      rootDir,
+      session: session ?? t("startup.ephemeral"),
+      tools: tools.size,
+      semantic: semantic.enabled ? t("startup.semanticOn") : "",
+    })}\n`,
   );
 
   const foreign = detectForeignAgentPlatform(rootDir);
