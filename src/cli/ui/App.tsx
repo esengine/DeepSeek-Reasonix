@@ -120,7 +120,6 @@ import {
 import { handleToolEvent } from "./hooks/handle-tool-event.js";
 import { useActivityLabel } from "./hooks/useActivityPhase.js";
 import { useAgentSession } from "./hooks/useAgentSession.js";
-import { useChatScroll } from "./hooks/useChatScroll.js";
 import { useCodeMode } from "./hooks/useCodeMode.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
@@ -151,6 +150,11 @@ import { PRESETS, resolvePreset } from "./presets.js";
 import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
+import {
+  ChatScrollProvider,
+  useChatScrollActions,
+  useChatScrollState,
+} from "./state/chat-scroll-provider.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
@@ -261,6 +265,25 @@ const FLUSH_INTERVAL_MS = (() => {
 })();
 
 /**
+ * Renders either the input area (pinned) or the "reading history" hint
+ * (scrolled up). Reads `pinned` from the chat-scroll store directly so
+ * AppInner doesn't subscribe — toggling pinned only re-renders this leaf.
+ */
+function InputAreaWithHistoryHint({
+  inputArea,
+}: { inputArea: React.ReactNode }): React.ReactElement {
+  const pinned = useChatScrollState((s) => s.pinned);
+  if (!pinned) {
+    return (
+      <Text color={FG.faint}>
+        {" 📖 reading history — End / PgDn to return · ↓ to advance one line"}
+      </Text>
+    );
+  }
+  return <>{inputArea}</>;
+}
+
+/**
  * Single-line status pill rendered below the modeline whenever a /loop
  * is active. Re-renders every second so the countdown ticks.
  */
@@ -306,7 +329,9 @@ export function App(props: AppProps): React.ReactElement {
   return (
     <ThemeProvider name={themeName}>
       <AgentStoreProvider session={session} initialCards={initialCards}>
-        <AppInner {...props} themeName={themeName} setThemeName={setThemeName} />
+        <ChatScrollProvider>
+          <AppInner {...props} themeName={themeName} setThemeName={setThemeName} />
+        </ChatScrollProvider>
       </AgentStoreProvider>
     </ThemeProvider>
   );
@@ -343,7 +368,7 @@ function AppInner({
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const activityLabel = useActivityLabel();
-  const chatScroll = useChatScroll();
+  const chatScroll = useChatScrollActions();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [slashUsage, setSlashUsage] = useState<Readonly<Record<string, number>>>(() =>
@@ -3369,11 +3394,7 @@ function AppInner({
               <Box flexDirection="column" flexGrow={1}>
                 <Box flexDirection="column" flexGrow={1}>
                   <LiveExpandContext.Provider value={liveExpand}>
-                    <CardStream
-                      suppressLive={modalOpen}
-                      scrollRows={chatScroll.scrollRows}
-                      onMaxScrollChange={chatScroll.setMaxScroll}
-                    />
+                    <CardStream suppressLive={modalOpen} />
                   </LiveExpandContext.Provider>
                   {/*
           Welcome card on the empty state. Visible only when nothing
@@ -3732,59 +3753,58 @@ function AppInner({
                     block={pendingEdits.current[0]!}
                     onChoose={handleWalkChoice}
                   />
-                ) : !chatScroll.pinned ? (
-                  <Text color={FG.faint}>
-                    {" 📖 reading history — End / PgDn to return · ↓ to advance one line"}
-                  </Text>
                 ) : (
-                  <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                    <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                      {codeMode ? (
-                        <ModeStatusBar
-                          editMode={editMode}
-                          pendingCount={pendingCount}
-                          flash={modeFlash}
-                          planMode={planMode}
-                          undoArmed={!!undoBanner || hasUndoable()}
-                          jobs={codeMode.jobs}
-                        />
-                      ) : null}
-                      {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
-                      <StatusRow />
-                      <PromptInput
-                        value={input}
-                        onChange={setInput}
-                        onSubmit={handleSubmit}
-                        disabled={busy}
-                        onHistoryPrev={recallPrev}
-                        onHistoryNext={recallNext}
-                      />
-                    </Box>
-                    <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                      {slashMatches !== null ? (
-                        <SlashSuggestions
-                          key={`slash-suggestions:${slashGroupMode ? "group" : "search"}`}
-                          matches={slashMatches}
-                          selectedIndex={slashSelected}
-                          groupMode={slashGroupMode}
-                          advancedHidden={slashAdvancedHidden}
-                        />
-                      ) : null}
-                      {atState !== null ? (
-                        <AtMentionSuggestions state={atState} selectedIndex={atSelected} />
-                      ) : null}
-                    </Box>
-                    {slashArgContext ? (
-                      <SlashArgPicker
-                        matches={slashArgMatches}
-                        selectedIndex={slashArgSelected}
-                        spec={slashArgContext.spec}
-                        kind={slashArgContext.kind}
-                        partial={slashArgContext.partial}
-                      />
-                    ) : null}
-                    {/* CtxFooter retired — UsageCard auto-emits per turn covers the same data */}
-                  </Box>
+                  <InputAreaWithHistoryHint
+                    inputArea={
+                      <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+                        <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+                          {codeMode ? (
+                            <ModeStatusBar
+                              editMode={editMode}
+                              pendingCount={pendingCount}
+                              flash={modeFlash}
+                              planMode={planMode}
+                              undoArmed={!!undoBanner || hasUndoable()}
+                              jobs={codeMode.jobs}
+                            />
+                          ) : null}
+                          {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
+                          <StatusRow />
+                          <PromptInput
+                            value={input}
+                            onChange={setInput}
+                            onSubmit={handleSubmit}
+                            disabled={busy}
+                            onHistoryPrev={recallPrev}
+                            onHistoryNext={recallNext}
+                          />
+                        </Box>
+                        <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+                          {slashMatches !== null ? (
+                            <SlashSuggestions
+                              key={`slash-suggestions:${slashGroupMode ? "group" : "search"}`}
+                              matches={slashMatches}
+                              selectedIndex={slashSelected}
+                              groupMode={slashGroupMode}
+                              advancedHidden={slashAdvancedHidden}
+                            />
+                          ) : null}
+                          {atState !== null ? (
+                            <AtMentionSuggestions state={atState} selectedIndex={atSelected} />
+                          ) : null}
+                        </Box>
+                        {slashArgContext ? (
+                          <SlashArgPicker
+                            matches={slashArgMatches}
+                            selectedIndex={slashArgSelected}
+                            spec={slashArgContext.spec}
+                            kind={slashArgContext.kind}
+                            partial={slashArgContext.partial}
+                          />
+                        ) : null}
+                      </Box>
+                    }
+                  />
                 )}
               </Box>
             </Box>
