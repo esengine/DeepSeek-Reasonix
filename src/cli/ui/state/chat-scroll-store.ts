@@ -9,6 +9,8 @@ export interface ChatScrollState {
   maxScroll: number;
   /** Bumped on every applied scroll delta — consumers can flash an indicator. */
   scrollVersion: number;
+  /** Per-card row height, populated as cards mount and re-measured on streaming changes. */
+  cardHeights: ReadonlyMap<string, number>;
 }
 
 export type ScrollListener = () => void;
@@ -22,17 +24,24 @@ export interface ChatScrollStore {
   scrollPageDown(): void;
   jumpToBottom(): void;
   setMaxScroll(rows: number): void;
+  /** Reports a card's measured height. No-op if value matches the cache. */
+  setCardHeight(id: string, rows: number): void;
+  /** Drops heights for cards no longer in the visible list. Called by CardStream when cards change. */
+  pruneCardHeights(liveIds: ReadonlySet<string>): void;
 }
 
 export const SCROLL_ARROW_ROWS = 3;
 export const SCROLL_PAGE_ROWS = 5;
 const COALESCE_MS = 16;
 
+const EMPTY_HEIGHTS: ReadonlyMap<string, number> = new Map();
+
 const initial: ChatScrollState = {
   scrollRows: 0,
   pinned: true,
   maxScroll: 0,
   scrollVersion: 0,
+  cardHeights: EMPTY_HEIGHTS,
 };
 
 export function createChatScrollStore(): ChatScrollStore {
@@ -47,7 +56,8 @@ export function createChatScrollStore(): ChatScrollStore {
       merged.scrollRows === state.scrollRows &&
       merged.pinned === state.pinned &&
       merged.maxScroll === state.maxScroll &&
-      merged.scrollVersion === state.scrollVersion
+      merged.scrollVersion === state.scrollVersion &&
+      merged.cardHeights === state.cardHeights
     ) {
       return;
     }
@@ -108,6 +118,24 @@ export function createChatScrollStore(): ChatScrollStore {
       // Pinned-mode invariant: scrollRows tracks maxScroll exactly.
       const nextScrollRows = state.pinned ? m : Math.min(state.scrollRows, m);
       set({ maxScroll: m, scrollRows: nextScrollRows });
+    },
+    setCardHeight(id: string, rows: number) {
+      if (state.cardHeights.get(id) === rows) return;
+      const next = new Map(state.cardHeights);
+      next.set(id, rows);
+      set({ cardHeights: next });
+    },
+    pruneCardHeights(liveIds: ReadonlySet<string>) {
+      let drop = 0;
+      for (const id of state.cardHeights.keys()) {
+        if (!liveIds.has(id)) drop++;
+      }
+      if (drop === 0) return;
+      const next = new Map<string, number>();
+      for (const [id, h] of state.cardHeights) {
+        if (liveIds.has(id)) next.set(id, h);
+      }
+      set({ cardHeights: next });
     },
   };
 }

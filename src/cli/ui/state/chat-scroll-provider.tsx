@@ -34,7 +34,14 @@ export function useChatScrollState<T>(selector: (s: ChatScrollState) => T): T {
 /** Returns the action set — stable across renders, never triggers re-renders by itself. */
 export function useChatScrollActions(): Pick<
   ChatScrollStore,
-  "scrollUp" | "scrollDown" | "scrollPageUp" | "scrollPageDown" | "jumpToBottom" | "setMaxScroll"
+  | "scrollUp"
+  | "scrollDown"
+  | "scrollPageUp"
+  | "scrollPageDown"
+  | "jumpToBottom"
+  | "setMaxScroll"
+  | "setCardHeight"
+  | "pruneCardHeights"
 > {
   return useStore();
 }
