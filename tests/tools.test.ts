@@ -310,4 +310,97 @@ describe("ToolRegistry", () => {
       expect(reg.isParallelSafe("nope")).toBe(false);
     });
   });
+
+  describe("required parameter validation", () => {
+    it("returns a structured error when a required param is missing entirely", async () => {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "read_file",
+        description: "read a file",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Path to read." },
+          },
+          required: ["path"],
+        },
+        fn: ({ path }: { path: string }) => `read ${path}`,
+      });
+      const out = await reg.dispatch("read_file", "{}");
+      expect(JSON.parse(out).error).toMatch(/missing required parameter "path"/);
+    });
+
+    it("lets the tool fn handle empty string — JSON Schema required only checks presence, not emptiness", async () => {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "read_file",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+          },
+          required: ["path"],
+        },
+        fn: ({ path }: { path: string }) => `read ${path}`,
+      });
+      const out = await reg.dispatch("read_file", '{"path": ""}');
+      expect(out).toBe("read ");
+    });
+
+    it("passes through when all required params are present and non-empty", async () => {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "read_file",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+          },
+          required: ["path"],
+        },
+        fn: ({ path }: { path: string }) => `read ${path}`,
+      });
+      const out = await reg.dispatch("read_file", '{"path": "/foo/bar.ts"}');
+      expect(out).toBe("read /foo/bar.ts");
+    });
+
+    it("skips validation when the schema has no required list (all params optional)", async () => {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "optional_tool",
+        parameters: {
+          type: "object",
+          properties: {
+            msg: { type: "string" },
+          },
+        },
+        fn: () => "ok",
+      });
+      const out = await reg.dispatch("optional_tool", "{}");
+      expect(out).toBe("ok");
+    });
+
+    it("passes through when required param is a nested object (not a string)", async () => {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "write_file",
+        parameters: {
+          type: "object",
+          properties: {
+            file: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+                content: { type: "string" },
+              },
+            },
+          },
+          required: ["file"],
+        },
+        fn: ({ file }: { file: { path: string; content: string } }) => `wrote ${file.path}`,
+      });
+      const out = await reg.dispatch("write_file", '{"file": {"path": "/foo", "content": "hi"}}');
+      expect(out).toBe("wrote /foo");
+    });
+  });
 });

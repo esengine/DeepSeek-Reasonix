@@ -184,6 +184,13 @@ export class ToolRegistry {
       args = nestArguments(args);
     }
 
+    const missing = tool.parameters ? missingRequiredParam(tool.parameters, args) : null;
+    if (missing) {
+      return JSON.stringify({
+        error: `${name}: missing required parameter "${missing}". Retry with all required parameters filled.`,
+      });
+    }
+
     // Plan-mode enforcement — runs AFTER arg parsing so a tool with a
     // runtime `readOnlyCheck` can inspect the actual args (e.g.
     // `run_command` is read-only iff the command matches its allowlist).
@@ -284,4 +291,14 @@ function hasDotKey(obj: Record<string, unknown>): boolean {
     if (k.includes(".")) return true;
   }
   return false;
+}
+
+/** If the schema declares required params, return the first one that's missing. */
+function missingRequiredParam(schema: JSONSchema, args: Record<string, unknown>): string | null {
+  const required = schema.required;
+  if (!required || required.length === 0) return null;
+  for (const key of required) {
+    if (args[key] === undefined) return key;
+  }
+  return null;
 }
