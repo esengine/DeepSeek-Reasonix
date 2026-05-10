@@ -575,6 +575,8 @@ export const zhCN: TranslationSchema = {
   handlers: {
     basic: {
       newInfo: "▸ 新对话 — 已从上下文中丢弃 {count} 条消息。同一会话，全新开始。",
+      newInfoArchived:
+        "▸ 新对话 — 已从上下文中丢弃 {count} 条消息。原对话已归档为「{archived}」，可在 Sessions 面板查看。",
       helpTitle: "命令：",
       helpShellTitle: "Shell 快捷方式：",
       helpShell: "  !<cmd>                   在沙箱根目录运行 <cmd>；输出进入对话",

@@ -592,6 +592,8 @@ export const EN: TranslationSchema = {
     basic: {
       newInfo:
         "▸ new conversation — dropped {count} message(s) from context. Same session, fresh slate.",
+      newInfoArchived:
+        '▸ new conversation — dropped {count} message(s) from context. Prior transcript archived as "{archived}" (visible under Sessions).',
       helpTitle: "Commands:",
       helpShellTitle: "Shell shortcut:",
       helpShell: "  !<cmd>                   run <cmd> in the sandbox root; output goes into",

@@ -44,6 +44,7 @@ import type { LoopEvent } from "./loop/types.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
 import {
   appendSessionMessage,
+  archiveSession,
   loadSessionMessages,
   loadSessionMeta,
   rewriteSession,
@@ -296,20 +297,22 @@ export class CacheFirstLoop {
     }
   }
 
-  /** "New chat" — drops messages but keeps session + immutable prefix (cache-first invariant). */
-  clearLog(): { dropped: number } {
+  /** "New chat" — drops in-memory messages, archives the on-disk transcript so it survives in Sessions, keeps sessionName so the prefix cache stays warm. */
+  clearLog(): { dropped: number; archived: string | null } {
     const dropped = this.log.length;
     this.log.compactInPlace([]);
+    let archived: string | null = null;
     if (this.sessionName) {
       try {
-        rewriteSession(this.sessionName, []);
+        archived = archiveSession(this.sessionName);
+        if (archived === null) rewriteSession(this.sessionName, []);
       } catch {
         /* disk issue shouldn't block the in-memory clear */
       }
     }
     this.scratch.reset();
     this._inflight.clear();
-    return { dropped };
+    return { dropped, archived };
   }
 
   configure(opts: ReconfigurableOptions): void {

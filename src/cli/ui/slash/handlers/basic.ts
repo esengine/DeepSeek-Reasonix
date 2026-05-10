@@ -7,11 +7,11 @@ import type { SlashCommandSpec, SlashGroup } from "../types.js";
 const exit: SlashHandler = () => ({ exit: true });
 
 const resetLog: SlashHandler = (_args, loop) => {
-  const { dropped } = loop.clearLog();
-  return {
-    clear: true,
-    info: t("handlers.basic.newInfo", { count: dropped }),
-  };
+  const { dropped, archived } = loop.clearLog();
+  const info = archived
+    ? t("handlers.basic.newInfoArchived", { count: dropped, archived })
+    : t("handlers.basic.newInfo", { count: dropped });
+  return { clear: true, info };
 };
 
 const GROUP_ORDER: ReadonlyArray<SlashGroup> = [

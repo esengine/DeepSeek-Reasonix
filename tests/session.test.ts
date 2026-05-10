@@ -7,6 +7,7 @@ import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import {
   appendSessionMessage,
+  archiveSession,
   deleteSession,
   findSessionsByPrefix,
   listSessions,
@@ -187,6 +188,102 @@ describe("session persistence", () => {
     expect(existsSync(sessionPath("yesterday"))).toBe(true);
     expect(pruneStaleSessions(1)).toEqual(["yesterday"]);
     expect(existsSync(sessionPath("yesterday"))).toBe(false);
+  });
+
+  describe("archiveSession", () => {
+    it("returns null when the session file does not exist", () => {
+      expect(archiveSession("ghost")).toBeNull();
+    });
+
+    it("returns null when the session file is empty", () => {
+      appendSessionMessage("empty", { role: "user", content: "x" });
+      writeFileSync(sessionPath("empty"), "");
+      expect(archiveSession("empty")).toBeNull();
+      expect(existsSync(sessionPath("empty"))).toBe(true);
+    });
+
+    it("renames jsonl + sidecars to a timestamped archive name", () => {
+      appendSessionMessage("live", { role: "user", content: "hi" });
+      const events = sessionPath("live").replace(/\.jsonl$/, ".events.jsonl");
+      const meta = sessionPath("live").replace(/\.jsonl$/, ".meta.json");
+      writeFileSync(events, '{"id":1}\n');
+      writeFileSync(meta, "{}");
+
+      const archived = archiveSession("live");
+      expect(archived).toMatch(/^live__archive_\d{12}/);
+      expect(existsSync(sessionPath("live"))).toBe(false);
+      expect(existsSync(sessionPath(archived!))).toBe(true);
+      expect(existsSync(events)).toBe(false);
+      expect(existsSync(meta)).toBe(false);
+      expect(existsSync(sessionPath(archived!).replace(/\.jsonl$/, ".events.jsonl"))).toBe(true);
+      expect(existsSync(sessionPath(archived!).replace(/\.jsonl$/, ".meta.json"))).toBe(true);
+      expect(loadSessionMessages(archived!)).toEqual([{ role: "user", content: "hi" }]);
+    });
+
+    it("disambiguates when called twice in the same minute", () => {
+      appendSessionMessage("rapid", { role: "user", content: "first" });
+      const a = archiveSession("rapid");
+      appendSessionMessage("rapid", { role: "user", content: "second" });
+      const b = archiveSession("rapid");
+      expect(a).not.toBeNull();
+      expect(b).not.toBeNull();
+      expect(a).not.toBe(b);
+      expect(loadSessionMessages(a!)).toEqual([{ role: "user", content: "first" }]);
+      expect(loadSessionMessages(b!)).toEqual([{ role: "user", content: "second" }]);
+    });
+
+    it("archive name is excluded from the resume-by-prefix lookup", () => {
+      appendSessionMessage("proj", { role: "user", content: "x" });
+      const archived = archiveSession("proj");
+      expect(archived).not.toBeNull();
+      expect(findSessionsByPrefix("proj-")).toEqual([]);
+    });
+
+    it("archive shows up in listSessions", () => {
+      appendSessionMessage("show", { role: "user", content: "x" });
+      const archived = archiveSession("show");
+      const names = listSessions().map((s) => s.name);
+      expect(names).toContain(archived);
+    });
+  });
+
+  describe("clearLog archive integration", () => {
+    it("CacheFirstLoop.clearLog archives the live transcript and starts an empty file", () => {
+      const client = new DeepSeekClient({
+        apiKey: "sk-test",
+        fetch: (async () => new Response()) as any,
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s" }),
+        stream: false,
+        session: "clear-archive",
+      });
+      loop.appendAndPersist({ role: "user", content: "first turn" });
+      loop.appendAndPersist({ role: "assistant", content: "reply" });
+
+      const { dropped, archived } = loop.clearLog();
+      expect(dropped).toBe(2);
+      expect(archived).toMatch(/^clear-archive__archive_\d{12}/);
+      expect(loadSessionMessages(archived!)).toHaveLength(2);
+      expect(loadSessionMessages("clear-archive")).toEqual([]);
+      expect(loop.log.length).toBe(0);
+    });
+
+    it("clearLog returns archived: null when the session has nothing on disk", () => {
+      const client = new DeepSeekClient({
+        apiKey: "sk-test",
+        fetch: (async () => new Response()) as any,
+      });
+      const loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s" }),
+        stream: false,
+        session: "clear-empty",
+      });
+      const { archived } = loop.clearLog();
+      expect(archived).toBeNull();
+    });
   });
 
   it("sessionsDir exists after first append", () => {

@@ -291,6 +291,22 @@ export function rewriteSession(name: string, messages: ChatMessage[]): void {
   }
 }
 
+/** Rotate the live jsonl + sidecars to `<name>__archive_<ts>` so /new doesn't destroy history. Returns the archive name, or null if there was nothing to archive. */
+export function archiveSession(name: string): string | null {
+  const path = sessionPath(name);
+  if (!existsSync(path)) return null;
+  try {
+    if (statSync(path).size === 0) return null;
+  } catch {
+    return null;
+  }
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const target = `${name}__archive_${timestampSuffix()}${attempt > 0 ? `_${attempt}` : ""}`;
+    if (renameSession(name, target)) return target;
+  }
+  return null;
+}
+
 function countLines(path: string): number {
   try {
     const raw = readFileSync(path, "utf8");
