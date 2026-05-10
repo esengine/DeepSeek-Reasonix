@@ -22,9 +22,14 @@ import { VERSION } from "../../version.js";
 export type DoctorLevel = "ok" | "warn" | "fail";
 
 export interface DoctorCheck {
+  id: string;
   label: string;
   level: DoctorLevel;
   detail: string;
+}
+
+export interface DoctorOptions {
+  json?: boolean;
 }
 
 type Level = DoctorLevel;
@@ -70,6 +75,7 @@ async function checkApiKey(): Promise<Check> {
   const fromEnv = process.env.DEEPSEEK_API_KEY;
   if (fromEnv) {
     return {
+      id: "api-key",
       label: "api key      ",
       level: "ok",
       detail: `set via env DEEPSEEK_API_KEY (${tail4(fromEnv)})`,
@@ -79,6 +85,7 @@ async function checkApiKey(): Promise<Check> {
     const cfg = readConfig();
     if (cfg.apiKey) {
       return {
+        id: "api-key",
         label: "api key      ",
         level: "ok",
         detail: `from ${defaultConfigPath()} (${tail4(cfg.apiKey)})`,
@@ -88,6 +95,7 @@ async function checkApiKey(): Promise<Check> {
     /* fall through */
   }
   return {
+    id: "api-key",
     label: "api key      ",
     level: "fail",
     detail:
@@ -99,6 +107,7 @@ async function checkConfig(): Promise<Check> {
   const path = defaultConfigPath();
   if (!existsSync(path)) {
     return {
+      id: "config",
       label: "config       ",
       level: "warn",
       detail: "missing — running with library defaults. `reasonix setup` writes one.",
@@ -111,12 +120,14 @@ async function checkConfig(): Promise<Check> {
     if (cfg.editMode) parts.push(`editMode=${cfg.editMode}`);
     if (cfg.mcp && cfg.mcp.length > 0) parts.push(`mcp=${cfg.mcp.length}`);
     return {
+      id: "config",
       label: "config       ",
       level: "ok",
       detail: `${path}${parts.length ? ` (${parts.join(", ")})` : ""}`,
     };
   } catch (err) {
     return {
+      id: "config",
       label: "config       ",
       level: "fail",
       detail: t("doctorErrors.unreadable", { path, message: (err as Error).message }),
@@ -128,6 +139,7 @@ async function checkApiReach(): Promise<Check> {
   const key = process.env.DEEPSEEK_API_KEY ?? readConfig().apiKey;
   if (!key) {
     return {
+      id: "api-reach",
       label: "api reach    ",
       level: "warn",
       detail: "skipped — no api key to test with",
@@ -145,6 +157,7 @@ async function checkApiReach(): Promise<Check> {
     }
     if (!balance) {
       return {
+        id: "api-reach",
         label: "api reach    ",
         level: "fail",
         detail: "/user/balance returned null — auth failed or network blocked",
@@ -153,6 +166,7 @@ async function checkApiReach(): Promise<Check> {
     if (!balance.is_available) {
       const info = balance.balance_infos[0];
       return {
+        id: "api-reach",
         label: "api reach    ",
         level: "warn",
         detail: `account flagged not-available${info ? ` (${info.total_balance} ${info.currency})` : ""} — top up or check your dashboard`,
@@ -160,6 +174,7 @@ async function checkApiReach(): Promise<Check> {
     }
     const info = balance.balance_infos[0];
     return {
+      id: "api-reach",
       label: "api reach    ",
       level: "ok",
       detail: info
@@ -168,6 +183,7 @@ async function checkApiReach(): Promise<Check> {
     };
   } catch (err) {
     return {
+      id: "api-reach",
       label: "api reach    ",
       level: "fail",
       detail: `${(err as Error).message}`,
@@ -184,6 +200,7 @@ async function checkTokenizer(): Promise<Check> {
     try {
       const stat = statSync(path);
       return {
+        id: "tokenizer",
         label: "tokenizer    ",
         level: "ok",
         detail: `${path} (${fmtBytes(stat.size)})`,
@@ -193,6 +210,7 @@ async function checkTokenizer(): Promise<Check> {
     }
   }
   return {
+    id: "tokenizer",
     label: "tokenizer    ",
     level: "warn",
     detail:
@@ -205,6 +223,7 @@ async function checkSessions(): Promise<Check> {
     const list = listSessions();
     if (list.length === 0) {
       return {
+        id: "sessions",
         label: "sessions     ",
         level: "ok",
         detail: "0 saved",
@@ -219,14 +238,16 @@ async function checkSessions(): Promise<Check> {
     const detail = `${list.length} saved · ${fmtBytes(totalBytes)} · oldest ${ageDays}d`;
     if (stale > 0) {
       return {
+        id: "sessions",
         label: "sessions     ",
         level: "warn",
         detail: `${detail} · ${stale} idle ≥90d (run \`reasonix prune-sessions\`)`,
       };
     }
-    return { label: "sessions     ", level: "ok", detail };
+    return { id: "sessions", label: "sessions     ", level: "ok", detail };
   } catch (err) {
     return {
+      id: "sessions",
       label: "sessions     ",
       level: "warn",
       detail: t("doctorErrors.cannotList", { message: (err as Error).message }),
@@ -240,12 +261,14 @@ async function checkHooks(projectRoot: string): Promise<Check> {
     const global = all.filter((h) => h.scope === "global").length;
     const project = all.filter((h) => h.scope === "project").length;
     return {
+      id: "hooks",
       label: "hooks        ",
       level: "ok",
       detail: `${global} global, ${project} project`,
     };
   } catch (err) {
     return {
+      id: "hooks",
       label: "hooks        ",
       level: "warn",
       detail: t("doctorErrors.parseFailed", { message: (err as Error).message }),
@@ -262,6 +285,7 @@ async function checkOllama(projectRoot: string): Promise<Check> {
   }
   if (!exists) {
     return {
+      id: "semantic",
       label: "semantic     ",
       level: "ok",
       detail: "not in use (no semantic index built; `reasonix index` to enable)",
@@ -272,12 +296,14 @@ async function checkOllama(projectRoot: string): Promise<Check> {
     const resolved = resolveSemanticEmbeddingConfig();
     if (resolved.provider !== "openai-compat") {
       return {
+        id: "semantic",
         label: "semantic     ",
         level: "warn",
         detail: `index uses openai-compat/${meta.model} but current config resolves to ${resolved.provider}/${resolved.model} — rebuild before searching`,
       };
     }
     return {
+      id: "semantic",
       label: "semantic     ",
       level: "ok",
       detail: `openai-compat · ${resolved.baseUrl} · model ${resolved.model} · api key configured`,
@@ -288,6 +314,7 @@ async function checkOllama(projectRoot: string): Promise<Check> {
     const status = await checkOllamaStatus(model);
     if (!status.binaryFound) {
       return {
+        id: "semantic",
         label: "semantic     ",
         level: "warn",
         detail:
@@ -296,6 +323,7 @@ async function checkOllama(projectRoot: string): Promise<Check> {
     }
     if (!status.daemonRunning) {
       return {
+        id: "semantic",
         label: "semantic     ",
         level: "warn",
         detail:
@@ -304,18 +332,21 @@ async function checkOllama(projectRoot: string): Promise<Check> {
     }
     if (!status.modelPulled) {
       return {
+        id: "semantic",
         label: "semantic     ",
         level: "warn",
         detail: `model ${status.modelName} not pulled — \`ollama pull ${status.modelName}\``,
       };
     }
     return {
+      id: "semantic",
       label: "semantic     ",
       level: "ok",
       detail: `ollama daemon up · model ${status.modelName} ready`,
     };
   } catch (err) {
     return {
+      id: "semantic",
       label: "semantic     ",
       level: "warn",
       detail: t("doctorErrors.probeFailed", { message: (err as Error).message }),
@@ -346,38 +377,62 @@ async function checkProject(projectRoot: string): Promise<Check> {
   const found = markers.filter((m) => existsSync(join(projectRoot, m)));
   if (found.length === 0) {
     return {
+      id: "project",
       label: "project      ",
       level: "warn",
       detail: `${projectRoot} has none of: ${markers.slice(0, 3).join(", ")} … — \`reasonix code\` will still run, but @-mentions and project memory have nothing to anchor`,
     };
   }
   return {
+    id: "project",
     label: "project      ",
     level: "ok",
     detail: `${projectRoot} (${found.join(", ")})`,
   };
 }
 
-export async function doctorCommand(): Promise<void> {
+export function formatDoctorJson(checks: DoctorCheck[], version: string): string {
+  const ok = checks.filter((c) => c.level === "ok").length;
+  const warn = checks.filter((c) => c.level === "warn").length;
+  const fail = checks.filter((c) => c.level === "fail").length;
+  return JSON.stringify({
+    version,
+    summary: { ok, warn, fail },
+    checks: checks.map((c) => ({ id: c.id, status: c.level, message: c.detail })),
+  });
+}
+
+export async function doctorCommand(opts: DoctorOptions = {}): Promise<void> {
   loadDotenv();
 
   const projectRoot = resolve(process.cwd());
-  console.log(`${color(`reasonix ${VERSION}  ·  doctor`, "1")}  (cwd: ${projectRoot})`);
-  console.log(`  home: ${homedir()}`);
-  console.log("");
+  const json = !!opts.json;
+
+  if (!json) {
+    console.log(`${color(`reasonix ${VERSION}  ·  doctor`, "1")}  (cwd: ${projectRoot})`);
+    console.log(`  home: ${homedir()}`);
+    console.log("");
+  }
 
   // Run independent checks in parallel — saves ~5s when api-reach has
   // to time out. Each handler swallows its own throws into a `fail`
   // result so a thrown promise can't kill the whole report.
   const checks = await runDoctorChecks(projectRoot);
 
+  const ok = checks.filter((c) => c.level === "ok").length;
+  const warn = checks.filter((c) => c.level === "warn").length;
+  const fail = checks.filter((c) => c.level === "fail").length;
+
+  if (json) {
+    console.log(formatDoctorJson(checks, VERSION));
+    if (fail > 0) process.exit(1);
+    return;
+  }
+
   for (const c of checks) {
     console.log(`  ${badge(c.level)}  ${c.label}  ${c.detail}`);
   }
 
-  const ok = checks.filter((c) => c.level === "ok").length;
-  const warn = checks.filter((c) => c.level === "warn").length;
-  const fail = checks.filter((c) => c.level === "fail").length;
   console.log("");
   const summary = `${ok} ok · ${warn} warn · ${fail} fail`;
   if (fail > 0) {

@@ -229,9 +229,10 @@ program
 program
   .command("doctor")
   .description(t("cli.doctor"))
-  .action(async () => {
+  .option("--json", t("ui.jsonHint"))
+  .action(async (opts) => {
     const { doctorCommand } = await import("./commands/doctor.js");
-    await doctorCommand();
+    await doctorCommand({ json: !!opts.json });
   });
 
 program
