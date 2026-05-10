@@ -3,6 +3,134 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] — 2026-05-10
+
+**Headline:** boot splash + zh-CN status bar, MCP-handshake stall on
+launch is gone (bridging deferred to first paint), card virtualization
+keeps long sessions snappy, and four field-reported bugs that all
+shared a "silent failure" shape — `/new` was overwriting the live
+session file so prior transcripts vanished from the Sessions tab,
+flat-format skills (`<dir>/<name>.md`) didn't appear in the dashboard
+even though `/skill <name>` ran them, skills missing a `description:`
+frontmatter were silently dropped from the prefix index so a new
+session claimed they didn't exist, and the escalation contract told
+every session it was running on flash so `/preset pro` self-reported
+as flash when asked.
+
+**Fixes:**
+
+- fix(loop): `/new` truncated `~/.reasonix/sessions/code-<project>.jsonl`
+  in place — multiple `/new`s in a project produced exactly one
+  Sessions row and every prior turn was destroyed without warning.
+  `clearLog` now rotates the live jsonl plus sidecars to
+  `<name>__archive_<ts>` via `archiveSession` so the prior conversation
+  survives in the dashboard. The `__archive_` infix sits outside the
+  `${name}-` resume-prefix matcher so archives don't auto-resume on
+  next launch. `sessionName` is unchanged so the cache-first prefix
+  invariant holds. (#587, #590)
+
+- fix(dashboard): `/api/skills` only walked folder-format skills
+  (`<dir>/<name>/SKILL.md`); flat-format skills (`<dir>/<name>.md`)
+  worked from `/skill <name>` in the TUI but the dashboard tab was
+  silently empty for users who installed them flat. The listing now
+  dispatches on `Dirent` and resolves both layouts; read / save /
+  delete share the same resolver so a flat skill can be edited or
+  removed from the dashboard without spawning a duplicate folder
+  entry. (#586, #589)
+
+- fix(skills): a skill whose frontmatter omitted `description:` worked
+  in the install session (because `/skill <name>` calls `store.read`
+  directly) and silently disappeared the next session (because
+  `applySkillsIndex` filtered it out of the prefix). Two-layer fix:
+  the dashboard install POST validates frontmatter via the new
+  `validateSkillFrontmatter()` and returns 400 instead of writing a
+  skill the model will never see; `applySkillsIndex` now lists blank-
+  description skills with a placeholder line so the model can name
+  them and tell the user how to fix the frontmatter. (#583, #591)
+
+- fix(prompt): `ESCALATION_CONTRACT` was a module-level const with
+  `deepseek-v4-flash` baked into the literal — interpolated into
+  `DEFAULT_SYSTEM`, `CODE_SYSTEM_PROMPT`, and `DEFAULT_SUBAGENT_SYSTEM`
+  at module load. A pro session got told it was running on flash and
+  answered honestly when asked which model it was. `escalationContract`
+  is now a function: pro tier gets a short "you are the escalation
+  tier; <<<NEEDS_PRO>>> is a no-op" note (no ladder, since pro can't
+  escalate to itself), other tiers get the full contract with the
+  actual model id interpolated plus an explicit "if asked which model
+  you are, answer `<id>`" line. The three system-prompt sites thread
+  the resolved session model through. The public `CODE_SYSTEM_PROMPT`
+  const is preserved for backward compat. (#582, #592)
+
+- fix(ui): wheel-up felt laggy because `schedule()` was trailing-edge —
+  every tick paid a 16 ms timer before any visual feedback, and on
+  top of Ink reconcile + Yoga layout a single tick cost 30-50 ms
+  before the frame moved. `schedule()` is now leading-edge so the
+  first delta lands immediately; subsequent calls inside the window
+  accumulate. Wheel/PgUp/PgDn step jumps from 3 → 8 rows so each
+  tick travels roughly a third of a viewport. (#571)
+
+- fix(ui): the default frame flush was 16ms (60Hz), which on
+  winpty / MINTTY / ConEmu / tmux / high-latency SSH couldn't
+  atomically swap the cursor-up rewrite — the previous frame's
+  bottom rows briefly bled through every redraw, visible as
+  vertical bobbing. Default is now 50ms (20Hz); still reads as
+  continuous streaming, no bob on any affected terminal. The
+  `REASONIX_UI=plain` escape hatch (which suppressed every live row)
+  is removed since the new default addresses the same terminals
+  without losing the spinner / status line / live cards. Override
+  via `REASONIX_FLUSH_MS=16` for terminals with atomic frame swap.
+  (#570)
+
+**Features:**
+
+- feat(ui): boot splash for `reasonix code` / `reasonix chat`. Cold
+  launch used to flash the alt-screen blank for a few hundred ms
+  before AppInner's first paint completed; users read that as a
+  freeze. The splash holds for one whale-spout cycle (~1.4s) so the
+  REASONIX wordmark lands cleanly and AppInner's heavy first-paint
+  cost (~150 hooks + several disk reads) hides under it. ANSI Shadow
+  block letters in brand color; three-tone shaded whale silhouette
+  with a 7-frame spout cycle and a shifting wave below. Setup screen
+  and SessionPicker bypass the splash. (#588)
+
+- feat(i18n): status bar, input placeholder, edit-mode hints, and
+  composer prompts route through `t()` with zh-CN coverage. Final
+  pieces of the chat surface that were still hardcoded English —
+  turn / cache / spent / left / slow / disconnect labels in
+  StatusRow, the "ask anything..." placeholder and "⏎ send · ^C quit"
+  hint in PromptInput, and the REVIEW / AUTO / YOLO mode label in
+  LiveRows. (#584)
+
+**Perf:**
+
+- perf(boot): MCP bridging moved from `chatCommand`'s pre-render
+  serial loop to an App.tsx mount-time effect that runs in the
+  background. Each `runtime.addSpec(raw)` handshake is 100ms-2s; users
+  with several servers configured used to watch a black alt-screen
+  until the last one finished. The UI now paints immediately, MCP
+  lifecycle events surface as in-app toasts via `log.pushInfo` /
+  `log.pushWarning`, and `loop.prefix.addTool` hot-adds tools as
+  they bridge — first turn after bridging is one cache-miss, same as
+  the existing `/mcp browse install` path. (#585)
+
+- perf(ui): card virtualization. Yoga used to lay out every card in
+  CardStream's inner Box on every scroll tick — for a 50-card
+  history that's hundreds of rows re-measured per tick. Each card
+  now reports its measured height to the chat-scroll store and
+  CardStream collapses off-viewport ranges into a single spacer Box,
+  so only the 5-10 cards under the viewport (± a 30-row buffer) go
+  through Yoga per scroll. Streaming and freshly-mounted cards always
+  render live for measurement. (#574)
+
+- perf(ui): scroll state isolated from App.tsx via
+  `chat-scroll-store` (same `useSyncExternalStore` pattern as the
+  agent store). Wheel/arrow ticks no longer re-render AppInner's
+  3,800 lines / 122 hooks per tick — only `CardStream` and the
+  position indicator. The static `↑ earlier` hint is now a live
+  position indicator (`↑ N / M rows above — K more`) that briefly
+  highlights on each applied delta so the user gets instant
+  confirmation. (#573)
+
 ## [0.36.2] — 2026-05-09
 
 **Headline:** stability sweep on field-reported crashes and freezes —
