@@ -493,6 +493,7 @@ export interface TranslationSchema {
     reasoningAborted: string;
     reasoningEllipsis: string;
     error: string;
+    doctor: string;
   };
   cardLabels: {
     prompt: string;
