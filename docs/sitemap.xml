@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset
+  xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:xhtml="http://www.w3.org/1999/xhtml"
+>
+  <url>
+    <loc>https://esengine.github.io/DeepSeek-Reasonix/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://esengine.github.io/DeepSeek-Reasonix/?lang=en" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://esengine.github.io/DeepSeek-Reasonix/?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://esengine.github.io/DeepSeek-Reasonix/" />
+  </url>
+  <url>
+    <loc>https://esengine.github.io/DeepSeek-Reasonix/configuration.html</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=en" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html" />
+  </url>
+</urlset>

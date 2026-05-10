@@ -9,6 +9,8 @@
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">官方网站</a>
   &nbsp;·&nbsp;
+  <a href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh">配置指南</a>
+  &nbsp;·&nbsp;
   <a href="./docs/ARCHITECTURE.md">架构文档</a>
   &nbsp;·&nbsp;
   <a href="./benchmarks/">基准测试</a>
@@ -50,55 +52,68 @@ cd my-project
 npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 ```
 
-要求 Node ≥ 22。已在 macOS · Linux · Windows（PowerShell · Git Bash · Windows Terminal）测过。[去拿 DeepSeek API Key →](https://platform.deepseek.com/api_keys) · 完整 flag 看 `reasonix code --help`。
+要求 Node ≥ 22。在 macOS · Linux · Windows（PowerShell · Git Bash · Windows Terminal）都跑得顺。[去拿 DeepSeek API Key →](https://platform.deepseek.com/api_keys) · 完整 flag 看 `reasonix code --help`。
 
-`npx` 是推荐路径 —— 不用全局安装，每次都拿到最新版本。如果你天天用、想把 `reasonix` 装到 `PATH` 上，跑一次 `reasonix update` 就行，它会替你跑 `npm install -g`。
+`npx` 是推荐路径 —— 不用全局安装，每次都拿最新版。如果你天天用、想把 `reasonix` 装到 `PATH`，跑一次 `reasonix update`。
 
-### 子命令速查
-
-| 命令 | 适用场景 |
+| 命令 | 何时用 |
 |---|---|
-| `reasonix code [dir]` | 锁在某个项目根目录的编码 agent。**先用这个。** |
-| `reasonix chat` | 纯聊天 —— 不挂文件系统工具，只是带历史的对话。 |
-| `reasonix run "task"` | 一次性，把答案直接流到 stdout。适合 shell 管道。 |
-| `reasonix doctor` | 环境体检（Node 版本、API Key、MCP 接线）。 |
+| `reasonix code [dir]` | 编码 agent。**先用这个。** |
+| `reasonix chat` | 纯聊天 —— 不挂文件系统 / shell 工具。 |
+| `reasonix run "task"` | 一次性，结果流到 stdout。适合 shell 管道。 |
+| `reasonix doctor` | 体检：Node 版本、API Key、MCP 接线。 |
 | `reasonix update` | 升级 Reasonix 本身。 |
 
-其他子命令（`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`）见 `reasonix --help` 和 [CLI 参考](https://esengine.github.io/DeepSeek-Reasonix/#cli)。
+其他子命令（`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`）在 `reasonix --help` 和 [CLI 参考](https://esengine.github.io/DeepSeek-Reasonix/#cli)。
 
-#### 什么时候用 `chat` 而不是 `code`
+<details>
+<summary><strong>切换工作区 · chat vs. code · 写第一个 Skill</strong></summary>
 
-`code` 是默认入口 —— 只有它能读写、编辑文件、跑 shell 命令、解析 SEARCH/REPLACE 块。`chat` 把这些全砍掉，只剩一个纯对话外壳；当你只想找模型对一对思路、又不想授予文件系统或 shell 权限时用它。
+**切换工作区。** Reasonix 把文件系统工具作用域绑定在启动目录，传 `--dir` 可以指别处。中途切换是有意不支持的（消息日志和 memory 路径会和旧根目录混在一起）—— 退出再启动。
 
-| 你拿到什么 | `reasonix code` | `reasonix chat` |
+```bash
+npx reasonix code --dir /path/to/project
+```
+
+**`chat` 还是 `code`？** `code` 是默认入口、唯一带文件系统 / shell 工具和 SEARCH/REPLACE 审阅的模式。`chat` 是更轻量的纯对话壳——想要一个挂着 MCP 但没有磁盘权限的“思路助手”时用它。
+
+| 你拿到什么 | `code` | `chat` |
 |---|---|---|
-| 原生文件系统工具（read · write · `edit_file`） | ✓ | — |
-| SEARCH/REPLACE 编辑块 → `/apply` 审核 | ✓ | — |
-| Shell 工具（带 confirm gate，`/mode yolo` 跳过） | ✓ | — |
-| Plan 模式 · `submit_plan` · `/todo` · `/skill new` · `/mcp add` 脚手架 | ✓ | — |
-| 记忆工具（`remember` / `recall_memory`） | 项目 + 全局 | 仅全局 |
-| Web 搜索 · `ask_choice` · 从配置加载的 MCP 服务 | ✓ | ✓ |
-| 编码导向系统提示词（SEARCH/REPLACE、仓库礼仪） | ✓ | 通用 |
-| Session 作用域 | 按目录（`code-<basename>`） | 共享默认 |
+| 文件系统工具 + `edit_file` | ✓ | — |
+| SEARCH/REPLACE → `/apply` 审阅 | ✓ | — |
+| Shell 工具（带 gate） | ✓ | — |
+| Plan 模式 · `/todo` · `/skill new` · `/mcp add` | ✓ | — |
+| Memory（`remember` / `recall_memory`） | 项目 + 全局 | 仅全局 |
+| 配置里的 MCP · web 搜索 · `ask_choice` | ✓ | ✓ |
+| 编码导向系统提示词 | ✓ | 通用 |
+| Session 作用域 | 按目录 | 共享默认 |
 
-`chat` 同样会从 `~/.reasonix/config.json` 读取 MCP 服务器，所以如果你只是想要一个聊天外壳挂一两个 MCP 集成，它是更轻量的入口。其他场景下，文档里所有截图、基准测试、slash 命令例子默认都是 `code`。
-
-**在其他目录工作：** Reasonix 把文件系统工具作用域绑定在启动目录。要在别的目录工作，传 `--dir`：
+**写第一个 Skill。** 暂无在线市场——自己写。编辑文件（`description:` frontmatter + 正文），然后 `/skill list` 就能看到。frontmatter 加 `runAs: subagent` 会以隔离 subagent 跑，而不是把正文内联进父 prompt。
 
 ```bash
-npx reasonix code --dir /path/to/project   # 也可以用相对路径
+/skill new my-skill              # <project>/.reasonix/skills/my-skill.md
+/skill new my-skill --global     # ~/.reasonix/skills，跨项目共用
 ```
 
-中途切换工作区是有意不支持的（消息日志和 memory 路径会和旧的根目录混在一起，状态错乱）。退出后用新的 `--dir` 重新启动来切换。`/status` 始终显示当前锁定的工作区。
+</details>
 
-**写第一个 Skill：** Skills 是模型可以调用的 markdown 剧本（`/skill <name>`）。暂无在线市场 —— 自己写：
+<br/>
 
-```bash
-/skill new my-skill          # 在 <project>/.reasonix/skills/my-skill.md 生成模板
-/skill new my-skill --global # 或者放到 ~/.reasonix/skills，跨项目共用
-```
+## 配置
 
-编辑文件（`description:` frontmatter + 正文），然后 `/skill list` 就能看到。frontmatter 里加 `runAs: subagent` 会以独立 subagent 跑，而不是把正文内联进父 prompt。
+一个全局 JSON 文件 `~/.reasonix/config.json`，加上项目级 `<project>/.reasonix/` 下的覆盖。完整的双语参考 —— 每一个 key、每一条斜杠命令、skills / memory / hooks 在磁盘上的形状 —— 都在这里：
+
+> 📘 **[配置指南](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh)** · [English](https://esengine.github.io/DeepSeek-Reasonix/configuration.html)
+
+| 主题 | 速读 |
+|---|---|
+| [MCP 服务器](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#mcp) | stdio · SSE · Streamable HTTP。`config.json` 和 `--mcp` 共用同一种 spec 格式。 |
+| [Skills](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#skills) | 模型可以调用的 markdown 剧本。`inline` 或 `subagent` 两种模式。 |
+| [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#memory) | 用户私有的知识，钉进前缀。`user` / `feedback` / `project` / `reference` 四类。 |
+| [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#hooks) | 生命周期事件触发的 shell 命令。`PreToolUse`（拦截）· `PostToolUse` · `UserPromptSubmit` · `Stop`。 |
+| [权限](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#permissions) | 按工作区的 shell 白名单，精确前缀匹配。 |
+| [Web 搜索](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#search) | 默认 Mojeek；用 `/search-engine` 可切到自托管的 SearXNG。 |
+| [语义索引](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#index) | `reasonix index` —— 本地 Ollama，或任何 OpenAI 兼容的 embedding 接口。 |
 
 <br/>
 

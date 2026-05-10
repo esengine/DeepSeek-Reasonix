@@ -14,10 +14,12 @@
       "nav.why": "Why",
       "nav.features": "Features",
       "nav.quickstart": "Quick start",
+      "nav.guide": "Guide",
       "nav.community": "Community",
       "nav.github": "GitHub",
 
-      "hero.badge": "v{version} · DeepSeek · cache-first · MIT",
+      "hero.status": "live · v{version}",
+      "hero.badge": "DeepSeek · cache-first · MIT",
       "hero.title.line1": "DeepSeek-native",
       "hero.title.line2": "AI coding agent in your terminal",
       "hero.sub":
@@ -26,12 +28,12 @@
       "hero.copy.done": "Copied",
       "hero.cta.start": "Get started →",
       "hero.cta.star": "Star on GitHub",
-      "hero.stat.cache.num": "Cache-engineered",
-      "hero.stat.cache": "Byte-stable prefix loop",
-      "hero.stat.lic.num": "Open source",
-      "hero.stat.lic": "MIT, community-developed",
-      "hero.stat.tui.num": "Terminal-native",
-      "hero.stat.tui": "Plus embedded dashboard",
+
+      "metric.hit": "Cache hit, single day",
+      "metric.tokens": "Input tokens served",
+      "metric.cost": "Cost vs. no-cache",
+      "metric.lic": "Open, community-built",
+      "metric.src": "Source: real-world cache case study (2026-05-01) →",
 
       "term.user":
         "users.ts findByEmail is case-sensitive — login fails for users with uppercase emails",
@@ -115,12 +117,29 @@
       "feat.events.body":
         "<code>events.jsonl</code> sidecar with reducers and a <code>reasonix events</code> CLI. Build dashboards, audits, or your own analytics.",
 
-      "bench.title": "Verify the cache claim yourself",
-      "bench.sub":
-        "We don't ship benchmark numbers in marketing copy — they move with model pricing and harness changes, so they live with the harness instead of the README. Reproduce on your own machine:",
-      "bench.repro.note":
-        "Each committed JSONL transcript carries per-turn <code>usage</code>, <code>cost</code>, and <code>prefixHash</code>. Reasonix's prefix hash stays byte-stable across every model call — that's the whole game.",
-      "bench.link": "Read the τ-bench-lite harness →",
+      "conf.title": "Configure in five minutes",
+      "conf.sub":
+        "One JSON file at <code>~/.reasonix/config.json</code>, plus per-project overrides under <code>.reasonix/</code>. Point. Click. Wire in your stack.",
+      "conf.read": "Read →",
+      "conf.mcp.title": "MCP servers",
+      "conf.mcp.body":
+        "stdio · SSE · Streamable HTTP. One spec format for both <code>config.json</code> and <code>--mcp</code>.",
+      "conf.sk.title": "Skills",
+      "conf.sk.body":
+        "Markdown playbooks the model invokes. Inline or sub-agent. Project overrides global.",
+      "conf.mem.title": "Memory",
+      "conf.mem.body":
+        "User-private knowledge pinned into the prefix. Global + project scopes. Four typed shapes.",
+      "conf.hk.title": "Hooks",
+      "conf.hk.body":
+        "Shell commands on lifecycle events. Pre/post tool, prompt submit, stop. Exit-2 to block.",
+      "conf.perm.title": "Permissions",
+      "conf.perm.body":
+        "Per-workspace shell allowlist. Exact-prefix match. Interactive \"always allow\" persists.",
+      "conf.ws.title": "Web search",
+      "conf.ws.body":
+        "Mojeek by default, no setup. Switch to self-hosted SearXNG with <code>/search-engine</code>.",
+      "conf.cta": "Open the configuration guide →",
 
       "cli.title": "CLI at a glance",
       "cli.code": "coding mode scoped to path",
@@ -175,10 +194,12 @@
       "nav.why": "为什么",
       "nav.features": "特性",
       "nav.quickstart": "快速上手",
+      "nav.guide": "配置指南",
       "nav.community": "社区",
       "nav.github": "GitHub",
 
-      "hero.badge": "v{version} · DeepSeek · 缓存优先 · MIT",
+      "hero.status": "运行中 · v{version}",
+      "hero.badge": "DeepSeek · 缓存优先 · MIT",
       "hero.title.line1": "DeepSeek 原生",
       "hero.title.line2": "终端里的 AI 编程代理",
       "hero.sub":
@@ -187,12 +208,12 @@
       "hero.copy.done": "已复制",
       "hero.cta.start": "开始使用 →",
       "hero.cta.star": "在 GitHub 加星",
-      "hero.stat.cache.num": "缓存工程化",
-      "hero.stat.cache": "字节稳定的前缀循环",
-      "hero.stat.lic.num": "开源",
-      "hero.stat.lic": "MIT 协议，社区共建",
-      "hero.stat.tui.num": "终端原生",
-      "hero.stat.tui": "外加内嵌仪表盘",
+
+      "metric.hit": "单日缓存命中率",
+      "metric.tokens": "单日输入 token",
+      "metric.cost": "对比无缓存成本",
+      "metric.lic": "开源 · 社区共建",
+      "metric.src": "数据来源：2026-05-01 真实用户缓存命中案例 →",
 
       "term.user":
         "users.ts 里 findByEmail 对大小写敏感导致登录失败，帮我改",
@@ -276,12 +297,29 @@
       "feat.events.body":
         "<code>events.jsonl</code> 旁路日志，附带 reducer 和 <code>reasonix events</code> CLI。自己搭仪表盘、审计、分析都行。",
 
-      "bench.title": "缓存命中自己也能验证",
-      "bench.sub":
-        "营销文案里我们不放具体 benchmark 数字——这些数会随模型定价和测试集变化，所以归在 harness 里，不进 README。在自己机器上复现：",
-      "bench.repro.note":
-        "提交进仓库的每个 JSONL transcript 都带逐轮 <code>usage</code>、<code>cost</code> 和 <code>prefixHash</code>。Reasonix 的前缀哈希在每次模型调用中都字节稳定——这就是全部把戏。",
-      "bench.link": "查看 τ-bench-lite harness →",
+      "conf.title": "五分钟配置完",
+      "conf.sub":
+        "一个全局 JSON <code>~/.reasonix/config.json</code>，加上项目级 <code>.reasonix/</code> 下的覆盖。点几下，把你的工具链接进来。",
+      "conf.read": "阅读 →",
+      "conf.mcp.title": "MCP 服务器",
+      "conf.mcp.body":
+        "stdio · SSE · Streamable HTTP。<code>config.json</code> 和 <code>--mcp</code> 共用同一种 spec 格式。",
+      "conf.sk.title": "Skills",
+      "conf.sk.body":
+        "模型可调用的 markdown 剧本。Inline 或 subagent。同名时项目级覆盖全局。",
+      "conf.mem.title": "Memory",
+      "conf.mem.body":
+        "用户私有的知识，钉进前缀。全局 + 项目两个 scope，四种结构化类型。",
+      "conf.hk.title": "Hooks",
+      "conf.hk.body":
+        "生命周期事件触发的 shell 命令。pre/post 工具、prompt 提交、退出。exit 2 即拦截。",
+      "conf.perm.title": "权限",
+      "conf.perm.body":
+        "按工作区的 shell 白名单。精确前缀匹配。交互式“永久允许”会持久化。",
+      "conf.ws.title": "Web 搜索",
+      "conf.ws.body":
+        "默认 Mojeek，零配置。要完全控制就用 <code>/search-engine</code> 切自托管 SearXNG。",
+      "conf.cta": "打开配置指南 →",
 
       "cli.title": "CLI 速览",
       "cli.code": "针对指定路径的编程模式",

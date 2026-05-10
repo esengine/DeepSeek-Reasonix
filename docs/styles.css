@@ -108,29 +108,94 @@ kbd {
   padding: 0 24px;
 }
 
-/* Background */
+/* ── Background system ────────────────────────────────────────────────
+ * Three layers, all fixed and pointer-events:none:
+ *   .bg-grid   — faint grid lattice, masked to fade at the viewport edges
+ *   .bg-glow   — two static, very-soft color blobs (no drift, no scale —
+ *                that's what made the page feel chaotic). Cursor parallax
+ *                on `--gx` / `--gy` still nudges them by a few percent.
+ *   .bg-noise  — SVG fractal turbulence at ~4% opacity. Gives the dark
+ *                surface a film-grain texture, which is what reads as
+ *                "premium" and stops gradients looking flat.
+ * ────────────────────────────────────────────────────────────────────── */
+/* Dot grid — single radial-gradient tile vs. two stacked linear-gradients
+ * for the line version. Reads more premium and is cheaper to paint. */
 .bg-grid {
   position: fixed;
   inset: 0;
-  background-image:
-    linear-gradient(rgba(165, 180, 252, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(165, 180, 252, 0.04) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0) 70%);
+  background-image: radial-gradient(
+    circle,
+    rgba(165, 180, 252, 0.10) 1px,
+    transparent 1.4px
+  );
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(
+    ellipse 70% 60% at 50% 25%,
+    rgba(0, 0, 0, 0.95) 0%,
+    rgba(0, 0, 0, 0) 80%
+  );
+          mask-image: radial-gradient(
+    ellipse 70% 60% at 50% 25%,
+    rgba(0, 0, 0, 0.95) 0%,
+    rgba(0, 0, 0, 0) 80%
+  );
   pointer-events: none;
   z-index: 0;
 }
 
+/* Three static color blobs anchored at top-left, top-right, and bottom
+ * center. Bottom blob gives the page floor a hint of horizon depth and
+ * keeps the lower viewport from looking flat. Zero animation. */
 .bg-glow {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(800px circle at 20% 10%, rgba(94, 234, 212, 0.10), transparent 50%),
-    radial-gradient(700px circle at 90% 30%, rgba(196, 181, 253, 0.10), transparent 55%),
-    radial-gradient(600px circle at 50% 100%, rgba(240, 171, 252, 0.07), transparent 50%);
+    radial-gradient(
+      ellipse 55vmax 42vmax at 12% 16%,
+      rgba(94, 234, 212, 0.13),
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 50vmax 40vmax at 88% 20%,
+      rgba(196, 181, 253, 0.11),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 90vmax 30vmax at 50% 110%,
+      rgba(165, 180, 252, 0.09),
+      transparent 70%
+    );
 }
+
+/* Faint horizon hairline — a single fixed gradient line that sits roughly
+ * at the hero / metrics seam. Adds a subtle depth break without animation. */
+.bg-horizon {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 64vh;
+  height: 1px;
+  pointer-events: none;
+  z-index: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    rgba(165, 180, 252, 0.18) 35%,
+    rgba(196, 181, 253, 0.18) 65%,
+    transparent 100%
+  );
+  opacity: 0.6;
+}
+
+/* The fractal-noise overlay was removed — even static, a fullscreen
+ * fixed layer adds a compositing pass on every scroll/resize. The dot
+ * grid + horizon hairline + glow blobs already give enough texture. */
+
+/* The conic-gradient + blur + rotate effect was removed: animating a blur
+ * on a >100% surface repaints the entire viewport every frame. The
+ * orbital SVG already provides motion under the hero. */
 
 main,
 .nav,
@@ -265,6 +330,7 @@ main,
 
 /* Hero */
 .hero {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 64px;
@@ -274,8 +340,80 @@ main,
   align-items: center;
 }
 
+/* Orbital SVG: lives behind the hero text column, slowly rotates the rings,
+ * counter-rotates the dot ring so it feels alive but never busy. */
+.hero-orbit {
+  position: absolute;
+  top: 50%;
+  left: -120px;
+  width: 620px;
+  height: 620px;
+  transform: translate3d(0, -50%, 0);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.55;
+  mask-image: radial-gradient(circle, #000 35%, transparent 75%);
+}
+.hero-orbit svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+/* Orbital SVG is now a static decoration. The composition reads as
+ * "system diagram" without needing motion — and the page no longer
+ * pays a continuous repaint cost for it. */
+.hero-orbit .orb-rings,
+.hero-orbit .orb-dots {
+  transform-origin: 0 0;
+}
+.hero-inner,
+.hero-terminal {
+  position: relative;
+  z-index: 1;
+}
+
 .hero-inner {
   min-width: 0;
+}
+
+.hero-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #c5fce8;
+  background: rgba(94, 234, 212, 0.08);
+  border: 1px solid rgba(94, 234, 212, 0.32);
+  padding: 5px 12px;
+  border-radius: 999px;
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7);
+  animation: status-pulse 1.8s ease-out infinite;
+}
+@keyframes status-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(52, 211, 153, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+  }
 }
 
 .badge {
@@ -290,7 +428,6 @@ main,
   border: 1px solid rgba(165, 180, 252, 0.25);
   padding: 5px 12px;
   border-radius: 999px;
-  margin-bottom: 24px;
 }
 
 .hero-title {
@@ -301,13 +438,15 @@ main,
   margin: 0 0 24px;
 }
 
-.grad-text {
+/* Static gradient text — no shimmer animation. `background-position`
+ * animation forces a paint per frame for every clipped-text element. */
+.grad-text,
+.grad-text-anim {
   background: linear-gradient(
     90deg,
     var(--grad-1) 0%,
-    var(--grad-2) 25%,
-    var(--grad-4) 60%,
-    var(--grad-6) 90%
+    var(--grad-3) 50%,
+    var(--grad-6) 100%
   );
   -webkit-background-clip: text;
   background-clip: text;
@@ -409,27 +548,98 @@ main,
   color: #fff;
 }
 
-.hero-stats {
+/* ── Metrics strip ─────────────────────────────────────────────────────
+ * Lives directly under the hero. Counters animate from 0 → target the
+ * first time the strip enters the viewport (motion.js). On dark gradient
+ * panel, with subtle vertical dividers between cells. */
+.metrics {
+  position: relative;
+  margin: 0 auto 80px;
+  max-width: var(--maxw);
+  padding: 0 32px;
+  z-index: 1;
+}
+.metrics-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  max-width: 520px;
+  grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 0;
+  /* No backdrop-filter — fullscreen-ish blurred backdrop forced a re-blur
+   * of underlying pixels every scroll frame. Plain solid panel reads
+   * almost identical at this opacity over the dark background. */
+  background: linear-gradient(
+    180deg,
+    rgba(20, 26, 46, 0.85),
+    rgba(13, 17, 28, 0.85)
+  );
+  border: 1px solid rgba(165, 180, 252, 0.18);
+  border-radius: 16px;
+  padding: 28px 32px;
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
-.stat-num {
+.metric {
+  text-align: center;
+  min-width: 0;
+}
+.metric-num {
   font-family: var(--font-mono);
-  font-size: 18px;
+  font-size: clamp(28px, 3.4vw, 42px);
   font-weight: 700;
-  letter-spacing: -0.01em;
-  margin-bottom: 4px;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin-bottom: 8px;
+  background: linear-gradient(
+    135deg,
+    var(--grad-1),
+    var(--grad-3) 50%,
+    var(--grad-6)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
-.stat-label {
+.metric-num.metric-static {
+  letter-spacing: 0.02em;
+}
+.metric-label {
   font-size: 12.5px;
   color: var(--fg-3);
-  line-height: 1.4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
+.metric-divider {
+  width: 1px;
+  height: 56px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(165, 180, 252, 0.35) 50%,
+    transparent
+  );
+}
+.metrics-foot {
+  text-align: center;
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--fg-3);
+}
+.metrics-foot a {
+  color: var(--fg-3);
+  border-bottom: 1px dashed rgba(165, 180, 252, 0.3);
+}
+.metrics-foot a:hover {
+  color: var(--fg);
+  border-bottom-color: var(--accent-2);
+}
+
+/* The marquee was removed — a continuous translate at 48 s still costs a
+ * frame each, and the same information is conveyed by the feature grid. */
 
 /* Hero terminal mock */
 .hero-terminal {
+  position: relative;
   background: var(--term-bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -440,6 +650,26 @@ main,
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.55;
+}
+.hero-terminal::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    rgba(94, 234, 212, 0.35),
+    rgba(196, 181, 253, 0.25) 50%,
+    rgba(240, 171, 252, 0.2)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  opacity: 0.6;
 }
 
 .term-bar {
@@ -983,66 +1213,122 @@ main,
   font-size: 14.5px;
 }
 
-/* Benchmarks */
-.bench {
+/* Configuration teaser — six cards linking into the dedicated guide.
+ * Card border uses a subtle gradient stroke; hover lifts + brightens.
+ */
+.configure {
   padding: 80px 0;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    rgba(20, 26, 46, 0.4) 50%,
-    transparent
-  );
 }
-
-.bench-table-wrap {
-  max-width: 880px;
-  margin: 0 auto 32px;
-  overflow-x: auto;
+.conf-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  max-width: 1100px;
+  margin: 0 auto;
 }
-
-.bench-table {
-  width: 100%;
-  border-collapse: collapse;
+.conf-card {
+  position: relative;
+  display: block;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  padding: 24px 26px;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
   overflow: hidden;
 }
-.bench-table th,
-.bench-table td {
-  text-align: left;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
+.conf-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgba(94, 234, 212, 0.0),
+    rgba(196, 181, 253, 0.0)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  transition: background 0.25s ease;
+}
+.conf-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(165, 180, 252, 0.35);
+  box-shadow: 0 14px 32px rgba(8, 11, 18, 0.5);
+}
+.conf-card:hover::before {
+  background: linear-gradient(
+    135deg,
+    rgba(94, 234, 212, 0.55),
+    rgba(196, 181, 253, 0.55) 50%,
+    rgba(240, 171, 252, 0.5)
+  );
+}
+.conf-icon {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    135deg,
+    rgba(94, 234, 212, 0.18),
+    rgba(196, 181, 253, 0.18)
+  );
+  border: 1px solid rgba(165, 180, 252, 0.3);
+  border-radius: 10px;
+  color: var(--accent-2);
+  margin-bottom: 16px;
+}
+.conf-card h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--fg);
+}
+.conf-card p {
+  margin: 0 0 14px;
+  color: var(--fg-2);
   font-size: 14.5px;
+  line-height: 1.6;
 }
-.bench-table th {
-  background: rgba(20, 26, 46, 0.6);
-  color: var(--fg-2);
-  font-weight: 600;
-  font-size: 12.5px;
+.conf-link {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent-2);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
-.bench-table tbody tr:last-child td {
-  border-bottom: 0;
-}
-.bench-table td.hi {
-  color: var(--grad-1);
-  font-weight: 600;
-}
-
-.bench p {
+.conf-cta {
   text-align: center;
-  color: var(--fg-2);
-  max-width: 720px;
-  margin: 0 auto 16px;
+  margin-top: 36px;
 }
 
-.bench .code {
-  max-width: 880px;
-  margin: 0 auto 24px;
+@media (max-width: 960px) {
+  .conf-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .conf-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
+/* Benchmarks */
 /* CLI */
 .cli {
   padding: 80px 0;
@@ -1143,11 +1429,113 @@ main,
   font-size: 13px;
 }
 
+/* ── Static affordances only ──────────────────────────────────────────
+ * No spotlight, no tilt, no scroll reveal, no stagger, no shimmer, no
+ * traveling beam, no hero-stat hover pulse. Just CSS hover hints and
+ * static decorations. The page should run with zero JS animation cost
+ * outside the one-shot counter and the term-anim demo. */
+
+/* Cards — plain, scoped hover. Border accent + small lift. */
+.why-card,
+.feat,
+.conf-card {
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+.why-card:hover,
+.feat:hover,
+.conf-card:hover {
+  border-color: rgba(165, 180, 252, 0.35);
+  transform: translateY(-2px);
+  background: rgba(20, 26, 46, 0.6);
+}
+
+/* Brand mark hover halo — single tiny element. */
+.nav-brand:hover .brand-mark {
+  filter: drop-shadow(0 0 8px rgba(196, 181, 253, 0.45));
+}
+
+/* Faint static scanlines on the hero terminal — pure paint at first
+ * paint only (no animation). */
+.hero-terminal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(165, 180, 252, 0.025) 0,
+    rgba(165, 180, 252, 0.025) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  opacity: 0.4;
+  z-index: 1;
+}
+
+/* Static section divider — gradient hairline at the top of each major
+ * section. No traveling pulse, no animation. */
+.why,
+.configure,
+.features,
+.cli,
+.community,
+.cta-band,
+.metrics {
+  position: relative;
+}
+.why::before,
+.configure::before,
+.features::before,
+.cli::before,
+.community::before,
+.cta-band::before,
+.metrics::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(165, 180, 252, 0.16) 25%,
+    rgba(196, 181, 253, 0.16) 75%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* Static section-title accent — small fixed-width gradient bar under H2. */
+.section-title {
+  position: relative;
+}
+.section-title::after {
+  content: "";
+  display: block;
+  margin: 14px auto 0;
+  width: 56px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--grad-1), var(--grad-5), var(--grad-7));
+}
+
 /* Responsive */
 @media (max-width: 960px) {
   .hero {
     grid-template-columns: 1fr;
     gap: 40px;
+  }
+  .hero-orbit {
+    display: none;
+  }
+  .metrics-row {
+    grid-template-columns: 1fr 1fr;
+    row-gap: 24px;
+    padding: 24px 20px;
+  }
+  .metric-divider {
+    display: none;
   }
   .why-grid,
   .feat-grid {
@@ -1196,7 +1584,8 @@ main,
   }
 }
 
-/* Reduced motion */
+/* Reduced motion — kill drift / shimmer / reveal animations,
+ * but keep `data-reveal` content visible (otherwise the page stays blank). */
 @media (prefers-reduced-motion: reduce) {
   .diamond,
   *,
@@ -1207,5 +1596,9 @@ main,
   }
   html {
     scroll-behavior: auto;
+  }
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }

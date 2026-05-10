@@ -9,6 +9,8 @@
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
   &nbsp;·&nbsp;
+  <a href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html">Guide</a>
+  &nbsp;·&nbsp;
   <a href="./docs/ARCHITECTURE.md">Architecture</a>
   &nbsp;·&nbsp;
   <a href="./benchmarks/">Benchmarks</a>
@@ -46,49 +48,6 @@
 
 <br/>
 
-## Web search
-
-Reasonix includes `web_search` and `web_fetch` tools. By default it uses **Mojeek** (no setup required). You can switch to a **self-hosted SearXNG** instance — a metasearch engine that aggregates whatever upstream engines your instance is configured for.
-
-### Switching engines (persists to disk)
-
-The `/search-engine` slash command (alias `/se`) writes your choice to `~/.reasonix/config.json` immediately — it survives restarts:
-
-```
-/search-engine mojeek              # default, no external deps
-/search-engine searxng             # SearXNG at http://localhost:8080
-/search-engine searxng http://192.168.1.100:8888  # custom endpoint
-```
-
-Equivalent `~/.reasonix/config.json`:
-
-```json
-{
-  "webSearchEngine": "searxng",
-  "webSearchEndpoint": "http://localhost:8080"
-}
-```
-
-The tool picks up the change on the next call — no restart needed.
-
-### Starting SearXNG
-
-```sh
-podman run -d --replace --name searxng -p 8080:8080 docker.io/searxng/searxng
-# or: docker run -d -p 8080:8080 searxng/searxng
-```
-
-Verify it's running:
-
-```sh
-curl http://localhost:8080/search?q=test
-# → HTML search results page
-```
-
-> **Note:** The endpoint must include the protocol (`http://`). `localhost:8080` alone will fail — the tool will show a clear error telling you to install SearXNG if the server is unreachable.
-
-<br/>
-
 ## Install
 
 ```bash
@@ -96,55 +55,68 @@ cd my-project
 npx reasonix code   # paste a DeepSeek API key on first run; persists after
 ```
 
-Requires Node ≥ 22. Tested on macOS · Linux · Windows (PowerShell · Git Bash · Windows Terminal). Get a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reasonix code --help` for flags.
+Requires Node ≥ 22. Works on macOS · Linux · Windows (PowerShell · Git Bash · Windows Terminal). Grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reasonix code --help` for flags.
 
-`npx` is the recommended path — no global install, always picks up the latest version. If you'll use Reasonix daily and want `reasonix` on your `PATH`, run `reasonix update` once and it'll do the `npm install -g` for you.
+`npx` is the recommended path — no global install, always latest. If you use Reasonix daily and want it on `PATH`, run `reasonix update` once.
 
-### Subcommand cheatsheet
-
-| Command | When to use |
+| Command | When |
 |---|---|
-| `reasonix code [dir]` | Coding agent rooted at a project. **Start here.** |
-| `reasonix chat` | Plain chat — no filesystem tools, just a conversation with persisted history. |
-| `reasonix run "task"` | One-shot, streams the answer to stdout. Good for shell pipes. |
-| `reasonix doctor` | Environment health check (Node version, API key, MCP wiring). |
+| `reasonix code [dir]` | The coding agent. **Start here.** |
+| `reasonix chat` | Plain chat — no filesystem or shell tools. |
+| `reasonix run "task"` | One-shot, streams to stdout. Good for pipes. |
+| `reasonix doctor` | Health check: Node, API key, MCP wiring. |
 | `reasonix update` | Upgrade Reasonix itself. |
 
-Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`) are listed in `reasonix --help` and on the [CLI reference](https://esengine.github.io/DeepSeek-Reasonix/#cli).
+Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`) are in `reasonix --help` and the [CLI reference](https://esengine.github.io/DeepSeek-Reasonix/#cli).
 
-#### When to pick `chat` over `code`
+<details>
+<summary><strong>Working in another folder · chat vs. code · author a skill</strong></summary>
 
-`code` is the default — it's the only mode that can read, write, or edit files, run shell commands, or apply SEARCH/REPLACE blocks. `chat` strips all of that down to a plain conversation; reach for it when you want a thinking-partner shell without granting filesystem or shell access.
+**Working in a different folder.** Reasonix scopes filesystem tools to the launch directory; pass `--dir` to retarget. Mid-session switching isn't supported by design (memory paths would tangle with stale roots) — quit and relaunch.
 
-| What you get | `reasonix code` | `reasonix chat` |
+```bash
+npx reasonix code --dir /path/to/project
+```
+
+**Picking `chat` vs `code`.** `code` is the default and the only mode with filesystem / shell tools and SEARCH/REPLACE review. `chat` is the lighter, tools-off shell — reach for it when you want a thinking partner with MCP attached but no disk access.
+
+| What you get | `code` | `chat` |
 |---|---|---|
-| Native filesystem tools (read · write · `edit_file`) | ✓ | — |
-| SEARCH/REPLACE edit blocks → `/apply` review | ✓ | — |
-| Shell tool (with confirm gate, `/mode yolo` to skip) | ✓ | — |
-| Plan mode · `submit_plan` · `/todo` · `/skill new` · `/mcp add` scaffolding | ✓ | — |
-| Memory tools (`remember` / `recall_memory`) | project + global | global only |
-| Web search · `ask_choice` · MCP servers from config | ✓ | ✓ |
-| Coding-focused system prompt (SEARCH/REPLACE, repo etiquette) | ✓ | generic |
-| Session scope | per-directory (`code-<basename>`) | shared default |
+| Filesystem tools + `edit_file` | ✓ | — |
+| SEARCH/REPLACE → `/apply` review | ✓ | — |
+| Shell tool (gated) | ✓ | — |
+| Plan mode · `/todo` · `/skill new` · `/mcp add` | ✓ | — |
+| Memory (`remember` / `recall_memory`) | project + global | global only |
+| MCP servers from config · web search · `ask_choice` | ✓ | ✓ |
+| Coding system prompt | ✓ | generic |
+| Session scope | per-directory | shared default |
 
-`chat` still picks up MCP servers from `~/.reasonix/config.json`, so if all you want is a chat shell with one or two MCP integrations, it's the lighter entrypoint. Otherwise `code` is what every screenshot, benchmark, and slash-command example in the docs assumes.
-
-**Working in a different folder:** Reasonix scopes filesystem tools to the launch directory. To work elsewhere, pass `--dir`:
+**Author your first skill.** No remote registry — write them directly. Edit the file (`description:` frontmatter + body), then `/skill list`. Add `runAs: subagent` to spawn an isolated subagent loop instead of inlining the body.
 
 ```bash
-npx reasonix code --dir /path/to/project   # or use a relative path
+/skill new my-skill              # <project>/.reasonix/skills/my-skill.md
+/skill new my-skill --global     # ~/.reasonix/skills for cross-project use
 ```
 
-Mid-session switching isn't supported by design (the message log + memory paths get tangled with stale roots). Quit and relaunch with a new `--dir` to retarget. `/status` always shows the current pinned workspace.
+</details>
 
-**Author your first skill:** Skills are markdown playbooks the model can invoke (`/skill <name>`). There's no remote registry yet — you author them directly:
+<br/>
 
-```bash
-/skill new my-skill          # scaffolds <project>/.reasonix/skills/my-skill.md
-/skill new my-skill --global # or under ~/.reasonix/skills for cross-project use
-```
+## Configuration
 
-Edit the file (`description:` frontmatter + body), then `/skill list` to see it. Add `runAs: subagent` to the frontmatter to spawn an isolated subagent loop instead of inlining the body.
+One JSON file at `~/.reasonix/config.json` plus per-project overrides under `<project>/.reasonix/`. The full bilingual reference — every key, every slash command, the on-disk shape of skills/memory/hooks — lives at:
+
+> 📘 **[Configuration Guide](https://esengine.github.io/DeepSeek-Reasonix/configuration.html)** · [中文](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh)
+
+| Topic | Quick read |
+|---|---|
+| [MCP servers](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#mcp) | stdio · SSE · Streamable HTTP. One spec format works for both `config.json` and `--mcp`. |
+| [Skills](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#skills) | Markdown playbooks the model can invoke. `inline` or `subagent` mode. |
+| [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#memory) | User-private knowledge pinned into the prefix. `user` / `feedback` / `project` / `reference` types. |
+| [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#hooks) | Shell commands on lifecycle events. `PreToolUse` (gating) · `PostToolUse` · `UserPromptSubmit` · `Stop`. |
+| [Permissions](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#permissions) | Per-workspace shell allowlist. Exact-prefix match. |
+| [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Mojeek by default; switch to self-hosted SearXNG with `/search-engine`. |
+| [Semantic index](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#index) | `reasonix index` — local Ollama or any OpenAI-compatible embedding endpoint. |
 
 <br/>
 

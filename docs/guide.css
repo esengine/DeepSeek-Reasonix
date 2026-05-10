@@ -1,0 +1,247 @@
+/* Reasonix configuration guide — layout extensions over styles.css. */
+
+.guide-main {
+  padding-bottom: 80px;
+}
+
+.guide-hero {
+  padding: 32px 0 48px;
+}
+.guide-hero .badge {
+  margin-bottom: 18px;
+}
+.guide-title {
+  font-size: clamp(32px, 4.4vw, 52px);
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 20px;
+}
+.guide-sub {
+  font-size: 17px;
+  color: var(--fg-2);
+  max-width: 780px;
+  margin: 0;
+}
+
+.guide-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 56px;
+  align-items: start;
+}
+
+.guide-toc {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  border-left: 1px solid var(--border);
+  padding: 4px 0 4px 18px;
+}
+.guide-toc h4 {
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin: 0 0 14px;
+  font-weight: 700;
+}
+.guide-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.guide-toc a {
+  display: block;
+  font-size: 14px;
+  color: var(--fg-2);
+  padding: 5px 0;
+  transition: color 0.15s ease;
+}
+.guide-toc a:hover {
+  color: var(--fg);
+}
+.guide-toc a.is-active {
+  color: var(--accent-2);
+}
+
+.guide-body section {
+  padding: 28px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.guide-body section:last-child {
+  border-bottom: 0;
+}
+.guide-body h2 {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  margin: 0 0 16px;
+  scroll-margin-top: 24px;
+}
+.guide-body h3 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 24px 0 10px;
+  color: var(--fg);
+  letter-spacing: 0.005em;
+}
+.guide-body p {
+  color: var(--fg-2);
+  font-size: 15.5px;
+  margin: 0 0 14px;
+}
+.guide-body p strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* Slim two-column reference table (slash commands, frontmatter fields). */
+.cmd-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 16px;
+  font-size: 14.5px;
+}
+.cmd-table th,
+.cmd-table td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.cmd-table th {
+  background: rgba(20, 26, 46, 0.4);
+  color: var(--fg-2);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cmd-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.cmd-table td:first-child {
+  white-space: nowrap;
+  width: 1%;
+}
+.cmd-table td code {
+  font-size: 13px;
+}
+.cmd-table td:last-child {
+  color: var(--fg-2);
+}
+
+/* Definition-style list — `field` then description. */
+.kv-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.kv-list li {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(30, 36, 54, 0.5);
+  font-size: 14.5px;
+  color: var(--fg-2);
+}
+.kv-list li:last-child {
+  border-bottom: 0;
+}
+.kv-list li > code {
+  font-size: 13px;
+  align-self: start;
+}
+
+/* Inline note block — gradient-edged callout that breaks up dense reference. */
+.callout {
+  position: relative;
+  background: linear-gradient(
+    135deg,
+    rgba(94, 234, 212, 0.06),
+    rgba(196, 181, 253, 0.06)
+  );
+  border: 1px solid rgba(165, 180, 252, 0.25);
+  border-left-width: 3px;
+  border-left-color: var(--grad-3);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  margin: 18px 0 8px;
+}
+.callout-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+  margin-bottom: 6px;
+}
+.callout p {
+  margin: 0;
+  color: var(--fg);
+  font-size: 14.5px;
+}
+
+.guide-cta {
+  text-align: center;
+  padding: 48px 0 8px !important;
+  border-bottom: 0 !important;
+}
+.guide-cta h2 {
+  text-align: center;
+  margin-bottom: 8px;
+}
+.guide-cta p {
+  text-align: center;
+  margin: 0 auto 20px;
+  max-width: 520px;
+}
+.guide-cta .hero-ctas {
+  justify-content: center;
+}
+
+.nav-links a.active {
+  color: var(--fg);
+  position: relative;
+}
+.nav-links a.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--grad-1), var(--grad-5));
+}
+
+@media (max-width: 960px) {
+  .guide-shell {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .guide-toc {
+    position: static;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 0;
+  }
+  .guide-toc ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+  .kv-list li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

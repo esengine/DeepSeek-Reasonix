@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configuration Guide — Reasonix · MCP, Skills, Memory, Hooks</title>
+    <meta
+      name="description"
+      content="Bilingual configuration guide for Reasonix — MCP servers, skills, memory, hooks, permissions, web search, and the full ~/.reasonix/config.json reference."
+    />
+    <meta
+      name="keywords"
+      content="Reasonix configuration, MCP setup, Model Context Protocol config, Claude Code skills, AI agent memory, lifecycle hooks, DeepSeek CLI, reasonix.config.json"
+    />
+    <meta name="author" content="esengine" />
+    <meta name="theme-color" content="#0b0f17" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+
+    <link
+      rel="canonical"
+      href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=en"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html"
+    />
+
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Reasonix" />
+    <meta property="og:title" content="Reasonix Configuration Guide" />
+    <meta
+      property="og:description"
+      content="MCP, skills, memory, hooks, permissions — every key, every slash command, the on-disk shape."
+    />
+    <meta
+      property="og:url"
+      content="https://esengine.github.io/DeepSeek-Reasonix/configuration.html"
+    />
+    <meta
+      property="og:image"
+      content="https://raw.githubusercontent.com/esengine/reasonix/main/docs/assets/hero-terminal.svg"
+    />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Reasonix Configuration Guide" />
+    <meta
+      name="twitter:description"
+      content="MCP, skills, memory, hooks, permissions — every key, every slash command."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="guide.css" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Reasonix Configuration Guide",
+        "description": "MCP servers, skills, memory, hooks, permissions, web search, and the full ~/.reasonix/config.json reference.",
+        "url": "https://esengine.github.io/DeepSeek-Reasonix/configuration.html",
+        "inLanguage": ["en", "zh-CN"],
+        "author": {
+          "@type": "Organization",
+          "name": "esengine",
+          "url": "https://github.com/esengine"
+        },
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": "Reasonix",
+          "url": "https://esengine.github.io/DeepSeek-Reasonix/"
+        },
+        "about": {
+          "@type": "SoftwareApplication",
+          "name": "Reasonix"
+        }
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Reasonix",
+            "item": "https://esengine.github.io/DeepSeek-Reasonix/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Configuration Guide",
+            "item": "https://esengine.github.io/DeepSeek-Reasonix/configuration.html"
+          }
+        ]
+      }
+    </script>
+  </head>
+
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="bg-horizon" aria-hidden="true"></div>
+
+    <header class="nav">
+      <a class="nav-brand" href="index.html" aria-label="Reasonix">
+        <span class="brand-mark" aria-hidden="true">
+          <span class="diamond"></span>
+          <span class="diamond inner"></span>
+        </span>
+        <span class="brand-name">Reasonix</span>
+      </a>
+
+      <nav class="nav-links">
+        <a href="index.html#why" data-i18n="nav.why">Why</a>
+        <a href="index.html#features" data-i18n="nav.features">Features</a>
+        <a href="index.html#quickstart" data-i18n="nav.quickstart">Quick start</a>
+        <a href="configuration.html" data-i18n="nav.guide" class="active">Guide</a>
+        <a
+          href="https://github.com/esengine/reasonix"
+          target="_blank"
+          rel="noopener"
+          data-i18n="nav.github"
+          >GitHub</a
+        >
+      </nav>
+
+      <div class="nav-actions">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button data-lang-btn="en" type="button" aria-pressed="true">EN</button>
+          <button data-lang-btn="zh" type="button" aria-pressed="false">中文</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="guide-main" id="top">
+      <section class="guide-hero">
+        <div class="container">
+          <div class="badge" data-i18n="guide.badge">Configuration · MCP · Skills · Memory</div>
+          <h1 class="guide-title">
+            <span class="grad-text" data-i18n="guide.title.line1">Configure Reasonix</span>
+            <br />
+            <span data-i18n="guide.title.line2">in five minutes</span>
+          </h1>
+          <p class="guide-sub" data-i18n="guide.sub">
+            One JSON file at <code>~/.reasonix/config.json</code> + per-project overrides
+            under <code>.reasonix/</code>. This page documents every key, every slash
+            command, and the on-disk shape of skills, memory, and hooks.
+          </p>
+        </div>
+      </section>
+
+      <div class="guide-shell container">
+        <aside class="guide-toc" aria-label="On this page">
+          <h4 data-i18n="guide.toc.title">On this page</h4>
+          <ul>
+            <li><a href="#config-json" data-i18n="guide.toc.config">config.json</a></li>
+            <li><a href="#mcp" data-i18n="guide.toc.mcp">MCP servers</a></li>
+            <li><a href="#skills" data-i18n="guide.toc.skills">Skills</a></li>
+            <li><a href="#memory" data-i18n="guide.toc.memory">Memory</a></li>
+            <li><a href="#hooks" data-i18n="guide.toc.hooks">Hooks</a></li>
+            <li><a href="#permissions" data-i18n="guide.toc.perms">Permissions</a></li>
+            <li><a href="#search" data-i18n="guide.toc.search">Web search</a></li>
+            <li><a href="#index" data-i18n="guide.toc.index">Semantic index</a></li>
+          </ul>
+        </aside>
+
+        <article class="guide-body">
+          <section id="config-json">
+            <h2 data-i18n="cfg.title">The config.json file</h2>
+            <p data-i18n="cfg.body1">
+              Reasonix reads a single global config from <code>~/.reasonix/config.json</code>
+              (Windows: <code>%USERPROFILE%\.reasonix\config.json</code>). The file is created
+              automatically on first run; you can hand-edit it any time. The CLI flag
+              <code>--no-config</code> bypasses it, useful in CI.
+            </p>
+            <p data-i18n="cfg.body2">
+              Per-project overrides live under <code>&lt;project&gt;/.reasonix/</code> —
+              skills, memory, settings.json (hooks). Project scope wins over global on name
+              collision.
+            </p>
+            <h3 data-i18n="cfg.shape">Top-level keys</h3>
+            <pre class="code"><code>{
+  "apiKey": "sk-...",
+  "baseUrl": "https://api.deepseek.com",
+  "lang": "en",                       <span class="hash"># <span data-i18n="cfg.k.lang">UI language: en | zh</span></span>
+  "preset": "auto",                   <span class="hash"># <span data-i18n="cfg.k.preset">auto | flash | pro</span></span>
+  "editMode": "review",               <span class="hash"># <span data-i18n="cfg.k.editmode">review | auto | yolo</span></span>
+  "reasoningEffort": "high",          <span class="hash"># <span data-i18n="cfg.k.effort">high | max</span></span>
+  "theme": "auto",                    <span class="hash"># <span data-i18n="cfg.k.theme">light | dark | auto</span></span>
+  "search": false,                    <span class="hash"># <span data-i18n="cfg.k.search">enable web_search/web_fetch tools</span></span>
+  "webSearchEngine": "mojeek",        <span class="hash"># <span data-i18n="cfg.k.engine">mojeek | searxng</span></span>
+  "webSearchEndpoint": "http://localhost:8080",
+  "mcp": [],                          <span class="hash"># <span data-i18n="cfg.k.mcp">MCP server specs</span></span>
+  "mcpDisabled": [],                  <span class="hash"># <span data-i18n="cfg.k.mcpoff">names skipped at startup</span></span>
+  "projects": {                       <span class="hash"># <span data-i18n="cfg.k.projects">per-workspace overrides</span></span>
+    "/abs/path": {
+      "shellAllowed": ["npm", "git status"]
+    }
+  },
+  "semantic": { ... },                <span class="hash"># <span data-i18n="cfg.k.semantic">embedding provider for `reasonix index`</span></span>
+  "session": null
+}</code></pre>
+            <div class="callout">
+              <div class="callout-tag" data-i18n="cfg.callout.tag">Trust dial</div>
+              <p data-i18n="cfg.callout.body">
+                <code>editMode</code> is the single trust dial for an entire session.
+                <code>review</code> queues edits + gates shell. <code>auto</code> applies
+                edits + still gates shell. <code>yolo</code> skips both gates — only use
+                inside a sandbox.
+              </p>
+            </div>
+          </section>
+
+          <section id="mcp">
+            <h2 data-i18n="mcp.title">MCP servers</h2>
+            <p data-i18n="mcp.body1">
+              Reasonix speaks the Model Context Protocol natively. Every entry in
+              <code>config.mcp</code> is a single string — the same format the
+              <code>--mcp</code> CLI flag accepts — so one parser handles both. Three
+              transports are supported.
+            </p>
+            <h3 data-i18n="mcp.h.stdio">Stdio (subprocess)</h3>
+            <pre class="code"><code>{
+  "mcp": [
+    "fs=npx -y @modelcontextprotocol/server-filesystem /tmp",
+    "git=uvx mcp-server-git --repository ."
+  ]
+}</code></pre>
+            <p data-i18n="mcp.body.stdio">
+              Format: <code>name=command arg1 arg2</code>. The <code>name=</code> prefix
+              namespaces every tool the server exposes. Args use shell-style splitting;
+              quote any with spaces.
+            </p>
+
+            <h3 data-i18n="mcp.h.sse">SSE (HTTP)</h3>
+            <pre class="code"><code>{
+  "mcp": [
+    "remote=https://example.com/mcp/sse",
+    "https://other.example.com/mcp"
+  ]
+}</code></pre>
+            <p data-i18n="mcp.body.sse">
+              Plain <code>http://</code> / <code>https://</code> URLs use HTTP+SSE for
+              back-compat. Anonymous (no <code>name=</code>) entries work but can't be
+              toggled by name later.
+            </p>
+
+            <h3 data-i18n="mcp.h.streamable">Streamable HTTP (2025-03 spec)</h3>
+            <pre class="code"><code>{
+  "mcp": [
+    "edge=streamable+https://edge.example.com/mcp"
+  ]
+}</code></pre>
+            <p data-i18n="mcp.body.streamable">
+              Opt in with the <code>streamable+</code> URL prefix.
+            </p>
+
+            <h3 data-i18n="mcp.h.cli">CLI flags &amp; slash commands</h3>
+            <pre class="code"><code>npx reasonix code --mcp "fs=npx -y @mcp/server-filesystem /tmp"
+npx reasonix mcp inspect "git=uvx mcp-server-git"
+npx reasonix mcp list</code></pre>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.cmd">Command</th>
+                  <th data-i18n="th.what">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>/mcp</code></td>
+                  <td data-i18n="mcp.cmd.hub">Open the interactive MCP hub.</td>
+                </tr>
+                <tr>
+                  <td><code>/mcp disable &lt;name&gt;</code></td>
+                  <td data-i18n="mcp.cmd.disable">
+                    Persist to <code>mcpDisabled</code>; effective on next launch.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>/mcp enable &lt;name&gt;</code></td>
+                  <td data-i18n="mcp.cmd.enable">Re-enable a disabled server.</td>
+                </tr>
+                <tr>
+                  <td><code>/mcp reconnect &lt;name&gt;</code></td>
+                  <td data-i18n="mcp.cmd.recon">
+                    Reconnect a live server and pick up newly-registered tools.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="skills">
+            <h2 data-i18n="sk.title">Skills</h2>
+            <p data-i18n="sk.body1">
+              A skill is a markdown playbook the model can invoke (<code>/skill &lt;name&gt;</code>).
+              Names + descriptions are pinned in the prompt; bodies load on demand. Project
+              skills override global ones with the same name.
+            </p>
+            <h3 data-i18n="sk.h.layout">Layout</h3>
+            <pre class="code"><code>~/.reasonix/skills/<span class="hash">           # global</span>
+  audit-logs.md
+  refactor-react/
+    SKILL.md
+
+&lt;project&gt;/.reasonix/skills/<span class="hash">    # project (overrides global)</span>
+  release-notes.md</code></pre>
+            <p data-i18n="sk.body.layout">
+              Two equivalent shapes: a flat <code>&lt;name&gt;.md</code>, or a
+              <code>&lt;name&gt;/SKILL.md</code> folder when you want to colocate
+              attachments.
+            </p>
+
+            <h3 data-i18n="sk.h.fm">Frontmatter</h3>
+            <pre class="code"><code>---
+name: audit-logs
+description: <span data-i18n="sk.fm.desc">Review git log for security red flags.</span>
+runAs: inline                  <span class="hash"># <span data-i18n="sk.fm.runas">inline | subagent</span></span>
+allowed-tools: bash,read       <span class="hash"># <span data-i18n="sk.fm.tools">subagent tool allowlist</span></span>
+model: deepseek-chat           <span class="hash"># <span data-i18n="sk.fm.model">subagent model override</span></span>
+---
+
+## <span data-i18n="sk.body.task">Task</span>
+
+1. <span data-i18n="sk.body.s1">Fetch the last 20 commits.</span>
+2. <span data-i18n="sk.body.s2">Flag commits whose message mentions password / secret / token.</span>
+3. <span data-i18n="sk.body.s3">Report findings.</span></code></pre>
+            <ul class="kv-list">
+              <li>
+                <code>name</code>
+                <span data-i18n="sk.fm.f.name">1–64 chars: alnum, <code>_</code>, <code>-</code>, interior <code>.</code>. Defaults to filename stem.</span>
+              </li>
+              <li>
+                <code>description</code>
+                <span data-i18n="sk.fm.f.desc">One line. Shown in <code>/skill list</code>.</span>
+              </li>
+              <li>
+                <code>runAs</code>
+                <span data-i18n="sk.fm.f.runas">
+                  <code>inline</code> (default): body enters parent log. <code>subagent</code>:
+                  isolated child loop, only the final answer returns.
+                </span>
+              </li>
+              <li>
+                <code>allowed-tools</code>
+                <span data-i18n="sk.fm.f.tools">
+                  Comma-separated literal tool names. Subagent only — scopes the child's tool registry.
+                </span>
+              </li>
+              <li>
+                <code>model</code>
+                <span data-i18n="sk.fm.f.model">
+                  Subagent only. Must start with <code>deepseek-</code>; ignored otherwise.
+                </span>
+              </li>
+            </ul>
+
+            <h3 data-i18n="sk.h.cmds">Slash commands</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/skill list</code></td>
+                  <td data-i18n="sk.cmd.list">List every skill, scope-tagged.</td>
+                </tr>
+                <tr>
+                  <td><code>/skill new &lt;name&gt;</code></td>
+                  <td data-i18n="sk.cmd.new">
+                    Scaffold a stub at project scope. Add <code>--global</code> for
+                    <code>~/.reasonix/skills</code>.
+                  </td>
+                </tr>
+                <tr>
+                  <td><code>/skill show &lt;name&gt;</code></td>
+                  <td data-i18n="sk.cmd.show">Print the full body.</td>
+                </tr>
+                <tr>
+                  <td><code>/skill &lt;name&gt; [args]</code></td>
+                  <td data-i18n="sk.cmd.run">
+                    Run it. Args are appended to the body as a single string.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="memory">
+            <h2 data-i18n="mem.title">Memory</h2>
+            <p data-i18n="mem.body1">
+              Memory is user-private knowledge pinned into the immutable prefix — so the
+              agent reads it on every turn without re-priming. Two scopes: <em>global</em>
+              (cross-project facts about you) and <em>project</em> (per-workspace context).
+              Distinct from a committable <code>REASONIX.md</code>, which lives in the repo.
+            </p>
+
+            <h3 data-i18n="mem.h.layout">Layout</h3>
+            <pre class="code"><code>~/.reasonix/memory/
+  global/
+    MEMORY.md                      <span class="hash"># <span data-i18n="mem.idx">index — pinned into the prefix</span></span>
+    user_role.md
+    feedback_terse_comments.md
+  &lt;project-hash&gt;/                  <span class="hash"># <span data-i18n="mem.proj">sha1(absRoot)[0..16]</span></span>
+    MEMORY.md
+    project_release_freeze.md</code></pre>
+
+            <h3 data-i18n="mem.h.entry">Entry shape</h3>
+            <pre class="code"><code>---
+name: user_role
+description: <span data-i18n="mem.f.desc">User is a senior backend engineer; new to React.</span>
+type: user                       <span class="hash"># <span data-i18n="mem.f.type">user | feedback | project | reference</span></span>
+scope: global
+created: 2026-05-09
+---
+
+<span data-i18n="mem.f.body">Body — the actual remembered fact, in plain markdown.</span></code></pre>
+            <p data-i18n="mem.body.types">
+              <strong>Types:</strong> <code>user</code> (who they are),
+              <code>feedback</code> (corrections / preferences),
+              <code>project</code> (initiative / deadline / motivation),
+              <code>reference</code> (where to look in external systems).
+            </p>
+
+            <h3 data-i18n="mem.h.cmds">Slash commands</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/memory list</code></td>
+                  <td data-i18n="mem.cmd.list">List all entries, both scopes.</td>
+                </tr>
+                <tr>
+                  <td><code>/memory show &lt;name&gt;</code></td>
+                  <td data-i18n="mem.cmd.show">Display body. Scope is auto-resolved.</td>
+                </tr>
+                <tr>
+                  <td><code>/memory forget &lt;name&gt;</code></td>
+                  <td data-i18n="mem.cmd.forget">Delete one entry.</td>
+                </tr>
+                <tr>
+                  <td><code>/memory clear &lt;scope&gt; confirm</code></td>
+                  <td data-i18n="mem.cmd.clear">
+                    Wipe an entire scope. <code>confirm</code> is mandatory.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p data-i18n="mem.body.write">
+              <strong>Writing memories:</strong> say it in chat ("remember I prefer
+              Vitest over Jest"). The model invokes the <code>scaffold_memory</code> tool,
+              which proposes a file and waits for your <code>/apply</code>.
+            </p>
+          </section>
+
+          <section id="hooks">
+            <h2 data-i18n="hk.title">Hooks</h2>
+            <p data-i18n="hk.body1">
+              Hooks are shell commands the harness fires on lifecycle events. Configured
+              in <code>settings.json</code>, not <code>config.json</code>. Project scope
+              first, then global.
+            </p>
+            <h3 data-i18n="hk.h.where">Where to put them</h3>
+            <pre class="code"><code>&lt;project&gt;/.reasonix/settings.json   <span class="hash"># <span data-i18n="hk.path.proj">project scope</span></span>
+~/.reasonix/settings.json           <span class="hash"># <span data-i18n="hk.path.glob">global scope</span></span></code></pre>
+
+            <h3 data-i18n="hk.h.shape">Shape</h3>
+            <pre class="code"><code>{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "command": "node scripts/audit.js",
+        "match": "^(write|edit_file|bash)$",
+        "description": "<span data-i18n="hk.ex.audit">Audit risky tool calls before they run</span>",
+        "timeout": 5000
+      }
+    ],
+    "PostToolUse": [
+      { "command": "echo done >> /tmp/reasonix.log" }
+    ],
+    "UserPromptSubmit": [],
+    "Stop": []
+  }
+}</code></pre>
+
+            <h3 data-i18n="hk.h.events">Events</h3>
+            <ul class="kv-list">
+              <li>
+                <code>PreToolUse</code>
+                <span data-i18n="hk.ev.pre">
+                  Before a tool runs. <strong>Gating:</strong> exit 2 blocks; exit 0
+                  passes. 5 s default timeout.
+                </span>
+              </li>
+              <li>
+                <code>PostToolUse</code>
+                <span data-i18n="hk.ev.post">
+                  After a tool runs. Non-gating; warn-only on non-zero. 30 s default.
+                </span>
+              </li>
+              <li>
+                <code>UserPromptSubmit</code>
+                <span data-i18n="hk.ev.usr">
+                  Before user input is processed. <strong>Gating</strong> (exit 2 blocks
+                  the message).
+                </span>
+              </li>
+              <li>
+                <code>Stop</code>
+                <span data-i18n="hk.ev.stop">On <code>/quit</code> or session exit. Non-gating.</span>
+              </li>
+            </ul>
+
+            <h3 data-i18n="hk.h.payload">Stdin payload</h3>
+            <p data-i18n="hk.body.payload">
+              Each hook receives a JSON object on stdin describing the event:
+            </p>
+            <pre class="code"><code>{
+  "event": "PreToolUse",
+  "cwd": "/workspace",
+  "toolName": "bash",
+  "toolArgs": { "command": "rm -rf /" },
+  "turn": 3
+}</code></pre>
+          </section>
+
+          <section id="permissions">
+            <h2 data-i18n="perm.title">Permissions</h2>
+            <p data-i18n="perm.body1">
+              Shell commands are gated per-workspace. The first time the agent runs a
+              command, you get an interactive <em>allow once / allow always / deny</em>
+              prompt; "allow always" persists the exact prefix to <code>config.json</code>
+              under that project.
+            </p>
+            <pre class="code"><code>{
+  "projects": {
+    "/abs/path/to/repo": {
+      "shellAllowed": [
+        "npm test",
+        "git status",
+        "ls"
+      ]
+    }
+  }
+}</code></pre>
+            <p data-i18n="perm.body.exact">
+              <strong>Exact match after trim.</strong> <code>git</code> alone does
+              <em>not</em> cover <code>git push origin main</code>; list each prefix you
+              actually want green-lit.
+            </p>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/permissions list</code></td>
+                  <td data-i18n="perm.cmd.list">Show this project's allowlist.</td>
+                </tr>
+                <tr>
+                  <td><code>/permissions add &lt;prefix&gt;</code></td>
+                  <td data-i18n="perm.cmd.add">Add a shell prefix.</td>
+                </tr>
+                <tr>
+                  <td><code>/permissions rm &lt;prefix|index&gt;</code></td>
+                  <td data-i18n="perm.cmd.rm">Remove by name or list index.</td>
+                </tr>
+                <tr>
+                  <td><code>/permissions clear confirm</code></td>
+                  <td data-i18n="perm.cmd.clear">Wipe everything. <code>confirm</code> is mandatory.</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="search">
+            <h2 data-i18n="ws.title">Web search</h2>
+            <p data-i18n="ws.body1">
+              <code>web_search</code> + <code>web_fetch</code> ship in the box. Default
+              backend is <strong>Mojeek</strong> (no setup); switch to a self-hosted
+              <strong>SearXNG</strong> when you want full control over upstream engines.
+            </p>
+            <pre class="code"><code>/search-engine mojeek
+/search-engine searxng                       <span class="hash"># http://localhost:8080</span>
+/search-engine searxng http://192.168.1.5:8888</code></pre>
+            <p data-i18n="ws.body.json">Equivalent <code>config.json</code>:</p>
+            <pre class="code"><code>{
+  "webSearchEngine": "searxng",
+  "webSearchEndpoint": "http://localhost:8080"
+}</code></pre>
+            <p data-i18n="ws.body.start">Start a local SearXNG:</p>
+            <pre class="code"><code>podman run -d --replace --name searxng -p 8080:8080 docker.io/searxng/searxng</code></pre>
+          </section>
+
+          <section id="index">
+            <h2 data-i18n="ix.title">Semantic index</h2>
+            <p data-i18n="ix.body1">
+              <code>reasonix index</code> builds an embedding index the agent can query.
+              Pick an embedding provider:
+            </p>
+            <pre class="code"><code>{
+  "semantic": {
+    "provider": "ollama",
+    "ollama": {
+      "baseUrl": "http://localhost:11434",
+      "model": "nomic-embed-text"
+    },
+    "openaiCompat": {
+      "baseUrl": "https://api.example.com/v1",
+      "apiKey": "...",
+      "model": "text-embedding-3-small"
+    }
+  }
+}</code></pre>
+            <p data-i18n="ix.body.swap">
+              Switch by changing <code>provider</code>. Local Ollama is free and
+              air-gapped; OpenAI-compat lets you point at any hosted embedding API.
+            </p>
+          </section>
+
+          <section class="guide-cta">
+            <h2 data-i18n="cta.title">Still stuck?</h2>
+            <p data-i18n="cta.sub">
+              Open a discussion or drop into <code>good first issue</code>. Every avatar
+              on the contributors wall started somewhere.
+            </p>
+            <div class="hero-ctas">
+              <a
+                class="cta primary"
+                href="https://github.com/esengine/reasonix/discussions"
+                target="_blank"
+                rel="noopener"
+                data-i18n="cta.disc"
+                >Discussions →</a
+              >
+              <a
+                class="cta ghost"
+                href="https://github.com/esengine/reasonix/blob/main/docs/ARCHITECTURE.md"
+                target="_blank"
+                rel="noopener"
+                data-i18n="cta.arch"
+                >Architecture deep dive</a
+              >
+            </div>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="foot">
+      <div class="container foot-inner">
+        <div>
+          <a href="index.html" class="nav-brand">
+            <span class="brand-mark small" aria-hidden="true">
+              <span class="diamond"></span>
+              <span class="diamond inner"></span>
+            </span>
+            <span class="brand-name">Reasonix</span>
+          </a>
+          <p class="foot-tag" data-i18n="foot.tag">DeepSeek does deep, deeply.</p>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span data-i18n="foot.copyright">© 2026 Reasonix · MIT License</span>
+      </div>
+    </footer>
+
+    <script src="i18n.js"></script>
+    <script src="guide-i18n.js"></script>
+    <script src="motion.js"></script>
+  </body>
+</html>
