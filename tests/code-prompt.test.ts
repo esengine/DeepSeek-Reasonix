@@ -73,6 +73,11 @@ describe("codeSystemPrompt", () => {
       expect(CODE_SYSTEM_PROMPT).toMatch(/parallelSafe\?: boolean/);
     });
 
+    it("requires grep over enumeration for inventory claims (which tools have flag F?)", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/For inventory claims/);
+      expect(CODE_SYSTEM_PROMPT).toMatch(/grep the flag — don't enumerate from memory/);
+    });
+
     it("forbids fabricated percentages without a measurement", () => {
       expect(CODE_SYSTEM_PROMPT).toMatch(/No fabricated percentages/);
       expect(CODE_SYSTEM_PROMPT).toMatch(/40-60% tokens/);
@@ -88,7 +93,12 @@ describe("codeSystemPrompt", () => {
     });
 
     it("flags promoting user-facing features to model tools as a category error", () => {
-      expect(CODE_SYSTEM_PROMPT).toMatch(/User-facing ≠ model-facing/);
+      expect(CODE_SYSTEM_PROMPT).toMatch(/User-facing ≠ model-facing ≠ library-facing/);
+    });
+
+    it("calls out library exports as a fourth surface so they aren't mistaken for dead code", () => {
+      expect(CODE_SYSTEM_PROMPT).toMatch(/library exports \(`src\/index\.ts`\)/);
+      expect(CODE_SYSTEM_PROMPT).toMatch(/Treating a library export as "dead code"/);
     });
   });
 
