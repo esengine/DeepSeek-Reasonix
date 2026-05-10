@@ -1,6 +1,7 @@
 /** Modal picker for `ask_choice` — options + optional "type my own" escape hatch. */
 
 import React from "react";
+import { t } from "../../i18n/index.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
@@ -33,18 +34,18 @@ function ChoiceConfirmInner({ question, options, allowCustom, onChoose }: Choice
   if (allowCustom) {
     items.push({
       value: CUSTOM_VALUE,
-      label: "Let me type my own answer",
-      hint: "None of the above fits — type a free-form reply. The model reads it verbatim.",
+      label: t("choiceConfirm.customLabel"),
+      hint: t("choiceConfirm.customDesc"),
     });
   }
   items.push({
     value: CANCEL_VALUE,
-    label: "Cancel — drop the question",
-    hint: "Model stops and asks what you want instead.",
+    label: t("choiceConfirm.cancelLabel"),
+    hint: t("choiceConfirm.cancelDesc"),
   });
 
   return (
-    <ApprovalCard tone="info" title={question} metaRight="awaiting">
+    <ApprovalCard tone="info" title={question} metaRight={t("shellConfirm.awaiting")}>
       <SingleSelect
         initialValue={options[0]?.id}
         items={items}

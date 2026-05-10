@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { DiffCard as DiffCardData } from "../state/cards.js";
@@ -52,11 +53,11 @@ export function DiffCard({ card }: { card: DiffCardData }): React.ReactElement {
       {showFooter && (
         <Box flexDirection="row" gap={2}>
           <Text bold color={TONE.ok}>
-            [a] apply
+            {t("cardLabels.applyAction")}
           </Text>
-          <Text color={FG.sub}>[s] skip</Text>
+          <Text color={FG.sub}>{t("cardLabels.skipAction")}</Text>
           <Text bold color={TONE.err}>
-            [r] reject
+            {t("cardLabels.rejectAction")}
           </Text>
         </Box>
       )}

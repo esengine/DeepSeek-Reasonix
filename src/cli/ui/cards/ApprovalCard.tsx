@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../../i18n/index.js";
 import { CARD, type CardTone, FG, SURFACE } from "../theme/tokens.js";
 
 const SEPARATOR_PAD = 6;
@@ -33,7 +34,7 @@ const TONE_PALETTE = {
   info: { color: CARD.tool.color, glyph: "?" },
 } as const;
 
-const DEFAULT_FOOTER = "↑↓ pick  ·  ⏎ confirm  ·  esc cancel";
+const DEFAULT_FOOTER = t("cardLabels.defaultFooter");
 
 export function ApprovalCard({
   tone,
