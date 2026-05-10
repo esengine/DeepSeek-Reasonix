@@ -3,6 +3,74 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.2] — 2026-05-09
+
+**Headline:** stability sweep on field-reported crashes and freezes —
+TUI no longer tears down on `/model` / `/sessions`, Esc and `/new`
+recover from a stuck plan checkpoint, the dashboard chat tab survives
+long streaming turns, plan-card spinners can't strand themselves on a
+missed end-event, and the model can't infer its identity from a
+foreign agent platform's data dir at the workspace root. New `/theme`
+picker for one-keystroke theme switching.
+
+**Fixes:**
+
+- fix(tui): a card-stream layout feedback loop (the `↑ earlier` hint
+  conditionally rendered as a sibling of the measured outer Box) tied
+  `outer.height` to `scrollRows`. Opening `/model` or `/sessions` —
+  which mounts a picker that shrinks the outer column by 10+ rows in
+  a single commit — could stack the cycle deep enough to trip React's
+  `MAX_NESTED_UPDATES = 50`, raising "Maximum update depth exceeded"
+  inside ink's `useBoxMetrics` and tearing down the TUI. The hint row
+  is now reserved unconditionally so its visibility no longer feeds
+  back into measurement. (#549)
+- fix(tui): `pauseGate.ask` ignored AbortSignal — when a tool was
+  awaiting the gate (e.g. `mark_step_complete` → `plan_checkpoint`)
+  and the user pressed Esc, the gate's promise stayed pending forever,
+  `busy` stayed true, the prompt stayed disabled, and `/new` was
+  silently dropped by `handleSubmit`'s `if (busy) return` guard. New
+  `pauseGate.cancelAll()` resolves every outstanding request with its
+  kind's safe-cancel verdict; Esc-during-busy and `/new` both flush
+  pending modals through it so the awaiting tool fn returns cleanly
+  and the user can recover. (#552)
+- fix(prompt): when the workspace root contained another agent
+  platform's config (`SOUL.md`, `skills/`, `memories/`, a foreign
+  `REASONIX.md`) the model would browse those files and claim a
+  layered architectural relationship — "the underlying runtime is
+  Hermes Agent" or similar. Top-of-prompt identity guard names the
+  failure mode: workspace files describe the user's project, never
+  what Reasonix is; identity questions are answered from the prompt,
+  not from `ls`. Plus a launch-time detector that warns when those
+  markers sit at the workspace root, suggesting `--dir <real-project>`.
+  (#555)
+- fix(dashboard): the embedded chat tab triggered Chrome's "Page not
+  responding" dialog during long sessions and concurrent jobs. Each
+  `assistant_delta` (~20/sec, more under fan-in) called setState
+  synchronously, re-rendering every historical `ChatMessage` with no
+  memoization — every delta re-ran `marked.parse` and `hljs.highlight`
+  on unchanged content. Memoized `ChatMessage` via `preact/compat`
+  `memo`, stabilised the per-row `streaming` prop so memo's shallow
+  compare actually bails out, and rAF-coalesced delta accumulation so
+  the streaming bubble re-renders at most once per frame regardless
+  of delta volume. (#560)
+- fix(loop): tool-card spinners occasionally kept spinning after the
+  underlying work had finished — the `running` flag was set
+  imperatively from paired events, and any exit path that forgot to
+  emit the closing event (storm-breaker, network drop, parent abort
+  propagating, hook block) left the card stuck. Replaced with a
+  finally-guaranteed `InflightSet` on the loop: tools are added at
+  dispatch entry and deleted in `finally` regardless of how the call
+  exits. UI tool cards consult the set via `useIsInflight(card.id)`
+  for the spinner, decoupling running-or-not from end-event delivery.
+  (#566)
+
+**Features:**
+
+- feat(ui): bare `/theme` opens a SingleSelect picker listing `auto`
+  + every registered theme; `/theme <name>` keeps its existing
+  persist-and-report behaviour. (#543, contributed by @J3y0r;
+  re-landed via #567 after rebasing onto current main)
+
 ## [0.36.1] — 2026-05-09
 
 **Fixes:**
