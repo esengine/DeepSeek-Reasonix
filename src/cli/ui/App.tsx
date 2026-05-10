@@ -126,6 +126,7 @@ import { useLoopMode } from "./hooks/useLoopMode.js";
 import { useQuit } from "./hooks/useQuit.js";
 import { useScrollback } from "./hooks/useScrollback.js";
 import { useTerminalSetup } from "./hooks/useTerminalSetup.js";
+import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
@@ -400,20 +401,15 @@ function AppInner({
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
-  // Name + truncated args of the tool currently dispatching. Populated
-  // on `tool_start`, cleared on `tool` (or error). Drives the
-  // "▸ tool<X> running…" pulse-spinner row so long tool calls don't
-  // look like the app hung.
-  const [ongoingTool, setOngoingTool] = useState<{ name: string; args?: string } | null>(null);
-  // Latest progress frame for the currently-running tool (MCP
-  // `notifications/progress`). `null` when no progress has been
-  // reported for this tool call — OngoingToolRow still spins, just
-  // without a progress number.
-  const [toolProgress, setToolProgress] = useState<{
-    progress: number;
-    total?: number;
-    message?: string;
-  } | null>(null);
+  const {
+    ongoingTool,
+    setOngoingTool,
+    toolProgress,
+    setToolProgress,
+    statusLine,
+    setStatusLine,
+    clear: clearToolProgressDisplay,
+  } = useToolProgressDisplay(progressSink);
   const { stdout } = useStdout();
   useTerminalSetup(mouse);
 
@@ -428,11 +424,6 @@ function AppInner({
     log,
     getWalletCurrency: () => walletCurrencyRef.current,
   });
-  // Transient "what's happening" text set by the loop during silent
-  // phases (harvest round-trip, between-iteration R1 thinking, forced
-  // summary). Rendered as a dim spinner row; auto-cleared on the next
-  // primary event.
-  const [statusLine, setStatusLine] = useState<string | null>(null);
   // Live working directory for every rootDir-dependent surface:
   // hook cwd, memory root, project shell allowlist root, `@file`
   // mention root, `applyEditBlocks` base, run_command cwd, project-
@@ -1131,24 +1122,6 @@ function AppInner({
     mcpServers: liveMcpServers,
     slashUsage,
   });
-
-  // Wire the shared progressSink so the bridge's onProgress → us.
-  // Only updates progress when the frame belongs to the currently-
-  // running tool: late frames from a previous call shouldn't overwrite
-  // the spinner of whatever's running next.
-  useEffect(() => {
-    if (!progressSink) return;
-    progressSink.current = (info) => {
-      setToolProgress({
-        progress: info.progress,
-        total: info.total,
-        message: info.message,
-      });
-    };
-    return () => {
-      if (progressSink.current) progressSink.current = null;
-    };
-  }, [progressSink]);
 
   // Surface a one-time banner about session state on first mount.
   const sessionBannerShown = useRef(false);
@@ -2688,9 +2661,7 @@ function AppInner({
         if (abortedThisTurn.current) {
           translator.abort();
         }
-        setOngoingTool(null);
-        setToolProgress(null);
-        setStatusLine(null);
+        clearToolProgressDisplay();
         setSummary(loop.stats.summary());
         setBusy(false);
         // Clear pro-on-turn badge; armed-for-next-turn already cleared
@@ -2735,6 +2706,10 @@ function AppInner({
       sealCurrentEntry,
       editMode,
       syncPendingCount,
+      setOngoingTool,
+      setToolProgress,
+      setStatusLine,
+      clearToolProgressDisplay,
       refreshBalance,
       refreshLatestVersion,
       refreshModels,
