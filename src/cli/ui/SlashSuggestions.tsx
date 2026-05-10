@@ -18,16 +18,10 @@ export interface SlashSuggestionsProps {
   advancedHidden?: number;
 }
 
-const GROUP_LABEL: Record<SlashGroup, string> = {
-  chat: "CHAT",
-  setup: "SETUP",
-  info: "INFO",
-  session: "SESSION",
-  extend: "EXTEND",
-  code: "CODE",
-  jobs: "JOBS",
-  advanced: "ADVANCED",
-};
+function groupLabel(group: SlashGroup): string {
+  const key = `slashSuggestions.group${group.charAt(0).toUpperCase() + group.slice(1)}`;
+  return t(key);
+}
 
 export function SlashSuggestions({
   matches,
@@ -65,8 +59,8 @@ export function SlashSuggestions({
           {GLYPH.warn}
         </Text>
         <Text> </Text>
-        <Text color={color.warn}>no slash command matches that prefix</Text>
-        <Text dimColor>{" — Backspace to edit, or /help for the full list"}</Text>
+        <Text color={color.warn}>{t("slashSuggestions.noMatch")}</Text>
+        <Text dimColor>{t("slashSuggestions.backspaceHint")}</Text>
       </Box>
     );
   }
@@ -81,8 +75,15 @@ export function SlashSuggestions({
         <Text color={color.accent} bold>
           {"/ "}
         </Text>
-        <Text dimColor>{`${total} command${total === 1 ? "" : "s"}`}</Text>
-        {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
+        <Text dimColor>
+          {t(
+            total === 1 ? "slashSuggestions.commandCount" : "slashSuggestions.commandCountPlural",
+            { count: total },
+          )}
+        </Text>
+        {hiddenAbove > 0 ? (
+          <Text dimColor>{t("slashSuggestions.aboveLabel", { count: hiddenAbove })}</Text>
+        ) : null}
       </Box>
       {items.map((item) => {
         if (item.kind === "group") {
@@ -97,14 +98,16 @@ export function SlashSuggestions({
           />
         );
       })}
-      {hiddenBelow > 0 ? <Text dimColor>{`   ↓ ${hiddenBelow} below`}</Text> : null}
+      {hiddenBelow > 0 ? (
+        <Text dimColor>{t("slashSuggestions.belowLabel", { count: hiddenBelow })}</Text>
+      ) : null}
       {groupMode && advancedHidden && advancedHidden > 0 ? (
         <Box marginTop={1}>
-          <Text dimColor>{`  + ${advancedHidden} advanced  ·  type a letter to search`}</Text>
+          <Text dimColor>{t("slashSuggestions.advancedHint", { count: advancedHidden })}</Text>
         </Box>
       ) : null}
       <Box marginTop={0}>
-        <Text dimColor>{"  ↑↓ navigate · Tab / ⏎ pick · esc cancel"}</Text>
+        <Text dimColor>{t("slashSuggestions.footerHint")}</Text>
       </Box>
     </Box>
   );
@@ -163,7 +166,7 @@ function GroupHeader({ group }: { group: SlashGroup }): React.ReactElement {
   return (
     <Box flexShrink={0} height={1} flexWrap="nowrap">
       <Text dimColor wrap="truncate">
-        {`  ${GROUP_LABEL[group]}`}
+        {`  ${groupLabel(group)}`}
       </Text>
     </Box>
   );

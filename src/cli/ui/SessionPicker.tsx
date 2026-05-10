@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useMemo, useState } from "react";
+import { t } from "../../i18n/index.js";
 import type { SessionInfo } from "../../memory/session.js";
 import { type PickerBroadcastPorts, usePickerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { useKeystroke } from "./keystroke-context.js";
@@ -41,11 +42,13 @@ export function SessionPicker({
   const snapshot = useMemo(
     () => ({
       pickerKind: "sessions",
-      title: `pick a session — ${workspace}`,
+      title: t("sessionPicker.title", { workspace }),
       items: sessions.map((s) => {
         const branch = s.meta.branch ?? "main";
+        const count = s.messageCount;
         const summary =
-          s.meta.summary ?? `${s.messageCount} message${s.messageCount === 1 ? "" : "s"}`;
+          s.meta.summary ??
+          t(count === 1 ? "sessionPicker.messages" : "sessionPicker.messagesPlural", { count });
         const turns = s.meta.turnCount ?? Math.ceil(s.messageCount / 2);
         const currency = walletCurrency ?? s.meta.balanceCurrency;
         const costLabel =
@@ -55,11 +58,13 @@ export function SessionPicker({
           title: s.name,
           subtitle: summary,
           badge: branch,
-          meta: costLabel ? `${turns} turns · ${costLabel}` : `${turns} turns`,
+          meta: costLabel
+            ? `${t("sessionPicker.turns", { count: turns })} · ${costLabel}`
+            : t("sessionPicker.turns", { count: turns }),
         };
       }),
       actions: ["pick", "delete", "rename", "new", "cancel"] as const,
-      hint: "↑↓ pick · ⏎ open · [n] new · [d] delete · [r] rename · esc quit",
+      hint: t("sessionPicker.pickerHint"),
     }),
     [sessions, workspace, walletCurrency],
   );
@@ -141,18 +146,18 @@ export function SessionPicker({
     <Box flexDirection="column" marginY={1}>
       <Box>
         <Text bold color={TONE.brand}>
-          {" ◈ REASONIX · pick a session "}
+          {t("sessionPicker.header")}
         </Text>
         <Text color={FG.meta}>{`  ·  ${workspace}`}</Text>
       </Box>
       <Box height={1} />
       {sessions.length === 0 ? (
         <Box>
-          <Text color={FG.faint}>{"  no saved sessions in this workspace yet — press "}</Text>
+          <Text color={FG.faint}>{t("sessionPicker.empty")}</Text>
           <Text bold color={TONE.brand}>
             {"⏎"}
           </Text>
-          <Text color={FG.faint}>{" to start a new one"}</Text>
+          <Text color={FG.faint}>{t("sessionPicker.emptyNew")}</Text>
         </Box>
       ) : (
         shown.map((s, i) => (
@@ -166,12 +171,12 @@ export function SessionPicker({
       )}
       {hiddenBelow > 0 ? (
         <Box>
-          <Text color={FG.faint}>{`     … ${hiddenBelow} more`}</Text>
+          <Text color={FG.faint}>{t("cardLabels.more", { count: hiddenBelow })}</Text>
         </Box>
       ) : null}
       {renaming ? (
         <Box marginTop={1}>
-          <Text color={FG.faint}>{`  rename "${renaming.from}" → `}</Text>
+          <Text color={FG.faint}>{t("sessionPicker.renamePrompt", { from: renaming.from })}</Text>
           <Text bold color={TONE.brand}>
             {renaming.buf}
           </Text>
@@ -183,10 +188,10 @@ export function SessionPicker({
       <Box marginTop={1}>
         <Text color={FG.faint}>
           {renaming
-            ? "  ⏎ confirm rename  ·  esc cancel"
+            ? t("sessionPicker.renameHint")
             : sessions.length === 0
-              ? "  ⏎ new session  ·  esc quit"
-              : "  ↑↓ pick  ·  ⏎ open  ·  [n] new  ·  [d] delete  ·  [r] rename  ·  esc quit"}
+              ? t("sessionPicker.emptyHint")
+              : t("sessionPicker.pickerHint")}
         </Text>
       </Box>
     </Box>
@@ -203,8 +208,10 @@ function SessionRow({
   walletCurrency?: string;
 }): React.ReactElement {
   const branch = info.meta.branch ?? "main";
+  const count = info.messageCount;
   const summary =
-    info.meta.summary ?? `${info.messageCount} message${info.messageCount === 1 ? "" : "s"}`;
+    info.meta.summary ??
+    t(count === 1 ? "sessionPicker.messages" : "sessionPicker.messagesPlural", { count });
   const turns = info.meta.turnCount ?? Math.ceil(info.messageCount / 2);
   const currency = walletCurrency ?? info.meta.balanceCurrency;
   const costLabel =
@@ -220,7 +227,7 @@ function SessionRow({
       <Text color={focused ? FG.body : FG.sub}>{truncate(summary, 40)}</Text>
       <Box flexGrow={1} />
       <Text color={FG.faint}>{`${time.padStart(11)}   `}</Text>
-      <Text color={FG.faint}>{`${turns} turns`}</Text>
+      <Text color={FG.faint}>{t("sessionPicker.turns", { count: turns })}</Text>
       {costLabel ? <Text color={FG.faint}>{` · ${costLabel}`}</Text> : null}
     </Box>
   );
@@ -234,12 +241,12 @@ function truncate(s: string, max: number): string {
 function relativeTime(date: Date): string {
   const ms = Date.now() - date.getTime();
   const mins = Math.floor(ms / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1) return t("sessionPicker.justNow");
+  if (mins < 60) return t("sessionPicker.minAgo", { count: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("sessionPicker.hoursAgo", { count: hours });
   const days = Math.floor(hours / 24);
-  if (days === 1) return "yesterday";
-  if (days < 7) return `${days} days ago`;
+  if (days === 1) return t("sessionPicker.yesterday");
+  if (days < 7) return t("sessionPicker.daysAgo", { count: days });
   return date.toISOString().slice(0, 10);
 }
