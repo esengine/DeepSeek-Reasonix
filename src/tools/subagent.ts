@@ -5,9 +5,9 @@ import { CacheFirstLoop } from "../loop.js";
 import { applyProjectMemory } from "../memory/project.js";
 import { ImmutablePrefix } from "../memory/runtime.js";
 import {
-  ESCALATION_CONTRACT,
   NEGATIVE_CLAIM_RULE,
   TUI_FORMATTING_RULES,
+  escalationContract,
 } from "../prompt-fragments.js";
 import { ToolRegistry } from "../tools.js";
 import { SUBAGENT_TYPE_NAMES, getSubagentType } from "./subagent-types.js";
@@ -83,7 +83,8 @@ export interface SubagentToolOptions {
   sink?: SubagentSink;
 }
 
-const DEFAULT_SUBAGENT_SYSTEM = `You are a Reasonix subagent. The parent agent spawned you to handle one focused subtask, then return.
+/** Memory-stable prefix — shared across spawns, cached. The model-dependent escalation contract is appended per spawn so a pro spawn doesn't get told it's running on flash (#582). */
+const SUBAGENT_BASE_SYSTEM = `You are a Reasonix subagent. The parent agent spawned you to handle one focused subtask, then return.
 
 Rules:
 - Stay on the task you were given. Do not expand scope.
@@ -93,9 +94,11 @@ Rules:
 
 ${NEGATIVE_CLAIM_RULE}
 
-${ESCALATION_CONTRACT}
-
 ${TUI_FORMATTING_RULES}`;
+
+function defaultSubagentSystem(modelId: string): string {
+  return `${SUBAGENT_BASE_SYSTEM}\n\n${escalationContract(modelId)}`;
+}
 
 const DEFAULT_MAX_RESULT_CHARS = 8000;
 const DEFAULT_MAX_ITERS = 16;
@@ -380,14 +383,15 @@ export function registerSubagentTool(
   parentRegistry: ToolRegistry,
   opts: SubagentToolOptions,
 ): ToolRegistry {
-  const baseSystem = opts.defaultSystem ?? DEFAULT_SUBAGENT_SYSTEM;
+  const baseSystem = opts.defaultSystem ?? SUBAGENT_BASE_SYSTEM;
   // Bake project memory into the default once — re-reading on every
   // spawn would (a) make the child prefix unstable when REASONIX.md
   // changes mid-session, defeating cache reuse across multiple
   // subagent calls, and (b) cost a stat() per call. The parent itself
   // also reads memory once at startup; matching that semantics keeps
-  // subagent and parent on the same page.
-  const defaultSystem = opts.projectRoot
+  // subagent and parent on the same page. The escalation contract is
+  // appended per-spawn against the spawn's resolved model id (#582).
+  const defaultSystemBase = opts.projectRoot
     ? applyProjectMemory(baseSystem, opts.projectRoot)
     : baseSystem;
   const defaultModel = opts.defaultModel ?? DEFAULT_SUBAGENT_MODEL;
@@ -451,14 +455,14 @@ export function registerSubagentTool(
         });
       }
       const typeSpec = getSubagentType(args.type);
-      const system =
-        typeof args.system === "string" && args.system.trim().length > 0
-          ? args.system.trim()
-          : (typeSpec?.system ?? defaultSystem);
       const model =
         typeof args.model === "string" && args.model.startsWith("deepseek-")
           ? args.model
           : defaultModel;
+      const system =
+        typeof args.system === "string" && args.system.trim().length > 0
+          ? args.system.trim()
+          : (typeSpec?.system ?? `${defaultSystemBase}\n\n${escalationContract(model)}`);
       const callerIters = clampMaxIters(args.max_iters);
       const result = await spawnSubagent({
         client: opts.client,

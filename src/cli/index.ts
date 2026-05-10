@@ -4,13 +4,14 @@ import { t } from "../i18n/index.js";
 import { VERSION } from "../index.js";
 import { listSessions } from "../memory/session.js";
 import { applyMemoryStack } from "../memory/user.js";
-import { ESCALATION_CONTRACT } from "../prompt-fragments.js";
+import { escalationContract } from "../prompt-fragments.js";
 import { resolveContinueFlag, resolveDefaults } from "./resolve.js";
 import { markPhase } from "./startup-profile.js";
 
 markPhase("cli_module_loaded");
 
-const DEFAULT_SYSTEM = `You are Reasonix, a helpful DeepSeek-powered assistant. Be concise and accurate. Use tools when available.
+function defaultSystemPrompt(modelId: string): string {
+  return `You are Reasonix, a helpful DeepSeek-powered assistant. Be concise and accurate. Use tools when available.
 
 # Cite or shut up — non-negotiable
 
@@ -30,7 +31,8 @@ Your training data has a cutoff. When an answer's correctness depends on somethi
 
 The signal isn't a topic list — it's: "if I'm wrong about this, is it because reality moved on?". If yes, ground the answer in fresh evidence; if no (definitions, mechanisms, well-established APIs), answer from memory.
 
-${ESCALATION_CONTRACT}`;
+${escalationContract(modelId)}`;
+}
 
 /** Lenient: malformed → undefined (no cap) so a bad flag doesn't abort launch. */
 function parseBudgetFlag(raw: number | undefined): number | undefined {
@@ -73,7 +75,7 @@ program.action(async (opts: { continue?: boolean }) => {
   const { chatCommand } = await import("./commands/chat.js");
   await chatCommand({
     model: defaults.model,
-    system: applyMemoryStack(DEFAULT_SYSTEM, process.cwd()),
+    system: applyMemoryStack(defaultSystemPrompt(defaults.model), process.cwd()),
     session: continueOpts.session,
     mcp: defaults.mcp,
     forceResume: continueOpts.forceResume,
@@ -124,7 +126,7 @@ program
   .command("chat")
   .description(t("cli.chat"))
   .option("-m, --model <id>", t("ui.modelIdHint"))
-  .option("-s, --system <prompt>", t("ui.systemPromptHint"), DEFAULT_SYSTEM)
+  .option("-s, --system <prompt>", t("ui.systemPromptHint"))
   .option("--transcript <path>", t("ui.transcriptHint"))
   .option("--preset <name>", t("ui.presetHint"))
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
@@ -167,7 +169,7 @@ program
     const { chatCommand } = await import("./commands/chat.js");
     await chatCommand({
       model: defaults.model,
-      system: applyMemoryStack(opts.system, process.cwd()),
+      system: applyMemoryStack(opts.system ?? defaultSystemPrompt(defaults.model), process.cwd()),
       transcript: opts.transcript,
       budgetUsd: parseBudgetFlag(opts.budget),
       session: continueOpts.session,
@@ -185,7 +187,7 @@ program
   .command("run <task>")
   .description(t("cli.run"))
   .option("-m, --model <id>", t("ui.modelIdHint"))
-  .option("-s, --system <prompt>", t("ui.systemPromptHint"), DEFAULT_SYSTEM)
+  .option("-s, --system <prompt>", t("ui.systemPromptHint"))
   .option("--preset <name>", t("ui.presetHintShort"))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
   .option("--transcript <path>", t("ui.transcriptHintShort"))
@@ -208,7 +210,7 @@ program
     await runCommand({
       task,
       model: defaults.model,
-      system: applyMemoryStack(opts.system, process.cwd()),
+      system: applyMemoryStack(opts.system ?? defaultSystemPrompt(defaults.model), process.cwd()),
       budgetUsd: parseBudgetFlag(opts.budget),
       transcript: opts.transcript,
       mcp: defaults.mcp,

@@ -209,6 +209,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
       hasSemanticSearch: semantic.enabled,
       systemAppend: opts.systemAppend,
       systemAppendFile: systemAppendFileContents,
+      modelId: opts.model ?? "deepseek-v4-flash",
     }),
     transcript: opts.transcript,
     session,

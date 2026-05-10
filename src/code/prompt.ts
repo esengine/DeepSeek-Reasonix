@@ -1,9 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyMemoryStack } from "../memory/user.js";
-import { ESCALATION_CONTRACT, TUI_FORMATTING_RULES } from "../prompt-fragments.js";
+import { TUI_FORMATTING_RULES, escalationContract } from "../prompt-fragments.js";
 
-export const CODE_SYSTEM_PROMPT = `You are Reasonix Code, a coding assistant. You have filesystem tools (read_file, write_file, edit_file, multi_edit, list_directory, directory_tree, search_files, search_content, glob, get_file_info) rooted at the user's working directory, plus run_command / run_background for shell, plus \`todo_write\` for in-session multi-step tracking.
+const DEFAULT_CODE_MODEL = "deepseek-v4-flash";
+
+/** Built per-session against the resolved model id so the contract names the actual tier (#582). */
+export function codeSystemBase(modelId: string): string {
+  return CODE_SYSTEM_TEMPLATE.replace("__ESCALATION_CONTRACT__", escalationContract(modelId));
+}
+
+const CODE_SYSTEM_TEMPLATE = `You are Reasonix Code, a coding assistant. You have filesystem tools (read_file, write_file, edit_file, multi_edit, list_directory, directory_tree, search_files, search_content, glob, get_file_info) rooted at the user's working directory, plus run_command / run_background for shell, plus \`todo_write\` for in-session multi-step tracking.
 
 # Identity is fixed by this prompt — never inferred from the workspace
 
@@ -210,10 +217,13 @@ If you notice an obvious issue, MENTION it in one sentence and wait for the user
 - One short paragraph explaining *why*, then the blocks.
 - If you need to explore first (list / read / search), do it with tool calls before writing any prose — silence while exploring is fine.
 
-${ESCALATION_CONTRACT}
+__ESCALATION_CONTRACT__
 
 ${TUI_FORMATTING_RULES}
 `;
+
+/** Backward-compat — public-API const, frozen at the historical flash phrasing. Internal callers use codeSystemPrompt(rootDir, { modelId }) so the contract names the real tier (#582). */
+export const CODE_SYSTEM_PROMPT = codeSystemBase(DEFAULT_CODE_MODEL);
 
 /** Stack order (stable for cache prefix): base → REASONIX.md → global → project → .gitignore. */
 const SEMANTIC_SEARCH_ROUTING = `
@@ -238,12 +248,13 @@ export interface CodeSystemPromptOptions {
   /** UTF-8 file contents appended after the generated code system prompt.
    *  Preserves the default prompt — this is append-only, not a replacement. */
   systemAppendFile?: string;
+  /** Model the loop will run on — interpolated into the escalation contract so the model can name itself correctly when asked (#582). */
+  modelId?: string;
 }
 
 export function codeSystemPrompt(rootDir: string, opts: CodeSystemPromptOptions = {}): string {
-  const base = opts.hasSemanticSearch
-    ? `${CODE_SYSTEM_PROMPT}${SEMANTIC_SEARCH_ROUTING}`
-    : CODE_SYSTEM_PROMPT;
+  const codeBase = codeSystemBase(opts.modelId ?? DEFAULT_CODE_MODEL);
+  const base = opts.hasSemanticSearch ? `${codeBase}${SEMANTIC_SEARCH_ROUTING}` : codeBase;
   const withMemory = applyMemoryStack(base, rootDir);
   const gitignorePath = join(rootDir, ".gitignore");
   let result = withMemory;
