@@ -3,6 +3,7 @@ import { Box, Text, useStdout } from "ink";
 import React from "react";
 import stringWidth from "string-width";
 import type { EditMode } from "../../config.js";
+import { t } from "../../i18n/index.js";
 import type { SessionSummary } from "../../telemetry/stats.js";
 import { Bar, ChromeRule } from "./primitives.js";
 import { COLOR, GRADIENT } from "./theme.js";
@@ -82,10 +83,11 @@ function ChromeRow({
   balance?: { currency: string; total: number } | null;
 }) {
   const modePill = pickModePill(planMode, editMode);
+  const proLabel = t("statsPanel.pro");
   const proPill = escalated
-    ? { label: "⇧ pro", color: COLOR.err }
+    ? { label: proLabel, color: COLOR.err }
     : proArmed
-      ? { label: "⇧ pro", color: COLOR.warn }
+      ? { label: proLabel, color: COLOR.warn }
       : null;
   const projectName = rootDir ? basename(rootDir) : null;
   const cachePct = (summary.cacheHitRatio * 100).toFixed(1);
@@ -226,10 +228,10 @@ function pickModePill(
   planMode: boolean | undefined,
   editMode: EditMode | undefined,
 ): { label: string; color: string } | null {
-  if (planMode) return { label: "PLAN", color: COLOR.err };
-  if (editMode === "yolo") return { label: "yolo", color: COLOR.err };
-  if (editMode === "auto") return { label: "auto", color: COLOR.primary };
-  if (editMode === "review") return { label: "review", color: COLOR.info };
+  if (planMode) return { label: t("statsPanel.modePlan"), color: COLOR.err };
+  if (editMode === "yolo") return { label: t("statsPanel.modeYolo"), color: COLOR.err };
+  if (editMode === "auto") return { label: t("statsPanel.modeAuto"), color: COLOR.primary };
+  if (editMode === "review") return { label: t("statsPanel.modeReview"), color: COLOR.info };
   return null;
 }
 
@@ -238,7 +240,7 @@ function BudgetRow({ spent, cap }: { spent: number; cap: number }) {
   const color = pct >= 100 ? "#f87171" : pct >= 80 ? "#fbbf24" : "#94a3b8";
   return (
     <Box>
-      <Text dimColor>{"  budget  "}</Text>
+      <Text dimColor>{t("statsPanel.budget")}</Text>
       <Text color={color}>
         {`$${spent.toFixed(4)} / $${cap.toFixed(2)}`}
         <Text dimColor>{`  (${pct.toFixed(0)}%)`}</Text>

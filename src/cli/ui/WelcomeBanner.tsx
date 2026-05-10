@@ -71,17 +71,17 @@ export function WelcomeBanner({
 
       {inCodeMode && workspaceRoot ? (
         <Box marginTop={1} flexDirection="row" gap={1}>
-          <Text color={TONE.brand}>{"▸ workspace"}</Text>
+          <Text color={TONE.brand}>{t("welcomeBanner.workspace")}</Text>
           <Text color={FG.faint}>{"·"}</Text>
           <Text color={FG.body}>{workspaceRoot}</Text>
-          <Text color={FG.faint}>{"  (relaunch with --dir <path> to switch)"}</Text>
+          <Text color={FG.faint}>{t("welcomeBanner.relaunchHint")}</Text>
         </Box>
       ) : null}
 
       {dashboardUrl ? (
         <Box marginTop={1} flexDirection="row" gap={1}>
           <Text color={TONE.brand} bold>
-            {"▸ web"}
+            {t("welcomeBanner.dashboard")}
           </Text>
           <Text color={FG.faint}>{"·"}</Text>
           <Text color={TONE.accent}>{dashboardUrl}</Text>
