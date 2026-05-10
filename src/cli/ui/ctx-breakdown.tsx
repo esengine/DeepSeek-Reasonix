@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS } from "../../telemetry/stats.js";
 import { countTokens } from "../../tokenizer.js";
@@ -95,7 +96,7 @@ export function CtxBreakdownBlock({ data }: { data: CtxBreakdownData }): React.R
     >
       <Box>
         <Text color={COLOR.brand} bold>
-          ▣ context
+          {t("ctxBreakdown.title")}
         </Text>
         <Text dimColor>{`  ${formatTokens(total)} of ${formatTokens(data.ctxMax)}`}</Text>
         <Text dimColor>{"  ·  "}</Text>
@@ -119,33 +120,35 @@ export function CtxBreakdownBlock({ data }: { data: CtxBreakdownData }): React.R
       </Box>
       <Box>
         <Text color={COLOR.brand}>■</Text>
-        <Text dimColor>{` system ${formatTokens(data.systemTokens)}`}</Text>
+        <Text dimColor>{` ${t("cardLabels.system")} ${formatTokens(data.systemTokens)}`}</Text>
         <Text>{"   "}</Text>
         <Text color={COLOR.accent}>■</Text>
-        <Text dimColor>{` tools ${formatTokens(data.toolsTokens)}`}</Text>
+        <Text dimColor>{` ${t("cardLabels.tools")} ${formatTokens(data.toolsTokens)}`}</Text>
         <Text dimColor>{` (${data.toolsCount})`}</Text>
         <Text>{"   "}</Text>
         <Text color={COLOR.primary}>■</Text>
-        <Text dimColor>{` log ${formatTokens(data.logTokens)}`}</Text>
-        <Text dimColor>{` (${data.logMessages} msg)`}</Text>
+        <Text dimColor>{` ${t("cardLabels.log")} ${formatTokens(data.logTokens)}`}</Text>
+        <Text dimColor>{` (${data.logMessages} ${t("ctxBreakdown.msg")})`}</Text>
         <Text>{"   "}</Text>
         <Text color={COLOR.tool}>■</Text>
-        <Text dimColor>{` input ${formatTokens(data.inputTokens)}`}</Text>
+        <Text dimColor>{` ${t("cardLabels.input")} ${formatTokens(data.inputTokens)}`}</Text>
       </Box>
       {data.topTools.length > 0 ? (
         <Box marginTop={1} flexDirection="column">
-          <Text dimColor>{`  top tool results by cost (${data.topTools.length}):`}</Text>
-          {data.topTools.map((t) => (
-            <Box key={`${t.turn}-${t.name}`}>
-              <Text dimColor>{`    turn ${String(t.turn).padStart(3)}  `}</Text>
-              <Text color={COLOR.info}>{t.name.padEnd(22)}</Text>
-              <Text dimColor>{`  ${formatTokens(t.tokens).padStart(8)}`}</Text>
+          <Text dimColor>{t("ctxBreakdown.topTools", { count: data.topTools.length })}</Text>
+          {data.topTools.map((tool) => (
+            <Box key={`${tool.turn}-${tool.name}`}>
+              <Text
+                dimColor
+              >{`    ${t("ctxBreakdown.turnLabel")} ${String(tool.turn).padStart(3)}  `}</Text>
+              <Text color={COLOR.info}>{tool.name.padEnd(22)}</Text>
+              <Text dimColor>{`  ${formatTokens(tool.tokens).padStart(8)}`}</Text>
             </Box>
           ))}
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>{"  /compact folds (auto at 50%) · /new wipes log"}</Text>
+        <Text dimColor>{t("ctxBreakdown.compactHint")}</Text>
       </Box>
     </Box>
   );
