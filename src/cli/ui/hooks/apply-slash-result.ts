@@ -17,6 +17,8 @@ export interface ApplySlashResultContext {
   stopLoop: () => void;
   quitProcess: () => void;
   pushHistory: (text: string) => void;
+  /** Flush pending modals + cancel awaiting pauseGate requests on /new — without this a stuck plan_checkpoint survives the wipe. */
+  resetPendingModals?: () => void;
   /** The verbatim text the user typed; used for promptHistory bookkeeping. */
   text: string;
 }
@@ -32,6 +34,7 @@ export function applySlashResult(result: SlashResult, ctx: ApplySlashResultConte
     return { kind: "consumed" };
   }
   if (result.clear) {
+    ctx.resetPendingModals?.();
     // 2J + 3J + H: visible buffer + scrollback + cursor home.
     ctx.stdoutWrite("\x1b[2J\x1b[3J\x1b[H");
     ctx.log.reset();

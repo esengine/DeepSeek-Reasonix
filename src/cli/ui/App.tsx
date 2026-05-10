@@ -1284,16 +1284,11 @@ function AppInner({
     if (key.escape && busy) {
       if (abortedThisTurn.current) return;
       abortedThisTurn.current = true;
-      // If an edit-review modal is up, resolve its promise first so the
-      // interceptor unblocks — otherwise the tool call hangs past the
-      // loop's abort and the next turn can't start. Esc during modal =
-      // "reject this edit" (safe default — nothing lands on disk).
-      const resolve = editReviewResolveRef.current;
-      if (resolve) {
-        editReviewResolveRef.current = null;
-        setPendingEditReview(null);
-        resolve({ choice: "reject" });
-      }
+      // Flush every pending modal + cancel the awaiting tool fn behind
+      // it. pauseGate.ask doesn't watch AbortSignal, so without this a
+      // plan_checkpoint / plan_proposed / choice / shell modal would
+      // strand its tool fn and busy would never clear.
+      resetPendingModals();
       // Esc during a busy turn also kills any active /loop — the user
       // is taking over. Loops persist past plain Esc when the system is
       // idle so a long-cadence loop doesn't die from random key noise.
@@ -2374,6 +2369,7 @@ function AppInner({
           stopLoop,
           quitProcess,
           pushHistory,
+          resetPendingModals,
           text,
         });
         if (outcome.kind === "resubmit") {
@@ -2809,6 +2805,28 @@ function AppInner({
   /** Holds the PauseGate request id for the current modal so
    *  handlePlanConfirm / handleCheckpointResponse / etc. can resolve it. */
   const pendingGateIdRef = useRef<number | null>(null);
+
+  /** Bail out of every pending modal + the awaiting tool fn behind it.
+   *  Called by Esc-during-busy and by /new — without this, a tool stuck
+   *  on `pauseGate.ask` ignores the AbortSignal and the turn never ends. */
+  const resetPendingModals = useCallback(() => {
+    const editResolve = editReviewResolveRef.current;
+    if (editResolve) {
+      editReviewResolveRef.current = null;
+      setPendingEditReview(null);
+      editResolve({ choice: "reject" });
+    }
+    setPendingShell(null);
+    setPendingPlan(null);
+    setPendingCheckpoint(null);
+    setPendingRevision(null);
+    setPendingChoice(null);
+    setStagedInput(null);
+    setStagedChoiceCustom(null);
+    setStagedCheckpointRevise(null);
+    pendingGateIdRef.current = null;
+    pauseGate.cancelAll();
+  }, []);
 
   // Drain the shell-confirm queue after the in-flight turn tears down.
   // React closure staleness means handleShellConfirm can't just await

@@ -183,6 +183,36 @@ describe("PauseGate", () => {
     ]);
   });
 
+  it("cancelAll resolves every pending request with its kind's safe-cancel verdict", async () => {
+    const gate = new PauseGate();
+    gate.on(() => {});
+
+    const shell = gate.ask({ kind: "run_command", payload: { command: "rm -rf /" } });
+    const plan = gate.ask({ kind: "plan_proposed", payload: { plan: "#", steps: [] } });
+    const cp = gate.ask({ kind: "plan_checkpoint", payload: { stepId: "s1", result: "ok" } });
+    const rev = gate.ask({ kind: "plan_revision", payload: { reason: "r", remainingSteps: [] } });
+    const ch = gate.ask({
+      kind: "choice",
+      payload: { question: "q", options: [], allowCustom: false },
+    });
+
+    gate.cancelAll();
+
+    await expect(shell).resolves.toEqual({ type: "deny" });
+    await expect(plan).resolves.toEqual({ type: "cancel" });
+    await expect(cp).resolves.toEqual({ type: "stop" });
+    await expect(rev).resolves.toEqual({ type: "cancelled" });
+    await expect(ch).resolves.toEqual({ type: "cancel" });
+    expect(gate.current).toBeNull();
+  });
+
+  it("cancelAll on an empty gate is a no-op", () => {
+    const gate = new PauseGate();
+    gate.on(() => {});
+    expect(() => gate.cancelAll()).not.toThrow();
+    expect(gate.current).toBeNull();
+  });
+
   it("does not emit audit events for non-tool pauses", async () => {
     const gate = new PauseGate();
     const audit = vi.fn();

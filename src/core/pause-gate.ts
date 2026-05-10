@@ -116,6 +116,17 @@ export class PauseGate {
     p.resolve(data);
   }
 
+  /** Safe-cancel every outstanding request — frees stranded tool fns on Esc / /new. */
+  cancelAll(): void {
+    const ids = [...this._pending.keys()];
+    for (const id of ids) {
+      const p = this._pending.get(id);
+      if (!p) continue;
+      this._pending.delete(id);
+      p.resolve(safeCancelVerdict(p.request.kind));
+    }
+  }
+
   setAuditListener(fn: AuditListener | null): void {
     this._auditListener = fn;
   }
@@ -171,6 +182,22 @@ export class PauseGate {
     } catch {
       /* audit path must never break the gate */
     }
+  }
+}
+
+function safeCancelVerdict(kind: PauseKind): unknown {
+  switch (kind) {
+    case "run_command":
+    case "run_background":
+      return { type: "deny" };
+    case "plan_proposed":
+      return { type: "cancel" };
+    case "plan_checkpoint":
+      return { type: "stop" };
+    case "plan_revision":
+      return { type: "cancelled" };
+    case "choice":
+      return { type: "cancel" };
   }
 }
 
