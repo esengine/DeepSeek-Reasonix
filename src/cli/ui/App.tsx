@@ -86,6 +86,7 @@ import { webFetch } from "../../tools/web.js";
 import { openTranscriptFile } from "../../transcript/log.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
+import { BootSplash } from "./BootSplash.js";
 import { CheckpointPicker } from "./CheckpointPicker.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
@@ -387,6 +388,13 @@ function AppInner({
     if (!isStreaming && liveExpand) setLiveExpand(false);
   }, [isStreaming, liveExpand]);
   const languageVersion = useLanguageReload();
+  // Splash holds for one full whale-spout cycle (~1.4s) so the brand
+  // mark always lands clean and heavy first-paint cost stays hidden.
+  const [bootReady, setBootReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setBootReady(true), 1400);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     markPhase("first_paint");
     dumpStartupProfile();
@@ -3263,6 +3271,8 @@ function AppInner({
   // Suspend cosmetic animations during modal interactions and idle so
   // a quiescent TUI is byte-stable.
   const tickerSuspended = modalOpen || (!busy && !isStreaming);
+
+  if (!bootReady) return <BootSplash />;
 
   return (
     <>
