@@ -460,6 +460,26 @@ export interface TranslationSchema {
     footerBrowseSearch: string;
     footerInsert: string;
   };
+  statsPanel: {
+    modePlan: string;
+    modeYolo: string;
+    modeAuto: string;
+    modeReview: string;
+    pro: string;
+    budget: string;
+  };
+  welcomeBanner: {
+    workspace: string;
+    relaunchHint: string;
+    dashboard: string;
+  };
+  ctxBreakdown: {
+    title: string;
+    compactHint: string;
+    topTools: string;
+    msg: string;
+    turnLabel: string;
+  };
   choiceConfirm: {
     customLabel: string;
     customDesc: string;

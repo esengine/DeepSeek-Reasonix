@@ -1156,6 +1156,26 @@ export const EN: TranslationSchema = {
       "\u2191\u2193 navigate \u00b7 Tab / \u23ce insert as @path \u00b7 esc cancel",
     footerInsert: "\u2191\u2193 navigate \u00b7 Tab / \u23ce insert as @path \u00b7 esc cancel",
   },
+  statsPanel: {
+    modePlan: "PLAN",
+    modeYolo: "yolo",
+    modeAuto: "auto",
+    modeReview: "review",
+    pro: "\u21e7 pro",
+    budget: "  budget  ",
+  },
+  welcomeBanner: {
+    workspace: "\u25b8 workspace",
+    relaunchHint: "  (relaunch with --dir <path> to switch)",
+    dashboard: "\u25b8 web",
+  },
+  ctxBreakdown: {
+    title: "\u25a3 context",
+    compactHint: "  /compact folds (auto at 50%) \u00b7 /new wipes log",
+    topTools: "  top tool results by cost ({count}):",
+    msg: "msg",
+    turnLabel: "turn",
+  },
   choiceConfirm: {
     customLabel: "Let me type my own answer",
     customDesc:

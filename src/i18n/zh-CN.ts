@@ -1094,6 +1094,26 @@ export const zhCN: TranslationSchema = {
     footerBrowseSearch: "↑↓ 导航 · Tab / ⏎ 以 @path 插入 · Esc 取消",
     footerInsert: "↑↓ 导航 · Tab / ⏎ 以 @path 插入 · Esc 取消",
   },
+  statsPanel: {
+    modePlan: "计划",
+    modeYolo: "自由",
+    modeAuto: "自动",
+    modeReview: "审核",
+    pro: "⇧ 专业",
+    budget: "  预算  ",
+  },
+  welcomeBanner: {
+    workspace: "▸ 工作区",
+    relaunchHint: "（重启时用 --dir <path> 切换）",
+    dashboard: "▸ 网页",
+  },
+  ctxBreakdown: {
+    title: "▣ 上下文",
+    compactHint: "  /compact 折叠（超过 50% 自动触发）· /new 清空日志",
+    topTools: "  按成本排序的 Top 工具结果（{count} 个）：",
+    msg: "条",
+    turnLabel: "轮",
+  },
   choiceConfirm: {
     customLabel: "自定义回答",
     customDesc: "以上选项都不合适 — 输入自由格式回复，模型会原样读取",
