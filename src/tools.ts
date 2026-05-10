@@ -90,6 +90,11 @@ export class ToolRegistry {
     this._resultAugmenter = fn;
   }
 
+  /** True when an augmenter is already wired — lets late-installing callers skip clobbering an earlier one. */
+  get hasResultAugmenter(): boolean {
+    return this._resultAugmenter !== null;
+  }
+
   register<A, R>(def: ToolDefinition<A, R>): this {
     if (!def.name) throw new Error("tool requires a name");
     const internal: InternalTool = { ...(def as ToolDefinition) };

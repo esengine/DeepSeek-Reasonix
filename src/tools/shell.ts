@@ -219,6 +219,8 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
     description:
       "Block until a background job exits or produces new output, bounded by `timeoutMs`. Use this instead of polling `job_output` with identical args when you're intentionally waiting for state to change. Returns JSON with `exited`, `exitCode`, and `latestOutput`.",
     readOnly: true,
+    parallelSafe: true,
+    stormExempt: true,
     parameters: {
       type: "object",
       properties: {

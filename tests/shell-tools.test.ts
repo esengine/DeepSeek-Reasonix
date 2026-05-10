@@ -377,6 +377,13 @@ describe("registerShellTools — dispatch integration", () => {
     expect(registry.has("list_jobs")).toBe(true);
   });
 
+  it("flags wait_for_job as parallelSafe + stormExempt — concurrent waits on different jobs are safe and polling-loop is the intended pattern", () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp });
+    expect(registry.isParallelSafe("wait_for_job")).toBe(true);
+    expect(registry.get("wait_for_job")?.stormExempt).toBe(true);
+  });
+
   it("wait_for_job returns structured state when a job emits new output", async () => {
     const registry = new ToolRegistry();
     const jobs = new (await import("../src/tools/jobs.js")).JobRegistry();

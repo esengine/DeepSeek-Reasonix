@@ -56,6 +56,8 @@ import { ToolRegistry } from "./tools.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
 const ESCALATION_MODEL = "deepseek-v4-pro";
+/** Iters-from-cap at which the parent loop starts injecting a remaining-budget tail into tool results. Subagent uses 3 against a 16-cap; parent's default 64-cap means this fires only at iter ≥ 60. */
+const PARENT_BUDGET_WARN_THRESHOLD = 5;
 
 export {
   fixToolCallPairing,
@@ -144,6 +146,7 @@ export class CacheFirstLoop {
   private readonly _turnFailures = new TurnFailureTracker();
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
+  private _toolDispatchesThisStep = 0;
   private context!: ContextManager;
 
   /** Subscribe API so UI hooks can derive `running` from finally-guaranteed insertions. */
@@ -209,6 +212,21 @@ export class CacheFirstLoop {
       stormThreshold: parsePositiveIntEnv(process.env.REASONIX_STORM_THRESHOLD),
       stormWindow: parsePositiveIntEnv(process.env.REASONIX_STORM_WINDOW),
     });
+
+    // Inject a remaining-iter hint into tool results when closing in on the per-turn cap. Subagent's child registry pre-installs its own augmenter before constructing the child loop — preserve it instead of clobbering.
+    if (!this.tools.hasResultAugmenter) {
+      this.tools.setResultAugmenter((_name, _args, result) => {
+        this._toolDispatchesThisStep++;
+        const remaining = this.maxToolIters - this._toolDispatchesThisStep;
+        if (remaining <= 0) {
+          return `${result}\n\n[budget: 0 of ${this.maxToolIters} tool calls left this turn — finalize NOW; the next iter forces a summary]`;
+        }
+        if (remaining <= PARENT_BUDGET_WARN_THRESHOLD) {
+          return `${result}\n\n[budget: ${remaining} of ${this.maxToolIters} tool calls left this turn — wrap up soon]`;
+        }
+        return result;
+      });
+    }
 
     // Heal-on-load: oversized tool results would 400 the next call before the user types.
     this.sessionName = opts.session ?? null;
@@ -517,6 +535,7 @@ export class CacheFirstLoop {
     this._turnSelfCorrected = false;
     this._escalateThisTurn = false;
     this._foldedThisTurn = false;
+    this._toolDispatchesThisStep = 0;
     let armedConsumed = false;
     if (this._proArmedForNextTurn) {
       this._escalateThisTurn = true;
