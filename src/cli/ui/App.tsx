@@ -247,30 +247,18 @@ export interface AppProps {
 }
 
 /**
- * Throttle interval in ms. We flush streaming deltas at most this often to
- * avoid re-rendering the whole UI on every single token from DeepSeek.
- * 16ms ≈ 60Hz — refresh rate of every modern monitor; streaming text
- * appears continuous rather than chunked. Bump higher via
- * `REASONIX_FLUSH_MS` for fragile terminals (winpty/MINTTY) that leave
- * repaint artifacts at high rates, or to give terminal-native drag
- * selection more stdout slack while streaming is active.
+ * Throttle interval in ms. 50ms ≈ 20Hz — slow enough that cursor-up
+ * repaints on winpty/MINTTY/ConEmu/tmux don't leave half-drawn frames,
+ * fast enough that streaming text still reads as continuous. Override
+ * via `REASONIX_FLUSH_MS` if you want 60Hz on a terminal you trust.
  */
 const FLUSH_INTERVAL_MS = (() => {
   const raw = process.env.REASONIX_FLUSH_MS;
-  if (!raw) return 16;
+  if (!raw) return 50;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 16 || parsed > 1000) return 16;
+  if (!Number.isFinite(parsed) || parsed < 16 || parsed > 1000) return 50;
   return Math.round(parsed);
 })();
-
-/**
- * True when the user has opted out of live spinner/streaming rows.
- * `REASONIX_UI=plain` suppresses every transient row in the render
- * tree so only the `<Static>` committed history + the input prompt
- * are drawn. Trades liveness for stability on terminals where Ink's
- * cursor-up repaint leaves ghost artifacts.
- */
-const PLAIN_UI = process.env.REASONIX_UI === "plain";
 
 /**
  * Single-line status pill rendered below the modeline whenever a /loop
@@ -2484,9 +2472,7 @@ function AppInner({
         reasoningBuf.current = "";
         toolCallBuildBuf.current = null;
       };
-      // In PLAIN mode the streaming row is suppressed, so flushing into
-      // streamRef does no visible work — skip the interval entirely.
-      const timer = PLAIN_UI ? null : setInterval(flush, FLUSH_INTERVAL_MS);
+      const timer = setInterval(flush, FLUSH_INTERVAL_MS);
 
       // Expand `@path/to/file.ts` mentions in code mode: the model
       // gets the inlined content appended under a "Referenced files"
@@ -2701,7 +2687,7 @@ function AppInner({
           }
         }
       } finally {
-        if (timer) clearInterval(timer);
+        clearInterval(timer);
         // Esc aborted the turn — close any in-flight cards (streaming /
         // reasoning / tool / branch) so they leave the live region. Without
         // this, stranded done=false cards stick in CardStream's live tail.
@@ -3371,9 +3357,8 @@ function AppInner({
   );
 
   // Suspend cosmetic animations during modal interactions and idle so
-  // a quiescent TUI is byte-stable. PLAIN_UI is the env-flag opt-out
-  // for fragile terminals.
-  const tickerSuspended = PLAIN_UI || modalOpen || (!busy && !isStreaming);
+  // a quiescent TUI is byte-stable.
+  const tickerSuspended = modalOpen || (!busy && !isStreaming);
 
   return (
     <>
@@ -3411,8 +3396,7 @@ function AppInner({
           attention. They come back naturally once the user chooses and
           the next turn begins.
         */}
-                  {!PLAIN_UI &&
-                  !pendingShell &&
+                  {!pendingShell &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3423,8 +3407,7 @@ function AppInner({
                   ongoingTool ? (
                     <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
                   ) : null}
-                  {!PLAIN_UI &&
-                  !pendingShell &&
+                  {!pendingShell &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3435,8 +3418,7 @@ function AppInner({
                   subagentActivities.length > 0 ? (
                     <SubagentLiveStack activities={subagentActivities} max={3} />
                   ) : null}
-                  {!PLAIN_UI &&
-                  !pendingShell &&
+                  {!pendingShell &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3448,8 +3430,7 @@ function AppInner({
                   statusLine ? (
                     <ThinkingRow text={statusLine} />
                   ) : null}
-                  {!PLAIN_UI &&
-                  undoBanner &&
+                  {undoBanner &&
                   !pendingShell &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
@@ -3466,8 +3447,7 @@ function AppInner({
                     <UndoBanner banner={undoBanner} />
                   ) : null}
                   {/* Activity row when no targeted indicator is visible — phase label from useActivityLabel. */}
-                  {!PLAIN_UI &&
-                  !pendingShell &&
+                  {!pendingShell &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3481,8 +3461,7 @@ function AppInner({
                   !statusLine ? (
                     <ThinkingRow text={activityLabel} />
                   ) : null}
-                  {!PLAIN_UI &&
-                  !pendingShell &&
+                  {!pendingShell &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&

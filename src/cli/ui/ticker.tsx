@@ -27,9 +27,9 @@ const TickerActiveContext = createContext(true);
 export interface TickerProviderProps {
   children: ReactNode;
   /**
-   * When true, every tick-driven animation pauses. Used by PLAIN_UI
-   * mode, modal overlays, and the idle-gate so a quiescent TUI is
-   * byte-stable (cursor blink and gradient pulses don't re-render).
+   * When true, every tick-driven animation pauses. Used by modal
+   * overlays and the idle-gate so a quiescent TUI is byte-stable
+   * (cursor blink and gradient pulses don't re-render).
    */
   disabled?: boolean;
 }
