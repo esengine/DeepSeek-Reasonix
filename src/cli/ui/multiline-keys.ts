@@ -32,6 +32,8 @@ export interface MultilineAction {
   historyHandoff?: "prev" | "next";
   /** Reducer is pure — hands raw paste to PromptInput which allocates a sentinel and inserts that. */
   pasteRequest?: { content: string };
+  /** Ctrl+X — hand the current buffer to $EDITOR; parent re-injects on exit. */
+  openExternalEditor?: boolean;
 }
 
 import { recoverCsiTail, stripCsiFragments } from "./key-normalize.js";
@@ -54,6 +56,13 @@ export function processMultilineKey(
   // Parent-owned keys: Tab (slash-complete), Esc (abort).
   if (key.tab || key.escape) {
     return NOOP;
+  }
+
+  // Ctrl+X — open $EDITOR with the current buffer (bash readline parity).
+  // Parent runs the spawn (filesystem + child process) and replaces the
+  // composer value with whatever the user saved.
+  if (key.ctrl && key.input === "x") {
+    return { ...NOOP, openExternalEditor: true };
   }
 
   // PageUp/PageDown jump to start/end of the WHOLE buffer — useful

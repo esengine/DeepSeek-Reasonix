@@ -1,6 +1,6 @@
 import { type WriteStream, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text, useStdin, useStdout } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type JsonlEventSink,
@@ -84,6 +84,7 @@ import { registerSkillTools } from "../../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
 import { webFetch } from "../../tools/web.js";
 import { openTranscriptFile } from "../../transcript/log.js";
+import { openInExternalEditor } from "../edit/external-editor.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { BootSplash } from "./BootSplash.js";
@@ -624,6 +625,23 @@ function AppInner({
   // persist to disk — the session log already keeps the messages, and
   // cross-session bash-style recall would need per-project scoping.
   const { recallPrev, recallNext, pushHistory, resetCursor } = useInputRecall(setInput);
+  const { setRawMode, isRawModeSupported } = useStdin();
+  // Ctrl+X — hand the composer buffer to $EDITOR. Raw-mode flip lets the
+  // editor own line-buffered input; result replaces the composer value.
+  const handleOpenExternalEditor = useCallback(async () => {
+    if (!isRawModeSupported) {
+      log.pushWarning(t("composer.editorFailed"), t("composer.editorNoRawMode"));
+      return;
+    }
+    setRawMode(false);
+    try {
+      const result = await openInExternalEditor(input);
+      if (result.kind === "ok") setInput(result.content);
+      else if (result.detail) log.pushWarning(t("composer.editorFailed"), result.detail);
+    } finally {
+      setRawMode(true);
+    }
+  }, [input, isRawModeSupported, log, setRawMode]);
   // Disambiguates <Static> keys when a single turn yields multiple assistant_final events.
   const assistantIterCounter = useRef<number>(0);
   // Per-session @url fetch cache. Keyed by stripped URL; same URL
@@ -3776,6 +3794,7 @@ function AppInner({
                             disabled={busy}
                             onHistoryPrev={recallPrev}
                             onHistoryNext={recallNext}
+                            onOpenExternalEditor={handleOpenExternalEditor}
                           />
                         </Box>
                         <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">

@@ -35,6 +35,8 @@ export interface PromptInputProps {
   /** Ctrl+P / Ctrl+N hand off here when no in-buffer cursor move applies — parent walks history and swaps `value` via `onChange`. */
   onHistoryPrev?: () => void;
   onHistoryNext?: () => void;
+  /** Ctrl+X — parent spawns $EDITOR with the current buffer and re-injects on exit. */
+  onOpenExternalEditor?: () => void;
 }
 
 export function PromptInput({
@@ -45,6 +47,7 @@ export function PromptInput({
   placeholder,
   onHistoryPrev,
   onHistoryNext,
+  onOpenExternalEditor,
 }: PromptInputProps) {
   // Cap at 24 — collapseLinesForDisplay hides content past ~20 logical lines.
   // Quantize spec.max to 4-row buckets so per-keystroke line-count changes
@@ -141,6 +144,7 @@ export function PromptInput({
     }
     if (action.historyHandoff === "prev") onHistoryPrev?.();
     if (action.historyHandoff === "next") onHistoryNext?.();
+    if (action.openExternalEditor) onOpenExternalEditor?.();
   }, !disabled);
 
   // ── Render ──────────────────────────────────────────────────────

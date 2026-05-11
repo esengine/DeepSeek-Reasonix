@@ -515,3 +515,19 @@ describe("lineAndColumn", () => {
     expect(lineAndColumn("abc", 99)).toEqual({ line: 0, col: 3 });
   });
 });
+
+describe("processMultilineKey — Ctrl+X opens external editor (issue #647)", () => {
+  it("Ctrl+X returns openExternalEditor flag without mutating the buffer", () => {
+    const action = processMultilineKey("draft", 3, key({ ctrl: true, input: "x" }));
+    expect(action.openExternalEditor).toBe(true);
+    expect(action.next).toBeNull();
+    expect(action.cursor).toBeNull();
+    expect(action.submit).toBe(false);
+  });
+
+  it("plain 'x' (no ctrl) still inserts as a character", () => {
+    const action = processMultilineKey("a", 1, key({ input: "x" }));
+    expect(action.openExternalEditor).toBeUndefined();
+    expect(action.next).toBe("ax");
+  });
+});
