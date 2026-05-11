@@ -1225,21 +1225,38 @@ export const EN: TranslationSchema = {
     probeFailed: "probe failed \u2014 {message}",
   },
   webErrors: {
-    status: "web_search {status}",
-    mojeekBlocked: "web_search: Mojeek anti-bot page \u2014 rate-limited or blocked",
+    status:
+      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine mojeek|searxng",
+    rateLimit429:
+      "web_search 429 \u2014 try: wait 10s before retrying, or rephrase the query; the search backend is rate-limiting this client",
+    forbidden403:
+      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine mojeek|searxng, or wait and retry later",
+    mojeekBlocked:
+      "web_search: Mojeek anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine searxng",
     mojeekNoResults:
-      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview})",
-    invalidEndpoint: 'web_search: invalid SearXNG endpoint "{endpoint}"',
-    endpointMustBeHttp: "web_search: SearXNG endpoint must be http(s), got {protocol}",
+      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine searxng",
+    invalidEndpoint:
+      'web_search: invalid SearXNG endpoint "{endpoint}" \u2014 try: set a valid URL with /search-endpoint http://host:port',
+    endpointMustBeHttp:
+      "web_search: SearXNG endpoint must be http(s), got {protocol} \u2014 try: set a valid URL with /search-endpoint http://host:port",
     cannotReach:
-      "web_search: Cannot reach SearXNG server at {endpoint}. Please install SearXNG (https://github.com/searxng/searxng) and start it (e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to the default engine with /search-engine mojeek.",
+      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to the default engine with /search-engine mojeek",
     searxngNoResults:
-      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars)",
-    fetchStatus: "web_fetch {status} for {url}",
-    fetchTooLarge: "web_fetch refused: content-length {len} bytes exceeds {cap}-byte cap ({url})",
+      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine mojeek",
+    fetchStatus:
+      "web_fetch {status} for {url} \u2014 try: confirm the URL resolves in a browser; status suggests the host returned an error page",
+    fetchRateLimit429:
+      "web_fetch 429 for {url} \u2014 try: wait 10s before retrying; the host is rate-limiting this client",
+    fetchForbidden403:
+      "web_fetch 403 for {url} \u2014 try: the host is blocking this client; the page may require login or block bots \u2014 use web_search snippets instead",
+    fetchTimeout:
+      "web_fetch: timed out after {ms}ms for {url} \u2014 try: a shorter URL or smaller content; this may be a slow CDN, or retry once",
+    fetchTooLarge:
+      "web_fetch refused: content-length {len} bytes exceeds {cap}-byte cap ({url}) \u2014 try: a different URL with smaller content; this page is too large to fetch",
     fetchBodyTooLarge:
-      "web_fetch refused: response body exceeded {cap}-byte cap ({seen} bytes seen)",
-    fetchInvalidUrl: "web_fetch: url must start with http:// or https://",
+      "web_fetch refused: response body exceeded {cap}-byte cap ({seen} bytes seen) \u2014 try: a different URL with smaller content; this page streamed past the size cap",
+    fetchInvalidUrl:
+      "web_fetch: url must start with http:// or https:// \u2014 try: pass an absolute http(s) URL (the URL is malformed or uses an unsupported scheme)",
   },
   choiceConfirm: {
     customLabel: "Let me type my own answer",

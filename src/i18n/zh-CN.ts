@@ -1163,20 +1163,38 @@ export const zhCN: TranslationSchema = {
     probeFailed: "探测失败 — {message}",
   },
   webErrors: {
-    status: "web_search 状态码 {status}",
-    mojeekBlocked: "web_search: Mojeek 反爬页面 — 频率限制或被屏蔽",
+    status:
+      "web_search {status} — try: 搜索后端返回错误；请改写查询，或使用 /search-engine mojeek|searxng 切换引擎",
+    rateLimit429:
+      "web_search 429 — try: 等待 10 秒后重试，或改写查询；搜索后端正在对该客户端进行限流",
+    forbidden403:
+      "web_search 403 — try: 搜索后端拒绝该客户端访问；使用 /search-engine mojeek|searxng 切换引擎，或稍后重试",
+    mojeekBlocked:
+      "web_search: Mojeek 反爬页面 — 频率限制或被屏蔽 — try: 等待 30 秒后重试，或使用 /search-engine searxng 切换引擎",
     mojeekNoResults:
-      "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）",
-    invalidEndpoint: 'web_search: 无效的 SearXNG 端点 "{endpoint}"',
-    endpointMustBeHttp: "web_search: SearXNG 端点必须是 http(s) 协议，当前为 {protocol}",
+      "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）— try: 使用更简单的关键词改写查询，或使用 /search-engine searxng 切换引擎",
+    invalidEndpoint:
+      'web_search: 无效的 SearXNG 端点 "{endpoint}" — try: 使用 /search-endpoint http://host:port 设置有效的 URL',
+    endpointMustBeHttp:
+      "web_search: SearXNG 端点必须是 http(s) 协议，当前为 {protocol} — try: 使用 /search-endpoint http://host:port 设置有效的 URL",
     cannotReach:
-      "web_search: 无法访问 SearXNG 服务器 {endpoint}。请安装 SearXNG（https://github.com/searxng/searxng）并启动（例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine mojeek 切换到默认引擎。",
+      "web_search: 无法访问 SearXNG 服务器 {endpoint} — try: 安装并启动 SearXNG（https://github.com/searxng/searxng，例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine mojeek 切换到默认引擎",
     searxngNoResults:
-      "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）",
-    fetchStatus: "web_fetch 状态码 {status}（{url}）",
-    fetchTooLarge: "web_fetch 拒绝：content-length {len} 字节超过上限 {cap} 字节（{url}）",
-    fetchBodyTooLarge: "web_fetch 拒绝：响应体超过 {cap} 字节上限（已接收 {seen} 字节）",
-    fetchInvalidUrl: "web_fetch: URL 必须以 http:// 或 https:// 开头",
+      "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）— try: 使用更简单的关键词改写查询，或使用 /search-engine mojeek 切换引擎",
+    fetchStatus:
+      "web_fetch {status} for {url} — try: 在浏览器中确认该 URL 能否访问；该状态码表明目标主机返回了错误页面",
+    fetchRateLimit429:
+      "web_fetch 429 for {url} — try: 等待 10 秒后重试；目标主机正在对该客户端进行限流",
+    fetchForbidden403:
+      "web_fetch 403 for {url} — try: 目标主机拒绝该客户端访问；该页面可能需要登录或屏蔽爬虫 — 改用 web_search 摘要",
+    fetchTimeout:
+      "web_fetch: timed out after {ms}ms for {url} — try: 更短的 URL 或更小的内容；可能是 CDN 较慢，或重试一次",
+    fetchTooLarge:
+      "web_fetch 拒绝：content-length {len} 字节超过上限 {cap} 字节（{url}）— try: 改换其他 URL 获取较小的内容；该页面过大无法获取",
+    fetchBodyTooLarge:
+      "web_fetch 拒绝：响应体超过 {cap} 字节上限（已接收 {seen} 字节）— try: 改换其他 URL 获取较小的内容；该页面流式传输超出大小上限",
+    fetchInvalidUrl:
+      "web_fetch: URL 必须以 http:// 或 https:// 开头 — try: 传入绝对的 http(s) URL（该 URL 格式错误或使用了不支持的协议）",
   },
   choiceConfirm: {
     customLabel: "自定义回答",

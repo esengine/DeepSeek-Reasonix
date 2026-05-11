@@ -220,6 +220,42 @@ describe("webSearch", () => {
     }
   });
 
+  it("annotates 429 with a wait-and-retry hint", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("blocked", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q")).rejects.toThrow(/web_search 429.*try:.*wait/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("annotates 403 with a hint that the backend is blocking", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q")).rejects.toThrow(/web_search 403.*try:/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("annotates generic 5xx with a try-hint tail", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("broken", { status: 503 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q")).rejects.toThrow(/web_search 503.*try:/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("returns [] on a legitimately empty 'No results' page", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
@@ -354,6 +390,81 @@ describe("webFetch", () => {
       await expect(webFetch("https://example.com/big.iso")).rejects.toThrow(
         /content-length .* exceeds .* cap/,
       );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("annotates 429 with a wait-and-retry hint", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("nope", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://example.com/rate")).rejects.toThrow(/web_fetch 429.*try:.*wait/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("annotates 403 with a hint that the host is blocking", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("nope", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://example.com/forbidden")).rejects.toThrow(
+        /web_fetch 403.*try:.*blocking|web_fetch 403.*try:/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws a timeout-with-hint message when the internal timer fires", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      // Hang until the caller (or our timer) aborts, then surface that
+      // as an AbortError exactly like real fetch does.
+      return await new Promise<Response>((_, reject) => {
+        const sig = init?.signal;
+        if (sig?.aborted) {
+          reject(new DOMException("aborted", "AbortError"));
+          return;
+        }
+        sig?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    }) as unknown as typeof fetch;
+    try {
+      await expect(
+        webFetch("https://example.com/slow", { timeoutMs: 10 }),
+      ).rejects.toThrow(/timed out after 10ms.*try:/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not conflate caller-cancelled aborts with the timeout hint", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      return await new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const ctl = new AbortController();
+      const p = webFetch("https://example.com/cancelled", {
+        timeoutMs: 60_000,
+        signal: ctl.signal,
+      });
+      ctl.abort();
+      await expect(p).rejects.toThrow();
+      // The thrown error should NOT be the timeout hint.
+      await expect(p).rejects.not.toThrow(/timed out after/);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -50,6 +50,19 @@ const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const MOJEEK_ENDPOINT = "https://www.mojeek.com/search";
 
+/** Pick a status-specific webErrors key so the model gets an actionable hint, not a bare status. */
+function searchStatusError(status: number): string {
+  if (status === 429) return t("webErrors.rateLimit429");
+  if (status === 403) return t("webErrors.forbidden403");
+  return t("webErrors.status", { status });
+}
+
+function fetchStatusError(status: number, url: string): string {
+  if (status === 429) return t("webErrors.fetchRateLimit429", { url });
+  if (status === 403) return t("webErrors.fetchForbidden403", { url });
+  return t("webErrors.fetchStatus", { status, url });
+}
+
 /** Distinguishes "truly 0 results" from "layout changed / blocked" so callers can tell. */
 export async function webSearch(
   query: string,
@@ -72,7 +85,7 @@ async function searchMojeek(query: string, opts: WebSearchOptions = {}): Promise
     signal: opts.signal,
     redirect: "follow",
   });
-  if (!resp.ok) throw new Error(t("webErrors.status", { status: resp.status }));
+  if (!resp.ok) throw new Error(searchStatusError(resp.status));
   const html = await resp.text();
   const results = parseMojeekResults(html).slice(0, topK);
   if (results.length === 0) {
@@ -127,7 +140,7 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
     }
     throw err;
   }
-  if (!resp.ok) throw new Error(t("webErrors.status", { status: resp.status }));
+  if (!resp.ok) throw new Error(searchStatusError(resp.status));
   const html = await resp.text();
   const results = parseSearxngHtmlResults(html).slice(0, topK);
   if (results.length === 0) {
@@ -225,7 +238,13 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
   const maxChars = opts.maxChars ?? DEFAULT_FETCH_MAX_CHARS;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  // Track whether the abort came from our internal timer vs the caller's
+  // signal — only the timer-driven abort should produce a "timed out" hint.
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctl.abort();
+  }, timeoutMs);
   // Forward the caller's abort too so an Esc during a long fetch is respected.
   const cancel = () => ctl.abort();
   opts.signal?.addEventListener("abort", cancel, { once: true });
@@ -236,11 +255,16 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
       signal: ctl.signal,
       redirect: "follow",
     });
+  } catch (err) {
+    if (timedOut) {
+      throw new Error(t("webErrors.fetchTimeout", { ms: timeoutMs, url }));
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", cancel);
   }
-  if (!resp.ok) throw new Error(t("webErrors.fetchStatus", { status: resp.status, url }));
+  if (!resp.ok) throw new Error(fetchStatusError(resp.status, url));
   const contentType = resp.headers.get("content-type") ?? "";
   // Pre-check Content-Length when the server provides it. Cheaper to
   // refuse upfront than to start streaming a 1GB ISO.
