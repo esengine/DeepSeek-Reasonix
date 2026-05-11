@@ -403,4 +403,98 @@ describe("ToolRegistry", () => {
       expect(out).toBe("wrote /foo");
     });
   });
+
+  describe("malformed-args storm guard (issue #651)", () => {
+    function readFileReg(): ToolRegistry {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "read_file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+        fn: ({ path }: { path: string }) => `read ${path}`,
+      });
+      return reg;
+    }
+
+    it("first malformed call returns the normal missing-param error", async () => {
+      const reg = readFileReg();
+      const out = await reg.dispatch("read_file", "{}");
+      const parsed = JSON.parse(out);
+      expect(parsed.error).toMatch(/missing required parameter "path"/);
+      expect(parsed.consecutiveMalformed).toBeUndefined();
+    });
+
+    it("2nd consecutive identical malformed call short-circuits with a sharper error", async () => {
+      const reg = readFileReg();
+      await reg.dispatch("read_file", "{}");
+      const out = await reg.dispatch("read_file", "{}");
+      const parsed = JSON.parse(out);
+      expect(parsed.consecutiveMalformed).toBe(true);
+      expect(parsed.error).toMatch(/DO NOT retry with identical args/);
+    });
+
+    it("a successful call between two malformed ones clears the streak", async () => {
+      const reg = readFileReg();
+      await reg.dispatch("read_file", "{}"); // 1st malformed
+      await reg.dispatch("read_file", '{"path": "ok.txt"}'); // success — clears
+      const out = await reg.dispatch("read_file", "{}"); // 1st-again, NOT 2nd-consecutive
+      const parsed = JSON.parse(out);
+      expect(parsed.consecutiveMalformed).toBeUndefined();
+    });
+
+    it("different malformed args to the same tool do not trip the guard", async () => {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "edit",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" }, body: { type: "string" } },
+          required: ["path", "body"],
+        },
+        fn: () => "edited",
+      });
+      await reg.dispatch("edit", '{"path": "x"}'); // missing body
+      const out = await reg.dispatch("edit", '{"body": "y"}'); // missing path — different shape
+      const parsed = JSON.parse(out);
+      expect(parsed.consecutiveMalformed).toBeUndefined();
+    });
+
+    it("invalid JSON, identical twice, also short-circuits", async () => {
+      const reg = readFileReg();
+      await reg.dispatch("read_file", "{not json");
+      const out = await reg.dispatch("read_file", "{not json");
+      const parsed = JSON.parse(out);
+      expect(parsed.consecutiveMalformed).toBe(true);
+      expect(parsed.error).toMatch(/invalid tool arguments JSON/);
+    });
+
+    it("per-tool tracking — malformed read_file does not affect a separate edit_file tool", async () => {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "read_file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+        fn: () => "r",
+      });
+      reg.register({
+        name: "edit_file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+        fn: () => "e",
+      });
+      await reg.dispatch("read_file", "{}");
+      const out = await reg.dispatch("edit_file", "{}"); // first time for edit_file
+      const parsed = JSON.parse(out);
+      expect(parsed.consecutiveMalformed).toBeUndefined();
+    });
+  });
 });
