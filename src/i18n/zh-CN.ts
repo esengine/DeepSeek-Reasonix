@@ -1226,6 +1226,7 @@ export const zhCN: TranslationSchema = {
     error: "错误",
     doctor: "环境诊断",
     you: "你",
+    task: "任务",
   },
   cardLabels: {
     prompt: "提示",

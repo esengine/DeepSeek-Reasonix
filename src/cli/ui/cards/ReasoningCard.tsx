@@ -11,10 +11,11 @@ import { Spinner } from "../primitives/Spinner.js";
 import type { ReasoningCard as ReasoningCardData } from "../state/cards.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 
-/** Streaming preview tail length — wide enough to feel responsive, small enough not to thrash on every chunk. Full body lives in the events log. */
-const STREAMING_PREVIEW_LINES = 4;
-/** Once settled, only the conclusion is actionable; the rest is in `/reasoning last`. */
+const STREAMING_PREVIEW_LINES = 3;
+const SETTLED_HEAD_LINES = 2;
 const SETTLED_TAIL_LINES = 2;
+/** Above this, head+tail noise > value — collapse to tail + scroll-past summary. */
+const XL_TOKEN_THRESHOLD = 800;
 
 export function ReasoningCard({
   card,
@@ -28,14 +29,17 @@ export function ReasoningCard({
   const lineCells = Math.max(20, cols - 4);
 
   const allLines = card.text.length > 0 ? card.text.split("\n") : [];
-  const showBody = expanded && (allLines.length > 0 || card.streaming);
+  const isEmpty = !card.streaming && !card.aborted && allLines.length === 0;
+  const showBody = expanded && (allLines.length > 0 || card.streaming || isEmpty);
   const tone = card.aborted ? TONE.err : card.streaming ? TONE_ACTIVE.accent : TONE.accent;
 
   return (
     <Card tone={tone}>
-      <ReasoningHeader card={card} />
+      <ReasoningHeader card={card} isEmpty={isEmpty} />
       {showBody &&
-        (card.streaming ? (
+        (isEmpty ? (
+          <EmptyHint />
+        ) : card.streaming ? (
           <StreamingPreview card={card} allLines={allLines} lineCells={lineCells} />
         ) : (
           <SettledPreview card={card} allLines={allLines} lineCells={lineCells} />
@@ -44,15 +48,28 @@ export function ReasoningCard({
   );
 }
 
-function ReasoningHeader({ card }: { card: ReasoningCardData }): React.ReactElement {
+function ReasoningHeader({
+  card,
+  isEmpty,
+}: {
+  card: ReasoningCardData;
+  isEmpty: boolean;
+}): React.ReactElement {
   const streamingActive = card.streaming && !card.aborted;
-  const headColor = card.aborted ? TONE.err : streamingActive ? TONE_ACTIVE.accent : TONE.accent;
+  const headColor = card.aborted
+    ? TONE.err
+    : streamingActive
+      ? TONE_ACTIVE.accent
+      : isEmpty
+        ? FG.faint
+        : TONE.accent;
   const glyph = streamingActive ? "◇" : "◆";
   const title = streamingActive
     ? t("cardTitles.reasoningEllipsis")
     : card.aborted
       ? t("cardTitles.reasoningAborted")
       : t("cardTitles.reasoning");
+  const pill = isEmpty ? PILL_SECTION.empty : PILL_SECTION.reason;
   const meta: MetaItem[] = [];
   const m = headerMeta(card);
   if (m) meta.push(m);
@@ -64,8 +81,8 @@ function ReasoningHeader({ card }: { card: ReasoningCardData }): React.ReactElem
       glyph={glyph}
       tone={headColor}
       title={title}
-      titleColor={PILL_SECTION.reason.fg}
-      titleBg={PILL_SECTION.reason.bg}
+      titleColor={pill.fg}
+      titleBg={pill.bg}
       meta={meta.length > 0 ? meta : undefined}
       right={
         <>
@@ -104,18 +121,61 @@ interface BodyProps {
 function StreamingPreview({ card, allLines, lineCells }: BodyProps): React.ReactElement {
   const visualLines = allLines.flatMap((l) => wrapToCells(l, lineCells));
   const visible = visualLines.slice(-STREAMING_PREVIEW_LINES);
-  return <BodyLines card={card} lines={visible} lineCells={lineCells} cursorOnLast />;
+  const hasOverflow = visualLines.length > visible.length;
+  return (
+    <>
+      {hasOverflow ? <Text color={FG.faint}>⋮</Text> : null}
+      <BodyLines
+        card={card}
+        lines={visible}
+        lineCells={lineCells}
+        anchor={!hasOverflow}
+        cursorOnLast
+      />
+    </>
+  );
 }
 
 function SettledPreview({ card, allLines, lineCells }: BodyProps): React.ReactElement {
   const visualLines = allLines.flatMap((l) => wrapToCells(l, lineCells));
-  const visible = visualLines.slice(-SETTLED_TAIL_LINES);
-  const droppedLines = Math.max(0, visualLines.length - visible.length);
+
+  if (card.tokens >= XL_TOKEN_THRESHOLD) {
+    const visible = visualLines.slice(-SETTLED_TAIL_LINES);
+    const droppedLines = Math.max(0, visualLines.length - visible.length);
+    return (
+      <>
+        {droppedLines > 0 ? <ScrollPastHint card={card} /> : null}
+        <BodyLines card={card} lines={visible} lineCells={lineCells} indexOffset={droppedLines} />
+      </>
+    );
+  }
+
+  const totalShown = SETTLED_HEAD_LINES + SETTLED_TAIL_LINES;
+  if (visualLines.length <= totalShown) {
+    return <BodyLines card={card} lines={visualLines} lineCells={lineCells} anchor />;
+  }
+  const headLines = visualLines.slice(0, SETTLED_HEAD_LINES);
+  const tailLines = visualLines.slice(-SETTLED_TAIL_LINES);
+  const droppedMid = visualLines.length - headLines.length - tailLines.length;
   return (
     <>
-      {droppedLines > 0 ? <ElisionHint droppedLines={droppedLines} card={card} /> : null}
-      <BodyLines card={card} lines={visible} lineCells={lineCells} indexOffset={droppedLines} />
+      <BodyLines card={card} lines={headLines} lineCells={lineCells} anchor />
+      <MidElisionHint droppedLines={droppedMid} />
+      <BodyLines
+        card={card}
+        lines={tailLines}
+        lineCells={lineCells}
+        indexOffset={headLines.length + droppedMid}
+      />
     </>
+  );
+}
+
+function EmptyHint(): React.ReactElement {
+  return (
+    <Text italic color={FG.faint}>
+      no thinking — direct answer
+    </Text>
   );
 }
 
@@ -125,6 +185,8 @@ interface BodyLinesProps {
   lineCells: number;
   cursorOnLast?: boolean;
   indexOffset?: number;
+  /** Render ↳ before the first line — only when this slice is the absolute body start. */
+  anchor?: boolean;
 }
 
 function BodyLines({
@@ -133,15 +195,20 @@ function BodyLines({
   lineCells,
   cursorOnLast = false,
   indexOffset = 0,
+  anchor = false,
 }: BodyLinesProps): React.ReactElement {
+  const tone = card.aborted ? TONE.err : card.streaming ? TONE_ACTIVE.accent : TONE.accent;
+  const innerCells = lineCells - (anchor ? 2 : 0);
   return (
     <>
       {lines.map((line, i) => {
         const isLast = i === lines.length - 1;
+        const isFirst = i === 0;
         return (
-          <Box key={`${card.id}:b:${indexOffset + i}`} flexDirection="row">
+          <Box key={`${card.id}:b:${indexOffset + i}`} flexDirection="row" gap={1}>
+            {anchor ? <Text color={tone}>{isFirst ? "↳" : " "}</Text> : null}
             <Text italic color={FG.meta}>
-              {clipToCells(line, lineCells)}
+              {clipToCells(line, innerCells)}
             </Text>
             {isLast && cursorOnLast && <CursorBlock />}
           </Box>
@@ -151,19 +218,15 @@ function BodyLines({
   );
 }
 
-function ElisionHint({
-  droppedLines,
-  card,
-}: {
-  droppedLines: number;
-  card: ReasoningCardData;
-}): React.ReactElement {
+function MidElisionHint({ droppedLines }: { droppedLines: number }): React.ReactElement {
+  return (
+    <Text color={FG.faint}>{`⋯ ${droppedLines} line${droppedLines === 1 ? "" : "s"} elided`}</Text>
+  );
+}
+
+function ScrollPastHint({ card }: { card: ReasoningCardData }): React.ReactElement {
   const parts: string[] = [];
-  if (card.paragraphs > 1) {
-    parts.push(`${card.paragraphs} ¶`);
-  } else {
-    parts.push(`${droppedLines} line${droppedLines === 1 ? "" : "s"}`);
-  }
-  if (card.tokens > 0) parts.push(`${card.tokens.toLocaleString()} tok`);
-  return <Text color={FG.faint}>{`⋯ ${parts.join(" · ")} above · /reasoning last`}</Text>;
+  if (card.paragraphs > 0) parts.push(`${card.paragraphs} ¶`);
+  if (card.tokens > 0) parts.push(`~${card.tokens.toLocaleString()} tok`);
+  return <Text color={FG.faint}>{`⋯ ${parts.join(" + ")} scrolled past · /reasoning last`}</Text>;
 }

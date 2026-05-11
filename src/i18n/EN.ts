@@ -1290,6 +1290,7 @@ export const EN: TranslationSchema = {
     error: "error",
     doctor: "doctor",
     you: "you",
+    task: "task",
   },
   cardLabels: {
     prompt: "prompt",

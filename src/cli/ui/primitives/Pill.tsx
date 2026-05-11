@@ -26,7 +26,11 @@ export const PILL_SECTION = {
   taskFailed: { bg: "#2c1416", fg: "#ff8b81" },
   plan: { bg: "#2a1f3d", fg: "#d2a8ff" },
   user: { bg: "#11141a", fg: "#8b949e" },
+  empty: { bg: "#11141a", fg: "#6e7681" },
 } as const;
+
+/** Path pill — bg-elev tint for filenames / paths / shell targets inside tool rows. */
+export const PILL_PATH = { bg: "#11141a", fg: "#8b949e" } as const;
 
 /** Model pill — neutral bg, color signals model class. */
 export const PILL_MODEL = {

@@ -553,6 +553,7 @@ export interface TranslationSchema {
     error: string;
     doctor: string;
     you: string;
+    task: string;
   };
   cardLabels: {
     prompt: string;
