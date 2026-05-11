@@ -6,6 +6,7 @@ import { type Token, type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
 import { wrapToCells } from "../../frame/width.js";
+import { decodeHtmlEntities } from "./html-entities.js";
 import { FG, SURFACE, TONE } from "./theme/tokens.js";
 
 /** Left margin consumed by card outer marginLeft + body paddingLeft + safety. */
@@ -136,7 +137,7 @@ function ListItem({
 
 function CodeBlock({ token }: { token: Tokens.Code }): React.ReactElement {
   const lang = token.lang?.split(/\s+/)[0] ?? "";
-  const colored = highlightCode(token.text, lang);
+  const colored = highlightCode(decodeHtmlEntities(token.text), lang);
   const lines = colored.split("\n");
   return (
     <Box flexDirection="column">
@@ -442,7 +443,7 @@ function InlineToken({ token }: { token: Token }): React.ReactElement {
     case "codespan":
       return (
         <Text color={FG.strong} backgroundColor={SURFACE.bgElev}>
-          {` ${(token as Tokens.Codespan).text} `}
+          {` ${decodeHtmlEntities((token as Tokens.Codespan).text)} `}
         </Text>
       );
     case "del":
@@ -489,7 +490,7 @@ export function plainText(tokens: Token[] | undefined): string {
         out += plainText((t as { tokens?: Token[] }).tokens ?? []);
         break;
       case "codespan":
-        out += (t as Tokens.Codespan).text;
+        out += decodeHtmlEntities((t as Tokens.Codespan).text);
         break;
       case "br":
         out += "\n";

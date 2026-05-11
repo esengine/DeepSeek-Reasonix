@@ -1,6 +1,7 @@
 /** Pure markdown → flat MdLine[]. Streaming-safe: marked.lexer tolerates partial input. */
 
 import { type Token, type Tokens, marked } from "marked";
+import { decodeHtmlEntities } from "./html-entities.js";
 
 export interface InlineStyle {
   bold?: boolean;
@@ -57,7 +58,11 @@ function emitBlock(tok: Token, out: MdLine[], depth: number): void {
     }
     case "code": {
       const c = tok as Tokens.Code;
-      out.push({ kind: "code", lang: (c.lang ?? "").split(/\s+/)[0] ?? "", text: c.text });
+      out.push({
+        kind: "code",
+        lang: (c.lang ?? "").split(/\s+/)[0] ?? "",
+        text: decodeHtmlEntities(c.text),
+      });
       return;
     }
     case "list": {
@@ -157,7 +162,7 @@ function walk(tokens: Token[], style: InlineStyle, out: InlineSpan[]): void {
         walk((tok as Tokens.Del).tokens, { ...style, strike: true }, out);
         break;
       case "codespan":
-        out.push({ text: (tok as Tokens.Codespan).text, code: true, ...style });
+        out.push({ text: decodeHtmlEntities((tok as Tokens.Codespan).text), code: true, ...style });
         break;
       case "link": {
         const l = tok as Tokens.Link;
