@@ -3034,11 +3034,14 @@ function AppInner({
   }, [handleShellConfirm]);
   // Listen for pause requests from tool functions (via PauseGate).
   // Dispatches to the correct modal based on request.kind.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: setters + editModeRef are stable; the listener installs once per mount and reads only refs/setters from closure
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setters, editModeRef, and chatScroll (store handle) are stable; the listener installs once per mount and reads only refs/setters from closure
   useEffect(() => {
     return pauseGate.on((request) => {
       const payload = request.payload as Record<string, unknown>;
       pendingGateIdRef.current = request.id;
+      // Modal pickers reserve viewport rows from the bottom; if the chat is
+      // scrolled up, the picker mounts off-screen and the user can't see it.
+      chatScroll.jumpToBottom();
 
       switch (request.kind) {
         case "run_command":
