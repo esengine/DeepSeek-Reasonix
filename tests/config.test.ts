@@ -305,6 +305,12 @@ describe("config", () => {
     expect(readConfig(path).editMode).toBe("auto");
   });
 
+  it("saveEditMode + loadEditMode round-trip 'yolo' (issue #644)", () => {
+    saveEditMode("yolo", path);
+    expect(loadEditMode(path)).toBe("yolo");
+    expect(readConfig(path).editMode).toBe("yolo");
+  });
+
   it("loadEditMode coerces unknown values back to 'review'", () => {
     writeConfig({ editMode: "garbage" as any }, path);
     expect(loadEditMode(path)).toBe("review");

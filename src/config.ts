@@ -295,7 +295,8 @@ export function clearProjectShellAllowed(
 /** Unknown values fall back to "review" so hand-edited bad config gets the safe default. */
 export function loadEditMode(path: string = defaultConfigPath()): EditMode {
   const v = readConfig(path).editMode;
-  return v === "auto" ? "auto" : "review";
+  if (v === "auto" || v === "yolo") return v;
+  return "review";
 }
 
 /** Persist the edit mode so `/mode auto` survives a relaunch. */
