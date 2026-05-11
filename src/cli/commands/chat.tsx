@@ -2,6 +2,7 @@ import { render } from "ink";
 import React, { useState } from "react";
 import {
   loadApiKey,
+  mcpEnvFor,
   readConfig,
   searchEnabled,
   webSearchEndpoint,
@@ -14,10 +15,8 @@ import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { type McpClientHost, bridgeMcpTools } from "../../mcp/registry.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
-import { SseTransport } from "../../mcp/sse.js";
-import { type McpTransport, StdioTransport } from "../../mcp/stdio.js";
-import { StreamableHttpTransport } from "../../mcp/streamable-http.js";
 import { buildMcpServerSummary } from "../../mcp/summary.js";
+import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import {
   deleteSession,
   listSessionsForWorkspace,
@@ -159,12 +158,7 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
           ? (ctx.getMcpPrefix() as string)
           : "";
       if (spec.transport === "stdio") preflightStdioSpec(spec);
-      const transport: McpTransport =
-        spec.transport === "sse"
-          ? new SseTransport({ url: spec.url })
-          : spec.transport === "streamable-http"
-            ? new StreamableHttpTransport({ url: spec.url })
-            : new StdioTransport({ command: spec.command, args: spec.args });
+      const transport = buildTransportFromSpec(spec, { env: mcpEnvFor(spec.name, readConfig()) });
       mcp = new McpClient({ transport });
       await mcp.initialize();
       const host: McpClientHost = { client: mcp };

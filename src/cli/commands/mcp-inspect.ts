@@ -1,11 +1,10 @@
+import { mcpEnvFor, readConfig } from "../../config.js";
 import { McpClient } from "../../mcp/client.js";
 import { inspectMcpServer } from "../../mcp/inspect.js";
 import type { InspectionReport } from "../../mcp/inspect.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
-import { SseTransport } from "../../mcp/sse.js";
-import { type McpTransport, StdioTransport } from "../../mcp/stdio.js";
-import { StreamableHttpTransport } from "../../mcp/streamable-http.js";
+import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 
 export interface McpInspectOptions {
   /** The raw --mcp spec string (e.g. `fs=npx -y @modelcontextprotocol/server-filesystem .`). */
@@ -17,12 +16,7 @@ export interface McpInspectOptions {
 export async function mcpInspectCommand(opts: McpInspectOptions): Promise<void> {
   const spec = parseMcpSpec(opts.spec);
   if (spec.transport === "stdio") preflightStdioSpec(spec);
-  const transport: McpTransport =
-    spec.transport === "sse"
-      ? new SseTransport({ url: spec.url })
-      : spec.transport === "streamable-http"
-        ? new StreamableHttpTransport({ url: spec.url })
-        : new StdioTransport({ command: spec.command, args: spec.args });
+  const transport = buildTransportFromSpec(spec, { env: mcpEnvFor(spec.name, readConfig()) });
   const client = new McpClient({ transport });
   try {
     await client.initialize();

@@ -4,9 +4,7 @@ import { McpClient } from "./client.js";
 import { classifyToolListDrift } from "./drift.js";
 import type { McpClientHost } from "./registry.js";
 import { type McpSpec, parseMcpSpec } from "./spec.js";
-import { SseTransport } from "./sse.js";
-import { type McpTransport, StdioTransport } from "./stdio.js";
-import { StreamableHttpTransport } from "./streamable-http.js";
+import { buildTransportFromSpec } from "./transport-from-spec.js";
 import type { McpTool } from "./types.js";
 
 export interface ReconnectArgs {
@@ -18,6 +16,8 @@ export interface ReconnectArgs {
   beforeTools: readonly McpTool[];
   /** Drift kinds the caller is willing to accept. Default: ["identity"]. */
   accept?: ReadonlyArray<"identity" | "append">;
+  /** Stdio env overlay — same lookup that produced the live client's env. */
+  env?: Record<string, string>;
 }
 
 export type ReconnectResult =
@@ -56,12 +56,7 @@ export async function reconnectMcpServer(args: ReconnectArgs): Promise<Reconnect
       ms: Date.now() - t0,
     };
   }
-  const transport: McpTransport =
-    parsed.transport === "sse"
-      ? new SseTransport({ url: parsed.url })
-      : parsed.transport === "streamable-http"
-        ? new StreamableHttpTransport({ url: parsed.url })
-        : new StdioTransport({ command: parsed.command, args: parsed.args });
+  const transport = buildTransportFromSpec(parsed, { env: args.env });
   const next = new McpClient({ transport });
   try {
     await next.initialize();

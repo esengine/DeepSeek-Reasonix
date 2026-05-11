@@ -88,6 +88,8 @@ export interface ReasonixConfig {
   mcp?: string[];
   /** Names of servers in `mcp` to skip on bridge — see `/mcp disable <name>`. */
   mcpDisabled?: string[];
+  /** Env overlay per MCP server name (matches the `name=` prefix of the spec). Stdio transports merge this over process.env; SSE/HTTP ignore it. */
+  mcpEnv?: Record<string, Record<string, string>>;
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
@@ -140,6 +142,21 @@ export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPat
 /** Resolve the language from config file. */
 export function loadLanguage(path: string = defaultConfigPath()): LanguageCode | undefined {
   return readConfig(path).lang;
+}
+
+export function mcpEnvFor(
+  serverName: string | null | undefined,
+  cfg: ReasonixConfig,
+): Record<string, string> | undefined {
+  if (!serverName) return undefined;
+  const entry = cfg.mcpEnv?.[serverName];
+  if (!entry) return undefined;
+  // Coerce to string and drop empty values — JSON config could be sloppy.
+  const filtered: Record<string, string> = {};
+  for (const [k, v] of Object.entries(entry)) {
+    if (typeof v === "string" && v.length > 0) filtered[k] = v;
+  }
+  return Object.keys(filtered).length > 0 ? filtered : undefined;
 }
 
 /** Persist the language so it survives a relaunch. */

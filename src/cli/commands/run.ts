@@ -6,6 +6,7 @@ import {
   isPlausibleKey,
   loadApiKey,
   loadBaseUrl,
+  mcpEnvFor,
   readConfig,
   saveApiKey,
 } from "../../config.js";
@@ -15,9 +16,7 @@ import { McpClient } from "../../mcp/client.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { bridgeMcpTools } from "../../mcp/registry.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
-import { SseTransport } from "../../mcp/sse.js";
-import { type McpTransport, StdioTransport } from "../../mcp/stdio.js";
-import { StreamableHttpTransport } from "../../mcp/streamable-http.js";
+import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import { appendUsage } from "../../telemetry/usage.js";
 import { ToolRegistry } from "../../tools.js";
 import { openTranscriptFile, recordFromLoopEvent, writeRecord } from "../../transcript/log.js";
@@ -102,12 +101,9 @@ export async function runCommand(opts: RunOptions): Promise<void> {
             ? opts.mcpPrefix
             : "";
         if (spec.transport === "stdio") preflightStdioSpec(spec);
-        const transport: McpTransport =
-          spec.transport === "sse"
-            ? new SseTransport({ url: spec.url })
-            : spec.transport === "streamable-http"
-              ? new StreamableHttpTransport({ url: spec.url })
-              : new StdioTransport({ command: spec.command, args: spec.args });
+        const transport = buildTransportFromSpec(spec, {
+          env: mcpEnvFor(spec.name, readConfig()),
+        });
         mcp = new McpClient({ transport });
         await mcp.initialize();
         const bridge = await bridgeMcpTools(mcp, {

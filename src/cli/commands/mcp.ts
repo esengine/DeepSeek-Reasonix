@@ -1,4 +1,4 @@
-import { readConfig, writeConfig } from "../../config.js";
+import { defaultConfigPath, readConfig, writeConfig } from "../../config.js";
 import { MCP_CATALOG, mcpCommandFor } from "../../mcp/catalog.js";
 import {
   type FetchProgress,
@@ -303,13 +303,22 @@ export async function mcpInstallCommand(name: string, opts: McpInstallOptions = 
 
   console.log(`Installed: ${entry.name}`);
   console.log(`  spec:    ${spec}`);
+  const installedName = parseInstalledName(spec);
   if (entry.install.requiredEnv?.length) {
+    console.log(`  needs:   ${entry.install.requiredEnv.join(", ")}`);
+    console.log("           Either export these before launching, or add them to config:");
+    console.log(`             mcpEnv.${installedName ?? entry.name} = { ... }`);
     console.log(
-      `  needs:   ${entry.install.requiredEnv.join(", ")}  (set these in your env before next chat)`,
+      `           (edit ${defaultConfigPath()} — values merge over process.env at spawn)`,
     );
   }
   console.log("");
   console.log(
     "Use it:  reasonix chat   (or `reasonix code`) — the server will be bridged automatically.",
   );
+}
+
+function parseInstalledName(spec: string): string | null {
+  const match = /^([a-zA-Z_][a-zA-Z0-9_-]*)=/.exec(spec);
+  return match ? match[1]! : null;
 }
