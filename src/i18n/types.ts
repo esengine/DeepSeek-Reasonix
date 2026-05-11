@@ -515,6 +515,9 @@ export interface TranslationSchema {
   };
   webErrors: {
     status: string;
+    searchStatus429: string;
+    searchStatus403: string;
+    searchStatus5xx: string;
     mojeekBlocked: string;
     mojeekNoResults: string;
     invalidEndpoint: string;
@@ -522,6 +525,10 @@ export interface TranslationSchema {
     cannotReach: string;
     searxngNoResults: string;
     fetchStatus: string;
+    fetchStatus429: string;
+    fetchStatus403: string;
+    fetchStatus5xx: string;
+    fetchTimeout: string;
     fetchTooLarge: string;
     fetchBodyTooLarge: string;
     fetchInvalidUrl: string;

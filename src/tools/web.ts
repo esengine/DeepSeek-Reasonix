@@ -8,6 +8,34 @@ import {
 import { t } from "../i18n/index.js";
 import type { ToolRegistry } from "../tools.js";
 
+/** Tool errors go back to the model verbatim, so we pick a status-specific
+ * key with an actionable hint instead of returning bare "web_search 429". */
+function searchStatusErrorKey(
+  status: number,
+):
+  | "webErrors.searchStatus429"
+  | "webErrors.searchStatus403"
+  | "webErrors.searchStatus5xx"
+  | "webErrors.status" {
+  if (status === 429) return "webErrors.searchStatus429";
+  if (status === 403) return "webErrors.searchStatus403";
+  if (status >= 500 && status <= 599) return "webErrors.searchStatus5xx";
+  return "webErrors.status";
+}
+
+function fetchStatusErrorKey(
+  status: number,
+):
+  | "webErrors.fetchStatus429"
+  | "webErrors.fetchStatus403"
+  | "webErrors.fetchStatus5xx"
+  | "webErrors.fetchStatus" {
+  if (status === 429) return "webErrors.fetchStatus429";
+  if (status === 403) return "webErrors.fetchStatus403";
+  if (status >= 500 && status <= 599) return "webErrors.fetchStatus5xx";
+  return "webErrors.fetchStatus";
+}
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -72,7 +100,7 @@ async function searchMojeek(query: string, opts: WebSearchOptions = {}): Promise
     signal: opts.signal,
     redirect: "follow",
   });
-  if (!resp.ok) throw new Error(t("webErrors.status", { status: resp.status }));
+  if (!resp.ok) throw new Error(t(searchStatusErrorKey(resp.status), { status: resp.status }));
   const html = await resp.text();
   const results = parseMojeekResults(html).slice(0, topK);
   if (results.length === 0) {
@@ -127,7 +155,7 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
     }
     throw err;
   }
-  if (!resp.ok) throw new Error(t("webErrors.status", { status: resp.status }));
+  if (!resp.ok) throw new Error(t(searchStatusErrorKey(resp.status), { status: resp.status }));
   const html = await resp.text();
   const results = parseSearxngHtmlResults(html).slice(0, topK);
   if (results.length === 0) {
@@ -236,11 +264,17 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
       signal: ctl.signal,
       redirect: "follow",
     });
+  } catch (err) {
+    // Our own timer's abort is a timeout; a caller-driven abort propagates as-is.
+    if ((err as { name?: string }).name === "AbortError" && !opts.signal?.aborted) {
+      throw new Error(t("webErrors.fetchTimeout", { ms: timeoutMs, url }));
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", cancel);
   }
-  if (!resp.ok) throw new Error(t("webErrors.fetchStatus", { status: resp.status, url }));
+  if (!resp.ok) throw new Error(t(fetchStatusErrorKey(resp.status), { status: resp.status, url }));
   const contentType = resp.headers.get("content-type") ?? "";
   // Pre-check Content-Length when the server provides it. Cheaper to
   // refuse upfront than to start streaming a 1GB ISO.

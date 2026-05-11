@@ -1234,7 +1234,14 @@ export const EN: TranslationSchema = {
     probeFailed: "probe failed \u2014 {message}",
   },
   webErrors: {
-    status: "web_search {status}",
+    status:
+      "web_search {status} \u2014 try: confirm the search engine is reachable and your query parses",
+    searchStatus429:
+      "web_search {status} \u2014 try: wait 10s before retrying, or rephrase the query (the engine is rate-limiting)",
+    searchStatus403:
+      "web_search {status} \u2014 try: confirm your network reaches the engine; switch with /search-engine if you're behind a proxy",
+    searchStatus5xx:
+      "web_search {status} \u2014 try: open the search URL in a browser; if it loads this is transient and a retry in 30s may help",
     mojeekBlocked: "web_search: Mojeek anti-bot page \u2014 rate-limited or blocked",
     mojeekNoResults:
       "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview})",
@@ -1244,7 +1251,16 @@ export const EN: TranslationSchema = {
       "web_search: Cannot reach SearXNG server at {endpoint}. Please install SearXNG (https://github.com/searxng/searxng) and start it (e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to the default engine with /search-engine mojeek.",
     searxngNoResults:
       "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars)",
-    fetchStatus: "web_fetch {status} for {url}",
+    fetchStatus:
+      "web_fetch {status} for {url} \u2014 try: confirm the URL resolves and returns an HTTP 2xx in a browser",
+    fetchStatus429:
+      "web_fetch {status} for {url} \u2014 try: wait 10s before retrying; the host is rate-limiting",
+    fetchStatus403:
+      "web_fetch {status} for {url} \u2014 try: confirm the URL is publicly accessible; some servers reject non-browser User-Agents",
+    fetchStatus5xx:
+      "web_fetch {status} for {url} \u2014 try: open the URL in a browser; if it loads this is transient and a retry in 30s may help",
+    fetchTimeout:
+      "web_fetch timed out after {ms}ms for {url} \u2014 try: a shorter or lighter URL, or skip pages known to be large",
     fetchTooLarge: "web_fetch refused: content-length {len} bytes exceeds {cap}-byte cap ({url})",
     fetchBodyTooLarge:
       "web_fetch refused: response body exceeded {cap}-byte cap ({seen} bytes seen)",

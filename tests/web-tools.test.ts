@@ -388,3 +388,63 @@ describe("webFetch", () => {
     }
   });
 });
+
+describe("actionable error hints", () => {
+  it("web_search 429 appends a wait/rephrase hint", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("blocked", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q")).rejects.toThrow(/web_search 429 — try: wait 10s/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_search 503 points the model at a 30s retry / browser check", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("down", { status: 503 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q")).rejects.toThrow(/web_search 503 — try:.*retry in 30s/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_fetch 403 suggests checking public access / User-Agent", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://example.com/private")).rejects.toThrow(
+        /web_fetch 403 .* try:.*publicly accessible/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_fetch surfaces an actionable timeout when the internal timer fires", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_input: unknown, init?: { signal?: AbortSignal }) => {
+      return await new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    }) as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://example.com/slow", { timeoutMs: 50 })).rejects.toThrow(
+        /web_fetch timed out after 50ms .* try: a shorter or lighter URL/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

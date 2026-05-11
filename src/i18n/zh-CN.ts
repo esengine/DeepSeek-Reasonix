@@ -1172,7 +1172,13 @@ export const zhCN: TranslationSchema = {
     probeFailed: "探测失败 — {message}",
   },
   webErrors: {
-    status: "web_search 状态码 {status}",
+    status: "web_search 状态码 {status} — 建议：确认搜索引擎可达，且查询能被解析",
+    searchStatus429:
+      "web_search 状态码 {status} — 建议：等待 10 秒再重试，或换种说法（引擎在限速）",
+    searchStatus403:
+      "web_search 状态码 {status} — 建议：确认网络能直达引擎；如在代理后请用 /search-engine 切换引擎",
+    searchStatus5xx:
+      "web_search 状态码 {status} — 建议：在浏览器打开搜索 URL；若能加载则属临时故障，等 30 秒重试即可",
     mojeekBlocked: "web_search: Mojeek 反爬页面 — 频率限制或被屏蔽",
     mojeekNoResults:
       "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）",
@@ -1182,7 +1188,14 @@ export const zhCN: TranslationSchema = {
       "web_search: 无法访问 SearXNG 服务器 {endpoint}。请安装 SearXNG（https://github.com/searxng/searxng）并启动（例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine mojeek 切换到默认引擎。",
     searxngNoResults:
       "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）",
-    fetchStatus: "web_fetch 状态码 {status}（{url}）",
+    fetchStatus: "web_fetch 状态码 {status}（{url}）— 建议：在浏览器打开该 URL，确认返回 HTTP 2xx",
+    fetchStatus429: "web_fetch 状态码 {status}（{url}）— 建议：等待 10 秒再重试；该主机正在限速",
+    fetchStatus403:
+      "web_fetch 状态码 {status}（{url}）— 建议：确认 URL 是公开可访问的；某些服务器拒绝非浏览器 User-Agent",
+    fetchStatus5xx:
+      "web_fetch 状态码 {status}（{url}）— 建议：在浏览器打开该 URL；若能加载则属临时故障，等 30 秒重试即可",
+    fetchTimeout:
+      "web_fetch 在 {ms}ms 后超时（{url}）— 建议：换更短/更轻量的 URL，或避开已知较大的页面",
     fetchTooLarge: "web_fetch 拒绝：content-length {len} 字节超过上限 {cap} 字节（{url}）",
     fetchBodyTooLarge: "web_fetch 拒绝：响应体超过 {cap} 字节上限（已接收 {seen} 字节）",
     fetchInvalidUrl: "web_fetch: URL 必须以 http:// 或 https:// 开头",
