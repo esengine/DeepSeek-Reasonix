@@ -49,6 +49,12 @@ export function createChatScrollStore(): ChatScrollStore {
   const listeners = new Set<ScrollListener>();
   let pendingDelta = 0;
   let flushTimer: NodeJS.Timeout | null = null;
+  // Trailing-edge coalesce target for pinned-mode shrinks (issue #653).
+  // While a burst of card-collapse re-measurements arrives, we hold the latest
+  // target here and apply it once on a microtask flush, so subscribers see one
+  // settled transition instead of N oscillating snaps.
+  let pendingMaxShrink: number | null = null;
+  let shrinkTimer: NodeJS.Timeout | null = null;
 
   function set(next: Partial<ChatScrollState>): void {
     const merged = { ...state, ...next };
@@ -91,6 +97,18 @@ export function createChatScrollStore(): ChatScrollStore {
     }
   }
 
+  function flushShrink(): void {
+    if (shrinkTimer !== null) {
+      clearTimeout(shrinkTimer);
+      shrinkTimer = null;
+    }
+    const target = pendingMaxShrink;
+    pendingMaxShrink = null;
+    if (target === null) return;
+    const nextScrollRows = state.pinned ? target : Math.min(state.scrollRows, target);
+    set({ maxScroll: target, scrollRows: nextScrollRows });
+  }
+
   return {
     getState() {
       return state;
@@ -111,10 +129,34 @@ export function createChatScrollStore(): ChatScrollStore {
         clearTimeout(flushTimer);
         flushTimer = null;
       }
+      // Drop any deferred shrink so an explicit jump isn't undone by a stale target.
+      pendingMaxShrink = null;
+      if (shrinkTimer !== null) {
+        clearTimeout(shrinkTimer);
+        shrinkTimer = null;
+      }
       set({ pinned: true });
     },
     setMaxScroll(rows: number) {
       const m = rows < 0 ? 0 : rows;
+      // Coalesce shrinks while pinned (issue #653): a burst of card-teardown
+      // re-measurements during an Esc-abort would otherwise snap scrollRows N
+      // times, producing a visible flicker. Grows still apply immediately so
+      // normal streaming output keeps the viewport pinned without latency.
+      const currentMax = pendingMaxShrink ?? state.maxScroll;
+      if (state.pinned && m < currentMax) {
+        pendingMaxShrink = m;
+        if (shrinkTimer === null) {
+          shrinkTimer = setTimeout(() => {
+            shrinkTimer = null;
+            flushShrink();
+          }, COALESCE_MS);
+        }
+        return;
+      }
+      // Non-shrink path: flush any deferred shrink first so its trailing state
+      // doesn't clobber the value we're about to set.
+      if (pendingMaxShrink !== null) flushShrink();
       // Pinned-mode invariant: scrollRows tracks maxScroll exactly.
       const nextScrollRows = state.pinned ? m : Math.min(state.scrollRows, m);
       set({ maxScroll: m, scrollRows: nextScrollRows });
