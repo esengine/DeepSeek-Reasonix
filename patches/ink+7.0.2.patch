@@ -1,0 +1,16 @@
+diff --git a/node_modules/ink/build/ink.js b/node_modules/ink/build/ink.js
+index 98ba6ef..d9e6f99 100644
+--- a/node_modules/ink/build/ink.js
++++ b/node_modules/ink/build/ink.js
+@@ -690,7 +690,10 @@ export default class Ink {
+         const viewportRows = isTty ? getWindowSize(this.options.stdout).rows : 24;
+         const isFullscreen = isTty && outputHeight >= viewportRows;
+         const outputToRender = isFullscreen ? output : output + '\n';
+-        const shouldClearTerminal = shouldClearTerminalForFrame({
++        // Reasonix patch (issue #639): alt-screen has no scrollback, so a per-frame
++        // clear costs nothing and eliminates log-update line-count drift when
++        // Yoga undercounts visual rows (CJK / ambiguous-width on East Asian terms).
++        const shouldClearTerminal = (isTty && this.alternateScreen) || shouldClearTerminalForFrame({
+             isTty,
+             viewportRows,
+             previousOutputHeight: this.lastOutputHeight,
