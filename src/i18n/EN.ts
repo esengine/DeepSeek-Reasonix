@@ -1247,6 +1247,8 @@ export const EN: TranslationSchema = {
       "web_search 429 \u2014 try: wait 10s before retrying, or rephrase the query; the search backend is rate-limiting this client",
     forbidden403:
       "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine mojeek|searxng, or wait and retry later",
+    serverError5xx:
+      "web_search {status} \u2014 try: open the search URL in a browser; if it loads this is transient and a retry in 30s may help",
     mojeekBlocked:
       "web_search: Mojeek anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine searxng",
     mojeekNoResults:
@@ -1265,6 +1267,8 @@ export const EN: TranslationSchema = {
       "web_fetch 429 for {url} \u2014 try: wait 10s before retrying; the host is rate-limiting this client",
     fetchForbidden403:
       "web_fetch 403 for {url} \u2014 try: the host is blocking this client; the page may require login or block bots \u2014 use web_search snippets instead",
+    fetchServerError5xx:
+      "web_fetch {status} for {url} \u2014 try: open the URL in a browser; if it loads this is transient and a retry in 30s may help",
     fetchTimeout:
       "web_fetch: timed out after {ms}ms for {url} \u2014 try: a shorter URL or smaller content; this may be a slow CDN, or retry once",
     fetchTooLarge:

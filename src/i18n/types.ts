@@ -524,6 +524,7 @@ export interface TranslationSchema {
     status: string;
     rateLimit429: string;
     forbidden403: string;
+    serverError5xx: string;
     mojeekBlocked: string;
     mojeekNoResults: string;
     invalidEndpoint: string;
@@ -533,6 +534,7 @@ export interface TranslationSchema {
     fetchStatus: string;
     fetchRateLimit429: string;
     fetchForbidden403: string;
+    fetchServerError5xx: string;
     fetchTimeout: string;
     fetchTooLarge: string;
     fetchBodyTooLarge: string;

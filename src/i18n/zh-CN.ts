@@ -1184,6 +1184,8 @@ export const zhCN: TranslationSchema = {
       "web_search 429 — try: 等待 10 秒后重试，或改写查询；搜索后端正在对该客户端进行限流",
     forbidden403:
       "web_search 403 — try: 搜索后端拒绝该客户端访问；使用 /search-engine mojeek|searxng 切换引擎，或稍后重试",
+    serverError5xx:
+      "web_search {status} — try: 在浏览器中打开搜索 URL；若能加载则属临时故障，等 30 秒重试即可",
     mojeekBlocked:
       "web_search: Mojeek 反爬页面 — 频率限制或被屏蔽 — try: 等待 30 秒后重试，或使用 /search-engine searxng 切换引擎",
     mojeekNoResults:
@@ -1202,6 +1204,8 @@ export const zhCN: TranslationSchema = {
       "web_fetch 429 for {url} — try: 等待 10 秒后重试；目标主机正在对该客户端进行限流",
     fetchForbidden403:
       "web_fetch 403 for {url} — try: 目标主机拒绝该客户端访问；该页面可能需要登录或屏蔽爬虫 — 改用 web_search 摘要",
+    fetchServerError5xx:
+      "web_fetch {status} for {url} — try: 在浏览器中打开该 URL；若能加载则属临时故障，等 30 秒重试即可",
     fetchTimeout:
       "web_fetch: timed out after {ms}ms for {url} — try: 更短的 URL 或更小的内容；可能是 CDN 较慢，或重试一次",
     fetchTooLarge:

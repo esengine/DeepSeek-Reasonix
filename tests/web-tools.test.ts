@@ -244,13 +244,13 @@ describe("webSearch", () => {
     }
   });
 
-  it("annotates generic 5xx with a try-hint tail", async () => {
+  it("annotates 5xx with a transient-retry hint", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
       async () => new Response("broken", { status: 503 }),
     ) as unknown as typeof fetch;
     try {
-      await expect(webSearch("q")).rejects.toThrow(/web_search 503.*try:/);
+      await expect(webSearch("q")).rejects.toThrow(/web_search 503.*try:.*retry in 30s/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -417,6 +417,20 @@ describe("webFetch", () => {
     try {
       await expect(webFetch("https://example.com/forbidden")).rejects.toThrow(
         /web_fetch 403.*try:.*blocking|web_fetch 403.*try:/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("annotates 5xx with a transient-retry hint", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("upstream broken", { status: 502 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://example.com/gateway")).rejects.toThrow(
+        /web_fetch 502.*try:.*retry in 30s/,
       );
     } finally {
       globalThis.fetch = originalFetch;

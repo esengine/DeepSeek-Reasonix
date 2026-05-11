@@ -54,12 +54,14 @@ const MOJEEK_ENDPOINT = "https://www.mojeek.com/search";
 function searchStatusError(status: number): string {
   if (status === 429) return t("webErrors.rateLimit429");
   if (status === 403) return t("webErrors.forbidden403");
+  if (status >= 500 && status <= 599) return t("webErrors.serverError5xx", { status });
   return t("webErrors.status", { status });
 }
 
 function fetchStatusError(status: number, url: string): string {
   if (status === 429) return t("webErrors.fetchRateLimit429", { url });
   if (status === 403) return t("webErrors.fetchForbidden403", { url });
+  if (status >= 500 && status <= 599) return t("webErrors.fetchServerError5xx", { status, url });
   return t("webErrors.fetchStatus", { status, url });
 }
 
