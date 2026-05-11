@@ -361,6 +361,8 @@ export interface ChatOptions {
    * URL is visible in the status bar.
    */
   noDashboard?: boolean;
+  /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
+  dashboardPort?: number;
   /**
    * Render into the terminal's alternate screen buffer. Default true —
    * alt-screen avoids the scrollback-mode resize/wrap ghost class. Pass
@@ -472,6 +474,7 @@ function Root({
         progressSink={progressSink}
         codeMode={appProps.codeMode}
         noDashboard={appProps.noDashboard}
+        dashboardPort={appProps.dashboardPort}
         mouse={appProps.mouse}
         onSwitchSession={setActiveSession}
       />

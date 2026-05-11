@@ -58,6 +58,8 @@ export interface CodeOptions {
   budgetUsd?: number;
   /** Suppress the auto-launched embedded web dashboard. */
   noDashboard?: boolean;
+  /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
+  dashboardPort?: number;
   /** Inline string appended to the code system prompt after the generated base prompt. */
   systemAppend?: string;
   /** Path to a UTF-8 text file whose contents are appended to the code system prompt. */
@@ -228,6 +230,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     forceResume: opts.forceResume,
     forceNew: opts.forceNew,
     noDashboard: opts.noDashboard,
+    dashboardPort: opts.dashboardPort,
     altScreen: opts.altScreen,
     mouse: opts.mouse,
   });

@@ -45,6 +45,10 @@ export const EN: TranslationSchema = {
     applied: "applied",
     rejected: "rejected",
     noDashboard: "Suppress the auto-launched embedded web dashboard.",
+    dashboardPortHint:
+      "Pin the dashboard to a fixed port (1–65535). Stable across restarts — required for SSH tunnels. Default: ephemeral.",
+    dashboardPortInvalid:
+      "▲ ignoring --dashboard-port={value} (must be an integer 1–65535) — falling back to ephemeral",
     dashboardAutoStartFailed:
       "▲ dashboard auto-start failed ({reason}) — try /dashboard, or pass --no-dashboard to silence",
     systemAppendHint:

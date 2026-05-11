@@ -46,6 +46,32 @@ function parseBudgetFlag(raw: number | undefined): number | undefined {
   return raw;
 }
 
+/** Lenient port parser — bad value warns + falls back to ephemeral, same shape as parseBudgetFlag. */
+function parseDashboardPortFlag(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    process.stderr.write(`${t("ui.dashboardPortInvalid", { value: raw })}\n`);
+    return undefined;
+  }
+  return n;
+}
+
+function resolveDashboardPort(
+  flagValue: number | undefined,
+  noConfig: boolean,
+): number | undefined {
+  if (flagValue !== undefined) return flagValue;
+  if (noConfig) return undefined;
+  const fromCfg = readConfig().dashboard?.port;
+  return typeof fromCfg === "number" &&
+    Number.isInteger(fromCfg) &&
+    fromCfg >= 1 &&
+    fromCfg <= 65535
+    ? fromCfg
+    : undefined;
+}
+
 const program = new Command();
 program
   .name("reasonix")
@@ -100,6 +126,7 @@ program
   .option("--transcript <path>", t("ui.transcriptHint"))
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
   .option("--no-dashboard", t("ui.noDashboard"))
+  .option("--dashboard-port <port>", t("ui.dashboardPortHint"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
   .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
   .option("--system-append <prompt>", t("ui.systemAppendHint"))
@@ -115,6 +142,7 @@ program
       forceNew: !!opts.new,
       budgetUsd: parseBudgetFlag(opts.budget),
       noDashboard: opts.dashboard === false,
+      dashboardPort: resolveDashboardPort(parseDashboardPortFlag(opts.dashboardPort), false),
       systemAppend: opts.systemAppend,
       systemAppendFile: opts.systemAppendFile,
       altScreen: opts.altScreen !== false,
@@ -144,6 +172,7 @@ program
   .option("--mcp-prefix <str>", t("ui.mcpPrefixHint"))
   .option("--no-config", t("ui.noConfigHint"))
   .option("--no-dashboard", t("ui.noDashboard"))
+  .option("--dashboard-port <port>", t("ui.dashboardPortHint"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
   .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
   .action(async (opts) => {
@@ -178,6 +207,10 @@ program
       forceResume: continueOpts.forceResume,
       forceNew: !!opts.new,
       noDashboard: opts.dashboard === false,
+      dashboardPort: resolveDashboardPort(
+        parseDashboardPortFlag(opts.dashboardPort),
+        opts.config === false,
+      ),
       altScreen: opts.altScreen !== false,
       mouse: opts.mouse !== false,
     });

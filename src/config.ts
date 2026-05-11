@@ -95,6 +95,10 @@ export interface ReasonixConfig {
   webSearchEngine?: "mojeek" | "searxng";
   /** Base URL for SearXNG instance (default http://localhost:8080). */
   webSearchEndpoint?: string;
+  dashboard?: {
+    /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
+    port?: number;
+  };
   projects?: {
     [absoluteRootDir: string]: {
       shellAllowed?: string[];

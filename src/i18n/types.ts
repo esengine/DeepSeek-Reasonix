@@ -45,6 +45,8 @@ export interface TranslationSchema {
     applied: string;
     rejected: string;
     noDashboard: string;
+    dashboardPortHint: string;
+    dashboardPortInvalid: string;
     dashboardAutoStartFailed: string;
     systemAppendHint: string;
     systemAppendFileHint: string;

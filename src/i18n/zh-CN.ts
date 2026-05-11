@@ -45,6 +45,10 @@ export const zhCN: TranslationSchema = {
     applied: "已应用",
     rejected: "已拒绝",
     noDashboard: "禁止自动启动嵌入式 Web 仪表板。",
+    dashboardPortHint:
+      "将仪表板绑定到固定端口 (1–65535)。重启后保持稳定 — SSH 隧道访问必需。默认为临时端口。",
+    dashboardPortInvalid:
+      "▲ 忽略 --dashboard-port={value} (必须为 1–65535 之间的整数) — 回退到临时端口",
     dashboardAutoStartFailed:
       "▲ 仪表板自动启动失败 ({reason}) — 尝试 /dashboard，或传递 --no-dashboard 以静默",
     systemAppendHint: "追加指令到代码系统提示词。不替换默认提示词 — 在其后添加。",
