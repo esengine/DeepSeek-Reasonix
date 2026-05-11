@@ -2,6 +2,7 @@
 
 import { Box, Text } from "ink";
 import React, { useState } from "react";
+import { t } from "../../i18n/index.js";
 import { McpBrowser } from "./McpBrowser.js";
 import { McpMarketplace } from "./McpMarketplace.js";
 import type { PickerBroadcastPorts } from "./dashboard/use-picker-broadcast.js";
@@ -54,10 +55,14 @@ export function McpHub({
           ◈ MCP
         </Text>
         <Text>{"  "}</Text>
-        <TabPill label="Live" count={liveServers.length} active={tab === "live"} />
+        <TabPill
+          label={t("handlers.mcp.liveTab")}
+          count={liveServers.length}
+          active={tab === "live"}
+        />
         <Text>{"  "}</Text>
-        <TabPill label="Marketplace" active={tab === "marketplace"} />
-        <Text dimColor>{"   tab to switch"}</Text>
+        <TabPill label={t("handlers.mcp.marketplaceTab")} active={tab === "marketplace"} />
+        <Text dimColor>{`   ${t("handlers.mcp.tabHint")}`}</Text>
       </Box>
       {tab === "live" ? (
         <McpBrowser

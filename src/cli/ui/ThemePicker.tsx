@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import React from "react";
+import { t } from "../../i18n/index.js";
 import { type SelectItem, SingleSelect } from "./Select.js";
 import { type ThemeName, listThemeNames } from "./theme/tokens.js";
 
@@ -25,13 +26,13 @@ export function ThemePicker({
 
   return (
     <Box flexDirection="column" marginY={1}>
-      <Text bold>Theme</Text>
+      <Text bold>{t("themePicker.header")}</Text>
       <SingleSelect
         items={items}
         initialValue={currentPreference}
         onSubmit={(value) => onChoose({ kind: "select", value })}
         onCancel={() => onChoose({ kind: "quit" })}
-        footer="↑↓ pick · ⏎ confirm · esc cancel"
+        footer={t("themePicker.footer")}
       />
     </Box>
   );
@@ -43,8 +44,8 @@ function describeTheme(
   activeTheme: ThemeName,
 ): string {
   const tags: string[] = [];
-  if (value === currentPreference) tags.push("current preference");
-  if (value === activeTheme) tags.push("active now");
-  if (value === "auto") tags.push("use REASONIX_THEME or default");
+  if (value === currentPreference) tags.push(t("themePicker.currentPref"));
+  if (value === activeTheme) tags.push(t("themePicker.activeNow"));
+  if (value === "auto") tags.push(t("themePicker.autoDesc"));
   return tags.join(" · ");
 }

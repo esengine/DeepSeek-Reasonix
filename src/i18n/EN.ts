@@ -429,6 +429,16 @@ export const EN: TranslationSchema = {
     savedFooter: "[Enter] to exit",
     selectFooter: "[↑↓] navigate · [Enter] confirm · [Esc] cancel",
     stepCounter: "Step {step}/{total} · ",
+    exitHint: "/exit to abort",
+    apiKeyPlaceholder: "sk-...",
+    themeSampleReasoning: "Reasoning",
+  },
+  themePicker: {
+    header: "Theme",
+    footer: "↑↓ pick · ⏎ confirm · esc cancel",
+    currentPref: "current preference",
+    activeNow: "active now",
+    autoDesc: "use REASONIX_THEME or default",
   },
   planFlow: {
     approveCardTitle: "Approve plan",
@@ -493,6 +503,9 @@ export const EN: TranslationSchema = {
       counterDone: "{done}/{total} done ({pct}%) · {total} steps",
       counterDoneSingular: "{done}/{total} done ({pct}%) · {total} step",
     },
+    reviseTitle: "Revise plan",
+    reviseSteps: "{count} steps",
+    reviseFooter: "↑↓ focus  ·  space toggle skip  ·  k/j move  ·  ⏎ accept  ·  esc cancel",
   },
   app: {
     walkCancelledRemaining: "▸ walk cancelled — {count} block(s) still pending.",
@@ -668,6 +681,8 @@ export const EN: TranslationSchema = {
       loopStarted:
         '▸ loop started — re-submitting "{prompt}" every {duration}. Type anything (or /loop stop) to cancel.',
       keysNeedsTui: "/keys needs a TUI context (postKeys wired).",
+      unknownCommand: "unknown command: /{cmd} — did you mean {list}?",
+      unknownCommandShort: "unknown command: /{cmd}  (try /help)",
     },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",
@@ -972,6 +987,9 @@ export const EN: TranslationSchema = {
       unknownServer: 'unknown MCP server "{name}". Known: {list}.',
       noneList: "(none)",
       reconnectNoTui: "/mcp reconnect requires the interactive TUI (postInfo not wired).",
+      liveTab: "Live",
+      marketplaceTab: "Marketplace",
+      tabHint: "tab to switch",
     },
     init: {
       codeOnly:
@@ -1143,6 +1161,14 @@ export const EN: TranslationSchema = {
     groupCode: "CODE",
     groupJobs: "JOBS",
     groupAdvanced: "ADVANCED",
+    groupDetailSetup: "model + cost",
+    groupDetailInfo: "current state",
+    groupDetailChat: "daily turn ops",
+    groupDetailExtend: "MCP, memory, skills",
+    groupDetailSession: "saved sessions",
+    groupDetailCode: "edits + plans (code mode)",
+    groupDetailJobs: "background processes (code mode)",
+    groupDetailAdvanced: "rare or set-and-forget",
   },
   atMentions: {
     loading: "loading\u2026",
@@ -1304,5 +1330,28 @@ export const EN: TranslationSchema = {
     labelReasoning: "reasoning",
     yankedToast: "▸ copied {size} chars to clipboard (osc52)",
     yankedToastFile: "▸ copied {size} chars · file: {path}",
+  },
+  mcpHealth: {
+    noData: "no inspect data",
+    healthy: "healthy \u00b7 {ms}ms",
+    slow: "slow \u00b7 {ms}ms",
+    verySlow: "very slow \u00b7 {ms}ms",
+  },
+  denyContextInput: {
+    description:
+      "Tell the agent why you denied this. The next attempt will see your reason as additional context.",
+  },
+  cardStream: {
+    scrollAbove: " \u2191 {scroll} / {max} row above",
+    scrollAbovePlural: " \u2191 {scroll} / {max} rows above",
+    scrollMore: " \u2014 {remaining} more",
+    scrollPgUp: " \u00b7 PgUp / wheel / \u2191",
+  },
+  slashArgPicker: {
+    noMatch: 'no match for "{partial}"',
+    keepTyping: " \u2014 keep typing, or Backspace to edit",
+    above: "   \u2191 {hidden} above",
+    below: "   \u2193 {hidden} below",
+    footer: "  \u2191\u2193 navigate \u00b7 Tab / \u23ce pick \u00b7 esc cancel",
   },
 };

@@ -1,11 +1,6 @@
 import { t, tObj } from "@/i18n/index.js";
 import { formatDuration, formatLoopStatus, parseLoopCommand } from "../../loop.js";
-import {
-  SLASH_COMMANDS,
-  SLASH_GROUP_LABEL,
-  SLASH_GROUP_ORDER,
-  orderSlashCommandsByGroup,
-} from "../commands.js";
+import { SLASH_COMMANDS, SLASH_GROUP_ORDER, orderSlashCommandsByGroup } from "../commands.js";
 import type { SlashHandler } from "../dispatch.js";
 import type { SlashCommandSpec, SlashGroup } from "../types.js";
 
@@ -19,19 +14,11 @@ const resetLog: SlashHandler = (_args, loop) => {
   return { clear: true, info };
 };
 
-const GROUP_DETAIL: Record<SlashGroup, string> = {
-  setup: "model + cost",
-  info: "current state",
-  chat: "daily turn ops",
-  extend: "MCP, memory, skills",
-  session: "saved sessions",
-  code: "edits + plans (code mode)",
-  jobs: "background processes (code mode)",
-  advanced: "rare or set-and-forget",
-};
-
 function groupHeader(group: SlashGroup): string {
-  return `${SLASH_GROUP_LABEL[group]}  ·  ${GROUP_DETAIL[group]}`;
+  const cap = group.charAt(0).toUpperCase() + group.slice(1);
+  const label = t(`slashSuggestions.group${cap}`);
+  const detail = t(`slashSuggestions.groupDetail${cap}`);
+  return `${label}  ·  ${detail}`;
 }
 
 function renderRow(spec: SlashCommandSpec): string {

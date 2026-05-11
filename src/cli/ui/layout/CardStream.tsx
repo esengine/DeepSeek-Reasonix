@@ -1,5 +1,6 @@
 import { Box, type DOMElement, Text, useBoxMetrics } from "ink";
 import React, { useEffect, useMemo, useRef } from "react";
+import { t } from "../../../i18n/index.js";
 import { CardRenderer } from "../cards/CardRenderer.js";
 import type { Card } from "../state/cards.js";
 import { useChatScrollActions, useChatScrollState } from "../state/chat-scroll-provider.js";
@@ -144,7 +145,12 @@ function ScrollIndicator({
     return () => clearTimeout(id);
   }, [version]);
   const remaining = Math.max(0, maxScroll - scrollRows);
-  const text = ` ↑ ${scrollRows} / ${maxScroll} rows above${remaining > 0 ? ` — ${remaining} more` : ""} · PgUp / wheel / ↑`;
+  const above =
+    scrollRows === 1
+      ? t("cardStream.scrollAbove", { scroll: scrollRows, max: maxScroll })
+      : t("cardStream.scrollAbovePlural", { scroll: scrollRows, max: maxScroll });
+  const more = remaining > 0 ? t("cardStream.scrollMore", { remaining }) : "";
+  const text = `${above}${more}${t("cardStream.scrollPgUp")}`;
   return <Text color={hot ? TONE.accent : FG.faint}>{text}</Text>;
 }
 

@@ -1,3 +1,4 @@
+import { t } from "../../../i18n/index.js";
 import type { CacheFirstLoop } from "../../../loop.js";
 import { resolveSlashAlias } from "./commands.js";
 import { handlers as adminHandlers } from "./handlers/admin.js";
@@ -54,7 +55,7 @@ export function handleSlash(
   const suggestions = nearestCommands(cmd, Object.keys(HANDLERS));
   if (suggestions.length > 0) {
     const list = suggestions.map((name) => `/${name}`).join(", ");
-    return { unknown: true, info: `unknown command: /${cmd} — did you mean ${list}?` };
+    return { unknown: true, info: t("handlers.basic.unknownCommand", { cmd, list }) };
   }
-  return { unknown: true, info: `unknown command: /${cmd}  (try /help)` };
+  return { unknown: true, info: t("handlers.basic.unknownCommandShort", { cmd }) };
 }

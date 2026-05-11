@@ -1,6 +1,7 @@
 import { Box, Text, useApp } from "ink";
 import React, { useState } from "react";
 import { defaultConfigPath, isPlausibleKey, redactKey, saveApiKey } from "../../config.js";
+import { t } from "../../i18n/index.js";
 import { MaskedInput } from "./MaskedInput.js";
 import { COLOR, GLYPH, GRADIENT } from "./theme.js";
 
@@ -20,14 +21,14 @@ export function Setup({ onReady }: SetupProps) {
       return;
     }
     if (!isPlausibleKey(trimmed)) {
-      setError("Key looks too short — paste the full token (16+ chars, no spaces).");
+      setError(t("wizard.apiKeyInvalid"));
       setValue("");
       return;
     }
     try {
       saveApiKey(trimmed);
     } catch (err) {
-      setError(`Could not save key: ${(err as Error).message}`);
+      setError(t("wizard.reviewSaveError", { message: (err as Error).message }));
       return;
     }
     onReady(trimmed);
@@ -40,21 +41,16 @@ export function Setup({ onReady }: SetupProps) {
           {GLYPH.brand}
         </Text>
         <Text>{"  "}</Text>
-        <Text bold>Welcome to </Text>
-        <Text bold color={GRADIENT[2]}>
-          REASONIX
-        </Text>
+        <Text bold>{t("wizard.welcomeTitle")}</Text>
       </Box>
       <Box marginTop={1}>
-        <Text color={COLOR.info}>Paste your DeepSeek API key to get started.</Text>
+        <Text color={COLOR.info}>{t("wizard.apiKeyPrompt")}</Text>
       </Box>
       <Box>
-        <Text dimColor>{"  sign up at · "}</Text>
-        <Text color={COLOR.primary}>https://platform.deepseek.com/api_keys</Text>
+        <Text dimColor>{`  ${t("wizard.apiKeyGetOne")}`}</Text>
       </Box>
       <Box>
-        <Text dimColor>{"  saved to "}</Text>
-        <Text dimColor>{defaultConfigPath()}</Text>
+        <Text dimColor>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
       </Box>
       <Box marginTop={1}>
         <Text bold color={COLOR.brand}>
@@ -68,7 +64,7 @@ export function Setup({ onReady }: SetupProps) {
           onChange={setValue}
           onSubmit={handleSubmit}
           mask="•"
-          placeholder="sk-..."
+          placeholder={t("wizard.apiKeyPlaceholder")}
         />
       </Box>
       {error ? (
@@ -80,11 +76,11 @@ export function Setup({ onReady }: SetupProps) {
         </Box>
       ) : value ? (
         <Box marginTop={1}>
-          <Text dimColor>{`  preview · ${redactKey(value)}`}</Text>
+          <Text dimColor>{t("wizard.apiKeyPreview", { redacted: redactKey(value) })}</Text>
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>{"  /exit to abort"}</Text>
+        <Text dimColor>{t("wizard.exitHint")}</Text>
       </Box>
     </Box>
   );

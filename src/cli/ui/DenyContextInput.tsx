@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import React, { useState } from "react";
+import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { FG, TONE } from "./theme/tokens.js";
 
@@ -9,8 +10,7 @@ export interface DenyContextInputProps {
   onCancel: () => void;
 }
 
-const DEFAULT_DESCRIPTION =
-  "Tell the agent why you denied this. The next attempt will see your reason as additional context.";
+const DEFAULT_DESCRIPTION = t("denyContextInput.description");
 
 export function DenyContextInput({
   description = DEFAULT_DESCRIPTION,

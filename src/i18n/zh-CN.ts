@@ -417,6 +417,16 @@ export const zhCN: TranslationSchema = {
     savedFooter: "[Enter] 退出",
     selectFooter: "[↑↓] 移动 · [Enter] 确认 · [Esc] 取消",
     stepCounter: "步骤 {step}/{total} · ",
+    exitHint: "/exit 中止",
+    apiKeyPlaceholder: "sk-...",
+    themeSampleReasoning: "推理中",
+  },
+  themePicker: {
+    header: "主题",
+    footer: "↑↓ 选择 · ⏎ 确认 · Esc 取消",
+    currentPref: "当前偏好",
+    activeNow: "当前生效",
+    autoDesc: "使用 REASONIX_THEME 或默认主题",
   },
   planFlow: {
     approveCardTitle: "确认计划",
@@ -480,6 +490,9 @@ export const zhCN: TranslationSchema = {
       counterDone: "{done}/{total} 已完成（{pct}%） · 共 {total} 步",
       counterDoneSingular: "{done}/{total} 已完成（{pct}%） · 共 {total} 步",
     },
+    reviseTitle: "修改计划",
+    reviseSteps: "{count} 个步骤",
+    reviseFooter: "↑↓ 焦点  ·  空格切换跳过  ·  k/j 移动  ·  ⏎ 确认  ·  Esc 取消",
   },
   app: {
     walkCancelledRemaining: "▸ 浏览已取消 — 还有 {count} 个待处理编辑块。",
@@ -640,6 +653,8 @@ export const zhCN: TranslationSchema = {
       loopStarted:
         '▸ 循环已启动 — 每 {duration} 重新提交 "{prompt}"。输入任何内容（或 /loop stop）取消。',
       keysNeedsTui: "/keys 需要 TUI 上下文（postKeys 已连接）。",
+      unknownCommand: "未知命令：/{cmd} — 你是不是想用 {list}？",
+      unknownCommandShort: "未知命令：/{cmd}  （试试 /help）",
     },
     admin: {
       doctorNeedsTui: "/doctor 需要 TUI 上下文（postDoctor 已连接）。",
@@ -920,6 +935,9 @@ export const zhCN: TranslationSchema = {
       unknownServer: '未知 MCP 服务器 "{name}"。已知：{list}。',
       noneList: "（无）",
       reconnectNoTui: "/mcp reconnect 需要交互式 TUI（postInfo 未连接）。",
+      liveTab: "已连接",
+      marketplaceTab: "市场",
+      tabHint: "按 tab 切换",
     },
     init: {
       codeOnly:
@@ -1083,6 +1101,14 @@ export const zhCN: TranslationSchema = {
     groupCode: "代码",
     groupJobs: "任务",
     groupAdvanced: "高级",
+    groupDetailSetup: "模型 + 成本",
+    groupDetailInfo: "当前状态",
+    groupDetailChat: "日常聊天操作",
+    groupDetailExtend: "MCP, 记忆, 技能",
+    groupDetailSession: "已保存的会话",
+    groupDetailCode: "编辑 + 计划 (代码模式)",
+    groupDetailJobs: "后台进程 (代码模式)",
+    groupDetailAdvanced: "高级或一次性设置",
   },
   atMentions: {
     loading: "加载中…",
@@ -1240,5 +1266,27 @@ export const zhCN: TranslationSchema = {
     labelReasoning: "推理",
     yankedToast: "▸ 已复制 {size} 字符到剪贴板 (osc52)",
     yankedToastFile: "▸ 已复制 {size} 字符 · 文件：{path}",
+  },
+  mcpHealth: {
+    noData: "无检查数据",
+    healthy: "正常 \u00b7 {ms}ms",
+    slow: "缓慢 \u00b7 {ms}ms",
+    verySlow: "非常慢 \u00b7 {ms}ms",
+  },
+  denyContextInput: {
+    description: "告诉模型你为什么拒绝了。模型下次会看到你的理由作为额外的上下文。",
+  },
+  cardStream: {
+    scrollAbove: " \u2191 {scroll}/{max} 行",
+    scrollAbovePlural: " \u2191 {scroll}/{max} 行",
+    scrollMore: " \u2014 还有 {remaining} 行",
+    scrollPgUp: " \u00b7 PgUp/\u6eda\u8f6e/\u2191",
+  },
+  slashArgPicker: {
+    noMatch: '\u6ca1\u6709\u5339\u914d "{partial}"',
+    keepTyping: " \u2014 \u7ee7\u7eed\u8f93\u5165\uff0c\u6216 Backspace \u4fee\u6539",
+    above: "   \u2191 \u8fd8\u6709 {hidden} \u4e2a",
+    below: "   \u2193 \u8fd8\u6709 {hidden} \u4e2a",
+    footer: "  \u2191\u2193 \u5bfc\u822a \u00b7 Tab/\u23ce \u9009\u62e9 \u00b7 Esc \u53d6\u6d88",
   },
 };

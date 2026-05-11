@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig.jsx = "react" needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../i18n/index.js";
 import type { SlashCommandSpec } from "./slash.js";
 import { GLYPH, useColor } from "./theme.js";
 
@@ -68,8 +69,8 @@ export function SlashArgPicker({
           <Text color={color.warn} bold>
             {GLYPH.warn}
           </Text>
-          <Text color={color.warn}>{` no match for "${partial}"`}</Text>
-          <Text dimColor>{" — keep typing, or Backspace to edit"}</Text>
+          <Text color={color.warn}>{t("slashArgPicker.noMatch", { partial })}</Text>
+          <Text dimColor>{t("slashArgPicker.keepTyping")}</Text>
         </Box>
       </Box>
     );
@@ -85,13 +86,17 @@ export function SlashArgPicker({
   return (
     <Box flexDirection="column" paddingX={1} marginTop={1}>
       {headerRow}
-      {hiddenAbove > 0 ? <Text dimColor>{`   ↑ ${hiddenAbove} above`}</Text> : null}
+      {hiddenAbove > 0 ? (
+        <Text dimColor>{t("slashArgPicker.above", { hidden: hiddenAbove })}</Text>
+      ) : null}
       {shown.map((value, i) => (
         <ArgRow key={value} value={value} isSelected={windowStart + i === selectedIndex} />
       ))}
-      {hiddenBelow > 0 ? <Text dimColor>{`   ↓ ${hiddenBelow} below`}</Text> : null}
+      {hiddenBelow > 0 ? (
+        <Text dimColor>{t("slashArgPicker.below", { hidden: hiddenBelow })}</Text>
+      ) : null}
       <Box marginTop={0}>
-        <Text dimColor>{"  ↑↓ navigate · Tab / ⏎ pick · esc cancel"}</Text>
+        <Text dimColor>{t("slashArgPicker.footer")}</Text>
       </Box>
     </Box>
   );

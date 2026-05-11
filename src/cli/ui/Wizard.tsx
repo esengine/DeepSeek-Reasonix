@@ -363,7 +363,7 @@ function ThemeStep({
         <Text color={theme.fg.meta}>{t("wizard.themeSampleHeading")}</Text>
         <Box marginTop={1}>
           <Text color={theme.tone.accent}>{"◆ "}</Text>
-          <Text color={theme.tone.accent}>Reasoning</Text>
+          <Text color={theme.tone.accent}>{t("wizard.themeSampleReasoning")}</Text>
         </Box>
         <Box>
           <Text color={theme.tone.info}>{"▣ "}</Text>

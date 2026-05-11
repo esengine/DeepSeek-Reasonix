@@ -283,6 +283,16 @@ export interface TranslationSchema {
     savedFooter: string;
     selectFooter: string;
     stepCounter: string;
+    exitHint: string;
+    apiKeyPlaceholder: string;
+    themeSampleReasoning: string;
+  };
+  themePicker: {
+    header: string;
+    footer: string;
+    currentPref: string;
+    activeNow: string;
+    autoDesc: string;
   };
   planFlow: {
     approveCardTitle: string;
@@ -325,6 +335,9 @@ export interface TranslationSchema {
       counterDone: string;
       counterDoneSingular: string;
     };
+    reviseTitle: string;
+    reviseSteps: string;
+    reviseFooter: string;
   };
   statusBar: {
     turn: string;
@@ -442,6 +455,14 @@ export interface TranslationSchema {
     groupCode: string;
     groupJobs: string;
     groupAdvanced: string;
+    groupDetailSetup: string;
+    groupDetailInfo: string;
+    groupDetailChat: string;
+    groupDetailExtend: string;
+    groupDetailSession: string;
+    groupDetailCode: string;
+    groupDetailJobs: string;
+    groupDetailAdvanced: string;
   };
   atMentions: {
     loading: string;
@@ -595,5 +616,27 @@ export interface TranslationSchema {
     labelReasoning: string;
     yankedToast: string;
     yankedToastFile: string;
+  };
+  mcpHealth: {
+    noData: string;
+    healthy: string;
+    slow: string;
+    verySlow: string;
+  };
+  denyContextInput: {
+    description: string;
+  };
+  cardStream: {
+    scrollAbove: string;
+    scrollAbovePlural: string;
+    scrollMore: string;
+    scrollPgUp: string;
+  };
+  slashArgPicker: {
+    noMatch: string;
+    keepTyping: string;
+    above: string;
+    below: string;
+    footer: string;
   };
 }

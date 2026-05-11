@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useState } from "react";
+import { t } from "../../i18n/index.js";
 import type { PlanStep } from "../../tools/plan.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
 import { useKeystroke } from "./keystroke-context.js";
@@ -98,9 +99,9 @@ export function PlanReviseEditor({
     <ApprovalCard
       tone="accent"
       glyph="✎"
-      title="Revise plan"
-      metaRight={`${rows.length} steps`}
-      footerHint="↑↓ focus  ·  space toggle skip  ·  k/j move  ·  ⏎ accept  ·  esc cancel"
+      title={t("planFlow.reviseTitle")}
+      metaRight={t("planFlow.reviseSteps", { count: rows.length })}
+      footerHint={t("planFlow.reviseFooter")}
     >
       {rows.map((r, i) => (
         <ReviseRow key={r.step.id} row={r} index={i} focused={i === focus} />
