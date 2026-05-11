@@ -16,6 +16,7 @@ import { t } from "../../i18n/index.js";
 import { indexExists } from "../../index/semantic/builder.js";
 import { checkOllamaStatus } from "../../index/semantic/ollama-launcher.js";
 import { listSessions } from "../../memory/session.js";
+import { detectProxyUrl } from "../../net/proxy.js";
 import { resolveDataPath } from "../../tokenizer.js";
 import { VERSION } from "../../version.js";
 
@@ -39,6 +40,7 @@ export async function runDoctorChecks(projectRoot: string): Promise<DoctorCheck[
   return Promise.all([
     checkApiKey(),
     checkConfig(),
+    checkProxy(),
     checkApiReach(),
     checkTokenizer(),
     checkSessions(),
@@ -46,6 +48,35 @@ export async function runDoctorChecks(projectRoot: string): Promise<DoctorCheck[
     checkOllama(projectRoot),
     checkProject(projectRoot),
   ]);
+}
+
+function checkProxy(): Check {
+  const url = detectProxyUrl();
+  if (!url) {
+    return {
+      id: "proxy",
+      label: "http proxy   ",
+      level: "ok",
+      detail: "no HTTPS_PROXY / HTTP_PROXY / ALL_PROXY set — direct connection",
+    };
+  }
+  let redacted = url;
+  try {
+    const u = new URL(url);
+    if (u.username || u.password) {
+      u.username = "***";
+      u.password = "";
+      redacted = u.toString();
+    }
+  } catch {
+    /* not a URL — leave raw */
+  }
+  return {
+    id: "proxy",
+    label: "http proxy   ",
+    level: "ok",
+    detail: `routing fetch through ${redacted}`,
+  };
 }
 
 const TTY = process.stdout.isTTY && process.env.TERM !== "dumb";

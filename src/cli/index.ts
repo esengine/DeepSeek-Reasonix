@@ -4,9 +4,15 @@ import { t } from "../i18n/index.js";
 import { VERSION } from "../index.js";
 import { listSessions } from "../memory/session.js";
 import { applyMemoryStack } from "../memory/user.js";
+import { installProxyIfConfigured } from "../net/proxy.js";
 import { escalationContract } from "../prompt-fragments.js";
 import { resolveContinueFlag, resolveDefaults } from "./resolve.js";
 import { markPhase } from "./startup-profile.js";
+
+// HTTPS_PROXY / HTTP_PROXY only reach Node's fetch via undici's global
+// dispatcher; install before any client (DeepSeek, web tools, dashboard)
+// constructs a fetch closure. Issue #646.
+installProxyIfConfigured();
 
 markPhase("cli_module_loaded");
 
