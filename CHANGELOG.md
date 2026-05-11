@@ -3,6 +3,46 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.1] — 2026-05-11
+
+**Hotfix:** `0.39.0` shipped with a `postinstall: patch-package` hook
+but neither `patch-package` (in `devDependencies` only) nor the
+`patches/` directory (omitted from `files`) made it into the published
+tarball. Fresh installs failed with `'patch-package' is not recognized
+as an internal or external command`, taking the whole install down.
+`0.39.0` is deprecated on npm.
+
+The `patch-package` approach was wrong by design — it patches
+`./node_modules/<dep>`, but npm hoists `ink` to the consumer's
+top-level `node_modules/ink`, so patch-package never finds the target
+when reasonix is installed as a dependency. The install-time
+machinery is removed entirely. The ink alt-screen render fix (#639)
+will return via a forked `ink` package and an `npm:` alias in a later
+release; until then the alt-screen ghosting on CJK terminals matches
+0.38.0 behavior. Tracked at #663.
+
+Three feature/fix PRs that were in flight piggyback on this release.
+
+**Features:**
+
+- feat(composer): Ctrl+X opens `$EDITOR` with the current input —
+  drafts long prompts in vim/code/etc. instead of fighting the
+  in-terminal editor. (#647, #661)
+- feat(composer): Ctrl+P / Ctrl+N navigate input-prefix pickers when
+  open — slash, `@`-mention, slash-arg pickers move up/down with the
+  same keys as ↑/↓ when active, fall through to history recall when
+  closed. (#647, #662)
+
+**Fixes:**
+
+- fix(pkg): drop `postinstall: patch-package`, the `patches/`
+  directory and the `patch-package` dependency. Fresh installs no
+  longer fail on the missing patch-package binary.
+- fix(web): `web_search` / `web_fetch` errors now carry an actionable
+  ` — try: …` tail so the model self-corrects (back off on 429,
+  switch engine on 403, pick a smaller URL on oversize, etc.) instead
+  of giving up on a bare status code. (#16, #632)
+
 ## [0.39.0] — 2026-05-11
 
 **Headline:** field-bug week — a wave of user-reported rendering, tool

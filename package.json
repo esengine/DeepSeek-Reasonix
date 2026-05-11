@@ -1,6 +1,6 @@
 {
   "name": "reasonix",
-  "version": "0.39.0",
+  "version": "0.39.1",
   "description": "DeepSeek-native coding agent: cache-first loop, flash-first cost control, tool-call repair.",
   "type": "module",
   "bin": {
@@ -37,7 +37,6 @@
     "format": "biome format --write src tests",
     "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard",
     "verify": "npm run build && npm run lint && npm run typecheck && npm run test --silent",
-    "postinstall": "patch-package",
     "prepare": "simple-git-hooks || true",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
@@ -95,7 +94,6 @@
     "htm": "^3.1.1",
     "ink-testing-library": "^4.0.0",
     "marked": "^15.0.12",
-    "patch-package": "^8.0.1",
     "preact": "^10.22.0",
     "simple-git-hooks": "^2.13.1",
     "tsup": "^8.3.5",
