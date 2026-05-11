@@ -121,6 +121,11 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         ? state
         : { ...state, session: { ...state.session, model: event.model } };
 
+    case "session.preset.change":
+      return state.status.preset === event.preset
+        ? state
+        : { ...state, status: { ...state.status, preset: event.preset } };
+
     case "focus.move":
       return {
         ...state,

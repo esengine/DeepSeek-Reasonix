@@ -129,6 +129,11 @@ const sessionModelChange = z.object({
   model: z.string().min(1),
 });
 
+const sessionPresetChange = z.object({
+  type: z.literal("session.preset.change"),
+  preset: z.enum(["auto", "flash", "pro"]).nullable(),
+});
+
 const focusMove = z.object({
   type: z.literal("focus.move"),
   direction: z.enum(["next", "prev", "first", "last"]),
@@ -319,6 +324,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   languageChange,
   sessionUpdate,
   sessionModelChange,
+  sessionPresetChange,
   focusMove,
   focusSet,
   cardToggle,

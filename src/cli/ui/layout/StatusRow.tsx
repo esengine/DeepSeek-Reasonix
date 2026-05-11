@@ -13,6 +13,7 @@ const RULE_MIN = 20;
 const WALLET_MIN_COLS = 90;
 const VERSION_MIN_COLS = 70;
 const FEEDBACK_HINT_MIN_COLS = 100;
+const PRESET_MIN_COLS = 60;
 
 export function StatusRow(): React.ReactElement {
   const status = useAgentState((s) => s.status);
@@ -41,6 +42,9 @@ export function StatusRow(): React.ReactElement {
           <CountdownRow mode={status.mode} secondsLeft={status.countdownSeconds} />
         ) : (
           <ModePill mode={status.mode} network={status.network} detail={status.networkDetail} />
+        )}
+        {cols >= PRESET_MIN_COLS && status.preset !== undefined && (
+          <PresetPill preset={status.preset} model={session.model} />
         )}
         <Sep />
         <Text color={FG.sub} wrap="truncate">{`${session.id} · ${session.branch}`}</Text>
@@ -89,6 +93,34 @@ export function StatusRow(): React.ReactElement {
       </Box>
     </Box>
   );
+}
+
+function PresetPill({
+  preset,
+  model,
+}: {
+  preset: "auto" | "flash" | "pro" | null;
+  model: string;
+}): React.ReactElement {
+  const label = preset ?? shortModelLabel(model);
+  const color = preset === "pro" ? TONE.accent : preset === "flash" ? TONE.brand : FG.sub;
+  return (
+    <>
+      <Sep />
+      <Text color={FG.meta} wrap="truncate">
+        {"▴ "}
+      </Text>
+      <Text color={color} wrap="truncate">
+        {label}
+      </Text>
+    </>
+  );
+}
+
+function shortModelLabel(model: string): string {
+  if (model === "deepseek-v4-flash") return "flash";
+  if (model === "deepseek-v4-pro") return "pro";
+  return model.replace(/^deepseek-/, "");
 }
 
 function WalletPill({
@@ -142,6 +174,7 @@ function ModePill({
   network: NetworkState;
   detail?: string;
 }): React.ReactElement {
+  const modeLabel = `${t("statusBar.editsLabel")}${mode}`;
   if (network === "online") {
     const pill = modeGlyph(mode);
     return (
@@ -149,7 +182,7 @@ function ModePill({
         <Text color={pill.color} wrap="truncate">
           {pill.glyph}
         </Text>
-        <Text color={FG.sub} wrap="truncate">{` ${mode}`}</Text>
+        <Text color={FG.sub} wrap="truncate">{` ${modeLabel}`}</Text>
       </Box>
     );
   }
@@ -161,7 +194,10 @@ function ModePill({
         <Text color={dot.color} wrap="truncate">
           {dot.glyph}
         </Text>
-        <Text color={dot.color} wrap="truncate">{` ${mode} · ${t("statusBar.slow")}${tail}`}</Text>
+        <Text
+          color={dot.color}
+          wrap="truncate"
+        >{` ${modeLabel} · ${t("statusBar.slow")}${tail}`}</Text>
       </Box>
     );
   }
@@ -202,7 +238,9 @@ function CountdownRow({
       <Text color={pill.color} wrap="truncate">
         {pill.glyph}
       </Text>
-      <Text color={FG.sub} wrap="truncate">{` ${mode}   ·   `}</Text>
+      <Text color={FG.sub} wrap="truncate">
+        {` ${t("statusBar.editsLabel")}${mode}   ·   `}
+      </Text>
       <Text color={TONE.warn} wrap="truncate">
         {t("statusBar.approvingIn")}
       </Text>

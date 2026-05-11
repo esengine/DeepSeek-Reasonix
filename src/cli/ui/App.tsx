@@ -42,6 +42,7 @@ import {
   mouseClipboardHintShown,
   resolveThemePreference,
   saveEditMode,
+  savePreset,
   saveReasoningEffort,
   saveTheme,
 } from "../../config.js";
@@ -877,6 +878,23 @@ function AppInner({
   useEffect(() => {
     loop.hooks = hookList;
   }, [loop, hookList]);
+
+  // Seed status.preset from initial loop state so the StatusRow preset pill
+  // renders correctly on first paint — usePresetMode's React-state mirror
+  // doesn't propagate to the agent store, so without this dispatch the pill
+  // would show the bare model id instead of the resolved preset.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
+  useEffect(() => {
+    const canonical: "auto" | "flash" | "pro" | null =
+      loop.model === "deepseek-v4-pro"
+        ? "pro"
+        : loop.model === "deepseek-v4-flash"
+          ? loop.autoEscalate
+            ? "auto"
+            : "flash"
+          : null;
+    agentStore.dispatch({ type: "session.preset.change", preset: canonical });
+  }, []);
 
   // Deferred MCP bridge — fire addSpec for each requested server in the
   // background instead of blocking startup, route lifecycle events to
@@ -1756,6 +1774,12 @@ function AppInner({
                   ? "auto"
                   : "flash";
             setPreset(canonical);
+            agentStore.dispatch({ type: "session.preset.change", preset: canonical });
+            try {
+              savePreset(canonical);
+            } catch {
+              /* disk full / perms — runtime change still took effect */
+            }
           },
           applyEffortLive: (effort) => {
             loop.configure({ reasoningEffort: effort });
@@ -3721,8 +3745,28 @@ function AppInner({
                     onChoose={(outcome) => {
                       setPendingModelPicker(false);
                       if (outcome.kind === "select") {
-                        loop.configure({ model: outcome.id });
+                        // Manual model pick = explicit pin: turn off auto-escalate
+                        // so flash doesn't get bumped, persist inferred preset.
+                        loop.configure({ model: outcome.id, autoEscalate: false });
                         agentStore.dispatch({ type: "session.model.change", model: outcome.id });
+                        const inferred =
+                          outcome.id === "deepseek-v4-pro"
+                            ? "pro"
+                            : outcome.id === "deepseek-v4-flash"
+                              ? "flash"
+                              : null;
+                        setPreset(inferred ?? "flash");
+                        agentStore.dispatch({
+                          type: "session.preset.change",
+                          preset: inferred,
+                        });
+                        if (inferred) {
+                          try {
+                            savePreset(inferred);
+                          } catch {
+                            /* disk full / perms — runtime change still took effect */
+                          }
+                        }
                         log.pushInfo(`▸ model: ${outcome.id}`);
                         return;
                       }
@@ -3734,8 +3778,14 @@ function AppInner({
                           reasoningEffort: p.reasoningEffort,
                         });
                         agentStore.dispatch({ type: "session.model.change", model: p.model });
+                        setPreset(outcome.name);
+                        agentStore.dispatch({
+                          type: "session.preset.change",
+                          preset: outcome.name,
+                        });
                         try {
                           saveReasoningEffort(p.reasoningEffort);
+                          savePreset(outcome.name);
                         } catch {
                           /* disk full / perms — runtime change still took effect */
                         }

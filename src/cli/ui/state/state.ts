@@ -32,6 +32,8 @@ export interface StatusBar {
   cacheHit: number;
   countdownSeconds?: number;
   recording?: { sizeBytes: number; events: number; path: string };
+  /** null → user is on a custom model that doesn't match any preset; pill falls back to the model id. */
+  preset?: "auto" | "flash" | "pro" | null;
 }
 
 export interface Toast {

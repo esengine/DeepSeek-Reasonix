@@ -1,7 +1,13 @@
-import { saveReasoningEffort } from "@/config.js";
+import { savePreset, saveReasoningEffort } from "@/config.js";
 import { t } from "@/i18n/index.js";
 import { PRESETS } from "../../presets.js";
 import type { SlashHandler } from "../dispatch.js";
+
+function inferPresetFromModel(id: string): "auto" | "flash" | "pro" | null {
+  if (id === "deepseek-v4-pro") return "pro";
+  if (id === "deepseek-v4-flash") return "flash";
+  return null;
+}
 
 const model: SlashHandler = (args, loop, ctx) => {
   const id = args[0];
@@ -9,8 +15,19 @@ const model: SlashHandler = (args, loop, ctx) => {
   if (!id) {
     return { openModelPicker: true };
   }
-  loop.configure({ model: id });
+  // Manual model pick = explicit pin: disable auto-escalate so flash doesn't
+  // get bumped, and persist the inferred preset so a relaunch keeps the choice.
+  loop.configure({ model: id, autoEscalate: false });
   ctx.dispatch?.({ type: "session.model.change", model: id });
+  const inferred = inferPresetFromModel(id);
+  ctx.dispatch?.({ type: "session.preset.change", preset: inferred });
+  if (inferred) {
+    try {
+      savePreset(inferred);
+    } catch {
+      /* disk full / perms — runtime change still took effect */
+    }
+  }
   if (known && known.length > 0 && !known.includes(id)) {
     return {
       info: t("handlers.model.modelNotInCatalog", { id, list: known.join(", ") }),
@@ -21,32 +38,34 @@ const model: SlashHandler = (args, loop, ctx) => {
 
 const preset: SlashHandler = (args, loop, ctx) => {
   const name = (args[0] ?? "").toLowerCase();
-  const applyAndPersist = (effort: "high" | "max") => {
-    try {
-      saveReasoningEffort(effort);
-    } catch {
-      /* disk full / perms — runtime change still took effect */
-    }
-  };
-  const apply = (p: (typeof PRESETS)[keyof typeof PRESETS]) => {
+  const apply = (
+    presetName: "auto" | "flash" | "pro",
+    p: (typeof PRESETS)[keyof typeof PRESETS],
+  ) => {
     loop.configure({
       model: p.model,
       autoEscalate: p.autoEscalate,
       reasoningEffort: p.reasoningEffort,
     });
     ctx.dispatch?.({ type: "session.model.change", model: p.model });
-    applyAndPersist(p.reasoningEffort);
+    ctx.dispatch?.({ type: "session.preset.change", preset: presetName });
+    try {
+      saveReasoningEffort(p.reasoningEffort);
+      savePreset(presetName);
+    } catch {
+      /* disk full / perms — runtime change still took effect */
+    }
   };
   if (name === "auto") {
-    apply(PRESETS.auto);
+    apply("auto", PRESETS.auto);
     return { info: t("handlers.model.presetAuto") };
   }
   if (name === "flash") {
-    apply(PRESETS.flash);
+    apply("flash", PRESETS.flash);
     return { info: t("handlers.model.presetFlash") };
   }
   if (name === "pro") {
-    apply(PRESETS.pro);
+    apply("pro", PRESETS.pro);
     return { info: t("handlers.model.presetPro") };
   }
   if (name === "") {

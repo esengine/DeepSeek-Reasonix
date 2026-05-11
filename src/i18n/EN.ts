@@ -1065,6 +1065,7 @@ export const EN: TranslationSchema = {
     recordingGlyph: "\u25CFREC",
     mb: " MB",
     evt: " evt",
+    editsLabel: "edits:",
   },
   editMode: {
     plan: "PLAN MODE",

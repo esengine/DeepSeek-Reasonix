@@ -1010,6 +1010,7 @@ export const zhCN: TranslationSchema = {
     recordingGlyph: "●REC",
     mb: " MB",
     evt: " 事件",
+    editsLabel: "编辑:",
   },
   editMode: {
     plan: "计划",

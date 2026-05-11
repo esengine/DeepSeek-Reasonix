@@ -353,6 +353,13 @@ export function saveReasoningEffort(
   writeConfig(cfg, path);
 }
 
+/** Persist preset so `/preset pro` (or `/model deepseek-v4-pro`) sticks across relaunches. */
+export function savePreset(preset: PresetName, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.preset = preset;
+  writeConfig(cfg, path);
+}
+
 export function loadIndexUserConfig(path: string = defaultConfigPath()): IndexUserConfig {
   return readConfig(path).index ?? {};
 }

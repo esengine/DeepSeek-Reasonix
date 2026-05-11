@@ -354,6 +354,8 @@ export interface TranslationSchema {
     recordingGlyph: string;
     mb: string;
     evt: string;
+    /** Prefix for the edit-gate mode pill — disambiguates from the preset (`/preset auto` is a different "auto"). */
+    editsLabel: string;
   };
   editMode: {
     plan: string;
