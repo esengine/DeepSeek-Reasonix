@@ -1094,6 +1094,9 @@ export const EN: TranslationSchema = {
     editorNoRawMode:
       "external editor unavailable \u2014 stdin doesn't support raw-mode toggling on this terminal",
     editorFailed: "external editor:",
+    editorMissing:
+      "no $EDITOR / $VISUAL / $GIT_EDITOR set \u2014 export one (e.g. `export EDITOR=nano`) and retry",
+    editorExited: "editor exited with code {code}",
   },
   shellConfirm: {
     title: "Shell command",
@@ -1378,6 +1381,7 @@ export const EN: TranslationSchema = {
     healthy: "healthy \u00b7 {ms}ms",
     slow: "slow \u00b7 {ms}ms",
     verySlow: "very slow \u00b7 {ms}ms",
+    slowToast: "\u26a0 MCP `{name}` slow \u00b7 {seconds}s p95 over the last {sampleSize} calls",
   },
   denyContextInput: {
     description:
@@ -1436,6 +1440,16 @@ export const EN: TranslationSchema = {
     empty: "No MCP servers attached. Run `reasonix setup` to pick some, or launch with --mcp.",
     serverCount: "{count} server{s}",
     footer: "\u2191\u2193 pick \u00b7 [r] reconnect \u00b7 [d] disable \u00b7 esc quit",
+  },
+  mcpLifecycle: {
+    handshake: "handshake\u2026",
+    connected: "connected",
+    failed: "failed",
+    disabled: "disabled",
+    reconnect: "reconnect\u2026",
+    initDetail: "initialise \u2192 tools/list \u2192 resources/list",
+    reconnectDetail: "tearing down \u00b7 re-handshake \u00b7 listing tools",
+    disabledDetail: "via /mcp disable {name}",
   },
   checkpointPicker: {
     title: "restore a checkpoint \u2014 {workspace}",

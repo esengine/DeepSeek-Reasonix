@@ -1038,6 +1038,9 @@ export const zhCN: TranslationSchema = {
     abortedHint: "用户已中止本轮 · 再按 Esc 清除 · ⏎ 继续提问",
     editorNoRawMode: "外部编辑器不可用 — 当前终端不支持 raw-mode 切换",
     editorFailed: "外部编辑器：",
+    editorMissing:
+      "未设置 $EDITOR / $VISUAL / $GIT_EDITOR — 请导出环境变量（例如 `export EDITOR=nano`）后重试",
+    editorExited: "编辑器异常退出，返回码 {code}",
   },
   shellConfirm: {
     title: "Shell 命令",
@@ -1314,6 +1317,7 @@ export const zhCN: TranslationSchema = {
     healthy: "正常 \u00b7 {ms}ms",
     slow: "缓慢 \u00b7 {ms}ms",
     verySlow: "非常慢 \u00b7 {ms}ms",
+    slowToast: "\u26a0 MCP `{name}` 响应缓慢 \u00b7 P95 {seconds}s \u00b7 最近 {sampleSize} 次调用",
   },
   denyContextInput: {
     description: "告诉模型你为什么拒绝了。模型下次会看到你的理由作为额外的上下文。",
@@ -1369,6 +1373,16 @@ export const zhCN: TranslationSchema = {
     empty: "没有挂载 MCP 服务器。运行 `reasonix setup` 选择一些，或使用 --mcp 启动。",
     serverCount: "{count} 个服务器",
     footer: "↑↓ 选择 · [r] 重连 · [d] 禁用 · Esc 退出",
+  },
+  mcpLifecycle: {
+    handshake: "握手中…",
+    connected: "已连接",
+    failed: "失败",
+    disabled: "已禁用",
+    reconnect: "重连中…",
+    initDetail: "初始化 → tools/list → resources/list",
+    reconnectDetail: "断开旧连接 · 重新握手 · 列出工具",
+    disabledDetail: "通过 /mcp disable {name}",
   },
   checkpointPicker: {
     title: "恢复检查点 \u2014 {workspace}",

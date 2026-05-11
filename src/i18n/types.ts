@@ -383,6 +383,8 @@ export interface TranslationSchema {
     abortedHint: string;
     editorNoRawMode: string;
     editorFailed: string;
+    editorMissing: string;
+    editorExited: string;
   };
   shellConfirm: {
     title: string;
@@ -639,6 +641,7 @@ export interface TranslationSchema {
     healthy: string;
     slow: string;
     verySlow: string;
+    slowToast: string;
   };
   denyContextInput: {
     description: string;
@@ -694,6 +697,16 @@ export interface TranslationSchema {
     empty: string;
     serverCount: string;
     footer: string;
+  };
+  mcpLifecycle: {
+    handshake: string;
+    connected: string;
+    failed: string;
+    disabled: string;
+    reconnect: string;
+    initDetail: string;
+    reconnectDetail: string;
+    disabledDetail: string;
   };
   checkpointPicker: {
     title: string;

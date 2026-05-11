@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { t } from "../../i18n/index.js";
 
 export interface OpenEditorResult {
   /** "ok" when the editor returned 0 and we read content back; "missing" when no editor env var is set; "failed" on spawn error or non-zero exit. */
@@ -30,8 +31,7 @@ export async function openInExternalEditor(initial: string): Promise<OpenEditorR
     return {
       kind: "missing",
       content: initial,
-      detail:
-        "no $EDITOR / $VISUAL / $GIT_EDITOR set — export one (e.g. `export EDITOR=nano`) and retry",
+      detail: t("composer.editorMissing"),
     };
   }
   const dir = mkdtempSync(join(tmpdir(), "reasonix-compose-"));
@@ -45,7 +45,7 @@ export async function openInExternalEditor(initial: string): Promise<OpenEditorR
     return {
       kind: "failed",
       content: initial,
-      detail: (err as Error).message,
+      detail: t("composer.editorExited", { code: (err as Error).message }),
     };
   } finally {
     try {
@@ -68,7 +68,7 @@ function spawnEditor(editor: string, path: string): Promise<void> {
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0 || code === null) resolve();
-      else reject(new Error(`editor exited with code ${code}`));
+      else reject(new Error(String(code)));
     });
   });
 }
