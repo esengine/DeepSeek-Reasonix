@@ -4,11 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  type DoctorCheck,
-  doctorCommand,
-  formatDoctorJson,
-} from "../src/cli/commands/doctor.js";
+import { type DoctorCheck, doctorCommand, formatDoctorJson } from "../src/cli/commands/doctor.js";
 import { VERSION } from "../src/version.js";
 
 describe("formatDoctorJson", () => {
@@ -51,17 +47,14 @@ describe("doctorCommand --json (integration)", () => {
   let tmpHome: string;
   let tmpCwd: string;
   const origCwd = process.cwd();
-  const origHome = process.env.HOME;
-  const origUserProfile = process.env.USERPROFILE;
-  const origApiKey = process.env.DEEPSEEK_API_KEY;
 
   beforeEach(() => {
     tmpHome = mkdtempSync(join(tmpdir(), "reasonix-doctor-home-"));
     tmpCwd = mkdtempSync(join(tmpdir(), "reasonix-doctor-cwd-"));
-    process.env.HOME = tmpHome;
-    process.env.USERPROFILE = tmpHome;
+    vi.stubEnv("HOME", tmpHome);
+    vi.stubEnv("USERPROFILE", tmpHome);
     // Ensure no API key so checkApiReach skips the network call.
-    delete process.env.DEEPSEEK_API_KEY;
+    vi.stubEnv("DEEPSEEK_API_KEY", "");
     process.chdir(tmpCwd);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
@@ -70,13 +63,8 @@ describe("doctorCommand --json (integration)", () => {
   afterEach(() => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
+    vi.unstubAllEnvs();
     process.chdir(origCwd);
-    if (origHome === undefined) delete process.env.HOME;
-    else process.env.HOME = origHome;
-    if (origUserProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = origUserProfile;
-    if (origApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
-    else process.env.DEEPSEEK_API_KEY = origApiKey;
     rmSync(tmpHome, { recursive: true, force: true });
     rmSync(tmpCwd, { recursive: true, force: true });
   });
