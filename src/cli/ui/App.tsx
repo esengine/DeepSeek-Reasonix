@@ -511,6 +511,9 @@ function AppInner({
     id: number;
     command: string;
     kind: "run_command" | "run_background";
+    cwd?: string;
+    timeoutSec?: number;
+    waitSec?: number;
   } | null>(null);
   // Plan text the model submitted via `submit_plan` while plan mode
   // was active. Non-null renders PlanConfirm; user picks Approve /
@@ -3160,13 +3163,23 @@ function AppInner({
 
       switch (request.kind) {
         case "run_command":
-        case "run_background":
+        case "run_background": {
+          const p = payload as {
+            command: string;
+            cwd?: string;
+            timeoutSec?: number;
+            waitSec?: number;
+          };
           setPendingShell({
             id: request.id,
-            command: (payload as { command: string }).command,
+            command: p.command,
             kind: request.kind,
+            cwd: p.cwd,
+            timeoutSec: p.timeoutSec,
+            waitSec: p.waitSec,
           });
           break;
+        }
         case "plan_proposed": {
           const p = payload as { plan: string; steps?: PlanStep[]; summary?: string };
           setPendingPlan(p.plan);
@@ -3847,6 +3860,9 @@ function AppInner({
                     command={pendingShell.command}
                     allowPrefix={derivePrefix(pendingShell.command)}
                     kind={pendingShell.kind}
+                    cwd={pendingShell.cwd}
+                    timeoutSec={pendingShell.timeoutSec}
+                    waitSec={pendingShell.waitSec}
                     onChoose={handleShellConfirm}
                   />
                 ) : pendingEditReview ? (

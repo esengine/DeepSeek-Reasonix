@@ -400,6 +400,9 @@ export interface TranslationSchema {
     allowAlwaysDesc: string;
     deny: string;
     denyDesc: string;
+    cwdLabel: string;
+    timeoutLabel: string;
+    waitLabel: string;
   };
   editConfirm: {
     footer: string;

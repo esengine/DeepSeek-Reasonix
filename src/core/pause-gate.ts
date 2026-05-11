@@ -55,8 +55,8 @@ interface PauseResponseMap {
 type PauseKind = keyof PauseResponseMap;
 
 interface PausePayloadMap {
-  run_command: { command: string };
-  run_background: { command: string };
+  run_command: { command: string; cwd?: string; timeoutSec?: number };
+  run_background: { command: string; cwd?: string; waitSec?: number };
   plan_proposed: { plan: string; steps?: unknown[]; summary?: string };
   plan_checkpoint: { stepId: string; title?: string; result: string; notes?: string };
   plan_revision: { reason: string; remainingSteps: unknown[]; summary?: string };

@@ -1055,6 +1055,9 @@ export const zhCN: TranslationSchema = {
     allowAlwaysDesc: "记住 `{prefix}`，本项目内不再询问",
     deny: "拒绝",
     denyDesc: "按 Tab 添加说明，告诉模型原因",
+    cwdLabel: "工作目录",
+    timeoutLabel: "超时",
+    waitLabel: "等待",
   },
   editConfirm: {
     footer:

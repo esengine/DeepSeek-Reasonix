@@ -451,7 +451,7 @@ describe("registerShellTools — dispatch integration", () => {
     });
     expect(spy.lastCall).not.toBeNull();
     expect(spy.lastCall!.kind).toBe("run_command");
-    expect(spy.lastCall!.payload).toEqual({ command: "npm i" });
+    expect(spy.lastCall!.payload).toMatchObject({ command: "npm i", cwd: tmp });
   });
 
   it("allowAll:true bypasses the allowlist entirely", async () => {

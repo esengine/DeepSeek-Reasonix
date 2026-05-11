@@ -112,9 +112,13 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
     fn: async (args: { command: string; timeoutSec?: number }, ctx) => {
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_command: empty command");
+      const effectiveTimeout = Math.max(1, Math.min(600, args.timeoutSec ?? timeoutSec));
       if (!isAllowAll() && !isCommandAllowed(cmd, getExtraAllowed())) {
         const gate = ctx?.confirmationGate ?? pauseGate;
-        const choice = await gate.ask({ kind: "run_command", payload: { command: cmd } });
+        const choice = await gate.ask({
+          kind: "run_command",
+          payload: { command: cmd, cwd: rootDir, timeoutSec: effectiveTimeout },
+        });
         if (choice.type === "deny") {
           throw new Error(
             `user denied: ${cmd}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`,
@@ -125,7 +129,6 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         }
         // "run_once" — fall through and execute
       }
-      const effectiveTimeout = Math.max(1, Math.min(600, args.timeoutSec ?? timeoutSec));
       const result = await runCommand(cmd, {
         cwd: rootDir,
         timeoutSec: effectiveTimeout,
@@ -161,7 +164,10 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       if (!cmd) throw new Error("run_background: empty command");
       if (!isAllowAll() && !isCommandAllowed(cmd, getExtraAllowed())) {
         const gate = ctx?.confirmationGate ?? pauseGate;
-        const choice = await gate.ask({ kind: "run_background", payload: { command: cmd } });
+        const choice = await gate.ask({
+          kind: "run_background",
+          payload: { command: cmd, cwd: rootDir, waitSec: args.waitSec },
+        });
         if (choice.type === "deny") {
           throw new Error(
             `user denied: ${cmd}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`,
