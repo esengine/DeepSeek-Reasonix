@@ -401,7 +401,9 @@ describe("webFetch", () => {
       async () => new Response("nope", { status: 429 }),
     ) as unknown as typeof fetch;
     try {
-      await expect(webFetch("https://example.com/rate")).rejects.toThrow(/web_fetch 429.*try:.*wait/);
+      await expect(webFetch("https://example.com/rate")).rejects.toThrow(
+        /web_fetch 429.*try:.*wait/,
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -438,9 +440,9 @@ describe("webFetch", () => {
       });
     }) as unknown as typeof fetch;
     try {
-      await expect(
-        webFetch("https://example.com/slow", { timeoutMs: 10 }),
-      ).rejects.toThrow(/timed out after 10ms.*try:/);
+      await expect(webFetch("https://example.com/slow", { timeoutMs: 10 })).rejects.toThrow(
+        /timed out after 10ms.*try:/,
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
