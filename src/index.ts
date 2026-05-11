@@ -51,10 +51,13 @@ export type { ImmutablePrefixOptions } from "./memory/runtime.js";
 
 export {
   PROJECT_MEMORY_FILE,
+  PROJECT_MEMORY_FILES,
   PROJECT_MEMORY_MAX_CHARS,
   applyProjectMemory,
+  findProjectMemoryPath,
   memoryEnabled,
   readProjectMemory,
+  resolveProjectMemoryWritePath,
 } from "./memory/project.js";
 export type { ProjectMemory } from "./memory/project.js";
 

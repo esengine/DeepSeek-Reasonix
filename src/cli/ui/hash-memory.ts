@@ -3,7 +3,7 @@
 import { closeSync, fstatSync, mkdirSync, openSync, readSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { PROJECT_MEMORY_FILE } from "../../memory/project.js";
+import { resolveProjectMemoryWritePath } from "../../memory/project.js";
 
 const PROJECT_HEADER = `# Reasonix project memory
 
@@ -61,7 +61,7 @@ export interface AppendMemoryResult {
 }
 
 export function appendProjectMemory(rootDir: string, note: string): AppendMemoryResult {
-  return appendBulletToFile(join(rootDir, PROJECT_MEMORY_FILE), note, PROJECT_HEADER);
+  return appendBulletToFile(resolveProjectMemoryWritePath(rootDir), note, PROJECT_HEADER);
 }
 
 export const GLOBAL_MEMORY_DIR = ".reasonix";

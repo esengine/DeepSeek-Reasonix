@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { t } from "@/i18n/index.js";
 import { PROJECT_MEMORY_FILE, memoryEnabled, readProjectMemory } from "@/memory/project.js";
 import { type MemoryScope, MemoryStore } from "@/memory/user.js";
@@ -97,9 +98,10 @@ const memory: SlashHandler = (args, _loop, ctx) => {
   const parts: string[] = [];
   const projMem = readProjectMemory(ctx.memoryRoot);
   if (projMem) {
+    const label = basename(projMem.path);
     const hdr = projMem.truncated
-      ? `▸ ${PROJECT_MEMORY_FILE}: ${projMem.path} (${projMem.originalChars.toLocaleString()} chars, truncated)`
-      : `▸ ${PROJECT_MEMORY_FILE}: ${projMem.path} (${projMem.originalChars.toLocaleString()} chars)`;
+      ? `▸ ${label}: ${projMem.path} (${projMem.originalChars.toLocaleString()} chars, truncated)`
+      : `▸ ${label}: ${projMem.path} (${projMem.originalChars.toLocaleString()} chars)`;
     parts.push(hdr, "", projMem.content);
   }
   const globalIdx = store.loadIndex("global");

@@ -11,8 +11,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve as resolvePath } from "node:path";
-import { PROJECT_MEMORY_FILE } from "../../memory/project.js";
+import { basename, dirname, join, resolve as resolvePath } from "node:path";
+import {
+  PROJECT_MEMORY_FILE,
+  findProjectMemoryPath,
+  resolveProjectMemoryWritePath,
+} from "../../memory/project.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
 
@@ -74,15 +78,17 @@ export async function handleMemory(
   const projectMemDir = cwd ? projectMemoryDir(cwd) : "";
 
   if (method === "GET" && rest.length === 0) {
-    const projectMemoryPath = cwd ? join(cwd, PROJECT_MEMORY_FILE) : null;
-    const projectMemoryExists = projectMemoryPath ? existsSync(projectMemoryPath) : false;
+    const existingProjectMemory = cwd ? findProjectMemoryPath(cwd) : null;
+    const projectMemoryPath =
+      existingProjectMemory ?? (cwd ? join(cwd, PROJECT_MEMORY_FILE) : null);
+    const projectMemoryExists = existingProjectMemory !== null;
     return {
       status: 200,
       body: {
         project: {
           path: projectMemoryPath,
           exists: projectMemoryExists,
-          file: PROJECT_MEMORY_FILE,
+          file: projectMemoryPath ? basename(projectMemoryPath) : PROJECT_MEMORY_FILE,
         },
         global: {
           path: globalDir,
@@ -103,8 +109,8 @@ export async function handleMemory(
   if (method === "GET") {
     if (scope === "project") {
       if (!cwd) return { status: 503, body: { error: "no active project" } };
-      const path = join(cwd, PROJECT_MEMORY_FILE);
-      if (!existsSync(path)) return { status: 404, body: { error: "REASONIX.md not found" } };
+      const path = findProjectMemoryPath(cwd);
+      if (!path) return { status: 404, body: { error: "project memory file not found" } };
       return { status: 200, body: { path, body: readFileSync(path, "utf8") } };
     }
     if ((scope === "global" || scope === "project-mem") && name && SAFE_NAME.test(name)) {
@@ -124,7 +130,7 @@ export async function handleMemory(
     }
     if (scope === "project") {
       if (!cwd) return { status: 503, body: { error: "no active project" } };
-      const path = join(cwd, PROJECT_MEMORY_FILE);
+      const path = resolveProjectMemoryWritePath(cwd);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, contents, "utf8");
       ctx.audit?.({ ts: Date.now(), action: "save-memory", payload: { scope, path } });
@@ -156,8 +162,8 @@ export async function handleMemory(
     }
     if (scope === "project") {
       if (!cwd) return { status: 503, body: { error: "no active project" } };
-      const path = join(cwd, PROJECT_MEMORY_FILE);
-      if (existsSync(path)) {
+      const path = findProjectMemoryPath(cwd);
+      if (path) {
         unlinkSync(path);
         ctx.audit?.({ ts: Date.now(), action: "delete-memory", payload: { scope, path } });
         return { status: 200, body: { deleted: true } };
