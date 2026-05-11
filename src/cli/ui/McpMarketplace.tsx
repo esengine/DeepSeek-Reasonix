@@ -3,6 +3,7 @@
 import { Box, Text } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readConfig, writeConfig } from "../../config.js";
+import { t } from "../../i18n/index.js";
 import {
   type RegistryHandle,
   fetchSmitheryDetail,
@@ -49,7 +50,7 @@ export function buildMarketplacePickerSnapshot(args: {
 }) {
   return {
     pickerKind: "mcp-marketplace" as const,
-    title: `MCP marketplace · ${args.status}`,
+    title: `${t("mcpMarketplace.title")} \u00b7 ${args.status}`,
     query: args.query,
     items: args.filtered.map((e) => {
       const installedSpec = isInstalled(args.installedSpecs, e);
@@ -64,12 +65,12 @@ export function buildMarketplacePickerSnapshot(args: {
             : e.source === "smithery"
               ? "smithery"
               : "local",
-        meta: e.popularity !== undefined ? `★ ${e.popularity.toLocaleString()}` : undefined,
+        meta: e.popularity !== undefined ? `\u2605 ${e.popularity.toLocaleString()}` : undefined,
       };
     }),
     actions: ["install", "uninstall", "refine", "load-more", "cancel"] as const,
     hasMore: args.hasMore,
-    hint: "type filter · ↑↓ pick · ⏎ install/toggle · PgDn load more · esc close",
+    hint: t("mcpMarketplace.footerHint"),
   };
 }
 
@@ -106,7 +107,7 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
     loading: true,
     query: "",
     selected: 0,
-    status: "opening registry…",
+    status: t("mcpMarketplace.opening"),
     installedSpecs: readInstalledSpecs(),
   });
 
@@ -120,13 +121,15 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
           ...s,
           handle,
           loading: false,
-          status: `${handle.source} · ${handle.cache.entries.length} entries${
-            handle.fromCache ? " · cached" : ""
-          }`,
+          status: `${handle.source} \u00b7 ${handle.cache.entries.length} entries${handle.fromCache ? t("mcpMarketplace.cached") : ""}`,
         }));
       } catch (err) {
         if (cancelled) return;
-        setState((s) => ({ ...s, loading: false, status: `error: ${(err as Error).message}` }));
+        setState((s) => ({
+          ...s,
+          loading: false,
+          status: t("mcpMarketplace.statusError", { message: (err as Error).message }),
+        }));
       }
     })();
     return () => {
@@ -144,10 +147,10 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
   const fetchMore = useCallback(async () => {
     if (!state.handle || state.loading) return;
     if (state.handle.cache.pagination.nextCursor === null) {
-      setState((s) => ({ ...s, status: "all pages loaded" }));
+      setState((s) => ({ ...s, status: t("mcpMarketplace.allLoaded") }));
       return;
     }
-    setState((s) => ({ ...s, loading: true, status: "loading more…" }));
+    setState((s) => ({ ...s, loading: true, status: t("mcpMarketplace.loadingMore") }));
     try {
       const r = await loadMorePages(state.handle, { pages: 5 });
       setState((s) => ({
@@ -188,7 +191,7 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
     async (entry: RegistryEntry) => {
       let install = entry.install;
       if (!install && entry.source === "smithery") {
-        setState((s) => ({ ...s, loading: true, status: "fetching smithery detail…" }));
+        setState((s) => ({ ...s, loading: true, status: t("mcpMarketplace.fetchingDetail") }));
         try {
           const detail = await fetchSmitheryDetail(entry.name);
           if (detail) {
@@ -357,13 +360,17 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
         <Text dimColor>{`  ·  ${state.status}`}</Text>
       </Box>
       <Box marginTop={1}>
-        <Text>filter: </Text>
-        <Text>{state.query || "(type to filter)"}</Text>
-        <Text dimColor>{`  ${filtered.length} match${filtered.length === 1 ? "" : "es"}`}</Text>
+        <Text>{t("mcpMarketplace.filter")}</Text>
+        <Text>{state.query || t("mcpMarketplace.filterPlaceholder")}</Text>
+        <Text
+          dimColor
+        >{`  ${t(filtered.length === 1 ? "mcpMarketplace.matchSingular" : "mcpMarketplace.matchPlural", { n: filtered.length })}`}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {window.length === 0 ? (
-          <Text dimColor>{state.loading ? "loading…" : "no entries"}</Text>
+          <Text dimColor>
+            {state.loading ? t("mcpMarketplace.loading") : t("mcpMarketplace.noEntries")}
+          </Text>
         ) : (
           window.map((e, i) => {
             const idx = (start || 0) + i;
@@ -389,22 +396,24 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
           {selected.description ? <Text dimColor>{selected.description.slice(0, 200)}</Text> : null}
           {selected.install ? (
             <Text dimColor>
-              {`spec: ${selected.install.runtime} ${selected.install.packageId ?? selected.install.url ?? "—"} · ${selected.install.transport}`}
+              {t("mcpMarketplace.specLine", {
+                runtime: selected.install.runtime,
+                id: selected.install.packageId ?? selected.install.url ?? "\u2014",
+                transport: selected.install.transport,
+              })}
             </Text>
           ) : (
-            <Text dimColor>(smithery listing — install detail fetched on Enter)</Text>
+            <Text dimColor>{t("mcpMarketplace.smitheryDetail")}</Text>
           )}
           {selected.install?.requiredEnv?.length ? (
-            <Text color="yellow">{`needs: ${selected.install.requiredEnv.join(", ")}`}</Text>
+            <Text color="yellow">
+              {t("mcpMarketplace.needsEnv", { env: selected.install.requiredEnv.join(", ") })}
+            </Text>
           ) : null}
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>
-          type filter · ↑↓ pick · enter{" "}
-          {selected && isInstalled(state.installedSpecs, selected) ? "uninstall" : "install"} · PgDn
-          load more · esc close
-        </Text>
+        <Text dimColor>{t("mcpMarketplace.footerHint")}</Text>
       </Box>
     </Box>
   );

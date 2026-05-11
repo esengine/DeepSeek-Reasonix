@@ -3,6 +3,7 @@ import { Box, Text, useStdout } from "ink";
 import React, { useMemo, useState } from "react";
 import type { CheckpointMeta } from "../../code/checkpoints.js";
 import { fmtAgo } from "../../code/checkpoints.js";
+import { t } from "../../i18n/index.js";
 import { type PickerBroadcastPorts, usePickerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { FG, TONE } from "./theme/tokens.js";
@@ -35,7 +36,7 @@ export function CheckpointPicker({
   const snapshot = useMemo(
     () => ({
       pickerKind: "checkpoints",
-      title: `restore a checkpoint — ${workspace}`,
+      title: t("checkpointPicker.title", { workspace }),
       items: checkpoints.map((c) => {
         const sizeKb = (c.bytes / 1024).toFixed(1);
         const tag = c.source === "manual" ? "" : ` (${c.source})`;
@@ -48,7 +49,7 @@ export function CheckpointPicker({
         };
       }),
       actions: ["pick", "delete", "cancel"] as const,
-      hint: "↑↓ pick · ⏎ restore · [d] forget · esc quit",
+      hint: t("checkpointPicker.footer"),
     }),
     [checkpoints, workspace],
   );
@@ -98,30 +99,28 @@ export function CheckpointPicker({
     <Box flexDirection="column" marginY={1}>
       <Box>
         <Text bold color={TONE.brand}>
-          {" ◈ REASONIX · pick a checkpoint "}
+          {t("checkpointPicker.header")}
         </Text>
-        <Text color={FG.meta}>{`  ·  ${workspace}`}</Text>
+        <Text color={FG.meta}>{`  \u00b7  ${workspace}`}</Text>
       </Box>
       <Box height={1} />
       {checkpoints.length === 0 ? (
         <Box>
-          <Text color={FG.faint}>
-            {"  no checkpoints in this workspace yet — see /checkpoint to make one"}
-          </Text>
+          <Text color={FG.faint}>{t("checkpointPicker.empty")}</Text>
         </Box>
       ) : (
         shown.map((c, i) => <CheckpointRow key={c.id} info={c} focused={start + i === focus} />)
       )}
       {hiddenBelow > 0 ? (
         <Box>
-          <Text color={FG.faint}>{`     … ${hiddenBelow} more`}</Text>
+          <Text color={FG.faint}>{t("checkpointPicker.more", { hidden: hiddenBelow })}</Text>
         </Box>
       ) : null}
       <Box marginTop={1}>
         <Text color={FG.faint}>
           {checkpoints.length === 0
-            ? "  esc quit"
-            : "  ↑↓ pick  ·  ⏎ restore  ·  [d] forget  ·  esc quit"}
+            ? t("checkpointPicker.footerEmpty")
+            : t("checkpointPicker.footer")}
         </Text>
       </Box>
     </Box>

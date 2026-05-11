@@ -10,6 +10,7 @@
 
 import { Box, Static, Text, useApp, useInput } from "ink";
 import React, { useMemo, useState } from "react";
+import { t } from "../../i18n/index.js";
 import type { TranscriptMeta } from "../../transcript/log.js";
 import { type TurnPage, computeCumulativeStats } from "../../transcript/replay.js";
 import { RecordView } from "./RecordView.js";
@@ -66,12 +67,14 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
     cumStats.prefixHashes.length === 1
       ? cumStats.prefixHashes[0]!.slice(0, 16)
       : cumStats.prefixHashes.length === 0
-        ? "(untracked)"
-        : `(churned ×${cumStats.prefixHashes.length})`;
+        ? t("replayApp.untracked")
+        : t("replayApp.churned", { count: cumStats.prefixHashes.length });
 
   const currentPage = pages[idx];
   const progressLabel =
-    pages.length === 0 ? "empty transcript" : `turn ${idx + 1} / ${pages.length}`;
+    pages.length === 0
+      ? t("replayApp.emptyTranscript")
+      : t("replayApp.turnProgress", { current: idx + 1, total: pages.length });
 
   return (
     <Box flexDirection="column">
@@ -97,7 +100,7 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
           </Static>
         ) : (
           <Text dimColor italic>
-            no records
+            {t("replayApp.noRecords")}
           </Text>
         )}
       </Box>

@@ -2,6 +2,7 @@
 
 import { Box, Text } from "ink";
 import React from "react";
+import { t } from "../../i18n/index.js";
 import type { TranscriptRecord } from "../../transcript/log.js";
 
 export interface RecordViewProps {
@@ -28,7 +29,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
     return (
       <Box marginTop={1}>
         <Text bold color="cyan">
-          you ›{" "}
+          {t("recordView.userPrefix")}
         </Text>
         <Text>{content}</Text>
       </Box>
@@ -39,7 +40,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
       <Box flexDirection="column" marginTop={1}>
         <Box>
           <Text bold color="green">
-            assistant
+            {t("recordView.assistant")}
           </Text>
           {rec.cost !== undefined ? (
             <Text dimColor>
@@ -53,7 +54,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
           <Text>{rec.content}</Text>
         ) : (
           <Text dimColor italic>
-            (tool-call response only)
+            {t("recordView.toolCallOnly")}
           </Text>
         )}
       </Box>
@@ -63,18 +64,18 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
     return (
       <Box flexDirection="column" marginTop={1}>
         <Text color="yellow">
-          {"tool<"}
+          {t("recordView.toolPrefix")}
           {rec.tool ?? "?"}
           {">"}
         </Text>
         {rec.args ? (
           <Text dimColor>
-            {"  args: "}
+            {t("recordView.argsLabel")}
             {truncate(rec.args, toolArgsMax)}
           </Text>
         ) : null}
         <Text dimColor>
-          {"  → "}
+          {t("recordView.resultArrow")}
           {truncate(rec.content, toolContentMax)}
         </Text>
       </Box>
@@ -84,7 +85,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
     return (
       <Box marginTop={1}>
         <Text color="red" bold>
-          error{" "}
+          {t("recordView.error")}
         </Text>
         <Text color="red">{rec.error ?? rec.content}</Text>
       </Box>
@@ -112,12 +113,14 @@ function CacheBadge({ usage }: { usage: NonNullable<TranscriptRecord["usage"]> }
   const color = pct >= 70 ? "green" : pct >= 40 ? "yellow" : "red";
   return (
     <Text>
-      <Text dimColor>{"  · cache "}</Text>
+      <Text dimColor>{t("recordView.cache")}</Text>
       <Text color={color}>{pct.toFixed(1)}%</Text>
     </Text>
   );
 }
 
 function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max)}… (+${s.length - max} chars)`;
+  return s.length <= max
+    ? s
+    : `${s.slice(0, max)}${t("recordView.truncateExtra", { extra: s.length - max })}`;
 }

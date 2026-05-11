@@ -641,4 +641,88 @@ export interface TranslationSchema {
     below: string;
     footer: string;
   };
+  mcpMarketplace: {
+    title: string;
+    filter: string;
+    filterPlaceholder: string;
+    matchSingular: string;
+    matchPlural: string;
+    loading: string;
+    noEntries: string;
+    opening: string;
+    cached: string;
+    exhausted: string;
+    loadingMore: string;
+    allLoaded: string;
+    fetchingDetail: string;
+    noInstallInfo: string;
+    alreadyInstalled: string;
+    installed: string;
+    uninstalled: string;
+    installFailed: string;
+    notInstalled: string;
+    bridged: string;
+    bridgeFailed: string;
+    bridgeReloadFailed: string;
+    restartBridge: string;
+    needsEnv: string;
+    badgeOfficial: string;
+    badgeSmithery: string;
+    badgeLocal: string;
+    footerHint: string;
+    specLine: string;
+    smitheryDetail: string;
+    statusError: string;
+  };
+  mcpBrowser: {
+    title: string;
+    empty: string;
+    serverCount: string;
+    footer: string;
+  };
+  checkpointPicker: {
+    title: string;
+    header: string;
+    empty: string;
+    more: string;
+    footer: string;
+    footerEmpty: string;
+  };
+  planReviseConfirm: {
+    title: string;
+    metaRight: string;
+    updatedSummary: string;
+    acceptLabel: string;
+    acceptHint: string;
+    rejectLabel: string;
+    rejectHint: string;
+  };
+  diffApp: {
+    title: string;
+    turnLabel: string;
+    turnsAligned: string;
+    paneEmpty: string;
+    kindMatch: string;
+    kindDiverge: string;
+    kindOnlyInA: string;
+    kindOnlyInB: string;
+  };
+  recordView: {
+    userPrefix: string;
+    assistant: string;
+    toolPrefix: string;
+    argsLabel: string;
+    resultArrow: string;
+    error: string;
+    cache: string;
+    toolCallOnly: string;
+    truncateExtra: string;
+  };
+  replayApp: {
+    emptyTranscript: string;
+    turnProgress: string;
+    noRecords: string;
+    untracked: string;
+    churned: string;
+  };
 }

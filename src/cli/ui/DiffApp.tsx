@@ -11,6 +11,7 @@
 
 import { Box, Static, Text, useApp, useInput } from "ink";
 import React, { useState } from "react";
+import { t } from "../../i18n/index.js";
 import {
   type DiffReport,
   type TurnPair,
@@ -63,7 +64,11 @@ export function DiffApp({ report }: DiffAppProps) {
 
       <Box marginTop={1} paddingX={1} justifyContent="space-between">
         <Text color="cyan" bold>
-          turn {pair?.turn ?? "?"} ({idx + 1} / {report.pairs.length})
+          {t("diffApp.turnLabel", {
+            turn: pair?.turn ?? "?",
+            current: idx + 1,
+            total: report.pairs.length,
+          })}
         </Text>
         <Text>{pair ? <KindBadge kind={pair.kind} /> : null}</Text>
       </Box>
@@ -82,10 +87,10 @@ export function DiffApp({ report }: DiffAppProps) {
 
       <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="gray">
         <Text dimColor>
-          <Text bold>j</Text>/<Text bold>↓</Text> next · <Text bold>k</Text>/<Text bold>↑</Text>{" "}
-          prev · <Text bold>n</Text> next-diverge · <Text bold>N</Text>/<Text bold>p</Text>{" "}
-          prev-diverge · <Text bold>g</Text>/<Text bold>G</Text> first/last · <Text bold>q</Text>{" "}
-          quit
+          <Text bold>j</Text>/<Text bold>\u2193</Text> next \u00b7 <Text bold>k</Text>/
+          <Text bold>\u2191</Text> prev \u00b7 <Text bold>n</Text> next-diverge \u00b7{" "}
+          <Text bold>N</Text>/<Text bold>p</Text> prev-diverge \u00b7 <Text bold>g</Text>/
+          <Text bold>G</Text> first/last \u00b7 <Text bold>q</Text> quit
         </Text>
       </Box>
     </Box>
@@ -122,14 +127,14 @@ function DiffHeader({ report }: { report: DiffReport }) {
       <Box justifyContent="space-between">
         <Text>
           <Text color="cyan" bold>
-            reasonix diff
+            {t("diffApp.title")}
           </Text>
-          <Text dimColor> · A=</Text>
+          <Text dimColor> \u00b7 A=</Text>
           <Text color="blue">{a.label}</Text>
           <Text dimColor> vs B=</Text>
           <Text color="magenta">{b.label}</Text>
         </Text>
-        <Text dimColor>{report.pairs.length} turns aligned</Text>
+        <Text dimColor>{t("diffApp.turnsAligned", { count: report.pairs.length })}</Text>
       </Box>
 
       <Box marginTop={1} gap={3}>
@@ -197,7 +202,7 @@ function Pane({
       {records.length === 0 ? (
         <Box marginTop={1}>
           <Text dimColor italic>
-            (no records on this side for this turn)
+            {t("diffApp.paneEmpty")}
           </Text>
         </Box>
       ) : (
@@ -211,15 +216,15 @@ function Pane({
 
 function KindBadge({ kind }: { kind: TurnPair["kind"] }) {
   if (kind === "match") {
-    return <Text color="green">✓ match</Text>;
+    return <Text color="green">{t("diffApp.kindMatch")}</Text>;
   }
   if (kind === "diverge") {
-    return <Text color="yellow">★ diverge</Text>;
+    return <Text color="yellow">{t("diffApp.kindDiverge")}</Text>;
   }
   if (kind === "only_in_a") {
-    return <Text color="blue">← only in A</Text>;
+    return <Text color="blue">{t("diffApp.kindOnlyInA")}</Text>;
   }
-  return <Text color="magenta">→ only in B</Text>;
+  return <Text color="magenta">{t("diffApp.kindOnlyInB")}</Text>;
 }
 
 // ----------------------------------------------------------------------------

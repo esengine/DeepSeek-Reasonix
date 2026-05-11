@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import React from "react";
+import { t } from "../../i18n/index.js";
 import type { PlanStep } from "../../tools/plan.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
@@ -59,22 +60,26 @@ function PlanReviseConfirmInner({
   return (
     <ApprovalCard
       tone="warn"
-      glyph="✏"
-      title="plan revision proposed"
-      metaRight={`−${removedCount}  +${addedCount}  ·  ${keptCount} kept`}
+      glyph="\u270f"
+      title={t("planReviseConfirm.title")}
+      metaRight={t("planReviseConfirm.metaRight", {
+        removed: removedCount,
+        added: addedCount,
+        kept: keptCount,
+      })}
     >
       <Box marginBottom={1}>
         <Text>{reason}</Text>
       </Box>
       {summary ? (
         <Box marginBottom={1}>
-          <Text dimColor>{`updated summary: ${summary}`}</Text>
+          <Text dimColor>{t("planReviseConfirm.updatedSummary", { summary })}</Text>
         </Box>
       ) : null}
       <Box marginBottom={1} flexDirection="column">
         {rows.map((row) => {
           const risk = riskDots(row.step.risk);
-          const prefix = row.kind === "removed" ? "−" : row.kind === "added" ? "+" : " ";
+          const prefix = row.kind === "removed" ? "\u2212" : row.kind === "added" ? "+" : " ";
           const prefixColor =
             row.kind === "removed" ? "#f87171" : row.kind === "added" ? "#4ade80" : "#94a3b8";
           const dim = row.kind === "kept";
@@ -88,7 +93,7 @@ function PlanReviseConfirmInner({
                 {risk.dots}
               </Text>
               <Text dimColor={dim} strikethrough={strike}>
-                {` ${row.step.id} · ${row.step.title}`}
+                {` ${row.step.id} \u00b7 ${row.step.title}`}
               </Text>
             </Box>
           );
@@ -99,13 +104,13 @@ function PlanReviseConfirmInner({
         items={[
           {
             value: "accept",
-            label: "Accept revision — apply the new step list",
-            hint: "Replaces the remaining plan with the proposed steps. Done steps are untouched.",
+            label: t("planReviseConfirm.acceptLabel"),
+            hint: t("planReviseConfirm.acceptHint"),
           },
           {
             value: "reject",
-            label: "Reject — keep the original plan",
-            hint: "Drops the proposal. Model continues with the original remaining steps.",
+            label: t("planReviseConfirm.rejectLabel"),
+            hint: t("planReviseConfirm.rejectHint"),
           },
         ]}
         onSubmit={(v) => onChoose(v as ReviseChoice)}

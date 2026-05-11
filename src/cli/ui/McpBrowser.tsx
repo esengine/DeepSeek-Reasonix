@@ -2,6 +2,7 @@
 
 import { Box, Text } from "ink";
 import React, { useState } from "react";
+import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { toggleMcpDisabled } from "./mcp-disable.js";
 import { healthBadge } from "./mcp-health.js";
@@ -55,17 +56,15 @@ export function McpBrowser({
     <Box flexDirection="column" paddingX={1}>
       <Box>
         <Text bold color={COLOR.brand}>
-          ◈ MCP browser
+          {t("mcpBrowser.title")}
         </Text>
         <Text
           dimColor
-        >{`  ·  ${configPath}  ·  ${servers.length} server${servers.length === 1 ? "" : "s"}`}</Text>
+        >{`  \u00b7  ${configPath}  \u00b7  ${t("mcpBrowser.serverCount", { count: servers.length, s: servers.length === 1 ? "" : "s" })}`}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {servers.length === 0 ? (
-          <Text dimColor>
-            No MCP servers attached. Run `reasonix setup` to pick some, or launch with --mcp.
-          </Text>
+          <Text dimColor>{t("mcpBrowser.empty")}</Text>
         ) : (
           servers.map((s, i) => (
             <ServerRow key={s.label + s.spec} server={s} active={i === index} />
@@ -73,7 +72,7 @@ export function McpBrowser({
         )}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>↑↓ pick · [r] reconnect · [d] disable · esc quit</Text>
+        <Text dimColor>{t("mcpBrowser.footer")}</Text>
       </Box>
     </Box>
   );
