@@ -3,6 +3,92 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.0] — 2026-05-11
+
+**Headline:** field-bug week — a wave of user-reported rendering, tool
+and network bugs all landed with focused fixes. Two structural wins:
+the open `AGENTS.md` spec now works without anyone having to create a
+separate `REASONIX.md`, and `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`
+are honored across every fetch path (DeepSeek API, web search, MCP,
+doctor) — Node's built-in fetch silently ignored them before. zh-CN
+coverage is now essentially complete for the TUI surface.
+
+**Features:**
+
+- feat(memory): `readProjectMemory` walks `REASONIX.md` → `AGENTS.md` →
+  `AGENT.md` and picks the first that exists; writes target whichever
+  file is already on disk. Projects on the open
+  [agents.md](https://agents.md) spec no longer need a separate
+  reasonix-only memory file. (#635, #636)
+- feat(net): HTTPS_PROXY / HTTP_PROXY / ALL_PROXY are now honored across
+  every fetch path — undici's global dispatcher gets a `ProxyAgent` at
+  CLI entry, before any client constructs. `/doctor` reports the active
+  proxy URL (credentials redacted). (#646, #650)
+- feat(mcp): per-server env config via `mcpEnv` — set custom env vars
+  on individual MCP server invocations instead of relying on the shell
+  inherited environment. (#627)
+- feat(dashboard): `--dashboard-port <port>` flag + `dashboard.port`
+  config field to pin the embedded dashboard to a fixed port; required
+  for stable SSH tunnels. (#624, #625)
+- feat(doctor): `--json` flag for structured machine-readable output —
+  scriptable / pipeable for CI checks and aggregator dashboards. (#620)
+- feat(tools): JSON-schema validation for tool-call arguments before
+  dispatch. (#621)
+- feat(plan): `/plans done <stepId>` and `/plans done all` — manual
+  escape valve when the model forgets to call `mark_step_complete`, so
+  the resume banner doesn't get stuck at `0/N done`. (#641, #645)
+- feat(i18n): zh-CN now covers setup wizard, theme picker, plan editor,
+  MCP hub, MCP marketplace, MCP browser, checkpoint picker, plan
+  revise, diff/replay — every modal, picker, marketplace, and tool
+  surface routes through `t()` with consistent translations. (#622,
+  #654)
+
+**Fixes:**
+
+- fix(render): force per-frame clear in alt-screen — kills `log-update`
+  line-count drift that produced duplicated status bars at the bottom
+  of the viewport for users with CJK / ambiguous-width content on East
+  Asian terminals (Windows Terminal at 120×30 + zh-CN was the field
+  repro). Patched via `patch-package` against ink@7.0.2. (#639, #640)
+- fix(ui): reset chat scroll to bottom when a confirm modal mounts —
+  shell-command, plan, checkpoint, revision, and ask_choice pickers all
+  appeared off-screen for users who had scrolled up, and arrow-key
+  inputs were captured by the picker so the user looked stuck. (#642,
+  #643)
+- fix(ui): user-message cards render verbatim, not through Markdown —
+  pasted code / stack traces / paths no longer get silently reformatted
+  (asterisks → italic, leading `#` → H1, `[label](url)` → link with URL
+  hidden, etc.). Assistant turns keep Markdown rendering. (#655, #656)
+- fix(markdown): decode HTML entities in code blocks and inline code —
+  models sometimes HTML-escape JSON / HTML / XML output (`&quot;`
+  instead of `"`); terminals don't render entities so they leaked
+  visibly. Common named + numeric forms decode at the rendering
+  boundary; unknown names pass through. (#657, #658)
+- fix(config): `loadEditMode` preserves `yolo` instead of demoting it
+  to `review` — the load path had only recognized `auto` and dropped
+  every other value back to the safe default, so `/mode yolo` survived
+  one process but reset on the next launch and the shell tool's
+  `allowAll` getter never returned true. (#644, #648)
+- fix(net): same as above but listed under features — the proxy fix is
+  both a new feature (we never had support) and a fix for a class of
+  silent network failures.
+- fix(tools): short-circuit a 2nd consecutive identical malformed tool
+  call. The model was caught calling `read_file({})` twice in a row
+  with the same missing-required-param error in between; the existing
+  `StormBreaker` threshold of 3 missed this shape. `ToolRegistry` now
+  tracks per-tool fingerprints of validation failures and returns a
+  sharper "DO NOT retry with identical args" error on the second
+  identical malformed call. (#651, #652)
+- fix(ci): `issue-labeler.yml` now uses `/pattern/i` literal regex form
+  instead of the PCRE `(?i)` inline flag, which JavaScript's RegExp
+  doesn't accept. The auto-label workflow was dying on every issue
+  before this. (#637)
+
+**Internal:**
+
+- chore(ci): add issue-triage workflows — auto-label by topic match,
+  surface similar prior issues on new reports. (#634)
+
 ## [0.38.0] — 2026-05-10
 
 **Headline:** new `/copy` slash command — a vim/tmux-style copy mode
