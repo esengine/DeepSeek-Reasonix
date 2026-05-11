@@ -914,6 +914,15 @@ export const EN: TranslationSchema = {
       completionComplete: "complete",
       stopAborted:
         "▸ plan stopped — model aborted; type a follow-up to continue or start a new task.",
+      doneUsage:
+        "usage: /plans done <stepId>  ·  /plans done all — manual override when the model forgot to call mark_step_complete",
+      doneUnavailable: "/plans done is only available inside an active session.",
+      doneNoPlan: "no active plan — nothing to mark done.",
+      doneNotInPlan: "step `{id}` is not in the active plan. Run /plans to see the step ids.",
+      doneAlready: "step `{id}` was already marked done.",
+      doneOk: "▸ marked step `{id}` done.",
+      doneAllNoop: "every step is already done.",
+      doneAllOk: "▸ marked {count} step(s) done.",
     },
     jobs: {
       codeOnly: "/jobs is only available inside `reasonix code`.",

@@ -105,6 +105,10 @@ export interface SlashContext {
   }) => void;
   dispatch?: (event: import("../state/events.js").AgentEvent) => void;
   setPlanMode?: (on: boolean) => void;
+  /** Manual escape valve when the model forgot to call `mark_step_complete` — used by `/plans done <id>`. */
+  markPlanStepDone?: (stepId: string) => "ok" | "not-in-plan" | "already-done" | "no-plan";
+  /** Mark every still-queued step done — used by `/plans done all`. Returns the count newly marked. */
+  markAllPlanStepsDone?: () => number;
 
   reloadHooks?: () => number;
   /** Switch the workspace root mid-session — re-targets filesystem/shell/memory tools, hooks, at-mention walker. Code mode only. */

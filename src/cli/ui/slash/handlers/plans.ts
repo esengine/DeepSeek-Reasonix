@@ -3,10 +3,14 @@ import { listPlanArchives, loadPlanState, relativeTime } from "@/code/plan-store
 import { t } from "@/i18n/index.js";
 import type { SlashHandler } from "../dispatch.js";
 
-const plans: SlashHandler = (_args, loop) => {
+const plans: SlashHandler = (args, loop, ctx) => {
   const sessionName = loop.sessionName;
   if (!sessionName) {
     return { info: t("handlers.plans.noSession") };
+  }
+  const sub = (args[0] ?? "").toLowerCase();
+  if (sub === "done") {
+    return handleDone(args.slice(1), ctx);
   }
   const lines: string[] = [];
   const active = loadPlanState(sessionName);
@@ -91,6 +95,33 @@ const stop: SlashHandler = (_args, loop) => {
   loop.abort();
   return { info: t("handlers.plans.stopAborted") };
 };
+
+function handleDone(rest: string[], ctx: Parameters<SlashHandler>[2]): { info: string } {
+  const target = (rest[0] ?? "").trim();
+  if (!target) {
+    return { info: t("handlers.plans.doneUsage") };
+  }
+  if (target.toLowerCase() === "all") {
+    const fn = ctx.markAllPlanStepsDone;
+    if (!fn) return { info: t("handlers.plans.doneUnavailable") };
+    const added = fn();
+    if (added === 0) return { info: t("handlers.plans.doneAllNoop") };
+    return { info: t("handlers.plans.doneAllOk", { count: added }) };
+  }
+  const fn = ctx.markPlanStepDone;
+  if (!fn) return { info: t("handlers.plans.doneUnavailable") };
+  const outcome = fn(target);
+  switch (outcome) {
+    case "ok":
+      return { info: t("handlers.plans.doneOk", { id: target }) };
+    case "already-done":
+      return { info: t("handlers.plans.doneAlready", { id: target }) };
+    case "not-in-plan":
+      return { info: t("handlers.plans.doneNotInPlan", { id: target }) };
+    case "no-plan":
+      return { info: t("handlers.plans.doneNoPlan") };
+  }
+}
 
 export const handlers: Record<string, SlashHandler> = {
   plans,

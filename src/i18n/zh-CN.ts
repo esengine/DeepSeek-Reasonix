@@ -865,6 +865,15 @@ export const zhCN: TranslationSchema = {
       archivedRow: "  ✓ {when}  {total}步 · {completion}  {label}",
       completionComplete: "已完成",
       stopAborted: "▸ 计划已停止 — 模型已中止；输入后续内容继续，或开始新任务。",
+      doneUsage:
+        "用法：/plans done <stepId>  ·  /plans done all — 模型忘记调用 mark_step_complete 时的手动兜底",
+      doneUnavailable: "/plans done 仅在活跃会话内可用。",
+      doneNoPlan: "当前无活跃计划 — 没有可标记的内容。",
+      doneNotInPlan: "步骤 `{id}` 不在当前计划中。运行 /plans 查看步骤 id。",
+      doneAlready: "步骤 `{id}` 已被标记为完成。",
+      doneOk: "▸ 已将步骤 `{id}` 标记为完成。",
+      doneAllNoop: "所有步骤均已完成。",
+      doneAllOk: "▸ 已标记 {count} 个步骤为完成。",
     },
     jobs: {
       codeOnly: "/jobs 仅在 `reasonix code` 中可用。",

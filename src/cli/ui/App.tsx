@@ -2231,6 +2231,29 @@ function AppInner({
               oneTime: false,
             }),
           dispatch: agentStore.dispatch,
+          markPlanStepDone: (stepId: string) => {
+            const steps = planStepsRef.current;
+            if (!steps || steps.length === 0) return "no-plan";
+            if (!steps.some((s) => s.id === stepId)) return "not-in-plan";
+            if (completedStepIdsRef.current.has(stepId)) return "already-done";
+            completedStepIdsRef.current.add(stepId);
+            persistPlanState();
+            log.completePlanStep(stepId);
+            return "ok";
+          },
+          markAllPlanStepsDone: () => {
+            const steps = planStepsRef.current;
+            if (!steps || steps.length === 0) return 0;
+            let added = 0;
+            for (const s of steps) {
+              if (completedStepIdsRef.current.has(s.id)) continue;
+              completedStepIdsRef.current.add(s.id);
+              log.completePlanStep(s.id);
+              added++;
+            }
+            if (added > 0) persistPlanState();
+            return added;
+          },
           reloadHooks: () => reloadHooks(codeMode ? currentRootDir : undefined),
           switchCwd: codeMode?.reregisterTools
             ? (newPath: string) => {
