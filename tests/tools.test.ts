@@ -509,13 +509,16 @@ describe("ToolRegistry", () => {
         fn: () => "ok",
       });
       reg.setPlanMode(true);
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const writeSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
         const out = await reg.dispatch("buggy_tool", "{}");
         expect(JSON.parse(out).error).toMatch(/unavailable in plan mode/);
-        expect(warnSpy).toHaveBeenCalledWith("readOnlyCheck for buggy_tool threw: check is buggy");
+        const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+        expect(
+          writes.some((w) => w.includes("readOnlyCheck for buggy_tool threw: check is buggy")),
+        ).toBe(true);
       } finally {
-        warnSpy.mockRestore();
+        writeSpy.mockRestore();
       }
     });
 
@@ -527,12 +530,13 @@ describe("ToolRegistry", () => {
         fn: () => "ok",
       });
       reg.setPlanMode(true);
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const writeSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       try {
         await reg.dispatch("good_tool", "{}");
-        expect(warnSpy).not.toHaveBeenCalled();
+        const writes = writeSpy.mock.calls.map((c) => String(c[0]));
+        expect(writes.some((w) => w.includes("readOnlyCheck for"))).toBe(false);
       } finally {
-        warnSpy.mockRestore();
+        writeSpy.mockRestore();
       }
     });
   });

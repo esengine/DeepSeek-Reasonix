@@ -304,7 +304,7 @@ function isReadOnlyCall(tool: InternalTool, args: Record<string, unknown>): bool
     } catch (err) {
       // A buggy readOnlyCheck silently downgrades to "may mutate" — log it so
       // the bug doesn't hide behind plan-mode refusals or storm-breaker noise.
-      console.warn(`readOnlyCheck for ${tool.name} threw: ${(err as Error).message}`);
+      process.stderr.write(`readOnlyCheck for ${tool.name} threw: ${(err as Error).message}\n`);
       return false;
     }
   }
