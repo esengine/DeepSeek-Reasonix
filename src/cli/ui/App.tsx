@@ -1137,6 +1137,56 @@ function AppInner({
     slashUsage,
   });
 
+  // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix
+  // picker is open (slash / @ / slash-arg), the keys navigate that picker
+  // — consistent with ↑/↓. Otherwise they walk prompt history (issue #647).
+  const handleHistoryPrev = useCallback(() => {
+    if (atState && atState.entries.length > 0) {
+      setAtSelected((i) => Math.max(0, i - 1));
+      return;
+    }
+    if (slashArgMatches && slashArgMatches.length > 0) {
+      setSlashArgSelected((i) => Math.max(0, i - 1));
+      return;
+    }
+    if (slashMatches && slashMatches.length > 0) {
+      setSlashSelected((i) => Math.max(0, i - 1));
+      return;
+    }
+    recallPrev();
+  }, [
+    atState,
+    slashArgMatches,
+    slashMatches,
+    setAtSelected,
+    setSlashArgSelected,
+    setSlashSelected,
+    recallPrev,
+  ]);
+  const handleHistoryNext = useCallback(() => {
+    if (atState && atState.entries.length > 0) {
+      setAtSelected((i) => Math.min(atState.entries.length - 1, i + 1));
+      return;
+    }
+    if (slashArgMatches && slashArgMatches.length > 0) {
+      setSlashArgSelected((i) => Math.min(slashArgMatches.length - 1, i + 1));
+      return;
+    }
+    if (slashMatches && slashMatches.length > 0) {
+      setSlashSelected((i) => Math.min(slashMatches.length - 1, i + 1));
+      return;
+    }
+    recallNext();
+  }, [
+    atState,
+    slashArgMatches,
+    slashMatches,
+    setAtSelected,
+    setSlashArgSelected,
+    setSlashSelected,
+    recallNext,
+  ]);
+
   // Surface a one-time banner about session state on first mount.
   const sessionBannerShown = useRef(false);
   useEffect(() => {
@@ -3792,8 +3842,8 @@ function AppInner({
                             onChange={setInput}
                             onSubmit={handleSubmit}
                             disabled={busy}
-                            onHistoryPrev={recallPrev}
-                            onHistoryNext={recallNext}
+                            onHistoryPrev={handleHistoryPrev}
+                            onHistoryNext={handleHistoryNext}
                             onOpenExternalEditor={handleOpenExternalEditor}
                           />
                         </Box>
