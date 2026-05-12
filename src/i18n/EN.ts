@@ -1405,6 +1405,8 @@ export const EN: TranslationSchema = {
     slow: "slow \u00b7 {ms}ms",
     verySlow: "very slow \u00b7 {ms}ms",
     slowToast: "\u26a0 MCP `{name}` slow \u00b7 {seconds}s p95 over the last {sampleSize} calls",
+    emptyHint:
+      "\u2139 no MCP servers configured \u2014 try: `reasonix setup` to re-pick, or `reasonix mcp install filesystem`",
   },
   denyContextInput: {
     description:

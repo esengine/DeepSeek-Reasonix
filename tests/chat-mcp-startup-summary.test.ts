@@ -124,9 +124,11 @@ vi.mock("../src/mcp/streamable-http.js", () => ({
 }));
 
 async function captureStartupState(opts?: {
-  readConfig?: { mcpDisabled?: string[] };
+  readConfig?: { mcpDisabled?: string[]; setupCompleted?: boolean; mcp?: string[] };
   initializeError?: Error;
   bridgeError?: Error;
+  mcp?: string[];
+  lang?: "EN" | "zh-CN";
 }) {
   vi.resetModules();
   mocks.renderMock.mockReset();
@@ -184,15 +186,17 @@ async function captureStartupState(opts?: {
     return { waitUntilExit: async () => undefined };
   });
 
-  const [{ chatCommand }, { ToolRegistry }] = await Promise.all([
+  const [{ chatCommand }, { ToolRegistry }, { setLanguageRuntime }] = await Promise.all([
     import("../src/cli/commands/chat.js"),
     import("../src/tools.js"),
+    import("../src/i18n/index.js"),
   ]);
+  setLanguageRuntime(opts?.lang ?? "EN");
 
   await chatCommand({
     model: "deepseek-chat",
     system: "s",
-    mcp: ["fs=npx -y @scope/fs /tmp"],
+    mcp: opts?.mcp ?? ["fs=npx -y @scope/fs /tmp"],
     seedTools: new ToolRegistry(),
   });
 
@@ -200,6 +204,7 @@ async function captureStartupState(opts?: {
   return capturedProps as {
     mcpServers: Array<{ label: string; spec: string }>;
     mcpSpecs: string[];
+    startupInfoHints: string[];
   };
 }
 
@@ -242,5 +247,36 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
     expect(props.mcpSpecs).toEqual(["fs=npx -y @scope/fs /tmp"]);
     expect(props.mcpServers).toEqual([]);
     expect(mocks.initializeMock).not.toHaveBeenCalled();
+  });
+
+  it("adds empty-MCP hint exactly when setup is completed and configured MCP list is empty", async () => {
+    const props = await captureStartupState({
+      readConfig: { setupCompleted: true, mcp: [] },
+      mcp: [],
+    });
+
+    expect(props.startupInfoHints).toEqual([
+      "\u2139 no MCP servers configured \u2014 try: `reasonix setup` to re-pick, or `reasonix mcp install filesystem`",
+    ]);
+  });
+
+  it("does not add empty-MCP hint when configured MCP list is non-empty", async () => {
+    const props = await captureStartupState({
+      readConfig: { setupCompleted: true, mcp: ["fs=npx -y @scope/fs /tmp"] },
+      mcp: ["fs=npx -y @scope/fs /tmp"],
+    });
+
+    expect(props.startupInfoHints).toEqual([]);
+  });
+
+  it("renders empty-MCP hint in zh-CN locale", async () => {
+    const props = await captureStartupState({
+      readConfig: { setupCompleted: true, mcp: [] },
+      mcp: [],
+      lang: "zh-CN",
+    });
+    expect(props.startupInfoHints).toEqual([
+      "\u2139 未配置 MCP 服务器 —— 可尝试：`reasonix setup` 重新选择，或 `reasonix mcp install filesystem`",
+    ]);
   });
 });

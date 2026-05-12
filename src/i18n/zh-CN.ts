@@ -1340,6 +1340,8 @@ export const zhCN: TranslationSchema = {
     slow: "缓慢 \u00b7 {ms}ms",
     verySlow: "非常慢 \u00b7 {ms}ms",
     slowToast: "\u26a0 MCP `{name}` 响应缓慢 \u00b7 P95 {seconds}s \u00b7 最近 {sampleSize} 次调用",
+    emptyHint:
+      "\u2139 未配置 MCP 服务器 —— 可尝试：`reasonix setup` 重新选择，或 `reasonix mcp install filesystem`",
   },
   denyContextInput: {
     description: "告诉模型你为什么拒绝了。模型下次会看到你的理由作为额外的上下文。",

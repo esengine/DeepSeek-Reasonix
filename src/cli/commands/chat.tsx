@@ -9,6 +9,7 @@ import {
   webSearchEngine,
 } from "../../config.js";
 import { loadDotenv } from "../../env.js";
+import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
@@ -404,6 +405,8 @@ interface RootProps extends ChatOptions {
   showPicker: boolean;
   /** Hot-reload runtime — passed through to App so /mcp browse + dashboard can bridge after install. */
   mcpRuntime: McpRuntime;
+  /** One-time startup info rows shown after App mounts. */
+  startupInfoHints: string[];
 }
 
 function Root({
@@ -414,6 +417,7 @@ function Root({
   progressSink,
   showPicker,
   mcpRuntime,
+  startupInfoHints,
   ...appProps
 }: RootProps) {
   const [key, setKey] = useState<string | undefined>(initialKey);
@@ -486,6 +490,7 @@ function Root({
         mcpServers={mcpServers}
         mcpRuntime={mcpRuntime}
         progressSink={progressSink}
+        startupInfoHints={startupInfoHints}
         codeMode={appProps.codeMode}
         noDashboard={appProps.noDashboard}
         dashboardPort={appProps.dashboardPort}
@@ -526,6 +531,11 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // and we don't want the alt-screen UI to block on the slowest one.
   const mcpSpecs = [...requestedSpecs];
   const mcpServers: McpServerSummary[] = [];
+  const cfg = readConfig();
+  const startupInfoHints: string[] = [];
+  if (cfg.setupCompleted === true && (cfg.mcp?.length ?? 0) === 0 && mcpSpecs.length === 0) {
+    startupInfoHints.push(t("mcpHealth.emptyHint"));
+  }
 
   // Register web search/fetch tools unless explicitly disabled. DDG
   // backs them with no key required; the model invokes them whenever
@@ -575,6 +585,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       mcpServers={mcpServers}
       mcpRuntime={runtime}
       progressSink={progressSink}
+      startupInfoHints={startupInfoHints}
       showPicker={showPicker}
       {...opts}
       session={resolvedSession}
