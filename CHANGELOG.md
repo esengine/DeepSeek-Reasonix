@@ -3,6 +3,103 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] — 2026-05-12
+
+**Headline:** npm-only release. The repo also gained a Tauri desktop
+client (`reasonix desktop`) wired against the agent loop with multi-
+tab concurrent runtimes — the source is here but the macOS / Windows /
+Linux installer bundles are NOT shipping this round; they'll get their
+own release once the signing pipeline is settled. The CLI side picked
+up a session-scoped checkpoint API + a git-changes panel in the
+dashboard, a shared pause-gate policy module so the desktop's
+auto-resolve rules don't drift from the CLI TUI's, plus a wave of
+field-reported fixes: the long-standing `Maximum update depth` crash
+inside CardStream is finally gone (this time for good — quantized
+window), `reasonix code` no longer boots dead when a user has only
+configured their key via `reasonix setup`, and a half-dozen MCP /
+shell / stdin / scroll papercuts are gone.
+
+**Features:**
+
+- feat(desktop): new Tauri client with multi-tab concurrent runtimes,
+  bundled Node, native filesystem tools, and one persistent agent
+  loop per tab. Source ships with this release; installer bundles
+  ship separately. (#689)
+- feat(desktop): wallet balance + version chip in the sidebar, active-
+  plan rail (collapsible, per-step risk + completion results),
+  abortable pause-gates, checkpoint / revision cards, ⌘K palette,
+  edit-gate pill, en + zh-CN i18n with a live toggle in Settings.
+  (#701)
+- feat(changes): in-process checkpoint API + a git-changes panel in
+  the embedded dashboard — zero external git deps, snapshots are
+  session-scoped, restore is one click. (#682)
+- feat(sandbox): outside-sandbox file access (reads or writes that
+  resolve outside the project root) is now gated behind an approval
+  modal — protects against the model wandering into `/etc`, `~`, or
+  a sibling repo by mistake. (#696)
+- feat(mcp): loading pill on each MCP server while tools are still
+  being inspected; tool dispatch is gated on readiness so the model
+  can't fire a call into a half-loaded server. (#687)
+- feat(loop): `--escalate-after <n>` flag +
+  `escalation.failureThreshold` config field to tune how many repair
+  signals it takes before flash → pro auto-escalates. Defaults
+  unchanged. (#699)
+- feat(status): preset is now visible in the status bar; the model
+  pin survives manual `/model` picks instead of being clobbered on
+  the next preset reload. (#668)
+- feat(tools, loop): `readOnlyCheck` thrown errors are warned instead
+  of silently swallowed — bugs in custom tool definitions surface
+  immediately. (#670, #673)
+- feat(tools/web): `web_search` / `web_fetch` now bucket 5xx errors
+  separately with a transient-retry hint so the model retries instead
+  of giving up on a status code. (#676)
+- feat(i18n): zh-CN coverage extended to MCP lifecycle events,
+  slow-network toast, external-editor messages. (#679)
+
+**Fixes:**
+
+- fix(tui): CardStream window position is now quantized to
+  `VISIBLE_BUFFER_ROWS` buckets — sub-bucket `scrollRows` /
+  `outer.height` wiggles no longer flip a boundary card live↔spacer,
+  which was the residual `Maximum update depth exceeded` crash inside
+  `useBoxMetrics` (the #549 fix only patched one instance of the
+  pattern). (#700, #702)
+- fix(code): `reasonix code` now calls `loadDotenv()` + bridges
+  `~/.reasonix/config.json` → `process.env.DEEPSEEK_API_KEY` like
+  `chat` / `desktop` / `run` already did. Subagent's `DeepSeekClient`
+  is constructed lazily so a missing key doesn't kill boot before the
+  setup wizard can prompt. (#703)
+- fix(scroll): pinned-mode shrinks now coalesce — a burst of card-
+  teardown re-measurements during an Esc-abort used to snap
+  scrollRows N times, producing a visible flicker. Trailing-edge
+  flush. (#653, #666)
+- fix(stdin): generic modifyOtherKeys / Kitty CSI envelopes are now
+  decoded correctly (Ctrl/Alt + character keys on terminals that
+  wrap modifier presses in `\e[27;` or `\e[u` sequences). (#692)
+- fix(ui/shell-confirm): long command previews clamp to the available
+  width so the Allow / Allow-prefix / Deny options stay visible
+  instead of scrolling off-screen. (#691)
+- fix(skills, memory): frontmatter parser handles BOM, folded lines,
+  and quoted values; previously a BOM-prefixed `REASONIX.md` was
+  silently dropped. (#690)
+- fix(mcp): inspect failures are classified into network / TLS / HTTP
+  buckets — the error in the UI is now actionable instead of a raw
+  Node `fetch failed`. (#688)
+- fix(mcp): debug log when the bridge receives a malformed JSON-RPC
+  frame instead of crashing the parser silently. (#669)
+- fix(i18n): session-pruned banners and overflow errors now point at
+  `/new` and `/sessions` (the live commands) rather than the
+  deprecated `/forget` and `/sessions delete`. (#698)
+- fix(prompt): system prompt explicitly documents that the model may
+  see OS-absolute paths (Windows `C:\...`) and forbids filesystem-
+  refusal hallucinations like "I don't have access to your filesystem"
+  when filesystem tools are clearly registered. (#667)
+
+**Polish:**
+
+- card border + composer cursor + shell modal info-row alignment all
+  hand-tuned; nothing structural, just paper-cuts. (#672)
+
 ## [0.39.1] — 2026-05-11
 
 **Hotfix:** `0.39.0` shipped with a `postinstall: patch-package` hook
