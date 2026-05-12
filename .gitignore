@@ -44,3 +44,6 @@ bun.lock
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/src-tauri/binaries/
+
+# Design mock-up reference (local, not part of repo)
+.design-ref/

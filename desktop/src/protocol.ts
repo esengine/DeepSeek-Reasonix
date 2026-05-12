@@ -93,7 +93,7 @@ export type PlanClearedEvent = { type: "$plan_cleared" };
 
 export type SessionsEvent = {
   type: "$sessions";
-  items: { name: string; messageCount: number; mtime: string }[];
+  items: { name: string; messageCount: number; mtime: string; summary?: string }[];
 };
 
 export type MentionResultsEvent = {

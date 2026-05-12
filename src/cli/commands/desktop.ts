@@ -368,6 +368,7 @@ function emitSessions(tab: Tab): void {
       name: s.name,
       messageCount: s.messageCount,
       mtime: s.mtime.toISOString(),
+      summary: s.meta.summary,
     }));
     emit({ type: "$sessions", items }, tab.id);
   } catch (err) {
@@ -588,6 +589,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (!tab.runtime) return;
     const rt = tab.runtime;
     tab.aborter = new AbortController();
+    if (tab.currentSession) {
+      const existing = loadSessionMeta(tab.currentSession).summary;
+      if (!existing || !existing.trim()) {
+        const summary = text.replace(/\s+/g, " ").trim().slice(0, 60);
+        if (summary) {
+          try {
+            patchSessionMeta(tab.currentSession, { summary });
+          } catch {
+            // meta is for display only — failure shouldn't block the turn
+          }
+        }
+      }
+    }
     await tabContext.run(tab.id, async () => {
       try {
         for await (const ev of rt.loop.step(text)) {

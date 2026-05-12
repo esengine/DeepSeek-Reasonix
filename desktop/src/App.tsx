@@ -3,35 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
-import { ArrowDown } from "lucide-react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
+import { I } from "./icons";
 import { WorkspaceProvider } from "./Markdown";
-import {
-  ActivePlanRail,
-  ApprovalCard,
-  AssistantMessage,
-  CheckpointCard,
-  ChoiceCard,
-  Composer,
-  ContextMenu,
-  type ContextMenuAction,
-  EmptyState,
-  ErrorBanner,
-  Header,
-  OnboardingScreen,
-  PlanCard,
-  RevisionCard,
-  SettingsPanel,
-  Sidebar,
-  StatusLine,
-  TabBar,
-  ThinkingBar,
-  UpdateBanner,
-  UserBubble,
-} from "./components";
-import { t, useLang } from "./i18n";
 import type {
   CheckpointVerdict,
   ChoiceVerdict,
@@ -42,6 +17,24 @@ import type {
   RevisionVerdict,
   SettingsPatch,
 } from "./protocol";
+import { Composer, type SlashCmd } from "./ui/composer";
+import { ContextPanel } from "./ui/context-panel";
+import { InterruptBar, useElapsed } from "./ui/live";
+import { SettingsModal } from "./ui/settings";
+import { Sidebar } from "./ui/sidebar";
+import { StatusBar } from "./ui/statusbar";
+import {
+  ActivePlanTaskCard,
+  AssistantMsg,
+  CheckpointApprovalCard,
+  ChoiceApprovalCard,
+  ConfirmApprovalCard,
+  PlanApprovalCard,
+  PlanBanner,
+  RevisionApprovalCard,
+  TurnDivider,
+  UserMsg,
+} from "./ui/thread";
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -58,7 +51,7 @@ export type AssistantSegment =
     };
 
 type ChatMessage =
-  | { kind: "user"; text: string; clientId: string }
+  | { kind: "user"; text: string; clientId: string; turn: number }
   | {
       kind: "assistant";
       turn: number;
@@ -100,7 +93,6 @@ export type ActivePlan = {
   summary?: string;
   steps: PlanStep[];
   completedStepIds: string[];
-  /** Latest result for each completed step, keyed by stepId. */
   stepResults: Record<string, string>;
 };
 
@@ -135,6 +127,7 @@ export type SessionInfo = {
   name: string;
   messageCount: number;
   mtime: string;
+  summary?: string;
 };
 
 export type Settings = {
@@ -157,11 +150,20 @@ export type Balance = {
   isAvailable: boolean;
 };
 
+type MentionResults = { nonce: number; query: string; results: string[] };
+type MentionPreviewState = {
+  nonce: number;
+  path: string;
+  head: string;
+  totalLines: number;
+};
+
 type State = {
   ready: boolean;
   needsSetup: boolean;
   busy: boolean;
   model?: string;
+  currentSession?: string;
   messages: ChatMessage[];
   pendingConfirms: PendingConfirm[];
   pendingChoices: PendingChoice[];
@@ -183,14 +185,6 @@ type DeltaBatchItem = {
   text: string;
 };
 
-type MentionResults = { nonce: number; query: string; results: string[] };
-type MentionPreviewState = {
-  nonce: number;
-  path: string;
-  head: string;
-  totalLines: number;
-};
-
 type Action =
   | { t: "send_user"; text: string; clientId: string }
   | { t: "incoming"; event: IncomingEvent }
@@ -208,15 +202,20 @@ type Action =
 
 function reduce(state: State, action: Action): State {
   switch (action.t) {
-    case "send_user":
+    case "send_user": {
+      const lastTurn = state.messages.reduce((max, m) => {
+        if (m.kind === "user" || m.kind === "assistant") return Math.max(max, m.turn);
+        return max;
+      }, 0);
       return {
         ...state,
         busy: true,
         messages: [
           ...state.messages,
-          { kind: "user", text: action.text, clientId: action.clientId },
+          { kind: "user", text: action.text, clientId: action.clientId, turn: lastTurn + 1 },
         ],
       };
+    }
     case "rpc_exit":
       return {
         ...state,
@@ -230,7 +229,6 @@ function reduce(state: State, action: Action): State {
     case "incoming":
       return applyIncoming(state, action.event);
     case "batch_delta": {
-      // Collapse same (turn, channel) adjacent items so we do one concat per cluster.
       const collapsed: DeltaBatchItem[] = [];
       for (const item of action.items) {
         const last = collapsed[collapsed.length - 1];
@@ -262,6 +260,7 @@ function reduce(state: State, action: Action): State {
       return {
         ...state,
         busy: false,
+        currentSession: undefined,
         messages: [],
         pendingConfirms: [],
         pendingChoices: [],
@@ -269,15 +268,7 @@ function reduce(state: State, action: Action): State {
         pendingCheckpoints: [],
         pendingRevisions: [],
         activePlan: null,
-        usage: {
-          totalCostUsd: 0,
-          totalPromptTokens: 0,
-          totalCompletionTokens: 0,
-          cacheHitTokens: 0,
-          cacheMissTokens: 0,
-          lastCallCacheHit: null,
-          lastCallCacheMiss: null,
-        },
+        usage: zeroUsage(),
       };
     case "resolve_confirm":
       return {
@@ -339,6 +330,18 @@ function reduce(state: State, action: Action): State {
   }
 }
 
+function zeroUsage(): UsageStats {
+  return {
+    totalCostUsd: 0,
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+    lastCallCacheHit: null,
+    lastCallCacheMiss: null,
+  };
+}
+
 function appendTextSegment(
   segments: AssistantSegment[],
   kind: "text" | "reasoning",
@@ -346,8 +349,7 @@ function appendTextSegment(
 ): AssistantSegment[] {
   const last = segments[segments.length - 1];
   if (last && last.kind === kind) {
-    const updated = { ...last, text: last.text + text };
-    return [...segments.slice(0, -1), updated];
+    return [...segments.slice(0, -1), { ...last, text: last.text + text }];
   }
   return [...segments, { kind, text }];
 }
@@ -464,17 +466,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingCheckpoints: wsChanged ? [] : state.pendingCheckpoints,
         pendingRevisions: wsChanged ? [] : state.pendingRevisions,
         activePlan: wsChanged ? null : state.activePlan,
-        usage: wsChanged
-          ? {
-              totalCostUsd: 0,
-              totalPromptTokens: 0,
-              totalCompletionTokens: 0,
-              cacheHitTokens: 0,
-              cacheMissTokens: 0,
-              lastCallCacheHit: null,
-              lastCallCacheMiss: null,
-            }
-          : state.usage,
+        usage: wsChanged ? zeroUsage() : state.usage,
         settings: {
           reasoningEffort: ev.reasoningEffort,
           editMode: ev.editMode,
@@ -491,10 +483,10 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     }
     case "$session_loaded": {
-      // biome-ignore lint: same intent as below
+      const sessionName = ev.name;
       const loaded: ChatMessage[] = ev.messages.map((m, i) => {
         if (m.kind === "user") {
-          return { kind: "user", text: m.text, clientId: `c-loaded-${i}` };
+          return { kind: "user", text: m.text, clientId: `c-loaded-${i}`, turn: i + 1 };
         }
         const segments: AssistantSegment[] = m.segments.map((s) => {
           if (s.kind === "tool") {
@@ -516,6 +508,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       return {
         ...state,
         busy: false,
+        currentSession: sessionName,
         messages: loaded,
         pendingConfirms: [],
         pendingChoices: [],
@@ -524,13 +517,11 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingRevisions: [],
         activePlan: null,
         usage: {
+          ...zeroUsage(),
           totalCostUsd: ev.carryover.totalCostUsd,
           totalPromptTokens: ev.carryover.cacheHitTokens + ev.carryover.cacheMissTokens,
-          totalCompletionTokens: 0,
           cacheHitTokens: ev.carryover.cacheHitTokens,
           cacheMissTokens: ev.carryover.cacheMissTokens,
-          lastCallCacheHit: null,
-          lastCallCacheMiss: null,
         },
       };
     }
@@ -668,97 +659,6 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
   }
 }
 
-function conversationToMarkdown(messages: ChatMessage[]): string {
-  const parts: string[] = [];
-  for (const m of messages) {
-    if (m.kind === "user") {
-      parts.push(`### 🧑 You\n\n${m.text}`);
-      continue;
-    }
-    if (m.kind === "assistant") {
-      const body: string[] = [];
-      for (const s of m.segments) {
-        if (s.kind === "text" && s.text) body.push(s.text);
-        else if (s.kind === "reasoning" && s.text) {
-          body.push(`<details>\n<summary>Reasoning</summary>\n\n${s.text}\n\n</details>`);
-        } else if (s.kind === "tool") {
-          const argLine = s.args ? `\n\`\`\`json\n${s.args}\n\`\`\`` : "";
-          const resLine = s.result
-            ? `\n\n<details>\n<summary>Result${s.ok === false ? " (error)" : ""}</summary>\n\n\`\`\`\n${s.result}\n\`\`\`\n\n</details>`
-            : "";
-          body.push(`> **Tool · \`${s.name}\`**${argLine}${resLine}`);
-        }
-      }
-      parts.push(`### 🤖 Reasonix\n\n${body.join("\n\n")}`);
-      continue;
-    }
-    if (m.kind === "error") {
-      parts.push(`### ⚠ Error\n\n${m.message}`);
-    }
-  }
-  return parts.join("\n\n---\n\n");
-}
-
-function tryParseArgs(raw: string): Record<string, unknown> | null {
-  if (!raw) return null;
-  try {
-    const v = JSON.parse(raw);
-    return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
-
-function shortenPath(p: string, max = 44): string {
-  if (p.length <= max) return p;
-  const tail = p.slice(p.length - (max - 1));
-  const cut = tail.search(/[\\/]/);
-  return `…${cut > 0 ? tail.slice(cut) : tail}`;
-}
-
-function describeToolCall(name: string, args: string): string {
-  const parsed = tryParseArgs(args);
-  const path = parsed && typeof parsed.path === "string" ? shortenPath(parsed.path) : null;
-  const pattern = parsed && typeof parsed.pattern === "string" ? parsed.pattern : null;
-  const command =
-    parsed && typeof parsed.command === "string"
-      ? parsed.command.length > 50
-        ? `${parsed.command.slice(0, 50)}…`
-        : parsed.command
-      : null;
-  switch (name) {
-    case "read_file":
-      return path ? `Reading ${path}` : "Reading file";
-    case "write_file":
-    case "edit_file":
-    case "multi_edit":
-      return path ? `Editing ${path}` : "Editing file";
-    case "list_directory":
-    case "directory_tree":
-      return path ? `Listing ${path}` : "Listing directory";
-    case "search_content":
-    case "search_files":
-      return pattern ? `Searching ${pattern}` : "Searching";
-    case "glob":
-      return pattern ? `Globbing ${pattern}` : "Globbing";
-    case "get_file_info":
-      return path ? `Stat ${path}` : "Stat";
-    case "create_directory":
-      return path ? `mkdir ${path}` : "mkdir";
-    case "delete_file":
-    case "delete_directory":
-      return path ? `Deleting ${path}` : "Deleting";
-    case "move_file":
-    case "copy_file":
-      return path ? `${name === "move_file" ? "Moving" : "Copying"} ${path}` : name;
-    case "run_command":
-    case "run_background":
-      return command ? `Running ${command}` : "Running command";
-    default:
-      return `Calling ${name}`;
-  }
-}
-
 type TabAction = Action;
 type TabDispatcher = (action: TabAction) => void;
 
@@ -774,6 +674,16 @@ interface TabRuntimeProps {
   onNewTab: () => void;
   onCloseTab: () => void;
   canCloseTab: boolean;
+  theme: "dark" | "light";
+  onToggleTheme: () => void;
+  sideCollapsed: boolean;
+  ctxCollapsed: boolean;
+  onToggleSide: () => void;
+  onToggleCtx: () => void;
+  onToggleCurrency: () => void;
+  tabsList: { id: string; workspaceDir?: string }[];
+  activeTabId: string;
+  setActiveTabId: (id: string) => void;
 }
 
 function TabRuntime({
@@ -788,8 +698,17 @@ function TabRuntime({
   onNewTab,
   onCloseTab,
   canCloseTab,
+  theme,
+  onToggleTheme,
+  sideCollapsed,
+  ctxCollapsed,
+  onToggleSide,
+  onToggleCtx,
+  onToggleCurrency,
+  tabsList,
+  activeTabId,
+  setActiveTabId,
 }: TabRuntimeProps) {
-  useLang();
   const [state, dispatch] = useReducer(reduce, {
     ready: false,
     needsSetup: false,
@@ -801,15 +720,7 @@ function TabRuntime({
     pendingCheckpoints: [],
     pendingRevisions: [],
     activePlan: null,
-    usage: {
-      totalCostUsd: 0,
-      totalPromptTokens: 0,
-      totalCompletionTokens: 0,
-      cacheHitTokens: 0,
-      cacheMissTokens: 0,
-      lastCallCacheHit: null,
-      lastCallCacheMiss: null,
-    },
+    usage: zeroUsage(),
     sessions: [],
     settings: null,
     balance: null,
@@ -818,22 +729,15 @@ function TabRuntime({
   });
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<string | null>(null);
-  const [ctxMenu, setCtxMenu] = useState<{
-    x: number;
-    y: number;
-    actions: ContextMenuAction[];
-  } | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const [atBottom, setAtBottom] = useState(true);
+  const threadRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const palette = useCommandPalette();
+
   useEffect(() => {
     registerDispatch(tabId, dispatch);
     return () => registerDispatch(tabId, null);
   }, [tabId, registerDispatch]);
-  const mentionResults = state.mentionResults;
-  const mentionPreview = state.mentionPreview;
-  const palette = useCommandPalette();
 
   const sendRpc = useCallback(
     (cmd: OutgoingCommand) => {
@@ -891,71 +795,6 @@ function TabRuntime({
     window.setTimeout(() => setToast(null), 1600);
   }, []);
 
-  const messageActions = useCallback(
-    (m: ChatMessage): ContextMenuAction[] => {
-      const acts: ContextMenuAction[] = [];
-      if (m.kind === "user") {
-        acts.push({
-          id: "copy",
-          label: "Copy",
-          icon: "⧉",
-          run: () => {
-            void navigator.clipboard.writeText(m.text);
-            flashToast(t("toast.copied"));
-          },
-        });
-        acts.push({
-          id: "resend",
-          label: "Resend",
-          icon: "↺",
-          run: () => setDraft(m.text),
-        });
-      } else if (m.kind === "assistant") {
-        const text = m.segments
-          .filter((s): s is { kind: "text"; text: string } => s.kind === "text")
-          .map((s) => s.text)
-          .join("\n\n")
-          .trim();
-        if (text) {
-          acts.push({
-            id: "copy",
-            label: "Copy reply",
-            icon: "⧉",
-            run: () => {
-              void navigator.clipboard.writeText(text);
-              flashToast(t("toast.copied"));
-            },
-          });
-          acts.push({
-            id: "quote",
-            label: "Quote",
-            icon: "❝",
-            run: () => {
-              const quoted = text
-                .split("\n")
-                .map((l) => `> ${l}`)
-                .join("\n");
-              setDraft((d) => (d ? `${d}\n\n${quoted}\n\n` : `${quoted}\n\n`));
-              composerRef.current?.focus();
-            },
-          });
-        }
-      } else if (m.kind === "error") {
-        acts.push({
-          id: "copy",
-          label: "Copy error",
-          icon: "⧉",
-          run: () => {
-            void navigator.clipboard.writeText(m.message);
-            flashToast(t("toast.copied"));
-          },
-        });
-      }
-      return acts;
-    },
-    [flashToast],
-  );
-
   const send = useCallback(
     (override?: string) => {
       const text = (override ?? draft).trim();
@@ -1006,106 +845,10 @@ function TabRuntime({
     [sendRpc],
   );
 
-  const copyLastReply = useCallback(() => {
-    const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
-    if (!last || last.kind !== "assistant") return;
-    const text = last.segments
-      .filter((s): s is { kind: "text"; text: string } => s.kind === "text")
-      .map((s) => s.text)
-      .join("\n\n")
-      .trim();
-    if (!text) return;
-    void navigator.clipboard.writeText(text);
-    flashToast(t("toast.copied"));
-  }, [state.messages, flashToast]);
-
-  const exportConversation = useCallback(() => {
-    const md = conversationToMarkdown(state.messages);
-    if (!md) return;
-    void navigator.clipboard.writeText(md);
-    flashToast(t("toast.copiedMd"));
-  }, [state.messages, flashToast]);
-
-  const versionLabel = state.settings?.version ?? "dev";
-  const commands = buildCommands({
-    newChat: () => {
-      newChat();
-      flashToast(t("toast.newSession"));
-    },
-    clearChat: () => {
-      dispatch({ t: "clear" });
-      flashToast(t("toast.cleared"));
-    },
-    focusComposer: () => {
-      composerRef.current?.focus();
-    },
-    openSettings: () => setSettingsOpen(true),
-    about: () => flashToast(t("toast.aboutLine", { version: versionLabel })),
-    abort,
-    copyLast: copyLastReply,
-    exportMarkdown: exportConversation,
-    pickWorkspace,
-    newTab: onNewTab,
-    closeTab: onCloseTab,
-    busy: state.busy,
-    canCloseTab,
-    hasMessages: state.messages.length > 0,
-  });
-
-  const slashCommands = [
-    {
-      id: "new",
-      label: t("palette.newChat"),
-      hint: t("palette.newChatHint"),
-      run: () => {
-        newChat();
-        flashToast(t("toast.newSession"));
-      },
-    },
-    {
-      id: "clear",
-      label: t("palette.clearChat"),
-      hint: t("palette.clearChatHint"),
-      run: () => dispatch({ t: "clear" }),
-    },
-    {
-      id: "abort",
-      label: t("palette.abort"),
-      hint: t("palette.abortHint"),
-      run: () => abort(),
-    },
-    {
-      id: "copy",
-      label: t("palette.copyLast"),
-      hint: t("palette.copyLastHint"),
-      run: () => {
-        const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
-        if (last && last.kind === "assistant") {
-          const text = last.segments
-            .filter((s): s is { kind: "text"; text: string } => s.kind === "text")
-            .map((s) => s.text)
-            .join("\n\n")
-            .trim();
-          if (text) {
-            void navigator.clipboard.writeText(text);
-            flashToast(t("toast.copied"));
-          }
-        }
-      },
-    },
-    {
-      id: "export",
-      label: t("palette.exportMd"),
-      hint: t("palette.exportMdHint"),
-      run: () => {
-        const md = conversationToMarkdown(state.messages);
-        if (md) {
-          void navigator.clipboard.writeText(md);
-          flashToast(t("toast.copiedMd"));
-        }
-      },
-    },
-  ];
+  useEffect(() => {
+    if (!threadRef.current) return;
+    threadRef.current.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
+  }, [state.messages.length]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1116,6 +859,9 @@ function TabRuntime({
       } else if (mod && (e.key === "n" || e.key === "N")) {
         e.preventDefault();
         newChat();
+      } else if (mod && e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen((v) => !v);
       } else if (e.key === "Escape" && state.busy) {
         const target = e.target as HTMLElement | null;
         if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
@@ -1127,290 +873,919 @@ function TabRuntime({
     return () => window.removeEventListener("keydown", onKey);
   }, [state.busy, abort, newChat]);
 
-  const hasMessages = state.messages.length > 0;
-  const turnCount = state.messages.filter((m) => m.kind === "assistant").length;
-  const [thinkStart, setThinkStart] = useState<number | null>(null);
-  useEffect(() => {
-    if (state.busy) {
-      setThinkStart((prev) => prev ?? Date.now());
-    } else {
-      setThinkStart(null);
-    }
-  }, [state.busy]);
-
-  // Derive what reasonix is currently doing from the latest assistant segment.
-  const { activity, liveCompletionChars } = (() => {
-    const latest = [...state.messages].reverse().find((m) => m.kind === "assistant");
-    if (!latest || latest.kind !== "assistant") {
-      return { activity: "Reasonix is thinking", liveCompletionChars: 0 };
-    }
-    const last = latest.segments[latest.segments.length - 1];
-    const chars = latest.segments.reduce(
-      (sum, s) => sum + (s.kind === "text" || s.kind === "reasoning" ? s.text.length : 0),
-      0,
-    );
-    if (!last) return { activity: "Reasonix is thinking", liveCompletionChars: chars };
-    if (last.kind === "tool") {
-      if (last.result === undefined) {
-        return {
-          activity: describeToolCall(last.name, last.args),
-          liveCompletionChars: chars,
-        };
+  const commands = buildCommands({
+    newChat: () => {
+      newChat();
+      flashToast("已创建新会话");
+    },
+    clearChat: () => {
+      dispatch({ t: "clear" });
+      flashToast("已清空");
+    },
+    focusComposer: () => composerRef.current?.focus(),
+    openSettings: () => setSettingsOpen(true),
+    about: () => flashToast(`Reasonix · ${state.settings?.version ?? "dev"}`),
+    abort,
+    copyLast: () => {
+      const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
+      if (!last || last.kind !== "assistant") return;
+      const text = last.segments
+        .filter((s): s is { kind: "text"; text: string } => s.kind === "text")
+        .map((s) => s.text)
+        .join("\n\n")
+        .trim();
+      if (text) {
+        void navigator.clipboard.writeText(text);
+        flashToast("已复制");
       }
-      return { activity: "Continuing after tool", liveCompletionChars: chars };
+    },
+    exportMarkdown: () => {
+      const md = state.messages
+        .map((m) => {
+          if (m.kind === "user") return `### 你\n\n${m.text}`;
+          if (m.kind === "assistant") {
+            const body = m.segments
+              .map((s) => {
+                if (s.kind === "text") return s.text;
+                if (s.kind === "reasoning") return `<details>\n<summary>Reasoning</summary>\n\n${s.text}\n\n</details>`;
+                return "";
+              })
+              .filter(Boolean)
+              .join("\n\n");
+            return `### Reasonix\n\n${body}`;
+          }
+          if (m.kind === "error") return `### Error\n\n${m.message}`;
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n\n---\n\n");
+      if (md) {
+        void navigator.clipboard.writeText(md);
+        flashToast("已复制 Markdown");
+      }
+    },
+    pickWorkspace,
+    newTab: onNewTab,
+    closeTab: onCloseTab,
+    busy: state.busy,
+    canCloseTab,
+    hasMessages: state.messages.length > 0,
+  });
+
+  const slashCommands: SlashCmd[] = [
+    { cmd: "/new", desc: "新建会话", run: () => newChat(), kb: "⌘N" },
+    { cmd: "/clear", desc: "清空当前对话", run: () => dispatch({ t: "clear" }) },
+    { cmd: "/abort", desc: "中断流式输出", run: () => abort(), kb: "esc" },
+    {
+      cmd: "/copy",
+      desc: "复制最后一条回复",
+      run: () => {
+        const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
+        if (last?.kind === "assistant") {
+          const text = last.segments
+            .filter((s): s is { kind: "text"; text: string } => s.kind === "text")
+            .map((s) => s.text)
+            .join("\n\n");
+          if (text) {
+            void navigator.clipboard.writeText(text);
+            flashToast("已复制");
+          }
+        }
+      },
+    },
+    { cmd: "/model", desc: "切换模型", run: () => setSettingsOpen(true), kb: "⌘M" },
+    { cmd: "/theme", desc: "切换深浅主题", run: onToggleTheme },
+    {
+      cmd: "/currency",
+      desc: "切换货币显示 (CNY / USD)",
+      run: onToggleCurrency,
+    },
+  ];
+
+  const elapsed = useElapsed(state.busy);
+  const workspaceLabel = state.settings?.workspaceDir
+    ? state.settings.workspaceDir.split(/[\\/]/).pop() || "workspace"
+    : "Reasonix";
+  const session = (() => {
+    const firstUser = state.messages.find((m) => m.kind === "user");
+    if (firstUser && firstUser.kind === "user") {
+      const cleaned = firstUser.text.replace(/\s+/g, " ").trim();
+      if (cleaned) return cleaned.length > 60 ? `${cleaned.slice(0, 60)}…` : cleaned;
     }
-    if (last.kind === "reasoning") {
-      return {
-        activity: latest.pending ? "Reasoning" : "Continuing",
-        liveCompletionChars: chars,
-      };
+    if (state.currentSession) {
+      const s = state.sessions.find((x) => x.name === state.currentSession);
+      if (s?.summary && s.summary.trim()) return s.summary.trim();
+      const m = state.currentSession.match(/^desktop-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
+      if (m) return `会话 ${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
     }
-    return {
-      activity: latest.pending ? "Writing response" : "Continuing",
-      liveCompletionChars: chars,
-    };
+    return state.messages.length === 0 ? `${workspaceLabel} · 新会话` : workspaceLabel;
   })();
 
-  // Completion tokens shown = settled past-turn total + rough estimate of
-  // chars streamed in the active turn so far (≈4 chars / token, blends EN+CN).
-  const liveCompletionTokens =
-    state.usage.totalCompletionTokens + Math.ceil(liveCompletionChars / 4);
+  const exportConversation = useCallback(() => {
+    const md = state.messages
+      .map((m) => {
+        if (m.kind === "user") return `### 你\n\n${m.text}`;
+        if (m.kind === "assistant") {
+          const body = m.segments
+            .map((s) => {
+              if (s.kind === "text") return s.text;
+              if (s.kind === "reasoning")
+                return `<details>\n<summary>Reasoning</summary>\n\n${s.text}\n\n</details>`;
+              if (s.kind === "tool") {
+                const arg = s.args ? `\n\n\`\`\`json\n${s.args}\n\`\`\`` : "";
+                const res = s.result ? `\n\n\`\`\`\n${s.result}\n\`\`\`` : "";
+                return `> **Tool · \`${s.name}\`**${arg}${res}`;
+              }
+              return "";
+            })
+            .filter(Boolean)
+            .join("\n\n");
+          return `### Reasonix\n\n${body}`;
+        }
+        if (m.kind === "error") return `### Error\n\n${m.message}`;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n---\n\n");
+    if (md) {
+      void navigator.clipboard.writeText(md);
+      flashToast("已复制 Markdown");
+    } else {
+      flashToast("会话为空");
+    }
+  }, [state.messages, flashToast]);
 
   return (
     <WorkspaceProvider
       value={{ dir: state.settings?.workspaceDir, editor: state.settings?.editor }}
     >
-      <div className="app" style={{ display: active ? undefined : "none" }}>
-        <Sidebar
-          sessions={state.sessions}
-          version={state.settings?.version}
-          balance={state.balance}
-          onNewChat={newChat}
+      <div
+        className="app"
+        data-theme={theme}
+        data-side-collapsed={sideCollapsed}
+        data-ctx-collapsed={ctxCollapsed}
+        style={{ display: active ? undefined : "none" }}
+      >
+        <TitleBar
+          session={session}
+          model={state.settings?.model}
+          sideOn={!sideCollapsed}
+          ctxOn={!ctxCollapsed}
+          onToggleSide={onToggleSide}
+          onToggleCtx={onToggleCtx}
           onOpenCommands={() => palette.setOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
-          onDeleteSession={(name) => sendRpc({ cmd: "session_delete", name })}
-          onLoadSession={(name) => sendRpc({ cmd: "session_load", name })}
+          onExport={exportConversation}
+          onClear={() => dispatch({ t: "clear" })}
+          hasMessages={state.messages.length > 0}
         />
-        <div className="main">
-          <Header
-            model={state.model}
-            preset={state.settings?.preset ?? "auto"}
-            editMode={state.settings?.editMode ?? "review"}
-            workspaceDir={state.settings?.workspaceDir}
-            recentWorkspaces={state.settings?.recentWorkspaces ?? []}
-            streaming={state.busy}
-            turnCount={turnCount}
-            usage={state.usage}
-            onOpenCommands={() => palette.setOpen(true)}
-            onPickPreset={(p) => saveSettings({ preset: p })}
-            onPickEditMode={(m) => saveSettings({ editMode: m })}
-            onPickWorkspace={pickWorkspace}
-            onSwitchWorkspace={(dir) => saveSettings({ workspaceDir: dir })}
-            currency={currency}
-          />
-          {active && pendingUpdate && (
-            <UpdateBanner
-              version={pendingUpdate.version}
-              currentVersion={pendingUpdate.currentVersion}
-              body={pendingUpdate.body}
-              status={updateStatus}
-              onInstall={installUpdate}
-              onDismiss={dismissUpdate}
-            />
-          )}
-          {state.activePlan && (
-            <ActivePlanRail
-              plan={state.activePlan.plan}
-              summary={state.activePlan.summary}
-              steps={state.activePlan.steps}
-              completedStepIds={state.activePlan.completedStepIds}
-              stepResults={state.activePlan.stepResults}
-              onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
-            />
-          )}
+
+        <TabBar
+          tabs={tabsList}
+          activeId={activeTabId}
+          setActive={setActiveTabId}
+          onClose={(id) => {
+            if (tabsList.length <= 1) return;
+            invoke("rpc_send", {
+              line: JSON.stringify({ cmd: "tab_close", tabId: id }),
+            }).catch((err) => console.error("tab_close failed", err));
+          }}
+          onNew={onNewTab}
+          singleTab={tabsList.length <= 1}
+        />
+
+
+        <Sidebar
+          sessions={state.sessions}
+          activeName={state.currentSession}
+          onNewChat={newChat}
+          onLoadSession={(name) => sendRpc({ cmd: "session_load", name })}
+          onDeleteSession={(name) => sendRpc({ cmd: "session_delete", name })}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenCommands={() => palette.setOpen(true)}
+        />
+
+        <main className="main" style={{ position: "relative" }}>
           {state.needsSetup ? (
-            <OnboardingScreen
+            <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
               onPickWorkspace={pickWorkspace}
               onSubmit={(key) => sendRpc({ cmd: "setup_save_key", key })}
             />
-          ) : hasMessages ? (
-            <div className="messages-wrap">
-              <Virtuoso
-                ref={virtuosoRef}
-                className="messages-virt"
-                data={state.messages}
-                followOutput={(isAtBottom) => (isAtBottom ? "smooth" : false)}
-                atBottomStateChange={setAtBottom}
-                atBottomThreshold={200}
-                increaseViewportBy={{ top: 200, bottom: 600 }}
-                itemContent={(i, m) => {
-                  const actions = messageActions(m);
-                  const isLastError =
-                    m.kind === "error" && i === state.messages.length - 1 && !state.busy;
-                  const lastUserBefore = isLastError
-                    ? (() => {
-                        for (let j = i - 1; j >= 0; j--) {
-                          const prev = state.messages[j];
-                          if (prev?.kind === "user") return prev.text;
-                        }
-                        return null;
-                      })()
-                    : null;
-                  const retry = lastUserBefore ? () => send(lastUserBefore) : undefined;
-                  return (
-                    <div
-                      className="messages-row"
-                      onContextMenu={
-                        actions.length > 0
-                          ? (e) => {
-                              e.preventDefault();
-                              setCtxMenu({ x: e.clientX, y: e.clientY, actions });
-                            }
-                          : undefined
-                      }
-                    >
-                      <MessageRow message={m} onRetry={retry} />
-                    </div>
-                  );
-                }}
-                components={{
-                  Footer: () => (
-                    <div className="messages-footer">
-                      {state.pendingConfirms.map((c) => (
-                        <ApprovalCard
-                          key={c.id}
-                          kind={c.kind}
-                          command={c.command}
-                          onAllow={() => resolveConfirm(c.id, { type: "run_once" })}
-                          onAlwaysAllow={(prefix) =>
-                            resolveConfirm(c.id, { type: "always_allow", prefix })
-                          }
-                          onDeny={(reason) =>
-                            resolveConfirm(c.id, { type: "deny", denyContext: reason })
-                          }
-                        />
-                      ))}
-                      {state.pendingChoices.map((c) => (
-                        <ChoiceCard
-                          key={c.id}
-                          question={c.question}
-                          options={c.options}
-                          allowCustom={c.allowCustom}
-                          onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
-                          onText={(text) => resolveChoice(c.id, { type: "text", text })}
-                          onCancel={() => resolveChoice(c.id, { type: "cancel" })}
-                        />
-                      ))}
-                      {state.pendingPlans.map((p) => (
-                        <PlanCard
-                          key={p.id}
-                          plan={p.plan}
-                          summary={p.summary}
-                          onApprove={(feedback) => resolvePlan(p.id, { type: "approve", feedback })}
-                          onRefine={(feedback) => resolvePlan(p.id, { type: "refine", feedback })}
-                          onCancel={(feedback) => resolvePlan(p.id, { type: "cancel", feedback })}
-                        />
-                      ))}
-                      {state.pendingCheckpoints.map((c) => (
-                        <CheckpointCard
-                          key={c.id}
-                          stepId={c.stepId}
-                          title={c.title}
-                          result={c.result}
-                          notes={c.notes}
-                          completed={c.completed}
-                          total={c.total}
-                          onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
-                          onRevise={(feedback) =>
-                            resolveCheckpoint(c.id, { type: "revise", feedback })
-                          }
-                          onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
-                        />
-                      ))}
-                      {state.pendingRevisions.map((r) => (
-                        <RevisionCard
-                          key={r.id}
-                          reason={r.reason}
-                          remainingSteps={r.remainingSteps}
-                          summary={r.summary}
-                          onAccept={() => resolveRevision(r.id, { type: "accepted" })}
-                          onReject={() => resolveRevision(r.id, { type: "rejected" })}
-                          onCancel={() => resolveRevision(r.id, { type: "cancelled" })}
-                        />
-                      ))}
-                      {!state.ready && <StatusLine text="connecting to reasonix" />}
-                    </div>
-                  ),
-                }}
-              />
-              <button
-                type="button"
-                className={`scroll-fab ${atBottom ? "" : "show"}`}
-                aria-label="scroll to bottom"
-                onClick={() =>
-                  virtuosoRef.current?.scrollToIndex({
-                    index: state.messages.length - 1,
-                    behavior: "smooth",
-                  })
-                }
-              >
-                <ArrowDown size={14} />
-              </button>
-            </div>
           ) : (
-            <EmptyState onPick={(t) => send(t)} />
+            <>
+              <MainHead
+                session={session}
+                model={state.settings?.model}
+                workspaceDir={state.settings?.workspaceDir}
+                busy={state.busy}
+                hasMessages={state.messages.length > 0}
+                onAbort={abort}
+                onNewChat={newChat}
+                onExport={exportConversation}
+                onPickWorkspace={pickWorkspace}
+              />
+              {state.settings?.editMode === "yolo" ? (
+                <div className="mode-banner">
+                  <span className="mb-pip" />
+                  <I.warn size={13} />
+                  <span className="mb-tag">YOLO</span>
+                  <span className="mb-msg">
+                    所有工具调用、shell 命令、文件编辑都会<b>自动批准</b>，不会再询问。
+                  </span>
+                  <span className="grow" />
+                  <button
+                    type="button"
+                    className="mb-btn"
+                    onClick={() => saveSettings({ editMode: "review" })}
+                  >
+                    切回 Review
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="thread" ref={threadRef}>
+                <div className="thread-inner">
+                  {pendingUpdate ? (
+                    <UpdateBanner
+                      version={pendingUpdate.version}
+                      currentVersion={pendingUpdate.currentVersion}
+                      status={updateStatus}
+                      onInstall={installUpdate}
+                      onDismiss={dismissUpdate}
+                    />
+                  ) : null}
+
+                  {state.activePlan ? (
+                    <>
+                      <PlanBanner
+                        plan={state.activePlan}
+                        onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
+                      />
+                      <ActivePlanTaskCard plan={state.activePlan} />
+                    </>
+                  ) : null}
+
+                  {state.messages.length === 0 ? (
+                    <EmptyState
+                      onPick={(t) => send(t)}
+                      workspaceDir={state.settings?.workspaceDir}
+                    />
+                  ) : null}
+
+                  {state.messages.map((m, i) => {
+                    if (m.kind === "user") {
+                      const dividerLabel = `turn ${m.turn}`;
+                      const prev = state.messages[i - 1];
+                      const needsDivider = !prev || prev.kind === "user";
+                      return (
+                        <div key={`u-${i}`}>
+                          {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
+                          <UserMsg text={m.text} />
+                        </div>
+                      );
+                    }
+                    if (m.kind === "assistant") {
+                      return (
+                        <AssistantMsg
+                          key={`a-${m.turn}`}
+                          segments={m.segments}
+                          pending={m.pending}
+                          model={state.model}
+                          onApproveConfirm={(id) =>
+                            resolveConfirm(id, { type: "run_once" })
+                          }
+                          onRejectConfirm={(id) => resolveConfirm(id, { type: "deny" })}
+                          onAlwaysAllowConfirm={(id, prefix) =>
+                            resolveConfirm(id, { type: "always_allow", prefix })
+                          }
+                          pendingConfirms={state.pendingConfirms}
+                        />
+                      );
+                    }
+                    if (m.kind === "error") {
+                      return (
+                        <div key={`e-${i}`} className="warn-card" style={{ borderColor: "var(--tone-err)", background: "var(--danger-soft)" }}>
+                          <span className="ico" style={{ color: "var(--tone-err)" }}>
+                            <I.warning size={16} />
+                          </span>
+                          <div>
+                            <div className="tt">错误</div>
+                            <div className="ds">{m.message}</div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
+
+                  {/* Pending approvals */}
+                  {state.pendingPlans.map((p) => (
+                    <PlanApprovalCard
+                      key={`pp-${p.id}`}
+                      p={p}
+                      onApprove={() => resolvePlan(p.id, { type: "approve" })}
+                      onRefine={() => resolvePlan(p.id, { type: "refine" })}
+                      onCancel={() => resolvePlan(p.id, { type: "cancel" })}
+                    />
+                  ))}
+                  {state.pendingCheckpoints.map((c) => (
+                    <CheckpointApprovalCard
+                      key={`cp-${c.id}`}
+                      c={c}
+                      onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
+                      onRevise={() => resolveCheckpoint(c.id, { type: "revise" })}
+                      onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
+                    />
+                  ))}
+                  {state.pendingRevisions.map((r) => (
+                    <RevisionApprovalCard
+                      key={`rv-${r.id}`}
+                      r={r}
+                      onAccept={() => resolveRevision(r.id, { type: "accepted" })}
+                      onReject={() => resolveRevision(r.id, { type: "rejected" })}
+                    />
+                  ))}
+                  {state.pendingConfirms.map((c) => (
+                    <ConfirmApprovalCard
+                      key={`cc-${c.id}`}
+                      c={c}
+                      onAllow={() => resolveConfirm(c.id, { type: "run_once" })}
+                      onAlwaysAllow={(prefix) =>
+                        resolveConfirm(c.id, { type: "always_allow", prefix })
+                      }
+                      onDeny={() => resolveConfirm(c.id, { type: "deny" })}
+                    />
+                  ))}
+                  {state.pendingChoices.map((c) => (
+                    <ChoiceApprovalCard
+                      key={`ch-${c.id}`}
+                      c={c}
+                      onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
+                      onCancel={() => resolveChoice(c.id, { type: "cancel" })}
+                    />
+                  ))}
+
+                  {!state.ready ? (
+                    <div
+                      style={{
+                        padding: 12,
+                        color: "var(--muted)",
+                        fontFamily: "IBM Plex Mono, monospace",
+                        fontSize: 11,
+                      }}
+                    >
+                      正在连接 reasonix 内核…
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <Composer
+                draft={draft}
+                setDraft={setDraft}
+                onSend={() => send()}
+                onAbort={abort}
+                disabled={!state.ready}
+                busy={state.busy}
+                textareaRef={composerRef}
+                preset={state.settings?.preset ?? "auto"}
+                modelLabel={state.settings?.model ?? "deepseek-chat"}
+                onPresetChange={(preset) => {
+                  saveSettings({ preset });
+                  flashToast(`已切换到 ${preset.toUpperCase()}`);
+                }}
+                editMode={state.settings?.editMode ?? "review"}
+                onEditModeChange={(mode) => {
+                  saveSettings({ editMode: mode });
+                  flashToast(`模式: ${mode.toUpperCase()}`);
+                }}
+                workspaceDir={state.settings?.workspaceDir}
+                slashCommands={slashCommands}
+                onMentionQuery={queryMentions}
+                onMentionPreview={previewMention}
+                onMentionPicked={markMentionPicked}
+                mentionResults={state.mentionResults}
+              />
+
+              {state.busy ? (
+                <InterruptBar
+                  visible={true}
+                  elapsedMs={elapsed}
+                  label="Reasoning"
+                  onStop={abort}
+                />
+              ) : null}
+            </>
           )}
-          {state.busy && thinkStart !== null && (
-            <ThinkingBar
-              startedAt={thinkStart}
-              label={activity}
-              promptTokens={state.usage.totalPromptTokens}
-              completionTokens={liveCompletionTokens}
-            />
-          )}
-          <Composer
-            draft={draft}
-            setDraft={setDraft}
-            onSend={() => send()}
-            onAbort={abort}
-            onOpenCommands={() => palette.setOpen(true)}
-            slashCommands={slashCommands}
-            disabled={!state.ready}
-            busy={state.busy}
-            textareaRef={composerRef}
-            onMentionQuery={queryMentions}
-            onMentionPreview={previewMention}
-            onMentionPicked={markMentionPicked}
-            mentionResults={mentionResults}
-            mentionPreview={mentionPreview}
-          />
-        </div>
+        </main>
+
+        <ContextPanel
+          settings={state.settings}
+          usage={state.usage}
+          workspaceDir={state.settings?.workspaceDir}
+        />
+
+        <StatusBar
+          settings={state.settings}
+          balance={state.balance}
+          usage={state.usage}
+          busy={state.busy}
+          ready={state.ready}
+          currency={currency}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          onToggleCurrency={onToggleCurrency}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+
         <CommandPalette
           open={palette.open}
           onClose={() => palette.setOpen(false)}
           commands={commands}
         />
-        {ctxMenu && (
-          <ContextMenu
-            x={ctxMenu.x}
-            y={ctxMenu.y}
-            actions={ctxMenu.actions}
-            onClose={() => setCtxMenu(null)}
-          />
-        )}
-        {settingsOpen && state.settings && (
-          <SettingsPanel
+
+        {settingsOpen && state.settings ? (
+          <SettingsModal
             settings={state.settings}
+            balance={state.balance}
+            usage={state.usage}
+            currency={currency}
+            onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
             onPickWorkspace={pickWorkspace}
-            onClose={() => setSettingsOpen(false)}
           />
-        )}
+        ) : null}
+
         <Toast message={toast} />
       </div>
     </WorkspaceProvider>
+  );
+}
+
+function TitleBar({
+  session,
+  model,
+  sideOn,
+  ctxOn,
+  onToggleSide,
+  onToggleCtx,
+  onOpenCommands,
+  onOpenSettings,
+  onExport,
+  onClear,
+  hasMessages,
+}: {
+  session: string;
+  model?: string;
+  sideOn: boolean;
+  ctxOn: boolean;
+  onToggleSide: () => void;
+  onToggleCtx: () => void;
+  onOpenCommands: () => void;
+  onOpenSettings: () => void;
+  onExport: () => void;
+  onClear: () => void;
+  hasMessages: boolean;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const moreWrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (moreWrapRef.current && !moreWrapRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+  return (
+    <header className="titlebar">
+      <div className="traffic">
+        <span className="dot r" />
+        <span className="dot y" />
+        <span className="dot g" />
+      </div>
+      <div className="brand">
+        <span className="mark" />
+        <span>Reasonix</span>
+      </div>
+      <div className="crumbs">
+        <span>{session}</span>
+        <span className="sep">/</span>
+        <span className="cur">{model ?? "—"}</span>
+      </div>
+      <span className="grow" />
+      <div className="actions">
+        <button
+          type="button"
+          className="iconbtn"
+          data-on={sideOn}
+          title="侧栏 (⌘B)"
+          onClick={onToggleSide}
+        >
+          <I.panel_l size={14} />
+        </button>
+        <button
+          type="button"
+          className="iconbtn"
+          data-on={ctxOn}
+          title="上下文面板"
+          onClick={onToggleCtx}
+        >
+          <I.panel_r size={14} />
+        </button>
+        <div ref={moreWrapRef} style={{ position: "relative" }}>
+          <button
+            type="button"
+            className="iconbtn"
+            title="更多"
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <I.more size={14} />
+          </button>
+        {menuOpen ? (
+          <div
+            className="popup"
+            style={{
+              top: "calc(100% + 6px)",
+              right: 0,
+              left: "auto",
+              bottom: "auto",
+              width: 220,
+            }}
+          >
+            <div className="popup-list">
+              <div
+                className="popup-item"
+                onClick={() => {
+                  onOpenCommands();
+                  setMenuOpen(false);
+                }}
+              >
+                <span className="ico">
+                  <I.search size={12} />
+                </span>
+                <div className="nm">
+                  <span>命令面板</span>
+                </div>
+                <span className="kb">⌘K</span>
+              </div>
+              <div
+                className="popup-item"
+                onClick={() => {
+                  if (hasMessages) onExport();
+                  setMenuOpen(false);
+                }}
+                data-active={!hasMessages ? undefined : false}
+                style={{ opacity: hasMessages ? 1 : 0.5 }}
+              >
+                <span className="ico">
+                  <I.download size={12} />
+                </span>
+                <div className="nm">
+                  <span>导出 Markdown</span>
+                </div>
+              </div>
+              <div
+                className="popup-item"
+                onClick={() => {
+                  onClear();
+                  setMenuOpen(false);
+                }}
+              >
+                <span className="ico">
+                  <I.x size={12} />
+                </span>
+                <div className="nm">
+                  <span>清空对话</span>
+                </div>
+              </div>
+              <div
+                className="popup-item"
+                onClick={() => {
+                  onOpenSettings();
+                  setMenuOpen(false);
+                }}
+              >
+                <span className="ico">
+                  <I.cog size={12} />
+                </span>
+                <div className="nm">
+                  <span>设置</span>
+                </div>
+                <span className="kb">⌘,</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function TabBar({
+  tabs,
+  activeId,
+  setActive,
+  onClose,
+  onNew,
+  singleTab,
+}: {
+  tabs: { id: string; workspaceDir?: string }[];
+  activeId: string;
+  setActive: (id: string) => void;
+  onClose: (id: string) => void;
+  onNew: () => void;
+  singleTab?: boolean;
+}) {
+  return (
+    <div className="tabbar">
+      {tabs.map((t) => {
+        const ws = t.workspaceDir ?? "";
+        const label = ws.replace(/[\\/]$/, "").split(/[\\/]/).pop() || "workspace";
+        return (
+          <div
+            key={t.id}
+            className="tab"
+            data-active={t.id === activeId}
+            onClick={() => setActive(t.id)}
+            title={ws || label}
+          >
+            <span className="dot" data-state="running" />
+            <span className="label">{label}</span>
+            {!singleTab ? (
+              <span
+                className="close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose(t.id);
+                }}
+              >
+                <I.x size={11} />
+              </span>
+            ) : null}
+          </div>
+        );
+      })}
+      <div className="tab newtab" title="新建标签 ⌘T" onClick={onNew}>
+        <I.plus size={11} />
+        <span style={{ fontSize: 11, marginLeft: 4 }}>新标签</span>
+      </div>
+    </div>
+  );
+}
+
+function MainHead({
+  session,
+  model,
+  workspaceDir,
+  busy,
+  hasMessages,
+  onAbort,
+  onNewChat,
+  onExport,
+  onPickWorkspace,
+}: {
+  session: string;
+  model?: string;
+  workspaceDir?: string;
+  busy: boolean;
+  hasMessages: boolean;
+  onAbort: () => void;
+  onNewChat: () => void;
+  onExport: () => void;
+  onPickWorkspace: () => void;
+}) {
+  const wsLabel = workspaceDir ? workspaceDir.split(/[\\/]/).pop() || "workspace" : "未选择工作区";
+  return (
+    <div className="main-head">
+      <div className="title-wrap">
+        <h1>
+          <span className="editable">{session}</span>
+          {busy ? (
+            <span className="pill" style={{ color: "var(--accent)" }}>
+              <span className="dot" />
+              <span className="shimmer">运行中</span>
+            </span>
+          ) : null}
+        </h1>
+        <div className="sub">
+          <span
+            onClick={onPickWorkspace}
+            style={{ cursor: "pointer" }}
+            title={workspaceDir ?? "点击选择工作区"}
+          >
+            <I.folder size={10} /> {wsLabel}
+          </span>
+          {model ? (
+            <span className="pill">
+              <I.brain size={10} /> {model}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <span className="grow" />
+      <button
+        type="button"
+        className="h-btn"
+        onClick={onExport}
+        disabled={!hasMessages}
+        title="复制对话为 Markdown"
+      >
+        <I.download size={12} /> 导出
+      </button>
+      <button type="button" className="h-btn" onClick={onNewChat}>
+        <I.plus size={12} /> 新会话
+      </button>
+      {busy ? (
+        <button type="button" className="h-btn primary" onClick={onAbort}>
+          <I.stop size={12} /> 中断
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function EmptyState({
+  onPick,
+  workspaceDir,
+}: {
+  onPick: (text: string) => void;
+  workspaceDir?: string;
+}) {
+  const suggestions = [
+    "帮我审查最近一次提交的代码改动",
+    "把当前文件的 TS 报错都修了",
+    "把 README 翻译成中英双语",
+    "为这个仓库生成一份 CHANGELOG",
+    "/help",
+  ];
+  const wsLabel = workspaceDir ? workspaceDir.split(/[\\/]/).pop() : null;
+  return (
+    <div
+      style={{
+        padding: "48px 16px 24px",
+        textAlign: "center",
+        color: "var(--muted)",
+        fontFamily: "IBM Plex Sans, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 12,
+          margin: "0 auto 14px",
+          background: "linear-gradient(135deg, var(--accent), var(--violet))",
+          position: "relative",
+        }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            inset: 8,
+            borderRadius: 6,
+            background: "var(--bg)",
+          }}
+        />
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 600, color: "var(--fg)", marginBottom: 4 }}>
+        欢迎使用 Reasonix
+      </div>
+      <div style={{ fontSize: 12, marginBottom: 18 }}>
+        {wsLabel ? (
+          <>
+            当前工作区：<code style={{ fontFamily: "IBM Plex Mono, monospace" }}>{wsLabel}</code>
+          </>
+        ) : (
+          "请先在顶部选择工作区"
+        )}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 8,
+          justifyContent: "center",
+          maxWidth: 540,
+          margin: "0 auto",
+        }}
+      >
+        {suggestions.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className="btn"
+            style={{ fontSize: 11.5 }}
+            onClick={() => onPick(s)}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NeedsSetupView({
+  workspaceDir,
+  onPickWorkspace,
+  onSubmit,
+}: {
+  workspaceDir?: string;
+  onPickWorkspace: () => void;
+  onSubmit: (key: string) => void;
+}) {
+  const [key, setKey] = useState("");
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        gap: 18,
+      }}
+    >
+      <div style={{ fontSize: 18, fontWeight: 600 }}>欢迎使用 Reasonix</div>
+      <div style={{ fontSize: 12.5, color: "var(--muted)", maxWidth: 400, textAlign: "center" }}>
+        首次使用需要配置 DeepSeek API Key 与工作目录。Key 仅保存在本地。
+      </div>
+      <div
+        style={{
+          width: "min(420px, 100%)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div className="setting-row" style={{ borderBottom: "none" }}>
+          <div className="l">
+            <div className="n">工作目录</div>
+            <div className="h">{workspaceDir || "未选择"}</div>
+          </div>
+          <button type="button" className="btn" onClick={onPickWorkspace}>
+            选择…
+          </button>
+        </div>
+        <input
+          className="field mono"
+          type="password"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          placeholder="sk-…"
+          style={{ width: "100%" }}
+        />
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!key.trim()}
+          onClick={() => onSubmit(key.trim())}
+        >
+          保存并开始
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function UpdateBanner({
+  version,
+  currentVersion,
+  status,
+  onInstall,
+  onDismiss,
+}: {
+  version: string;
+  currentVersion: string;
+  status: "idle" | "installing" | "error";
+  onInstall: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="plan-banner" style={{ background: "var(--accent-soft)", borderColor: "var(--accent)" }}>
+      <span className="ico">
+        <I.download size={14} />
+      </span>
+      <div className="body">
+        <div className="t">
+          新版本可用 · {currentVersion} → {version}
+        </div>
+        <div className="s">{status === "installing" ? "正在安装…" : status === "error" ? "安装失败" : "点击安装并重启"}</div>
+      </div>
+      <div className="prog">
+        <button type="button" onClick={onInstall} disabled={status === "installing"}>
+          安装
+        </button>
+        <button type="button" onClick={onDismiss}>
+          稍后
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1434,6 +1809,18 @@ export function App() {
     const v = localStorage.getItem("reasonix.currency");
     return v === "USD" ? "USD" : "CNY";
   });
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const v = localStorage.getItem("reasonix.theme");
+    return v === "light" ? "light" : "dark";
+  });
+  const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [ctxCollapsed, setCtxCollapsed] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("reasonix.theme", theme);
+  }, [theme]);
+
   useEffect(() => {
     const onCur = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -1474,7 +1861,7 @@ export function App() {
         const update = await check();
         if (!cancelled && update) setPendingUpdate(update);
       } catch {
-        // updater not configured (no pubkey / endpoint), or network down — silent
+        // updater not configured
       }
     })();
     return () => {
@@ -1562,7 +1949,6 @@ export function App() {
               setTabs((prev) =>
                 prev.map((t) => (t.id === tabId ? { ...t, workspaceDir: ev.workspaceDir } : t)),
               );
-              // fall through to also deliver to the tab reducer
             }
 
             const target = tabId;
@@ -1653,33 +2039,35 @@ export function App() {
         const next = e.shiftKey ? (idx - 1 + tabs.length) % tabs.length : (idx + 1) % tabs.length;
         const target = tabs[next];
         if (target) setActiveTabId(target.id);
+      } else if (mod && (e.key === "b" || e.key === "B")) {
+        if (e.altKey) {
+          e.preventDefault();
+          setCtxCollapsed((v) => !v);
+        } else {
+          e.preventDefault();
+          setSideCollapsed((v) => !v);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [openTab, closeTab, activeTabId, tabs]);
 
+  const onToggleTheme = useCallback(() => {
+    setTheme((t) => (t === "dark" ? "light" : "dark"));
+  }, []);
+
+  const onToggleCurrency = useCallback(() => {
+    setCurrency((c) => {
+      const next = c === "CNY" ? "USD" : "CNY";
+      localStorage.setItem("reasonix.currency", next);
+      window.dispatchEvent(new CustomEvent("reasonix:currency", { detail: next }));
+      return next;
+    });
+  }, []);
+
   return (
     <>
-      {tabs.length > 1 && (
-        <TabBar
-          tabs={tabs}
-          activeId={activeTabId}
-          onActivate={setActiveTabId}
-          onClose={closeTab}
-          onNew={openTab}
-        />
-      )}
-      {tabs.length === 1 && (
-        <TabBar
-          tabs={tabs}
-          activeId={activeTabId}
-          onActivate={setActiveTabId}
-          onClose={closeTab}
-          onNew={openTab}
-          singleTab
-        />
-      )}
       {tabs.map((t) => (
         <TabRuntime
           key={t.id}
@@ -1694,27 +2082,18 @@ export function App() {
           onNewTab={openTab}
           onCloseTab={() => closeTab(t.id)}
           canCloseTab={tabs.length > 1}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+          sideCollapsed={sideCollapsed}
+          ctxCollapsed={ctxCollapsed}
+          onToggleSide={() => setSideCollapsed((v) => !v)}
+          onToggleCtx={() => setCtxCollapsed((v) => !v)}
+          onToggleCurrency={onToggleCurrency}
+          tabsList={tabs}
+          activeTabId={activeTabId}
+          setActiveTabId={setActiveTabId}
         />
       ))}
     </>
   );
-}
-
-function MessageRow({
-  message,
-  onRetry,
-}: {
-  message: ChatMessage;
-  onRetry?: () => void;
-}) {
-  switch (message.kind) {
-    case "user":
-      return <UserBubble text={message.text} />;
-    case "assistant":
-      return <AssistantMessage segments={message.segments} pending={message.pending} />;
-    case "status":
-      return <StatusLine text={message.text} />;
-    case "error":
-      return <ErrorBanner message={message.message} onRetry={onRetry} />;
-  }
 }
