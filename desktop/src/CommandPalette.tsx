@@ -1,4 +1,18 @@
-import { CornerDownLeft, FilePlus, FocusIcon, Info, Settings, Sparkles, Trash2 } from "lucide-react";
+import {
+  ClipboardCopy,
+  CornerDownLeft,
+  Download,
+  FilePlus,
+  FocusIcon,
+  FolderOpen,
+  Info,
+  Plus,
+  Settings,
+  Sparkles,
+  SquareX,
+  StopCircle,
+  Trash2,
+} from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 export type Command = {
@@ -28,14 +42,25 @@ export function useCommandPalette() {
   return { open, setOpen };
 }
 
-export function buildCommands(handlers: {
+export type CommandHandlers = {
   newChat: () => void;
   clearChat: () => void;
   focusComposer: () => void;
   openSettings: () => void;
   about: () => void;
-}): Command[] {
-  return [
+  abort: () => void;
+  copyLast: () => void;
+  exportMarkdown: () => void;
+  pickWorkspace: () => void;
+  newTab: () => void;
+  closeTab: () => void;
+  busy: boolean;
+  canCloseTab: boolean;
+  hasMessages: boolean;
+};
+
+export function buildCommands(handlers: CommandHandlers): Command[] {
+  const list: Command[] = [
     {
       id: "new-chat",
       label: "New chat",
@@ -45,33 +70,85 @@ export function buildCommands(handlers: {
       run: handlers.newChat,
     },
     {
+      id: "new-tab",
+      label: "New tab",
+      hint: "再开一个独立工作区标签",
+      icon: <Plus size={14} />,
+      shortcut: ["⌘", "T"],
+      run: handlers.newTab,
+    },
+  ];
+  if (handlers.canCloseTab) {
+    list.push({
+      id: "close-tab",
+      label: "Close tab",
+      hint: "关闭当前标签",
+      icon: <SquareX size={14} />,
+      shortcut: ["⌘", "W"],
+      run: handlers.closeTab,
+    });
+  }
+  if (handlers.busy) {
+    list.push({
+      id: "abort",
+      label: "Stop current turn",
+      hint: "打断模型当前生成",
+      icon: <StopCircle size={14} />,
+      shortcut: ["esc"],
+      run: handlers.abort,
+    });
+  }
+  if (handlers.hasMessages) {
+    list.push({
+      id: "copy-last",
+      label: "Copy last reply",
+      hint: "复制最近一条助手回复",
+      icon: <ClipboardCopy size={14} />,
+      run: handlers.copyLast,
+    });
+    list.push({
+      id: "export-md",
+      label: "Export conversation as Markdown",
+      hint: "整段对话复制到剪贴板",
+      icon: <Download size={14} />,
+      run: handlers.exportMarkdown,
+    });
+    list.push({
       id: "clear-chat",
       label: "Clear messages",
       hint: "只清当前 UI，subprocess 不重启",
       icon: <Trash2 size={14} />,
       run: handlers.clearChat,
-    },
-    {
-      id: "focus-composer",
-      label: "Focus composer",
-      icon: <FocusIcon size={14} />,
-      shortcut: ["⌘", "L"],
-      run: handlers.focusComposer,
-    },
-    {
-      id: "settings",
-      label: "Settings",
-      hint: "即将上线",
-      icon: <Settings size={14} />,
-      run: handlers.openSettings,
-    },
-    {
-      id: "about",
-      label: "About Reasonix",
-      icon: <Info size={14} />,
-      run: handlers.about,
-    },
-  ];
+    });
+  }
+  list.push({
+    id: "focus-composer",
+    label: "Focus composer",
+    icon: <FocusIcon size={14} />,
+    shortcut: ["⌘", "L"],
+    run: handlers.focusComposer,
+  });
+  list.push({
+    id: "pick-workspace",
+    label: "Switch workspace…",
+    hint: "选另一个工作目录",
+    icon: <FolderOpen size={14} />,
+    run: handlers.pickWorkspace,
+  });
+  list.push({
+    id: "settings",
+    label: "Settings",
+    hint: "模型、预算、主题…",
+    icon: <Settings size={14} />,
+    run: handlers.openSettings,
+  });
+  list.push({
+    id: "about",
+    label: "About Reasonix",
+    icon: <Info size={14} />,
+    run: handlers.about,
+  });
+  return list;
 }
 
 export function CommandPalette({

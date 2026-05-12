@@ -53,6 +53,7 @@ import {
 } from "../../memory/session.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
+import { VERSION } from "../../version.js";
 import { canonicalPresetName, resolvePreset } from "../ui/presets.js";
 
 export interface DesktopOptions {
@@ -108,6 +109,14 @@ interface SettingsEvent {
   model: string;
   preset: "auto" | "flash" | "pro";
   editor?: string;
+  version: string;
+}
+
+interface BalanceEvent {
+  type: "$balance";
+  currency: string;
+  total: number;
+  isAvailable: boolean;
 }
 
 interface PlanRequiredEvent {
@@ -209,6 +218,7 @@ type EmittableEvent =
   | SessionLoadedEvent
   | NeedsSetupEvent
   | SettingsEvent
+  | BalanceEvent
   | MentionResultsEvent
   | MentionPreviewEvent
   | TabOpenedEvent
@@ -283,6 +293,23 @@ function emitSettings(tab: Tab): void {
       model: tab.currentModel,
       preset: tab.currentPreset,
       editor: loadEditor(),
+      version: VERSION,
+    },
+    tab.id,
+  );
+}
+
+async function emitBalance(tab: Tab): Promise<void> {
+  if (!tab.runtime) return;
+  const bal = await tab.runtime.loop.client.getBalance().catch(() => null);
+  if (!bal || !bal.balance_infos.length) return;
+  const primary = bal.balance_infos[0]!;
+  emit(
+    {
+      type: "$balance",
+      currency: primary.currency,
+      total: Number(primary.total_balance),
+      isAvailable: bal.is_available,
     },
     tab.id,
   );
@@ -517,6 +544,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         tab.aborter = null;
         emit({ type: "$turn_complete" }, tab.id);
         emitSessions(tab);
+        void emitBalance(tab);
       }
     });
   }
@@ -612,6 +640,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   else emit({ type: "$needs_setup", reason: "no_api_key" }, first.id);
   emitSessions(first);
   emitSettings(first);
+  void emitBalance(first);
 
   const rl = createInterface({ input: stdin });
   rl.on("line", (line) => {
@@ -634,6 +663,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           else emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
           emitSessions(tab);
           emitSettings(tab);
+          void emitBalance(tab);
         } catch (err) {
           emit({ type: "$error", message: `tab_open failed: ${(err as Error).message}` });
         }
@@ -668,6 +698,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           tab.runtime = buildRuntimeFor(tab);
           emit({ type: "$ready" }, tab.id);
           emitSettings(tab);
+          void emitBalance(tab);
         }
       } catch (err) {
         emit({ type: "$error", message: `saveApiKey failed: ${(err as Error).message}` });

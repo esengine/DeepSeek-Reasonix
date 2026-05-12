@@ -113,6 +113,13 @@ export type Settings = {
   model: string;
   preset: "auto" | "flash" | "pro";
   editor?: string;
+  version: string;
+};
+
+export type Balance = {
+  currency: string;
+  total: number;
+  isAvailable: boolean;
 };
 
 type State = {
@@ -127,6 +134,7 @@ type State = {
   usage: UsageStats;
   sessions: SessionInfo[];
   settings: Settings | null;
+  balance: Balance | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
 };
@@ -301,6 +309,15 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "$sessions":
       return { ...state, sessions: ev.items };
+    case "$balance":
+      return {
+        ...state,
+        balance: {
+          currency: ev.currency,
+          total: ev.total,
+          isAvailable: ev.isAvailable,
+        },
+      };
     case "$settings": {
       const prevWs = state.settings?.workspaceDir;
       const wsChanged = prevWs !== undefined && prevWs !== ev.workspaceDir;
@@ -333,6 +350,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           model: ev.model,
           preset: ev.preset,
           editor: ev.editor,
+          version: ev.version,
         },
       };
     }
@@ -618,6 +636,9 @@ interface TabRuntimeProps {
   installUpdate: () => void;
   dismissUpdate: () => void;
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
+  onNewTab: () => void;
+  onCloseTab: () => void;
+  canCloseTab: boolean;
 }
 
 function TabRuntime({
@@ -629,6 +650,9 @@ function TabRuntime({
   installUpdate,
   dismissUpdate,
   registerDispatch,
+  onNewTab,
+  onCloseTab,
+  canCloseTab,
 }: TabRuntimeProps) {
   const [state, dispatch] = useReducer(reduce, {
     ready: false,
@@ -649,6 +673,7 @@ function TabRuntime({
     },
     sessions: [],
     settings: null,
+    balance: null,
     mentionResults: null,
     mentionPreview: null,
   });
@@ -829,6 +854,27 @@ function TabRuntime({
     [sendRpc],
   );
 
+  const copyLastReply = useCallback(() => {
+    const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
+    if (!last || last.kind !== "assistant") return;
+    const text = last.segments
+      .filter((s): s is { kind: "text"; text: string } => s.kind === "text")
+      .map((s) => s.text)
+      .join("\n\n")
+      .trim();
+    if (!text) return;
+    void navigator.clipboard.writeText(text);
+    flashToast("已复制");
+  }, [state.messages, flashToast]);
+
+  const exportConversation = useCallback(() => {
+    const md = conversationToMarkdown(state.messages);
+    if (!md) return;
+    void navigator.clipboard.writeText(md);
+    flashToast("整段对话已复制为 Markdown");
+  }, [state.messages, flashToast]);
+
+  const versionLabel = state.settings?.version ?? "dev";
   const commands = buildCommands({
     newChat: () => {
       newChat();
@@ -841,8 +887,17 @@ function TabRuntime({
     focusComposer: () => {
       composerRef.current?.focus();
     },
-    openSettings: () => flashToast("Settings 即将上线"),
-    about: () => flashToast("Reasonix · cache-first DeepSeek agent"),
+    openSettings: () => setSettingsOpen(true),
+    about: () => flashToast(`Reasonix v${versionLabel} · cache-first DeepSeek agent`),
+    abort,
+    copyLast: copyLastReply,
+    exportMarkdown: exportConversation,
+    pickWorkspace,
+    newTab: onNewTab,
+    closeTab: onCloseTab,
+    busy: state.busy,
+    canCloseTab,
+    hasMessages: state.messages.length > 0,
   });
 
   const slashCommands = [
@@ -982,6 +1037,8 @@ function TabRuntime({
     <div className="app" style={{ display: active ? undefined : "none" }}>
       <Sidebar
         sessions={state.sessions}
+        version={state.settings?.version}
+        balance={state.balance}
         onNewChat={newChat}
         onOpenCommands={() => palette.setOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -1454,6 +1511,9 @@ export function App() {
           installUpdate={installUpdate}
           dismissUpdate={() => setPendingUpdate(null)}
           registerDispatch={registerDispatch}
+          onNewTab={openTab}
+          onCloseTab={() => closeTab(t.id)}
+          canCloseTab={tabs.length > 1}
         />
       ))}
     </>

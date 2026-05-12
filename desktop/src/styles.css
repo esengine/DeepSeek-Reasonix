@@ -220,10 +220,15 @@ input:focus-visible:not(.composer textarea):not(.composer input) {
   color: var(--text-1);
 }
 .sidebar-brand-meta {
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-num);
-  color: var(--text-4);
-  letter-spacing: 0.04em;
+  font-feature-settings: "tnum";
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
 }
 
 .sidebar-body {
@@ -394,14 +399,60 @@ input:focus-visible:not(.composer textarea):not(.composer input) {
   color: var(--danger);
 }
 
+.sidebar-wallet {
+  margin: 10px 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-2);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.sidebar-wallet:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+.sidebar-wallet > svg {
+  color: var(--accent, var(--text-2));
+  flex-shrink: 0;
+}
+.sidebar-wallet-label {
+  flex: 1;
+  text-align: left;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-4);
+  font-weight: 600;
+}
+.sidebar-wallet-amount {
+  font-size: 13px;
+  font-family: var(--font-num);
+  font-feature-settings: "tnum";
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.005em;
+}
+.sidebar-wallet.warn > svg,
+.sidebar-wallet.warn .sidebar-wallet-amount {
+  color: var(--danger, var(--warning));
+}
+
 .sidebar-foot {
-  margin-top: auto;
+  margin-top: 8px;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 6px 4px;
   border-top: 1px solid var(--border);
 }
+.sidebar-wallet + .sidebar-foot { margin-top: 8px; }
 .sidebar-foot-hint {
   font-size: 10.5px;
   color: var(--text-4);

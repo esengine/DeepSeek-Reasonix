@@ -127,6 +127,14 @@ export type SettingsEvent = {
   model: string;
   preset: PresetName;
   editor?: string;
+  version: string;
+};
+
+export type BalanceEvent = {
+  type: "$balance";
+  currency: string;
+  total: number;
+  isAvailable: boolean;
 };
 
 export type SettingsPatch = {
@@ -242,6 +250,7 @@ export type IncomingEvent = { tabId?: string } & (
   | SessionLoadedEvent
   | NeedsSetupEvent
   | SettingsEvent
+  | BalanceEvent
   | MentionResultsEvent
   | MentionPreviewEvent
   | TabOpenedEvent

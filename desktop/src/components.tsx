@@ -22,6 +22,7 @@ import {
   Slash,
   Sparkles,
   Square,
+  Wallet as WalletIcon,
   X,
   XCircle,
 } from "lucide-react";
@@ -122,6 +123,8 @@ export function TabBar({
 
 export function Sidebar({
   sessions,
+  version,
+  balance,
   onNewChat,
   onOpenCommands,
   onOpenSettings,
@@ -129,6 +132,8 @@ export function Sidebar({
   onLoadSession,
 }: {
   sessions: { name: string; messageCount: number; mtime: string }[];
+  version?: string;
+  balance: { currency: string; total: number; isAvailable: boolean } | null;
   onNewChat: () => void;
   onOpenCommands: () => void;
   onOpenSettings: () => void;
@@ -141,7 +146,7 @@ export function Sidebar({
         <div className="brand-mark">R</div>
         <div className="sidebar-brand-text">
           <span className="sidebar-brand-name">Reasonix</span>
-          <span className="sidebar-brand-meta">0.39</span>
+          {version && <span className="sidebar-brand-meta">v{version}</span>}
         </div>
       </div>
       <div className="sidebar-body">
@@ -202,6 +207,24 @@ export function Sidebar({
             </div>
           )}
         </div>
+        {balance && (
+          <button
+            type="button"
+            className={`sidebar-wallet ${balance.isAvailable ? "" : "warn"}`}
+            onClick={onOpenSettings}
+            title={
+              balance.isAvailable
+                ? `DeepSeek wallet · ${formatWallet(balance.total, balance.currency)} remaining`
+                : "Account flagged not-available — top up at platform.deepseek.com"
+            }
+          >
+            <WalletIcon size={14} strokeWidth={2} />
+            <span className="sidebar-wallet-label">wallet</span>
+            <span className="sidebar-wallet-amount">
+              {formatWallet(balance.total, balance.currency)}
+            </span>
+          </button>
+        )}
         <div className="sidebar-foot">
           <button
             type="button"
@@ -237,6 +260,29 @@ function formatTokens(n: number): string {
   if (n < 1000) return n.toString();
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+function currencySymbol(code: string): string {
+  switch (code.toUpperCase()) {
+    case "CNY":
+      return "¥";
+    case "USD":
+      return "$";
+    case "EUR":
+      return "€";
+    case "GBP":
+      return "£";
+    case "JPY":
+      return "¥";
+    default:
+      return "";
+  }
+}
+
+function formatWallet(total: number, code: string): string {
+  const sym = currencySymbol(code);
+  const fixed = total >= 1000 ? total.toFixed(0) : total < 1 ? total.toFixed(3) : total.toFixed(2);
+  return sym ? `${sym}${fixed}` : `${fixed} ${code}`;
 }
 
 const PRESET_OPTIONS: { id: "auto" | "flash" | "pro"; label: string; hint: string }[] = [
