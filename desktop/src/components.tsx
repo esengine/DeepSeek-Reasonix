@@ -25,6 +25,7 @@ import {
   Wallet as WalletIcon,
   X,
   XCircle,
+  Zap,
 } from "lucide-react";
 import { t, useLang, setLang, type Lang } from "./i18n";
 import {
@@ -303,6 +304,7 @@ function workspaceBasename(p?: string): string | null {
 export function Header({
   model,
   preset,
+  editMode,
   workspaceDir,
   recentWorkspaces,
   streaming,
@@ -310,12 +312,14 @@ export function Header({
   usage,
   onOpenCommands,
   onPickPreset,
+  onPickEditMode,
   onPickWorkspace,
   onSwitchWorkspace,
   currency,
 }: {
   model?: string;
   preset: "auto" | "flash" | "pro";
+  editMode: "default" | "yolo" | "review";
   workspaceDir?: string;
   recentWorkspaces: string[];
   streaming: boolean;
@@ -331,6 +335,7 @@ export function Header({
   };
   onOpenCommands: () => void;
   onPickPreset: (p: "auto" | "flash" | "pro") => void;
+  onPickEditMode: (m: "default" | "yolo" | "review") => void;
   onPickWorkspace: () => void;
   onSwitchWorkspace: (dir: string) => void;
   currency: "CNY" | "USD";
@@ -366,6 +371,17 @@ export function Header({
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [wsOpen]);
+  const [editModeOpen, setEditModeOpen] = useState(false);
+  const editModeRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!editModeOpen) return;
+    const onDown = (e: globalThis.MouseEvent) => {
+      if (!editModeRef.current?.contains(e.target as Node)) setEditModeOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [editModeOpen]);
+  useLang();
   return (
     <div className="header">
       <div className="header-title">
@@ -466,6 +482,56 @@ export function Header({
             <span className="stat-num">{formatCost(usage.totalCostUsd, currency)}</span>
           </span>
         )}
+        <div className="preset-pill-wrap" ref={editModeRef}>
+          <button
+            type="button"
+            className={`badge edit-pill edit-pill-${editMode}`}
+            onClick={() => setEditModeOpen((v) => !v)}
+            title={t("editMode.label")}
+          >
+            {editMode === "review" ? (
+              <ShieldCheck size={11} strokeWidth={2.4} />
+            ) : editMode === "yolo" ? (
+              <Zap size={11} strokeWidth={2.4} />
+            ) : (
+              <Sparkles size={11} strokeWidth={2.4} />
+            )}
+            <span className="edit-pill-label">
+              {editMode === "default" ? t("editMode.auto") : t(`editMode.${editMode}` as const)}
+            </span>
+            <ChevronRight
+              size={11}
+              strokeWidth={2.4}
+              style={{ transform: editModeOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 120ms ease" }}
+            />
+          </button>
+          {editModeOpen && (
+            <div className="preset-menu">
+              {(["review", "default", "yolo"] as const).map((opt) => (
+                <button
+                  type="button"
+                  key={opt}
+                  className={`preset-menu-item ${opt === editMode ? "active" : ""}`}
+                  onClick={() => {
+                    if (opt !== editMode) onPickEditMode(opt);
+                    setEditModeOpen(false);
+                  }}
+                >
+                  <span className="preset-menu-label">
+                    {opt === "default" ? t("editMode.auto") : t(`editMode.${opt}` as const)}
+                  </span>
+                  <span className="preset-menu-hint">
+                    {opt === "default"
+                      ? t("editMode.autoDesc")
+                      : opt === "review"
+                        ? t("editMode.reviewDesc")
+                        : t("editMode.yoloDesc")}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="preset-pill-wrap" ref={presetRef}>
           <button
             type="button"
@@ -551,7 +617,7 @@ export function SettingsPanel({
   const [keyVisible, setKeyVisible] = useState(false);
   const [editorDraft, setEditorDraft] = useState<string>(settings.editor ?? "");
   const editorPresets: { id: string; label: string; cmd: string }[] = [
-    { id: "system", label: "System default", cmd: "" },
+    { id: "system", label: t("settings.editorSystem"), cmd: "" },
     { id: "vscode", label: "VS Code", cmd: "code" },
     { id: "cursor", label: "Cursor", cmd: "cursor" },
     { id: "windsurf", label: "Windsurf", cmd: "windsurf" },
@@ -592,15 +658,15 @@ export function SettingsPanel({
     <div className="settings-overlay" onMouseDown={onClose}>
       <div className="settings-panel" onMouseDown={(e) => e.stopPropagation()}>
         <div className="settings-head">
-          <div className="settings-title">Settings</div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="close">
+          <div className="settings-title">{t("settings.title")}</div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label={t("settings.close")}>
             <X size={14} />
           </button>
         </div>
         <div className="settings-body">
           <SettingsSection
-            label="Cost currency"
-            hint="Display only. Internal cost is computed in USD-equiv per token, converted at fixed 7.2 FX."
+            label={t("settings.costCurrency")}
+            hint={t("settings.costCurrencyHint")}
           >
             <div className="settings-radio-group">
               {(["CNY", "USD"] as const).map((opt) => (
@@ -612,9 +678,7 @@ export function SettingsPanel({
                 >
                   <span className="settings-radio-name">{opt === "CNY" ? "¥ CNY" : "$ USD"}</span>
                   <span className="settings-radio-desc">
-                    {opt === "CNY"
-                      ? "matches DeepSeek dashboard"
-                      : "matches per-token reference rates"}
+                    {opt === "CNY" ? t("settings.cnyDesc") : t("settings.usdDesc")}
                   </span>
                 </button>
               ))}
@@ -641,7 +705,7 @@ export function SettingsPanel({
             </div>
           </SettingsSection>
 
-          <SettingsSection label="Theme" hint="Local to this device, not synced with TUI.">
+          <SettingsSection label={t("settings.theme")} hint={t("settings.themeHint")}>
             <div className="settings-radio-group">
               {(["dark", "light"] as const).map((opt) => (
                 <button
@@ -650,16 +714,21 @@ export function SettingsPanel({
                   className={`settings-radio ${theme === opt ? "on" : ""}`}
                   onClick={() => applyTheme(opt)}
                 >
-                  <span className="settings-radio-name">{opt}</span>
+                  <span className="settings-radio-name">
+                    {opt === "dark" ? t("settings.themeDark") : t("settings.themeLight")}
+                  </span>
                   <span className="settings-radio-desc">
-                    {opt === "dark" ? "default · low-light" : "high-contrast · daytime"}
+                    {opt === "dark" ? t("settings.themeDarkDesc") : t("settings.themeLightDesc")}
                   </span>
                 </button>
               ))}
             </div>
           </SettingsSection>
 
-          <SettingsSection label="Reasoning effort" hint="Applies live to the running session.">
+          <SettingsSection
+            label={t("settings.reasoningEffort")}
+            hint={t("settings.reasoningEffortHint")}
+          >
             <div className="settings-radio-group">
               {(["high", "max"] as const).map((opt) => (
                 <button
@@ -668,11 +737,13 @@ export function SettingsPanel({
                   className={`settings-radio ${settings.reasoningEffort === opt ? "on" : ""}`}
                   onClick={() => onSave({ reasoningEffort: opt })}
                 >
-                  <span className="settings-radio-name">{opt}</span>
+                  <span className="settings-radio-name">
+                    {opt === "high" ? t("settings.effortHigh") : t("settings.effortMax")}
+                  </span>
                   <span className="settings-radio-desc">
                     {opt === "high"
-                      ? "faster, less thinking"
-                      : "deeper reasoning, slower"}
+                      ? t("settings.effortHighDesc")
+                      : t("settings.effortMaxDesc")}
                   </span>
                 </button>
               ))}
@@ -680,8 +751,8 @@ export function SettingsPanel({
           </SettingsSection>
 
           <SettingsSection
-            label="Edit mode"
-            hint="Tool approval behavior — change saves to disk, takes effect on next tool call."
+            label={t("settings.editMode")}
+            hint={t("settings.editModeHint")}
           >
             <div className="settings-radio-group">
               {(["review", "default", "yolo"] as const).map((opt) => (
@@ -691,20 +762,26 @@ export function SettingsPanel({
                   className={`settings-radio ${settings.editMode === opt ? "on" : ""}`}
                   onClick={() => onSave({ editMode: opt })}
                 >
-                  <span className="settings-radio-name">{opt}</span>
+                  <span className="settings-radio-name">
+                    {opt === "review"
+                      ? t("settings.editModeReview")
+                      : opt === "default"
+                        ? t("settings.editModeAuto")
+                        : t("settings.editModeYolo")}
+                  </span>
                   <span className="settings-radio-desc">
                     {opt === "review"
-                      ? "approve every write"
+                      ? t("settings.editModeReviewDesc")
                       : opt === "default"
-                        ? "approve commands, auto edits"
-                        : "approve nothing — full auto"}
+                        ? t("settings.editModeAutoDesc")
+                        : t("settings.editModeYoloDesc")}
                   </span>
                 </button>
               ))}
             </div>
           </SettingsSection>
 
-          <SettingsSection label="Budget cap" hint="USD per session. Empty = no cap.">
+          <SettingsSection label={t("settings.budget")} hint={t("settings.budgetHint")}>
             <div className="settings-input-row">
               <span className="settings-input-prefix">$</span>
               <input
@@ -712,7 +789,7 @@ export function SettingsPanel({
                 inputMode="decimal"
                 className="settings-input"
                 value={budget}
-                placeholder="no cap"
+                placeholder={t("settings.budgetPlaceholder")}
                 onChange={(e) => setBudget(e.target.value)}
                 onBlur={() => {
                   const trimmed = budget.trim();
@@ -728,8 +805,8 @@ export function SettingsPanel({
           </SettingsSection>
 
           <SettingsSection
-            label="DeepSeek base URL"
-            hint="Override only if using a proxy. Empty = official endpoint. Restart required."
+            label={t("settings.baseUrl")}
+            hint={t("settings.baseUrlHint")}
           >
             <input
               type="text"
@@ -746,8 +823,8 @@ export function SettingsPanel({
           </SettingsSection>
 
           <SettingsSection
-            label="Workspace"
-            hint="Root dir agent tools operate inside. Switching saves to config and reloads tools."
+            label={t("settings.workspace")}
+            hint={t("settings.workspaceHint")}
           >
             <div className="settings-workspace">
               <span className="settings-workspace-path mono" title={settings.workspaceDir}>
@@ -758,14 +835,14 @@ export function SettingsPanel({
                 className="settings-workspace-btn"
                 onClick={onPickWorkspace}
               >
-                Change…
+                {t("settings.workspaceChange")}
               </button>
             </div>
           </SettingsSection>
 
           <SettingsSection
-            label="Editor"
-            hint="Used when you click a file link / path. System default = OS file association. Others must be in PATH."
+            label={t("settings.editor")}
+            hint={t("settings.editorHint")}
           >
             <div className="settings-radio-group editor-grid">
               {editorPresets.map((p) => (
@@ -780,18 +857,18 @@ export function SettingsPanel({
                 >
                   <span className="settings-radio-name">{p.label}</span>
                   <span className="settings-radio-desc mono">
-                    {p.cmd || "(default)"}
+                    {p.cmd || t("settings.editorDefault")}
                   </span>
                 </button>
               ))}
             </div>
             <div className="settings-editor-custom">
-              <span className="settings-meta-key">custom</span>
+              <span className="settings-meta-key">{t("settings.editorCustom")}</span>
               <input
                 type="text"
                 className="settings-input long"
                 value={editorDraft}
-                placeholder='e.g. "code", "subl", or full path to executable'
+                placeholder={t("settings.editorPlaceholder")}
                 onChange={(e) => setEditorDraft(e.target.value)}
                 onBlur={() => {
                   if (editorDraft !== (settings.editor ?? "")) {
@@ -803,8 +880,8 @@ export function SettingsPanel({
           </SettingsSection>
 
           <SettingsSection
-            label="API key"
-            hint="DeepSeek key — saved to ~/.reasonix/config.json (0600)."
+            label={t("settings.apiKey")}
+            hint={t("settings.apiKeyHint")}
           >
             {keyEditing ? (
               <div className="settings-key-edit">
@@ -825,7 +902,7 @@ export function SettingsPanel({
                     className="settings-key-toggle"
                     onClick={() => setKeyVisible((v) => !v)}
                   >
-                    {keyVisible ? "hide" : "show"}
+                    {keyVisible ? t("settings.apiKeyHide") : t("settings.apiKeyShow")}
                   </button>
                 </div>
                 <div className="settings-key-actions">
@@ -838,7 +915,7 @@ export function SettingsPanel({
                       setKeyVisible(false);
                     }}
                   >
-                    Cancel
+                    {t("settings.apiKeyCancel")}
                   </button>
                   <button
                     type="button"
@@ -851,30 +928,30 @@ export function SettingsPanel({
                       setKeyVisible(false);
                     }}
                   >
-                    Save
+                    {t("settings.apiKeySave")}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="settings-workspace">
                 <span className="settings-workspace-path mono">
-                  {settings.apiKeyPrefix ?? "(not set)"}
+                  {settings.apiKeyPrefix ?? t("settings.apiKeyNotSet")}
                 </span>
                 <button
                   type="button"
                   className="settings-workspace-btn"
                   onClick={() => setKeyEditing(true)}
                 >
-                  Change…
+                  {t("settings.workspaceChange")}
                 </button>
               </div>
             )}
           </SettingsSection>
 
-          <SettingsSection label="Environment">
+          <SettingsSection label={t("settings.environment")}>
             <div className="settings-meta">
               <div className="settings-meta-row">
-                <span className="settings-meta-key">model</span>
+                <span className="settings-meta-key">{t("settings.model")}</span>
                 <span className="settings-meta-val mono">{settings.model}</span>
               </div>
             </div>
@@ -1219,13 +1296,11 @@ export function ThinkingBar({
   label,
   promptTokens,
   completionTokens,
-  onStop,
 }: {
   startedAt: number;
   label: string;
   promptTokens: number;
   completionTokens: number;
-  onStop?: () => void;
 }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -1260,18 +1335,6 @@ export function ThinkingBar({
         </div>
         <span className="thinking-bar-sep">·</span>
         <span className="thinking-bar-time">{formatThinkDuration(elapsedMs)}</span>
-        {onStop && (
-          <button
-            type="button"
-            className="thinking-bar-stop"
-            onClick={onStop}
-            title="Stop generating (Esc)"
-            aria-label="Stop generating"
-          >
-            <Square size={9} fill="currentColor" />
-            <span>Stop</span>
-          </button>
-        )}
       </div>
     </div>
   );
@@ -2298,14 +2361,12 @@ export function ActivePlanRail({
   steps,
   completedStepIds,
   stepResults,
-  onAbort,
 }: {
   plan: string;
   summary?: string;
   steps: PlanStepLite[];
   completedStepIds: string[];
   stepResults: Record<string, string>;
-  onAbort?: () => void;
 }) {
   useLang();
   const [expanded, setExpanded] = useState(false);
@@ -2377,18 +2438,6 @@ export function ActivePlanRail({
             </div>
           )}
         </div>
-      )}
-      {onAbort && (
-        <button
-          type="button"
-          className="active-plan-stop"
-          onClick={onAbort}
-          title={t("plan.stopRun")}
-          aria-label={t("plan.stopRun")}
-        >
-          <Square size={10} fill="currentColor" />
-          <span>{t("plan.stopRun")}</span>
-        </button>
       )}
     </div>
   );

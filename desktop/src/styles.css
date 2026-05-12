@@ -3231,26 +3231,6 @@ input:focus-visible:not(.composer textarea):not(.composer input) {
   flex: 1;
   min-height: 0;
 }
-.thinking-bar-stop {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: 12px;
-  padding: 3px 9px 3px 7px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--danger);
-  background: rgba(248, 113, 113, 0.1);
-  border: 1px solid var(--danger-border);
-  border-radius: 999px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.thinking-bar-stop:hover {
-  background: rgba(248, 113, 113, 0.22);
-  color: #fff;
-}
-
 .mention-preview-dir {
   font-size: 11.5px;
   color: var(--text-4);
@@ -3934,24 +3914,6 @@ input:focus-visible:not(.composer textarea):not(.composer input) {
 .active-plan-step-risk.r-med { background: rgba(245, 158, 11, 0.12); color: var(--warning); }
 .active-plan-step-risk.r-high { background: rgba(239, 68, 68, 0.12); color: var(--danger); }
 .active-plan-markdown { font-size: 12.5px; color: var(--text-2); }
-.active-plan-stop {
-  position: absolute;
-  top: 8px;
-  right: 38px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  font-size: 10.5px;
-  font-family: inherit;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: 6px;
-  color: var(--danger);
-  cursor: pointer;
-  transition: all var(--t-fast) var(--ease);
-}
-.active-plan-stop:hover { background: rgba(239, 68, 68, 0.16); border-color: rgba(239, 68, 68, 0.36); }
 
 .checkpoint-card {
   margin: 0 auto;
@@ -4073,3 +4035,38 @@ input:focus-visible:not(.composer textarea):not(.composer input) {
 .revision-step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .revision-step-title { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-1); }
 .revision-step-action { font-size: 11.5px; color: var(--text-3); }
+
+/* ─── edit-mode pill ─── */
+.edit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  transition: all var(--t-fast) var(--ease);
+}
+.edit-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+.edit-pill-label {
+  font-size: 11px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.edit-pill-review {
+  color: var(--success);
+  border-color: rgba(52, 211, 153, 0.28);
+  background: var(--success-soft);
+}
+.edit-pill-default {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.edit-pill-yolo {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.08);
+}
