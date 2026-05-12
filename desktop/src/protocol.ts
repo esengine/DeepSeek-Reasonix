@@ -157,7 +157,7 @@ export type NeedsSetupEvent = {
   reason: "no_api_key";
 };
 
-export type EditMode = "default" | "yolo" | "review";
+export type EditMode = "review" | "auto" | "yolo";
 
 export type PresetName = "auto" | "flash" | "pro";
 

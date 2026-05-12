@@ -118,6 +118,7 @@ export const en = {
     progressNoTotal: "{done} steps",
     expand: "expand",
     collapse: "collapse",
+    dismiss: "Dismiss plan",
     riskLow: "low",
     riskMed: "med",
     riskHigh: "high",

@@ -48,6 +48,7 @@ import {
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
+import { shouldAutoResolveCheckpoint } from "../../core/pause-policy.js";
 import { formatHookOutcomeMessage, runHooks } from "../../hooks.js";
 import { t, tObj } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
@@ -3260,10 +3261,10 @@ function AppInner({
           // completed/total come from planStepsRef — don't have them via gate
           const completed = completedStepIdsRef.current.size;
           const total = planStepsRef.current?.length ?? 0;
-          // auto/yolo: user opted out of checkpoints — resolve "continue"
-          // without prompting. Per-step rollback snapshot still runs so
-          // /restore granularity is preserved.
-          if (editModeRef.current === "auto" || editModeRef.current === "yolo") {
+          // Shared policy (src/core/pause-policy.ts) decides whether to
+          // auto-resolve. Per-step rollback snapshot still runs so /restore
+          // granularity is preserved.
+          if (shouldAutoResolveCheckpoint(editModeRef.current)) {
             handleAutoCheckpointContinueRef.current(p.stepId, p.title);
             pauseGate.resolve(request.id, { type: "continue" });
             break;

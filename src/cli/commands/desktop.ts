@@ -43,6 +43,7 @@ import {
   type RevisionVerdict,
   pauseGate,
 } from "../../core/pause-gate.js";
+import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import {
@@ -598,6 +599,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       } finally {
         tab.aborter = null;
         emit({ type: "$turn_complete" }, tab.id);
+        if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
+          tab.completedStepIds.clear();
+          tab.planTotalSteps = 0;
+          emit({ type: "$plan_cleared" }, tab.id);
+        }
         emitSessions(tab);
         void emitBalance(tab);
       }
@@ -668,6 +674,36 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const tab = activeRunningTab();
     const tabId = tab?.id;
     if (tab) tab.pendingGateIds.add(req.id);
+    // Shared auto-resolve policy (e.g. plan_checkpoint in auto/yolo) — must
+    // still run BEFORE we emit any UI event, otherwise the surface flickers
+    // a card that we'd immediately tear down.
+    const auto = autoResolveVerdict(req, loadEditMode());
+    if (auto !== null) {
+      // plan_checkpoint specifically needs the step-completed signal to flow
+      // through so the rail progress ticks. Emit it before resolving.
+      if (req.kind === "plan_checkpoint") {
+        const payload = req.payload as {
+          stepId: string;
+          title?: string;
+          result: string;
+          notes?: string;
+        };
+        if (tab) tab.completedStepIds.add(payload.stepId);
+        emit(
+          {
+            type: "$step_completed",
+            stepId: payload.stepId,
+            title: payload.title,
+            result: payload.result,
+            notes: payload.notes,
+          },
+          tabId,
+        );
+      }
+      if (tab) tab.pendingGateIds.delete(req.id);
+      pauseGate.resolve(req.id, auto);
+      return;
+    }
     if (req.kind === "run_command" || req.kind === "run_background") {
       const payload = req.payload as { command?: string };
       emit(

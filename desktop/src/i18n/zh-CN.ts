@@ -117,6 +117,7 @@ export const zhCN: typeof en = {
     progressNoTotal: "已完成 {done} 步",
     expand: "展开",
     collapse: "收起",
+    dismiss: "关闭计划",
     riskLow: "低",
     riskMed: "中",
     riskHigh: "高",

@@ -139,7 +139,7 @@ export type SessionInfo = {
 
 export type Settings = {
   reasoningEffort: "high" | "max";
-  editMode: "default" | "yolo" | "review";
+  editMode: "review" | "auto" | "yolo";
   budgetUsd: number | null;
   baseUrl?: string;
   apiKeyPrefix?: string;
@@ -202,6 +202,7 @@ type Action =
   | { t: "resolve_plan"; id: number; verdict: PlanVerdict }
   | { t: "resolve_checkpoint"; id: number; verdict: CheckpointVerdict }
   | { t: "resolve_revision"; id: number; verdict: RevisionVerdict }
+  | { t: "dismiss_plan" }
   | { t: "mention_results"; results: MentionResults }
   | { t: "mention_preview"; preview: MentionPreviewState };
 
@@ -329,6 +330,8 @@ function reduce(state: State, action: Action): State {
         activePlan,
       };
     }
+    case "dismiss_plan":
+      return { ...state, activePlan: null };
     case "mention_results":
       return { ...state, mentionResults: action.results };
     case "mention_preview":
@@ -1192,7 +1195,7 @@ function TabRuntime({
           <Header
             model={state.model}
             preset={state.settings?.preset ?? "auto"}
-            editMode={state.settings?.editMode ?? "default"}
+            editMode={state.settings?.editMode ?? "review"}
             workspaceDir={state.settings?.workspaceDir}
             recentWorkspaces={state.settings?.recentWorkspaces ?? []}
             streaming={state.busy}
@@ -1222,6 +1225,7 @@ function TabRuntime({
               steps={state.activePlan.steps}
               completedStepIds={state.activePlan.completedStepIds}
               stepResults={state.activePlan.stepResults}
+              onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
             />
           )}
           {state.needsSetup ? (

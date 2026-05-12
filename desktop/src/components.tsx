@@ -319,7 +319,7 @@ export function Header({
 }: {
   model?: string;
   preset: "auto" | "flash" | "pro";
-  editMode: "default" | "yolo" | "review";
+  editMode: "review" | "auto" | "yolo";
   workspaceDir?: string;
   recentWorkspaces: string[];
   streaming: boolean;
@@ -335,7 +335,7 @@ export function Header({
   };
   onOpenCommands: () => void;
   onPickPreset: (p: "auto" | "flash" | "pro") => void;
-  onPickEditMode: (m: "default" | "yolo" | "review") => void;
+  onPickEditMode: (m: "review" | "auto" | "yolo") => void;
   onPickWorkspace: () => void;
   onSwitchWorkspace: (dir: string) => void;
   currency: "CNY" | "USD";
@@ -496,9 +496,7 @@ export function Header({
             ) : (
               <Sparkles size={11} strokeWidth={2.4} />
             )}
-            <span className="edit-pill-label">
-              {editMode === "default" ? t("editMode.auto") : t(`editMode.${editMode}` as const)}
-            </span>
+            <span className="edit-pill-label">{t(`editMode.${editMode}` as const)}</span>
             <ChevronRight
               size={11}
               strokeWidth={2.4}
@@ -507,7 +505,7 @@ export function Header({
           </button>
           {editModeOpen && (
             <div className="preset-menu">
-              {(["review", "default", "yolo"] as const).map((opt) => (
+              {(["review", "auto", "yolo"] as const).map((opt) => (
                 <button
                   type="button"
                   key={opt}
@@ -517,14 +515,12 @@ export function Header({
                     setEditModeOpen(false);
                   }}
                 >
-                  <span className="preset-menu-label">
-                    {opt === "default" ? t("editMode.auto") : t(`editMode.${opt}` as const)}
-                  </span>
+                  <span className="preset-menu-label">{t(`editMode.${opt}` as const)}</span>
                   <span className="preset-menu-hint">
-                    {opt === "default"
-                      ? t("editMode.autoDesc")
-                      : opt === "review"
-                        ? t("editMode.reviewDesc")
+                    {opt === "review"
+                      ? t("editMode.reviewDesc")
+                      : opt === "auto"
+                        ? t("editMode.autoDesc")
                         : t("editMode.yoloDesc")}
                   </span>
                 </button>
@@ -588,7 +584,7 @@ export function SettingsPanel({
 }: {
   settings: {
     reasoningEffort: "high" | "max";
-    editMode: "default" | "yolo" | "review";
+    editMode: "review" | "auto" | "yolo";
     budgetUsd: number | null;
     baseUrl?: string;
     apiKeyPrefix?: string;
@@ -598,7 +594,7 @@ export function SettingsPanel({
   };
   onSave: (patch: {
     reasoningEffort?: "high" | "max";
-    editMode?: "default" | "yolo" | "review";
+    editMode?: "review" | "auto" | "yolo";
     budgetUsd?: number | null;
     baseUrl?: string;
     workspaceDir?: string;
@@ -755,7 +751,7 @@ export function SettingsPanel({
             hint={t("settings.editModeHint")}
           >
             <div className="settings-radio-group">
-              {(["review", "default", "yolo"] as const).map((opt) => (
+              {(["review", "auto", "yolo"] as const).map((opt) => (
                 <button
                   key={opt}
                   type="button"
@@ -765,14 +761,14 @@ export function SettingsPanel({
                   <span className="settings-radio-name">
                     {opt === "review"
                       ? t("settings.editModeReview")
-                      : opt === "default"
+                      : opt === "auto"
                         ? t("settings.editModeAuto")
                         : t("settings.editModeYolo")}
                   </span>
                   <span className="settings-radio-desc">
                     {opt === "review"
                       ? t("settings.editModeReviewDesc")
-                      : opt === "default"
+                      : opt === "auto"
                         ? t("settings.editModeAutoDesc")
                         : t("settings.editModeYoloDesc")}
                   </span>
@@ -2361,12 +2357,14 @@ export function ActivePlanRail({
   steps,
   completedStepIds,
   stepResults,
+  onDismiss,
 }: {
   plan: string;
   summary?: string;
   steps: PlanStepLite[];
   completedStepIds: string[];
   stepResults: Record<string, string>;
+  onDismiss?: () => void;
 }) {
   useLang();
   const [expanded, setExpanded] = useState(false);
@@ -2401,6 +2399,17 @@ export function ActivePlanRail({
           style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}
         />
       </button>
+      {onDismiss && (
+        <button
+          type="button"
+          className="active-plan-dismiss"
+          onClick={onDismiss}
+          aria-label={t("plan.dismiss")}
+          title={t("plan.dismiss")}
+        >
+          <X size={11} strokeWidth={2.4} />
+        </button>
+      )}
       {expanded && (
         <div className="active-plan-body">
           {total > 0 ? (

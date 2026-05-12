@@ -4060,7 +4060,7 @@ input:focus-visible:not(.composer textarea):not(.composer input) {
   border-color: rgba(52, 211, 153, 0.28);
   background: var(--success-soft);
 }
-.edit-pill-default {
+.edit-pill-auto {
   color: var(--accent);
   border-color: var(--accent-border);
   background: var(--accent-soft);
@@ -4069,4 +4069,24 @@ input:focus-visible:not(.composer textarea):not(.composer input) {
   color: var(--danger);
   border-color: rgba(239, 68, 68, 0.28);
   background: rgba(239, 68, 68, 0.08);
+}
+
+.active-plan-dismiss {
+  position: absolute;
+  top: 9px;
+  right: 38px;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-4);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.active-plan-dismiss:hover {
+  background: var(--bg-hover);
+  color: var(--text-2);
 }
