@@ -83,6 +83,12 @@ export interface ReasonixConfig {
   editModeHintShown?: boolean;
   mouseClipboardHintShown?: boolean;
   reasoningEffort?: ReasoningEffort;
+  /** Default workspace root for the desktop client. CLI uses cwd. */
+  workspaceDir?: string;
+  /** Last N workspace paths the desktop client has opened, most recent first. */
+  recentWorkspaces?: string[];
+  /** Desktop only — `openWith` value for clicking file links. Empty/undefined = OS default app. Examples: "code", "cursor", "C:\\path\\to\\editor.exe". */
+  editor?: string;
   theme?: ThemeName | "auto";
   /** Stored as `--mcp`-format strings so one parser handles both flag and config. */
   mcp?: string[];
@@ -351,6 +357,52 @@ export function saveReasoningEffort(
   const cfg = readConfig(path);
   cfg.reasoningEffort = effort;
   writeConfig(cfg, path);
+}
+
+export function loadWorkspaceDir(path: string = defaultConfigPath()): string | undefined {
+  const v = readConfig(path).workspaceDir;
+  return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+export function saveWorkspaceDir(dir: string, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  const trimmed = dir.trim();
+  if (trimmed) cfg.workspaceDir = trimmed;
+  else cfg.workspaceDir = undefined;
+  writeConfig(cfg, path);
+}
+
+export function loadEditor(path: string = defaultConfigPath()): string | undefined {
+  const v = readConfig(path).editor;
+  return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+export function saveEditor(editor: string, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  const trimmed = editor.trim();
+  if (trimmed) cfg.editor = trimmed;
+  else cfg.editor = undefined;
+  writeConfig(cfg, path);
+}
+
+export function loadRecentWorkspaces(path: string = defaultConfigPath()): string[] {
+  const v = readConfig(path).recentWorkspaces;
+  return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+}
+
+const MAX_RECENT_WORKSPACES = 8;
+export function pushRecentWorkspace(dir: string, path: string = defaultConfigPath()): void {
+  const trimmed = dir.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  const list = (cfg.recentWorkspaces ?? []).filter((s) => s !== trimmed);
+  list.unshift(trimmed);
+  cfg.recentWorkspaces = list.slice(0, MAX_RECENT_WORKSPACES);
+  writeConfig(cfg, path);
+}
+
+export function loadPreset(path: string = defaultConfigPath()): PresetName | undefined {
+  return readConfig(path).preset;
 }
 
 /** Persist preset so `/preset pro` (or `/model deepseek-v4-pro`) sticks across relaunches. */

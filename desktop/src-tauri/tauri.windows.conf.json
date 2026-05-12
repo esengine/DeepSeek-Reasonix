@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "binaries/node.exe": "node.exe"
+    }
+  }
+}

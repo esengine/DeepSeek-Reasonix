@@ -242,6 +242,7 @@ export class CacheFirstLoop {
       const tokensSaved = shrunk.tokensSaved;
       for (const msg of messages) this.log.append(msg);
       this.resumedMessageCount = messages.length;
+      this._turn = messages.reduce((n, m) => (m.role === "assistant" ? n + 1 : n), 0);
       // Carry forward cumulative cost / turn count so the TUI's session
       // total continues across resumes; otherwise each restart resets to $0.
       if (messages.length > 0) {

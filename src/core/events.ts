@@ -48,6 +48,12 @@ export interface ModelFinalEvent extends EventBase {
   forcedSummary?: boolean;
 }
 
+export interface ToolPreparingEvent extends EventBase {
+  type: "tool.preparing";
+  callId: string;
+  name: string;
+}
+
 export interface ToolIntentEvent extends EventBase {
   type: "tool.intent";
   callId: string;
@@ -219,6 +225,7 @@ export type Event =
   | ModelTurnStartedEvent
   | ModelDeltaEvent
   | ModelFinalEvent
+  | ToolPreparingEvent
   | ToolIntentEvent
   | ToolDispatchedEvent
   | ToolDeniedEvent

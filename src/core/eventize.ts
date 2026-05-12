@@ -17,6 +17,7 @@ import type {
   ToolConfirmDenyEvent,
   ToolDispatchedEvent,
   ToolIntentEvent,
+  ToolPreparingEvent,
   ToolResultEvent,
   UserMessageEvent,
 } from "./events.js";
@@ -31,12 +32,18 @@ export class Eventizer {
   private nextId = 0;
   private lastTurn = -1;
   private nextToolSeq = 0;
-  private pendingCallIds: string[] = [];
+  /** Tool calls announced via tool_call_delta but not yet dispatched. FIFO upgraded by tool_start. */
+  private preparingCallIds: string[] = [];
+  /** Tool calls dispatched but not yet finished. FIFO popped by tool result. */
+  private inflightCallIds: string[] = [];
+  /** Per-turn dedupe so each toolCallIndex emits exactly one tool.preparing. */
+  private announcedToolIdx = new Set<string>();
 
   consume(ev: LoopEvent, ctx: EventizeContext): Event[] {
     const out: Event[] = [];
     if (ev.turn !== this.lastTurn) {
       this.lastTurn = ev.turn;
+      this.announcedToolIdx.clear();
       out.push(this.turnStartedEvent(ev.turn, ctx));
     }
     switch (ev.role) {
@@ -44,21 +51,30 @@ export class Eventizer {
         if (ev.content) out.push(this.deltaEvent(ev.turn, "content", ev.content));
         if (ev.reasoningDelta) out.push(this.deltaEvent(ev.turn, "reasoning", ev.reasoningDelta));
         break;
-      case "tool_call_delta":
-        // Progress signal only; intent + args land on tool_start.
+      case "tool_call_delta": {
+        const idx = ev.toolCallIndex;
+        const name = ev.toolName;
+        if (idx === undefined || !name) break;
+        const key = `${ev.turn}:${idx}`;
+        if (this.announcedToolIdx.has(key)) break;
+        this.announcedToolIdx.add(key);
+        const callId = `tc-${++this.nextToolSeq}`;
+        this.preparingCallIds.push(callId);
+        out.push(this.toolPreparingEvent(ev.turn, callId, name));
         break;
+      }
       case "assistant_final":
         out.push(this.finalEvent(ev));
         break;
       case "tool_start": {
-        const callId = `tc-${++this.nextToolSeq}`;
-        this.pendingCallIds.push(callId);
+        const callId = this.preparingCallIds.shift() ?? `tc-${++this.nextToolSeq}`;
+        this.inflightCallIds.push(callId);
         out.push(this.toolIntentEvent(ev.turn, callId, ev.toolName ?? "", ev.toolArgs ?? ""));
         out.push(this.toolDispatchedEvent(ev.turn, callId));
         break;
       }
       case "tool": {
-        const callId = this.pendingCallIds.shift() ?? `tc-orphan-${++this.nextToolSeq}`;
+        const callId = this.inflightCallIds.shift() ?? `tc-orphan-${++this.nextToolSeq}`;
         const ok = !looksLikeToolError(ev.content, ev.toolName);
         out.push(this.toolResultEvent(ev.turn, callId, ok, ev.content, 0));
         break;
@@ -241,6 +257,17 @@ export class Eventizer {
     };
     if (ev.forcedSummary) out.forcedSummary = true;
     return out;
+  }
+
+  private toolPreparingEvent(turn: number, callId: string, name: string): ToolPreparingEvent {
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn,
+      type: "tool.preparing",
+      callId,
+      name,
+    };
   }
 
   private toolIntentEvent(

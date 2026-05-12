@@ -20,20 +20,11 @@
 
 import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import { loadEditMode, loadProjectShellAllowed, readConfig } from "../../config.js";
+import { buildCodeToolset } from "../../code/setup.js";
+import { readConfig } from "../../config.js";
 import { t } from "../../i18n/index.js";
-import { bootstrapSemanticSearchInCodeMode } from "../../index/semantic/tool.js";
 import { detectForeignAgentPlatform } from "../../memory/project.js";
 import { sanitizeName } from "../../memory/session.js";
-import { ToolRegistry } from "../../tools.js";
-import { registerChoiceTool } from "../../tools/choice.js";
-import { registerFilesystemTools } from "../../tools/filesystem.js";
-import { JobRegistry } from "../../tools/jobs.js";
-import { registerMemoryTools } from "../../tools/memory.js";
-import { registerPlanTool } from "../../tools/plan.js";
-import { registerScaffoldTools } from "../../tools/scaffold.js";
-import { registerShellTools } from "../../tools/shell.js";
-import { registerTodoTool } from "../../tools/todo.js";
 import { markPhase } from "../startup-profile.js";
 import { chatCommand } from "./chat.js";
 
@@ -79,85 +70,10 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   // truncating most project names.
   const session = opts.noSession ? undefined : `code-${sanitizeName(basename(rootDir))}`;
 
-  // Native filesystem tools. No subprocess, ~50-200 ms faster per call
-  // than the MCP server was, and `edit_file` takes a flat SEARCH/REPLACE
-  // shape instead of the `string="false"` JSON-in-string array that
-  // triggered R1's DSML hallucinations all through 0.4.x.
-  const tools = new ToolRegistry();
-  // Background-process registry shared between the shell tools and the
-  // TUI's /jobs + /kill slashes + exit cleanup. One per `reasonix code`
-  // run — orphan prevention on SIGINT / process exit kills everything
-  // it owns, so dev servers don't outlive the Reasonix process.
-  const jobs = new JobRegistry();
-  // Bundled re-registration so `/cwd <path>` can swap every rootDir-
-  // dependent tool atomically. ToolRegistry.register is keyed by name
-  // and overwrites in-place, so re-calling these against the existing
-  // registry replaces the closures cleanly without disturbing tool
-  // specs (names/descriptions/params don't reference rootDir, so the
-  // prefix cache survives).
-  const registerRootedTools = (root: string): void => {
-    registerFilesystemTools(tools, { rootDir: root });
-    registerShellTools(tools, {
-      rootDir: root,
-      // Per-project "always allow" list persisted from prior ShellConfirm
-      // choices; merged on top of the built-in allowlist in shell.ts.
-      // GETTER form — re-read every dispatch so a prefix the user adds
-      // via ShellConfirm mid-session takes effect on the next shell call
-      // instead of waiting for `/new` or a relaunch.
-      extraAllowed: () => loadProjectShellAllowed(root),
-      // `yolo` edit-mode disables shell confirmations entirely. Re-read
-      // from config on each dispatch so /mode yolo (or Shift+Tab cycling
-      // through to it) flips the gate live without forcing a relaunch.
-      allowAll: () => loadEditMode() === "yolo",
-      jobs,
-    });
-    // `remember` / `forget` / `recall_memory` — cross-session user memory.
-    // Project scope hashes off rootDir so switching projects gets a fresh
-    // per-project memory store; the global scope is shared across runs.
-    registerMemoryTools(tools, { projectRoot: root });
-  };
-  // Async tail to `registerRootedTools`. Kept separate because the FS /
-  // shell / memory re-registration above is sync and must happen before
-  // the next tool dispatch, while semantic-index probing reads disk and
-  // can race ahead in the background. On `/cwd`, App.tsx fires this
-  // after the sync swap and surfaces the result via postInfo.
-  const reBootstrapSemantic = async (root: string): Promise<{ enabled: boolean }> => {
-    const result = await bootstrapSemanticSearchInCodeMode(tools, root);
-    if (!result.enabled) tools.unregister("semantic_search");
-    return result;
-  };
-  registerRootedTools(rootDir);
-  // `submit_plan` is always in the spec list so the prefix cache stays
-  // stable across plan-mode toggles (Pillar 1). The tool itself is a
-  // no-op outside plan mode and throws `PlanProposedError` when the
-  // user has `/plan`-enabled the session.
-  registerPlanTool(tools);
-  // `ask_choice` — branching primitive. Independent of plan mode: the
-  // model uses it to put a 2–4 way choice in front of the user
-  // (strategy, style, library pick) without trying to squeeze the
-  // menu into a submit_plan body. Keeping it always-registered
-  // preserves the prefix cache across plan-mode toggles.
-  registerChoiceTool(tools);
-  // `todo_write` — lightweight in-session task tracker, no approval gate.
-  // Independent of plan mode (readOnly=true so it stays callable in /plan).
-  registerTodoTool(tools);
-  // `create_skill` / `add_mcp_server` — let the model scaffold from chat.
-  // Both writes go through the same paths the wizard / `/skill new` use,
-  // so the on-disk shape stays one source of truth. New servers take
-  // effect on next launch (no live client churn).
-  registerScaffoldTools(tools, { projectRoot: rootDir });
-  // `run_skill` is intentionally NOT registered here — App.tsx wires it
-  // up with the subagent runner attached, so `runAs: subagent` skills
-  // can spawn isolated child loops. Doing it here would mean the App's
-  // re-registration would shadow the no-runner version, which works
-  // (last write wins) but obscures the wiring.
-
-  // Bootstrap semantic_search. Silent: registers the tool when an
-  // on-disk index already exists, skips entirely otherwise. Setup
-  // happens via the explicit `reasonix index` command — never
-  // by surprise on launch.
   markPhase("semantic_bootstrap_start");
-  const semantic = await reBootstrapSemantic(rootDir);
+  const { tools, jobs, registerRooted, reBootstrapSemantic, semantic } = await buildCodeToolset({
+    rootDir,
+  });
   markPhase(
     semantic.enabled ? "semantic_bootstrap_done_enabled" : "semantic_bootstrap_done_skipped",
   );
@@ -223,7 +139,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     codeMode: {
       rootDir,
       jobs,
-      reregisterTools: registerRootedTools,
+      reregisterTools: registerRooted,
       reBootstrapSemantic,
     },
     mcp: readConfig().mcp,

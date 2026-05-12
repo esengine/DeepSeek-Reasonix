@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8b7cff"/>
+      <stop offset="100%" stop-color="#5b3df0"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="38%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="innerShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feOffset dy="-12" result="off"/>
+      <feComposite in="off" in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1" result="inner"/>
+      <feFlood flood-color="#1a0e7a" flood-opacity="0.35"/>
+      <feComposite in2="inner" operator="in"/>
+    </filter>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="220" ry="220" fill="url(#g)"/>
+  <rect x="64" y="64" width="896" height="896" rx="220" ry="220" fill="url(#sheen)"/>
+  <g fill="#ffffff" font-family="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-weight="800" text-anchor="middle">
+    <text x="512" y="700" font-size="640" letter-spacing="-12">R</text>
+  </g>
+</svg>
