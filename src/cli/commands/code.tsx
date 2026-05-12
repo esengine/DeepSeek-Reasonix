@@ -21,7 +21,8 @@
 import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { buildCodeToolset } from "../../code/setup.js";
-import { readConfig } from "../../config.js";
+import { loadApiKey, readConfig } from "../../config.js";
+import { loadDotenv } from "../../env.js";
 import { t } from "../../i18n/index.js";
 import { detectForeignAgentPlatform } from "../../memory/project.js";
 import { sanitizeName } from "../../memory/session.js";
@@ -65,6 +66,16 @@ export interface CodeOptions {
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   markPhase("code_command_enter");
+  // Bridge .env + ~/.reasonix/config.json into process.env so buildCodeToolset's
+  // eager DeepSeekClient constructions (subagent client; semantic embedder) can
+  // pick up a key the user already configured via `reasonix setup`. chatCommand
+  // does the same dance — code.tsx wraps chatCommand but must also seed env
+  // before buildCodeToolset runs, which is BEFORE chatCommand.
+  loadDotenv();
+  const cfgKey = loadApiKey();
+  if (cfgKey && !process.env.DEEPSEEK_API_KEY) {
+    process.env.DEEPSEEK_API_KEY = cfgKey;
+  }
   const { codeSystemPrompt } = await import("../../code/prompt.js");
   const rootDir = resolve(opts.dir ?? process.cwd());
   // Per-directory session so switching projects doesn't mix histories.
