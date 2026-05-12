@@ -3,7 +3,8 @@
 import { Box, Text } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readConfig, writeConfig } from "../../config.js";
-import { t } from "../../i18n/index.js";
+import { getLanguage, t } from "../../i18n/index.js";
+import { applyOverlay } from "../../mcp/marketplace-overlay/loader.js";
 import {
   type RegistryHandle,
   fetchSmitheryDetail,
@@ -48,16 +49,22 @@ export function buildMarketplacePickerSnapshot(args: {
   status: string;
   hasMore: boolean;
 }) {
+  const lang = getLanguage();
   return {
     pickerKind: "mcp-marketplace" as const,
     title: `${t("mcpMarketplace.title")} \u00b7 ${args.status}`,
     query: args.query,
     items: args.filtered.map((e) => {
       const installedSpec = isInstalled(args.installedSpecs, e);
+      const localized = applyOverlay(e, lang);
+      const title = localized.title || e.name;
+      const subtitle = localized.englishTitle
+        ? `${localized.englishTitle}\u2003\u00b7\u2003${localized.description?.slice(0, 160) ?? ""}`
+        : (localized.description?.slice(0, 200) ?? undefined);
       return {
         id: e.name,
-        title: e.title || e.name,
-        subtitle: e.description?.slice(0, 200) ?? undefined,
+        title,
+        subtitle,
         badge: installedSpec
           ? "installed"
           : e.source === "official"
@@ -390,31 +397,39 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
           })
         )}
       </Box>
-      {selected ? (
-        <Box marginTop={1} flexDirection="column">
-          <Text bold>{selected.title}</Text>
-          {selected.description ? <Text dimColor>{selected.description.slice(0, 200)}</Text> : null}
-          {selected.install ? (
-            <Text dimColor>
-              {t("mcpMarketplace.specLine", {
-                runtime: selected.install.runtime,
-                id: selected.install.packageId ?? selected.install.url ?? "\u2014",
-                transport: selected.install.transport,
-              })}
-            </Text>
-          ) : (
-            <Text dimColor>{t("mcpMarketplace.smitheryDetail")}</Text>
-          )}
-          {selected.install?.requiredEnv?.length ? (
-            <Text color="yellow">
-              {t("mcpMarketplace.needsEnv", { env: selected.install.requiredEnv.join(", ") })}
-            </Text>
-          ) : null}
-        </Box>
-      ) : null}
+      {selected ? <MarketplaceDetail entry={selected} /> : null}
       <Box marginTop={1}>
         <Text dimColor>{t("mcpMarketplace.footerHint")}</Text>
       </Box>
+    </Box>
+  );
+}
+
+function MarketplaceDetail({ entry }: { entry: RegistryEntry }) {
+  const localized = applyOverlay(entry, getLanguage());
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <Text bold>{localized.title}</Text>
+      {localized.englishTitle ? <Text dimColor>{localized.englishTitle}</Text> : null}
+      {localized.description ? (
+        <Text dimColor>{localized.description.slice(0, 200)}</Text>
+      ) : null}
+      {entry.install ? (
+        <Text dimColor>
+          {t("mcpMarketplace.specLine", {
+            runtime: entry.install.runtime,
+            id: entry.install.packageId ?? entry.install.url ?? "—",
+            transport: entry.install.transport,
+          })}
+        </Text>
+      ) : (
+        <Text dimColor>{t("mcpMarketplace.smitheryDetail")}</Text>
+      )}
+      {entry.install?.requiredEnv?.length ? (
+        <Text color="yellow">
+          {t("mcpMarketplace.needsEnv", { env: entry.install.requiredEnv.join(", ") })}
+        </Text>
+      ) : null}
     </Box>
   );
 }

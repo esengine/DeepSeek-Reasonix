@@ -1,0 +1,46 @@
+{
+  "filesystem": {
+    "title": "文件系统",
+    "description": "为代理授予对指定目录的读写权限,该目录被强制为硬性沙箱。"
+  },
+  "memory": {
+    "title": "持久记忆",
+    "description": "在多次会话之间持久化的键值记忆,用于长期上下文。"
+  },
+  "github": {
+    "title": "GitHub",
+    "description": "读取 issue、PR 与代码搜索结果(需要设置 GITHUB_PERSONAL_ACCESS_TOKEN)。"
+  },
+  "puppeteer": {
+    "title": "Puppeteer 浏览器自动化",
+    "description": "通过无头浏览器进行截屏、点击、输入等自动化操作(首次运行会下载 Chromium)。"
+  },
+  "everything": {
+    "title": "MCP 全功能示例服务器",
+    "description": "官方测试服务器,涵盖 MCP 的全部能力——用于调试本地配置。"
+  },
+  "fetch": {
+    "title": "网页抓取",
+    "description": "抓取并解析远程网页,将正文转换为 Markdown 供代理阅读。"
+  },
+  "git": {
+    "title": "Git 仓库",
+    "description": "在本地 Git 仓库上执行只读检查:diff、log、blame 与文件历史。"
+  },
+  "sqlite": {
+    "title": "SQLite 数据库",
+    "description": "对本地 SQLite 数据库进行只读 SQL 查询,适合分析与原型开发。"
+  },
+  "postgres": {
+    "title": "PostgreSQL 数据库",
+    "description": "对 PostgreSQL 数据库进行只读 SQL 查询并返回行结果。"
+  },
+  "slack": {
+    "title": "Slack",
+    "description": "读取频道与会话消息、发布消息(需要 Slack Bot Token)。"
+  },
+  "time": {
+    "title": "时间与时区",
+    "description": "返回当前时间、做时区换算,适合需要明确时间戳的代理。"
+  }
+}

@@ -4,6 +4,8 @@ import { Box, Text, render, useApp, useInput } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readConfig, writeConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";
+import { getLanguage } from "../../i18n/index.js";
+import { applyOverlay } from "../../mcp/marketplace-overlay/loader.js";
 import {
   type RegistryHandle,
   loadMorePages,
@@ -196,27 +198,33 @@ function McpBrowseApp() {
           })
         )}
       </Box>
-      {selected ? (
-        <Box marginTop={1} flexDirection="column">
-          <Text bold color="white">
-            {selected.title}
-          </Text>
-          {selected.description ? <Text dimColor>{selected.description.slice(0, 160)}</Text> : null}
-          {selected.install ? (
-            <Text dimColor>
-              {`spec: ${selected.install.runtime} ${selected.install.packageId ?? selected.install.url ?? "—"} · ${selected.install.transport}`}
-            </Text>
-          ) : (
-            <Text dimColor>(smithery listing — install info not exposed)</Text>
-          )}
-          {selected.install?.requiredEnv?.length ? (
-            <Text color="yellow">{`needs: ${selected.install.requiredEnv.join(", ")}`}</Text>
-          ) : null}
-        </Box>
-      ) : null}
+      {selected ? <BrowseDetail entry={selected} /> : null}
       <Box marginTop={1}>
         <Text dimColor>type to filter · ↑↓ pick · enter install · tab load more · esc quit</Text>
       </Box>
+    </Box>
+  );
+}
+
+function BrowseDetail({ entry }: { entry: RegistryEntry }) {
+  const localized = applyOverlay(entry, getLanguage());
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <Text bold color="white">
+        {localized.title}
+      </Text>
+      {localized.englishTitle ? <Text dimColor>{localized.englishTitle}</Text> : null}
+      {localized.description ? <Text dimColor>{localized.description.slice(0, 160)}</Text> : null}
+      {entry.install ? (
+        <Text dimColor>
+          {`spec: ${entry.install.runtime} ${entry.install.packageId ?? entry.install.url ?? "—"} · ${entry.install.transport}`}
+        </Text>
+      ) : (
+        <Text dimColor>(smithery listing — install info not exposed)</Text>
+      )}
+      {entry.install?.requiredEnv?.length ? (
+        <Text color="yellow">{`needs: ${entry.install.requiredEnv.join(", ")}`}</Text>
+      ) : null}
     </Box>
   );
 }
