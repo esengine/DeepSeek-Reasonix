@@ -22,7 +22,9 @@ import { ContextPanel } from "./ui/context-panel";
 import { InterruptBar, useElapsed } from "./ui/live";
 import { SettingsModal } from "./ui/settings";
 import { Sidebar } from "./ui/sidebar";
+import { Splash, shouldShowSplash } from "./ui/splash";
 import { StatusBar } from "./ui/statusbar";
+import { WorkdirPop } from "./ui/workdir-pop";
 import {
   ActivePlanTaskCard,
   AssistantMsg,
@@ -729,6 +731,9 @@ function TabRuntime({
   });
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+  const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());
+  const [wdOpen, setWdOpen] = useState(false);
+  const [wdAnchor, setWdAnchor] = useState<{ top: number; left: number } | undefined>(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -859,6 +864,10 @@ function TabRuntime({
       } else if (mod && (e.key === "n" || e.key === "N")) {
         e.preventDefault();
         newChat();
+      } else if (mod && (e.key === "o" || e.key === "O")) {
+        e.preventDefault();
+        setWdAnchor(undefined);
+        setWdOpen((v) => !v);
       } else if (mod && e.key === ",") {
         e.preventDefault();
         setSettingsOpen((v) => !v);
@@ -1083,7 +1092,10 @@ function TabRuntime({
                 onAbort={abort}
                 onNewChat={newChat}
                 onExport={exportConversation}
-                onPickWorkspace={pickWorkspace}
+                onOpenWorkdir={(anchor) => {
+                  setWdAnchor(anchor);
+                  setWdOpen(true);
+                }}
               />
               {state.settings?.editMode === "yolo" ? (
                 <div className="mode-banner">
@@ -1305,6 +1317,16 @@ function TabRuntime({
           commands={commands}
         />
 
+        <WorkdirPop
+          open={wdOpen}
+          onClose={() => setWdOpen(false)}
+          recent={state.settings?.recentWorkspaces ?? []}
+          current={state.settings?.workspaceDir}
+          anchor={wdAnchor}
+          onPick={(path) => saveSettings({ workspaceDir: path })}
+          onBrowse={pickWorkspace}
+        />
+
         {settingsOpen && state.settings ? (
           <SettingsModal
             settings={state.settings}
@@ -1319,6 +1341,8 @@ function TabRuntime({
         ) : null}
 
         <Toast message={toast} />
+
+        {splashOn ? <Splash onDone={() => setSplashOn(false)} /> : null}
       </div>
     </WorkspaceProvider>
   );
@@ -1546,7 +1570,7 @@ function MainHead({
   onAbort,
   onNewChat,
   onExport,
-  onPickWorkspace,
+  onOpenWorkdir,
 }: {
   session: string;
   model?: string;
@@ -1556,7 +1580,7 @@ function MainHead({
   onAbort: () => void;
   onNewChat: () => void;
   onExport: () => void;
-  onPickWorkspace: () => void;
+  onOpenWorkdir: (anchor: { top: number; left: number }) => void;
 }) {
   const wsLabel = workspaceDir ? workspaceDir.split(/[\\/]/).pop() || "workspace" : "未选择工作区";
   return (
@@ -1573,7 +1597,11 @@ function MainHead({
         </h1>
         <div className="sub">
           <span
-            onClick={onPickWorkspace}
+            className="ws-crumb"
+            onClick={(e) => {
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              onOpenWorkdir({ top: r.bottom + 6, left: r.left });
+            }}
             style={{ cursor: "pointer" }}
             title={workspaceDir ?? "点击选择工作区"}
           >

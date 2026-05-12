@@ -27,6 +27,17 @@ export const zhCN: typeof en = {
     settings: "设置",
     settingsHint: "模型、预算、主题…",
     about: "关于 Reasonix",
+    groupNav: "导航",
+    groupAction: "动作",
+    groupWorkspace: "目录",
+    groupSettings: "设置",
+    countSuffix: "项",
+  },
+  workdir: {
+    title: "切换工作目录",
+    searchPlaceholder: "搜索最近路径…",
+    empty: "暂无最近工作目录",
+    browse: "浏览本地…",
   },
   sidebar: {
     newChat: "新建会话",

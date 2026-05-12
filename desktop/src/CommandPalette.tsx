@@ -1,14 +1,13 @@
 import {
   ClipboardCopy,
-  CornerDownLeft,
   Download,
   FilePlus,
   FocusIcon,
   FolderOpen,
   Info,
   Plus,
+  Search,
   Settings,
-  Sparkles,
   SquareX,
   StopCircle,
   Trash2,
@@ -16,12 +15,15 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { t, useLang } from "./i18n";
 
+export type CommandGroup = "nav" | "action" | "workspace" | "settings";
+
 export type Command = {
   id: string;
   label: string;
   hint?: string;
   icon: ReactNode;
   shortcut?: string[];
+  group: CommandGroup;
   run: () => void;
 };
 
@@ -64,17 +66,19 @@ export function buildCommands(handlers: CommandHandlers): Command[] {
   const list: Command[] = [
     {
       id: "new-chat",
+      group: "nav",
       label: t("palette.newChat"),
       hint: t("palette.newChatHint"),
-      icon: <FilePlus size={14} />,
+      icon: <FilePlus size={13} />,
       shortcut: ["⌘", "N"],
       run: handlers.newChat,
     },
     {
       id: "new-tab",
+      group: "nav",
       label: t("palette.newTab"),
       hint: t("palette.newTabHint"),
-      icon: <Plus size={14} />,
+      icon: <Plus size={13} />,
       shortcut: ["⌘", "T"],
       run: handlers.newTab,
     },
@@ -82,19 +86,29 @@ export function buildCommands(handlers: CommandHandlers): Command[] {
   if (handlers.canCloseTab) {
     list.push({
       id: "close-tab",
+      group: "nav",
       label: t("palette.closeTab"),
       hint: t("palette.closeTabHint"),
-      icon: <SquareX size={14} />,
+      icon: <SquareX size={13} />,
       shortcut: ["⌘", "W"],
       run: handlers.closeTab,
     });
   }
+  list.push({
+    id: "focus-composer",
+    group: "nav",
+    label: t("palette.focusComposer"),
+    icon: <FocusIcon size={13} />,
+    shortcut: ["⌘", "L"],
+    run: handlers.focusComposer,
+  });
   if (handlers.busy) {
     list.push({
       id: "abort",
+      group: "action",
       label: t("palette.abort"),
       hint: t("palette.abortHint"),
-      icon: <StopCircle size={14} />,
+      icon: <StopCircle size={13} />,
       shortcut: ["esc"],
       run: handlers.abort,
     });
@@ -102,54 +116,64 @@ export function buildCommands(handlers: CommandHandlers): Command[] {
   if (handlers.hasMessages) {
     list.push({
       id: "copy-last",
+      group: "action",
       label: t("palette.copyLast"),
       hint: t("palette.copyLastHint"),
-      icon: <ClipboardCopy size={14} />,
+      icon: <ClipboardCopy size={13} />,
       run: handlers.copyLast,
     });
     list.push({
       id: "export-md",
+      group: "action",
       label: t("palette.exportMd"),
       hint: t("palette.exportMdHint"),
-      icon: <Download size={14} />,
+      icon: <Download size={13} />,
       run: handlers.exportMarkdown,
     });
     list.push({
       id: "clear-chat",
+      group: "action",
       label: t("palette.clearChat"),
       hint: t("palette.clearChatHint"),
-      icon: <Trash2 size={14} />,
+      icon: <Trash2 size={13} />,
       run: handlers.clearChat,
     });
   }
   list.push({
-    id: "focus-composer",
-    label: t("palette.focusComposer"),
-    icon: <FocusIcon size={14} />,
-    shortcut: ["⌘", "L"],
-    run: handlers.focusComposer,
-  });
-  list.push({
     id: "pick-workspace",
+    group: "workspace",
     label: t("palette.pickWorkspace"),
     hint: t("palette.pickWorkspaceHint"),
-    icon: <FolderOpen size={14} />,
+    icon: <FolderOpen size={13} />,
     run: handlers.pickWorkspace,
   });
   list.push({
     id: "settings",
+    group: "settings",
     label: t("palette.settings"),
     hint: t("palette.settingsHint"),
-    icon: <Settings size={14} />,
+    icon: <Settings size={13} />,
     run: handlers.openSettings,
   });
   list.push({
     id: "about",
+    group: "settings",
     label: t("palette.about"),
-    icon: <Info size={14} />,
+    icon: <Info size={13} />,
     run: handlers.about,
   });
   return list;
+}
+
+const GROUP_ORDER: CommandGroup[] = ["nav", "action", "workspace", "settings"];
+
+function groupLabel(g: CommandGroup): string {
+  switch (g) {
+    case "nav": return t("palette.groupNav");
+    case "action": return t("palette.groupAction");
+    case "workspace": return t("palette.groupWorkspace");
+    case "settings": return t("palette.groupSettings");
+  }
 }
 
 export function CommandPalette({
@@ -192,6 +216,18 @@ export function CommandPalette({
     el?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
+  const grouped = useMemo(() => {
+    const byGroup = new Map<CommandGroup, Command[]>();
+    for (const c of filtered) {
+      const arr = byGroup.get(c.group) ?? [];
+      arr.push(c);
+      byGroup.set(c.group, arr);
+    }
+    return GROUP_ORDER
+      .map((g) => ({ group: g, items: byGroup.get(g) ?? [] }))
+      .filter((s) => s.items.length > 0);
+  }, [filtered]);
+
   if (!open) return null;
 
   const run = (cmd: Command) => {
@@ -200,13 +236,12 @@ export function CommandPalette({
   };
 
   return (
-    <div className="palette-overlay" onMouseDown={onClose}>
-      <div className="palette" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="palette-head">
-          <Sparkles size={14} className="palette-glyph" />
+    <div className="cmdk-mask" onMouseDown={onClose}>
+      <div className="cmdk" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="cmdk-head">
+          <Search size={14} />
           <input
             ref={inputRef}
-            className="palette-input"
             placeholder={t("palette.searchPlaceholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -224,52 +259,57 @@ export function CommandPalette({
               }
             }}
           />
-          <span className="kbd">esc</span>
+          <span className="hint">
+            <kbd>esc</kbd>
+          </span>
         </div>
-        <div className="palette-list" ref={listRef}>
-          {filtered.length === 0 && <div className="palette-empty">{t("palette.empty")}</div>}
-          {filtered.map((c, i) => (
-            <button
-              type="button"
-              key={c.id}
-              data-idx={i}
-              className={`palette-item ${i === active ? "active" : ""}`}
-              onMouseEnter={() => setActive(i)}
-              onClick={() => run(c)}
-            >
-              <span className="palette-item-icon">{c.icon}</span>
-              <span className="palette-item-label">
-                <span>{c.label}</span>
-                {c.hint && <span className="palette-item-hint">{c.hint}</span>}
-              </span>
-              {c.shortcut && (
-                <span className="palette-item-kbd">
-                  {c.shortcut.map((k) => (
-                    <span key={k} className="kbd">
-                      {k}
-                    </span>
-                  ))}
-                </span>
-              )}
-              {i === active && !c.shortcut && (
-                <CornerDownLeft size={12} className="palette-item-enter" />
-              )}
-            </button>
+        <div className="cmdk-body" ref={listRef}>
+          {filtered.length === 0 ? (
+            <div className="cmdk-empty">{t("palette.empty")}</div>
+          ) : null}
+          {grouped.map((section) => (
+            <div className="cmdk-group" key={section.group}>
+              <div className="cmdk-gh">{groupLabel(section.group)}</div>
+              {section.items.map((c) => {
+                const i = filtered.indexOf(c);
+                return (
+                  <div
+                    key={c.id}
+                    data-idx={i}
+                    className="cmdk-row"
+                    data-active={i === active}
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => run(c)}
+                  >
+                    <span className="ic">{c.icon}</span>
+                    <span className="l">{c.label}</span>
+                    <span className="g">{groupLabel(c.group)}</span>
+                    {c.shortcut ? (
+                      <span className="kb">{c.shortcut.join("")}</span>
+                    ) : (
+                      <span className="kb-empty" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           ))}
         </div>
-        <div className="palette-foot">
-          <span className="kbd-group">
-            <span className="kbd">↑</span>
-            <span className="kbd">↓</span>
+        <div className="cmdk-foot">
+          <span>
+            <kbd>↑↓</kbd>
             {t("palette.footMove")}
           </span>
-          <span className="kbd-group">
-            <span className="kbd">↵</span>
+          <span>
+            <kbd>⏎</kbd>
             {t("palette.footRun")}
           </span>
-          <span className="kbd-group">
-            <span className="kbd">esc</span>
+          <span>
+            <kbd>esc</kbd>
             {t("palette.footClose")}
+          </span>
+          <span style={{ marginLeft: "auto", color: "var(--muted)" }}>
+            {filtered.length} {t("palette.countSuffix")}
           </span>
         </div>
       </div>

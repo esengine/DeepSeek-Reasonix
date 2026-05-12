@@ -25,6 +25,17 @@ export const en = {
     settings: "Settings",
     settingsHint: "Model, budget, theme…",
     about: "About Reasonix",
+    groupNav: "Navigate",
+    groupAction: "Action",
+    groupWorkspace: "Workspace",
+    groupSettings: "Settings",
+    countSuffix: "items",
+  },
+  workdir: {
+    title: "Switch workspace",
+    searchPlaceholder: "Search recent paths…",
+    empty: "No recent workspaces",
+    browse: "Browse local…",
   },
   sidebar: {
     newChat: "New chat",
