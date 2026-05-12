@@ -46,6 +46,7 @@ export type ToolConfirmationAuditEvent =
 interface PauseResponseMap {
   run_command: ConfirmationChoice;
   run_background: ConfirmationChoice;
+  path_access: ConfirmationChoice;
   plan_proposed: PlanVerdict;
   plan_checkpoint: CheckpointVerdict;
   plan_revision: RevisionVerdict;
@@ -57,6 +58,18 @@ type PauseKind = keyof PauseResponseMap;
 interface PausePayloadMap {
   run_command: { command: string; cwd?: string; timeoutSec?: number };
   run_background: { command: string; cwd?: string; waitSec?: number };
+  path_access: {
+    /** Absolute path the tool wants to touch. */
+    path: string;
+    /** Why we're being asked — read leaks content, write mutates files. */
+    intent: "read" | "write";
+    /** The filesystem tool calling in — surfaced so users can see what's about to happen. */
+    toolName: string;
+    /** Sandbox root the path is escaping — surfaced for context. */
+    sandboxRoot: string;
+    /** Directory prefix that would be persisted if the user picks "always allow". */
+    allowPrefix: string;
+  };
   plan_proposed: { plan: string; steps?: unknown[]; summary?: string };
   plan_checkpoint: { stepId: string; title?: string; result: string; notes?: string };
   plan_revision: { reason: string; remainingSteps: unknown[]; summary?: string };
@@ -189,6 +202,7 @@ function safeCancelVerdict(kind: PauseKind): unknown {
   switch (kind) {
     case "run_command":
     case "run_background":
+    case "path_access":
       return { type: "deny" };
     case "plan_proposed":
       return { type: "cancel" };

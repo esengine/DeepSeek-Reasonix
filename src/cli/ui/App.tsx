@@ -94,6 +94,7 @@ import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { McpHub } from "./McpHub.js";
 import { ModelPicker } from "./ModelPicker.js";
+import { PathConfirm } from "./PathConfirm.js";
 import { PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
@@ -514,6 +515,15 @@ function AppInner({
     cwd?: string;
     timeoutSec?: number;
     waitSec?: number;
+  } | null>(null);
+  /** Outside-sandbox file access the model asked for (#684). Non-null renders PathConfirm and blocks the gate behind it. */
+  const [pendingPath, setPendingPath] = useState<{
+    id: number;
+    path: string;
+    intent: "read" | "write";
+    toolName: string;
+    sandboxRoot: string;
+    allowPrefix: string;
   } | null>(null);
   // Plan text the model submitted via `submit_plan` while plan mode
   // was active. Non-null renders PlanConfirm; user picks Approve /
@@ -1311,7 +1321,8 @@ function AppInner({
       (atState?.entries.length ?? 0) > 0 ||
       (slashMatches?.length ?? 0) > 0 ||
       (slashArgMatches?.length ?? 0) > 0 ||
-      pendingShell != null;
+      pendingShell != null ||
+      pendingPath != null;
     if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollPageUp();
     else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollPageDown();
     else if (ev.end) chatScroll.jumpToBottom();
@@ -1397,6 +1408,7 @@ function AppInner({
       key.shift &&
       key.tab &&
       !pendingShell &&
+      !pendingPath &&
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
@@ -1432,6 +1444,7 @@ function AppInner({
       input.length === 0 &&
       (chKey === "u" || chKey === "U") &&
       !pendingShell &&
+      !pendingPath &&
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
@@ -1460,6 +1473,7 @@ function AppInner({
       chKey === " " &&
       undoBanner &&
       !pendingShell &&
+      !pendingPath &&
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
@@ -1483,6 +1497,7 @@ function AppInner({
       key.input === "o" &&
       isStreaming &&
       !pendingShell &&
+      !pendingPath &&
       !pendingPlan &&
       !pendingReviseEditor &&
       !pendingSessionsPicker &&
@@ -1503,7 +1518,7 @@ function AppInner({
     // kept handling ↑/↓ / Tab here they'd race with its SingleSelect
     // — the picker would move AND history recall would fire into the
     // (hidden) prompt buffer. Bail early.
-    if (pendingShell) return;
+    if (pendingShell || pendingPath) return;
 
     // @-mention picker takes the same priority tier as slash. ↑/↓ walk
     // the list; Tab on a folder drills into it, Tab on a file commits.
@@ -2916,6 +2931,24 @@ function AppInner({
     [pendingShell, codeMode, currentRootDir, log],
   );
 
+  /** PathConfirm callback — mirrors handleShellConfirm. Resolves the gate, no synthetic user message. */
+  const handlePathConfirm = useCallback(
+    (choice: "run_once" | "always_allow" | "deny", denyContext?: string) => {
+      const pending = pendingPath;
+      if (!pending) return;
+      const { id, allowPrefix } = pending;
+      setPendingPath(null);
+      if (choice === "deny") {
+        pauseGate.resolve(id, { type: "deny", denyContext });
+      } else if (choice === "always_allow") {
+        pauseGate.resolve(id, { type: "always_allow", prefix: allowPrefix });
+      } else {
+        pauseGate.resolve(id, { type: "run_once" });
+      }
+    },
+    [pendingPath],
+  );
+
   /** Holds the PauseGate request id for the current modal so
    *  handlePlanConfirm / handleCheckpointResponse / etc. can resolve it. */
   const pendingGateIdRef = useRef<number | null>(null);
@@ -2931,6 +2964,7 @@ function AppInner({
       editResolve({ choice: "reject" });
     }
     setPendingShell(null);
+    setPendingPath(null);
     setPendingPlan(null);
     setPendingCheckpoint(null);
     setPendingRevision(null);
@@ -3187,6 +3221,24 @@ function AppInner({
             cwd: p.cwd,
             timeoutSec: p.timeoutSec,
             waitSec: p.waitSec,
+          });
+          break;
+        }
+        case "path_access": {
+          const p = payload as {
+            path: string;
+            intent: "read" | "write";
+            toolName: string;
+            sandboxRoot: string;
+            allowPrefix: string;
+          };
+          setPendingPath({
+            id: request.id,
+            path: p.path,
+            intent: p.intent,
+            toolName: p.toolName,
+            sandboxRoot: p.sandboxRoot,
+            allowPrefix: p.allowPrefix,
           });
           break;
         }
@@ -3515,6 +3567,7 @@ function AppInner({
           the next turn begins.
         */}
                   {!pendingShell &&
+                  !pendingPath &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3526,6 +3579,7 @@ function AppInner({
                     <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
                   ) : null}
                   {!pendingShell &&
+                  !pendingPath &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3537,6 +3591,7 @@ function AppInner({
                     <SubagentLiveStack activities={subagentActivities} max={3} />
                   ) : null}
                   {!pendingShell &&
+                  !pendingPath &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3566,6 +3621,7 @@ function AppInner({
                   ) : null}
                   {/* Activity row when no targeted indicator is visible — phase label from useActivityLabel. */}
                   {!pendingShell &&
+                  !pendingPath &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3580,6 +3636,7 @@ function AppInner({
                     <ThinkingRow text={activityLabel} />
                   ) : null}
                   {!pendingShell &&
+                  !pendingPath &&
                   !pendingPlan &&
                   !pendingReviseEditor &&
                   !pendingSessionsPicker &&
@@ -3874,6 +3931,15 @@ function AppInner({
                     timeoutSec={pendingShell.timeoutSec}
                     waitSec={pendingShell.waitSec}
                     onChoose={handleShellConfirm}
+                  />
+                ) : pendingPath ? (
+                  <PathConfirm
+                    path={pendingPath.path}
+                    intent={pendingPath.intent}
+                    toolName={pendingPath.toolName}
+                    sandboxRoot={pendingPath.sandboxRoot}
+                    allowPrefix={pendingPath.allowPrefix}
+                    onChoose={handlePathConfirm}
                   />
                 ) : pendingEditReview ? (
                   <EditConfirm

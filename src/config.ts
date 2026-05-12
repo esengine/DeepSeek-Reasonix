@@ -110,6 +110,8 @@ export interface ReasonixConfig {
   projects?: {
     [absoluteRootDir: string]: {
       shellAllowed?: string[];
+      /** Absolute directory prefixes the user pre-approved for outside-sandbox file access (#684). */
+      pathAllowed?: string[];
     };
   };
   index?: IndexUserConfig;
@@ -294,6 +296,69 @@ export function clearProjectShellAllowed(
   if (!cfg.projects) cfg.projects = {};
   if (!cfg.projects[key]) cfg.projects[key] = {};
   cfg.projects[key].shellAllowed = [];
+  writeConfig(cfg, path);
+  return existing.length;
+}
+
+export function loadProjectPathAllowed(
+  rootDir: string,
+  path: string = defaultConfigPath(),
+): string[] {
+  const cfg = readConfig(path);
+  const key = findProjectKey(cfg, rootDir);
+  if (key === undefined) return [];
+  return cfg.projects?.[key]?.pathAllowed ?? [];
+}
+
+export function addProjectPathAllowed(
+  rootDir: string,
+  prefix: string,
+  path: string = defaultConfigPath(),
+): void {
+  const trimmed = prefix.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  if (!cfg.projects) cfg.projects = {};
+  const key = findProjectKey(cfg, rootDir) ?? rootDir;
+  if (!cfg.projects[key]) cfg.projects[key] = {};
+  const existing = cfg.projects[key].pathAllowed ?? [];
+  if (existing.includes(trimmed)) return;
+  cfg.projects[key].pathAllowed = [...existing, trimmed];
+  writeConfig(cfg, path);
+}
+
+export function removeProjectPathAllowed(
+  rootDir: string,
+  prefix: string,
+  path: string = defaultConfigPath(),
+): boolean {
+  const trimmed = prefix.trim();
+  if (!trimmed) return false;
+  const cfg = readConfig(path);
+  const key = findProjectKey(cfg, rootDir);
+  if (key === undefined) return false;
+  const existing = cfg.projects?.[key]?.pathAllowed ?? [];
+  if (!existing.includes(trimmed)) return false;
+  const next = existing.filter((p) => p !== trimmed);
+  if (!cfg.projects) cfg.projects = {};
+  if (!cfg.projects[key]) cfg.projects[key] = {};
+  cfg.projects[key].pathAllowed = next;
+  writeConfig(cfg, path);
+  return true;
+}
+
+export function clearProjectPathAllowed(
+  rootDir: string,
+  path: string = defaultConfigPath(),
+): number {
+  const cfg = readConfig(path);
+  const key = findProjectKey(cfg, rootDir);
+  if (key === undefined) return 0;
+  const existing = cfg.projects?.[key]?.pathAllowed ?? [];
+  if (existing.length === 0) return 0;
+  if (!cfg.projects) cfg.projects = {};
+  if (!cfg.projects[key]) cfg.projects[key] = {};
+  cfg.projects[key].pathAllowed = [];
   writeConfig(cfg, path);
   return existing.length;
 }

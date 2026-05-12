@@ -3,8 +3,10 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
 import picomatch from "picomatch";
+import { addProjectPathAllowed, loadProjectPathAllowed } from "../config.js";
+import { type ConfirmationChoice, pauseGate as defaultPauseGate } from "../core/pause-gate.js";
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
-import type { ToolRegistry } from "../tools.js";
+import type { ToolCallContext, ToolRegistry } from "../tools.js";
 import { applyEdit, applyMultiEdit } from "./fs/edit.js";
 import { globFiles } from "./fs/glob.js";
 import { searchContent, searchFiles } from "./fs/search.js";
@@ -115,37 +117,102 @@ export function registerFilesystemTools(
   const maxReadBytes = opts.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
   const maxListBytes = opts.maxListBytes ?? DEFAULT_MAX_LIST_BYTES;
 
-  /** Resolve path, enforce it's under rootDir, return absolute. */
-  const safePath = (raw: unknown): string => {
+  const normRoot = pathMod.resolve(rootDir);
+  /** Approved-this-session directory prefixes — `run_once` keeps the user from being asked twice for follow-up reads in the same dir. Wiped on process exit, not persisted. */
+  const sessionApproved = new Set<string>();
+  /** In-flight gate prompts keyed by `allowPrefix` so parallel reads under the same dir only fire one modal. */
+  const inflightGate = new Map<string, Promise<ConfirmationChoice>>();
+
+  function pathIsUnder(child: string, parent: string): boolean {
+    const rel = pathMod.relative(parent, child);
+    return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
+  }
+
+  /** Heuristic: does the raw input express "I really mean this absolute system path" rather than the model-convention sandbox-relative form? Windows drive-letter prefixes always count; POSIX absolutes only count when their first segment is a known system root. */
+  function looksLikeAbsoluteSystemPath(raw: string): boolean {
+    if (/^[A-Za-z]:[\\/]/.test(raw)) return true;
+    return /^\/(?:home|Users|etc|var|opt|tmp|usr|mnt|Library|Volumes|proc|sys|dev|run|srv|media|Applications|System|root|boot|private)(?:[/\\]|$)/.test(
+      raw,
+    );
+  }
+
+  async function ensureOutsideSandboxAllowed(
+    abs: string,
+    intent: "read" | "write",
+    toolName: string,
+    ctx: ToolCallContext | undefined,
+  ): Promise<void> {
+    for (const dir of loadProjectPathAllowed(rootDir)) {
+      if (pathIsUnder(abs, dir)) return;
+    }
+    for (const dir of sessionApproved) {
+      if (pathIsUnder(abs, dir)) return;
+    }
+    const stat = await safeLstat(abs);
+    const allowPrefix = stat?.isDirectory() ? abs : pathMod.dirname(abs);
+    let pending = inflightGate.get(allowPrefix);
+    if (!pending) {
+      const gate = ctx?.confirmationGate ?? defaultPauseGate;
+      pending = gate.ask({
+        kind: "path_access",
+        payload: { path: abs, intent, toolName, sandboxRoot: normRoot, allowPrefix },
+      });
+      inflightGate.set(allowPrefix, pending);
+      void pending.finally(() => inflightGate.delete(allowPrefix));
+    }
+    const choice = await pending;
+    if (choice.type === "deny") {
+      throw new Error(
+        `user denied access to ${abs}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`,
+      );
+    }
+    if (choice.type === "always_allow") {
+      addProjectPathAllowed(rootDir, choice.prefix);
+    } else {
+      sessionApproved.add(allowPrefix);
+    }
+  }
+
+  /** Resolve path, route outside-sandbox access through the approval gate, return absolute. */
+  const safePath = async (
+    raw: unknown,
+    toolName: string,
+    ctx: ToolCallContext | undefined,
+    intent: "read" | "write" = "read",
+  ): Promise<string> => {
     if (typeof raw !== "string" || raw.length === 0) {
       throw new Error("path must be a non-empty string");
     }
-    // Sandbox-root semantics: a leading POSIX-style `/` (or `\` on
-    // Windows) means "from the project root", not "from the filesystem
-    // root". Models routinely write `path: "/"` or `path: "/src/foo.ts"`
-    // intending the sandbox root — without this normalization,
-    // path.resolve interprets `/` as the actual drive root (`F:\` on
-    // Windows, `/` on POSIX) and the escape check rightly rejects it,
-    // confusing the model. Strip leading separators so the rest of the
-    // resolution treats the input as relative to rootDir. Drive-letter
-    // absolutes (`C:\foo`) and Unix absolutes outside rootDir still
-    // get caught by the relative-escape check below.
+    if (looksLikeAbsoluteSystemPath(raw)) {
+      const abs = pathMod.resolve(raw);
+      if (pathIsUnder(abs, normRoot)) return abs;
+      await ensureOutsideSandboxAllowed(abs, intent, toolName, ctx);
+      return abs;
+    }
+    // Sandbox-root semantics: leading `/` or `\` means "from project root", not "from filesystem root".
+    // Model routinely writes `path: "/src/foo.ts"` intending rootDir-relative.
     let normalized = raw;
     while (normalized.startsWith("/") || normalized.startsWith("\\")) {
       normalized = normalized.slice(1);
     }
     if (normalized.length === 0) normalized = ".";
     const resolved = pathMod.resolve(rootDir, normalized);
-    const normRoot = pathMod.resolve(rootDir);
-    // Use relative() to catch any `..` segments that escape.
-    const rel = pathMod.relative(normRoot, resolved);
-    if (rel.startsWith("..") || pathMod.isAbsolute(rel)) {
+    if (!pathIsUnder(resolved, normRoot)) {
       throw new Error(
-        `path escapes sandbox root (${normRoot}): ${raw} — workspace is pinned at launch; quit and relaunch with \`reasonix code --dir <path>\` to work in a different folder`,
+        `path escapes sandbox root (${normRoot}): ${raw} — use an absolute system path like /Users/foo or C:\\Users\\foo to request approved outside-sandbox access`,
       );
     }
     return resolved;
   };
+
+  /** lstat that swallows ENOENT so we can still gate writes to brand-new paths. */
+  async function safeLstat(p: string): Promise<import("node:fs").Stats | null> {
+    try {
+      return await fs.lstat(p);
+    } catch {
+      return null;
+    }
+  }
 
   registry.register({
     name: "read_file",
@@ -171,8 +238,11 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
       },
       required: ["path"],
     },
-    fn: async (args: { path: string; head?: number; tail?: number; range?: string }) => {
-      const abs = safePath(args.path);
+    fn: async (
+      args: { path: string; head?: number; tail?: number; range?: string },
+      ctx?: ToolCallContext,
+    ) => {
+      const abs = await safePath(args.path, "read_file", ctx);
       // Open once and reuse the fd so the directory check and the read
       // bind to the same inode — closes the stat→read TOCTOU race.
       const fh = await fs.open(abs, "r");
@@ -266,8 +336,8 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
         path: { type: "string", description: "Directory to list (default: root)." },
       },
     },
-    fn: async (args: { path?: string }) => {
-      const abs = safePath(args.path ?? ".");
+    fn: async (args: { path?: string }, ctx?: ToolCallContext) => {
+      const abs = await safePath(args.path ?? ".", "list_directory", ctx);
       const entries = await fs.readdir(abs, { withFileTypes: true });
       const lines: string[] = [];
       for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -302,8 +372,11 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
         },
       },
     },
-    fn: async (args: { path?: string; maxDepth?: number; include_deps?: boolean }) => {
-      const startAbs = safePath(args.path ?? ".");
+    fn: async (
+      args: { path?: string; maxDepth?: number; include_deps?: boolean },
+      ctx?: ToolCallContext,
+    ) => {
+      const startAbs = await safePath(args.path ?? ".", "directory_tree", ctx);
       const maxDepth = typeof args.maxDepth === "number" ? args.maxDepth : 2;
       const includeDeps = args.include_deps === true;
       const lines: string[] = [];
@@ -392,7 +465,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
     fn: async (args: { path?: string; pattern: string; include_deps?: boolean }, toolCtx) =>
       searchFiles(
         { rootDir, maxListBytes, skipDirNames: SKIP_DIR_NAMES },
-        safePath(args.path ?? "."),
+        await safePath(args.path ?? ".", "search_files", toolCtx),
         { ...args, signal: toolCtx?.signal },
       ),
   });
@@ -461,7 +534,7 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
           isBinaryByName: isLikelyBinaryByName,
           nameMatch: compileNameFilter(typeof args.glob === "string" ? args.glob : null),
         },
-        safePath(args.path ?? "."),
+        await safePath(args.path ?? ".", "search_content", toolCtx),
         { ...args, signal: toolCtx?.signal },
       ),
   });
@@ -512,10 +585,11 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       toolCtx,
     ) =>
-      globFiles({ rootDir, skipDirNames: SKIP_DIR_NAMES }, safePath(args.path ?? "."), {
-        ...args,
-        signal: toolCtx?.signal,
-      }),
+      globFiles(
+        { rootDir, skipDirNames: SKIP_DIR_NAMES },
+        await safePath(args.path ?? ".", "glob", toolCtx),
+        { ...args, signal: toolCtx?.signal },
+      ),
   });
 
   registry.register({
@@ -531,8 +605,8 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["path"],
     },
-    fn: async (args: { path: string }) => {
-      const abs = safePath(args.path);
+    fn: async (args: { path: string }, ctx?: ToolCallContext) => {
+      const abs = await safePath(args.path, "get_file_info", ctx);
       const st = await fs.lstat(abs);
       const type = st.isDirectory() ? "directory" : st.isSymbolicLink() ? "symlink" : "file";
       return JSON.stringify({
@@ -557,8 +631,8 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["path", "content"],
     },
-    fn: async (args: { path: string; content: string }) => {
-      const abs = safePath(args.path);
+    fn: async (args: { path: string; content: string }, ctx?: ToolCallContext) => {
+      const abs = await safePath(args.path, "write_file", ctx, "write");
       await fs.mkdir(pathMod.dirname(abs), { recursive: true });
       await fs.writeFile(abs, args.content, "utf8");
       return `wrote ${args.content.length} chars to ${displayRel(rootDir, abs)}`;
@@ -578,8 +652,8 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["path", "search", "replace"],
     },
-    fn: async (args: { path: string; search: string; replace: string }) =>
-      applyEdit(rootDir, safePath(args.path), args),
+    fn: async (args: { path: string; search: string; replace: string }, ctx?: ToolCallContext) =>
+      applyEdit(rootDir, await safePath(args.path, "edit_file", ctx, "write"), args),
   });
 
   registry.register({
@@ -611,12 +685,17 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["edits"],
     },
-    fn: async (args: { edits: Array<{ path: string; search: string; replace: string }> }) => {
-      const resolved = (args.edits ?? []).map((e) => ({
-        abs: safePath(e?.path),
-        search: e?.search,
-        replace: e?.replace,
-      }));
+    fn: async (
+      args: { edits: Array<{ path: string; search: string; replace: string }> },
+      ctx?: ToolCallContext,
+    ) => {
+      const resolved = await Promise.all(
+        (args.edits ?? []).map(async (e) => ({
+          abs: await safePath(e?.path, "multi_edit", ctx, "write"),
+          search: e?.search,
+          replace: e?.replace,
+        })),
+      );
       return applyMultiEdit(rootDir, resolved);
     },
   });
@@ -629,8 +708,8 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       properties: { path: { type: "string" } },
       required: ["path"],
     },
-    fn: async (args: { path: string }) => {
-      const abs = safePath(args.path);
+    fn: async (args: { path: string }, ctx?: ToolCallContext) => {
+      const abs = await safePath(args.path, "create_directory", ctx, "write");
       await fs.mkdir(abs, { recursive: true });
       return `created ${displayRel(rootDir, abs)}/`;
     },
@@ -647,9 +726,9 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["source", "destination"],
     },
-    fn: async (args: { source: string; destination: string }) => {
-      const src = safePath(args.source);
-      const dst = safePath(args.destination);
+    fn: async (args: { source: string; destination: string }, ctx?: ToolCallContext) => {
+      const src = await safePath(args.source, "move_file", ctx, "write");
+      const dst = await safePath(args.destination, "move_file", ctx, "write");
       await fs.mkdir(pathMod.dirname(dst), { recursive: true });
       await fs.rename(src, dst);
       return `moved ${displayRel(rootDir, src)} → ${displayRel(rootDir, dst)}`;
@@ -665,8 +744,8 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       properties: { path: { type: "string" } },
       required: ["path"],
     },
-    fn: async (args: { path: string }) => {
-      const abs = safePath(args.path);
+    fn: async (args: { path: string }, ctx?: ToolCallContext) => {
+      const abs = await safePath(args.path, "delete_file", ctx, "write");
       const st = await fs.lstat(abs);
       if (st.isDirectory()) {
         throw new Error(
@@ -694,8 +773,8 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["path"],
     },
-    fn: async (args: { path: string; recursive?: boolean }) => {
-      const abs = safePath(args.path);
+    fn: async (args: { path: string; recursive?: boolean }, ctx?: ToolCallContext) => {
+      const abs = await safePath(args.path, "delete_directory", ctx, "write");
       const st = await fs.lstat(abs);
       if (!st.isDirectory()) {
         throw new Error(`delete_directory: ${args.path} is a file — use delete_file to remove it`);
@@ -724,9 +803,9 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
       },
       required: ["source", "destination"],
     },
-    fn: async (args: { source: string; destination: string }) => {
-      const src = safePath(args.source);
-      const dst = safePath(args.destination);
+    fn: async (args: { source: string; destination: string }, ctx?: ToolCallContext) => {
+      const src = await safePath(args.source, "copy_file", ctx);
+      const dst = await safePath(args.destination, "copy_file", ctx, "write");
       await fs.mkdir(pathMod.dirname(dst), { recursive: true });
       await fs.cp(src, dst, { recursive: true, force: false, errorOnExist: true });
       return `copied ${displayRel(rootDir, src)} → ${displayRel(rootDir, dst)}`;

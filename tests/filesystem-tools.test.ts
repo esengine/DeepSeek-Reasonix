@@ -167,13 +167,17 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toMatch(/escapes sandbox/);
     });
 
-    it("reinterprets POSIX-absolute paths as sandbox-relative (model can't escape via /)", async () => {
-      // Sandbox-root semantics: `/etc/passwd` becomes `etc/passwd`
-      // under rootDir. Real /etc/passwd stays unreachable; the lookup
-      // just fails because <root>/etc/passwd doesn't exist.
+    it("routes POSIX-absolute system paths through the approval gate (no escape without consent)", async () => {
+      // `/etc/passwd` is recognised as an absolute system path (#684); without
+      // a gate listener wired up, the call refuses rather than falling back to
+      // the old "remap into sandbox" behavior — i.e. no escape without consent.
       const out = await tools.dispatch("read_file", JSON.stringify({ path: "/etc/passwd" }));
-      expect(out).not.toMatch(/escapes sandbox/);
-      expect(out).toMatch(/ENOENT|no such file/i);
+      expect(out).toMatch(/no confirmation listener/i);
+    });
+
+    it("still treats `/<sandbox-relative>` as project-rooted (model convention preserved)", async () => {
+      const out = await tools.dispatch("read_file", JSON.stringify({ path: "/hello.txt" }));
+      expect(out).toContain("line 1");
     });
 
     it("returns a truncation notice when file exceeds maxReadBytes", async () => {

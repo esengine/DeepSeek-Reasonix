@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  addProjectPathAllowed,
   addProjectShellAllowed,
+  clearProjectPathAllowed,
   clearProjectShellAllowed,
   editModeHintShown,
   isPlausibleKey,
@@ -12,6 +14,7 @@ import {
   loadEditMode,
   loadIndexConfig,
   loadIndexUserConfig,
+  loadProjectPathAllowed,
   loadProjectShellAllowed,
   loadReasoningEffort,
   loadSemanticEmbeddingUserConfig,
@@ -20,6 +23,7 @@ import {
   readConfig,
   redactKey,
   redactSemanticEmbeddingConfig,
+  removeProjectPathAllowed,
   removeProjectShellAllowed,
   resolveSemanticEmbeddingConfig,
   resolveThemePreference,
@@ -266,6 +270,29 @@ describe("config", () => {
 
   it("clearProjectShellAllowed returns 0 when nothing stored", () => {
     expect(clearProjectShellAllowed("/empty", path)).toBe(0);
+  });
+
+  it("pathAllowed CRUD mirrors shellAllowed (load/add/dedup/remove/clear)", () => {
+    expect(loadProjectPathAllowed("/a", path)).toEqual([]);
+    addProjectPathAllowed("/a", "/Users/foo/Documents", path);
+    addProjectPathAllowed("/a", "/etc", path);
+    addProjectPathAllowed("/a", "/Users/foo/Documents", path); // dedup
+    addProjectPathAllowed("/b", "/var/log", path);
+    expect(loadProjectPathAllowed("/a", path)).toEqual(["/Users/foo/Documents", "/etc"]);
+    expect(loadProjectPathAllowed("/b", path)).toEqual(["/var/log"]);
+    expect(removeProjectPathAllowed("/a", "/etc", path)).toBe(true);
+    expect(removeProjectPathAllowed("/a", "/etc", path)).toBe(false);
+    expect(loadProjectPathAllowed("/a", path)).toEqual(["/Users/foo/Documents"]);
+    expect(clearProjectPathAllowed("/a", path)).toBe(1);
+    expect(loadProjectPathAllowed("/a", path)).toEqual([]);
+    expect(loadProjectPathAllowed("/b", path)).toEqual(["/var/log"]);
+  });
+
+  it("pathAllowed coexists with shellAllowed on the same project entry", () => {
+    addProjectShellAllowed("/proj", "npm install", path);
+    addProjectPathAllowed("/proj", "/Users/foo", path);
+    expect(loadProjectShellAllowed("/proj", path)).toEqual(["npm install"]);
+    expect(loadProjectPathAllowed("/proj", path)).toEqual(["/Users/foo"]);
   });
 
   it.runIf(process.platform === "win32")(

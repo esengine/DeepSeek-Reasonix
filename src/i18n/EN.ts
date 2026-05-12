@@ -1099,6 +1099,27 @@ export const EN: TranslationSchema = {
       "no $EDITOR / $VISUAL / $GIT_EDITOR set \u2014 export one (e.g. `export EDITOR=nano`) and retry",
     editorExited: "editor exited with code {code}",
   },
+  pathConfirm: {
+    title: "Outside-sandbox path",
+    subtitleRead: "{tool} wants to READ a file outside the project sandbox",
+    subtitleWrite: "{tool} wants to WRITE a file outside the project sandbox",
+    awaiting: "awaiting",
+    denyTitle: "Deny \u2014 provide context",
+    optional: "optional",
+    denyFooter:
+      "type context  \u00b7  \u23ce submit with reason  \u00b7  esc skip (deny without reason)",
+    pickFooter:
+      "\u2191\u2193 pick  \u00b7  \u23ce confirm  \u00b7  Tab add context  \u00b7  esc cancel",
+    allowOnce: "allow once",
+    allowOnceDesc: "permit this access; remember the directory for the rest of this session",
+    allowAlways: "allow always",
+    allowAlwaysDesc: "remember `{prefix}` for this project (persisted in ~/.reasonix/config.json)",
+    deny: "deny",
+    denyDesc: "press Tab to add context telling the model why",
+    pathLabel: "path",
+    sandboxLabel: "sandbox",
+    allowPrefixLabel: "prefix",
+  },
   shellConfirm: {
     title: "Shell command",
     bgTitle: "Background process",

@@ -388,6 +388,25 @@ export interface TranslationSchema {
     editorMissing: string;
     editorExited: string;
   };
+  pathConfirm: {
+    title: string;
+    subtitleRead: string;
+    subtitleWrite: string;
+    awaiting: string;
+    denyTitle: string;
+    denyFooter: string;
+    optional: string;
+    pickFooter: string;
+    allowOnce: string;
+    allowOnceDesc: string;
+    allowAlways: string;
+    allowAlwaysDesc: string;
+    deny: string;
+    denyDesc: string;
+    pathLabel: string;
+    sandboxLabel: string;
+    allowPrefixLabel: string;
+  };
   shellConfirm: {
     title: string;
     bgTitle: string;
