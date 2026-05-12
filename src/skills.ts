@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { parseFrontmatter } from "./frontmatter.js";
 import { NEGATIVE_CLAIM_RULE, TUI_FORMATTING_RULES } from "./prompt-fragments.js";
 
 export const SKILLS_DIRNAME = "skills";
@@ -55,27 +56,6 @@ export function validateSkillFrontmatter(raw: string): { ok: true } | { error: s
     };
   }
   return { ok: true };
-}
-
-function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
-  const lines = raw.split(/\r?\n/);
-  if (lines[0] !== "---") return { data: {}, body: raw };
-  const end = lines.indexOf("---", 1);
-  if (end < 0) return { data: {}, body: raw };
-  const data: Record<string, string> = {};
-  for (let i = 1; i < end; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const m = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*):\s*(.*)$/);
-    if (m?.[1]) data[m[1]] = (m[2] ?? "").trim();
-  }
-  return {
-    data,
-    body: lines
-      .slice(end + 1)
-      .join("\n")
-      .replace(/^\n+/, ""),
-  };
 }
 
 function isValidSkillName(name: string): boolean {

@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { parseFrontmatter } from "../../frontmatter.js";
 import { SKILLS_DIRNAME, SKILL_FILE, validateSkillFrontmatter } from "../../skills.js";
 import { readUsageLog } from "../../telemetry/usage.js";
 import type { DashboardContext } from "../context.js";
@@ -61,14 +62,8 @@ interface ResolvedSkillPath {
 }
 
 function parseFrontmatterDescription(raw: string): string | undefined {
-  const lines = raw.split(/\r?\n/);
-  if (lines[0] !== "---") return undefined;
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i] === "---") break;
-    const m = lines[i]!.match(/^description:\s*(.*)$/);
-    if (m) return m[1]!.trim();
-  }
-  return undefined;
+  const desc = parseFrontmatter(raw).data.description?.trim();
+  return desc ? desc : undefined;
 }
 
 function readSkillListEntry(

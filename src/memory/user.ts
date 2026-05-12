@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseFrontmatter } from "../frontmatter.js";
 import { applySkillsIndex } from "../skills.js";
 import { applyProjectMemory, memoryEnabled } from "./project.js";
 
@@ -78,27 +79,6 @@ function scopeDir(opts: { homeDir: string; scope: MemoryScope; projectRoot?: str
 
 function ensureDir(p: string): void {
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
-}
-
-function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
-  const lines = raw.split(/\r?\n/);
-  if (lines[0] !== "---") return { data: {}, body: raw };
-  const end = lines.indexOf("---", 1);
-  if (end < 0) return { data: {}, body: raw };
-  const data: Record<string, string> = {};
-  for (let i = 1; i < end; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const m = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*):\s*(.*)$/);
-    if (m?.[1]) data[m[1]] = (m[2] ?? "").trim();
-  }
-  return {
-    data,
-    body: lines
-      .slice(end + 1)
-      .join("\n")
-      .replace(/^\n+/, ""),
-  };
 }
 
 function formatFrontmatter(e: WriteInput & { createdAt: string }): string {
