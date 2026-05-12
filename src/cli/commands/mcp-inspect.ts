@@ -46,6 +46,34 @@ export function formatMcpInspectFailure(err: unknown): string {
     return `${message} — try: confirm ${target ?? "the MCP server"} is running and the host/port match the spec`;
   }
 
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    return `${message} — try: confirm the hostname is spelled correctly and DNS resolution is working (check your network/VPN)`;
+  }
+
+  if (code === "ECONNRESET") {
+    return `${message} — try: retry the request; if it keeps happening, check the server's logs for crashes or rate limits`;
+  }
+
+  if (code === "ETIMEDOUT") {
+    return `${message} — try: confirm the host is reachable and no firewall/proxy is blocking the port`;
+  }
+
+  if (
+    code === "CERT_HAS_EXPIRED" ||
+    code === "DEPTH_ZERO_SELF_SIGNED_CERT" ||
+    code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
+    code === "SELF_SIGNED_CERT_IN_CHAIN"
+  ) {
+    return `${message} — try: renew or trust the server's TLS certificate, or point the spec at an endpoint with a valid cert`;
+  }
+
+  // HTTP non-2xx from SSE / Streamable HTTP transports. Match the three
+  // exact shapes those transports emit and surface an auth/endpoint hint.
+  const httpStatus = matchTransportHttpStatus(message);
+  if (httpStatus !== null) {
+    return `${message}${hintForHttpStatus(httpStatus)}`;
+  }
+
   if (/^MCP request initialize \(id=\d+\) timed out after \d+ms$/.test(message)) {
     return `${message} — try: confirm the target speaks MCP and completes the handshake before the request timeout`;
   }
@@ -55,6 +83,33 @@ export function formatMcpInspectFailure(err: unknown): string {
   }
 
   return message;
+}
+
+function matchTransportHttpStatus(message: string): number | null {
+  // src/mcp/sse.ts: `SSE handshake <url> → <status> <statusText>`
+  // src/mcp/sse.ts: `MCP SSE POST <url> failed: <status> <statusText>`
+  // src/mcp/streamable-http.ts: `MCP Streamable HTTP POST <url> → <status> <statusText>...`
+  const m =
+    message.match(/^SSE handshake \S+ → (\d{3})\b/) ??
+    message.match(/^MCP SSE POST \S+ failed: (\d{3})\b/) ??
+    message.match(/^MCP Streamable HTTP POST \S+ → (\d{3})\b/);
+  return m ? Number(m[1]) : null;
+}
+
+function hintForHttpStatus(status: number): string {
+  if (status === 401) {
+    return " — try: check the spec's auth header (e.g. `Authorization: Bearer …`) or confirm the token isn't expired";
+  }
+  if (status === 403) {
+    return " — try: confirm the credentials have permission to reach this MCP endpoint";
+  }
+  if (status === 404) {
+    return " — try: confirm the endpoint path in the spec matches what the server actually exposes";
+  }
+  if (status >= 500 && status <= 599) {
+    return " — try: retry shortly; if the failure persists, check the MCP server's logs";
+  }
+  return "";
 }
 
 function formatReport(nsName: string, r: InspectionReport): string {

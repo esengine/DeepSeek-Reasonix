@@ -258,6 +258,85 @@ describe("formatMcpInspectFailure", () => {
     );
   });
 
+  it("adds a DNS hint for ENOTFOUND / EAI_AGAIN", () => {
+    const enotfound = Object.assign(new Error("getaddrinfo ENOTFOUND mcp.bogus.example"), {
+      code: "ENOTFOUND",
+    });
+    expect(formatMcpInspectFailure(enotfound)).toBe(
+      "getaddrinfo ENOTFOUND mcp.bogus.example — try: confirm the hostname is spelled correctly and DNS resolution is working (check your network/VPN)",
+    );
+    const eaiAgain = Object.assign(new Error("getaddrinfo EAI_AGAIN mcp.example.com"), {
+      code: "EAI_AGAIN",
+    });
+    expect(formatMcpInspectFailure(eaiAgain)).toBe(
+      "getaddrinfo EAI_AGAIN mcp.example.com — try: confirm the hostname is spelled correctly and DNS resolution is working (check your network/VPN)",
+    );
+  });
+
+  it("adds a connection-reset and timeout hint for ECONNRESET / ETIMEDOUT", () => {
+    const reset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+    expect(formatMcpInspectFailure(reset)).toBe(
+      "read ECONNRESET — try: retry the request; if it keeps happening, check the server's logs for crashes or rate limits",
+    );
+    const timedOut = Object.assign(new Error("connect ETIMEDOUT 10.0.0.1:8443"), {
+      code: "ETIMEDOUT",
+    });
+    expect(formatMcpInspectFailure(timedOut)).toBe(
+      "connect ETIMEDOUT 10.0.0.1:8443 — try: confirm the host is reachable and no firewall/proxy is blocking the port",
+    );
+  });
+
+  it("adds a TLS hint for cert-validation failures", () => {
+    const expired = Object.assign(new Error("certificate has expired"), {
+      code: "CERT_HAS_EXPIRED",
+    });
+    expect(formatMcpInspectFailure(expired)).toBe(
+      "certificate has expired — try: renew or trust the server's TLS certificate, or point the spec at an endpoint with a valid cert",
+    );
+    const selfSigned = Object.assign(new Error("self signed certificate"), {
+      code: "DEPTH_ZERO_SELF_SIGNED_CERT",
+    });
+    expect(formatMcpInspectFailure(selfSigned)).toBe(
+      "self signed certificate — try: renew or trust the server's TLS certificate, or point the spec at an endpoint with a valid cert",
+    );
+  });
+
+  it("adds an auth hint for 401 from SSE handshake / POST and Streamable HTTP POST", () => {
+    const handshake = new Error("SSE handshake https://mcp.example.com/sse → 401 Unauthorized");
+    expect(formatMcpInspectFailure(handshake)).toBe(
+      "SSE handshake https://mcp.example.com/sse → 401 Unauthorized — try: check the spec's auth header (e.g. `Authorization: Bearer …`) or confirm the token isn't expired",
+    );
+    const ssePost = new Error("MCP SSE POST https://mcp.example.com/msg failed: 401 Unauthorized");
+    expect(formatMcpInspectFailure(ssePost)).toBe(
+      "MCP SSE POST https://mcp.example.com/msg failed: 401 Unauthorized — try: check the spec's auth header (e.g. `Authorization: Bearer …`) or confirm the token isn't expired",
+    );
+    const streamable = new Error(
+      "MCP Streamable HTTP POST https://mcp.example.com/mcp → 401 Unauthorized",
+    );
+    expect(formatMcpInspectFailure(streamable)).toBe(
+      "MCP Streamable HTTP POST https://mcp.example.com/mcp → 401 Unauthorized — try: check the spec's auth header (e.g. `Authorization: Bearer …`) or confirm the token isn't expired",
+    );
+  });
+
+  it("adds endpoint / permission / server hints for 403, 404, and 5xx", () => {
+    const forbidden = new Error(
+      "MCP Streamable HTTP POST https://mcp.example.com/mcp → 403 Forbidden",
+    );
+    expect(formatMcpInspectFailure(forbidden)).toBe(
+      "MCP Streamable HTTP POST https://mcp.example.com/mcp → 403 Forbidden — try: confirm the credentials have permission to reach this MCP endpoint",
+    );
+    const notFound = new Error("SSE handshake https://mcp.example.com/sse → 404 Not Found");
+    expect(formatMcpInspectFailure(notFound)).toBe(
+      "SSE handshake https://mcp.example.com/sse → 404 Not Found — try: confirm the endpoint path in the spec matches what the server actually exposes",
+    );
+    const bad = new Error(
+      "MCP Streamable HTTP POST https://mcp.example.com/mcp → 503 Service Unavailable",
+    );
+    expect(formatMcpInspectFailure(bad)).toBe(
+      "MCP Streamable HTTP POST https://mcp.example.com/mcp → 503 Service Unavailable — try: retry shortly; if the failure persists, check the MCP server's logs",
+    );
+  });
+
   it("leaves unknown errors unchanged", () => {
     expect(formatMcpInspectFailure(new Error("boom"))).toBe("boom");
   });
