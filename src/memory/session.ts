@@ -278,7 +278,7 @@ export function deleteSession(name: string): boolean {
   }
 }
 
-/** Non-atomic truncate+write window is acceptable — concurrent crash here = `/forget`. */
+/** Non-atomic truncate+write window is acceptable — a concurrent crash leaves the session file empty, same end state as the user deleting it. */
 export function rewriteSession(name: string, messages: ChatMessage[]): void {
   const path = sessionPath(name);
   mkdirSync(dirname(path), { recursive: true });

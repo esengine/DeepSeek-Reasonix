@@ -55,8 +55,8 @@ export const zhCN: TranslationSchema = {
     systemAppendFileHint:
       "追加文件内容到代码系统提示词。不替换默认提示词。UTF-8，相对于 cwd 或绝对路径。",
     resumedSession:
-      '▸ 已恢复会话 "{name}"，包含 {count} 条历史消息 · /forget 重新开始 · /sessions 列出',
-    newSession: '▸ 会话 "{name}" (新) — 随聊随存 · /forget 删除 · /sessions 列出',
+      '▸ 已恢复会话 "{name}"，包含 {count} 条历史消息 · /new 重新开始 · /sessions 管理',
+    newSession: '▸ 会话 "{name}" (新) — 随聊随存 · /sessions 重命名或删除',
     ephemeralSession: "▸ 临时聊天 (不保存会话) — 去掉 --no-session 以启用保存",
     restoredEdits:
       "▸ 从中断的运行中恢复了 {count} 个待处理的编辑块 — /apply 提交或 /discard 放弃。",
@@ -582,7 +582,7 @@ export const zhCN: TranslationSchema = {
   },
   errors: {
     contextOverflow:
-      "上下文溢出（DeepSeek 400）：会话历史已达 {requested}，超出模型 prompt 上限（V4：1M tokens；旧版 chat/reasoner：131k）。通常是单个工具结果太大。Reasonix 默认将新工具结果限制在 8k tokens，并在会话加载时自动修复超大历史 — 重启常能清掉。如果仍然溢出，运行 /forget（删除会话）或 /clear（丢弃显示中的历史）从头开始。",
+      "上下文溢出（DeepSeek 400）：会话历史已达 {requested}，超出模型 prompt 上限（V4：1M tokens；旧版 chat/reasoner：131k）。通常是单个工具结果太大。Reasonix 默认将新工具结果限制在 8k tokens，并在会话加载时自动修复超大历史 — 重启常能清掉。如果仍然溢出，运行 /new 重新开始，或打开 /sessions 选中后按 [d] 删除该会话。",
     contextOverflowTooMany: "tokens 数量过多",
     auth401:
       "认证失败（DeepSeek 401）：{inner}。你的 API key 被拒绝。运行 `reasonix setup` 或 `export DEEPSEEK_API_KEY=sk-...` 修复。在 https://platform.deepseek.com/api_keys 获取 key。",

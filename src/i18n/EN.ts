@@ -56,9 +56,8 @@ export const EN: TranslationSchema = {
     systemAppendFileHint:
       "Append file contents to the code system prompt. Does NOT replace the default prompt. UTF-8, relative to cwd or absolute.",
     resumedSession:
-      '▸ resumed session "{name}" with {count} prior messages · /forget to start over · /sessions to list',
-    newSession:
-      '▸ session "{name}" (new) — auto-saved as you chat · /forget to delete · /sessions to list',
+      '▸ resumed session "{name}" with {count} prior messages · /new to start fresh · /sessions to manage',
+    newSession: '▸ session "{name}" (new) — auto-saved as you chat · /sessions to rename or delete',
     ephemeralSession: "▸ ephemeral chat (no session persistence) — drop --no-session to enable",
     restoredEdits:
       "▸ restored {count} pending edit block(s) from an interrupted prior run — /apply to commit or /discard to drop.",
@@ -598,7 +597,7 @@ export const EN: TranslationSchema = {
   },
   errors: {
     contextOverflow:
-      "Context overflow (DeepSeek 400): session history is {requested}, past the model's prompt limit (V4: 1M tokens; legacy chat/reasoner: 131k). Usually a single tool result grew too big. Reasonix caps new tool results at 8k tokens and auto-heals oversized history on session load — a restart often clears it. If it still overflows, run /forget (delete the session) or /clear (drop the displayed history) to start fresh.",
+      "Context overflow (DeepSeek 400): session history is {requested}, past the model's prompt limit (V4: 1M tokens; legacy chat/reasoner: 131k). Usually a single tool result grew too big. Reasonix caps new tool results at 8k tokens and auto-heals oversized history on session load — a restart often clears it. If it still overflows, run /new to start fresh, or open /sessions and press [d] to delete this session.",
     contextOverflowTooMany: "too many tokens",
     auth401:
       "Authentication failed (DeepSeek 401): {inner}. Your API key is rejected. Fix with `reasonix setup` or `export DEEPSEEK_API_KEY=sk-...`. Get one at https://platform.deepseek.com/api_keys.",
