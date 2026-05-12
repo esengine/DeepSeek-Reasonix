@@ -121,6 +121,42 @@ function lookupCsi(tail: string): KeyEvent | null {
   return null;
 }
 
+/** modifyOtherKeys / Kitty: reconstruct the keystroke from `<codepoint>` + `<mod>`. */
+function decodeModifiedKey(cp: number, mod: number): KeyEvent | null {
+  if (mod < 1 || mod > 8) return null;
+  const bits = mod - 1;
+  const shift = (bits & 1) !== 0;
+  const alt = (bits & 2) !== 0;
+  const ctrl = (bits & 4) !== 0;
+  if (cp >= 0x20 && cp <= 0x7e && !ctrl && !alt) {
+    const ev: KeyEvent = { input: String.fromCharCode(cp) };
+    if (shift) ev.shift = true;
+    return ev;
+  }
+  if (cp >= 0x20 && cp <= 0x7e && alt && !ctrl) {
+    const ev: KeyEvent = { input: String.fromCharCode(cp), meta: true };
+    if (shift) ev.shift = true;
+    return ev;
+  }
+  if (cp >= 0x41 && cp <= 0x7a && ctrl && !alt) {
+    const ev: KeyEvent = { input: String.fromCharCode(cp).toLowerCase(), ctrl: true };
+    if (shift) ev.shift = true;
+    return ev;
+  }
+  return null;
+}
+
+/** Generic modifyOtherKeys / Kitty envelope — picks up the keys lookupCsi misses (`@`, `_`, `[`, `\`, `]`, `^` under `>4;2m`). */
+function tryDecodeGenericCsi(seq: string): KeyEvent | null {
+  let m = /^27;(\d+);(\d+)~$/.exec(seq);
+  if (m) return decodeModifiedKey(Number.parseInt(m[2]!, 10), Number.parseInt(m[1]!, 10));
+  m = /^(\d+);(\d+)u$/.exec(seq);
+  if (m) return decodeModifiedKey(Number.parseInt(m[1]!, 10), Number.parseInt(m[2]!, 10));
+  m = /^(\d+)u$/.exec(seq);
+  if (m) return decodeModifiedKey(Number.parseInt(m[1]!, 10), 1);
+  return null;
+}
+
 /** Heuristic paste-burst detector — wraps raw multi-line chunks when the terminal didn't (#522). */
 export function looksLikeUnbracketedPaste(chunk: string): boolean {
   if (chunk.length < 2) return false;
@@ -498,7 +534,15 @@ export class StdinReader {
       }
     }
     const ev = lookupCsi(seq);
-    if (ev) this.dispatch(ev);
+    if (ev) {
+      this.dispatch(ev);
+      return;
+    }
+    const generic = tryDecodeGenericCsi(seq);
+    if (generic) {
+      this.dispatch(generic);
+      return;
+    }
     // Unknown CSI → drop. Do NOT insert raw bytes as text.
   }
 }

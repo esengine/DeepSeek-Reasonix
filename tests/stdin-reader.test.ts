@@ -74,6 +74,42 @@ describe("StdinReader — CSI sequences (well-behaved)", () => {
     reader.feed("\x1b[42m"); // SGR — irrelevant to us, skip
     expect(events).toEqual([]);
   });
+
+  it("recovers `@` / `_` / `[` / `\\` / `]` / `^` from modifyOtherKeys CSI 27 (ghostty, issue #683)", () => {
+    const { reader, events } = setup();
+    // xterm modifyOtherKeys=2 re-encodes these because Ctrl+them yields control bytes.
+    reader.feed("\x1b[27;2;64~"); // Shift+2 = @
+    reader.feed("\x1b[27;2;95~"); // Shift+- = _
+    reader.feed("\x1b[27;1;91~"); // [
+    reader.feed("\x1b[27;1;92~"); // \
+    reader.feed("\x1b[27;1;93~"); // ]
+    reader.feed("\x1b[27;2;94~"); // Shift+6 = ^
+    expect(events).toEqual([
+      { input: "@", shift: true },
+      { input: "_", shift: true },
+      { input: "[" },
+      { input: "\\" },
+      { input: "]" },
+      { input: "^", shift: true },
+    ]);
+  });
+
+  it("recovers `@` / `_` from Kitty `<cp>;<mod>u` and bare `<cp>u`", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[64;2u"); // Shift+@ via Kitty
+    reader.feed("\x1b[95u"); // _ without modifier
+    expect(events).toEqual([{ input: "@", shift: true }, { input: "_" }]);
+  });
+
+  it("decodes Alt+letter and Ctrl+letter from modifyOtherKeys", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[27;3;97~"); // Alt+a
+    reader.feed("\x1b[27;5;65~"); // Ctrl+A (uppercase code in envelope)
+    expect(events).toEqual([
+      { input: "a", meta: true },
+      { input: "a", ctrl: true },
+    ]);
+  });
 });
 
 describe("StdinReader — CSI sequences (Windows ConPTY ESC-stripped)", () => {
