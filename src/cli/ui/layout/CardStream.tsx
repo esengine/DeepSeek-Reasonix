@@ -9,7 +9,50 @@ import { FG, TONE } from "../theme/tokens.js";
 
 /** Buffer of rows kept rendered on each side of the viewport so a single scroll
  * step doesn't reveal an unmeasured card. Larger = smoother but renders more. */
-const VISIBLE_BUFFER_ROWS = 30;
+export const VISIBLE_BUFFER_ROWS = 30;
+
+export type CardStreamItem<T> =
+  | { kind: "spacer"; rows: number; key: string }
+  | { kind: "card"; card: T };
+
+/** Decide which cards render live vs collapse into a spacer, given the cached
+ * heights and the current viewport position. Window is quantized to
+ * VISIBLE_BUFFER_ROWS buckets so a single-row scrollRows / outerHeight wiggle
+ * doesn't toggle a boundary card and re-trigger inner.height oscillation
+ * (root cause of issues #549 / #700). */
+export function computeCardStreamItems<T extends { id: string }>(
+  cards: readonly T[],
+  cardHeights: ReadonlyMap<string, number>,
+  scrollRows: number,
+  outerHeight: number,
+): CardStreamItem<T>[] {
+  const bucket = Math.floor(scrollRows / VISIBLE_BUFFER_ROWS) * VISIBLE_BUFFER_ROWS;
+  const winStart = Math.max(0, bucket - VISIBLE_BUFFER_ROWS);
+  const winEnd = bucket + outerHeight + VISIBLE_BUFFER_ROWS * 2;
+  const out: CardStreamItem<T>[] = [];
+  let cursor = 0;
+  let pendingSpacer = 0;
+  let spacerKey = 0;
+  for (const card of cards) {
+    const h = cardHeights.get(card.id);
+    const cardEnd = cursor + (h ?? 0);
+    const live = h === undefined || (cardEnd >= winStart && cursor <= winEnd);
+    if (live) {
+      if (pendingSpacer > 0) {
+        out.push({ kind: "spacer", rows: pendingSpacer, key: `sp-${spacerKey++}` });
+        pendingSpacer = 0;
+      }
+      out.push({ kind: "card", card });
+    } else {
+      pendingSpacer += h ?? 0;
+    }
+    cursor = cardEnd;
+  }
+  if (pendingSpacer > 0) {
+    out.push({ kind: "spacer", rows: pendingSpacer, key: `sp-${spacerKey}` });
+  }
+  return out;
+}
 
 /**
  * Row-precision virtual scroll with card-level virtualization.
@@ -55,39 +98,10 @@ export function CardStream({
     visible = cards.slice(0, -1);
   }
 
-  /** Compute which cards land inside the visible window + buffer. Cards with
-   * unknown heights are always kept live so they get measured on first paint. */
-  const items = useMemo(() => {
-    const winStart = Math.max(0, scrollRows - VISIBLE_BUFFER_ROWS);
-    const winEnd = scrollRows + outer.height + VISIBLE_BUFFER_ROWS;
-    const out: Array<{ kind: "spacer"; rows: number; key: string } | { kind: "card"; card: Card }> =
-      [];
-    let cursor = 0;
-    let pendingSpacer = 0;
-    let spacerKey = 0;
-    for (const card of visible) {
-      const h = cardHeights.get(card.id);
-      const cardEnd = cursor + (h ?? 0);
-      // Render live when:
-      //   1. height isn't cached yet (need to measure), OR
-      //   2. card range overlaps the visible window.
-      const live = h === undefined || (cardEnd >= winStart && cursor <= winEnd);
-      if (live) {
-        if (pendingSpacer > 0) {
-          out.push({ kind: "spacer", rows: pendingSpacer, key: `sp-${spacerKey++}` });
-          pendingSpacer = 0;
-        }
-        out.push({ kind: "card", card });
-      } else {
-        pendingSpacer += h ?? 0;
-      }
-      cursor = cardEnd;
-    }
-    if (pendingSpacer > 0) {
-      out.push({ kind: "spacer", rows: pendingSpacer, key: `sp-${spacerKey}` });
-    }
-    return out;
-  }, [visible, cardHeights, scrollRows, outer.height]);
+  const items = useMemo(
+    () => computeCardStreamItems(visible, cardHeights, scrollRows, outer.height),
+    [visible, cardHeights, scrollRows, outer.height],
+  );
 
   return (
     <>
