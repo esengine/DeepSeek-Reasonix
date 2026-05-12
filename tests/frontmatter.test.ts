@@ -67,4 +67,16 @@ describe("parseFrontmatter", () => {
     const { data } = parseFrontmatter(raw);
     expect(data.description).toBe("one");
   });
+
+  it("drops keys that would mutate Object.prototype (__proto__, constructor, prototype)", () => {
+    const raw =
+      "---\n__proto__: polluted\nconstructor: nope\nprototype: also-nope\nname: ok\n---\n";
+    const probe = {} as Record<string, unknown>;
+    const before = probe.polluted;
+    const { data } = parseFrontmatter(raw);
+    expect(data.name).toBe("ok");
+    expect(data.__proto__).toBeUndefined();
+    expect(Object.getPrototypeOf(data)).toBeNull();
+    expect(probe.polluted).toBe(before);
+  });
 });

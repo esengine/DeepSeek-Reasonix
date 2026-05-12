@@ -1,6 +1,8 @@
 /** Tiny YAML-frontmatter parser shared by skills / memory loaders. Single source so BOM + folded + quoted handling stay consistent. */
 
 const KEY_RE = /^([a-zA-Z_][a-zA-Z0-9_-]*):\s*(.*)$/;
+/** Bracket-write guard — regex permits these as identifiers, but writing them would mutate Object.prototype. */
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function stripQuotes(s: string): string {
   if (s.length < 2) return s;
@@ -18,7 +20,7 @@ export function parseFrontmatter(raw: string): { data: Record<string, string>; b
   if (lines[0] !== "---") return { data: {}, body: stripped };
   const end = lines.indexOf("---", 1);
   if (end < 0) return { data: {}, body: stripped };
-  const data: Record<string, string> = {};
+  const entries = new Map<string, string>();
   let currentKey: string | null = null;
   for (let i = 1; i < end; i++) {
     const line = lines[i] ?? "";
@@ -27,17 +29,19 @@ export function parseFrontmatter(raw: string): { data: Record<string, string>; b
       continue;
     }
     const m = line.match(KEY_RE);
-    if (m?.[1]) {
+    if (m?.[1] && !FORBIDDEN_KEYS.has(m[1])) {
       currentKey = m[1];
-      data[currentKey] = (m[2] ?? "").trim();
+      entries.set(currentKey, (m[2] ?? "").trim());
     } else if (currentKey) {
       const cont = line.trim();
-      const prev = data[currentKey] ?? "";
-      data[currentKey] = prev ? `${prev} ${cont}` : cont;
+      const prev = entries.get(currentKey) ?? "";
+      entries.set(currentKey, prev ? `${prev} ${cont}` : cont);
     }
   }
-  for (const k of Object.keys(data)) {
-    data[k] = stripQuotes(data[k] ?? "");
+  const data: Record<string, string> = Object.create(null);
+  for (const [k, v] of entries) {
+    if (FORBIDDEN_KEYS.has(k)) continue;
+    data[k] = stripQuotes(v);
   }
   return {
     data,
