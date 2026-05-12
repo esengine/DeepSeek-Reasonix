@@ -2,6 +2,7 @@
 
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
+import { dispatchKernelEvent, toolKindFor } from "../src/acp/dispatch.js";
 import {
   ACP_PROTOCOL_VERSION,
   type ContentBlock,
@@ -10,6 +11,7 @@ import {
   flattenPrompt,
 } from "../src/acp/protocol.js";
 import { AcpServer } from "../src/acp/server.js";
+import type { Event as KernelEvent } from "../src/core/events.js";
 
 function makePair(): {
   server: AcpServer;
@@ -148,6 +150,183 @@ describe("ACP protocol helpers", () => {
 
   it("ACP_PROTOCOL_VERSION pins to the spec's v1", () => {
     expect(ACP_PROTOCOL_VERSION).toBe(1);
+  });
+});
+
+describe("ACP kernel-event dispatch", () => {
+  function captureUpdates(): { server: AcpServer; updates: () => unknown[] } {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const lines: string[] = [];
+    output.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.trim()) lines.push(line.trim());
+      }
+    });
+    const server = new AcpServer({ input, output });
+    return {
+      server,
+      updates: () =>
+        lines
+          .map((l) => JSON.parse(l))
+          .filter((m) => m.method === "session/update")
+          .map((m) => m.params.update),
+    };
+  }
+
+  function kev<T extends KernelEvent["type"]>(type: T, fields: Partial<KernelEvent>): KernelEvent {
+    return {
+      id: 1,
+      ts: "2026-05-12T00:00:00Z",
+      turn: 1,
+      type,
+      ...fields,
+    } as KernelEvent;
+  }
+
+  it("model.delta on content channel emits agent_message_chunk", async () => {
+    const { server, updates } = captureUpdates();
+    dispatchKernelEvent(
+      server,
+      "s1",
+      kev("model.delta", { channel: "content", text: "hello" } as never),
+    );
+    await wait(5);
+    expect(updates()).toEqual([
+      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hello" } },
+    ]);
+    server.close();
+  });
+
+  it("model.delta on reasoning channel emits agent_thought_chunk", async () => {
+    const { server, updates } = captureUpdates();
+    dispatchKernelEvent(
+      server,
+      "s1",
+      kev("model.delta", { channel: "reasoning", text: "thinking…" } as never),
+    );
+    await wait(5);
+    expect(updates()).toEqual([
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thinking…" } },
+    ]);
+    server.close();
+  });
+
+  it("tool.preparing emits a pending tool_call with the right kind classification", async () => {
+    const { server, updates } = captureUpdates();
+    dispatchKernelEvent(
+      server,
+      "s1",
+      kev("tool.preparing", { callId: "tc-1", name: "read_file" } as never),
+    );
+    await wait(5);
+    expect(updates()).toEqual([
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "tc-1",
+        title: "read_file",
+        kind: "read",
+        status: "pending",
+      },
+    ]);
+    server.close();
+  });
+
+  it("tool.intent emits in_progress then a tool_call carrying parsed rawInput", async () => {
+    const { server, updates } = captureUpdates();
+    dispatchKernelEvent(
+      server,
+      "s1",
+      kev("tool.intent", {
+        callId: "tc-2",
+        name: "write_file",
+        args: '{"path":"a.ts","content":"x"}',
+      } as never),
+    );
+    await wait(5);
+    const seen = updates();
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toEqual({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tc-2",
+      status: "in_progress",
+    });
+    expect(seen[1]).toMatchObject({
+      sessionUpdate: "tool_call",
+      toolCallId: "tc-2",
+      kind: "edit",
+      status: "in_progress",
+      rawInput: { path: "a.ts", content: "x" },
+    });
+    server.close();
+  });
+
+  it("tool.result emits completed with content; failed when ok=false", async () => {
+    const { server, updates } = captureUpdates();
+    dispatchKernelEvent(
+      server,
+      "s1",
+      kev("tool.result", {
+        callId: "tc-3",
+        ok: true,
+        output: "42",
+        durationMs: 7,
+      } as never),
+    );
+    dispatchKernelEvent(
+      server,
+      "s1",
+      kev("tool.result", {
+        callId: "tc-4",
+        ok: false,
+        output: "ENOENT",
+        durationMs: 1,
+      } as never),
+    );
+    await wait(5);
+    const seen = updates();
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toMatchObject({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tc-3",
+      status: "completed",
+      content: [{ type: "content", content: { type: "text", text: "42" } }],
+    });
+    expect(seen[1]).toMatchObject({
+      toolCallId: "tc-4",
+      status: "failed",
+      content: [{ type: "content", content: { type: "text", text: "ENOENT" } }],
+    });
+    server.close();
+  });
+
+  it("very long tool outputs are clipped with a truncation suffix", async () => {
+    const { server, updates } = captureUpdates();
+    const big = "x".repeat(8000 + 200);
+    dispatchKernelEvent(
+      server,
+      "s1",
+      kev("tool.result", { callId: "tc-5", ok: true, output: big, durationMs: 1 } as never),
+    );
+    await wait(5);
+    const seen = updates();
+    const text = (seen[0] as { content: Array<{ content: { text: string } }> }).content[0]?.content
+      .text as string;
+    expect(text.length).toBeGreaterThan(0);
+    expect(text.length).toBeLessThan(big.length);
+    expect(text).toContain("more chars truncated");
+    server.close();
+  });
+
+  it("toolKindFor classifies known tool names into ACP kinds", () => {
+    expect(toolKindFor("read_file")).toBe("read");
+    expect(toolKindFor("glob")).toBe("read");
+    expect(toolKindFor("write_file")).toBe("edit");
+    expect(toolKindFor("multi_edit")).toBe("edit");
+    expect(toolKindFor("search_content")).toBe("search");
+    expect(toolKindFor("run_command")).toBe("execute");
+    expect(toolKindFor("run_background")).toBe("execute");
+    expect(toolKindFor("totally_made_up_tool")).toBe("other");
   });
 });
 

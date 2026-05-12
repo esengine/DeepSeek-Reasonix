@@ -2,6 +2,7 @@
 
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { dispatchKernelEvent } from "../../acp/dispatch.js";
 import {
   ACP_PROTOCOL_VERSION,
   type ContentBlock,
@@ -22,7 +23,6 @@ import { codeSystemPrompt } from "../../code/prompt.js";
 import { buildCodeToolset } from "../../code/setup.js";
 import { loadApiKey, loadBaseUrl, loadPreset, loadReasoningEffort } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
-import type { Event as KernelEvent } from "../../core/events.js";
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import { timestampSuffix } from "../../memory/session.js";
@@ -182,16 +182,4 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
   });
 
   await server.done();
-}
-
-/** Stage 1 mapping — only assistant content + reasoning deltas are forwarded as ACP session/update notifications. Tool events come in stage 2. */
-function dispatchKernelEvent(server: AcpServer, sessionId: string, ev: KernelEvent): void {
-  if (ev.type !== "model.delta") return;
-  if (!ev.text) return;
-  const variant = ev.channel === "reasoning" ? "agent_thought_chunk" : "agent_message_chunk";
-  const update: SessionUpdateParams = {
-    sessionId,
-    update: { sessionUpdate: variant, content: { type: "text", text: ev.text } },
-  };
-  server.sendNotification("session/update", update);
 }
