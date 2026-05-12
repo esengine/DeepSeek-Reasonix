@@ -407,6 +407,8 @@ export interface TranslationSchema {
     cwdLabel: string;
     timeoutLabel: string;
     waitLabel: string;
+    previewMore: string;
+    previewMorePlural: string;
   };
   editConfirm: {
     footer: string;

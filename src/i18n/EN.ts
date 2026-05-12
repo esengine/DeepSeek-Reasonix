@@ -1120,6 +1120,8 @@ export const EN: TranslationSchema = {
     cwdLabel: "cwd",
     timeoutLabel: "timeout",
     waitLabel: "wait",
+    previewMore: "… {n} more line hidden — press esc, ask the model to split it",
+    previewMorePlural: "… {n} more lines hidden — press esc, ask the model to split it",
   },
   editConfirm: {
     footer:

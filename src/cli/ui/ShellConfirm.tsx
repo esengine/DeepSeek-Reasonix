@@ -6,8 +6,13 @@ import { t } from "../../i18n/index.js";
 import { DenyContextInput } from "./DenyContextInput.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
-import { useReserveRows } from "./layout/viewport-budget.js";
+import { useReserveRows, useTotalRows } from "./layout/viewport-budget.js";
 import { FG, TONE } from "./theme/tokens.js";
+
+/** Header + subtitle + info rows + 3-option select + separator + footer — empirically 18 rows. */
+const CHROME_ROWS = 18;
+/** Floor so the user can always see *something* of the command on tiny terminals. */
+const MIN_COMMAND_LINES = 3;
 
 export type ShellConfirmChoice = "run_once" | "always_allow" | "deny";
 
@@ -24,6 +29,13 @@ export interface ShellConfirmProps {
   /** run_background startup wait in seconds — surfaced as "wait 3s". */
   waitSec?: number;
   onChoose: (choice: ShellConfirmChoice, denyContext?: string) => void;
+}
+
+/** Keep the first `max` lines so the SingleSelect + footer stay on screen; `hidden` counts the dropped tail. */
+export function clampCommand(command: string, max: number): { preview: string; hidden: number } {
+  const lines = command.split("\n");
+  if (lines.length <= max) return { preview: command, hidden: 0 };
+  return { preview: lines.slice(0, max).join("\n"), hidden: lines.length - max };
 }
 
 /** ~/foo when path is under $HOME so the row doesn't blow past viewport width. */
@@ -47,6 +59,9 @@ export function ShellConfirm({
   onChoose,
 }: ShellConfirmProps) {
   useReserveRows("modal", { min: 8, max: 14 });
+  const totalRows = useTotalRows();
+  const maxCommandLines = Math.max(MIN_COMMAND_LINES, totalRows - CHROME_ROWS);
+  const { preview, hidden } = clampCommand(command, maxCommandLines);
 
   const isBackground = kind === "run_background";
   const subtitle = isBackground ? t("shellConfirm.bgSubtitle") : t("shellConfirm.subtitle");
@@ -81,13 +96,22 @@ export function ShellConfirm({
       <Box marginBottom={1}>
         <Text color={FG.faint}>{subtitle}</Text>
       </Box>
-      <Box marginBottom={1}>
-        <Text bold color={TONE.err}>
-          {"$ "}
-        </Text>
-        <Text bold color={FG.strong}>
-          {command}
-        </Text>
+      <Box marginBottom={1} flexDirection="column">
+        <Box>
+          <Text bold color={TONE.err}>
+            {"$ "}
+          </Text>
+          <Text bold color={FG.strong}>
+            {preview}
+          </Text>
+        </Box>
+        {hidden > 0 ? (
+          <Text color={FG.faint}>
+            {t(hidden === 1 ? "shellConfirm.previewMore" : "shellConfirm.previewMorePlural", {
+              n: hidden,
+            })}
+          </Text>
+        ) : null}
       </Box>
       <InfoRows cwd={cwd} timeoutSec={timeoutSec} waitSec={waitSec} kind={kind} />
       <SingleSelect

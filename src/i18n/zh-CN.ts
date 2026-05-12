@@ -1062,6 +1062,8 @@ export const zhCN: TranslationSchema = {
     cwdLabel: "工作目录",
     timeoutLabel: "超时",
     waitLabel: "等待",
+    previewMore: "… 还有 {n} 行未显示 — 按 esc 取消，让模型拆分后再试",
+    previewMorePlural: "… 还有 {n} 行未显示 — 按 esc 取消，让模型拆分后再试",
   },
   editConfirm: {
     footer:
