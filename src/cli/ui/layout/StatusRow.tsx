@@ -8,6 +8,15 @@ import { useAgentState } from "../state/provider.js";
 import type { Mode, NetworkState, StatusBar } from "../state/state.js";
 import { FG, TONE, balanceColor, formatBalance, formatCost } from "../theme/tokens.js";
 
+export interface StatusBarConfig {
+  showBalance: boolean;
+  showSessionCost: boolean;
+  showTurnCost: boolean;
+  showCacheHit: boolean;
+  showVersion: boolean;
+  showFeedbackHint: boolean;
+}
+
 const RULE_PAD = 4;
 const RULE_MIN = 20;
 const WALLET_MIN_COLS = 90;
@@ -15,7 +24,18 @@ const VERSION_MIN_COLS = 70;
 const FEEDBACK_HINT_MIN_COLS = 100;
 const PRESET_MIN_COLS = 60;
 
-export function StatusRow(): React.ReactElement {
+const DEFAULT_STATUS_BAR_CONFIG: StatusBarConfig = {
+  showBalance: true,
+  showSessionCost: true,
+  showTurnCost: true,
+  showCacheHit: true,
+  showVersion: true,
+  showFeedbackHint: true,
+};
+
+export function StatusRow({
+  statusBar = DEFAULT_STATUS_BAR_CONFIG,
+}: { statusBar?: StatusBarConfig }): React.ReactElement {
   const status = useAgentState((s) => s.status);
   const session = useAgentState((s) => s.session);
   const { stdout } = useStdout();
@@ -24,7 +44,9 @@ export function StatusRow(): React.ReactElement {
   const hasTurn = status.cost > 0;
   const hasSession = status.sessionCost > 0;
   const hasBalance = typeof status.balance === "number";
-  const showWallet = cols >= WALLET_MIN_COLS && (hasSession || hasBalance);
+  const showWallet =
+    cols >= WALLET_MIN_COLS &&
+    ((hasSession && statusBar.showSessionCost) || (hasBalance && statusBar.showBalance));
 
   return (
     <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
@@ -48,7 +70,7 @@ export function StatusRow(): React.ReactElement {
         )}
         <Sep />
         <Text color={FG.sub} wrap="truncate">{`${session.id} · ${session.branch}`}</Text>
-        {hasTurn && (
+        {hasTurn && statusBar.showTurnCost && (
           <>
             <Sep />
             <Text bold color={TONE.brand} wrap="truncate">
@@ -59,11 +81,15 @@ export function StatusRow(): React.ReactElement {
             </Text>
           </>
         )}
-        <Sep />
-        <Text
-          color={TONE.accent}
-          wrap="truncate"
-        >{`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}</Text>
+        {statusBar.showCacheHit && (
+          <>
+            <Sep />
+            <Text
+              color={TONE.accent}
+              wrap="truncate"
+            >{`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}</Text>
+          </>
+        )}
         {status.mcpLoading && status.mcpLoading.ready < status.mcpLoading.total && (
           <McpLoadingPill ready={status.mcpLoading.ready} total={status.mcpLoading.total} />
         )}
@@ -72,25 +98,25 @@ export function StatusRow(): React.ReactElement {
             sessionCostUsd={status.sessionCost}
             balance={status.balance}
             currency={status.balanceCurrency}
+            showSessionCost={statusBar.showSessionCost}
+            showBalance={statusBar.showBalance}
           />
         )}
-        {cols >= VERSION_MIN_COLS && (
+        {statusBar.showVersion && cols >= VERSION_MIN_COLS && (
           <>
             <Sep />
             <Text color={FG.faint} wrap="truncate">{`v${VERSION}`}</Text>
-            {cols >= FEEDBACK_HINT_MIN_COLS && (
-              <>
-                <Text color={FG.faint} wrap="truncate">
-                  {"  ·  "}
-                </Text>
-                <Text color={FG.meta} wrap="truncate">
-                  {"⚑ "}
-                </Text>
-                <Text color={FG.sub} wrap="truncate">
-                  {"/feedback"}
-                </Text>
-              </>
-            )}
+          </>
+        )}
+        {statusBar.showFeedbackHint && cols >= FEEDBACK_HINT_MIN_COLS && (
+          <>
+            <Sep />
+            <Text color={FG.meta} wrap="truncate">
+              {"⚑ "}
+            </Text>
+            <Text color={FG.sub} wrap="truncate">
+              {"/feedback"}
+            </Text>
           </>
         )}
       </Box>
@@ -151,13 +177,17 @@ function WalletPill({
   sessionCostUsd,
   balance,
   currency,
+  showSessionCost,
+  showBalance: showBalanceCfg,
 }: {
   sessionCostUsd: number;
   balance?: number;
   currency?: string;
+  showSessionCost: boolean;
+  showBalance: boolean;
 }): React.ReactElement {
-  const showSpent = sessionCostUsd > 0;
-  const showBalance = typeof balance === "number";
+  const showSpent = showSessionCost && sessionCostUsd > 0;
+  const showBalanceLine = showBalanceCfg && typeof balance === "number";
   return (
     <>
       <Sep />
@@ -170,17 +200,17 @@ function WalletPill({
           wrap="truncate"
         >{`${formatCost(sessionCostUsd, currency, 2)} ${t("statusBar.spent")}`}</Text>
       )}
-      {showSpent && showBalance && (
+      {showSpent && showBalanceLine && (
         <Text color={FG.meta} wrap="truncate">
           {"  /  "}
         </Text>
       )}
-      {showBalance && (
+      {showBalanceLine && (
         <Text bold color={balanceColor(balance, currency)} wrap="truncate">
           {formatBalance(balance, currency, { fractionDigits: 2 })}
         </Text>
       )}
-      {showBalance && (
+      {showBalanceLine && (
         <Text color={FG.faint} wrap="truncate">
           {t("statusBar.left")}
         </Text>

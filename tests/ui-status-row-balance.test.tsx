@@ -104,6 +104,96 @@ describe("StatusRow — turn cost currency", () => {
   });
 });
 
+describe("StatusRow — statusBar config toggles", () => {
+  async function renderStatusRowWithConfig(
+    overrides: Partial<AgentState["status"]>,
+    config: Partial<import("../src/cli/ui/layout/StatusRow.js").StatusBarConfig>,
+  ): Promise<string> {
+    const cfg = {
+      showBalance: true,
+      showSessionCost: true,
+      showTurnCost: true,
+      showCacheHit: true,
+      showVersion: true,
+      showFeedbackHint: true,
+      ...config,
+    };
+    const stdout = makeFakeStdout();
+    const { unmount } = render(
+      <AgentStoreProvider session={SESSION}>
+        <StateInjector overrides={overrides}>
+          <StatusRow
+            statusBar={cfg as import("../src/cli/ui/layout/StatusRow.js").StatusBarConfig}
+          />
+        </StateInjector>
+      </AgentStoreProvider>,
+      { stdout: stdout as never, stdin: makeFakeStdin() as never },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    unmount();
+    return stdout.text();
+  }
+
+  it("default config (all true) shows turn cost and cache", async () => {
+    const text = await renderStatusRowWithConfig({ cost: 0.05, cacheHit: 0.5 } as any, {});
+    expect(text).toContain("turn");
+    expect(text).toContain("cache");
+  });
+
+  it("showTurnCost=false hides turn cost", async () => {
+    const text = await renderStatusRowWithConfig({ cost: 0.05, cacheHit: 0.5 } as any, {
+      showTurnCost: false,
+    });
+    expect(text).not.toContain("turn");
+    expect(text).toContain("cache");
+  });
+
+  it("showCacheHit=false hides cache hit", async () => {
+    const text = await renderStatusRowWithConfig({ cost: 0.05, cacheHit: 0.5 } as any, {
+      showCacheHit: false,
+    });
+    expect(text).toContain("turn");
+    expect(text).not.toContain("cache");
+  });
+
+  it("showVersion=false hides version string", async () => {
+    const text = await renderStatusRowWithConfig({ cost: 0 } as any, { showVersion: false });
+    expect(text).not.toContain(`v${VERSION}`);
+  });
+
+  it("showFeedbackHint=false hides /feedback hint", async () => {
+    const text = await renderStatusRowWithConfig({ cost: 0 } as any, { showFeedbackHint: false });
+    expect(text).not.toContain("/feedback");
+  });
+
+  it("both showBalance and showSessionCost false drops wallet pill", async () => {
+    const text = await renderStatusRowWithConfig(
+      { cost: 0, sessionCost: 0.01, balance: 5 } as any,
+      { showBalance: false, showSessionCost: false },
+    );
+    expect(text).not.toContain("⛁");
+  });
+
+  it("showBalance=false still shows session cost in wallet", async () => {
+    const text = await renderStatusRowWithConfig(
+      { cost: 0, sessionCost: 0.01, balance: 5 } as any,
+      { showBalance: false, showSessionCost: true },
+    );
+    expect(text).toContain("⛁");
+    expect(text).toContain("spent");
+    expect(text).not.toContain("left");
+  });
+
+  it("default config (all true) shows balance and session cost in wallet", async () => {
+    const text = await renderStatusRowWithConfig(
+      { cost: 0, sessionCost: 0.01, balance: 10, balanceCurrency: "USD" } as any,
+      {},
+    );
+    expect(text).toContain("⛁");
+    expect(text).toContain("spent");
+  });
+});
+
 function makeSlashCommands(count: number): SlashCommandSpec[] {
   return Array.from({ length: count }, (_, i) => ({
     cmd: `cmd${i.toString().padStart(2, "0")}`,

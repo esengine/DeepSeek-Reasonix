@@ -40,6 +40,7 @@ import {
   markEditModeHintShown,
   markMouseClipboardHintShown,
   mouseClipboardHintShown,
+  readConfig,
   resolveThemePreference,
   saveEditMode,
   savePreset,
@@ -149,6 +150,7 @@ import {
   UndoBanner,
 } from "./layout/LiveRows.js";
 import { StatusRow } from "./layout/StatusRow.js";
+import type { StatusBarConfig } from "./layout/StatusRow.js";
 import { ToastRail } from "./layout/ToastRail.js";
 import { PlanLiveRow } from "./layout/plan-live-row.js";
 import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
@@ -344,11 +346,27 @@ export function App(props: AppProps): React.ReactElement {
   const [themeName, setThemeName] = React.useState<ThemeName>(() =>
     resolveThemePreference(loadTheme(), process.env.REASONIX_THEME),
   );
+  const statusBar = React.useMemo((): StatusBarConfig => {
+    const cfg = readConfig().statusBar ?? {};
+    return {
+      showBalance: cfg.showBalance !== false,
+      showSessionCost: cfg.showSessionCost !== false,
+      showTurnCost: cfg.showTurnCost !== false,
+      showCacheHit: cfg.showCacheHit !== false,
+      showVersion: cfg.showVersion !== false,
+      showFeedbackHint: cfg.showFeedbackHint !== false,
+    };
+  }, []);
   return (
     <ThemeProvider name={themeName}>
       <AgentStoreProvider session={session} initialCards={initialCards}>
         <ChatScrollProvider>
-          <AppInner {...props} themeName={themeName} setThemeName={setThemeName} />
+          <AppInner
+            {...props}
+            themeName={themeName}
+            setThemeName={setThemeName}
+            statusBar={statusBar}
+          />
         </ChatScrollProvider>
       </AgentStoreProvider>
     </ThemeProvider>
@@ -358,6 +376,7 @@ export function App(props: AppProps): React.ReactElement {
 type AppInnerProps = AppProps & {
   themeName: ThemeName;
   setThemeName: React.Dispatch<React.SetStateAction<ThemeName>>;
+  statusBar: StatusBarConfig;
 };
 
 function AppInner({
@@ -379,6 +398,7 @@ function AppInner({
   mouse = true,
   themeName,
   setThemeName,
+  statusBar,
 }: AppInnerProps) {
   markPhase("app_inner_start");
   const log = useScrollback();
@@ -3983,7 +4003,7 @@ function AppInner({
                             />
                           ) : null}
                           {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
-                          <StatusRow />
+                          <StatusRow statusBar={statusBar} />
                           <PromptInput
                             value={input}
                             onChange={setInput}
