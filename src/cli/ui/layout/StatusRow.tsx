@@ -64,6 +64,9 @@ export function StatusRow(): React.ReactElement {
           color={TONE.accent}
           wrap="truncate"
         >{`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}</Text>
+        {status.mcpLoading && status.mcpLoading.ready < status.mcpLoading.total && (
+          <McpLoadingPill ready={status.mcpLoading.ready} total={status.mcpLoading.total} />
+        )}
         {showWallet && (
           <WalletPill
             sessionCostUsd={status.sessionCost}
@@ -121,6 +124,27 @@ function shortModelLabel(model: string): string {
   if (model === "deepseek-v4-flash") return "flash";
   if (model === "deepseek-v4-pro") return "pro";
   return model.replace(/^deepseek-/, "");
+}
+
+function McpLoadingPill({
+  ready,
+  total,
+}: {
+  ready: number;
+  total: number;
+}): React.ReactElement {
+  return (
+    <>
+      <Sep />
+      <Text color={TONE.brand} wrap="truncate">
+        {"⌁ "}
+      </Text>
+      <Text
+        color={FG.body}
+        wrap="truncate"
+      >{`${t("statusBar.mcpLoading")} ${ready}/${total}`}</Text>
+    </>
+  );
 }
 
 function WalletPill({

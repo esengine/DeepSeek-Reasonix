@@ -143,11 +143,25 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     const disabledNames = new Set(readConfig().mcpDisabled ?? []);
     let label = "anon";
     let mcp: McpClient | undefined;
+    // Per-server readiness gate — tool dispatches via the bridge await
+    // this before calling into `live.callTool`. Resolved on `connected`,
+    // rejected on `failed`, so a tool invoked mid-handshake waits
+    // (capped by `bridgeMcpTools`'s `readyTimeoutMs`) instead of
+    // surfacing a transport error.
+    let resolveReady!: () => void;
+    let rejectReady!: (err: Error) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    // Avoid unhandledRejection if no consumer awaits `ready` yet.
+    ready.catch(() => undefined);
     try {
       const spec = parseMcpSpec(raw);
       label = spec.name ?? "anon";
       if (spec.name && disabledNames.has(spec.name)) {
         sink({ kind: "disabled", name: label });
+        rejectReady(new Error(`MCP server "${label}" is disabled`));
         return { ok: false, reason: "disabled by user" };
       }
       sink({ kind: "handshake", name: label });
@@ -167,6 +181,7 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         namePrefix,
         serverName: label,
         host,
+        ready,
         onProgress: (info) => ctx.progressSink.current?.(info),
         onSlow: (info) =>
           sink({
@@ -201,6 +216,7 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         prompts: promptCount,
         ms,
       });
+      resolveReady();
       const summary = buildMcpServerSummary({
         label,
         spec: raw,
@@ -230,6 +246,7 @@ function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       await mcp?.close().catch(() => undefined);
       const reason = (err as Error).message;
       sink({ kind: "failed", name: label, reason });
+      rejectReady(new Error(`MCP server "${label}" failed to start: ${reason}`));
       return { ok: false, reason };
     }
   }

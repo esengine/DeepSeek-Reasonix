@@ -126,6 +126,20 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         ? state
         : { ...state, status: { ...state.status, preset: event.preset } };
 
+    case "mcp.loading": {
+      const current = state.status.mcpLoading;
+      if (event.total <= 0) {
+        if (!current) return state;
+        const { mcpLoading: _drop, ...rest } = state.status;
+        return { ...state, status: rest };
+      }
+      if (current && current.ready === event.ready && current.total === event.total) return state;
+      return {
+        ...state,
+        status: { ...state.status, mcpLoading: { ready: event.ready, total: event.total } },
+      };
+    }
+
     case "focus.move":
       return {
         ...state,

@@ -907,6 +907,13 @@ function AppInner({
     if (mcpBridgeStartedRef.current) return;
     if (!mcpRuntime || !mcpSpecs || mcpSpecs.length === 0) return;
     mcpBridgeStartedRef.current = true;
+    const total = mcpSpecs.length;
+    let ready = 0;
+    agentStore.dispatch({ type: "mcp.loading", ready, total });
+    const bumpReady = () => {
+      ready = Math.min(ready + 1, total);
+      agentStore.dispatch({ type: "mcp.loading", ready, total });
+    };
     mcpRuntime.setLifecycleSink((notice) => {
       if (notice.kind === "handshake") {
         log.pushInfo(formatMcpLifecycleEvent({ state: "handshake", name: notice.name }));
@@ -921,13 +928,16 @@ function AppInner({
             ms: notice.ms,
           }),
         );
+        bumpReady();
       } else if (notice.kind === "disabled") {
         log.pushInfo(formatMcpLifecycleEvent({ state: "disabled", name: notice.name }));
+        bumpReady();
       } else if (notice.kind === "failed") {
         log.pushWarning(
           `MCP · ${notice.name} failed`,
           `${notice.reason}\n→ run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).`,
         );
+        bumpReady();
       } else if (notice.kind === "slow") {
         log.pushInfo(
           formatMcpSlowToast({
@@ -943,7 +953,7 @@ function AppInner({
         setLiveMcpServers(mcpRuntime.summaries());
       });
     }
-  }, [mcpRuntime, mcpSpecs, loop, log]);
+  }, [mcpRuntime, mcpSpecs, loop, log, agentStore]);
 
   // Ambient session info (balance, model catalog, latest published
   // version) — three independent mount-time fetches behind one hook

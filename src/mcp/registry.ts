@@ -29,6 +29,10 @@ export interface BridgeOptions {
   onSlow?: (ev: SlowEvent) => void;
   /** Indirection so reconnect can swap the underlying client without re-registering tools. */
   host?: McpClientHost;
+  /** Awaited before each `callTool` — resolves on `connected`, rejects on `failed`, caps via `readyTimeoutMs`. */
+  ready?: Promise<void>;
+  /** How long to wait on `ready` before failing the dispatch. Default 30_000ms. */
+  readyTimeoutMs?: number;
 }
 
 /** Mutable holder so `/mcp reconnect` can swap the underlying client without re-bridging tools. */
@@ -40,6 +44,9 @@ export const DEFAULT_MAX_RESULT_CHARS = 32_000;
 
 /** ~6% of DeepSeek V3 context. Char cap alone fails on CJK (~1 char/token). */
 export const DEFAULT_MAX_RESULT_TOKENS = 8_000;
+
+/** Default per-call wait before failing if the server is still handshaking. */
+export const DEFAULT_READY_TIMEOUT_MS = 30_000;
 
 export interface BridgeResult {
   registry: ToolRegistry;
@@ -57,6 +64,12 @@ export interface BridgeEnv {
   maxResultChars: number;
   tracker: LatencyTracker | null;
   onProgress?: BridgeOptions["onProgress"];
+  /** Optional readiness gate awaited before each `callTool` dispatch. */
+  ready?: Promise<void>;
+  /** Timeout for waiting on `ready` — milliseconds. Defaults to DEFAULT_READY_TIMEOUT_MS. */
+  readyTimeoutMs?: number;
+  /** Server name surfaced in timeout errors. Defaults to the prefix or "anon". */
+  serverName?: string;
 }
 
 /** Register one MCP tool's bridged closure into the registry. Returns the registered name (or "" if skipped). */
@@ -71,6 +84,14 @@ export function registerSingleMcpTool(
     description: mcpTool.description ?? "",
     parameters: mcpTool.inputSchema as JSONSchema,
     fn: async (args: Record<string, unknown>, ctx) => {
+      if (env.ready) {
+        await waitForReady(
+          env.ready,
+          env.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
+          env.serverName ?? (env.prefix.replace(/_$/, "") || "anon"),
+          ctx?.signal,
+        );
+      }
       const t0 = env.tracker ? Date.now() : 0;
       // Resolve client at call time via the host indirection so `/mcp reconnect`
       // can swap a fresh client in without re-bridging tools.
@@ -86,6 +107,61 @@ export function registerSingleMcpTool(
     },
   });
   return registeredName;
+}
+
+async function waitForReady(
+  ready: Promise<void>,
+  timeoutMs: number,
+  serverName: string,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  let settled = false;
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      ready.then(
+        () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        },
+        (err) => {
+          if (settled) return;
+          settled = true;
+          reject(err instanceof Error ? err : new Error(String(err)));
+        },
+      );
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(
+            new Error(
+              `MCP server "${serverName}" still handshaking after ${timeoutMs}ms — try /mcp reconnect or check the server logs.`,
+            ),
+          );
+        }, timeoutMs);
+      }
+      if (signal) {
+        if (signal.aborted) {
+          if (settled) return;
+          settled = true;
+          reject(new Error("aborted"));
+          return;
+        }
+        onAbort = () => {
+          if (settled) return;
+          settled = true;
+          reject(new Error("aborted"));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 export async function bridgeMcpTools(
@@ -113,6 +189,9 @@ export async function bridgeMcpTools(
     maxResultChars,
     tracker,
     onProgress: opts.onProgress,
+    ready: opts.ready,
+    readyTimeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
+    serverName,
   };
   const listed = await client.listTools();
   for (const mcpTool of listed.tools) {

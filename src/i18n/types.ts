@@ -356,6 +356,8 @@ export interface TranslationSchema {
     evt: string;
     /** Prefix for the edit-gate mode pill — disambiguates from the preset (`/preset auto` is a different "auto"). */
     editsLabel: string;
+    /** Label for the MCP-handshake progress pill (rendered as `⌁ MCP n/m`). */
+    mcpLoading: string;
   };
   editMode: {
     plan: string;

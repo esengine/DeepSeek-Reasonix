@@ -1066,6 +1066,7 @@ export const EN: TranslationSchema = {
     mb: " MB",
     evt: " evt",
     editsLabel: "edits:",
+    mcpLoading: "MCP",
   },
   editMode: {
     plan: "PLAN MODE",

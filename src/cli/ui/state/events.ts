@@ -134,6 +134,12 @@ const sessionPresetChange = z.object({
   preset: z.enum(["auto", "flash", "pro"]).nullable(),
 });
 
+const mcpLoading = z.object({
+  type: z.literal("mcp.loading"),
+  ready: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+
 const focusMove = z.object({
   type: z.literal("focus.move"),
   direction: z.enum(["next", "prev", "first", "last"]),
@@ -325,6 +331,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   sessionUpdate,
   sessionModelChange,
   sessionPresetChange,
+  mcpLoading,
   focusMove,
   focusSet,
   cardToggle,
