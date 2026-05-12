@@ -1,8 +1,10 @@
 /** ACP (Agent Client Protocol) agent — drives the cache-first loop over stdio NDJSON JSON-RPC. */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { dispatchKernelEvent } from "../../acp/dispatch.js";
+import { requestPermissionForGate } from "../../acp/gates.js";
 import {
   ACP_PROTOCOL_VERSION,
   type ContentBlock,
@@ -22,7 +24,10 @@ import { AcpServer } from "../../acp/server.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
 import { buildCodeToolset } from "../../code/setup.js";
 import { loadApiKey, loadBaseUrl, loadPreset, loadReasoningEffort } from "../../config.js";
+import { loadEditMode } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
+import { pauseGate } from "../../core/pause-gate.js";
+import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import { timestampSuffix } from "../../memory/session.js";
@@ -102,7 +107,25 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
 
   const defaultDir = resolveDir(opts.dir, process.cwd());
   const sessions = new Map<string, Session>();
+  const sessionContext = new AsyncLocalStorage<string>();
   const server = new AcpServer();
+
+  pauseGate.on((req) => {
+    const auto = autoResolveVerdict(req, loadEditMode());
+    if (auto !== null) {
+      pauseGate.resolve(req.id, auto);
+      return;
+    }
+    const activeSessionId = sessionContext.getStore();
+    if (!activeSessionId || !sessions.has(activeSessionId)) {
+      pauseGate.cancel(req.id);
+      return;
+    }
+    void (async () => {
+      const verdict = await requestPermissionForGate(server, activeSessionId, req);
+      pauseGate.resolve(req.id, verdict);
+    })();
+  });
 
   server.onRequest<InitializeParams, InitializeResult>("initialize", (params) => {
     if (!params || typeof params !== "object") {
@@ -150,16 +173,18 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
     session.aborter = new AbortController();
     let stopReason: StopReason = "end_turn";
     try {
-      for await (const ev of session.loop.step(text)) {
-        if (session.aborter.signal.aborted) {
-          stopReason = "cancelled";
-          break;
+      await sessionContext.run(session.id, async () => {
+        for await (const ev of session.loop.step(text)) {
+          if (session.aborter?.signal.aborted) {
+            stopReason = "cancelled";
+            break;
+          }
+          for (const kev of session.eventizer.consume(ev, session.ctx)) {
+            dispatchKernelEvent(server, session.id, kev);
+            if (kev.type === "error") stopReason = "error";
+          }
         }
-        for (const kev of session.eventizer.consume(ev, session.ctx)) {
-          dispatchKernelEvent(server, session.id, kev);
-          if (kev.type === "error") stopReason = "error";
-        }
-      }
+      });
     } catch (err) {
       const message = (err as Error).message;
       server.sendNotification("session/update", {

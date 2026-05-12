@@ -3,6 +3,7 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { dispatchKernelEvent, toolKindFor } from "../src/acp/dispatch.js";
+import { permissionOptionsFor, requestPermissionForGate, verdictFor } from "../src/acp/gates.js";
 import {
   ACP_PROTOCOL_VERSION,
   type ContentBlock,
@@ -12,6 +13,7 @@ import {
 } from "../src/acp/protocol.js";
 import { AcpServer } from "../src/acp/server.js";
 import type { Event as KernelEvent } from "../src/core/events.js";
+import type { PauseRequest } from "../src/core/pause-gate.js";
 
 function makePair(): {
   server: AcpServer;
@@ -327,6 +329,193 @@ describe("ACP kernel-event dispatch", () => {
     expect(toolKindFor("run_command")).toBe("execute");
     expect(toolKindFor("run_background")).toBe("execute");
     expect(toolKindFor("totally_made_up_tool")).toBe("other");
+  });
+});
+
+describe("ACP outbound requests + gate bridge", () => {
+  it("sendRequest resolves with the peer's result when the matching id replies", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const lines: string[] = [];
+    output.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.trim()) lines.push(line.trim());
+      }
+    });
+    const server = new AcpServer({ input, output });
+    const promise = server.sendRequest<{ ok: number }>("ping", { x: 1 });
+    await wait(5);
+    const outboundId = JSON.parse(lines[0] ?? "{}").id;
+    input.write(`${JSON.stringify({ jsonrpc: "2.0", id: outboundId, result: { ok: 42 } })}\n`);
+    expect(await promise).toEqual({ ok: 42 });
+    server.close();
+  });
+
+  it("sendRequest rejects when the peer returns an error", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const lines: string[] = [];
+    output.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.trim()) lines.push(line.trim());
+      }
+    });
+    const server = new AcpServer({ input, output });
+    const promise = server.sendRequest("oops", {});
+    await wait(5);
+    const id = JSON.parse(lines[0] ?? "{}").id;
+    input.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32000, message: "denied" },
+      })}\n`,
+    );
+    await expect(promise).rejects.toThrow("denied");
+    server.close();
+  });
+
+  it("close() rejects all in-flight outbound requests", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    output.on("data", () => {});
+    const server = new AcpServer({ input, output });
+    const promise = server.sendRequest("never");
+    server.close();
+    await expect(promise).rejects.toThrow(/closed/);
+  });
+
+  describe("permissionOptionsFor", () => {
+    it("offers allow_once / allow_always / reject for shell commands", () => {
+      const req: PauseRequest = {
+        id: 1,
+        kind: "run_command",
+        payload: { command: "rm -rf /" },
+      };
+      const opts = permissionOptionsFor(req);
+      expect(opts.map((o) => o.kind)).toEqual(["allow_once", "allow_always", "reject_once"]);
+    });
+
+    it("offers approve / refine / cancel for plan_proposed", () => {
+      const req: PauseRequest = {
+        id: 2,
+        kind: "plan_proposed",
+        payload: { plan: "do the thing" },
+      };
+      const ids = permissionOptionsFor(req).map((o) => o.optionId);
+      expect(ids).toEqual(["allow_once", "refine", "cancel"]);
+    });
+
+    it("offers continue / revise / stop for plan_checkpoint", () => {
+      const req: PauseRequest = {
+        id: 3,
+        kind: "plan_checkpoint",
+        payload: { stepId: "s1", result: "done" },
+      };
+      const ids = permissionOptionsFor(req).map((o) => o.optionId);
+      expect(ids).toEqual(["allow_once", "revise", "stop"]);
+    });
+  });
+
+  describe("verdictFor", () => {
+    it("shell allow_once → run_once", () => {
+      const req: PauseRequest = {
+        id: 1,
+        kind: "run_command",
+        payload: { command: "ls -la /tmp" },
+      };
+      expect(verdictFor(req, { outcome: { outcome: "selected", optionId: "allow_once" } })).toEqual(
+        { type: "run_once" },
+      );
+    });
+
+    it("shell allow_always → always_allow with command-prefix glob", () => {
+      const req: PauseRequest = {
+        id: 1,
+        kind: "run_command",
+        payload: { command: "git status -sb" },
+      };
+      expect(
+        verdictFor(req, { outcome: { outcome: "selected", optionId: "allow_always" } }),
+      ).toEqual({ type: "always_allow", prefix: "git *" });
+    });
+
+    it("shell cancelled / reject → deny", () => {
+      const req: PauseRequest = {
+        id: 1,
+        kind: "run_command",
+        payload: { command: "rm -rf /" },
+      };
+      expect(verdictFor(req, { outcome: { outcome: "cancelled" } })).toEqual({ type: "deny" });
+      expect(verdictFor(req, { outcome: { outcome: "selected", optionId: "reject" } })).toEqual({
+        type: "deny",
+      });
+    });
+
+    it("plan checkpoint continue / revise / stop map cleanly", () => {
+      const req: PauseRequest = {
+        id: 1,
+        kind: "plan_checkpoint",
+        payload: { stepId: "s1", result: "" },
+      };
+      expect(verdictFor(req, { outcome: { outcome: "selected", optionId: "allow_once" } })).toEqual(
+        { type: "continue" },
+      );
+      expect(verdictFor(req, { outcome: { outcome: "selected", optionId: "revise" } })).toEqual({
+        type: "revise",
+      });
+      expect(verdictFor(req, { outcome: { outcome: "cancelled" } })).toEqual({ type: "stop" });
+    });
+
+    it("plan_revision accept / reject / cancel map cleanly", () => {
+      const req: PauseRequest = {
+        id: 1,
+        kind: "plan_revision",
+        payload: { reason: "", remainingSteps: [] },
+      };
+      expect(verdictFor(req, { outcome: { outcome: "selected", optionId: "accept" } })).toEqual({
+        type: "accepted",
+      });
+      expect(verdictFor(req, { outcome: { outcome: "selected", optionId: "reject" } })).toEqual({
+        type: "rejected",
+      });
+      expect(verdictFor(req, { outcome: { outcome: "cancelled" } })).toEqual({
+        type: "cancelled",
+      });
+    });
+  });
+
+  it("requestPermissionForGate round-trips via sendRequest and returns the mapped verdict", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const lines: string[] = [];
+    output.on("data", (chunk: Buffer) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.trim()) lines.push(line.trim());
+      }
+    });
+    const server = new AcpServer({ input, output });
+    const req: PauseRequest = {
+      id: 7,
+      kind: "run_command",
+      payload: { command: "pnpm test" },
+    };
+    const verdictPromise = requestPermissionForGate(server, "s1", req);
+    await wait(5);
+    const sent = JSON.parse(lines[0] ?? "{}");
+    expect(sent.method).toBe("session/request_permission");
+    expect(sent.params.sessionId).toBe("s1");
+    expect(sent.params.toolCall.kind).toBe("execute");
+    expect(sent.params.options.length).toBe(3);
+    input.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: sent.id,
+        result: { outcome: { outcome: "selected", optionId: "allow_always" } },
+      })}\n`,
+    );
+    expect(await verdictPromise).toEqual({ type: "always_allow", prefix: "pnpm *" });
+    server.close();
   });
 });
 

@@ -122,6 +122,34 @@ export interface SessionCancelParams {
   sessionId: string;
 }
 
+export type PermissionOptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
+
+export interface PermissionOption {
+  optionId: string;
+  name: string;
+  kind: PermissionOptionKind;
+}
+
+export interface PermissionRequestParams {
+  sessionId: string;
+  toolCall: {
+    toolCallId: string;
+    title?: string;
+    kind?: "read" | "edit" | "search" | "execute" | "other";
+    status?: "pending";
+    rawInput?: unknown;
+  };
+  options: PermissionOption[];
+}
+
+export type PermissionOutcome =
+  | { outcome: "selected"; optionId: string }
+  | { outcome: "cancelled" };
+
+export interface PermissionRequestResult {
+  outcome: PermissionOutcome;
+}
+
 export const ERR_PARSE = -32700;
 export const ERR_INVALID_REQUEST = -32600;
 export const ERR_METHOD_NOT_FOUND = -32601;

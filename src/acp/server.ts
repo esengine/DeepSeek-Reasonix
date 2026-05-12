@@ -20,9 +20,16 @@ export interface AcpServerOptions {
   output?: Writable;
 }
 
+interface PendingOutbound {
+  resolve: (value: unknown) => void;
+  reject: (err: Error) => void;
+}
+
 export class AcpServer {
   private requestHandlers = new Map<string, RequestHandler>();
   private notificationHandlers = new Map<string, NotificationHandler>();
+  private pending = new Map<JsonRpcId, PendingOutbound>();
+  private nextOutboundId = 1;
   private readonly output: Writable;
   private readonly rl: Interface;
   private closed = false;
@@ -48,9 +55,23 @@ export class AcpServer {
     this.write({ jsonrpc: "2.0", method, params });
   }
 
+  /** Send an outbound JSON-RPC request and resolve when the peer responds. */
+  sendRequest<R = unknown>(method: string, params: unknown): Promise<R> {
+    const id = this.nextOutboundId++;
+    return new Promise<R>((resolve, reject) => {
+      this.pending.set(id, {
+        resolve: resolve as (v: unknown) => void,
+        reject,
+      });
+      this.write({ jsonrpc: "2.0", id, method, params });
+    });
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    for (const p of this.pending.values()) p.reject(new Error("server closed"));
+    this.pending.clear();
     this.rl.close();
   }
 
@@ -107,6 +128,16 @@ export class AcpServer {
       }
       return;
     }
-    // Responses to outbound requests are ignored in stage 1 (we don't make any yet — stage 3 will).
+    if (msg.id !== undefined && msg.method === undefined) {
+      const response = parsed as JsonRpcResponse;
+      const pending = this.pending.get(response.id as JsonRpcId);
+      if (!pending) return;
+      this.pending.delete(response.id as JsonRpcId);
+      if (response.error) {
+        pending.reject(new Error(response.error.message));
+      } else {
+        pending.resolve(response.result);
+      }
+    }
   }
 }
