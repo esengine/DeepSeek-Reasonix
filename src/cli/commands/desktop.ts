@@ -36,9 +36,11 @@ import {
 import { Eventizer } from "../../core/eventize.js";
 import type { Event as KernelEvent } from "../../core/events.js";
 import {
+  type CheckpointVerdict,
   type ChoiceVerdict,
   type ConfirmationChoice,
   type PlanVerdict,
+  type RevisionVerdict,
   pauseGate,
 } from "../../core/pause-gate.js";
 import { loadDotenv } from "../../env.js";
@@ -69,6 +71,8 @@ type InMessage = { tabId?: string } & (
   | { cmd: "confirm_response"; id: number; response: ConfirmationChoice }
   | { cmd: "choice_response"; id: number; response: ChoiceVerdict }
   | { cmd: "plan_response"; id: number; response: PlanVerdict }
+  | { cmd: "checkpoint_response"; id: number; response: CheckpointVerdict }
+  | { cmd: "revision_response"; id: number; response: RevisionVerdict }
   | { cmd: "session_list" }
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_load"; name: string }
@@ -203,6 +207,44 @@ interface ChoiceRequiredEvent {
   allowCustom: boolean;
 }
 
+interface PlanStepLite {
+  id: string;
+  title: string;
+  action: string;
+  risk?: "low" | "med" | "high";
+}
+
+interface CheckpointRequiredEvent {
+  type: "$checkpoint_required";
+  id: number;
+  stepId: string;
+  title?: string;
+  result: string;
+  notes?: string;
+  completed: number;
+  total: number;
+}
+
+interface RevisionRequiredEvent {
+  type: "$revision_required";
+  id: number;
+  reason: string;
+  remainingSteps: PlanStepLite[];
+  summary?: string;
+}
+
+interface StepCompletedEvent {
+  type: "$step_completed";
+  stepId: string;
+  title?: string;
+  result: string;
+  notes?: string;
+}
+
+interface PlanClearedEvent {
+  type: "$plan_cleared";
+}
+
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
  *  block buffering) so every JSON line reaches Rust the moment it's
  *  produced, not whenever the next 8 KB flushes. */
@@ -214,6 +256,10 @@ type EmittableEvent =
   | ConfirmRequiredEvent
   | ChoiceRequiredEvent
   | PlanRequiredEvent
+  | CheckpointRequiredEvent
+  | RevisionRequiredEvent
+  | StepCompletedEvent
+  | PlanClearedEvent
   | SessionsEvent
   | SessionLoadedEvent
   | NeedsSetupEvent
@@ -352,6 +398,12 @@ interface Tab {
   symbolIndex: SymbolEntry[] | null;
   symbolBuilding: Promise<SymbolEntry[]> | null;
   recentMentions: string[];
+  /** Pause-gate ids waiting on this tab — abort uses these to free stranded plan_checkpoint / plan_revision / shell-confirm callers. */
+  pendingGateIds: Set<number>;
+  /** Step ids already marked complete in the in-flight plan — also tells UI when a plan is "active". */
+  completedStepIds: Set<string>;
+  /** Total steps in the in-flight plan (0 = no active plan / steps not provided). */
+  planTotalSteps: number;
 }
 
 let tabCounter = 0;
@@ -507,6 +559,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       symbolIndex: null,
       symbolBuilding: null,
       recentMentions: [],
+      pendingGateIds: new Set<number>(),
+      completedStepIds: new Set<string>(),
+      planTotalSteps: 0,
     };
     tab.currentSession = mintSessionFor(dir);
     if (loadApiKey()) {
@@ -585,6 +640,25 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitSettings(tab);
   }
 
+  function forgetGate(id: number): Tab | undefined {
+    for (const t of tabs.values()) {
+      if (t.pendingGateIds.delete(id)) return t;
+    }
+    return undefined;
+  }
+
+  function cancelPendingGates(tab: Tab): void {
+    const hadActivePlan = tab.planTotalSteps > 0 || tab.completedStepIds.size > 0;
+    const ids = [...tab.pendingGateIds];
+    tab.pendingGateIds.clear();
+    for (const id of ids) pauseGate.cancel(id);
+    if (hadActivePlan) {
+      tab.completedStepIds.clear();
+      tab.planTotalSteps = 0;
+      emit({ type: "$plan_cleared" }, tab.id);
+    }
+  }
+
   const first = await createTab();
   process.once("exit", () => {
     for (const t of tabs.values()) void t.toolset.jobs.shutdown();
@@ -593,6 +667,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   pauseGate.on((req) => {
     const tab = activeRunningTab();
     const tabId = tab?.id;
+    if (tab) tab.pendingGateIds.add(req.id);
     if (req.kind === "run_command" || req.kind === "run_background") {
       const payload = req.payload as { command?: string };
       emit(
@@ -620,13 +695,68 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (req.kind === "plan_proposed") {
-      const payload = req.payload as { plan: string; steps?: unknown[]; summary?: string };
+      const payload = req.payload as { plan: string; steps?: PlanStepLite[]; summary?: string };
+      if (tab) {
+        tab.completedStepIds.clear();
+        tab.planTotalSteps = payload.steps?.length ?? 0;
+      }
       emit(
         {
           type: "$plan_required",
           id: req.id,
           plan: payload.plan,
           steps: payload.steps,
+          summary: payload.summary,
+        },
+        tabId,
+      );
+      return;
+    }
+    if (req.kind === "plan_checkpoint") {
+      const payload = req.payload as {
+        stepId: string;
+        title?: string;
+        result: string;
+        notes?: string;
+      };
+      if (tab) tab.completedStepIds.add(payload.stepId);
+      emit(
+        {
+          type: "$step_completed",
+          stepId: payload.stepId,
+          title: payload.title,
+          result: payload.result,
+          notes: payload.notes,
+        },
+        tabId,
+      );
+      emit(
+        {
+          type: "$checkpoint_required",
+          id: req.id,
+          stepId: payload.stepId,
+          title: payload.title,
+          result: payload.result,
+          notes: payload.notes,
+          completed: tab?.completedStepIds.size ?? 0,
+          total: tab?.planTotalSteps ?? 0,
+        },
+        tabId,
+      );
+      return;
+    }
+    if (req.kind === "plan_revision") {
+      const payload = req.payload as {
+        reason: string;
+        remainingSteps: PlanStepLite[];
+        summary?: string;
+      };
+      emit(
+        {
+          type: "$revision_required",
+          id: req.id,
+          reason: payload.reason,
+          remainingSteps: payload.remainingSteps,
           summary: payload.summary,
         },
         tabId,
@@ -671,14 +801,37 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "confirm_response") {
+      forgetGate(msg.id);
       pauseGate.resolve(msg.id, msg.response);
       return;
     }
     if (msg.cmd === "choice_response") {
+      forgetGate(msg.id);
       pauseGate.resolve(msg.id, msg.response);
       return;
     }
     if (msg.cmd === "plan_response") {
+      const tab = forgetGate(msg.id);
+      if (tab && msg.response.type === "cancel") {
+        tab.completedStepIds.clear();
+        tab.planTotalSteps = 0;
+        emit({ type: "$plan_cleared" }, tab.id);
+      }
+      pauseGate.resolve(msg.id, msg.response);
+      return;
+    }
+    if (msg.cmd === "checkpoint_response") {
+      const tab = forgetGate(msg.id);
+      if (tab && msg.response.type === "stop") {
+        tab.completedStepIds.clear();
+        tab.planTotalSteps = 0;
+        emit({ type: "$plan_cleared" }, tab.id);
+      }
+      pauseGate.resolve(msg.id, msg.response);
+      return;
+    }
+    if (msg.cmd === "revision_response") {
+      forgetGate(msg.id);
       pauseGate.resolve(msg.id, msg.response);
       return;
     }
@@ -714,6 +867,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     if (msg.cmd === "abort") {
       tab.aborter?.abort();
+      cancelPendingGates(tab);
       return;
     }
     if (msg.cmd === "tab_close") {
@@ -734,6 +888,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const records = loadSessionMessages(msg.name);
         const meta = loadSessionMeta(msg.name);
         tab.aborter?.abort();
+        cancelPendingGates(tab);
         tab.currentSession = msg.name;
         if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
         emit(
@@ -756,6 +911,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "new_chat") {
       tab.aborter?.abort();
+      cancelPendingGates(tab);
       tab.currentSession = mintSessionFor(tab.rootDir);
       if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
       emitSessions(tab);

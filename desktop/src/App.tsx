@@ -15,8 +15,10 @@ import {
 } from "./CommandPalette";
 import { ArrowDown } from "lucide-react";
 import {
+  ActivePlanRail,
   ApprovalCard,
   AssistantMessage,
+  CheckpointCard,
   ChoiceCard,
   Composer,
   type ContextMenuAction,
@@ -26,6 +28,7 @@ import {
   Header,
   OnboardingScreen,
   PlanCard,
+  RevisionCard,
   SettingsPanel,
   Sidebar,
   StatusLine,
@@ -35,11 +38,13 @@ import {
   UserBubble,
 } from "./components";
 import type {
+  CheckpointVerdict,
   ChoiceVerdict,
   ConfirmationChoice,
   IncomingEvent,
   OutgoingCommand,
   PlanVerdict,
+  RevisionVerdict,
   SettingsPatch,
 } from "./protocol";
 
@@ -84,6 +89,40 @@ export type PendingChoice = {
 export type PendingPlan = {
   id: number;
   plan: string;
+  summary?: string;
+  steps?: PlanStep[];
+};
+
+export type PlanStep = {
+  id: string;
+  title: string;
+  action: string;
+  risk?: "low" | "med" | "high";
+};
+
+export type ActivePlan = {
+  plan: string;
+  summary?: string;
+  steps: PlanStep[];
+  completedStepIds: string[];
+  /** Latest result for each completed step, keyed by stepId. */
+  stepResults: Record<string, string>;
+};
+
+export type PendingCheckpoint = {
+  id: number;
+  stepId: string;
+  title?: string;
+  result: string;
+  notes?: string;
+  completed: number;
+  total: number;
+};
+
+export type PendingRevision = {
+  id: number;
+  reason: string;
+  remainingSteps: PlanStep[];
   summary?: string;
 };
 
@@ -132,6 +171,9 @@ type State = {
   pendingConfirms: PendingConfirm[];
   pendingChoices: PendingChoice[];
   pendingPlans: PendingPlan[];
+  pendingCheckpoints: PendingCheckpoint[];
+  pendingRevisions: PendingRevision[];
+  activePlan: ActivePlan | null;
   usage: UsageStats;
   sessions: SessionInfo[];
   settings: Settings | null;
@@ -162,7 +204,9 @@ type Action =
   | { t: "clear" }
   | { t: "resolve_confirm"; id: number }
   | { t: "resolve_choice"; id: number }
-  | { t: "resolve_plan"; id: number }
+  | { t: "resolve_plan"; id: number; verdict: PlanVerdict }
+  | { t: "resolve_checkpoint"; id: number; verdict: CheckpointVerdict }
+  | { t: "resolve_revision"; id: number; verdict: RevisionVerdict }
   | { t: "mention_results"; results: MentionResults }
   | { t: "mention_preview"; preview: MentionPreviewState };
 
@@ -226,6 +270,9 @@ function reduce(state: State, action: Action): State {
         pendingConfirms: [],
         pendingChoices: [],
         pendingPlans: [],
+        pendingCheckpoints: [],
+        pendingRevisions: [],
+        activePlan: null,
         usage: {
           totalCostUsd: 0,
           totalPromptTokens: 0,
@@ -246,11 +293,47 @@ function reduce(state: State, action: Action): State {
         ...state,
         pendingChoices: state.pendingChoices.filter((c) => c.id !== action.id),
       };
-    case "resolve_plan":
+    case "resolve_plan": {
+      const removed = state.pendingPlans.find((p) => p.id === action.id);
+      let activePlan = state.activePlan;
+      if (removed && action.verdict.type === "approve") {
+        const pendingSteps = (removed as PendingPlan & { steps?: PlanStep[] }).steps;
+        activePlan = {
+          plan: removed.plan,
+          summary: removed.summary,
+          steps: pendingSteps ?? [],
+          completedStepIds: [],
+          stepResults: {},
+        };
+      }
       return {
         ...state,
         pendingPlans: state.pendingPlans.filter((p) => p.id !== action.id),
+        activePlan,
       };
+    }
+    case "resolve_checkpoint":
+      return {
+        ...state,
+        pendingCheckpoints: state.pendingCheckpoints.filter((c) => c.id !== action.id),
+      };
+    case "resolve_revision": {
+      const removed = state.pendingRevisions.find((r) => r.id === action.id);
+      let activePlan = state.activePlan;
+      if (removed && action.verdict.type === "accepted" && activePlan) {
+        const doneIds = new Set(activePlan.completedStepIds);
+        const keptDone = activePlan.steps.filter((s) => doneIds.has(s.id));
+        activePlan = {
+          ...activePlan,
+          steps: [...keptDone, ...removed.remainingSteps],
+        };
+      }
+      return {
+        ...state,
+        pendingRevisions: state.pendingRevisions.filter((r) => r.id !== action.id),
+        activePlan,
+      };
+    }
     case "mention_results":
       return { ...state, mentionResults: action.results };
     case "mention_preview":
@@ -300,13 +383,64 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           },
         ],
       };
-    case "$plan_required":
+    case "$plan_required": {
+      const steps = Array.isArray(ev.steps) ? (ev.steps as PlanStep[]) : undefined;
       return {
         ...state,
         pendingPlans: [
           ...state.pendingPlans,
-          { id: ev.id, plan: ev.plan, summary: ev.summary },
+          { id: ev.id, plan: ev.plan, summary: ev.summary, ...(steps ? { steps } : {}) },
         ],
+      };
+    }
+    case "$checkpoint_required":
+      return {
+        ...state,
+        pendingCheckpoints: [
+          ...state.pendingCheckpoints,
+          {
+            id: ev.id,
+            stepId: ev.stepId,
+            title: ev.title,
+            result: ev.result,
+            notes: ev.notes,
+            completed: ev.completed,
+            total: ev.total,
+          },
+        ],
+      };
+    case "$revision_required":
+      return {
+        ...state,
+        pendingRevisions: [
+          ...state.pendingRevisions,
+          {
+            id: ev.id,
+            reason: ev.reason,
+            remainingSteps: ev.remainingSteps,
+            summary: ev.summary,
+          },
+        ],
+      };
+    case "$step_completed": {
+      if (!state.activePlan) return state;
+      const stepIds = new Set(state.activePlan.completedStepIds);
+      stepIds.add(ev.stepId);
+      return {
+        ...state,
+        activePlan: {
+          ...state.activePlan,
+          completedStepIds: [...stepIds],
+          stepResults: { ...state.activePlan.stepResults, [ev.stepId]: ev.result },
+        },
+      };
+    }
+    case "$plan_cleared":
+      return {
+        ...state,
+        activePlan: null,
+        pendingCheckpoints: [],
+        pendingRevisions: [],
       };
     case "$sessions":
       return { ...state, sessions: ev.items };
@@ -329,6 +463,9 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingConfirms: wsChanged ? [] : state.pendingConfirms,
         pendingChoices: wsChanged ? [] : state.pendingChoices,
         pendingPlans: wsChanged ? [] : state.pendingPlans,
+        pendingCheckpoints: wsChanged ? [] : state.pendingCheckpoints,
+        pendingRevisions: wsChanged ? [] : state.pendingRevisions,
+        activePlan: wsChanged ? null : state.activePlan,
         usage: wsChanged
           ? {
               totalCostUsd: 0,
@@ -385,6 +522,9 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingConfirms: [],
         pendingChoices: [],
         pendingPlans: [],
+        pendingCheckpoints: [],
+        pendingRevisions: [],
+        activePlan: null,
         usage: {
           totalCostUsd: ev.carryover.totalCostUsd,
           totalPromptTokens: ev.carryover.cacheHitTokens + ev.carryover.cacheMissTokens,
@@ -664,6 +804,9 @@ function TabRuntime({
     pendingConfirms: [],
     pendingChoices: [],
     pendingPlans: [],
+    pendingCheckpoints: [],
+    pendingRevisions: [],
+    activePlan: null,
     usage: {
       totalCostUsd: 0,
       totalPromptTokens: 0,
@@ -851,7 +994,21 @@ function TabRuntime({
   const resolvePlan = useCallback(
     (id: number, response: PlanVerdict) => {
       sendRpc({ cmd: "plan_response", id, response });
-      dispatch({ t: "resolve_plan", id });
+      dispatch({ t: "resolve_plan", id, verdict: response });
+    },
+    [sendRpc],
+  );
+  const resolveCheckpoint = useCallback(
+    (id: number, response: CheckpointVerdict) => {
+      sendRpc({ cmd: "checkpoint_response", id, response });
+      dispatch({ t: "resolve_checkpoint", id, verdict: response });
+    },
+    [sendRpc],
+  );
+  const resolveRevision = useCallback(
+    (id: number, response: RevisionVerdict) => {
+      sendRpc({ cmd: "revision_response", id, response });
+      dispatch({ t: "resolve_revision", id, verdict: response });
     },
     [sendRpc],
   );
@@ -1066,6 +1223,16 @@ function TabRuntime({
             onDismiss={dismissUpdate}
           />
         )}
+        {state.activePlan && (
+          <ActivePlanRail
+            plan={state.activePlan.plan}
+            summary={state.activePlan.summary}
+            steps={state.activePlan.steps}
+            completedStepIds={state.activePlan.completedStepIds}
+            stepResults={state.activePlan.stepResults}
+            onAbort={state.busy ? abort : undefined}
+          />
+        )}
         {state.needsSetup ? (
           <OnboardingScreen
             workspaceDir={state.settings?.workspaceDir}
@@ -1148,6 +1315,33 @@ function TabRuntime({
                         onApprove={(feedback) => resolvePlan(p.id, { type: "approve", feedback })}
                         onRefine={(feedback) => resolvePlan(p.id, { type: "refine", feedback })}
                         onCancel={(feedback) => resolvePlan(p.id, { type: "cancel", feedback })}
+                      />
+                    ))}
+                    {state.pendingCheckpoints.map((c) => (
+                      <CheckpointCard
+                        key={c.id}
+                        stepId={c.stepId}
+                        title={c.title}
+                        result={c.result}
+                        notes={c.notes}
+                        completed={c.completed}
+                        total={c.total}
+                        onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
+                        onRevise={(feedback) =>
+                          resolveCheckpoint(c.id, { type: "revise", feedback })
+                        }
+                        onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
+                      />
+                    ))}
+                    {state.pendingRevisions.map((r) => (
+                      <RevisionCard
+                        key={r.id}
+                        reason={r.reason}
+                        remainingSteps={r.remainingSteps}
+                        summary={r.summary}
+                        onAccept={() => resolveRevision(r.id, { type: "accepted" })}
+                        onReject={() => resolveRevision(r.id, { type: "rejected" })}
+                        onCancel={() => resolveRevision(r.id, { type: "cancelled" })}
                       />
                     ))}
                     {!state.ready && <StatusLine text="connecting to reasonix" />}

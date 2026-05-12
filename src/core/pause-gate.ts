@@ -140,6 +140,15 @@ export class PauseGate {
     }
   }
 
+  /** Cancel one pending request — used by multi-tab hosts that need per-scope abort. */
+  cancel(id: number): boolean {
+    const p = this._pending.get(id);
+    if (!p) return false;
+    this._pending.delete(id);
+    p.resolve(safeCancelVerdict(p.request.kind));
+    return true;
+  }
+
   setAuditListener(fn: AuditListener | null): void {
     this._auditListener = fn;
   }

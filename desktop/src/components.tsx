@@ -2277,3 +2277,278 @@ export function ScrollToBottom({
     </button>
   );
 }
+
+type PlanStepLite = {
+  id: string;
+  title: string;
+  action: string;
+  risk?: "low" | "med" | "high";
+};
+
+function riskLabel(risk: PlanStepLite["risk"]): string {
+  if (risk === "low") return t("plan.riskLow");
+  if (risk === "med") return t("plan.riskMed");
+  if (risk === "high") return t("plan.riskHigh");
+  return "";
+}
+
+export function ActivePlanRail({
+  plan,
+  summary,
+  steps,
+  completedStepIds,
+  stepResults,
+  onAbort,
+}: {
+  plan: string;
+  summary?: string;
+  steps: PlanStepLite[];
+  completedStepIds: string[];
+  stepResults: Record<string, string>;
+  onAbort?: () => void;
+}) {
+  useLang();
+  const [expanded, setExpanded] = useState(false);
+  const total = steps.length;
+  const doneSet = new Set(completedStepIds);
+  const done = doneSet.size;
+  const progress = total > 0 ? t("plan.progress", { done, total }) : t("plan.progressNoTotal", { done });
+  const currentIndex = total > 0 ? steps.findIndex((s) => !doneSet.has(s.id)) : -1;
+  return (
+    <div className="active-plan-rail">
+      <button
+        type="button"
+        className="active-plan-head"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <ClipboardCheck size={13} strokeWidth={2.4} />
+        <span className="active-plan-eyebrow">{t("plan.activeTitle")}</span>
+        <span className="active-plan-title">{summary ?? plan.split("\n", 1)[0]}</span>
+        <span className="active-plan-progress">{progress}</span>
+        {total > 0 && (
+          <span
+            className="active-plan-bar"
+            style={{ ["--pct" as unknown as string]: `${Math.round((done / total) * 100)}%` }}
+            aria-hidden="true"
+          />
+        )}
+        <ChevronRight
+          size={11}
+          strokeWidth={2.4}
+          className="active-plan-chev"
+          style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}
+        />
+      </button>
+      {expanded && (
+        <div className="active-plan-body">
+          {total > 0 ? (
+            <ol className="active-plan-steps">
+              {steps.map((s, i) => {
+                const isDone = doneSet.has(s.id);
+                const isCurrent = i === currentIndex;
+                return (
+                  <li
+                    key={s.id}
+                    className={`active-plan-step ${isDone ? "done" : ""} ${isCurrent ? "current" : ""}`}
+                  >
+                    <span className="active-plan-step-mark">
+                      {isDone ? <Check size={11} strokeWidth={2.6} /> : i + 1}
+                    </span>
+                    <span className="active-plan-step-body">
+                      <span className="active-plan-step-title">
+                        {s.title}
+                        {s.risk && (
+                          <span className={`active-plan-step-risk r-${s.risk}`}>{riskLabel(s.risk)}</span>
+                        )}
+                      </span>
+                      <span className="active-plan-step-action">{s.action}</span>
+                      {isDone && stepResults[s.id] && (
+                        <span className="active-plan-step-result">{stepResults[s.id]}</span>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <div className="active-plan-markdown">
+              <Markdown source={plan} />
+            </div>
+          )}
+        </div>
+      )}
+      {onAbort && (
+        <button
+          type="button"
+          className="active-plan-stop"
+          onClick={onAbort}
+          title={t("plan.stopRun")}
+          aria-label={t("plan.stopRun")}
+        >
+          <Square size={10} fill="currentColor" />
+          <span>{t("plan.stopRun")}</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function CheckpointCard({
+  stepId,
+  title,
+  result,
+  notes,
+  completed,
+  total,
+  onContinue,
+  onRevise,
+  onStop,
+}: {
+  stepId: string;
+  title?: string;
+  result: string;
+  notes?: string;
+  completed: number;
+  total: number;
+  onContinue: () => void;
+  onRevise: (feedback?: string) => void;
+  onStop: () => void;
+}) {
+  useLang();
+  const [revising, setRevising] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const heading = title ?? stepId;
+  const progress = total > 0 ? t("checkpoint.progress", { done: completed, total }) : null;
+  return (
+    <div className="msg-row">
+      <div className="checkpoint-card">
+        <div className="checkpoint-head">
+          <div className="checkpoint-mark">
+            <Check size={13} strokeWidth={2.6} />
+          </div>
+          <div className="checkpoint-title-wrap">
+            <div className="checkpoint-eyebrow">{t("checkpoint.title")}</div>
+            <div className="checkpoint-title">{heading}</div>
+          </div>
+          {progress && <div className="checkpoint-progress">{progress}</div>}
+        </div>
+        <div className="checkpoint-result">{result}</div>
+        {notes && (
+          <div className="checkpoint-notes">
+            <span className="checkpoint-notes-label">{t("checkpoint.notesLabel")}</span>
+            <span className="checkpoint-notes-body">{notes}</span>
+          </div>
+        )}
+        {revising && (
+          <div className="checkpoint-revise">
+            <input
+              type="text"
+              className="choice-card-input"
+              placeholder={t("checkpoint.revisePlaceholder")}
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              autoFocus
+            />
+          </div>
+        )}
+        <div className="approval-actions">
+          <button type="button" className="appr-btn deny" onClick={onStop}>
+            <Square size={11} fill="currentColor" />
+            <span>{t("checkpoint.stop")}</span>
+          </button>
+          {revising ? (
+            <button
+              type="button"
+              className="appr-btn always"
+              onClick={() => {
+                onRevise(feedback.trim() || undefined);
+                setFeedback("");
+                setRevising(false);
+              }}
+            >
+              <RefreshCcw size={13} strokeWidth={2.4} />
+              <span>{t("checkpoint.sendRevise")}</span>
+            </button>
+          ) : (
+            <button type="button" className="appr-btn always" onClick={() => setRevising(true)}>
+              <RefreshCcw size={13} strokeWidth={2.4} />
+              <span>{t("checkpoint.revise")}</span>
+            </button>
+          )}
+          <button type="button" className="appr-btn allow" onClick={onContinue}>
+            <Check size={13} strokeWidth={2.6} />
+            <span>{t("checkpoint.continue")}</span>
+            <span className="kbd appr-btn-kbd">↵</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function RevisionCard({
+  reason,
+  remainingSteps,
+  summary,
+  onAccept,
+  onReject,
+  onCancel,
+}: {
+  reason: string;
+  remainingSteps: PlanStepLite[];
+  summary?: string;
+  onAccept: () => void;
+  onReject: () => void;
+  onCancel: () => void;
+}) {
+  useLang();
+  return (
+    <div className="msg-row">
+      <div className="revision-card">
+        <div className="revision-head">
+          <div className="revision-mark">
+            <RefreshCcw size={13} strokeWidth={2.4} />
+          </div>
+          <div className="revision-title-wrap">
+            <div className="revision-eyebrow">{t("revision.title")}</div>
+            <div className="revision-title">{summary ?? t("revision.subtitle")}</div>
+          </div>
+        </div>
+        <div className="revision-reason">{reason}</div>
+        <div className="revision-steps-label">{t("revision.remainingHeading")}</div>
+        <ol className="revision-steps">
+          {remainingSteps.map((s, i) => (
+            <li key={s.id} className="revision-step">
+              <span className="revision-step-mark">{i + 1}</span>
+              <span className="revision-step-body">
+                <span className="revision-step-title">
+                  {s.title}
+                  {s.risk && (
+                    <span className={`active-plan-step-risk r-${s.risk}`}>{riskLabel(s.risk)}</span>
+                  )}
+                </span>
+                <span className="revision-step-action">{s.action}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div className="approval-actions">
+          <button type="button" className="appr-btn deny" onClick={onCancel}>
+            <X size={13} strokeWidth={2.4} />
+            <span>{t("revision.cancel")}</span>
+          </button>
+          <button type="button" className="appr-btn always" onClick={onReject}>
+            <X size={13} strokeWidth={2.4} />
+            <span>{t("revision.reject")}</span>
+          </button>
+          <button type="button" className="appr-btn allow" onClick={onAccept}>
+            <Check size={13} strokeWidth={2.6} />
+            <span>{t("revision.accept")}</span>
+            <span className="kbd appr-btn-kbd">↵</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
