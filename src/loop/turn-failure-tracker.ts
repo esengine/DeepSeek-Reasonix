@@ -5,13 +5,18 @@ export const FAILURE_ESCALATION_THRESHOLD = 3;
 export class TurnFailureTracker {
   private count = 0;
   private types: Record<string, number> = {};
+  private readonly threshold: number;
+
+  constructor(threshold: number = FAILURE_ESCALATION_THRESHOLD) {
+    this.threshold = threshold;
+  }
 
   reset(): void {
     this.count = 0;
     this.types = {};
   }
 
-  /** True ONLY on the call where the count crosses FAILURE_ESCALATION_THRESHOLD. */
+  /** True ONLY on the call where the count crosses the configured threshold. */
   noteAndCrossedThreshold(resultJson: string, repair?: RepairReport): boolean {
     const before = this.count;
     const bump = (kind: string, by = 1): void => {
@@ -26,7 +31,7 @@ export class TurnFailureTracker {
       if (repair.truncationsFixed > 0) bump("truncated", repair.truncationsFixed);
       if (repair.stormsBroken > 0) bump("repeat-loop", repair.stormsBroken);
     }
-    return before < FAILURE_ESCALATION_THRESHOLD && this.count >= FAILURE_ESCALATION_THRESHOLD;
+    return before < this.threshold && this.count >= this.threshold;
   }
 
   formatBreakdown(): string {

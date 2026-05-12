@@ -47,6 +47,8 @@ export interface CodeOptions {
    * via `/budget <usd>` slash command.
    */
   budgetUsd?: number;
+  /** Per-turn repair-signal count required to escalate flash→pro. Undefined → loop default (3). */
+  failureThreshold?: number;
   /** Suppress the auto-launched embedded web dashboard. */
   noDashboard?: boolean;
   /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
@@ -127,6 +129,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   await chatCommand({
     model: opts.model ?? "deepseek-v4-flash",
     budgetUsd: opts.budgetUsd,
+    failureThreshold: opts.failureThreshold,
     system: codeSystemPrompt(rootDir, {
       hasSemanticSearch: semantic.enabled,
       systemAppend: opts.systemAppend,

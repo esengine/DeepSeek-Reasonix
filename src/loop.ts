@@ -39,7 +39,7 @@ import {
   stripHallucinatedToolMarkup,
   thinkingModeForModel,
 } from "./loop/thinking.js";
-import { TurnFailureTracker } from "./loop/turn-failure-tracker.js";
+import { FAILURE_ESCALATION_THRESHOLD, TurnFailureTracker } from "./loop/turn-failure-tracker.js";
 import type { LoopEvent } from "./loop/types.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
 import {
@@ -86,6 +86,8 @@ export interface CacheFirstLoopOptions {
   autoEscalate?: boolean;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
+  /** Per-turn repair/error signal count required to escalate flash→pro. Defaults to FAILURE_ESCALATION_THRESHOLD. Out-of-range values warn + fall back. */
+  failureThreshold?: number;
   session?: string;
   /** PreToolUse + PostToolUse only — UserPromptSubmit / Stop live at the App boundary. */
   hooks?: ResolvedHook[];
@@ -143,7 +145,7 @@ export class CacheFirstLoop {
 
   private _proArmedForNextTurn = false;
   private _escalateThisTurn = false;
-  private readonly _turnFailures = new TurnFailureTracker();
+  private readonly _turnFailures: TurnFailureTracker;
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
   private _toolDispatchesThisStep = 0;
@@ -167,6 +169,9 @@ export class CacheFirstLoop {
     if (opts.autoEscalate !== undefined) this.autoEscalate = opts.autoEscalate;
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
+    this._turnFailures = new TurnFailureTracker(
+      resolveFailureThreshold(opts.failureThreshold, FAILURE_ESCALATION_THRESHOLD),
+    );
     // Last-resort backstop — primary stop is the token-context guard inside step().
     this.maxToolIters = opts.maxToolIters ?? 64;
     this.hooks = opts.hooks ?? [];
@@ -1204,4 +1209,19 @@ function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/** Sane-range bounds for the flash→pro escalation threshold. */
+const FAILURE_THRESHOLD_MIN = 1;
+const FAILURE_THRESHOLD_MAX = 20;
+
+function resolveFailureThreshold(raw: number | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  if (!Number.isInteger(raw) || raw < FAILURE_THRESHOLD_MIN || raw > FAILURE_THRESHOLD_MAX) {
+    process.stderr.write(
+      `▲ ignoring escalation failureThreshold=${raw} (must be an integer in [${FAILURE_THRESHOLD_MIN},${FAILURE_THRESHOLD_MAX}]) — using default ${fallback}\n`,
+    );
+    return fallback;
+  }
+  return raw;
 }

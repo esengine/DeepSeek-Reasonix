@@ -185,6 +185,8 @@ export interface AppProps {
   transcript?: string;
   /** Soft USD spend cap; undefined → no cap. See CacheFirstLoopOptions.budgetUsd. */
   budgetUsd?: number;
+  /** Per-turn repair-signal count required to escalate flash→pro. Undefined → loop default (3). */
+  failureThreshold?: number;
   session?: string;
   /**
    * Pre-populated tool registry (e.g. from bridgeMcpTools()). When present,
@@ -362,6 +364,7 @@ function AppInner({
   system,
   transcript,
   budgetUsd,
+  failureThreshold,
   session,
   tools,
   mcpSpecs,
@@ -829,6 +832,7 @@ function AppInner({
       tools,
       model,
       budgetUsd,
+      failureThreshold,
       session,
       hooks: hookList,
       hookCwd: currentRootDir,
@@ -839,7 +843,7 @@ function AppInner({
     });
     loopRef.current = l;
     return l;
-  }, [model, system, budgetUsd, session, tools, codeMode]);
+  }, [model, system, budgetUsd, failureThreshold, session, tools, codeMode]);
 
   useEffect(() => {
     if (!session || !tools) return;

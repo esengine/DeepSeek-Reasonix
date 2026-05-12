@@ -107,6 +107,10 @@ export interface ReasonixConfig {
     /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
     port?: number;
   };
+  escalation?: {
+    /** Per-turn repair/error signal count required to escalate flash→pro. Defaults to 3. Out-of-range → default. */
+    failureThreshold?: number;
+  };
   projects?: {
     [absoluteRootDir: string]: {
       shellAllowed?: string[];

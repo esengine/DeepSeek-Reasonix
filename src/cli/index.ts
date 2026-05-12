@@ -52,6 +52,35 @@ function parseBudgetFlag(raw: number | undefined): number | undefined {
   return raw;
 }
 
+/** Lenient: malformed → undefined so a bad flag falls back to config / default. */
+function parseEscalateAfterFlag(raw: number | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  if (!Number.isInteger(raw) || raw < 1 || raw > 20) {
+    process.stderr.write(
+      `▲ ignoring --escalate-after=${raw} (must be an integer in [1,20]) — using default\n`,
+    );
+    return undefined;
+  }
+  return raw;
+}
+
+function resolveFailureThreshold(
+  flagValue: number | undefined,
+  noConfig: boolean,
+): number | undefined {
+  if (flagValue !== undefined) return flagValue;
+  if (noConfig) return undefined;
+  const fromCfg = readConfig().escalation?.failureThreshold;
+  if (typeof fromCfg !== "number") return undefined;
+  if (!Number.isInteger(fromCfg) || fromCfg < 1 || fromCfg > 20) {
+    process.stderr.write(
+      `▲ ignoring escalation.failureThreshold=${fromCfg} from config (must be an integer in [1,20]) — using default\n`,
+    );
+    return undefined;
+  }
+  return fromCfg;
+}
+
 /** Lenient port parser — bad value warns + falls back to ephemeral, same shape as parseBudgetFlag. */
 function parseDashboardPortFlag(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
@@ -131,6 +160,11 @@ program
   .option("-n, --new", t("ui.newHint"))
   .option("--transcript <path>", t("ui.transcriptHint"))
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
+  .option(
+    "--escalate-after <n>",
+    "repair-signal count before flash→pro escalation (default 3)",
+    (v) => Number.parseInt(v, 10),
+  )
   .option("--no-dashboard", t("ui.noDashboard"))
   .option("--dashboard-port <port>", t("ui.dashboardPortHint"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
@@ -147,6 +181,7 @@ program
       forceResume: !!opts.resume,
       forceNew: !!opts.new,
       budgetUsd: parseBudgetFlag(opts.budget),
+      failureThreshold: resolveFailureThreshold(parseEscalateAfterFlag(opts.escalateAfter), false),
       noDashboard: opts.dashboard === false,
       dashboardPort: resolveDashboardPort(parseDashboardPortFlag(opts.dashboardPort), false),
       systemAppend: opts.systemAppend,
@@ -164,6 +199,11 @@ program
   .option("--transcript <path>", t("ui.transcriptHint"))
   .option("--preset <name>", t("ui.presetHint"))
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
+  .option(
+    "--escalate-after <n>",
+    "repair-signal count before flash→pro escalation (default 3)",
+    (v) => Number.parseInt(v, 10),
+  )
   .option("--session <name>", t("ui.sessionNameHint"))
   .option("--no-session", t("ui.ephemeralHint"))
   .option("-r, --resume", t("ui.resumeHint"))
@@ -207,6 +247,10 @@ program
       system: applyMemoryStack(opts.system ?? defaultSystemPrompt(defaults.model), process.cwd()),
       transcript: opts.transcript,
       budgetUsd: parseBudgetFlag(opts.budget),
+      failureThreshold: resolveFailureThreshold(
+        parseEscalateAfterFlag(opts.escalateAfter),
+        opts.config === false,
+      ),
       session: continueOpts.session,
       mcp: defaults.mcp,
       mcpPrefix: opts.mcpPrefix,
@@ -229,6 +273,11 @@ program
   .option("-s, --system <prompt>", t("ui.systemPromptHint"))
   .option("--preset <name>", t("ui.presetHintShort"))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
+  .option(
+    "--escalate-after <n>",
+    "repair-signal count before flash→pro escalation (default 3)",
+    (v) => Number.parseInt(v, 10),
+  )
   .option("--transcript <path>", t("ui.transcriptHintShort"))
   .option(
     "--mcp <spec>",
@@ -251,6 +300,10 @@ program
       model: defaults.model,
       system: applyMemoryStack(opts.system ?? defaultSystemPrompt(defaults.model), process.cwd()),
       budgetUsd: parseBudgetFlag(opts.budget),
+      failureThreshold: resolveFailureThreshold(
+        parseEscalateAfterFlag(opts.escalateAfter),
+        opts.config === false,
+      ),
       transcript: opts.transcript,
       mcp: defaults.mcp,
       mcpPrefix: opts.mcpPrefix,

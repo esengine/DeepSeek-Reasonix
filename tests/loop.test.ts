@@ -1124,6 +1124,91 @@ describe("CacheFirstLoop - auto-escalation on tool failures", () => {
     expect(result.escalated).toBe(false);
     expect(loop.escalatedThisTurn).toBe(false);
   });
+
+  it("custom failureThreshold=5 does not escalate until 5th signal", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      failureThreshold: 5,
+    });
+    // First four signals should not escalate.
+    for (let i = 0; i < 4; i++) {
+      const result = signalToolFailure(loop, {
+        repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
+      });
+      expect(result.escalated).toBe(false);
+    }
+    expect(loop.escalatedThisTurn).toBe(false);
+    // Fifth signal crosses the configured threshold.
+    const fifth = signalToolFailure(loop, {
+      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
+    });
+    expect(fifth.escalated).toBe(true);
+    expect(fifth.count).toBe(5);
+    expect(loop.escalatedThisTurn).toBe(true);
+  });
+
+  it("default failureThreshold preserves the 3-signal escalation behavior", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      // No failureThreshold passed — should use default of 3.
+    });
+    // Two signals: not crossed yet.
+    for (let i = 0; i < 2; i++) {
+      const result = signalToolFailure(loop, {
+        repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
+      });
+      expect(result.escalated).toBe(false);
+    }
+    // Third crosses.
+    const third = signalToolFailure(loop, {
+      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
+    });
+    expect(third.escalated).toBe(true);
+    expect(third.count).toBe(3);
+  });
+
+  it("invalid failureThreshold values warn on stderr and fall back to default 3", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    // Capture stderr writes during construction so we can assert the warning.
+    (process.stderr as unknown as { write: (s: string) => boolean }).write = (s: string) => {
+      writes.push(String(s));
+      return true;
+    };
+    let loop: CacheFirstLoop;
+    try {
+      loop = new CacheFirstLoop({
+        client,
+        prefix: new ImmutablePrefix({ system: "s" }),
+        stream: false,
+        // Out-of-range value (>20) — must warn and fall back to default 3.
+        failureThreshold: 999,
+      });
+    } finally {
+      (process.stderr as unknown as { write: typeof original }).write = original;
+    }
+    expect(writes.some((w) => /failureThreshold=999/.test(w))).toBe(true);
+
+    // Behavior matches the default-3 threshold.
+    for (let i = 0; i < 2; i++) {
+      const result = signalToolFailure(loop, {
+        repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
+      });
+      expect(result.escalated).toBe(false);
+    }
+    const third = signalToolFailure(loop, {
+      repair: { scavenged: 1, truncationsFixed: 0, stormsBroken: 0, notes: [] },
+    });
+    expect(third.escalated).toBe(true);
+    expect(third.count).toBe(3);
+  });
 });
 
 describe("CacheFirstLoop - retryLastUser edge cases", () => {
