@@ -1,6 +1,9 @@
 /** Writes are eager but the prefix is NOT re-loaded mid-session — keeps prompt-cache stable. */
 
+import { loadMemoryTypeRegistry } from "../config.js";
 import {
+  type MemoryExpires,
+  type MemoryPriority,
   type MemoryScope,
   MemoryStore,
   type MemoryType,
@@ -22,6 +25,17 @@ export function registerMemoryTools(
   const store = new MemoryStore({ homeDir: opts.homeDir, projectRoot: opts.projectRoot });
   const hasProject = store.hasProjectScope();
 
+  const registry_types = loadMemoryTypeRegistry();
+  const customTypeNames = registry_types.filter((r) => !r.builtin).map((r) => r.name);
+  const typeDescParts = [
+    "'user' = role/skills/prefs; 'feedback' = corrections or confirmed approaches; 'project' = facts/decisions about the current work; 'reference' = pointers to external systems the user uses.",
+  ];
+  if (customTypeNames.length > 0) {
+    typeDescParts.push(
+      `Custom types declared in config: ${customTypeNames.join(", ")}. Any string is accepted; unknown types are stored verbatim and treated as 'reference' priority.`,
+    );
+  }
+
   registry.register({
     name: "remember",
     description:
@@ -31,9 +45,7 @@ export function registerMemoryTools(
       properties: {
         type: {
           type: "string",
-          enum: ["user", "feedback", "project", "reference"],
-          description:
-            "'user' = role/skills/prefs; 'feedback' = corrections or confirmed approaches; 'project' = facts/decisions about the current work; 'reference' = pointers to external systems the user uses.",
+          description: typeDescParts.join(" "),
         },
         scope: {
           type: "string",
@@ -55,6 +67,18 @@ export function registerMemoryTools(
           description:
             "Full memory body in markdown. For feedback/project types, structure as: rule/fact, then **Why:** line, then **How to apply:** line.",
         },
+        priority: {
+          type: "string",
+          enum: ["low", "medium", "high"],
+          description:
+            "Optional per-memory priority. `high` injects the entry into a `# HIGH PRIORITY constraints` block at the top of the system prompt — use sparingly, only for hard rules the model must never violate.",
+        },
+        expires: {
+          type: "string",
+          enum: ["project_end"],
+          description:
+            "Optional lifecycle hint. `project_end` causes `/memory clear project` to also remove this entry even when it's stored at global scope.",
+        },
       },
       required: ["type", "scope", "name", "description", "content"],
     },
@@ -64,6 +88,8 @@ export function registerMemoryTools(
       name: string;
       description: string;
       content: string;
+      priority?: MemoryPriority;
+      expires?: MemoryExpires;
     }) => {
       if (args.scope === "project" && !hasProject) {
         return JSON.stringify({
@@ -78,6 +104,8 @@ export function registerMemoryTools(
           scope: args.scope,
           description: args.description,
           body: args.content,
+          ...(args.priority ? { priority: args.priority } : {}),
+          ...(args.expires ? { expires: args.expires } : {}),
         });
         const key = sanitizeMemoryName(args.name);
         // The return text is load-bearing: it's the ONLY thing keeping

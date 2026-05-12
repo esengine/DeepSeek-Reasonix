@@ -120,6 +120,70 @@ export interface ReasonixConfig {
   };
   index?: IndexUserConfig;
   semantic?: SemanticEmbeddingUserConfig;
+  /** User-declared extensions to the built-in memory types (#709). Unknown types round-trip even without a declaration; declaring one lets you attach a default priority + lifecycle. */
+  memory?: {
+    customTypes?: CustomMemoryTypeConfig[];
+  };
+}
+
+export interface CustomMemoryTypeConfig {
+  name: string;
+  description?: string;
+  priority?: "low" | "medium" | "high";
+  expires?: "project_end";
+}
+
+export interface MemoryTypeRegistryEntry {
+  name: string;
+  builtin: boolean;
+  description?: string;
+  priority?: "low" | "medium" | "high";
+  expires?: "project_end";
+}
+
+const BUILTIN_TYPE_DOCS: Record<string, string> = {
+  user: "role / skills / preferences",
+  feedback: "corrections or confirmed approaches",
+  project: "facts / decisions about the current work",
+  reference: "pointers to external systems the user uses",
+};
+
+/** Resolve the merged registry of memory types — built-ins, overlaid by anything in `config.memory.customTypes`. */
+export function loadMemoryTypeRegistry(
+  cfg: ReasonixConfig = readConfig(),
+): MemoryTypeRegistryEntry[] {
+  const out: MemoryTypeRegistryEntry[] = [];
+  for (const name of ["user", "feedback", "project", "reference"]) {
+    out.push({ name, builtin: true, description: BUILTIN_TYPE_DOCS[name] });
+  }
+  const seen = new Set(out.map((e) => e.name));
+  for (const raw of cfg.memory?.customTypes ?? []) {
+    if (!raw || typeof raw.name !== "string") continue;
+    const name = raw.name.trim();
+    if (!name || !/^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/.test(name)) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const entry: MemoryTypeRegistryEntry = { name, builtin: false };
+    if (typeof raw.description === "string") entry.description = raw.description;
+    if (raw.priority === "low" || raw.priority === "medium" || raw.priority === "high") {
+      entry.priority = raw.priority;
+    }
+    if (raw.expires === "project_end") entry.expires = raw.expires;
+    out.push(entry);
+  }
+  return out;
+}
+
+export function memoryTypeDefaults(
+  typeName: string,
+  cfg: ReasonixConfig = readConfig(),
+): { priority?: "low" | "medium" | "high"; expires?: "project_end" } {
+  const found = loadMemoryTypeRegistry(cfg).find((e) => e.name === typeName);
+  if (!found) return {};
+  const out: { priority?: "low" | "medium" | "high"; expires?: "project_end" } = {};
+  if (found.priority) out.priority = found.priority;
+  if (found.expires) out.expires = found.expires;
+  return out;
 }
 
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";

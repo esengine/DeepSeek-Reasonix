@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { type ReasonixConfig, memoryTypeDefaults } from "../config.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { applySkillsIndex } from "../skills.js";
 import { applyProjectMemory, memoryEnabled } from "./project.js";
@@ -20,8 +21,13 @@ export const MEMORY_INDEX_FILE = "MEMORY.md";
 /** Cap on the index file content loaded into the prefix, per scope. */
 export const MEMORY_INDEX_MAX_CHARS = 4000;
 
-export type MemoryType = "user" | "feedback" | "project" | "reference";
+export const BUILTIN_MEMORY_TYPES = ["user", "feedback", "project", "reference"] as const;
+export type BuiltinMemoryType = (typeof BUILTIN_MEMORY_TYPES)[number];
+/** Built-ins plus any string declared in `config.memory.customTypes`. Unknown values are accepted (round-tripped verbatim). */
+export type MemoryType = BuiltinMemoryType | (string & {});
 export type MemoryScope = "global" | "project";
+export type MemoryPriority = "low" | "medium" | "high";
+export type MemoryExpires = "project_end";
 
 export interface MemoryEntry {
   name: string;
@@ -31,6 +37,10 @@ export interface MemoryEntry {
   body: string;
   /** ISO date string (YYYY-MM-DD). */
   createdAt: string;
+  /** Explicit per-entry priority; absent → resolve from config default for `type`, else "medium". */
+  priority?: MemoryPriority;
+  /** Lifecycle hint. `project_end` → cleared by `/memory clear project`. */
+  expires?: MemoryExpires;
 }
 
 export interface MemoryStoreOptions {
@@ -46,6 +56,8 @@ export interface WriteInput {
   scope: MemoryScope;
   description: string;
   body: string;
+  priority?: MemoryPriority;
+  expires?: MemoryExpires;
 }
 
 const VALID_NAME = /^[a-zA-Z0-9_-][a-zA-Z0-9_.-]{1,38}[a-zA-Z0-9]$/;
@@ -82,16 +94,26 @@ function ensureDir(p: string): void {
 }
 
 function formatFrontmatter(e: WriteInput & { createdAt: string }): string {
-  return [
+  const lines = [
     "---",
     `name: ${e.name}`,
     `description: ${e.description.replace(/\n/g, " ")}`,
     `type: ${e.type}`,
     `scope: ${e.scope}`,
     `created: ${e.createdAt}`,
-    "---",
-    "",
-  ].join("\n");
+  ];
+  if (e.priority) lines.push(`priority: ${e.priority}`);
+  if (e.expires) lines.push(`expires: ${e.expires}`);
+  lines.push("---", "");
+  return lines.join("\n");
+}
+
+function coercePriority(v: unknown): MemoryPriority | undefined {
+  return v === "low" || v === "medium" || v === "high" ? v : undefined;
+}
+
+function coerceExpires(v: unknown): MemoryExpires | undefined {
+  return v === "project_end" ? v : undefined;
 }
 
 function todayIso(): string {
@@ -165,7 +187,7 @@ export class MemoryStore {
     }
     const raw = readFileSync(file, "utf8");
     const { data, body } = parseFrontmatter(raw);
-    return {
+    const entry: MemoryEntry = {
       name: data.name ?? name,
       type: (data.type as MemoryType) ?? "project",
       scope: (data.scope as MemoryScope) ?? scope,
@@ -173,6 +195,11 @@ export class MemoryStore {
       body: body.trim(),
       createdAt: data.created ?? "",
     };
+    const priority = coercePriority(data.priority);
+    if (priority) entry.priority = priority;
+    const expires = coerceExpires(data.expires);
+    if (expires) entry.expires = expires;
+    return entry;
   }
 
   /** Skips malformed files — index stays queryable even if one file is hand-edited into nonsense. */
@@ -218,6 +245,8 @@ export class MemoryStore {
       body,
       createdAt: todayIso(),
     };
+    if (input.priority) entry.priority = input.priority;
+    if (input.expires) entry.expires = input.expires;
     const dir = this.dir(input.scope);
     const file = join(dir, `${name}.md`);
     const content = `${formatFrontmatter(entry)}${body}\n`;
@@ -314,17 +343,46 @@ export function applyGlobalReasonixMemory(basePrompt: string, homeDir?: string):
   ].join("\n");
 }
 
+/** Effective priority: entry's own field wins, else the config default for its type, else undefined. */
+export function effectivePriority(
+  entry: MemoryEntry,
+  cfg?: ReasonixConfig,
+): MemoryPriority | undefined {
+  if (entry.priority) return entry.priority;
+  return memoryTypeDefaults(entry.type, cfg).priority;
+}
+
+function highPriorityBlock(entries: MemoryEntry[], cfg?: ReasonixConfig): string | null {
+  const high = entries.filter((e) => effectivePriority(e, cfg) === "high");
+  if (high.length === 0) return null;
+  const lines: string[] = [
+    "# HIGH PRIORITY constraints (must observe)",
+    "",
+    "These memories were declared `priority: high` (via config.memory.customTypes or the memory file itself). Treat them as hard rules — violations override any other guidance below.",
+    "",
+  ];
+  for (const e of high) {
+    const head = `!!! [${e.scope}/${e.type}/${e.name}] ${e.description || "(no description)"}`;
+    lines.push(head);
+    if (e.body) lines.push("", e.body);
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd();
+}
+
 /** Empty index → omit the whole block (otherwise we'd add bytes to the prefix hash for nothing). */
 export function applyUserMemory(
   basePrompt: string,
-  opts: { homeDir?: string; projectRoot?: string } = {},
+  opts: { homeDir?: string; projectRoot?: string; cfg?: ReasonixConfig } = {},
 ): string {
   if (!memoryEnabled()) return basePrompt;
   const store = new MemoryStore(opts);
   const global = store.loadIndex("global");
   const project = store.hasProjectScope() ? store.loadIndex("project") : null;
-  if (!global && !project) return basePrompt;
+  const high = highPriorityBlock(store.list(), opts.cfg);
+  if (!global && !project && !high) return basePrompt;
   const parts: string[] = [basePrompt];
+  if (high) parts.push("", high);
   if (global) {
     parts.push(
       "",
