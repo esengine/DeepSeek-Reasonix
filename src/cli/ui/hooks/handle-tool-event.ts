@@ -1,5 +1,6 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { archivePlanState } from "../../../code/plan-store.js";
+import { t } from "../../../i18n/index.js";
 import type { LoopEvent } from "../../../loop.js";
 import type { ChoiceOption } from "../../../tools/choice.js";
 import type { PlanStep, StepCompletion } from "../../../tools/plan.js";
@@ -58,9 +59,7 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
         if (ctx.session && total > 0 && completed >= total) {
           const archive = archivePlanState(ctx.session);
           if (archive) {
-            ctx.log.pushInfo(
-              `▸ plan complete — all ${total} step${total === 1 ? "" : "s"} done · archived`,
-            );
+            ctx.log.pushInfo(t("planFlow.completeMsg", { total, s: total === 1 ? "" : "s" }));
           }
         }
       }

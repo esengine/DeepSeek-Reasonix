@@ -63,7 +63,7 @@ describe("reduceSubagentInnerEvent", () => {
     expect(next[0]).toBe(a);
     expect(next[1]).not.toBe(b);
     expect(next[1]?.lastInner?.label).toBe("grep");
-    expect(next[1]?.lastInner?.meta).toBe("done");
+    expect(next[1]?.lastInner?.meta).toBe("Done");
   });
 
   it("returns prev by reference when progress repeats the same iter/elapsedMs", () => {

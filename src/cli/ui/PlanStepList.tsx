@@ -81,8 +81,8 @@ function statusGlyph(status: StepStatus, isCur: boolean): StatusGlyph {
 }
 
 function riskLabel(risk: PlanStepRisk | undefined): { text: string; color: string } | null {
-  if (risk === "med") return { text: `${GLYPH.warn} med`, color: COLOR.warn };
-  if (risk === "high") return { text: `${GLYPH.warn} high`, color: COLOR.err };
+  if (risk === "med") return { text: `${GLYPH.warn}${t("planFlow.riskMed")}`, color: COLOR.warn };
+  if (risk === "high") return { text: `${GLYPH.warn}${t("planFlow.riskHigh")}`, color: COLOR.err };
   // low + undefined: omitted entirely (the default reading should be
   // "low risk" — surfacing it on every line buries the med/high ones).
   return null;

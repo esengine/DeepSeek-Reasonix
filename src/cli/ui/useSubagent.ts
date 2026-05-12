@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../../i18n/index.js";
 import type { LoopEvent } from "../../loop.js";
 import { appendUsage } from "../../telemetry/usage.js";
 import type { SubagentEvent, SubagentSink } from "../../tools/subagent.js";
@@ -59,23 +60,28 @@ function summariseInner(ev: LoopEvent): SubagentInnerSummary | null {
     return {
       glyph: "▣",
       color: CARD.tool.color,
-      label: ev.toolName ?? "tool",
-      meta: "running",
+      label: ev.toolName ?? t("common.tool"),
+      meta: t("common.running"),
     };
   }
   if (ev.role === "tool") {
     return {
       glyph: "▣",
       color: CARD.tool.color,
-      label: ev.toolName ?? "tool",
-      meta: "done",
+      label: ev.toolName ?? t("common.tool"),
+      meta: t("common.done"),
     };
   }
   if (ev.role === "warning") {
-    return { glyph: "⚠", color: TONE.warn, label: "warning", meta: ev.content?.slice(0, 40) };
+    return {
+      glyph: "\u26a0",
+      color: TONE.warn,
+      label: t("common.warning"),
+      meta: ev.content?.slice(0, 40),
+    };
   }
   if (ev.role === "error") {
-    return { glyph: "✖", color: TONE.err, label: ev.error ?? "error" };
+    return { glyph: "\u2716", color: TONE.err, label: ev.error ?? t("common.error") };
   }
   return null;
 }

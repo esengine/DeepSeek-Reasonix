@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useEffect, useState } from "react";
+import { t } from "../../i18n/index.js";
 import { FG, TONE } from "./theme/tokens.js";
 
 const REASONIX_LOGO = [
@@ -75,7 +76,7 @@ export function BootSplash(): React.ReactElement {
         <Text color={FG.faint}>{wave}</Text>
       </Box>
       <Box marginTop={1}>
-        <Text color={FG.meta}>{`loading${dots}`}</Text>
+        <Text color={FG.meta}>{`${t("common.loading")}${dots}`}</Text>
       </Box>
     </Box>
   );

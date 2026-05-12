@@ -1,6 +1,7 @@
 import { Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
+import { t } from "../../i18n/index.js";
 import { COLOR } from "./theme.js";
 
 /**
@@ -72,7 +73,7 @@ export function ContextCell({
         <Text color={COLOR.info} dimColor>
           {"▣ ctx "}
         </Text>
-        <Text dimColor>— (no turns yet)</Text>
+        <Text dimColor>{`\u2014 ${t("common.noTurns")}`}</Text>
       </Text>
     );
   }

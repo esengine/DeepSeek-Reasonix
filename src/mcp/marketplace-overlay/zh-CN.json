@@ -1,0 +1,42 @@
+{
+  "filesystem": {
+    "title": "文件系统",
+    "description": "为代理授予对指定目录的读写权限，支持创建、读取、编辑和删除文件"
+  },
+  "fetch": {
+    "title": "网络请求",
+    "description": "从互联网获取网页内容，支持 HTML 抓取和 API 调用"
+  },
+  "git": {
+    "title": "Git 版本控制",
+    "description": "执行 Git 操作：查看日志、分支、差异，暂存和提交变更"
+  },
+  "sqlite": {
+    "title": "SQLite 数据库",
+    "description": "在本地 SQLite 数据库中执行 SQL 查询和管理表结构"
+  },
+  "postgres": {
+    "title": "PostgreSQL 数据库",
+    "description": "连接 PostgreSQL 数据库，执行 SQL 查询和管理表结构"
+  },
+  "github": {
+    "title": "GitHub API",
+    "description": "管理 GitHub 仓库、Issue、PR、分支和 Actions"
+  },
+  "slack": {
+    "title": "Slack 消息",
+    "description": "发送和读取 Slack 频道消息，管理频道和用户"
+  },
+  "brave-search": {
+    "title": "Brave 搜索",
+    "description": "通过 Brave Search API 进行网页和新闻搜索"
+  },
+  "memory": {
+    "title": "知识图谱记忆",
+    "description": "持久化存储和检索知识图谱实体的记忆系统"
+  },
+  "puppeteer": {
+    "title": "Puppeteer 浏览器",
+    "description": "通过 Puppeteer 控制的 Chromium 实例进行网页浏览、截图和交互"
+  }
+}

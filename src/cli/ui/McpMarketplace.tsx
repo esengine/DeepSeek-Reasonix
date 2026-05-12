@@ -4,6 +4,7 @@ import { Box, Text } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readConfig, writeConfig } from "../../config.js";
 import { t } from "../../i18n/index.js";
+import { loadOverlay } from "../../mcp/marketplace-overlay/loader.js";
 import {
   type RegistryHandle,
   fetchSmitheryDetail,
@@ -345,6 +346,8 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
     }
   });
 
+  const overlay = useMemo(() => loadOverlay("zh-CN"), []);
+
   const start = Math.max(
     0,
     Math.min(state.selected - Math.floor(VISIBLE_ROWS / 2), filtered.length - VISIBLE_ROWS),
@@ -392,8 +395,15 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
       </Box>
       {selected ? (
         <Box marginTop={1} flexDirection="column">
-          <Text bold>{selected.title}</Text>
-          {selected.description ? <Text dimColor>{selected.description.slice(0, 200)}</Text> : null}
+          <Text bold>
+            {overlay?.[selected.name]?.title ?? selected.title}
+            {overlay?.[selected.name] ? (
+              <Text dimColor>{`  \u00b7  ${selected.title}`}</Text>
+            ) : null}
+          </Text>
+          <Text dimColor>
+            {overlay?.[selected.name]?.description ?? selected.description?.slice(0, 200) ?? null}
+          </Text>
           {selected.install ? (
             <Text dimColor>
               {t("mcpMarketplace.specLine", {

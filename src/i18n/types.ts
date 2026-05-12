@@ -10,6 +10,9 @@ export interface TranslationSchema {
     confirm: string;
     back: string;
     next: string;
+    tool: string;
+    running: string;
+    noTurns: string;
   };
   cli: {
     description: string;
@@ -340,6 +343,9 @@ export interface TranslationSchema {
     reviseTitle: string;
     reviseSteps: string;
     reviseFooter: string;
+    riskMed: string;
+    riskHigh: string;
+    completeMsg: string;
   };
   statusBar: {
     turn: string;

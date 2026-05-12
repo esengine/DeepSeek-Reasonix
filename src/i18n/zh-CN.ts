@@ -10,6 +10,9 @@ export const zhCN: TranslationSchema = {
     confirm: "确认",
     back: "返回",
     next: "下一步",
+    tool: "工具",
+    running: "运行中",
+    noTurns: "(暂无对话)",
   },
   cli: {
     description: "DeepSeek 原生智能体框架 — 专为缓存命中和低成本令牌构建。",
@@ -496,7 +499,12 @@ export const zhCN: TranslationSchema = {
     },
     reviseTitle: "修改计划",
     reviseSteps: "{count} 个步骤",
-    reviseFooter: "↑↓ 焦点  ·  空格切换跳过  ·  k/j 移动  ·  ⏎ 确认  ·  Esc 取消",
+    reviseFooter:
+      "\u2191\u2193 焦点  \u00b7  空格切换跳过  \u00b7  k/j 移动  \u00b7  \u23ce 确认  \u00b7  Esc 取消",
+    riskMed: " 中",
+    riskHigh: " 高",
+    completeMsg:
+      "\u25b8 \u8ba1\u5212\u5b8c\u6210 \u2014 \u5168\u90e8 {total} \u4e2a\u6b65\u9aa4\u5df2\u5b8c\u6210 \u00b7 \u5df2\u5f52\u6863",
   },
   app: {
     walkCancelledRemaining: "▸ 浏览已取消 — 还有 {count} 个待处理编辑块。",

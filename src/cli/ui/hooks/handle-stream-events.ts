@@ -1,4 +1,5 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import { t } from "../../../i18n/index.js";
 import type { LoopEvent } from "../../../loop.js";
 import type { TurnTranslator } from "../state/TurnTranslator.js";
 import type { Scrollback } from "./useScrollback.js";
@@ -65,7 +66,7 @@ export function handleErrorEvent(ev: LoopEvent, ctx: ErrorContext): void {
   ctx.setToolProgress(null);
   ctx.toolStartedAtRef.current = null;
   ctx.translator.toolAbort(ev.error ?? ev.content);
-  ctx.log.pushError("tool error", ev.error ?? ev.content);
+  ctx.log.pushError(t("common.error"), ev.error ?? ev.content);
 }
 
 export interface WarningContext {
@@ -74,7 +75,7 @@ export interface WarningContext {
 }
 
 export function handleWarningEvent(ev: LoopEvent, ctx: WarningContext): void {
-  ctx.log.pushWarning("warning", ev.content);
+  ctx.log.pushWarning(t("common.warning"), ev.content);
   // Loop emits warnings starting with "⇧" whenever this turn is (or just
   // became) running on pro — flip the badge so the escalation shows.
   if (ev.content?.startsWith("⇧ ")) ctx.setTurnOnPro(true);

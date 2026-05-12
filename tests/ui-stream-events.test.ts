@@ -72,6 +72,6 @@ describe("stream event handlers", () => {
     expect(toolProgress).toBeNull();
     expect(toolStartedAtRef.current).toBeNull();
     expect(translator.toolAbort).toHaveBeenCalledWith("Error: tool crashed");
-    expect(log.pushError).toHaveBeenCalledWith("tool error", "Error: tool crashed");
+    expect(log.pushError).toHaveBeenCalledWith("Error", "Error: tool crashed");
   });
 });

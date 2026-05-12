@@ -4,6 +4,7 @@ import { Box, Text, render, useApp, useInput } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { readConfig, writeConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";
+import { loadOverlay } from "../../mcp/marketplace-overlay/loader.js";
 import {
   type RegistryHandle,
   loadMorePages,
@@ -157,6 +158,8 @@ function McpBrowseApp() {
     }
   });
 
+  const overlay = useMemo(() => loadOverlay("zh-CN"), []);
+
   const start = Math.max(
     0,
     Math.min(state.selected - Math.floor(VISIBLE_ROWS / 2), filtered.length - VISIBLE_ROWS),
@@ -199,9 +202,14 @@ function McpBrowseApp() {
       {selected ? (
         <Box marginTop={1} flexDirection="column">
           <Text bold color="white">
-            {selected.title}
+            {overlay?.[selected.name]?.title ?? selected.title}
+            {overlay?.[selected.name] ? (
+              <Text dimColor>{`  \u00b7  ${selected.title}`}</Text>
+            ) : null}
           </Text>
-          {selected.description ? <Text dimColor>{selected.description.slice(0, 160)}</Text> : null}
+          <Text dimColor>
+            {overlay?.[selected.name]?.description ?? selected.description?.slice(0, 160) ?? null}
+          </Text>
           {selected.install ? (
             <Text dimColor>
               {`spec: ${selected.install.runtime} ${selected.install.packageId ?? selected.install.url ?? "—"} · ${selected.install.transport}`}

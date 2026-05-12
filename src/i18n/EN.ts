@@ -10,6 +10,9 @@ export const EN: TranslationSchema = {
     confirm: "Confirm",
     back: "Back",
     next: "Next",
+    tool: "tool",
+    running: "running",
+    noTurns: "(no turns yet)",
   },
   cli: {
     description: "DeepSeek-native agent framework — built for cache hits and cheap tokens.",
@@ -508,7 +511,11 @@ export const EN: TranslationSchema = {
     },
     reviseTitle: "Revise plan",
     reviseSteps: "{count} steps",
-    reviseFooter: "↑↓ focus  ·  space toggle skip  ·  k/j move  ·  ⏎ accept  ·  esc cancel",
+    reviseFooter:
+      "\u2191\u2193 focus  \u00b7  space toggle skip  \u00b7  k/j move  \u00b7  \u23ce accept  \u00b7  esc cancel",
+    riskMed: " med",
+    riskHigh: " high",
+    completeMsg: "\u25b8 plan complete \u2014 all {total} step{s} done \u00b7 archived",
   },
   app: {
     walkCancelledRemaining: "▸ walk cancelled — {count} block(s) still pending.",
