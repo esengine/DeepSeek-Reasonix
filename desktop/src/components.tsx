@@ -26,6 +26,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { t, useLang, setLang, type Lang } from "./i18n";
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -140,6 +141,7 @@ export function Sidebar({
   onDeleteSession: (name: string) => void;
   onLoadSession: (name: string) => void;
 }) {
+  useLang();
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -152,7 +154,7 @@ export function Sidebar({
       <div className="sidebar-body">
         <button type="button" className="sidebar-new" onClick={onNewChat}>
           <MessageSquarePlus size={14} strokeWidth={2.2} />
-          <span>New chat</span>
+          <span>{t("sidebar.newChat")}</span>
           <span className="sidebar-new-kbd">
             <span className="kbd">⌘</span>
             <span className="kbd">N</span>
@@ -160,15 +162,15 @@ export function Sidebar({
         </button>
         <button type="button" className="sidebar-cmdk" onClick={onOpenCommands}>
           <Command size={13} />
-          <span>Search commands…</span>
+          <span>{t("sidebar.searchCommands")}</span>
           <span className="kbd">⌘K</span>
         </button>
         <div className="sidebar-section">
           <div className="sidebar-section-label">
-            Recent {sessions.length > 0 && <span className="sidebar-count">{sessions.length}</span>}
+            {t("sidebar.recent")} {sessions.length > 0 && <span className="sidebar-count">{sessions.length}</span>}
           </div>
           {sessions.length === 0 ? (
-            <div className="sidebar-empty">No sessions yet</div>
+            <div className="sidebar-empty">{t("sidebar.noSessions")}</div>
           ) : (
             <div className="sidebar-list">
               {sessions.map((s) => (
@@ -219,7 +221,7 @@ export function Sidebar({
             }
           >
             <WalletIcon size={14} strokeWidth={2} />
-            <span className="sidebar-wallet-label">wallet</span>
+            <span className="sidebar-wallet-label">{t("sidebar.wallet")}</span>
             <span className="sidebar-wallet-amount">
               {formatWallet(balance.total, balance.currency)}
             </span>
@@ -230,12 +232,12 @@ export function Sidebar({
             type="button"
             className="icon-btn"
             aria-label="settings"
-            title="Settings"
+            title={t("palette.settings")}
             onClick={onOpenSettings}
           >
             <Settings size={14} />
           </button>
-          <span className="sidebar-foot-hint">cache-first agent</span>
+          <span className="sidebar-foot-hint">{t("sidebar.footHint")}</span>
         </div>
       </div>
     </aside>
@@ -575,6 +577,10 @@ export function SettingsPanel({
     localStorage.setItem("reasonix.currency", next);
     window.dispatchEvent(new CustomEvent("reasonix:currency", { detail: next }));
   };
+  const lang = useLang();
+  const applyLang = (next: Lang) => {
+    setLang(next);
+  };
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -609,6 +615,26 @@ export function SettingsPanel({
                     {opt === "CNY"
                       ? "matches DeepSeek dashboard"
                       : "matches per-token reference rates"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </SettingsSection>
+
+          <SettingsSection label={t("settings.language")} hint={t("settings.languageHint")}>
+            <div className="settings-radio-group">
+              {(["en", "zh-CN"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  className={`settings-radio ${lang === opt ? "on" : ""}`}
+                  onClick={() => applyLang(opt)}
+                >
+                  <span className="settings-radio-name">
+                    {opt === "en" ? t("settings.langEn") : t("settings.langZhCn")}
+                  </span>
+                  <span className="settings-radio-desc">
+                    {opt === "en" ? t("settings.langEnDesc") : t("settings.langZhCnDesc")}
                   </span>
                 </button>
               ))}
@@ -1565,7 +1591,7 @@ export function PlanCard({
           <input
             type="text"
             className="choice-card-input"
-            placeholder="可选反馈 — 想要修改时写这里"
+            placeholder={t("modal.planFeedbackPlaceholder")}
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
           />
@@ -1642,7 +1668,7 @@ export function ChoiceCard({
             <input
               type="text"
               className="choice-card-input"
-              placeholder="或者自己写一个答案…"
+              placeholder={t("modal.choiceCustomPlaceholder")}
               value={custom}
               onChange={(e) => setCustom(e.target.value)}
               onKeyDown={(e) => {
@@ -2104,7 +2130,7 @@ export function Composer({
           onClick={(e) => syncCaret(e.currentTarget)}
           onKeyUp={(e) => syncCaret(e.currentTarget)}
           onKeyDown={onKey}
-          placeholder={busy ? "reasonix 正在思考…" : "问点什么"}
+          placeholder={busy ? t("composer.busy") : t("composer.idle")}
           disabled={disabled}
           rows={1}
         />
@@ -2129,13 +2155,15 @@ export function Composer({
       <div className="composer-hint">
         <div className="composer-hint-left">
           <span className="kbd-group">
-            <span className="kbd">Enter</span> 发送
+            <span className="kbd">Enter</span> {t("composer.send")}
           </span>
           <span className="kbd-group">
-            <span className="kbd">Shift</span>+<span className="kbd">Enter</span> 换行
+            <span className="kbd">Shift</span>+<span className="kbd">Enter</span>{" "}
+            {t("composer.newline")}
           </span>
           <span className="kbd-group">
-            <span className="kbd">⌘</span>+<span className="kbd">K</span> 命令
+            <span className="kbd">⌘</span>+<span className="kbd">K</span>{" "}
+            {t("composer.commands")}
           </span>
         </div>
         <div className="composer-hint-right">

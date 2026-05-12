@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { t, useLang } from "./i18n";
 
 export type Command = {
   id: string;
@@ -63,16 +64,16 @@ export function buildCommands(handlers: CommandHandlers): Command[] {
   const list: Command[] = [
     {
       id: "new-chat",
-      label: "New chat",
-      hint: "丢掉当前对话，开新一轮",
+      label: t("palette.newChat"),
+      hint: t("palette.newChatHint"),
       icon: <FilePlus size={14} />,
       shortcut: ["⌘", "N"],
       run: handlers.newChat,
     },
     {
       id: "new-tab",
-      label: "New tab",
-      hint: "再开一个独立工作区标签",
+      label: t("palette.newTab"),
+      hint: t("palette.newTabHint"),
       icon: <Plus size={14} />,
       shortcut: ["⌘", "T"],
       run: handlers.newTab,
@@ -81,8 +82,8 @@ export function buildCommands(handlers: CommandHandlers): Command[] {
   if (handlers.canCloseTab) {
     list.push({
       id: "close-tab",
-      label: "Close tab",
-      hint: "关闭当前标签",
+      label: t("palette.closeTab"),
+      hint: t("palette.closeTabHint"),
       icon: <SquareX size={14} />,
       shortcut: ["⌘", "W"],
       run: handlers.closeTab,
@@ -91,8 +92,8 @@ export function buildCommands(handlers: CommandHandlers): Command[] {
   if (handlers.busy) {
     list.push({
       id: "abort",
-      label: "Stop current turn",
-      hint: "打断模型当前生成",
+      label: t("palette.abort"),
+      hint: t("palette.abortHint"),
       icon: <StopCircle size={14} />,
       shortcut: ["esc"],
       run: handlers.abort,
@@ -101,50 +102,50 @@ export function buildCommands(handlers: CommandHandlers): Command[] {
   if (handlers.hasMessages) {
     list.push({
       id: "copy-last",
-      label: "Copy last reply",
-      hint: "复制最近一条助手回复",
+      label: t("palette.copyLast"),
+      hint: t("palette.copyLastHint"),
       icon: <ClipboardCopy size={14} />,
       run: handlers.copyLast,
     });
     list.push({
       id: "export-md",
-      label: "Export conversation as Markdown",
-      hint: "整段对话复制到剪贴板",
+      label: t("palette.exportMd"),
+      hint: t("palette.exportMdHint"),
       icon: <Download size={14} />,
       run: handlers.exportMarkdown,
     });
     list.push({
       id: "clear-chat",
-      label: "Clear messages",
-      hint: "只清当前 UI，subprocess 不重启",
+      label: t("palette.clearChat"),
+      hint: t("palette.clearChatHint"),
       icon: <Trash2 size={14} />,
       run: handlers.clearChat,
     });
   }
   list.push({
     id: "focus-composer",
-    label: "Focus composer",
+    label: t("palette.focusComposer"),
     icon: <FocusIcon size={14} />,
     shortcut: ["⌘", "L"],
     run: handlers.focusComposer,
   });
   list.push({
     id: "pick-workspace",
-    label: "Switch workspace…",
-    hint: "选另一个工作目录",
+    label: t("palette.pickWorkspace"),
+    hint: t("palette.pickWorkspaceHint"),
     icon: <FolderOpen size={14} />,
     run: handlers.pickWorkspace,
   });
   list.push({
     id: "settings",
-    label: "Settings",
-    hint: "模型、预算、主题…",
+    label: t("palette.settings"),
+    hint: t("palette.settingsHint"),
     icon: <Settings size={14} />,
     run: handlers.openSettings,
   });
   list.push({
     id: "about",
-    label: "About Reasonix",
+    label: t("palette.about"),
     icon: <Info size={14} />,
     run: handlers.about,
   });
@@ -160,6 +161,7 @@ export function CommandPalette({
   onClose: () => void;
   commands: Command[];
 }) {
+  useLang();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -205,7 +207,7 @@ export function CommandPalette({
           <input
             ref={inputRef}
             className="palette-input"
-            placeholder="搜索命令…"
+            placeholder={t("palette.searchPlaceholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -225,7 +227,7 @@ export function CommandPalette({
           <span className="kbd">esc</span>
         </div>
         <div className="palette-list" ref={listRef}>
-          {filtered.length === 0 && <div className="palette-empty">没匹配到</div>}
+          {filtered.length === 0 && <div className="palette-empty">{t("palette.empty")}</div>}
           {filtered.map((c, i) => (
             <button
               type="button"
@@ -259,15 +261,15 @@ export function CommandPalette({
           <span className="kbd-group">
             <span className="kbd">↑</span>
             <span className="kbd">↓</span>
-            移动
+            {t("palette.footMove")}
           </span>
           <span className="kbd-group">
             <span className="kbd">↵</span>
-            执行
+            {t("palette.footRun")}
           </span>
           <span className="kbd-group">
             <span className="kbd">esc</span>
-            关闭
+            {t("palette.footClose")}
           </span>
         </div>
       </div>

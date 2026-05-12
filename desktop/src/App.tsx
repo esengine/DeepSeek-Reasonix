@@ -4,6 +4,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { WorkspaceProvider } from "./Markdown";
+import { t, useLang } from "./i18n";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import {
@@ -654,6 +655,7 @@ function TabRuntime({
   onCloseTab,
   canCloseTab,
 }: TabRuntimeProps) {
+  useLang();
   const [state, dispatch] = useReducer(reduce, {
     ready: false,
     needsSetup: false,
@@ -762,7 +764,7 @@ function TabRuntime({
           icon: "⧉",
           run: () => {
             void navigator.clipboard.writeText(m.text);
-            flashToast("已复制");
+            flashToast(t("toast.copied"));
           },
         });
         acts.push({
@@ -784,7 +786,7 @@ function TabRuntime({
             icon: "⧉",
             run: () => {
               void navigator.clipboard.writeText(text);
-              flashToast("已复制");
+              flashToast(t("toast.copied"));
             },
           });
           acts.push({
@@ -808,7 +810,7 @@ function TabRuntime({
           icon: "⧉",
           run: () => {
             void navigator.clipboard.writeText(m.message);
-            flashToast("已复制");
+            flashToast(t("toast.copied"));
           },
         });
       }
@@ -864,31 +866,31 @@ function TabRuntime({
       .trim();
     if (!text) return;
     void navigator.clipboard.writeText(text);
-    flashToast("已复制");
+    flashToast(t("toast.copied"));
   }, [state.messages, flashToast]);
 
   const exportConversation = useCallback(() => {
     const md = conversationToMarkdown(state.messages);
     if (!md) return;
     void navigator.clipboard.writeText(md);
-    flashToast("整段对话已复制为 Markdown");
+    flashToast(t("toast.copiedMd"));
   }, [state.messages, flashToast]);
 
   const versionLabel = state.settings?.version ?? "dev";
   const commands = buildCommands({
     newChat: () => {
       newChat();
-      flashToast("已开新会话");
+      flashToast(t("toast.newSession"));
     },
     clearChat: () => {
       dispatch({ t: "clear" });
-      flashToast("已清空 UI");
+      flashToast(t("toast.cleared"));
     },
     focusComposer: () => {
       composerRef.current?.focus();
     },
     openSettings: () => setSettingsOpen(true),
-    about: () => flashToast(`Reasonix v${versionLabel} · cache-first DeepSeek agent`),
+    about: () => flashToast(t("toast.aboutLine", { version: versionLabel })),
     abort,
     copyLast: copyLastReply,
     exportMarkdown: exportConversation,
@@ -903,29 +905,29 @@ function TabRuntime({
   const slashCommands = [
     {
       id: "new",
-      label: "New chat",
-      hint: "新建会话",
+      label: t("palette.newChat"),
+      hint: t("palette.newChatHint"),
       run: () => {
         newChat();
-        flashToast("已开新会话");
+        flashToast(t("toast.newSession"));
       },
     },
     {
       id: "clear",
-      label: "Clear messages",
-      hint: "等同 /new",
+      label: t("palette.clearChat"),
+      hint: t("palette.clearChatHint"),
       run: () => dispatch({ t: "clear" }),
     },
     {
       id: "abort",
-      label: "Abort current turn",
-      hint: "停止模型当前生成",
+      label: t("palette.abort"),
+      hint: t("palette.abortHint"),
       run: () => abort(),
     },
     {
       id: "copy",
-      label: "Copy last reply",
-      hint: "复制最近一条助手回复",
+      label: t("palette.copyLast"),
+      hint: t("palette.copyLastHint"),
       run: () => {
         const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
         if (last && last.kind === "assistant") {
@@ -936,28 +938,22 @@ function TabRuntime({
             .trim();
           if (text) {
             void navigator.clipboard.writeText(text);
-            flashToast("已复制");
+            flashToast(t("toast.copied"));
           }
         }
       },
     },
     {
       id: "export",
-      label: "Export conversation as Markdown",
-      hint: "整段对话复制到剪贴板",
+      label: t("palette.exportMd"),
+      hint: t("palette.exportMdHint"),
       run: () => {
         const md = conversationToMarkdown(state.messages);
         if (md) {
           void navigator.clipboard.writeText(md);
-          flashToast("整段对话已复制为 Markdown");
+          flashToast(t("toast.copiedMd"));
         }
       },
-    },
-    {
-      id: "help",
-      label: "Show shortcuts",
-      hint: "⌘K · ⌘N · ⌘L",
-      run: () => flashToast("⌘K commands · ⌘N new chat · ⌘L focus composer"),
     },
   ];
 
