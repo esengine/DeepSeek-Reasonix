@@ -56,14 +56,25 @@
 
 ## Install
 
+Requires Node ≥ 22. Works on macOS · Linux · Windows (PowerShell · Git Bash · Windows Terminal).
+
+Install Reasonix globally if you want the `reasonix` command available on your `PATH`:
+
 ```bash
-cd my-project
-npx reasonix code   # paste a DeepSeek API key on first run; persists after
+npm install -g reasonix
+reasonix code my-project   # paste a DeepSeek API key on first run; persists after
 ```
 
-Requires Node ≥ 22. Works on macOS · Linux · Windows (PowerShell · Git Bash · Windows Terminal). Grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reasonix code --help` for flags.
+Or run it once without installing globally:
 
-`npx` is the recommended path — no global install, always latest. If you use Reasonix daily and want it on `PATH`, run `reasonix update` once.
+```bash
+cd my-project
+npx reasonix code          # always uses the latest package by default
+```
+
+Grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reasonix code --help` for flags.
+
+If you use Reasonix daily, global install is the simplest path. If you just want to try it, use `npx`.
 
 | Command | When |
 |---|---|
