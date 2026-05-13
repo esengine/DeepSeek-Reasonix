@@ -231,4 +231,6 @@ Scoped starter tickets — each with background, code pointers, acceptance crite
   <sub>MIT — see <a href="./LICENSE">LICENSE</a></sub>
   <br/>
   <sub>Built by the community at <a href="https://github.com/esengine/reasonix/graphs/contributors">esengine/reasonix</a></sub>
+  <br/>
+  <sub>Special thanks to <a href="https://xhslink.com/m/80ngts127cA">AIGC Link</a> for the promotions on XiaoHongShu.</sub>
 </p>
