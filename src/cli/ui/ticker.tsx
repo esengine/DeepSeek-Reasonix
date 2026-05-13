@@ -63,6 +63,19 @@ export function useSlowTick(): number {
   return useAnimation({ interval: SLOW_TICK_MS, isActive }).frame;
 }
 
+/**
+ * Cursor blink — 1Hz while the heartbeat is running; forced visible when
+ * the ticker is suspended. Without the active-guard the raw frame stays
+ * at whatever value it last reached (issue #728): a turn that lasts an
+ * odd number of seconds leaves the cursor stuck off, so the user can't
+ * tell where input lands.
+ */
+export function useCursorBlink(): boolean {
+  const isActive = useTickerActive();
+  const tick = useSlowTick();
+  return !isActive || tick % 2 === 0;
+}
+
 /** Seconds elapsed since mount. Re-renders at 1Hz via the slow tick. */
 export function useElapsedSeconds(): number {
   const [start] = useState(() => Date.now());
