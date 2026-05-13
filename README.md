@@ -86,6 +86,18 @@ If you use Reasonix daily, global install is the simplest path. If you just want
 
 Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`) are in `reasonix --help` and the [CLI reference](https://esengine.github.io/DeepSeek-Reasonix/#cli).
 
+### Desktop client (prerelease)
+
+A native Tauri client for users who want a GUI over the same loop. Multi-tab, the right-panel shows files the agent has read or edited this session, the same cost / cache / token meters live at the bottom. Same DeepSeek API key, same `~/.reasonix` config — the desktop bundles its own Node runtime, no separate `npm install` step.
+
+Download platform installers from [GitHub Releases](https://github.com/esengine/DeepSeek-Reasonix/releases). The desktop ships as a **prerelease**: the loop and protocol are the same as the CLI, but the UI is still being polished and the installers aren't code-signed yet.
+
+- **macOS** — first launch hits Gatekeeper. One-time fix: `xattr -dr com.apple.quarantine /Applications/Reasonix.app` (or right-click → Open → confirm).
+- **Windows** — SmartScreen warns "Unknown publisher". Click **More info → Run anyway**.
+- **Linux** — `.deb` and `.AppImage` ship plain, no extra step.
+
+The CLI remains the canonical surface. Anything that lands in the CLI is also available from the desktop's composer.
+
 <details>
 <summary><strong>Working in another folder · chat vs. code · author a skill</strong></summary>
 
