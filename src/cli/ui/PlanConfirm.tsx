@@ -24,7 +24,9 @@ export interface PlanConfirmProps {
 
 const DEFAULT_DETAIL_LINES = 12;
 const MIN_DETAIL_LINES = 6;
+/** Header + step list + dividers + footer hints + picker — what's left over for the detail window when expanded. */
 const EXPANDED_MODAL_OVERHEAD_ROWS = 12;
+/** Card stripe + outer dividers — rows the modal needs even when the detail window owns everything else. */
 const EXPANDED_DETAIL_CHROME_ROWS = 4;
 
 function PlanConfirmInner({ plan, steps, summary, onChoose }: PlanConfirmProps) {

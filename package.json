@@ -96,6 +96,7 @@
     "marked": "^15.0.12",
     "preact": "^10.22.0",
     "simple-git-hooks": "^2.13.1",
+    "strip-ansi": "^7.1.0",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",

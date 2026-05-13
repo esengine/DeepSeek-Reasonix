@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import { render } from "ink-testing-library";
 import React from "react";
+import stripAnsi from "strip-ansi";
 import { describe, expect, it } from "vitest";
 import { PlanConfirm } from "../src/cli/ui/PlanConfirm.js";
 import { ViewportBudgetProvider, useReserveRows } from "../src/cli/ui/layout/viewport-budget.js";
@@ -31,10 +32,6 @@ function ModalHost({ children }: { children: React.ReactNode }): React.ReactElem
 
 async function nextFrame(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function stripAnsi(text: string): string {
-  return text.replaceAll("", "").replace(/\[[0-9;]*m/g, "");
 }
 
 function blankLinesBetween(out: string, before: string, after: string): number {
