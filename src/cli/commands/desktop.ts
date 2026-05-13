@@ -585,6 +585,7 @@ function mintSessionFor(rootDir: string): string {
 function buildRuntimeFor(tab: Tab): RuntimeState {
   const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: tab.toolset.tools.specs() });
+  const reasoningEffort = loadReasoningEffort();
   const loop = new CacheFirstLoop({
     client,
     prefix,
@@ -592,8 +593,8 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     model: tab.currentModel,
     budgetUsd: tab.budgetUsd,
     session: tab.currentSession,
+    reasoningEffort,
   });
-  const reasoningEffort = loadReasoningEffort();
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };
   return { loop, eventizer, ctx };
@@ -1270,7 +1271,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           const resolved = resolvePreset(tab.currentPreset);
           tab.currentModel = resolved.model;
           savePreset(tab.currentPreset);
-          saveReasoningEffort(resolved.reasoningEffort);
           tab.system = codeSystemPrompt(tab.rootDir, {
             hasSemanticSearch: tab.toolset.semantic.enabled,
             modelId: tab.currentModel,

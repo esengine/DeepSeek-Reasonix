@@ -44,7 +44,6 @@ import {
   resolveThemePreference,
   saveEditMode,
   savePreset,
-  saveReasoningEffort,
   saveTheme,
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
@@ -3971,7 +3970,6 @@ function AppInner({
                           preset: outcome.name,
                         });
                         try {
-                          saveReasoningEffort(p.reasoningEffort);
                           savePreset(outcome.name);
                         } catch {
                           /* disk full / perms — runtime change still took effect */

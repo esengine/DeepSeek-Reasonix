@@ -1,4 +1,4 @@
-import { savePreset, saveReasoningEffort } from "@/config.js";
+import { savePreset } from "@/config.js";
 import { t } from "@/i18n/index.js";
 import { PRESETS } from "../../presets.js";
 import type { SlashHandler } from "../dispatch.js";
@@ -50,7 +50,6 @@ const preset: SlashHandler = (args, loop, ctx) => {
     ctx.dispatch?.({ type: "session.model.change", model: p.model });
     ctx.dispatch?.({ type: "session.preset.change", preset: presetName });
     try {
-      saveReasoningEffort(p.reasoningEffort);
       savePreset(presetName);
     } catch {
       /* disk full / perms — runtime change still took effect */
