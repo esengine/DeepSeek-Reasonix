@@ -64,8 +64,17 @@ export type PlanItem = {
   note?: string;
 };
 
+function derivePlanBadge(items: PlanItem[]): { cls: "run" | "ok" | "warn" | "err"; label: string } {
+  if (items.some((x) => x.status === "failed")) return { cls: "err", label: "失败" };
+  if (items.some((x) => x.status === "blocked")) return { cls: "warn", label: "阻塞" };
+  if (items.some((x) => x.status === "active")) return { cls: "run", label: "运行中" };
+  if (items.length > 0 && items.every((x) => x.status === "done")) return { cls: "ok", label: "已完成" };
+  return { cls: "run", label: "待开始" };
+}
+
 export function PlanCardView({ items, title = "计划" }: { items: PlanItem[]; title?: string }) {
   const done = items.filter((x) => x.status === "done").length;
+  const badge = derivePlanBadge(items);
   return (
     <Card
       tone="accent"
@@ -77,7 +86,7 @@ export function PlanCardView({ items, title = "计划" }: { items: PlanItem[]; t
           <span>
             {done}/{items.length}
           </span>
-          <span className="pill-tag run">运行中</span>
+          <span className={`pill-tag ${badge.cls}`}>{badge.label}</span>
         </>
       }
     >

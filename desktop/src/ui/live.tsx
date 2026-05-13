@@ -144,11 +144,6 @@ export function ToolRunningCard({
         <span className="pill-tag run">running</span>
         <span className="timer">{fmtElapsed(elapsedMs)}</span>
       </div>
-      <div className="body">
-        <div className="skel-line w-90" />
-        <div className="skel-line w-70" />
-        <div className="skel-line w-60" />
-      </div>
       {logLines && logLines.length > 0 ? (
         <div className="live-log">
           {logLines.map((ln, i) => (
@@ -161,7 +156,13 @@ export function ToolRunningCard({
             </div>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <div className="body">
+          <div className="skel-line w-90" />
+          <div className="skel-line w-70" />
+          <div className="skel-line w-60" />
+        </div>
+      )}
     </div>
   );
 }

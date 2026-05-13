@@ -295,8 +295,6 @@ function PageModels({
       desc: "自动从 flash 起步，遇复杂任务升级到 pro，兼顾速度与质量。",
       ctx: "—",
       out: "—",
-      speed: "—",
-      bench: "动态",
     },
     {
       id: "flash" as const,
@@ -305,8 +303,6 @@ function PageModels({
       desc: "通用对话模型，速度快、长上下文、价格友好。",
       ctx: "1M",
       out: "8K",
-      speed: "180 t/s",
-      bench: "MMLU 88.5",
     },
     {
       id: "pro" as const,
@@ -315,8 +311,6 @@ function PageModels({
       desc: "深度推理模型，先生成可解释的思考链，再给最终答案。",
       ctx: "1M",
       out: "32K",
-      speed: "84 t/s",
-      bench: "AIME 79.8",
     },
   ];
   return (
@@ -343,14 +337,6 @@ function PageModels({
               <div>
                 <span className="k">输出 </span>
                 <span className="v">{m.out}</span>
-              </div>
-              <div>
-                <span className="k">速度 </span>
-                <span className="v">{m.speed}</span>
-              </div>
-              <div>
-                <span className="k">基准 </span>
-                <span className="v">{m.bench}</span>
               </div>
             </div>
           </div>
