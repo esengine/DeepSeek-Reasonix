@@ -1947,6 +1947,13 @@ button {
   background: var(--warning);
 }
 
+.ctx-empty {
+  padding: 8px 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+}
+
 /* mcp list */
 .mcp-row {
   display: flex;

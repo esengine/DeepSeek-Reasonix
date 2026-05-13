@@ -1340,7 +1340,8 @@ function TabRuntime({
           settings={state.settings}
           usage={state.usage}
           workspaceDir={state.settings?.workspaceDir}
-          messages={state.messages}
+          mcpSpecs={state.mcpSpecs}
+          mcpBridged={state.mcpBridged}
         />
 
         <StatusBar

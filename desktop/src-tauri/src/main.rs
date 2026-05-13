@@ -3,6 +3,73 @@
 mod rpc;
 
 use rpc::{RpcState, rpc_send, rpc_spawn};
+use serde::Serialize;
+use std::path::Path;
+
+#[derive(Serialize)]
+struct FileEntry {
+    path: String,
+    depth: u32,
+    kind: &'static str,
+    name: String,
+}
+
+const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "out"];
+const MAX_ENTRIES: usize = 800;
+
+fn walk_dir(dir: &Path, depth: u32, max_depth: u32, out: &mut Vec<FileEntry>) {
+    if depth > max_depth || out.len() >= MAX_ENTRIES {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut items: Vec<_> = entries.flatten().collect();
+    items.sort_by_key(|e| {
+        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        (!is_dir, e.file_name())
+    });
+    for entry in items {
+        if out.len() >= MAX_ENTRIES {
+            break;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // Hidden files (.git, .next, .env) and well-known noise dirs.
+        if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else { continue };
+        let path = entry.path().to_string_lossy().into_owned();
+        if file_type.is_dir() {
+            out.push(FileEntry {
+                path: path.clone(),
+                depth,
+                kind: "dir",
+                name,
+            });
+            walk_dir(&entry.path(), depth + 1, max_depth, out);
+        } else if file_type.is_file() {
+            out.push(FileEntry {
+                path,
+                depth,
+                kind: "file",
+                name,
+            });
+        }
+    }
+}
+
+#[tauri::command]
+fn list_workspace_tree(root: String, max_depth: u32) -> Result<Vec<FileEntry>, String> {
+    let root_path = Path::new(&root);
+    if !root_path.is_dir() {
+        return Err(format!("not a directory: {root}"));
+    }
+    let mut out = Vec::new();
+    walk_dir(root_path, 0, max_depth.min(4), &mut out);
+    Ok(out)
+}
 
 #[tauri::command]
 fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<(), String> {
@@ -48,7 +115,12 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(RpcState::default())
-        .invoke_handler(tauri::generate_handler![rpc_spawn, rpc_send, open_in_editor])
+        .invoke_handler(tauri::generate_handler![
+            rpc_spawn,
+            rpc_send,
+            open_in_editor,
+            list_workspace_tree
+        ])
         .setup(|app| {
             if std::env::var("REASONIX_DEVTOOLS").is_ok() {
                 #[cfg(debug_assertions)]

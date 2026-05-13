@@ -1,27 +1,39 @@
-import { useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+import type { Settings, UsageStats } from "../App";
 import { I } from "../icons";
-import type { ChatMessage, Settings, UsageStats } from "../App";
+import type { McpSpecInfo } from "../protocol";
 
 type Tab = "files" | "tools" | "memory" | "rules";
+
+type FileEntry = {
+  path: string;
+  depth: number;
+  kind: "dir" | "file";
+  name: string;
+};
+
+const CONTEXT_MAX_TOKENS = 1_000_000;
 
 export function ContextPanel({
   settings,
   usage,
   workspaceDir,
-  messages,
+  mcpSpecs,
+  mcpBridged,
 }: {
   settings: Settings | null;
   usage: UsageStats;
   workspaceDir?: string;
-  messages: ChatMessage[];
+  mcpSpecs: McpSpecInfo[];
+  mcpBridged: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("files");
   const used = usage.cacheMissTokens;
   const cached = usage.cacheHitTokens;
-  const max = 128_000;
-  const usedPct = Math.min(100, (used / max) * 100);
-  const cachedPct = Math.min(100, (cached / max) * 100);
-  const free = Math.max(0, max - used - cached);
+  const usedPct = Math.min(100, (used / CONTEXT_MAX_TOKENS) * 100);
+  const cachedPct = Math.min(100, (cached / CONTEXT_MAX_TOKENS) * 100);
+  const free = Math.max(0, CONTEXT_MAX_TOKENS - used - cached);
   return (
     <aside className="ctx">
       <div className="ctx-tabs">
@@ -44,7 +56,7 @@ export function ContextPanel({
           <div className="h">
             <span>上下文 · tokens</span>
             <span className="right">
-              {(used + cached).toLocaleString()} / {max.toLocaleString()}
+              {(used + cached).toLocaleString()} / {CONTEXT_MAX_TOKENS.toLocaleString()}
             </span>
           </div>
           <div className="meter">
@@ -67,7 +79,7 @@ export function ContextPanel({
         </div>
 
         {tab === "files" && <CtxFiles workspaceDir={workspaceDir} />}
-        {tab === "tools" && <CtxTools messages={messages} />}
+        {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
         {tab === "memory" && <CtxMemory />}
         {tab === "rules" && <CtxRules settings={settings} />}
       </div>
@@ -76,78 +88,95 @@ export function ContextPanel({
 }
 
 function CtxFiles({ workspaceDir }: { workspaceDir?: string }) {
+  const [entries, setEntries] = useState<FileEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workspaceDir) {
+      setEntries(null);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setEntries(null);
+    setError(null);
+    invoke<FileEntry[]>("list_workspace_tree", { root: workspaceDir, maxDepth: 2 })
+      .then((rows) => {
+        if (!cancelled) setEntries(rows);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(String((err as { message?: string })?.message ?? err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceDir]);
+
+  const fileCount = entries?.filter((e) => e.kind === "file").length ?? 0;
+
   return (
     <div className="ctx-block">
       <div className="h">
         <span>当前工作区</span>
-        <span className="right">—</span>
+        <span className="right">{entries ? `${fileCount} files` : "—"}</span>
       </div>
       <div className="tree">
-        {workspaceDir ? (
-          <div className="node">
-            <span className="ico">
-              <I.folder size={12} />
-            </span>
-            <span className="nm">{workspaceDir.split(/[\\/]/).pop()}</span>
-          </div>
+        {!workspaceDir ? (
+          <div className="ctx-empty">未选择工作区</div>
+        ) : error ? (
+          <div className="ctx-empty">读取失败：{error}</div>
+        ) : entries === null ? (
+          <div className="ctx-empty">加载中…</div>
+        ) : entries.length === 0 ? (
+          <div className="ctx-empty">空目录</div>
         ) : (
-          <div
-            style={{
-              padding: "8px 4px",
-              fontSize: 11,
-              color: "var(--muted-2)",
-              fontFamily: "IBM Plex Mono, monospace",
-            }}
-          >
-            未选择工作区
-          </div>
+          entries.map((n) => (
+            <div className="node" key={n.path} data-d={n.depth} title={n.path}>
+              <span className="ico">
+                {n.kind === "dir" ? <I.folder size={12} /> : <I.file size={12} />}
+              </span>
+              <span className="nm">
+                {n.name}
+                {n.kind === "dir" ? "/" : ""}
+              </span>
+            </div>
+          ))
         )}
       </div>
     </div>
   );
 }
 
-function CtxTools({ messages }: { messages: ChatMessage[] }) {
-  const entries = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const m of messages) {
-      if (m.kind !== "assistant") continue;
-      for (const s of m.segments) {
-        if (s.kind !== "tool") continue;
-        counts.set(s.name, (counts.get(s.name) ?? 0) + 1);
-      }
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [messages]);
+function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }) {
   return (
     <div className="ctx-block">
       <div className="h">
-        <span>本会话工具</span>
-        <span className="right">{entries.length}</span>
+        <span>MCP 服务器</span>
+        <span className="right">
+          {specs.length === 0 ? "—" : `${specs.length} ${bridged ? "ready" : "loading"}`}
+        </span>
       </div>
-      {entries.length === 0 ? (
-        <div
-          style={{
-            padding: "8px",
-            fontSize: 11.5,
-            color: "var(--muted)",
-            fontFamily: "IBM Plex Mono, monospace",
-          }}
-        >
-          本会话尚未调用工具。
-        </div>
+      {specs.length === 0 ? (
+        <div className="ctx-empty">未配置 MCP 服务器</div>
       ) : (
-        entries.map(([name, n]) => (
-          <div className="mcp-row" key={name}>
-            <span className="ico">
-              <I.wrench size={12} />
-            </span>
-            <div className="body">
-              <div className="n">{name}</div>
-              <div className="m">{n} 次调用</div>
+        specs.map((s) => {
+          const ok = bridged && !s.parseError;
+          return (
+            <div className="mcp-row" key={s.raw}>
+              <span className="ico">
+                <I.wrench size={12} />
+              </span>
+              <div className="body">
+                <div className="n">{s.name ?? s.summary}</div>
+                <div className="m">
+                  {s.transport}
+                  {s.parseError ? ` · ${s.parseError}` : bridged ? " · ready" : " · loading"}
+                </div>
+              </div>
+              <span className="status" data-s={ok ? "ok" : "off"} />
             </div>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );
@@ -160,34 +189,33 @@ function CtxMemory() {
         <span>长期记忆</span>
         <span className="right">—</span>
       </div>
-      <div
-        style={{
-          padding: "8px",
-          fontSize: 11.5,
-          color: "var(--muted)",
-          fontFamily: "IBM Plex Mono, monospace",
-        }}
-      >
-        当前会话尚未记录长期记忆。
-      </div>
+      <div className="ctx-empty">当前会话尚未记录长期记忆。</div>
     </div>
   );
 }
 
 function CtxRules({ settings }: { settings: Settings | null }) {
   const editMode = settings?.editMode ?? "review";
-  const items: { p: string; allow: boolean; desc: string }[] = [
-    { p: editMode === "yolo" ? "* (YOLO)" : editMode === "auto" ? "read_*, search_*" : "需要确认", allow: editMode !== "review", desc: `当前模式：${editMode}` },
-    { p: "run_command, run_background", allow: false, desc: "执行 shell 前需确认" },
-  ];
+  const items: { p: string; allow: boolean; desc: string }[] =
+    editMode === "yolo"
+      ? [{ p: "*", allow: true, desc: "YOLO 模式 · 所有工具调用自动批准" }]
+      : editMode === "auto"
+        ? [
+            { p: "read_file, list_directory, search_files, *", allow: true, desc: "只读工具自动批准" },
+            { p: "run_command (allowlist)", allow: true, desc: "命中 shell 白名单的命令自动批准" },
+            { p: "edit_file, write_file, run_command (其他)", allow: false, desc: "写入与未知 shell 命令需确认" },
+          ]
+        : [
+            { p: "*", allow: false, desc: "Review 模式 · 每个工具调用都需确认" },
+          ];
   return (
     <div className="ctx-block">
       <div className="h">
         <span>自动批准</span>
-        <span className="right">{items.length}</span>
+        <span className="right">{editMode}</span>
       </div>
-      {items.map((r, i) => (
-        <div className="rule" key={i}>
+      {items.map((r) => (
+        <div className="rule" key={r.p}>
           <div className="top">
             <span className={`pat ${r.allow ? "" : "deny"}`}>{r.p}</span>
             <span className={`sw ${r.allow ? "" : "deny"}`}>{r.allow ? "ALLOW" : "ASK"}</span>
