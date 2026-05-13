@@ -150,6 +150,11 @@ export type SkillsEvent = {
   items: SkillInfo[];
 };
 
+export type CtxBreakdownEvent = {
+  type: "$ctx_breakdown";
+  reservedTokens: number;
+};
+
 export type LoadedSegment =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
@@ -337,6 +342,7 @@ export type IncomingEvent = { tabId?: string } & (
   | TabClosedEvent
   | McpSpecsEvent
   | SkillsEvent
+  | CtxBreakdownEvent
   | UserMessageEvent
   | ModelTurnStartedEvent
   | ModelDeltaEvent

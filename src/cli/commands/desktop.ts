@@ -59,6 +59,7 @@ import {
   timestampSuffix,
 } from "../../memory/session.js";
 import { SkillStore } from "../../skills.js";
+import { countTokens } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
 import { VERSION } from "../../version.js";
@@ -269,6 +270,11 @@ interface McpSpecsEvent {
   bridged: boolean;
 }
 
+interface CtxBreakdownEvent {
+  type: "$ctx_breakdown";
+  reservedTokens: number;
+}
+
 interface SkillInfo {
   name: string;
   description: string;
@@ -308,7 +314,8 @@ type EmittableEvent =
   | TabOpenedEvent
   | TabClosedEvent
   | McpSpecsEvent
-  | SkillsEvent;
+  | SkillsEvent
+  | CtxBreakdownEvent;
 
 function emit(ev: EmittableEvent, tabId?: string): void {
   const payload = tabId ? { ...ev, tabId } : ev;
@@ -449,6 +456,20 @@ function emitMcpSpecs(tab: Tab): void {
   const cfg = readConfig();
   const specs = (cfg.mcp ?? []).map(summarizeMcpSpec);
   emit({ type: "$mcp_specs", specs, bridged: false }, tab.id);
+}
+
+// reserved = system prompt + tool specs, constant for the tab's lifetime once
+// the loop is built. The growing log portion is already covered by the
+// per-turn cache hit/miss numbers in `model.final`.
+function emitCtxBreakdown(tab: Tab): void {
+  if (!tab.runtime) return;
+  try {
+    const sys = countTokens(tab.runtime.loop.prefix.system);
+    const tools = countTokens(JSON.stringify(tab.runtime.loop.prefix.toolSpecs));
+    emit({ type: "$ctx_breakdown", reservedTokens: sys + tools }, tab.id);
+  } catch {
+    // tokenizer warmup can throw on first call before the data file loads
+  }
 }
 
 function emitSkills(tab: Tab): void {
@@ -915,6 +936,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   emitSettings(first);
   emitMcpSpecs(first);
   emitSkills(first);
+  emitCtxBreakdown(first);
   void emitBalance(first);
 
   const rl = createInterface({ input: stdin });
@@ -940,6 +962,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           emitSettings(tab);
           emitMcpSpecs(tab);
           emitSkills(tab);
+          emitCtxBreakdown(tab);
           void emitBalance(tab);
         } catch (err) {
           emit({ type: "$error", message: `tab_open failed: ${(err as Error).message}` });

@@ -126,6 +126,8 @@ export type UsageStats = {
   cacheMissTokens: number;
   lastCallCacheHit: number | null;
   lastCallCacheMiss: number | null;
+  /** System prompt + tool specs — constant for the session, sent on tab open. */
+  reservedTokens: number;
 };
 
 export type SessionInfo = {
@@ -347,6 +349,7 @@ function zeroUsage(): UsageStats {
     cacheMissTokens: 0,
     lastCallCacheHit: null,
     lastCallCacheMiss: null,
+    reservedTokens: 0,
   };
 }
 
@@ -456,6 +459,8 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, mcpSpecs: ev.specs, mcpBridged: ev.bridged };
     case "$skills":
       return { ...state, skills: ev.items };
+    case "$ctx_breakdown":
+      return { ...state, usage: { ...state.usage, reservedTokens: ev.reservedTokens } };
     case "$balance":
       return {
         ...state,
@@ -583,6 +588,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         cacheMissTokens: state.usage.cacheMissTokens + callMiss,
         lastCallCacheHit: hasCall ? callHit : state.usage.lastCallCacheHit,
         lastCallCacheMiss: hasCall ? callMiss : state.usage.lastCallCacheMiss,
+        reservedTokens: state.usage.reservedTokens,
       };
       return {
         ...state,

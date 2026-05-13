@@ -29,11 +29,16 @@ export function ContextPanel({
   mcpBridged: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("files");
-  const used = usage.cacheMissTokens;
-  const cached = usage.cacheHitTokens;
+  const reserved = usage.reservedTokens;
+  // After a warm cache turn the API counts the reserved prefix inside cacheHit;
+  // subtract to keep the bar segments visually disjoint. Cold cache shows the
+  // reserved portion in cacheMiss instead, so do the same for `used`.
+  const cached = Math.max(0, usage.cacheHitTokens - reserved);
+  const used = Math.max(0, usage.cacheMissTokens - Math.max(0, reserved - usage.cacheHitTokens));
+  const reservedPct = Math.min(100, (reserved / CONTEXT_MAX_TOKENS) * 100);
   const usedPct = Math.min(100, (used / CONTEXT_MAX_TOKENS) * 100);
   const cachedPct = Math.min(100, (cached / CONTEXT_MAX_TOKENS) * 100);
-  const free = Math.max(0, CONTEXT_MAX_TOKENS - used - cached);
+  const free = Math.max(0, CONTEXT_MAX_TOKENS - reserved - used - cached);
   return (
     <aside className="ctx">
       <div className="ctx-tabs">
@@ -56,21 +61,27 @@ export function ContextPanel({
           <div className="h">
             <span>上下文 · tokens</span>
             <span className="right">
-              {(used + cached).toLocaleString()} / {CONTEXT_MAX_TOKENS.toLocaleString()}
+              {(reserved + used + cached).toLocaleString()} /{" "}
+              {CONTEXT_MAX_TOKENS.toLocaleString()}
             </span>
           </div>
           <div className="meter">
-            <span className="used" style={{ width: `${usedPct}%` }} />
+            <span className="rsvd" style={{ width: `${reservedPct}%` }} />
             <span className="cached" style={{ width: `${cachedPct}%` }} />
+            <span className="used" style={{ width: `${usedPct}%` }} />
           </div>
           <div className="legend">
             <span className="l">
-              <span className="sw u" />
-              已用 <span className="v">{used.toLocaleString()}</span>
+              <span className="sw r" />
+              保留 <span className="v">{reserved.toLocaleString()}</span>
             </span>
             <span className="l">
               <span className="sw c" />
               缓存 <span className="v">{cached.toLocaleString()}</span>
+            </span>
+            <span className="l">
+              <span className="sw u" />
+              已用 <span className="v">{used.toLocaleString()}</span>
             </span>
             <span className="l">
               余 <span className="v">{free.toLocaleString()}</span>
