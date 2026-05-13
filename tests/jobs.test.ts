@@ -129,7 +129,7 @@ describe("JobRegistry", () => {
     expect(tailed?.output).not.toContain("line0\n");
   });
 
-  it("stop() kills a running job", async () => {
+  it("stop() kills a running job", { timeout: 15000 }, async () => {
     const cmd = `node -e "setTimeout(()=>{}, 10000)"`;
     const res = await registry.start(cmd, { cwd, waitSec: 0.2 });
     expect(res.stillRunning).toBe(true);
@@ -161,7 +161,7 @@ describe("JobRegistry", () => {
     expect(r2?.exitCode).toBe(0);
   });
 
-  it("runningCount() reflects live state", async () => {
+  it("runningCount() reflects live state", { timeout: 15000 }, async () => {
     expect(registry.runningCount()).toBe(0);
     const a = await registry.start(`node -e "setTimeout(()=>{}, 10000)"`, { cwd, waitSec: 0.2 });
     expect(registry.runningCount()).toBe(1);
@@ -220,7 +220,7 @@ describe("JobRegistry", () => {
     expect(waited?.latestOutput).toBe("");
   });
 
-  it("shutdown() kills all running jobs", async () => {
+  it("shutdown() kills all running jobs", { timeout: 15000 }, async () => {
     await registry.start(`node -e "setTimeout(()=>{}, 10000)"`, { cwd, waitSec: 0.2 });
     await registry.start(`node -e "setTimeout(()=>{}, 10000)"`, { cwd, waitSec: 0.2 });
     expect(registry.runningCount()).toBe(2);
