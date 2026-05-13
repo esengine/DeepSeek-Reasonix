@@ -155,6 +155,17 @@ export type CtxBreakdownEvent = {
   reservedTokens: number;
 };
 
+export type MemoryEntryInfo = {
+  name: string;
+  scope: "project" | "global";
+  description: string;
+};
+
+export type MemoryEvent = {
+  type: "$memory";
+  entries: MemoryEntryInfo[];
+};
+
 export type LoadedSegment =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
@@ -343,6 +354,7 @@ export type IncomingEvent = { tabId?: string } & (
   | McpSpecsEvent
   | SkillsEvent
   | CtxBreakdownEvent
+  | MemoryEvent
   | UserMessageEvent
   | ModelTurnStartedEvent
   | ModelDeltaEvent

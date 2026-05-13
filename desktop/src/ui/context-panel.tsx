@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState } from "react";
 import type { Settings, UsageStats } from "../App";
 import { I } from "../icons";
-import type { McpSpecInfo } from "../protocol";
+import type { McpSpecInfo, MemoryEntryInfo } from "../protocol";
 
 type Tab = "files" | "tools" | "memory" | "rules";
 
@@ -27,6 +27,7 @@ export function ContextPanel({
   mcpSpecs,
   mcpBridged,
   inContextPaths,
+  memory,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -34,6 +35,7 @@ export function ContextPanel({
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   inContextPaths: string[];
+  memory: MemoryEntryInfo[];
 }) {
   const [tab, setTab] = useState<Tab>("files");
   const reserved = usage.reservedTokens;
@@ -100,7 +102,7 @@ export function ContextPanel({
           <CtxFiles workspaceDir={workspaceDir} inContextPaths={inContextPaths} />
         )}
         {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
-        {tab === "memory" && <CtxMemory />}
+        {tab === "memory" && <CtxMemory entries={memory} />}
         {tab === "rules" && <CtxRules settings={settings} />}
       </div>
     </aside>
@@ -318,14 +320,27 @@ function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }
   );
 }
 
-function CtxMemory() {
+function CtxMemory({ entries }: { entries: MemoryEntryInfo[] }) {
   return (
     <div className="ctx-block">
       <div className="h">
         <span>长期记忆</span>
-        <span className="right">—</span>
+        <span className="right">{entries.length === 0 ? "—" : `${entries.length} 项`}</span>
       </div>
-      <div className="ctx-empty">当前会话尚未记录长期记忆。</div>
+      {entries.length === 0 ? (
+        <div className="ctx-empty">当前会话尚未记录长期记忆。</div>
+      ) : (
+        <div className="mem">
+          {entries.map((m) => (
+            <div className="mem-row" key={`${m.scope}/${m.name}`}>
+              <span className="scope" data-s={m.scope}>
+                {m.scope === "project" ? "项目" : "全局"}
+              </span>
+              <span className="txt">{m.description || m.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

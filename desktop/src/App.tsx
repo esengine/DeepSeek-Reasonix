@@ -14,6 +14,7 @@ import type {
   ConfirmationChoice,
   IncomingEvent,
   McpSpecInfo,
+  MemoryEntryInfo,
   OutgoingCommand,
   PlanVerdict,
   RevisionVerdict,
@@ -189,6 +190,7 @@ type State = {
   skills: SkillInfo[];
   /** Files the agent has read this session — paths as the tool args provided them (typically relative to workspace). */
   inContextPaths: string[];
+  memory: MemoryEntryInfo[];
 };
 
 type DeltaBatchItem = {
@@ -483,6 +485,8 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, skills: ev.items };
     case "$ctx_breakdown":
       return { ...state, usage: { ...state.usage, reservedTokens: ev.reservedTokens } };
+    case "$memory":
+      return { ...state, memory: ev.entries };
     case "$balance":
       return {
         ...state,
@@ -787,6 +791,7 @@ function TabRuntime({
     mcpBridged: false,
     skills: [],
     inContextPaths: [],
+    memory: [],
   });
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -1389,6 +1394,7 @@ function TabRuntime({
           mcpSpecs={state.mcpSpecs}
           mcpBridged={state.mcpBridged}
           inContextPaths={state.inContextPaths}
+          memory={state.memory}
         />
 
         <StatusBar

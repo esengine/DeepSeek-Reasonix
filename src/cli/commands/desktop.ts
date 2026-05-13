@@ -58,6 +58,7 @@ import {
   patchSessionMeta,
   timestampSuffix,
 } from "../../memory/session.js";
+import { MemoryStore } from "../../memory/user.js";
 import { SkillStore } from "../../skills.js";
 import { countTokens } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
@@ -275,6 +276,17 @@ interface CtxBreakdownEvent {
   reservedTokens: number;
 }
 
+interface MemoryEntryInfo {
+  name: string;
+  scope: "project" | "global";
+  description: string;
+}
+
+interface MemoryEvent {
+  type: "$memory";
+  entries: MemoryEntryInfo[];
+}
+
 interface SkillInfo {
   name: string;
   description: string;
@@ -315,7 +327,8 @@ type EmittableEvent =
   | TabClosedEvent
   | McpSpecsEvent
   | SkillsEvent
-  | CtxBreakdownEvent;
+  | CtxBreakdownEvent
+  | MemoryEvent;
 
 function emit(ev: EmittableEvent, tabId?: string): void {
   const payload = tabId ? { ...ev, tabId } : ev;
@@ -456,6 +469,20 @@ function emitMcpSpecs(tab: Tab): void {
   const cfg = readConfig();
   const specs = (cfg.mcp ?? []).map(summarizeMcpSpec);
   emit({ type: "$mcp_specs", specs, bridged: false }, tab.id);
+}
+
+function emitMemory(tab: Tab): void {
+  try {
+    const store = new MemoryStore({ projectRoot: tab.rootDir });
+    const entries: MemoryEntryInfo[] = store.list().map((e) => ({
+      name: e.name,
+      scope: e.scope,
+      description: e.description,
+    }));
+    emit({ type: "$memory", entries }, tab.id);
+  } catch (err) {
+    emit({ type: "$error", message: `memory_get failed: ${(err as Error).message}` }, tab.id);
+  }
 }
 
 // reserved = system prompt + tool specs, constant for the tab's lifetime once
@@ -936,6 +963,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   emitSettings(first);
   emitMcpSpecs(first);
   emitSkills(first);
+  emitMemory(first);
   emitCtxBreakdown(first);
   void emitBalance(first);
 
@@ -962,6 +990,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           emitSettings(tab);
           emitMcpSpecs(tab);
           emitSkills(tab);
+          emitMemory(tab);
           emitCtxBreakdown(tab);
           void emitBalance(tab);
         } catch (err) {
