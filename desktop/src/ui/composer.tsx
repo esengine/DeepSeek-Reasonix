@@ -16,8 +16,8 @@ export type EditMode = "review" | "auto" | "yolo";
 
 const PRESET_INFO: Record<PresetName, { label: string; badge: string; desc: string }> = {
   auto: { label: "auto", badge: "AUTO", desc: "Flash → Pro 自动升级" },
-  flash: { label: "deepseek-chat", badge: "FLASH", desc: "快、便宜、长上下文" },
-  pro: { label: "deepseek-reasoner", badge: "PRO", desc: "深度推理 · R1" },
+  flash: { label: "deepseek-v4-flash", badge: "FLASH", desc: "快、便宜、长上下文" },
+  pro: { label: "deepseek-v4-pro", badge: "PRO", desc: "深度推理" },
 };
 
 const MODE_INFO: { k: EditMode; label: string; icon: React.ReactNode; hint: string }[] = [

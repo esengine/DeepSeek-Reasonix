@@ -1311,7 +1311,7 @@ function TabRuntime({
                 busy={state.busy}
                 textareaRef={composerRef}
                 preset={state.settings?.preset ?? "auto"}
-                modelLabel={state.settings?.model ?? "deepseek-chat"}
+                modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
                 onPresetChange={(preset) => {
                   saveSettings({ preset });
                   flashToast(`已切换到 ${preset.toUpperCase()}`);
