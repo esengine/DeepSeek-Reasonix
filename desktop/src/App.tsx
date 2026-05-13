@@ -187,6 +187,8 @@ type State = {
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   skills: SkillInfo[];
+  /** Files the agent has read this session — paths as the tool args provided them (typically relative to workspace). */
+  inContextPaths: string[];
 };
 
 type DeltaBatchItem = {
@@ -338,6 +340,26 @@ function reduce(state: State, action: Action): State {
     case "mention_preview":
       return { ...state, mentionPreview: action.preview };
   }
+}
+
+const FILE_READING_TOOLS = new Set([
+  "read_file",
+  "list_directory",
+  "directory_tree",
+  "search_files",
+  "get_file_info",
+  "glob_files",
+]);
+
+function extractToolFilePath(name: string, args: string): string | null {
+  if (!FILE_READING_TOOLS.has(name)) return null;
+  try {
+    const parsed = JSON.parse(args) as { path?: unknown };
+    if (typeof parsed?.path === "string") return parsed.path;
+  } catch {
+    // malformed args — skip; tool will error on the real side anyway
+  }
+  return null;
 }
 
 function zeroUsage(): UsageStats {
@@ -522,6 +544,15 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         });
         return { kind: "assistant", turn: m.turn, segments, pending: false };
       });
+      const inContextPaths: string[] = [];
+      for (const m of loaded) {
+        if (m.kind !== "assistant") continue;
+        for (const s of m.segments) {
+          if (s.kind !== "tool") continue;
+          const p = extractToolFilePath(s.name, s.args);
+          if (p && !inContextPaths.includes(p)) inContextPaths.push(p);
+        }
+      }
       return {
         ...state,
         busy: false,
@@ -540,6 +571,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           cacheHitTokens: ev.carryover.cacheHitTokens,
           cacheMissTokens: ev.carryover.cacheMissTokens,
         },
+        inContextPaths,
       };
     }
     case "$error":
@@ -620,9 +652,15 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           };
         }),
       };
-    case "tool.intent":
+    case "tool.intent": {
+      const filePath = extractToolFilePath(ev.name, ev.args);
+      const inContextPaths =
+        filePath && !state.inContextPaths.includes(filePath)
+          ? [...state.inContextPaths, filePath]
+          : state.inContextPaths;
       return {
         ...state,
+        inContextPaths,
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
@@ -649,6 +687,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           };
         }),
       };
+    }
     case "tool.result":
       return {
         ...state,
@@ -747,6 +786,7 @@ function TabRuntime({
     mcpSpecs: [],
     mcpBridged: false,
     skills: [],
+    inContextPaths: [],
   });
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -1348,6 +1388,7 @@ function TabRuntime({
           workspaceDir={state.settings?.workspaceDir}
           mcpSpecs={state.mcpSpecs}
           mcpBridged={state.mcpBridged}
+          inContextPaths={state.inContextPaths}
         />
 
         <StatusBar

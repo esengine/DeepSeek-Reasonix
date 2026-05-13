@@ -71,6 +71,57 @@ fn list_workspace_tree(root: String, max_depth: u32) -> Result<Vec<FileEntry>, S
     Ok(out)
 }
 
+#[derive(Serialize)]
+struct GitStatusEntry {
+    path: String,
+    kind: &'static str,
+}
+
+#[tauri::command]
+fn git_status(root: String) -> Result<Vec<GitStatusEntry>, String> {
+    use std::process::Command;
+    let root_path = Path::new(&root);
+    if !root_path.is_dir() {
+        return Err(format!("not a directory: {root}"));
+    }
+    let mut cmd = Command::new("git");
+    cmd.arg("status").arg("--porcelain").arg("-z").current_dir(root_path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = match cmd.output() {
+        Ok(o) => o,
+        Err(_) => return Ok(Vec::new()), // not a git repo / no git on PATH — silent
+    };
+    if !output.status.success() {
+        return Ok(Vec::new()); // not a git repo — silent
+    }
+    let mut out = Vec::new();
+    for rec in output.stdout.split(|&b| b == 0) {
+        if rec.len() < 4 {
+            continue;
+        }
+        // `git status --porcelain -z` format: `XY ` + path, where X / Y are
+        // index / worktree statuses. Map both to a coarse `kind`.
+        let x = rec[0];
+        let y = rec[1];
+        let kind = match (x, y) {
+            (b'?', b'?') => "untracked",
+            (b'A', _) | (_, b'A') => "added",
+            (b'D', _) | (_, b'D') => "deleted",
+            (b'M', _) | (_, b'M') => "modified",
+            (b'R', _) | (_, b'R') => "renamed",
+            _ => continue,
+        };
+        let path = String::from_utf8_lossy(&rec[3..]).into_owned();
+        out.push(GitStatusEntry { path, kind });
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<(), String> {
     use std::process::{Command, Stdio};
@@ -119,7 +170,8 @@ fn main() {
             rpc_spawn,
             rpc_send,
             open_in_editor,
-            list_workspace_tree
+            list_workspace_tree,
+            git_status
         ])
         .setup(|app| {
             if std::env::var("REASONIX_DEVTOOLS").is_ok() {

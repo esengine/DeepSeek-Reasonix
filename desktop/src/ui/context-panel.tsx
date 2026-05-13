@@ -13,6 +13,11 @@ type FileEntry = {
   name: string;
 };
 
+type GitStatusEntry = {
+  path: string;
+  kind: string;
+};
+
 const CONTEXT_MAX_TOKENS = 1_000_000;
 
 export function ContextPanel({
@@ -21,12 +26,14 @@ export function ContextPanel({
   workspaceDir,
   mcpSpecs,
   mcpBridged,
+  inContextPaths,
 }: {
   settings: Settings | null;
   usage: UsageStats;
   workspaceDir?: string;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
+  inContextPaths: string[];
 }) {
   const [tab, setTab] = useState<Tab>("files");
   const reserved = usage.reservedTokens;
@@ -89,7 +96,9 @@ export function ContextPanel({
           </div>
         </div>
 
-        {tab === "files" && <CtxFiles workspaceDir={workspaceDir} />}
+        {tab === "files" && (
+          <CtxFiles workspaceDir={workspaceDir} inContextPaths={inContextPaths} />
+        )}
         {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
         {tab === "memory" && <CtxMemory />}
         {tab === "rules" && <CtxRules settings={settings} />}
@@ -98,16 +107,24 @@ export function ContextPanel({
   );
 }
 
-function CtxFiles({ workspaceDir }: { workspaceDir?: string }) {
+function CtxFiles({
+  workspaceDir,
+  inContextPaths,
+}: {
+  workspaceDir?: string;
+  inContextPaths: string[];
+}) {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [modified, setModified] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (!workspaceDir) {
       setEntries(null);
       setError(null);
       setCollapsed(new Set());
+      setModified(new Set());
       return;
     }
     let cancelled = false;
@@ -125,6 +142,50 @@ function CtxFiles({ workspaceDir }: { workspaceDir?: string }) {
       cancelled = true;
     };
   }, [workspaceDir]);
+
+  // Poll git status every 5s. Silent if the workspace isn't a git repo —
+  // the Rust side returns an empty list rather than erroring.
+  useEffect(() => {
+    if (!workspaceDir) return;
+    let cancelled = false;
+    const refresh = () => {
+      invoke<GitStatusEntry[]>("git_status", { root: workspaceDir })
+        .then((rows) => {
+          if (cancelled) return;
+          setModified(new Set(rows.map((r) => r.path.replace(/\\/g, "/"))));
+        })
+        .catch(() => {
+          if (!cancelled) setModified(new Set());
+        });
+    };
+    refresh();
+    const t = setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [workspaceDir]);
+
+  const inContextSet = useMemo(() => {
+    return new Set(inContextPaths.map((p) => p.replace(/\\/g, "/")));
+  }, [inContextPaths]);
+
+  const relativize = (absPath: string): string => {
+    if (!workspaceDir) return absPath;
+    const root = workspaceDir.replace(/\\/g, "/");
+    const norm = absPath.replace(/\\/g, "/");
+    if (norm.startsWith(`${root}/`)) return norm.slice(root.length + 1);
+    if (norm === root) return "";
+    return norm;
+  };
+
+  const statusFor = (e: FileEntry): "m" | "c" | null => {
+    if (e.kind !== "file") return null;
+    const rel = relativize(e.path);
+    if (modified.has(rel)) return "m";
+    if (inContextSet.has(rel) || inContextSet.has(e.path.replace(/\\/g, "/"))) return "c";
+    return null;
+  };
 
   // depth-first traversal — each entry's parent is the nearest dir above it
   // at depth-1, which is what walk_dir on the Rust side guarantees.
@@ -199,6 +260,16 @@ function CtxFiles({ workspaceDir }: { workspaceDir?: string }) {
                 {n.name}
                 {n.kind === "dir" ? "/" : ""}
               </span>
+              {(() => {
+                const s = statusFor(n);
+                return s ? (
+                  <span
+                    className="dot"
+                    data-s={s}
+                    title={s === "m" ? "modified" : "in context"}
+                  />
+                ) : null;
+              })()}
             </div>
           ))
         )}
