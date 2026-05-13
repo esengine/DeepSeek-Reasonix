@@ -1,6 +1,16 @@
 export type ReadyEvent = { type: "$ready" };
 export type ProtocolErrorEvent = { type: "$error"; message: string };
 export type TurnCompleteEvent = { type: "$turn_complete" };
+export type PathAccessRequiredEvent = {
+  type: "$path_access_required";
+  id: number;
+  path: string;
+  intent: "read" | "write";
+  toolName: string;
+  sandboxRoot: string;
+  allowPrefix: string;
+};
+
 export type ConfirmRequiredEvent = {
   type: "$confirm_required";
   id: number;
@@ -341,6 +351,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ProtocolErrorEvent
   | TurnCompleteEvent
   | ConfirmRequiredEvent
+  | PathAccessRequiredEvent
   | ChoiceRequiredEvent
   | PlanRequiredEvent
   | SessionsEvent

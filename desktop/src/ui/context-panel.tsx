@@ -1,40 +1,25 @@
-import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useMemo, useState } from "react";
-import type { Settings, UsageStats } from "../App";
+import { useMemo, useState } from "react";
+import type { SessionFile, Settings, UsageStats } from "../App";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryEntryInfo } from "../protocol";
 
 type Tab = "files" | "tools" | "memory" | "rules";
-
-type FileEntry = {
-  path: string;
-  depth: number;
-  kind: "dir" | "file";
-  name: string;
-};
-
-type GitStatusEntry = {
-  path: string;
-  kind: string;
-};
 
 const CONTEXT_MAX_TOKENS = 1_000_000;
 
 export function ContextPanel({
   settings,
   usage,
-  workspaceDir,
   mcpSpecs,
   mcpBridged,
-  inContextPaths,
+  sessionFiles,
   memory,
 }: {
   settings: Settings | null;
   usage: UsageStats;
-  workspaceDir?: string;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
-  inContextPaths: string[];
+  sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
 }) {
   const [tab, setTab] = useState<Tab>("files");
@@ -98,9 +83,7 @@ export function ContextPanel({
           </div>
         </div>
 
-        {tab === "files" && (
-          <CtxFiles workspaceDir={workspaceDir} inContextPaths={inContextPaths} />
-        )}
+        {tab === "files" && <CtxFiles files={sessionFiles} />}
         {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
         {tab === "memory" && <CtxMemory entries={memory} />}
         {tab === "rules" && <CtxRules settings={settings} />}
@@ -109,171 +92,80 @@ export function ContextPanel({
   );
 }
 
-function CtxFiles({
-  workspaceDir,
-  inContextPaths,
-}: {
-  workspaceDir?: string;
-  inContextPaths: string[];
-}) {
-  const [entries, setEntries] = useState<FileEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [modified, setModified] = useState<Set<string>>(() => new Set());
+type TreeNode =
+  | { kind: "dir"; depth: number; name: string; key: string }
+  | { kind: "file"; depth: number; name: string; key: string; status: "c" | "m" };
 
-  useEffect(() => {
-    if (!workspaceDir) {
-      setEntries(null);
-      setError(null);
-      setCollapsed(new Set());
-      setModified(new Set());
-      return;
+function buildSessionTree(files: SessionFile[]): TreeNode[] {
+  const sorted = [...files].sort((a, b) =>
+    a.path.replace(/\\/g, "/").localeCompare(b.path.replace(/\\/g, "/")),
+  );
+  const out: TreeNode[] = [];
+  const seenDirs = new Set<string>();
+  for (const f of sorted) {
+    const parts = f.path.replace(/\\/g, "/").split("/").filter(Boolean);
+    if (parts.length === 0) continue;
+    let prefix = "";
+    for (let i = 0; i < parts.length - 1; i++) {
+      const seg = parts[i] ?? "";
+      prefix = prefix ? `${prefix}/${seg}` : seg;
+      if (!seenDirs.has(prefix)) {
+        seenDirs.add(prefix);
+        out.push({ kind: "dir", depth: i, name: seg, key: `d:${prefix}` });
+      }
     }
-    let cancelled = false;
-    setEntries(null);
-    setError(null);
-    setCollapsed(new Set());
-    invoke<FileEntry[]>("list_workspace_tree", { root: workspaceDir, maxDepth: 2 })
-      .then((rows) => {
-        if (!cancelled) setEntries(rows);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(String((err as { message?: string })?.message ?? err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceDir]);
-
-  // Poll git status every 5s. Silent if the workspace isn't a git repo —
-  // the Rust side returns an empty list rather than erroring.
-  useEffect(() => {
-    if (!workspaceDir) return;
-    let cancelled = false;
-    const refresh = () => {
-      invoke<GitStatusEntry[]>("git_status", { root: workspaceDir })
-        .then((rows) => {
-          if (cancelled) return;
-          setModified(new Set(rows.map((r) => r.path.replace(/\\/g, "/"))));
-        })
-        .catch(() => {
-          if (!cancelled) setModified(new Set());
-        });
-    };
-    refresh();
-    const t = setInterval(refresh, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [workspaceDir]);
-
-  const inContextSet = useMemo(() => {
-    return new Set(inContextPaths.map((p) => p.replace(/\\/g, "/")));
-  }, [inContextPaths]);
-
-  const relativize = (absPath: string): string => {
-    if (!workspaceDir) return absPath;
-    const root = workspaceDir.replace(/\\/g, "/");
-    const norm = absPath.replace(/\\/g, "/");
-    if (norm.startsWith(`${root}/`)) return norm.slice(root.length + 1);
-    if (norm === root) return "";
-    return norm;
-  };
-
-  const statusFor = (e: FileEntry): "m" | "c" | null => {
-    if (e.kind !== "file") return null;
-    const rel = relativize(e.path);
-    if (modified.has(rel)) return "m";
-    if (inContextSet.has(rel) || inContextSet.has(e.path.replace(/\\/g, "/"))) return "c";
-    return null;
-  };
-
-  // depth-first traversal — each entry's parent is the nearest dir above it
-  // at depth-1, which is what walk_dir on the Rust side guarantees.
-  const parentByPath = useMemo(() => {
-    const map = new Map<string, string | null>();
-    if (!entries) return map;
-    const stack: string[] = [];
-    for (const e of entries) {
-      while (stack.length > e.depth) stack.pop();
-      map.set(e.path, e.depth === 0 ? null : (stack[e.depth - 1] ?? null));
-      if (e.kind === "dir") stack[e.depth] = e.path;
-    }
-    return map;
-  }, [entries]);
-
-  const isVisible = (path: string): boolean => {
-    const parent = parentByPath.get(path);
-    if (!parent) return true;
-    if (collapsed.has(parent)) return false;
-    return isVisible(parent);
-  };
-
-  const toggle = (path: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
+    const leaf = parts[parts.length - 1] ?? "";
+    out.push({
+      kind: "file",
+      depth: parts.length - 1,
+      name: leaf,
+      key: `f:${f.path}`,
+      status: f.status,
     });
+  }
+  return out;
+}
 
-  const fileCount = entries?.filter((e) => e.kind === "file").length ?? 0;
-  const visible = entries?.filter((e) => isVisible(e.path)) ?? [];
-
+function CtxFiles({ files }: { files: SessionFile[] }) {
+  const tree = useMemo(() => buildSessionTree(files), [files]);
   return (
     <div className="ctx-block">
       <div className="h">
-        <span>当前工作区</span>
-        <span className="right">{entries ? `${fileCount} files` : "—"}</span>
+        <span>上下文中的文件</span>
+        <span className="right">{files.length === 0 ? "—" : `${files.length} files`}</span>
       </div>
       <div className="tree">
-        {!workspaceDir ? (
-          <div className="ctx-empty">未选择工作区</div>
-        ) : error ? (
-          <div className="ctx-empty">读取失败：{error}</div>
-        ) : entries === null ? (
-          <div className="ctx-empty">加载中…</div>
-        ) : entries.length === 0 ? (
-          <div className="ctx-empty">空目录</div>
+        {files.length === 0 ? (
+          <div className="ctx-empty">本会话尚未读取或修改文件。</div>
         ) : (
-          visible.map((n) => (
-            <div
-              className="node"
-              key={n.path}
-              data-d={n.depth}
-              data-kind={n.kind}
-              title={n.path}
-              onClick={n.kind === "dir" ? () => toggle(n.path) : undefined}
-            >
-              <span className="caret">
-                {n.kind === "dir" ? (
-                  collapsed.has(n.path) ? (
-                    <I.chevR size={10} />
-                  ) : (
-                    <I.chev size={10} />
-                  )
-                ) : null}
-              </span>
-              <span className="ico">
-                {n.kind === "dir" ? <I.folder size={12} /> : <I.file size={12} />}
-              </span>
-              <span className="nm">
-                {n.name}
-                {n.kind === "dir" ? "/" : ""}
-              </span>
-              {(() => {
-                const s = statusFor(n);
-                return s ? (
-                  <span
-                    className="dot"
-                    data-s={s}
-                    title={s === "m" ? "modified" : "in context"}
-                  />
-                ) : null;
-              })()}
-            </div>
-          ))
+          tree.map((n) =>
+            n.kind === "dir" ? (
+              <div className="node" key={n.key} data-d={n.depth} data-kind="dir">
+                <span className="ico">
+                  <I.folder size={12} />
+                </span>
+                <span className="nm">{n.name}/</span>
+              </div>
+            ) : (
+              <div
+                className="node"
+                key={n.key}
+                data-d={n.depth}
+                data-kind="file"
+                title={n.name}
+              >
+                <span className="ico">
+                  <I.file size={12} />
+                </span>
+                <span className="nm">{n.name}</span>
+                <span
+                  className="dot"
+                  data-s={n.status}
+                  title={n.status === "m" ? "modified" : "in context"}
+                />
+              </div>
+            ),
+          )
         )}
       </div>
     </div>

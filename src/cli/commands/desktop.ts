@@ -212,6 +212,16 @@ interface ConfirmRequiredEvent {
   command: string;
 }
 
+interface PathAccessRequiredEvent {
+  type: "$path_access_required";
+  id: number;
+  path: string;
+  intent: "read" | "write";
+  toolName: string;
+  sandboxRoot: string;
+  allowPrefix: string;
+}
+
 interface ChoiceRequiredEvent {
   type: "$choice_required";
   id: number;
@@ -316,6 +326,7 @@ type EmittableEvent =
   | { type: "$error"; message: string }
   | { type: "$turn_complete" }
   | ConfirmRequiredEvent
+  | PathAccessRequiredEvent
   | ChoiceRequiredEvent
   | PlanRequiredEvent
   | CheckpointRequiredEvent
@@ -942,6 +953,28 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       const payload = req.payload as { command?: string };
       emit(
         { type: "$confirm_required", id: req.id, kind: req.kind, command: payload.command ?? "" },
+        tabId,
+      );
+      return;
+    }
+    if (req.kind === "path_access") {
+      const payload = req.payload as {
+        path: string;
+        intent: "read" | "write";
+        toolName: string;
+        sandboxRoot: string;
+        allowPrefix: string;
+      };
+      emit(
+        {
+          type: "$path_access_required",
+          id: req.id,
+          path: payload.path,
+          intent: payload.intent,
+          toolName: payload.toolName,
+          sandboxRoot: payload.sandboxRoot,
+          allowPrefix: payload.allowPrefix,
+        },
         tabId,
       );
       return;

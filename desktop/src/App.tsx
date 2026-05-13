@@ -35,6 +35,7 @@ import {
   CheckpointApprovalCard,
   ChoiceApprovalCard,
   ConfirmApprovalCard,
+  PathAccessApprovalCard,
   PlanApprovalCard,
   PlanBanner,
   RevisionApprovalCard,
@@ -71,6 +72,15 @@ export type PendingConfirm = {
   id: number;
   kind: "run_command" | "run_background";
   command: string;
+};
+
+export type PendingPathAccess = {
+  id: number;
+  path: string;
+  intent: "read" | "write";
+  toolName: string;
+  sandboxRoot: string;
+  allowPrefix: string;
 };
 
 export type PendingChoice = {
@@ -174,6 +184,7 @@ type State = {
   currentSession?: string;
   messages: ChatMessage[];
   pendingConfirms: PendingConfirm[];
+  pendingPathAccess: PendingPathAccess[];
   pendingChoices: PendingChoice[];
   pendingPlans: PendingPlan[];
   pendingCheckpoints: PendingCheckpoint[];
@@ -188,9 +199,15 @@ type State = {
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   skills: SkillInfo[];
-  /** Files the agent has read this session — paths as the tool args provided them (typically relative to workspace). */
-  inContextPaths: string[];
+  /** Files the agent has read or modified this session — paths as the tool args provided them. */
+  sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
+};
+
+export type SessionFile = {
+  path: string;
+  /** "c": pulled into context (read_file). "m": modified by the agent (edit_file / write_file / multi_edit). */
+  status: "c" | "m";
 };
 
 type DeltaBatchItem = {
@@ -206,6 +223,7 @@ type Action =
   | { t: "rpc_exit"; code: number | null }
   | { t: "clear" }
   | { t: "resolve_confirm"; id: number }
+  | { t: "resolve_path_access"; id: number }
   | { t: "resolve_choice"; id: number }
   | { t: "resolve_plan"; id: number; verdict: PlanVerdict }
   | { t: "resolve_checkpoint"; id: number; verdict: CheckpointVerdict }
@@ -277,17 +295,24 @@ function reduce(state: State, action: Action): State {
         currentSession: undefined,
         messages: [],
         pendingConfirms: [],
+        pendingPathAccess: [],
         pendingChoices: [],
         pendingPlans: [],
         pendingCheckpoints: [],
         pendingRevisions: [],
         activePlan: null,
         usage: zeroUsage(),
+        sessionFiles: [],
       };
     case "resolve_confirm":
       return {
         ...state,
         pendingConfirms: state.pendingConfirms.filter((c) => c.id !== action.id),
+      };
+    case "resolve_path_access":
+      return {
+        ...state,
+        pendingPathAccess: state.pendingPathAccess.filter((p) => p.id !== action.id),
       };
     case "resolve_choice":
       return {
@@ -344,24 +369,56 @@ function reduce(state: State, action: Action): State {
   }
 }
 
-const FILE_READING_TOOLS = new Set([
-  "read_file",
-  "list_directory",
-  "directory_tree",
-  "search_files",
-  "get_file_info",
-  "glob_files",
-]);
+const READING_TOOLS = new Set(["read_file"]);
+const MODIFYING_TOOLS = new Set(["edit_file", "write_file"]);
 
-function extractToolFilePath(name: string, args: string): string | null {
-  if (!FILE_READING_TOOLS.has(name)) return null;
+function extractToolFiles(name: string, args: string): SessionFile[] {
   try {
-    const parsed = JSON.parse(args) as { path?: unknown };
-    if (typeof parsed?.path === "string") return parsed.path;
+    const parsed = JSON.parse(args) as { path?: unknown; edits?: unknown };
+    if (READING_TOOLS.has(name) && typeof parsed?.path === "string") {
+      return [{ path: parsed.path, status: "c" }];
+    }
+    if (MODIFYING_TOOLS.has(name) && typeof parsed?.path === "string") {
+      return [{ path: parsed.path, status: "m" }];
+    }
+    if (name === "multi_edit" && Array.isArray(parsed?.edits)) {
+      const out: SessionFile[] = [];
+      const seen = new Set<string>();
+      for (const e of parsed.edits as Array<{ path?: unknown }>) {
+        if (typeof e?.path === "string" && !seen.has(e.path)) {
+          seen.add(e.path);
+          out.push({ path: e.path, status: "m" });
+        }
+      }
+      return out;
+    }
   } catch {
     // malformed args — skip; tool will error on the real side anyway
   }
-  return null;
+  return [];
+}
+
+function mergeSessionFiles(existing: SessionFile[], adds: SessionFile[]): SessionFile[] {
+  if (adds.length === 0) return existing;
+  const next = [...existing];
+  const indexByPath = new Map<string, number>();
+  next.forEach((f, i) => indexByPath.set(f.path, i));
+  let changed = false;
+  for (const add of adds) {
+    const idx = indexByPath.get(add.path);
+    if (idx === undefined) {
+      indexByPath.set(add.path, next.length);
+      next.push(add);
+      changed = true;
+      continue;
+    }
+    const prev = next[idx];
+    if (!prev || prev.status === "m") continue; // never downgrade m → c
+    if (prev.status === add.status) continue;
+    next[idx] = add;
+    changed = true;
+  }
+  return changed ? next : existing;
 }
 
 function zeroUsage(): UsageStats {
@@ -403,6 +460,21 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingConfirms: [
           ...state.pendingConfirms,
           { id: ev.id, kind: ev.kind, command: ev.command },
+        ],
+      };
+    case "$path_access_required":
+      return {
+        ...state,
+        pendingPathAccess: [
+          ...state.pendingPathAccess,
+          {
+            id: ev.id,
+            path: ev.path,
+            intent: ev.intent,
+            toolName: ev.toolName,
+            sandboxRoot: ev.sandboxRoot,
+            allowPrefix: ev.allowPrefix,
+          },
         ],
       };
     case "$choice_required":
@@ -504,12 +576,14 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         busy: wsChanged ? false : state.busy,
         messages: wsChanged ? [] : state.messages,
         pendingConfirms: wsChanged ? [] : state.pendingConfirms,
+        pendingPathAccess: wsChanged ? [] : state.pendingPathAccess,
         pendingChoices: wsChanged ? [] : state.pendingChoices,
         pendingPlans: wsChanged ? [] : state.pendingPlans,
         pendingCheckpoints: wsChanged ? [] : state.pendingCheckpoints,
         pendingRevisions: wsChanged ? [] : state.pendingRevisions,
         activePlan: wsChanged ? null : state.activePlan,
         usage: wsChanged ? zeroUsage() : state.usage,
+        sessionFiles: wsChanged ? [] : state.sessionFiles,
         settings: {
           reasoningEffort: ev.reasoningEffort,
           editMode: ev.editMode,
@@ -548,13 +622,14 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         });
         return { kind: "assistant", turn: m.turn, segments, pending: false };
       });
-      const inContextPaths: string[] = [];
+      let sessionFiles: SessionFile[] = [];
       for (const m of loaded) {
         if (m.kind !== "assistant") continue;
         for (const s of m.segments) {
           if (s.kind !== "tool") continue;
-          const p = extractToolFilePath(s.name, s.args);
-          if (p && !inContextPaths.includes(p)) inContextPaths.push(p);
+          // For replayed sessions we don't have tool.result ok-status here, but
+          // segments only survive into history if the call completed. Trust it.
+          sessionFiles = mergeSessionFiles(sessionFiles, extractToolFiles(s.name, s.args));
         }
       }
       return {
@@ -563,6 +638,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         currentSession: sessionName,
         messages: loaded,
         pendingConfirms: [],
+        pendingPathAccess: [],
         pendingChoices: [],
         pendingPlans: [],
         pendingCheckpoints: [],
@@ -575,7 +651,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           cacheHitTokens: ev.carryover.cacheHitTokens,
           cacheMissTokens: ev.carryover.cacheMissTokens,
         },
-        inContextPaths,
+        sessionFiles,
       };
     }
     case "$error":
@@ -657,14 +733,10 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         }),
       };
     case "tool.intent": {
-      const filePath = extractToolFilePath(ev.name, ev.args);
-      const inContextPaths =
-        filePath && !state.inContextPaths.includes(filePath)
-          ? [...state.inContextPaths, filePath]
-          : state.inContextPaths;
+      const adds = extractToolFiles(ev.name, ev.args);
       return {
         ...state,
-        inContextPaths,
+        sessionFiles: mergeSessionFiles(state.sessionFiles, adds),
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
@@ -776,6 +848,7 @@ function TabRuntime({
     busy: false,
     messages: [],
     pendingConfirms: [],
+    pendingPathAccess: [],
     pendingChoices: [],
     pendingPlans: [],
     pendingCheckpoints: [],
@@ -790,7 +863,7 @@ function TabRuntime({
     mcpSpecs: [],
     mcpBridged: false,
     skills: [],
-    inContextPaths: [],
+    sessionFiles: [],
     memory: [],
   });
   const [draft, setDraft] = useState("");
@@ -897,6 +970,13 @@ function TabRuntime({
     (id: number, response: ConfirmationChoice) => {
       sendRpc({ cmd: "confirm_response", id, response });
       dispatch({ t: "resolve_confirm", id });
+    },
+    [sendRpc],
+  );
+  const resolvePathAccess = useCallback(
+    (id: number, response: ConfirmationChoice) => {
+      sendRpc({ cmd: "confirm_response", id, response });
+      dispatch({ t: "resolve_path_access", id });
     },
     [sendRpc],
   );
@@ -1329,6 +1409,17 @@ function TabRuntime({
                       onDeny={() => resolveConfirm(c.id, { type: "deny" })}
                     />
                   ))}
+                  {state.pendingPathAccess.map((p) => (
+                    <PathAccessApprovalCard
+                      key={`pa-${p.id}`}
+                      p={p}
+                      onAllow={() => resolvePathAccess(p.id, { type: "run_once" })}
+                      onAlwaysAllow={(prefix) =>
+                        resolvePathAccess(p.id, { type: "always_allow", prefix })
+                      }
+                      onDeny={() => resolvePathAccess(p.id, { type: "deny" })}
+                    />
+                  ))}
                   {state.pendingChoices.map((c) => (
                     <ChoiceApprovalCard
                       key={`ch-${c.id}`}
@@ -1390,10 +1481,9 @@ function TabRuntime({
         <ContextPanel
           settings={state.settings}
           usage={state.usage}
-          workspaceDir={state.settings?.workspaceDir}
           mcpSpecs={state.mcpSpecs}
           mcpBridged={state.mcpBridged}
-          inContextPaths={state.inContextPaths}
+          sessionFiles={state.sessionFiles}
           memory={state.memory}
         />
 

@@ -351,6 +351,50 @@ export function ConfirmApprovalCard({
   );
 }
 
+export function PathAccessApprovalCard({
+  p,
+  onAllow,
+  onAlwaysAllow,
+  onDeny,
+}: {
+  p: {
+    id: number;
+    path: string;
+    intent: "read" | "write";
+    toolName: string;
+    sandboxRoot: string;
+    allowPrefix: string;
+  };
+  onAllow: () => void;
+  onAlwaysAllow: (prefix: string) => void;
+  onDeny: () => void;
+}) {
+  const intentText = p.intent === "write" ? "写入" : "读取";
+  return (
+    <ApprovalCard
+      kind="path access"
+      tone="warn"
+      title={`${intentText}沙盒外的路径`}
+      sub={p.path}
+      preview={
+        <>
+          <div>{p.toolName} → {p.path}</div>
+          <div style={{ color: "var(--muted)", marginTop: 4 }}>
+            workspace: {p.sandboxRoot}
+          </div>
+        </>
+      }
+      meta={`risk · 中 · ${p.intent}`}
+      primaryLabel={intentText === "写入" ? "允许写入" : "允许读取"}
+      secondaryLabel="拒绝"
+      tertiaryLabel={`始终允许 ${p.allowPrefix}`}
+      onPrimary={onAllow}
+      onSecondary={onDeny}
+      onTertiary={() => onAlwaysAllow(p.allowPrefix)}
+    />
+  );
+}
+
 export function ChoiceApprovalCard({
   c,
   onPick,
