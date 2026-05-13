@@ -102,6 +102,28 @@ describe("Markdown — issue #340 table fallback row grouping", () => {
   });
 });
 
+describe("Markdown — issue #723 link OSC-8 emission", () => {
+  function bytesFor(text: string): string {
+    const { lastFrame, unmount } = render(React.createElement(Markdown, { text }));
+    const out = lastFrame() ?? "";
+    unmount();
+    return out;
+  }
+
+  it("emits OSC-8 hyperlink wrapping [text](url) so terminals can click it", () => {
+    const out = bytesFor("see [点此查看](https://example.com/issues/1549) for details");
+    expect(out).toContain("\x1b]8;;https://example.com/issues/1549\x1b\\");
+    expect(out).toContain("\x1b]8;;\x1b\\");
+    expect(out).toContain("点此查看");
+  });
+
+  it("emits OSC-8 hyperlink for file refs (file://path:line)", () => {
+    const out = bytesFor("look at src/cli/ui/markdown.tsx:42 closely");
+    expect(out).toContain("\x1b]8;;file://src/cli/ui/markdown.tsx:42\x1b\\");
+    expect(out).toContain("\x1b]8;;\x1b\\");
+  });
+});
+
 describe("Markdown — issue #330 file-ref over-match regression", () => {
   it("English abbreviations 'e.g' / 'i.e' are NOT treated as file refs", () => {
     function bytesFor(text: string): string {

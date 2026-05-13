@@ -1,7 +1,7 @@
 /** Markdown → Ink. Parsing via marked; visual mapping mirrors dashboard/app.css `.md` rules. Code blocks pass through cli-highlight for ANSI syntax coloring. */
 
 import { highlight, supportsLanguage } from "cli-highlight";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text, Transform, useStdout } from "ink";
 import { type Token, type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
@@ -375,11 +375,13 @@ function looksLikeFileRef(path: string, hasLine: boolean): boolean {
   return ext.length >= 2;
 }
 
-function osc8(label: string, _target: string, color: string): React.ReactElement {
+function osc8(children: React.ReactNode, target: string, color: string): React.ReactElement {
   return (
-    <Text color={color} underline>
-      {label}
-    </Text>
+    <Transform transform={(text) => `\x1b]8;;${target}\x1b\\${text}\x1b]8;;\x1b\\`}>
+      <Text color={color} underline>
+        {children}
+      </Text>
+    </Transform>
   );
 }
 
@@ -454,11 +456,7 @@ function InlineToken({ token }: { token: Token }): React.ReactElement {
       );
     case "link": {
       const l = token as Tokens.Link;
-      return (
-        <Text color={TONE.brand} underline>
-          <Inline tokens={l.tokens} />
-        </Text>
-      );
+      return osc8(<Inline tokens={l.tokens} />, l.href, TONE.brand);
     }
     case "image": {
       const im = token as Tokens.Image;
