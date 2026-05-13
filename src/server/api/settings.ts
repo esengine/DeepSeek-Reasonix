@@ -42,6 +42,10 @@ export async function handleSettings(
 ): Promise<ApiResult> {
   if (method === "GET") {
     const cfg = readConfig(ctx.configPath);
+    if (cfg.search === undefined) {
+      cfg.search = true;
+      writeConfig(cfg, ctx.configPath);
+    }
     const live = ctx.loop;
     return {
       status: 200,

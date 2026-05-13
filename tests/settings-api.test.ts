@@ -100,6 +100,24 @@ describe("settings API — combined POST persistence (#274)", () => {
     expect(cfg.lang).toBe("EN");
   });
 
+  it("GET persists search=true when the field is missing (issue #778)", async () => {
+    writeFileSync(configPath, JSON.stringify({ lang: "EN" }), "utf8");
+    expect(readCfg(configPath).search).toBeUndefined();
+    const res = await handleSettings("GET", [], "", makeCtx(configPath));
+    expect(res.status).toBe(200);
+    expect((res.body as { search: boolean }).search).toBe(true);
+    expect(readCfg(configPath).search).toBe(true);
+  });
+
+  it("GET does not rewrite the file when search is already explicit", async () => {
+    writeFileSync(configPath, JSON.stringify({ lang: "EN", search: false }), "utf8");
+    const before = readFileSync(configPath, "utf8");
+    const res = await handleSettings("GET", [], "", makeCtx(configPath));
+    expect(res.status).toBe(200);
+    expect((res.body as { search: boolean }).search).toBe(false);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
   it("fires applyPresetLive only after the disk write succeeds", async () => {
     const calls: string[] = [];
     const ctx: DashboardContext = {
