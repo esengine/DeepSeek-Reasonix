@@ -340,6 +340,7 @@ description: <span data-i18n="sk.fm.desc">Review git log for security red flags.
 runAs: inline                  <span class="hash"># <span data-i18n="sk.fm.runas">inline | subagent</span></span>
 allowed-tools: bash,read       <span class="hash"># <span data-i18n="sk.fm.tools">subagent tool allowlist</span></span>
 model: deepseek-chat           <span class="hash"># <span data-i18n="sk.fm.model">subagent model override</span></span>
+max-iters: 32                  <span class="hash"># <span data-i18n="sk.fm.iters">subagent tool-call budget (default 16, max 32)</span></span>
 ---
 
 ## <span data-i18n="sk.body.task">Task</span>
@@ -373,6 +374,12 @@ model: deepseek-chat           <span class="hash"># <span data-i18n="sk.fm.model
                 <code>model</code>
                 <span data-i18n="sk.fm.f.model">
                   Subagent only. Must start with <code>deepseek-</code>; ignored otherwise.
+                </span>
+              </li>
+              <li>
+                <code>max-iters</code>
+                <span data-i18n="sk.fm.f.iters">
+                  Subagent only. Tool-call budget for the spawned loop. Default 16, clamped to [1, 32]. Raise when a skill empirically runs out before finishing.
                 </span>
               </li>
             </ul>
