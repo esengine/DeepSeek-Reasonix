@@ -1927,6 +1927,18 @@ button {
 .tree .node[data-d="2"] {
   padding-left: 32px;
 }
+.tree .node[data-kind="file"] {
+  cursor: default;
+}
+.tree .node .caret {
+  width: 10px;
+  height: 10px;
+  color: var(--muted-2);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .tree .node .ico {
   color: var(--muted-2);
   flex-shrink: 0;

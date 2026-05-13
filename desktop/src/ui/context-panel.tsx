@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Settings, UsageStats } from "../App";
 import { I } from "../icons";
 import type { McpSpecInfo } from "../protocol";
@@ -90,16 +90,19 @@ export function ContextPanel({
 function CtxFiles({ workspaceDir }: { workspaceDir?: string }) {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (!workspaceDir) {
       setEntries(null);
       setError(null);
+      setCollapsed(new Set());
       return;
     }
     let cancelled = false;
     setEntries(null);
     setError(null);
+    setCollapsed(new Set());
     invoke<FileEntry[]>("list_workspace_tree", { root: workspaceDir, maxDepth: 2 })
       .then((rows) => {
         if (!cancelled) setEntries(rows);
@@ -112,7 +115,37 @@ function CtxFiles({ workspaceDir }: { workspaceDir?: string }) {
     };
   }, [workspaceDir]);
 
+  // depth-first traversal — each entry's parent is the nearest dir above it
+  // at depth-1, which is what walk_dir on the Rust side guarantees.
+  const parentByPath = useMemo(() => {
+    const map = new Map<string, string | null>();
+    if (!entries) return map;
+    const stack: string[] = [];
+    for (const e of entries) {
+      while (stack.length > e.depth) stack.pop();
+      map.set(e.path, e.depth === 0 ? null : (stack[e.depth - 1] ?? null));
+      if (e.kind === "dir") stack[e.depth] = e.path;
+    }
+    return map;
+  }, [entries]);
+
+  const isVisible = (path: string): boolean => {
+    const parent = parentByPath.get(path);
+    if (!parent) return true;
+    if (collapsed.has(parent)) return false;
+    return isVisible(parent);
+  };
+
+  const toggle = (path: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+
   const fileCount = entries?.filter((e) => e.kind === "file").length ?? 0;
+  const visible = entries?.filter((e) => isVisible(e.path)) ?? [];
 
   return (
     <div className="ctx-block">
@@ -130,8 +163,24 @@ function CtxFiles({ workspaceDir }: { workspaceDir?: string }) {
         ) : entries.length === 0 ? (
           <div className="ctx-empty">空目录</div>
         ) : (
-          entries.map((n) => (
-            <div className="node" key={n.path} data-d={n.depth} title={n.path}>
+          visible.map((n) => (
+            <div
+              className="node"
+              key={n.path}
+              data-d={n.depth}
+              data-kind={n.kind}
+              title={n.path}
+              onClick={n.kind === "dir" ? () => toggle(n.path) : undefined}
+            >
+              <span className="caret">
+                {n.kind === "dir" ? (
+                  collapsed.has(n.path) ? (
+                    <I.chevR size={10} />
+                  ) : (
+                    <I.chev size={10} />
+                  )
+                ) : null}
+              </span>
               <span className="ico">
                 {n.kind === "dir" ? <I.folder size={12} /> : <I.file size={12} />}
               </span>
