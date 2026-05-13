@@ -25,6 +25,11 @@ jobs:
           - { os: macos-13, label: "macos-x64", rust: "x86_64-apple-darwin" }
           - { os: windows-latest, label: "windows-x64", rust: "x86_64-pc-windows-msvc" }
     runs-on: ${{ matrix.target.os }}
+    # secrets.* isn't accessible from step-level if:, so expose presence as a
+    # job-level env. Treat "true"/"false" strings as booleans downstream.
+    env:
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_WIN_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -90,8 +95,8 @@ jobs:
       # `security import` / `signtool` on missing certs.
       - name: Build Tauri bundle (unsigned)
         if: >-
-          (matrix.target.os != 'windows-latest' || secrets.WINDOWS_CERTIFICATE == '')
-          && (!startsWith(matrix.target.os, 'macos-') || secrets.APPLE_CERTIFICATE == '')
+          (matrix.target.os != 'windows-latest' || env.HAS_WIN_CERT != 'true')
+          && (!startsWith(matrix.target.os, 'macos-') || env.HAS_APPLE_CERT != 'true')
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -105,7 +110,7 @@ jobs:
           args: --target ${{ matrix.target.rust }}
 
       - name: Build Tauri bundle (Windows, signed)
-        if: matrix.target.os == 'windows-latest' && secrets.WINDOWS_CERTIFICATE != ''
+        if: matrix.target.os == 'windows-latest' && env.HAS_WIN_CERT == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -121,7 +126,7 @@ jobs:
           args: --target ${{ matrix.target.rust }}
 
       - name: Build Tauri bundle (macOS, signed + notarized)
-        if: startsWith(matrix.target.os, 'macos-') && secrets.APPLE_CERTIFICATE != ''
+        if: startsWith(matrix.target.os, 'macos-') && env.HAS_APPLE_CERT == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
