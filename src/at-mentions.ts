@@ -357,8 +357,8 @@ export function parseAtQuery(query: string): ParsedAtQuery {
   };
 }
 
-/** Trailing-token only, anchored at end-of-input — distinct from `AT_MENTION_PATTERN` which scans all. */
-export const AT_PICKER_PREFIX = /(?:^|\s)@([a-zA-Z0-9_./\\-]*)$/;
+/** Trailing-token only, anchored at end-of-input — distinct from `AT_MENTION_PATTERN` which scans all. `\p{L}\p{N}` for CJK and other non-ASCII filenames. */
+export const AT_PICKER_PREFIX = /(?:^|\s)@([\p{L}\p{N}_./\\-]*)$/u;
 
 export function detectAtPicker(input: string): { query: string; atOffset: number } | null {
   const m = AT_PICKER_PREFIX.exec(input);
@@ -475,7 +475,7 @@ function fuzzySubseqScore(needle: string, target: string): number | null {
 }
 
 /** Word-boundary anchor rejects `@` embedded in emails / social handles; trailing `.` stripped before lookup. */
-export const AT_MENTION_PATTERN = /(?<=^|\s)@([a-zA-Z0-9_./\\-]+)/g;
+export const AT_MENTION_PATTERN = /(?<=^|\s)@([\p{L}\p{N}_./\\-]+)/gu;
 
 export interface AtMentionExpansion {
   /** The raw `@path` token as it appeared in the text. */

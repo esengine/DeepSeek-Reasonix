@@ -43,6 +43,12 @@ describe("AT_MENTION_PATTERN", () => {
     expect(m2).toHaveLength(0);
   });
 
+  it("matches CJK-named paths (issue #749)", () => {
+    const text = "see @docs/中文/readme.md";
+    const matches = [...text.matchAll(AT_MENTION_PATTERN)].map((m) => m[1]);
+    expect(matches).toEqual(["docs/中文/readme.md"]);
+  });
+
   it("matches multiple @paths in one string", () => {
     const m = [..."compare @a.ts and @b.ts".matchAll(AT_MENTION_PATTERN)];
     expect(m).toHaveLength(2);
@@ -217,6 +223,26 @@ describe("detectAtPicker", () => {
     expect(r).not.toBeNull();
     expect(r!.query).toBe("sr");
     expect(r!.atOffset).toBe(0);
+  });
+
+  it("captures CJK characters in the path (issue #749)", () => {
+    const r = detectAtPicker("look at @中文");
+    expect(r).not.toBeNull();
+    expect(r!.query).toBe("中文");
+    expect(r!.atOffset).toBe(8);
+  });
+
+  it("captures CJK folder with trailing slash so Tab can drill in (issue #749)", () => {
+    const r = detectAtPicker("@中文/");
+    expect(r).not.toBeNull();
+    expect(r!.query).toBe("中文/");
+    expect(r!.atOffset).toBe(0);
+  });
+
+  it("captures a child path under a CJK folder (issue #749)", () => {
+    const r = detectAtPicker("@中文/sub.ts");
+    expect(r).not.toBeNull();
+    expect(r!.query).toBe("中文/sub.ts");
   });
 });
 
