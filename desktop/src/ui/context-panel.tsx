@@ -202,14 +202,19 @@ function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }
       <div className="h">
         <span>MCP 服务器</span>
         <span className="right">
-          {specs.length === 0 ? "—" : `${specs.length} ${bridged ? "ready" : "loading"}`}
+          {specs.length === 0 ? "—" : `${specs.length} ${bridged ? "ready" : "configured"}`}
         </span>
       </div>
       {specs.length === 0 ? (
         <div className="ctx-empty">未配置 MCP 服务器</div>
       ) : (
         specs.map((s) => {
-          const ok = bridged && !s.parseError;
+          const ok = !s.parseError;
+          const suffix = s.parseError
+            ? ` · ${s.parseError}`
+            : bridged
+              ? " · ready"
+              : " · configured";
           return (
             <div className="mcp-row" key={s.raw}>
               <span className="ico">
@@ -219,7 +224,7 @@ function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }
                 <div className="n">{s.name ?? s.summary}</div>
                 <div className="m">
                   {s.transport}
-                  {s.parseError ? ` · ${s.parseError}` : bridged ? " · ready" : " · loading"}
+                  {suffix}
                 </div>
               </div>
               <span className="status" data-s={ok ? "ok" : "off"} />
