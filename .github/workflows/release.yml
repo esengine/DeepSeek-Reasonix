@@ -69,6 +69,9 @@ jobs:
       - name: Install root deps
         run: npm ci
 
+      - name: Sync desktop version from tag
+        run: node scripts/sync-desktop-version.mjs "${{ steps.tag.outputs.name }}"
+
       - name: Build CLI bundle (dist/)
         run: npm run build
 
