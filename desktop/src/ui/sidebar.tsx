@@ -30,6 +30,7 @@ export function Sidebar({
   onLoadSession,
   onDeleteSession,
   onOpenSettings,
+  onOpenRules,
   onOpenCommands,
 }: {
   sessions: SessionInfo[];
@@ -38,6 +39,7 @@ export function Sidebar({
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
   onOpenSettings: () => void;
+  onOpenRules: () => void;
   onOpenCommands: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -149,12 +151,11 @@ export function Sidebar({
       </div>
 
       <div className="side-foot">
-        <div className="row" onClick={onOpenSettings}>
+        <div className="row" onClick={onOpenRules}>
           <span className="ico">
             <I.shield size={13} />
           </span>
           <span>审批规则</span>
-          <span className="right">⌘,</span>
         </div>
         <div className="row" onClick={onOpenSettings}>
           <span className="ico">

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { I } from "../icons";
-import type { Settings, UsageStats } from "../App";
+import type { ChatMessage, Settings, UsageStats } from "../App";
 
 type Tab = "files" | "tools" | "memory" | "rules";
 
@@ -8,10 +8,12 @@ export function ContextPanel({
   settings,
   usage,
   workspaceDir,
+  messages,
 }: {
   settings: Settings | null;
   usage: UsageStats;
   workspaceDir?: string;
+  messages: ChatMessage[];
 }) {
   const [tab, setTab] = useState<Tab>("files");
   const used = usage.cacheMissTokens;
@@ -65,7 +67,7 @@ export function ContextPanel({
         </div>
 
         {tab === "files" && <CtxFiles workspaceDir={workspaceDir} />}
-        {tab === "tools" && <CtxTools />}
+        {tab === "tools" && <CtxTools messages={messages} />}
         {tab === "memory" && <CtxMemory />}
         {tab === "rules" && <CtxRules settings={settings} />}
       </div>
@@ -105,30 +107,48 @@ function CtxFiles({ workspaceDir }: { workspaceDir?: string }) {
   );
 }
 
-function CtxTools() {
+function CtxTools({ messages }: { messages: ChatMessage[] }) {
+  const entries = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of messages) {
+      if (m.kind !== "assistant") continue;
+      for (const s of m.segments) {
+        if (s.kind !== "tool") continue;
+        counts.set(s.name, (counts.get(s.name) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [messages]);
   return (
     <div className="ctx-block">
       <div className="h">
-        <span>内置工具</span>
-        <span className="right">connected</span>
+        <span>本会话工具</span>
+        <span className="right">{entries.length}</span>
       </div>
-      {[
-        { id: "fs", name: "filesystem", tools: 12 },
-        { id: "shell", name: "shell", tools: 2 },
-        { id: "search", name: "search", tools: 4 },
-        { id: "edit", name: "edit", tools: 5 },
-      ].map((m) => (
-        <div className="mcp-row" key={m.id}>
-          <span className="ico">
-            <I.wrench size={12} />
-          </span>
-          <div className="body">
-            <div className="n">{m.name}</div>
-            <div className="m">{m.tools} tools · ready</div>
-          </div>
-          <span className="status" />
+      {entries.length === 0 ? (
+        <div
+          style={{
+            padding: "8px",
+            fontSize: 11.5,
+            color: "var(--muted)",
+            fontFamily: "IBM Plex Mono, monospace",
+          }}
+        >
+          本会话尚未调用工具。
         </div>
-      ))}
+      ) : (
+        entries.map(([name, n]) => (
+          <div className="mcp-row" key={name}>
+            <span className="ico">
+              <I.wrench size={12} />
+            </span>
+            <div className="body">
+              <div className="n">{name}</div>
+              <div className="m">{n} 次调用</div>
+            </div>
+          </div>
+        ))
+      )}
     </div>
   );
 }

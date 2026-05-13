@@ -3,11 +3,9 @@ import { I } from "../icons";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import type { SettingsPatch } from "../protocol";
 
-type PageId =
+export type PageId =
   | "general"
   | "models"
-  | "mcp"
-  | "skills"
   | "memory"
   | "rules"
   | "billing"
@@ -16,9 +14,7 @@ type PageId =
 const SETTING_PAGES: { id: PageId; label: string; icon: keyof typeof I; desc: string }[] = [
   { id: "general", label: "通用", icon: "cog", desc: "外观、语言、行为" },
   { id: "models", label: "模型", icon: "brain", desc: "选择默认模型与采样参数" },
-  { id: "mcp", label: "MCP 服务器", icon: "wrench", desc: "管理 MCP 协议工具服务器" },
-  { id: "skills", label: "技能 / Skills", icon: "zap", desc: "为 / 命令绑定的可复用提示集" },
-  { id: "memory", label: "记忆", icon: "bookmark", desc: "项目 / 用户 / 全局三层长期记忆" },
+  { id: "memory", label: "记忆", icon: "bookmark", desc: "CLAUDE.md / AGENTS.md 注入说明" },
   { id: "rules", label: "审批规则", icon: "shield", desc: "自动批准、拒绝、需确认命令模式" },
   { id: "billing", label: "账户 & 计费", icon: "coin", desc: "账户余额、用量与发票" },
   { id: "shortcuts", label: "快捷键", icon: "cpu", desc: "键盘快捷键总览" },
@@ -29,6 +25,7 @@ export function SettingsModal({
   balance,
   usage,
   currency,
+  initialPage,
   onClose,
   onSave,
   onSaveApiKey,
@@ -38,12 +35,13 @@ export function SettingsModal({
   balance: Balance | null;
   usage: UsageStats;
   currency: "CNY" | "USD";
+  initialPage?: PageId;
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
   onPickWorkspace: () => void;
 }) {
-  const [page, setPage] = useState<PageId>("general");
+  const [page, setPage] = useState<PageId>(initialPage ?? "general");
   const current = SETTING_PAGES.find((p) => p.id === page) ?? SETTING_PAGES[0]!;
   return (
     <div className="settings-mask" onClick={onClose}>
@@ -78,8 +76,6 @@ export function SettingsModal({
               <PageGeneral settings={settings} onSave={onSave} onPickWorkspace={onPickWorkspace} />
             )}
             {page === "models" && <PageModels settings={settings} onSave={onSave} />}
-            {page === "mcp" && <PageMCP />}
-            {page === "skills" && <PageSkills />}
             {page === "memory" && <PageMemory />}
             {page === "rules" && <PageRules settings={settings} onSave={onSave} />}
             {page === "billing" && (
@@ -336,46 +332,6 @@ function PageModels({
             </div>
           </div>
         ))}
-      </div>
-    </section>
-  );
-}
-
-function PageMCP() {
-  return (
-    <section className="section">
-      <div className="stitle">MCP 服务器</div>
-      <div
-        style={{
-          padding: 16,
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          fontSize: 12,
-          color: "var(--muted)",
-        }}
-      >
-        MCP 集成在路线图上。当前内核内置文件 / 搜索 / shell / edit 工具。
-      </div>
-    </section>
-  );
-}
-
-function PageSkills() {
-  return (
-    <section className="section">
-      <div className="stitle">技能</div>
-      <div
-        style={{
-          padding: 16,
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          fontSize: 12,
-          color: "var(--muted)",
-        }}
-      >
-        通过 / 命令调用自定义提示集。即将开放配置入口。
       </div>
     </section>
   );
