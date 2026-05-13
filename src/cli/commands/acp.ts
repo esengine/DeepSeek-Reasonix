@@ -23,16 +23,30 @@ import {
 import { AcpServer } from "../../acp/server.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
 import { buildCodeToolset } from "../../code/setup.js";
-import { loadApiKey, loadBaseUrl, loadPreset, loadReasoningEffort } from "../../config.js";
+import {
+  loadApiKey,
+  loadBaseUrl,
+  loadPreset,
+  loadReasoningEffort,
+  mcpEnvFor,
+  readConfig,
+} from "../../config.js";
 import { loadEditMode } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
 import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
+import { McpClient } from "../../mcp/client.js";
+import { preflightStdioSpec } from "../../mcp/preflight.js";
+import { bridgeMcpTools } from "../../mcp/registry.js";
+import { parseMcpSpec } from "../../mcp/spec.js";
+import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import { timestampSuffix } from "../../memory/session.js";
 import { openTranscriptFile, recordFromLoopEvent, writeRecord } from "../../transcript/log.js";
 import { VERSION } from "../../version.js";
+import { formatMcpLifecycleEvent } from "../ui/mcp-lifecycle.js";
+import { formatMcpSlowToast } from "../ui/mcp-toast.js";
 import { canonicalPresetName, resolvePreset } from "../ui/presets.js";
 
 export interface AcpOptions {
@@ -41,6 +55,10 @@ export interface AcpOptions {
   budgetUsd?: number;
   transcript?: string;
   yolo?: boolean;
+  /** Zero or more MCP server specs. Each: `"name=cmd args..."` or `"cmd args..."`. */
+  mcpSpecs?: string[];
+  /** Global prefix — only honored when a single anonymous server is given. */
+  mcpPrefix?: string;
 }
 
 interface Session {
@@ -48,10 +66,76 @@ interface Session {
   rootDir: string;
   model: string;
   toolset: Awaited<ReturnType<typeof buildCodeToolset>>;
+  mcpClients: McpClient[];
   loop: CacheFirstLoop;
   eventizer: Eventizer;
   ctx: { model: string; prefixHash: string; reasoningEffort: "high" | "max" };
   aborter: AbortController | null;
+}
+
+function resolveMcpPrefix(
+  specName: string | null | undefined,
+  specCount: number,
+  globalPrefix: string | undefined,
+): string {
+  if (specName) return `${specName}_`;
+  if (specCount === 1 && globalPrefix) return globalPrefix;
+  return "";
+}
+
+// Mirrors run.ts:81-142.
+export async function loadMcpServers(
+  tools: import("../../tools.js").ToolRegistry,
+  specs: string[],
+  globalPrefix: string | undefined,
+): Promise<McpClient[]> {
+  const clients: McpClient[] = [];
+  if (specs.length === 0) return clients;
+  const cfg = readConfig();
+  const disabledNames = new Set(cfg.mcpDisabled ?? []);
+  for (const raw of specs) {
+    let label = "anon";
+    let mcp: McpClient | undefined;
+    try {
+      const spec = parseMcpSpec(raw);
+      label = spec.name ?? "anon";
+      if (spec.name && disabledNames.has(spec.name)) {
+        process.stderr.write(`${formatMcpLifecycleEvent({ state: "disabled", name: label })}\n`);
+        continue;
+      }
+      process.stderr.write(`${formatMcpLifecycleEvent({ state: "handshake", name: label })}\n`);
+      const t0 = Date.now();
+      const prefix = resolveMcpPrefix(spec.name, specs.length, globalPrefix);
+      if (spec.transport === "stdio") preflightStdioSpec(spec);
+      const transport = buildTransportFromSpec(spec, { env: mcpEnvFor(spec.name, cfg) });
+      mcp = new McpClient({ transport });
+      await mcp.initialize();
+      const bridge = await bridgeMcpTools(mcp, {
+        registry: tools,
+        namePrefix: prefix,
+        serverName: label,
+        onSlow: (info) =>
+          process.stderr.write(
+            `${formatMcpSlowToast({ name: info.serverName, p95Ms: info.p95Ms, sampleSize: info.sampleSize })}\n`,
+          ),
+      });
+      process.stderr.write(
+        `${formatMcpLifecycleEvent({
+          state: "connected",
+          name: label,
+          tools: bridge.registeredNames.length,
+          ms: Date.now() - t0,
+        })}\n`,
+      );
+      clients.push(mcp);
+    } catch (err) {
+      await mcp?.close().catch(() => undefined);
+      process.stderr.write(
+        `${formatMcpLifecycleEvent({ state: "failed", name: label, reason: (err as Error).message })}\n  → run \`reasonix setup\` to remove broken entries from your saved config.\n`,
+      );
+    }
+  }
+  return clients;
 }
 
 function resolveDir(raw: string | undefined, fallback: string): string {
@@ -67,11 +151,15 @@ async function buildSession(opts: {
   rootDir: string;
   modelOverride?: string;
   budgetUsd?: number;
+  mcpSpecs?: string[];
+  mcpPrefix?: string;
 }): Promise<Session> {
   const preset = canonicalPresetName(loadPreset());
   const resolved = resolvePreset(preset);
   const model = opts.modelOverride || resolved.model;
   const toolset = await buildCodeToolset({ rootDir: opts.rootDir });
+  // Bridge MCP tools BEFORE building the prefix so their specs make it into the cache key.
+  const mcpClients = await loadMcpServers(toolset.tools, opts.mcpSpecs ?? [], opts.mcpPrefix);
   const system = codeSystemPrompt(opts.rootDir, {
     hasSemanticSearch: toolset.semantic.enabled,
     modelId: model,
@@ -91,6 +179,7 @@ async function buildSession(opts: {
     rootDir: opts.rootDir,
     model,
     toolset,
+    mcpClients,
     loop,
     eventizer: new Eventizer(),
     ctx: {
@@ -164,6 +253,8 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
       rootDir,
       modelOverride: opts.model,
       budgetUsd: opts.budgetUsd,
+      mcpSpecs: opts.mcpSpecs,
+      mcpPrefix: opts.mcpPrefix,
     });
     sessions.set(session.id, session);
     return { sessionId: session.id };
@@ -235,5 +326,13 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
     await server.done();
   } finally {
     transcriptStream?.end();
+    // Tear down MCP children so spawned servers don't outlive the agent.
+    const closes: Promise<unknown>[] = [];
+    for (const session of sessions.values()) {
+      for (const mcp of session.mcpClients) {
+        closes.push(mcp.close().catch(() => undefined));
+      }
+    }
+    await Promise.all(closes);
   }
 }

@@ -322,10 +322,17 @@ program
     "--yolo",
     "auto-approve plan checkpoints for this invocation (equivalent to editMode=yolo without mutating config)",
   )
+  .option(
+    "--mcp <spec>",
+    t("ui.mcpSpecHintShort"),
+    (value: string, previous: string[] = []) => [...previous, value],
+    [] as string[],
+  )
+  .option("--mcp-prefix <str>", t("ui.mcpPrefixHintShort"))
   .action(async (opts) => {
     const defaults = resolveDefaults({
       model: opts.model,
-      mcp: [],
+      mcp: opts.mcp as string[],
       preset: opts.preset,
       noConfig: false,
     });
@@ -336,6 +343,8 @@ program
       dir: opts.dir,
       transcript: opts.transcript,
       yolo: !!opts.yolo,
+      mcpSpecs: defaults.mcp,
+      mcpPrefix: opts.mcpPrefix,
     });
   });
 
