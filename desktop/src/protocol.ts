@@ -120,6 +120,36 @@ export type TabClosedEvent = {
   type: "$tab_closed";
 };
 
+export type McpSpecInfo = {
+  raw: string;
+  name: string | null;
+  transport: "stdio" | "sse" | "streamable-http";
+  summary: string;
+  parseError?: string;
+};
+
+export type McpSpecsEvent = {
+  type: "$mcp_specs";
+  specs: McpSpecInfo[];
+  bridged: boolean;
+};
+
+export type SkillScope = "project" | "global" | "builtin";
+
+export type SkillInfo = {
+  name: string;
+  description: string;
+  scope: SkillScope;
+  path: string;
+  runAs: "inline" | "subagent";
+  model?: string;
+};
+
+export type SkillsEvent = {
+  type: "$skills";
+  items: SkillInfo[];
+};
+
 export type LoadedSegment =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
@@ -305,6 +335,8 @@ export type IncomingEvent = { tabId?: string } & (
   | MentionPreviewEvent
   | TabOpenedEvent
   | TabClosedEvent
+  | McpSpecsEvent
+  | SkillsEvent
   | UserMessageEvent
   | ModelTurnStartedEvent
   | ModelDeltaEvent
@@ -336,4 +368,8 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mention_picked"; path: string }
   | { cmd: "tab_open"; workspaceDir?: string }
   | { cmd: "tab_close" }
+  | { cmd: "mcp_specs_get" }
+  | { cmd: "mcp_specs_add"; spec: string }
+  | { cmd: "mcp_specs_remove"; spec: string }
+  | { cmd: "skills_get" }
 );

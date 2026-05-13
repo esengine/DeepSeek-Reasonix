@@ -25,6 +25,7 @@ import {
   loadRecentWorkspaces,
   loadWorkspaceDir,
   pushRecentWorkspace,
+  readConfig,
   saveApiKey,
   saveBaseUrl,
   saveEditMode,
@@ -32,6 +33,7 @@ import {
   savePreset,
   saveReasoningEffort,
   saveWorkspaceDir,
+  writeConfig,
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
 import type { Event as KernelEvent } from "../../core/events.js";
@@ -46,6 +48,7 @@ import {
 import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
+import { parseMcpSpec } from "../../mcp/spec.js";
 import {
   deleteSession,
   listSessionsForWorkspace,
@@ -54,6 +57,7 @@ import {
   patchSessionMeta,
   timestampSuffix,
 } from "../../memory/session.js";
+import { SkillStore } from "../../skills.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
 import { VERSION } from "../../version.js";
@@ -95,6 +99,10 @@ type InMessage = { tabId?: string } & (
   | { cmd: "mention_picked"; path: string }
   | { cmd: "tab_open"; workspaceDir?: string }
   | { cmd: "tab_close" }
+  | { cmd: "mcp_specs_get" }
+  | { cmd: "mcp_specs_add"; spec: string }
+  | { cmd: "mcp_specs_remove"; spec: string }
+  | { cmd: "skills_get" }
 );
 
 interface NeedsSetupEvent {
@@ -246,6 +254,34 @@ interface PlanClearedEvent {
   type: "$plan_cleared";
 }
 
+interface McpSpecInfo {
+  raw: string;
+  name: string | null;
+  transport: "stdio" | "sse" | "streamable-http";
+  summary: string;
+  parseError?: string;
+}
+
+interface McpSpecsEvent {
+  type: "$mcp_specs";
+  specs: McpSpecInfo[];
+  bridged: boolean;
+}
+
+interface SkillInfo {
+  name: string;
+  description: string;
+  scope: "project" | "global" | "builtin";
+  path: string;
+  runAs: "inline" | "subagent";
+  model?: string;
+}
+
+interface SkillsEvent {
+  type: "$skills";
+  items: SkillInfo[];
+}
+
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
  *  block buffering) so every JSON line reaches Rust the moment it's
  *  produced, not whenever the next 8 KB flushes. */
@@ -269,7 +305,9 @@ type EmittableEvent =
   | MentionResultsEvent
   | MentionPreviewEvent
   | TabOpenedEvent
-  | TabClosedEvent;
+  | TabClosedEvent
+  | McpSpecsEvent
+  | SkillsEvent;
 
 function emit(ev: EmittableEvent, tabId?: string): void {
   const payload = tabId ? { ...ev, tabId } : ev;
@@ -373,6 +411,58 @@ function emitSessions(tab: Tab): void {
     emit({ type: "$sessions", items }, tab.id);
   } catch (err) {
     emit({ type: "$error", message: `session_list failed: ${(err as Error).message}` }, tab.id);
+  }
+}
+
+function summarizeMcpSpec(raw: string): McpSpecInfo {
+  try {
+    const parsed = parseMcpSpec(raw);
+    if (parsed.transport === "stdio") {
+      const argv = [parsed.command, ...parsed.args].join(" ");
+      return {
+        raw,
+        name: parsed.name,
+        transport: "stdio",
+        summary: `stdio · ${argv}`,
+      };
+    }
+    return {
+      raw,
+      name: parsed.name,
+      transport: parsed.transport,
+      summary: `${parsed.transport} · ${parsed.url}`,
+    };
+  } catch (err) {
+    return {
+      raw,
+      name: null,
+      transport: "stdio",
+      summary: raw,
+      parseError: (err as Error).message,
+    };
+  }
+}
+
+function emitMcpSpecs(tab: Tab): void {
+  const cfg = readConfig();
+  const specs = (cfg.mcp ?? []).map(summarizeMcpSpec);
+  emit({ type: "$mcp_specs", specs, bridged: false }, tab.id);
+}
+
+function emitSkills(tab: Tab): void {
+  try {
+    const store = new SkillStore({ projectRoot: tab.rootDir });
+    const items = store.list().map((s) => ({
+      name: s.name,
+      description: s.description,
+      scope: s.scope,
+      path: s.path,
+      runAs: s.runAs,
+      model: s.model,
+    }));
+    emit({ type: "$skills", items }, tab.id);
+  } catch (err) {
+    emit({ type: "$error", message: `skills_get failed: ${(err as Error).message}` }, tab.id);
   }
 }
 
@@ -658,6 +748,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
     emitSessions(tab);
     emitSettings(tab);
+    emitSkills(tab);
   }
 
   function forgetGate(id: number): Tab | undefined {
@@ -820,6 +911,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   else emit({ type: "$needs_setup", reason: "no_api_key" }, first.id);
   emitSessions(first);
   emitSettings(first);
+  emitMcpSpecs(first);
+  emitSkills(first);
   void emitBalance(first);
 
   const rl = createInterface({ input: stdin });
@@ -843,6 +936,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           else emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
           emitSessions(tab);
           emitSettings(tab);
+          emitMcpSpecs(tab);
+          emitSkills(tab);
           void emitBalance(tab);
         } catch (err) {
           emit({ type: "$error", message: `tab_open failed: ${(err as Error).message}` });
@@ -922,6 +1017,53 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "tab_close") {
       void closeTab(tab);
+      return;
+    }
+    if (msg.cmd === "mcp_specs_get") {
+      emitMcpSpecs(tab);
+      return;
+    }
+    if (msg.cmd === "mcp_specs_add") {
+      const spec = msg.spec.trim();
+      if (!spec) {
+        emit({ type: "$error", message: "mcp_specs_add: spec is empty" }, tab.id);
+        return;
+      }
+      try {
+        parseMcpSpec(spec);
+      } catch (err) {
+        emit({ type: "$error", message: `mcp_specs_add: ${(err as Error).message}` }, tab.id);
+        return;
+      }
+      try {
+        const cfg = readConfig();
+        const list = cfg.mcp ?? [];
+        if (!list.includes(spec)) {
+          cfg.mcp = [...list, spec];
+          writeConfig(cfg);
+        }
+        emitMcpSpecs(tab);
+      } catch (err) {
+        emit({ type: "$error", message: `mcp_specs_add: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "mcp_specs_remove") {
+      try {
+        const cfg = readConfig();
+        const list = cfg.mcp ?? [];
+        if (list.includes(msg.spec)) {
+          cfg.mcp = list.filter((s) => s !== msg.spec);
+          writeConfig(cfg);
+        }
+        emitMcpSpecs(tab);
+      } catch (err) {
+        emit({ type: "$error", message: `mcp_specs_remove: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "skills_get") {
+      emitSkills(tab);
       return;
     }
     if (msg.cmd === "session_list") {

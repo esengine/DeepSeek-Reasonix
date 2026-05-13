@@ -1,11 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { I } from "../icons";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
-import type { SettingsPatch } from "../protocol";
+import type { McpSpecInfo, SettingsPatch, SkillInfo } from "../protocol";
 
 export type PageId =
   | "general"
   | "models"
+  | "mcp"
+  | "skills"
   | "memory"
   | "rules"
   | "billing"
@@ -14,6 +16,8 @@ export type PageId =
 const SETTING_PAGES: { id: PageId; label: string; icon: keyof typeof I; desc: string }[] = [
   { id: "general", label: "通用", icon: "cog", desc: "外观、语言、行为" },
   { id: "models", label: "模型", icon: "brain", desc: "选择默认模型与采样参数" },
+  { id: "mcp", label: "MCP 服务器", icon: "wrench", desc: "管理 MCP 协议工具服务器" },
+  { id: "skills", label: "技能 / Skills", icon: "zap", desc: "为 / 命令绑定的可复用提示集" },
   { id: "memory", label: "记忆", icon: "bookmark", desc: "CLAUDE.md / AGENTS.md 注入说明" },
   { id: "rules", label: "审批规则", icon: "shield", desc: "自动批准、拒绝、需确认命令模式" },
   { id: "billing", label: "账户 & 计费", icon: "coin", desc: "账户余额、用量与发票" },
@@ -26,20 +30,30 @@ export function SettingsModal({
   usage,
   currency,
   initialPage,
+  mcpSpecs,
+  mcpBridged,
+  skills,
   onClose,
   onSave,
   onSaveApiKey,
   onPickWorkspace,
+  onAddMcpSpec,
+  onRemoveMcpSpec,
 }: {
   settings: SettingsType;
   balance: Balance | null;
   usage: UsageStats;
   currency: "CNY" | "USD";
   initialPage?: PageId;
+  mcpSpecs: McpSpecInfo[];
+  mcpBridged: boolean;
+  skills: SkillInfo[];
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
   onPickWorkspace: () => void;
+  onAddMcpSpec: (spec: string) => void;
+  onRemoveMcpSpec: (spec: string) => void;
 }) {
   const [page, setPage] = useState<PageId>(initialPage ?? "general");
   const current = SETTING_PAGES.find((p) => p.id === page) ?? SETTING_PAGES[0]!;
@@ -76,6 +90,15 @@ export function SettingsModal({
               <PageGeneral settings={settings} onSave={onSave} onPickWorkspace={onPickWorkspace} />
             )}
             {page === "models" && <PageModels settings={settings} onSave={onSave} />}
+            {page === "mcp" && (
+              <PageMCP
+                specs={mcpSpecs}
+                bridged={mcpBridged}
+                onAdd={onAddMcpSpec}
+                onRemove={onRemoveMcpSpec}
+              />
+            )}
+            {page === "skills" && <PageSkills skills={skills} />}
             {page === "memory" && <PageMemory />}
             {page === "rules" && <PageRules settings={settings} onSave={onSave} />}
             {page === "billing" && (
@@ -333,6 +356,175 @@ function PageModels({
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+function PageMCP({
+  specs,
+  bridged,
+  onAdd,
+  onRemove,
+}: {
+  specs: McpSpecInfo[];
+  bridged: boolean;
+  onAdd: (spec: string) => void;
+  onRemove: (spec: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const submit = () => {
+    const v = draft.trim();
+    if (!v) return;
+    onAdd(v);
+    setDraft("");
+  };
+  return (
+    <>
+      <section className="section">
+        <div className="stitle">
+          已配置 · {specs.length}
+          {bridged ? (
+            <span style={{ color: "var(--accent)", marginLeft: 8, fontSize: 11 }}>
+              · 已桥接
+            </span>
+          ) : (
+            <span style={{ color: "var(--muted)", marginLeft: 8, fontSize: 11 }}>
+              · 当前桌面会话未桥接，重启 reasonix code (TUI) 后生效
+            </span>
+          )}
+        </div>
+        {specs.length === 0 ? (
+          <div
+            style={{
+              padding: 16,
+              background: "var(--card)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              fontSize: 12,
+              color: "var(--muted)",
+            }}
+          >
+            还没有配置 MCP 服务器。下面输入 spec 添加。
+          </div>
+        ) : (
+          specs.map((s) => (
+            <div className="scard" key={s.raw}>
+              <div className="top">
+                <span className="ico">
+                  <I.wrench size={14} />
+                </span>
+                <div>
+                  <div className="nm">{s.name ?? "(anonymous)"}</div>
+                  <div className="sub">{s.summary}</div>
+                </div>
+                <span className="grow" />
+                <button
+                  type="button"
+                  className="btn ghost"
+                  style={{ color: "var(--danger)" }}
+                  onClick={() => onRemove(s.raw)}
+                >
+                  移除
+                </button>
+              </div>
+              {s.parseError ? (
+                <div className="desc" style={{ color: "var(--danger)" }}>
+                  解析失败：{s.parseError}
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </section>
+      <section className="section">
+        <div className="stitle">添加服务器</div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">spec 字符串</div>
+            <div className="h">
+              格式：<code>name=command args</code> 或 <code>name=https://host/sse</code>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              className="field mono"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="github=npx -y @smithery/cli ..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+            />
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!draft.trim()}
+              onClick={submit}
+            >
+              添加
+            </button>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function PageSkills({ skills }: { skills: SkillInfo[] }) {
+  return (
+    <section className="section">
+      <div className="stitle">已加载 · {skills.length} · 通过 / 命令调用</div>
+      {skills.length === 0 ? (
+        <div
+          style={{
+            padding: 16,
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            fontSize: 12,
+            color: "var(--muted)",
+          }}
+        >
+          没有可用技能。可在 ~/.reasonix/skills/ 或 项目根/.reasonix/skills/ 下创建 SKILL.md。
+        </div>
+      ) : (
+        skills.map((s) => (
+          <div className="scard" key={`${s.scope}:${s.name}`}>
+            <div className="top">
+              <span className="ico">
+                <I.zap size={14} />
+              </span>
+              <div>
+                <div className="nm">
+                  <span
+                    style={{
+                      fontFamily: "IBM Plex Mono, monospace",
+                      color: "var(--accent)",
+                    }}
+                  >
+                    /{s.name}
+                  </span>
+                </div>
+                <div className="sub">
+                  {s.scope} · {s.runAs}
+                  {s.model ? ` · ${s.model}` : ""}
+                </div>
+              </div>
+            </div>
+            <div className="desc">{s.description}</div>
+            <div
+              style={{
+                fontFamily: "IBM Plex Mono, monospace",
+                fontSize: 10.5,
+                color: "var(--muted-2)",
+                marginTop: 4,
+              }}
+            >
+              {s.path}
+            </div>
+          </div>
+        ))
+      )}
     </section>
   );
 }

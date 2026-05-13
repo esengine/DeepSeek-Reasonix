@@ -13,10 +13,12 @@ import type {
   ChoiceVerdict,
   ConfirmationChoice,
   IncomingEvent,
+  McpSpecInfo,
   OutgoingCommand,
   PlanVerdict,
   RevisionVerdict,
   SettingsPatch,
+  SkillInfo,
 } from "./protocol";
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
@@ -180,6 +182,9 @@ type State = {
   balance: Balance | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
+  mcpSpecs: McpSpecInfo[];
+  mcpBridged: boolean;
+  skills: SkillInfo[];
 };
 
 type DeltaBatchItem = {
@@ -447,6 +452,10 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "$sessions":
       return { ...state, sessions: ev.items };
+    case "$mcp_specs":
+      return { ...state, mcpSpecs: ev.specs, mcpBridged: ev.bridged };
+    case "$skills":
+      return { ...state, skills: ev.items };
     case "$balance":
       return {
         ...state,
@@ -729,6 +738,9 @@ function TabRuntime({
     balance: null,
     mentionResults: null,
     mentionPreview: null,
+    mcpSpecs: [],
+    mcpBridged: false,
+    skills: [],
   });
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -778,6 +790,14 @@ function TabRuntime({
   );
   const saveApiKey = useCallback(
     (key: string) => sendRpc({ cmd: "setup_save_key", key }),
+    [sendRpc],
+  );
+  const addMcpSpec = useCallback(
+    (spec: string) => sendRpc({ cmd: "mcp_specs_add", spec }),
+    [sendRpc],
+  );
+  const removeMcpSpec = useCallback(
+    (spec: string) => sendRpc({ cmd: "mcp_specs_remove", spec }),
     [sendRpc],
   );
   const newChat = useCallback(() => {
@@ -1357,10 +1377,15 @@ function TabRuntime({
             usage={state.usage}
             currency={currency}
             initialPage={settingsPage}
+            mcpSpecs={state.mcpSpecs}
+            mcpBridged={state.mcpBridged}
+            skills={state.skills}
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
             onPickWorkspace={pickWorkspace}
+            onAddMcpSpec={addMcpSpec}
+            onRemoveMcpSpec={removeMcpSpec}
           />
         ) : null}
 
