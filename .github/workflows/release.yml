@@ -83,13 +83,49 @@ jobs:
         working-directory: desktop
         run: npm run bundle:node
 
-      - name: Build Tauri bundle
+      # tauri-action signs OS bundles whenever the corresponding env vars are
+      # defined — including when they're defined to the empty string, which is
+      # what `secrets.UNSET` evaluates to. Gate each signing block on its
+      # certificate being non-empty so unsigned prereleases don't trip
+      # `security import` / `signtool` on missing certs.
+      - name: Build Tauri bundle (unsigned)
+        if: >-
+          (matrix.target.os != 'windows-latest' || secrets.WINDOWS_CERTIFICATE == '')
+          && (!startsWith(matrix.target.os, 'macos-') || secrets.APPLE_CERTIFICATE == '')
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: Reasonix ${{ steps.tag.outputs.name }}
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target.rust }}
+
+      - name: Build Tauri bundle (Windows, signed)
+        if: matrix.target.os == 'windows-latest' && secrets.WINDOWS_CERTIFICATE != ''
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          projectPath: desktop
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: Reasonix ${{ steps.tag.outputs.name }}
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target.rust }}
+
+      - name: Build Tauri bundle (macOS, signed + notarized)
+        if: startsWith(matrix.target.os, 'macos-') && secrets.APPLE_CERTIFICATE != ''
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
