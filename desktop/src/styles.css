@@ -2654,6 +2654,7 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 .settings-head {
   display: flex;
