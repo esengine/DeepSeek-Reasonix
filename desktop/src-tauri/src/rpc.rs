@@ -3,7 +3,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use parking_lot::Mutex;
@@ -20,6 +22,10 @@ pub struct RpcState {
 
 struct RpcHandle {
     stdin: ChildStdin,
+    /// Held only so its drop disconnects the wait thread's recv, signalling
+    /// it to kill the child. Replaces the old fire-and-forget exit watcher
+    /// that left Node orphaned if Tauri exited while a tool call was in flight.
+    _kill_signal: mpsc::Sender<()>,
 }
 
 #[derive(Clone, Serialize)]
@@ -164,7 +170,8 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let stderr = child.stderr.take().ok_or("no stderr")?;
 
-    *guard = Some(RpcHandle { stdin });
+    let (kill_tx, kill_rx) = mpsc::channel::<()>();
+    *guard = Some(RpcHandle { stdin, _kill_signal: kill_tx });
     drop(guard);
 
     let app_for_stdout = app.clone();
@@ -183,12 +190,45 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
         }
     });
 
+    // Wait thread: poll try_wait every 500 ms while watching the kill channel.
+    // Disconnected fires when RpcHandle drops (rpc_kill or Tauri exit) — the
+    // 500 ms cadence is a tradeoff between exit-detection latency and idle CPU.
     let app_for_exit = app.clone();
+    let inner_for_exit = state.inner.clone();
     thread::spawn(move || {
-        let code = child.wait().ok().and_then(|s| s.code());
-        let _ = app_for_exit.emit("rpc:exit", ExitEvent { code });
+        loop {
+            match kill_rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = child.kill();
+                    let code = child.wait().ok().and_then(|s| s.code());
+                    let _ = app_for_exit.emit("rpc:exit", ExitEvent { code });
+                    return;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        let _ = inner_for_exit.lock().take();
+                        let _ = app_for_exit.emit("rpc:exit", ExitEvent { code: status.code() });
+                        return;
+                    }
+                    Ok(None) => continue,
+                    Err(_) => {
+                        let _ = child.kill();
+                        let _ = inner_for_exit.lock().take();
+                        return;
+                    }
+                },
+            }
+        }
     });
 
+    Ok(())
+}
+
+/// Drop the spawned Node child cleanly. Used by Tauri-side teardown and by a
+/// future "restart RPC" UI affordance. Idempotent — no-op if nothing is running.
+#[tauri::command]
+pub fn rpc_kill(state: State<'_, RpcState>) -> Result<(), String> {
+    state.inner.lock().take();
     Ok(())
 }
 

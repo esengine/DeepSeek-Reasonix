@@ -2,7 +2,7 @@
 
 mod rpc;
 
-use rpc::{RpcState, rpc_send, rpc_spawn};
+use rpc::{RpcState, rpc_kill, rpc_send, rpc_spawn};
 use serde::Serialize;
 use std::path::Path;
 
@@ -169,6 +169,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             rpc_spawn,
             rpc_send,
+            rpc_kill,
             open_in_editor,
             list_workspace_tree,
             git_status
@@ -186,6 +187,16 @@ fn main() {
             let _ = app;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("tauri run failed");
+        .build(tauri::generate_context!())
+        .expect("tauri build failed")
+        .run(|app, event| {
+            // Tauri 2 normally exits the process via Exit; managed-state drops
+            // don't always run. ExitRequested fires before that, so we kill the
+            // Node child here too — belt-and-braces vs the Drop on RpcHandle.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                use tauri::Manager;
+                let state = app.state::<RpcState>();
+                let _ = rpc::rpc_kill(state);
+            }
+        });
 }
