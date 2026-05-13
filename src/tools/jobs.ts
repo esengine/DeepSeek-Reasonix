@@ -249,12 +249,19 @@ export class JobRegistry {
       job.signalReady();
       job.signalClosed();
     });
-    child.on("close", (code) => {
+    // `exit` fires when the process is dead; `close` waits for stdio drain too.
+    // On Windows + Node ≥ 24, drained stdio can lag 5–10s behind taskkill /T /F,
+    // so we settle `running`/`closedPromise` on the earlier event. `close` is
+    // still wired for the no-exit fallback (spawn error before any process exists).
+    const settleClosed = (code: number | null) => {
+      if (!job.running && job.exitCode !== null) return;
       job.running = false;
       job.exitCode = code;
       job.signalReady();
       job.signalClosed();
-    });
+    };
+    child.on("exit", settleClosed);
+    child.on("close", settleClosed);
 
     const onAbort = () => this.stop(id, { graceMs: 100 });
     if (opts.signal?.aborted) {
@@ -380,6 +387,13 @@ export class JobRegistry {
       // before Node's `close` event fires under load (Windows taskkill
       // /T /F on a three-level tree can take ~1s to propagate).
       await Promise.race([job.closedPromise, new Promise<void>((res) => setTimeout(res, 5000))]);
+      // Node ≥ 24 on Windows sometimes never fires `close` after taskkill /T /F
+      // (the OS handle lingers even though the process is dead). We issued the
+      // kill; trust it and settle the record so callers don't see ghost-running.
+      if (job.running) {
+        job.running = false;
+        job.signalClosed();
+      }
     }
     return snapshot(job);
   }
@@ -426,6 +440,15 @@ export class JobRegistry {
     // non-zero after shutdown" looks like.
     const remaining = Math.max(800, deadlineMs - elapsed());
     await Promise.race([allClose, new Promise<void>((res) => setTimeout(res, remaining))]);
+    // Same Node ≥ 24 Windows fallback as `stop()`: settle any job whose `close`
+    // event never arrived after taskkill /T /F — the kill is synchronous, the
+    // notification isn't.
+    for (const job of runningJobs) {
+      if (job.running) {
+        job.running = false;
+        job.signalClosed();
+      }
+    }
   }
 
   /** Count of still-running jobs — drives the TUI status-bar indicator. */
