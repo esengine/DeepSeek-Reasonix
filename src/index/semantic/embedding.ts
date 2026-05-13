@@ -133,7 +133,13 @@ async function embedOpenAICompat(
   opts: Extract<EmbedOptions, { provider: "openai-compat" }>,
 ): Promise<Float32Array> {
   const vectors = await requestOpenAICompatEmbeddings(text, opts);
-  return vectors[0] ?? new Float32Array(0);
+  const v = vectors[0];
+  if (!v) {
+    throw new EmbeddingError(
+      `Embedding provider returned no vector for the input (model ${opts.model})`,
+    );
+  }
+  return v;
 }
 
 async function embedAllOpenAICompat(
@@ -146,6 +152,16 @@ async function embedAllOpenAICompat(
   if (texts.length === 0) return [];
   if (opts.signal?.aborted) throw new EmbeddingError("embedding aborted");
   const vectors = await requestOpenAICompatEmbeddings([...texts], opts);
+  for (let i = 0; i < vectors.length; i++) {
+    if (vectors[i] === null) {
+      opts.onError?.(
+        i,
+        new EmbeddingError(
+          `provider dropped input ${i} from the batch (model ${opts.model} returned no embedding for it)`,
+        ),
+      );
+    }
+  }
   opts.onProgress?.(texts.length, texts.length);
   return vectors;
 }
@@ -153,7 +169,7 @@ async function embedAllOpenAICompat(
 async function requestOpenAICompatEmbeddings(
   input: string | string[],
   opts: Extract<EmbedOptions, { provider: "openai-compat" }>,
-): Promise<Float32Array[]> {
+): Promise<Array<Float32Array | null>> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const { controller, cleanup } = composeAbort(opts.signal, timeoutMs, "embedding timeout");
   const url = opts.baseUrl.trim();
@@ -231,11 +247,7 @@ async function requestOpenAICompatEmbeddings(
     }
     out[index] = toFloat32Array(row.embedding, `data[${index}].embedding`);
   }
-  for (let i = 0; i < out.length; i++) {
-    if (!out[i])
-      throw new EmbeddingError(`OpenAI-compatible response missing embedding at index ${i}`);
-  }
-  return out as Float32Array[];
+  return out;
 }
 
 function toFloat32Array(values: unknown[], label: string): Float32Array {
