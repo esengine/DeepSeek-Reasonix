@@ -413,6 +413,7 @@ function AppInner({
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const activityLabel = useActivityLabel();
   const chatScroll = useChatScrollActions();
+  const pinned = useChatScrollState((s) => s.pinned);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [slashUsage, setSlashUsage] = useState<Readonly<Record<string, number>>>(() =>
@@ -1359,6 +1360,28 @@ function AppInner({
     else if (!pickerOwnsArrows && ev.upArrow) chatScroll.scrollUp();
     else if (!pickerOwnsArrows && ev.downArrow) chatScroll.scrollDown();
   }, !modalOpen);
+
+  // When scrolled up (PromptInput unmounted), capture printable keys
+  // and backspace so the user can type blind and see their input when
+  // they scroll back down. Enter returns to bottom.
+  useKeystroke(
+    (ev) => {
+      if (ev.paste) return;
+      if (ev.return) {
+        chatScroll.jumpToBottom();
+        return;
+      }
+      if (ev.backspace) {
+        setInput(input.slice(0, -1));
+        return;
+      }
+      if (ev.input.length > 0 && ev.input >= " ") {
+        setInput(input + ev.input);
+        return;
+      }
+    },
+    !modalOpen && !pinned && !busy,
+  );
 
   // Esc during busy → forward to the loop as an abort signal. The loop
   // finishes the tool call in flight (we can't kill subprocess stdio
