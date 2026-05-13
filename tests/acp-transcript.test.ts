@@ -120,5 +120,9 @@ describe("acp-driver.ndjson fixture", () => {
     }
     expect(requests[0].params.protocolVersion).toBe(1);
     expect(requests[2].params.prompt[0].type).toBe("text");
+    // sessionId is a placeholder by design — a real smoke test must splice the value
+    // from the session/new response before sending request #3, or the agent returns
+    // ERR_INVALID_PARAMS "unknown session" with no actionable hint.
+    expect(requests[2].params.sessionId).toMatch(/^<.+>$/);
   });
 });
