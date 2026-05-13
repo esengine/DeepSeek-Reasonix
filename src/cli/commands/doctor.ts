@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { DeepSeekClient } from "../../client.js";
+import { DeepSeekClient, pickPrimaryBalance } from "../../client.js";
 import {
   defaultConfigPath,
   loadBaseUrl,
@@ -194,23 +194,20 @@ async function checkApiReach(): Promise<Check> {
         detail: "/user/balance returned null — auth failed or network blocked",
       };
     }
+    const summary = summarizeBalances(balance.balance_infos);
     if (!balance.is_available) {
-      const info = balance.balance_infos[0];
       return {
         id: "api-reach",
         label: "api reach    ",
         level: "warn",
-        detail: `account flagged not-available${info ? ` (${info.total_balance} ${info.currency})` : ""} — top up or check your dashboard`,
+        detail: `account flagged not-available${summary ? ` (${summary})` : ""} — top up or check your dashboard`,
       };
     }
-    const info = balance.balance_infos[0];
     return {
       id: "api-reach",
       label: "api reach    ",
       level: "ok",
-      detail: info
-        ? `/user/balance ok — ${info.total_balance} ${info.currency}`
-        : "/user/balance ok",
+      detail: summary ? `/user/balance ok — ${summary}` : "/user/balance ok",
     };
   } catch (err) {
     return {
@@ -220,6 +217,17 @@ async function checkApiReach(): Promise<Check> {
       detail: `${(err as Error).message}`,
     };
   }
+}
+
+function summarizeBalances(
+  infos: ReadonlyArray<{ currency: string; total_balance: string }>,
+): string {
+  if (infos.length === 0) return "";
+  const primary = pickPrimaryBalance(infos);
+  if (infos.length === 1 || !primary)
+    return primary ? `${primary.total_balance} ${primary.currency}` : "";
+  const rest = infos.filter((i) => i !== primary).map((i) => `${i.total_balance} ${i.currency}`);
+  return `${primary.total_balance} ${primary.currency} + ${rest.join(" + ")}`;
 }
 
 async function checkTokenizer(): Promise<Check> {

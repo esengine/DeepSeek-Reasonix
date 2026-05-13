@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { pickPrimaryBalance } from "../../client.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { VERSION, compareVersions, getLatestVersion } from "../../version.js";
 
@@ -32,8 +33,9 @@ export function useSessionInfo(loop: CacheFirstLoop): UseSessionInfoResult {
     let cancelled = false;
     void (async () => {
       const bal = await loop.client.getBalance().catch(() => null);
-      if (cancelled || !bal || !bal.balance_infos.length) return;
-      const primary = bal.balance_infos[0]!;
+      if (cancelled || !bal) return;
+      const primary = pickPrimaryBalance(bal.balance_infos);
+      if (!primary) return;
       setBalance({ currency: primary.currency, total: Number(primary.total_balance) });
     })();
     return () => {
@@ -79,9 +81,9 @@ export function useSessionInfo(loop: CacheFirstLoop): UseSessionInfoResult {
   const refreshBalance = useCallback(() => {
     void (async () => {
       const bal = await loop.client.getBalance().catch(() => null);
-      if (bal?.balance_infos.length) {
-        const p = bal.balance_infos[0]!;
-        setBalance({ currency: p.currency, total: Number(p.total_balance) });
+      const primary = bal ? pickPrimaryBalance(bal.balance_infos) : null;
+      if (primary) {
+        setBalance({ currency: primary.currency, total: Number(primary.total_balance) });
       }
     })();
   }, [loop]);

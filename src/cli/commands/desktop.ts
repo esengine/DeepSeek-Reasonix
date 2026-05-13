@@ -11,6 +11,7 @@ import {
   parseAtQuery,
   rankPickerCandidates,
 } from "../../at-mentions.js";
+import { pickPrimaryBalance } from "../../client.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
 import { buildCodeToolset } from "../../code/setup.js";
 import {
@@ -387,8 +388,9 @@ function emitSettings(tab: Tab): void {
 async function emitBalance(tab: Tab): Promise<void> {
   if (!tab.runtime) return;
   const bal = await tab.runtime.loop.client.getBalance().catch(() => null);
-  if (!bal || !bal.balance_infos.length) return;
-  const primary = bal.balance_infos[0]!;
+  if (!bal) return;
+  const primary = pickPrimaryBalance(bal.balance_infos);
+  if (!primary) return;
   emit(
     {
       type: "$balance",

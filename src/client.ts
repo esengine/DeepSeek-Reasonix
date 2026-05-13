@@ -57,6 +57,16 @@ export interface UserBalance {
   balance_infos: BalanceInfo[];
 }
 
+/** Largest `total_balance` wins — the wallet the user actually paid for and expects to see ticking down. */
+export function pickPrimaryBalance(infos: ReadonlyArray<BalanceInfo>): BalanceInfo | null {
+  if (infos.length === 0) return null;
+  let best = infos[0]!;
+  for (let i = 1; i < infos.length; i++) {
+    if (Number(infos[i]!.total_balance) > Number(best.total_balance)) best = infos[i]!;
+  }
+  return best;
+}
+
 export interface ModelInfo {
   id: string;
   object: "model";
