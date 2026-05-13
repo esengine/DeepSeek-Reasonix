@@ -114,7 +114,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       ].join("\n");
       await fs.writeFile(join(root, "App.tsx"), src);
       const out = await tools.dispatch("read_file", JSON.stringify({ path: "App.tsx" }));
-      expect(out).toMatch(/\[outline: 3 top-level exports\]/);
+      expect(out).toMatch(/\[outline: 3 symbols\]/);
       expect(out).toMatch(/L\s*4\s+export interface AppProps/);
       expect(out).toMatch(/L128\s+export function AppInner/);
       expect(out).toMatch(/L211\s+export const handleSubmit/);
@@ -140,7 +140,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       for (let i = 0; i < 60; i++) lines.push(`// trailer ${i}`);
       await fs.writeFile(join(root, "many.ts"), lines.join("\n"));
       const out = await tools.dispatch("read_file", JSON.stringify({ path: "many.ts" }));
-      const outlineMatch = /\[outline: 35 top-level exports\]([\s\S]*?)\n\n/.exec(out);
+      const outlineMatch = /\[outline: 35 symbols\]([\s\S]*?)\n\n/.exec(out);
       expect(outlineMatch).not.toBeNull();
       const outlineBlock = outlineMatch![1]!;
       expect(outlineBlock).toMatch(/export const sym01/);
@@ -151,7 +151,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(outlineBlock).toMatch(/export const sym35/);
       const gapStart = exportPositions[24]!;
       const gapEnd = exportPositions[30]!;
-      expect(outlineBlock).toContain(`[… 5 more exports between L${gapStart} and L${gapEnd} …]`);
+      expect(outlineBlock).toContain(`[… 5 more symbols between L${gapStart} and L${gapEnd} …]`);
     });
 
     it("returns full content when file is at or below the auto-preview threshold", async () => {
