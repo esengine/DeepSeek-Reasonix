@@ -533,7 +533,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const mcpServers: McpServerSummary[] = [];
   const cfg = readConfig();
   const startupInfoHints: string[] = [];
-  if (cfg.setupCompleted === true && (cfg.mcp?.length ?? 0) === 0 && mcpSpecs.length === 0) {
+  if ((cfg.setupCompleted === true || cfg.mcp === undefined) && (cfg.mcp?.length ?? 0) === 0 && mcpSpecs.length === 0) {
     startupInfoHints.push(t("mcpHealth.emptyHint"));
   }
 
