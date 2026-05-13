@@ -60,6 +60,13 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     group: "chat",
     summary: "abort the current model turn (typed alternative to Esc)",
   },
+  {
+    cmd: "btw",
+    group: "chat",
+    argsHint: "<question>",
+    summary:
+      "ask a quick side question — answered from a blank slate, never added to the conversation context",
+  },
 
   {
     cmd: "preset",

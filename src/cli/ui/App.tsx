@@ -2301,6 +2301,42 @@ function AppInner({
         return;
       }
 
+      // `/btw <question>` — one-shot side question. Same async-not-fit-
+      // handleSlash shape as MCP browse: intercept here, call the client
+      // directly with a fresh message list, never append to `loop.messages`
+      // so the side exchange leaves the conversation context untouched.
+      const btwMatch = /^\/btw(?:\s+([\s\S]+))?$/.exec(text);
+      if (btwMatch) {
+        const question = btwMatch[1]?.trim() ?? "";
+        pushHistory(text);
+        log.pushUser(text);
+        if (!question) {
+          log.pushInfo(t("app.btwUsage"));
+          return;
+        }
+        setBusy(true);
+        try {
+          const reply = await loop.client.chat({
+            model: loop.model,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are answering a side question that is unrelated to the current coding conversation. Answer concisely (1-3 sentences) in plain prose. Do not call tools, do not ask clarifying questions, and do not reference any prior turns.",
+              },
+              { role: "user", content: question },
+            ],
+          });
+          const answer = reply.content.trim() || "(no answer)";
+          log.pushInfo(`${t("app.btwHeader")}\n${answer}`, "brand");
+        } catch (err) {
+          log.pushWarning(t("app.btwFailed"), (err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
+
       // MCP resource / prompt browsers — async calls that don't fit the
       // synchronous handleSlash shape, so we intercept the exact command
       // forms here. The slash-command registry still lists them (for

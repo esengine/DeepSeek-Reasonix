@@ -166,6 +166,9 @@ export interface TranslationSchema {
     notedVerbAppended: string;
     memoryWriteFailed: string;
     commandFailed: string;
+    btwUsage: string;
+    btwHeader: string;
+    btwFailed: string;
     restoreCodeOnly: string;
     hookUserPromptSubmit: string;
     hookStop: string;

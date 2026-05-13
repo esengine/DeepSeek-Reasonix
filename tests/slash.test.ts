@@ -538,10 +538,31 @@ describe("handleSlash", () => {
     // Case-insensitive.
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
     // Empty prefix returns the full non-advanced release list, including code commands.
-    expect(suggestSlashCommands("", true)).toHaveLength(39);
+    expect(suggestSlashCommands("", true)).toHaveLength(40);
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("logs");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("language");
     expect(suggestSlashCommands("lan").map((s) => s.cmd)).toContain("language");
+  });
+
+  describe("/btw — issue #725", () => {
+    it("registers /btw under the chat group with a <question> argsHint", () => {
+      const spec = SLASH_COMMANDS.find((s) => s.cmd === "btw");
+      expect(spec).toBeDefined();
+      expect(spec?.group).toBe("chat");
+      expect(spec?.argsHint).toBe("<question>");
+    });
+
+    it("/btw is interception-handled — handleSlash routes to the unknown branch (action lives in App.tsx)", () => {
+      const loop = makeLoop();
+      const r = handleSlash("btw", ["hello?"], loop, {});
+      expect(r.unknown).toBe(true);
+    });
+
+    it("parseSlash splits /btw <multi word question> correctly", () => {
+      const r = parseSlash("/btw what is the capital of france?");
+      expect(r?.cmd).toBe("btw");
+      expect(r?.args.join(" ")).toBe("what is the capital of france?");
+    });
   });
 
   describe("/update", () => {
