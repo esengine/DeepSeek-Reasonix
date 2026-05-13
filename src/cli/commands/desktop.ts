@@ -65,6 +65,7 @@ import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
 import { VERSION } from "../../version.js";
 import { canonicalPresetName, resolvePreset } from "../ui/presets.js";
+import { type McpRuntime, createMcpRuntime } from "./mcp-runtime.js";
 
 export interface DesktopOptions {
   model: string;
@@ -257,12 +258,17 @@ interface PlanClearedEvent {
   type: "$plan_cleared";
 }
 
+type McpSpecStatus = "configured" | "handshake" | "connected" | "failed" | "disabled";
+
 interface McpSpecInfo {
   raw: string;
   name: string | null;
   transport: "stdio" | "sse" | "streamable-http";
   summary: string;
   parseError?: string;
+  status: McpSpecStatus;
+  statusReason?: string;
+  toolCount?: number;
 }
 
 interface McpSpecsEvent {
@@ -446,6 +452,7 @@ function summarizeMcpSpec(raw: string): McpSpecInfo {
         name: parsed.name,
         transport: "stdio",
         summary: `stdio · ${argv}`,
+        status: "configured",
       };
     }
     return {
@@ -453,6 +460,7 @@ function summarizeMcpSpec(raw: string): McpSpecInfo {
       name: parsed.name,
       transport: parsed.transport,
       summary: `${parsed.transport} · ${parsed.url}`,
+      status: "configured",
     };
   } catch (err) {
     return {
@@ -461,14 +469,22 @@ function summarizeMcpSpec(raw: string): McpSpecInfo {
       transport: "stdio",
       summary: raw,
       parseError: (err as Error).message,
+      status: "failed",
+      statusReason: (err as Error).message,
     };
   }
 }
 
 function emitMcpSpecs(tab: Tab): void {
   const cfg = readConfig();
-  const specs = (cfg.mcp ?? []).map(summarizeMcpSpec);
-  emit({ type: "$mcp_specs", specs, bridged: false }, tab.id);
+  const specs = (cfg.mcp ?? []).map((raw) => {
+    const base = summarizeMcpSpec(raw);
+    const live = tab.mcpStatuses.get(raw);
+    if (!live) return base;
+    return { ...base, status: live.kind, statusReason: live.reason, toolCount: live.toolCount };
+  });
+  const bridged = specs.length > 0 && specs.every((s) => s.status === "connected");
+  emit({ type: "$mcp_specs", specs, bridged }, tab.id);
 }
 
 function emitMemory(tab: Tab): void {
@@ -546,6 +562,8 @@ interface Tab {
   completedStepIds: Set<string>;
   /** Total steps in the in-flight plan (0 = no active plan / steps not provided). */
   planTotalSteps: number;
+  mcpRuntime: McpRuntime | null;
+  mcpStatuses: Map<string, { kind: McpSpecStatus; reason?: string; toolCount?: number }>;
 }
 
 let tabCounter = 0;
@@ -704,14 +722,67 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       pendingGateIds: new Set<number>(),
       completedStepIds: new Set<string>(),
       planTotalSteps: 0,
+      mcpRuntime: null,
+      mcpStatuses: new Map(),
     };
     tab.currentSession = mintSessionFor(dir);
     if (loadApiKey()) {
       process.env.DEEPSEEK_API_KEY = loadApiKey();
       tab.runtime = buildRuntimeFor(tab);
+      void bridgeTabMcp(tab);
     }
     tabs.set(tab.id, tab);
     return tab;
+  }
+
+  function bridgeTabMcp(tab: Tab): Promise<void> {
+    if (!tab.runtime) return Promise.resolve();
+    if (tab.mcpRuntime) {
+      // Already constructed — reload so new/removed specs settle without restart.
+      return tab.mcpRuntime
+        .reloadFromConfig(tab.runtime.loop)
+        .then(() => emitMcpSpecs(tab))
+        .catch((err) => {
+          emit({ type: "$error", message: `mcp reload failed: ${(err as Error).message}` }, tab.id);
+        });
+    }
+    const requested = (readConfig().mcp ?? []).length;
+    if (requested === 0) return Promise.resolve();
+    const runtime = createMcpRuntime({
+      getTools: () => tab.toolset.tools,
+      getMcpPrefix: () => undefined,
+      getRequestedCount: () => requested,
+      progressSink: { current: null },
+    });
+    tab.mcpRuntime = runtime;
+    runtime.setLifecycleSink((notice) => {
+      if (notice.kind === "slow") return; // not surfaced in the desktop panel
+      const cfg = readConfig().mcp ?? [];
+      const target = cfg.find((raw) => {
+        try {
+          return parseMcpSpec(raw).name === notice.name;
+        } catch {
+          return false;
+        }
+      });
+      if (!target) return;
+      if (notice.kind === "handshake") {
+        tab.mcpStatuses.set(target, { kind: "handshake" });
+      } else if (notice.kind === "connected") {
+        tab.mcpStatuses.set(target, { kind: "connected", toolCount: notice.tools });
+      } else if (notice.kind === "failed") {
+        tab.mcpStatuses.set(target, { kind: "failed", reason: notice.reason });
+      } else if (notice.kind === "disabled") {
+        tab.mcpStatuses.set(target, { kind: "disabled" });
+      }
+      emitMcpSpecs(tab);
+    });
+    return runtime
+      .reloadFromConfig(tab.runtime.loop)
+      .then(() => undefined)
+      .catch((err) => {
+        emit({ type: "$error", message: `mcp bridge failed: ${(err as Error).message}` }, tab.id);
+      });
   }
 
   async function closeTab(tab: Tab): Promise<void> {
@@ -720,6 +791,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       await tab.toolset.jobs.shutdown();
     } catch {
       // shutdown errors aren't actionable here
+    }
+    if (tab.mcpRuntime) {
+      try {
+        await tab.mcpRuntime.closeAll();
+      } catch {
+        // MCP shutdown errors aren't actionable here either
+      }
     }
     tabs.delete(tab.id);
     emit({ type: "$tab_closed" }, tab.id);
@@ -1097,6 +1175,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           writeConfig(cfg);
         }
         emitMcpSpecs(tab);
+        void bridgeTabMcp(tab);
       } catch (err) {
         emit({ type: "$error", message: `mcp_specs_add: ${(err as Error).message}` }, tab.id);
       }
@@ -1110,7 +1189,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           cfg.mcp = list.filter((s) => s !== msg.spec);
           writeConfig(cfg);
         }
+        tab.mcpStatuses.delete(msg.spec);
         emitMcpSpecs(tab);
+        void bridgeTabMcp(tab);
       } catch (err) {
         emit({ type: "$error", message: `mcp_specs_remove: ${(err as Error).message}` }, tab.id);
       }

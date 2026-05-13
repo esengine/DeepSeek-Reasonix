@@ -120,12 +120,17 @@ export type TabClosedEvent = {
   type: "$tab_closed";
 };
 
+export type McpSpecStatus = "configured" | "handshake" | "connected" | "failed" | "disabled";
+
 export type McpSpecInfo = {
   raw: string;
   name: string | null;
   transport: "stdio" | "sse" | "streamable-http";
   summary: string;
   parseError?: string;
+  status: McpSpecStatus;
+  statusReason?: string;
+  toolCount?: number;
 };
 
 export type McpSpecsEvent = {

@@ -2009,6 +2009,9 @@ button {
 .mcp-row .status[data-s="off"] {
   background: var(--border-strong);
 }
+.mcp-row .status[data-s="pending"] {
+  background: var(--warning);
+}
 
 /* rules / approvals */
 .rule {

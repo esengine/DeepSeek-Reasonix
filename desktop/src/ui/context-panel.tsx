@@ -281,24 +281,42 @@ function CtxFiles({
 }
 
 function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }) {
+  const readyCount = specs.filter((s) => s.status === "connected").length;
   return (
     <div className="ctx-block">
       <div className="h">
         <span>MCP 服务器</span>
         <span className="right">
-          {specs.length === 0 ? "—" : `${specs.length} ${bridged ? "ready" : "configured"}`}
+          {specs.length === 0
+            ? "—"
+            : bridged
+              ? `${specs.length} ready`
+              : `${readyCount}/${specs.length} ready`}
         </span>
       </div>
       {specs.length === 0 ? (
         <div className="ctx-empty">未配置 MCP 服务器</div>
       ) : (
         specs.map((s) => {
-          const ok = !s.parseError;
-          const suffix = s.parseError
-            ? ` · ${s.parseError}`
-            : bridged
-              ? " · ready"
-              : " · configured";
+          const dot =
+            s.status === "connected"
+              ? "ok"
+              : s.status === "failed" || s.parseError
+                ? "off"
+                : "pending";
+          const suffix = s.statusReason
+            ? ` · ${s.statusReason}`
+            : s.status === "connected"
+              ? typeof s.toolCount === "number"
+                ? ` · ${s.toolCount} tools`
+                : " · ready"
+              : s.status === "handshake"
+                ? " · connecting"
+                : s.status === "disabled"
+                  ? " · disabled"
+                  : s.status === "failed"
+                    ? " · failed"
+                    : " · configured";
           return (
             <div className="mcp-row" key={s.raw}>
               <span className="ico">
@@ -311,7 +329,7 @@ function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }
                   {suffix}
                 </div>
               </div>
-              <span className="status" data-s={ok ? "ok" : "off"} />
+              <span className="status" data-s={dot} />
             </div>
           );
         })
