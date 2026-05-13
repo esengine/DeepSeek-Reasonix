@@ -48,7 +48,7 @@ import {
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
-import { shouldAutoResolveCheckpoint } from "../../core/pause-policy.js";
+import { autoResolveVerdict, shouldAutoResolveCheckpoint } from "../../core/pause-policy.js";
 import { formatHookOutcomeMessage, runHooks } from "../../hooks.js";
 import { t, tObj } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
@@ -3329,6 +3329,11 @@ function AppInner({
           break;
         }
         case "path_access": {
+          const auto = autoResolveVerdict(request, editModeRef.current);
+          if (auto !== null) {
+            pauseGate.resolve(request.id, auto);
+            break;
+          }
           const p = payload as {
             path: string;
             intent: "read" | "write";

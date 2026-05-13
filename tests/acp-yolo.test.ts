@@ -61,7 +61,7 @@ describe("acp --yolo", () => {
     expect(bridged).toBe(false);
   });
 
-  it("does NOT auto-resolve run_command requests even with --yolo (plan-checkpoint-only scope)", async () => {
+  it("does NOT auto-resolve run_command requests even with --yolo (shell.ts handles that via allowAll)", async () => {
     const gate = new PauseGate();
     let bridgedReqId: number | null = null;
     makeListener({ yolo: true }, "review")(gate, (id) => {
@@ -70,6 +70,48 @@ describe("acp --yolo", () => {
     });
 
     await gate.ask({ kind: "run_command", payload: { command: "rm -rf /" } });
+    expect(bridgedReqId).not.toBeNull();
+  });
+
+  it("auto-allows path_access (run_once) when yolo — mirrors shell.ts allowAll bypass", async () => {
+    const gate = new PauseGate();
+    let bridged = false;
+    makeListener({ yolo: true }, "review")(gate, () => {
+      bridged = true;
+    });
+
+    const promise = gate.ask({
+      kind: "path_access",
+      payload: {
+        path: "/tmp/foo",
+        intent: "read",
+        toolName: "read_file",
+        sandboxRoot: "/work",
+        allowPrefix: "/tmp",
+      },
+    });
+    await expect(promise).resolves.toEqual({ type: "run_once" });
+    expect(bridged).toBe(false);
+  });
+
+  it("bridges path_access to the client in auto mode (only yolo bypasses)", async () => {
+    const gate = new PauseGate();
+    let bridgedReqId: number | null = null;
+    makeListener({ yolo: false }, "auto")(gate, (id) => {
+      bridgedReqId = id;
+      gate.resolve(id, { type: "deny" } as never);
+    });
+
+    await gate.ask({
+      kind: "path_access",
+      payload: {
+        path: "/etc/passwd",
+        intent: "read",
+        toolName: "read_file",
+        sandboxRoot: "/work",
+        allowPrefix: "/etc",
+      },
+    });
     expect(bridgedReqId).not.toBeNull();
   });
 });
