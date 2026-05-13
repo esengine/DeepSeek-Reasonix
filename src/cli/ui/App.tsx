@@ -57,6 +57,7 @@ import type { LoopEvent } from "../../loop.js";
 import {
   deleteSession,
   detectGitBranch,
+  freshSessionName,
   type listSessions,
   listSessionsForWorkspace,
   loadSessionMessages,
@@ -3824,7 +3825,7 @@ function AppInner({
                       if (outcome.kind === "new") {
                         setPendingSessionsPicker(false);
                         if (onSwitchSession) {
-                          onSwitchSession(undefined);
+                          onSwitchSession(freshSessionName(session));
                         } else {
                           log.pushInfo(
                             "▸ to start a fresh session, quit and run: reasonix chat (no --session flag)",

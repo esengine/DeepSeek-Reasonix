@@ -20,6 +20,7 @@ import { buildMcpServerSummary } from "../../mcp/summary.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import {
   deleteSession,
+  freshSessionName,
   listSessionsForWorkspace,
   renameSession,
   resolveSession,
@@ -451,7 +452,7 @@ function Root({
               return;
             }
             if (outcome.kind === "new") {
-              setActiveSession(undefined);
+              setActiveSession(freshSessionName(activeSession));
               setPickerOpen(false);
               return;
             }

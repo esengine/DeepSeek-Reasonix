@@ -10,6 +10,7 @@ import {
   archiveSession,
   deleteSession,
   findSessionsByPrefix,
+  freshSessionName,
   listSessions,
   listSessionsForWorkspace,
   loadSessionMessages,
@@ -326,6 +327,28 @@ describe("session persistence", () => {
       const b = timestampSuffix();
       // In the unlikely event both fall on the same minute, they're equal
       expect(b.localeCompare(a)).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe("freshSessionName", () => {
+    it("defaults to a default-prefixed name when no current session", () => {
+      expect(freshSessionName(undefined)).toMatch(/^default-\d{14}$/);
+    });
+
+    it("preserves a non-timestamped base", () => {
+      expect(freshSessionName("foo")).toMatch(/^foo-\d{14}$/);
+    });
+
+    it("strips an existing 12-digit timestamp suffix before re-stamping", () => {
+      expect(freshSessionName("foo-202605120800")).toMatch(/^foo-\d{14}$/);
+    });
+
+    it("strips an existing 14-digit timestamp suffix before re-stamping", () => {
+      expect(freshSessionName("foo-20260512080000")).toMatch(/^foo-\d{14}$/);
+    });
+
+    it("keeps dashed bases intact (only the trailing timestamp is stripped)", () => {
+      expect(freshSessionName("my-app-bar")).toMatch(/^my-app-bar-\d{14}$/);
     });
   });
 

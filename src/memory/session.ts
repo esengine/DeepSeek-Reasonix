@@ -75,6 +75,13 @@ export function timestampSuffix(): string {
   return new Date().toISOString().replace(/[^\d]/g, "").slice(0, 12);
 }
 
+/** Unique name for an in-app "new session" — strips a trailing 12/14-digit timestamp from the current name and re-stamps with seconds precision so back-to-back clicks don't collide. */
+export function freshSessionName(currentName: string | undefined): string {
+  const base = currentName ? currentName.replace(/-\d{12,14}$/, "") : "default";
+  const stamp = new Date().toISOString().replace(/[^\d]/g, "").slice(0, 14);
+  return `${base || "default"}-${stamp}`;
+}
+
 /** Names of `.jsonl` sessions starting with `prefix`, newest-first by filename. */
 export function findSessionsByPrefix(prefix: string): string[] {
   const dir = sessionsDir();
