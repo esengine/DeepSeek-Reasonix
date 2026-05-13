@@ -3,6 +3,147 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.0] — 2026-05-13
+
+**Headline:** ACP graduates — three stages of work on the headless
+entrypoint (NDJSON framing, `tool_call` streaming, `session/request_permission`
+bridging) plus three flags (`--transcript`, `--yolo`, `--mcp` /
+`--mcp-prefix`) make `reasonix acp` ready for non-interactive callers
+like CI harnesses and cost-tracking adapters. The loop picked up
+auto-escalation on read-only sequences (caps the dead-end fishing-trip
+cost), `read_file` now outlines four more languages, and `wait_for_job`
+got an exit-only mode so chatty long jobs (curl, wget, big installs)
+stop burning one tool call per progress tick. On the daily-driver side:
+`/btw` for side questions that don't pollute context, user-defined
+memory types with priority + expiry, status-bar field toggles, and
+field-reported fixes for `/new` silently keeping the old REASONIX.md,
+the dashboard search toggle's one-way-trap UX, preset/effort
+persistence on auto-preset switch, plus a stack of desktop UI surfaces
+gaining real data.
+
+**Features:**
+
+- feat(acp): three-stage rollout of `reasonix acp`, the headless ACP
+  entrypoint. Stage 1 brings the NDJSON framing + `initialize` /
+  `session/new` / `session/prompt` round-trip with `agent_thought_chunk`
+  / `agent_message_chunk` streaming. Stage 2 wires `tool_call` /
+  `tool_call_update` notifications. Stage 3 bridges shell + plan
+  permission gates to `session/request_permission`. (#714, #715, #717)
+- feat(acp): `--transcript <path>` writes JSONL receipts with `usage`
+  / `cost` / `prefixHash`, mirroring the same flag on `chat` / `code`.
+  (#766)
+- feat(acp): `--yolo` flag bypasses plan checkpoints without mutating
+  `~/.reasonix/config.json` — process-per-task callers don't have to
+  rewrite user config to skip the modal. (#767)
+- feat(acp): `--mcp <spec>` (repeatable) + `--mcp-prefix <str>` for
+  headless callers — domain-specific tools (custom MCP servers,
+  downstream cost-tracking adapters) bridge cleanly into the cache
+  key without config mutation. Shared `loadMcpServers` helper
+  de-duplicates the spec/transport logic across `acp` / `chat` /
+  `run`. (#780)
+- feat(loop): auto-escalate flash → pro on consecutive read-only tool
+  calls. Caps the cost of dead-end fishing-trip turns where flash
+  loops on file reads without ever committing; pro takes over. (#681,
+  #768)
+- feat(read_file): outline support extended to Python, Go, Rust, and
+  Markdown — the same skim-mode that worked on TypeScript / JavaScript
+  files now answers "what's in here?" for the rest of the stack. (#769)
+- feat(bg-jobs): `wait_for_job` gains a `waitFor: 'exit'` mode
+  (default) that doesn't wake on every output chunk — a 5-minute
+  download costs ONE tool call, not one per progress line.
+  `timeoutMs` cap raised to 300_000. (#777)
+- feat(chat): `/btw <question>` asks a side question without
+  polluting the main turn's context — the answer shows in scrollback,
+  but the message log stays clean. (#736)
+- feat(chat): hint when no MCP servers are configured — the
+  marketplace pointer is visible from inside `chat` so users don't
+  have to discover `/mcp marketplace` cold. (#716)
+- feat(memory): user-defined memory types with priority + expires.
+  Type tags steer recall order and per-entry expiry kicks in so stale
+  notes don't outlive the work they describe. (#711)
+- feat(config): `statusBar` toggles for each individual field
+  (`showBalance` / `showSessionCost` / `showTurnCost` / `showCacheHit`
+  / `showVersion` / `showFeedbackHint`) — hide what doesn't matter,
+  keep the bar dense for what does. (#626, #712)
+- feat(desktop): rebuild the UI on a card-based design system with
+  splash intro, cmdk palette, workdir popover, statusbar workspace
+  switch, and the right-panel Files / Tools / Memory tabs now showing
+  real data (file status dots, dir expand/collapse, per-server MCP
+  status, memory store entries). Reserved-tokens bucket added to the
+  context meter; model cards updated to v4 names + 1M context. (#710,
+  #718, #722, #741, #748, #750, #751, #758, #759, #761, #762)
+- feat(i18n): zh-CN overlay covers the new marketplace flow and
+  closes remaining TUI gaps from the prior round. (#706)
+
+**Fixes:**
+
+- fix(loop): `/new` now re-runs the system-prompt builder, so editing
+  REASONIX.md and starting a fresh conversation actually picks up the
+  new content. Previously the prompt was baked into
+  `ImmutablePrefix.system` at startup and `clearLog()` never touched
+  it — users had to restart. Cache-key invalidation happens only when
+  the file actually changed. (#781)
+- fix(settings): dashboard search toggle no longer one-way-traps users
+  whose config has no `"search"` field. The runtime default is on,
+  but the missing field made the button render ON before any explicit
+  value was set, so a single "enable it" click flipped to OFF. GET
+  now persists the default on first read; subsequent clicks toggle a
+  real boolean. (#782)
+- fix(preset): switching preset (e.g. `/preset auto`) no longer
+  clobbers the persisted `reasoningEffort` — a `/effort high` set
+  before a preset switch used to silently revert. (#775)
+- fix(healing): bare `tool_calls` without an `id` now get a fallback
+  stamp so the next DeepSeek call doesn't 400 on validation. (#713)
+- fix(markdown): emit OSC-8 hyperlinks for `[text](url)` so the
+  rendered markdown is clickable in supporting terminals (iTerm2,
+  WezTerm, Kitty, recent Windows Terminal). (#730)
+- fix(wallet): pick the largest balance from `balance_infos[]`
+  instead of trusting `[0]` — the upstream can return multiple
+  buckets in any order. (#731)
+- fix(embed): tolerate providers that drop inputs from a batch
+  embedding response — fall back to per-input retry instead of
+  failing the whole batch. (#732)
+- fix(composer): keep the prompt cursor visible when the ticker
+  suspends. (#733)
+- fix(plan): stabilize the expanded approval modal layout so body,
+  options, and footer no longer reflow on rerender. (#734)
+- fix(session): persist new sessions opened via `/session <name>`
+  instead of dropping them on the next launch. (#740)
+- fix(jobs): settle the running state on `exit` (not just `close`)
+  and after a taskkill timeout, so Windows + Node ≥ 24 no longer
+  ghost-run a job after `stop_job` returns. (#746)
+- fix(mcp): silence the race-leg derivative on initialize timeout —
+  the loser of the timer-vs-init race no longer logs a spurious
+  abort. (#747)
+- fix(at-mention): allow CJK and other Unicode letters in
+  `@`-mention paths — previously the regex narrowed to ASCII and
+  silently dropped any path with non-ASCII characters. (#764)
+- fix(ui): capture keystrokes while scrolled up in history — typing
+  no longer disappears when the user is browsing the scrollback.
+  (#760)
+- fix(desktop): drop stale literals from preset, plan badge, and
+  tool card — copy reads from i18n consistently. (#771)
+- fix(desktop): replace MCP "loading" copy with "configured" once
+  the server actually loads. (#752)
+- fix(web): align the Changes page chat with `ChatPanel` core logic
+  + poll `/overview` every 2.5s. (#719, #720)
+- fix(dashboard): memoise chat feed + rails to kill input-typing lag
+  — large message histories no longer make the composer feel glued.
+  (#729)
+- fix(changes-ui): remove dead `+` button, widen editor / diff line
+  number gutters, file tab click exits review mode. (#707)
+
+**Polish / refactor:**
+
+- refactor(ui): extract `HistoryTypingCapture` so `AppInner` stops
+  subscribing to `pinned` — fewer renders, same behavior. (#763)
+- chore(plan): document magic numbers + swap the hand-rolled
+  ANSI-strip for the standard `strip-ansi` package. (#738)
+- chore: oosmetrics badges + weekly health-check workflow; point
+  Star History at the canonical DeepSeek-Reasonix slug. (#772, #773)
+- docs(readme): badge color pass; thank AIGC Link for XiaoHongShu
+  promotions. (#726)
+
 ## [0.40.0] — 2026-05-12
 
 **Headline:** npm-only release. The repo also gained a Tauri desktop
