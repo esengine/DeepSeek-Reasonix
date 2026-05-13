@@ -40,6 +40,7 @@ export interface AcpOptions {
   dir?: string;
   budgetUsd?: number;
   transcript?: string;
+  yolo?: boolean;
 }
 
 interface Session {
@@ -124,7 +125,8 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
   }
 
   pauseGate.on((req) => {
-    const auto = autoResolveVerdict(req, loadEditMode());
+    const editMode = opts.yolo ? "yolo" : loadEditMode();
+    const auto = autoResolveVerdict(req, editMode);
     if (auto !== null) {
       pauseGate.resolve(req.id, auto);
       return;

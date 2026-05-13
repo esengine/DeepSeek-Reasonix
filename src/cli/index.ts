@@ -318,6 +318,10 @@ program
   .option("--preset <name>", t("ui.presetHintShort"))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
   .option("--transcript <path>", t("ui.transcriptHint"))
+  .option(
+    "--yolo",
+    "auto-approve plan checkpoints for this invocation (equivalent to editMode=yolo without mutating config)",
+  )
   .action(async (opts) => {
     const defaults = resolveDefaults({
       model: opts.model,
@@ -331,6 +335,7 @@ program
       budgetUsd: parseBudgetFlag(opts.budget),
       dir: opts.dir,
       transcript: opts.transcript,
+      yolo: !!opts.yolo,
     });
   });
 
