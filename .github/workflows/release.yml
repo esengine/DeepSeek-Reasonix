@@ -20,10 +20,14 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { os: ubuntu-22.04, label: "linux-x64", rust: "x86_64-unknown-linux-gnu" }
-          - { os: macos-14, label: "macos-arm64", rust: "aarch64-apple-darwin" }
-          - { os: macos-13, label: "macos-x64", rust: "x86_64-apple-darwin" }
-          - { os: windows-latest, label: "windows-x64", rust: "x86_64-pc-windows-msvc" }
+          # `rust` is the comma-separated list installed by dtolnay/rust-toolchain;
+          # `tauri` is what we pass to `cargo tauri build --target`. They differ
+          # only for the universal Mac shard, which produces one fat binary from
+          # two real Rust targets via lipo. Intel-only macos-13 runner is dropped
+          # — GH retired most of that pool, queue waits ran to hours.
+          - { os: ubuntu-22.04, label: "linux-x64", rust: "x86_64-unknown-linux-gnu", tauri: "x86_64-unknown-linux-gnu" }
+          - { os: macos-14, label: "macos-universal", rust: "aarch64-apple-darwin,x86_64-apple-darwin", tauri: "universal-apple-darwin" }
+          - { os: windows-latest, label: "windows-x64", rust: "x86_64-pc-windows-msvc", tauri: "x86_64-pc-windows-msvc" }
     runs-on: ${{ matrix.target.os }}
     # secrets.* isn't accessible from step-level if:, so expose presence as a
     # job-level env. Treat "true"/"false" strings as booleans downstream.
@@ -108,7 +112,7 @@ jobs:
           releaseName: Reasonix ${{ steps.tag.outputs.name }}
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target.rust }}
+          args: --target ${{ matrix.target.tauri }}
 
       - name: Build Tauri bundle (Windows, signed)
         if: matrix.target.os == 'windows-latest' && env.HAS_WIN_CERT == 'true'
@@ -125,7 +129,7 @@ jobs:
           releaseName: Reasonix ${{ steps.tag.outputs.name }}
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target.rust }}
+          args: --target ${{ matrix.target.tauri }}
 
       - name: Build Tauri bundle (macOS, signed + notarized)
         if: startsWith(matrix.target.os, 'macos-') && env.HAS_APPLE_CERT == 'true'
@@ -146,4 +150,4 @@ jobs:
           releaseName: Reasonix ${{ steps.tag.outputs.name }}
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target.rust }}
+          args: --target ${{ matrix.target.tauri }}
