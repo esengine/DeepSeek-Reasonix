@@ -981,6 +981,136 @@ describe("CacheFirstLoop - auto-escalation on tool failures", () => {
     expect(warnings.some((w) => /escalat/i.test(w))).toBe(false);
   });
 
+  // ── Read-only loop escalation (#681) ──────────────────────────────
+
+  it("auto-escalates when 8 consecutive read-only calls fire without a write (#681)", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "peek",
+      description: "read-only fake",
+      parameters: { type: "object", properties: { n: { type: "integer" } }, required: [] },
+      readOnly: true,
+      fn: ({ n }: { n?: number }) => JSON.stringify({ saw: n ?? 0 }),
+    });
+    const call = (id: string, n: number) => ({
+      content: "",
+      tool_calls: [
+        {
+          id,
+          type: "function" as const,
+          function: { name: "peek", arguments: JSON.stringify({ n }) },
+        },
+      ],
+    });
+    // 8 read-only calls + a final text response so step() terminates.
+    const client = makeClient([
+      ...Array.from({ length: 8 }, (_, i) => call(`c${i}`, i)),
+      { content: "done after reads" },
+    ]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const warnings: string[] = [];
+    for await (const ev of loop.step("read everything")) {
+      if (ev.role === "warning") warnings.push(ev.content);
+    }
+
+    expect(loop.escalatedThisTurn).toBe(true);
+    expect(warnings.some((w) => /consecutive read-only/i.test(w))).toBe(true);
+  });
+
+  it("a mutating call mid-streak resets the read-only counter (#681)", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "peek",
+      description: "read-only fake",
+      parameters: { type: "object", properties: { n: { type: "integer" } }, required: [] },
+      readOnly: true,
+      fn: ({ n }: { n?: number }) => JSON.stringify({ saw: n ?? 0 }),
+    });
+    tools.register({
+      name: "poke",
+      description: "mutating fake",
+      parameters: { type: "object", properties: {}, required: [] },
+      fn: () => JSON.stringify({ ok: true }),
+    });
+    const peek = (id: string, n: number) => ({
+      content: "",
+      tool_calls: [
+        {
+          id,
+          type: "function" as const,
+          function: { name: "peek", arguments: JSON.stringify({ n }) },
+        },
+      ],
+    });
+    const poke = (id: string) => ({
+      content: "",
+      tool_calls: [{ id, type: "function" as const, function: { name: "poke", arguments: "{}" } }],
+    });
+    // 7 reads, one mutating call (resets), 7 more reads — never crosses 8 in a row.
+    const client = makeClient([
+      ...Array.from({ length: 7 }, (_, i) => peek(`r${i}`, i)),
+      poke("m"),
+      ...Array.from({ length: 7 }, (_, i) => peek(`r${i + 100}`, i + 100)),
+      { content: "done" },
+    ]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    for await (const _ev of loop.step("mix it up")) {
+      // drain
+    }
+
+    expect(loop.escalatedThisTurn).toBe(false);
+  });
+
+  it("read-only loop does not escalate when autoEscalate=false (#681)", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "peek",
+      description: "read-only fake",
+      parameters: { type: "object", properties: { n: { type: "integer" } }, required: [] },
+      readOnly: true,
+      fn: ({ n }: { n?: number }) => JSON.stringify({ saw: n ?? 0 }),
+    });
+    const call = (id: string, n: number) => ({
+      content: "",
+      tool_calls: [
+        {
+          id,
+          type: "function" as const,
+          function: { name: "peek", arguments: JSON.stringify({ n }) },
+        },
+      ],
+    });
+    const client = makeClient([
+      ...Array.from({ length: 8 }, (_, i) => call(`c${i}`, i)),
+      { content: "done" },
+    ]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      autoEscalate: false,
+    });
+
+    for await (const _ev of loop.step("read everything")) {
+      // drain
+    }
+
+    expect(loop.escalatedThisTurn).toBe(false);
+  });
+
   it("autoEscalate=false prevents auto-escalation despite accumulated failures", async () => {
     const tools = new ToolRegistry();
     tools.register({

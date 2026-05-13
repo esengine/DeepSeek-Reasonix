@@ -29,6 +29,10 @@ import {
 import { hookWarnings, safeParseToolArgs } from "./loop/hook-events.js";
 import { buildAssistantMessage, buildSyntheticAssistantMessage } from "./loop/messages.js";
 import {
+  READONLY_LOOP_ESCALATION_THRESHOLD,
+  ReadOnlyLoopTracker,
+} from "./loop/read-only-loop-tracker.js";
+import {
   looksLikeCompleteJson,
   shrinkOversizedToolCallArgsByTokens,
   shrinkOversizedToolResults,
@@ -146,6 +150,7 @@ export class CacheFirstLoop {
   private _proArmedForNextTurn = false;
   private _escalateThisTurn = false;
   private readonly _turnFailures: TurnFailureTracker;
+  private readonly _readOnlyLoop: ReadOnlyLoopTracker;
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
   private _toolDispatchesThisStep = 0;
@@ -172,6 +177,10 @@ export class CacheFirstLoop {
     this._turnFailures = new TurnFailureTracker(
       resolveFailureThreshold(opts.failureThreshold, FAILURE_ESCALATION_THRESHOLD),
     );
+    this._readOnlyLoop = new ReadOnlyLoopTracker(
+      parsePositiveIntEnv(process.env.REASONIX_READONLY_LOOP_THRESHOLD) ??
+        READONLY_LOOP_ESCALATION_THRESHOLD,
+    );
     // Last-resort backstop — primary stop is the token-context guard inside step().
     this.maxToolIters = opts.maxToolIters ?? 64;
     this.hooks = opts.hooks ?? [];
@@ -184,29 +193,6 @@ export class CacheFirstLoop {
     const allowedNames = new Set([...this.prefix.toolSpecs.map((s) => s.function.name)]);
     // Storm breaker clears its window on mutating calls so read → edit → verify isn't a storm.
     const registry = this.tools;
-    const isMutating = (call: ToolCall): boolean => {
-      const name = call.function?.name;
-      if (!name) return false;
-      const def = registry.get(name);
-      if (!def) return false;
-      if (def.readOnlyCheck) {
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(call.function?.arguments ?? "{}") ?? {};
-        } catch {
-          // Malformed args → fall through to the static flag below; the
-          // dynamic check would've thrown anyway.
-        }
-        try {
-          if (def.readOnlyCheck(args as never)) return false;
-        } catch (err) {
-          // Mirror tools.ts: surface buggy readOnlyCheck instead of silently
-          // falling through to the static flag.
-          process.stderr.write(`readOnlyCheck for ${name} threw: ${(err as Error).message}\n`);
-        }
-      }
-      return def.readOnly !== true;
-    };
     const isStormExempt = (call: ToolCall): boolean => {
       const name = call.function?.name;
       if (!name) return false;
@@ -214,7 +200,7 @@ export class CacheFirstLoop {
     };
     this.repair = new ToolCallRepair({
       allowedToolNames: allowedNames,
-      isMutating,
+      isMutating: (call) => this.isMutating(call),
       isStormExempt,
       stormThreshold: parsePositiveIntEnv(process.env.REASONIX_STORM_THRESHOLD),
       stormWindow: parsePositiveIntEnv(process.env.REASONIX_STORM_WINDOW),
@@ -391,6 +377,40 @@ export class CacheFirstLoop {
     return true;
   }
 
+  /** Returns true ONLY on the call where the read-only streak crosses the threshold (#681). */
+  private noteReadOnlyToolCall(call: ToolCall): boolean {
+    const isReadOnly = !this.isMutating(call);
+    if (!this._readOnlyLoop.noteAndCrossedThreshold(isReadOnly)) return false;
+    if (this._escalateThisTurn || !this.autoEscalate) return false;
+    this._escalateThisTurn = true;
+    return true;
+  }
+
+  /** A call counts as mutating when its definition reports `readOnly !== true` and any dynamic `readOnlyCheck` doesn't override that for these args. */
+  private isMutating(call: ToolCall): boolean {
+    const name = call.function?.name;
+    if (!name) return false;
+    const def = this.tools.get(name);
+    if (!def) return false;
+    if (def.readOnlyCheck) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(call.function?.arguments ?? "{}") ?? {};
+      } catch {
+        // Malformed args → fall through to the static flag below; the
+        // dynamic check would've thrown anyway.
+      }
+      try {
+        if (def.readOnlyCheck(args as never)) return false;
+      } catch (err) {
+        // Mirror tools.ts: surface buggy readOnlyCheck instead of silently
+        // falling through to the static flag.
+        process.stderr.write(`readOnlyCheck for ${name} threw: ${(err as Error).message}\n`);
+      }
+    }
+    return def.readOnly !== true;
+  }
+
   private async runOneToolCall(
     call: ToolCall,
     signal: AbortSignal,
@@ -540,6 +560,7 @@ export class CacheFirstLoop {
     // armed intent is one-shot — next turn starts fresh on flash
     // unless the user re-arms or mid-turn escalation triggers).
     this._turnFailures.reset();
+    this._readOnlyLoop.reset();
     this._turnSelfCorrected = false;
     this._escalateThisTurn = false;
     this._foldedThisTurn = false;
@@ -1157,6 +1178,17 @@ export class CacheFirstLoop {
               content: t("loop.autoEscalation", {
                 model: ESCALATION_MODEL,
                 breakdown: this._turnFailures.formatBreakdown(),
+                fallback: this.model,
+              }),
+            };
+          }
+          if (this.noteReadOnlyToolCall(call)) {
+            yield {
+              turn: this._turn,
+              role: "warning",
+              content: t("loop.readOnlyLoopEscalation", {
+                model: ESCALATION_MODEL,
+                n: this._readOnlyLoop.currentStreak,
                 fallback: this.model,
               }),
             };

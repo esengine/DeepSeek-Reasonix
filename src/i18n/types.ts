@@ -211,6 +211,7 @@ export interface TranslationSchema {
     flashEscalation: string;
     harvestStatus: string;
     autoEscalation: string;
+    readOnlyLoopEscalation: string;
     repeatToolCallWarning: string;
     stormStuck: string;
     stormSuppressed: string;

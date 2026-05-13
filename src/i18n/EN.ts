@@ -597,6 +597,8 @@ export const EN: TranslationSchema = {
     harvestStatus: "extracting plan state from reasoning…",
     autoEscalation:
       "⇧ auto-escalating to {model} for the rest of this turn — flash hit {breakdown}. Next turn falls back to {fallback} unless /pro is armed.",
+    readOnlyLoopEscalation:
+      "⇧ auto-escalating to {model} — flash made {n} consecutive read-only calls without producing an edit or final answer. Next turn falls back to {fallback} unless /pro is armed.",
     repeatToolCallWarning:
       "Caught a repeated tool call — let the model see the issue and retry with a different approach.",
     stormStuck:
