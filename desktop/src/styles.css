@@ -1930,15 +1930,6 @@ button {
 .tree .node[data-kind="file"] {
   cursor: default;
 }
-.tree .node .caret {
-  width: 10px;
-  height: 10px;
-  color: var(--muted-2);
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
 .tree .node .ico {
   color: var(--muted-2);
   flex-shrink: 0;
@@ -2278,7 +2269,7 @@ button {
 
 /* ---- streaming caret ---- */
 
-.caret {
+.stream-caret {
   display: inline-block;
   width: 6px;
   height: 14px;
@@ -2286,9 +2277,9 @@ button {
   vertical-align: text-bottom;
   margin-left: 1px;
   border-radius: 1px;
-  animation: caret 1s steps(2) infinite;
+  animation: stream-caret 1s steps(2) infinite;
 }
-@keyframes caret {
+@keyframes stream-caret {
   50% {
     opacity: 0;
   }

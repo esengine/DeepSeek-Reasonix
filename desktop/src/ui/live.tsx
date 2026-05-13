@@ -63,7 +63,7 @@ export function LiveReasoning({ lines }: { lines: string[] }) {
       {lines.map((line, i) => (
         <div key={i}>
           {line}
-          {i === lines.length - 1 ? <span className="caret" /> : null}
+          {i === lines.length - 1 ? <span className="stream-caret" /> : null}
         </div>
       ))}
     </div>
