@@ -306,6 +306,12 @@ export interface TranslationSchema {
     openQuestionsHeader: string;
     truncatedBodyMore: string;
     truncatedBodyMorePlural: string;
+    noPlanSummary: string;
+    detailCollapsedHint: string;
+    detailExpandedHint: string;
+    detailHeader: string;
+    detailWindow: string;
+    detailScrollHint: string;
     picker: {
       accept: string;
       acceptHint: string;

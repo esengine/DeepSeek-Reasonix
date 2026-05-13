@@ -1,6 +1,5 @@
 import { render } from "ink-testing-library";
-// biome-ignore lint/style/useImportType: needed in value scope for JSX
-import React from "react";
+import type React from "react";
 import { describe, expect, it } from "vitest";
 import { UserCard } from "../src/cli/ui/cards/UserCard.js";
 import type { UserCard as UserCardData } from "../src/cli/ui/state/cards.js";

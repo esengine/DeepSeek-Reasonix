@@ -497,6 +497,12 @@ export const zhCN: TranslationSchema = {
       counterDone: "{done}/{total} 已完成（{pct}%） · 共 {total} 步",
       counterDoneSingular: "{done}/{total} 已完成（{pct}%） · 共 {total} 步",
     },
+    noPlanSummary: "尚未提交计划内容。",
+    detailCollapsedHint: "Ctrl+P 展开完整计划详情。",
+    detailExpandedHint: "Ctrl+P 收起详情。",
+    detailHeader: "计划详情",
+    detailWindow: "显示第 {start}-{end} 行，共 {total} 行",
+    detailScrollHint: "PgUp/PgDn 滚动详情 · Home/End 跳转",
     reviseTitle: "修改计划",
     reviseSteps: "{count} 个步骤",
     reviseFooter:

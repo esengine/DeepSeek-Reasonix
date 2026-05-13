@@ -509,6 +509,12 @@ export const EN: TranslationSchema = {
       counterDone: "{done}/{total} done ({pct}%) · {total} steps",
       counterDoneSingular: "{done}/{total} done ({pct}%) · {total} step",
     },
+    noPlanSummary: "No plan body submitted yet.",
+    detailCollapsedHint: "Ctrl+P expands full plan details.",
+    detailExpandedHint: "Ctrl+P collapses details.",
+    detailHeader: "Plan details",
+    detailWindow: "showing lines {start}-{end} of {total}",
+    detailScrollHint: "PgUp/PgDn scroll details · Home/End jump",
     reviseTitle: "Revise plan",
     reviseSteps: "{count} steps",
     reviseFooter:

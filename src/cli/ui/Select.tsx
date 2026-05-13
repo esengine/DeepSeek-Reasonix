@@ -3,12 +3,13 @@
 import { Box, Text } from "ink";
 import React, { useState } from "react";
 import { useKeystroke } from "./keystroke-context.js";
+import type { KeyEvent } from "./stdin-reader.js";
 import { type UiColor, useColor } from "./theme.js";
 
 export interface SelectItem<V extends string = string> {
   value: V;
   label: string;
-  /** Optional second row rendered dimmed. */
+  /** Optional descriptive text rendered dimmed. */
   hint?: string;
   /** Disabled rows render dimmed and are skipped on nav. */
   disabled?: boolean;
@@ -23,6 +24,10 @@ export interface SingleSelectProps<V extends string> {
   onTab?: (value: V) => void;
   /** Optional dim footer beneath the list. */
   footer?: string;
+  /** Render item hints on the same row as the label instead of a second row. */
+  inlineHints?: boolean;
+  /** Ignore matching keystrokes so an enclosing component can own them. */
+  ignoreKey?: (ev: KeyEvent) => boolean;
 }
 
 export function SingleSelect<V extends string>({
@@ -32,6 +37,8 @@ export function SingleSelect<V extends string>({
   onTab,
   onCancel,
   footer,
+  inlineHints = false,
+  ignoreKey,
 }: SingleSelectProps<V>) {
   const color = useColor();
   const initialIndex = Math.max(
@@ -41,7 +48,7 @@ export function SingleSelect<V extends string>({
   const [index, setIndex] = useState(initialIndex === -1 ? 0 : initialIndex);
 
   useKeystroke((ev) => {
-    if (ev.paste) return;
+    if (ev.paste || ignoreKey?.(ev)) return;
     if (ev.upArrow) {
       setIndex((i) => findNextEnabled(items, i, -1));
     } else if (ev.downArrow) {
@@ -66,6 +73,7 @@ export function SingleSelect<V extends string>({
           active={i === index}
           marker={i === index ? "▸" : " "}
           color={color}
+          inlineHint={inlineHints}
         />
       ))}
       {footer ? (
@@ -84,6 +92,10 @@ export interface MultiSelectProps<V extends string> {
   onCancel?: () => void;
   /** Footer hint under the list — e.g. "[Space] toggle · [Enter] confirm". */
   footer?: string;
+  /** Render item hints on the same row as the label instead of a second row. */
+  inlineHints?: boolean;
+  /** Ignore matching keystrokes so an enclosing component can own them. */
+  ignoreKey?: (ev: KeyEvent) => boolean;
 }
 
 export function MultiSelect<V extends string>({
@@ -92,6 +104,8 @@ export function MultiSelect<V extends string>({
   onSubmit,
   onCancel,
   footer,
+  inlineHints = false,
+  ignoreKey,
 }: MultiSelectProps<V>) {
   const color = useColor();
   const [index, setIndex] = useState(() => {
@@ -101,7 +115,7 @@ export function MultiSelect<V extends string>({
   const [selected, setSelected] = useState<Set<V>>(new Set(initialSelected));
 
   useKeystroke((ev) => {
-    if (ev.paste) return;
+    if (ev.paste || ignoreKey?.(ev)) return;
     if (ev.upArrow) {
       setIndex((i) => findNextEnabled(items, i, -1));
     } else if (ev.downArrow) {
@@ -135,6 +149,7 @@ export function MultiSelect<V extends string>({
             active={i === index}
             marker={`${i === index ? "▸" : " "} ${marker}`}
             color={color}
+            inlineHint={inlineHints}
           />
         );
       })}
@@ -152,18 +167,31 @@ function SelectRow<V extends string>({
   active,
   marker,
   color,
+  inlineHint = false,
 }: {
   item: SelectItem<V>;
   active: boolean;
   marker: string;
   color: UiColor;
+  inlineHint?: boolean;
 }) {
   const rowColor = item.disabled ? color.info : active ? color.primary : undefined;
+  const labelText = `${marker} ${item.label}`;
+  if (inlineHint) {
+    return (
+      <Box flexDirection="row" flexWrap="nowrap" minHeight={1}>
+        <Text color={rowColor} bold={active} dimColor={item.disabled} wrap="truncate">
+          {labelText}
+        </Text>
+        {item.hint ? <Text dimColor wrap="truncate">{`  ${item.hint}`}</Text> : null}
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column">
       <Box>
         <Text color={rowColor} bold={active} dimColor={item.disabled}>
-          {marker} {item.label}
+          {labelText}
         </Text>
       </Box>
       {item.hint ? (

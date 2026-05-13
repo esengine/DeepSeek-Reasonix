@@ -1,15 +1,15 @@
-/** Modal-style picker for `submit_plan`: accept / refine / cancel. */
-
-import { Box, Text } from "ink";
-import React from "react";
+import { Box, Text, useStdout } from "ink";
+import React, { useMemo, useState } from "react";
 import { t } from "../../i18n/index.js";
 import type { PlanStep } from "../../tools/plan.js";
 import { PlanStepList } from "./PlanStepList.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
-import { useReserveRows } from "./layout/viewport-budget.js";
+import { useKeystroke } from "./keystroke-context.js";
+import { useReserveRows, useTotalRows } from "./layout/viewport-budget.js";
 import { MarkdownView } from "./markdown-view.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
+import type { KeyEvent } from "./stdin-reader.js";
 import { CARD, FG, TONE } from "./theme/tokens.js";
 
 export type PlanConfirmChoice = "approve" | "refine" | "revise" | "cancel";
@@ -17,27 +17,95 @@ export type PlanConfirmChoice = "approve" | "refine" | "revise" | "cancel";
 export interface PlanConfirmProps {
   plan: string;
   steps?: PlanStep[];
-  /** Optional human-friendly title from the model — surfaced in the header. */
   summary?: string;
   onChoose: (choice: PlanConfirmChoice) => void;
   projectRoot?: string;
 }
 
-const PLAN_BODY_PREVIEW_LINES = 24;
+const DEFAULT_DETAIL_LINES = 12;
+const MIN_DETAIL_LINES = 6;
+const EXPANDED_MODAL_OVERHEAD_ROWS = 12;
+const EXPANDED_DETAIL_CHROME_ROWS = 4;
 
-function PlanConfirmInner({ plan, steps, onChoose }: PlanConfirmProps) {
+function PlanConfirmInner({ plan, steps, summary, onChoose }: PlanConfirmProps) {
+  const { stdout } = useStdout();
+  const totalRows = useTotalRows();
+  const [expanded, setExpanded] = useState(false);
+  const [detailOffset, setDetailOffset] = useState(0);
   const stepRows = steps?.length ?? 0;
   const hasSteps = stepRows > 0;
   const openQuestions = extractOpenQuestionsSection(plan);
-  const planLines = plan.split("\n");
-  const truncatedBody = planLines.length > PLAN_BODY_PREVIEW_LINES;
-  const previewBody = truncatedBody ? planLines.slice(0, PLAN_BODY_PREVIEW_LINES).join("\n") : plan;
-  const previewRows = truncatedBody
-    ? PLAN_BODY_PREVIEW_LINES
-    : Math.min(planLines.length, PLAN_BODY_PREVIEW_LINES);
-  const reservedFor = hasSteps ? stepRows : previewRows;
-  const oqRows = openQuestions ? openQuestions.split("\n").length : 0;
-  useReserveRows("modal", { min: 10, max: Math.max(16, reservedFor + oqRows + 14) });
+  const planLines = useMemo(() => plan.split("\n"), [plan]);
+  const effectiveSummary = useMemo(
+    () => summarizePlan(plan, summary, steps),
+    [plan, summary, steps],
+  );
+
+  const oqRows = openQuestions ? Math.min(openQuestions.split("\n").length, 8) : 0;
+  const modalRows = useReserveRows("modal", {
+    min: 10,
+    max: expanded
+      ? Math.max(10, totalRows - EXPANDED_DETAIL_CHROME_ROWS)
+      : Math.max(16, Math.min(32, (hasSteps ? stepRows + 2 : 2) + oqRows + 14)),
+  });
+  const detailViewRows = expanded
+    ? Math.max(10, modalRows - EXPANDED_MODAL_OVERHEAD_ROWS)
+    : Math.max(
+        MIN_DETAIL_LINES,
+        Math.min(18, Math.floor(((stdout?.rows ?? 32) - 14) / 2) || DEFAULT_DETAIL_LINES),
+      );
+  const maxDetailOffset = Math.max(0, planLines.length - detailViewRows);
+  const clampedDetailOffset = Math.min(detailOffset, maxDetailOffset);
+  const rawSliceStart = clampedDetailOffset;
+  const rawSliceEnd = Math.min(planLines.length, rawSliceStart + detailViewRows);
+  const { displayStart, displayEnd } = (() => {
+    let start = rawSliceStart;
+    let end = rawSliceEnd;
+    while (start < end && planLines[start]?.trim() === "" && end < planLines.length) {
+      start += 1;
+      end += 1;
+    }
+    return { displayStart: start, displayEnd: end };
+  })();
+  const visiblePlanLines = planLines.slice(displayStart, displayEnd);
+  const detailOverflow = planLines.length > detailViewRows;
+  const showDetailScrollHint = expanded && plan.trim().length > 0 && detailOverflow;
+
+  const detailOwnsScrollKey = expanded && detailOverflow;
+  const isDetailScrollKey = (ev: KeyEvent) =>
+    detailOwnsScrollKey &&
+    !!(
+      ev.pageUp ||
+      ev.pageDown ||
+      ev.home ||
+      ev.end ||
+      ev.mouseScrollUp ||
+      ev.mouseScrollDown ||
+      ev.upArrow ||
+      ev.downArrow
+    );
+
+  useKeystroke((ev) => {
+    if (ev.paste) return;
+    if (ev.ctrl && ev.input === "p") {
+      setExpanded((v) => !v);
+      return;
+    }
+    if (!isDetailScrollKey(ev)) return;
+    if (ev.pageUp || ev.mouseScrollUp) {
+      setDetailOffset((n) => Math.max(0, n - detailViewRows));
+    } else if (ev.pageDown || ev.mouseScrollDown) {
+      setDetailOffset((n) => Math.min(maxDetailOffset, n + detailViewRows));
+    } else if (ev.home) {
+      setDetailOffset(0);
+    } else if (ev.end) {
+      setDetailOffset(maxDetailOffset);
+    } else if (ev.upArrow) {
+      setDetailOffset((n) => Math.max(0, n - 1));
+    } else if (ev.downArrow) {
+      setDetailOffset((n) => Math.min(maxDetailOffset, n + 1));
+    }
+  });
 
   const refineLabel = t("planFlow.picker.refine");
   const bannerTemplate = t("planFlow.openQuestionsBanner");
@@ -66,23 +134,35 @@ function PlanConfirmInner({ plan, steps, onChoose }: PlanConfirmProps) {
           </Box>
         </Box>
       ) : null}
-      {hasSteps ? (
+      {!expanded || plan.trim().length === 0 ? (
         <Box marginBottom={1} flexDirection="column">
-          <PlanStepList steps={steps!} />
-        </Box>
-      ) : plan.trim().length > 0 ? (
-        <Box marginBottom={1} flexDirection="column">
-          <MarkdownView text={previewBody} />
-          {truncatedBody ? (
-            <Text color={FG.faint}>
-              {t(
-                planLines.length - PLAN_BODY_PREVIEW_LINES === 1
-                  ? "planFlow.truncatedBodyMore"
-                  : "planFlow.truncatedBodyMorePlural",
-                { n: planLines.length - PLAN_BODY_PREVIEW_LINES },
-              )}
-            </Text>
+          {effectiveSummary ? (
+            <Text color={FG.body}>{effectiveSummary}</Text>
+          ) : (
+            <Text color={FG.faint}>{t("planFlow.noPlanSummary")}</Text>
+          )}
+          {!expanded && hasSteps ? (
+            <Box marginTop={1} flexDirection="column">
+              <PlanStepList steps={steps!} />
+            </Box>
           ) : null}
+          <Text color={FG.faint}>
+            {expanded ? t("planFlow.detailExpandedHint") : t("planFlow.detailCollapsedHint")}
+          </Text>
+        </Box>
+      ) : null}
+      {expanded && plan.trim().length > 0 ? (
+        <PlanDetailWindow
+          lines={visiblePlanLines}
+          overflow={detailOverflow}
+          start={displayStart + 1}
+          end={displayEnd}
+          total={planLines.length}
+        />
+      ) : null}
+      {showDetailScrollHint ? (
+        <Box marginBottom={1}>
+          <Text color={FG.faint}>{t("planFlow.detailScrollHint")}</Text>
         </Box>
       ) : null}
       <SingleSelect
@@ -111,10 +191,54 @@ function PlanConfirmInner({ plan, steps, onChoose }: PlanConfirmProps) {
         ]}
         onSubmit={(v) => onChoose(v as PlanConfirmChoice)}
         onCancel={() => onChoose("cancel")}
+        inlineHints
+        ignoreKey={isDetailScrollKey}
       />
     </ApprovalCard>
   );
 }
 
-/** Memoized — parent re-renders every tick; props only change on user action. */
+function PlanDetailWindow({
+  lines,
+  overflow,
+  start,
+  end,
+  total,
+}: {
+  lines: readonly string[];
+  overflow: boolean;
+  start: number;
+  end: number;
+  total: number;
+}): React.ReactElement {
+  return (
+    <Box flexDirection="column">
+      {overflow ? (
+        <Text color={FG.faint}>{t("planFlow.detailWindow", { start, end, total })}</Text>
+      ) : null}
+      {lines.map((line, i) => (
+        <Text key={`plan-detail-${start + i}`} wrap="truncate">
+          {line.length > 0 ? line : " "}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+function summarizePlan(
+  plan: string,
+  summary: string | undefined,
+  steps: PlanStep[] | undefined,
+): string {
+  const trimmedSummary = summary?.trim();
+  if (trimmedSummary) return trimmedSummary;
+  const firstTextLine = plan
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && !/^#{1,6}\s*$/.test(line));
+  if (firstTextLine) return firstTextLine.replace(/^#{1,6}\s+/, "").slice(0, 160);
+  if (steps && steps.length > 0) return steps[0]?.title ?? "";
+  return "";
+}
+
 export const PlanConfirm = React.memo(PlanConfirmInner);

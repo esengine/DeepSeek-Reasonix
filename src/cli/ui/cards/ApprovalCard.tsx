@@ -51,7 +51,7 @@ export function ApprovalCard({
   const ruleWidth = Math.max(MIN_SEPARATOR, cols - SEPARATOR_PAD);
 
   return (
-    <Box flexDirection="column" marginY={1}>
+    <Box flexDirection="column" marginY={1} flexShrink={0}>
       <Box flexDirection="row">
         <Text color={palette.color} backgroundColor={SURFACE.bgElev}>
           {" ▎ "}
@@ -68,13 +68,13 @@ export function ApprovalCard({
           </Text>
         )}
       </Box>
-      <Box flexDirection="column" paddingX={2} marginTop={1}>
+      <Box flexDirection="column" paddingX={2} marginTop={1} flexShrink={0}>
         {children}
       </Box>
-      <Box paddingX={2} marginTop={1}>
+      <Box paddingX={2} marginTop={1} flexShrink={0}>
         <Text color={FG.faint}>{"─".repeat(ruleWidth)}</Text>
       </Box>
-      <Box paddingX={2}>
+      <Box paddingX={2} flexShrink={0}>
         <Text color={FG.faint}>{effectiveFooter}</Text>
       </Box>
     </Box>

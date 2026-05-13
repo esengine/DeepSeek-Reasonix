@@ -109,7 +109,7 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 | `/show [id]` | Dump a stored edit diff |
 | `/commit "msg"` | `git add -A && git commit -m ...` |
 | `/mode <review\|auto\|yolo>` | Edit-gate mode. Shift+Tab cycles |
-| `/plan [on\|off]` | Toggle read-only plan mode |
+| `/plan [on\|off]` | Toggle read-only plan mode. Submitted plans initially show a compact summary; press `Ctrl+P` in the plan confirmation modal to expand/collapse full details |
 | `/checkpoint [name\|list\|forget]` | Snapshot every file the session has touched |
 | `/restore <name\|id>` | Roll back to a named checkpoint |
 | `/cwd <path>` (`/sandbox`) | Switch the workspace root mid-session |
@@ -147,7 +147,7 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 | `Enter` | Submit the prompt |
 | `Shift+Enter` | Insert a newline in the prompt |
 | `↑` / `↓` | Scroll chat history (mouse wheel routes here too) |
-| `Ctrl+P` / `Ctrl+N` | Previous / next prompt history · cursor up / down in a multi-line draft |
+| `Ctrl+P` / `Ctrl+N` | Previous / next prompt history · cursor up / down in a multi-line draft. In a submitted-plan confirmation modal, `Ctrl+P` expands/collapses full plan details |
 | `Ctrl+A` / `Ctrl+E` | Jump to start / end of the current line |
 | `Ctrl+W` | Delete the word before the cursor |
 | `Ctrl+U` | Clear the entire prompt buffer |
@@ -155,7 +155,7 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 | `Shift+Tab` | Edit-gate: toggle review ↔ AUTO mode |
 | `Esc` | Dismiss picker · abort the running model turn |
 | `Ctrl+C` | Abort the running model turn (NOT copy — see clipboard) |
-| `PgUp` / `PgDn` | Scroll chat history a page at a time |
+| `PgUp` / `PgDn` | Scroll chat history a page at a time. While plan details are expanded, scroll the bounded detail window |
 | `End` | Jump chat to the most recent line |
 
 ### Edit-gate (code mode)
