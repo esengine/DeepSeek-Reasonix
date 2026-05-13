@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import { render } from "ink-testing-library";
-import type React from "react";
+import React from "react";
 import { describe, expect, it } from "vitest";
 import { PlanConfirm } from "../src/cli/ui/PlanConfirm.js";
 import { ViewportBudgetProvider, useReserveRows } from "../src/cli/ui/layout/viewport-budget.js";

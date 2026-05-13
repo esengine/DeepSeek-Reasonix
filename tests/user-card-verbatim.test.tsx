@@ -1,5 +1,5 @@
 import { render } from "ink-testing-library";
-import type React from "react";
+import React from "react";
 import { describe, expect, it } from "vitest";
 import { UserCard } from "../src/cli/ui/cards/UserCard.js";
 import type { UserCard as UserCardData } from "../src/cli/ui/state/cards.js";
