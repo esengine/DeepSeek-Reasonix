@@ -115,4 +115,22 @@ describe("McpClient.request() timeout/no-crash", () => {
     await expect(client.initialize()).rejects.toThrow(/timed out/);
     await client.close();
   });
+
+  it("silent-server timeout does not emit unhandledRejection", async () => {
+    const transport = new SilentServerTransport();
+    const client = new McpClient({
+      transport,
+      requestTimeoutMs: shortTimeoutMs,
+    });
+    const handler = vi.fn();
+    process.on("unhandledRejection", handler);
+    try {
+      await expect(client.initialize()).rejects.toThrow(/timed out/);
+      await new Promise((r) => setTimeout(r, shortTimeoutMs + 100));
+      expect(handler).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", handler);
+      await client.close();
+    }
+  });
 });

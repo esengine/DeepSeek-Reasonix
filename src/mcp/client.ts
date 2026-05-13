@@ -235,8 +235,14 @@ export class McpClient {
       }
     });
     promise.catch(() => undefined);
+    // Swallow rejection on the race-leg derivative too — if `send` wins the race,
+    // a late-rejecting `promise.then(...)` would otherwise be orphaned (#742).
+    const promiseSettled = promise.then(
+      () => undefined,
+      () => undefined,
+    );
     try {
-      await Promise.race([this.transport.send(frame), promise.then(() => undefined)]);
+      await Promise.race([this.transport.send(frame), promiseSettled]);
     } catch (err) {
       const pending = this.pending.get(id);
       if (pending) clearTimeout(pending.timeout);
