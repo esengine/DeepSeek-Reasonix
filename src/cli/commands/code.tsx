@@ -137,16 +137,19 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     }
   }
 
-  await chatCommand({
-    model: opts.model ?? "deepseek-v4-flash",
-    budgetUsd: opts.budgetUsd,
-    failureThreshold: opts.failureThreshold,
-    system: codeSystemPrompt(rootDir, {
+  const codeRebuildSystem = () =>
+    codeSystemPrompt(rootDir, {
       hasSemanticSearch: semantic.enabled,
       systemAppend: opts.systemAppend,
       systemAppendFile: systemAppendFileContents,
       modelId: opts.model ?? "deepseek-v4-flash",
-    }),
+    });
+  await chatCommand({
+    model: opts.model ?? "deepseek-v4-flash",
+    budgetUsd: opts.budgetUsd,
+    failureThreshold: opts.failureThreshold,
+    system: codeRebuildSystem(),
+    rebuildSystem: codeRebuildSystem,
     transcript: opts.transcript,
     session,
     seedTools: tools,

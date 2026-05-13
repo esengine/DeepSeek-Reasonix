@@ -99,6 +99,8 @@ export interface CacheFirstLoopOptions {
   hookCwd?: string;
   /** PauseGate bridge — defaults to singleton, injectable for tests. */
   confirmationGate?: PauseGate;
+  /** Re-runs the prompt builder (applyMemoryStack / codeSystemPrompt) on /new so REASONIX.md edits take effect without a restart. Accepting a cache miss is the price. */
+  rebuildSystem?: () => string;
 }
 
 export interface ReconfigurableOptions {
@@ -139,6 +141,8 @@ export class CacheFirstLoop {
 
   /** Number of messages that were pre-loaded from the session file. */
   readonly resumedMessageCount: number;
+
+  private readonly _rebuildSystem: (() => string) | null;
 
   private _turn = 0;
   private _streamPreference: boolean;
@@ -186,6 +190,7 @@ export class CacheFirstLoop {
     this.hooks = opts.hooks ?? [];
     this.hookCwd = opts.hookCwd ?? process.cwd();
     this.confirmationGate = opts.confirmationGate ?? defaultPauseGate;
+    this._rebuildSystem = opts.rebuildSystem ?? null;
 
     this._streamPreference = opts.stream ?? true;
     this.stream = this._streamPreference;
@@ -309,8 +314,8 @@ export class CacheFirstLoop {
     }
   }
 
-  /** "New chat" — drops in-memory messages, archives the on-disk transcript so it survives in Sessions, keeps sessionName so the prefix cache stays warm. */
-  clearLog(): { dropped: number; archived: string | null } {
+  /** "New chat" — drops in-memory messages, archives the on-disk transcript so it survives in Sessions, keeps sessionName so the prefix cache stays warm. Re-runs the system-prompt builder if one was wired (issue #778: REASONIX.md edits otherwise need a restart). */
+  clearLog(): { dropped: number; archived: string | null; systemRebuilt: boolean } {
     const dropped = this.log.length;
     this.log.compactInPlace([]);
     let archived: string | null = null;
@@ -324,7 +329,15 @@ export class CacheFirstLoop {
     }
     this.scratch.reset();
     this._inflight.clear();
-    return { dropped, archived };
+    let systemRebuilt = false;
+    if (this._rebuildSystem) {
+      try {
+        systemRebuilt = this.prefix.replaceSystem(this._rebuildSystem());
+      } catch {
+        /* builder threw — keep prior system rather than crash /new */
+      }
+    }
+    return { dropped, archived, systemRebuilt };
   }
 
   configure(opts: ReconfigurableOptions): void {

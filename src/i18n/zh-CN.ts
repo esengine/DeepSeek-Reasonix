@@ -634,6 +634,7 @@ export const zhCN: TranslationSchema = {
       newInfo: "▸ 新对话 — 已从上下文中丢弃 {count} 条消息。同一会话，全新开始。",
       newInfoArchived:
         "▸ 新对话 — 已从上下文中丢弃 {count} 条消息。原对话已归档为「{archived}」，可在 Sessions 面板查看。",
+      newInfoSystemReloaded: " · REASONIX.md / 项目记忆已重新加载（下一轮一次性 cache miss）",
       helpTitle: "命令：",
       helpShellTitle: "Shell 快捷方式：",
       helpShell: "  !<cmd>                   在沙箱根目录运行 <cmd>；输出进入对话",

@@ -1543,6 +1543,55 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     expect(dropped).toBe(0);
   });
 
+  it("clearLog rebuilds prefix.system when the rebuild closure returns a new string", () => {
+    const client = makeClient([{ content: "ok" }]);
+    let current = "system-v1";
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: current }),
+      stream: false,
+      rebuildSystem: () => current,
+    });
+    expect(loop.prefix.system).toBe("system-v1");
+    const fp1 = loop.prefix.fingerprint;
+
+    current = "system-v2";
+    const { systemRebuilt } = loop.clearLog();
+    expect(systemRebuilt).toBe(true);
+    expect(loop.prefix.system).toBe("system-v2");
+    expect(loop.prefix.fingerprint).not.toBe(fp1);
+  });
+
+  it("clearLog leaves prefix.system untouched when the rebuild closure returns the same string", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "stable" }),
+      stream: false,
+      rebuildSystem: () => "stable",
+    });
+    const fp1 = loop.prefix.fingerprint;
+    const { systemRebuilt } = loop.clearLog();
+    expect(systemRebuilt).toBe(false);
+    expect(loop.prefix.system).toBe("stable");
+    expect(loop.prefix.fingerprint).toBe(fp1);
+  });
+
+  it("clearLog swallows rebuild-closure exceptions and keeps the prior system", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "keep-me" }),
+      stream: false,
+      rebuildSystem: () => {
+        throw new Error("disk on fire");
+      },
+    });
+    const { systemRebuilt } = loop.clearLog();
+    expect(systemRebuilt).toBe(false);
+    expect(loop.prefix.system).toBe("keep-me");
+  });
+
   it("retryLastUser returns null when no user message exists", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({

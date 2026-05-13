@@ -134,9 +134,13 @@ program.action(async (opts: { continue?: boolean }) => {
     (msg) => process.stderr.write(`${msg}\n`),
   );
   const { chatCommand } = await import("./commands/chat.js");
+  const defaultBase = defaultSystemPrompt(defaults.model);
+  const defaultCwd = process.cwd();
+  const defaultRebuildSystem = () => applyMemoryStack(defaultBase, defaultCwd);
   await chatCommand({
     model: defaults.model,
-    system: applyMemoryStack(defaultSystemPrompt(defaults.model), process.cwd()),
+    system: defaultRebuildSystem(),
+    rebuildSystem: defaultRebuildSystem,
     session: continueOpts.session,
     mcp: defaults.mcp,
     forceResume: continueOpts.forceResume,
@@ -242,9 +246,13 @@ program
           (msg) => process.stderr.write(`${msg}\n`),
         );
     const { chatCommand } = await import("./commands/chat.js");
+    const chatBase = opts.system ?? defaultSystemPrompt(defaults.model);
+    const chatCwd = process.cwd();
+    const chatRebuildSystem = () => applyMemoryStack(chatBase, chatCwd);
     await chatCommand({
       model: defaults.model,
-      system: applyMemoryStack(opts.system ?? defaultSystemPrompt(defaults.model), process.cwd()),
+      system: chatRebuildSystem(),
+      rebuildSystem: chatRebuildSystem,
       transcript: opts.transcript,
       budgetUsd: parseBudgetFlag(opts.budget),
       failureThreshold: resolveFailureThreshold(

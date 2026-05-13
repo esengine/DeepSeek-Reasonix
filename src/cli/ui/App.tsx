@@ -185,6 +185,8 @@ import { useSubagent } from "./useSubagent.js";
 export interface AppProps {
   model: string;
   system: string;
+  /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Must produce the same shape as `system` was built from. */
+  rebuildSystem?: () => string;
   transcript?: string;
   /** Soft USD spend cap; undefined → no cap. See CacheFirstLoopOptions.budgetUsd. */
   budgetUsd?: number;
@@ -419,6 +421,7 @@ type AppInnerProps = AppProps & {
 function AppInner({
   model,
   system,
+  rebuildSystem,
   transcript,
   budgetUsd,
   failureThreshold,
@@ -899,10 +902,11 @@ function AppInner({
       // `/effort high` silently reverted to `max` on relaunch — the
       // loop's constructor default wins over persisted state.
       reasoningEffort: loadReasoningEffort(),
+      rebuildSystem,
     });
     loopRef.current = l;
     return l;
-  }, [model, system, budgetUsd, failureThreshold, session, tools, codeMode]);
+  }, [model, system, rebuildSystem, budgetUsd, failureThreshold, session, tools, codeMode]);
 
   useEffect(() => {
     if (!session || !tools) return;

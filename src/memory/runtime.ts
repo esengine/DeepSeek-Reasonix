@@ -8,17 +8,26 @@ export interface ImmutablePrefixOptions {
 }
 
 export class ImmutablePrefix {
-  readonly system: string;
+  /** Stable across turns; rebuilt only on /new when REASONIX.md changed on disk. */
+  system: string;
   /** Each `addTool` costs one cache-miss turn — DeepSeek's prefix cache is keyed by full tool list. */
   private _toolSpecs: ToolSpec[];
   readonly fewShots: readonly ChatMessage[];
-  /** Invalidated only via `addTool`; bypassing it leaves cache stale → fingerprint diverges from sent prefix. */
+  /** Invalidated by addTool / removeTool / replaceSystem; bypassing any of those leaves cache stale → fingerprint diverges from sent prefix. */
   private _fingerprintCache: string | null = null;
 
   constructor(opts: ImmutablePrefixOptions) {
     this.system = opts.system;
     this._toolSpecs = [...(opts.toolSpecs ?? [])];
     this.fewShots = Object.freeze([...(opts.fewShots ?? [])]);
+  }
+
+  /** Replaces the system prompt; returns true iff the string actually changed. Caller must accept a cache miss on the next turn. */
+  replaceSystem(s: string): boolean {
+    if (this.system === s) return false;
+    this.system = s;
+    this._fingerprintCache = null;
+    return true;
   }
 
   get toolSpecs(): readonly ToolSpec[] {

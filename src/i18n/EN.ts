@@ -651,6 +651,8 @@ export const EN: TranslationSchema = {
         "▸ new conversation — dropped {count} message(s) from context. Same session, fresh slate.",
       newInfoArchived:
         '▸ new conversation — dropped {count} message(s) from context. Prior transcript archived as "{archived}" (visible under Sessions).',
+      newInfoSystemReloaded:
+        " · REASONIX.md / project memory reloaded (next turn pays one cache miss)",
       helpTitle: "Commands:",
       helpShellTitle: "Shell shortcut:",
       helpShell: "  !<cmd>                   run <cmd> in the sandbox root; output goes into",

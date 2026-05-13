@@ -40,6 +40,8 @@ export type { McpLifecycleNotice, McpLifecycleSink, McpRuntime, ProgressInfo };
 export interface ChatOptions {
   model: string;
   system: string;
+  /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Should produce the same string `system` was built from. */
+  rebuildSystem?: () => string;
   transcript?: string;
   /**
    * Soft USD cap on session spend. Undefined → no cap (default).
@@ -195,6 +197,7 @@ function Root({
         key={activeSession ?? "__new__"}
         model={appProps.model}
         system={appProps.system}
+        rebuildSystem={appProps.rebuildSystem}
         transcript={appProps.transcript}
         budgetUsd={appProps.budgetUsd}
         failureThreshold={appProps.failureThreshold}
