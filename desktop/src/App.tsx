@@ -746,7 +746,9 @@ function TabRuntime({
   const [toast, setToast] = useState<string | null>(null);
   const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());
   const [wdOpen, setWdOpen] = useState(false);
-  const [wdAnchor, setWdAnchor] = useState<{ top: number; left: number } | undefined>(undefined);
+  const [wdAnchor, setWdAnchor] = useState<
+    { top?: number; bottom?: number; left: number } | undefined
+  >(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -943,7 +945,8 @@ function TabRuntime({
             const body = m.segments
               .map((s) => {
                 if (s.kind === "text") return s.text;
-                if (s.kind === "reasoning") return `<details>\n<summary>Reasoning</summary>\n\n${s.text}\n\n</details>`;
+                if (s.kind === "reasoning")
+                  return `<details>\n<summary>Reasoning</summary>\n\n${s.text}\n\n</details>`;
                 return "";
               })
               .filter(Boolean)
@@ -1104,7 +1107,6 @@ function TabRuntime({
           singleTab={tabsList.length <= 1}
         />
 
-
         <Sidebar
           sessions={state.sessions}
           activeName={state.currentSession}
@@ -1206,9 +1208,7 @@ function TabRuntime({
                           segments={m.segments}
                           pending={m.pending}
                           model={state.model}
-                          onApproveConfirm={(id) =>
-                            resolveConfirm(id, { type: "run_once" })
-                          }
+                          onApproveConfirm={(id) => resolveConfirm(id, { type: "run_once" })}
                           onRejectConfirm={(id) => resolveConfirm(id, { type: "deny" })}
                           onAlwaysAllowConfirm={(id, prefix) =>
                             resolveConfirm(id, { type: "always_allow", prefix })
@@ -1219,7 +1219,14 @@ function TabRuntime({
                     }
                     if (m.kind === "error") {
                       return (
-                        <div key={`e-${i}`} className="warn-card" style={{ borderColor: "var(--tone-err)", background: "var(--danger-soft)" }}>
+                        <div
+                          key={`e-${i}`}
+                          className="warn-card"
+                          style={{
+                            borderColor: "var(--tone-err)",
+                            background: "var(--danger-soft)",
+                          }}
+                        >
                           <span className="ico" style={{ color: "var(--tone-err)" }}>
                             <I.warning size={16} />
                           </span>
@@ -1323,12 +1330,7 @@ function TabRuntime({
               />
 
               {state.busy ? (
-                <InterruptBar
-                  visible={true}
-                  elapsedMs={elapsed}
-                  label="Reasoning"
-                  onStop={abort}
-                />
+                <InterruptBar visible={true} elapsedMs={elapsed} label="Reasoning" onStop={abort} />
               ) : null}
             </>
           )}
@@ -1352,6 +1354,10 @@ function TabRuntime({
           onToggleTheme={onToggleTheme}
           onToggleCurrency={onToggleCurrency}
           onOpenSettings={() => openSettingsAt("general")}
+          onOpenWorkdir={(anchor) => {
+            setWdAnchor(anchor);
+            setWdOpen(true);
+          }}
         />
 
         <CommandPalette
@@ -1427,7 +1433,8 @@ function TitleBar({
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (moreWrapRef.current && !moreWrapRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (moreWrapRef.current && !moreWrapRef.current.contains(e.target as Node))
+        setMenuOpen(false);
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -1477,81 +1484,81 @@ function TitleBar({
           >
             <I.more size={14} />
           </button>
-        {menuOpen ? (
-          <div
-            className="popup"
-            style={{
-              top: "calc(100% + 6px)",
-              right: 0,
-              left: "auto",
-              bottom: "auto",
-              width: 220,
-            }}
-          >
-            <div className="popup-list">
-              <div
-                className="popup-item"
-                onClick={() => {
-                  onOpenCommands();
-                  setMenuOpen(false);
-                }}
-              >
-                <span className="ico">
-                  <I.search size={12} />
-                </span>
-                <div className="nm">
-                  <span>命令面板</span>
+          {menuOpen ? (
+            <div
+              className="popup"
+              style={{
+                top: "calc(100% + 6px)",
+                right: 0,
+                left: "auto",
+                bottom: "auto",
+                width: 220,
+              }}
+            >
+              <div className="popup-list">
+                <div
+                  className="popup-item"
+                  onClick={() => {
+                    onOpenCommands();
+                    setMenuOpen(false);
+                  }}
+                >
+                  <span className="ico">
+                    <I.search size={12} />
+                  </span>
+                  <div className="nm">
+                    <span>命令面板</span>
+                  </div>
+                  <span className="kb">⌘K</span>
                 </div>
-                <span className="kb">⌘K</span>
-              </div>
-              <div
-                className="popup-item"
-                onClick={() => {
-                  if (hasMessages) onExport();
-                  setMenuOpen(false);
-                }}
-                data-active={!hasMessages ? undefined : false}
-                style={{ opacity: hasMessages ? 1 : 0.5 }}
-              >
-                <span className="ico">
-                  <I.download size={12} />
-                </span>
-                <div className="nm">
-                  <span>导出 Markdown</span>
+                <div
+                  className="popup-item"
+                  onClick={() => {
+                    if (hasMessages) onExport();
+                    setMenuOpen(false);
+                  }}
+                  data-active={!hasMessages ? undefined : false}
+                  style={{ opacity: hasMessages ? 1 : 0.5 }}
+                >
+                  <span className="ico">
+                    <I.download size={12} />
+                  </span>
+                  <div className="nm">
+                    <span>导出 Markdown</span>
+                  </div>
                 </div>
-              </div>
-              <div
-                className="popup-item"
-                onClick={() => {
-                  onClear();
-                  setMenuOpen(false);
-                }}
-              >
-                <span className="ico">
-                  <I.x size={12} />
-                </span>
-                <div className="nm">
-                  <span>清空对话</span>
+                <div
+                  className="popup-item"
+                  onClick={() => {
+                    onClear();
+                    setMenuOpen(false);
+                  }}
+                >
+                  <span className="ico">
+                    <I.x size={12} />
+                  </span>
+                  <div className="nm">
+                    <span>清空对话</span>
+                  </div>
                 </div>
-              </div>
-              <div
-                className="popup-item"
-                onClick={() => {
-                  onOpenSettings();
-                  setMenuOpen(false);
-                }}
-              >
-                <span className="ico">
-                  <I.cog size={12} />
-                </span>
-                <div className="nm">
-                  <span>设置</span>
+                <div
+                  className="popup-item"
+                  onClick={() => {
+                    onOpenSettings();
+                    setMenuOpen(false);
+                  }}
+                >
+                  <span className="ico">
+                    <I.cog size={12} />
+                  </span>
+                  <div className="nm">
+                    <span>设置</span>
+                  </div>
+                  <span className="kb">⌘,</span>
                 </div>
-                <span className="kb">⌘,</span>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
         </div>
       </div>
     </header>
@@ -1577,7 +1584,11 @@ function TabBar({
     <div className="tabbar">
       {tabs.map((t) => {
         const ws = t.workspaceDir ?? "";
-        const label = ws.replace(/[\\/]$/, "").split(/[\\/]/).pop() || "workspace";
+        const label =
+          ws
+            .replace(/[\\/]$/, "")
+            .split(/[\\/]/)
+            .pop() || "workspace";
         return (
           <div
             key={t.id}
@@ -1629,7 +1640,7 @@ function MainHead({
   onAbort: () => void;
   onNewChat: () => void;
   onExport: () => void;
-  onOpenWorkdir: (anchor: { top: number; left: number }) => void;
+  onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
 }) {
   const wsLabel = workspaceDir ? workspaceDir.split(/[\\/]/).pop() || "workspace" : "未选择工作区";
   return (
@@ -1844,7 +1855,10 @@ function UpdateBanner({
   onDismiss: () => void;
 }) {
   return (
-    <div className="plan-banner" style={{ background: "var(--accent-soft)", borderColor: "var(--accent)" }}>
+    <div
+      className="plan-banner"
+      style={{ background: "var(--accent-soft)", borderColor: "var(--accent)" }}
+    >
       <span className="ico">
         <I.download size={14} />
       </span>
@@ -1852,7 +1866,13 @@ function UpdateBanner({
         <div className="t">
           新版本可用 · {currentVersion} → {version}
         </div>
-        <div className="s">{status === "installing" ? "正在安装…" : status === "error" ? "安装失败" : "点击安装并重启"}</div>
+        <div className="s">
+          {status === "installing"
+            ? "正在安装…"
+            : status === "error"
+              ? "安装失败"
+              : "点击安装并重启"}
+        </div>
       </div>
       <div className="prog">
         <button type="button" onClick={onInstall} disabled={status === "installing"}>

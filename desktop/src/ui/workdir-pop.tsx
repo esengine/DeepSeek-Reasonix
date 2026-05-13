@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { I } from "../icons";
 import { t, useLang } from "../i18n";
 
-type Anchor = { top: number; left: number };
+type Anchor = { top?: number; bottom?: number; left: number };
 
 export function WorkdirPop({
   open,
@@ -41,16 +41,15 @@ export function WorkdirPop({
 
   if (!open) return null;
 
-  const top = anchor?.top ?? 56;
   const left = anchor?.left ?? 240;
+  const positionStyle =
+    anchor?.bottom !== undefined
+      ? { bottom: anchor.bottom, left }
+      : { top: anchor?.top ?? 56, left };
 
   return (
     <div className="wd-mask" onMouseDown={onClose}>
-      <div
-        className="wd-pop"
-        style={{ top, left }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+      <div className="wd-pop" style={positionStyle} onMouseDown={(e) => e.stopPropagation()}>
         <div className="wd-head">
           <I.folder size={12} />
           <span>{t("workdir.title")}</span>
