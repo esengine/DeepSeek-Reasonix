@@ -1,3 +1,4 @@
+import { memo } from "preact/compat";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import {
   ChatMessage,
@@ -535,18 +536,6 @@ export function ChatPanel() {
     }, 0);
   }, [messages, streaming]);
 
-  const allMessages = streaming
-    ? [
-        ...messages,
-        {
-          id: streaming.id,
-          role: "assistant",
-          text: streaming.text,
-          reasoning: streaming.reasoning,
-        },
-      ]
-    : messages;
-
   const resolveModal = useCallback<OnResolve>(async (kind, choice, text) => {
     try {
       await api("/modal/resolve", {
@@ -756,23 +745,7 @@ export function ChatPanel() {
 
       <div class="chat-body">
         <div class="chat-main">
-          <div class="chat-feed" ref=${feedRef}>
-            ${
-              allMessages.length === 0
-                ? html`<div class="chat-empty">
-                    ${t("chat.noConversation")}
-                  </div>`
-                : allMessages.map(
-                    (m) => html`
-                      <${ChatMessage}
-                        key=${m.id}
-                        msg=${m}
-                        streaming=${Boolean(streaming && streaming.id === m.id)}
-                      />
-                    `,
-                  )
-            }
-          </div>
+          <${ChatFeed} messages=${messages} streaming=${streaming} innerRef=${feedRef} />
 
           <div class="chat-input-area" style="position:relative">
             ${
@@ -843,13 +816,52 @@ export function ChatPanel() {
   `;
 }
 
+interface ChatFeedProps {
+  messages: ChatMsg[];
+  streaming: StreamingState | null;
+  innerRef: { current: HTMLDivElement | null };
+}
+
+/** Memoised so keystrokes in ChatPanel don't re-walk the message list. */
+const ChatFeed = memo(function ChatFeed({ messages, streaming, innerRef }: ChatFeedProps) {
+  useLang();
+  const allMessages = streaming
+    ? [
+        ...messages,
+        {
+          id: streaming.id,
+          role: "assistant" as const,
+          text: streaming.text,
+          reasoning: streaming.reasoning,
+        },
+      ]
+    : messages;
+  return html`
+    <div class="chat-feed" ref=${innerRef}>
+      ${
+        allMessages.length === 0
+          ? html`<div class="chat-empty">${t("chat.noConversation")}</div>`
+          : allMessages.map(
+              (m) => html`
+                <${ChatMessage}
+                  key=${m.id}
+                  msg=${m}
+                  streaming=${Boolean(streaming && streaming.id === m.id)}
+                />
+              `,
+            )
+      }
+    </div>
+  `;
+});
+
 interface SideRailProps {
   stats: ChatStats | null;
   budgetUsd: number | null;
   activePlan: RailPlan | null;
 }
 
-function SideRail({ stats, budgetUsd, activePlan }: SideRailProps) {
+const SideRail = memo(function SideRail({ stats, budgetUsd, activePlan }: SideRailProps) {
   useLang();
   if (!stats && !activePlan) return html`<aside class="chat-rail"></aside>`;
   const cachePct = stats ? stats.cacheHitRatio * 100 : 0;
@@ -894,7 +906,7 @@ function SideRail({ stats, budgetUsd, activePlan }: SideRailProps) {
       }
     </aside>
   `;
-}
+});
 
 function ActivePlanCard({ plan }: { plan: RailPlan }) {
   useLang();
@@ -1023,7 +1035,7 @@ interface ChatStatusBarProps {
   model: string | null;
 }
 
-function ChatStatusBar({ stats, model }: ChatStatusBarProps) {
+const ChatStatusBar = memo(function ChatStatusBar({ stats, model }: ChatStatusBarProps) {
   useLang();
   if (!stats) {
     return html`
@@ -1077,4 +1089,4 @@ function ChatStatusBar({ stats, model }: ChatStatusBarProps) {
       }
     </div>
   `;
-}
+});
