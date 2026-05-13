@@ -142,7 +142,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "run_background",
     description:
-      "Spawn a long-running process (dev server, watcher) and detach. Waits up to `waitSec` for startup or a readiness signal ('Local:', 'listening on', 'compiled successfully'), then returns the job id + startup preview. Tail logs with `job_output`, kill with `stop_job`, list with `list_jobs`.\n\nSingle process only — chains / redirects / `cd` work as in run_command, but a typical dev-server invocation is one binary. Use the binary's own --cwd / --prefix flag for subdirectories. Vite gotcha: npm's `--prefix` only finds package.json; vite's server root still uses process cwd — pass `vite <project-dir>` instead.\n\nUSE THIS — not run_command — for: npm/yarn/pnpm dev, uvicorn / flask run, cargo watch, tsc --watch, webpack serve, anything with dev/serve/watch in the name.",
+      "Spawn a long-running process and detach. Waits up to `waitSec` for startup or a readiness signal ('Local:', 'listening on', 'compiled successfully'), then returns the job id + startup preview. Tail logs with `job_output`, block on completion with `wait_for_job`, kill with `stop_job`, list with `list_jobs`.\n\nSingle process only — chains / redirects / `cd` work as in run_command, but a typical invocation is one binary. Use the binary's own --cwd / --prefix flag for subdirectories. Vite gotcha: npm's `--prefix` only finds package.json; vite's server root still uses process cwd — pass `vite <project-dir>` instead.\n\nUSE THIS — not run_command — for:\n- Dev servers / watchers: npm/yarn/pnpm dev, uvicorn / flask run, cargo watch, tsc --watch, webpack serve, anything with dev/serve/watch in the name.\n- One-shot long jobs: curl / wget large downloads, `huggingface-cli download`, multi-GB `pip install` / `npm install`, big `cargo build` / `docker build`. Start with `run_background`, then call `wait_for_job` once (default `waitFor: 'exit'`, timeoutMs up to 300_000) — the harness blocks server-side so a 5-minute download costs ONE tool call, not 30 polls.",
     parameters: {
       type: "object",
       properties: {
@@ -223,7 +223,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "wait_for_job",
     description:
-      "Block until a background job exits or produces new output, bounded by `timeoutMs`. Use this instead of polling `job_output` with identical args when you're intentionally waiting for state to change. Returns JSON with `exited`, `exitCode`, and `latestOutput`.",
+      "Block server-side until a background job finishes (or, opt-in, until it produces new output), bounded by `timeoutMs`. Costs ONE tool call regardless of how long the wait runs — use this instead of polling `job_output` in a loop. Returns JSON with `exited`, `exitCode`, and `latestOutput`.\n\n`waitFor` controls the wake condition:\n- `'exit'` (default) — only wake on the job exiting (or the timeout). Right for downloads, installs, builds, anything one-shot. Chatty progress bars do NOT wake the wait.\n- `'output-or-exit'` — also wake whenever the job writes a new line. Right for tailing a dev server / watcher and reacting to a specific log line.\n\nFor a download or install, set `timeoutMs` to the slowest reasonable end-to-end (e.g. 300_000 for a 5-min wheel install).",
     readOnly: true,
     parallelSafe: true,
     stormExempt: true,
@@ -234,13 +234,26 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         timeoutMs: {
           type: "integer",
           description:
-            "Max time to block before returning if nothing changes. Clamped to 0..30000. Default 5000.",
+            "Max time to block before returning if the wake condition hasn't fired. Clamped to 0..300000. Default 5000.",
+        },
+        waitFor: {
+          type: "string",
+          enum: ["exit", "output-or-exit"],
+          description:
+            "Wake condition. 'exit' = only on job exit (right for downloads / installs / builds). 'output-or-exit' = also on any new output (right for tailing a dev server). Default 'exit'.",
         },
       },
       required: ["jobId"],
     },
-    fn: async (args: { jobId: number; timeoutMs?: number }) => {
-      const out = await jobs.waitForJob(args.jobId, { timeoutMs: args.timeoutMs });
+    fn: async (args: {
+      jobId: number;
+      timeoutMs?: number;
+      waitFor?: "exit" | "output-or-exit";
+    }) => {
+      const out = await jobs.waitForJob(args.jobId, {
+        timeoutMs: args.timeoutMs,
+        waitFor: args.waitFor,
+      });
       if (!out) return `job ${args.jobId}: not found (use list_jobs)`;
       return {
         jobId: args.jobId,

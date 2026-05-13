@@ -314,7 +314,10 @@ export class JobRegistry {
     };
   }
 
-  async waitForJob(id: number, opts: { timeoutMs?: number } = {}): Promise<JobWaitResult | null> {
+  async waitForJob(
+    id: number,
+    opts: { timeoutMs?: number; waitFor?: "exit" | "output-or-exit" } = {},
+  ): Promise<JobWaitResult | null> {
     const job = this.jobs.get(id);
     if (!job) return null;
     if (!job.running) {
@@ -325,22 +328,27 @@ export class JobRegistry {
       };
     }
 
-    const timeoutMs = Math.max(0, Math.min(30_000, opts.timeoutMs ?? 5_000));
+    const timeoutMs = Math.max(0, Math.min(300_000, opts.timeoutMs ?? 5_000));
+    const waitFor = opts.waitFor ?? "exit";
     const startOutput = job.output;
-    let wakeOutput: (() => void) | null = null;
-    const outputPromise = new Promise<void>((resolve) => {
-      wakeOutput = resolve;
-      job.outputWaiters.add(resolve);
-    });
 
+    const racers: Promise<void>[] = [job.closedPromise];
+    let wakeOutput: (() => void) | null = null;
+    if (waitFor === "output-or-exit") {
+      racers.push(
+        new Promise<void>((resolve) => {
+          wakeOutput = resolve;
+          job.outputWaiters.add(resolve);
+        }),
+      );
+    }
     let timer: ReturnType<typeof setTimeout> | null = null;
-    await Promise.race([
-      job.closedPromise,
-      outputPromise,
+    racers.push(
       new Promise<void>((resolve) => {
         timer = setTimeout(resolve, timeoutMs);
       }),
-    ]);
+    );
+    await Promise.race(racers);
     if (timer) clearTimeout(timer);
     if (wakeOutput) job.outputWaiters.delete(wakeOutput);
 

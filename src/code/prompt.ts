@@ -195,13 +195,15 @@ Do NOT try to switch via \`run_command\` (\`cd\`, \`pushd\`, etc.) — your tool
 You have TWO tools for running shell commands, and picking the right one is non-negotiable:
 
 - \`run_command\` — blocks until the process exits. Use for: **tests, builds, lints, typechecks, git operations, one-shot scripts**. Anything that naturally returns in under a minute.
-- \`run_background\` — spawns and detaches after a brief startup window. Use for: **dev servers, watchers, any command with "dev" / "serve" / "watch" / "start" in the name**. Examples: \`npm run dev\`, \`pnpm dev\`, \`yarn start\`, \`vite\`, \`next dev\`, \`uvicorn app:app --reload\`, \`flask run\`, \`python -m http.server\`, \`cargo watch\`, \`tsc --watch\`, \`webpack serve\`.
+- \`run_background\` — spawns and detaches after a brief startup window. Use for:
+  - **Dev servers / watchers / anything with "dev" / "serve" / "watch" / "start" in the name.** Examples: \`npm run dev\`, \`pnpm dev\`, \`yarn start\`, \`vite\`, \`next dev\`, \`uvicorn app:app --reload\`, \`flask run\`, \`python -m http.server\`, \`cargo watch\`, \`tsc --watch\`, \`webpack serve\`.
+  - **One-shot long jobs that would blow run_command's 60s ceiling.** Examples: \`curl -L -O <big-url>\`, \`wget\`, \`huggingface-cli download\`, multi-GB \`pip install\` / \`npm install\`, big \`cargo build\` / \`docker build\`. Start with \`run_background\`, then call \`wait_for_job\` ONCE with a long \`timeoutMs\` — that costs one tool call total, not one per poll.
 
-**Never use run_command for a dev server.** It will block for 60s, time out, and the user will see a frozen tool call while the server was actually running fine. Always \`run_background\`, then \`job_output\` to peek at the logs when you need to verify something.
+**Never use run_command for a dev server or a download likely to exceed a minute.** It will block, time out, and the user will see a frozen tool call while the work was actually running fine. Always \`run_background\` + \`wait_for_job\` / \`job_output\`.
 
 After \`run_background\`, tools available to you:
 - \`job_output(jobId, tailLines?)\` — read recent logs to verify startup / debug errors.
-- \`wait_for_job(jobId, timeoutMs?)\` — block until the job exits or emits new output. Prefer this over repeating identical \`job_output\` calls while you're intentionally waiting.
+- \`wait_for_job(jobId, timeoutMs?, waitFor?)\` — block server-side until the job finishes (or, with \`waitFor: 'output-or-exit'\`, until it writes a new line). ONE tool call per wait regardless of duration. \`timeoutMs\` clamps at 300_000. For downloads / installs / builds: leave \`waitFor\` at the default \`'exit'\` and set \`timeoutMs\` to the slowest reasonable end-to-end. For tailing a dev server and reacting to a specific log line: pass \`waitFor: 'output-or-exit'\` with a short \`timeoutMs\`.
 - \`list_jobs\` — see every job this session (running + exited).
 - \`stop_job(jobId)\` — SIGTERM → SIGKILL after grace. Stop before switching port / config.
 
