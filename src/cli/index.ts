@@ -317,6 +317,7 @@ program
   .option("--dir <path>", "root directory for filesystem tools (default: cwd)")
   .option("--preset <name>", t("ui.presetHintShort"))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
+  .option("--transcript <path>", t("ui.transcriptHint"))
   .action(async (opts) => {
     const defaults = resolveDefaults({
       model: opts.model,
@@ -329,6 +330,7 @@ program
       model: defaults.model,
       budgetUsd: parseBudgetFlag(opts.budget),
       dir: opts.dir,
+      transcript: opts.transcript,
     });
   });
 

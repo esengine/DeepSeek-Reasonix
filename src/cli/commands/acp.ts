@@ -1,7 +1,7 @@
 /** ACP (Agent Client Protocol) agent — drives the cache-first loop over stdio NDJSON JSON-RPC. */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, statSync } from "node:fs";
+import { type WriteStream, existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { dispatchKernelEvent } from "../../acp/dispatch.js";
 import { requestPermissionForGate } from "../../acp/gates.js";
@@ -31,6 +31,7 @@ import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import { timestampSuffix } from "../../memory/session.js";
+import { openTranscriptFile, recordFromLoopEvent, writeRecord } from "../../transcript/log.js";
 import { VERSION } from "../../version.js";
 import { canonicalPresetName, resolvePreset } from "../ui/presets.js";
 
@@ -38,6 +39,7 @@ export interface AcpOptions {
   model?: string;
   dir?: string;
   budgetUsd?: number;
+  transcript?: string;
 }
 
 interface Session {
@@ -110,6 +112,17 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
   const sessionContext = new AsyncLocalStorage<string>();
   const server = new AcpServer();
 
+  let transcriptStream: WriteStream | null = null;
+  if (opts.transcript) {
+    const defaultModel = opts.model || resolvePreset(canonicalPresetName(loadPreset())).model;
+    transcriptStream = openTranscriptFile(opts.transcript, {
+      version: 1,
+      source: "reasonix acp",
+      model: defaultModel,
+      startedAt: new Date().toISOString(),
+    });
+  }
+
   pauseGate.on((req) => {
     const auto = autoResolveVerdict(req, loadEditMode());
     if (auto !== null) {
@@ -179,6 +192,16 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
             stopReason = "cancelled";
             break;
           }
+          // transcript needs raw LoopEvent (usage/cost/stats); kernel events lose those fields
+          if (transcriptStream) {
+            writeRecord(
+              transcriptStream,
+              recordFromLoopEvent(ev, {
+                model: session.ctx.model,
+                prefixHash: session.ctx.prefixHash,
+              }),
+            );
+          }
           for (const kev of session.eventizer.consume(ev, session.ctx)) {
             dispatchKernelEvent(server, session.id, kev);
             if (kev.type === "error") stopReason = "error";
@@ -206,5 +229,9 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
     session?.aborter?.abort();
   });
 
-  await server.done();
+  try {
+    await server.done();
+  } finally {
+    transcriptStream?.end();
+  }
 }
