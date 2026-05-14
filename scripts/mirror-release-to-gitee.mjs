@@ -17,7 +17,10 @@ const REPO = envOrDie("GITEE_REPO");
 const TAG = envOrDie("RELEASE_TAG");
 const ASSETS_DIR = envOrDie("ASSETS_DIR");
 const RELEASE_NAME = process.env.RELEASE_NAME ?? `Reasonix ${TAG}`;
-const RELEASE_BODY = process.env.RELEASE_BODY ?? `Mirror of GitHub Release ${TAG}.`;
+// Gitee rejects empty body with "发行版的描述不能为空"; treat unset / empty / whitespace alike.
+const RELEASE_BODY = process.env.RELEASE_BODY?.trim()
+  ? process.env.RELEASE_BODY
+  : `Mirror of GitHub Release ${TAG}. See https://github.com/esengine/DeepSeek-Reasonix/releases/tag/${TAG}`;
 const TARGET_BRANCH = process.env.GITEE_TARGET_BRANCH ?? "main";
 
 async function giteeFetch(p, init = {}) {
