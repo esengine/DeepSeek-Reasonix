@@ -269,6 +269,20 @@ export function Composer({
         dismiss();
         return;
       }
+      if (e.key === "Tab" && popup.kind === "at" && items.length > 0) {
+        // Tab on a directory enters it — replaces `@src` with `@src/`
+        // and re-queries so the popup shows that directory's children.
+        const it = items[activeIdx];
+        if (it && (it as MentionItem).kind === "dir") {
+          e.preventDefault();
+          const dirPath = (it as MentionItem).name.replace(/\/+$/, "");
+          const next = draft.replace(/[@][^\s]*$/, `@${dirPath}/`);
+          setDraft(next);
+          const nonce = ++nonceRef.current;
+          setPopup({ kind: "at", query: `${dirPath}/`, nonce });
+          return;
+        }
+      }
       if (e.key === "Enter") {
         if (items.length > 0) {
           e.preventDefault();
