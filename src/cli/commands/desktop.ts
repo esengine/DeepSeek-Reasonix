@@ -558,7 +558,9 @@ interface Tab {
   currentPreset: "auto" | "flash" | "pro";
   currentModel: string;
   budgetUsd: number | undefined;
-  toolset: Awaited<ReturnType<typeof buildCodeToolset>>;
+  /** null while the tab is bootstrapping — see `initTabToolset`. UI gates input on `$ready`, which only fires once this is set. */
+  toolset: Awaited<ReturnType<typeof buildCodeToolset>> | null;
+  /** Empty while bootstrapping; populated together with `toolset`. */
   system: string;
   runtime: RuntimeState | null;
   aborter: AbortController | null;
@@ -595,14 +597,16 @@ function mintSessionFor(rootDir: string): string {
 }
 
 function buildRuntimeFor(tab: Tab): RuntimeState {
+  if (!tab.toolset) throw new Error("buildRuntimeFor called before initTabToolset finished");
+  const toolset = tab.toolset;
   const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
-  const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: tab.toolset.tools.specs() });
+  const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = loadReasoningEffort();
   const { autoEscalate } = resolvePreset(tab.currentPreset);
   const loop = new CacheFirstLoop({
     client,
     prefix,
-    tools: tab.toolset.tools,
+    tools: toolset.tools,
     model: tab.currentModel,
     budgetUsd: tab.budgetUsd,
     session: tab.currentSession,
@@ -712,17 +716,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     return id ? tabs.get(id) : undefined;
   }
 
-  async function createTab(initialDir?: string): Promise<Tab> {
+  /** Synchronous tab construction — no I/O. All cheap, disk-only events (`$settings`, `$sessions`, `$memory`, `$skills`, `$mcp_specs`) can fire against this immediately. The heavy bits (`buildCodeToolset`, MCP probes, runtime construction) happen in `initTabToolset` so the UI shell paints without waiting for them. */
+  function createTabSkeleton(initialDir?: string): Tab {
     const dir = resolve(initialDir ?? opts.dir ?? loadWorkspaceDir() ?? process.cwd());
     pushRecentWorkspace(dir);
     const preset = canonicalPresetName(loadPreset());
     const resolved = resolvePreset(preset);
     const model = opts.model || resolved.model;
-    const toolset = await buildCodeToolset({ rootDir: dir });
-    const system = codeSystemPrompt(dir, {
-      hasSemanticSearch: toolset.semantic.enabled,
-      modelId: model,
-    });
     const tab: Tab = {
       id: nextTabId(),
       rootDir: dir,
@@ -730,8 +730,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       currentPreset: preset,
       currentModel: model,
       budgetUsd: opts.budgetUsd,
-      toolset,
-      system,
+      toolset: null,
+      system: "",
       runtime: null,
       aborter: null,
       fileIndex: null,
@@ -747,17 +747,27 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       mcpStatuses: new Map(),
     };
     tab.currentSession = mintSessionFor(dir);
+    tabs.set(tab.id, tab);
+    return tab;
+  }
+
+  /** Builds the toolset / system prompt / runtime / MCP bridge for a freshly-created skeleton. Reads `tab.currentModel` at call time so preset changes that landed during the wait are honored. */
+  async function initTabToolset(tab: Tab): Promise<void> {
+    const toolset = await buildCodeToolset({ rootDir: tab.rootDir });
+    tab.toolset = toolset;
+    tab.system = codeSystemPrompt(tab.rootDir, {
+      hasSemanticSearch: toolset.semantic.enabled,
+      modelId: tab.currentModel,
+    });
     if (loadApiKey()) {
       process.env.DEEPSEEK_API_KEY = loadApiKey();
       tab.runtime = buildRuntimeFor(tab);
       void bridgeTabMcp(tab);
     }
-    tabs.set(tab.id, tab);
-    return tab;
   }
 
   function bridgeTabMcp(tab: Tab): Promise<void> {
-    if (!tab.runtime) return Promise.resolve();
+    if (!tab.runtime || !tab.toolset) return Promise.resolve();
     if (tab.mcpRuntime) {
       // Already constructed — reload so new/removed specs settle without restart.
       return tab.mcpRuntime
@@ -770,7 +780,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const requested = (readConfig().mcp ?? []).length;
     if (requested === 0) return Promise.resolve();
     const runtime = createMcpRuntime({
-      getTools: () => tab.toolset.tools,
+      getTools: () => {
+        if (!tab.toolset) throw new Error("toolset gone");
+        return tab.toolset.tools;
+      },
       getMcpPrefix: () => undefined,
       getRequestedCount: () => requested,
       progressSink: { current: null },
@@ -809,7 +822,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   async function closeTab(tab: Tab): Promise<void> {
     tab.aborter?.abort();
     try {
-      await tab.toolset.jobs.shutdown();
+      await tab.toolset?.jobs.shutdown();
     } catch {
       // shutdown errors aren't actionable here
     }
@@ -882,7 +895,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     tab.aborter?.abort();
     try {
-      await tab.toolset.jobs.shutdown();
+      await tab.toolset?.jobs.shutdown();
     } catch {
       // shutdown errors aren't actionable here
     }
@@ -926,9 +939,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
   }
 
-  const first = await createTab();
+  const first = createTabSkeleton();
   process.once("exit", () => {
-    for (const t of tabs.values()) void t.toolset.jobs.shutdown();
+    for (const t of tabs.values()) void t.toolset?.jobs.shutdown();
   });
 
   pauseGate.on((req) => {
@@ -1084,16 +1097,28 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
   });
 
+  // Fast-path: emit disk-only events immediately so the UI shell renders
+  // before the toolset finishes building. Heavy work (semantic bootstrap,
+  // MCP probes, runtime construction) runs in initTabToolset which fires
+  // `$ready` when it completes — until then `state.ready` keeps the
+  // composer disabled, so users can't send a message before the runtime
+  // exists. emitBalance was already fire-and-forget.
   emit({ type: "$tab_opened", workspaceDir: first.rootDir }, first.id);
-  if (loadApiKey()) emit({ type: "$ready" }, first.id);
-  else emit({ type: "$needs_setup", reason: "no_api_key" }, first.id);
   emitSessions(first);
   emitSettings(first);
   emitMcpSpecs(first);
   emitSkills(first);
   emitMemory(first);
-  emitCtxBreakdown(first);
+  if (!loadApiKey()) emit({ type: "$needs_setup", reason: "no_api_key" }, first.id);
   void emitBalance(first);
+  void initTabToolset(first)
+    .then(() => {
+      if (loadApiKey()) emit({ type: "$ready" }, first.id);
+      emitCtxBreakdown(first);
+    })
+    .catch((err) => {
+      emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, first.id);
+    });
 
   const rl = createInterface({ input: stdin });
   rl.on("line", (line) => {
@@ -1108,23 +1133,27 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
 
     if (msg.cmd === "tab_open") {
-      void (async () => {
-        try {
-          const tab = await createTab(msg.workspaceDir);
-          emit({ type: "$tab_opened", workspaceDir: tab.rootDir }, tab.id);
-          if (loadApiKey()) emit({ type: "$ready" }, tab.id);
-          else emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
-          emitSessions(tab);
-          emitSettings(tab);
-          emitMcpSpecs(tab);
-          emitSkills(tab);
-          emitMemory(tab);
-          emitCtxBreakdown(tab);
-          void emitBalance(tab);
-        } catch (err) {
-          emit({ type: "$error", message: `tab_open failed: ${(err as Error).message}` });
-        }
-      })();
+      try {
+        const tab = createTabSkeleton(msg.workspaceDir);
+        emit({ type: "$tab_opened", workspaceDir: tab.rootDir }, tab.id);
+        emitSessions(tab);
+        emitSettings(tab);
+        emitMcpSpecs(tab);
+        emitSkills(tab);
+        emitMemory(tab);
+        if (!loadApiKey()) emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
+        void emitBalance(tab);
+        void initTabToolset(tab)
+          .then(() => {
+            if (loadApiKey()) emit({ type: "$ready" }, tab.id);
+            emitCtxBreakdown(tab);
+          })
+          .catch((err) => {
+            emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
+          });
+      } catch (err) {
+        emit({ type: "$error", message: `tab_open failed: ${(err as Error).message}` });
+      }
       return;
     }
     if (msg.cmd === "confirm_response") {
@@ -1175,6 +1204,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         saveApiKey(key);
         process.env.DEEPSEEK_API_KEY = key;
         for (const tab of tabs.values()) {
+          // Skeleton tabs still mid-bootstrap pick up the new key inside
+          // initTabToolset's tail when buildCodeToolset settles — don't
+          // try to construct a runtime against a null toolset here.
+          if (!tab.toolset) {
+            emitSettings(tab);
+            void emitBalance(tab);
+            continue;
+          }
           tab.runtime = buildRuntimeFor(tab);
           emit({ type: "$ready" }, tab.id);
           emitSettings(tab);
@@ -1320,11 +1357,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           const resolved = resolvePreset(tab.currentPreset);
           tab.currentModel = resolved.model;
           savePreset(tab.currentPreset);
-          tab.system = codeSystemPrompt(tab.rootDir, {
-            hasSemanticSearch: tab.toolset.semantic.enabled,
-            modelId: tab.currentModel,
-          });
-          if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+          // If the toolset isn't built yet (mid-bootstrap), let initTabToolset
+          // see the updated currentModel and compute system + runtime once.
+          if (tab.toolset) {
+            tab.system = codeSystemPrompt(tab.rootDir, {
+              hasSemanticSearch: tab.toolset.semantic.enabled,
+              modelId: tab.currentModel,
+            });
+            if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+          }
         }
         emitSettings(tab);
       } catch (err) {
