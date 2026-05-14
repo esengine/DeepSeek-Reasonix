@@ -43,8 +43,6 @@ export interface SubagentSink {
   current: ((ev: SubagentEvent) => void) | null;
 }
 
-export type IterCapSource = "json-arg" | "type" | "frontmatter" | "default";
-
 export interface SpawnSubagentOptions {
   client: DeepSeekClient;
   parentRegistry: ToolRegistry;
@@ -59,9 +57,6 @@ export interface SpawnSubagentOptions {
   skillName?: string;
   /** Scopes the child registry to these literal tool names; NEVER_INHERITED still wins. Driven by skill `allowed-tools` frontmatter. */
   allowedTools?: readonly string[];
-  /** Experiment telemetry — see PR widening MAX_MAX_ITERS to 256. Optional; missing = "unknown". */
-  itersSource?: IterCapSource;
-  itersRaw?: number | null;
 }
 
 export interface SubagentResult {
@@ -108,7 +103,6 @@ function defaultSubagentSystem(modelId: string): string {
 const DEFAULT_MAX_RESULT_CHARS = 8000;
 const DEFAULT_MAX_ITERS = 16;
 const MIN_MAX_ITERS = 1;
-/** Widened from 32 to 256 as an experiment — see PR: collecting evidence on whether the model picks pathological values when given freedom, before deciding whether to remove the cap entirely. */
 const MAX_MAX_ITERS = 256;
 /** Iters-from-cap at which we start appending a remaining-budget hint to tool results. */
 const BUDGET_WARN_THRESHOLD = 3;
@@ -149,23 +143,6 @@ export function subagentBudgetHint(spawnCount: number, totalTokens: number): str
   return null;
 }
 
-/** Experiment-only stderr telemetry collecting evidence on what model picks for max_iters when the cap is wide. Single line per spawn — easy to grep, easy to delete once the data is in. */
-function emitIterCapTelemetry(info: {
-  skillName?: string;
-  model: string;
-  maxToolIters: number;
-  source?: IterCapSource;
-  raw?: number | null;
-}): void {
-  if (process.env.REASONIX_ITER_CAP_TELEMETRY === "off") return;
-  const skill = info.skillName ?? "anon";
-  const src = info.source ?? "unknown";
-  const raw = info.raw !== undefined && info.raw !== null ? ` raw=${info.raw}` : "";
-  process.stderr.write(
-    `[iter-cap-exp] skill=${skill} model=${info.model} source=${src} chosen=${info.maxToolIters}${raw}\n`,
-  );
-}
-
 /** Errors captured in the result shape, never thrown — caller decides how to surface. */
 export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<SubagentResult> {
   const model = opts.model ?? DEFAULT_SUBAGENT_MODEL;
@@ -177,13 +154,6 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   const startedAt = Date.now();
   const runId = nextRunId();
   const taskPreview = opts.task.length > 30 ? `${opts.task.slice(0, 30)}…` : opts.task;
-  emitIterCapTelemetry({
-    skillName,
-    model,
-    maxToolIters,
-    source: opts.itersSource,
-    raw: opts.itersRaw,
-  });
   sink?.current?.({
     kind: "start",
     runId,
@@ -516,14 +486,6 @@ export function registerSubagentTool(
           ? args.system.trim()
           : (typeSpec?.system ?? `${defaultSystemBase}\n\n${escalationContract(model)}`);
       const callerIters = clampMaxIters(args.max_iters);
-      const itersSource: IterCapSource =
-        callerIters !== undefined
-          ? "json-arg"
-          : typeSpec?.maxToolIters !== undefined
-            ? "type"
-            : opts.maxToolIters !== undefined
-              ? "frontmatter"
-              : "default";
       const result = await spawnSubagent({
         client: opts.client,
         parentRegistry,
@@ -534,8 +496,6 @@ export function registerSubagentTool(
         maxResultChars,
         sink,
         parentSignal: ctx?.signal,
-        itersSource,
-        itersRaw: typeof args.max_iters === "number" ? args.max_iters : null,
       });
       sessionSpawnCount++;
       sessionSpawnTokens += result.usage.totalTokens;

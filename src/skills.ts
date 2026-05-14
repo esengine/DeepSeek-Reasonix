@@ -73,7 +73,7 @@ function parseAllowedTools(raw: string | undefined): readonly string[] | undefin
   return names.length > 0 ? Object.freeze(names) : undefined;
 }
 
-/** Match subagent's own bounds (src/tools/subagent.ts MIN_MAX_ITERS / MAX_MAX_ITERS). Widened from 32 → 256 alongside the subagent cap as part of the iter-cap experiment. */
+/** Match subagent's own bounds (src/tools/subagent.ts MIN_MAX_ITERS / MAX_MAX_ITERS). */
 const SKILL_MAX_ITERS_MIN = 1;
 const SKILL_MAX_ITERS_MAX = 256;
 
