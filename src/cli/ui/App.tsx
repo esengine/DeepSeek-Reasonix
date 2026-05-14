@@ -1219,6 +1219,23 @@ function AppInner({
     };
   }, [pendingRevision, broadcastDashboardEvent]);
 
+  useEffect(() => {
+    if (!pendingCheckpoint) return;
+    broadcastDashboardEvent({
+      kind: "modal-up",
+      modal: {
+        kind: "checkpoint",
+        stepId: pendingCheckpoint.stepId,
+        ...(pendingCheckpoint.title ? { title: pendingCheckpoint.title } : {}),
+        completed: pendingCheckpoint.completed,
+        total: pendingCheckpoint.total,
+      },
+    });
+    return () => {
+      broadcastDashboardEvent({ kind: "modal-down", modalKind: "checkpoint" });
+    };
+  }, [pendingCheckpoint, broadcastDashboardEvent]);
+
   // Three mutually-exclusive input-prefix pickers (slash name, @ file
   // mention, slash argument) — state + memos + commit callbacks live
   // in a dedicated hook so App.tsx only sees the small surface it
@@ -2003,6 +2020,15 @@ function AppInner({
                   ...(s.risk ? { risk: s.risk } : {}),
                 })),
                 ...(pendingRevision.summary ? { summary: pendingRevision.summary } : {}),
+              };
+            }
+            if (pendingCheckpoint) {
+              return {
+                kind: "checkpoint",
+                stepId: pendingCheckpoint.stepId,
+                ...(pendingCheckpoint.title ? { title: pendingCheckpoint.title } : {}),
+                completed: pendingCheckpoint.completed,
+                total: pendingCheckpoint.total,
               };
             }
             const picker = activePickerSnapshotRef.current;
