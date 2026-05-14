@@ -21,6 +21,12 @@ interface ToolsError {
   body?: { error?: string };
 }
 
+function toolDesc(name: string, fallback: string): string {
+  const key = `tools.desc.${name}`;
+  const translated = t(key);
+  return translated === key ? fallback : translated;
+}
+
 export function ToolsPanel() {
   useLang();
   const { data, error, loading } = usePoll<ToolsData>("/tools", 4000);
@@ -65,7 +71,7 @@ export function ToolsPanel() {
                             : html`<span class="pill acc">${t("tools.write")}</span>`}
                           ${tool.flattened ? html` <span class="pill">${t("tools.flat")}</span>` : null}
                         </td>
-                        <td class="dim">${tool.description ?? ""}</td>
+                        <td class="dim">${toolDesc(tool.name, tool.description ?? "")}</td>
                       </tr>
                     `,
                   )}
