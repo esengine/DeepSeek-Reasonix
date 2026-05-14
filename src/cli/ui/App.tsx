@@ -879,6 +879,8 @@ function AppInner({
             // Stamped onto every event so the TUI sink + usage log can
             // attribute the run to a skill without extra bookkeeping.
             skillName: skill.name,
+            maxToolIters: skill.maxToolIters,
+            itersSource: skill.maxToolIters !== undefined ? "frontmatter" : "default",
           });
           return formatSubagentResult(result);
         },

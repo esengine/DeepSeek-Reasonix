@@ -83,6 +83,8 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         model: skill.model,
         allowedTools: skill.allowedTools,
         maxToolIters: skill.maxToolIters,
+        skillName: skill.name,
+        itersSource: skill.maxToolIters !== undefined ? "frontmatter" : "default",
       });
       return formatSubagentResult(result);
     },

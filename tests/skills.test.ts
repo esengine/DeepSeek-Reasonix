@@ -411,17 +411,30 @@ describe("Skill frontmatter — runAs", () => {
     expect(store.read("big")?.maxToolIters).toBe(32);
   });
 
-  it("clamps max-iters above 32 to the upper bound", () => {
+  it("passes max-iters values up to 256 through unchanged", () => {
     writeSkillDir(
       home,
       "global",
-      "toobig",
-      { description: "...", runAs: "subagent", "max-iters": "100" },
+      "bigger",
+      { description: "...", runAs: "subagent", "max-iters": "128" },
       "body",
       home,
     );
     const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("toobig")?.maxToolIters).toBe(32);
+    expect(store.read("bigger")?.maxToolIters).toBe(128);
+  });
+
+  it("clamps max-iters above 256 to the upper bound", () => {
+    writeSkillDir(
+      home,
+      "global",
+      "toobig",
+      { description: "...", runAs: "subagent", "max-iters": "9999" },
+      "body",
+      home,
+    );
+    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+    expect(store.read("toobig")?.maxToolIters).toBe(256);
   });
 
   it("clamps max-iters below 1 to the lower bound", () => {

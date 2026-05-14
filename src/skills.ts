@@ -73,9 +73,9 @@ function parseAllowedTools(raw: string | undefined): readonly string[] | undefin
   return names.length > 0 ? Object.freeze(names) : undefined;
 }
 
-/** Match subagent's own bounds (src/tools/subagent.ts MIN_MAX_ITERS / MAX_MAX_ITERS). */
+/** Match subagent's own bounds (src/tools/subagent.ts MIN_MAX_ITERS / MAX_MAX_ITERS). Widened from 32 → 256 alongside the subagent cap as part of the iter-cap experiment. */
 const SKILL_MAX_ITERS_MIN = 1;
-const SKILL_MAX_ITERS_MAX = 32;
+const SKILL_MAX_ITERS_MAX = 256;
 
 function parseMaxToolIters(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
@@ -257,7 +257,7 @@ Tips:
 - Reference tools by name (run_command, edit_file, search_content, ...)
 - Add \`runAs: subagent\` to frontmatter to spawn an isolated subagent loop
 - Add \`allowed-tools: read_file, search_content\` to scope a subagent's tools
-- Add \`max-iters: 32\` to raise the subagent's tool-call budget (default 16, max 32)
+- Add \`max-iters: 64\` (or higher, up to 256) to raise the subagent's tool-call budget — default 16. Pick what the task actually needs; large values just delay the natural termination.
 `;
 }
 

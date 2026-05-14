@@ -407,7 +407,7 @@ describe("registerSubagentTool", () => {
     };
     expect(params.properties.max_iters.type).toBe("integer");
     expect(params.properties.max_iters.minimum).toBe(1);
-    expect(params.properties.max_iters.maximum).toBe(32);
+    expect(params.properties.max_iters.maximum).toBe(256);
   });
 
   it("caps the child loop at the caller-supplied max_iters", async () => {
@@ -426,14 +426,14 @@ describe("registerSubagentTool", () => {
   it("clamps max_iters above the maximum", async () => {
     const parent = new ToolRegistry();
     parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const client = makeClient(makeToolCallResponses(50));
+    const client = makeClient(makeToolCallResponses(300));
     registerSubagentTool(parent, { client });
     const out = await parent.dispatch(
       "spawn_subagent",
       JSON.stringify({ task: "loop forever", max_iters: 9999 }),
     );
     const parsed = JSON.parse(out);
-    expect(parsed.tool_iters).toBe(32);
+    expect(parsed.tool_iters).toBe(256);
   });
 
   it("ignores non-numeric max_iters and falls back to the default", async () => {
