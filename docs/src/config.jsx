@@ -6,13 +6,16 @@ const CONFIG_TABS = [
     id: 'mcp',
     label: 'MCP',
     title: 'Model Context Protocol',
-    cn: '外部工具服务器',
-    desc: 'MCP 是 Reasonix 接入外部能力的一等公民通道，支持 stdio / SSE / Streamable HTTP 三种传输。每个 server 的工具会以前缀合并进统一的工具 registry，对模型透明。',
+    cn: { zh: '外部工具服务器', en: 'External tool servers' },
+    desc: {
+      zh: 'MCP 是 Reasonix 接入外部能力的一等公民通道，支持 stdio / SSE / Streamable HTTP 三种传输。每个 server 的工具会以前缀合并进统一的工具 registry，对模型透明。',
+      en: 'MCP is the first-class channel for plugging external capabilities into Reasonix — supports stdio, SSE, and Streamable HTTP transports. Each server\'s tools merge into the unified registry under a prefix, transparent to the model.',
+    },
     bullets: [
-      '一行命令挂载: --mcp \'name=cmd args\'',
-      '所有 MCP 工具沙箱权限与原生工具一致',
-      '/mcp 子命令查看已挂载服务器 · 健康状态 · 工具清单',
-      '失败重连 · 自动 reconnect with backoff',
+      { zh: '一行命令挂载: --mcp \'name=cmd args\'', en: 'One-line mount: --mcp \'name=cmd args\'' },
+      { zh: '所有 MCP 工具沙箱权限与原生工具一致', en: 'MCP tools share the same sandbox as built-ins' },
+      { zh: '/mcp 子命令查看已挂载服务器 · 健康状态 · 工具清单', en: '`/mcp` lists mounted servers · health · tools' },
+      { zh: '失败重连 · 自动 reconnect with backoff', en: 'Auto-reconnect on failure with exponential backoff' },
     ],
     files: [
       {
@@ -50,43 +53,46 @@ const CONFIG_TABS = [
     id: 'skills',
     label: 'Skills',
     title: 'Skills',
-    cn: '可复用的 Markdown 剧本',
-    desc: 'Skill 是一段带 frontmatter 的 Markdown，把"做某件事的方式"凝固成可调用单元。runAs: subagent 时会在隔离子 agent 里运行，allowed-tools 限制可用工具集。',
+    cn: { zh: '可复用的 Markdown 剧本', en: 'Reusable Markdown playbooks' },
+    desc: {
+      zh: 'Skill 是一段带 frontmatter 的 Markdown，把"做某件事的方式"凝固成可调用单元。runAs: subagent 时会在隔离子 agent 里运行，allowed-tools 限制可用工具集。',
+      en: 'A skill is a Markdown file with frontmatter that crystallises "how to do X" into something callable. `runAs: subagent` runs it inside an isolated sub-agent; `allowed-tools` restricts which tools it can call.',
+    },
     bullets: [
-      '项目级: <project>/.reasonix/skills/<name>.md',
-      '全局: ~/.reasonix/skills/<name>.md',
-      '/skill new <name> 生成脚手架',
-      'runAs: subagent 让 skill 跑在隔离的子循环里',
+      { zh: '项目级: <project>/.reasonix/skills/<name>.md', en: 'Project: <project>/.reasonix/skills/<name>.md' },
+      { zh: '全局: ~/.reasonix/skills/<name>.md', en: 'Global: ~/.reasonix/skills/<name>.md' },
+      { zh: '/skill new <name> 生成脚手架', en: '/skill new <name> scaffolds a template' },
+      { zh: 'runAs: subagent 让 skill 跑在隔离的子循环里', en: '`runAs: subagent` runs the body in an isolated sub-loop' },
     ],
     files: [
       {
         name: '.reasonix/skills/review-pr.md',
         lang: 'md',
         code: `---
-description: 阅读当前分支 vs main 的 diff，输出 review 意见
+description: Review the current branch diff against main
 runAs: subagent
 allowed-tools: [run_command, read_file, grep_files]
 ---
-你是一名严格的 code reviewer。请按以下步骤工作：
+You are a strict code reviewer. Steps:
 
-1. 运行 \`git diff main..HEAD\` 获取变更
-2. 对每个被修改的文件，read_file 加载上下文
-3. 输出结构化 review：
-   - blockers (必须修复)
-   - suggestions (建议改进)
-   - nits (风格)
-4. 不要写文件 · 不要执行测试
+1. Run \`git diff main..HEAD\` to get the change.
+2. For each modified file, read_file to load context.
+3. Output a structured review:
+   - blockers (must fix)
+   - suggestions (improvements)
+   - nits (style)
+4. Do not write files. Do not run tests.
 
-只关注本次 diff 涉及的代码，不要离题。`,
+Only focus on the code touched by this diff — don't go off-topic.`,
       },
       {
         name: 'invoke',
         lang: 'bash',
-        code: `# 在 TUI 中
+        code: `# Inside the TUI
 › /skill run review-pr
 
-# 或者直接当 tool 调用 —— 模型也能主动触发
-› 请帮我 review 当前分支`,
+# Or just ask — the model can trigger it on its own
+› please review the current branch`,
       },
     ],
   },
@@ -94,44 +100,47 @@ allowed-tools: [run_command, read_file, grep_files]
     id: 'memory',
     label: 'Memory',
     title: 'Memory',
-    cn: '项目级与全局记忆',
-    desc: 'Reasonix 把"应当记住"的内容拆成两层：仓库级的 reasonix.md（提交进 git，团队共享）与用户级的 ~/.reasonix/memory.md（个人偏好，不入库）。每次会话启动时自动注入到 prompt 头部。',
+    cn: { zh: '项目级与全局记忆', en: 'Project + global memory' },
+    desc: {
+      zh: 'Reasonix 把"应当记住"的内容拆成两层：仓库级的 reasonix.md（提交进 git，团队共享）与用户级的 ~/.reasonix/memory.md（个人偏好，不入库）。每次会话启动时自动注入到 prompt 头部。',
+      en: 'Reasonix splits "what to remember" into two layers: repo-level `reasonix.md` (checked into git, shared with the team) and user-level `~/.reasonix/memory.md` (personal preferences, kept private). Both are injected at the top of the prompt on every session.',
+    },
     bullets: [
-      '<project>/reasonix.md · 项目约定 · git-tracked',
-      '~/.reasonix/memory.md · 用户偏好 · 私有',
-      '/memory edit 在 TUI 内直接编辑',
-      '注入位置位于 cache-stable 前缀 · 不影响命中',
+      { zh: '<project>/reasonix.md · 项目约定 · git-tracked', en: '<project>/reasonix.md · project conventions · git-tracked' },
+      { zh: '~/.reasonix/memory.md · 用户偏好 · 私有', en: '~/.reasonix/memory.md · user preferences · private' },
+      { zh: '/memory edit 在 TUI 内直接编辑', en: '/memory edit opens it inside the TUI' },
+      { zh: '注入位置位于 cache-stable 前缀 · 不影响命中', en: 'Injected inside the cache-stable prefix · cache hit unaffected' },
     ],
     files: [
       {
         name: '<project>/reasonix.md',
         lang: 'md',
         code: `# reasonix.md
-# 这个文件会被 Reasonix 在每次会话启动时加载
+# Reasonix loads this on every session start.
 
-## 项目约定
-- 包管理器使用 pnpm，不要建议 npm install
-- 测试运行 \`pnpm test --filter=affected\`
-- TypeScript strict 模式，禁用 any
-- 提交信息遵循 Conventional Commits
+## Conventions
+- Package manager is pnpm — don't suggest npm install
+- Tests run via \`pnpm test --filter=affected\`
+- TypeScript strict mode — no any
+- Commits follow Conventional Commits
 
-## 目录结构
-- src/   业务代码
-- packages/   monorepo 子包
-- tooling/   构建脚本，未经讨论不要改
+## Layout
+- src/        product code
+- packages/   monorepo packages
+- tooling/    build scripts — don't touch without asking
 
-## 不要做
-- 不要自动 git commit · 等我手动确认
-- 不要修改 package.json 里的版本号`,
+## Don't
+- Don't auto git commit · wait for me to confirm
+- Don't bump version numbers in package.json`,
       },
       {
         name: '~/.reasonix/memory.md',
         lang: 'md',
-        code: `# 个人偏好
+        code: `# Personal preferences
 
-- 中文回答 · 代码注释保持英文
-- 函数式风格优先 · 少用 class
-- 喜欢小步提交 · 一次只改一件事`,
+- Reply in English · keep code comments in English
+- Prefer functional style · light on classes
+- Small commits · one thing at a time`,
       },
     ],
   },
@@ -139,13 +148,16 @@ allowed-tools: [run_command, read_file, grep_files]
     id: 'config',
     label: 'Config',
     title: 'Config',
-    cn: '全局与项目级配置',
-    desc: '一份 JSON 配置承载所有可调项。全局放 ~/.reasonix/config.json，每个项目可以再用 <project>/.reasonix/config.json 局部覆盖。',
+    cn: { zh: '全局与项目级配置', en: 'Global + project config' },
+    desc: {
+      zh: '一份 JSON 配置承载所有可调项。全局放 ~/.reasonix/config.json，每个项目可以再用 <project>/.reasonix/config.json 局部覆盖。',
+      en: 'A single JSON file holds every knob. The global one lives at `~/.reasonix/config.json`; any project can override it locally with `<project>/.reasonix/config.json`.',
+    },
     bullets: [
-      '模型 · 推理深度 · 输出格式',
-      'MCP 服务器声明',
-      '主题 · 快捷键',
-      '项目级覆盖优先于全局',
+      { zh: '模型 · 推理深度 · 输出格式', en: 'Model · reasoning depth · output format' },
+      { zh: 'MCP 服务器声明', en: 'MCP server declarations' },
+      { zh: '主题 · 快捷键', en: 'Theme · keybindings' },
+      { zh: '项目级覆盖优先于全局', en: 'Project config wins over global' },
     ],
     files: [
       {
@@ -182,38 +194,41 @@ allowed-tools: [run_command, read_file, grep_files]
     id: 'slash',
     label: 'Slash',
     title: 'Slash Commands',
-    cn: 'TUI 内的快捷指令',
-    desc: '在交互式 TUI 中以 / 开头的命令直接控制 session 行为。所有命令支持 "did you mean /…?" 模糊纠错。输入 /help 查看完整列表。',
+    cn: { zh: 'TUI 内的快捷指令', en: 'TUI shortcut commands' },
+    desc: {
+      zh: '在交互式 TUI 中以 / 开头的命令直接控制 session 行为。所有命令支持 "did you mean /…?" 模糊纠错。输入 /help 查看完整列表。',
+      en: 'Inside the TUI, anything starting with `/` controls the session directly. Every command supports "did you mean /…?" fuzzy correction. Type `/help` for the full list.',
+    },
     bullets: [
-      '/pro · /preset · /effort   — 模型与推理深度切换',
-      '/plan · /apply · /discard  — 编辑审批门',
-      '/mcp · /skill · /memory    — 外部能力与剧本管理',
-      '/status · /stats · /replay — 会话状态与回放',
+      { zh: '/pro · /preset · /effort   — 模型与推理深度切换', en: '/pro · /preset · /effort   — switch model + reasoning depth' },
+      { zh: '/plan · /apply · /discard  — 编辑审批门', en: '/plan · /apply · /discard  — edit approval gate' },
+      { zh: '/mcp · /skill · /memory    — 外部能力与剧本管理', en: '/mcp · /skill · /memory    — capabilities + playbooks' },
+      { zh: '/status · /stats · /replay — 会话状态与回放', en: '/status · /stats · /replay — session state + replay' },
     ],
     files: [
       {
         name: 'common commands',
         lang: 'shell',
-        code: `# 推理深度与模型
-› /pro                # 下一回合切到 V4-Pro
-› /preset max         # 整个 session 用 Pro
-› /effort high        # 强推理 (think harder)
+        code: `# Reasoning depth + model
+› /pro                # next turn on V4-Pro
+› /preset max         # whole session on Pro
+› /effort high        # think harder
 
-# 编辑审批
-› /plan               # 进入只读审计门
-› /apply              # 写入待提交的编辑
-› /discard            # 丢弃所有 pending 编辑
+# Edit approval
+› /plan               # enter read-only audit gate
+› /apply              # commit pending edits
+› /discard            # drop all pending edits
 
-# 能力管理
-› /mcp list           # 已挂载的 MCP server
-› /skill new fix-bug  # 新建 skill 脚手架
-› /memory edit        # 打开 reasonix.md
+# Capabilities
+› /mcp list           # mounted MCP servers
+› /skill new fix-bug  # scaffold a new skill
+› /memory edit        # open reasonix.md
 
-# 会话与回放
-› /status             # 模型 · 缓存命中 · 成本
-› /stats              # token 与费用统计
-› /replay -1          # 回放上一次会话
-› /help               # 完整命令参考`,
+# Session + replay
+› /status             # model · cache hit · cost
+› /stats              # token + cost stats
+› /replay -1          # replay the previous session
+› /help               # full command reference`,
       },
     ],
   },
@@ -226,11 +241,8 @@ function syntaxHighlight(code, lang) {
   const lines = code.split('\n');
   const out = lines.map((line) => {
     if (lang === 'json') {
-      // Handle key, then string-value, then number/bool
-      // Tokenize by walking the line
       let result = '';
       let rest = line;
-      // simple loop: match key/value pairs
       while (rest.length) {
         let m;
         if ((m = rest.match(/^(\s*)("(?:[^"\\]|\\.)*")(\s*:)/))) {
@@ -255,7 +267,6 @@ function syntaxHighlight(code, lang) {
     if (lang === 'md') {
       if (/^---$/.test(line)) return '<span style="color:#6b7593">' + esc(line) + '</span>';
       if (/^#{1,3}\s/.test(line)) return '<span style="color:#7ec8ff">' + esc(line) + '</span>';
-      // frontmatter key (only when before --- ends)
       let m = line.match(/^([a-zA-Z\-]+:)(.*)$/);
       if (m) return '<span style="color:#ffb84d">' + esc(m[1]) + '</span>' + esc(m[2]);
       if (/^- /.test(line)) return '<span style="color:#a3adc6">' + esc(line) + '</span>';
@@ -263,16 +274,13 @@ function syntaxHighlight(code, lang) {
     }
     if (lang === 'bash' || lang === 'shell') {
       if (/^\s*#/.test(line)) return '<span style="color:#6b7593">' + esc(line) + '</span>';
-      // Walk tokens, escaping each chunk separately
       let result = '';
       let rest = line;
-      // leading prompt
       let m = rest.match(/^(›\s|\$\s)/);
       if (m) {
         result += '<span style="color:#4d6bfe">' + esc(m[1]) + '</span>';
         rest = rest.slice(m[0].length);
       }
-      // tokenize the remainder by whitespace, coloring slash-commands and flags
       const parts = rest.split(/(\s+)/);
       for (const p of parts) {
         if (/^\s+$/.test(p)) { result += esc(p); continue; }
@@ -313,46 +321,58 @@ function CodePanel({ file }) {
 
 function Config() {
   const [tab, setTab] = React.useState('mcp');
-  const cur = CONFIG_TABS.find(t => t.id === tab) || CONFIG_TABS[0];
+  const { lang } = useLang();
+  const cur = CONFIG_TABS.find(it => it.id === tab) || CONFIG_TABS[0];
 
   return (
     <section className="section" id="config">
       <SecHead
         num="04"
         label="Configure"
-        title="扩展、记忆、配置 — <em>纯文本</em>就够了。"
-        sub="Reasonix 把可扩展性收敛到几个明确的目录与文件 —— 没有花哨的注册表，所有内容都是可读、可 diff、可入库的纯文本。"
+        title={t({
+          zh: '扩展、记忆、配置 — <em>纯文本</em>就够了。',
+          en: 'Extensions, memory, config — <em>plain text</em> is enough.',
+        }, lang)}
+        sub={t({
+          zh: 'Reasonix 把可扩展性收敛到几个明确的目录与文件 —— 没有花哨的注册表，所有内容都是可读、可 diff、可入库的纯文本。',
+          en: 'Reasonix collapses extensibility into a handful of well-defined directories and files. No registries, no magic — everything is readable, diffable, git-trackable plain text.',
+        }, lang)}
       />
 
       <div className="config-grid">
         <div className="config-side">
-          {CONFIG_TABS.map(t => (
-            <div key={t.id} className={'config-tab ' + (t.id === tab ? 'on' : '')} onClick={() => setTab(t.id)}>
-              <span className="config-tab-key">/{t.label.toLowerCase()}</span>
+          {CONFIG_TABS.map(it => (
+            <div key={it.id} className={'config-tab ' + (it.id === tab ? 'on' : '')} onClick={() => setTab(it.id)}>
+              <span className="config-tab-key">/{it.label.toLowerCase()}</span>
               <div>
-                <div className="config-tab-title">{t.title}</div>
-                <div className="config-tab-cn">{t.cn}</div>
+                <div className="config-tab-title">{it.title}</div>
+                <div className="config-tab-cn">{t(it.cn, lang)}</div>
               </div>
               <Ic.Arrow size={13}/>
             </div>
           ))}
           <div className="config-hint">
             <Ic.Sparkle size={13}/>
-            <span>所有路径与命令均来自 <a href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noreferrer" style={{color:'var(--accent)', textDecoration:'none'}}>esengine/DeepSeek-Reasonix</a>。</span>
+            <span>
+              {t({
+                zh: <>所有路径与命令均来自 <a href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noreferrer" style={{color:'var(--accent)', textDecoration:'none'}}>esengine/DeepSeek-Reasonix</a>。</>,
+                en: <>Every path and command shown lives in <a href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noreferrer" style={{color:'var(--accent)', textDecoration:'none'}}>esengine/DeepSeek-Reasonix</a>.</>,
+              }, lang)}
+            </span>
           </div>
         </div>
 
         <div className="config-main" key={cur.id}>
           <div className="config-main-head">
-            <h3>{cur.title}<span> · {cur.cn}</span></h3>
-            <p>{cur.desc}</p>
+            <h3>{cur.title}<span> · {t(cur.cn, lang)}</span></h3>
+            <p>{t(cur.desc, lang)}</p>
           </div>
 
           <ul className="config-bullets">
             {cur.bullets.map((b, i) => (
               <li key={i}>
                 <span className="bullet-dot"></span>
-                <span>{b}</span>
+                <span>{t(b, lang)}</span>
               </li>
             ))}
           </ul>

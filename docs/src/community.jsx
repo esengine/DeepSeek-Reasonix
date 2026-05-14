@@ -30,13 +30,20 @@ function useGithubStats() {
 
 function Community() {
   const { stats, contributors } = useGithubStats();
+  const { lang } = useLang();
   return (
     <section className="section" id="community">
       <SecHead
         num="06"
         label="Community"
-        title="由 <em>社区</em>驱动，完全开源。"
-        sub="MIT 协议、公开 Roadmap、公开 Discussions。欢迎一起把推理型 Agent 的工程基线推得更高。"
+        title={t({
+          zh: '由 <em>社区</em>驱动，完全开源。',
+          en: '<em>Community-driven</em>, fully open source.',
+        }, lang)}
+        sub={t({
+          zh: 'MIT 协议、公开 Roadmap、公开 Discussions。欢迎一起把推理型 Agent 的工程基线推得更高。',
+          en: 'MIT-licensed, public roadmap, open Discussions. Help push the engineering baseline for reasoning-type agents higher.',
+        }, lang)}
       />
 
       <div className="community-grid">
@@ -58,16 +65,16 @@ function Community() {
               <Ic.Star size={13}/> Star on GitHub
             </a>
             <a className="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noreferrer">
-              <Ic.Github size={13}/> 阅读源码
+              <Ic.Github size={13}/> {t({ zh: '阅读源码', en: 'Read source' }, lang)}
             </a>
             <a className="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix/discussions" target="_blank" rel="noreferrer">
-              加入讨论
+              {t({ zh: '加入讨论', en: 'Join discussions' }, lang)}
             </a>
           </div>
         </div>
 
         <div className="contrib-grid">
-          <h3>开源贡献者</h3>
+          <h3>{t({ zh: '开源贡献者', en: 'Open-source contributors' }, lang)}</h3>
           <div className="sub">core · plugin · docs · translation</div>
           <div className="contrib-wall">
             {contributors.slice(0, 24).map((c) => (
@@ -99,7 +106,10 @@ function Community() {
             )}
           </div>
           <p style={{color:"var(--cream-mute)", fontSize:12.5, marginTop:18, marginBottom:0, lineHeight:1.6}}>
-            想成为下一个？阅读 <a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer" style={{color:"var(--accent)", textDecoration:"none"}}>CONTRIBUTING.md</a> 并领取一个 <span className="kbd">good first issue</span>。
+            {t({
+              zh: <>想成为下一个？阅读 <a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer" style={{color:"var(--accent)", textDecoration:"none"}}>CONTRIBUTING.md</a> 并领取一个 <span className="kbd">good first issue</span>。</>,
+              en: <>Want to be next? Read <a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer" style={{color:"var(--accent)", textDecoration:"none"}}>CONTRIBUTING.md</a> and pick up a <span className="kbd">good first issue</span>.</>,
+            }, lang)}
           </p>
         </div>
       </div>

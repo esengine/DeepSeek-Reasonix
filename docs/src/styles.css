@@ -1628,3 +1628,30 @@ body {
   .dl-promo { grid-template-columns: 1fr; }
   .dl-promo-actions { flex-wrap: wrap; }
 }
+
+.lang-switch {
+  display: inline-flex;
+  border: 1px solid var(--rule-2);
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.lang-switch button {
+  background: transparent;
+  border: 0;
+  color: var(--cream-mute);
+  padding: 5px 9px;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+.lang-switch button + button { border-left: 1px solid var(--rule-2); }
+.lang-switch button:hover { color: var(--cream); }
+.lang-switch button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}

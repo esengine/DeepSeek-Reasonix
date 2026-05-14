@@ -120,6 +120,7 @@ function Terminal() {
 }
 
 function Hero() {
+  const { lang } = useLang();
   return (
     <section className="hero" id="top">
       <div className="hero-head">
@@ -129,22 +130,31 @@ function Hero() {
       </div>
       <div className="hero-grid">
         <div>
-          <h1>
-            为终端而生的<br/>
-            <em>DeepSeek</em> 原生<br/>
-            编程 <em>Agent</em>。
-          </h1>
+          {lang === 'en' ? (
+            <h1>
+              A <em>DeepSeek</em>-native<br/>
+              coding <em>agent</em>,<br/>
+              for your terminal.
+            </h1>
+          ) : (
+            <h1>
+              为终端而生的<br/>
+              <em>DeepSeek</em> 原生<br/>
+              编程 <em>Agent</em>。
+            </h1>
+          )}
           <p className="lede">
-            Reasonix 直接对接 <b>api.deepseek.com</b>，围绕 DeepSeek 的字节稳定 prefix-cache 设计了
-            append-only 的运行循环 —— 长会话能把缓存命中保持在 90%+，输入 token 成本降到 1/5。
-            终端优先，留它一直跑着。
+            {t({
+              zh: <>Reasonix 直接对接 <b>api.deepseek.com</b>，围绕 DeepSeek 的字节稳定 prefix-cache 设计了 append-only 的运行循环 —— 长会话能把缓存命中保持在 90%+，输入 token 成本降到 1/5。终端优先，留它一直跑着。</>,
+              en: <>Reasonix talks straight to <b>api.deepseek.com</b>. The loop is append-only, engineered around DeepSeek's byte-stable prefix cache — long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. Terminal-first, leave it running.</>,
+            }, lang)}
           </p>
           <div className="hero-actions">
             <a className="btn btn-primary" href="#install">
-              立即开始 →
+              {t({ zh: '立即开始 →', en: 'Get started →' }, lang)}
             </a>
             <a className="btn btn-ghost" href="download.html">
-              下载桌面端
+              {t({ zh: '下载桌面端', en: 'Download desktop' }, lang)}
             </a>
           </div>
           <div className="hero-stats">

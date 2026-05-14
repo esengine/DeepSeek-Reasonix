@@ -62,13 +62,8 @@
     />
 
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="src/fonts.css" />
+    <link rel="stylesheet" href="src/styles.css" />
     <link rel="stylesheet" href="guide.css" />
 
     <script type="application/ld+json">
@@ -118,40 +113,37 @@
   </head>
 
   <body>
-    <div class="bg-grid" aria-hidden="true"></div>
-    <div class="bg-glow" aria-hidden="true"></div>
-    <div class="bg-horizon" aria-hidden="true"></div>
+    <div class="grid-bg"></div>
+    <div class="noise"></div>
 
-    <header class="nav">
-      <a class="nav-brand" href="index.html" aria-label="Reasonix">
-        <span class="brand-mark" aria-hidden="true">
-          <span class="diamond"></span>
-          <span class="diamond inner"></span>
-        </span>
-        <span class="brand-name">Reasonix</span>
-      </a>
-
-      <nav class="nav-links">
-        <a href="index.html#why" data-i18n="nav.why">Why</a>
-        <a href="index.html#features" data-i18n="nav.features">Features</a>
-        <a href="index.html#quickstart" data-i18n="nav.quickstart">Quick start</a>
-        <a href="configuration.html" data-i18n="nav.guide" class="active">Guide</a>
-        <a
-          href="https://github.com/esengine/reasonix"
-          target="_blank"
-          rel="noopener"
-          data-i18n="nav.github"
-          >GitHub</a
-        >
-      </nav>
-
-      <div class="nav-actions">
-        <div class="lang-switch" role="group" aria-label="Language">
-          <button data-lang-btn="en" type="button" aria-pressed="true">EN</button>
-          <button data-lang-btn="zh" type="button" aria-pressed="false">中文</button>
+    <nav class="nav">
+      <div class="nav-inner">
+        <a class="brand" href="index.html">
+          <span class="brand-mark"></span>
+          <span class="brand-name">
+            <b>Reasonix</b><span>DS · v0.42.0-3</span>
+          </span>
+        </a>
+        <div class="nav-links" role="navigation">
+          <a href="index.html#install">Install</a>
+          <a href="index.html#agents">Pillars</a>
+          <a href="index.html#features">Features</a>
+          <a href="index.html#config">Config</a>
+          <a href="configuration.html" style="color: var(--accent)">Guide</a>
+          <a href="download.html">Download</a>
+          <a href="index.html#roadmap">Roadmap</a>
+          <a href="index.html#faq">FAQ</a>
+        </div>
+        <div class="nav-cta">
+          <div class="lang-switch" role="group" aria-label="Language">
+            <button data-lang-btn="en" type="button" aria-pressed="true">EN</button>
+            <button data-lang-btn="zh" type="button" aria-pressed="false">中文</button>
+          </div>
+          <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener">GitHub</a>
+          <a class="btn btn-primary btn-sm" href="download.html">Download →</a>
         </div>
       </div>
-    </header>
+    </nav>
 
     <main class="guide-main" id="top">
       <section class="guide-hero">
@@ -677,21 +669,54 @@ created: 2026-05-09
       </div>
     </main>
 
-    <footer class="foot">
-      <div class="container foot-inner">
+    <footer class="footer">
+      <div class="footer-inner">
         <div>
-          <a href="index.html" class="nav-brand">
-            <span class="brand-mark small" aria-hidden="true">
-              <span class="diamond"></span>
-              <span class="diamond inner"></span>
-            </span>
-            <span class="brand-name">Reasonix</span>
+          <a class="brand" href="index.html" style="text-decoration:none; color:inherit">
+            <span class="brand-mark"></span>
+            <span class="brand-name"><b>DeepSeek-Reasonix</b></span>
           </a>
-          <p class="foot-tag" data-i18n="foot.tag">DeepSeek does deep, deeply.</p>
+          <p style="color:var(--cream-mute); font-size:13px; margin-top:14px; line-height:1.65; max-width:340px">
+            DeepSeek-native AI coding agent for your terminal. Engineered around prefix-cache stability — leave it running.
+          </p>
+          <div style="display:flex; gap:10px; margin-top:18px">
+            <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener" aria-label="GitHub">GitHub</a>
+            <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix/discussions" target="_blank" rel="noopener">Discussions</a>
+          </div>
+        </div>
+        <div>
+          <h5>Product</h5>
+          <ul>
+            <li><a href="index.html#install">CLI</a></li>
+            <li><a href="download.html">Desktop</a></li>
+            <li><a href="index.html#agents">Pillars</a></li>
+            <li><a href="index.html#config">Config</a></li>
+          </ul>
+        </div>
+        <div>
+          <h5>Community</h5>
+          <ul>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener">GitHub</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/discussions" target="_blank" rel="noopener">Discussions</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/issues" target="_blank" rel="noopener">Issues</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a></li>
+          </ul>
+        </div>
+        <div>
+          <h5>Resources</h5>
+          <ul>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix#readme" target="_blank" rel="noopener">README</a></li>
+            <li><a href="index.html#roadmap">Roadmap</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
+            <li><a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek Platform</a></li>
+          </ul>
         </div>
       </div>
-      <div class="foot-bottom">
-        <span data-i18n="foot.copyright">© 2026 Reasonix · MIT License</span>
+      <div class="footer-bottom">
+        <span>© 2026 esengine · MIT License</span>
+        <span class="spacer"></span>
+        <span>Independent open-source project · not affiliated with DeepSeek</span>
+        <span style="margin-left:18px">v0.42.0-3 · prerelease</span>
       </div>
     </footer>
 

@@ -79,6 +79,7 @@ async function probeMirror(url) {
 }
 
 function MirrorGrid({ os, setOs }) {
+  const { lang } = useLang();
   const [testing, setTesting] = React.useState(true);
   const [results, setResults] = React.useState(() =>
     MIRRORS.map(m => ({ id: m.id, lat: null, done: false, ok: false }))
@@ -128,13 +129,13 @@ function MirrorGrid({ os, setOs }) {
           className="btn btn-ghost btn-sm"
           onClick={runTest}
           disabled={testing}
-          title="重新探测"
+          title={t({ zh: "重新探测", en: "Re-probe" }, lang)}
           style={{ marginLeft: "auto" }}
         >
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={testing ? { animation: "spin 0.9s linear infinite" } : {}}>
             <path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>
           </svg>
-          {testing ? "探测中…" : "重新探测"}
+          {testing ? t({ zh: "探测中…", en: "Probing…" }, lang) : t({ zh: "重新探测", en: "Re-probe" }, lang)}
         </button>
       </div>
 
@@ -157,14 +158,14 @@ function MirrorGrid({ os, setOs }) {
               </div>
               <div className="mirror-stats">
                 <div className="mirror-stat">
-                  <label>延迟 · TTFB</label>
+                  <label>{t({ zh: "延迟 · TTFB", en: "Latency · TTFB" }, lang)}</label>
                   <b>
                     {r.done ? (r.ok ? r.lat : "—") : "—"}
                     <span className="unit">{r.done && r.ok ? "ms" : ""}</span>
                   </b>
                 </div>
                 <div className="mirror-stat">
-                  <label>状态 · Status</label>
+                  <label>{t({ zh: "状态 · Status", en: "Status" }, lang)}</label>
                   <b>{isTesting ? "probing…" : failed ? "unreachable" : "online"}</b>
                 </div>
               </div>
@@ -173,7 +174,7 @@ function MirrorGrid({ os, setOs }) {
                 className={"btn btn-sm " + (isFastest ? "btn-primary" : "btn-ghost")}
                 style={{ marginTop: 18, width: "100%", justifyContent: "center", ...(failed ? { opacity: 0.5, pointerEvents: "none" } : {}) }}
               >
-                从此镜像下载 →
+                {t({ zh: "从此镜像下载 →", en: "Download from this mirror →" }, lang)}
               </a>
             </div>
           );
@@ -183,20 +184,20 @@ function MirrorGrid({ os, setOs }) {
       <div className="dl-summary">
         <div className="info">
           {testing ? (
-            <>正在探测最快镜像 <span style={{ color: "var(--cream-mute)" }}>· measuring TTFB</span></>
+            <>{t({ zh: "正在探测最快镜像", en: "Probing for the fastest mirror" }, lang)} <span style={{ color: "var(--cream-mute)" }}>· measuring TTFB</span></>
           ) : fastestMirror ? (
             <>
-              已为你选择 <b>{fastestMirror.name}</b>
+              {t({ zh: "已为你选择 ", en: "Picked " }, lang)}<b>{fastestMirror.name}</b>
               <span style={{ color: "var(--cream-mute)" }}> · {currentOs.file} · {currentOs.size}</span>
             </>
-          ) : "探测失败 · 请手动选择镜像"}
+          ) : t({ zh: "探测失败 · 请手动选择镜像", en: "Probe failed · pick a mirror manually" }, lang)}
         </div>
         <a
           href={downloadUrl || "#"}
           className="btn btn-primary"
           style={testing || !downloadUrl ? { opacity: 0.5, pointerEvents: "none" } : {}}
         >
-          下载 {currentOs.label} 版本 →
+          {t({ zh: `下载 ${currentOs.label} 版本 →`, en: `Download for ${currentOs.label} →` }, lang)}
         </a>
       </div>
 
