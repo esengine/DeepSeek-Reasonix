@@ -11,8 +11,9 @@
     "bundle:node": "node scripts/bundle-node.mjs"
   },
   "dependencies": {
-    "@fontsource-variable/inter": "^5.1.0",
-    "@fontsource-variable/jetbrains-mono": "^5.1.0",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@fontsource/ibm-plex-serif": "^5.2.7",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2.0.0",
