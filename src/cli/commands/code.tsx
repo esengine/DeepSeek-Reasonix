@@ -21,12 +21,13 @@
 import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { buildCodeToolset } from "../../code/setup.js";
-import { loadApiKey, readConfig } from "../../config.js";
+import { loadApiKey, loadPreset, readConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { t } from "../../i18n/index.js";
 import { detectForeignAgentPlatform } from "../../memory/project.js";
 import { sanitizeName } from "../../memory/session.js";
 import { markPhase } from "../startup-profile.js";
+import { resolvePreset } from "../ui/presets.js";
 import { chatCommand } from "./chat.js";
 
 export interface CodeOptions {
@@ -66,6 +67,7 @@ export interface CodeOptions {
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   markPhase("code_command_enter");
+  const resolvedModel = opts.model ?? resolvePreset(loadPreset()).model;
   // Bridge .env + ~/.reasonix/config.json into process.env so buildCodeToolset's
   // eager DeepSeekClient constructions (subagent client; semantic embedder) can
   // pick up a key the user already configured via `reasonix setup`. chatCommand
@@ -142,10 +144,10 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
       hasSemanticSearch: semantic.enabled,
       systemAppend: opts.systemAppend,
       systemAppendFile: systemAppendFileContents,
-      modelId: opts.model ?? "deepseek-v4-flash",
+      modelId: resolvedModel,
     });
   await chatCommand({
-    model: opts.model ?? "deepseek-v4-flash",
+    model: resolvedModel,
     budgetUsd: opts.budgetUsd,
     failureThreshold: opts.failureThreshold,
     system: codeRebuildSystem(),
