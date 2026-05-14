@@ -20,6 +20,7 @@ import { ToolRegistry } from "../../tools.js";
 import { registerChoiceTool } from "../../tools/choice.js";
 import { registerMemoryTools } from "../../tools/memory.js";
 import { registerWebTools } from "../../tools/web.js";
+import { stopAndSaveCpuProfile } from "../cpu-prof.js";
 import { markPhase } from "../startup-profile.js";
 import { App } from "../ui/App.js";
 import { SessionPicker } from "../ui/SessionPicker.js";
@@ -184,7 +185,10 @@ function Root({
               return;
             }
             if (outcome.kind === "quit") {
-              process.exit(0);
+              void (async () => {
+                await stopAndSaveCpuProfile();
+                process.exit(0);
+              })();
             }
           }}
         />
