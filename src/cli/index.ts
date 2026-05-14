@@ -6,7 +6,7 @@ import { listSessions } from "../memory/session.js";
 import { applyMemoryStack } from "../memory/user.js";
 import { installProxyIfConfigured } from "../net/proxy.js";
 import { escalationContract } from "../prompt-fragments.js";
-import { resolveContinueFlag, resolveDefaults } from "./resolve.js";
+import { resolveBareCommandMode, resolveContinueFlag, resolveDefaults } from "./resolve.js";
 import { markPhase } from "./startup-profile.js";
 
 // HTTPS_PROXY / HTTP_PROXY only reach Node's fetch via undici's global
@@ -121,9 +121,16 @@ program
 // `chat` / `setup` / `--mcp` — just type `reasonix`.
 program.action(async (opts: { continue?: boolean }) => {
   const cfg = readConfig();
-  if (!cfg.setupCompleted) {
+  const cwd = process.cwd();
+  const mode = resolveBareCommandMode(cwd, cfg);
+  if (mode === "setup") {
     const { setupCommand } = await import("./commands/setup.js");
     await setupCommand({ forceKeyStep: true });
+    return;
+  }
+  if (mode === "code") {
+    const { codeCommand } = await import("./commands/code.js");
+    await codeCommand({ dir: cwd });
     return;
   }
   const defaults = resolveDefaults({});
@@ -133,10 +140,12 @@ program.action(async (opts: { continue?: boolean }) => {
     () => listSessions()[0],
     (msg) => process.stderr.write(`${msg}\n`),
   );
+  process.stderr.write(
+    "ℹ chat mode (no filesystem tools). Run `reasonix code` to work on files in this folder.\n",
+  );
   const { chatCommand } = await import("./commands/chat.js");
   const defaultBase = defaultSystemPrompt(defaults.model);
-  const defaultCwd = process.cwd();
-  const defaultRebuildSystem = () => applyMemoryStack(defaultBase, defaultCwd);
+  const defaultRebuildSystem = () => applyMemoryStack(defaultBase, cwd);
   await chatCommand({
     model: defaults.model,
     system: defaultRebuildSystem(),

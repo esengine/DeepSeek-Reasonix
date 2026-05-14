@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import { render } from "ink-testing-library";
-import React from "react";
+import type React from "react";
 import stripAnsi from "strip-ansi";
 import { describe, expect, it } from "vitest";
 import { PlanConfirm } from "../src/cli/ui/PlanConfirm.js";

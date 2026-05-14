@@ -1,5 +1,7 @@
 /** Precedence: per-setting flag > --preset > config.preset > "auto" defaults. */
 
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { type PresetName, type ReasonixConfig, readConfig } from "../config.js";
 import { resolvePreset } from "./ui/presets.js";
 
@@ -85,4 +87,30 @@ export function resolveContinueFlag(
     return { session: fallbackSession, forceResume: false };
   }
   return { session: latest.name, forceResume: true };
+}
+
+const PROJECT_MARKERS = [
+  ".git",
+  "package.json",
+  "pyproject.toml",
+  "Cargo.toml",
+  "go.mod",
+  "pom.xml",
+  "build.gradle",
+  "CMakeLists.txt",
+];
+
+export function looksLikeProjectDir(cwd: string, recentWorkspaces: string[] = []): boolean {
+  const root = resolve(cwd);
+  if (recentWorkspaces.some((workspace) => resolve(workspace) === root)) return true;
+
+  return PROJECT_MARKERS.some((marker) => existsSync(resolve(root, marker)));
+}
+
+export function resolveBareCommandMode(
+  cwd: string,
+  cfg: Pick<ReasonixConfig, "setupCompleted" | "recentWorkspaces">,
+): "setup" | "code" | "chat" {
+  if (!cfg.setupCompleted) return "setup";
+  return looksLikeProjectDir(cwd, cfg.recentWorkspaces) ? "code" : "chat";
 }
