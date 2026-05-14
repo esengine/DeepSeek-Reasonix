@@ -1028,6 +1028,18 @@ function TabRuntime({
     },
     [sendRpc],
   );
+  const onApproveConfirm = useCallback(
+    (id: number) => resolveConfirm(id, { type: "run_once" }),
+    [resolveConfirm],
+  );
+  const onRejectConfirm = useCallback(
+    (id: number) => resolveConfirm(id, { type: "deny" }),
+    [resolveConfirm],
+  );
+  const onAlwaysAllowConfirm = useCallback(
+    (id: number, prefix: string) => resolveConfirm(id, { type: "always_allow", prefix }),
+    [resolveConfirm],
+  );
   const resolvePathAccess = useCallback(
     (id: number, response: ConfirmationChoice) => {
       sendRpc({ cmd: "confirm_response", id, response });
@@ -1394,11 +1406,9 @@ function TabRuntime({
                           segments={m.segments}
                           pending={m.pending}
                           model={state.model}
-                          onApproveConfirm={(id) => resolveConfirm(id, { type: "run_once" })}
-                          onRejectConfirm={(id) => resolveConfirm(id, { type: "deny" })}
-                          onAlwaysAllowConfirm={(id, prefix) =>
-                            resolveConfirm(id, { type: "always_allow", prefix })
-                          }
+                          onApproveConfirm={onApproveConfirm}
+                          onRejectConfirm={onRejectConfirm}
+                          onAlwaysAllowConfirm={onAlwaysAllowConfirm}
                           pendingConfirms={state.pendingConfirms}
                         />
                       );

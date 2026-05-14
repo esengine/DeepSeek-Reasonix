@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { I } from "../icons";
 import { Markdown } from "../Markdown";
 
@@ -672,10 +672,10 @@ export function Checkpoint({
 
 // ---- Plain text block (assistant content via markdown) ----
 
-export function AssistantText({ text }: { text: string }) {
+export const AssistantText = memo(function AssistantText({ text }: { text: string }) {
   return (
     <div className="msg-text">
       <Markdown source={text} />
     </div>
   );
-}
+});

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { I } from "../icons";
 import type { AssistantSegment, ActivePlan, PendingPlan, PendingCheckpoint, PendingRevision, PendingConfirm, PendingChoice } from "../App";
 import { AssistantText, PlanCardView, ReasoningCard, ShellCard, ToolCard, type PlanItem } from "./cards";
@@ -13,7 +13,7 @@ export function TurnDivider({ label }: { label: string }) {
   );
 }
 
-export function UserMsg({ text, time }: { text: string; time?: string }) {
+export const UserMsg = memo(function UserMsg({ text, time }: { text: string; time?: string }) {
   return (
     <div className="msg user">
       <div className="avatar">YOU</div>
@@ -26,9 +26,9 @@ export function UserMsg({ text, time }: { text: string; time?: string }) {
       </div>
     </div>
   );
-}
+});
 
-export function AssistantMsg({
+export const AssistantMsg = memo(function AssistantMsg({
   segments,
   pending,
   model,
@@ -119,7 +119,7 @@ export function AssistantMsg({
       </div>
     </div>
   );
-}
+});
 
 function extractCommand(args: string): string | undefined {
   if (!args) return undefined;

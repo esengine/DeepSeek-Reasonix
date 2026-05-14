@@ -6,6 +6,7 @@ import {
   cloneElement,
   createContext,
   isValidElement,
+  memo,
   type ReactNode,
   useContext,
   useState,
@@ -133,7 +134,7 @@ function withFilePills(children: ReactNode): ReactNode {
   });
 }
 
-export function Markdown({ source }: { source: string }) {
+export const Markdown = memo(function Markdown({ source }: { source: string }) {
   return (
     <div className="markdown">
       <ReactMarkdown
@@ -158,7 +159,7 @@ export function Markdown({ source }: { source: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 function SafeLink({ href, children }: { href?: string; children: ReactNode }) {
   const ctx = useContext(WorkspaceContext);
