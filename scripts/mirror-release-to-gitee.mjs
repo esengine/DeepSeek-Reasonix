@@ -94,8 +94,14 @@ async function uploadAsset(releaseId, filePath) {
   console.log(`Gitee: uploaded ${filename} (${buf.byteLength} bytes)`);
 }
 
+// Gitee caps individual release assets at 100MB on free accounts; uploading
+// over that hangs until undici's headersTimeout fires and the script crashes.
+const GITEE_ASSET_SIZE_LIMIT = 90 * 1024 * 1024;
+
 const release = await getOrCreateRelease();
 const skip = await existingAssetNames(release.id);
+const failed = [];
+const skipped = [];
 for (const name of await readdir(ASSETS_DIR)) {
   const fp = path.join(ASSETS_DIR, name);
   const st = await stat(fp);
@@ -104,6 +110,22 @@ for (const name of await readdir(ASSETS_DIR)) {
     console.log(`Gitee: skip ${name} (already present)`);
     continue;
   }
-  await uploadAsset(release.id, fp);
+  if (st.size > GITEE_ASSET_SIZE_LIMIT) {
+    const mb = (st.size / 1024 / 1024).toFixed(1);
+    console.log(`Gitee: skip ${name} (${mb} MB exceeds ${GITEE_ASSET_SIZE_LIMIT / 1024 / 1024} MB limit)`);
+    skipped.push(`${name} (${mb} MB)`);
+    continue;
+  }
+  try {
+    await uploadAsset(release.id, fp);
+  } catch (err) {
+    console.error(`Gitee: ${name} upload failed: ${err instanceof Error ? err.message : err}`);
+    failed.push(name);
+  }
+}
+if (skipped.length > 0) console.log(`Gitee: skipped (too large): ${skipped.join(", ")}`);
+if (failed.length > 0) {
+  console.error(`Gitee: ${failed.length} upload(s) failed: ${failed.join(", ")}`);
+  process.exit(1);
 }
 console.log("Gitee mirror complete.");
