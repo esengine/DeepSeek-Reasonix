@@ -77,21 +77,32 @@ async function existingAssetNames(releaseId) {
   return new Set((data.assets ?? []).map((a) => a.name));
 }
 
+// Hard cap per upload — undici's default 5-min headersTimeout is too generous
+// when Gitee just hangs; bail fast so the rest of the batch isn't blocked.
+const UPLOAD_TIMEOUT_MS = 180_000;
+
 async function uploadAsset(releaseId, filePath) {
   const filename = path.basename(filePath);
   const buf = await readFile(filePath);
   const form = new FormData();
   form.append("file", new Blob([buf]), filename);
-  const res = await fetch(`${GITEE_API}/repos/${REPO}/releases/${releaseId}/attach_files`, {
-    method: "POST",
-    headers: { Authorization: `token ${TOKEN}` },
-    body: form,
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`upload ${filename} → ${res.status}: ${body}`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error(`timeout after ${UPLOAD_TIMEOUT_MS / 1000}s`)), UPLOAD_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${GITEE_API}/repos/${REPO}/releases/${releaseId}/attach_files`, {
+      method: "POST",
+      headers: { Authorization: `token ${TOKEN}` },
+      body: form,
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`upload ${filename} → ${res.status}: ${body}`);
+    }
+    console.log(`Gitee: uploaded ${filename} (${buf.byteLength} bytes)`);
+  } finally {
+    clearTimeout(timer);
   }
-  console.log(`Gitee: uploaded ${filename} (${buf.byteLength} bytes)`);
 }
 
 // Gitee caps individual release assets at 100MB on free accounts; uploading
