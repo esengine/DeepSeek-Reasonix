@@ -1640,11 +1640,6 @@ function TitleBar({
   }, [menuOpen]);
   return (
     <header className="titlebar">
-      <div className="traffic">
-        <span className="dot r" />
-        <span className="dot y" />
-        <span className="dot g" />
-      </div>
       <div className="brand">
         <span className="mark" />
         <span>Reasonix</span>
