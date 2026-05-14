@@ -1,0 +1,12 @@
+/* System-font stack tuned to match the mockup's editorial look:
+   - sans: Geist → Inter → system fallback
+   - serif: Instrument Serif → Iowan/Charter/Hoefler system serifs
+   - mono: Geist Mono / JetBrains Mono → system mono
+   Loading actual woff2 from a third-party CDN is intentionally avoided —
+   external font hosts are blocked or slow on mainland China networks. */
+
+:root {
+  --sans:  "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --serif: "Instrument Serif", "Iowan Old Style", "Apple Garamond", "Hoefler Text", "Source Han Serif SC", Georgia, serif;
+  --mono:  "Geist Mono", "JetBrains Mono", ui-monospace, "SFMono-Regular", "Cascadia Mono", "Liberation Mono", Menlo, monospace;
+}

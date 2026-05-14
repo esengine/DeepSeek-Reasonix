@@ -1,0 +1,11 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: interest-cohort=()
+
+/src/*.jsx
+  Cache-Control: public, max-age=300, must-revalidate
+  Content-Type: text/babel; charset=utf-8
+
+/src/*.css
+  Cache-Control: public, max-age=86400, must-revalidate
