@@ -47,3 +47,4 @@ desktop/src-tauri/binaries/
 
 # Design mock-up reference (local, not part of repo)
 .design-ref/
+*.cpuprofile

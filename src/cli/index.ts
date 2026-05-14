@@ -6,8 +6,15 @@ import { listSessions } from "../memory/session.js";
 import { applyMemoryStack } from "../memory/user.js";
 import { installProxyIfConfigured } from "../net/proxy.js";
 import { escalationContract } from "../prompt-fragments.js";
+import { installCpuProfileExitHandler, startCpuProfile } from "./cpu-prof.js";
 import { resolveBareCommandMode, resolveContinueFlag, resolveDefaults } from "./resolve.js";
 import { markPhase } from "./startup-profile.js";
+
+async function maybeStartCpuProfile(flag: unknown): Promise<void> {
+  if (flag === undefined || flag === false) return;
+  installCpuProfileExitHandler();
+  await startCpuProfile(typeof flag === "string" ? flag : undefined);
+}
 
 // HTTPS_PROXY / HTTP_PROXY only reach Node's fetch via undici's global
 // dispatcher; install before any client (DeepSeek, web tools, dashboard)
@@ -185,7 +192,12 @@ program
   .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
   .option("--system-append <prompt>", t("ui.systemAppendHint"))
   .option("--system-append-file <path>", t("ui.systemAppendFileHint"))
+  .option(
+    "--profile [path]",
+    "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
+  )
   .action(async (dir: string | undefined, opts) => {
+    await maybeStartCpuProfile(opts.profile);
     const { codeCommand } = await import("./commands/code.js");
     await codeCommand({
       dir,
@@ -237,7 +249,12 @@ program
   .option("--dashboard-port <port>", t("ui.dashboardPortHint"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
   .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
+  .option(
+    "--profile [path]",
+    "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
+  )
   .action(async (opts) => {
+    await maybeStartCpuProfile(opts.profile);
     const defaults = resolveDefaults({
       model: opts.model,
       mcp: opts.mcp as string[],
