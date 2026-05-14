@@ -91,6 +91,8 @@ export interface ChatOptions {
    * URL is visible in the status bar.
    */
   noDashboard?: boolean;
+  /** When true and the dashboard is enabled, open its URL in the system default browser as soon as the server is ready. */
+  openDashboard?: boolean;
   /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
   dashboardPort?: number;
   /**
@@ -210,6 +212,7 @@ function Root({
         startupInfoHints={startupInfoHints}
         codeMode={appProps.codeMode}
         noDashboard={appProps.noDashboard}
+        openDashboard={appProps.openDashboard}
         dashboardPort={appProps.dashboardPort}
         mouse={appProps.mouse}
         onSwitchSession={setActiveSession}

@@ -160,6 +160,7 @@ import { handleMcpBrowseSlash } from "./mcp-browse.js";
 import { formatMcpLifecycleEvent } from "./mcp-lifecycle.js";
 import { replaceMcpServerSummary } from "./mcp-server-list.js";
 import { formatMcpSlowToast } from "./mcp-toast.js";
+import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
@@ -258,6 +259,8 @@ export interface AppProps {
    * who don't want a localhost listener.
    */
   noDashboard?: boolean;
+  /** When true and the dashboard is enabled, open its URL in the system default browser as soon as the auto-start finishes. */
+  openDashboard?: boolean;
   /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
   dashboardPort?: number;
   /** Mid-chat session swap — Root remounts App with the new session via key. */
@@ -433,6 +436,7 @@ function AppInner({
   progressSink,
   codeMode,
   noDashboard,
+  openDashboard,
   dashboardPort,
   onSwitchSession,
   mouse = true,
@@ -2148,16 +2152,20 @@ function AppInner({
   useEffect(() => {
     if (noDashboard) return;
     if (dashboardRef.current) return;
-    startDashboard().catch((err) => {
-      // Auto-start failure surfaces as a visible warn row. The URL
-      // itself is shown on the welcome card (when the server is up),
-      // so silence here would leave the user with no way to know the
-      // web UI is unreachable — port already in use, permission
-      // denied, etc. Don't block the TUI; everything else keeps working.
-      const reason = err instanceof Error ? err.message : String(err);
-      log.pushInfo(t("ui.dashboardAutoStartFailed", { reason }));
-    });
-  }, [noDashboard, startDashboard, log]);
+    startDashboard()
+      .then((url) => {
+        if (url && openDashboard) openUrl(url);
+      })
+      .catch((err) => {
+        // Auto-start failure surfaces as a visible warn row. The URL
+        // itself is shown on the welcome card (when the server is up),
+        // so silence here would leave the user with no way to know the
+        // web UI is unreachable — port already in use, permission
+        // denied, etc. Don't block the TUI; everything else keeps working.
+        const reason = err instanceof Error ? err.message : String(err);
+        log.pushInfo(t("ui.dashboardAutoStartFailed", { reason }));
+      });
+  }, [noDashboard, openDashboard, startDashboard, log]);
 
   // Tear the dashboard down on unmount so the port doesn't leak when
   // the TUI exits via /exit, Ctrl+C, etc.

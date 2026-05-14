@@ -179,6 +179,7 @@ program
     (v) => Number.parseInt(v, 10),
   )
   .option("--no-dashboard", t("ui.noDashboard"))
+  .option("--open-dashboard", t("ui.openDashboardHint"))
   .option("--dashboard-port <port>", t("ui.dashboardPortHint"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
   .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
@@ -196,6 +197,7 @@ program
       budgetUsd: parseBudgetFlag(opts.budget),
       failureThreshold: resolveFailureThreshold(parseEscalateAfterFlag(opts.escalateAfter), false),
       noDashboard: opts.dashboard === false,
+      openDashboard: opts.openDashboard === true,
       dashboardPort: resolveDashboardPort(parseDashboardPortFlag(opts.dashboardPort), false),
       systemAppend: opts.systemAppend,
       systemAppendFile: opts.systemAppendFile,
@@ -231,6 +233,7 @@ program
   .option("--mcp-prefix <str>", t("ui.mcpPrefixHint"))
   .option("--no-config", t("ui.noConfigHint"))
   .option("--no-dashboard", t("ui.noDashboard"))
+  .option("--open-dashboard", t("ui.openDashboardHint"))
   .option("--dashboard-port <port>", t("ui.dashboardPortHint"))
   .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
   .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
@@ -274,6 +277,7 @@ program
       forceResume: continueOpts.forceResume,
       forceNew: !!opts.new,
       noDashboard: opts.dashboard === false,
+      openDashboard: opts.openDashboard === true,
       dashboardPort: resolveDashboardPort(
         parseDashboardPortFlag(opts.dashboardPort),
         opts.config === false,

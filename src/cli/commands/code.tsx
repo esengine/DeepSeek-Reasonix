@@ -53,6 +53,8 @@ export interface CodeOptions {
   failureThreshold?: number;
   /** Suppress the auto-launched embedded web dashboard. */
   noDashboard?: boolean;
+  /** When true and the dashboard is enabled, open its URL in the system default browser as soon as the server is ready. */
+  openDashboard?: boolean;
   /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
   dashboardPort?: number;
   /** Inline string appended to the code system prompt after the generated base prompt. */
@@ -165,6 +167,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     forceResume: opts.forceResume,
     forceNew: opts.forceNew,
     noDashboard: opts.noDashboard,
+    openDashboard: opts.openDashboard,
     dashboardPort: opts.dashboardPort,
     altScreen: opts.altScreen,
     mouse: opts.mouse,

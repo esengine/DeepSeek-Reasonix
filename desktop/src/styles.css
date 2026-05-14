@@ -183,29 +183,7 @@ button {
   font-size: 12px;
 }
 
-.traffic {
-  display: flex;
-  gap: 8px;
-  padding: 0 6px;
-}
-.traffic .dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--border-strong);
-}
-.traffic .dot.r {
-  background: oklch(65% 0.18 22);
-}
-.traffic .dot.y {
-  background: oklch(78% 0.14 75);
-}
-.traffic .dot.g {
-  background: oklch(68% 0.14 145);
-}
-
 .titlebar .brand {
-  margin-left: 14px;
   display: flex;
   align-items: center;
   gap: 8px;
