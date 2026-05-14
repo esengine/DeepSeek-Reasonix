@@ -38,11 +38,14 @@ async function getOrCreateRelease() {
     { headers: { Authorization: `token ${TOKEN}` } },
   );
   if (lookup.status === 200) {
-    const data = await lookup.json();
-    console.log(`Gitee: release ${TAG} exists (id=${data.id}), reusing.`);
-    return data;
-  }
-  if (lookup.status !== 404) {
+    // Gitee returns 200 + literal `null` body when the tag has no release yet,
+    // not 404 like a sane API would. Fall through to create in that case.
+    const data = await lookup.json().catch(() => null);
+    if (data && data.id) {
+      console.log(`Gitee: release ${TAG} exists (id=${data.id}), reusing.`);
+      return data;
+    }
+  } else if (lookup.status !== 404) {
     const body = await lookup.text().catch(() => "");
     throw new Error(`Gitee lookup failed: ${lookup.status}: ${body}`);
   }
