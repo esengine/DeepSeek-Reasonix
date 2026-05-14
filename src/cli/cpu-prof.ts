@@ -1,10 +1,11 @@
 import { writeFileSync } from "node:fs";
 import { Session } from "node:inspector/promises";
 import { resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 
 let session: Session | null = null;
 let outPath: string | null = null;
-let installed = false;
+let signalHandlerInstalled = false;
 let stopping = false;
 
 function defaultOutPath(): string {
@@ -20,19 +21,26 @@ export async function startCpuProfile(pathArg?: string | true): Promise<string> 
   await session.post("Profiler.enable");
   await session.post("Profiler.start");
   process.stderr.write(`▸ cpu profile recording — will save to ${outPath} on exit\n`);
+  installSignalHandler();
   return outPath;
 }
 
-async function stopAndSave(): Promise<void> {
+export async function stopAndSaveCpuProfile(): Promise<void> {
   if (!session || !outPath || stopping) return;
   stopping = true;
   const s = session;
-  const out = outPath;
+  const baseOut = outPath;
   session = null;
   try {
     const { profile } = (await s.post("Profiler.stop")) as { profile: unknown };
-    writeFileSync(out, JSON.stringify(profile));
-    process.stderr.write(`▸ cpu profile saved → ${out}\n`);
+    const json = JSON.stringify(profile);
+    const gz = gzipSync(json);
+    const gzPath = `${baseOut}.gz`;
+    writeFileSync(gzPath, gz);
+    const mb = (gz.length / (1024 * 1024)).toFixed(2);
+    process.stderr.write(
+      `▸ cpu profile saved → ${gzPath} (${mb} MB gzipped)\n  drag into a GitHub issue comment, or:\n  gh issue comment <N> --repo esengine/DeepSeek-Reasonix -F "${gzPath}"\n`,
+    );
   } catch (e) {
     process.stderr.write(`▲ cpu profile save failed: ${(e as Error).message}\n`);
   } finally {
@@ -44,20 +52,15 @@ async function stopAndSave(): Promise<void> {
   }
 }
 
-export function installCpuProfileExitHandler(): void {
-  if (installed) return;
-  installed = true;
-  const onSignal = (sig: NodeJS.Signals) => {
-    void (async () => {
-      await stopAndSave();
-      process.exit(sig === "SIGINT" ? 130 : 0);
-    })();
-  };
+function installSignalHandler(): void {
+  if (signalHandlerInstalled) return;
+  signalHandlerInstalled = true;
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-    process.on(sig, onSignal);
+    process.on(sig, () => {
+      void (async () => {
+        await stopAndSaveCpuProfile();
+        process.exit(sig === "SIGINT" ? 130 : 0);
+      })();
+    });
   }
-  // beforeExit fires when the loop is empty — gives us one chance to await.
-  process.on("beforeExit", () => {
-    void stopAndSave();
-  });
 }

@@ -6,14 +6,14 @@ import { listSessions } from "../memory/session.js";
 import { applyMemoryStack } from "../memory/user.js";
 import { installProxyIfConfigured } from "../net/proxy.js";
 import { escalationContract } from "../prompt-fragments.js";
-import { installCpuProfileExitHandler, startCpuProfile } from "./cpu-prof.js";
+import { startCpuProfile, stopAndSaveCpuProfile } from "./cpu-prof.js";
 import { resolveBareCommandMode, resolveContinueFlag, resolveDefaults } from "./resolve.js";
 import { markPhase } from "./startup-profile.js";
 
-async function maybeStartCpuProfile(flag: unknown): Promise<void> {
-  if (flag === undefined || flag === false) return;
-  installCpuProfileExitHandler();
+async function maybeStartCpuProfile(flag: unknown): Promise<boolean> {
+  if (flag === undefined || flag === false) return false;
   await startCpuProfile(typeof flag === "string" ? flag : undefined);
+  return true;
 }
 
 // HTTPS_PROXY / HTTP_PROXY only reach Node's fetch via undici's global
@@ -197,25 +197,32 @@ program
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
   .action(async (dir: string | undefined, opts) => {
-    await maybeStartCpuProfile(opts.profile);
-    const { codeCommand } = await import("./commands/code.js");
-    await codeCommand({
-      dir,
-      model: opts.model,
-      noSession: opts.session === false,
-      transcript: opts.transcript,
-      forceResume: !!opts.resume,
-      forceNew: !!opts.new,
-      budgetUsd: parseBudgetFlag(opts.budget),
-      failureThreshold: resolveFailureThreshold(parseEscalateAfterFlag(opts.escalateAfter), false),
-      noDashboard: opts.dashboard === false,
-      openDashboard: opts.openDashboard === true,
-      dashboardPort: resolveDashboardPort(parseDashboardPortFlag(opts.dashboardPort), false),
-      systemAppend: opts.systemAppend,
-      systemAppendFile: opts.systemAppendFile,
-      altScreen: opts.altScreen !== false,
-      mouse: opts.mouse !== false,
-    });
+    const profiling = await maybeStartCpuProfile(opts.profile);
+    try {
+      const { codeCommand } = await import("./commands/code.js");
+      await codeCommand({
+        dir,
+        model: opts.model,
+        noSession: opts.session === false,
+        transcript: opts.transcript,
+        forceResume: !!opts.resume,
+        forceNew: !!opts.new,
+        budgetUsd: parseBudgetFlag(opts.budget),
+        failureThreshold: resolveFailureThreshold(
+          parseEscalateAfterFlag(opts.escalateAfter),
+          false,
+        ),
+        noDashboard: opts.dashboard === false,
+        openDashboard: opts.openDashboard === true,
+        dashboardPort: resolveDashboardPort(parseDashboardPortFlag(opts.dashboardPort), false),
+        systemAppend: opts.systemAppend,
+        systemAppendFile: opts.systemAppendFile,
+        altScreen: opts.altScreen !== false,
+        mouse: opts.mouse !== false,
+      });
+    } finally {
+      if (profiling) await stopAndSaveCpuProfile();
+    }
   });
 
 program
@@ -254,54 +261,58 @@ program
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
   .action(async (opts) => {
-    await maybeStartCpuProfile(opts.profile);
-    const defaults = resolveDefaults({
-      model: opts.model,
-      mcp: opts.mcp as string[],
-      session: opts.session,
-      preset: opts.preset,
-      noConfig: opts.config === false,
-    });
-    // `-c` is "newest-touched session" + auto-resume; `-r` is "this
-    // session's prior messages, even if you also passed --session".
-    // When both are set we prefer the explicit `--session` + `-r`
-    // (more specific input wins). `-c` only kicks in if `-r` wasn't.
-    const continueOpts = opts.resume
-      ? { session: defaults.session, forceResume: true }
-      : resolveContinueFlag(
-          opts.continue,
-          defaults.session,
-          () => listSessions()[0],
-          (msg) => process.stderr.write(`${msg}\n`),
-        );
-    const { chatCommand } = await import("./commands/chat.js");
-    const chatBase = opts.system ?? defaultSystemPrompt(defaults.model);
-    const chatCwd = process.cwd();
-    const chatRebuildSystem = () => applyMemoryStack(chatBase, chatCwd);
-    await chatCommand({
-      model: defaults.model,
-      system: chatRebuildSystem(),
-      rebuildSystem: chatRebuildSystem,
-      transcript: opts.transcript,
-      budgetUsd: parseBudgetFlag(opts.budget),
-      failureThreshold: resolveFailureThreshold(
-        parseEscalateAfterFlag(opts.escalateAfter),
-        opts.config === false,
-      ),
-      session: continueOpts.session,
-      mcp: defaults.mcp,
-      mcpPrefix: opts.mcpPrefix,
-      forceResume: continueOpts.forceResume,
-      forceNew: !!opts.new,
-      noDashboard: opts.dashboard === false,
-      openDashboard: opts.openDashboard === true,
-      dashboardPort: resolveDashboardPort(
-        parseDashboardPortFlag(opts.dashboardPort),
-        opts.config === false,
-      ),
-      altScreen: opts.altScreen !== false,
-      mouse: opts.mouse !== false,
-    });
+    const profiling = await maybeStartCpuProfile(opts.profile);
+    try {
+      const defaults = resolveDefaults({
+        model: opts.model,
+        mcp: opts.mcp as string[],
+        session: opts.session,
+        preset: opts.preset,
+        noConfig: opts.config === false,
+      });
+      // `-c` is "newest-touched session" + auto-resume; `-r` is "this
+      // session's prior messages, even if you also passed --session".
+      // When both are set we prefer the explicit `--session` + `-r`
+      // (more specific input wins). `-c` only kicks in if `-r` wasn't.
+      const continueOpts = opts.resume
+        ? { session: defaults.session, forceResume: true }
+        : resolveContinueFlag(
+            opts.continue,
+            defaults.session,
+            () => listSessions()[0],
+            (msg) => process.stderr.write(`${msg}\n`),
+          );
+      const { chatCommand } = await import("./commands/chat.js");
+      const chatBase = opts.system ?? defaultSystemPrompt(defaults.model);
+      const chatCwd = process.cwd();
+      const chatRebuildSystem = () => applyMemoryStack(chatBase, chatCwd);
+      await chatCommand({
+        model: defaults.model,
+        system: chatRebuildSystem(),
+        rebuildSystem: chatRebuildSystem,
+        transcript: opts.transcript,
+        budgetUsd: parseBudgetFlag(opts.budget),
+        failureThreshold: resolveFailureThreshold(
+          parseEscalateAfterFlag(opts.escalateAfter),
+          opts.config === false,
+        ),
+        session: continueOpts.session,
+        mcp: defaults.mcp,
+        mcpPrefix: opts.mcpPrefix,
+        forceResume: continueOpts.forceResume,
+        forceNew: !!opts.new,
+        noDashboard: opts.dashboard === false,
+        openDashboard: opts.openDashboard === true,
+        dashboardPort: resolveDashboardPort(
+          parseDashboardPortFlag(opts.dashboardPort),
+          opts.config === false,
+        ),
+        altScreen: opts.altScreen !== false,
+        mouse: opts.mouse !== false,
+      });
+    } finally {
+      if (profiling) await stopAndSaveCpuProfile();
+    }
   });
 
 program
