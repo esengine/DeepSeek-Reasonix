@@ -2,6 +2,7 @@
 
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
+import { devNull } from "node:os";
 import * as pathMod from "node:path";
 import { isDqEscape, killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
 
@@ -352,6 +353,14 @@ interface SegmentStdio {
   toClose: number[];
 }
 
+/** Models reach for `2>nul` (Windows) and `2>/dev/null` (POSIX) interchangeably; without this the parser materializes a real `<cwd>/nul` file. */
+function isNullDeviceAlias(target: string): boolean {
+  const lower = target.toLowerCase();
+  if (lower === "/dev/null") return true;
+  if (process.platform === "win32" && lower === "nul") return true;
+  return false;
+}
+
 function openRedirects(redirects: readonly Redirect[], cwd: string): SegmentStdio {
   let stdinFd: number | null = null;
   let stdoutFd: number | null = null;
@@ -360,7 +369,7 @@ function openRedirects(redirects: readonly Redirect[], cwd: string): SegmentStdi
   let bothFd: number | null = null;
   const toClose: number[] = [];
   const open = (target: string, flags: "r" | "w" | "a"): number => {
-    const resolved = pathMod.resolve(cwd, target);
+    const resolved = isNullDeviceAlias(target) ? devNull : pathMod.resolve(cwd, target);
     const fd = openSync(resolved, flags);
     toClose.push(fd);
     return fd;

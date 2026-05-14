@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -236,4 +236,71 @@ describe("runCommand — redirect dispatch", () => {
     const r = await runCommand('node -e "process.exit(7)" > out.txt', { cwd: tmp });
     expect(r.exitCode).toBe(7);
   });
+});
+
+describe("runChain — null-device redirects", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "reasonix-null-dev-"));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const baseOpts = { timeoutSec: 10, maxOutputChars: 32_000 };
+
+  it("`2> /dev/null` discards stderr without creating a `/dev/null` file in cwd", async () => {
+    const c = parseCommandChain(
+      "node -e \"console.error('noisy'); process.stdout.write('quiet')\" 2> /dev/null",
+    )!;
+    const r = await runChain(c, { cwd: tmp, ...baseOpts });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).toContain("quiet");
+    expect(r.output).not.toContain("noisy");
+    expect(existsSync(join(tmp, "dev"))).toBe(false);
+    expect(existsSync(join(tmp, "/dev/null"))).toBe(false);
+  });
+
+  it("`> /dev/null` discards stdout without creating a file in cwd", async () => {
+    const c = parseCommandChain("node -e \"process.stdout.write('vanish')\" > /dev/null")!;
+    const r = await runChain(c, { cwd: tmp, ...baseOpts });
+    expect(r.exitCode).toBe(0);
+    expect(r.output).not.toContain("vanish");
+    expect(existsSync(join(tmp, "dev"))).toBe(false);
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "`2>nul` (Windows) discards stderr without leaving a `nul` file behind",
+    async () => {
+      const c = parseCommandChain(
+        "node -e \"console.error('boom'); process.stdout.write('ok')\" 2>nul",
+      )!;
+      const r = await runChain(c, { cwd: tmp, ...baseOpts });
+      expect(r.exitCode).toBe(0);
+      expect(r.output).toContain("ok");
+      expect(r.output).not.toContain("boom");
+      expect(existsSync(join(tmp, "nul"))).toBe(false);
+    },
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "uppercase `2>NUL` also routes to the null device",
+    async () => {
+      const c = parseCommandChain("node -e \"console.error('x')\" 2>NUL")!;
+      const r = await runChain(c, { cwd: tmp, ...baseOpts });
+      expect(r.exitCode).toBe(0);
+      expect(existsSync(join(tmp, "NUL"))).toBe(false);
+      expect(existsSync(join(tmp, "nul"))).toBe(false);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "`nul` is a regular filename on POSIX (no aliasing)",
+    async () => {
+      const c = parseCommandChain("node -e \"process.stdout.write('p')\" > nul")!;
+      await runChain(c, { cwd: tmp, ...baseOpts });
+      expect(existsSync(join(tmp, "nul"))).toBe(true);
+      expect(readFileSync(join(tmp, "nul"), "utf8")).toBe("p");
+    },
+  );
 });
