@@ -564,6 +564,7 @@ interface Tab {
   aborter: AbortController | null;
   fileIndex: FileWithStats[] | null;
   fileIndexBuilding: Promise<FileWithStats[]> | null;
+  fileIndexBuiltAt: number;
   symbolIndex: SymbolEntry[] | null;
   symbolBuilding: Promise<SymbolEntry[]> | null;
   recentMentions: string[];
@@ -616,12 +617,17 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
 const TS_EXPORT_RE =
   /^export\s+(?:default\s+)?(?:async\s+)?(function|class|const|let|var|interface|type|enum)\s+\*?\s*(\w+)/;
 
+/** TTL on the in-memory file index — without this, files deleted / renamed since the last @ popup still show up as candidates. 10s balances "fresh enough for typical edit-then-mention flows" against "don't re-scan 5000 files on every keystroke". */
+const FILE_INDEX_TTL_MS = 10_000;
+
 async function getFileIndexFor(tab: Tab): Promise<FileWithStats[]> {
-  if (tab.fileIndex) return tab.fileIndex;
+  const fresh = tab.fileIndex && Date.now() - tab.fileIndexBuiltAt < FILE_INDEX_TTL_MS;
+  if (fresh) return tab.fileIndex as FileWithStats[];
   if (tab.fileIndexBuilding) return tab.fileIndexBuilding;
   tab.fileIndexBuilding = listFilesWithStatsAsync(tab.rootDir, { maxResults: 5000 })
     .then((res) => {
       tab.fileIndex = res;
+      tab.fileIndexBuiltAt = Date.now();
       tab.fileIndexBuilding = null;
       return res;
     })
@@ -730,6 +736,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       aborter: null,
       fileIndex: null,
       fileIndexBuilding: null,
+      fileIndexBuiltAt: 0,
       symbolIndex: null,
       symbolBuilding: null,
       recentMentions: [],
@@ -878,6 +885,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     pushRecentWorkspace(target);
     tab.fileIndex = null;
     tab.fileIndexBuilding = null;
+    tab.fileIndexBuiltAt = 0;
     tab.symbolIndex = null;
     tab.symbolBuilding = null;
     tab.recentMentions.length = 0;
@@ -1325,7 +1333,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       const nonce = msg.nonce;
       const query = msg.query;
       const parsed = parseAtQuery(query);
-      if (parsed.trailingSlash) {
+      // Empty query → list workspace root's top-level entries (tree
+      // style). Without this, bare `@` floods with all 5000 files; the
+      // TUI's @+Tab pattern already shows the tree top.
+      const treeWalk = parsed.trailingSlash || query.length === 0;
+      if (treeWalk) {
         void listDirectory(tab.rootDir, parsed.dir)
           .then((entries) => {
             const results = entries.map((e) => (e.isDir ? `${e.path}/` : e.path));
