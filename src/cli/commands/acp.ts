@@ -36,6 +36,7 @@ import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
 import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { loadDotenv } from "../../env.js";
+import { t } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import { McpClient } from "../../mcp/client.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
@@ -131,7 +132,7 @@ export async function loadMcpServers(
     } catch (err) {
       await mcp?.close().catch(() => undefined);
       process.stderr.write(
-        `${formatMcpLifecycleEvent({ state: "failed", name: label, reason: (err as Error).message })}\n  → run \`reasonix setup\` to remove broken entries from your saved config.\n`,
+        `${formatMcpLifecycleEvent({ state: "failed", name: label, reason: (err as Error).message })}\n  → ${t("mcpLifecycle.failedSetupConfigHint")}\n`,
       );
     }
   }

@@ -219,6 +219,13 @@ export const zhCN: TranslationSchema = {
     jsonHintReport: "以 JSON 格式输出检查报告",
     modelOverrideFlash: "覆盖模型（默认：deepseek-v4-flash）",
     skipConfirmHint: "跳过确认提示",
+    yoloHint: "自动批准本次调用的计划检查点（等同于 editMode=yolo，但不修改配置文件）",
+  },
+  code: {
+    workspaceConflict:
+      "⚠ 工作区包含另一个智能体平台的文件 ({platforms})。Reasonix Code 可能会将其作为项目内容读取；如果不是您想要的，请使用 --dir <your-project> 重新启动。\n",
+    systemAppendEmpty: "--system-append 为空 — 不会追加任何提示文本\n",
+    systemAppendFileReadError: '错误：无法读取 --system-append-file "{filePath}"：{errorDetails}\n',
   },
   slash: {
     help: { description: "显示完整命令参考" },
@@ -1430,6 +1437,8 @@ export const zhCN: TranslationSchema = {
     initDetail: "初始化 → tools/list → resources/list",
     reconnectDetail: "断开旧连接 · 重新握手 · 列出工具",
     disabledDetail: "通过 /mcp disable {name}",
+    failedSetupHint: "→ 运行 `reasonix setup` 移除此条目，或修复底层问题（缺少 npm 包、网络等）。",
+    failedSetupConfigHint: "→ 运行 `reasonix setup` 从已保存配置中移除损坏的条目。",
   },
   checkpointPicker: {
     title: "恢复检查点 \u2014 {workspace}",

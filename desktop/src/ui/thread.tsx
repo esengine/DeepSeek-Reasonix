@@ -1,5 +1,6 @@
 import { memo, type ReactNode } from "react";
 import { I } from "../icons";
+import { t, useLang } from "../i18n";
 import type { AssistantSegment, ActivePlan, PendingPlan, PendingCheckpoint, PendingRevision, PendingConfirm, PendingChoice } from "../App";
 import { AssistantText, PlanCardView, ReasoningCard, ShellCard, ToolCard, type PlanItem } from "./cards";
 import { ApprovalCard, TaskCard, type TaskStepView } from "./extra-cards";
@@ -270,12 +271,13 @@ export function RevisionApprovalCard({
   onAccept: () => void;
   onReject: () => void;
 }) {
+  useLang();
   return (
     <ApprovalCard
       kind="plan revision"
       tone="warn"
       title="计划重写"
-      sub={`保留已完成步骤 · 新增 ${r.remainingSteps.length} step`}
+      sub={t("thread.keepSteps", { n: r.remainingSteps.length })}
       body={
         <>
           <div style={{ marginBottom: 8 }}>{r.reason}</div>
@@ -309,7 +311,7 @@ export function RevisionApprovalCard({
       }
       meta="reason · runtime constraint"
       primaryLabel="批准重写"
-      secondaryLabel="保留原方案"
+      secondaryLabel={t("thread.keepOriginal")}
       onPrimary={onAccept}
       onSecondary={onReject}
     />

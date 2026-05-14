@@ -223,6 +223,15 @@ export const EN: TranslationSchema = {
     jsonHintReport: "output the inspection report as JSON",
     modelOverrideFlash: "override the model (default: deepseek-v4-flash)",
     skipConfirmHint: "skip the confirmation prompt",
+    yoloHint:
+      "auto-approve plan checkpoints for this invocation (equivalent to editMode=yolo without mutating config)",
+  },
+  code: {
+    workspaceConflict:
+      "⚠ workspace contains another agent platform's files ({platforms}). Reasonix Code may read them as project content; relaunch with --dir <your-project> if that's not what you want.\n",
+    systemAppendEmpty: "--system-append is empty — no prompt text will be appended\n",
+    systemAppendFileReadError:
+      'Error: cannot read --system-append-file "{filePath}": {errorDetails}\n',
   },
   slash: {
     help: { description: "show the full command reference" },
@@ -1498,6 +1507,10 @@ export const EN: TranslationSchema = {
     initDetail: "initialise \u2192 tools/list \u2192 resources/list",
     reconnectDetail: "tearing down \u00b7 re-handshake \u00b7 listing tools",
     disabledDetail: "via /mcp disable {name}",
+    failedSetupHint:
+      "→ run `reasonix setup` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).",
+    failedSetupConfigHint:
+      "→ run `reasonix setup` to remove broken entries from your saved config.",
   },
   checkpointPicker: {
     title: "restore a checkpoint \u2014 {workspace}",

@@ -367,10 +367,7 @@ program
   .option("--preset <name>", t("ui.presetHintShort"))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
   .option("--transcript <path>", t("ui.transcriptHint"))
-  .option(
-    "--yolo",
-    "auto-approve plan checkpoints for this invocation (equivalent to editMode=yolo without mutating config)",
-  )
+  .option("--yolo", t("ui.yoloHint"))
   .option(
     "--mcp <spec>",
     t("ui.mcpSpecHintShort"),

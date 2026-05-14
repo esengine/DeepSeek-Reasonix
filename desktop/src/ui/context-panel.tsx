@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
+import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryEntryInfo } from "../protocol";
 
@@ -22,6 +23,7 @@ export function ContextPanel({
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
 }) {
+  useLang();
   const [tab, setTab] = useState<Tab>("files");
   const reserved = usage.reservedTokens;
   // After a warm cache turn the API counts the reserved prefix inside cacheHit;
@@ -67,7 +69,7 @@ export function ContextPanel({
           <div className="legend">
             <span className="l">
               <span className="sw r" />
-              保留 <span className="v">{reserved.toLocaleString()}</span>
+              {t("contextPanel.reservedKey")} <span className="v">{reserved.toLocaleString()}</span>
             </span>
             <span className="l">
               <span className="sw c" />
@@ -75,7 +77,7 @@ export function ContextPanel({
             </span>
             <span className="l">
               <span className="sw u" />
-              已用 <span className="v">{used.toLocaleString()}</span>
+              {t("contextPanel.usedKey")} <span className="v">{used.toLocaleString()}</span>
             </span>
             <span className="l">
               余 <span className="v">{free.toLocaleString()}</span>
@@ -136,7 +138,7 @@ function CtxFiles({ files }: { files: SessionFile[] }) {
       </div>
       <div className="tree">
         {files.length === 0 ? (
-          <div className="ctx-empty">本会话尚未读取或修改文件。</div>
+          <div className="ctx-empty">{t("contextPanel.noFilesMsg")}</div>
         ) : (
           tree.map((n) =>
             n.kind === "dir" ? (
@@ -238,7 +240,7 @@ function CtxMemory({ entries }: { entries: MemoryEntryInfo[] }) {
         <span className="right">{entries.length === 0 ? "—" : `${entries.length} 项`}</span>
       </div>
       {entries.length === 0 ? (
-        <div className="ctx-empty">当前会话尚未记录长期记忆。</div>
+        <div className="ctx-empty">{t("contextPanel.noMemoriesMsg")}</div>
       ) : (
         <div className="mem">
           {entries.map((m) => (

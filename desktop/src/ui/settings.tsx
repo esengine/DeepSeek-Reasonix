@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
-import { type Lang, setLang, t, useLang } from "../i18n";
+import { t } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, SettingsPatch, SkillInfo } from "../protocol";
 
@@ -14,40 +14,15 @@ export type PageId =
   | "billing"
   | "shortcuts";
 
-const PAGE_KEYS: { id: PageId; labelKey: string; descKey: string; icon: keyof typeof I }[] = [
-  {
-    id: "general",
-    labelKey: "settings.navGeneral",
-    descKey: "settings.navGeneralDesc",
-    icon: "cog",
-  },
-  {
-    id: "models",
-    labelKey: "settings.navModels",
-    descKey: "settings.navModelsDesc",
-    icon: "brain",
-  },
-  { id: "mcp", labelKey: "settings.navMcp", descKey: "settings.navMcpDesc", icon: "wrench" },
-  { id: "skills", labelKey: "settings.navSkills", descKey: "settings.navSkillsDesc", icon: "zap" },
-  {
-    id: "memory",
-    labelKey: "settings.navMemory",
-    descKey: "settings.navMemoryDesc",
-    icon: "bookmark",
-  },
-  { id: "rules", labelKey: "settings.navRules", descKey: "settings.navRulesDesc", icon: "shield" },
-  {
-    id: "billing",
-    labelKey: "settings.navBilling",
-    descKey: "settings.navBillingDesc",
-    icon: "coin",
-  },
-  {
-    id: "shortcuts",
-    labelKey: "settings.navShortcuts",
-    descKey: "settings.navShortcutsDesc",
-    icon: "cpu",
-  },
+const PAGE_META: ReadonlyArray<{ id: PageId; icon: keyof typeof I }> = [
+  { id: "general", icon: "cog" },
+  { id: "models", icon: "brain" },
+  { id: "mcp", icon: "wrench" },
+  { id: "skills", icon: "zap" },
+  { id: "memory", icon: "bookmark" },
+  { id: "rules", icon: "shield" },
+  { id: "billing", icon: "coin" },
+  { id: "shortcuts", icon: "cpu" },
 ];
 
 export function SettingsModal({
@@ -81,15 +56,14 @@ export function SettingsModal({
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
 }) {
-  useLang();
   const [page, setPage] = useState<PageId>(initialPage ?? "general");
-  const current = PAGE_KEYS.find((p) => p.id === page) ?? PAGE_KEYS[0]!;
+  const currentMeta = PAGE_META.find((p) => p.id === page) ?? PAGE_META[0]!;
   return (
     <div className="settings-mask" onClick={onClose}>
       <div className="settings" onClick={(e) => e.stopPropagation()}>
         <nav className="settings-side">
           <div className="sg">{t("settings.title")}</div>
-          {PAGE_KEYS.map((p) => (
+          {PAGE_META.map((p) => (
             <div
               key={p.id}
               className="row"
@@ -97,15 +71,23 @@ export function SettingsModal({
               onClick={() => setPage(p.id)}
             >
               <span className="ico">{I[p.icon]({ size: 13 })}</span>
-              <span>{t(p.labelKey as never)}</span>
+              <span>{t(`settings.page${p.id[0]!.toUpperCase()}${p.id.slice(1)}Label` as any)}</span>
             </div>
           ))}
         </nav>
         <div className="settings-main">
           <div className="settings-head">
             <div>
-              <h2>{t(current.labelKey as never)}</h2>
-              <div className="desc">{t(current.descKey as never)}</div>
+              <h2>
+                {t(
+                  `settings.page${currentMeta.id[0]!.toUpperCase()}${currentMeta.id.slice(1)}Label` as any,
+                )}
+              </h2>
+              <div className="desc">
+                {t(
+                  `settings.page${currentMeta.id[0]!.toUpperCase()}${currentMeta.id.slice(1)}Desc` as any,
+                )}
+              </div>
             </div>
             <span className="grow" />
             <button type="button" className="close-btn" onClick={onClose}>
@@ -156,47 +138,24 @@ function PageGeneral({
   onSave: (patch: SettingsPatch) => void;
   onPickWorkspace: () => void;
 }) {
-  const lang = useLang();
   const [editorDraft, setEditorDraft] = useState(settings.editor ?? "");
   return (
     <>
       <section className="section">
-        <div className="stitle">{t("settings.language")}</div>
+        <div className="stitle">{t("settings.workspaceSection")}</div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">{t("settings.language")}</div>
-            <div className="h">{t("settings.languageHint")}</div>
-          </div>
-          <div className="seg-ctrl">
-            {(["en", "zh-CN"] as const).map((code) => (
-              <button
-                type="button"
-                key={code}
-                data-on={lang === code}
-                onClick={() => setLang(code as Lang)}
-              >
-                {code === "en" ? t("settings.langEn") : t("settings.langZhCn")}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="stitle">{t("settings.workspace")}</div>
-        <div className="setting-row">
-          <div className="l">
-            <div className="n">{t("settings.workspace")}</div>
-            <div className="h">{settings.workspaceDir || t("settings.workspaceUnset")}</div>
+            <div className="n">{t("settings.currentWorkspace")}</div>
+            <div className="h">{settings.workspaceDir || t("settings.notSelected")}</div>
           </div>
           <button type="button" className="btn" onClick={onPickWorkspace}>
-            {t("settings.pickWorkspaceBtn")}
+            {t("settings.workspaceChange")}
           </button>
         </div>
         <div className="setting-row">
           <div className="l">
             <div className="n">{t("settings.editor")}</div>
-            <div className="h">{t("settings.editorHintShort")}</div>
+            <div className="h">{t("settings.editorHint")}</div>
           </div>
           <input
             className="field mono"
@@ -213,7 +172,7 @@ function PageGeneral({
         <div className="setting-row">
           <div className="l">
             <div className="n">{t("settings.reasoningEffort")}</div>
-            <div className="h">{t("settings.reasoningEffortShort")}</div>
+            <div className="h">{t("settings.reasoningEffortHint")}</div>
           </div>
           <div className="seg-ctrl">
             <button
@@ -235,7 +194,7 @@ function PageGeneral({
         <div className="setting-row">
           <div className="l">
             <div className="n">{t("settings.editMode")}</div>
-            <div className="h">{t("settings.editModeShort")}</div>
+            <div className="h">{t("settings.editModeHint")}</div>
           </div>
           <div className="seg-ctrl">
             {(["review", "auto", "yolo"] as const).map((m) => (
@@ -252,14 +211,14 @@ function PageGeneral({
         </div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">{t("settings.budgetUsdLabel")}</div>
-            <div className="h">{t("settings.budgetUsdHint")}</div>
+            <div className="n">{t("settings.budget")}</div>
+            <div className="h">{t("settings.budgetHint")}</div>
           </div>
           <input
             className="field"
             type="number"
             defaultValue={settings.budgetUsd ?? ""}
-            placeholder={t("settings.budgetUsdPlaceholder")}
+            placeholder={t("settings.budgetPlaceholder")}
             onBlur={(e) => {
               const v = e.target.value.trim();
               onSave({ budgetUsd: v === "" ? null : Number(v) });
@@ -282,19 +241,18 @@ function ApiKeySection({
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
 }) {
-  useLang();
   const [key, setKey] = useState("");
   const [urlDraft, setUrlDraft] = useState(baseUrl ?? "");
   return (
     <section className="section">
-      <div className="stitle">{t("settings.apiSectionTitle")}</div>
+      <div className="stitle">{t("settings.apiSection")}</div>
       <div className="setting-row">
         <div className="l">
           <div className="n">{t("settings.apiKey")}</div>
           <div className="h">
             {apiKeyPrefix
-              ? t("settings.apiKeyConfiguredPrefix", { prefix: apiKeyPrefix })
-              : t("settings.apiKeyUnconfigured")}
+              ? t("settings.apiKeySet", { prefix: apiKeyPrefix })
+              : t("settings.apiKeyNotSet")}
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
@@ -303,7 +261,7 @@ function ApiKeySection({
             type="password"
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder={t("settings.apiKeyPlaceholder")}
+            placeholder="sk-…"
           />
           <button
             type="button"
@@ -315,14 +273,14 @@ function ApiKeySection({
               setKey("");
             }}
           >
-            {t("settings.apiKeySaveBtn")}
+            {t("settings.apiKeySave")}
           </button>
         </div>
       </div>
       <div className="setting-row">
         <div className="l">
           <div className="n">{t("settings.baseUrl")}</div>
-          <div className="h">{t("settings.baseUrlHintShort")}</div>
+          <div className="h">{t("settings.baseUrlHint")}</div>
         </div>
         <input
           className="field mono"
@@ -342,11 +300,10 @@ function PageModels({
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
 }) {
-  useLang();
   const presets = [
     {
       id: "auto" as const,
-      name: t("settings.modelAutoName"),
+      name: "auto (flash → pro)",
       badge: "AUTO",
       desc: t("settings.modelAutoDesc"),
       ctx: "—",
@@ -354,7 +311,7 @@ function PageModels({
     },
     {
       id: "flash" as const,
-      name: t("settings.modelFlashName"),
+      name: "deepseek-v4-flash",
       badge: "FLASH",
       desc: t("settings.modelFlashDesc"),
       ctx: "1M",
@@ -362,7 +319,7 @@ function PageModels({
     },
     {
       id: "pro" as const,
-      name: t("settings.modelProName"),
+      name: "deepseek-v4-pro",
       badge: "PRO",
       desc: t("settings.modelProDesc"),
       ctx: "1M",
@@ -387,11 +344,11 @@ function PageModels({
             <div className="desc">{m.desc}</div>
             <div className="spec">
               <div>
-                <span className="k">{t("settings.modelCtxLabel")} </span>
+                <span className="k">{t("settings.ctxWindow")} </span>
                 <span className="v">{m.ctx}</span>
               </div>
               <div>
-                <span className="k">{t("settings.modelOutLabel")} </span>
+                <span className="k">{t("settings.maxOutput")} </span>
                 <span className="v">{m.out}</span>
               </div>
             </div>
@@ -413,7 +370,6 @@ function PageMCP({
   onAdd: (spec: string) => void;
   onRemove: (spec: string) => void;
 }) {
-  useLang();
   const [draft, setDraft] = useState("");
   const submit = () => {
     const v = draft.trim();
@@ -425,14 +381,14 @@ function PageMCP({
     <>
       <section className="section">
         <div className="stitle">
-          {t("settings.mcpConfiguredCount", { count: specs.length })}
+          {t("settings.mcpConfigured", { count: specs.length })}
           {bridged ? (
             <span style={{ color: "var(--accent)", marginLeft: 8, fontSize: 11 }}>
-              · {t("settings.mcpBridgedTag")}
+              {t("settings.mcpBridged")}
             </span>
           ) : (
             <span style={{ color: "var(--muted)", marginLeft: 8, fontSize: 11 }}>
-              · {t("settings.mcpNotBridgedHint")}
+              {t("settings.mcpNotBridged")}
             </span>
           )}
         </div>
@@ -457,7 +413,7 @@ function PageMCP({
                   <I.wrench size={14} />
                 </span>
                 <div>
-                  <div className="nm">{s.name ?? t("settings.mcpAnonymous")}</div>
+                  <div className="nm">{s.name ?? "(anonymous)"}</div>
                   <div className="sub">{s.summary}</div>
                 </div>
                 <span className="grow" />
@@ -472,8 +428,7 @@ function PageMCP({
               </div>
               {s.parseError ? (
                 <div className="desc" style={{ color: "var(--danger)" }}>
-                  {t("settings.mcpParseErrorPrefix")}
-                  {s.parseError}
+                  {t("settings.parseError", { error: s.parseError })}
                 </div>
               ) : null}
             </div>
@@ -485,25 +440,20 @@ function PageMCP({
         <div className="setting-row">
           <div className="l">
             <div className="n">{t("settings.mcpSpecLabel")}</div>
-            <div className="h">
-              {t("settings.mcpSpecHintFormat")}
-              <code>name=command args</code>
-              {t("settings.mcpOr")}
-              <code>name=https://host/sse</code>
-            </div>
+            <div className="h" dangerouslySetInnerHTML={{ __html: t("settings.mcpSpecFormat") }} />
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <input
               className="field mono"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder={t("settings.mcpSpecPlaceholder")}
+              placeholder="github=npx -y @smithery/cli ..."
               onKeyDown={(e) => {
                 if (e.key === "Enter") submit();
               }}
             />
             <button type="button" className="btn primary" disabled={!draft.trim()} onClick={submit}>
-              {t("settings.mcpAddBtn")}
+              {t("settings.mcpAdd")}
             </button>
           </div>
         </div>
@@ -513,10 +463,9 @@ function PageMCP({
 }
 
 function PageSkills({ skills }: { skills: SkillInfo[] }) {
-  useLang();
   return (
     <section className="section">
-      <div className="stitle">{t("settings.skillsLoadedCount", { count: skills.length })}</div>
+      <div className="stitle">{t("settings.skillsLoaded", { count: skills.length })}</div>
       {skills.length === 0 ? (
         <div
           style={{
@@ -573,7 +522,6 @@ function PageSkills({ skills }: { skills: SkillInfo[] }) {
 }
 
 function PageMemory() {
-  useLang();
   return (
     <section className="section">
       <div className="stitle">{t("settings.memorySection")}</div>
@@ -587,7 +535,7 @@ function PageMemory() {
           color: "var(--muted)",
         }}
       >
-        {t("settings.memoryBody")}
+        {t("settings.memoryDesc")}
       </div>
     </section>
   );
@@ -600,15 +548,14 @@ function PageRules({
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
 }) {
-  useLang();
   return (
     <>
       <section className="section">
-        <div className="stitle">{t("settings.rulesEditModeSection")}</div>
+        <div className="stitle">{t("settings.editMode")}</div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">{t("settings.rulesApplyMode")}</div>
-            <div className="h">{t("settings.rulesApplyModeHint")}</div>
+            <div className="n">{t("settings.appMode")}</div>
+            <div className="h">{t("settings.editModeHint")}</div>
           </div>
           <div className="seg-ctrl">
             {(["review", "auto", "yolo"] as const).map((m) => (
@@ -625,7 +572,7 @@ function PageRules({
         </div>
       </section>
       <section className="section">
-        <div className="stitle">{t("settings.rulesCommandAutoSection")}</div>
+        <div className="stitle">{t("settings.ruleAutoApprovalSection")}</div>
         <div
           style={{
             padding: 12,
@@ -636,7 +583,7 @@ function PageRules({
             color: "var(--muted)",
           }}
         >
-          {t("settings.rulesCommandAutoBody")}
+          {t("settings.ruleAutoApprovalHint")}
         </div>
       </section>
     </>
@@ -652,7 +599,6 @@ function PageBilling({
   usage: UsageStats;
   currency: "CNY" | "USD";
 }) {
-  useLang();
   const symbol = currency === "CNY" ? "¥" : "$";
   const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
   const hitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
@@ -660,7 +606,7 @@ function PageBilling({
     <>
       <div className="bill-grid">
         <div className="bill-card">
-          <div className="l">{t("settings.billingWalletBalance")}</div>
+          <div className="l">{t("settings.balanceLabel")}</div>
           <div className="v ok">
             {balance
               ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
@@ -668,27 +614,23 @@ function PageBilling({
           </div>
           <div className="sub">
             {balance && !balance.isAvailable
-              ? t("settings.billingInsufficient")
-              : t("settings.billingAvailable")}
+              ? t("settings.balanceLow")
+              : t("settings.balanceAvailable")}
           </div>
         </div>
         <div className="bill-card">
-          <div className="l">{t("settings.billingSessionSpent")}</div>
+          <div className="l">{t("settings.sessionCost")}</div>
           <div className="v">
             {symbol} {usage.totalCostUsd.toFixed(4)}
           </div>
-          <div className="sub">
-            {t("settings.billingPromptTokens", { n: usage.totalPromptTokens.toLocaleString() })}
-          </div>
+          <div className="sub">prompt {usage.totalPromptTokens.toLocaleString()} t</div>
         </div>
         <div className="bill-card">
-          <div className="l">{t("settings.billingCacheHitRate")}</div>
+          <div className="l">{t("settings.cacheHitRate")}</div>
           <div className="v acc">{hitPct}%</div>
           <div className="sub">
-            {t("settings.billingHitMiss", {
-              hit: usage.cacheHitTokens.toLocaleString(),
-              miss: usage.cacheMissTokens.toLocaleString(),
-            })}
+            hit {usage.cacheHitTokens.toLocaleString()} / miss{" "}
+            {usage.cacheMissTokens.toLocaleString()}
           </div>
         </div>
       </div>
@@ -697,16 +639,15 @@ function PageBilling({
 }
 
 function PageShortcuts() {
-  useLang();
   const rows: { nm: string; keys: string[] }[] = [
-    { nm: t("settings.scNewSession"), keys: ["⌘", "N"] },
-    { nm: t("settings.scNewTab"), keys: ["⌘", "T"] },
-    { nm: t("settings.scCloseTab"), keys: ["⌘", "W"] },
-    { nm: t("settings.scPalette"), keys: ["⌘", "K"] },
-    { nm: t("settings.scFocusInput"), keys: ["⌘", "L"] },
-    { nm: t("settings.scSwitchTab"), keys: ["⌘", "⇥"] },
-    { nm: t("settings.scAbortStream"), keys: ["esc"] },
-    { nm: t("settings.scOpenSettings"), keys: ["⌘", ","] },
+    { nm: t("settings.shortcutNewChat"), keys: ["⌘", "N"] },
+    { nm: t("settings.shortcutNewTab"), keys: ["⌘", "T"] },
+    { nm: t("settings.shortcutCloseTab"), keys: ["⌘", "W"] },
+    { nm: t("settings.shortcutCommandPalette"), keys: ["⌘", "K"] },
+    { nm: t("settings.shortcutFocusComposer"), keys: ["⌘", "L"] },
+    { nm: t("settings.shortcutSwitchTab"), keys: ["⌘", "⇥"] },
+    { nm: t("settings.shortcutAbort"), keys: ["esc"] },
+    { nm: t("settings.shortcutSettings"), keys: ["⌘", ","] },
   ];
   return (
     <section className="section">

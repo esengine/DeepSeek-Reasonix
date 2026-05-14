@@ -1,6 +1,7 @@
 import { memo, useState, type ReactNode } from "react";
 import { I } from "../icons";
 import { Markdown } from "../Markdown";
+import { t, useLang } from "../i18n";
 
 type Tone = "default" | "success" | "warning" | "danger" | "accent" | "violet";
 
@@ -65,14 +66,16 @@ export type PlanItem = {
 };
 
 function derivePlanBadge(items: PlanItem[]): { cls: "run" | "ok" | "warn" | "err"; label: string } {
-  if (items.some((x) => x.status === "failed")) return { cls: "err", label: "失败" };
-  if (items.some((x) => x.status === "blocked")) return { cls: "warn", label: "阻塞" };
-  if (items.some((x) => x.status === "active")) return { cls: "run", label: "运行中" };
-  if (items.length > 0 && items.every((x) => x.status === "done")) return { cls: "ok", label: "已完成" };
-  return { cls: "run", label: "待开始" };
+  if (items.some((x) => x.status === "failed")) return { cls: "err", label: t("planBadge.failed") };
+  if (items.some((x) => x.status === "blocked")) return { cls: "warn", label: t("planBadge.blocked") };
+  if (items.some((x) => x.status === "active")) return { cls: "run", label: t("planBadge.running") };
+  if (items.length > 0 && items.every((x) => x.status === "done")) return { cls: "ok", label: t("planBadge.done") };
+  return { cls: "run", label: t("planBadge.pending") };
 }
 
-export function PlanCardView({ items, title = "计划" }: { items: PlanItem[]; title?: string }) {
+export function PlanCardView({ items, title }: { items: PlanItem[]; title?: string }) {
+  useLang();
+  const resolvedTitle = title ?? t("cards.planDefaultTitle");
   const done = items.filter((x) => x.status === "done").length;
   const badge = derivePlanBadge(items);
   return (
@@ -80,7 +83,7 @@ export function PlanCardView({ items, title = "计划" }: { items: PlanItem[]; t
       tone="accent"
       icon={<I.list size={12} />}
       kind="plan"
-      name={title}
+      name={resolvedTitle}
       meta={
         <>
           <span>
@@ -126,12 +129,13 @@ export function ReasoningCard({
   elapsed?: string;
   model?: string;
 }) {
+  useLang();
   return (
     <Card
       tone="violet"
       icon={<I.brain size={12} />}
       kind="reasoning"
-      name="思考"
+      name={t("cards.reasoningName")}
       meta={
         <>
           {elapsed || tokens ? (
@@ -146,7 +150,7 @@ export function ReasoningCard({
               <span className="shimmer">streaming…</span>
             </span>
           ) : (
-            <span className="pill-tag ok">完成</span>
+            <span className="pill-tag ok">{t("cards.reasoningComplete")}</span>
           )}
         </>
       }
@@ -203,6 +207,7 @@ export function ShellCard({
   onReject?: () => void;
   onAlwaysAllow?: () => void;
 }) {
+  useLang();
   const tone: Tone = state === "failed" ? "danger" : state === "done" ? "success" : "warning";
   const durationLabel = durationMs ? ` · ${(durationMs / 1000).toFixed(2)}s` : "";
   return (
@@ -213,9 +218,9 @@ export function ShellCard({
       name="shell"
       meta={
         state === "await" ? (
-          <span className="pill-tag warn">等待批准</span>
+          <span className="pill-tag warn">{t("cards.shellAwaiting")}</span>
         ) : state === "running" ? (
-          <span className="pill-tag run">运行中</span>
+          <span className="pill-tag run">{t("cards.shellRunning")}</span>
         ) : state === "failed" ? (
           <span className="pill-tag err">failed{durationLabel}</span>
         ) : (
@@ -250,21 +255,21 @@ export function ShellCard({
         {state === "await" && onApprove ? (
           <div className="approve-row">
             <div className="why">
-              <b>等待批准</b> — 执行此命令
+              <b>{t("cards.shellAwaiting")}</b> — {t("cards.shellExecuteHint")}
             </div>
             <div className="actions">
               {onAlwaysAllow ? (
                 <button type="button" className="btn ghost" onClick={onAlwaysAllow}>
-                  始终允许
+                  {t("cards.shellAlwaysAllow")}
                 </button>
               ) : null}
               {onReject ? (
                 <button type="button" className="btn" onClick={onReject}>
-                  拒绝 <kbd>⌘.</kbd>
+                  {t("cards.shellReject")} <kbd>⌘.</kbd>
                 </button>
               ) : null}
               <button type="button" className="btn primary" onClick={onApprove}>
-                运行 <kbd>⌘⏎</kbd>
+                {t("cards.shellRun")} <kbd>⌘⏎</kbd>
               </button>
             </div>
           </div>
@@ -354,6 +359,7 @@ export function DiffCard({
   onApply?: () => void;
   onDiscard?: () => void;
 }) {
+  useLang();
   const adds = lines.filter((x) => x.t === "add").length;
   const rms = lines.filter((x) => x.t === "rm").length;
   return (
@@ -366,7 +372,7 @@ export function DiffCard({
         <>
           <span style={{ color: "var(--success)" }}>+{adds}</span>
           <span style={{ color: "var(--danger)" }}>−{rms}</span>
-          {applied ? <span className="pill-tag ok">applied</span> : <span className="pill-tag warn">等待批准</span>}
+          {applied ? <span className="pill-tag ok">applied</span> : <span className="pill-tag warn">{t("cards.diffAwaiting")}</span>}
         </>
       }
     >
@@ -397,17 +403,17 @@ export function DiffCard({
         {!applied && (onApply || onDiscard) ? (
           <div className="approve-row">
             <div className="why">
-              <b>应用变更</b> · +{adds} / −{rms}
+              <b>{t("cards.diffApplyChanges")}</b> · +{adds} / −{rms}
             </div>
             <div className="actions">
               {onDiscard ? (
                 <button type="button" className="btn" onClick={onDiscard}>
-                  丢弃
+                  {t("cards.diffDiscard")}
                 </button>
               ) : null}
               {onApply ? (
                 <button type="button" className="btn primary" onClick={onApply}>
-                  应用 <kbd>⌘⏎</kbd>
+                  {t("cards.diffApply")} <kbd>⌘⏎</kbd>
                 </button>
               ) : null}
             </div>
@@ -421,12 +427,13 @@ export function DiffCard({
 // ---- Error ----
 
 export function ErrorCard({ message, hint, code }: { message: string; hint?: ReactNode; code?: string }) {
+  useLang();
   return (
     <Card
       tone="danger"
       icon={<I.warning size={12} />}
       kind="error"
-      name="错误"
+      name={t("cards.errorName")}
       meta={code ? <span className="pill-tag err">{code}</span> : null}
     >
       <div className="error-body">
@@ -442,12 +449,13 @@ export function ErrorCard({ message, hint, code }: { message: string; hint?: Rea
 export type SearchHit = { url: string; title: string; snippet: string };
 
 export function WebSearchCard({ query, results }: { query: string; results: SearchHit[] }) {
+  useLang();
   return (
     <Card
       tone="default"
       icon={<I.globe size={12} />}
       kind="web_search"
-      name="网页搜索"
+      name={t("cards.searchName")}
       meta={
         <>
           <span>"{query}"</span>
@@ -489,6 +497,7 @@ export function SubagentCard({
   children: SubAgentChild[];
   status: "running" | "done" | "failed";
 }) {
+  useLang();
   const done = children.filter((c) => c.status === "done").length;
   return (
     <Card
@@ -499,14 +508,14 @@ export function SubagentCard({
       meta={
         <>
           <span>
-            {done} / {children.length} 完成
+            {done} / {children.length} {t("cards.subagentDoneProgress")}
           </span>
           {status === "done" ? (
-            <span className="pill-tag ok">完成</span>
+            <span className="pill-tag ok">{t("cards.subagentDone")}</span>
           ) : status === "failed" ? (
-            <span className="pill-tag err">失败</span>
+            <span className="pill-tag err">{t("cards.subagentFailed")}</span>
           ) : (
-            <span className="pill-tag run">运行中</span>
+            <span className="pill-tag run">{t("cards.subagentRunning")}</span>
           )}
         </>
       }
@@ -538,13 +547,14 @@ export function SubagentCard({
 export type MemRow = { scope: string; txt: string };
 
 export function MemoryCard({ rows }: { rows: MemRow[] }) {
+  useLang();
   return (
     <Card
       tone="violet"
       icon={<I.bookmark size={12} />}
       kind="memory"
-      name="记忆"
-      meta={<span>+ {rows.length} 项</span>}
+      name={t("cards.memoryName")}
+      meta={<span>+ {rows.length} {t("cards.memoryCountSuffix")}</span>}
     >
       <div className="mem">
         {rows.map((m, i) => (
@@ -655,6 +665,7 @@ export function Checkpoint({
   label: string;
   onRewind?: () => void;
 }) {
+  useLang();
   return (
     <div className="checkpoint">
       <I.history size={12} />
@@ -663,7 +674,7 @@ export function Checkpoint({
       <span>{label}</span>
       {onRewind ? (
         <button type="button" onClick={onRewind}>
-          回到此处
+          {t("cards.checkpointRewind")}
         </button>
       ) : null}
     </div>

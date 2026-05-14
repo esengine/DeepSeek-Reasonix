@@ -1,4 +1,5 @@
 import { I } from "../icons";
+import { t } from "../i18n";
 import type { Balance, Settings, UsageStats } from "../App";
 
 function formatMoney(amount: number, currency: "CNY" | "USD"): string {
@@ -51,7 +52,7 @@ export function StatusBar({
           style={connState === "off" ? { background: "var(--danger)" } : undefined}
         />
         <span>{settings?.baseUrl?.replace(/^https?:\/\//, "") ?? "api.deepseek.com"}</span>
-        <span className="v">{!ready ? "离线" : busy ? "运行中" : "在线"}</span>
+        <span className="v">{!ready ? t("statusbar.offline") : busy ? t("statusbar.busy") : t("statusbar.online")}</span>
       </span>
       <span className="seg" title="cache hit">
         <I.zap size={11} style={{ color: "var(--accent)" }} />

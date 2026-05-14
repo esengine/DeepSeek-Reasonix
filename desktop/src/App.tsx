@@ -5,9 +5,9 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
-import { I } from "./icons";
-import { getLang, setLang } from "./i18n";
 import { WorkspaceProvider } from "./Markdown";
+import { getLang, setLang, t, useLang } from "./i18n";
+import { I } from "./icons";
 import type {
   CheckpointVerdict,
   ChoiceVerdict,
@@ -24,11 +24,10 @@ import type {
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
 import { InterruptBar, useElapsed } from "./ui/live";
-import { type PageId as SettingsPageId, SettingsModal } from "./ui/settings";
+import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Sidebar } from "./ui/sidebar";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import { StatusBar } from "./ui/statusbar";
-import { WorkdirPop } from "./ui/workdir-pop";
 import {
   ActivePlanTaskCard,
   AssistantMsg,
@@ -42,6 +41,7 @@ import {
   TurnDivider,
   UserMsg,
 } from "./ui/thread";
+import { WorkdirPop } from "./ui/workdir-pop";
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -866,6 +866,7 @@ function TabRuntime({
     sessionFiles: [],
     memory: [],
   });
+  useLang();
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());
@@ -1112,11 +1113,11 @@ function TabRuntime({
   const commands = buildCommands({
     newChat: () => {
       newChat();
-      flashToast("已创建新会话");
+      flashToast(t("app.toast.newSession"));
     },
     clearChat: () => {
       dispatch({ t: "clear" });
-      flashToast("已清空");
+      flashToast(t("app.toast.cleared"));
     },
     focusComposer: () => composerRef.current?.focus(),
     openSettings: () => openSettingsAt("general"),
@@ -1132,13 +1133,14 @@ function TabRuntime({
         .trim();
       if (text) {
         void navigator.clipboard.writeText(text);
-        flashToast("已复制");
+        flashToast(t("app.toast.copied"));
       }
     },
     exportMarkdown: () => {
+      const userLabel = t("app.exportUserLabel");
       const md = state.messages
         .map((m) => {
-          if (m.kind === "user") return `### 你\n\n${m.text}`;
+          if (m.kind === "user") return `### ${userLabel}\n\n${m.text}`;
           if (m.kind === "assistant") {
             const body = m.segments
               .map((s) => {
@@ -1158,7 +1160,7 @@ function TabRuntime({
         .join("\n\n---\n\n");
       if (md) {
         void navigator.clipboard.writeText(md);
-        flashToast("已复制 Markdown");
+        flashToast(t("app.toast.copiedMd"));
       }
     },
     pickWorkspace,
@@ -1170,12 +1172,12 @@ function TabRuntime({
   });
 
   const slashCommands: SlashCmd[] = [
-    { cmd: "/new", desc: "新建会话", run: () => newChat(), kb: "⌘N" },
-    { cmd: "/clear", desc: "清空当前对话", run: () => dispatch({ t: "clear" }) },
-    { cmd: "/abort", desc: "中断流式输出", run: () => abort(), kb: "esc" },
+    { cmd: "/new", desc: t("app.cmd.newSession"), run: () => newChat(), kb: "⌘N" },
+    { cmd: "/clear", desc: t("app.cmd.clearChat"), run: () => dispatch({ t: "clear" }) },
+    { cmd: "/abort", desc: t("app.cmd.abort"), run: () => abort(), kb: "esc" },
     {
       cmd: "/copy",
-      desc: "复制最后一条回复",
+      desc: t("app.cmd.copyLast"),
       run: () => {
         const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
         if (last?.kind === "assistant") {
@@ -1185,30 +1187,31 @@ function TabRuntime({
             .join("\n\n");
           if (text) {
             void navigator.clipboard.writeText(text);
-            flashToast("已复制");
+            flashToast(t("app.toast.copied"));
           }
         }
       },
     },
-    { cmd: "/model", desc: "切换模型", run: () => openSettingsAt("models") },
-    { cmd: "/theme", desc: "切换深浅主题", run: onToggleTheme },
+    { cmd: "/model", desc: t("app.cmd.switchModel"), run: () => openSettingsAt("models") },
+    { cmd: "/theme", desc: t("app.cmd.toggleTheme"), run: onToggleTheme },
     {
       cmd: "/currency",
-      desc: "切换货币显示 (CNY / USD)",
+      desc: t("app.cmd.toggleCurrency"),
       run: onToggleCurrency,
     },
     {
       cmd: "/lang",
-      desc: "切换界面语言 (中 / 英)",
+      desc: t("app.cmd.toggleLang"),
       run: () => {
         const next = getLang() === "zh-CN" ? "en" : "zh-CN";
         setLang(next);
-        flashToast(next === "zh-CN" ? "已切换到中文" : "switched to English");
+        const langName = next === "zh-CN" ? t("app.langZH") : t("app.langEN");
+        flashToast(t("app.toast.langSwitched", { lang: langName }));
       },
     },
     {
       cmd: "/export",
-      desc: "复制本会话为 Markdown",
+      desc: t("app.cmd.exportMd"),
       run: () => exportConversation(),
     },
   ];
@@ -1225,17 +1228,26 @@ function TabRuntime({
     }
     if (state.currentSession) {
       const s = state.sessions.find((x) => x.name === state.currentSession);
-      if (s?.summary && s.summary.trim()) return s.summary.trim();
+      if (s?.summary?.trim()) return s.summary.trim();
       const m = state.currentSession.match(/^desktop-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
-      if (m) return `会话 ${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+      if (m)
+        return t("app.session.format", {
+          month: m[2],
+          day: m[3],
+          hour: m[4],
+          minute: m[5],
+        });
     }
-    return state.messages.length === 0 ? `${workspaceLabel} · 新会话` : workspaceLabel;
+    return state.messages.length === 0
+      ? t("app.session.new", { workspace: workspaceLabel })
+      : workspaceLabel;
   })();
 
   const exportConversation = useCallback(() => {
+    const userLabel = t("app.exportUserLabel");
     const md = state.messages
       .map((m) => {
-        if (m.kind === "user") return `### 你\n\n${m.text}`;
+        if (m.kind === "user") return `### ${userLabel}\n\n${m.text}`;
         if (m.kind === "assistant") {
           const body = m.segments
             .map((s) => {
@@ -1260,9 +1272,9 @@ function TabRuntime({
       .join("\n\n---\n\n");
     if (md) {
       void navigator.clipboard.writeText(md);
-      flashToast("已复制 Markdown");
+      flashToast(t("app.toast.copiedMd"));
     } else {
-      flashToast("会话为空");
+      flashToast(t("app.toast.emptySession"));
     }
   }, [state.messages, flashToast]);
 
@@ -1345,7 +1357,9 @@ function TabRuntime({
                   <I.warn size={13} />
                   <span className="mb-tag">YOLO</span>
                   <span className="mb-msg">
-                    所有工具调用、shell 命令、文件编辑都会<b>自动批准</b>，不会再询问。
+                    {t("app.yolo.banner1")}
+                    <b>{t("app.yolo.bannerBold")}</b>
+                    {t("app.yolo.banner2")}
                   </span>
                   <span className="grow" />
                   <button
@@ -1353,7 +1367,7 @@ function TabRuntime({
                     className="mb-btn"
                     onClick={() => saveSettings({ editMode: "review" })}
                   >
-                    切回 Review
+                    {t("app.yolo.switchBack")}
                   </button>
                 </div>
               ) : null}
@@ -1427,7 +1441,7 @@ function TabRuntime({
                             <I.warning size={16} />
                           </span>
                           <div>
-                            <div className="tt">错误</div>
+                            <div className="tt">{t("app.errorLabel")}</div>
                             <div className="ds">{m.message}</div>
                           </div>
                         </div>
@@ -1503,7 +1517,7 @@ function TabRuntime({
                         fontSize: 11,
                       }}
                     >
-                      正在连接 reasonix 内核…
+                      {t("app.connecting")}
                     </div>
                   ) : null}
                 </div>
@@ -1521,12 +1535,12 @@ function TabRuntime({
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
                 onPresetChange={(preset) => {
                   saveSettings({ preset });
-                  flashToast(`已切换到 ${preset.toUpperCase()}`);
+                  flashToast(t("app.toast.modelSwitched", { model: preset.toUpperCase() }));
                 }}
                 editMode={state.settings?.editMode ?? "review"}
                 onEditModeChange={(mode) => {
                   saveSettings({ editMode: mode });
-                  flashToast(`模式: ${mode.toUpperCase()}`);
+                  flashToast(t("app.toast.modeSwitched", { mode: mode.toUpperCase() }));
                 }}
                 workspaceDir={state.settings?.workspaceDir}
                 slashCommands={slashCommands}
@@ -1637,6 +1651,7 @@ function TitleBar({
   onClear: () => void;
   hasMessages: boolean;
 }) {
+  useLang();
   const [menuOpen, setMenuOpen] = useState(false);
   const moreWrapRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1665,7 +1680,7 @@ function TitleBar({
           type="button"
           className="iconbtn"
           data-on={sideOn}
-          title="侧栏 (⌘B)"
+          title={t("app.titlebar.sidebar")}
           onClick={onToggleSide}
         >
           <I.panel_l size={14} />
@@ -1674,7 +1689,7 @@ function TitleBar({
           type="button"
           className="iconbtn"
           data-on={ctxOn}
-          title="上下文面板"
+          title={t("app.titlebar.contextPanel")}
           onClick={onToggleCtx}
         >
           <I.panel_r size={14} />
@@ -1683,7 +1698,7 @@ function TitleBar({
           <button
             type="button"
             className="iconbtn"
-            title="更多"
+            title={t("app.titlebar.more")}
             onClick={() => setMenuOpen((v) => !v)}
           >
             <I.more size={14} />
@@ -1711,7 +1726,7 @@ function TitleBar({
                     <I.search size={12} />
                   </span>
                   <div className="nm">
-                    <span>命令面板</span>
+                    <span>{t("app.titlebar.commandPalette")}</span>
                   </div>
                   <span className="kb">⌘K</span>
                 </div>
@@ -1728,7 +1743,7 @@ function TitleBar({
                     <I.download size={12} />
                   </span>
                   <div className="nm">
-                    <span>导出 Markdown</span>
+                    <span>{t("app.titlebar.exportMd")}</span>
                   </div>
                 </div>
                 <div
@@ -1742,7 +1757,7 @@ function TitleBar({
                     <I.x size={12} />
                   </span>
                   <div className="nm">
-                    <span>清空对话</span>
+                    <span>{t("app.titlebar.clearChat")}</span>
                   </div>
                 </div>
                 <div
@@ -1756,7 +1771,7 @@ function TitleBar({
                     <I.cog size={12} />
                   </span>
                   <div className="nm">
-                    <span>设置</span>
+                    <span>{t("app.titlebar.settings")}</span>
                   </div>
                   <span className="kb">⌘,</span>
                 </div>
@@ -1784,6 +1799,7 @@ function TabBar({
   onNew: () => void;
   singleTab?: boolean;
 }) {
+  useLang();
   return (
     <div className="tabbar">
       {tabs.map((t) => {
@@ -1817,9 +1833,9 @@ function TabBar({
           </div>
         );
       })}
-      <div className="tab newtab" title="新建标签 ⌘T" onClick={onNew}>
-        <I.plus size={11} />
-        <span style={{ fontSize: 11, marginLeft: 4 }}>新标签</span>
+      <div className="tab newtab" title={t("app.tab.newTabTitle")} onClick={onNew}>
+        <I.plus size={12} />
+        <span style={{ fontSize: 11, marginLeft: 4 }}>{t("app.tab.newTab")}</span>
       </div>
     </div>
   );
@@ -1846,7 +1862,10 @@ function MainHead({
   onExport: () => void;
   onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
 }) {
-  const wsLabel = workspaceDir ? workspaceDir.split(/[\\/]/).pop() || "workspace" : "未选择工作区";
+  useLang();
+  const wsLabel = workspaceDir
+    ? workspaceDir.split(/[\\/]/).pop() || "workspace"
+    : t("app.header.noWorkspace");
   return (
     <div className="main-head">
       <div className="title-wrap">
@@ -1855,7 +1874,7 @@ function MainHead({
           {busy ? (
             <span className="pill" style={{ color: "var(--accent)" }}>
               <span className="dot" />
-              <span className="shimmer">运行中</span>
+              <span className="shimmer">{t("app.header.running")}</span>
             </span>
           ) : null}
         </h1>
@@ -1867,7 +1886,7 @@ function MainHead({
               onOpenWorkdir({ top: r.bottom + 6, left: r.left });
             }}
             style={{ cursor: "pointer" }}
-            title={workspaceDir ?? "点击选择工作区"}
+            title={workspaceDir ?? t("app.header.clickToSelect")}
           >
             <I.folder size={10} /> {wsLabel}
           </span>
@@ -1884,16 +1903,16 @@ function MainHead({
         className="h-btn"
         onClick={onExport}
         disabled={!hasMessages}
-        title="复制对话为 Markdown"
+        title={t("app.header.copyMd")}
       >
-        <I.download size={12} /> 导出
+        <I.download size={12} /> {t("app.header.export")}
       </button>
       <button type="button" className="h-btn" onClick={onNewChat}>
-        <I.plus size={12} /> 新会话
+        <I.plus size={12} /> {t("app.header.newChat")}
       </button>
       {busy ? (
         <button type="button" className="h-btn primary" onClick={onAbort}>
-          <I.stop size={12} /> 中断
+          <I.stop size={12} /> {t("app.header.abort")}
         </button>
       ) : null}
     </div>
@@ -1907,11 +1926,12 @@ function EmptyState({
   onPick: (text: string) => void;
   workspaceDir?: string;
 }) {
+  useLang();
   const suggestions = [
-    "帮我审查最近一次提交的代码改动",
-    "把当前文件的 TS 报错都修了",
-    "把 README 翻译成中英双语",
-    "为这个仓库生成一份 CHANGELOG",
+    t("app.empty.suggestion0"),
+    t("app.empty.suggestion1"),
+    t("app.empty.suggestion2"),
+    t("app.empty.suggestion3"),
     "/help",
   ];
   const wsLabel = workspaceDir ? workspaceDir.split(/[\\/]/).pop() : null;
@@ -1944,15 +1964,16 @@ function EmptyState({
         />
       </div>
       <div style={{ fontSize: 18, fontWeight: 600, color: "var(--fg)", marginBottom: 4 }}>
-        欢迎使用 Reasonix
+        {t("app.empty.welcome")}
       </div>
       <div style={{ fontSize: 12, marginBottom: 18 }}>
         {wsLabel ? (
           <>
-            当前工作区：<code style={{ fontFamily: "IBM Plex Mono, monospace" }}>{wsLabel}</code>
+            {t("app.empty.currentWorkspace")}
+            <code style={{ fontFamily: "IBM Plex Mono, monospace" }}>{wsLabel}</code>
           </>
         ) : (
-          "请先在顶部选择工作区"
+          t("app.empty.selectWorkspace")
         )}
       </div>
       <div
@@ -1990,6 +2011,7 @@ function NeedsSetupView({
   onPickWorkspace: () => void;
   onSubmit: (key: string) => void;
 }) {
+  useLang();
   const [key, setKey] = useState("");
   return (
     <div
@@ -2003,9 +2025,9 @@ function NeedsSetupView({
         gap: 18,
       }}
     >
-      <div style={{ fontSize: 18, fontWeight: 600 }}>欢迎使用 Reasonix</div>
+      <div style={{ fontSize: 18, fontWeight: 600 }}>{t("app.setup.welcome")}</div>
       <div style={{ fontSize: 12.5, color: "var(--muted)", maxWidth: 400, textAlign: "center" }}>
-        首次使用需要配置 DeepSeek API Key 与工作目录。Key 仅保存在本地。
+        {t("app.setup.description")}
       </div>
       <div
         style={{
@@ -2017,11 +2039,11 @@ function NeedsSetupView({
       >
         <div className="setting-row" style={{ borderBottom: "none" }}>
           <div className="l">
-            <div className="n">工作目录</div>
-            <div className="h">{workspaceDir || "未选择"}</div>
+            <div className="n">{t("app.setup.workspace")}</div>
+            <div className="h">{workspaceDir || t("app.setup.notSelected")}</div>
           </div>
           <button type="button" className="btn" onClick={onPickWorkspace}>
-            选择…
+            {t("app.setup.choose")}
           </button>
         </div>
         <input
@@ -2038,7 +2060,7 @@ function NeedsSetupView({
           disabled={!key.trim()}
           onClick={() => onSubmit(key.trim())}
         >
-          保存并开始
+          {t("app.setup.saveAndStart")}
         </button>
       </div>
     </div>
@@ -2058,6 +2080,13 @@ function UpdateBanner({
   onInstall: () => void;
   onDismiss: () => void;
 }) {
+  useLang();
+  const statusText =
+    status === "installing"
+      ? t("app.update.installing")
+      : status === "error"
+        ? t("app.update.failed")
+        : t("app.update.clickToInstall");
   return (
     <div
       className="plan-banner"
@@ -2068,22 +2097,16 @@ function UpdateBanner({
       </span>
       <div className="body">
         <div className="t">
-          新版本可用 · {currentVersion} → {version}
+          {t("app.update.available", { current: currentVersion, latest: version })}
         </div>
-        <div className="s">
-          {status === "installing"
-            ? "正在安装…"
-            : status === "error"
-              ? "安装失败"
-              : "点击安装并重启"}
-        </div>
+        <div className="s">{statusText}</div>
       </div>
       <div className="prog">
         <button type="button" onClick={onInstall} disabled={status === "installing"}>
-          安装
+          {t("app.update.install")}
         </button>
         <button type="button" onClick={onDismiss}>
-          稍后
+          {t("app.update.later")}
         </button>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { mcpEnvFor, readConfig } from "../../config.js";
+import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
@@ -62,7 +63,7 @@ export const stderrLifecycleSink: McpLifecycleSink = (n) => {
   }
   if (n.kind === "failed") {
     process.stderr.write(
-      `${formatMcpLifecycleEvent({ state: "failed", name: n.name, reason: n.reason })}\n  → run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).\n`,
+      `${formatMcpLifecycleEvent({ state: "failed", name: n.name, reason: n.reason })}\n  → ${t("mcpLifecycle.failedSetupHint")}\n`,
     );
     return;
   }

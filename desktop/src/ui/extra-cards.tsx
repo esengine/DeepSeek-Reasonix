@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { I } from "../icons";
+import { t } from "../i18n";
 
 export type ApprovalTone = "ok" | "warn" | "danger" | "info" | "brand" | "ghost";
 
@@ -258,7 +259,7 @@ export function UsageFull({
     <div className="usage-full">
       <div className="uh">
         <div>
-          <div className="tt">本会话用量</div>
+          <div className="tt">{t("extraCards.sessionUsage")}</div>
           {range ? <div className="ss">{range}</div> : null}
         </div>
         <span className="grow" />
@@ -309,7 +310,7 @@ export function UsageFull({
           cache
         </span>
         <span style={{ marginLeft: "auto" }}>
-          本会话花费 {costLabel}
+          {t("extraCards.sessionCost", { costLabel })}
           {balanceLabel ? ` · 余额 ${balanceLabel}` : ""}
         </span>
       </div>

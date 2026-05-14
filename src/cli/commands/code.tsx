@@ -106,9 +106,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
 
   const foreign = detectForeignAgentPlatform(rootDir);
   if (foreign) {
-    process.stderr.write(
-      `⚠ workspace contains another agent platform's files (${foreign.join(", ")}). Reasonix Code may read them as project content; relaunch with --dir <your-project> if that's not what you want.\n`,
-    );
+    process.stderr.write(t("code.workspaceConflict", { platforms: foreign.join(", ") }));
   }
 
   // Belt-and-suspenders cleanup: even though spawn(detached:false)
@@ -126,7 +124,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
 
   let systemAppendFileContents: string | undefined;
   if (opts.systemAppend !== undefined && opts.systemAppend.trim().length === 0) {
-    process.stderr.write("--system-append is empty — no prompt text will be appended\n");
+    process.stderr.write(t("code.systemAppendEmpty"));
   }
   if (opts.systemAppendFile) {
     const filePath = resolve(opts.systemAppendFile);
@@ -134,9 +132,8 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
       systemAppendFileContents = readFileSync(filePath, "utf8");
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
-      process.stderr.write(
-        `Error: cannot read --system-append-file "${filePath}": ${e.code ? `[${e.code}] ` : ""}${e.message}\n`,
-      );
+      const errorDetails = e.code ? `[${e.code}] ${e.message}` : e.message;
+      process.stderr.write(t("code.systemAppendFileReadError", { filePath, errorDetails }));
       process.exit(1);
     }
   }

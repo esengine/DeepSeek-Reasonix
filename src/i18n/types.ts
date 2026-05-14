@@ -140,6 +140,12 @@ export interface TranslationSchema {
     jsonHintReport: string;
     modelOverrideFlash: string;
     skipConfirmHint: string;
+    yoloHint: string;
+  };
+  code: {
+    workspaceConflict: string;
+    systemAppendEmpty: string;
+    systemAppendFileReadError: string;
   };
   slash: {
     [key: string]: {
@@ -750,6 +756,8 @@ export interface TranslationSchema {
     initDetail: string;
     reconnectDetail: string;
     disabledDetail: string;
+    failedSetupHint: string;
+    failedSetupConfigHint: string;
   };
   checkpointPicker: {
     title: string;
