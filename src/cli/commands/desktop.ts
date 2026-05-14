@@ -597,6 +597,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: tab.toolset.tools.specs() });
   const reasoningEffort = loadReasoningEffort();
+  const { autoEscalate } = resolvePreset(tab.currentPreset);
   const loop = new CacheFirstLoop({
     client,
     prefix,
@@ -605,6 +606,7 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     budgetUsd: tab.budgetUsd,
     session: tab.currentSession,
     reasoningEffort,
+    autoEscalate,
   });
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };
