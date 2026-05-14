@@ -101,6 +101,8 @@ export interface CacheFirstLoopOptions {
   confirmationGate?: PauseGate;
   /** Re-runs the prompt builder (applyMemoryStack / codeSystemPrompt) on /new so REASONIX.md edits take effect without a restart. Accepting a cache miss is the price. */
   rebuildSystem?: () => string;
+  /** What to do when the per-step iter budget is exhausted. "summarize" (default) fires a no-tools call so the user sees an answer — right for top-level chat. "pause" yields a `paused` event leaving the session intact — right for subagents whose parent can decide to resume or accept partial state. */
+  onIterBudgetExhausted?: "summarize" | "pause";
 }
 
 export interface ReconfigurableOptions {
@@ -132,6 +134,7 @@ export class CacheFirstLoop {
   /** One-shot 80% warning latch — cleared by setBudget so a bump re-arms at the new boundary. */
   private _budgetWarned = false;
   sessionName: string | null;
+  readonly onIterBudgetExhausted: "summarize" | "pause";
 
   hooks: ResolvedHook[];
   hookCwd: string;
@@ -187,6 +190,7 @@ export class CacheFirstLoop {
     );
     // Last-resort backstop — primary stop is the token-context guard inside step().
     this.maxToolIters = opts.maxToolIters ?? 64;
+    this.onIterBudgetExhausted = opts.onIterBudgetExhausted ?? "summarize";
     this.hooks = opts.hooks ?? [];
     this.hookCwd = opts.hookCwd ?? process.cwd();
     this.confirmationGate = opts.confirmationGate ?? defaultPauseGate;
@@ -1219,11 +1223,21 @@ export class CacheFirstLoop {
       }
     }
 
-    // We exhausted the tool-call budget while the model still wanted to
-    // call more tools. Rather than stopping silently (which leaves the
-    // user staring at a blank prompt), force one final no-tools call so
-    // the model must produce a text summary from everything it has
-    // already seen.
+    // Iter budget exhausted while the model still wanted more tools.
+    // Top-level chat → force a no-tools summary call so the user sees
+    // SOMETHING. Subagents → emit `paused`, leaving session messages
+    // intact so the parent can resume by passing the session name back.
+    if (this.onIterBudgetExhausted === "pause") {
+      yield {
+        turn: this._turn,
+        role: "paused",
+        content: "",
+        sessionName: this.sessionName ?? undefined,
+        pausedAtIter: this.maxToolIters,
+      };
+      yield { turn: this._turn, role: "done", content: "" };
+      return;
+    }
     yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "budget" });
   }
 

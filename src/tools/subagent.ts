@@ -4,6 +4,7 @@ import { type DeepSeekClient, Usage } from "../client.js";
 import { CacheFirstLoop } from "../loop.js";
 import { applyProjectMemory } from "../memory/project.js";
 import { ImmutablePrefix } from "../memory/runtime.js";
+import { timestampSuffix } from "../memory/session.js";
 import {
   NEGATIVE_CLAIM_RULE,
   TUI_FORMATTING_RULES,
@@ -57,6 +58,8 @@ export interface SpawnSubagentOptions {
   skillName?: string;
   /** Scopes the child registry to these literal tool names; NEVER_INHERITED still wins. Driven by skill `allowed-tools` frontmatter. */
   allowedTools?: readonly string[];
+  /** Reuse an earlier pausedSession instead of starting fresh. The child loop loads the prior messages from disk and continues; `task` is treated as a continuation nudge. */
+  resumeSession?: string;
 }
 
 export interface SubagentResult {
@@ -71,6 +74,10 @@ export interface SubagentResult {
   skillName?: string;
   /** Zero-filled when no API calls landed so consumers always see a valid shape. */
   usage: Usage;
+  /** True when the child hit its pause-every interval without producing a final answer. */
+  paused?: boolean;
+  /** Session name the caller passes back as `resume_session` to continue. Set whenever `paused` is true. */
+  pausedSession?: string;
 }
 
 export interface SubagentToolOptions {
@@ -101,9 +108,8 @@ function defaultSubagentSystem(modelId: string): string {
 }
 
 const DEFAULT_MAX_RESULT_CHARS = 8000;
-const DEFAULT_MAX_ITERS = 16;
-const MIN_MAX_ITERS = 1;
-const MAX_MAX_ITERS = 256;
+/** How many tool calls a subagent runs before yielding `paused` back to its parent. Not a budget — work continues via `resume_session`; this is checkpoint cadence. */
+const DEFAULT_PAUSE_EVERY = 16;
 /** Iters-from-cap at which we start appending a remaining-budget hint to tool results. */
 const BUDGET_WARN_THRESHOLD = 3;
 
@@ -146,13 +152,14 @@ export function subagentBudgetHint(spawnCount: number, totalTokens: number): str
 /** Errors captured in the result shape, never thrown — caller decides how to surface. */
 export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<SubagentResult> {
   const model = opts.model ?? DEFAULT_SUBAGENT_MODEL;
-  const maxToolIters = opts.maxToolIters ?? DEFAULT_MAX_ITERS;
+  const maxToolIters = opts.maxToolIters ?? DEFAULT_PAUSE_EVERY;
   const maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
   const sink = opts.sink;
   const skillName = opts.skillName;
+  const runId = nextRunId();
+  const sessionName = opts.resumeSession ?? `subagent-${runId}-${timestampSuffix()}`;
 
   const startedAt = Date.now();
-  const runId = nextRunId();
   const taskPreview = opts.task.length > 30 ? `${opts.task.slice(0, 30)}…` : opts.task;
   sink?.current?.({
     kind: "start",
@@ -233,10 +240,9 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     reasoningEffort: DEFAULT_SUBAGENT_EFFORT,
     maxToolIters,
     hooks: [],
-    // Streaming on so the parent UI can flip the "summarising" phase the
-    // moment the model starts emitting the final answer (first assistant_delta
-    // after the last tool result, before assistant_final lands).
     stream: true,
+    session: sessionName,
+    onIterBudgetExhausted: "pause",
   });
 
   // Wire parent-abort → child-abort. Two pitfalls we have to handle:
@@ -263,8 +269,13 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   let errorMessage: string | undefined;
   let toolIter = 0;
   let summarisingEmitted = false;
+  let paused = false;
+  // Resume: tell the model the budget refreshed — without this it reads prior "finalize NOW" hints as still in force and refuses to keep calling tools.
+  const taskForLoop = opts.resumeSession
+    ? `[Resume: your tool-call budget has been refreshed with ${maxToolIters} new calls. Earlier "wrap up" / "finalize NOW" budget hints in this conversation referred to the previous window — they no longer apply. Continue the work you were given.]\n\n${opts.task}`
+    : opts.task;
   try {
-    for await (const ev of childLoop.step(opts.task)) {
+    for await (const ev of childLoop.step(taskForLoop)) {
       sink?.current?.({ kind: "inner", runId, task: taskPreview, skillName, model, inner: ev });
 
       if (ev.role === "tool") {
@@ -306,6 +317,9 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       if (ev.role === "error") {
         errorMessage = ev.error ?? "subagent error";
       }
+      if (ev.role === "paused") {
+        paused = true;
+      }
     }
   } catch (err) {
     errorMessage = (err as Error).message;
@@ -318,7 +332,10 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   // still counts as a failure: no answer came back, the parent has
   // nothing to render. Synthesize an error so `success: false` and the
   // UI surfaces the abort instead of returning empty output.
-  if (!errorMessage && !final) {
+  //
+  // Pause is NOT failure — the session is intact on disk, the parent
+  // resumes by passing sessionName back. Don't synthesize an error.
+  if (!errorMessage && !final && !paused) {
     errorMessage = opts.parentSignal?.aborted
       ? "subagent aborted before producing an answer"
       : "subagent ended without producing an answer";
@@ -360,6 +377,8 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     model,
     skillName,
     usage,
+    paused: paused || undefined,
+    pausedSession: paused ? sessionName : undefined,
   };
 }
 
@@ -377,6 +396,17 @@ function aggregateChildUsage(loop: CacheFirstLoop): Usage {
 }
 
 export function formatSubagentResult(r: SubagentResult): string {
+  if (r.paused) {
+    return JSON.stringify({
+      success: false,
+      paused: true,
+      resume_session: r.pausedSession,
+      tool_iters: r.toolIters,
+      elapsed_ms: r.elapsedMs,
+      cost_usd: r.costUsd,
+      note: `Subagent reached its pause-every interval (${r.toolIters} tool calls) without producing a final answer. To continue from where it left off, call spawn_subagent again with resume_session="${r.pausedSession}" (the task arg becomes a continuation nudge — e.g. "finish what you started"). To accept the partial work, ignore this and proceed with what you already know.`,
+    });
+  }
   if (!r.success) {
     return JSON.stringify({
       success: false,
@@ -413,7 +443,7 @@ export function registerSubagentTool(
     ? applyProjectMemory(baseSystem, opts.projectRoot)
     : baseSystem;
   const defaultModel = opts.defaultModel ?? DEFAULT_SUBAGENT_MODEL;
-  const maxToolIters = opts.maxToolIters ?? DEFAULT_MAX_ITERS;
+  const maxToolIters = opts.maxToolIters ?? DEFAULT_PAUSE_EVERY;
   const maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
   const sink = opts.sink;
   // Per-session counters survive across spawn calls because registerSubagentTool
@@ -425,19 +455,19 @@ export function registerSubagentTool(
     name: SUBAGENT_TOOL_NAME,
     parallelSafe: true,
     description:
-      "Spawn an isolated subagent to handle a self-contained subtask in a fresh context, returning only its final answer. **Prefer direct tools.** Spawn primarily for parallel fan-out (2+ independent investigations issued in one tool batch) or when the work would otherwise need >10 file reads/searches whose trail you don't need to keep. Single greps, 1-3 file cross-references, and 'keep my context clean for one question' are NOT good reasons to spawn — direct tools are cheaper and let you reference the evidence later. Each spawn pays a fresh prefix-cache miss plus a full child loop. The subagent inherits your tools but runs in its own isolated message log; only the final assistant message comes back. Keep tasks focused; the subagent has a stricter iter budget than you do.",
+      "Spawn an isolated subagent to handle a self-contained subtask in a fresh context, returning only its final answer. **Prefer direct tools.** Spawn primarily for parallel fan-out (2+ independent investigations issued in one tool batch) or when the work would otherwise need >10 file reads/searches whose trail you don't need to keep. Single greps, 1-3 file cross-references, and 'keep my context clean for one question' are NOT good reasons to spawn — direct tools are cheaper and let you reference the evidence later. Each fresh spawn pays a prefix-cache miss plus a full child loop. The subagent inherits your tools but runs in its own isolated message log; only the final assistant message comes back. **Pause/resume**: subagents yield back to you every `max_iters` tool calls. A paused result returns `{ paused: true, resume_session: \"...\" }` — you can either accept the partial state, or call spawn_subagent again with `resume_session` set to continue where it left off (cheap: the prior prefix is cached). Tasks expected to run much longer than 16 tool calls don't need a huge `max_iters` — just resume.",
     parameters: {
       type: "object",
       properties: {
         task: {
           type: "string",
           description:
-            "The subtask the subagent should perform. Be specific and self-contained — the subagent has none of your conversation context, only what you write here.",
+            'The subtask the subagent should perform. Be specific and self-contained — the subagent has none of your conversation context, only what you write here. When resuming via `resume_session`, this becomes a continuation nudge (e.g. "finish what you started" or a delta instruction).',
         },
         system: {
           type: "string",
           description:
-            "Optional override for the subagent's system prompt. The default tells it to stay focused and return a concise answer; override only when the subtask needs a specialized persona.",
+            "Optional override for the subagent's system prompt. The default tells it to stay focused and return a concise answer; override only when the subtask needs a specialized persona. Ignored on resume — the prior session keeps its original system prompt for cache stability.",
         },
         model: {
           type: "string",
@@ -447,9 +477,13 @@ export function registerSubagentTool(
         },
         max_iters: {
           type: "integer",
-          minimum: MIN_MAX_ITERS,
-          maximum: MAX_MAX_ITERS,
-          description: `Cap on the subagent's tool-call iterations. Default 16 (or the type's default when 'type' is set). Hard range: ${MIN_MAX_ITERS}-${MAX_MAX_ITERS}; out-of-range values are clamped to the nearest end. Pick what the task actually needs — flash spawns are cheap, but values much larger than the work warrants just delay the natural termination.`,
+          description:
+            "How many tool calls the subagent runs before pausing back to you for a checkpoint. Default 16. This is checkpoint cadence, not a budget — work continues across pauses via `resume_session`. Pick what feels natural for the granularity of decisions you want to make: small (4-8) when you want frequent control, larger (32-64) when the subagent should mostly run autonomously.",
+        },
+        resume_session: {
+          type: "string",
+          description:
+            "Provide the `resume_session` value returned by a previous paused spawn to continue that subagent. When set, prior messages are loaded from disk and the original system prompt is reused (cache-friendly). `task` becomes a continuation nudge.",
         },
         type: {
           type: "string",
@@ -467,6 +501,7 @@ export function registerSubagentTool(
         model?: unknown;
         max_iters?: unknown;
         type?: unknown;
+        resume_session?: unknown;
       },
       ctx,
     ) => {
@@ -485,7 +520,11 @@ export function registerSubagentTool(
         typeof args.system === "string" && args.system.trim().length > 0
           ? args.system.trim()
           : (typeSpec?.system ?? `${defaultSystemBase}\n\n${escalationContract(model)}`);
-      const callerIters = clampMaxIters(args.max_iters);
+      const callerIters = parseMaxIters(args.max_iters);
+      const resumeSession =
+        typeof args.resume_session === "string" && args.resume_session.trim().length > 0
+          ? args.resume_session.trim()
+          : undefined;
       const result = await spawnSubagent({
         client: opts.client,
         parentRegistry,
@@ -496,6 +535,7 @@ export function registerSubagentTool(
         maxResultChars,
         sink,
         parentSignal: ctx?.signal,
+        resumeSession,
       });
       sessionSpawnCount++;
       sessionSpawnTokens += result.usage.totalTokens;
@@ -508,13 +548,11 @@ export function registerSubagentTool(
   return parentRegistry;
 }
 
-/** Floats round down; non-finite / wrong-type yields undefined so caller falls back to its default. */
-function clampMaxIters(raw: unknown): number | undefined {
+/** Floats round down; non-finite / wrong-type / non-positive yields undefined so caller falls back to its default. No upper clamp — the value is a pause cadence, work continues via resume_session. */
+function parseMaxIters(raw: unknown): number | undefined {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
   const n = Math.floor(raw);
-  if (n < MIN_MAX_ITERS) return MIN_MAX_ITERS;
-  if (n > MAX_MAX_ITERS) return MAX_MAX_ITERS;
-  return n;
+  return n >= 1 ? n : undefined;
 }
 
 /** Plan-mode state propagates — a subagent spawned under `/plan` MUST NOT escape it. */

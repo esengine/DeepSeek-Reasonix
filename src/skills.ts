@@ -73,15 +73,12 @@ function parseAllowedTools(raw: string | undefined): readonly string[] | undefin
   return names.length > 0 ? Object.freeze(names) : undefined;
 }
 
-/** Match subagent's own bounds (src/tools/subagent.ts MIN_MAX_ITERS / MAX_MAX_ITERS). */
-const SKILL_MAX_ITERS_MIN = 1;
-const SKILL_MAX_ITERS_MAX = 256;
-
+/** `max-iters` is checkpoint cadence, not a budget — work continues across pauses via resume_session. No upper bound; values below 1 fall back to the subagent default. */
 function parseMaxToolIters(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
   const n = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(n)) return undefined;
-  return Math.min(SKILL_MAX_ITERS_MAX, Math.max(SKILL_MAX_ITERS_MIN, n));
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return n;
 }
 
 export class SkillStore {
@@ -257,7 +254,7 @@ Tips:
 - Reference tools by name (run_command, edit_file, search_content, ...)
 - Add \`runAs: subagent\` to frontmatter to spawn an isolated subagent loop
 - Add \`allowed-tools: read_file, search_content\` to scope a subagent's tools
-- Add \`max-iters: 64\` (or higher, up to 256) to raise the subagent's tool-call budget — default 16. Pick what the task actually needs; large values just delay the natural termination.
+- Add \`max-iters: N\` to change the subagent's pause cadence (default 16). This isn't a budget — the parent resumes on pause, so N is how often the parent gets a checkpoint, not how much total work the subagent gets.
 `;
 }
 

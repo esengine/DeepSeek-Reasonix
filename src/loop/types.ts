@@ -12,6 +12,8 @@ export type EventRole =
   | "done"
   | "error"
   | "warning"
+  /** Loop reached its pause interval; state is on disk under `sessionName`, caller may resume. */
+  | "paused"
   /** Transient indicator for silent phases; UI clears on next primary event. */
   | "status";
 
@@ -36,4 +38,8 @@ export interface LoopEvent {
   error?: string;
   /** Display-only — code-mode applier MUST skip SEARCH/REPLACE in forced-summary text. */
   forcedSummary?: boolean;
+  /** Set on `role === "paused"` — the session name caller passes back as `resume_session` to continue. */
+  sessionName?: string;
+  /** Set on `role === "paused"` — iter count consumed before pausing. */
+  pausedAtIter?: number;
 }

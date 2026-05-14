@@ -397,20 +397,19 @@ describe("registerSubagentTool", () => {
     expect(fetchCalls).toBe(0);
   });
 
-  it("exposes max_iters in the tool schema with min/max bounds", () => {
+  it("exposes max_iters in the tool schema without an upper bound (checkpoint cadence, not budget)", () => {
     const parent = new ToolRegistry();
     const client = makeClient([{ content: "ok" }]);
     registerSubagentTool(parent, { client });
     const spec = parent.specs().find((s) => s.function.name === "spawn_subagent");
     const params = spec?.function.parameters as {
-      properties: { max_iters: { type: string; minimum: number; maximum: number } };
+      properties: { max_iters: { type: string; minimum?: number; maximum?: number } };
     };
     expect(params.properties.max_iters.type).toBe("integer");
-    expect(params.properties.max_iters.minimum).toBe(1);
-    expect(params.properties.max_iters.maximum).toBe(256);
+    expect(params.properties.max_iters.maximum).toBeUndefined();
   });
 
-  it("caps the child loop at the caller-supplied max_iters", async () => {
+  it("paces the child loop at the caller-supplied max_iters (pauses on reaching it)", async () => {
     const parent = new ToolRegistry();
     parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
     const client = makeClient(makeToolCallResponses(50));
@@ -421,19 +420,22 @@ describe("registerSubagentTool", () => {
     );
     const parsed = JSON.parse(out);
     expect(parsed.tool_iters).toBe(3);
+    expect(parsed.paused).toBe(true);
+    expect(typeof parsed.resume_session).toBe("string");
   });
 
-  it("clamps max_iters above the maximum", async () => {
+  it("passes large max_iters values through without clamping", async () => {
     const parent = new ToolRegistry();
     parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const client = makeClient(makeToolCallResponses(300));
+    const client = makeClient(makeToolCallResponses(60));
     registerSubagentTool(parent, { client });
     const out = await parent.dispatch(
       "spawn_subagent",
-      JSON.stringify({ task: "loop forever", max_iters: 9999 }),
+      JSON.stringify({ task: "loop forever", max_iters: 50 }),
     );
     const parsed = JSON.parse(out);
-    expect(parsed.tool_iters).toBe(256);
+    expect(parsed.tool_iters).toBe(50);
+    expect(parsed.paused).toBe(true);
   });
 
   it("ignores non-numeric max_iters and falls back to the default", async () => {
@@ -543,9 +545,11 @@ describe("registerSubagentTool", () => {
   });
 
   it("appends a remaining-budget hint to tool results within 3 iters of the cap", async () => {
-    // Drive 5 tool calls then a stop. The augmenter should append a hint
-    // starting at iter 2 (remaining=3) through iter 5 (remaining=0).
-    const responses = [...makeToolCallResponses(5), { content: "done" }];
+    // Drive 5 tool calls. The augmenter appends a hint starting at iter 2
+    // (remaining=3). With pause-on-budget the loop ends at iter 4 without
+    // a sixth model call, so the model only sees results 1-4 (the 5th
+    // result lands in the session but isn't sent because the loop paused).
+    const responses = makeToolCallResponses(5);
     const innerFetch = fakeFetch(responses);
     const seenToolResults: string[] = [];
     const fetchSpy = vi.fn(async (url: any, init: any) => {
@@ -563,17 +567,14 @@ describe("registerSubagentTool", () => {
     parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
     registerSubagentTool(parent, { client, maxToolIters: 5 });
     await parent.dispatch("spawn_subagent", JSON.stringify({ task: "go" }));
-    expect(seenToolResults.length).toBeGreaterThanOrEqual(5);
-    // Each tool result is sent on every subsequent turn — dedupe by
-    // taking the first occurrence of each unique result.
+    expect(seenToolResults.length).toBeGreaterThanOrEqual(4);
     const unique = Array.from(new Set(seenToolResults));
-    expect(unique).toHaveLength(5);
+    expect(unique).toHaveLength(4);
     expect(unique[0]).not.toMatch(/budget:/);
     expect(unique[0]).toBe("noop-result");
     expect(unique[1]).toMatch(/\[budget: 3 of 5 tool calls left/);
     expect(unique[2]).toMatch(/\[budget: 2 of 5 tool calls left/);
     expect(unique[3]).toMatch(/\[budget: 1 of 5 tool call left/);
-    expect(unique[4]).toMatch(/\[budget: 0 of 5 tool calls left — finalize NOW/);
   });
 });
 
