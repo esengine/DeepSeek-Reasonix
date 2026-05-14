@@ -9,6 +9,7 @@ import {
   rankPickerCandidates,
   walkFilesStream,
 } from "../../at-mentions.js";
+import { SkillStore } from "../../skills.js";
 import {
   type McpServerSummary,
   type SlashArgContext,
@@ -228,8 +229,18 @@ export function useCompletionPickers({
       if (!partial) return names.slice(0, 40);
       return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);
     }
+    if (completer === "skills") {
+      const store = new SkillStore({ projectRoot: codeMode?.rootDir });
+      const names = store
+        .list()
+        .filter((s) => s.scope !== "builtin")
+        .map((s) => s.name);
+      if (partial && names.some((n) => n.toLowerCase() === needle)) return null;
+      if (!partial) return names.slice(0, 40);
+      return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);
+    }
     return null;
-  }, [slashArgContext, models, mcpServers]);
+  }, [slashArgContext, models, mcpServers, codeMode]);
   useEffect(() => {
     setSlashArgSelected((prev) => {
       if (!slashArgMatches || slashArgMatches.length === 0) return 0;

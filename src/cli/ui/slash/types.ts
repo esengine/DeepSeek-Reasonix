@@ -165,7 +165,7 @@ export interface SlashCommandSpec {
   /** If the command takes args, hint text shown after the name. */
   argsHint?: string;
   /** First-arg picker source — file paths intentionally absent (use `@path` mentions instead). */
-  argCompleter?: "models" | "mcp-resources" | "mcp-prompts" | readonly string[];
+  argCompleter?: "models" | "mcp-resources" | "mcp-prompts" | "skills" | readonly string[];
   /** Alternate names — typing any of these resolves to `cmd` for dispatch / suggestion / arg-context. */
   aliases?: readonly string[];
 }
