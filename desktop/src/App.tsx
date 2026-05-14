@@ -952,6 +952,61 @@ function TabRuntime({
     window.setTimeout(() => setToast(null), 1600);
   }, []);
 
+  // Drag-and-drop: dropping files/folders onto the window inserts them
+  // as @-mentions in the draft (relative to workspaceDir when inside it).
+  // Tauri's webview API gives us absolute paths; converting to relative
+  // matches what the file-picker dialog does in composer.attachFile.
+  useEffect(() => {
+    const ws = state.settings?.workspaceDir;
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const mod = await import("@tauri-apps/api/webview");
+        const webview = mod.getCurrentWebview();
+        const handle = await webview.onDragDropEvent((event) => {
+          if (event.payload.type === "enter") {
+            document.body.dataset.dragOver = "1";
+            return;
+          }
+          if (event.payload.type === "leave") {
+            delete document.body.dataset.dragOver;
+            return;
+          }
+          if (event.payload.type !== "drop") return;
+          delete document.body.dataset.dragOver;
+          const paths = event.payload.paths ?? [];
+          if (paths.length === 0) return;
+          const mentions = paths.map((p) => {
+            const norm = p.replace(/\\/g, "/");
+            if (ws) {
+              const wsNorm = ws.replace(/\\/g, "/").replace(/\/+$/, "");
+              if (norm === wsNorm || norm.startsWith(`${wsNorm}/`)) {
+                return norm.slice(wsNorm.length).replace(/^\/+/, "") || ".";
+              }
+            }
+            return norm;
+          });
+          setDraft((d) => {
+            const prefix = d.trim() ? `${d.replace(/\s+$/, "")} ` : "";
+            return `${prefix}${mentions.map((m) => `@${m}`).join(" ")} `;
+          });
+          for (const m of mentions) markMentionPicked(m);
+          composerRef.current?.focus();
+        });
+        if (cancelled) handle();
+        else unlisten = handle;
+      } catch (err) {
+        console.error("drag-drop listen failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      delete document.body.dataset.dragOver;
+    };
+  }, [state.settings?.workspaceDir, markMentionPicked]);
+
   const send = useCallback(
     (override?: string) => {
       const text = (override ?? draft).trim();

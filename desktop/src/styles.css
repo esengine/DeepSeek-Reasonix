@@ -27,6 +27,21 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+body[data-drag-over="1"]::after {
+  content: "Drop to attach as @-mention";
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: oklch(20% 0.006 255 / 0.6);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 500;
+  border: 2px dashed var(--accent);
+  z-index: 9999;
+  pointer-events: none;
+}
+
 /* ---------- THEME TOKENS ---------- */
 
 :root,
