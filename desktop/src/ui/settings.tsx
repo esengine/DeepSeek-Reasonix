@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
-import { I } from "../icons";
+import { type ReactNode, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
+import { type Lang, setLang, t, useLang } from "../i18n";
+import { I } from "../icons";
 import type { McpSpecInfo, SettingsPatch, SkillInfo } from "../protocol";
 
 export type PageId =
@@ -13,15 +14,40 @@ export type PageId =
   | "billing"
   | "shortcuts";
 
-const SETTING_PAGES: { id: PageId; label: string; icon: keyof typeof I; desc: string }[] = [
-  { id: "general", label: "通用", icon: "cog", desc: "外观、语言、行为" },
-  { id: "models", label: "模型", icon: "brain", desc: "选择默认模型与采样参数" },
-  { id: "mcp", label: "MCP 服务器", icon: "wrench", desc: "管理 MCP 协议工具服务器" },
-  { id: "skills", label: "技能 / Skills", icon: "zap", desc: "为 / 命令绑定的可复用提示集" },
-  { id: "memory", label: "记忆", icon: "bookmark", desc: "CLAUDE.md / AGENTS.md 注入说明" },
-  { id: "rules", label: "审批规则", icon: "shield", desc: "自动批准、拒绝、需确认命令模式" },
-  { id: "billing", label: "账户 & 计费", icon: "coin", desc: "账户余额、用量与发票" },
-  { id: "shortcuts", label: "快捷键", icon: "cpu", desc: "键盘快捷键总览" },
+const PAGE_KEYS: { id: PageId; labelKey: string; descKey: string; icon: keyof typeof I }[] = [
+  {
+    id: "general",
+    labelKey: "settings.navGeneral",
+    descKey: "settings.navGeneralDesc",
+    icon: "cog",
+  },
+  {
+    id: "models",
+    labelKey: "settings.navModels",
+    descKey: "settings.navModelsDesc",
+    icon: "brain",
+  },
+  { id: "mcp", labelKey: "settings.navMcp", descKey: "settings.navMcpDesc", icon: "wrench" },
+  { id: "skills", labelKey: "settings.navSkills", descKey: "settings.navSkillsDesc", icon: "zap" },
+  {
+    id: "memory",
+    labelKey: "settings.navMemory",
+    descKey: "settings.navMemoryDesc",
+    icon: "bookmark",
+  },
+  { id: "rules", labelKey: "settings.navRules", descKey: "settings.navRulesDesc", icon: "shield" },
+  {
+    id: "billing",
+    labelKey: "settings.navBilling",
+    descKey: "settings.navBillingDesc",
+    icon: "coin",
+  },
+  {
+    id: "shortcuts",
+    labelKey: "settings.navShortcuts",
+    descKey: "settings.navShortcutsDesc",
+    icon: "cpu",
+  },
 ];
 
 export function SettingsModal({
@@ -55,14 +81,15 @@ export function SettingsModal({
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
 }) {
+  useLang();
   const [page, setPage] = useState<PageId>(initialPage ?? "general");
-  const current = SETTING_PAGES.find((p) => p.id === page) ?? SETTING_PAGES[0]!;
+  const current = PAGE_KEYS.find((p) => p.id === page) ?? PAGE_KEYS[0]!;
   return (
     <div className="settings-mask" onClick={onClose}>
       <div className="settings" onClick={(e) => e.stopPropagation()}>
         <nav className="settings-side">
-          <div className="sg">设置</div>
-          {SETTING_PAGES.map((p) => (
+          <div className="sg">{t("settings.title")}</div>
+          {PAGE_KEYS.map((p) => (
             <div
               key={p.id}
               className="row"
@@ -70,15 +97,15 @@ export function SettingsModal({
               onClick={() => setPage(p.id)}
             >
               <span className="ico">{I[p.icon]({ size: 13 })}</span>
-              <span>{p.label}</span>
+              <span>{t(p.labelKey as never)}</span>
             </div>
           ))}
         </nav>
         <div className="settings-main">
           <div className="settings-head">
             <div>
-              <h2>{current.label}</h2>
-              <div className="desc">{current.desc}</div>
+              <h2>{t(current.labelKey as never)}</h2>
+              <div className="desc">{t(current.descKey as never)}</div>
             </div>
             <span className="grow" />
             <button type="button" className="close-btn" onClick={onClose}>
@@ -129,24 +156,47 @@ function PageGeneral({
   onSave: (patch: SettingsPatch) => void;
   onPickWorkspace: () => void;
 }) {
+  const lang = useLang();
   const [editorDraft, setEditorDraft] = useState(settings.editor ?? "");
   return (
     <>
       <section className="section">
-        <div className="stitle">工作区</div>
+        <div className="stitle">{t("settings.language")}</div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">当前工作目录</div>
-            <div className="h">{settings.workspaceDir || "未选择"}</div>
+            <div className="n">{t("settings.language")}</div>
+            <div className="h">{t("settings.languageHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            {(["en", "zh-CN"] as const).map((code) => (
+              <button
+                type="button"
+                key={code}
+                data-on={lang === code}
+                onClick={() => setLang(code as Lang)}
+              >
+                {code === "en" ? t("settings.langEn") : t("settings.langZhCn")}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="stitle">{t("settings.workspace")}</div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.workspace")}</div>
+            <div className="h">{settings.workspaceDir || t("settings.workspaceUnset")}</div>
           </div>
           <button type="button" className="btn" onClick={onPickWorkspace}>
-            选择…
+            {t("settings.pickWorkspaceBtn")}
           </button>
         </div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">外部编辑器</div>
-            <div className="h">用于 file:line 链接打开，如 cursor / code / idea</div>
+            <div className="n">{t("settings.editor")}</div>
+            <div className="h">{t("settings.editorHintShort")}</div>
           </div>
           <input
             className="field mono"
@@ -159,11 +209,11 @@ function PageGeneral({
       </section>
 
       <section className="section">
-        <div className="stitle">行为</div>
+        <div className="stitle">{t("settings.behaviorSection")}</div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">推理强度</div>
-            <div className="h">high — 性价比；max — 复杂任务</div>
+            <div className="n">{t("settings.reasoningEffort")}</div>
+            <div className="h">{t("settings.reasoningEffortShort")}</div>
           </div>
           <div className="seg-ctrl">
             <button
@@ -184,8 +234,8 @@ function PageGeneral({
         </div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">编辑模式</div>
-            <div className="h">review — 每次确认；auto — 文件操作自动；yolo — 全部自动</div>
+            <div className="n">{t("settings.editMode")}</div>
+            <div className="h">{t("settings.editModeShort")}</div>
           </div>
           <div className="seg-ctrl">
             {(["review", "auto", "yolo"] as const).map((m) => (
@@ -202,14 +252,14 @@ function PageGeneral({
         </div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">预算上限 (USD)</div>
-            <div className="h">超过此值自动暂停；留空为无限制</div>
+            <div className="n">{t("settings.budgetUsdLabel")}</div>
+            <div className="h">{t("settings.budgetUsdHint")}</div>
           </div>
           <input
             className="field"
             type="number"
             defaultValue={settings.budgetUsd ?? ""}
-            placeholder="无限制"
+            placeholder={t("settings.budgetUsdPlaceholder")}
             onBlur={(e) => {
               const v = e.target.value.trim();
               onSave({ budgetUsd: v === "" ? null : Number(v) });
@@ -232,15 +282,20 @@ function ApiKeySection({
   onSave: (patch: SettingsPatch) => void;
   onSaveApiKey: (key: string) => void;
 }) {
+  useLang();
   const [key, setKey] = useState("");
   const [urlDraft, setUrlDraft] = useState(baseUrl ?? "");
   return (
     <section className="section">
-      <div className="stitle">DeepSeek API</div>
+      <div className="stitle">{t("settings.apiSectionTitle")}</div>
       <div className="setting-row">
         <div className="l">
-          <div className="n">API Key</div>
-          <div className="h">{apiKeyPrefix ? `已设置 · ${apiKeyPrefix}…` : "未配置"}</div>
+          <div className="n">{t("settings.apiKey")}</div>
+          <div className="h">
+            {apiKeyPrefix
+              ? t("settings.apiKeyConfiguredPrefix", { prefix: apiKeyPrefix })
+              : t("settings.apiKeyUnconfigured")}
+          </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <input
@@ -248,7 +303,7 @@ function ApiKeySection({
             type="password"
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder="sk-…"
+            placeholder={t("settings.apiKeyPlaceholder")}
           />
           <button
             type="button"
@@ -260,14 +315,14 @@ function ApiKeySection({
               setKey("");
             }}
           >
-            保存
+            {t("settings.apiKeySaveBtn")}
           </button>
         </div>
       </div>
       <div className="setting-row">
         <div className="l">
-          <div className="n">Base URL</div>
-          <div className="h">默认 api.deepseek.com — 可改为兼容端点</div>
+          <div className="n">{t("settings.baseUrl")}</div>
+          <div className="h">{t("settings.baseUrlHintShort")}</div>
         </div>
         <input
           className="field mono"
@@ -287,35 +342,36 @@ function PageModels({
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
 }) {
+  useLang();
   const presets = [
     {
       id: "auto" as const,
-      name: "auto (flash → pro)",
+      name: t("settings.modelAutoName"),
       badge: "AUTO",
-      desc: "自动从 flash 起步，遇复杂任务升级到 pro，兼顾速度与质量。",
+      desc: t("settings.modelAutoDesc"),
       ctx: "—",
       out: "—",
     },
     {
       id: "flash" as const,
-      name: "deepseek-v4-flash",
+      name: t("settings.modelFlashName"),
       badge: "FLASH",
-      desc: "通用对话模型，速度快、长上下文、价格友好。",
+      desc: t("settings.modelFlashDesc"),
       ctx: "1M",
       out: "8K",
     },
     {
       id: "pro" as const,
-      name: "deepseek-v4-pro",
+      name: t("settings.modelProName"),
       badge: "PRO",
-      desc: "深度推理模型，先生成可解释的思考链，再给最终答案。",
+      desc: t("settings.modelProDesc"),
       ctx: "1M",
       out: "32K",
     },
   ];
   return (
     <section className="section">
-      <div className="stitle">默认模型 · 当前 {settings.model}</div>
+      <div className="stitle">{t("settings.defaultModelCurrent", { model: settings.model })}</div>
       <div className="model-grid">
         {presets.map((m) => (
           <div
@@ -331,11 +387,11 @@ function PageModels({
             <div className="desc">{m.desc}</div>
             <div className="spec">
               <div>
-                <span className="k">上下文 </span>
+                <span className="k">{t("settings.modelCtxLabel")} </span>
                 <span className="v">{m.ctx}</span>
               </div>
               <div>
-                <span className="k">输出 </span>
+                <span className="k">{t("settings.modelOutLabel")} </span>
                 <span className="v">{m.out}</span>
               </div>
             </div>
@@ -357,6 +413,7 @@ function PageMCP({
   onAdd: (spec: string) => void;
   onRemove: (spec: string) => void;
 }) {
+  useLang();
   const [draft, setDraft] = useState("");
   const submit = () => {
     const v = draft.trim();
@@ -368,14 +425,14 @@ function PageMCP({
     <>
       <section className="section">
         <div className="stitle">
-          已配置 · {specs.length}
+          {t("settings.mcpConfiguredCount", { count: specs.length })}
           {bridged ? (
             <span style={{ color: "var(--accent)", marginLeft: 8, fontSize: 11 }}>
-              · 已桥接
+              · {t("settings.mcpBridgedTag")}
             </span>
           ) : (
             <span style={{ color: "var(--muted)", marginLeft: 8, fontSize: 11 }}>
-              · 当前桌面会话未桥接，重启 reasonix code (TUI) 后生效
+              · {t("settings.mcpNotBridgedHint")}
             </span>
           )}
         </div>
@@ -390,7 +447,7 @@ function PageMCP({
               color: "var(--muted)",
             }}
           >
-            还没有配置 MCP 服务器。下面输入 spec 添加。
+            {t("settings.mcpEmpty")}
           </div>
         ) : (
           specs.map((s) => (
@@ -400,7 +457,7 @@ function PageMCP({
                   <I.wrench size={14} />
                 </span>
                 <div>
-                  <div className="nm">{s.name ?? "(anonymous)"}</div>
+                  <div className="nm">{s.name ?? t("settings.mcpAnonymous")}</div>
                   <div className="sub">{s.summary}</div>
                 </div>
                 <span className="grow" />
@@ -410,12 +467,13 @@ function PageMCP({
                   style={{ color: "var(--danger)" }}
                   onClick={() => onRemove(s.raw)}
                 >
-                  移除
+                  {t("settings.mcpRemove")}
                 </button>
               </div>
               {s.parseError ? (
                 <div className="desc" style={{ color: "var(--danger)" }}>
-                  解析失败：{s.parseError}
+                  {t("settings.mcpParseErrorPrefix")}
+                  {s.parseError}
                 </div>
               ) : null}
             </div>
@@ -423,12 +481,15 @@ function PageMCP({
         )}
       </section>
       <section className="section">
-        <div className="stitle">添加服务器</div>
+        <div className="stitle">{t("settings.mcpAddSection")}</div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">spec 字符串</div>
+            <div className="n">{t("settings.mcpSpecLabel")}</div>
             <div className="h">
-              格式：<code>name=command args</code> 或 <code>name=https://host/sse</code>
+              {t("settings.mcpSpecHintFormat")}
+              <code>name=command args</code>
+              {t("settings.mcpOr")}
+              <code>name=https://host/sse</code>
             </div>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
@@ -436,18 +497,13 @@ function PageMCP({
               className="field mono"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="github=npx -y @smithery/cli ..."
+              placeholder={t("settings.mcpSpecPlaceholder")}
               onKeyDown={(e) => {
                 if (e.key === "Enter") submit();
               }}
             />
-            <button
-              type="button"
-              className="btn primary"
-              disabled={!draft.trim()}
-              onClick={submit}
-            >
-              添加
+            <button type="button" className="btn primary" disabled={!draft.trim()} onClick={submit}>
+              {t("settings.mcpAddBtn")}
             </button>
           </div>
         </div>
@@ -457,9 +513,10 @@ function PageMCP({
 }
 
 function PageSkills({ skills }: { skills: SkillInfo[] }) {
+  useLang();
   return (
     <section className="section">
-      <div className="stitle">已加载 · {skills.length} · 通过 / 命令调用</div>
+      <div className="stitle">{t("settings.skillsLoadedCount", { count: skills.length })}</div>
       {skills.length === 0 ? (
         <div
           style={{
@@ -471,7 +528,7 @@ function PageSkills({ skills }: { skills: SkillInfo[] }) {
             color: "var(--muted)",
           }}
         >
-          没有可用技能。可在 ~/.reasonix/skills/ 或 项目根/.reasonix/skills/ 下创建 SKILL.md。
+          {t("settings.skillsEmpty")}
         </div>
       ) : (
         skills.map((s) => (
@@ -516,9 +573,10 @@ function PageSkills({ skills }: { skills: SkillInfo[] }) {
 }
 
 function PageMemory() {
+  useLang();
   return (
     <section className="section">
-      <div className="stitle">长期记忆</div>
+      <div className="stitle">{t("settings.memorySection")}</div>
       <div
         style={{
           padding: 16,
@@ -529,7 +587,7 @@ function PageMemory() {
           color: "var(--muted)",
         }}
       >
-        当前版本依赖内置 CLAUDE.md / AGENTS.md 注入；项目级别记忆在内核侧维护。
+        {t("settings.memoryBody")}
       </div>
     </section>
   );
@@ -542,14 +600,15 @@ function PageRules({
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
 }) {
+  useLang();
   return (
     <>
       <section className="section">
-        <div className="stitle">编辑模式</div>
+        <div className="stitle">{t("settings.rulesEditModeSection")}</div>
         <div className="setting-row">
           <div className="l">
-            <div className="n">应用模式</div>
-            <div className="h">review 每次确认，auto 文件自动，yolo 全部自动</div>
+            <div className="n">{t("settings.rulesApplyMode")}</div>
+            <div className="h">{t("settings.rulesApplyModeHint")}</div>
           </div>
           <div className="seg-ctrl">
             {(["review", "auto", "yolo"] as const).map((m) => (
@@ -566,7 +625,7 @@ function PageRules({
         </div>
       </section>
       <section className="section">
-        <div className="stitle">命令自动批准</div>
+        <div className="stitle">{t("settings.rulesCommandAutoSection")}</div>
         <div
           style={{
             padding: 12,
@@ -577,7 +636,7 @@ function PageRules({
             color: "var(--muted)",
           }}
         >
-          在 ApprovalCard 中点击 "始终允许" 可向白名单添加命令前缀；后续匹配命令将不再询问。
+          {t("settings.rulesCommandAutoBody")}
         </div>
       </section>
     </>
@@ -593,6 +652,7 @@ function PageBilling({
   usage: UsageStats;
   currency: "CNY" | "USD";
 }) {
+  useLang();
   const symbol = currency === "CNY" ? "¥" : "$";
   const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
   const hitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
@@ -600,28 +660,35 @@ function PageBilling({
     <>
       <div className="bill-grid">
         <div className="bill-card">
-          <div className="l">钱包余额</div>
+          <div className="l">{t("settings.billingWalletBalance")}</div>
           <div className="v ok">
             {balance
               ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
               : "—"}
           </div>
           <div className="sub">
-            {balance && !balance.isAvailable ? "余额不足" : "可用"}
+            {balance && !balance.isAvailable
+              ? t("settings.billingInsufficient")
+              : t("settings.billingAvailable")}
           </div>
         </div>
         <div className="bill-card">
-          <div className="l">本会话花费</div>
+          <div className="l">{t("settings.billingSessionSpent")}</div>
           <div className="v">
             {symbol} {usage.totalCostUsd.toFixed(4)}
           </div>
-          <div className="sub">prompt {usage.totalPromptTokens.toLocaleString()} t</div>
+          <div className="sub">
+            {t("settings.billingPromptTokens", { n: usage.totalPromptTokens.toLocaleString() })}
+          </div>
         </div>
         <div className="bill-card">
-          <div className="l">缓存命中率</div>
+          <div className="l">{t("settings.billingCacheHitRate")}</div>
           <div className="v acc">{hitPct}%</div>
           <div className="sub">
-            hit {usage.cacheHitTokens.toLocaleString()} / miss {usage.cacheMissTokens.toLocaleString()}
+            {t("settings.billingHitMiss", {
+              hit: usage.cacheHitTokens.toLocaleString(),
+              miss: usage.cacheMissTokens.toLocaleString(),
+            })}
           </div>
         </div>
       </div>
@@ -630,15 +697,16 @@ function PageBilling({
 }
 
 function PageShortcuts() {
+  useLang();
   const rows: { nm: string; keys: string[] }[] = [
-    { nm: "新建会话", keys: ["⌘", "N"] },
-    { nm: "新建标签", keys: ["⌘", "T"] },
-    { nm: "关闭标签", keys: ["⌘", "W"] },
-    { nm: "命令面板", keys: ["⌘", "K"] },
-    { nm: "聚焦输入框", keys: ["⌘", "L"] },
-    { nm: "切换标签", keys: ["⌘", "⇥"] },
-    { nm: "中断流式输出", keys: ["esc"] },
-    { nm: "设置", keys: ["⌘", ","] },
+    { nm: t("settings.scNewSession"), keys: ["⌘", "N"] },
+    { nm: t("settings.scNewTab"), keys: ["⌘", "T"] },
+    { nm: t("settings.scCloseTab"), keys: ["⌘", "W"] },
+    { nm: t("settings.scPalette"), keys: ["⌘", "K"] },
+    { nm: t("settings.scFocusInput"), keys: ["⌘", "L"] },
+    { nm: t("settings.scSwitchTab"), keys: ["⌘", "⇥"] },
+    { nm: t("settings.scAbortStream"), keys: ["esc"] },
+    { nm: t("settings.scOpenSettings"), keys: ["⌘", ","] },
   ];
   return (
     <section className="section">

@@ -23,6 +23,17 @@ function detectDefault(): Lang {
 
 let currentLang: Lang = detectDefault();
 
+function syncHtmlLang(lang: Lang): void {
+  if (typeof document === "undefined") return;
+  try {
+    document.documentElement.lang = lang;
+  } catch {
+    /* document not ready */
+  }
+}
+
+syncHtmlLang(currentLang);
+
 export function getLang(): Lang {
   return currentLang;
 }
@@ -35,6 +46,7 @@ export function setLang(lang: Lang): void {
   } catch {
     /* ignore */
   }
+  syncHtmlLang(lang);
   for (const cb of listeners) cb();
 }
 
