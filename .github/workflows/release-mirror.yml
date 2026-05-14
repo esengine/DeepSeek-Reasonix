@@ -61,24 +61,28 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Mirror to Gitee
+        id: gitee
         if: env.HAS_GITEE == 'true'
+        continue-on-error: true
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_REPO: reasonix/deep-seek-reasonix
+          GITEE_REPO: reasonix/DeepSeek-Reasonix
           RELEASE_TAG: ${{ steps.tag.outputs.name }}
           RELEASE_BODY: ${{ steps.notes.outputs.body }}
           ASSETS_DIR: assets
         run: node scripts/mirror-release-to-gitee.mjs
 
       - name: Configure AWS CLI for R2
-        if: env.HAS_R2 == 'true'
+        if: always() && env.HAS_R2 == 'true'
         run: |
           aws configure set aws_access_key_id "${{ secrets.R2_ACCESS_KEY_ID }}"
           aws configure set aws_secret_access_key "${{ secrets.R2_SECRET_ACCESS_KEY }}"
           aws configure set region auto
 
       - name: Mirror to R2
-        if: env.HAS_R2 == 'true'
+        id: r2
+        if: always() && env.HAS_R2 == 'true'
+        continue-on-error: true
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
@@ -93,11 +97,31 @@ jobs:
             --endpoint-url "$ENDPOINT"
 
       - name: Summary
+        if: always()
         run: |
+          gitee_status="skipped (no GITEE_TOKEN)"
+          if [ "${{ env.HAS_GITEE }}" = "true" ]; then
+            if [ "${{ steps.gitee.outcome }}" = "success" ]; then
+              gitee_status="✓ mirrored"
+            else
+              gitee_status="✗ failed — check the 'Mirror to Gitee' step log"
+            fi
+          fi
+          r2_status="skipped (no R2 secrets)"
+          if [ "${{ env.HAS_R2 }}" = "true" ]; then
+            if [ "${{ steps.r2.outcome }}" = "success" ]; then
+              r2_status="✓ mirrored"
+            else
+              r2_status="✗ failed — check the 'Mirror to R2' step log"
+            fi
+          fi
           {
             echo "## Mirror result"
             echo ""
             echo "- Tag: \`${{ steps.tag.outputs.name }}\`"
-            echo "- Gitee: ${{ env.HAS_GITEE == 'true' && '✓ mirrored' || 'skipped (no GITEE_TOKEN)' }}"
-            echo "- R2:    ${{ env.HAS_R2 == 'true' && '✓ mirrored' || 'skipped (no R2 secrets)' }}"
+            echo "- Gitee: $gitee_status"
+            echo "- R2:    $r2_status"
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.gitee.outcome }}" = "failure" ] || [ "${{ steps.r2.outcome }}" = "failure" ]; then
+            exit 1
+          fi
