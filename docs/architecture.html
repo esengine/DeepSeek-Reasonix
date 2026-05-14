@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture — Reasonix · Cache-First Loop, Tool-Call Repair, Cost Control</title>
+    <meta
+      name="description"
+      content="Reasonix architecture deep dive — cache-first loop, tool-call repair pipeline, cost control, and module layout."
+    />
+    <meta
+      name="keywords"
+      content="Reasonix architecture, cache-first loop, tool-call repair, DeepSeek cost control, prefix caching, agent architecture"
+    />
+    <meta name="author" content="esengine" />
+    <meta name="theme-color" content="#0b0f17" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+
+    <link
+      rel="canonical"
+      href="https://esengine.github.io/DeepSeek-Reasonix/architecture.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://esengine.github.io/DeepSeek-Reasonix/architecture.html?lang=en"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://esengine.github.io/DeepSeek-Reasonix/architecture.html?lang=zh"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://esengine.github.io/DeepSeek-Reasonix/architecture.html"
+    />
+
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Reasonix" />
+    <meta property="og:title" content="Reasonix Architecture" />
+    <meta
+      property="og:description"
+      content="Cache-first loop, tool-call repair, cost control, and module layout — the full architecture deep dive."
+    />
+    <meta
+      property="og:url"
+      content="https://esengine.github.io/DeepSeek-Reasonix/architecture.html"
+    />
+    <meta
+      property="og:image"
+      content="https://raw.githubusercontent.com/esengine/reasonix/main/docs/assets/hero-terminal.svg"
+    />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Reasonix Architecture" />
+    <meta
+      name="twitter:description"
+      content="Cache-first loop, tool-call repair, cost control, and module layout."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="stylesheet" href="src/fonts.css" />
+    <link rel="stylesheet" href="src/styles.css" />
+    <link rel="stylesheet" href="guide.css" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Reasonix Architecture",
+        "description": "Cache-first loop, tool-call repair pipeline, cost control, and module layout.",
+        "url": "https://esengine.github.io/DeepSeek-Reasonix/architecture.html",
+        "inLanguage": ["en", "zh-CN"],
+        "author": {
+          "@type": "Organization",
+          "name": "esengine",
+          "url": "https://github.com/esengine"
+        },
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": "Reasonix",
+          "url": "https://esengine.github.io/DeepSeek-Reasonix/"
+        },
+        "about": {
+          "@type": "SoftwareApplication",
+          "name": "Reasonix"
+        }
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Reasonix",
+            "item": "https://esengine.github.io/DeepSeek-Reasonix/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "Architecture",
+            "item": "https://esengine.github.io/DeepSeek-Reasonix/architecture.html"
+          }
+        ]
+      }
+    </script>
+  </head>
+
+  <body>
+    <div class="grid-bg"></div>
+    <div class="noise"></div>
+
+    <nav class="nav">
+      <div class="nav-inner">
+        <a class="brand" href="index.html">
+          <span class="brand-mark"></span>
+          <span class="brand-name">
+            <b>Reasonix</b><span>DS · v0.42.0-3</span>
+          </span>
+        </a>
+        <div class="nav-links" role="navigation">
+          <a href="index.html#install">Install</a>
+          <a href="index.html#agents">Pillars</a>
+          <a href="index.html#features">Features</a>
+          <a href="index.html#config">Config</a>
+          <a href="configuration.html">Guide</a>
+          <a href="download.html">Download</a>
+          <a href="index.html#roadmap">Roadmap</a>
+          <a href="index.html#faq">FAQ</a>
+        </div>
+        <div class="nav-cta">
+          <div class="lang-switch" role="group" aria-label="Language">
+            <button data-lang-btn="en" type="button" aria-pressed="true">EN</button>
+            <button data-lang-btn="zh" type="button" aria-pressed="false">中文</button>
+          </div>
+          <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener">GitHub</a>
+          <a class="btn btn-primary btn-sm" href="download.html">Download →</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="guide-main" id="top">
+      <section class="guide-hero">
+        <div class="container">
+          <div class="badge" data-i18n="arch.badge">Cache · Repair · Cost · Modules</div>
+          <h1 class="guide-title">
+            <span class="grad-text" data-i18n="arch.title.line1">Reasonix Architecture</span>
+            <br />
+            <span data-i18n="arch.title.line2">how it works under the hood</span>
+          </h1>
+          <p class="guide-sub" data-i18n="arch.sub">
+            Reasonix is <strong>opinionated, not general</strong>. Every abstraction is
+            justified by a DeepSeek-specific behavior or economic property. The product
+            north star: a coding agent that stays cheap enough to leave on.
+          </p>
+        </div>
+      </section>
+
+      <div class="guide-shell container">
+        <aside class="guide-toc" aria-label="On this page">
+          <h4 data-i18n="arch.toc.title">On this page</h4>
+          <ul>
+            <li><a href="#philosophy" data-i18n="arch.toc.philosophy">Design philosophy</a></li>
+            <li><a href="#pillar1" data-i18n="arch.toc.pillar1">Pillar 1 — Cache</a></li>
+            <li><a href="#pillar2" data-i18n="arch.toc.pillar2">Pillar 2 — Repair</a></li>
+            <li><a href="#pillar3" data-i18n="arch.toc.pillar3">Pillar 3 — Cost</a></li>
+            <li><a href="#modules" data-i18n="arch.toc.modules">Module layout</a></li>
+            <li><a href="#evolution" data-i18n="arch.toc.evolution">Design evolution</a></li>
+            <li><a href="#nongoals" data-i18n="arch.toc.nongoals">Non-goals</a></li>
+          </ul>
+        </aside>
+
+        <article class="guide-body">
+          <section id="philosophy">
+            <h2 data-i18n="ph.title">Design philosophy</h2>
+            <p data-i18n="ph.body1">
+              Reasonix is <strong>opinionated, not general</strong>. Every abstraction is
+              justified by a DeepSeek-specific behavior or economic property. If it's
+              generic, we don't ship it.
+            </p>
+            <p data-i18n="ph.body2">
+              The product north star: <strong>coding agent that stays cheap enough to leave
+              on</strong>. A tool that quietly burns $200/month on a background project is
+              one nobody uses. Every subsystem below is answerable to that goal.
+            </p>
+          </section>
+
+          <section id="pillar1">
+            <h2 data-i18n="p1.title">Pillar 1 — Cache-First Loop</h2>
+            <p data-i18n="p1.problem">
+              <strong>Problem.</strong> DeepSeek bills cached input at ~10% of the miss
+              rate. Automatic prefix caching activates only when the <em>exact</em> byte
+              prefix of the previous request matches. Most agent loops reorder, rewrite, or
+              inject fresh timestamps each turn — cache hit rate in practice: &lt;20%.
+            </p>
+            <p data-i18n="p1.solution">
+              <strong>Solution.</strong> Partition the context into three regions:
+            </p>
+            <pre class="code"><code>┌─────────────────────────────────────────┐
+│ IMMUTABLE PREFIX                        │ ← fixed for session
+│   system + tool_specs + few_shots        │   cache hit candidate
+├─────────────────────────────────────────┤
+│ APPEND-ONLY LOG                         │ ← grows monotonically
+│   [assistant₁][tool₁][assistant₂]...    │   preserves prefix of prior turns
+├─────────────────────────────────────────┤
+│ VOLATILE SCRATCH                        │ ← reset each turn
+│   R1 thought, transient plan state      │   never sent upstream
+└─────────────────────────────────────────┘</code></pre>
+            <p data-i18n="p1.inv.title"><strong>Invariants:</strong></p>
+            <ol>
+              <li data-i18n="p1.inv1">Prefix is computed once per session, hashed, and pinned.</li>
+              <li data-i18n="p1.inv2">Log entries are serialized in append order; no rewrites.</li>
+              <li data-i18n="p1.inv3">
+                Scratch is distilled via Pillar 2 before any information from it is folded
+                into the log.
+              </li>
+            </ol>
+            <p data-i18n="p1.metric">
+              <strong>Metric.</strong> <code>prompt_cache_hit_tokens / (hit + miss)</code>
+              exposed per-turn and aggregated per-session. Visible in the TUI's top-bar
+              cache cell.
+            </p>
+
+            <h3 data-i18n="p1.h.parallel">Parallel tool dispatch</h3>
+            <p data-i18n="p1.parallel.body">
+              Each tool declares <code>parallelSafe?: boolean</code> (default
+              <code>false</code>). The loop dispatcher groups consecutive parallel-safe
+              calls into chunks and races them via <code>Promise.allSettled</code>; the
+              first non-parallel-safe call ends the chunk and runs alone (serial barrier —
+              read-after-write order preserved). Tool-result yields and history append still
+              land in declared order regardless of which call settles first, so the model
+              sees the same shape it would under a fully serial dispatch.
+            </p>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.var">Env var</th>
+                  <th data-i18n="th.default">Default</th>
+                  <th data-i18n="th.effect">Effect</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>REASONIX_PARALLEL_MAX</code></td>
+                  <td><code>3</code> (hard cap <code>16</code>)</td>
+                  <td>Max chunk size.</td>
+                </tr>
+                <tr>
+                  <td><code>REASONIX_TOOL_DISPATCH=serial</code></td>
+                  <td>unset</td>
+                  <td>Forces serial dispatch — escape hatch.</td>
+                </tr>
+              </tbody>
+            </table>
+            <p data-i18n="p1.parallel.optins">
+              Built-in opt-ins: read-only filesystem (<code>read_file</code>,
+              <code>list_directory</code>, <code>directory_tree</code>,
+              <code>search_files</code>, <code>search_content</code>,
+              <code>get_file_info</code>), web (<code>web_search</code>,
+              <code>web_fetch</code>), <code>recall_memory</code>,
+              <code>semantic_search</code>, isolated child loops (<code>run_skill</code>,
+              <code>spawn_subagent</code>), in-memory job queries (<code>job_output</code>,
+              <code>list_jobs</code>). Mutating / side-effecting tools stay default.
+              MCP-bridged tools default <code>false</code> — third-party tools opt in only
+              when the server explicitly declares parallel safety.
+            </p>
+          </section>
+
+          <section id="pillar2">
+            <h2 data-i18n="p2.title">Pillar 2 — Tool-Call Repair</h2>
+            <p data-i18n="p2.problem">
+              <strong>Problem.</strong> Empirical DeepSeek failure modes:
+            </p>
+            <ul>
+              <li data-i18n="p2.fm1">Tool-call JSON emitted inside <code>&lt;think&gt;</code>, missing from the final message.</li>
+              <li data-i18n="p2.fm2">Arguments dropped when schema has &gt;10 params or deeply nested objects.</li>
+              <li data-i18n="p2.fm3">Same tool called repeatedly with identical args (call-storm).</li>
+              <li data-i18n="p2.fm4">Truncated JSON due to <code>max_tokens</code> hit mid-structure.</li>
+            </ul>
+            <p data-i18n="p2.solution"><strong>Solution.</strong> Four passes:</p>
+            <ol>
+              <li data-i18n="p2.pass1">
+                <strong><code>flatten</code></strong> — schemas with &gt;10 leaf params or
+                depth &gt;2 are auto-detected on <code>ToolRegistry.register()</code> and
+                presented to the model in dot-notation form. <code>dispatch()</code>
+                re-nests the args before calling the user's <code>fn</code>.
+              </li>
+              <li data-i18n="p2.pass2">
+                <strong><code>scavenge</code></strong> — regex + JSON parser sweeps
+                <code>reasoning_content</code> for any tool call the model forgot to emit
+                in <code>tool_calls</code>.
+              </li>
+              <li data-i18n="p2.pass3">
+                <strong><code>truncation</code></strong> — detect unbalanced JSON and
+                repair by closing braces or requesting a continuation completion.
+              </li>
+              <li data-i18n="p2.pass4">
+                <strong><code>storm</code></strong> — identical <code>(tool, args)</code>
+                tuple within a sliding window → suppress the call, inject a reflection turn.
+              </li>
+            </ol>
+          </section>
+
+          <section id="pillar3">
+            <h2 data-i18n="p3.title">Pillar 3 — Cost Control (v0.6)</h2>
+            <p data-i18n="p3.problem">
+              <strong>Problem.</strong> Coding agents that default to the frontier model
+              (v4-pro, ~12× flash cost) and accumulate full tool results in context are
+              $150–$250/month for active users. Most turns don't need frontier reasoning;
+              most sessions re-pay for tool results that were only useful once.
+            </p>
+            <p data-i18n="p3.solution">
+              <strong>Solution.</strong> Four complementary mechanisms, none of which
+              require manual tuning in the common case:
+            </p>
+
+            <h3 data-i18n="p3.h.tiers">4.1 Tiered defaults (flash-first)</h3>
+            <p data-i18n="p3.tiers.body">
+              The three presets trade <strong>model tier</strong> and <strong>reasoning
+              effort</strong>:
+            </p>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.preset">Preset</th>
+                  <th data-i18n="th.model">Model</th>
+                  <th data-i18n="th.effort">Effort</th>
+                  <th data-i18n="th.cost">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>flash</code></td>
+                  <td><code>v4-flash</code></td>
+                  <td><code>max</code></td>
+                  <td>1×</td>
+                </tr>
+                <tr>
+                  <td><code>auto</code> (default)</td>
+                  <td><code>v4-flash</code> → <code>v4-pro</code> on hard turns</td>
+                  <td><code>max</code></td>
+                  <td>1–3×</td>
+                </tr>
+                <tr>
+                  <td><code>pro</code></td>
+                  <td><code>v4-pro</code></td>
+                  <td><code>max</code></td>
+                  <td>~12×</td>
+                </tr>
+              </tbody>
+            </table>
+            <p data-i18n="p3.tiers.aux">
+              All auxiliary calls — <code>forceSummaryAfterIterLimit</code>, subagent
+              spawns, truncation repair retries — hard-code <code>v4-flash +
+              effort=high</code> regardless of the user's preset. There's no reason to pay
+              pro rates for paraphrasing tool results or for an <code>explore</code>
+              subagent's grep chain.
+            </p>
+
+            <h3 data-i18n="p3.h.compact">4.2 Turn-end auto-compaction</h3>
+            <p data-i18n="p3.compact.body">
+              Every tool result in the log exceeding
+              <code>TURN_END_RESULT_CAP_TOKENS</code> (3000) is shrunk to that cap when a
+              turn ends. The model had the full text for the turn that read it; subsequent
+              turns see a compact summary and can re-read if needed. One extra
+              <code>read_file</code> call is vastly cheaper than dragging 12 KB through
+              every future prompt.
+            </p>
+            <p data-i18n="p3.compact.proactive">
+              A proactive 40% context-ratio threshold runs the same shrink pre-emptively
+              inside long multi-iter turns before the 80% emergency threshold fires.
+            </p>
+
+            <h3 data-i18n="p3.h.pro">4.3 /pro single-turn arming</h3>
+            <p data-i18n="p3.pro.body">
+              Users who predict a hard task type <code>/pro</code>; the <strong>next</strong>
+              turn runs on <code>v4-pro</code>, then auto-disarms. No preset churn, no
+              forgotten revert. Armed state is visible as a yellow <code>⇧ pro armed</code>
+              pill in the header.
+            </p>
+
+            <h3 data-i18n="p3.h.escalation">4.4 Failure-signal auto-escalation</h3>
+            <p data-i18n="p3.esc.body">
+              The loop counts visible "flash is struggling" events per turn:
+            </p>
+            <ul>
+              <li data-i18n="p3.esc.e1"><code>edit_file</code> / <code>write_file</code> SEARCH-not-found errors</li>
+              <li data-i18n="p3.esc.e2">ToolCallRepair fires (scavenge / truncation-fix / storm-break)</li>
+            </ul>
+            <p data-i18n="p3.esc.threshold">
+              Once the count hits <code>FAILURE_ESCALATION_THRESHOLD</code> (3), the
+              <strong>remainder of the current turn</strong> runs on <code>v4-pro</code>.
+              Announced via a yellow warning row — no silent cost surprises. Counter +
+              escalation flag reset at every turn start.
+            </p>
+            <p data-i18n="p3.esc.pill">
+              Header shows a red <code>⇧ pro escalated</code> pill while the turn is on pro.
+            </p>
+
+            <h3 data-i18n="p3.h.transparency">Cost transparency</h3>
+            <p data-i18n="p3.trans.body">
+              Per-turn and session cost are colored in the StatsPanel:
+            </p>
+            <ul>
+              <li data-i18n="p3.trans.turn"><code>turn $0.003</code> — green &lt;$0.05, yellow $0.05–0.20, red ≥$0.20</li>
+              <li data-i18n="p3.trans.session"><code>session $0.12</code> — same scale ×10</li>
+            </ul>
+          </section>
+
+          <section id="modules">
+            <h2 data-i18n="mod.title">Module layout</h2>
+            <pre class="code"><code>src/
+├── client.ts               <span class="hash"># DeepSeek client (fetch + SSE)</span>
+├── loop.ts                 <span class="hash"># Pillar 1 + 3 — CacheFirstLoop</span>
+├── repair/                 <span class="hash"># Pillar 2 pipeline</span>
+│   ├── index.ts
+│   ├── scavenge.ts
+│   ├── flatten.ts
+│   ├── truncation.ts
+│   └── storm.ts
+├── prompt-fragments.ts     <span class="hash"># TUI_FORMATTING_RULES, NEGATIVE_CLAIM_RULE</span>
+├── code/prompt.ts          <span class="hash"># reasonix code main system prompt</span>
+├── tools/                  <span class="hash"># Tool implementations</span>
+│   ├── filesystem.ts       <span class="hash"># read / list / search / edit / write</span>
+│   ├── shell.ts            <span class="hash"># run_command + run_background (JobRegistry)</span>
+│   ├── jobs.ts             <span class="hash"># background-process registry</span>
+│   ├── memory.ts           <span class="hash"># remember / forget / list user memories</span>
+│   ├── skills.ts           <span class="hash"># list + invoke SKILL.md playbooks</span>
+│   ├── subagent.ts         <span class="hash"># spawn_subagent — flash+high by default</span>
+│   ├── plan.ts             <span class="hash"># submit_plan (review gate)</span>
+│   └── web.ts              <span class="hash"># web_search, web_fetch (multi-engine)</span>
+├── mcp/                    <span class="hash"># MCP client + bridge (stdio + SSE)</span>
+├── memory.ts               <span class="hash"># ImmutablePrefix / AppendOnlyLog / VolatileScratch</span>
+├── project-memory.ts       <span class="hash"># REASONIX.md loader</span>
+├── user-memory.ts          <span class="hash"># ~/.reasonix/memory/ store (project + global)</span>
+├── skills.ts               <span class="hash"># built-in explore + research skills</span>
+├── session.ts              <span class="hash"># JSONL session persistence</span>
+├── telemetry.ts            <span class="hash"># cost + cache-hit accounting + SessionSummary</span>
+├── tokenizer.ts            <span class="hash"># DeepSeek V3 tokenizer (ported)</span>
+├── usage.ts                <span class="hash"># ~/.reasonix/usage.jsonl roll-up</span>
+├── types.ts                <span class="hash"># ChatMessage, ToolCall, ToolSpec</span>
+├── index.ts                <span class="hash"># library barrel</span>
+└── cli/
+    ├── index.ts            <span class="hash"># commander entry</span>
+    ├── resolve.ts          <span class="hash"># config + CLI flag precedence</span>
+    ├── commands/           <span class="hash"># chat, code, run, stats, sessions, ...</span>
+    └── ui/
+        ├── App.tsx                  <span class="hash"># root Ink component (~1984 LOC)</span>
+        ├── LiveRows.tsx             <span class="hash"># spinner rows</span>
+        ├── EventLog.tsx             <span class="hash"># historical row rendering</span>
+        ├── StatsPanel.tsx           <span class="hash"># top bar + cost badges</span>
+        ├── PromptInput.tsx          <span class="hash"># cursor-aware multi-line input</span>
+        ├── PlanConfirm.tsx          <span class="hash"># submit_plan review modal</span>
+        ├── ShellConfirm.tsx         <span class="hash"># run_command approval modal</span>
+        ├── EditConfirm.tsx          <span class="hash"># per-edit review modal</span>
+        ├── markdown.tsx             <span class="hash"># Ink-native markdown renderer</span>
+        ├── edit-history.ts          <span class="hash"># EditHistoryEntry + formatters</span>
+        ├── useEditHistory.ts        <span class="hash"># /undo, /history, /show state machine</span>
+        ├── useCompletionPickers.ts  <span class="hash"># slash, @, slash-arg pickers</span>
+        ├── useSessionInfo.ts        <span class="hash"># balance + models + updates fetch</span>
+        ├── useSubagent.ts           <span class="hash"># subagent sink wiring</span>
+        └── slash/                   <span class="hash"># /-command implementation</span>
+            ├── types.ts
+            ├── commands.ts
+            ├── helpers.ts
+            ├── dispatch.ts
+            └── handlers/</code></pre>
+            <p data-i18n="mod.note">
+              Files kept small by design: the largest module under <code>cli/ui/</code> is
+              2K lines (App.tsx), every handler under <code>slash/handlers/</code> is
+              ≤200 lines, every hook under <code>cli/ui/</code> is ≤310 lines. Adding a
+              new slash command means editing one handler file and one registry line.
+            </p>
+          </section>
+
+          <section id="evolution">
+            <h2 data-i18n="evo.title">Design evolution</h2>
+            <ul>
+              <li><strong>v0.0.x</strong> — Pillar 1 end-to-end, repair pipeline complete, Ink TUI scaffold.</li>
+              <li><strong>v0.1</strong> — τ-bench numbers published, streaming polish, transcript replay.</li>
+              <li><strong>v0.3</strong> — MCP client (stdio + SSE), session persistence.</li>
+              <li><strong>v0.4.x</strong> — <code>reasonix code</code> with SEARCH/REPLACE edits, review/auto gate, background jobs, hooks.</li>
+              <li><strong>v0.5.x</strong> — V4 model support, skills, memory, subagents, actionable error messages.</li>
+              <li>
+                <strong>v0.6</strong> —
+                <ul>
+                  <li><strong>Cost control</strong> (flash-first defaults, auto-compaction, <code>/pro</code> one-shot, failure-triggered escalation, cost badges).</li>
+                  <li><code>deepseek-chat</code> / <code>deepseek-reasoner</code> scheduled for deprecation — all user-facing surfaces updated to <code>v4-flash</code> / <code>v4-pro</code>.</li>
+                  <li>Shared prompt fragments (<code>TUI_FORMATTING_RULES</code>, <code>NEGATIVE_CLAIM_RULE</code>).</li>
+                  <li>UI refactor: App.tsx split into 6 hooks/components, slash.ts split into 13 per-topic modules.</li>
+                </ul>
+              </li>
+              <li><strong>v0.31</strong> <em>(current)</em> — <code>branch</code> + <code>harvest</code> features removed entirely (the parallel-sample selector and Pillar 2 plan-state extractor); both rarely paid for themselves and bloated the slash surface.</li>
+            </ul>
+          </section>
+
+          <section id="nongoals">
+            <h2 data-i18n="ng.title">Explicit non-goals</h2>
+            <ul>
+              <li data-i18n="ng.item1">Multi-agent orchestration as a first-class concept (subagents are a cost-reduction mechanism, not a coordination primitive).</li>
+              <li data-i18n="ng.item2">RAG / vector retrieval.</li>
+              <li data-i18n="ng.item3">Support for non-DeepSeek backends (an OpenAI-compatible shim would work today via <code>--model</code> override, but is not tested).</li>
+              <li data-i18n="ng.item4">Web UI / SaaS.</li>
+              <li data-i18n="ng.item5">Automatic cost escalation without user-visible announcement. Every pro-tier model call is surfaced; silent escalation was considered and rejected.</li>
+            </ul>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <div>
+          <a class="brand" href="index.html" style="text-decoration:none; color:inherit">
+            <span class="brand-mark"></span>
+            <span class="brand-name"><b>DeepSeek-Reasonix</b></span>
+          </a>
+          <p style="color:var(--cream-mute); font-size:13px; margin-top:14px; line-height:1.65; max-width:340px">
+            DeepSeek-native AI coding agent for your terminal. Engineered around prefix-cache stability — leave it running.
+          </p>
+          <div style="display:flex; gap:10px; margin-top:18px">
+            <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener" aria-label="GitHub">GitHub</a>
+            <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix/discussions" target="_blank" rel="noopener">Discussions</a>
+          </div>
+        </div>
+        <div>
+          <h5>Product</h5>
+          <ul>
+            <li><a href="index.html#install">CLI</a></li>
+            <li><a href="download.html">Desktop</a></li>
+            <li><a href="index.html#agents">Pillars</a></li>
+            <li><a href="index.html#config">Config</a></li>
+          </ul>
+        </div>
+        <div>
+          <h5>Community</h5>
+          <ul>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener">GitHub</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/discussions" target="_blank" rel="noopener">Discussions</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/issues" target="_blank" rel="noopener">Issues</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a></li>
+          </ul>
+        </div>
+        <div>
+          <h5>Resources</h5>
+          <ul>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix#readme" target="_blank" rel="noopener">README</a></li>
+            <li><a href="index.html#roadmap">Roadmap</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
+            <li><a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek Platform</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 esengine · MIT License</span>
+        <span class="spacer"></span>
+        <span>Independent open-source project · not affiliated with DeepSeek</span>
+        <span style="margin-left:18px">v0.42.0-3 · prerelease</span>
+      </div>
+    </footer>
+
+    <script src="i18n.js"></script>
+    <script src="arch-i18n.js"></script>
+    <script src="motion.js"></script>
+  </body>
+</html>

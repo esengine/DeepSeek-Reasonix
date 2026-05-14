@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CLI Reference — Reasonix · Shell, Slash Commands, Keyboard, Mouse</title>
+    <meta
+      name="description"
+      content="Complete CLI reference for Reasonix — every shell subcommand, every TUI slash command, every keybinding, and mouse / copy-paste guide."
+    />
+    <meta
+      name="keywords"
+      content="Reasonix CLI, reasonix commands, slash commands, keyboard shortcuts, DeepSeek CLI reference, reasonix code, reasonix chat"
+    />
+    <meta name="author" content="esengine" />
+    <meta name="theme-color" content="#0b0f17" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+
+    <link
+      rel="canonical"
+      href="https://esengine.github.io/DeepSeek-Reasonix/cli-reference.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://esengine.github.io/DeepSeek-Reasonix/cli-reference.html?lang=en"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://esengine.github.io/DeepSeek-Reasonix/cli-reference.html?lang=zh"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://esengine.github.io/DeepSeek-Reasonix/cli-reference.html"
+    />
+
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Reasonix" />
+    <meta property="og:title" content="Reasonix CLI Reference" />
+    <meta
+      property="og:description"
+      content="Every shell subcommand, every slash command, every keybinding — the printable companion to /help and /keys."
+    />
+    <meta
+      property="og:url"
+      content="https://esengine.github.io/DeepSeek-Reasonix/cli-reference.html"
+    />
+    <meta
+      property="og:image"
+      content="https://raw.githubusercontent.com/esengine/reasonix/main/docs/assets/hero-terminal.svg"
+    />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Reasonix CLI Reference" />
+    <meta
+      name="twitter:description"
+      content="Every shell subcommand, every slash command, every keybinding."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="stylesheet" href="src/fonts.css" />
+    <link rel="stylesheet" href="src/styles.css" />
+    <link rel="stylesheet" href="guide.css" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Reasonix CLI Reference",
+        "description": "Every shell subcommand, every TUI slash command, every keybinding, and mouse / copy-paste guide.",
+        "url": "https://esengine.github.io/DeepSeek-Reasonix/cli-reference.html",
+        "inLanguage": ["en", "zh-CN"],
+        "author": {
+          "@type": "Organization",
+          "name": "esengine",
+          "url": "https://github.com/esengine"
+        },
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": "Reasonix",
+          "url": "https://esengine.github.io/DeepSeek-Reasonix/"
+        },
+        "about": {
+          "@type": "SoftwareApplication",
+          "name": "Reasonix"
+        }
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Reasonix",
+            "item": "https://esengine.github.io/DeepSeek-Reasonix/"
+          },
+          {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "CLI Reference",
+            "item": "https://esengine.github.io/DeepSeek-Reasonix/cli-reference.html"
+          }
+        ]
+      }
+    </script>
+  </head>
+
+  <body>
+    <div class="grid-bg"></div>
+    <div class="noise"></div>
+
+    <nav class="nav">
+      <div class="nav-inner">
+        <a class="brand" href="index.html">
+          <span class="brand-mark"></span>
+          <span class="brand-name">
+            <b>Reasonix</b><span>DS · v0.42.0-3</span>
+          </span>
+        </a>
+        <div class="nav-links" role="navigation">
+          <a href="index.html#install">Install</a>
+          <a href="index.html#agents">Pillars</a>
+          <a href="index.html#features">Features</a>
+          <a href="index.html#config">Config</a>
+          <a href="configuration.html">Guide</a>
+          <a href="download.html">Download</a>
+          <a href="index.html#roadmap">Roadmap</a>
+          <a href="index.html#faq">FAQ</a>
+        </div>
+        <div class="nav-cta">
+          <div class="lang-switch" role="group" aria-label="Language">
+            <button data-lang-btn="en" type="button" aria-pressed="true">EN</button>
+            <button data-lang-btn="zh" type="button" aria-pressed="false">中文</button>
+          </div>
+          <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener">GitHub</a>
+          <a class="btn btn-primary btn-sm" href="download.html">Download →</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="guide-main" id="top">
+      <section class="guide-hero">
+        <div class="container">
+          <div class="badge" data-i18n="cli.badge">Shell · Slash Commands · Keyboard · Mouse</div>
+          <h1 class="guide-title">
+            <span class="grad-text" data-i18n="cli.title.line1">CLI Reference</span>
+            <br />
+            <span data-i18n="cli.title.line2">every command, key, and flag</span>
+          </h1>
+          <p class="guide-sub" data-i18n="cli.sub">
+            Every shell subcommand, every TUI slash command, every keybinding. The in-app
+            <code>/help</code> and <code>/keys</code> panels are the live source of truth — this
+            page is the printable companion.
+          </p>
+        </div>
+      </section>
+
+      <div class="guide-shell container">
+        <aside class="guide-toc" aria-label="On this page">
+          <h4 data-i18n="cli.toc.title">On this page</h4>
+          <ul>
+            <li><a href="#shell" data-i18n="cli.toc.shell">Shell subcommands</a></li>
+            <li><a href="#slash" data-i18n="cli.toc.slash">Slash commands</a></li>
+            <li><a href="#keyboard" data-i18n="cli.toc.keyboard">Keyboard</a></li>
+            <li><a href="#mouse" data-i18n="cli.toc.mouse">Mouse</a></li>
+            <li><a href="#copypaste" data-i18n="cli.toc.copypaste">Copy / paste</a></li>
+          </ul>
+        </aside>
+
+        <article class="guide-body">
+          <section id="shell">
+            <h2 data-i18n="sh.title">Shell subcommands</h2>
+            <p data-i18n="sh.body">
+              Run <code>reasonix --help</code> (or any subcommand with <code>--help</code>) for the
+              full flag list. Headline subcommands:
+            </p>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.cmd">Command</th>
+                  <th data-i18n="th.what">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>reasonix code [dir]</code></td>
+                  <td>Code-mode TUI — file edits, plan mode, edit-gate, project-scoped sessions</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix chat</code></td>
+                  <td>Chat-only TUI — no filesystem access, no code mode</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix run &lt;task&gt;</code></td>
+                  <td>Headless run — read prompt, execute, exit (CI-friendly)</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix setup</code></td>
+                  <td>Interactive first-run config (API key, language, theme)</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix sessions [name]</code></td>
+                  <td>List or open a saved session</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix prune-sessions</code></td>
+                  <td>Drop sessions older than <code>--days N</code></td>
+                </tr>
+                <tr>
+                  <td><code>reasonix replay &lt;transcript&gt;</code></td>
+                  <td>Re-render a JSONL transcript without calling the model</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix diff &lt;a&gt; &lt;b&gt;</code></td>
+                  <td>Compare two transcripts (cost / cache / tokens)</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix events &lt;name&gt;</code></td>
+                  <td>Tail the event log for a session</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix stats [transcript]</code></td>
+                  <td>One-shot cost / cache breakdown</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix doctor</code></td>
+                  <td>Health check — API reach, config, hooks, project</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix commit</code></td>
+                  <td><code>git add -A &amp;&amp; git commit</code> with an LLM-written message</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix mcp &lt;list|search|install|inspect|browse&gt;</code></td>
+                  <td>MCP server management</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix index</code></td>
+                  <td>Build the local semantic index (Ollama or OpenAI-compatible embeddings)</td>
+                </tr>
+                <tr>
+                  <td><code>reasonix version</code> / <code>reasonix update</code></td>
+                  <td>Version info + upgrade hint</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="sh.flags.title">Notable runtime flags (chat / code)</h3>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th>Flag</th>
+                  <th data-i18n="th.what">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>--no-session</code></td>
+                  <td>Ephemeral run — nothing is persisted</td>
+                </tr>
+                <tr>
+                  <td><code>--session &lt;name&gt;</code></td>
+                  <td>Resume / pin to a named session</td>
+                </tr>
+                <tr>
+                  <td><code>--continue</code></td>
+                  <td>Resume the most recent session for this workspace</td>
+                </tr>
+                <tr>
+                  <td><code>--new</code></td>
+                  <td>Force a fresh session even if one exists</td>
+                </tr>
+                <tr>
+                  <td><code>--budget &lt;usd&gt;</code></td>
+                  <td>Per-session USD cap — warns at 80%, refuses next turn at 100%</td>
+                </tr>
+                <tr>
+                  <td><code>--preset &lt;auto|flash|pro&gt;</code></td>
+                  <td>Model bundle (auto-escalation, locked flash, locked pro)</td>
+                </tr>
+                <tr>
+                  <td><code>--mcp &lt;spec&gt;</code></td>
+                  <td>Attach an MCP server for this run (repeatable)</td>
+                </tr>
+                <tr>
+                  <td><code>--no-config</code></td>
+                  <td>Ignore <code>~/.reasonix/config.json</code> for this run</td>
+                </tr>
+                <tr>
+                  <td><code>--no-dashboard</code></td>
+                  <td>Don't auto-start the embedded web dashboard</td>
+                </tr>
+                <tr>
+                  <td><code>--no-alt-screen</code></td>
+                  <td>Render to scrollback instead of the alt-screen buffer (preserves chat in shell history; legacy mode, can ghost on resize)</td>
+                </tr>
+                <tr>
+                  <td><code>--no-mouse</code></td>
+                  <td>Disable DECSET 1007 (alternate-scroll); wheel reverts to native terminal scroll</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="slash">
+            <h2 data-i18n="sl.title">Slash commands</h2>
+            <p data-i18n="sl.body">
+              Type <code>/</code> mid-chat to open the picker. Aliases shown in parentheses.
+              Code-mode-only commands marked <strong>(code)</strong>.
+            </p>
+
+            <h3 data-i18n="sl.h.chatops">Chat ops</h3>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.cmd">Command</th>
+                  <th data-i18n="th.what">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>/help</code> (<code>/?</code>)</td>
+                  <td>Show the full command reference inline</td>
+                </tr>
+                <tr>
+                  <td><code>/new</code> (<code>/reset</code>, <code>/clear</code>)</td>
+                  <td>Start a fresh conversation (clear context + scrollback)</td>
+                </tr>
+                <tr>
+                  <td><code>/retry</code></td>
+                  <td>Truncate and resend your last message — fresh sample</td>
+                </tr>
+                <tr>
+                  <td><code>/compact</code></td>
+                  <td>Fold older turns into a summary (cache-safe). Auto-fires at 50% ctx; this is the manual trigger</td>
+                </tr>
+                <tr>
+                  <td><code>/stop</code></td>
+                  <td>Abort the current model turn (typed alternative to Esc)</td>
+                </tr>
+                <tr>
+                  <td><code>/copy</code></td>
+                  <td>Open vim/tmux-style copy mode — <code>j</code>/<code>k</code> navigate, <code>v</code> select, <code>y</code> yank to clipboard. The right answer for SSH / mosh / tmux where drag-select can't extend past the viewport</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="sl.h.setup">Setup</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/preset &lt;auto|flash|pro&gt;</code></td>
+                  <td>Switch model bundle. Bare opens picker</td>
+                </tr>
+                <tr>
+                  <td><code>/model &lt;id&gt;</code></td>
+                  <td>Switch DeepSeek model id. Bare opens picker</td>
+                </tr>
+                <tr>
+                  <td><code>/language &lt;EN|zh-CN&gt;</code> (<code>/lang</code>)</td>
+                  <td>Switch the runtime language</td>
+                </tr>
+                <tr>
+                  <td><code>/theme &lt;name&gt;</code></td>
+                  <td>Show or persist terminal theme. Bare opens picker</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="sl.h.info">Info</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/status</code></td>
+                  <td>Current model, flags, context, session</td>
+                </tr>
+                <tr>
+                  <td><code>/cost [text]</code></td>
+                  <td>Bare → last turn's spend; with text → estimate cost of sending it next</td>
+                </tr>
+                <tr>
+                  <td><code>/context</code></td>
+                  <td>Context-window breakdown (system / tools / log / input)</td>
+                </tr>
+                <tr>
+                  <td><code>/stats</code></td>
+                  <td>Cross-session cost dashboard (today / week / month / all-time)</td>
+                </tr>
+                <tr>
+                  <td><code>/doctor</code></td>
+                  <td>Health check (api / config / api-reach / index / hooks / project)</td>
+                </tr>
+                <tr>
+                  <td><code>/keys</code></td>
+                  <td>Keyboard + mouse + copy/paste reference</td>
+                </tr>
+                <tr>
+                  <td><code>/feedback</code></td>
+                  <td>Open a GitHub issue with diagnostic info copied to clipboard</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="sl.h.extend">Extend</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/mcp</code></td>
+                  <td>Open the MCP hub (live + marketplace tabs)</td>
+                </tr>
+                <tr>
+                  <td><code>/resource [uri]</code></td>
+                  <td>Browse / read MCP resources</td>
+                </tr>
+                <tr>
+                  <td><code>/prompt [name]</code></td>
+                  <td>Browse / fetch MCP prompts</td>
+                </tr>
+                <tr>
+                  <td><code>/memory [list|show|forget|clear]</code></td>
+                  <td>Manage pinned memory (REASONIX.md + <code>~/.reasonix/memory</code>)</td>
+                </tr>
+                <tr>
+                  <td><code>/skill [list|show|new|&lt;name&gt;]</code></td>
+                  <td>List / run / scaffold user skills</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="sl.h.session">Session</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/sessions</code></td>
+                  <td>List saved sessions (current marked with ▸)</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="sl.h.code">Code mode</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/init [force]</code></td>
+                  <td>Scan project, synthesize a baseline <code>REASONIX.md</code></td>
+                </tr>
+                <tr>
+                  <td><code>/apply [N|N,M|N-M]</code></td>
+                  <td>Commit pending edit blocks to disk (subset selection supported)</td>
+                </tr>
+                <tr>
+                  <td><code>/discard [N|N,M|N-M]</code></td>
+                  <td>Drop pending edits without writing</td>
+                </tr>
+                <tr>
+                  <td><code>/walk</code></td>
+                  <td>Step through pending edits one block at a time (git-add-p style)</td>
+                </tr>
+                <tr>
+                  <td><code>/undo</code></td>
+                  <td>Roll back the last applied edit batch</td>
+                </tr>
+                <tr>
+                  <td><code>/history</code></td>
+                  <td>List every edit batch this session</td>
+                </tr>
+                <tr>
+                  <td><code>/show [id]</code></td>
+                  <td>Dump a stored edit diff</td>
+                </tr>
+                <tr>
+                  <td><code>/commit "msg"</code></td>
+                  <td><code>git add -A &amp;&amp; git commit -m ...</code></td>
+                </tr>
+                <tr>
+                  <td><code>/mode &lt;review|auto|yolo&gt;</code></td>
+                  <td>Edit-gate mode. Shift+Tab cycles</td>
+                </tr>
+                <tr>
+                  <td><code>/plan [on|off]</code></td>
+                  <td>Toggle read-only plan mode. Submitted plans initially show a compact summary; press <code>Ctrl+P</code> in the plan confirmation modal to expand/collapse full details</td>
+                </tr>
+                <tr>
+                  <td><code>/checkpoint [name|list|forget]</code></td>
+                  <td>Snapshot every file the session has touched</td>
+                </tr>
+                <tr>
+                  <td><code>/restore &lt;name|id&gt;</code></td>
+                  <td>Roll back to a named checkpoint</td>
+                </tr>
+                <tr>
+                  <td><code>/cwd &lt;path&gt;</code> (<code>/sandbox</code>)</td>
+                  <td>Switch the workspace root mid-session</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="sl.h.jobs">Jobs (code mode)</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/jobs</code></td>
+                  <td>List background jobs</td>
+                </tr>
+                <tr>
+                  <td><code>/kill &lt;id&gt;</code></td>
+                  <td>Stop a background job (SIGTERM → SIGKILL)</td>
+                </tr>
+                <tr>
+                  <td><code>/logs &lt;id&gt; [lines]</code></td>
+                  <td>Tail a job's output (default 80 lines)</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="sl.h.advanced">Advanced</h3>
+            <table class="cmd-table">
+              <tbody>
+                <tr>
+                  <td><code>/pro [off]</code></td>
+                  <td>Arm v4-pro for the NEXT turn only</td>
+                </tr>
+                <tr>
+                  <td><code>/budget [usd|off]</code></td>
+                  <td>Session USD cap</td>
+                </tr>
+                <tr>
+                  <td><code>/search-engine &lt;mojeek|searxng&gt;</code> (<code>/se</code>)</td>
+                  <td>Switch web search backend</td>
+                </tr>
+                <tr>
+                  <td><code>/hooks [reload]</code></td>
+                  <td>List / reload hooks</td>
+                </tr>
+                <tr>
+                  <td><code>/permissions [list|add|remove|clear]</code></td>
+                  <td>Edit shell allowlist</td>
+                </tr>
+                <tr>
+                  <td><code>/dashboard [stop]</code></td>
+                  <td>Launch / stop the embedded web dashboard</td>
+                </tr>
+                <tr>
+                  <td><code>/loop &lt;interval&gt; &lt;prompt&gt;</code></td>
+                  <td>Auto-resubmit a prompt every interval</td>
+                </tr>
+                <tr>
+                  <td><code>/plans</code></td>
+                  <td>List active + archived plans</td>
+                </tr>
+                <tr>
+                  <td><code>/replay [N]</code></td>
+                  <td>Load an archived plan as a read-only Time Travel snapshot</td>
+                </tr>
+                <tr>
+                  <td><code>/update</code></td>
+                  <td>Show current vs latest version</td>
+                </tr>
+                <tr>
+                  <td><code>/exit</code> (<code>/quit</code>, <code>/q</code>)</td>
+                  <td>Quit the TUI</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="keyboard">
+            <h2 data-i18n="kb.title">Keyboard</h2>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.key">Key</th>
+                  <th data-i18n="th.what">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>Enter</code></td>
+                  <td>Submit the prompt</td>
+                </tr>
+                <tr>
+                  <td><code>Shift+Enter</code></td>
+                  <td>Insert a newline in the prompt</td>
+                </tr>
+                <tr>
+                  <td><code>↑</code> / <code>↓</code></td>
+                  <td>Scroll chat history (mouse wheel routes here too)</td>
+                </tr>
+                <tr>
+                  <td><code>Ctrl+P</code> / <code>Ctrl+N</code></td>
+                  <td>Previous / next prompt history · cursor up / down in a multi-line draft. In a submitted-plan confirmation modal, <code>Ctrl+P</code> expands/collapses full plan details</td>
+                </tr>
+                <tr>
+                  <td><code>Ctrl+A</code> / <code>Ctrl+E</code></td>
+                  <td>Jump to start / end of the current line</td>
+                </tr>
+                <tr>
+                  <td><code>Ctrl+W</code></td>
+                  <td>Delete the word before the cursor</td>
+                </tr>
+                <tr>
+                  <td><code>Ctrl+U</code></td>
+                  <td>Clear the entire prompt buffer</td>
+                </tr>
+                <tr>
+                  <td><code>Tab</code></td>
+                  <td>Complete @-mention · drill folder · accept slash command</td>
+                </tr>
+                <tr>
+                  <td><code>Shift+Tab</code></td>
+                  <td>Edit-gate: toggle review ↔ AUTO mode</td>
+                </tr>
+                <tr>
+                  <td><code>Esc</code></td>
+                  <td>Dismiss picker · abort the running model turn</td>
+                </tr>
+                <tr>
+                  <td><code>Ctrl+C</code></td>
+                  <td>Abort the running model turn (NOT copy — see clipboard)</td>
+                </tr>
+                <tr>
+                  <td><code>PgUp</code> / <code>PgDn</code></td>
+                  <td>Scroll chat history a page at a time. While plan details are expanded, scroll the bounded detail window</td>
+                </tr>
+                <tr>
+                  <td><code>End</code></td>
+                  <td>Jump chat to the most recent line</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="kb.h.editgate">Edit-gate (code mode)</h3>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.key">Key</th>
+                  <th data-i18n="th.what">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>y</code> / <code>n</code></td>
+                  <td>Accept / drop pending edits in the review modal</td>
+                </tr>
+                <tr>
+                  <td><code>Shift+Tab</code></td>
+                  <td>Toggle review ↔ AUTO (persisted across sessions)</td>
+                </tr>
+                <tr>
+                  <td><code>u</code></td>
+                  <td>Undo the last auto-applied batch (within the 5s banner)</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="mouse">
+            <h2 data-i18n="ms.title">Mouse</h2>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.action">Action</th>
+                  <th data-i18n="th.what">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Wheel</td>
+                  <td>Scrolls chat history (works on web / cloud / SSH terminals too)</td>
+                </tr>
+                <tr>
+                  <td>Drag</td>
+                  <td>Selects text natively — no modifier needed</td>
+                </tr>
+                <tr>
+                  <td>Right-click</td>
+                  <td>Terminal-native (e.g. paste menu on Windows Terminal)</td>
+                </tr>
+              </tbody>
+            </table>
+            <p data-i18n="ms.body">
+              Reasonix sets DECSET 1007 (alternate-scroll) only — wheel events translate to
+              ↑/↓ keypresses for the app, but native click/drag selection is left untouched.
+              Pass <code>--no-mouse</code> to opt out entirely.
+            </p>
+          </section>
+
+          <section id="copypaste">
+            <h2 data-i18n="cp.title">Copy / paste</h2>
+            <p data-i18n="cp.body">
+              The default path is <strong>terminal-native</strong>. Drag to select, then use
+              your terminal's normal copy keys:
+            </p>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.action">Action</th>
+                  <th>How</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Select text</td>
+                  <td>Drag — terminal-native (no modifier)</td>
+                </tr>
+                <tr>
+                  <td>Copy</td>
+                  <td><code>Ctrl+Shift+C</code> (Win / Linux) · <code>Cmd+C</code> (macOS) — or auto-copy-on-select if your terminal does it</td>
+                </tr>
+                <tr>
+                  <td>Paste</td>
+                  <td><code>Ctrl+V</code> or <code>Ctrl+Shift+V</code> (Win / Linux) · <code>Cmd+V</code> (macOS)</td>
+                </tr>
+                <tr>
+                  <td>Multi-line paste</td>
+                  <td>Bracketed paste — pastes stay one block, no auto-submit on intermediate newlines</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 data-i18n="cp.h.drag">When drag-select doesn't work</h3>
+            <p data-i18n="cp.body.drag">
+              In SSH / mosh / tmux, the alt-screen buffer prevents the terminal from extending
+              the selection past the visible viewport — there is no scrollback above the
+              alt-screen to drag into. Two fixes:
+            </p>
+            <ol>
+              <li data-i18n="cp.fix1">
+                <strong><code>/copy</code></strong> — open vim/tmux-style copy mode in-app.
+                Snapshots the current chat to a navigable buffer; <code>y</code> yanks to
+                clipboard via OSC 52 (with a temp-file fallback for terminals that don't
+                support it).
+              </li>
+              <li data-i18n="cp.fix2">
+                <strong><code>--no-alt-screen</code></strong> — render to shell scrollback
+                instead. Drag-select then works terminal-natively (the chat content is real
+                lines in the scrollback above your cursor). Trade-off: redraw can ghost on
+                resize.
+              </li>
+            </ol>
+
+            <h3 data-i18n="cp.h.copymode"><code>/copy</code> — copy mode keys</h3>
+            <table class="cmd-table">
+              <thead>
+                <tr>
+                  <th data-i18n="th.key">Key</th>
+                  <th data-i18n="th.what">What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>j</code> / <code>↓</code></td>
+                  <td>Cursor down one line</td>
+                </tr>
+                <tr>
+                  <td><code>k</code> / <code>↑</code></td>
+                  <td>Cursor up one line</td>
+                </tr>
+                <tr>
+                  <td><code>PgUp</code> / <code>PgDn</code></td>
+                  <td>Page up / down</td>
+                </tr>
+                <tr>
+                  <td><code>g</code> / <code>G</code></td>
+                  <td>Jump to top / bottom</td>
+                </tr>
+                <tr>
+                  <td><code>v</code></td>
+                  <td>Start (or cancel) selection at the cursor</td>
+                </tr>
+                <tr>
+                  <td><code>y</code> / <code>Enter</code></td>
+                  <td>Yank selection to clipboard, exit</td>
+                </tr>
+                <tr>
+                  <td><code>q</code> / <code>Esc</code></td>
+                  <td>Quit without yanking</td>
+                </tr>
+              </tbody>
+            </table>
+            <p data-i18n="cp.body.osc">
+              <code>y</code> with no active selection yanks just the current line. The yank
+              goes through OSC 52 first (works through SSH, mosh, tmux with
+              <code>set -g set-clipboard on</code>); content larger than 75 KB falls back to
+              a temp file whose path is printed on exit.
+            </p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <div>
+          <a class="brand" href="index.html" style="text-decoration:none; color:inherit">
+            <span class="brand-mark"></span>
+            <span class="brand-name"><b>DeepSeek-Reasonix</b></span>
+          </a>
+          <p style="color:var(--cream-mute); font-size:13px; margin-top:14px; line-height:1.65; max-width:340px">
+            DeepSeek-native AI coding agent for your terminal. Engineered around prefix-cache stability — leave it running.
+          </p>
+          <div style="display:flex; gap:10px; margin-top:18px">
+            <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener" aria-label="GitHub">GitHub</a>
+            <a class="btn btn-ghost btn-sm" href="https://github.com/esengine/DeepSeek-Reasonix/discussions" target="_blank" rel="noopener">Discussions</a>
+          </div>
+        </div>
+        <div>
+          <h5>Product</h5>
+          <ul>
+            <li><a href="index.html#install">CLI</a></li>
+            <li><a href="download.html">Desktop</a></li>
+            <li><a href="index.html#agents">Pillars</a></li>
+            <li><a href="index.html#config">Config</a></li>
+          </ul>
+        </div>
+        <div>
+          <h5>Community</h5>
+          <ul>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noopener">GitHub</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/discussions" target="_blank" rel="noopener">Discussions</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/issues" target="_blank" rel="noopener">Issues</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a></li>
+          </ul>
+        </div>
+        <div>
+          <h5>Resources</h5>
+          <ul>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix#readme" target="_blank" rel="noopener">README</a></li>
+            <li><a href="index.html#roadmap">Roadmap</a></li>
+            <li><a href="https://github.com/esengine/DeepSeek-Reasonix/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
+            <li><a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek Platform</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 esengine · MIT License</span>
+        <span class="spacer"></span>
+        <span>Independent open-source project · not affiliated with DeepSeek</span>
+        <span style="margin-left:18px">v0.42.0-3 · prerelease</span>
+      </div>
+    </footer>
+
+    <script src="i18n.js"></script>
+    <script src="cli-ref-i18n.js"></script>
+    <script src="motion.js"></script>
+  </body>
+</html>
