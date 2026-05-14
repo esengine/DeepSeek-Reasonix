@@ -845,6 +845,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         for await (const ev of rt.loop.step(text)) {
           for (const kev of rt.eventizer.consume(ev, rt.ctx)) emit(kev, tab.id);
+          // Memory tools mutate disk state behind the loop's back — the UI
+          // panel won't know until we re-emit. Without this the right-hand
+          // panel only updates on tab reopen.
+          if (ev.role === "tool" && (ev.toolName === "remember" || ev.toolName === "forget")) {
+            emitMemory(tab);
+          }
           if (tab.aborter?.signal.aborted) break;
         }
       } catch (err) {
