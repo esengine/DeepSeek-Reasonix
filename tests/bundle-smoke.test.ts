@@ -45,18 +45,23 @@ describe("bundled dist — tokenizer path resolution", () => {
   );
 
   (cliExists ? it : it.skip)(
-    'dist/cli/* keeps `from "ink"` external so users get the real package',
+    "dist/cli/* inlines runtime deps so the desktop sidecar can run without node_modules",
     async () => {
       const { readdirSync, readFileSync } = await import("node:fs");
       const distDir = resolve("dist/cli");
       const jsFiles = readdirSync(distDir).filter((f) => f.endsWith(".js"));
-      const inkImporters = jsFiles.filter((f) =>
-        /from\s*"ink"/.test(readFileSync(resolve(distDir, f), "utf8")),
-      );
+      const leakedImports = jsFiles.flatMap((f) => {
+        const body = readFileSync(resolve(distDir, f), "utf8");
+        const hits: string[] = [];
+        for (const pkg of ["commander", "ink", "undici"]) {
+          if (new RegExp(`from\\s*["']${pkg}["']`).test(body)) hits.push(`${f}:${pkg}`);
+        }
+        return hits;
+      });
       expect(
-        inkImporters.length,
-        `expected at least one dist/cli/*.js to import "ink" (found ${jsFiles.length} JS files)`,
-      ).toBeGreaterThan(0);
+        leakedImports,
+        `dist/cli/*.js still imports runtime deps from node_modules: ${leakedImports.join(", ")}`,
+      ).toEqual([]);
     },
   );
 
