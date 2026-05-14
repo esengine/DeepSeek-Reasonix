@@ -1,6 +1,7 @@
 import htm from "htm";
 import { h } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { isThirdPartyError } from "./bus-filter.js";
 
 const html = htm.bind(h);
 
@@ -29,10 +30,12 @@ export function reportAppError(error: unknown, source: string, info?: string): v
 
 window.addEventListener("error", (ev) => {
   if (!ev.error) return;
+  if (isThirdPartyError(ev.error, ev.filename)) return;
   reportAppError(ev.error, "window", ev.message);
 });
 
 window.addEventListener("unhandledrejection", (ev) => {
+  if (isThirdPartyError(ev.reason)) return;
   reportAppError(ev.reason, "promise");
 });
 
