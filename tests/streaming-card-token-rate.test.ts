@@ -46,15 +46,15 @@ describe("estimateLiveTokenCount", () => {
     const tokenizer = counter();
     const first = estimateLiveTokenCount("hello", "card-1", null, tokenizer.count);
     const grown = estimateLiveTokenCount(
-      `hello${"x".repeat(500)}`,
+      `hello${"x".repeat(1000)}`,
       "card-1",
       first.calibration,
       tokenizer.count,
     );
 
     expect(grown.exact).toBe(true);
-    expect(grown.tokens).toBe(1010);
-    expect(grown.calibration).toEqual({ cardId: "card-1", chars: 505, tokens: 1010 });
+    expect(grown.tokens).toBe(2010);
+    expect(grown.calibration).toEqual({ cardId: "card-1", chars: 1005, tokens: 2010 });
     expect(tokenizer.calls).toHaveLength(2);
   });
 
@@ -84,6 +84,6 @@ describe("estimateLiveTokenCount", () => {
 
     expect(tokenizer.calls.length).toBeLessThanOrEqual(20);
     expect(tokenizer.calls.length).toBeGreaterThan(1);
-    expect(tokenizer.calls.at(-1)).toHaveLength(9600);
+    expect(tokenizer.calls.at(-1)).toHaveLength(9100);
   });
 });

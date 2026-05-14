@@ -1,7 +1,7 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { clipToCells, wrapToCells } from "../../../frame/width.js";
+import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
@@ -10,6 +10,7 @@ import { PILL_MODEL, PILL_SECTION, Pill, modelBadgeFor } from "../primitives/Pil
 import { Spinner } from "../primitives/Spinner.js";
 import type { ReasoningCard as ReasoningCardData } from "../state/cards.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
+import { useIncrementalWrap } from "./useIncrementalWrap.js";
 
 const STREAMING_PREVIEW_LINES = 3;
 const SETTLED_HEAD_LINES = 2;
@@ -28,9 +29,10 @@ export function ReasoningCard({
   const cols = stdout?.columns ?? 80;
   const lineCells = Math.max(20, cols - 4);
 
-  const allLines = card.text.length > 0 ? card.text.split("\n") : [];
-  const isEmpty = !card.streaming && !card.aborted && allLines.length === 0;
-  const showBody = expanded && (allLines.length > 0 || card.streaming || isEmpty);
+  const wrapped = useIncrementalWrap(card.text, lineCells);
+  const visualLines = card.text.length === 0 ? [] : wrapped;
+  const isEmpty = !card.streaming && !card.aborted && card.text.length === 0;
+  const showBody = expanded && (card.text.length > 0 || card.streaming || isEmpty);
   const tone = card.aborted ? TONE.err : card.streaming ? TONE_ACTIVE.accent : TONE.accent;
 
   return (
@@ -40,9 +42,9 @@ export function ReasoningCard({
         (isEmpty ? (
           <EmptyHint />
         ) : card.streaming ? (
-          <StreamingPreview card={card} allLines={allLines} lineCells={lineCells} />
+          <StreamingPreview card={card} visualLines={visualLines} lineCells={lineCells} />
         ) : (
-          <SettledPreview card={card} allLines={allLines} lineCells={lineCells} />
+          <SettledPreview card={card} visualLines={visualLines} lineCells={lineCells} />
         ))}
     </Card>
   );
@@ -114,12 +116,11 @@ function headerDuration(card: ReasoningCardData): string {
 
 interface BodyProps {
   card: ReasoningCardData;
-  allLines: string[];
+  visualLines: string[];
   lineCells: number;
 }
 
-function StreamingPreview({ card, allLines, lineCells }: BodyProps): React.ReactElement {
-  const visualLines = allLines.flatMap((l) => wrapToCells(l, lineCells));
+function StreamingPreview({ card, visualLines, lineCells }: BodyProps): React.ReactElement {
   const visible = visualLines.slice(-STREAMING_PREVIEW_LINES);
   const hasOverflow = visualLines.length > visible.length;
   return (
@@ -136,9 +137,7 @@ function StreamingPreview({ card, allLines, lineCells }: BodyProps): React.React
   );
 }
 
-function SettledPreview({ card, allLines, lineCells }: BodyProps): React.ReactElement {
-  const visualLines = allLines.flatMap((l) => wrapToCells(l, lineCells));
-
+function SettledPreview({ card, visualLines, lineCells }: BodyProps): React.ReactElement {
   if (card.tokens >= XL_TOKEN_THRESHOLD) {
     const visible = visualLines.slice(-SETTLED_TAIL_LINES);
     const droppedLines = Math.max(0, visualLines.length - visible.length);

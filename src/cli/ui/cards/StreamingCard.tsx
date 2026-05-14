@@ -1,6 +1,6 @@
 import { Box, Text, useStdout } from "ink";
 import React, { useContext } from "react";
-import { clipToCells, wrapToCells } from "../../../frame/width.js";
+import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
 import { countTokens } from "../../../tokenizer.js";
 import { LiveExpandContext } from "../layout/LiveExpandContext.js";
@@ -13,6 +13,7 @@ import { Spinner } from "../primitives/Spinner.js";
 import type { StreamingCard as StreamingCardData } from "../state/cards.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 import { useSlowTick } from "../ticker.js";
+import { useIncrementalWrap } from "./useIncrementalWrap.js";
 
 /** Streaming preview tail length — bounded live region so chunks don't thrash whole-card layout. */
 const STREAMING_PREVIEW_LINES = 4;
@@ -21,7 +22,7 @@ const EXPANDED_MAX_LINES = 60;
 
 const MIN_ELAPSED_MS_FOR_RATE = 500;
 const MIN_TOKENS_FOR_RATE = 4;
-const LIVE_TOKEN_CALIBRATION_CHARS = 500;
+const LIVE_TOKEN_CALIBRATION_CHARS = 1000;
 const ESTIMATED_CHARS_PER_TOKEN = 4;
 
 export interface LiveTokenCalibration {
@@ -107,6 +108,8 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   // Frozen once `card.done` is true — settled cards render via Static.
   useSlowTick();
   const liveRate = useLiveTokenRate(card, !card.done && !card.aborted);
+  const lineCells = Math.max(20, cols - 4);
+  const visualLines = useIncrementalWrap(card.text, lineCells);
 
   const modelBadge = card.model ? modelBadgeFor(card.model) : null;
   const modelPill = modelBadge ? (
@@ -137,9 +140,6 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
     );
   }
 
-  const lineCells = Math.max(20, cols - 4);
-  const allLines = card.text.length > 0 ? card.text.split("\n") : [""];
-  const visualLines = allLines.flatMap((l) => wrapToCells(l, lineCells));
   const cap = expanded ? EXPANDED_MAX_LINES : STREAMING_PREVIEW_LINES;
   const visible = visualLines.slice(-cap);
   const droppedAbove = Math.max(0, visualLines.length - visible.length);
