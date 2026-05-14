@@ -175,16 +175,34 @@ fn main() {
             git_status
         ])
         .setup(|app| {
-            if std::env::var("REASONIX_DEVTOOLS").is_ok() {
-                #[cfg(debug_assertions)]
-                {
-                    use tauri::Manager;
-                    if let Some(w) = app.get_webview_window("main") {
-                        w.open_devtools();
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                // HiDPI fit: the JSON config asks for 1024x720 logical px.
+                // On Windows laptops at 200% scale (1920x1080 → 960x540
+                // effective logical px) that overflows the screen and the
+                // window opens partially off-canvas. Clamp to 90% of the
+                // monitor's available logical size whenever the configured
+                // size doesn't fit, then recenter.
+                if let Ok(Some(monitor)) = w.current_monitor() {
+                    let scale = monitor.scale_factor();
+                    let phys = monitor.size();
+                    let avail_w = phys.width as f64 / scale;
+                    let avail_h = phys.height as f64 / scale;
+                    let want_w = 1024_f64.min(avail_w * 0.9);
+                    let want_h = 720_f64.min(avail_h * 0.9);
+                    if want_w < 1024.0 || want_h < 720.0 {
+                        let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                            width: want_w,
+                            height: want_h,
+                        }));
+                        let _ = w.center();
                     }
                 }
+                if std::env::var("REASONIX_DEVTOOLS").is_ok() {
+                    #[cfg(debug_assertions)]
+                    w.open_devtools();
+                }
             }
-            let _ = app;
             Ok(())
         })
         .build(tauri::generate_context!())
