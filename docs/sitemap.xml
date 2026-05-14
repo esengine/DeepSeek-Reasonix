@@ -19,4 +19,9 @@
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html" />
   </url>
+  <url>
+    <loc>https://esengine.github.io/DeepSeek-Reasonix/download.html</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
 </urlset>

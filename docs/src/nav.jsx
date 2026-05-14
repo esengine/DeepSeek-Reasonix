@@ -13,6 +13,7 @@ function Nav({ active }) {
     { href: 'index.html#agents',   label: '原理' },
     { href: 'index.html#features', label: '特性' },
     { href: 'index.html#config',   label: '配置' },
+    { href: 'configuration.html',  label: 'Guide' },
     { href: 'download.html',       label: '下载', key: 'download' },
     { href: 'index.html#roadmap',  label: 'Roadmap' },
     { href: 'index.html#faq',      label: 'FAQ' },
