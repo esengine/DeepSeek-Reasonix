@@ -165,6 +165,22 @@ describe("ui reducer", () => {
     expect(s.status.cacheHit).toBeCloseTo(0.92);
   });
 
+  it("turn.end records promptTokens and remembers promptCap across turns", () => {
+    const s = run([
+      {
+        type: "turn.end",
+        usage: { prompt: 12_000, reason: 0, output: 200, cacheHit: 0.5, cost: 0 },
+        promptCap: 1_000_000,
+      },
+      {
+        type: "turn.end",
+        usage: { prompt: 48_000, reason: 0, output: 200, cacheHit: 0.5, cost: 0 },
+      },
+    ]);
+    expect(s.status.promptTokens).toBe(48_000);
+    expect(s.status.promptCap).toBe(1_000_000);
+  });
+
   it("turn.end + session.update sets all display fields", () => {
     // Full flow: a turn completes (updates cost/sessionCost), then the
     // App dispatches balance + balanceCurrency via session.update.

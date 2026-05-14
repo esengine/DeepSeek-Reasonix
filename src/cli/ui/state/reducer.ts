@@ -97,6 +97,8 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
           cost: event.usage.cost,
           sessionCost,
           cacheHit: event.usage.cacheHit,
+          promptTokens: event.usage.prompt,
+          promptCap: event.promptCap ?? state.status.promptCap,
         },
       };
     }

@@ -1034,6 +1034,7 @@ export const zhCN: TranslationSchema = {
     evt: " 事件",
     editsLabel: "编辑:",
     mcpLoading: "MCP",
+    ctx: "上下文",
   },
   editMode: {
     plan: "计划",

@@ -30,6 +30,10 @@ export interface StatusBar {
   balance?: number;
   balanceCurrency?: string;
   cacheHit: number;
+  /** Last-turn prompt tokens; drives the context-usage pill. */
+  promptTokens?: number;
+  /** Model context-window cap (denominator for the usage pill). */
+  promptCap?: number;
   countdownSeconds?: number;
   recording?: { sizeBytes: number; events: number; path: string };
   /** null → user is on a custom model that doesn't match any preset; pill falls back to the model id. */

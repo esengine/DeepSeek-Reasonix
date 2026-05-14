@@ -2,10 +2,13 @@ import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
+import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS } from "../../../telemetry/stats.js";
 import { VERSION } from "../../../version.js";
+import { formatTokens } from "../primitives.js";
 import { Countdown } from "../primitives/Countdown.js";
 import { useAgentState } from "../state/provider.js";
 import type { Mode, NetworkState, StatusBar } from "../state/state.js";
+import { GLYPH } from "../theme.js";
 import { FG, TONE, balanceColor, formatBalance, formatCost } from "../theme/tokens.js";
 
 export interface StatusBarConfig {
@@ -13,6 +16,7 @@ export interface StatusBarConfig {
   showSessionCost: boolean;
   showTurnCost: boolean;
   showCacheHit: boolean;
+  showCtxUsage: boolean;
   showVersion: boolean;
   showFeedbackHint: boolean;
 }
@@ -23,12 +27,16 @@ const WALLET_MIN_COLS = 90;
 const VERSION_MIN_COLS = 70;
 const FEEDBACK_HINT_MIN_COLS = 100;
 const PRESET_MIN_COLS = 60;
+const CTX_TOKENS_MIN_COLS = 90;
+const CTX_BAR_MIN_COLS = 110;
+const CTX_BAR_CELLS = 8;
 
 const DEFAULT_STATUS_BAR_CONFIG: StatusBarConfig = {
   showBalance: true,
   showSessionCost: true,
   showTurnCost: true,
   showCacheHit: true,
+  showCtxUsage: true,
   showVersion: true,
   showFeedbackHint: true,
 };
@@ -90,6 +98,15 @@ export function StatusRow({
             >{`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}</Text>
           </>
         )}
+        {statusBar.showCtxUsage && status.promptTokens !== undefined && status.promptTokens > 0 && (
+          <CtxUsagePill
+            tokens={status.promptTokens}
+            cap={
+              status.promptCap ?? DEEPSEEK_CONTEXT_TOKENS[session.model] ?? DEFAULT_CONTEXT_TOKENS
+            }
+            cols={cols}
+          />
+        )}
         {status.mcpLoading && status.mcpLoading.ready < status.mcpLoading.total && (
           <McpLoadingPill ready={status.mcpLoading.ready} total={status.mcpLoading.total} />
         )}
@@ -150,6 +167,47 @@ function shortModelLabel(model: string): string {
   if (model === "deepseek-v4-flash") return "flash";
   if (model === "deepseek-v4-pro") return "pro";
   return model.replace(/^deepseek-/, "");
+}
+
+function CtxUsagePill({
+  tokens,
+  cap,
+  cols,
+}: {
+  tokens: number;
+  cap: number;
+  cols: number;
+}): React.ReactElement {
+  const ratio = cap > 0 ? Math.min(1, tokens / cap) : 0;
+  const pct = Math.round(ratio * 100);
+  const color = ratio >= 0.8 ? TONE.err : ratio >= 0.5 ? TONE.warn : TONE.ok;
+  const showTokens = cols >= CTX_TOKENS_MIN_COLS;
+  const showBar = cols >= CTX_BAR_MIN_COLS;
+  const filled = Math.round(CTX_BAR_CELLS * ratio);
+  return (
+    <>
+      <Sep />
+      <Text color={FG.meta} wrap="truncate">{`${t("statusBar.ctx")} `}</Text>
+      {showBar && (
+        <>
+          <Text color={color} wrap="truncate">
+            {GLYPH.block.repeat(filled)}
+          </Text>
+          <Text color={FG.faint} wrap="truncate">
+            {GLYPH.shade1.repeat(CTX_BAR_CELLS - filled)}
+          </Text>
+          <Text wrap="truncate"> </Text>
+        </>
+      )}
+      <Text color={color} wrap="truncate">{`${pct}%`}</Text>
+      {showTokens && (
+        <Text
+          color={FG.faint}
+          wrap="truncate"
+        >{` · ${formatTokens(tokens)}/${formatTokens(cap)}`}</Text>
+      )}
+    </>
+  );
 }
 
 function McpLoadingPill({

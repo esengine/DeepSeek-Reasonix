@@ -114,6 +114,7 @@ describe("StatusRow — statusBar config toggles", () => {
       showSessionCost: true,
       showTurnCost: true,
       showCacheHit: true,
+      showCtxUsage: true,
       showVersion: true,
       showFeedbackHint: true,
       ...config,
@@ -191,6 +192,29 @@ describe("StatusRow — statusBar config toggles", () => {
     );
     expect(text).toContain("⛁");
     expect(text).toContain("spent");
+  });
+
+  it("ctx pill renders pct + tokens once promptTokens is known", async () => {
+    const text = await renderStatusRowWithConfig(
+      { cost: 0, promptTokens: 720_000, promptCap: 1_000_000 } as any,
+      {},
+    );
+    expect(text).toContain("ctx");
+    expect(text).toContain("72%");
+    expect(text).toContain("703K/977K");
+  });
+
+  it("showCtxUsage=false hides ctx pill", async () => {
+    const text = await renderStatusRowWithConfig(
+      { cost: 0, promptTokens: 720_000, promptCap: 1_000_000 } as any,
+      { showCtxUsage: false },
+    );
+    expect(text).not.toContain("ctx ");
+  });
+
+  it("ctx pill hidden when promptTokens is unset", async () => {
+    const text = await renderStatusRowWithConfig({ cost: 0 } as any, {});
+    expect(text).not.toContain("ctx ");
   });
 });
 

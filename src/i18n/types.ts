@@ -375,6 +375,8 @@ export interface TranslationSchema {
     editsLabel: string;
     /** Label for the MCP-handshake progress pill (rendered as `⌁ MCP n/m`). */
     mcpLoading: string;
+    /** Word used in the context-usage pill (rendered as `ctx 72% · 144K/200K`). */
+    ctx: string;
   };
   editMode: {
     plan: string;

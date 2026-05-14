@@ -1088,6 +1088,7 @@ export const EN: TranslationSchema = {
     evt: " evt",
     editsLabel: "edits:",
     mcpLoading: "MCP",
+    ctx: "ctx",
   },
   editMode: {
     plan: "PLAN MODE",

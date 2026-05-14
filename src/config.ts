@@ -117,6 +117,7 @@ export interface ReasonixConfig {
     showSessionCost?: boolean;
     showTurnCost?: boolean;
     showCacheHit?: boolean;
+    showCtxUsage?: boolean;
     showVersion?: boolean;
     showFeedbackHint?: boolean;
   };
