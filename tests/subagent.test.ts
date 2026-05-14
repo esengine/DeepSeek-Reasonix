@@ -424,6 +424,43 @@ describe("registerSubagentTool", () => {
     expect(typeof parsed.resume_session).toBe("string");
   });
 
+  it("paused result carries partial_summary so the parent can decide informed", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    const responses: FakeResponseShape[] = [
+      ...makeToolCallResponses(2),
+      {
+        content:
+          "Read 2 files, mapped the auth flow; still need to wire the refresh-token path; blocked on the token-store interface choice.",
+      },
+    ];
+    const client = makeClient(responses);
+    registerSubagentTool(parent, { client });
+    const out = await parent.dispatch(
+      "spawn_subagent",
+      JSON.stringify({ task: "trace the auth flow", max_iters: 2 }),
+    );
+    const parsed = JSON.parse(out);
+    expect(parsed.paused).toBe(true);
+    expect(parsed.partial_summary).toMatch(/Read 2 files/);
+    expect(parsed.partial_summary).toMatch(/blocked/);
+  });
+
+  it("paused result still works when the summary call returns empty content", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    const responses: FakeResponseShape[] = [...makeToolCallResponses(2), { content: "" }];
+    const client = makeClient(responses);
+    registerSubagentTool(parent, { client });
+    const out = await parent.dispatch(
+      "spawn_subagent",
+      JSON.stringify({ task: "loop forever", max_iters: 2 }),
+    );
+    const parsed = JSON.parse(out);
+    expect(parsed.paused).toBe(true);
+    expect(parsed.partial_summary).toBeUndefined();
+  });
+
   it("passes large max_iters values through without clamping", async () => {
     const parent = new ToolRegistry();
     parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
@@ -546,9 +583,9 @@ describe("registerSubagentTool", () => {
 
   it("appends a remaining-budget hint to tool results within 3 iters of the cap", async () => {
     // Drive 5 tool calls. The augmenter appends a hint starting at iter 2
-    // (remaining=3). With pause-on-budget the loop ends at iter 4 without
-    // a sixth model call, so the model only sees results 1-4 (the 5th
-    // result lands in the session but isn't sent because the loop paused).
+    // (remaining=3). After iter 5 the loop pauses; the partial-summary call
+    // (one extra no-tools fetch) then sees all 5 results in the session —
+    // including the iter-5 "0 of 5 left — finalize NOW" form.
     const responses = makeToolCallResponses(5);
     const innerFetch = fakeFetch(responses);
     const seenToolResults: string[] = [];
@@ -567,14 +604,15 @@ describe("registerSubagentTool", () => {
     parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
     registerSubagentTool(parent, { client, maxToolIters: 5 });
     await parent.dispatch("spawn_subagent", JSON.stringify({ task: "go" }));
-    expect(seenToolResults.length).toBeGreaterThanOrEqual(4);
+    expect(seenToolResults.length).toBeGreaterThanOrEqual(5);
     const unique = Array.from(new Set(seenToolResults));
-    expect(unique).toHaveLength(4);
+    expect(unique).toHaveLength(5);
     expect(unique[0]).not.toMatch(/budget:/);
     expect(unique[0]).toBe("noop-result");
     expect(unique[1]).toMatch(/\[budget: 3 of 5 tool calls left/);
     expect(unique[2]).toMatch(/\[budget: 2 of 5 tool calls left/);
     expect(unique[3]).toMatch(/\[budget: 1 of 5 tool call left/);
+    expect(unique[4]).toMatch(/\[budget: 0 of 5 tool calls left — finalize NOW/);
   });
 });
 

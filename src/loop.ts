@@ -19,7 +19,11 @@ import {
   looksLikePartialEscalationMarker,
   parseEscalationMarker,
 } from "./loop/escalation.js";
-import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "./loop/force-summary.js";
+import {
+  type ForceSummaryContext,
+  forceSummaryAfterIterLimit,
+  summarizePartialProgress,
+} from "./loop/force-summary.js";
 import {
   fixToolCallPairing,
   healLoadedMessages,
@@ -1228,12 +1232,14 @@ export class CacheFirstLoop {
     // SOMETHING. Subagents → emit `paused`, leaving session messages
     // intact so the parent can resume by passing the session name back.
     if (this.onIterBudgetExhausted === "pause") {
+      const partial = await summarizePartialProgress(this.summaryContext());
       yield {
         turn: this._turn,
         role: "paused",
         content: "",
         sessionName: this.sessionName ?? undefined,
         pausedAtIter: this.maxToolIters,
+        partialSummary: partial?.summary,
       };
       yield { turn: this._turn, role: "done", content: "" };
       return;

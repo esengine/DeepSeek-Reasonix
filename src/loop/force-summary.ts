@@ -7,6 +7,9 @@ import { buildAssistantMessage } from "./messages.js";
 import { stripHallucinatedToolMarkup, thinkingModeForModel } from "./thinking.js";
 import type { LoopEvent } from "./types.js";
 
+const PAUSE_SUMMARY_MODEL = "deepseek-v4-flash";
+const PAUSE_SUMMARY_EFFORT: "high" | "max" = "high";
+
 export type ForceSummaryReason = "budget" | "aborted" | "context-guard" | "stuck";
 
 export interface ForceSummaryContext {
@@ -74,5 +77,32 @@ export async function* forceSummaryAfterIterLimit(
       error: t("summary.failedAfterReason", { label, message: (err as Error).message }),
     };
     yield { turn: ctx.turn, role: "done", content: "" };
+  }
+}
+
+/** One-shot no-tools summary of progress / remaining / blockers; does not persist, so the resumed child stays clean. Returns null on empty/failed responses — pause still works without it. */
+export async function summarizePartialProgress(
+  ctx: ForceSummaryContext,
+): Promise<{ summary: string; stats: TurnStats } | null> {
+  try {
+    const messages = ctx.buildMessages();
+    messages.push({
+      role: "user",
+      content:
+        "You're being paused at a checkpoint, not stopped. In 3-6 sentences of plain prose, tell the parent agent: (1) what you accomplished so far, (2) what's still left, (3) any blockers or open questions. Be concrete — mention specific files / functions / tool results — so the parent can decide whether to resume you or take over. Do NOT emit any tool calls, function-call markup, DSML invocations, or SEARCH/REPLACE edit blocks — they will be silently discarded. Just plain text.",
+    });
+    const resp = await ctx.client.chat({
+      model: PAUSE_SUMMARY_MODEL,
+      messages,
+      signal: ctx.signal,
+      thinking: thinkingModeForModel(PAUSE_SUMMARY_MODEL),
+      reasoningEffort: PAUSE_SUMMARY_EFFORT,
+    });
+    const cleaned = stripHallucinatedToolMarkup(resp.content?.trim() ?? "");
+    if (!cleaned) return null;
+    const stats = ctx.recordStats(PAUSE_SUMMARY_MODEL, resp.usage ?? new Usage());
+    return { summary: cleaned, stats };
+  } catch {
+    return null;
   }
 }

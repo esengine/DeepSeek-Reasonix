@@ -42,4 +42,6 @@ export interface LoopEvent {
   sessionName?: string;
   /** Set on `role === "paused"` — iter count consumed before pausing. */
   pausedAtIter?: number;
+  /** Set on `role === "paused"` — one-shot no-tools summary of progress / remaining / blockers, for the parent's resume decision. */
+  partialSummary?: string;
 }

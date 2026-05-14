@@ -78,6 +78,8 @@ export interface SubagentResult {
   paused?: boolean;
   /** Session name the caller passes back as `resume_session` to continue. Set whenever `paused` is true. */
   pausedSession?: string;
+  /** Subagent's own report of progress / remaining / blockers at the pause checkpoint — only set when paused. */
+  partialSummary?: string;
 }
 
 export interface SubagentToolOptions {
@@ -270,6 +272,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   let toolIter = 0;
   let summarisingEmitted = false;
   let paused = false;
+  let partialSummary: string | undefined;
   // Resume: tell the model the budget refreshed — without this it reads prior "finalize NOW" hints as still in force and refuses to keep calling tools.
   const taskForLoop = opts.resumeSession
     ? `[Resume: your tool-call budget has been refreshed with ${maxToolIters} new calls. Earlier "wrap up" / "finalize NOW" budget hints in this conversation referred to the previous window — they no longer apply. Continue the work you were given.]\n\n${opts.task}`
@@ -319,6 +322,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
       }
       if (ev.role === "paused") {
         paused = true;
+        if (ev.partialSummary) partialSummary = ev.partialSummary;
       }
     }
   } catch (err) {
@@ -379,6 +383,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     usage,
     paused: paused || undefined,
     pausedSession: paused ? sessionName : undefined,
+    partialSummary: paused ? partialSummary : undefined,
   };
 }
 
@@ -404,7 +409,8 @@ export function formatSubagentResult(r: SubagentResult): string {
       tool_iters: r.toolIters,
       elapsed_ms: r.elapsedMs,
       cost_usd: r.costUsd,
-      note: `Subagent reached its pause-every interval (${r.toolIters} tool calls) without producing a final answer. To continue from where it left off, call spawn_subagent again with resume_session="${r.pausedSession}" (the task arg becomes a continuation nudge — e.g. "finish what you started"). To accept the partial work, ignore this and proceed with what you already know.`,
+      partial_summary: r.partialSummary,
+      note: `Subagent reached its pause-every interval (${r.toolIters} tool calls) without producing a final answer. Read partial_summary above to see what was done / left / blocked, then decide: resume by calling spawn_subagent again with resume_session="${r.pausedSession}" (the task arg becomes a continuation nudge — e.g. "finish what you started"), or accept the partial work and proceed with what you already know.`,
     });
   }
   if (!r.success) {
