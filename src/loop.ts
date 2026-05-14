@@ -778,6 +778,18 @@ export class CacheFirstLoop {
             thinking: thinkingModeForModel(callModel),
             reasoningEffort: this.reasoningEffort,
           })) {
+            // DeepSeek transition chunks carry both reasoning_content and
+            // content; emit reasoning first so consumers can merge
+            // consecutive same-kind segments instead of fragmenting.
+            if (chunk.reasoningDelta) {
+              reasoningContent += chunk.reasoningDelta;
+              yield {
+                turn: this._turn,
+                role: "assistant_delta",
+                content: "",
+                reasoningDelta: chunk.reasoningDelta,
+              };
+            }
             if (chunk.contentDelta) {
               assistantContent += chunk.contentDelta;
               if (bufferForEscalation && !escalationBufFlushed) {
@@ -810,15 +822,6 @@ export class CacheFirstLoop {
                   content: chunk.contentDelta,
                 };
               }
-            }
-            if (chunk.reasoningDelta) {
-              reasoningContent += chunk.reasoningDelta;
-              yield {
-                turn: this._turn,
-                role: "assistant_delta",
-                content: "",
-                reasoningDelta: chunk.reasoningDelta,
-              };
             }
             if (chunk.toolCallDelta) {
               const d = chunk.toolCallDelta;

@@ -1887,6 +1887,49 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     expect(deltas[deltas.length - 1]!.chars).toBeGreaterThan(deltas[0]!.chars!);
   });
 
+  it("yields reasoning before content when a chunk carries both fields", async () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: (async (_url: any, _init: any) => {
+        const frames = [
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "I" } }] })}\n\n`,
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "'m thinking", content: "Let" } }] })}\n\n`,
+          `data: ${JSON.stringify({ choices: [{ delta: { content: " me reply" } }] })}\n\n`,
+          `data: ${JSON.stringify({ choices: [{ finish_reason: "stop", delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 1 } })}\n\n`,
+          "data: [DONE]\n\n",
+        ];
+        const body = new ReadableStream({
+          start(ctrl) {
+            for (const f of frames) ctrl.enqueue(new TextEncoder().encode(f));
+            ctrl.close();
+          },
+        });
+        return new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: true,
+      maxToolIters: 1,
+      autoEscalate: false,
+    });
+
+    const channels: Array<"reasoning" | "content"> = [];
+    for await (const ev of loop.step("hi")) {
+      if (ev.role === "assistant_delta") {
+        channels.push(ev.reasoningDelta ? "reasoning" : "content");
+      }
+      if (ev.role === "done") break;
+    }
+
+    expect(channels).toEqual(["reasoning", "reasoning", "content", "content"]);
+  });
+
   it("does not emit a red error event when the API call is aborted mid-flight", async () => {
     // Reproduces the reported "error This operation was aborted" UX
     // bug: when App.tsx calls loop.abort() to switch to a queued
