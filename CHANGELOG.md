@@ -3,6 +3,165 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] — 2026-05-14
+
+**Headline:** Desktop client graduates — `v0.42.0-*` prereleases hardened
+the bundle pipeline (sync-from-tag versioning, signed Windows + signed
++ notarized macOS, Linux deb/AppImage, bundled-Node sidecar, R2-mirrored
+installers reachable from the new GitHub Pages landing), and 0.43.0 is
+the first stable cut where the installer is the recommended path for
+non-Node users. The subagent loop turns its iteration cap from a hard
+budget into a checkpoint cadence — pause/resume lets long jobs survive
+restarts, and the cap goes 32 → 256 (validated end-to-end on real API
+runs). Skills pick up a `max-iters` frontmatter knob so per-skill budget
+overrides don't need a config edit, and `/skill` arg picker
+autocompletes skill names. The CLI gets `--profile` for V8 CPU profiles
+(send the file with a perf bug report; no instrumentation needed). On
+the daily-driver side: `/btw` arg picker and `/skill` autocomplete in
+the slash menu, a context-usage pill in the TUI status row, full i18n
+sweep (settings UI, dashboard tool descriptions, residual hardcoded
+strings), and ~20 desktop UX fixes (HiDPI window clamping, @-mention
+drag-drop + tree picker, font scale + family pickers, language picker
+synced to `<html lang>`, theme toggle, skill-running indicator, memory
+panel mid-turn refresh, plan-checkpoint modal in dashboard, and several
+keyboard / pause-state regressions caught in the field).
+
+**Note:** 0.41.0's `ReadOnlyLoopTracker` (auto-escalate flash → pro on
+read-only sequences) is removed in 0.43.0 — the heuristic fired on
+legitimate skim-mode reads and the cost ceiling didn't justify the
+behavior change. Preset escalation now happens only on explicit
+`/preset` or `--auto-escalate`. (#860)
+
+**Features:**
+
+- feat(subagent): pause/resume on the subagent loop. The iteration cap
+  is now a checkpoint cadence — when it hits, the loop persists state
+  (including `partial_summary` in the paused result) and a follow-up
+  call resumes from there. Cap raised 32 → 256, validated end-to-end
+  against the real API. (#822, #823, #838, #839)
+- feat(skills): `max-iters` frontmatter on skill files raises the
+  subagent tool budget for that skill only — no config edit, no global
+  bump. (#791)
+- feat(cli): `--profile <path>` records a V8 CPU profile for the
+  session and writes it on exit (flushed before `useQuit`'s
+  `process.exit` so the file actually lands). Attach to perf bug
+  reports without rebuilding with instrumentation. (#846, #847)
+- feat(slash): `/skill` arg picker autocompletes skill names. (#805)
+- feat(tui): context-usage pill in the status row — see remaining
+  context budget at a glance instead of doing the math from cache
+  hit %. (#828, #837)
+- feat(web): landing + download site, ported from the design mockup
+  and served from `docs/` via GitHub Pages. Installer links resolve to
+  the R2-mirrored bundles. (#815, #817)
+- feat(desktop): @-mention UX — drag-drop files, tree picker, and a
+  TTL'd file index so large repos don't re-walk on every keystroke.
+  (#826)
+- feat(desktop): localize settings UI; language picker syncs
+  `<html lang>` so the OS-level locale fall-through works. (#841,
+  #842)
+- feat(desktop): font scale slider + family picker, with API key /
+  base URL always visible in general settings (was hidden behind a
+  toggle that surprised first-run users). (#877, #879)
+- feat(desktop): visible "skill running" indicator on the composer
+  while a user skill executes — no more silent waits when a skill
+  takes 10+ seconds. (#884)
+- feat(i18n): residual hardcoded CLI + desktop strings extracted into
+  the i18n system; dashboard tool descriptions translated to zh-CN.
+  (#850, #858)
+- feat(skills): `/btw` and `/search-engine` zh-CN keys filled; `/help`
+  hanging-indent wrap fixed for long arg lists. (#875)
+
+**Fixes:**
+
+- fix(desktop): catch unknown `PauseKind` in the IPC bridge so the
+  agent loop doesn't silently hang when the desktop ships ahead of a
+  new pause variant. (#873)
+- fix(desktop): per-tab keyboard shortcuts gate on `active` — a
+  background tab no longer reacts to global hotkeys meant for the
+  foreground session. (#874)
+- fix(desktop): bundled CLI loads on installed targets (was looking
+  for the dev path); CDN fonts dropped in favor of the @fontsource
+  bundle so first paint works offline. (#806)
+- fix(desktop): kill the bundled Node child on Tauri exit — added
+  `rpc_kill` so the front-end can request a clean shutdown. (#792)
+- fix(desktop): clamp the initial window to fit HiDPI / small
+  monitors — startup no longer opens off-screen on 1366×768 laptops.
+  (#833)
+- fix(desktop): refresh the memory panel mid-turn after `remember` /
+  `forget` — the right-panel was stale until the next user input.
+  (#829)
+- fix(desktop): @-mention UX — surface user skills in the `/`
+  autocomplete popup; normalize workspace path so the session sidebar
+  filter matches sessions opened from a different cwd casing. (#881,
+  #883)
+- fix(desktop): wire `path_access` gate and scope the right-panel to
+  the active session — cross-session leakage on workdir switch.
+  (#787)
+- fix(desktop): composer-foot overflows on narrow center column.
+  (cfd9db2)
+- fix(desktop): honor preset `autoEscalate` when building the loop —
+  was always reading the global default. (#819)
+- fix(loop): preserve skill bodies verbatim across context fold — a
+  fold that cut into a skill body could drop the body's leading
+  fence, breaking the next subagent run. (#871)
+- fix(loop): yield reasoning before content so transition chunks
+  don't fragment — long reasoning runs no longer get split across two
+  message bubbles. (#859)
+- fix(tui): drop ESC-stripped SGR mouse reports instead of inserting
+  them as keypresses. (#872)
+- fix(tui): strip bidi + zero-width controls from pasted text — RTL
+  override and zero-width joiners no longer survive the round-trip.
+  (#876)
+- fix(shell): route `2>nul` and `2>/dev/null` to the OS null device
+  cross-platform, so the same shell line works in WSL and Windows
+  cmd. (#821)
+- fix(code): honor the configured preset instead of hardcoding flash.
+  (#824)
+- fix(cli): route bare project launches (`reasonix` with no
+  subcommand, in a project directory) to `code` mode. (#812)
+- fix(policy): `--yolo` bypasses `path_access` too, parity with the
+  shell `allowAll` shortcut. (#786)
+- fix(dashboard): plans API timed out on users with many sessions —
+  switched to a paginated query + cache. (#880)
+- fix(dashboard): broadcast plan-checkpoint pause so the web UI
+  actually shows the modal (was only firing in the desktop). (#832,
+  #840)
+- fix(dashboard): swallow third-party-origin errors in the global
+  overlay — extension scripts no longer surface as Reasonix crashes.
+  (#825)
+
+**Polish / refactor:**
+
+- chore(desktop): theme toggle in settings; deduplicate the settings
+  entry point so the dialog renders the same component everywhere.
+  (#852)
+- chore(desktop): drop the fake traffic-light dots from the titlebar
+  — they didn't wire to any window controls and read as broken on
+  Linux. (#830, #831)
+- perf(desktop): paint the UI shell before `buildCodeToolset`
+  finishes — first frame ~200 ms earlier on cold start. (#836)
+- perf(desktop): memoize the message list so historical messages skip
+  re-renders on each new chunk. (#844, #845)
+- perf(ui): incremental wrap cache for streaming cards — long
+  reasoning blocks no longer re-wrap from scratch on every chunk.
+  (#800)
+- chore(release): sync desktop version from tag (single source of
+  truth for tauri.conf.json + Cargo.toml + desktop/package.json), set
+  minimum CSP. (#789)
+- ci(release): split the bundle step so unsigned builds skip the
+  codesign envs; expose secret presence via job-level env so step
+  `if:` can read it; pass `GITHUB_TOKEN` to tauri-action; switch
+  macOS to universal-apple-darwin and drop the macos-13 shard
+  (queue waits ran to hours). (#794, #795, #796, #799)
+- ci(release): mirror published releases to R2 (Gitee mirror tried
+  for ~6 fixes, dropped — 90 MB cap, 200+null on missing tags, 3-min
+  timeout per upload all stacked up; R2 is enough). (#804, #808,
+  #809, #810, #811, #813, #814)
+- docs: render CLI reference and architecture pages in-site; repoint
+  configuration CTAs at the new in-site pages. (#848, 06bae63)
+- docs(readme): announce the desktop client (prerelease at the time);
+  install instructions. (#788, #793)
+
 ## [0.41.0] — 2026-05-13
 
 **Headline:** ACP graduates — three stages of work on the headless
