@@ -28,6 +28,7 @@ import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
 import { KeystrokeProvider } from "../ui/keystroke-context.js";
+import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
   type McpLifecycleNotice,
@@ -336,6 +337,9 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     }
   }
 
+  const rustRendererActive = process.env.REASONIX_RENDERER === "rust";
+  const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
+
   const { waitUntilExit } = render(
     <Root
       initialKey={initialKey}
@@ -353,6 +357,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       qqErrorRef={qqErrorRef}
     />,
     {
+      stdout: inkStdout,
       exitOnCtrlC: true,
       // patchConsole:false — winpty/MINTTY redraw-glitch source.
       patchConsole: false,
@@ -365,7 +370,8 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       // Default true — alt-screen is the only mode without scrollback-
       // reflow ghosting. `--no-alt-screen` opts back into scrollback mode
       // for users who need chat output preserved in shell history on exit.
-      alternateScreen: opts.altScreen !== false,
+      // Off when the Rust child owns the terminal — it runs its own alt-screen.
+      alternateScreen: !rustRendererActive && opts.altScreen !== false,
     },
   );
   try {

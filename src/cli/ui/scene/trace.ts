@@ -81,7 +81,7 @@ function rendererCommand(): readonly string[] {
       // fall through to default
     }
   }
-  return [...DEFAULT_COMMAND, "--", "--decode-only"];
+  return [...DEFAULT_COMMAND];
 }
 
 function truncate(path: string): void {
