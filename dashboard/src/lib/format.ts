@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.js";
+
 export function fmtUsd(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
   if (n === 0) return "$0";
@@ -59,9 +61,9 @@ export function fmtRelativeTime(iso: string | number | null | undefined): string
   const ms = typeof iso === "number" ? iso : Date.parse(iso);
   if (!Number.isFinite(ms)) return "—";
   const dSec = (Date.now() - ms) / 1000;
-  if (dSec < 60) return "just now";
-  if (dSec < 3600) return `${Math.floor(dSec / 60)}m ago`;
-  if (dSec < 86400) return `${Math.floor(dSec / 3600)}h ago`;
-  if (dSec < 30 * 86400) return `${Math.floor(dSec / 86400)}d ago`;
+  if (dSec < 60) return t("fmt.justNow");
+  if (dSec < 3600) return t("fmt.minutesAgo", { n: Math.floor(dSec / 60) });
+  if (dSec < 86400) return t("fmt.hoursAgo", { n: Math.floor(dSec / 3600) });
+  if (dSec < 30 * 86400) return t("fmt.daysAgo", { n: Math.floor(dSec / 86400) });
   return new Date(ms).toISOString().slice(0, 10);
 }

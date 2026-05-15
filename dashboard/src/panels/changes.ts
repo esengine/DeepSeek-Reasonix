@@ -1,56 +1,98 @@
-import { h } from "preact";
-import { useState, useCallback, useEffect, useRef } from "preact/hooks";
-import htm from "htm";
 import hljs from "highlight.js/lib/common";
-import { api, TOKEN } from "../lib/api.js";
-import { showToast } from "../lib/bus.js";
-import { ChatMessage, ChatMsg, ToolCard } from "../components/chat-internals.js";
-// ChatStatusBar — inlined (mirrors chat.ts pattern)
-import { getFileIcon, useFileTreeState, useProjectTree, type OpenFile, type TreeNode } from "../lib/file-tree.js";
-import { useLineComments, type LineComment, type LineCommentDraft } from "../lib/line-comments.js";
-import { useReviewDiffs } from "../lib/review-diffs.js";
+import htm from "htm";
+import { h } from "preact";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { ChatMessage, type ChatMsg, ToolCard } from "../components/chat-internals.js";
 import { t, useLang } from "../i18n/index.js";
+import { TOKEN, api } from "../lib/api.js";
+import { showToast } from "../lib/bus.js";
 import { parseHunks } from "../lib/diff-parser.js";
+// ChatStatusBar — inlined (mirrors chat.ts pattern)
+import {
+  type OpenFile,
+  type TreeNode,
+  getFileIcon,
+  useFileTreeState,
+  useProjectTree,
+} from "../lib/file-tree.js";
+import { type LineComment, type LineCommentDraft, useLineComments } from "../lib/line-comments.js";
+import { useReviewDiffs } from "../lib/review-diffs.js";
 
 const html = htm.bind(h);
 
 // Diff rendering helpers — render patch to HTML, bypassing Preact VDOM
-interface DE { kind: "context" | "ins" | "del"; text: string }
-interface DP { left: string | null; right: string | null; kind: "context" | "change" | "del" | "ins" }
+interface DE {
+  kind: "context" | "ins" | "del";
+  text: string;
+}
+interface DP {
+  left: string | null;
+  right: string | null;
+  kind: "context" | "change" | "del" | "ins";
+}
 
 function escapeAttr(s: string): string {
-  return s.replace(/["&<>]/g, (c) => ({ '"': "&quot;", "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
+  return s.replace(
+    /["&<>]/g,
+    (c) => ({ '"': "&quot;", "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!,
+  );
 }
 
 function lineDiff(a: string[], b: string[]): DE[] {
-  const m = a.length, n = b.length;
+  const m = a.length,
+    n = b.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
-  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
-    dp[i]![j] = a[i - 1] === b[j - 1] ? dp[i - 1]![j - 1]! + 1 : Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
-  const out: DE[] = []; let i = m, j = n;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i]![j] =
+        a[i - 1] === b[j - 1] ? dp[i - 1]![j - 1]! + 1 : Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+  const out: DE[] = [];
+  let i = m,
+    j = n;
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) { out.push({ kind: "context", text: a[i - 1]! }); i--; j--; }
-    else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) { out.push({ kind: "ins", text: b[j - 1]! }); j--; }
-    else { out.push({ kind: "del", text: a[i - 1]! }); i--; }
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+      out.push({ kind: "context", text: a[i - 1]! });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
+      out.push({ kind: "ins", text: b[j - 1]! });
+      j--;
+    } else {
+      out.push({ kind: "del", text: a[i - 1]! });
+      i--;
+    }
   }
   return out.reverse();
 }
 
 function pairDiffRows(diff: DE[]): DP[] {
-  const rows: DP[] = []; let k = 0;
+  const rows: DP[] = [];
+  let k = 0;
   while (k < diff.length) {
     const e = diff[k]!;
-    if (e.kind === "context") { rows.push({ left: e.text, right: e.text, kind: "context" }); k++; continue; }
-    const d: string[] = [], ins: string[] = [];
+    if (e.kind === "context") {
+      rows.push({ left: e.text, right: e.text, kind: "context" });
+      k++;
+      continue;
+    }
+    const d: string[] = [],
+      ins: string[] = [];
     while (k < diff.length && diff[k]!.kind === "del") d.push(diff[k]!.text), k++;
     while (k < diff.length && diff[k]!.kind === "ins") ins.push(diff[k]!.text), k++;
     const p = Math.max(d.length, ins.length);
-    for (let i = 0; i < p; i++) rows.push({ left: d[i] ?? null, right: ins[i] ?? null, kind: d[i] != null && ins[i] != null ? "change" : d[i] != null ? "del" : "ins" });
+    for (let i = 0; i < p; i++)
+      rows.push({
+        left: d[i] ?? null,
+        right: ins[i] ?? null,
+        kind: d[i] != null && ins[i] != null ? "change" : d[i] != null ? "del" : "ins",
+      });
   }
   return rows;
 }
 
-function hE(s: string): string { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function hE(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 function renderDiffHtml(patch: string, style: "unified" | "split"): string {
   const hunks = parseHunks(patch);
@@ -68,25 +110,35 @@ function renderDiffHtml(patch: string, style: "unified" | "split"): string {
     return html;
   }
   // Split
-  const oldLines: string[] = [], newLines: string[] = [];
+  const oldLines: string[] = [],
+    newLines: string[] = [];
   for (const hunk of hunks) {
     for (const line of hunk.lines) {
-      if (line.type === "ctx") { oldLines.push(line.content); newLines.push(line.content); }
-      else if (line.type === "del") oldLines.push(line.content);
+      if (line.type === "ctx") {
+        oldLines.push(line.content);
+        newLines.push(line.content);
+      } else if (line.type === "del") oldLines.push(line.content);
       else newLines.push(line.content);
     }
   }
   const diff = lineDiff(oldLines, newLines);
   const rows = pairDiffRows(diff);
-  let oldNum = 1, newNum = 1;
+  let oldNum = 1,
+    newNum = 1;
   let html = `<div class="edit-diff-head"><div class="edit-diff-side edit-diff-side-old"><span class="edit-diff-marker">−</span> Before</div><div class="edit-diff-side edit-diff-side-new"><span class="edit-diff-marker">+</span> After</div></div><div class="edit-diff-body">`;
   for (const row of rows) {
     html += `<div class="edit-diff-row edit-diff-row-${row.kind}">`;
     html += `<div class="edit-diff-cell edit-diff-cell-old">`;
-    if (row.left != null) { html += `<span class="edit-diff-ln">${oldNum}</span><span class="edit-diff-marker">${row.kind === "del" || row.kind === "change" ? "−" : " "}</span>${hE(row.left)}`; oldNum++; }
+    if (row.left != null) {
+      html += `<span class="edit-diff-ln">${oldNum}</span><span class="edit-diff-marker">${row.kind === "del" || row.kind === "change" ? "−" : " "}</span>${hE(row.left)}`;
+      oldNum++;
+    }
     html += `</div>`;
     html += `<div class="edit-diff-cell edit-diff-cell-new">`;
-    if (row.right != null) { html += `<span class="edit-diff-ln">${newNum}</span><span class="edit-diff-marker">${row.kind === "ins" || row.kind === "change" ? "+" : " "}</span>${hE(row.right)}`; newNum++; }
+    if (row.right != null) {
+      html += `<span class="edit-diff-ln">${newNum}</span><span class="edit-diff-marker">${row.kind === "ins" || row.kind === "change" ? "+" : " "}</span>${hE(row.right)}`;
+      newNum++;
+    }
     html += `</div></div>`;
   }
   html += `</div>`;
@@ -96,11 +148,32 @@ function renderDiffHtml(patch: string, style: "unified" | "split"): string {
 export function ChangesPanel() {
   useLang();
   const { tree, loading } = useProjectTree();
-  const { expanded, openFiles, activeFilePath, activeFile, toggleExpand, openFile, closeFile, setActiveFilePath } = useFileTreeState(tree);
-  const { comments, draft, startDraft, cancelDraft, setDraftContent, submitDraft, commentsForFile, deleteComment, editComment } = useLineComments();
+  const {
+    expanded,
+    openFiles,
+    activeFilePath,
+    activeFile,
+    toggleExpand,
+    openFile,
+    closeFile,
+    setActiveFilePath,
+  } = useFileTreeState(tree);
+  const {
+    comments,
+    draft,
+    startDraft,
+    cancelDraft,
+    setDraftContent,
+    submitDraft,
+    commentsForFile,
+    deleteComment,
+    editComment,
+  } = useLineComments();
   const { diffs, modifiedFiles, modifiedCount, reload } = useReviewDiffs();
   const [diffSource, setDiffSource] = useState<"session" | "git" | "checkpoint">("git");
-  const [checkpointList, setCheckpointList] = useState<Array<{ id: string; name: string; ago: string; fileCount: number }>>([]);
+  const [checkpointList, setCheckpointList] = useState<
+    Array<{ id: string; name: string; ago: string; fileCount: number }>
+  >([]);
   const [selectedCheckpointId, setSelectedCheckpointId] = useState<string | null>(null);
   const [createName, setCreateName] = useState("");
   const [leftPct, setLeftPct] = useState(30);
@@ -118,8 +191,12 @@ export function ChangesPanel() {
 
   const diffEndpoint =
     diffSource === "checkpoint"
-      ? selectedCheckpointId ? `/checkpoint-diffs?id=${selectedCheckpointId}` : null
-      : diffSource === "git" ? "/git-diffs" : "/review-diffs";
+      ? selectedCheckpointId
+        ? `/checkpoint-diffs?id=${selectedCheckpointId}`
+        : null
+      : diffSource === "git"
+        ? "/git-diffs"
+        : "/review-diffs";
 
   // Load checkpoint list when switching to checkpoint mode
   useEffect(() => {
@@ -135,7 +212,9 @@ export function ChangesPanel() {
       reload(diffEndpoint);
     } else {
       // No checkpoint selected yet — keep empty
-      setReviewHtml(`<div class="review-empty">${t("changes.reviewEmpty") || "Select a checkpoint to compare"}</div>`);
+      setReviewHtml(
+        `<div class="review-empty">${t("changes.reviewEmpty") || "Select a checkpoint to compare"}</div>`,
+      );
     }
     void diffEndpoint; // suppress unused
   }, [diffEndpoint, reload]);
@@ -148,15 +227,17 @@ export function ChangesPanel() {
       return;
     }
     setReviewHtml(
-      diffs.map((diff) => {
-        const file = hE(diff.file);
-        const chev = '<span class="chev">▸</span>';
-        const stat = `<span class="stat"><span class="add">+${diff.additions}</span><span class="rem"> -${diff.deletions}</span></span>`;
-        const body = diff.patch
-          ? `<div class="review-file-body" style="display:none">${renderDiffHtml(diff.patch, diffStyle)}</div>`
-          : "";
-        return `<div class="review-file-item" data-file="${escapeAttr(file)}"><div class="review-file-header">${chev}<span class="filename">${escapeAttr(file)}</span>${stat}</div>${body}</div>`;
-      }).join(""),
+      diffs
+        .map((diff) => {
+          const file = hE(diff.file);
+          const chev = '<span class="chev">▸</span>';
+          const stat = `<span class="stat"><span class="add">+${diff.additions}</span><span class="rem"> -${diff.deletions}</span></span>`;
+          const body = diff.patch
+            ? `<div class="review-file-body" style="display:none">${renderDiffHtml(diff.patch, diffStyle)}</div>`
+            : "";
+          return `<div class="review-file-item" data-file="${escapeAttr(file)}"><div class="review-file-header">${chev}<span class="filename">${escapeAttr(file)}</span>${stat}</div>${body}</div>`;
+        })
+        .join(""),
     );
   }, [diffs, diffStyle, t]);
 
@@ -276,25 +357,41 @@ export function ChangesPanel() {
       <${ResizeHandle} onResize=${handleLeftResize} direction="horizontal" />
 
       <div class="changes-panel changes-panel-center">
-        ${reviewMode
-          ? html`
+        ${
+          reviewMode
+            ? html`
               <${TabBar}
                 reviewTab=${html`<${ReviewTab} count=${modifiedCount()} active=${true} onClick=${toggleReviewMode} />`}
-                fileList=${diffs.map(d => d.file)}
-                onOpenFile=${(f: string) => { handleOpenFile(f); setReviewMode(false); }}
+                fileList=${diffs.map((d) => d.file)}
+                onOpenFile=${(f: string) => {
+                  handleOpenFile(f);
+                  setReviewMode(false);
+                }}
                 onToggleReview=${toggleReviewMode}
                 files=${openFiles}
                 activePath=${activeFilePath}
-                onSelect=${(path: string) => { setActiveFilePath(path); setReviewMode(false); }}
+                onSelect=${(path: string) => {
+                  setActiveFilePath(path);
+                  setReviewMode(false);
+                }}
                 onClose=${closeFile}
               />
               <div class="review-controls" style=${{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 12px", borderBottom: "1px solid var(--bd)", fontSize: "12px" }}>
-                <select value=${diffSource} onChange=${(e: Event) => { const v = (e.target as HTMLSelectElement).value as "session" | "git" | "checkpoint"; setDiffSource(v); if (v !== "checkpoint") setSelectedCheckpointId(null); }} style=${{ fontSize: "12px", fontWeight: 500, padding: "1px 4px", borderRadius: "3px", background: "var(--bg-elev)", color: "var(--fg-0)", border: "1px solid var(--bd)", cursor: "pointer", outline: "none" }}>
+                <select value=${diffSource} onChange=${(e: Event) => {
+                  const v = (e.target as HTMLSelectElement).value as
+                    | "session"
+                    | "git"
+                    | "checkpoint";
+                  setDiffSource(v);
+                  if (v !== "checkpoint") setSelectedCheckpointId(null);
+                }} style=${{ fontSize: "12px", fontWeight: 500, padding: "1px 4px", borderRadius: "3px", background: "var(--bg-elev)", color: "var(--fg-0)", border: "1px solid var(--bd)", cursor: "pointer", outline: "none" }}>
                   <option value="git">${t("changes.diffSourceGit")}</option>
                   <option value="session">${t("changes.diffSourceSession")}</option>
                   <option value="checkpoint">${t("changes.diffSourceCheckpoint")}</option>
                 </select>
-                ${diffSource !== "checkpoint" || selectedCheckpointId ? html`
+                ${
+                  diffSource !== "checkpoint" || selectedCheckpointId
+                    ? html`
                 <span style=${{ color: "var(--fg-3)" }}>${modifiedCount()}</span>
                 <div style=${{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "4px" }}>
                   <button class=${`toggle-btn ${diffStyle === "unified" ? "active" : ""}`} onClick=${() => setDiffStyle("unified")} style=${{ fontSize: "11px", padding: "2px 6px" }}>${t("changes.diffStyleUnified")}</button>
@@ -302,14 +399,22 @@ export function ChangesPanel() {
                   <button class="toggle-btn" onClick=${expandAll} style=${{ fontSize: "11px", padding: "2px 6px" }}>${t("changes.expandAll")}</button>
                   <button class="toggle-btn" onClick=${collapseAll} style=${{ fontSize: "11px", padding: "2px 6px" }}>${t("changes.collapseAll")}</button>
                 </div>
-                ` : null}
+                `
+                    : null
+                }
               </div>
-              ${diffSource === "checkpoint" && selectedCheckpointId ? html`
+              ${
+                diffSource === "checkpoint" && selectedCheckpointId
+                  ? html`
                 <div style=${{ padding: "4px 12px", fontSize: "11px", color: "var(--fg-3)", borderBottom: "1px solid var(--bd)", cursor: "pointer" }}>
                   <span onClick=${() => setSelectedCheckpointId(null)} style=${{ color: "var(--c-brand)", cursor: "pointer" }}>← ${t("changes.backToList")}</span>
                 </div>
-              ` : null}
-              ${diffSource === "checkpoint" && !selectedCheckpointId ? html`
+              `
+                  : null
+              }
+              ${
+                diffSource === "checkpoint" && !selectedCheckpointId
+                  ? html`
                 <div class="checkpoint-picker" style=${{ flex: "1", overflowY: "auto", padding: "8px 12px" }}>
                   <div style=${{ display: "flex", gap: "6px", marginBottom: "8px" }}>
                     <input
@@ -326,28 +431,41 @@ export function ChangesPanel() {
                         try {
                           await api("/checkpoint-create", { method: "POST", body: { name } });
                           setCreateName("");
-                          const list = await api<Array<{ id: string; name: string; ago: string; fileCount: number }>>("/checkpoints");
+                          const list =
+                            await api<
+                              Array<{ id: string; name: string; ago: string; fileCount: number }>
+                            >("/checkpoints");
                           setCheckpointList(list);
                         } catch {
-                          alert("create failed");
+                          alert(t("changes.createFailed"));
                         }
                       }}
                       disabled=${!createName.trim()}
                       style=${{ padding: "5px 12px" }}
                     >${t("changes.createBtn")}</button>
                   </div>
-                  ${checkpointList.length === 0 ? html`
+                  ${
+                    checkpointList.length === 0
+                      ? html`
                     <div class="empty" style=${{ textAlign: "center", margin: "12px" }}>${t("changes.checkpointEmpty")}</div>
-                  ` : checkpointList.map((c) => html`
+                  `
+                      : checkpointList.map(
+                          (c) => html`
                     <div
                       key=${c.id}
                       class="checkpoint-item"
                       style=${{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 8px", cursor: "pointer", borderRadius: "4px", borderBottom: "1px solid var(--bd)" }}
-                      onMouseEnter=${(e: Event) => { (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)"; }}
-                      onMouseLeave=${(e: Event) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                      onMouseEnter=${(e: Event) => {
+                        (e.currentTarget as HTMLElement).style.background = "var(--bg-hover)";
+                      }}
+                      onMouseLeave=${(e: Event) => {
+                        (e.currentTarget as HTMLElement).style.background = "transparent";
+                      }}
                     >
                       <div
-                        onClick=${() => { setSelectedCheckpointId(c.id); }}
+                        onClick=${() => {
+                          setSelectedCheckpointId(c.id);
+                        }}
                         style=${{ display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}
                       >
                         <span style=${{ fontSize: "13px", fontWeight: 500 }}>${c.name}</span>
@@ -356,26 +474,57 @@ export function ChangesPanel() {
                       <div style=${{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <span style=${{ fontSize: "11px", color: "var(--fg-4)" }}>${c.ago}</span>
                         <button
-                          onClick=${async (e: Event) => { e.stopPropagation(); if (confirm(t("changes.restoreConfirm").replace("{name}", c.name))) { try { await api("/checkpoint-restore", { method: "POST", body: { id: c.id } }); setSelectedCheckpointId(null); setDiffSource("git"); } catch { alert("restore failed"); } } }}
+                          onClick=${async (e: Event) => {
+                            e.stopPropagation();
+                            if (confirm(t("changes.restoreConfirm").replace("{name}", c.name))) {
+                              try {
+                                await api("/checkpoint-restore", {
+                                  method: "POST",
+                                  body: { id: c.id },
+                                });
+                                setSelectedCheckpointId(null);
+                                setDiffSource("git");
+                              } catch {
+                                alert(t("changes.restoreFailed"));
+                              }
+                            }
+                          }}
                           style=${{ fontSize: "11px", padding: "2px 6px", background: "var(--c-brand)", color: "#fff", border: "none", borderRadius: "3px", cursor: "pointer" }}
                         >${t("changes.restoreBtn")}</button>
                         <button
-                          onClick=${async (e: Event) => { e.stopPropagation(); if (confirm(t("changes.deleteConfirm").replace("{name}", c.name))) { try { await api("/checkpoint-delete", { method: "POST", body: { id: c.id } }); setCheckpointList((prev) => prev.filter((x) => x.id !== c.id)); } catch { alert("delete failed"); } } }}
+                          onClick=${async (e: Event) => {
+                            e.stopPropagation();
+                            if (confirm(t("changes.deleteConfirm").replace("{name}", c.name))) {
+                              try {
+                                await api("/checkpoint-delete", {
+                                  method: "POST",
+                                  body: { id: c.id },
+                                });
+                                setCheckpointList((prev) => prev.filter((x) => x.id !== c.id));
+                              } catch {
+                                alert(t("changes.deleteFailed"));
+                              }
+                            }
+                          }}
                           style=${{ fontSize: "11px", padding: "2px 6px", color: "var(--fg-3)", border: "1px solid var(--bd)", borderRadius: "3px", cursor: "pointer", background: "transparent" }}
                         >${t("changes.deleteBtn")}</button>
                       </div>
                     </div>
-                  `)}
+                  `,
+                        )
+                  }
                 </div>
-              ` : null}
+              `
+                  : null
+              }
               <div class="review-diff-view" style=${{ flex: "1", overflowY: "auto" }}>
                 <div class="review-diff-list" style=${{ padding: "0 12px" }} key=${diffStyle} dangerouslySetInnerHTML=${{ __html: reviewHtml }}></div>
               </div>
             `
-          : html`
+            : html`
               <${TabBar}
                 reviewTab=${html`<${ReviewTab} count=${modifiedCount()} active=${false} onClick=${toggleReviewMode} />`}
-                fileList=${diffs.map(d => d.file)}
+                fileList=${diffs.map((d) => d.file)}
                 onOpenFile=${handleOpenFile}
                 files=${openFiles}
                 activePath=${activeFilePath}
@@ -394,7 +543,8 @@ export function ChangesPanel() {
                 onSubmitComment=${submitDraft}
                 onDeleteComment=${deleteComment}
               />
-            `}
+            `
+        }
       </div>
 
       <${ResizeHandle} onResize=${handleRightResize} direction="horizontal" />
@@ -410,16 +560,21 @@ export function ChangesPanel() {
           onToggle=${toggleModifiedFilter}
         />
         <div class="changes-panel-body">
-          ${loading
-            ? html`<div class="empty" style=${{ margin: "12px", textAlign: "center" }}>${t("changes.loadingFiles")}</div>`
-            : html`<${FileTree}
+          ${
+            loading
+              ? html`<div class="empty" style=${{ margin: "12px", textAlign: "center" }}>${t("changes.loadingFiles")}</div>`
+              : html`<${FileTree}
                 nodes=${tree}
                 expanded=${expanded}
                 onToggle=${toggleExpand}
-                onSelect=${(node: any) => { setReviewMode(false); openFile(node); }}
+                onSelect=${(node: any) => {
+                  setReviewMode(false);
+                  openFile(node);
+                }}
                 modifiedFiles=${modifiedFiles()}
                 showOnlyModified=${showOnlyModified}
-              />`}
+              />`
+          }
         </div>
       </div>
     </div>
@@ -539,11 +694,16 @@ function LineCommentAnchor(props: LineCommentAnchorProps) {
   return html`
     <div
       class="line-comment-anchor ${props.visible ? "visible" : ""}"
-      onClick=${(e: Event) => { e.stopPropagation(); props.onClick(); }}
+      onClick=${(e: Event) => {
+        e.stopPropagation();
+        props.onClick();
+      }}
     >
-      ${props.hasComments
-        ? html`<span class="comment-count">${props.commentCount}</span>`
-        : html`<span class="plus-icon">+</span>`}
+      ${
+        props.hasComments
+          ? html`<span class="comment-count">${props.commentCount}</span>`
+          : html`<span class="plus-icon">+</span>`
+      }
     </div>
   `;
 }
@@ -604,7 +764,9 @@ function LineCommentEditor(props: LineCommentEditorProps) {
       <textarea
         class="line-comment-textarea"
         value=${props.value}
-        onCompositionStart=${() => { isComposingRef.current = true; }}
+        onCompositionStart=${() => {
+          isComposingRef.current = true;
+        }}
         onCompositionEnd=${(e: CompositionEvent) => {
           isComposingRef.current = false;
           props.onInput((e.target as HTMLTextAreaElement).value);
@@ -654,7 +816,15 @@ function filterModifiedNodes(nodes: TreeNode[], modifiedFiles: Set<string>): Tre
 }
 
 function renderTree(props: FileTreeProps): any[] {
-  const { nodes, expanded, onToggle, onSelect, indent = 0, modifiedFiles = new Set(), showOnlyModified = false } = props;
+  const {
+    nodes,
+    expanded,
+    onToggle,
+    onSelect,
+    indent = 0,
+    modifiedFiles = new Set(),
+    showOnlyModified = false,
+  } = props;
   const displayNodes = showOnlyModified ? filterModifiedNodes(nodes, modifiedFiles) : nodes;
   return displayNodes.map((node) => {
     const isExpanded = expanded.has(node.path);
@@ -672,14 +842,26 @@ function renderTree(props: FileTreeProps): any[] {
             <span class="icon dir">▼</span>
             <span class="name">${node.name}</span>
           </div>
-          ${isExpanded && node.children && node.children.length > 0
-            ? renderTree({ nodes: node.children, expanded, onToggle, onSelect, indent: indent + 1, modifiedFiles, showOnlyModified })
-            : null}
-          ${isExpanded && (!node.children || node.children.length === 0)
-            ? html`<div class="tree-node" style=${{ paddingLeft: `${(indent + 1) * 14 + 8}px` }}>
+          ${
+            isExpanded && node.children && node.children.length > 0
+              ? renderTree({
+                  nodes: node.children,
+                  expanded,
+                  onToggle,
+                  onSelect,
+                  indent: indent + 1,
+                  modifiedFiles,
+                  showOnlyModified,
+                })
+              : null
+          }
+          ${
+            isExpanded && (!node.children || node.children.length === 0)
+              ? html`<div class="tree-node" style=${{ paddingLeft: `${(indent + 1) * 14 + 8}px` }}>
                 <span class="name muted">${t("changes.treeEmpty")}</span>
               </div>`
-            : null}
+              : null
+          }
         </div>
       `;
     }
@@ -769,13 +951,16 @@ function ResizeHandle(props: ResizeHandleProps) {
   const dragging = useRef(false);
   const startX = useRef(0);
 
-  const onMouseDown = useCallback((e: MouseEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    startX.current = direction === "horizontal" ? e.clientX : e.clientY;
-    document.body.style.cursor = direction === "horizontal" ? "col-resize" : "row-resize";
-    document.body.style.userSelect = "none";
-  }, [direction]);
+  const onMouseDown = useCallback(
+    (e: MouseEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      startX.current = direction === "horizontal" ? e.clientX : e.clientY;
+      document.body.style.cursor = direction === "horizontal" ? "col-resize" : "row-resize";
+      document.body.style.userSelect = "none";
+    },
+    [direction],
+  );
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -811,8 +996,12 @@ function ResizeHandle(props: ResizeHandleProps) {
         flexShrink: 0,
         transition: "background 0.15s",
       }}
-      onMouseEnter=${(e: Event) => { (e.target as HTMLElement).style.background = "var(--c-brand)"; }}
-      onMouseLeave=${(e: Event) => { (e.target as HTMLElement).style.background = "var(--bd)"; }}
+      onMouseEnter=${(e: Event) => {
+        (e.target as HTMLElement).style.background = "var(--c-brand)";
+      }}
+      onMouseLeave=${(e: Event) => {
+        (e.target as HTMLElement).style.background = "var(--bd)";
+      }}
     />
   `;
 }
@@ -848,11 +1037,13 @@ function TabBar(props: TabBarProps) {
       const allFiles = fileList;
       const popup = document.createElement("div");
       popupRef.current = popup;
-      popup.style.cssText = "position:fixed;top:20%;left:50%;transform:translateX(-50%);background:var(--bg-elev-2);border:1px solid var(--bd);border-radius:6px;max-height:400px;display:flex;flex-direction:column;z-index:1000;min-width:380px;max-width:600px;box-shadow:0 8px 24px rgba(0,0,0,.4)";
+      popup.style.cssText =
+        "position:fixed;top:20%;left:50%;transform:translateX(-50%);background:var(--bg-elev-2);border:1px solid var(--bd);border-radius:6px;max-height:400px;display:flex;flex-direction:column;z-index:1000;min-width:380px;max-width:600px;box-shadow:0 8px 24px rgba(0,0,0,.4)";
 
       const input = document.createElement("input");
       input.placeholder = "搜索文件...";
-      input.style.cssText = "margin:6px 8px;padding:5px 8px;font-size:12px;background:var(--bg);color:var(--fg-0);border:1px solid var(--bd);border-radius:4px;outline:none;flex-shrink:0";
+      input.style.cssText =
+        "margin:6px 8px;padding:5px 8px;font-size:12px;background:var(--bg);color:var(--fg-0);border:1px solid var(--bd);border-radius:4px;outline:none;flex-shrink:0";
       input.onclick = (ev) => ev.stopPropagation();
       popup.appendChild(input);
 
@@ -867,7 +1058,8 @@ function TabBar(props: TabBarProps) {
           if (q && !f.toLowerCase().includes(q)) continue;
           const row = document.createElement("div");
           row.textContent = f;
-          row.style.cssText = "padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--font-mono);border-radius:3px";
+          row.style.cssText =
+            "padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--font-mono);border-radius:3px";
           row.onmouseenter = () => (row.style.background = "var(--bg-hover)");
           row.onmouseleave = () => (row.style.background = "transparent");
           row.onclick = (ev) => {
@@ -900,14 +1092,19 @@ function TabBar(props: TabBarProps) {
     btn.addEventListener("click", toggle);
     return () => {
       btn.removeEventListener("click", toggle);
-      if (popupRef.current) { popupRef.current.remove(); popupRef.current = null; }
+      if (popupRef.current) {
+        popupRef.current.remove();
+        popupRef.current = null;
+      }
     };
   }, [fileList, onOpenFile]);
 
   return html`
     <div class="editor-tabs">
       ${reviewTab || null}
-      ${fileList ? html`
+      ${
+        fileList
+          ? html`
         <span
           ref=${btnRef}
           style=${{
@@ -921,8 +1118,11 @@ function TabBar(props: TabBarProps) {
           }}
           title="Open file"
         >+</span>
-      ` : null}
-      ${files.map((f) => html`
+      `
+          : null
+      }
+      ${files.map(
+        (f) => html`
         <div
           key=${f.path}
           class=${`editor-tab ${f.path === activePath ? "active" : ""}`}
@@ -932,11 +1132,15 @@ function TabBar(props: TabBarProps) {
           <span>${f.name}</span>
           <span
             class="x"
-            onClick=${(e: Event) => { e.stopPropagation(); onClose(f.path); }}
+            onClick=${(e: Event) => {
+              e.stopPropagation();
+              onClose(f.path);
+            }}
             title=${t("changes.tabClose")}
           >×</span>
         </div>
-      `)}
+      `,
+      )}
     </div>
   `;
 }
@@ -956,7 +1160,17 @@ interface CodeViewerProps {
 }
 
 function CodeViewer(props: CodeViewerProps) {
-  const { file, comments = [], draft, onStartComment, onEditComment, onCancelComment, onCommentChange, onSubmitComment, onDeleteComment } = props;
+  const {
+    file,
+    comments = [],
+    draft,
+    onStartComment,
+    onEditComment,
+    onCancelComment,
+    onCommentChange,
+    onSubmitComment,
+    onDeleteComment,
+  } = props;
   const codeRef = useRef<HTMLDivElement>(null);
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
 
@@ -994,10 +1208,13 @@ function CodeViewer(props: CodeViewerProps) {
       gutter.style.gap = "4px";
 
       if (onStartComment) {
-        const isVisible = hoveredLine === lineNumber && (!draft || draft.file !== file.path || draft.lineNumber !== lineNumber);
+        const isVisible =
+          hoveredLine === lineNumber &&
+          (!draft || draft.file !== file.path || draft.lineNumber !== lineNumber);
         const anchorBtn = document.createElement("span");
         anchorBtn.className = `line-comment-anchor ${isVisible ? "visible" : ""}`;
-        anchorBtn.style.cssText = "width:16px;height:16px;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;cursor:pointer;transition:opacity 0.15s ease;flex-shrink:0;";
+        anchorBtn.style.cssText =
+          "width:16px;height:16px;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;cursor:pointer;transition:opacity 0.15s ease;flex-shrink:0;";
         if (isVisible) {
           anchorBtn.style.opacity = "1";
           anchorBtn.style.pointerEvents = "auto";
@@ -1037,13 +1254,16 @@ function CodeViewer(props: CodeViewerProps) {
         textarea.rows = 2;
         textarea.value = draft.content;
         let isComposing = false;
-        textarea.addEventListener("compositionstart", () => { isComposing = true; });
+        textarea.addEventListener("compositionstart", () => {
+          isComposing = true;
+        });
         textarea.addEventListener("compositionend", (e) => {
           isComposing = false;
           if (onCommentChange) onCommentChange((e.target as HTMLTextAreaElement).value);
         });
         textarea.addEventListener("input", (e) => {
-          if (!isComposing && onCommentChange) onCommentChange((e.target as HTMLTextAreaElement).value);
+          if (!isComposing && onCommentChange)
+            onCommentChange((e.target as HTMLTextAreaElement).value);
         });
         textarea.addEventListener("keydown", (e) => {
           if (e.key === "Escape" && onCancelComment) {
@@ -1060,14 +1280,16 @@ function CodeViewer(props: CodeViewerProps) {
         const cancelBtn = document.createElement("button");
         cancelBtn.className = "btn ghost";
         cancelBtn.textContent = t("changes.commentCancel");
-        cancelBtn.style.cssText = "background:transparent;border:none;color:#6e7681;padding:3px 8px;font-size:11px;cursor:pointer;";
+        cancelBtn.style.cssText =
+          "background:transparent;border:none;color:#6e7681;padding:3px 8px;font-size:11px;cursor:pointer;";
         cancelBtn.addEventListener("click", () => {
           if (onCancelComment) onCancelComment();
         });
         const submitBtn = document.createElement("button");
         submitBtn.className = "btn primary";
         submitBtn.textContent = t("changes.commentSubmit");
-        submitBtn.style.cssText = "background:#79c0ff;color:#0a0c10;border:none;padding:3px 8px;font-size:11px;cursor:pointer;border-radius:2px;font-weight:600;";
+        submitBtn.style.cssText =
+          "background:#79c0ff;color:#0a0c10;border:none;padding:3px 8px;font-size:11px;cursor:pointer;border-radius:2px;font-weight:600;";
         submitBtn.disabled = !draft.content.trim();
         submitBtn.addEventListener("click", () => {
           if (onSubmitComment) onSubmitComment();
@@ -1105,7 +1327,8 @@ function CodeViewer(props: CodeViewerProps) {
             const editBtn = document.createElement("button");
             editBtn.className = "bubble-btn";
             editBtn.textContent = "编辑";
-            editBtn.style.cssText = "background:transparent;border:none;color:#6e7681;padding:3px 8px;font-size:11px;cursor:pointer;border-radius:2px;";
+            editBtn.style.cssText =
+              "background:transparent;border:none;color:#6e7681;padding:3px 8px;font-size:11px;cursor:pointer;border-radius:2px;";
             editBtn.addEventListener("click", (e) => {
               e.stopPropagation();
               onEditComment(comment.id, comment.content);
@@ -1116,7 +1339,8 @@ function CodeViewer(props: CodeViewerProps) {
             const deleteBtn = document.createElement("button");
             deleteBtn.className = "bubble-btn danger";
             deleteBtn.textContent = "删除";
-            deleteBtn.style.cssText = "background:transparent;border:none;color:#6e7681;padding:3px 8px;font-size:11px;cursor:pointer;border-radius:2px;";
+            deleteBtn.style.cssText =
+              "background:transparent;border:none;color:#6e7681;padding:3px 8px;font-size:11px;cursor:pointer;border-radius:2px;";
             deleteBtn.addEventListener("click", (e) => {
               e.stopPropagation();
               onDeleteComment(comment.id);
@@ -1154,8 +1378,10 @@ function CodeViewer(props: CodeViewerProps) {
     anchors.forEach((anchor) => {
       const lineDiv = anchor.closest(".editor-line") as HTMLElement;
       if (!lineDiv) return;
-      const lineNumber = parseInt(lineDiv.dataset.lineNumber || "0", 10);
-      const isVisible = hoveredLine === lineNumber && (!draft || draft.file !== file.path || draft.lineNumber !== lineNumber);
+      const lineNumber = Number.parseInt(lineDiv.dataset.lineNumber || "0", 10);
+      const isVisible =
+        hoveredLine === lineNumber &&
+        (!draft || draft.file !== file.path || draft.lineNumber !== lineNumber);
       anchor.style.opacity = isVisible ? "1" : "0";
       anchor.style.pointerEvents = isVisible ? "auto" : "none";
     });
@@ -1266,7 +1492,9 @@ function ChatPane(props: ChatPaneProps) {
         /* swallow */
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1282,7 +1510,9 @@ function ChatPane(props: ChatPaneProps) {
         if (!cancelled) setMessages([]);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1345,9 +1575,16 @@ function ChatPane(props: ChatPaneProps) {
     };
     es.onmessage = (ev) => {
       let dash: any;
-      try { dash = JSON.parse(ev.data); } catch { return; }
+      try {
+        dash = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
       if (dash.kind === "ping") return;
-      if (dash.kind === "busy-change") { setBusy(dash.busy); return; }
+      if (dash.kind === "busy-change") {
+        setBusy(dash.busy);
+        return;
+      }
       if (dash.kind === "user") {
         setMessages((prev) => [...prev, { id: dash.id, role: "user" as const, text: dash.text }]);
         return;
@@ -1382,7 +1619,13 @@ function ChatPane(props: ChatPaneProps) {
         setActiveTool((cur) => (cur && cur.id === dash.id ? null : cur));
         setMessages((prev) => [
           ...prev,
-          { id: dash.id, role: "tool", text: dash.content, toolName: dash.toolName, toolArgs: dash.args },
+          {
+            id: dash.id,
+            role: "tool",
+            text: dash.content,
+            toolName: dash.toolName,
+            toolArgs: dash.args,
+          },
         ]);
         return;
       }
@@ -1489,7 +1732,10 @@ function ChatPane(props: ChatPaneProps) {
         method: "POST",
         body: { prompt },
       });
-      if (!res.accepted) { setError(res.reason ?? "rejected"); return; }
+      if (!res.accepted) {
+        setError(res.reason ?? "rejected");
+        return;
+      }
       setInput("");
       props.comments.forEach((c) => props.deleteComment(c.id));
     } catch (err) {
@@ -1498,7 +1744,11 @@ function ChatPane(props: ChatPaneProps) {
   }, [input, busy, props.comments]);
 
   const abort = useCallback(async () => {
-    try { await api("/abort", { method: "POST" }); } catch { /* swallow */ }
+    try {
+      await api("/abort", { method: "POST" });
+    } catch {
+      /* swallow */
+    }
   }, []);
 
   const newConversation = useCallback(async () => {
@@ -1546,28 +1796,64 @@ function ChatPane(props: ChatPaneProps) {
     }
   }, []);
 
-  const onKeyDown = useCallback((e: KeyboardEvent) => {
-    if (popoverKind && popoverItems.length > 0) {
-      if (e.key === "ArrowDown") { e.preventDefault(); setPopoverSel((i) => (i + 1) % popoverItems.length); return; }
-      if (e.key === "ArrowUp") { e.preventDefault(); setPopoverSel((i) => (i - 1 + popoverItems.length) % popoverItems.length); return; }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); if (applyPopover() && e.key === "Enter" && popoverKind === "slash") send(); return; }
-      if (e.key === "Escape") { e.preventDefault(); setPopoverKind(null); return; }
-    }
-    if (e.key === "Escape" && busy) { e.preventDefault(); abort(); return; }
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-  }, [send, abort, busy, popoverKind, popoverItems, applyPopover]);
+  const onKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (popoverKind && popoverItems.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setPopoverSel((i) => (i + 1) % popoverItems.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setPopoverSel((i) => (i - 1 + popoverItems.length) % popoverItems.length);
+          return;
+        }
+        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+          e.preventDefault();
+          if (applyPopover() && e.key === "Enter" && popoverKind === "slash") send();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setPopoverKind(null);
+          return;
+        }
+      }
+      if (e.key === "Escape" && busy) {
+        e.preventDefault();
+        abort();
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    },
+    [send, abort, busy, popoverKind, popoverItems, applyPopover],
+  );
 
   const allMessages = streaming
-    ? [...messages, { id: streaming.id, role: "assistant" as const, text: streaming.text, reasoning: streaming.reasoning }]
+    ? [
+        ...messages,
+        {
+          id: streaming.id,
+          role: "assistant" as const,
+          text: streaming.text,
+          reasoning: streaming.reasoning,
+        },
+      ]
     : messages;
 
   return html`
     <div style=${{ display: "flex", flexDirection: "column", height: "100%" }}>
       ${statusLine ? html`<div class="changes-panel-header"><span>${statusLine}</span></div>` : null}
       <div class="chat-feed" style=${{ flex: 1, overflowY: "auto", padding: "8px" }} ref=${feedRef}>
-        ${allMessages.length === 0 && !streaming
-          ? html`<div class="empty" style=${{ margin: "12px", textAlign: "center" }}>${t("changes.chatWelcome")}</div>`
-          : null}
+        ${
+          allMessages.length === 0 && !streaming
+            ? html`<div class="empty" style=${{ margin: "12px", textAlign: "center" }}>${t("changes.chatWelcome")}</div>`
+            : null
+        }
         ${allMessages.map((msg) => {
           const isStreaming = streaming && msg.id === streaming.id;
           if (msg.role === "tool") {
@@ -1589,9 +1875,12 @@ function ChatPane(props: ChatPaneProps) {
       </div>
       ${error ? html`<div class="notice err" style=${{ margin: "0 8px 4px" }}>${error}</div>` : null}
       <div style=${{ padding: "8px", borderTop: "1px solid var(--bd)", flexShrink: 0 }}>
-        ${props.comments.length > 0 ? html`
+        ${
+          props.comments.length > 0
+            ? html`
           <div class="comment-cards-container" style=${{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
-            ${props.comments.map((comment) => html`
+            ${props.comments.map(
+              (comment) => html`
               <${CommentCard}
                 key=${comment.id}
                 fileName=${comment.file}
@@ -1599,9 +1888,12 @@ function ChatPane(props: ChatPaneProps) {
                 content=${comment.content}
                 onRemove=${() => props.deleteComment(comment.id)}
               />
-            `)}
+            `,
+            )}
           </div>
-        ` : null}
+        `
+            : null
+        }
         <div style=${{ display: "flex", gap: "8px", alignItems: "flex-end", position: "relative" }}>
           <div style=${{ flex: 1, position: "relative" }}>
             ${

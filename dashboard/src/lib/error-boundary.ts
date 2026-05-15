@@ -1,6 +1,7 @@
 import htm from "htm";
 import { Component, type ComponentChildren, h } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { t } from "../i18n/index.js";
 import { MODE } from "./api.js";
 import { type ErrorReport, appBus, reportAppError } from "./bus.js";
 
@@ -80,7 +81,7 @@ export function ErrorOverlay() {
         <div class="error-overlay-head">
           <span class="error-overlay-icon">✦</span>
           <div>
-            <div class="error-overlay-title">Something broke in the dashboard</div>
+            <div class="error-overlay-title">${t("error.title")}</div>
             <div class="error-overlay-subtitle">${err.source} error · ${errMsg}</div>
           </div>
         </div>
@@ -94,19 +95,17 @@ export function ErrorOverlay() {
         }
 
         <div class="error-overlay-help">
-          The TUI is unaffected — only this browser tab tripped. You can
-          dismiss and keep working, or report it so we can fix the
-          underlying cause.
+          ${t("error.body")}
         </div>
 
         <div class="error-overlay-actions">
           <button class="primary" onClick=${copyDetails}>
-            ${copied ? "Copied ✓" : "Copy details"}
+            ${copied ? t("error.copied") : t("error.copyDetails")}
           </button>
           <a class="button" href=${issueUrl} target="_blank" rel="noopener noreferrer">
-            Report on GitHub
+            ${t("error.reportOnGithub")}
           </a>
-          <button onClick=${() => setErr(null)} style="margin-left: auto;">Dismiss (Esc)</button>
+          <button onClick=${() => setErr(null)} style="margin-left: auto;">${t("error.dismiss")}</button>
         </div>
       </div>
     </div>
@@ -145,14 +144,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       if ((this.state.attempts ?? 0) >= 3) {
         return html`
           <div class="boot" style="flex-direction: column; gap: 12px;">
-            <div>this panel keeps crashing — the error overlay has the trace.</div>
+            <div>${t("error.crashing", { name: "the error overlay has the trace" })}</div>
             <button onClick=${() => this.setState({ caught: false, attempts: 0 })}>
-              Try again
+              ${t("error.retry")}
             </button>
           </div>
         `;
       }
-      return html`<div class="boot">recovering…</div>`;
+      return html`<div class="boot">${t("error.recovering")}</div>`;
     }
     return this.props.children;
   }
