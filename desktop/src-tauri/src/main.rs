@@ -6,6 +6,50 @@ use rpc::{RpcState, rpc_kill, rpc_send, rpc_spawn};
 use serde::Serialize;
 use std::path::Path;
 
+/// #892: bundled libwayland in AppImage can ABI-mismatch the host Wayland
+/// compositor → WebKitWebProcess `abort()`s on EGL display creation. Redirect
+/// the child to the host's libwayland via LD_PRELOAD before WebKit forks.
+#[cfg(target_os = "linux")]
+fn linux_webkit_compat() {
+    fn set_default(key: &str, value: &str) {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+        }
+    }
+
+    // Always-on: DMABUF renderer breaks on a wider set of Mesa stacks than
+    // libwayland bundling does. Cheap to disable, slow path is still fine.
+    set_default("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+
+    let in_appimage = std::env::var_os("APPDIR").is_some();
+    let on_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    if !(in_appimage && on_wayland) {
+        return;
+    }
+
+    // Disable accelerated compositing as well — same EGL init path.
+    set_default("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+
+    // Skip /usr/lib/libwayland-client.so.0 — on 64-bit Fedora that path can
+    // resolve to a 32-bit library and the loader prints a wrong-ELF-class
+    // warning instead of preloading.
+    const CANDIDATES: &[&str] = &[
+        "/usr/lib64/libwayland-client.so.0",
+        "/usr/lib/x86_64-linux-gnu/libwayland-client.so.0",
+        "/lib/x86_64-linux-gnu/libwayland-client.so.0",
+    ];
+    let Some(lib) = CANDIDATES.iter().find(|p| Path::new(p).exists()) else {
+        return;
+    };
+    let existing = std::env::var("LD_PRELOAD").unwrap_or_default();
+    let merged = if existing.is_empty() {
+        (*lib).to_string()
+    } else {
+        format!("{lib}:{existing}")
+    };
+    std::env::set_var("LD_PRELOAD", merged);
+}
+
 #[derive(Serialize)]
 struct FileEntry {
     path: String,
@@ -160,15 +204,8 @@ fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<()
 }
 
 fn main() {
-    // #892: WebKitGTK 2.42+ DMABUF renderer SIGABRTs on some Wayland + Mesa
-    // combos (black screen on launch). Disable it before WebKitWebProcess
-    // spawns; users can opt back in by exporting the var themselves.
     #[cfg(target_os = "linux")]
-    {
-        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-    }
+    linux_webkit_compat();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
