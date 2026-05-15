@@ -1,7 +1,7 @@
 use std::io::{self, BufRead, Write};
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -10,7 +10,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use reasonix_render::decode_only::run_decode_only;
-use reasonix_render::input::{is_quit, translate_key};
+use reasonix_render::input::{is_quit, paste_event, translate_key};
 use reasonix_render::render::render_frame;
 use reasonix_render::scene::SceneFrame;
 
@@ -57,7 +57,12 @@ fn run_stream_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Res
 
 fn run_emit_input() -> Result<()> {
     enable_raw_mode().context("enable raw mode")?;
+    let mut stdout_for_setup = io::stdout();
+    let paste_enabled = execute!(stdout_for_setup, EnableBracketedPaste).is_ok();
     let result = emit_input_loop();
+    if paste_enabled {
+        execute!(stdout_for_setup, DisableBracketedPaste).ok();
+    }
     disable_raw_mode().ok();
     result
 }
@@ -66,17 +71,25 @@ fn emit_input_loop() -> Result<()> {
     let stdout = io::stdout();
     let mut out = stdout.lock();
     loop {
-        let Event::Key(key) = event::read()? else {
-            continue;
-        };
-        if is_quit(&key) {
-            return Ok(());
+        match event::read()? {
+            Event::Key(key) => {
+                if is_quit(&key) {
+                    return Ok(());
+                }
+                let Some(translated) = translate_key(&key) else {
+                    continue;
+                };
+                let json = serde_json::to_string(&translated).context("serialize input event")?;
+                writeln!(out, "{json}").context("write input event")?;
+                out.flush().context("flush stdout")?;
+            }
+            Event::Paste(text) => {
+                let event = paste_event(text);
+                let json = serde_json::to_string(&event).context("serialize paste event")?;
+                writeln!(out, "{json}").context("write paste event")?;
+                out.flush().context("flush stdout")?;
+            }
+            _ => {}
         }
-        let Some(translated) = translate_key(&key) else {
-            continue;
-        };
-        let json = serde_json::to_string(&translated).context("serialize input event")?;
-        writeln!(out, "{json}").context("write input event")?;
-        out.flush().context("flush stdout")?;
     }
 }

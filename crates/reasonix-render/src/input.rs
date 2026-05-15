@@ -11,6 +11,19 @@ pub struct InputEvent {
     pub modifiers: Vec<&'static str>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PasteEvent {
+    pub event: &'static str,
+    pub text: String,
+}
+
+pub fn paste_event(text: String) -> PasteEvent {
+    PasteEvent {
+        event: "paste",
+        text,
+    }
+}
+
 pub fn translate_key(event: &KeyEvent) -> Option<InputEvent> {
     if event.kind != KeyEventKind::Press {
         return None;

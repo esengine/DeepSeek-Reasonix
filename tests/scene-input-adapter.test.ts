@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createRustKeystrokeReader, translate } from "../src/cli/ui/scene/input-adapter.js";
-import type { KeyInputEvent } from "../src/cli/ui/scene/input-source.js";
+import {
+  createRustKeystrokeReader,
+  translate,
+  translatePaste,
+} from "../src/cli/ui/scene/input-adapter.js";
+import type { KeyInputEvent, PasteInputEvent } from "../src/cli/ui/scene/input-source.js";
 
 const STUB = "tests/fixtures/input-emit-stub.mjs";
 
@@ -96,7 +100,7 @@ describe("createRustKeystrokeReader", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function writeEvents(events: KeyInputEvent[]): void {
+  function writeEvents(events: (KeyInputEvent | PasteInputEvent)[]): void {
     writeFileSync(eventsPath, `${events.map((e) => JSON.stringify(e)).join("\n")}\n`);
   }
 
@@ -152,5 +156,41 @@ describe("createRustKeystrokeReader", () => {
     });
     await reader.wait();
     expect(received).toHaveLength(1);
+  });
+
+  it("forwards paste events as KeyEvent with paste=true", async () => {
+    writeEvents([
+      { event: "key", code: "Char", char: "a" },
+      { event: "paste", text: "hello world" },
+      { event: "key", code: "Enter" },
+    ]);
+    const reader = createRustKeystrokeReader({
+      command: [process.execPath, STUB],
+      env: { ...process.env, INPUT_EMIT_FILE: eventsPath },
+    });
+    const received: Array<{ input: string; paste?: boolean; return?: boolean }> = [];
+    reader.subscribe((ev) => received.push(ev));
+    await reader.wait();
+    expect(received).toEqual([
+      { input: "a" },
+      { input: "hello world", paste: true },
+      { input: "", return: true },
+    ]);
+  });
+});
+
+describe("translatePaste", () => {
+  it("wraps the text as a KeyEvent with paste=true", () => {
+    expect(translatePaste({ event: "paste", text: "hello" })).toEqual({
+      input: "hello",
+      paste: true,
+    });
+  });
+
+  it("strips invisible bidi/zero-width chars via sanitizePasteText", () => {
+    const polluted = "a\u200Bb\u202Ec";
+    const result = translatePaste({ event: "paste", text: polluted });
+    expect(result.input).toBe("abc");
+    expect(result.paste).toBe(true);
   });
 });
