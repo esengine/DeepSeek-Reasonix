@@ -25,6 +25,7 @@ import type {
   ChoiceVerdict,
   ConfirmationChoice,
   IncomingEvent,
+  JobInfo,
   McpSpecInfo,
   MemoryEntryInfo,
   OutgoingCommand,
@@ -35,6 +36,7 @@ import type {
 } from "./protocol";
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
+import { JobsPop } from "./ui/jobs-pop";
 import { useElapsed } from "./ui/live";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Sidebar } from "./ui/sidebar";
@@ -219,6 +221,7 @@ type State = {
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
+  jobs: JobInfo[];
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
   /** Messages typed while busy=true — auto-sent FIFO once the current turn completes. Cleared on `clear`, `rpc_exit`, `session_loaded`. */
@@ -619,6 +622,8 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, usage: { ...state.usage, reservedTokens: ev.reservedTokens } };
     case "$memory":
       return { ...state, memory: ev.entries };
+    case "$jobs":
+      return { ...state, jobs: ev.items };
     case "$balance":
       return {
         ...state,
@@ -938,6 +943,7 @@ function TabRuntime({
     skills: [],
     sessionFiles: [],
     memory: [],
+    jobs: [],
     activeSkill: null,
     queuedSends: [],
   });
@@ -953,6 +959,7 @@ function TabRuntime({
   const threadRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
+  const [jobsOpen, setJobsOpen] = useState(false);
   const openSettingsAt = useCallback((page: SettingsPageId = "general") => {
     setSettingsPage(page);
     setSettingsOpen(true);
@@ -1166,6 +1173,20 @@ function TabRuntime({
   }, [state.messages.length]);
 
   useEffect(() => {
+    if (!active) return;
+    if (!jobsOpen) return;
+    sendRpc({ cmd: "jobs_list" });
+    const id = window.setInterval(() => sendRpc({ cmd: "jobs_list" }), 1500);
+    return () => window.clearInterval(id);
+  }, [active, jobsOpen, sendRpc]);
+
+  useEffect(() => {
+    if (!active) return;
+    if (state.busy) return;
+    sendRpc({ cmd: "jobs_list" });
+  }, [active, state.busy, sendRpc]);
+
+  useEffect(() => {
     // Every TabRuntime stays mounted (display:none on inactive), so each registers its own keydown — without this gate Cmd+N would fire newChat() in every tab and wipe the inactive ones' sessions.
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1184,6 +1205,9 @@ function TabRuntime({
         e.preventDefault();
         if (settingsOpen) setSettingsOpen(false);
         else openSettingsAt("general");
+      } else if (mod && (e.key === "j" || e.key === "J")) {
+        e.preventDefault();
+        setJobsOpen((v) => !v);
       } else if (e.key === "Escape" && state.busy) {
         const target = e.target as HTMLElement | null;
         if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
@@ -1681,6 +1705,9 @@ function TabRuntime({
           ready={state.ready}
           currency={currency}
           theme={theme}
+          jobs={state.jobs}
+          jobsOpen={jobsOpen}
+          onToggleJobs={() => setJobsOpen((v) => !v)}
           onToggleTheme={onToggleTheme}
           onToggleCurrency={onToggleCurrency}
           onOpenSettings={() => openSettingsAt("general")}
@@ -1730,6 +1757,14 @@ function TabRuntime({
             onRemoveMcpSpec={removeMcpSpec}
           />
         ) : null}
+
+        <JobsPop
+          open={jobsOpen}
+          onClose={() => setJobsOpen(false)}
+          jobs={state.jobs}
+          onStop={(jobId) => sendRpc({ cmd: "jobs_stop", jobId })}
+          onStopAll={() => sendRpc({ cmd: "jobs_stop_all" })}
+        />
 
         <Toast message={toast} />
 

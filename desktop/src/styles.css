@@ -4814,3 +4814,271 @@ button {
   opacity: 1;
   transform: translateY(0);
 }
+
+/* ============================================================
+   Jobs popover — surfaces JobRegistry (run_background) processes
+   ============================================================ */
+
+.jobs-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 145;
+  background: oklch(0% 0 0 / 0.18);
+}
+[data-theme="light"] .jobs-mask {
+  background: oklch(0% 0 0 / 0.08);
+}
+.jobs-pop {
+  position: absolute;
+  bottom: 36px;
+  right: 12px;
+  width: 560px;
+  max-width: calc(100vw - 24px);
+  max-height: 75vh;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+  animation: rise 0.18s ease-out;
+}
+.jobs-body {
+  overflow-y: auto;
+  min-height: 0;
+}
+.jobs-empty {
+  padding: 28px 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.jobs-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.jobs-head .ico {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.jobs-head .tt {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.jobs-head .ss {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.jobs-head .ss .b {
+  font-weight: 600;
+}
+.jobs-head .ss .b.ok {
+  color: var(--accent);
+}
+.jobs-head .ss .b.mut {
+  color: var(--muted);
+}
+.jobs-head .grow {
+  flex: 1;
+}
+
+.btn.sm {
+  padding: 3px 8px;
+  font-size: 10.5px;
+}
+
+.jobs-grp {
+  padding: 8px 14px 2px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-2);
+}
+
+.job-row {
+  border-top: 1px solid var(--border);
+}
+.jobs-body > .job-row:first-child {
+  border-top: none;
+}
+.jr-main {
+  display: grid;
+  grid-template-columns: 22px auto 1fr 60px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.jr-main:hover {
+  background: var(--bg-2);
+}
+.jr-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.jr-state .spin {
+  width: 11px;
+  height: 11px;
+  border-width: 1.5px;
+}
+.jr-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  background: var(--panel);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.jr-body {
+  min-width: 0;
+}
+.jr-body .nm {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "IBM Plex Mono", monospace;
+}
+.jr-body .sub {
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jr-body .sub .ses {
+  color: var(--fg-2);
+}
+.jr-body .sub .rk {
+  color: var(--warning);
+  margin-left: 4px;
+}
+.jr-time {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--muted-2);
+  text-align: right;
+}
+.jr-act {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.jr-exit {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  color: var(--muted);
+  padding: 3px 8px;
+}
+.job-row[data-status="exited"] .jr-kind {
+  opacity: 0.6;
+}
+.job-row[data-status="exited"] .jr-body .nm {
+  color: var(--fg-2);
+}
+
+.jr-detail {
+  padding: 8px 14px 12px 14px;
+  background: var(--bg-2);
+  border-top: 1px dashed var(--border);
+}
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px 14px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  padding: 4px 0 8px;
+}
+.kv-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kv-grid .k {
+  color: var(--muted);
+}
+.kv-grid .v {
+  color: var(--fg);
+}
+.jr-log {
+  margin: 0;
+  padding: 8px 10px;
+  background: oklch(10% 0.006 250);
+  color: var(--fg-2);
+  border-radius: 6px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 120px;
+  overflow-y: auto;
+}
+[data-theme="light"] .jr-log {
+  background: oklch(96% 0.005 250);
+  color: var(--fg-2);
+}
+
+.jobs-foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-2);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.jobs-foot .row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.jobs-foot .v {
+  color: var(--fg);
+}
+.jobs-foot kbd {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-right: 2px;
+}
+.jobs-foot .grow {
+  flex: 1;
+}
+
+.statusbar .seg.jobs {
+  cursor: pointer;
+}
+.statusbar .seg.jobs:hover {
+  background: var(--panel);
+  color: var(--fg);
+}
+.statusbar .seg.jobs.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}

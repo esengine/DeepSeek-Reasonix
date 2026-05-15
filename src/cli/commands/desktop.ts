@@ -108,6 +108,9 @@ type InMessage = { tabId?: string } & (
   | { cmd: "mcp_specs_remove"; spec: string }
   | { cmd: "skills_get" }
   | { cmd: "skill_run"; name: string; args?: string }
+  | { cmd: "jobs_list" }
+  | { cmd: "jobs_stop"; jobId: number }
+  | { cmd: "jobs_stop_all" }
 );
 
 interface NeedsSetupEvent {
@@ -318,6 +321,24 @@ interface SkillsEvent {
   items: SkillInfo[];
 }
 
+interface JobInfoPayload {
+  id: number;
+  tabId: string;
+  sessionLabel: string;
+  command: string;
+  pid: number | null;
+  running: boolean;
+  exitCode: number | null;
+  startedAt: number;
+  outputTail: string;
+  spawnError?: string;
+}
+
+interface JobsEvent {
+  type: "$jobs";
+  items: JobInfoPayload[];
+}
+
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
  *  block buffering) so every JSON line reaches Rust the moment it's
  *  produced, not whenever the next 8 KB flushes. */
@@ -346,11 +367,18 @@ type EmittableEvent =
   | McpSpecsEvent
   | SkillsEvent
   | CtxBreakdownEvent
-  | MemoryEvent;
+  | MemoryEvent
+  | JobsEvent;
 
 function emit(ev: EmittableEvent, tabId?: string): void {
   const payload = tabId ? { ...ev, tabId } : ev;
   writeSync(1, Buffer.from(`${JSON.stringify(payload)}\n`, "utf8"));
+}
+
+function tailLines(s: string, n: number): string {
+  if (!s) return "";
+  const lines = s.split(/\r?\n/);
+  return lines.slice(-n).join("\n");
 }
 
 function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
@@ -939,6 +967,70 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.runtime?.loop.abort();
   }
 
+  function tabSessionLabel(tab: Tab): string {
+    if (tab.currentSession) {
+      try {
+        const summary = loadSessionMeta(tab.currentSession).summary?.trim();
+        if (summary) return summary;
+      } catch {
+        // session file unreadable — fall through to workspace basename
+      }
+    }
+    return tab.rootDir.split(/[\\/]/).filter(Boolean).pop() ?? tab.rootDir;
+  }
+
+  function emitJobs(): void {
+    const items: JobInfoPayload[] = [];
+    for (const t of tabs.values()) {
+      const reg = t.toolset?.jobs;
+      if (!reg) continue;
+      const label = tabSessionLabel(t);
+      for (const j of reg.list()) {
+        items.push({
+          id: j.id,
+          tabId: t.id,
+          sessionLabel: label,
+          command: j.command,
+          pid: j.pid,
+          running: j.running,
+          exitCode: j.exitCode,
+          startedAt: j.startedAt,
+          outputTail: tailLines(j.output, 8),
+          spawnError: j.spawnError,
+        });
+      }
+    }
+    items.sort((a, b) => {
+      if (a.running !== b.running) return a.running ? -1 : 1;
+      return b.startedAt - a.startedAt;
+    });
+    emit({ type: "$jobs", items });
+  }
+
+  async function stopJob(jobId: number): Promise<boolean> {
+    for (const t of tabs.values()) {
+      const reg = t.toolset?.jobs;
+      if (!reg) continue;
+      const hit = reg.list().find((j) => j.id === jobId);
+      if (!hit) continue;
+      await reg.stop(jobId);
+      return true;
+    }
+    return false;
+  }
+
+  async function stopAllJobs(): Promise<void> {
+    const ops: Promise<unknown>[] = [];
+    for (const t of tabs.values()) {
+      const reg = t.toolset?.jobs;
+      if (!reg) continue;
+      for (const j of reg.list()) {
+        if (j.running) ops.push(reg.stop(j.id));
+      }
+    }
+    await Promise.allSettled(ops);
+  }
+
   function cancelPendingGates(tab: Tab): void {
     const hadActivePlan = tab.planTotalSteps > 0 || tab.completedStepIds.size > 0;
     const ids = [...tab.pendingGateIds];
@@ -1254,6 +1346,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       } catch (err) {
         emit({ type: "$error", message: `saveApiKey failed: ${(err as Error).message}` });
       }
+      return;
+    }
+
+    if (msg.cmd === "jobs_list") {
+      emitJobs();
+      return;
+    }
+    if (msg.cmd === "jobs_stop") {
+      void stopJob(msg.jobId).finally(() => emitJobs());
+      return;
+    }
+    if (msg.cmd === "jobs_stop_all") {
+      void stopAllJobs().finally(() => emitJobs());
       return;
     }
 

@@ -236,6 +236,20 @@ export const zhCN: typeof en = {
     offline: "离线",
     busy: "运行中",
     online: "在线",
+    jobs: "任务",
+    jobsTip: "后台任务 · ⌘J",
+  },
+  jobs: {
+    title: "后台任务",
+    running: "运行中",
+    exited: "已结束",
+    empty: "当前工作区还没有后台任务。",
+    stopAll: "全部中止",
+    stopAllTip: "向所有正在运行的任务发送 SIGTERM",
+    stop: "中止",
+    stopOne: "中止该任务",
+    kbToggle: "切换",
+    kbClose: "关闭",
   },
   app: {
     toast: {
