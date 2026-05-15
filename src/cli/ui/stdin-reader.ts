@@ -108,6 +108,37 @@ function tryEscapelessCsi(chunk: string, i: number): { advance: number; ev: KeyE
   return null;
 }
 
+/** `[<btn;col;row[Mm]` — SGR mouse report body (without leading ESC). */
+const SGR_MOUSE_ESCAPELESS_RE = /^\[<\d+;\d+;\d+[Mm]/;
+
+function decodeSgrMouseBody(body: string): KeyEvent | null {
+  const m = /^<(\d+);(\d+);(\d+)([Mm])$/.exec(body);
+  if (!m) return null;
+  const btn = Number.parseInt(m[1]!, 10);
+  const col = Number.parseInt(m[2]!, 10);
+  const row = Number.parseInt(m[3]!, 10);
+  if (!Number.isFinite(btn) || !Number.isFinite(col) || !Number.isFinite(row)) return null;
+  const tail = m[4]!;
+  if (tail === "m") return { input: "", mouseRelease: true, mouseRow: row, mouseCol: col };
+  if (btn === 64) return { input: "", mouseScrollUp: true, mouseRow: row, mouseCol: col };
+  if (btn === 65) return { input: "", mouseScrollDown: true, mouseRow: row, mouseCol: col };
+  if (btn === 0) return { input: "", mouseClick: true, mouseRow: row, mouseCol: col };
+  if (btn === 32) return { input: "", mouseDrag: true, mouseRow: row, mouseCol: col };
+  return null;
+}
+
+/** ConPTY can strip the ESC off SGR mouse reports — match the bare shape and drop, issue #867. */
+function tryEscapelessSgrMouse(
+  chunk: string,
+  i: number,
+): { advance: number; ev: KeyEvent | null } | null {
+  if (chunk[i] !== "[") return null;
+  const m = SGR_MOUSE_ESCAPELESS_RE.exec(chunk.slice(i));
+  if (!m) return null;
+  const body = m[0].slice(1);
+  return { advance: m[0].length, ev: decodeSgrMouseBody(body) };
+}
+
 function isCsiFinal(ch: string): boolean {
   const code = ch.charCodeAt(0);
   return code >= 0x40 && code <= 0x7e;
@@ -404,6 +435,12 @@ export class StdinReader {
         i += escapeless.advance;
         continue;
       }
+      const mouseEscapeless = tryEscapelessSgrMouse(chunk, i);
+      if (mouseEscapeless) {
+        if (mouseEscapeless.ev) this.dispatch(mouseEscapeless.ev);
+        i += mouseEscapeless.advance;
+        continue;
+      }
 
       // Single-byte control keys.
       // \r (CR, 0x0D) is Enter on every terminal in raw mode.
@@ -462,7 +499,7 @@ export class StdinReader {
         if (cc >= 1 && cc <= 26) break;
         // Don't swallow into a printable run if a CSI / paste prefix
         // starts at this position.
-        if (c === "[" && tryEscapelessCsi(chunk, end)) break;
+        if (c === "[" && (tryEscapelessCsi(chunk, end) || tryEscapelessSgrMouse(chunk, end))) break;
         if (chunk.slice(end, end + PASTE_START_BARE.length) === PASTE_START_BARE) break;
         end++;
       }
@@ -490,48 +527,11 @@ export class StdinReader {
       // but if we do, drop it silently.
       return;
     }
-    // SGR mouse: `<button;col;rowM` (press) or `<button;col;rowm`
-    // (release). Only fired when the App enabled SGR mode + button-
-    // event tracking at startup. Buttons:
-    //   0 = left, 1 = middle, 2 = right
-    //   64 = scroll up, 65 = scroll down (no release event for wheel)
-    // We surface scroll wheels and left-button presses; the rest are
-    // dropped to avoid noisy events.
+    // SGR mouse report — surface wheel/click/drag/release, drop the rest. Always consumes the bytes even when the button isn't one we map (issue #867).
     if (seq.length > 1 && seq.charCodeAt(0) === 60 /* '<' */) {
-      const tail = seq[seq.length - 1]!;
-      if (tail === "M" || tail === "m") {
-        const body = seq.slice(1, -1);
-        const parts = body.split(";");
-        if (parts.length === 3) {
-          const btn = Number.parseInt(parts[0]!, 10);
-          const col = Number.parseInt(parts[1]!, 10);
-          const row = Number.parseInt(parts[2]!, 10);
-          if (Number.isFinite(btn) && Number.isFinite(col) && Number.isFinite(row)) {
-            // SGR mouse: bit 5 (32) = motion, bit 6 (64) = wheel.
-            if (tail === "M" && btn === 64) {
-              this.dispatch({ input: "", mouseScrollUp: true, mouseRow: row, mouseCol: col });
-              return;
-            }
-            if (tail === "M" && btn === 65) {
-              this.dispatch({ input: "", mouseScrollDown: true, mouseRow: row, mouseCol: col });
-              return;
-            }
-            if (tail === "M" && btn === 0) {
-              this.dispatch({ input: "", mouseClick: true, mouseRow: row, mouseCol: col });
-              return;
-            }
-            if (tail === "M" && btn === 32) {
-              this.dispatch({ input: "", mouseDrag: true, mouseRow: row, mouseCol: col });
-              return;
-            }
-            if (tail === "m") {
-              this.dispatch({ input: "", mouseRelease: true, mouseRow: row, mouseCol: col });
-              return;
-            }
-            return;
-          }
-        }
-      }
+      const ev = decodeSgrMouseBody(seq);
+      if (ev) this.dispatch(ev);
+      return;
     }
     const ev = lookupCsi(seq);
     if (ev) {

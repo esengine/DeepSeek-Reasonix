@@ -356,3 +356,73 @@ describe("StdinReader — ESC + char (Alt+key)", () => {
     expect(events).toEqual([{ input: "x", meta: true }]);
   });
 });
+
+describe("StdinReader — SGR mouse reports (issue #867)", () => {
+  it("dispatches wheel-up as mouseScrollUp (with ESC)", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[<64;10;5M");
+    expect(events).toEqual([{ input: "", mouseScrollUp: true, mouseRow: 5, mouseCol: 10 }]);
+  });
+
+  it("dispatches wheel-down as mouseScrollDown (with ESC)", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[<65;10;5M");
+    expect(events).toEqual([{ input: "", mouseScrollDown: true, mouseRow: 5, mouseCol: 10 }]);
+  });
+
+  it("dispatches left-click press + release", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[<0;3;7M");
+    reader.feed("\x1b[<0;3;7m");
+    expect(events).toEqual([
+      { input: "", mouseClick: true, mouseRow: 7, mouseCol: 3 },
+      { input: "", mouseRelease: true, mouseRow: 7, mouseCol: 3 },
+    ]);
+  });
+
+  it("drops mouse reports with unmapped buttons (no garbage text)", () => {
+    const { reader, events } = setup();
+    // Btn 2 = right-click. We don't surface it; the bytes still get consumed.
+    reader.feed("\x1b[<2;10;5M");
+    reader.feed("\x1b[<2;10;5m");
+    expect(events).toEqual([{ input: "", mouseRelease: true, mouseRow: 5, mouseCol: 10 }]);
+  });
+
+  it("drops ESC-stripped wheel reports (ConPTY) instead of leaking as text", () => {
+    const { reader, events } = setup();
+    reader.feed("[<64;10;5M");
+    expect(events).toEqual([{ input: "", mouseScrollUp: true, mouseRow: 5, mouseCol: 10 }]);
+  });
+
+  it("drops a burst of ESC-stripped reports without inserting any text", () => {
+    const { reader, events } = setup();
+    reader.feed("[<64;10;5M[<64;11;5M[<64;12;5M");
+    expect(events).toEqual([
+      { input: "", mouseScrollUp: true, mouseRow: 5, mouseCol: 10 },
+      { input: "", mouseScrollUp: true, mouseRow: 5, mouseCol: 11 },
+      { input: "", mouseScrollUp: true, mouseRow: 5, mouseCol: 12 },
+    ]);
+  });
+
+  it("printable text adjacent to an ESC-stripped report still arrives intact", () => {
+    const { reader, events } = setup();
+    reader.feed("ab[<64;10;5Mcd");
+    expect(events).toEqual([
+      { input: "ab" },
+      { input: "", mouseScrollUp: true, mouseRow: 5, mouseCol: 10 },
+      { input: "cd" },
+    ]);
+  });
+
+  it("ESC-stripped report with unmapped button is consumed silently", () => {
+    const { reader, events } = setup();
+    reader.feed("ab[<99;10;5Mcd");
+    expect(events).toEqual([{ input: "ab" }, { input: "cd" }]);
+  });
+
+  it("does not eat a literal `[<` that isn't a mouse report", () => {
+    const { reader, events } = setup();
+    reader.feed("[<not-a-mouse-report");
+    expect(events).toEqual([{ input: "[<not-a-mouse-report" }]);
+  });
+});
