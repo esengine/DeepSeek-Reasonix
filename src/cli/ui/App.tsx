@@ -1,5 +1,5 @@
 import { type WriteStream, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { Box, Text, useStdin, useStdout } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -63,6 +63,7 @@ import {
   loadSessionMeta,
   patchSessionMeta,
   renameSession,
+  sanitizeName,
 } from "../../memory/session.js";
 import type {
   ActiveModal,
@@ -249,6 +250,8 @@ export interface AppProps {
      * isn't blocked on disk I/O.
      */
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
+    /** Notify the launcher that the workspace root just changed — lets the rebuildSystem closure see the new dir on the next /cwd. */
+    onRootChange?: (newRoot: string) => void;
   };
   /**
    * When `true`, suppress the auto-launch of the embedded web dashboard
@@ -2530,6 +2533,15 @@ function AppInner({
                 codeMode.reregisterTools?.(resolved);
                 setCurrentRootDir(resolved);
                 reloadHooks(resolved);
+                codeMode.onRootChange?.(resolved);
+                // Mirror code.tsx's launch-time formula so the session label tracks the workspace basename.
+                const newSessionName = `code-${sanitizeName(basename(resolved))}`;
+                loop.switchWorkspace({ sessionName: newSessionName });
+                agentStore.dispatch({
+                  type: "session.workspace.change",
+                  id: newSessionName,
+                  workspace: resolved,
+                });
                 const reBootstrap = codeMode.reBootstrapSemantic;
                 if (reBootstrap) {
                   void reBootstrap(resolved).then(
@@ -2547,7 +2559,11 @@ function AppInner({
                     },
                   );
                 }
-                return { ok: true, info: `▸ workspace switched to ${resolved}` };
+                return {
+                  ok: true,
+                  info: `▸ workspace switched to ${resolved} · session: ${newSessionName}`,
+                  clear: true,
+                };
               }
             : undefined,
           reloadMcp: mcpRuntime

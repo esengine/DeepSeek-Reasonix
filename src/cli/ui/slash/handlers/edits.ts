@@ -254,7 +254,7 @@ const cwd: SlashHandler = (args, _loop, ctx) => {
     };
   }
   const result = ctx.switchCwd(stripOuterQuotes(target));
-  return { info: result.info };
+  return result.clear ? { info: result.info, clear: true } : { info: result.info };
 };
 
 export const handlers: Record<string, SlashHandler> = {

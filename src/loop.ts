@@ -340,6 +340,32 @@ export class CacheFirstLoop {
     return { dropped, archived, systemRebuilt };
   }
 
+  /** `/cwd` follow-through — archives the previous session, drops in-memory state, repoints sessionName, and rebuilds the system prompt against whatever the rebuilder closure now resolves (the caller is expected to have already updated the root the closure reads). */
+  switchWorkspace(opts: { sessionName: string }): { dropped: number; archived: string | null } {
+    const dropped = this.log.length;
+    let archived: string | null = null;
+    if (this.sessionName) {
+      try {
+        archived = archiveSession(this.sessionName);
+        if (archived === null) rewriteSession(this.sessionName, []);
+      } catch {
+        /* disk issue shouldn't block the in-memory swap */
+      }
+    }
+    this.log.compactInPlace([]);
+    this.scratch.reset();
+    this._inflight.clear();
+    this.sessionName = opts.sessionName;
+    if (this._rebuildSystem) {
+      try {
+        this.prefix.replaceSystem(this._rebuildSystem());
+      } catch {
+        /* builder threw — keep prior system rather than crash /cwd */
+      }
+    }
+    return { dropped, archived };
+  }
+
   configure(opts: ReconfigurableOptions): void {
     if (opts.model !== undefined) this.model = opts.model;
     if (opts.stream !== undefined) {

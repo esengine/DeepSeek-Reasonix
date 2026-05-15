@@ -81,6 +81,8 @@ export interface ChatOptions {
     reregisterTools?: (rootDir: string) => void;
     /** Async tail of `/cwd` — re-probe the new dir for a semantic index. */
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
+    /** Notify the launcher that the workspace root just changed — lets the rebuildSystem closure see the new dir. */
+    onRootChange?: (newRoot: string) => void;
   };
   /** Skip the session picker — assume "Resume" (backwards-compatible auto-continue). */
   forceResume?: boolean;

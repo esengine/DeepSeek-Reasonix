@@ -138,9 +138,14 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     }
   }
 
+  // The rebuilder is re-invoked on `/new` and `/cwd`. `currentRoot` is the live
+  // pointer; `/cwd` updates it via `onRootChange` so the rebuild picks up the
+  // new workspace's REASONIX.md / memory without restarting the loop.
+  let currentRoot = rootDir;
+  let semanticEnabled = semantic.enabled;
   const codeRebuildSystem = () =>
-    codeSystemPrompt(rootDir, {
-      hasSemanticSearch: semantic.enabled,
+    codeSystemPrompt(currentRoot, {
+      hasSemanticSearch: semanticEnabled,
       systemAppend: opts.systemAppend,
       systemAppendFile: systemAppendFileContents,
       modelId: resolvedModel,
@@ -158,7 +163,14 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
       rootDir,
       jobs,
       reregisterTools: registerRooted,
-      reBootstrapSemantic,
+      reBootstrapSemantic: async (root: string) => {
+        const r = await reBootstrapSemantic(root);
+        semanticEnabled = r.enabled;
+        return r;
+      },
+      onRootChange: (newRoot: string) => {
+        currentRoot = newRoot;
+      },
     },
     mcp: readConfig().mcp,
     forceResume: opts.forceResume,

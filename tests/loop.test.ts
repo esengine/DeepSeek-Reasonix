@@ -1462,6 +1462,60 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     expect(loop.prefix.system).toBe("keep-me");
   });
 
+  it("switchWorkspace drops the log, repoints sessionName, and rebuilds system via the rebuilder closure", () => {
+    const client = makeClient([{ content: "ok" }]);
+    let currentSystem = "system-tmp-a";
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: currentSystem }),
+      stream: false,
+      session: "code-tmp-a",
+      rebuildSystem: () => currentSystem,
+    });
+    loop.log.append({ role: "user", content: "from tmp-a" });
+    loop.log.append({ role: "assistant", content: "ok" });
+    loop.scratch.notes = ["stale"];
+    expect(loop.sessionName).toBe("code-tmp-a");
+    expect(loop.log.length).toBe(2);
+
+    currentSystem = "system-tmp-b";
+    const { dropped } = loop.switchWorkspace({ sessionName: "code-tmp-b" });
+    expect(dropped).toBe(2);
+    expect(loop.log.length).toBe(0);
+    expect(loop.scratch.notes).toEqual([]);
+    expect(loop.sessionName).toBe("code-tmp-b");
+    expect(loop.prefix.system).toBe("system-tmp-b");
+  });
+
+  it("switchWorkspace is a noop on log content when there's nothing to drop", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      session: "code-old",
+    });
+    const { dropped } = loop.switchWorkspace({ sessionName: "code-new" });
+    expect(dropped).toBe(0);
+    expect(loop.sessionName).toBe("code-new");
+  });
+
+  it("switchWorkspace swallows rebuilder errors and keeps the prior system", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "keep-me" }),
+      stream: false,
+      session: "code-a",
+      rebuildSystem: () => {
+        throw new Error("rebuilder went sideways");
+      },
+    });
+    loop.switchWorkspace({ sessionName: "code-b" });
+    expect(loop.prefix.system).toBe("keep-me");
+    expect(loop.sessionName).toBe("code-b");
+  });
+
   it("retryLastUser returns null when no user message exists", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({

@@ -208,6 +208,14 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
     case "session.reset":
       return { ...state, cards: [], focusedCardId: null, toasts: [] };
 
+    case "session.workspace.change":
+      return state.session.id === event.id && state.session.workspace === event.workspace
+        ? state
+        : {
+            ...state,
+            session: { ...state.session, id: event.id, workspace: event.workspace },
+          };
+
     case "plan.show":
       return appendCard(state, {
         kind: "plan",

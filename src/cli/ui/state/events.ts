@@ -196,6 +196,12 @@ const sessionReset = z.object({
   type: z.literal("session.reset"),
 });
 
+const sessionWorkspaceChange = z.object({
+  type: z.literal("session.workspace.change"),
+  id: z.string().min(1),
+  workspace: z.string().min(1),
+});
+
 const languageChange = z.object({
   type: z.literal("language.change"),
   lang: z.string(),
@@ -345,6 +351,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   liveShow,
   tipShow,
   sessionReset,
+  sessionWorkspaceChange,
   planShow,
   planStepComplete,
   planDrop,

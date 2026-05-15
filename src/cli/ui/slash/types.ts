@@ -113,8 +113,8 @@ export interface SlashContext {
   markAllPlanStepsDone?: () => number;
 
   reloadHooks?: () => number;
-  /** Switch the workspace root mid-session — re-targets filesystem/shell/memory tools, hooks, at-mention walker. Code mode only. */
-  switchCwd?: (newPath: string) => { ok: boolean; info: string };
+  /** Switch the workspace root mid-session — re-targets filesystem/shell/memory tools, hooks, at-mention walker. Code mode only. `clear` mirrors `/new` (drops in-memory history + UI cards) so the previous workspace's chat doesn't contaminate the new one. */
+  switchCwd?: (newPath: string) => { ok: boolean; info: string; clear?: boolean };
   /** Diff config.mcp[] vs live bridges → add/close clients accordingly. Wired from chat.tsx mcpRuntime. */
   reloadMcp?: () => Promise<{
     added: string[];
