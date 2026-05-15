@@ -103,6 +103,18 @@ export type {
   SubagentToolOptions,
 } from "./tools/subagent.js";
 export {
+  DEFAULT_SPAWN_STORM_THRESHOLD,
+  SubagentTelemetry,
+  computeSpawnDistillation,
+  countSpawnStorms,
+  summarizeSubagentSession,
+} from "./telemetry/subagent-distillation.js";
+export type {
+  SpawnDistillation,
+  SubagentResultLike,
+  SubagentSessionSummary,
+} from "./telemetry/subagent-distillation.js";
+export {
   NeedsConfirmationError,
   detectShellOperator,
   formatCommandResult,

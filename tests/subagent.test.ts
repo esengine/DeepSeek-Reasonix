@@ -616,6 +616,43 @@ describe("registerSubagentTool", () => {
     expect(unique[3]).toMatch(/\[budget: 1 of 5 tool call left/);
     expect(unique[4]).toMatch(/\[budget: 0 of 5 tool calls left — finalize NOW/);
   });
+
+  it("fires onSpawnComplete once per dispatch with the full SubagentResult", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    const client = makeClient([{ content: "the distilled answer" }]);
+    const captured: { output: string; costUsd: number; usage: { completionTokens: number } }[] = [];
+    registerSubagentTool(parent, {
+      client,
+      onSpawnComplete: (result) => {
+        captured.push({
+          output: result.output,
+          costUsd: result.costUsd,
+          usage: { completionTokens: result.usage.completionTokens },
+        });
+      },
+    });
+    await parent.dispatch("spawn_subagent", JSON.stringify({ task: "say something" }));
+    expect(captured).toHaveLength(1);
+    expect(captured[0]!.output).toBe("the distilled answer");
+    expect(captured[0]!.usage.completionTokens).toBeGreaterThan(0);
+  });
+
+  it("does not propagate onSpawnComplete errors out of the spawn tool dispatch", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    const client = makeClient([{ content: "ok" }]);
+    registerSubagentTool(parent, {
+      client,
+      onSpawnComplete: () => {
+        throw new Error("telemetry boom");
+      },
+    });
+    const out = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "anything" }));
+    const parsed = JSON.parse(out);
+    expect(parsed.success).toBe(true);
+    expect(parsed.output).toBe("ok");
+  });
 });
 
 describe("subagentBudgetHint", () => {

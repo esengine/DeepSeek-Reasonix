@@ -92,6 +92,8 @@ export interface SubagentToolOptions {
   maxToolIters?: number;
   maxResultChars?: number;
   sink?: SubagentSink;
+  /** Fires once per spawn, after `spawnSubagent` returns and before its result is formatted for the parent. Bind a `SubagentTelemetry.record` here for automatic distillation capture. */
+  onSpawnComplete?: (result: SubagentResult) => void;
 }
 
 /** Memory-stable prefix — shared across spawns, cached. The model-dependent escalation contract is appended per spawn so a pro spawn doesn't get told it's running on flash (#582). */
@@ -572,6 +574,13 @@ export function registerSubagentTool(
       });
       sessionSpawnCount++;
       sessionSpawnTokens += result.usage.totalTokens;
+      if (opts.onSpawnComplete) {
+        try {
+          opts.onSpawnComplete(result);
+        } catch {
+          // Telemetry callback errors must not break the spawn-tool dispatch.
+        }
+      }
       const formatted = formatSubagentResult(result);
       const hint = subagentBudgetHint(sessionSpawnCount, sessionSpawnTokens);
       return hint ? `${formatted}\n${hint}` : formatted;
