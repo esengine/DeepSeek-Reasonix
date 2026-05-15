@@ -129,9 +129,16 @@ export class SkillStore {
         dir: join(this.projectRoot, ".reasonix", SKILLS_DIRNAME),
         scope: "project",
       });
+      // #870: pick up `.agents/skills` automatically — common convention shared
+      // by skills.sh-style tooling, no config required.
+      out.push({
+        dir: join(this.projectRoot, ".agents", SKILLS_DIRNAME),
+        scope: "project",
+      });
     }
     for (const dir of this.customSkillPaths) out.push({ dir, scope: "custom" });
     out.push({ dir: join(this.homeDir, ".reasonix", SKILLS_DIRNAME), scope: "global" });
+    out.push({ dir: join(this.homeDir, ".agents", SKILLS_DIRNAME), scope: "global" });
     return out.map((root, priority) => ({ ...root, priority, status: skillPathStatus(root.dir) }));
   }
 

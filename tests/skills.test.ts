@@ -114,6 +114,25 @@ describe("SkillStore", () => {
     expect(list[0]?.path).toContain(projectRoot);
   });
 
+  it("discovers .agents/skills as a default root (#870) — both project and global", () => {
+    const projParent = join(projectRoot, ".agents", "skills");
+    mkdirSync(projParent, { recursive: true });
+    const projPath = join(projParent, "deploy", "SKILL.md");
+    mkdirSync(join(projParent, "deploy"));
+    writeFileSync(projPath, "---\ndescription: from .agents\n---\nbody\n", "utf8");
+
+    const globParent = join(home, ".agents", "skills");
+    mkdirSync(globParent, { recursive: true });
+    const globPath = join(globParent, "review", "SKILL.md");
+    mkdirSync(join(globParent, "review"));
+    writeFileSync(globPath, "---\ndescription: glob agents\n---\nbody\n", "utf8");
+
+    const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+    const names = store.list().map((s) => s.name);
+    expect(names).toContain("deploy");
+    expect(names).toContain("review");
+  });
+
   it("project scope wins on a name collision with global", () => {
     writeSkillDir(projectRoot, "global", "review", { description: "global one" }, "G", home);
     writeSkillDir(projectRoot, "project", "review", { description: "project one" }, "P", home);
