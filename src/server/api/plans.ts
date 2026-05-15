@@ -1,5 +1,4 @@
-import { listPlanArchives } from "../../code/plan-store.js";
-import { listSessions } from "../../memory/session.js";
+import { listAllPlanArchives } from "../../code/plan-store.js";
 import type { PlanStep } from "../../tools/plan.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
@@ -28,27 +27,21 @@ export async function handlePlans(
   if (method !== "GET") {
     return { status: 405, body: { error: "GET only" } };
   }
-  const out: PlanRow[] = [];
-  for (const session of listSessions()) {
-    const archives = listPlanArchives(session.name);
-    for (const a of archives) {
-      const total = a.steps.length;
-      const done = a.completedStepIds.length;
-      const row: PlanRow = {
-        session: session.name,
-        path: a.path,
-        completedAt: a.completedAt,
-        totalSteps: total,
-        completedSteps: done,
-        completionRatio: total > 0 ? done / total : 0,
-        steps: a.steps,
-        completedStepIds: a.completedStepIds,
-      };
-      if (a.summary) row.summary = a.summary;
-      out.push(row);
-    }
-  }
-  // Newest archive first across the whole pool.
-  out.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
+  const out: PlanRow[] = listAllPlanArchives().map((a) => {
+    const total = a.steps.length;
+    const done = a.completedStepIds.length;
+    const row: PlanRow = {
+      session: a.sessionName,
+      path: a.path,
+      completedAt: a.completedAt,
+      totalSteps: total,
+      completedSteps: done,
+      completionRatio: total > 0 ? done / total : 0,
+      steps: a.steps,
+      completedStepIds: a.completedStepIds,
+    };
+    if (a.summary) row.summary = a.summary;
+    return row;
+  });
   return { status: 200, body: { plans: out } };
 }

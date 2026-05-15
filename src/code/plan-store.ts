@@ -193,6 +193,73 @@ export function listPlanArchives(sessionName: string): PlanArchiveSummary[] {
   return summaries;
 }
 
+export interface PlanArchiveWithSession extends PlanArchiveSummary {
+  sessionName: string;
+}
+
+/** Cross-session enumeration in a single dir scan — used by the dashboard plans panel where the per-session loop was O(N×M) and timed out for users with hundreds of sessions. */
+export function listAllPlanArchives(): PlanArchiveWithSession[] {
+  const dir = sessionsDir();
+  if (!existsSync(dir)) return [];
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: PlanArchiveWithSession[] = [];
+  const suffix = ".done.json";
+  const planMarker = ".plan.";
+  for (const name of entries) {
+    if (!name.endsWith(suffix)) continue;
+    const planIdx = name.indexOf(planMarker);
+    if (planIdx < 0) continue;
+    const sessionName = name.slice(0, planIdx);
+    if (!sessionName) continue;
+    const full = join(dir, name);
+    try {
+      const raw = readFileSync(full, "utf8");
+      const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
+      if (parsed.version !== 1) continue;
+      if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) continue;
+      const steps = parsed.steps.filter(
+        (s): s is PlanStep =>
+          !!s &&
+          typeof s === "object" &&
+          typeof (s as PlanStep).id === "string" &&
+          typeof (s as PlanStep).title === "string" &&
+          typeof (s as PlanStep).action === "string",
+      );
+      if (steps.length === 0) continue;
+      const completedStepIds = Array.isArray(parsed.completedStepIds)
+        ? parsed.completedStepIds.filter((id): id is string => typeof id === "string" && !!id)
+        : [];
+      let completedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : "";
+      if (!completedAt || Number.isNaN(Date.parse(completedAt))) {
+        try {
+          completedAt = statSync(full).mtime.toISOString();
+        } catch {
+          completedAt = new Date(0).toISOString();
+        }
+      }
+      const entry: PlanArchiveWithSession = {
+        sessionName,
+        path: full,
+        completedAt,
+        steps,
+        completedStepIds,
+      };
+      if (typeof parsed.body === "string" && parsed.body) entry.body = parsed.body;
+      if (typeof parsed.summary === "string" && parsed.summary) entry.summary = parsed.summary;
+      out.push(entry);
+    } catch {
+      // Skip the corrupt archive entirely.
+    }
+  }
+  out.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
+  return out;
+}
+
 /** Falls back to raw ISO string past a week — "47 days ago" misleads more than it helps. */
 export function relativeTime(updatedAt: string, now: number = Date.now()): string {
   const t = Date.parse(updatedAt);
