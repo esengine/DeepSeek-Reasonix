@@ -15,8 +15,9 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { loadResolvedSkillPaths } from "../../config.js";
 import { parseFrontmatter } from "../../frontmatter.js";
-import { SKILLS_DIRNAME, SKILL_FILE, validateSkillFrontmatter } from "../../skills.js";
+import { SKILLS_DIRNAME, SKILL_FILE, SkillStore, validateSkillFrontmatter } from "../../skills.js";
 import { readUsageLog } from "../../telemetry/usage.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
@@ -47,7 +48,7 @@ function projectSkillsDir(rootDir: string): string {
 
 interface SkillListEntry {
   name: string;
-  scope: "project" | "global" | "builtin";
+  scope: "project" | "custom" | "global" | "builtin";
   description?: string;
   path: string;
   size: number;
@@ -69,7 +70,7 @@ function parseFrontmatterDescription(raw: string): string | undefined {
 function readSkillListEntry(
   skillPath: string,
   name: string,
-  scope: "project" | "global",
+  scope: "project" | "custom" | "global",
 ): SkillListEntry | null {
   try {
     // Open once and reuse the fd so size/mtime/content all bind to
@@ -126,7 +127,7 @@ function defaultSkillPath(dir: string, name: string): ResolvedSkillPath {
   return { path: join(dir, name, SKILL_FILE), layout: "folder" };
 }
 
-function listSkills(dir: string, scope: "project" | "global"): SkillListEntry[] {
+function listSkills(dir: string, scope: "project" | "custom" | "global"): SkillListEntry[] {
   if (!existsSync(dir)) return [];
   const out: SkillListEntry[] = [];
   try {
@@ -177,10 +178,16 @@ export async function handleSkills(
     const runs7d = countSubagentRuns(ctx.usageLogPath);
     const tag = (rows: SkillListEntry[]) =>
       rows.map((r) => ({ ...r, runs7d: runs7d.get(r.name) ?? 0 }));
+    const store = new SkillStore({
+      projectRoot: cwd,
+      customSkillPaths: loadResolvedSkillPaths(cwd ?? process.cwd(), ctx.configPath),
+    });
+    const customRoots = store.customRoots();
     return {
       status: 200,
       body: {
         global: tag(listSkills(globalSkillsDir(), "global")),
+        custom: tag(customRoots.flatMap((root) => listSkills(root.dir, "custom"))),
         project: cwd ? tag(listSkills(projectSkillsDir(cwd), "project")) : [],
         builtin: [
           {
@@ -199,6 +206,7 @@ export async function handleSkills(
         paths: {
           global: globalSkillsDir(),
           project: cwd ? projectSkillsDir(cwd) : null,
+          custom: customRoots,
         },
       },
     };

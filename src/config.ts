@@ -2,7 +2,7 @@
 
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { type ThemeName, isThemeName, resolveThemeName } from "./cli/ui/theme/tokens.js";
 import type { LanguageCode } from "./i18n/types.js";
 import {
@@ -132,6 +132,9 @@ export interface ReasonixConfig {
   };
   index?: IndexUserConfig;
   semantic?: SemanticEmbeddingUserConfig;
+  skills?: {
+    paths?: string[];
+  };
   /** User-declared extensions to the built-in memory types (#709). Unknown types round-trip even without a declaration; declaring one lets you attach a default priority + lifecycle. */
   memory?: {
     customTypes?: CustomMemoryTypeConfig[];
@@ -284,6 +287,132 @@ export function saveBaseUrl(url: string, path: string = defaultConfigPath()): vo
     cfg.baseUrl = undefined;
   }
   writeConfig(cfg, path);
+}
+
+export interface SkillPathEntry {
+  raw: string;
+  resolved: string;
+}
+
+export function resolveSkillPath(raw: string, baseDir: string): string {
+  const homeExpanded = expandCurrentUserHome(raw.trim());
+  return resolve(isAbsolute(homeExpanded) ? homeExpanded : join(baseDir, homeExpanded));
+}
+
+export function normalizeSkillPathEntries(
+  paths: readonly unknown[],
+  baseDir: string,
+): SkillPathEntry[] {
+  const out: SkillPathEntry[] = [];
+  const seen = new Set<string>();
+  for (const value of paths) {
+    if (typeof value !== "string") continue;
+    const raw = value.trim();
+    if (!raw) continue;
+    const resolved = resolveSkillPath(raw, baseDir);
+    const key = skillPathKey(resolved);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ raw, resolved });
+  }
+  return out;
+}
+
+export function normalizeSkillPaths(paths: readonly unknown[], baseDir: string): string[] {
+  return normalizeSkillPathEntries(paths, baseDir).map((entry) => entry.raw);
+}
+
+export function resolveSkillPaths(paths: readonly unknown[], baseDir: string): string[] {
+  return normalizeSkillPathEntries(paths, baseDir).map((entry) => entry.resolved);
+}
+
+function skillPathKey(path: string): string {
+  return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+function expandCurrentUserHome(path: string): string {
+  if (path === "~") return homedir();
+  if (path.startsWith("~/") || path.startsWith("~\\")) return join(homedir(), path.slice(2));
+  return path;
+}
+
+export function loadSkillPaths(
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): string[] {
+  const raw = readConfig(path).skills?.paths;
+  return Array.isArray(raw) ? normalizeSkillPaths(raw, baseDir) : [];
+}
+
+export function loadResolvedSkillPaths(
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): string[] {
+  const raw = readConfig(path).skills?.paths;
+  return Array.isArray(raw) ? resolveSkillPaths(raw, baseDir) : [];
+}
+
+export function saveSkillPaths(
+  paths: readonly unknown[],
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): string[] {
+  const cfg = readConfig(path);
+  const normalized = normalizeSkillPaths(paths, baseDir);
+  cfg.skills = { ...(cfg.skills ?? {}), paths: normalized };
+  writeConfig(cfg, path);
+  return normalized;
+}
+
+export function addSkillPath(
+  skillPath: string,
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): { added: boolean; path: string; resolved: string; paths: string[] } | { error: string } {
+  const entry = normalizeSkillPathEntries([skillPath], baseDir)[0];
+  if (!entry) return { error: "skill path is empty" };
+  const existing = loadSkillPaths(baseDir, path);
+  const seen = new Set(resolveSkillPaths(existing, baseDir).map(skillPathKey));
+  const key = skillPathKey(entry.resolved);
+  if (seen.has(key))
+    return { added: false, path: entry.raw, resolved: entry.resolved, paths: existing };
+  const paths = saveSkillPaths([...existing, entry.raw], baseDir, path);
+  return { added: true, path: entry.raw, resolved: entry.resolved, paths };
+}
+
+export function removeSkillPath(
+  target: string,
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): { removed: boolean; path?: string; resolved?: string; paths: string[] } {
+  const existing = loadSkillPaths(baseDir, path);
+  const trimmed = target.trim();
+  if (!trimmed) return { removed: false, paths: existing };
+  const existingEntries = normalizeSkillPathEntries(existing, baseDir);
+  const idx = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) - 1 : -1;
+  let removeAt = idx >= 0 && idx < existing.length ? idx : -1;
+  if (removeAt < 0) {
+    const targetEntry = normalizeSkillPathEntries([trimmed], baseDir)[0];
+    const targetKey = targetEntry ? skillPathKey(targetEntry.resolved) : undefined;
+    removeAt = existingEntries.findIndex(
+      (entry) =>
+        entry.raw === trimmed ||
+        (targetKey !== undefined && skillPathKey(entry.resolved) === targetKey),
+    );
+  }
+  if (removeAt < 0) return { removed: false, paths: existing };
+  const removed = existingEntries[removeAt];
+  const paths = saveSkillPaths(
+    existing.filter((_, i) => i !== removeAt),
+    baseDir,
+    path,
+  );
+  return {
+    removed: true,
+    path: removed?.raw ?? existing[removeAt],
+    resolved: removed?.resolved,
+    paths,
+  };
 }
 
 export function searchEnabled(path: string = defaultConfigPath()): boolean {

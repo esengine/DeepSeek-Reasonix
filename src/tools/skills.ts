@@ -17,6 +17,7 @@ export interface SkillToolsOptions {
   /** Override `$HOME` — tests set this to a tmpdir. */
   homeDir?: string;
   projectRoot?: string;
+  customSkillPaths?: readonly string[];
   /** When omitted, subagent skills error rather than silently falling back to inline (loses isolation). */
   subagentRunner?: SubagentRunner;
   /** Hide built-in skills (test-only knob; production callers leave off). */
@@ -32,6 +33,7 @@ export function registerSkillTools(
   const store = new SkillStore({
     homeDir: opts.homeDir,
     projectRoot: opts.projectRoot,
+    customSkillPaths: opts.customSkillPaths,
     disableBuiltins: opts.disableBuiltins,
   });
   const subagentRunner = opts.subagentRunner;

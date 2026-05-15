@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
+import { t, useLang } from "../i18n/index.js";
 import { api } from "../lib/api.js";
 import { html } from "../lib/html.js";
-import { t, useLang } from "../i18n/index.js";
 
 interface SkillEntry {
   name: string;
@@ -9,14 +9,22 @@ interface SkillEntry {
   runs7d?: number;
 }
 
+interface SkillPathInfo {
+  dir: string;
+  scope: "custom";
+  status: string;
+  priority: number;
+}
+
 interface SkillsData {
-  paths: { project?: string };
+  paths: { project?: string; custom?: SkillPathInfo[] };
   project: SkillEntry[];
+  custom: SkillEntry[];
   global: SkillEntry[];
   builtin: SkillEntry[];
 }
 
-type Scope = "project" | "global" | "builtin";
+type Scope = "project" | "custom" | "global" | "builtin";
 
 export function SkillsPanel() {
   useLang();
@@ -44,7 +52,7 @@ export function SkillsPanel() {
 
   const openSkill = useCallback(async (scope: Scope, name: string) => {
     setOpen({ scope, name });
-    if (scope === "builtin") {
+    if (scope === "builtin" || scope === "custom") {
       setBody("");
       return;
     }
@@ -118,6 +126,7 @@ export function SkillsPanel() {
 
   const allWith = [
     ...data.project.map((s) => ({ scope: "project" as Scope, ...s })),
+    ...data.custom.map((s) => ({ scope: "custom" as Scope, ...s })),
     ...data.global.map((s) => ({ scope: "global" as Scope, ...s })),
     ...data.builtin.map((s) => ({ scope: "builtin" as Scope, ...s })),
   ];
@@ -152,6 +161,10 @@ export function SkillsPanel() {
             class=${`chip-f ${scopeFilter === "project" ? "active" : ""}`}
             onClick=${() => setScopeFilter("project")}
           >${t("skills.project")} <span class="ct">${data.project.length}</span></span>
+          <span
+            class=${`chip-f ${scopeFilter === "custom" ? "active" : ""}`}
+            onClick=${() => setScopeFilter("custom")}
+          >${t("skills.custom")} <span class="ct">${data.custom.length}</span></span>
           <span
             class=${`chip-f ${scopeFilter === "global" ? "active" : ""}`}
             onClick=${() => setScopeFilter("global")}
@@ -192,6 +205,7 @@ export function SkillsPanel() {
                 <span class="name">
                   ${s.name}
                   ${s.scope === "builtin" ? html`<span class="pill">${t("skills.builtin")}</span>` : null}
+                  ${s.scope === "custom" ? html`<span class="pill">${t("skills.custom")}</span>` : null}
                 </span>
                 <span class="preview">${s.description ?? t("skills.noDescription")}</span>
                 <span class="meta">
@@ -233,7 +247,26 @@ export function SkillsPanel() {
                     </div>
                   `;
                 })()
-              : html`
+              : open.scope === "custom"
+                ? (() => {
+                    const custom = data.custom.find((b) => b.name === open.name);
+                    return html`
+                      <div class="sessions-detail-h">
+                        <span class="name">${open.scope}/${open.name}</span>
+                        <span class="ws"><span class="pill">${t("skills.readOnlyCustom")}</span></span>
+                        <span class="actions">
+                          <button class="btn ghost" onClick=${() => setOpen(null)}>${t("common.back")}</button>
+                        </span>
+                      </div>
+                      <div style="color:var(--fg-2);font-size:13px;line-height:1.6">
+                        ${custom?.description ?? t("skills.noDescription")}
+                      </div>
+                      <div style="margin-top:14px;color:var(--fg-3);font-size:11.5px;font-family:var(--font-mono)">
+                        ${data.paths.custom?.map((p) => html`<div>${p.status} · ${p.dir}</div>`)}
+                      </div>
+                    `;
+                  })()
+                : html`
                 <div class="sessions-detail-h">
                   <span class="name">${open.scope}/${open.name}</span>
                   <span class="ws">${body.length.toLocaleString()} chars</span>

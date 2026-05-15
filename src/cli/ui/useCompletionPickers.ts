@@ -9,6 +9,7 @@ import {
   rankPickerCandidates,
   walkFilesStream,
 } from "../../at-mentions.js";
+import { loadResolvedSkillPaths } from "../../config.js";
 import { SkillStore } from "../../skills.js";
 import {
   type McpServerSummary,
@@ -230,7 +231,11 @@ export function useCompletionPickers({
       return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);
     }
     if (completer === "skills") {
-      const store = new SkillStore({ projectRoot: codeMode?.rootDir });
+      const baseDir = codeMode?.rootDir ?? process.cwd();
+      const store = new SkillStore({
+        projectRoot: codeMode?.rootDir,
+        customSkillPaths: loadResolvedSkillPaths(baseDir),
+      });
       const names = store
         .list()
         .filter((s) => s.scope !== "builtin")

@@ -278,8 +278,8 @@ export const EN: TranslationSchema = {
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
     },
     skill: {
-      description: "list / run user skills (<project>/.reasonix/skills + ~/.reasonix/skills)",
-      argsHint: "[list|show <name>|<name> [args]]",
+      description: "list / run user skills (project + custom + global + builtin)",
+      argsHint: "[list|paths|show <name>|<name> [args]]",
     },
     hooks: {
       description: "list active hooks (settings.json under .reasonix/) · reload re-reads from disk",
@@ -1091,6 +1091,19 @@ export const EN: TranslationSchema = {
       newUsage: "usage: /skill new <name> [--global]",
       newCreated: "▸ created skill: {name}\n  {path}\n  edit it, then `/skill {name}` to invoke",
       newError: "▲ /skill new failed: {reason}",
+      pathsHeader: "Skill paths (priority order):",
+      pathsPriority:
+        "Priority: project > custom paths in config order > global > builtin. Changes affect the system prompt on next /new or new session.",
+      pathsUsage:
+        "usage: /skill paths [list]\n       /skill paths add <path>\n       /skill paths remove <path|N>",
+      pathsAddUsage: "usage: /skill paths add <path>",
+      pathsRemoveUsage: "usage: /skill paths remove <path|N>",
+      pathsAdded: "▸ added custom skills path: {path}",
+      pathsAlready: "▸ custom skills path already configured: {path}",
+      pathsRemoved: "▸ removed custom skills path: {path}",
+      pathsRemoveNotFound: "▸ no custom skills path matches: {target}",
+      pathsRestartHint:
+        "The current session's system prompt is unchanged; run /new or start a new session to refresh the skills index.",
     },
   },
   statusBar: {

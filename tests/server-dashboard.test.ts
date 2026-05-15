@@ -355,6 +355,35 @@ describe("dashboard server: endpoints", () => {
     }
   });
 
+  it("GET /api/skills returns custom skills and path status", async () => {
+    const proj = mkdtempSync(join(tmpdir(), "reasonix-dash-skills-custom-proj-"));
+    const custom = mkdtempSync(join(tmpdir(), "reasonix-dash-skills-custom-"));
+    try {
+      await writeFile(
+        cfgPath,
+        JSON.stringify({ skills: { paths: [custom, join(proj, "missing")] } }),
+        "utf8",
+      );
+      await mkdir(join(custom, "custom-skill"), { recursive: true });
+      await writeFile(
+        join(custom, "custom-skill", "SKILL.md"),
+        "---\ndescription: Custom skill\n---\ncustom body\n",
+        "utf8",
+      );
+      const base = await boot({ getCurrentCwd: () => proj });
+      const list = await call(`${base}api/skills`, { token: TOKEN });
+      expect(list.status).toBe(200);
+      expect(list.body.custom.map((s: { name: string }) => s.name)).toEqual(["custom-skill"]);
+      expect(list.body.paths.custom.map((p: { status: string }) => p.status)).toEqual([
+        "ok",
+        "missing",
+      ]);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+      rmSync(custom, { recursive: true, force: true });
+    }
+  });
+
   it("POST /api/skills rejects content missing a description frontmatter line (#583)", async () => {
     const proj = mkdtempSync(join(tmpdir(), "reasonix-dash-skills-desc-"));
     try {

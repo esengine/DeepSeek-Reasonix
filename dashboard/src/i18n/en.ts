@@ -138,6 +138,10 @@ export const en = {
     loopRunning: "running",
     loopIter: "iter {iter}",
     loopFiresIn: "fires in {remaining}",
+    sectionSkills: "Skills",
+    skillPaths: "skill paths",
+    skillPathsPlaceholder: "/path/to/skills-a, /path/to/skills-b",
+    skillPathsNote: "comma-separated · next /new or new session",
     sectionRuntime: "Runtime",
     activeModel: "active model",
     modelPricingLine: "${hit} hit · ${miss} miss · ${out} out  per 1M tok",
@@ -306,41 +310,72 @@ export const en = {
     write: "write",
     flat: "flat",
     desc: {
-      web_search: "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer depends on current state — events, prices, releases, real-world status.",
-      web_fetch: "Download a URL and return its visible text content (scripts/styles/nav stripped). Use after web_search when a snippet isn't enough.",
-      run_command: "Run a shell command in the project root; returns combined stdout+stderr. Allowlisted read-only commands run immediately; mutations are gated by user confirmation.",
-      run_background: "Spawn a long-running process and detach. Returns a job id for tailing logs, waiting for completion, or killing. Use for dev servers, watchers, and one-shot long jobs.",
-      job_output: "Read the latest output of a background job. Returns the tail of the buffer and tells you whether the job is still running.",
-      wait_for_job: "Block server-side until a background job finishes, bounded by timeout. Use instead of polling job_output in a loop.",
-      stop_job: "Stop a background job. SIGTERM first, SIGKILL after a grace period. Safe to call on an already-exited job.",
-      list_jobs: "List every background job started this session — running and exited — with id, command, pid, and status.",
-      remember: "Save a memory for future sessions. Use when the user states a preference, corrects your approach, shares a non-obvious fact, or asks you to remember something.",
-      forget: "Delete a memory file and remove it from MEMORY.md. Use when the user asks to forget something or a remembered fact is now wrong.",
-      recall_memory: "Read the full body of a memory file when its one-line summary isn't enough detail.",
-      read_file: "Read a file under the sandbox root. Supports head/tail/range scoping to save context. Auto-returns a preview for files over 200 lines.",
-      list_directory: "List entries in a directory. Returns one line per entry, marking directories with a trailing slash.",
-      directory_tree: "Recursively list entries in a directory as an indented tree. Budget-aware with auto-collapse for large subtrees.",
-      search_files: "Find files whose NAME matches a substring or regex. Case-insensitive. Skips dependency/build directories by default.",
-      search_content: "Recursively grep file CONTENTS for a substring or regex. Returns matches in path:line:text format. The right tool for finding references.",
+      web_search:
+        "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer depends on current state — events, prices, releases, real-world status.",
+      web_fetch:
+        "Download a URL and return its visible text content (scripts/styles/nav stripped). Use after web_search when a snippet isn't enough.",
+      run_command:
+        "Run a shell command in the project root; returns combined stdout+stderr. Allowlisted read-only commands run immediately; mutations are gated by user confirmation.",
+      run_background:
+        "Spawn a long-running process and detach. Returns a job id for tailing logs, waiting for completion, or killing. Use for dev servers, watchers, and one-shot long jobs.",
+      job_output:
+        "Read the latest output of a background job. Returns the tail of the buffer and tells you whether the job is still running.",
+      wait_for_job:
+        "Block server-side until a background job finishes, bounded by timeout. Use instead of polling job_output in a loop.",
+      stop_job:
+        "Stop a background job. SIGTERM first, SIGKILL after a grace period. Safe to call on an already-exited job.",
+      list_jobs:
+        "List every background job started this session — running and exited — with id, command, pid, and status.",
+      remember:
+        "Save a memory for future sessions. Use when the user states a preference, corrects your approach, shares a non-obvious fact, or asks you to remember something.",
+      forget:
+        "Delete a memory file and remove it from MEMORY.md. Use when the user asks to forget something or a remembered fact is now wrong.",
+      recall_memory:
+        "Read the full body of a memory file when its one-line summary isn't enough detail.",
+      read_file:
+        "Read a file under the sandbox root. Supports head/tail/range scoping to save context. Auto-returns a preview for files over 200 lines.",
+      list_directory:
+        "List entries in a directory. Returns one line per entry, marking directories with a trailing slash.",
+      directory_tree:
+        "Recursively list entries in a directory as an indented tree. Budget-aware with auto-collapse for large subtrees.",
+      search_files:
+        "Find files whose NAME matches a substring or regex. Case-insensitive. Skips dependency/build directories by default.",
+      search_content:
+        "Recursively grep file CONTENTS for a substring or regex. Returns matches in path:line:text format. The right tool for finding references.",
       glob: "List files matching a glob pattern, sorted by mtime. Default limit 200, max 1000. Skips node_modules/.git/dist by default.",
       get_file_info: "Stat a path under the sandbox root. Returns type, size in bytes, and mtime.",
-      write_file: "Create or overwrite a file with the given content. Parent directories are created as needed.",
-      edit_file: "Apply a SEARCH/REPLACE edit to an existing file. The search must match exactly and be unique in the file.",
-      multi_edit: "Apply N SEARCH/REPLACE edits across one or more files atomically. If any edit fails, no files are written.",
+      write_file:
+        "Create or overwrite a file with the given content. Parent directories are created as needed.",
+      edit_file:
+        "Apply a SEARCH/REPLACE edit to an existing file. The search must match exactly and be unique in the file.",
+      multi_edit:
+        "Apply N SEARCH/REPLACE edits across one or more files atomically. If any edit fails, no files are written.",
       create_directory: "Create a directory (and any missing parents) under the sandbox root.",
       move_file: "Rename or move a file or directory under the sandbox root.",
-      delete_file: "Delete one file under the sandbox root. Refuses directories — use delete_directory for those.",
-      delete_directory: "Recursively delete a directory under the sandbox root. Pass recursive:false to refuse non-empty directories.",
-      copy_file: "Copy a file or directory under the sandbox root. Refuses to overwrite an existing destination.",
-      submit_plan: "Submit one concrete plan for a review gate. Use for multi-file refactors, architecture changes, or anything expensive to undo.",
-      mark_step_complete: "Mark one step of the approved plan as done. Call exactly once after finishing each step.",
-      revise_plan: "Surgically replace the remaining steps of an in-flight plan. Done steps are never touched.",
-      run_skill: "Invoke a playbook from the Skills index. Pass the bare skill name. Subagent-tagged skills spawn an isolated subagent.",
-      spawn_subagent: "Spawn an isolated subagent for a self-contained subtask. Use for parallel fan-out or when the work needs many file reads.",
-      todo_write: "In-session task tracker for multi-step work. Replaces the entire list every call. No approval gate or file writes.",
-      ask_choice: "Present 2-6 alternatives to the user. Use when the user asks for options or you need a preference decision.",
-      create_skill: "Scaffold a new skill the user can invoke later via /skill. Supports inline and subagent run modes.",
-      add_mcp_server: "Register a new MCP server in the user's config. Takes effect on the next session. Supports stdio, SSE, and streamable-http.",
+      delete_file:
+        "Delete one file under the sandbox root. Refuses directories — use delete_directory for those.",
+      delete_directory:
+        "Recursively delete a directory under the sandbox root. Pass recursive:false to refuse non-empty directories.",
+      copy_file:
+        "Copy a file or directory under the sandbox root. Refuses to overwrite an existing destination.",
+      submit_plan:
+        "Submit one concrete plan for a review gate. Use for multi-file refactors, architecture changes, or anything expensive to undo.",
+      mark_step_complete:
+        "Mark one step of the approved plan as done. Call exactly once after finishing each step.",
+      revise_plan:
+        "Surgically replace the remaining steps of an in-flight plan. Done steps are never touched.",
+      run_skill:
+        "Invoke a playbook from the Skills index. Pass the bare skill name. Subagent-tagged skills spawn an isolated subagent.",
+      spawn_subagent:
+        "Spawn an isolated subagent for a self-contained subtask. Use for parallel fan-out or when the work needs many file reads.",
+      todo_write:
+        "In-session task tracker for multi-step work. Replaces the entire list every call. No approval gate or file writes.",
+      ask_choice:
+        "Present 2-6 alternatives to the user. Use when the user asks for options or you need a preference decision.",
+      create_skill:
+        "Scaffold a new skill the user can invoke later via /skill. Supports inline and subagent run modes.",
+      add_mcp_server:
+        "Register a new MCP server in the user's config. Takes effect on the next session. Supports stdio, SSE, and streamable-http.",
     },
   },
   permissions: {
@@ -461,6 +496,7 @@ export const en = {
     loading: "loading skills…",
     filterPlaceholder: "filter skills",
     project: "project",
+    custom: "custom",
     global: "global",
     builtin: "builtin",
     newSkill: "new skill",
@@ -468,6 +504,7 @@ export const en = {
     runs7d: "runs · 7d",
     pickHint: "Pick a skill on the left, or create a new one above.",
     readOnlyBuiltin: "read-only · builtin",
+    readOnlyCustom: "read-only · custom path",
     builtinDesc:
       "Built-in skills ship with Reasonix; the model picks them up automatically. To customize, create a project- or global-scoped skill with the same name.",
     saved: "saved {scope}/{name}",
@@ -552,7 +589,8 @@ export const en = {
     lastBuild: "last build",
     builtWith: "built with",
     currentTarget: "current target",
-    incompatibleHint: "This on-disk index was built for a different provider or model. Run Rebuild to replace it.",
+    incompatibleHint:
+      "This on-disk index was built for a different provider or model. Run Rebuild to replace it.",
     runIndexHint: "Run an index to enable semantic_search.",
     reIndex: "Re-index",
     build: "Build",

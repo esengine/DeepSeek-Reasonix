@@ -3,6 +3,7 @@ import {
   loadBaseUrl,
   loadEditMode,
   loadProjectShellAllowed,
+  loadResolvedSkillPaths,
   searchEnabled,
   webSearchEndpoint,
   webSearchEngine,
@@ -77,6 +78,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   let subagentClient: DeepSeekClient | null = null;
   registerSkillTools(tools, {
     projectRoot: opts.rootDir,
+    customSkillPaths: loadResolvedSkillPaths(opts.rootDir),
     onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal) => {
       if (!subagentClient) subagentClient = new DeepSeekClient({ baseUrl: loadBaseUrl() });

@@ -1,8 +1,17 @@
 /** Project scope wins over global. Only names+descriptions enter the prefix; bodies load lazily into the append-only log. */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  constants,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { accessSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
 import { NEGATIVE_CLAIM_RULE, TUI_FORMATTING_RULES } from "./prompt-fragments.js";
 
@@ -13,7 +22,9 @@ export const SKILLS_INDEX_MAX_CHARS = 4000;
 /** Skill identifier shape — alnum + `_` + `-` + interior `.`, 1-64 chars. */
 const VALID_SKILL_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
-export type SkillScope = "project" | "global" | "builtin";
+export type SkillScope = "project" | "custom" | "global" | "builtin";
+
+export type SkillPathStatus = "ok" | "missing" | "not-directory" | "unreadable";
 
 /** inline = body enters parent log; subagent = isolated child loop, only final answer returns. */
 export type SkillRunAs = "inline" | "subagent";
@@ -38,11 +49,19 @@ export interface Skill {
   maxToolIters?: number;
 }
 
+export interface SkillRoot {
+  dir: string;
+  scope: Exclude<SkillScope, "builtin">;
+  status: SkillPathStatus;
+  priority: number;
+}
+
 export interface SkillStoreOptions {
   /** Override `$HOME` — tests point this at a tmpdir. */
   homeDir?: string;
   /** Required for project-scope skills; omit to read only the global scope. */
   projectRoot?: string;
+  customSkillPaths?: readonly string[];
   /** Suppress bundled built-ins — for tests asserting exact list contents. */
   disableBuiltins?: boolean;
 }
@@ -84,11 +103,16 @@ function parseMaxToolIters(raw: string | undefined): number | undefined {
 export class SkillStore {
   private readonly homeDir: string;
   private readonly projectRoot: string | undefined;
+  private readonly customSkillPaths: readonly string[];
   private readonly disableBuiltins: boolean;
 
   constructor(opts: SkillStoreOptions = {}) {
     this.homeDir = opts.homeDir ?? homedir();
     this.projectRoot = opts.projectRoot ? resolve(opts.projectRoot) : undefined;
+    const baseDir = this.projectRoot ?? process.cwd();
+    this.customSkillPaths = dedupePaths(
+      opts.customSkillPaths?.map((p) => resolveCustomSkillPath(p, baseDir, this.homeDir)) ?? [],
+    );
     this.disableBuiltins = opts.disableBuiltins === true;
   }
 
@@ -97,24 +121,29 @@ export class SkillStore {
     return this.projectRoot !== undefined;
   }
 
-  /** Project scope first so per-repo skill overrides a global with the same name. */
-  roots(): Array<{ dir: string; scope: SkillScope }> {
-    const out: Array<{ dir: string; scope: SkillScope }> = [];
+  /** Project scope first so per-repo skill overrides custom/global entries with the same name. */
+  roots(): SkillRoot[] {
+    const out: Array<{ dir: string; scope: Exclude<SkillScope, "builtin"> }> = [];
     if (this.projectRoot) {
       out.push({
         dir: join(this.projectRoot, ".reasonix", SKILLS_DIRNAME),
         scope: "project",
       });
     }
+    for (const dir of this.customSkillPaths) out.push({ dir, scope: "custom" });
     out.push({ dir: join(this.homeDir, ".reasonix", SKILLS_DIRNAME), scope: "global" });
-    return out;
+    return out.map((root, priority) => ({ ...root, priority, status: skillPathStatus(root.dir) }));
   }
 
-  /** Higher-priority root wins on collision (project > global > builtin); sorted for stable prefix hash. */
+  customRoots(): SkillRoot[] {
+    return this.roots().filter((root) => root.scope === "custom");
+  }
+
+  /** Higher-priority root wins on collision (project > custom > global > builtin); sorted for stable prefix hash. */
   list(): Skill[] {
     const byName = new Map<string, Skill>();
-    for (const { dir, scope } of this.roots()) {
-      if (!existsSync(dir)) continue;
+    for (const { dir, scope, status } of this.roots()) {
+      if (status !== "ok") continue;
       let entries: import("node:fs").Dirent[];
       try {
         entries = readdirSync(dir, { withFileTypes: true });
@@ -177,8 +206,8 @@ export class SkillStore {
   /** Resolve one skill by name. Returns `null` if not found or malformed. */
   read(name: string): Skill | null {
     if (!isValidSkillName(name)) return null;
-    for (const { dir, scope } of this.roots()) {
-      if (!existsSync(dir)) continue;
+    for (const { dir, scope, status } of this.roots()) {
+      if (status !== "ok") continue;
       const dirCandidate = join(dir, name, SKILL_FILE);
       if (existsSync(dirCandidate) && statSync(dirCandidate).isFile()) {
         return this.parse(dirCandidate, name, scope);
@@ -231,6 +260,42 @@ export class SkillStore {
       model: data.model?.startsWith("deepseek-") ? data.model : undefined,
       maxToolIters: parseMaxToolIters(data["max-iters"]),
     };
+  }
+}
+
+function dedupePaths(paths: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    const key = process.platform === "win32" ? path.toLowerCase() : path;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(path);
+  }
+  return out;
+}
+
+function resolveCustomSkillPath(path: string, baseDir: string, homeDir: string): string {
+  const trimmed = path.trim();
+  const expanded =
+    trimmed === "~"
+      ? homeDir
+      : trimmed.startsWith("~/") || trimmed.startsWith("~\\")
+        ? join(homeDir, trimmed.slice(2))
+        : trimmed;
+  return resolve(isAbsolute(expanded) ? expanded : join(baseDir, expanded));
+}
+
+export function skillPathStatus(dir: string): SkillPathStatus {
+  try {
+    const stat = statSync(dir);
+    if (!stat.isDirectory()) return "not-directory";
+    accessSync(dir, constants.R_OK);
+    return "ok";
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return "missing";
+    return "unreadable";
   }
 }
 

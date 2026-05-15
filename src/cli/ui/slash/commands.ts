@@ -173,8 +173,9 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "skill",
     group: "extend",
-    argsHint: "[list|show <name>|new <name>|<name> [args]]",
-    summary: "list / run / scaffold user skills (<project>/.reasonix/skills + ~/.reasonix/skills)",
+    argsHint:
+      "[list|paths|paths add <path>|paths remove <path|N>|show <name>|new <name>|<name> [args]]",
+    summary: "list / run / scaffold skills (project + custom + global + builtin)",
     argCompleter: "skills",
   },
 

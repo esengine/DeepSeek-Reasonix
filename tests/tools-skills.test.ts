@@ -74,6 +74,45 @@ describe("run_skill tool", () => {
     expect(out).toContain("Run pipeline");
   });
 
+  it("returns a custom path skill when customSkillPaths is passed", async () => {
+    const custom = mkdtempSync(join(tmpdir(), "reasonix-skilltool-custom-"));
+    try {
+      const dir = join(custom, "custom-run");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "SKILL.md"),
+        "---\nname: custom-run\ndescription: Custom run\n---\n\nCustom body\n",
+        "utf8",
+      );
+      const reg = new ToolRegistry();
+      registerSkillTools(reg, { homeDir: home, customSkillPaths: [custom], disableBuiltins: true });
+      const out = await reg.dispatch("run_skill", { name: "custom-run" });
+      expect(out).toContain("scope: custom");
+      expect(out).toContain("Custom body");
+    } finally {
+      rmSync(custom, { recursive: true, force: true });
+    }
+  });
+
+  it("unknown skill available list includes custom skills", async () => {
+    const custom = mkdtempSync(join(tmpdir(), "reasonix-skilltool-custom-"));
+    try {
+      const dir = join(custom, "custom-known");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "SKILL.md"),
+        "---\nname: custom-known\ndescription: Custom known\n---\n\nbody\n",
+        "utf8",
+      );
+      const reg = new ToolRegistry();
+      registerSkillTools(reg, { homeDir: home, customSkillPaths: [custom], disableBuiltins: true });
+      const out = await reg.dispatch("run_skill", { name: "missing" });
+      expect(JSON.parse(out).available).toContain("custom-known");
+    } finally {
+      rmSync(custom, { recursive: true, force: true });
+    }
+  });
+
   it("appends a forwarded 'Arguments:' line when provided", async () => {
     writeSkill(home, "greet", "Greet someone", "Say hello to the name in args.");
     const reg = new ToolRegistry();

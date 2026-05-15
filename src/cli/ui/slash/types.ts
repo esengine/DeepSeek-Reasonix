@@ -58,6 +58,7 @@ export interface SlashResult {
 }
 
 export interface SlashContext {
+  configPath?: string;
   mcpSpecs?: string[];
   codeUndo?: (args: readonly string[]) => string;
   codeApply?: (indices?: readonly number[]) => string;

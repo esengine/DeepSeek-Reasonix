@@ -271,8 +271,8 @@ export const zhCN: TranslationSchema = {
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
     },
     skill: {
-      description: "列出 / 运行用户技能（<project>/.reasonix/skills + ~/.reasonix/skills）",
-      argsHint: "[list|show <name>|<name> [args]]",
+      description: "列出 / 运行用户技能（项目 + 自定义 + 全局 + 内置）",
+      argsHint: "[list|paths|show <name>|<name> [args]]",
     },
     hooks: {
       description: "列出活跃的 hooks（.reasonix/ 下的 settings.json）· reload 从磁盘重新读取",
@@ -1034,6 +1034,18 @@ export const zhCN: TranslationSchema = {
       newUsage: "用法：/skill new <name> [--global]",
       newCreated: "▸ 已创建技能：{name}\n  {path}\n  编辑后用 `/skill {name}` 调用",
       newError: "▲ /skill new 失败：{reason}",
+      pathsHeader: "技能路径（按优先级）：",
+      pathsPriority:
+        "优先级：项目 > 配置顺序中的自定义路径 > 全局 > 内置。更改会在下次 /new 或新会话刷新系统提示词时生效。",
+      pathsUsage:
+        "用法：/skill paths [list]\n       /skill paths add <path>\n       /skill paths remove <path|N>",
+      pathsAddUsage: "用法：/skill paths add <path>",
+      pathsRemoveUsage: "用法：/skill paths remove <path|N>",
+      pathsAdded: "▸ 已添加自定义技能路径：{path}",
+      pathsAlready: "▸ 自定义技能路径已存在：{path}",
+      pathsRemoved: "▸ 已移除自定义技能路径：{path}",
+      pathsRemoveNotFound: "▸ 没有匹配的自定义技能路径：{target}",
+      pathsRestartHint: "当前会话的系统提示词不会热更新；运行 /new 或启动新会话以刷新技能索引。",
     },
   },
   statusBar: {

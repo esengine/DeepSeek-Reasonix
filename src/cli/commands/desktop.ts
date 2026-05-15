@@ -24,6 +24,7 @@ import {
   loadPreset,
   loadReasoningEffort,
   loadRecentWorkspaces,
+  loadResolvedSkillPaths,
   loadWorkspaceDir,
   pushRecentWorkspace,
   readConfig,
@@ -310,7 +311,7 @@ interface MemoryEvent {
 interface SkillInfo {
   name: string;
   description: string;
-  scope: "project" | "global" | "builtin";
+  scope: "project" | "custom" | "global" | "builtin";
   path: string;
   runAs: "inline" | "subagent";
   model?: string;
@@ -557,7 +558,10 @@ function emitCtxBreakdown(tab: Tab): void {
 
 function emitSkills(tab: Tab): void {
   try {
-    const store = new SkillStore({ projectRoot: tab.rootDir });
+    const store = new SkillStore({
+      projectRoot: tab.rootDir,
+      customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+    });
     const items = store.list().map((s) => ({
       name: s.name,
       description: s.description,
@@ -1438,7 +1442,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         return;
       }
       try {
-        const store = new SkillStore({ projectRoot: tab.rootDir });
+        const store = new SkillStore({
+          projectRoot: tab.rootDir,
+          customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+        });
         const found = store.read(msg.name);
         if (!found) {
           emit({ type: "$error", message: `skill not found: ${msg.name}` }, tab.id);
