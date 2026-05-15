@@ -11,7 +11,7 @@ import {
   DEFAULT_CONTEXT_TOKENS,
   type SessionStats,
 } from "./telemetry/stats.js";
-import { estimateConversationTokens, estimateRequestTokens } from "./tokenizer.js";
+import { countTokens, estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage } from "./types.js";
 
 /** Auto-fold when a turn's response shows promptTokens above this fraction of ctxMax. */
@@ -134,7 +134,7 @@ export class ContextManager {
     model: string,
   ): PreflightDecision {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
-    const estimate = estimateRequestTokens(messages, toolSpecs ?? null);
+    const estimate = estimateRequestTokens(messages, toolSpecs ?? null, true);
     return {
       needsAction: estimate / ctxMax > PREFLIGHT_EMERGENCY_THRESHOLD,
       estimateTokens: estimate,
@@ -155,7 +155,8 @@ export class ContextManager {
     };
     if (all.length === 0) return noop;
 
-    const tokenCounts = all.map((m) => estimateConversationTokens([m]));
+    // Per-message content-only comparison for fold ordering (not exact API match).
+    const tokenCounts = all.map((m) => countTokens(m.content ?? ""));
     const totalTokens = tokenCounts.reduce((a, b) => a + b, 0);
 
     let cumTokens = 0;

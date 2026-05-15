@@ -1,4 +1,6 @@
-/** Encode-only DeepSeek V4 tokenizer port; ~3% drift vs API (chat-template framing not replayed). */
+/** Encode-only DeepSeek V4 tokenizer port. `estimateConversationTokens` applies
+ *  the V4 chat template (BOS, `<｜User｜>`, `<｜Assistant｜>`, DSML tool-calls, EOS,
+ *  generation suffix) so the count closely tracks API `prompt_tokens`. */
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -254,33 +256,256 @@ export function countTokens(text: string): number {
   return encode(text).length;
 }
 
-/** Doesn't add chat-template framing overhead; under-counts ~3-6% vs real `prompt_tokens`. */
-export function estimateConversationTokens(
-  messages: Array<{ content?: string | null; tool_calls?: unknown }>,
-): number {
-  let total = 0;
-  for (const m of messages) {
-    if (typeof m.content === "string" && m.content) {
-      total += countTokens(m.content);
-    }
-    // Tool-call arguments are serialized as JSON in the prompt by the
-    // chat template; their bytes WILL count upstream, so we count
-    // them too. Stringify-once is cheap relative to the tokenize.
-    if (m.tool_calls && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-      total += countTokens(JSON.stringify(m.tool_calls));
-    }
-  }
-  return total;
+const BOS = "<｜begin▁of▁sentence｜>";
+const EOS = "<｜end▁of▁sentence｜>";
+const USER_SP = "<｜User｜>";
+const ASSISTANT_SP = "<｜Assistant｜>";
+const THINK_START = "<think>";
+const THINK_END = "</think>";
+
+const DSML = "｜DSML｜";
+const TC_BEGIN = `<${DSML}tool_calls>`;
+const TC_END = `</${DSML}tool_calls>`;
+const INVOKE_BEGIN = `<${DSML}invoke name="`;
+const INVOKE_END = `</${DSML}invoke>`;
+const PARAM_TEMPLATE = `<${DSML}parameter name="{key}" string="{is_str}">{value}</${DSML}parameter>`;
+const TOOL_RESULT_TEMPLATE = "<tool_result>{content}</tool_result>";
+
+function renderTools(tools: ReadonlyArray<unknown>): string {
+  const schemas = tools
+    .map((t) => {
+      const fn = (t as { function?: unknown }).function ?? t;
+      return JSON.stringify(fn);
+    })
+    .join("\n");
+  return `## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<${DSML}tool_calls>" block like the following:\n\n<${DSML}tool_calls>\n<${DSML}invoke name="$TOOL_NAME">\n<${DSML}parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</${DSML}parameter>\n...\n</${DSML}invoke>\n<${DSML}invoke name="$TOOL_NAME2">\n...\n</${DSML}invoke>\n</${DSML}tool_calls>\n\nString parameters should be specified as is and set \`string="true"\`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set \`string="false"\`.\n\nIf thinking_mode is enabled (triggered by ${THINK_START}), you MUST output your complete reasoning inside ${THINK_START}...${THINK_END} BEFORE any tool calls or final response.\n\nOtherwise, output directly after ${THINK_END} with tool calls or final response.\n\n### Available Tool Schemas\n\n${schemas}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.`;
 }
 
-/** Tool specs ride in a separate request blob; must be counted separately for an accurate preflight. */
-export function estimateRequestTokens(
-  messages: Array<{ content?: string | null; tool_calls?: unknown }>,
-  toolSpecs?: ReadonlyArray<unknown> | null,
+interface ToolCall {
+  function?: { name?: string; arguments?: string };
+  [k: string]: unknown;
+}
+
+interface V4Message {
+  role?: string;
+  content?: string | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  reasoning_content?: string | null;
+}
+
+function encodeArgumentsToDsml(argsJson: string): string {
+  let args: Record<string, unknown>;
+  try {
+    args = JSON.parse(argsJson) as Record<string, unknown>;
+  } catch {
+    args = { arguments: argsJson };
+  }
+  return Object.entries(args)
+    .map(([k, v]) =>
+      PARAM_TEMPLATE.replace("{key}", k)
+        .replace("{is_str}", typeof v === "string" ? "true" : "false")
+        .replace("{value}", typeof v === "string" ? v : JSON.stringify(v)),
+    )
+    .join("\n");
+}
+
+function renderToolCallsDsml(toolCalls: ToolCall[]): string {
+  const invokes = toolCalls
+    .map((tc) => {
+      const name = tc.function?.name ?? "";
+      const argsJson = tc.function?.arguments ?? "{}";
+      return `${INVOKE_BEGIN + name}">\n${encodeArgumentsToDsml(argsJson)}\n${INVOKE_END}`;
+    })
+    .join("\n");
+  return `\n\n${TC_BEGIN}\n${invokes}\n${TC_END}`;
+}
+
+function mergeToolMessages(messages: V4Message[]): V4Message[] {
+  const merged: V4Message[] = [];
+  for (const msg of messages) {
+    const role = msg.role ?? "user";
+    if (role === "tool") {
+      const toolBlock = TOOL_RESULT_TEMPLATE.replace("{content}", msg.content ?? "");
+      const last = merged[merged.length - 1];
+      if (last && last.role === "user" && Array.isArray(last._toolBlocks)) {
+        last._toolBlocks.push(toolBlock);
+        last.content = `${last._textParts.join("\n\n")}\n\n${last._toolBlocks.join("\n")}`.replace(
+          /^\n\n/,
+          "",
+        );
+      } else {
+        merged.push({
+          role: "user",
+          content: toolBlock,
+          _textParts: [],
+          _toolBlocks: [toolBlock],
+        } as V4Message & { _textParts: string[]; _toolBlocks: string[] });
+      }
+    } else if (role === "user") {
+      const text = msg.content ?? "";
+      const last = merged[merged.length - 1];
+      if (last && last.role === "user" && Array.isArray(last._toolBlocks)) {
+        last._textParts.push(text);
+        last.content =
+          `${last._textParts.join("\n\n")}\n\n${last._toolBlocks.join("\n\n")}`.replace(
+            /^\n\n/,
+            "",
+          );
+      } else {
+        merged.push({
+          ...msg,
+          role: "user",
+          content: text,
+          _textParts: [text],
+          _toolBlocks: [],
+        } as V4Message & { _textParts: string[]; _toolBlocks: string[] });
+      }
+    } else {
+      merged.push({ ...msg });
+    }
+  }
+  for (const m of merged) {
+    (m as Record<string, unknown>)._textParts = undefined;
+    (m as Record<string, unknown>)._toolBlocks = undefined;
+  }
+  return merged;
+}
+
+/**
+ * Drop `reasoning_content` from assistant messages that appear before the
+ * last user/developer message. This matches Python `_drop_thinking_messages`
+ * — the API only charges thinking tokens for the tail after the latest user
+ * turn; earlier reasoning is discarded server-side.
+ */
+function dropThinkingMessages(messages: V4Message[]): V4Message[] {
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const role = messages[i]!.role;
+    if (role === "user" || role === "developer") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx < 0) return messages;
+
+  // Match Python `_drop_thinking_messages`:
+  //   - developer messages before lastUserIdx are dropped entirely
+  //   - assistant messages before lastUserIdx keep content & tool_calls
+  //     but have reasoning_content stripped
+  const result: V4Message[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (i < lastUserIdx && msg.role === "developer") continue;
+    if (i < lastUserIdx && msg.role === "assistant") {
+      result.push({ ...msg, reasoning_content: null });
+    } else {
+      result.push(msg);
+    }
+  }
+  return result;
+}
+
+/**
+ * Apply DeepSeek V4 chat template to a messages array.
+ *
+ * Matches the format produced by the official `encoding_dsv4.py`:
+ * ```
+ * <｜begin▁of▁sentence｜>{system}<｜User｜>{user1}<｜Assistant｜>༚{asst1}<｜end▁of▁sentence｜><｜User｜>{user2}<｜Assistant｜>༚
+ * ```
+ *
+ * Tool results are merged into user messages with `<tool_result>` blocks;
+ * assistant tool_calls use DSML format. The generation suffix
+ * `<｜Assistant｜>༚` is appended after the last user message.
+ */
+export function formatDeepSeekPrompt(
+  messages: Array<{
+    role?: string;
+    content?: string | null;
+    tool_calls?: unknown;
+    tool_call_id?: string;
+    reasoning_content?: string | null;
+  }>,
+  drop_thinking = false,
+): string {
+  if (messages.length === 0) return ASSISTANT_SP + THINK_END;
+
+  let msgs = messages as V4Message[];
+  if (drop_thinking) {
+    msgs = dropThinkingMessages(msgs);
+  }
+  const merged = mergeToolMessages(msgs);
+
+  let prompt = BOS;
+
+  for (let i = 0; i < merged.length; i++) {
+    const msg = merged[i]!;
+    const role = msg.role ?? "user";
+    const nextRole = i + 1 < merged.length ? (merged[i + 1]!.role ?? "user") : null;
+
+    if (role === "system") {
+      prompt += msg.content ?? "";
+    } else if (role === "user") {
+      prompt += USER_SP + (msg.content ?? "");
+      if (nextRole === "assistant" || nextRole === null) {
+        prompt += ASSISTANT_SP + THINK_END;
+      }
+    } else if (role === "assistant") {
+      if (msg.reasoning_content) {
+        prompt += THINK_START + msg.reasoning_content + THINK_END;
+      }
+      if (msg.content) prompt += msg.content;
+      const tcs = msg.tool_calls;
+      if (Array.isArray(tcs) && tcs.length > 0) {
+        prompt += renderToolCallsDsml(tcs);
+      }
+      prompt += EOS;
+    }
+  }
+
+  return prompt;
+}
+
+/**
+ * Token-count the FULL conversation as the API would see it: wraps
+ * messages in DeepSeek V4's chat template, then encodes once.
+ *
+ * Includes BOS, `<｜User｜>`, `<｜Assistant｜>`, EOS, DSML tool-call
+ * framing, and the generation suffix — matching API `prompt_tokens`.
+ */
+export function estimateConversationTokens(
+  messages: Array<{
+    role?: string;
+    content?: string | null;
+    tool_calls?: unknown;
+    tool_call_id?: string;
+    reasoning_content?: string | null;
+  }>,
+  drop_thinking = false,
 ): number {
-  let total = estimateConversationTokens(messages);
+  if (messages.length === 0) return 0;
+  return countTokens(formatDeepSeekPrompt(messages, drop_thinking));
+}
+
+/**
+ * Total request tokens (messages + tool specs) as the API counts them.
+ * Tool specs are rendered via the V4 TOOLS_TEMPLATE (DSML format with
+ * tool schemas) and added to the templated message token count.
+ */
+export function estimateRequestTokens(
+  messages: Array<{
+    role?: string;
+    content?: string | null;
+    tool_calls?: unknown;
+    tool_call_id?: string;
+    reasoning_content?: string | null;
+  }>,
+  toolSpecs?: ReadonlyArray<unknown> | null,
+  drop_thinking = false,
+): number {
+  let total = estimateConversationTokens(messages, drop_thinking);
   if (toolSpecs && toolSpecs.length > 0) {
-    total += countTokens(JSON.stringify(toolSpecs));
+    total += countTokens(renderTools(toolSpecs));
   }
   return total;
 }
