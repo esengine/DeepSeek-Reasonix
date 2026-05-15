@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/reasonix-render"]
+exclude = ["desktop"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+publish = false
