@@ -35,7 +35,7 @@ import type {
 } from "./protocol";
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
-import { InterruptBar, useElapsed } from "./ui/live";
+import { useElapsed } from "./ui/live";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Sidebar } from "./ui/sidebar";
 import { Splash, shouldShowSplash } from "./ui/splash";
@@ -1601,6 +1601,14 @@ function TabRuntime({
                 onAbort={abort}
                 disabled={!state.ready}
                 busy={state.busy}
+                busyLabel={
+                  state.busy
+                    ? state.activeSkill
+                      ? `Skill · ${state.activeSkill.name}`
+                      : "Reasoning"
+                    : undefined
+                }
+                busyElapsedMs={elapsed}
                 textareaRef={composerRef}
                 preset={state.settings?.preset ?? "auto"}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
@@ -1620,15 +1628,6 @@ function TabRuntime({
                 onMentionPicked={markMentionPicked}
                 mentionResults={state.mentionResults}
               />
-
-              {state.busy ? (
-                <InterruptBar
-                  visible={true}
-                  elapsedMs={elapsed}
-                  label={state.activeSkill ? `Skill · ${state.activeSkill.name}` : "Reasoning"}
-                  onStop={abort}
-                />
-              ) : null}
             </>
           )}
         </main>

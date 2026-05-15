@@ -70,57 +70,6 @@ export function LiveReasoning({ lines }: { lines: string[] }) {
   );
 }
 
-export function InterruptBar({
-  visible,
-  elapsedMs,
-  tps,
-  label,
-  onStop,
-}: {
-  visible: boolean;
-  elapsedMs: number;
-  tps?: number;
-  label: string;
-  onStop: () => void;
-}) {
-  if (!visible) return null;
-  return (
-    <div className="interrupt-bar">
-      <span className="pip" />
-      <span>
-        <span className="shimmer">{label}</span>
-      </span>
-      <span className="timer">{fmtElapsed(elapsedMs)}</span>
-      {tps !== undefined ? (
-        <span className="tps">
-          <span className="bars">
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-          </span>
-          <span>{tps} t/s</span>
-        </span>
-      ) : null}
-      <button type="button" onClick={onStop}>
-        <I.stop size={11} /> 中断
-        <kbd
-          style={{
-            background: "oklch(100% 0 0 / 0.2)",
-            padding: "0 4px",
-            borderRadius: 3,
-            fontSize: 9,
-            marginLeft: 2,
-          }}
-        >
-          esc
-        </kbd>
-      </button>
-    </div>
-  );
-}
-
 export function ToolRunningCard({
   kind = "tool",
   name,

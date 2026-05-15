@@ -10,6 +10,7 @@ import {
 import type React from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { I } from "../icons";
+import { fmtElapsed } from "./live";
 
 export type PresetName = "auto" | "flash" | "pro";
 export type EditMode = "review" | "auto" | "yolo";
@@ -110,6 +111,8 @@ export function Composer({
   onAbort,
   disabled,
   busy,
+  busyLabel,
+  busyElapsedMs,
   preset,
   modelLabel,
   onPresetChange,
@@ -129,6 +132,9 @@ export function Composer({
   onAbort: () => void;
   disabled?: boolean;
   busy?: boolean;
+  /** Replaces the hint-row left side while the agent is running — typically "Reasoning" or "Skill · <name>". */
+  busyLabel?: string;
+  busyElapsedMs?: number;
   preset: PresetName;
   modelLabel: string;
   onPresetChange: (preset: PresetName) => void;
@@ -307,12 +313,27 @@ export function Composer({
     <div className="composer-wrap">
       <div className="composer-inner">
         <div className="hint-row">
-          <span>
-            <kbd>/</kbd> 命令 &nbsp;·&nbsp; <kbd>@</kbd> 提及文件 &nbsp;·&nbsp; <kbd>⌘K</kbd> 命令面板
-          </span>
-          <span>
-            <kbd>⏎</kbd> 发送 &nbsp; <kbd>⇧⏎</kbd> 换行
-          </span>
+          {busy && busyLabel ? (
+            <>
+              <span className="composer-busy-status">
+                <span className="composer-busy-pip" />
+                <span className="composer-busy-label">{busyLabel}</span>
+                <span className="composer-busy-time">{fmtElapsed(busyElapsedMs ?? 0)}</span>
+              </span>
+              <span>
+                <kbd>⏎</kbd>/<kbd>esc</kbd> 中断
+              </span>
+            </>
+          ) : (
+            <>
+              <span>
+                <kbd>/</kbd> 命令 &nbsp;·&nbsp; <kbd>@</kbd> 提及文件 &nbsp;·&nbsp; <kbd>⌘K</kbd> 命令面板
+              </span>
+              <span>
+                <kbd>⏎</kbd> 发送 &nbsp; <kbd>⇧⏎</kbd> 换行
+              </span>
+            </>
+          )}
         </div>
 
         <div className="composer">

@@ -2443,56 +2443,35 @@ button {
   to { opacity: 1; }
 }
 
-/* ---- interrupt floating bar ---- */
-
-.interrupt-bar {
-  position: absolute;
-  left: 50%;
-  bottom: 88px;
-  transform: translateX(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--card);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-lg);
-  border-radius: 999px;
-  padding: 6px 6px 6px 14px;
-  font-size: 11.5px;
-  color: var(--fg-2);
-  font-family: "IBM Plex Mono", monospace;
-  z-index: 30;
-  animation: rise 0.25s ease-out;
-}
 @keyframes rise {
   from { opacity: 0; transform: translate(-50%, 8px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
-.interrupt-bar .pip {
-  width: 7px;
-  height: 7px;
+
+.composer-busy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.composer-busy-pip {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--accent);
   animation: blink 1.2s ease-in-out infinite;
+  flex-shrink: 0;
 }
-.interrupt-bar .timer {
+.composer-busy-label {
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-busy-time {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-  min-width: 36px;
-}
-.interrupt-bar button {
-  background: var(--danger);
-  color: oklch(99% 0 0);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-family: inherit;
-  font-size: 11px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.interrupt-bar button:hover {
-  background: oklch(58% 0.18 22);
+  flex-shrink: 0;
 }
 
 /* ---- queued tab-row indicator (multiple sessions running) ---- */
