@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { countTokens, encode, estimateConversationTokens } from "../src/tokenizer.js";
 
-describe("DeepSeek V3 tokenizer — golden cases", () => {
+describe("DeepSeek V4 tokenizer — golden cases", () => {
   // These IDs were captured from the pure-TS port running against the
   // bundled `data/deepseek-tokenizer.json.gz`. They match what DeepSeek's
   // official Python tokenizer produces (HF LlamaTokenizerFast on the
@@ -33,10 +33,10 @@ describe("DeepSeek V3 tokenizer — golden cases", () => {
   });
 
   it("recognizes <think>/</think> as atomic added tokens", () => {
-    // 128798 = <think>, 128799 = </think> per tokenizer.json added_tokens.
+    // 128821 = <think>, 128822 = </think> per tokenizer.json added_tokens (V4).
     const ids = encode("<think>reasoning here</think>");
-    expect(ids[0]).toBe(128798);
-    expect(ids[ids.length - 1]).toBe(128799);
+    expect(ids[0]).toBe(128821);
+    expect(ids[ids.length - 1]).toBe(128822);
     expect(ids.length).toBe(5);
   });
 
@@ -59,7 +59,7 @@ describe("DeepSeek V3 tokenizer — golden cases", () => {
     const text = "深度求索是一家专注于人工智能基础技术研究的公司";
     const n = countTokens(text);
     // 22 CJK chars → DeepSeek's doc claims ~0.6 tokens/char ≈ 13, our
-    // V3 tokenizer's CJK compression is tighter; allow 8-16 as the
+    // V4 tokenizer's CJK compression is tighter; allow 8-16 as the
     // sanity range.
     expect(n).toBeGreaterThanOrEqual(8);
     expect(n).toBeLessThanOrEqual(16);

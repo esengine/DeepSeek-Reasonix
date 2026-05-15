@@ -1,4 +1,4 @@
-/** Encode-only DeepSeek V3 tokenizer port; ~3% drift vs API (chat-template framing not replayed). */
+/** Encode-only DeepSeek V4 tokenizer port; ~3% drift vs API (chat-template framing not replayed). */
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
