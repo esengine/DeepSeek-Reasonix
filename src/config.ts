@@ -99,10 +99,12 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "mojeek" (default, scrapes Mojeek) or "searxng" (self-hosted SearXNG). */
-  webSearchEngine?: "mojeek" | "searxng";
+  /** Web search engine backend: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), or "metaso" (Metaso API). */
+  webSearchEngine?: "mojeek" | "searxng" | "metaso";
   /** Base URL for SearXNG instance (default http://localhost:8080). */
   webSearchEndpoint?: string;
+  /** Metaso API key. Falls back to METASO_API_KEY env var, then a built-in default. */
+  metasoApiKey?: string;
   dashboard?: {
     /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
     port?: number;
@@ -196,6 +198,15 @@ export function memoryTypeDefaults(
   return out;
 }
 
+const DEFAULT_METASO_API_KEY = "mk-E384C1DD5E8501BB7EFE27C949AFDE5B";
+
+export function loadMetasoApiKey(path: string = defaultConfigPath()): string {
+  if (process.env.METASO_API_KEY) return process.env.METASO_API_KEY;
+  const cfg = readConfig(path).metasoApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return DEFAULT_METASO_API_KEY;
+}
+
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL = "nomic-embed-text";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -283,9 +294,12 @@ export function searchEnabled(path: string = defaultConfigPath()): boolean {
   return true;
 }
 
-export function webSearchEngine(path: string = defaultConfigPath()): "mojeek" | "searxng" {
+export function webSearchEngine(
+  path: string = defaultConfigPath(),
+): "mojeek" | "searxng" | "metaso" {
   const cfg = readConfig(path).webSearchEngine;
   if (cfg === "searxng") return "searxng";
+  if (cfg === "metaso") return "metaso";
   return "mojeek";
 }
 

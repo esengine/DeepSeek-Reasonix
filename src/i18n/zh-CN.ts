@@ -385,8 +385,9 @@ export const zhCN: TranslationSchema = {
       argsHint: "<question>",
     },
     "search-engine": {
-      description: "切换网络搜索后端 — mojeek（默认，无依赖）或 searxng（自托管）",
-      argsHint: "<mojeek|searxng> [<endpoint>]",
+      description:
+        "切换网络搜索后端 — mojeek（默认，无依赖）、searxng（自托管）或 metaso（每日 100 次免费额度）",
+      argsHint: "<mojeek|searxng|metaso> [<endpoint>]",
     },
   },
   wizard: {
@@ -1003,11 +1004,14 @@ export const zhCN: TranslationSchema = {
       usageMojeek: "  /search-engine mojeek            使用 Mojeek（默认，无外部依赖）",
       usageSearxng: "  /search-engine searxng            使用 SearXNG 默认端点",
       usageSearxngUrl: "  /search-engine searxng <url>      使用 SearXNG 自定义端点",
+      usageMetaso:
+        "  /search-engine metaso              使用 Metaso API（每天 100 次免费，设置 METASO_API_KEY 提高额度）",
       alias: "别名：/se",
       searxngInfo: "SearXNG 是一个自托管的元搜索引擎（https://github.com/searxng/searxng）。",
       searxngInstall: "安装命令：  docker run -d -p 8080:8080 searxng/searxng",
       switched: '已切换网页搜索引擎为 "{engine}"。{note}',
       switchedSearxngNote: " 请确保 SearXNG 在 {endpoint} 运行。",
+      switchedMetasoNote: " 每日限额 100 次（设置 METASO_API_KEY 可提升限额）。",
       confirmed: '✓ 网页搜索引擎已设为 "{engine}"{detail}。下一轮模型调用将生效。',
       confirmedDetail: "（{endpoint}）",
     },
@@ -1259,6 +1263,16 @@ export const zhCN: TranslationSchema = {
       "web_search: 无法访问 SearXNG 服务器 {endpoint} — try: 安装并启动 SearXNG（https://github.com/searxng/searxng，例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine mojeek 切换到默认引擎",
     searxngNoResults:
       "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）— try: 使用更简单的关键词改写查询，或使用 /search-engine mojeek 切换引擎",
+    metasoDailyLimit:
+      "web_search: 默认 API 密钥的每日搜索次数已达上限 — 设置 METASO_API_KEY 环境变量，或在 https://metaso.cn/search-api/playground 获取自己的密钥",
+    metasoUnauthorized:
+      "web_search: Metaso API 密钥被拒绝 — 检查 METASO_API_KEY，或在 https://metaso.cn/search-api/playground 获取密钥",
+    metasoRateLimit:
+      "web_search: Metaso 请求频率限制 — 等待后重试，或在 https://metaso.cn/search-api/playground 获取自己的密钥",
+    metasoServerError:
+      "web_search: Metaso 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek 切换引擎",
+    metasoParseError: "web_search: Metaso 返回无法解析的响应（HTTP {status}）— 稍后重试",
+    metasoApiError: "web_search: Metaso API 错误（code {code}: {message}）— 稍后重试",
     fetchStatus:
       "web_fetch {status} for {url} — try: 在浏览器中确认该 URL 能否访问；该状态码表明目标主机返回了错误页面",
     fetchRateLimit429:

@@ -2,6 +2,7 @@
 
 import { parse as parseHtml } from "node-html-parser";
 import {
+  loadMetasoApiKey,
   webSearchEndpoint as loadWebSearchEndpoint,
   webSearchEngine as loadWebSearchEngine,
 } from "../config.js";
@@ -33,8 +34,8 @@ export interface WebFetchOptions {
 export interface WebSearchOptions {
   topK?: number;
   signal?: AbortSignal;
-  /** Backend engine: "mojeek" (scrapes Mojeek HTML) or "searxng" (self-hosted SearXNG JSON API). */
-  engine?: "mojeek" | "searxng";
+  /** Backend engine: "mojeek" (scrapes Mojeek HTML), "searxng" (self-hosted SearXNG JSON API), or "metaso" (Metaso API). */
+  engine?: "mojeek" | "searxng" | "metaso";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -49,6 +50,7 @@ const FETCH_MAX_BYTES = 10 * 1024 * 1024;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const MOJEEK_ENDPOINT = "https://www.mojeek.com/search";
+const METASO_ENDPOINT = "https://metaso.cn/api/v1";
 
 /** Pick a status-specific webErrors key so the model gets an actionable hint, not a bare status. */
 function searchStatusError(status: number): string {
@@ -70,6 +72,9 @@ export async function webSearch(
   query: string,
   opts: WebSearchOptions = {},
 ): Promise<SearchResult[]> {
+  if (opts.engine === "metaso") {
+    return searchMetaso(query, opts);
+  }
   if (opts.engine === "searxng") {
     return searchSearxng(query, opts);
   }
@@ -150,6 +155,93 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
     throw new Error(t("webErrors.searxngNoResults", { chars: html.length }));
   }
   return results;
+}
+
+interface MetasoWebpage {
+  title: string;
+  link: string;
+  snippet?: string;
+  summary?: string;
+  score?: string;
+  position?: number;
+  date?: string;
+}
+
+interface MetasoSearchResponse {
+  credits?: number;
+  total?: number;
+  webpages?: MetasoWebpage[];
+  code?: number;
+  message?: string;
+}
+
+async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(100, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadMetasoApiKey();
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${METASO_ENDPOINT}/search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        q: query,
+        scope: "webpage",
+        size: topK,
+      }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: METASO_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  const raw = await resp.text();
+  let data: MetasoSearchResponse;
+  try {
+    data = JSON.parse(raw) as MetasoSearchResponse;
+  } catch {
+    throw new Error(t("webErrors.metasoParseError", { status: resp.status }));
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.metasoUnauthorized"));
+    }
+    if (resp.status === 429) {
+      throw new Error(t("webErrors.metasoRateLimit"));
+    }
+    throw new Error(t("webErrors.metasoServerError", { status: resp.status }));
+  }
+
+  if (data.code === 3003) {
+    throw new Error(t("webErrors.metasoDailyLimit"));
+  }
+  if (data.code === 2005) {
+    throw new Error(t("webErrors.metasoUnauthorized"));
+  }
+  if (data.code && data.code !== 0) {
+    throw new Error(
+      t("webErrors.metasoApiError", { code: data.code, message: data.message ?? "" }),
+    );
+  }
+
+  const webpages = data.webpages ?? [];
+  if (webpages.length === 0) {
+    return [];
+  }
+
+  return webpages.slice(0, topK).map((wp) => ({
+    title: wp.title,
+    url: wp.link,
+    snippet: wp.snippet ?? wp.summary ?? "",
+  }));
 }
 
 /** Parse SearXNG HTML search results using node-html-parser. */
@@ -417,8 +509,8 @@ export interface WebToolsOptions {
   defaultTopK?: number;
   /** Byte cap for `web_fetch` extracted text. */
   maxFetchChars?: number;
-  /** Backend engine: "mojeek" (default, scrapes Mojeek) or "searxng" (self-hosted SearXNG). */
-  webSearchEngine?: "mojeek" | "searxng";
+  /** Backend engine: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), or "metaso" (Metaso API). */
+  webSearchEngine?: "mojeek" | "searxng" | "metaso";
   /** Base URL for SearXNG (default http://localhost:8080). */
   webSearchEndpoint?: string;
 }
@@ -431,7 +523,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
     name: "web_search",
     description:
       "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this." +
-      " To change the backend, use /web-search-engine mojeek|searxng.",
+      " To change the backend, use /search-engine mojeek|searxng|metaso.",
     readOnly: true,
     parallelSafe: true,
     parameters: {

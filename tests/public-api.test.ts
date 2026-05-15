@@ -273,6 +273,7 @@ const PUBLIC_API: readonly string[] = [
   "loadBaseUrl",
   "loadDotenv",
   "loadHooks",
+  "loadMetasoApiKey",
   "loadSessionMessages",
   "matchesTool",
   "memoryEnabled",

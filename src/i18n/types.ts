@@ -580,6 +580,12 @@ export interface TranslationSchema {
     endpointMustBeHttp: string;
     cannotReach: string;
     searxngNoResults: string;
+    metasoDailyLimit: string;
+    metasoUnauthorized: string;
+    metasoRateLimit: string;
+    metasoServerError: string;
+    metasoParseError: string;
+    metasoApiError: string;
     fetchStatus: string;
     fetchRateLimit429: string;
     fetchForbidden403: string;

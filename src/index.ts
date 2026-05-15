@@ -280,6 +280,7 @@ export {
   isPlausibleKey,
   loadApiKey,
   loadBaseUrl,
+  loadMetasoApiKey,
   readConfig,
   redactKey,
   saveApiKey,

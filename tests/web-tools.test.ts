@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { loadMetasoApiKey } from "../src/config.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
   formatSearchResults,
@@ -293,6 +294,156 @@ describe("webSearch", () => {
     ) as unknown as typeof fetch;
     try {
       await expect(webSearch("q")).rejects.toThrow(/doesn't look like a real empty page/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("searchMetaso", () => {
+  const sampleResponse = {
+    credits: 3,
+    total: 72,
+    webpages: [
+      {
+        title: "Result One",
+        link: "https://example.com/1",
+        snippet: "Snippet one.",
+        score: "high",
+        position: 1,
+      },
+      {
+        title: "Result Two",
+        link: "https://example.com/2",
+        summary: "Summary two.",
+        score: "medium",
+        position: 2,
+      },
+    ],
+  };
+
+  it("POSTs to metaso API with JSON body and auth header", async () => {
+    const captured: { url: string; method: string; headers: Record<string, string>; body: string } =
+      { url: "", method: "", headers: {}, body: "" };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.headers = (init?.headers ?? {}) as Record<string, string>;
+      captured.body = String(init?.body ?? "");
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "metaso", topK: 5 });
+      expect(captured.url).toContain("metaso.cn/api/v1/search");
+      expect(captured.method).toBe("POST");
+      expect(captured.headers.Authorization).toBe(`Bearer ${loadMetasoApiKey()}`);
+      expect(captured.headers["Content-Type"]).toBe("application/json");
+      const body = JSON.parse(captured.body);
+      expect(body.q).toBe("test query");
+      expect(body.scope).toBe("webpage");
+      expect(body.size).toBe(5);
+      expect(out).toHaveLength(2);
+      expect(out[0]).toEqual({
+        title: "Result One",
+        url: "https://example.com/1",
+        snippet: "Snippet one.",
+      });
+      expect(out[1]).toEqual({
+        title: "Result Two",
+        url: "https://example.com/2",
+        snippet: "Summary two.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws daily limit error on code 3003", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ code: 3003, message: "今日调用次数已达上限" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(/daily search limit/);
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(
+        /metaso.cn\/search-api\/playground/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws unauthorized error on code 2005 (invalid API key)", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ code: 2005, message: "API密钥无效" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(/API key rejected/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws rate limit error on 429", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: "rate limited" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(/rate-limited/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("returns empty array on 0 results", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ credits: 1, total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("q", { engine: "metaso" });
+      expect(out).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("clamps topK to [1, 100]", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify(sampleResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      const outMax = await webSearch("x", { engine: "metaso", topK: 999 });
+      expect(outMax.length).toBeLessThanOrEqual(2);
+      const outMin = await webSearch("x", { engine: "metaso", topK: 0 });
+      expect(outMin.length).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -396,8 +396,9 @@ export const EN: TranslationSchema = {
       argsHint: "<question>",
     },
     "search-engine": {
-      description: "switch web search backend — mojeek (default, no deps) or searxng (self-hosted)",
-      argsHint: "<mojeek|searxng> [<endpoint>]",
+      description:
+        "switch web search backend — mojeek (default, no deps), searxng (self-hosted), or metaso (free quota 100/d)",
+      argsHint: "<mojeek|searxng|metaso> [<endpoint>]",
     },
   },
   wizard: {
@@ -1057,12 +1058,15 @@ export const EN: TranslationSchema = {
       usageMojeek: "  /search-engine mojeek            use Mojeek (default, no external deps)",
       usageSearxng: "  /search-engine searxng            use SearXNG at default endpoint",
       usageSearxngUrl: "  /search-engine searxng <url>      use SearXNG at custom endpoint",
+      usageMetaso:
+        "  /search-engine metaso              use Metaso API (100/d free, set METASO_API_KEY for more)",
       alias: "Alias: /se",
       searxngInfo:
         "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
       searxngInstall: "Install it with:  docker run -d -p 8080:8080 searxng/searxng",
       switched: 'Switched web search engine to "{engine}".{note}',
       switchedSearxngNote: " Make sure SearXNG is running at {endpoint}.",
+      switchedMetasoNote: " There is a daily quota of 100 (set METASO_API_KEY for higher limits).",
       confirmed:
         '✓ Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
       confirmedDetail: " ({endpoint})",
@@ -1326,6 +1330,17 @@ export const EN: TranslationSchema = {
       "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to the default engine with /search-engine mojeek",
     searxngNoResults:
       "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine mojeek",
+    metasoDailyLimit:
+      "web_search: daily search limit reached for the default API key \u2014 set your own METASO_API_KEY env var or get one at https://metaso.cn/search-api/playground",
+    metasoUnauthorized:
+      "web_search: Metaso API key rejected \u2014 check METASO_API_KEY or get one at https://metaso.cn/search-api/playground",
+    metasoRateLimit:
+      "web_search: Metaso rate-limited \u2014 wait and retry, or get your own API key at https://metaso.cn/search-api/playground",
+    metasoServerError:
+      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek",
+    metasoParseError:
+      "web_search: Metaso returned unparseable response (HTTP {status}) \u2014 try again later",
+    metasoApiError: "web_search: Metaso API error (code {code}: {message}) \u2014 try again later",
     fetchStatus:
       "web_fetch {status} for {url} \u2014 try: confirm the URL resolves in a browser; status suggests the host returned an error page",
     fetchRateLimit429:
