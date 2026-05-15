@@ -47,6 +47,7 @@ export function StatusBar({
 }) {
   const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
   const cacheHitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
+  const runningJobs = jobs.filter((j) => j.running).length;
   const spent = formatMoney(usage.totalCostUsd, currency);
   const balanceLabel = balance
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
@@ -80,17 +81,15 @@ export function StatusBar({
 
       <span className="grow" />
 
-      {jobs.length > 0 ? (
-        <span
-          className={`seg jobs ${jobsOpen ? "active" : ""}`}
-          onClick={onToggleJobs}
-          title={t("statusbar.jobsTip")}
-        >
-          <I.cpu size={11} />
-          <span>{t("statusbar.jobs")}</span>
-          <span className="v acc">{jobs.filter((j) => j.running).length}</span>
-        </span>
-      ) : null}
+      <span
+        className={`seg jobs ${jobsOpen ? "active" : ""}`}
+        onClick={onToggleJobs}
+        title={t("statusbar.jobsTip")}
+      >
+        <I.cpu size={11} />
+        <span>{t("statusbar.jobs")}</span>
+        <span className={runningJobs > 0 ? "v acc" : "v"}>{runningJobs}</span>
+      </span>
 
       {settings?.workspaceDir ? (
         <span
