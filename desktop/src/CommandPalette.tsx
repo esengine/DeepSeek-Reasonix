@@ -27,9 +27,11 @@ export type Command = {
   run: () => void;
 };
 
-export function useCommandPalette() {
+export function useCommandPalette(active: boolean = true) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
+    // Skip in background tabs — each TabRuntime calls this hook, so without the gate Cmd+K toggles every tab's palette at once.
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && (e.key === "k" || e.key === "K")) {
@@ -41,7 +43,7 @@ export function useCommandPalette() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [active]);
   return { open, setOpen };
 }
 

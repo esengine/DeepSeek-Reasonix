@@ -885,7 +885,7 @@ function TabRuntime({
     setSettingsPage(page);
     setSettingsOpen(true);
   }, []);
-  const palette = useCommandPalette();
+  const palette = useCommandPalette(active);
 
   useEffect(() => {
     registerDispatch(tabId, dispatch);
@@ -1086,6 +1086,8 @@ function TabRuntime({
   }, [state.messages.length]);
 
   useEffect(() => {
+    // Every TabRuntime stays mounted (display:none on inactive), so each registers its own keydown — without this gate Cmd+N would fire newChat() in every tab and wipe the inactive ones' sessions.
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && (e.key === "l" || e.key === "L")) {
@@ -1111,7 +1113,7 @@ function TabRuntime({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.busy, abort, newChat, settingsOpen, openSettingsAt]);
+  }, [active, state.busy, abort, newChat, settingsOpen, openSettingsAt]);
 
   const commands = buildCommands({
     newChat: () => {
