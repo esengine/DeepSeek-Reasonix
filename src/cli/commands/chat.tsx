@@ -28,6 +28,7 @@ import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
 import { KeystrokeProvider } from "../ui/keystroke-context.js";
+import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
@@ -339,6 +340,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
 
   const rustRendererActive = process.env.REASONIX_RENDERER === "rust";
   const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
+  const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
 
   const { waitUntilExit } = render(
     <Root
@@ -358,6 +360,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     />,
     {
       stdout: inkStdout,
+      stdin: inkStdin,
       exitOnCtrlC: true,
       // patchConsole:false — winpty/MINTTY redraw-glitch source.
       patchConsole: false,
