@@ -4,8 +4,7 @@ use reasonix_render::scene::{
 
 #[test]
 fn deserializes_a_simple_text_frame() {
-    let json =
-        r#"{"schemaVersion":1,"cols":80,"rows":24,"root":{"kind":"text","runs":[{"text":"hello"}]}}"#;
+    let json = r#"{"schemaVersion":1,"cols":80,"rows":24,"root":{"kind":"text","runs":[{"text":"hello"}]}}"#;
     let frame: SceneFrame = serde_json::from_str(json).expect("valid frame");
     assert_eq!(frame.schema_version, 1);
     assert_eq!(frame.cols, 80);
@@ -101,8 +100,7 @@ fn round_trips_through_serde_without_field_loss() {
 
 #[test]
 fn rejects_unknown_node_kind() {
-    let json =
-        r#"{"schemaVersion":1,"cols":80,"rows":24,"root":{"kind":"image","src":"x.png"}}"#;
+    let json = r#"{"schemaVersion":1,"cols":80,"rows":24,"root":{"kind":"image","src":"x.png"}}"#;
     let err = serde_json::from_str::<SceneFrame>(json).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("kind") || msg.contains("variant"), "{msg}");

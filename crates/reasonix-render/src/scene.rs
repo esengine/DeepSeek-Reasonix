@@ -103,15 +103,27 @@ pub struct BoxLayout {
     pub height: Option<Dim>,
     #[serde(default, rename = "flexGrow", skip_serializing_if = "Option::is_none")]
     pub flex_grow: Option<i32>,
-    #[serde(default, rename = "flexShrink", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "flexShrink",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub flex_shrink: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<FlexAlign>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub justify: Option<FlexJustify>,
-    #[serde(default, rename = "borderStyle", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "borderStyle",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub border_style: Option<BorderStyle>,
-    #[serde(default, rename = "borderColor", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "borderColor",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub border_color: Option<Color>,
 }
 
