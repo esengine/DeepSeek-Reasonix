@@ -380,6 +380,14 @@ export const zhCN: TranslationSchema = {
       description: "跟踪后台作业的输出（默认最后 80 行）",
       argsHint: "<id> [lines]",
     },
+    btw: {
+      description: "顺便问一下 — 从空白上下文回答，不写入会话历史",
+      argsHint: "<question>",
+    },
+    "search-engine": {
+      description: "切换网络搜索后端 — mojeek（默认，无依赖）或 searxng（自托管）",
+      argsHint: "<mojeek|searxng> [<endpoint>]",
+    },
   },
   wizard: {
     languageTitle: "选择语言",

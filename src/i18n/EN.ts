@@ -390,6 +390,15 @@ export const EN: TranslationSchema = {
       description: "tail a background job's output (default last 80 lines)",
       argsHint: "<id> [lines]",
     },
+    btw: {
+      description:
+        "ask a quick side question — answered from a blank slate, never added to the conversation context",
+      argsHint: "<question>",
+    },
+    "search-engine": {
+      description: "switch web search backend — mojeek (default, no deps) or searxng (self-hosted)",
+      argsHint: "<mojeek|searxng> [<endpoint>]",
+    },
   },
   wizard: {
     languageTitle: "Choose your language",

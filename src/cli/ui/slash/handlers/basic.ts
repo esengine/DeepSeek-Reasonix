@@ -1,3 +1,4 @@
+import { wrapToCells } from "@/frame/width.js";
 import { t, tObj } from "@/i18n/index.js";
 import { formatDuration, formatLoopStatus, parseLoopCommand } from "../../loop.js";
 import { SLASH_COMMANDS, SLASH_GROUP_ORDER, orderSlashCommandsByGroup } from "../commands.js";
@@ -22,14 +23,25 @@ function groupHeader(group: SlashGroup): string {
   return `${label}  ·  ${detail}`;
 }
 
-function renderRow(spec: SlashCommandSpec): string {
+const HELP_NAME_COL = 28;
+const HELP_HANGING_INDENT = 2 + HELP_NAME_COL + 2;
+
+function renderRow(spec: SlashCommandSpec, cols: number): string {
   const name = `/${spec.cmd}${spec.argsHint ? ` ${spec.argsHint}` : ""}`;
   const desc = t(`slash.${spec.cmd}.description`);
   const summary = desc === `slash.${spec.cmd}.description` ? spec.summary : desc;
-  return `  ${name.padEnd(28)}  ${summary}`;
+  const descWidth = Math.max(20, cols - HELP_HANGING_INDENT);
+  const chunks = wrapToCells(summary, descWidth);
+  const head = `  ${name.padEnd(HELP_NAME_COL)}  ${chunks[0] ?? ""}`;
+  if (chunks.length <= 1) return head;
+  const tail = chunks.slice(1).map((c) => `${" ".repeat(HELP_HANGING_INDENT)}${c}`);
+  return [head, ...tail].join("\n");
 }
 
 const help: SlashHandler = () => {
+  // Match the info-card chrome (`markdown.tsx` BODY_LEFT_CELLS=7) so wide
+  // CJK descriptions wrap inside the card, not past its right edge.
+  const cols = (process.stdout.columns ?? 80) - 7;
   const lines: string[] = [t("handlers.basic.helpTitle"), ""];
   const rowsByGroup = new Map<SlashGroup, SlashCommandSpec[]>();
   for (const group of SLASH_GROUP_ORDER) rowsByGroup.set(group, []);
@@ -40,7 +52,7 @@ const help: SlashHandler = () => {
     const rows = rowsByGroup.get(group) ?? [];
     if (rows.length === 0) continue;
     lines.push(`  ${groupHeader(group)}`);
-    for (const r of rows) lines.push(renderRow(r));
+    for (const r of rows) lines.push(renderRow(r, cols));
     lines.push("");
   }
   lines.push(
