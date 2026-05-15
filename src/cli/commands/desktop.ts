@@ -952,8 +952,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   const first = createTabSkeleton();
-  process.once("exit", () => {
-    for (const t of tabs.values()) void t.toolset?.jobs.shutdown();
+
+  let shuttingDown = false;
+  async function gracefulShutdown(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await Promise.allSettled(
+      [...tabs.values()].map((t) => t.toolset?.jobs.shutdown(1500) ?? Promise.resolve()),
+    );
+    process.exit(0);
+  }
+  process.on("SIGTERM", () => {
+    void gracefulShutdown();
+  });
+  process.on("SIGINT", () => {
+    void gracefulShutdown();
   });
 
   pauseGate.on((req) => {
@@ -1513,5 +1526,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
   });
 
-  await new Promise<void>((resolve) => rl.on("close", resolve));
+  await new Promise<void>((resolve) => {
+    rl.on("close", () => {
+      void gracefulShutdown();
+      resolve();
+    });
+  });
 }

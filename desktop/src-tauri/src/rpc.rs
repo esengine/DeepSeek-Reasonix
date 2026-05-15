@@ -1,11 +1,10 @@
 use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
-use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use parking_lot::Mutex;
@@ -22,10 +21,13 @@ pub struct RpcState {
 
 struct RpcHandle {
     stdin: ChildStdin,
-    /// Held only so its drop disconnects the wait thread's recv, signalling
-    /// it to kill the child. Replaces the old fire-and-forget exit watcher
-    /// that left Node orphaned if Tauri exited while a tool call was in flight.
-    _kill_signal: mpsc::Sender<()>,
+    /// Shared with the natural-exit watcher thread. `rpc_kill` takes the
+    /// Child on app shutdown so it can poll try_wait synchronously and then
+    /// tree-kill on timeout — Tauri's stock `child.kill()` only hits the
+    /// direct Node child and leaves vite / http-server descendants orphaned
+    /// past app shutdown (#907).
+    child: Arc<parking_lot::Mutex<Option<Child>>>,
+    child_pid: u32,
 }
 
 #[derive(Clone, Serialize)]
@@ -169,9 +171,14 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
     let stdin = child.stdin.take().ok_or("no stdin")?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let stderr = child.stderr.take().ok_or("no stderr")?;
+    let child_pid = child.id();
 
-    let (kill_tx, kill_rx) = mpsc::channel::<()>();
-    *guard = Some(RpcHandle { stdin, _kill_signal: kill_tx });
+    let child_shared = Arc::new(parking_lot::Mutex::new(Some(child)));
+    *guard = Some(RpcHandle {
+        stdin,
+        child: child_shared.clone(),
+        child_pid,
+    });
     drop(guard);
 
     let app_for_stdout = app.clone();
@@ -190,33 +197,31 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
         }
     });
 
-    // Wait thread: poll try_wait every 500 ms while watching the kill channel.
-    // Disconnected fires when RpcHandle drops (rpc_kill or Tauri exit) — the
-    // 500 ms cadence is a tradeoff between exit-detection latency and idle CPU.
+    // Natural-exit watcher: emits rpc:exit if Node dies on its own (crash,
+    // explicit process.exit). rpc_kill owns the active-shutdown path; this
+    // thread bails the moment that path takes the Child.
     let app_for_exit = app.clone();
     let inner_for_exit = state.inner.clone();
-    thread::spawn(move || {
-        loop {
-            match kill_rx.recv_timeout(Duration::from_millis(500)) {
-                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    let _ = child.kill();
-                    let code = child.wait().ok().and_then(|s| s.code());
-                    let _ = app_for_exit.emit("rpc:exit", ExitEvent { code });
-                    return;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => match child.try_wait() {
-                    Ok(Some(status)) => {
-                        let _ = inner_for_exit.lock().take();
-                        let _ = app_for_exit.emit("rpc:exit", ExitEvent { code: status.code() });
-                        return;
-                    }
-                    Ok(None) => continue,
-                    Err(_) => {
-                        let _ = child.kill();
-                        let _ = inner_for_exit.lock().take();
-                        return;
-                    }
-                },
+    let child_for_wait = child_shared;
+    thread::spawn(move || loop {
+        let status = {
+            let mut guard = child_for_wait.lock();
+            match guard.as_mut() {
+                Some(c) => c.try_wait(),
+                None => return,
+            }
+        };
+        match status {
+            Ok(Some(s)) => {
+                child_for_wait.lock().take();
+                let _ = inner_for_exit.lock().take();
+                let _ = app_for_exit.emit("rpc:exit", ExitEvent { code: s.code() });
+                return;
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(500)),
+            Err(_) => {
+                let _ = inner_for_exit.lock().take();
+                return;
             }
         }
     });
@@ -224,11 +229,75 @@ pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), Strin
     Ok(())
 }
 
-/// Drop the spawned Node child cleanly. Used by Tauri-side teardown and by a
-/// future "restart RPC" UI affordance. Idempotent — no-op if nothing is running.
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+        let _ = Command::new("pkill")
+            .args(["-KILL", "-P", &pid.to_string()])
+            .status();
+    }
+}
+
+/// Drop the spawned Node child cleanly. Used by Tauri-side teardown.
+/// Closes Node's stdin (which trips its readline `close` → graceful job
+/// shutdown), polls the child for up to 3 s, then tree-kills any survivors
+/// so dev-server grandchildren don't outlive the desktop (#907).
 #[tauri::command]
 pub fn rpc_kill(state: State<'_, RpcState>) -> Result<(), String> {
-    state.inner.lock().take();
+    let handle_opt = state.inner.lock().take();
+    let Some(handle) = handle_opt else { return Ok(()) };
+
+    drop(handle.stdin);
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let exited = loop {
+        let done = {
+            let mut guard = handle.child.lock();
+            match guard.as_mut() {
+                Some(c) => match c.try_wait() {
+                    Ok(Some(_)) => {
+                        guard.take();
+                        true
+                    }
+                    Ok(None) => false,
+                    Err(_) => {
+                        guard.take();
+                        true
+                    }
+                },
+                None => true,
+            }
+        };
+        if done {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+
+    if !exited {
+        kill_process_tree(handle.child_pid);
+        if let Some(mut c) = handle.child.lock().take() {
+            let _ = c.wait();
+        }
+    }
+
     Ok(())
 }
 
