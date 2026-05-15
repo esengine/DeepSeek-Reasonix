@@ -7,6 +7,7 @@ import {
   createContext,
   isValidElement,
   memo,
+  type ReactElement,
   type ReactNode,
   useContext,
   useState,
@@ -140,15 +141,17 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          pre: ({ children }) => <>{children}</>,
-          code: ({ className, children }) => {
-            const langMatch = /language-([\w-]+)/.exec(className ?? "");
-            const text = String(children).replace(/\n$/, "");
-            if (!langMatch) {
-              return <code className={className}>{children}</code>;
-            }
-            return <CodeBlock lang={langMatch[1] ?? "text"} text={text} />;
+          pre: ({ children }) => {
+            const codeEl = Children.toArray(children).find(
+              (c): c is ReactElement<{ className?: string; children?: ReactNode }> =>
+                isValidElement(c) && c.type === "code",
+            );
+            if (!codeEl) return <pre>{children}</pre>;
+            const text = String(codeEl.props.children ?? "").replace(/\n$/, "");
+            const lang = /language-([\w-]+)/.exec(codeEl.props.className ?? "")?.[1] ?? "text";
+            return <CodeBlock lang={lang} text={text} />;
           },
+          code: ({ className, children }) => <code className={className}>{children}</code>,
           a: ({ href, children }) => <SafeLink href={href}>{children}</SafeLink>,
           p: ({ children }) => <p>{withFilePills(children)}</p>,
           li: ({ children }) => <li>{withFilePills(children)}</li>,

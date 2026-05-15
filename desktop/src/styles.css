@@ -887,6 +887,78 @@ button {
   margin: 6px 0;
 }
 
+.markdown .codeblock {
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.markdown .codeblock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+.markdown .codeblock-lang {
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.markdown .copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.markdown .copy-btn:hover {
+  color: var(--fg-2);
+  border-color: var(--border-strong);
+}
+.markdown .copy-btn.done {
+  color: var(--success);
+  border-color: var(--success-soft);
+}
+.markdown .codeview {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--fg);
+}
+.markdown .codeview-line {
+  display: flex;
+  gap: 14px;
+  min-width: 0;
+}
+.markdown .codeview-line-num {
+  flex: 0 0 auto;
+  min-width: 2ch;
+  text-align: right;
+  color: var(--muted-2);
+  user-select: none;
+}
+.markdown .codeview-line-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre;
+}
+
 /* ============================================================
    styles part 3 — cards
    ============================================================ */
