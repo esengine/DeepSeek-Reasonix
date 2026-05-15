@@ -406,4 +406,5 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_add"; spec: string }
   | { cmd: "mcp_specs_remove"; spec: string }
   | { cmd: "skills_get" }
+  | { cmd: "skill_run"; name: string; args?: string }
 );

@@ -107,6 +107,7 @@ type InMessage = { tabId?: string } & (
   | { cmd: "mcp_specs_add"; spec: string }
   | { cmd: "mcp_specs_remove"; spec: string }
   | { cmd: "skills_get" }
+  | { cmd: "skill_run"; name: string; args?: string }
 );
 
 interface NeedsSetupEvent {
@@ -1295,6 +1296,31 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "skills_get") {
       emitSkills(tab);
+      return;
+    }
+    if (msg.cmd === "skill_run") {
+      if (!tab.runtime) {
+        emit(
+          { type: "$error", message: "Not configured yet — paste your DeepSeek API key first." },
+          tab.id,
+        );
+        return;
+      }
+      try {
+        const store = new SkillStore({ projectRoot: tab.rootDir });
+        const found = store.read(msg.name);
+        if (!found) {
+          emit({ type: "$error", message: `skill not found: ${msg.name}` }, tab.id);
+          return;
+        }
+        const extra = msg.args?.trim() ?? "";
+        const header = `# Skill: ${found.name}${found.description ? `\n> ${found.description}` : ""}`;
+        const argsLine = extra ? `\n\nArguments: ${extra}` : "";
+        const payload = `${header}\n\n${found.body}${argsLine}`;
+        void runTurn(tab, payload);
+      } catch (err) {
+        emit({ type: "$error", message: `skill_run: ${(err as Error).message}` }, tab.id);
+      }
       return;
     }
     if (msg.cmd === "session_list") {

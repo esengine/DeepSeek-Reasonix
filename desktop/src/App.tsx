@@ -1238,6 +1238,11 @@ function TabRuntime({
       desc: t("app.cmd.exportMd"),
       run: () => exportConversation(),
     },
+    ...state.skills.map((s) => ({
+      cmd: `/${s.name}`,
+      desc: s.description || `skill · ${s.scope}`,
+      run: () => sendRpc({ cmd: "skill_run", name: s.name }),
+    })),
   ];
 
   const elapsed = useElapsed(state.busy);
