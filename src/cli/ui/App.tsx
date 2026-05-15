@@ -136,7 +136,7 @@ import { useLanguageReload } from "./hooks/useLanguageReload.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
 import { usePresetMode } from "./hooks/usePresetMode.js";
 import { useQuit } from "./hooks/useQuit.js";
-import { useSceneTrace } from "./hooks/useSceneTrace.js";
+import { summarizeCard, useSceneTrace } from "./hooks/useSceneTrace.js";
 import { useScrollback } from "./hooks/useScrollback.js";
 import { useTerminalSetup } from "./hooks/useTerminalSetup.js";
 import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
@@ -469,6 +469,8 @@ function AppInner({
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const cardCount = useAgentState((s) => s.cards.length);
+  const lastCardKind = useAgentState((s) => s.cards.at(-1)?.kind);
+  const lastCardSummary = useAgentState((s) => summarizeCard(s.cards.at(-1)));
   const activityLabel = useActivityLabel();
   const chatScroll = useChatScrollActions();
   const [input, setInput] = useState("");
@@ -507,7 +509,14 @@ function AppInner({
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
-  useSceneTrace({ cardCount, busy, activity: activityLabel });
+  useSceneTrace({
+    cardCount,
+    busy,
+    activity: activityLabel,
+    model,
+    lastCardKind,
+    lastCardSummary,
+  });
   const {
     ongoingTool,
     setOngoingTool,
