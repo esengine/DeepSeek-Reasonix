@@ -1260,6 +1260,7 @@ function AppInner({
     slashArgMatches,
     slashArgSelected,
     setSlashArgSelected,
+    slashArgPathCandidates,
     pickSlashArg,
   } = useCompletionPickers({
     input,
@@ -1637,9 +1638,10 @@ function AppInner({
     }
 
     // Slash-argument picker. Fires inside `/<cmd> <partial>` — either
-    // a file picker (for /edit), enum picker (for /preset, /model,
+    // a path picker (for /cwd), enum picker (for /preset, /model,
     // /plan, /branch, /harvest), or hint-only row. Navigation + Tab
-    // substitute the highlighted value at the arg's offset.
+    // substitute the highlighted value at the arg's offset. For path
+    // completers, directories drill (trailing `/`), files commit.
     if (slashArgMatches && slashArgMatches.length > 0) {
       if (key.upArrow) {
         setSlashArgSelected((i) => Math.max(0, i - 1));
@@ -1651,7 +1653,11 @@ function AppInner({
       }
       if (key.tab) {
         const sel = slashArgMatches[slashArgSelected] ?? slashArgMatches[0];
-        if (sel) pickSlashArg(sel);
+        if (sel) {
+          const candidate =
+            slashArgPathCandidates?.[slashArgSelected] ?? slashArgPathCandidates?.[0];
+          pickSlashArg(sel, candidate?.isDir);
+        }
         return;
       }
     }
@@ -2280,7 +2286,17 @@ function AppInner({
       // /model, /plan, …) we splice without trailing space; those
       // commands take no further args, so the user presses Enter a
       // second time to run.
-      if (slashArgMatches && slashArgMatches.length > 0 && slashArgContext) {
+      //
+      // When the partial ends with `/` (browse mode, e.g. after Tab-
+      // completing a directory in `/cwd`), the user has already landed
+      // on the path they want — skip the picker and let Enter submit
+      // the command directly.
+      if (
+        slashArgMatches &&
+        slashArgMatches.length > 0 &&
+        slashArgContext &&
+        !slashArgContext.partial.endsWith("/")
+      ) {
         const sel = slashArgMatches[slashArgSelected] ?? slashArgMatches[0];
         if (sel) {
           pickSlashArg(sel);
@@ -4176,6 +4192,7 @@ function AppInner({
                             spec={slashArgContext.spec}
                             kind={slashArgContext.kind}
                             partial={slashArgContext.partial}
+                            pathCandidates={slashArgPathCandidates}
                           />
                         ) : null}
                       </Box>

@@ -4,6 +4,7 @@ import React from "react";
 import { t } from "../../i18n/index.js";
 import type { SlashCommandSpec } from "./slash.js";
 import { GLYPH, useColor } from "./theme.js";
+import type { AtPickerEntry } from "./useCompletionPickers.js";
 
 export interface SlashArgPickerProps {
   /**
@@ -24,6 +25,11 @@ export interface SlashArgPickerProps {
   kind: "picker" | "hint";
   /** The user's partial input — shown in the "no matches" hint. */
   partial: string;
+  /**
+   * When the completer is `"path"`, carries the rich entries (with `isDir`)
+   * so the picker can render a trailing `/` on directories.
+   */
+  pathCandidates?: readonly AtPickerEntry[] | null;
 }
 
 /**
@@ -37,6 +43,7 @@ export function SlashArgPicker({
   spec,
   kind,
   partial,
+  pathCandidates,
 }: SlashArgPickerProps): React.ReactElement | null {
   const color = useColor();
   const headerRow = (
@@ -89,9 +96,13 @@ export function SlashArgPicker({
       {hiddenAbove > 0 ? (
         <Text dimColor>{t("slashArgPicker.above", { hidden: hiddenAbove })}</Text>
       ) : null}
-      {shown.map((value, i) => (
-        <ArgRow key={value} value={value} isSelected={windowStart + i === selectedIndex} />
-      ))}
+      {shown.map((value, i) => {
+        const idx = windowStart + i;
+        const isDir = pathCandidates?.[idx]?.isDir ?? false;
+        return (
+          <ArgRow key={value} value={value} isSelected={idx === selectedIndex} isDir={isDir} />
+        );
+      })}
       {hiddenBelow > 0 ? (
         <Text dimColor>{t("slashArgPicker.below", { hidden: hiddenBelow })}</Text>
       ) : null}
@@ -102,7 +113,15 @@ export function SlashArgPicker({
   );
 }
 
-function ArgRow({ value, isSelected }: { value: string; isSelected: boolean }) {
+function ArgRow({
+  value,
+  isSelected,
+  isDir,
+}: {
+  value: string;
+  isSelected: boolean;
+  isDir: boolean;
+}) {
   const color = useColor();
   return (
     <Box>
@@ -112,6 +131,7 @@ function ArgRow({ value, isSelected }: { value: string; isSelected: boolean }) {
       <Text color={isSelected ? color.user : color.info} bold={isSelected} dimColor={!isSelected}>
         {value}
       </Text>
+      {isDir ? <Text dimColor>/</Text> : null}
     </Box>
   );
 }
