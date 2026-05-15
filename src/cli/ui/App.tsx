@@ -332,7 +332,10 @@ function HistoryTypingCapture({
 }): null {
   const pinned = useChatScrollState((s) => s.pinned);
   useKeystroke((ev) => {
-    if (ev.paste) return;
+    if (ev.paste) {
+      setInput(input + ev.input);
+      return;
+    }
     if (ev.return) {
       onReturnToBottom();
       return;
