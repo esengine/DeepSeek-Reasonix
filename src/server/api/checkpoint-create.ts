@@ -25,8 +25,16 @@ export async function handleCheckpointCreate(
   let paths: string[];
   try {
     const { execSync } = await import("node:child_process");
+    // Strip GIT_* env vars: if this handler runs in a context where git set
+    // GIT_DIR (e.g. inside a pre-push hook spawning the dashboard), ls-files
+    // would resolve to the *outer* repo instead of rootDir.
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const k of Object.keys(env)) {
+      if (k.startsWith("GIT_")) delete env[k];
+    }
     const stdout = execSync("git ls-files --cached --others --exclude-standard", {
       cwd: rootDir,
+      env,
       encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024,
     });

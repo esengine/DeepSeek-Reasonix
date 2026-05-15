@@ -1236,11 +1236,21 @@ describe("dashboard server: checkpoint API", () => {
     await mkdir(cwd, { recursive: true });
     await writeFile(join(cwd, "hello.txt"), "hello world\n");
     const { execSync } = await import("node:child_process");
-    execSync("git init", { cwd });
-    execSync("git config user.email test@test.com", { cwd });
-    execSync("git config user.name test", { cwd });
-    execSync("git add -A", { cwd });
-    execSync("git commit -m init", { cwd });
+    // Strip GIT_* env vars so execSync doesn't inherit them from a calling
+    // git operation (e.g. when this suite runs under a pre-push hook).
+    // Without this, `git commit` would resolve GIT_DIR from the env and
+    // operate on the parent repo, not the temp dir — and `git config
+    // user.email test@test.com` would silently rewrite the parent's
+    // committer identity.
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const k of Object.keys(env)) {
+      if (k.startsWith("GIT_")) delete env[k];
+    }
+    execSync("git init", { cwd, env });
+    execSync("git config user.email test@test.com", { cwd, env });
+    execSync("git config user.name test", { cwd, env });
+    execSync("git add -A", { cwd, env });
+    execSync("git commit -m init", { cwd, env });
   });
 
   afterEach(async () => {
