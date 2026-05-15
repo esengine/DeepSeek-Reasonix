@@ -221,6 +221,8 @@ type State = {
   memory: MemoryEntryInfo[];
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
+  /** Messages typed while busy=true — auto-sent FIFO once the current turn completes. Cleared on `clear`, `rpc_exit`, `session_loaded`. */
+  queuedSends: string[];
 };
 
 export type SessionFile = {
@@ -250,7 +252,10 @@ type Action =
   | { t: "resolve_revision"; id: number; verdict: RevisionVerdict }
   | { t: "dismiss_plan" }
   | { t: "mention_results"; results: MentionResults }
-  | { t: "mention_preview"; preview: MentionPreviewState };
+  | { t: "mention_preview"; preview: MentionPreviewState }
+  | { t: "enqueue_send"; text: string }
+  | { t: "dequeue_send"; index: number }
+  | { t: "shift_queued_send" };
 
 function reduce(state: State, action: Action): State {
   switch (action.t) {
@@ -296,6 +301,7 @@ function reduce(state: State, action: Action): State {
         ready: false,
         busy: false,
         activeSkill: null,
+        queuedSends: [],
         messages: [
           ...state.messages,
           { kind: "error", message: `reasonix exited (code ${action.code ?? "?"})` },
@@ -347,6 +353,7 @@ function reduce(state: State, action: Action): State {
         usage: zeroUsage(),
         sessionFiles: [],
         activeSkill: null,
+        queuedSends: [],
       };
     case "resolve_confirm":
       return {
@@ -410,6 +417,15 @@ function reduce(state: State, action: Action): State {
       return { ...state, mentionResults: action.results };
     case "mention_preview":
       return { ...state, mentionPreview: action.preview };
+    case "enqueue_send":
+      return { ...state, queuedSends: [...state.queuedSends, action.text] };
+    case "dequeue_send":
+      return {
+        ...state,
+        queuedSends: state.queuedSends.filter((_, i) => i !== action.index),
+      };
+    case "shift_queued_send":
+      return { ...state, queuedSends: state.queuedSends.slice(1) };
   }
 }
 
@@ -697,6 +713,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         },
         sessionFiles,
         activeSkill: null,
+        queuedSends: [],
       };
     }
     case "$error":
@@ -922,6 +939,7 @@ function TabRuntime({
     sessionFiles: [],
     memory: [],
     activeSkill: null,
+    queuedSends: [],
   });
   useLang();
   const [draft, setDraft] = useState("");
@@ -1078,6 +1096,14 @@ function TabRuntime({
   );
 
   const abort = useCallback(() => sendRpc({ cmd: "abort" }), [sendRpc]);
+
+  useEffect(() => {
+    if (state.busy || !state.ready || state.queuedSends.length === 0) return;
+    const next = state.queuedSends[0];
+    if (!next) return;
+    dispatch({ t: "shift_queued_send" });
+    send(next);
+  }, [state.busy, state.ready, state.queuedSends, send]);
 
   const resolveConfirm = useCallback(
     (id: number, response: ConfirmationChoice) => {
@@ -1627,6 +1653,12 @@ function TabRuntime({
                 onMentionPreview={previewMention}
                 onMentionPicked={markMentionPicked}
                 mentionResults={state.mentionResults}
+                queuedSends={state.queuedSends}
+                onQueueWhileBusy={(text) => {
+                  dispatch({ t: "enqueue_send", text });
+                  setDraft("");
+                }}
+                onDequeueSend={(index) => dispatch({ t: "dequeue_send", index })}
               />
             </>
           )}

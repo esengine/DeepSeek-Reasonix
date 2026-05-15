@@ -125,6 +125,9 @@ export function Composer({
   onMentionPicked,
   mentionResults,
   workspaceDir,
+  queuedSends,
+  onQueueWhileBusy,
+  onDequeueSend,
 }: {
   draft: string;
   setDraft: (s: string) => void;
@@ -147,6 +150,11 @@ export function Composer({
   onMentionPicked?: (path: string) => void;
   mentionResults?: { nonce: number; query: string; results: string[] } | null;
   workspaceDir?: string;
+  /** Messages typed while busy=true; rendered as removable chips above the textarea and auto-drained FIFO on turn-complete. */
+  queuedSends?: string[];
+  /** Called when the user presses Enter while busy with a non-empty draft. Owns clearing the draft. */
+  onQueueWhileBusy?: (text: string) => void;
+  onDequeueSend?: (index: number) => void;
 }) {
   const [chips, setChips] = useState<Chip[]>([]);
   const [popup, setPopup] = useState<Popup>(null);
@@ -301,7 +309,11 @@ export function Composer({
     if (e.key === "Enter" && !e.shiftKey && !popup) {
       e.preventDefault();
       if (busy) {
-        onAbort();
+        const text = draft.trim();
+        if (text && onQueueWhileBusy) {
+          onQueueWhileBusy(text);
+          setChips([]);
+        }
       } else if (!disabled && draft.trim()) {
         onSend();
         setChips([]);
@@ -312,6 +324,22 @@ export function Composer({
   return (
     <div className="composer-wrap">
       <div className="composer-inner">
+        {queuedSends && queuedSends.length > 0 ? (
+          <div className="composer-queued">
+            <span className="composer-queued-label">排队 {queuedSends.length}</span>
+            {queuedSends.map((text, i) => (
+              <span key={i} className="composer-queue-chip" title={text}>
+                <span className="text">{text}</span>
+                {onDequeueSend ? (
+                  <span className="x" onClick={() => onDequeueSend(i)}>
+                    <I.x size={10} />
+                  </span>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         <div className="hint-row">
           {busy && busyLabel ? (
             <>
@@ -321,7 +349,7 @@ export function Composer({
                 <span className="composer-busy-time">{fmtElapsed(busyElapsedMs ?? 0)}</span>
               </span>
               <span>
-                <kbd>⏎</kbd>/<kbd>esc</kbd> 中断
+                <kbd>⏎</kbd> 排队 &nbsp;·&nbsp; <kbd>esc</kbd> 中断
               </span>
             </>
           ) : (

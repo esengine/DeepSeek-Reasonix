@@ -2474,6 +2474,52 @@ button {
   flex-shrink: 0;
 }
 
+.composer-queued {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 6px 6px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+}
+.composer-queued-label {
+  color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.composer-queue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  padding: 2px 4px 2px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--fg-2);
+}
+.composer-queue-chip .text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.composer-queue-chip .x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--muted);
+}
+.composer-queue-chip .x:hover {
+  background: var(--border);
+  color: var(--fg);
+}
+
 /* ---- queued tab-row indicator (multiple sessions running) ---- */
 .queue-strip {
   display: flex;
