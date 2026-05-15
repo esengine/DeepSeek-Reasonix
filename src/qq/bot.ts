@@ -205,7 +205,7 @@ export class QQBot extends EventEmitter {
       }
     });
 
-    this.ws.on("message", (raw) => {
+    this.ws.on("message", (raw: WebSocket.RawData) => {
       try {
         const payload = JSON.parse(raw.toString());
         this.handlePayload(payload).catch(() => {});
@@ -231,8 +231,8 @@ export class QQBot extends EventEmitter {
       }
     });
 
-    this.ws.on("error", (err) => {
-      const msg = `QQ WebSocket error: ${(err as Error).message}`;
+    this.ws.on("error", (err: Error) => {
+      const msg = `QQ WebSocket error: ${err.message}`;
       console.error(msg);
       this.emit("bot_error", msg);
     });
