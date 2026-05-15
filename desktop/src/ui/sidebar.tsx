@@ -1,6 +1,13 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { I } from "../icons";
 import type { SessionInfo } from "../App";
+
+type PendingDelete = {
+  name: string;
+  pretty: string;
+  x: number;
+  y: number;
+};
 
 function prettyName(s: SessionInfo): string {
   if (s.summary && s.summary.trim()) return s.summary.trim();
@@ -43,6 +50,7 @@ export function Sidebar({
   onOpenCommands: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const filtered = query
     ? sessions.filter((s) => {
         const q = query.toLowerCase();
@@ -51,6 +59,23 @@ export function Sidebar({
         );
       })
     : sessions;
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest(".session-delete-popover")) setPendingDelete(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPendingDelete(null);
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [pendingDelete]);
 
   return (
     <aside className="sidebar">
@@ -123,7 +148,12 @@ export function Sidebar({
                 onClick={() => onLoadSession(s.name)}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  if (confirm(`删除会话 "${prettyName(s)}"?`)) onDeleteSession(s.name);
+                  setPendingDelete({
+                    name: s.name,
+                    pretty: prettyName(s),
+                    x: e.clientX,
+                    y: e.clientY,
+                  });
                 }}
                 role="button"
                 tabIndex={0}
@@ -165,6 +195,73 @@ export function Sidebar({
           <span className="right">⌘,</span>
         </div>
       </div>
+
+      {pendingDelete ? (
+        <SessionDeletePopover
+          target={pendingDelete}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            onDeleteSession(pendingDelete.name);
+            setPendingDelete(null);
+          }}
+        />
+      ) : null}
     </aside>
+  );
+}
+
+function SessionDeletePopover({
+  target,
+  onCancel,
+  onConfirm,
+}: {
+  target: PendingDelete;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number }>({
+    left: target.x,
+    top: target.y,
+  });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const pad = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = target.x;
+    let top = target.y;
+    if (left + rect.width + pad > vw) left = Math.max(pad, vw - rect.width - pad);
+    if (top + rect.height + pad > vh) top = Math.max(pad, vh - rect.height - pad);
+    if (left !== pos.left || top !== pos.top) setPos({ left, top });
+    cancelRef.current?.focus();
+  }, [target.x, target.y, pos.left, pos.top]);
+
+  return (
+    <div
+      ref={ref}
+      className="session-delete-popover"
+      role="dialog"
+      aria-modal="true"
+      style={{ left: pos.left, top: pos.top }}
+    >
+      <div className="msg">
+        删除会话
+        <span className="name">{target.pretty}</span>
+      </div>
+      <div className="actions">
+        <button ref={cancelRef} type="button" className="cancel" onClick={onCancel}>
+          取消
+        </button>
+        <button type="button" className="confirm" onClick={onConfirm}>
+          <I.x size={11} />
+          删除
+        </button>
+      </div>
+    </div>
   );
 }

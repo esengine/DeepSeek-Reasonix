@@ -564,6 +564,68 @@ button {
   color: var(--muted);
 }
 
+.session-delete-popover {
+  position: fixed;
+  z-index: 80;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px 12px;
+  min-width: 220px;
+  max-width: 280px;
+  font-size: 12px;
+  color: var(--fg);
+  animation: rise 0.16s ease-out;
+}
+.session-delete-popover .msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  color: var(--fg-2);
+  line-height: 1.4;
+}
+.session-delete-popover .msg .name {
+  color: var(--fg);
+  font-weight: 500;
+  word-break: break-all;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+.session-delete-popover .actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.session-delete-popover button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.session-delete-popover button.cancel {
+  background: var(--panel);
+  color: var(--fg-2);
+  border: 1px solid var(--border);
+}
+.session-delete-popover button.cancel:hover {
+  background: var(--border);
+  color: var(--fg);
+}
+.session-delete-popover button.confirm {
+  background: var(--danger);
+  color: oklch(99% 0 0);
+  border: 1px solid transparent;
+}
+.session-delete-popover button.confirm:hover {
+  background: oklch(58% 0.18 22);
+}
+
 .side-foot {
   padding: 8px;
   border-top: 1px solid var(--border);
