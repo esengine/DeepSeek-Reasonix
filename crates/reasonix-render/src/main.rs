@@ -10,10 +10,17 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
+use reasonix_render::decode_only::run_decode_only;
 use reasonix_render::render::render_frame;
 use reasonix_render::scene::SceneFrame;
 
 fn main() -> Result<()> {
+    if std::env::args().skip(1).any(|a| a == "--decode-only") {
+        let stdin = io::stdin();
+        let stdout = io::stdout();
+        run_decode_only(stdin.lock(), stdout.lock())?;
+        return Ok(());
+    }
     let frames = read_frames()?;
     if frames.is_empty() {
         anyhow::bail!("no frames on stdin");

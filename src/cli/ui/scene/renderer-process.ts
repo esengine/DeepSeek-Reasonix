@@ -12,7 +12,13 @@ export type SpawnRendererOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
-const DEFAULT_COMMAND: readonly string[] = ["cargo", "run", "--quiet", "--bin", "reasonix-render"];
+export const DEFAULT_COMMAND: readonly string[] = [
+  "cargo",
+  "run",
+  "--quiet",
+  "--bin",
+  "reasonix-render",
+];
 
 export function spawnRenderer(opts: SpawnRendererOptions = {}): RendererProcess {
   const command = opts.command ?? DEFAULT_COMMAND;
