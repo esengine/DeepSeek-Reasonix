@@ -785,6 +785,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const toolset = await buildCodeToolset({
       rootDir: tab.rootDir,
       onSkillInstalled: () => emitSkills(tab),
+      onJobsChanged: () => emitJobs(),
     });
     tab.toolset = toolset;
     tab.system = codeSystemPrompt(tab.rootDir, {
@@ -944,6 +945,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.toolset = await buildCodeToolset({
       rootDir: target,
       onSkillInstalled: () => emitSkills(tab),
+      onJobsChanged: () => emitJobs(),
     });
     tab.system = codeSystemPrompt(target, {
       hasSemanticSearch: tab.toolset.semantic.enabled,

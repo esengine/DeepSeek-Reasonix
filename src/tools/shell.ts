@@ -44,6 +44,8 @@ export interface ShellToolsOptions {
   /** Getter form lets `editMode === "yolo"` flip mid-session without re-registering tools. */
   allowAll?: boolean | (() => boolean);
   jobs?: JobRegistry;
+  /** Fired after `run_background` / `stop_job` mutate the registry — used by the desktop popover for near-real-time updates without polling. */
+  onJobsChanged?: () => void;
 }
 
 /** Error thrown by `run_command` when the command isn't allowlisted. */
@@ -142,7 +144,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "run_background",
     description:
-      "Spawn a long-running process and detach. Waits up to `waitSec` for startup or a readiness signal ('Local:', 'listening on', 'compiled successfully'), then returns the job id + startup preview. Tail logs with `job_output`, block on completion with `wait_for_job`, kill with `stop_job`, list with `list_jobs`.\n\nSingle process only — chains / redirects / `cd` work as in run_command, but a typical invocation is one binary. Use the binary's own --cwd / --prefix flag for subdirectories. Vite gotcha: npm's `--prefix` only finds package.json; vite's server root still uses process cwd — pass `vite <project-dir>` instead.\n\nUSE THIS — not run_command — for:\n- Dev servers / watchers: npm/yarn/pnpm dev, uvicorn / flask run, cargo watch, tsc --watch, webpack serve, anything with dev/serve/watch in the name.\n- One-shot long jobs: curl / wget large downloads, `huggingface-cli download`, multi-GB `pip install` / `npm install`, big `cargo build` / `docker build`. Start with `run_background`, then call `wait_for_job` once (default `waitFor: 'exit'`, timeoutMs up to 300_000) — the harness blocks server-side so a 5-minute download costs ONE tool call, not 30 polls.",
+      "Spawn a long-running process and detach. Waits up to `waitSec` for startup or a readiness signal ('Local:', 'listening on', 'compiled successfully'), then returns the job id + startup preview. Tail logs with `job_output`, block on completion with `wait_for_job`, kill with `stop_job`, list with `list_jobs`.\n\nSingle process only — no chains / redirects. For subdirectories use the `cwd` parameter (workspace-relative or absolute, must stay inside the workspace root); do NOT write `cd X && cmd`, that gets rejected.\n\nUSE THIS — not run_command — for:\n- Dev servers / watchers: npm/yarn/pnpm dev, uvicorn / flask run, cargo watch, tsc --watch, webpack serve, anything with dev/serve/watch in the name.\n- One-shot long jobs: curl / wget large downloads, `huggingface-cli download`, multi-GB `pip install` / `npm install`, big `cargo build` / `docker build`. Start with `run_background`, then call `wait_for_job` once (default `waitFor: 'exit'`, timeoutMs up to 300_000) — the harness blocks server-side so a 5-minute download costs ONE tool call, not 30 polls.",
     parameters: {
       type: "object",
       properties: {
@@ -150,6 +152,11 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
           type: "string",
           description:
             "Full command line. Same quoting rules as run_command (no pipes / redirects / chaining).",
+        },
+        cwd: {
+          type: "string",
+          description:
+            "Working directory for the spawn. Workspace-relative or absolute. Defaults to the workspace root. Must resolve inside the workspace — paths escaping the root are rejected.",
         },
         waitSec: {
           type: "integer",
@@ -159,14 +166,15 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
       },
       required: ["command"],
     },
-    fn: async (args: { command: string; waitSec?: number }, ctx) => {
+    fn: async (args: { command: string; cwd?: string; waitSec?: number }, ctx) => {
       const cmd = args.command.trim();
       if (!cmd) throw new Error("run_background: empty command");
+      const cwd = resolveCwdInsideRoot(rootDir, args.cwd);
       if (!isAllowAll() && !isCommandAllowed(cmd, getExtraAllowed())) {
         const gate = ctx?.confirmationGate ?? pauseGate;
         const choice = await gate.ask({
           kind: "run_background",
-          payload: { command: cmd, cwd: rootDir, waitSec: args.waitSec },
+          payload: { command: cmd, cwd, waitSec: args.waitSec },
         });
         if (choice.type === "deny") {
           throw new Error(
@@ -179,10 +187,11 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         // "run_once" — fall through and execute
       }
       const result = await jobs.start(cmd, {
-        cwd: rootDir,
+        cwd,
         waitSec: args.waitSec,
         signal: ctx?.signal,
       });
+      opts.onJobsChanged?.();
       return formatJobStart(result);
     },
   });
@@ -255,6 +264,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         waitFor: args.waitFor,
       });
       if (!out) return `job ${args.jobId}: not found (use list_jobs)`;
+      if (out.exited) opts.onJobsChanged?.();
       return {
         jobId: args.jobId,
         exited: out.exited,
@@ -277,6 +287,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
     },
     fn: async (args: { jobId: number }) => {
       const rec = await jobs.stop(args.jobId);
+      opts.onJobsChanged?.();
       if (!rec) return `job ${args.jobId}: not found`;
       return formatJobStop(rec);
     },
@@ -298,6 +309,19 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   });
 
   return registry;
+}
+
+function resolveCwdInsideRoot(rootDir: string, raw: string | undefined): string {
+  const root = pathMod.resolve(rootDir);
+  if (!raw || !raw.trim()) return root;
+  const resolved = pathMod.resolve(root, raw);
+  const rel = pathMod.relative(root, resolved);
+  if (rel.startsWith("..") || pathMod.isAbsolute(rel)) {
+    throw new Error(
+      `run_background: cwd "${raw}" resolves outside the workspace root (${root}). Pass a workspace-relative path.`,
+    );
+  }
+  return resolved;
 }
 
 function formatJobStart(r: import("./jobs.js").JobStartResult): string {

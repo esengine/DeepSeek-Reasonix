@@ -2443,6 +2443,13 @@ export function App() {
               );
             }
 
+            if (ev.type === "$jobs") {
+              for (const id of dispatchersRef.current.keys()) {
+                deliverToTab(id, { t: "incoming", event: ev });
+              }
+              return;
+            }
+
             const target = tabId;
             if (target) {
               flushTabDeltas(target);
