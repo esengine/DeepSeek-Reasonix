@@ -8,8 +8,10 @@ import {
   NeedsConfirmationError,
   detectShellOperator,
   formatCommandResult,
+  hasSensitivePathArgs,
   injectPowerShellUtf8,
   isAllowed,
+  isCommandAllowed,
   prepareSpawn,
   quoteForCmdExe,
   registerShellTools,
@@ -283,6 +285,90 @@ describe("isAllowed", () => {
       expect(isAllowed("ruff check --fix src")).toBe(false);
       expect(isAllowed("ruff check --unsafe-fixes src")).toBe(false);
       expect(isAllowed("ruff format src")).toBe(false);
+    });
+  });
+
+  // Issue #259 — allowlisted commands that touch sensitive paths
+  // (credentials, keys, env files) are demoted to the confirm gate.
+  describe("sensitive-path demotion", () => {
+    const projectRoot = "/home/user/project";
+
+    it("does NOT demote when projectRoot is not provided (backward compat)", () => {
+      expect(isAllowed("cat ~/.ssh/id_rsa")).toBe(true);
+      expect(isAllowed("cat .env")).toBe(true);
+    });
+
+    it("demotes tilde-relative sensitive prefixes", () => {
+      expect(isAllowed("cat ~/.ssh/id_rsa", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat ~/.ssh/config", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat ~/.aws/credentials", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat ~/.gnupg/gpg.conf", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat ~/.kube/config", [], projectRoot)).toBe(false);
+      expect(isAllowed("head /etc/shadow", [], projectRoot)).toBe(false);
+      expect(isAllowed("head /etc/sudoers", [], projectRoot)).toBe(false);
+    });
+
+    it("demotes sensitive filename patterns", () => {
+      expect(isAllowed("cat .env", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat .env.local", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat .env.production", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat server.key", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat cert.pem", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat id_rsa", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat id_rsa_old", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat id_ed25519", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat aws_credentials.json", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat app.secret.key", [], projectRoot)).toBe(false);
+    });
+
+    it("demotes .env.example (matches *.env.*)", () => {
+      expect(isAllowed("cat .env.example", [], projectRoot)).toBe(false);
+    });
+
+    it("does NOT demote safe paths in the project", () => {
+      expect(isAllowed("cat src/index.ts", [], projectRoot)).toBe(true);
+      expect(isAllowed("cat README.md", [], projectRoot)).toBe(true);
+      expect(isAllowed("cat package.json", [], projectRoot)).toBe(true);
+      expect(isAllowed("head src/main.ts", [], projectRoot)).toBe(true);
+      expect(isAllowed("grep TODO src/", [], projectRoot)).toBe(true);
+    });
+
+    it("does NOT demote flags that look like paths", () => {
+      expect(isAllowed("ls --color", [], projectRoot)).toBe(true);
+      expect(isAllowed("grep --include=*.ts", [], projectRoot)).toBe(true);
+    });
+
+    it("does NOT demote URLs", () => {
+      expect(isAllowed("curl http://example.com", [], projectRoot)).toBe(false); // not allowlisted anyway
+      expect(isAllowed("cat http://example.com", [], projectRoot)).toBe(true); // URL, not path — but cat isn't allowlisted with URL
+    });
+
+    it("demotes relative paths that resolve to sensitive locations", () => {
+      expect(isAllowed("cat ../.ssh/id_rsa", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat ../../../etc/shadow", [], projectRoot)).toBe(false);
+    });
+
+    it("is case-insensitive on filename patterns", () => {
+      expect(isAllowed("cat .ENV", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat SERVER.KEY", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat CERT.PEM", [], projectRoot)).toBe(false);
+    });
+
+    it("accepts user-configured extra prefixes", () => {
+      expect(isAllowed("cat /opt/secrets/config.yml", [], projectRoot)).toBe(true);
+      expect(
+        isAllowed("cat /opt/secrets/config.yml", [], projectRoot, { prefixes: ["/opt/secrets"] }),
+      ).toBe(false);
+    });
+
+    it("accepts user-configured extra patterns", () => {
+      expect(isAllowed("cat config.nopem", [], projectRoot)).toBe(true);
+      expect(isAllowed("cat config.nopem", [], projectRoot, { patterns: ["*.nopem"] })).toBe(false);
+    });
+
+    it("works through isCommandAllowed for chain commands", () => {
+      expect(isCommandAllowed("cat ~/.ssh/id_rsa | grep KEY", [], projectRoot)).toBe(false);
+      expect(isCommandAllowed("cat src/index.ts && grep TODO src/", [], projectRoot)).toBe(true);
     });
   });
 });

@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import * as pathMod from "node:path";
 import { type CommandChain, chainAllowed, parseCommandChain } from "../shell-chain.js";
 
 /** Read-only reports + test runners whose failure mode is "exit 1 with output". */
@@ -187,8 +189,96 @@ function tailHasRisky(tail: readonly string[], risky: readonly string[]): boolea
   return false;
 }
 
-/** Allowlist match on leading argv tokens; demoted by `RISKY_ARGS` when a destructive flag appears in the tail. */
-export function isAllowed(cmd: string, extra: readonly string[] = []): boolean {
+/** Issue #259 — default sensitive-path prefixes (tilde-relative). Matching a path argument against these
+ *  demotes an otherwise-allowlisted command back to the confirm gate, preventing the agent from
+ *  silently reading credentials / keys and piping them into the LLM context. */
+const DEFAULT_SENSITIVE_PREFIXES: ReadonlyArray<string> = [
+  "~/.ssh",
+  "~/.aws",
+  "~/.gnupg",
+  "~/.kube",
+  "/etc/shadow",
+  "/etc/sudoers",
+];
+
+/** Issue #259 — filename patterns (case-insensitive basename match). */
+const DEFAULT_SENSITIVE_PATTERNS: ReadonlyArray<string> = [
+  "*.env",
+  "*.env.*",
+  "*.key",
+  "*.pem",
+  "id_rsa*",
+  "id_ed25519*",
+  "*credentials*",
+  "*secret*",
+];
+
+/** Resolve `~` to `homedir()` and normalize. Non-path-like tokens (flags, URLs, env vars) are skipped. */
+function resolveSensitivePath(token: string, projectRoot: string): string | null {
+  if (!token || token.startsWith("-") || token.includes("://") || token.startsWith("$"))
+    return null;
+  let expanded = token;
+  if (expanded.startsWith("~")) {
+    expanded = pathMod.join(homedir(), expanded.slice(1));
+  }
+  return pathMod.resolve(projectRoot, expanded);
+}
+
+/** Convert a tilde-relative prefix to an absolute path for comparison. */
+function expandPrefix(prefix: string): string {
+  if (prefix.startsWith("~")) return pathMod.join(homedir(), prefix.slice(1));
+  return prefix;
+}
+
+/** Ensure prefix matches only at directory boundaries (not mid-segment). */
+function pathStartsWithPrefix(normalized: string, prefix: string): boolean {
+  return normalized === prefix || normalized.startsWith(`${prefix}/`);
+}
+
+/** Glob-style match: `*.env` matches `foo.env`, `id_rsa*` matches `id_rsa_old`. */
+function matchesGlob(name: string, pattern: string): boolean {
+  const regex = new RegExp(
+    `^${pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*/g, ".*")
+      .replace(/\?/g, ".")}$`,
+    "i",
+  );
+  return regex.test(name);
+}
+
+/** Check whether a command's path-like arguments touch sensitive locations. */
+export function hasSensitivePathArgs(
+  argv: readonly string[],
+  projectRoot: string,
+  extraPrefixes: readonly string[] = [],
+  extraPatterns: readonly string[] = [],
+): boolean {
+  const prefixes = [...DEFAULT_SENSITIVE_PREFIXES, ...extraPrefixes].map(expandPrefix);
+  const patterns = [...DEFAULT_SENSITIVE_PATTERNS, ...extraPatterns];
+  for (const token of argv) {
+    const resolved = resolveSensitivePath(token, projectRoot);
+    if (!resolved) continue;
+    const normalized = pathMod.normalize(resolved);
+    for (const pfx of prefixes) {
+      if (pathStartsWithPrefix(normalized, pfx)) return true;
+    }
+    const base = pathMod.basename(normalized);
+    for (const pat of patterns) {
+      if (matchesGlob(base, pat)) return true;
+    }
+  }
+  return false;
+}
+
+/** Allowlist match on leading argv tokens; demoted by `RISKY_ARGS` when a destructive flag appears in the tail,
+ *  or by `SENSITIVE_PATHS` when a path argument targets a sensitive location (#259). */
+export function isAllowed(
+  cmd: string,
+  extra: readonly string[] = [],
+  projectRoot?: string,
+  sensitivePathConfig?: { prefixes?: readonly string[]; patterns?: readonly string[] },
+): boolean {
   let argv: string[];
   try {
     argv = tokenizeCommand(cmd);
@@ -212,19 +302,34 @@ export function isAllowed(cmd: string, extra: readonly string[] = []): boolean {
 
     const risky = RISKY_ARGS[prefix];
     if (risky && tailHasRisky(argv.slice(prefixTokens.length), risky)) return false;
+    if (
+      projectRoot &&
+      hasSensitivePathArgs(
+        argv,
+        projectRoot,
+        sensitivePathConfig?.prefixes,
+        sensitivePathConfig?.patterns,
+      )
+    )
+      return false;
     return true;
   }
   return false;
 }
 
 /** For chain commands, every segment must individually clear the allowlist. */
-export function isCommandAllowed(cmd: string, extra: readonly string[] = []): boolean {
+export function isCommandAllowed(
+  cmd: string,
+  extra: readonly string[] = [],
+  projectRoot?: string,
+  sensitivePathConfig?: { prefixes?: readonly string[]; patterns?: readonly string[] },
+): boolean {
   let chain: CommandChain | null;
   try {
     chain = parseCommandChain(cmd);
   } catch {
     return false;
   }
-  if (chain === null) return isAllowed(cmd, extra);
-  return chainAllowed(chain, (seg) => isAllowed(seg, extra));
+  if (chain === null) return isAllowed(cmd, extra, projectRoot, sensitivePathConfig);
+  return chainAllowed(chain, (seg) => isAllowed(seg, extra, projectRoot, sensitivePathConfig));
 }
