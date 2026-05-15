@@ -317,6 +317,10 @@ export const zhCN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "列出已保存的会话（当前标记为 ▸）" },
+    qq: {
+      description: "连接、查看或断开当前会话的 QQ 通道",
+      argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
+    },
     setup: { description: "提醒您退出并运行 `reasonix setup`" },
     semantic: {
       description: "显示 semantic_search 状态 — 已构建？Ollama 已安装？如何启用",

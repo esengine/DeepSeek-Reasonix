@@ -22,10 +22,14 @@ describe("user-memory", () => {
   let home: string;
   let projectRoot: string;
   const originalEnv = process.env.REASONIX_MEMORY;
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "reasonix-umem-home-"));
     projectRoot = mkdtempSync(join(tmpdir(), "reasonix-umem-proj-"));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
     // biome-ignore lint/performance/noDelete: avoid leaking "undefined" into env
     delete process.env.REASONIX_MEMORY;
   });
@@ -38,6 +42,18 @@ describe("user-memory", () => {
       delete process.env.REASONIX_MEMORY;
     } else {
       process.env.REASONIX_MEMORY = originalEnv;
+    }
+    if (originalHome === undefined) {
+      // biome-ignore lint/performance/noDelete: env restoration needs absence, not "undefined"
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      // biome-ignore lint/performance/noDelete: env restoration needs absence, not "undefined"
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
     }
   });
 

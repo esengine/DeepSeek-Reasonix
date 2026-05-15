@@ -178,6 +178,13 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "list / run / scaffold skills (project + custom + global + builtin)",
     argCompleter: "skills",
   },
+  {
+    cmd: "qq",
+    group: "extend",
+    argsHint: "<connect|status|disconnect>",
+    summary: "connect, inspect, or disconnect the QQ channel",
+    argCompleter: ["connect", "status", "disconnect"],
+  },
 
   {
     cmd: "init",

@@ -74,6 +74,13 @@ export interface SemanticEmbeddingConfigView {
   };
 }
 
+export interface QQBotConfig {
+  appId?: string;
+  appSecret?: string;
+  sandbox?: boolean;
+  enabled?: boolean;
+}
+
 export interface ReasonixConfig {
   apiKey?: string;
   baseUrl?: string;
@@ -139,6 +146,8 @@ export interface ReasonixConfig {
   memory?: {
     customTypes?: CustomMemoryTypeConfig[];
   };
+  /** QQ Bot configuration */
+  qq?: QQBotConfig;
 }
 
 export interface CustomMemoryTypeConfig {
@@ -851,4 +860,38 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
+}
+
+export interface LoadedQQConfig {
+  appId?: string;
+  appSecret?: string;
+  sandbox?: boolean;
+  enabled?: boolean;
+}
+
+export function loadQQConfig(path: string = defaultConfigPath()): LoadedQQConfig {
+  const envSandbox = process.env.QQ_SANDBOX;
+  const fromEnv = {
+    appId: process.env.QQ_APPID,
+    appSecret: process.env.QQ_SECRET,
+    sandbox: envSandbox === "1" ? true : envSandbox === "0" ? false : undefined,
+  };
+  const fromCfg = readConfig(path).qq ?? {};
+  return {
+    appId: fromEnv.appId ?? fromCfg.appId,
+    appSecret: fromEnv.appSecret ?? fromCfg.appSecret,
+    sandbox: fromEnv.sandbox ?? fromCfg.sandbox ?? false,
+    enabled: fromCfg.enabled === true,
+  };
+}
+
+export function saveQQConfig(cfg: LoadedQQConfig, path: string = defaultConfigPath()): void {
+  const rootCfg = readConfig(path);
+  rootCfg.qq = {
+    appId: cfg.appId,
+    appSecret: cfg.appSecret,
+    sandbox: cfg.sandbox,
+    enabled: cfg.enabled,
+  };
+  writeConfig(rootCfg, path);
 }

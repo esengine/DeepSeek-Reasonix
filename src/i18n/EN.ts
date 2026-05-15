@@ -326,6 +326,10 @@ export const EN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "list saved sessions (current marked with ▸)" },
+    qq: {
+      description: "connect, inspect, or disconnect the QQ channel for this session",
+      argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
+    },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
       description: "show semantic_search status — built? Ollama installed? how to enable",

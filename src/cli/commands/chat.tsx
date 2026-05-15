@@ -16,6 +16,7 @@ import {
   renameSession,
   resolveSession,
 } from "../../memory/session.js";
+import { QQChannel } from "../../qq/channel.js";
 import { ToolRegistry } from "../../tools.js";
 import { registerChoiceTool } from "../../tools/choice.js";
 import { registerMemoryTools } from "../../tools/memory.js";
@@ -128,6 +129,12 @@ interface RootProps extends ChatOptions {
   mcpRuntime: McpRuntime;
   /** One-time startup info rows shown after App mounts. */
   startupInfoHints: string[];
+  /** Pre-created QQ channel (started before TUI mounts). */
+  qqChannel?: QQChannel;
+  /** App fills this ref on mount so QQ messages flow into the TUI input queue. */
+  qqSubmitRef: { current: ((text: string) => void) | null };
+  /** App fills this ref on mount so QQ errors appear in the TUI log. */
+  qqErrorRef: { current: ((msg: string) => void) | null };
 }
 
 function Root({
@@ -221,6 +228,9 @@ function Root({
         openDashboard={appProps.openDashboard}
         dashboardPort={appProps.dashboardPort}
         mouse={appProps.mouse}
+        qqChannel={appProps.qqChannel}
+        qqSubmitRef={appProps.qqSubmitRef}
+        qqErrorRef={appProps.qqErrorRef}
         onSwitchSession={setActiveSession}
       />
     </KeystrokeProvider>
@@ -303,6 +313,29 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     !opts.session && !opts.forceResume && listSessionsForWorkspace(launchWorkspace).length > 0;
 
   markPhase("ink_render_call");
+
+  // Create QQ channel before the TUI mounts so connection setup stays
+  // outside React lifecycle timing and the WebSocket handshake remains
+  // deterministic.
+  const qqSubmitRef: { current: ((text: string) => void) | null } = { current: null };
+  const qqErrorRef: { current: ((msg: string) => void) | null } = { current: null };
+  const qqRequested = cfg.qq?.enabled === true;
+  let qqChannel: QQChannel | undefined;
+  if (qqRequested) {
+    const channel = new QQChannel({
+      onSubmitMessage: (text) => qqSubmitRef.current?.(text),
+      onError: (msg) => qqErrorRef.current?.(msg),
+    });
+    process.stderr.write("Connecting QQ bot...\n");
+    try {
+      await channel.start();
+      qqChannel = channel;
+      process.stderr.write("QQ bot connected\n");
+    } catch (err) {
+      process.stderr.write(`QQ bot failed: ${(err as Error).message}\n`);
+    }
+  }
+
   const { waitUntilExit } = render(
     <Root
       initialKey={initialKey}
@@ -315,6 +348,9 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       showPicker={showPicker}
       {...opts}
       session={resolvedSession}
+      qqChannel={qqChannel}
+      qqSubmitRef={qqSubmitRef}
+      qqErrorRef={qqErrorRef}
     />,
     {
       exitOnCtrlC: true,
@@ -336,6 +372,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     await waitUntilExit();
   } finally {
     await runtime.closeAll();
+    qqChannel?.stop();
     // Eat any pending terminal-feature-detection responses (#365) so the
     // parent shell doesn't print them as junk after exit.
     await drainTtyResponses();
