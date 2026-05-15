@@ -18,12 +18,16 @@ export class Usage {
 
   static fromApi(raw: RawUsage | undefined | null): Usage {
     const u = raw ?? {};
+    const promptTokens = u.prompt_tokens ?? 0;
+    const cacheHitTokens = u.prompt_cache_hit_tokens ?? 0;
+    const cacheMissTokens =
+      u.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - cacheHitTokens);
     return new Usage(
-      u.prompt_tokens ?? 0,
+      promptTokens,
       u.completion_tokens ?? 0,
       u.total_tokens ?? 0,
-      u.prompt_cache_hit_tokens ?? 0,
-      u.prompt_cache_miss_tokens ?? 0,
+      cacheHitTokens,
+      cacheMissTokens,
     );
   }
 }

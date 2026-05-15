@@ -1,7 +1,7 @@
 /** CacheFirstLoop integration — fake-fetch DeepSeekClient, non-streaming path. */
 
 import { describe, expect, it, vi } from "vitest";
-import { DeepSeekClient } from "../src/client.js";
+import { DeepSeekClient, Usage } from "../src/client.js";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
@@ -1393,12 +1393,17 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     expect(loop.log.length).toBeGreaterThan(0);
     loop.scratch.notes = ["stale note"];
     loop.scratch.reasoning = "stale reasoning";
+    loop.stats.record(1, "deepseek-chat", new Usage(1000, 100, 1100, 800, 200));
+    expect(loop.stats.summary().totalCostUsd).toBeGreaterThan(0);
 
     const { dropped } = loop.clearLog();
     expect(dropped).toBe(2);
     expect(loop.log.length).toBe(0);
     expect(loop.scratch.notes).toEqual([]);
     expect(loop.scratch.reasoning).toBeNull();
+    expect(loop.stats.summary().totalCostUsd).toBe(0);
+    expect(loop.stats.summary().turns).toBe(0);
+    expect(loop.currentTurn).toBe(0);
   });
 
   it("clearLog returns 0 dropped when already empty", () => {

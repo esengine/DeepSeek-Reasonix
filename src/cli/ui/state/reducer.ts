@@ -206,7 +206,20 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       });
 
     case "session.reset":
-      return { ...state, cards: [], focusedCardId: null, toasts: [] };
+      return {
+        ...state,
+        cards: [],
+        focusedCardId: null,
+        toasts: [],
+        status: {
+          ...state.status,
+          cost: 0,
+          sessionCost: 0,
+          cacheHit: 0,
+          promptTokens: undefined,
+          promptCap: undefined,
+        },
+      };
 
     case "session.workspace.change":
       return state.session.id === event.id && state.session.workspace === event.workspace

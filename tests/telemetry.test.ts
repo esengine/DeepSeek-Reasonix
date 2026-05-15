@@ -23,9 +23,33 @@ describe("Usage.cacheHitRatio", () => {
   it("is zero on empty", () => {
     expect(new Usage().cacheHitRatio).toBe(0);
   });
+
+  it("falls back cache miss tokens from prompt minus cache hit when the API omits miss", () => {
+    const u = Usage.fromApi({
+      prompt_tokens: 1000,
+      completion_tokens: 100,
+      total_tokens: 1100,
+      prompt_cache_hit_tokens: 800,
+    });
+    expect(u.promptCacheHitTokens).toBe(800);
+    expect(u.promptCacheMissTokens).toBe(200);
+  });
 });
 
 describe("costUsd", () => {
+  it("matches DeepSeek's published V4 USD pricing sheet", () => {
+    expect(DEEPSEEK_PRICING["deepseek-v4-flash"]).toEqual({
+      inputCacheHit: 0.0028,
+      inputCacheMiss: 0.14,
+      output: 0.28,
+    });
+    expect(DEEPSEEK_PRICING["deepseek-v4-pro"]).toEqual({
+      inputCacheHit: 0.003625,
+      inputCacheMiss: 0.435,
+      output: 0.87,
+    });
+  });
+
   it("applies DeepSeek pricing tiers", () => {
     const u = new Usage(1000, 100, 0, 800, 200);
     const c = costUsd("deepseek-chat", u);
@@ -82,6 +106,28 @@ describe("SessionStats", () => {
     // Sum of input+output equals total (within rounding).
     expect(s.totalInputCostUsd + s.totalOutputCostUsd).toBeCloseTo(s.totalCostUsd, 6);
   });
+
+  it("reset clears live and carryover totals for /new", () => {
+    const stats = new SessionStats();
+    stats.seedCarryover({
+      totalCostUsd: 0.05,
+      turnCount: 3,
+      cacheHitTokens: 1000,
+      cacheMissTokens: 100,
+      lastPromptTokens: 1100,
+    });
+    stats.record(4, "deepseek-chat", new Usage(1000, 100, 1100, 800, 200));
+    stats.reset();
+    expect(stats.turns).toHaveLength(0);
+    expect(stats.totalCost).toBe(0);
+    expect(stats.summary()).toMatchObject({
+      turns: 0,
+      totalCostUsd: 0,
+      cacheHitRatio: 0,
+      lastPromptTokens: 0,
+      lastTurnCostUsd: 0,
+    });
+  });
 });
 
 describe("inputCostUsd / outputCostUsd", () => {
@@ -124,7 +170,7 @@ describe("inputCostUsd / outputCostUsd", () => {
     const u = new Usage(0, 100, 0, 0, 1000);
     const flashCost = costUsd("deepseek-v4-flash", u);
     const proCost = costUsd("deepseek-v4-pro", u);
-    expect(proCost).toBeGreaterThan(flashCost * 5); // ~12x on output+miss
+    expect(proCost).toBeGreaterThan(flashCost * 3); // current pro promo is ~3.1x flash
   });
 
   it("both return 0 for an unknown model", () => {

@@ -222,6 +222,28 @@ describe("ui reducer", () => {
     expect(s.status.balanceCurrency).toBe("CNY");
   });
 
+  it("session.reset clears visible cost counters but keeps wallet info", () => {
+    const s = run([
+      {
+        type: "session.update",
+        patch: { balance: 5.0, balanceCurrency: "CNY" },
+      },
+      {
+        type: "turn.end",
+        usage: { prompt: 1000, reason: 0, output: 100, cacheHit: 0.8, cost: 0.01 },
+        promptCap: 1_000_000,
+      },
+      { type: "session.reset" },
+    ]);
+    expect(s.status.cost).toBe(0);
+    expect(s.status.sessionCost).toBe(0);
+    expect(s.status.cacheHit).toBe(0);
+    expect(s.status.promptTokens).toBeUndefined();
+    expect(s.status.promptCap).toBeUndefined();
+    expect(s.status.balance).toBe(5.0);
+    expect(s.status.balanceCurrency).toBe("CNY");
+  });
+
   it("focus.move walks cards forward and back, clamped at edges", () => {
     let s = run([
       { type: "user.submit", text: "a" },

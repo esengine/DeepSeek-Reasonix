@@ -347,6 +347,10 @@ export class CacheFirstLoop {
     }
     this.scratch.reset();
     this._inflight.clear();
+    this.stats.reset();
+    this._turn = 0;
+    this._turnFailures.reset();
+    this._budgetWarned = false;
     let systemRebuilt = false;
     if (this._rebuildSystem) {
       try {
