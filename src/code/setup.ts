@@ -16,13 +16,15 @@ import { registerMemoryTools } from "../tools/memory.js";
 import { registerPlanTool } from "../tools/plan.js";
 import { registerScaffoldTools } from "../tools/scaffold.js";
 import { registerShellTools } from "../tools/shell.js";
-import { registerSkillTools } from "../tools/skills.js";
+import { type SkillInstalledHook, registerSkillTools } from "../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../tools/subagent.js";
 import { registerTodoTool } from "../tools/todo.js";
 import { registerWebTools } from "../tools/web.js";
 
 export interface CodeToolsetOpts {
   rootDir: string;
+  /** Fired after `install_skill` writes a new skill — desktop wires this to push a fresh `$skills` event so the sidebar updates without a tab reload. */
+  onSkillInstalled?: SkillInstalledHook;
 }
 
 export interface CodeToolset {
@@ -72,6 +74,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   let subagentClient: DeepSeekClient | null = null;
   registerSkillTools(tools, {
     projectRoot: opts.rootDir,
+    onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal) => {
       if (!subagentClient) subagentClient = new DeepSeekClient({ baseUrl: loadBaseUrl() });
       const result = await spawnSubagent({

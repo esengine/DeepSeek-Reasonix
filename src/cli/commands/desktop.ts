@@ -754,7 +754,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
   /** Builds the toolset / system prompt / runtime / MCP bridge for a freshly-created skeleton. Reads `tab.currentModel` at call time so preset changes that landed during the wait are honored. */
   async function initTabToolset(tab: Tab): Promise<void> {
-    const toolset = await buildCodeToolset({ rootDir: tab.rootDir });
+    const toolset = await buildCodeToolset({
+      rootDir: tab.rootDir,
+      onSkillInstalled: () => emitSkills(tab),
+    });
     tab.toolset = toolset;
     tab.system = codeSystemPrompt(tab.rootDir, {
       hasSemanticSearch: toolset.semantic.enabled,
@@ -910,7 +913,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.symbolBuilding = null;
     tab.recentMentions.length = 0;
     tab.currentSession = mintSessionFor(target);
-    tab.toolset = await buildCodeToolset({ rootDir: target });
+    tab.toolset = await buildCodeToolset({
+      rootDir: target,
+      onSkillInstalled: () => emitSkills(tab),
+    });
     tab.system = codeSystemPrompt(target, {
       hasSemanticSearch: tab.toolset.semantic.enabled,
       modelId: tab.currentModel,

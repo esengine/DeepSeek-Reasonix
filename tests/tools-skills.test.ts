@@ -1,9 +1,10 @@
 /** run_skill — temp homeDir / projectRoot so the tool never reads real skill dirs. */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SkillStore } from "../src/skills.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerSkillTools } from "../src/tools/skills.js";
 
@@ -203,5 +204,208 @@ describe("run_skill tool", () => {
     const out = await reg.dispatch("run_skill", { name: "inline-skill" });
     expect(out).toContain("Step 1, Step 2.");
     expect(runnerCalls).toBe(0);
+  });
+});
+
+describe("install_skill tool", () => {
+  let home: string;
+  let projectRoot: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "reasonix-installskill-"));
+    projectRoot = mkdtempSync(join(tmpdir(), "reasonix-installskill-proj-"));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it("registers install_skill alongside run_skill", () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, disableBuiltins: true });
+    expect(reg.get("install_skill")).toBeDefined();
+    expect(reg.get("run_skill")).toBeDefined();
+  });
+
+  it("writes a project-scope skill file with valid frontmatter and returns its path", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
+    const out = await reg.dispatch("install_skill", {
+      name: "summarize-prs",
+      description: "Summarize merged PRs from the last week",
+      body: "Run gh pr list and group by author.",
+    });
+    const parsed = JSON.parse(out);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.scope).toBe("project");
+    expect(parsed.runAs).toBe("inline");
+    expect(parsed.path).toContain(projectRoot);
+    expect(existsSync(parsed.path)).toBe(true);
+    const raw = readFileSync(parsed.path, "utf8");
+    expect(raw).toContain("name: summarize-prs");
+    expect(raw).toContain("description: Summarize merged PRs from the last week");
+    expect(raw).toContain("Run gh pr list");
+  });
+
+  it("the newly-installed skill is immediately runnable via run_skill in the same registry", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
+    await reg.dispatch("install_skill", {
+      name: "lint-fix",
+      description: "Run linter and apply autofixes",
+      body: "Step 1: npm run lint --fix.",
+    });
+    const out = await reg.dispatch("run_skill", { name: "lint-fix" });
+    expect(out).toContain("# Skill: lint-fix");
+    expect(out).toContain("Step 1: npm run lint --fix");
+  });
+
+  it("defaults scope to global when no projectRoot is set", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, disableBuiltins: true });
+    const out = await reg.dispatch("install_skill", {
+      name: "everywhere",
+      description: "Available in every project",
+      body: "do a thing",
+    });
+    const parsed = JSON.parse(out);
+    expect(parsed.scope).toBe("global");
+    expect(parsed.path).toContain(home);
+  });
+
+  it("rejects scope=project when no workspace is configured", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, disableBuiltins: true });
+    const out = await reg.dispatch("install_skill", {
+      name: "x",
+      description: "y",
+      body: "z",
+      scope: "project",
+    });
+    expect(JSON.parse(out).error).toMatch(/requires a workspace/);
+  });
+
+  it("rejects an empty name / description / body", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
+    expect(
+      JSON.parse(await reg.dispatch("install_skill", { name: "", description: "d", body: "b" }))
+        .error,
+    ).toMatch(/'name'/);
+    expect(
+      JSON.parse(await reg.dispatch("install_skill", { name: "ok", description: "", body: "b" }))
+        .error,
+    ).toMatch(/'description'/);
+    expect(
+      JSON.parse(await reg.dispatch("install_skill", { name: "ok", description: "d", body: "" }))
+        .error,
+    ).toMatch(/'body'/);
+  });
+
+  it("rejects invalid skill names", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
+    const out = await reg.dispatch("install_skill", {
+      name: "../etc/passwd",
+      description: "d",
+      body: "b",
+    });
+    expect(JSON.parse(out).error).toMatch(/invalid skill name/);
+  });
+
+  it("refuses to overwrite an existing skill", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
+    await reg.dispatch("install_skill", {
+      name: "dup",
+      description: "first",
+      body: "first body",
+    });
+    const out = await reg.dispatch("install_skill", {
+      name: "dup",
+      description: "second",
+      body: "second body",
+    });
+    expect(JSON.parse(out).error).toMatch(/already exists/);
+  });
+
+  it("fires onSkillInstalled with the name + scope + path", async () => {
+    const reg = new ToolRegistry();
+    const calls: Array<{ name: string; scope: string; path: string }> = [];
+    registerSkillTools(reg, {
+      homeDir: home,
+      projectRoot,
+      disableBuiltins: true,
+      onSkillInstalled: (info) => calls.push(info),
+    });
+    await reg.dispatch("install_skill", {
+      name: "watched",
+      description: "trigger the hook",
+      body: "noop",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.name).toBe("watched");
+    expect(calls[0]?.scope).toBe("project");
+    expect(calls[0]?.path).toContain(projectRoot);
+  });
+
+  it("writes subagent frontmatter (runAs/model/max-iters/allowed-tools) when runAs=subagent", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
+    const out = await reg.dispatch("install_skill", {
+      name: "deep-research",
+      description: "research subagent",
+      body: "You are a research subagent. Investigate and answer.",
+      runAs: "subagent",
+      model: "deepseek-chat",
+      maxToolIters: 24,
+      allowedTools: ["read_file", "search_content"],
+    });
+    const parsed = JSON.parse(out);
+    expect(parsed.runAs).toBe("subagent");
+    const raw = readFileSync(parsed.path, "utf8");
+    expect(raw).toContain("runAs: subagent");
+    expect(raw).toContain("model: deepseek-chat");
+    expect(raw).toContain("max-iters: 24");
+    expect(raw).toContain("allowed-tools: read_file, search_content");
+
+    const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+    const skill = store.read("deep-research");
+    expect(skill?.runAs).toBe("subagent");
+    expect(skill?.model).toBe("deepseek-chat");
+    expect(skill?.maxToolIters).toBe(24);
+    expect(skill?.allowedTools).toEqual(["read_file", "search_content"]);
+  });
+
+  it("skips subagent-only frontmatter for inline skills", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
+    const out = await reg.dispatch("install_skill", {
+      name: "plain",
+      description: "inline skill",
+      body: "do the thing",
+      model: "deepseek-chat",
+      maxToolIters: 42,
+      allowedTools: ["read_file"],
+    });
+    const raw = readFileSync(JSON.parse(out).path, "utf8");
+    expect(raw).not.toContain("runAs:");
+    expect(raw).not.toContain("model:");
+    expect(raw).not.toContain("max-iters:");
+    expect(raw).not.toContain("allowed-tools:");
+  });
+
+  it("normalizes newlines in description to spaces (frontmatter is single-line per key)", async () => {
+    const reg = new ToolRegistry();
+    registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
+    const out = await reg.dispatch("install_skill", {
+      name: "multiline-desc",
+      description: "first line\nsecond line\nthird",
+      body: "x",
+    });
+    const raw = readFileSync(JSON.parse(out).path, "utf8");
+    expect(raw).toContain("description: first line second line third");
+    expect(raw).not.toMatch(/description: first line\n/);
   });
 });
