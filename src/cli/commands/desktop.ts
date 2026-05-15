@@ -824,7 +824,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   async function closeTab(tab: Tab): Promise<void> {
-    tab.aborter?.abort();
+    abortTurn(tab);
     try {
       await tab.toolset?.jobs.shutdown();
     } catch {
@@ -897,7 +897,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitSettings(tab);
       return;
     }
-    tab.aborter?.abort();
+    abortTurn(tab);
     try {
       await tab.toolset?.jobs.shutdown();
     } catch {
@@ -932,6 +932,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       if (t.pendingGateIds.delete(id)) return t;
     }
     return undefined;
+  }
+
+  function abortTurn(tab: Tab): void {
+    tab.aborter?.abort();
+    tab.runtime?.loop.abort();
   }
 
   function cancelPendingGates(tab: Tab): void {
@@ -1246,7 +1251,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
 
     if (msg.cmd === "abort") {
-      tab.aborter?.abort();
+      abortTurn(tab);
       cancelPendingGates(tab);
       return;
     }
@@ -1342,7 +1347,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         const records = loadSessionMessages(msg.name);
         const meta = loadSessionMeta(msg.name);
-        tab.aborter?.abort();
+        abortTurn(tab);
         cancelPendingGates(tab);
         tab.currentSession = msg.name;
         if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
@@ -1365,7 +1370,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
-      tab.aborter?.abort();
+      abortTurn(tab);
       cancelPendingGates(tab);
       tab.currentSession = mintSessionFor(tab.rootDir);
       if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
