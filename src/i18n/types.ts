@@ -34,6 +34,16 @@ export interface TranslationSchema {
     update: string;
     index: string;
   };
+  stats: {
+    usageHint: string;
+    usageDetail: string;
+  };
+  run: {
+    missingApiKey: string;
+  };
+  sessions: {
+    emptyHint: string;
+  };
   ui: {
     welcome: string;
     taglineChat: string;

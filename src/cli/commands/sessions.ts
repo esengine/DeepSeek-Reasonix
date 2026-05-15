@@ -1,3 +1,4 @@
+import { t } from "../../i18n/index.js";
 import { listSessions, loadSessionMessages, sessionPath } from "../../index.js";
 import type { ChatMessage } from "../../index.js";
 
@@ -19,9 +20,7 @@ export function sessionsCommand(opts: SessionsOptions): void {
 function listAll(): void {
   const items = listSessions();
   if (items.length === 0) {
-    console.log(
-      "no saved sessions yet — run `reasonix chat` (sessions are auto-saved unless --no-session).",
-    );
+    console.log(t("sessions.emptyHint"));
     return;
   }
   console.log("Saved sessions (~/.reasonix/sessions/):");

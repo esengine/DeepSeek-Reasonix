@@ -34,6 +34,19 @@ export const EN: TranslationSchema = {
     update: "Check for a newer Reasonix and install it.",
     index: "Build (or incrementally refresh) a local semantic search index.",
   },
+  stats: {
+    usageHint: "run `reasonix chat`, `reasonix code`, or `reasonix run <task>` — every turn",
+    usageDetail: "appends one line to the log and `reasonix stats` will roll it up.",
+  },
+  run: {
+    missingApiKey:
+      "DEEPSEEK_API_KEY is not set and stdin is not a TTY (cannot prompt).\n" +
+      "Set the env var, or run `reasonix chat` once interactively to save a key.\n",
+  },
+  sessions: {
+    emptyHint:
+      "no saved sessions yet — run `reasonix chat` (sessions are auto-saved unless --no-session).",
+  },
   ui: {
     welcome: "Run `reasonix` any time to start chatting — your settings are remembered.",
     taglineChat: "DeepSeek-native agent",
