@@ -1095,6 +1095,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       );
       return;
     }
+    // Unknown PauseKind — `never` makes a new kind without a handler a compile
+    // error; the runtime cancel is the last-mile defense so the agent loop
+    // doesn't hang waiting on a request no one will resolve.
+    const exhaustive: never = req.kind;
+    process.stderr.write(
+      `[desktop] no handler for pause kind "${String(exhaustive)}" — auto-cancelling gate id=${req.id}\n`,
+    );
+    if (tab) tab.pendingGateIds.delete(req.id);
+    pauseGate.cancel(req.id);
   });
 
   // Fast-path: emit disk-only events immediately so the UI shell renders
