@@ -178,7 +178,7 @@ describe("settings API — combined POST persistence (#274)", () => {
         raw: "~/.agents/skills/find-skills",
         resolved: join(homedir(), ".agents", "skills", "find-skills"),
       },
-      { raw: absolute, resolved: absolute },
+      { raw: absolute, resolved: resolve(absolute) },
     ]);
   });
 
