@@ -773,6 +773,24 @@ button {
   padding: 1px 6px;
   border-radius: 4px;
 }
+.msg .who .skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--warning);
+  background: oklch(from var(--warning) l c h / 0.14);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.msg .who .skill-chip .sub {
+  font-size: 9px;
+  color: var(--muted);
+  margin-left: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
 
 .msg-text {
   font-size: 13.5px;

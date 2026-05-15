@@ -69,8 +69,13 @@ export type AssistantSegment =
       durationMs?: number;
     };
 
+export type SkillOrigin = {
+  name: string;
+  runAs: "inline" | "subagent";
+};
+
 export type ChatMessage =
-  | { kind: "user"; text: string; clientId: string; turn: number }
+  | { kind: "user"; text: string; clientId: string; turn: number; skill?: SkillOrigin }
   | {
       kind: "assistant";
       turn: number;
@@ -214,6 +219,8 @@ type State = {
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
+  /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
+  activeSkill: SkillOrigin | null;
 };
 
 export type SessionFile = {
@@ -230,6 +237,7 @@ type DeltaBatchItem = {
 
 type Action =
   | { t: "send_user"; text: string; clientId: string }
+  | { t: "start_skill"; skill: SkillOrigin; args?: string; clientId: string }
   | { t: "incoming"; event: IncomingEvent }
   | { t: "batch_delta"; items: DeltaBatchItem[] }
   | { t: "rpc_exit"; code: number | null }
@@ -260,11 +268,34 @@ function reduce(state: State, action: Action): State {
         ],
       };
     }
+    case "start_skill": {
+      const lastTurn = state.messages.reduce((max, m) => {
+        if (m.kind === "user" || m.kind === "assistant") return Math.max(max, m.turn);
+        return max;
+      }, 0);
+      const argsLine = action.args ? ` ${action.args}` : "";
+      return {
+        ...state,
+        busy: true,
+        activeSkill: action.skill,
+        messages: [
+          ...state.messages,
+          {
+            kind: "user",
+            text: `/${action.skill.name}${argsLine}`,
+            clientId: action.clientId,
+            turn: lastTurn + 1,
+            skill: action.skill,
+          },
+        ],
+      };
+    }
     case "rpc_exit":
       return {
         ...state,
         ready: false,
         busy: false,
+        activeSkill: null,
         messages: [
           ...state.messages,
           { kind: "error", message: `reasonix exited (code ${action.code ?? "?"})` },
@@ -315,6 +346,7 @@ function reduce(state: State, action: Action): State {
         activePlan: null,
         usage: zeroUsage(),
         sessionFiles: [],
+        activeSkill: null,
       };
     case "resolve_confirm":
       return {
@@ -465,7 +497,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$needs_setup":
       return { ...state, needsSetup: true, ready: false };
     case "$turn_complete":
-      return { ...state, busy: false };
+      return { ...state, busy: false, activeSkill: null };
     case "$confirm_required":
       return {
         ...state,
@@ -664,6 +696,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           cacheMissTokens: ev.carryover.cacheMissTokens,
         },
         sessionFiles,
+        activeSkill: null,
       };
     }
     case "$error":
@@ -671,6 +704,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       return {
         ...state,
         busy: false,
+        activeSkill: null,
         messages: [...state.messages, { kind: "error", message: ev.message }],
       };
     case "model.turn.started":
@@ -887,6 +921,7 @@ function TabRuntime({
     skills: [],
     sessionFiles: [],
     memory: [],
+    activeSkill: null,
   });
   useLang();
   const [draft, setDraft] = useState("");
@@ -1241,7 +1276,14 @@ function TabRuntime({
     ...state.skills.map((s) => ({
       cmd: `/${s.name}`,
       desc: s.description || `skill · ${s.scope}`,
-      run: () => sendRpc({ cmd: "skill_run", name: s.name }),
+      run: () => {
+        dispatch({
+          t: "start_skill",
+          skill: { name: s.name, runAs: s.runAs },
+          clientId: `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        });
+        sendRpc({ cmd: "skill_run", name: s.name });
+      },
     })),
   ];
 
@@ -1438,7 +1480,7 @@ function TabRuntime({
                       return (
                         <div key={`u-${i}`}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg text={m.text} />
+                          <UserMsg text={m.text} skill={m.skill} />
                         </div>
                       );
                     }
@@ -1580,7 +1622,12 @@ function TabRuntime({
               />
 
               {state.busy ? (
-                <InterruptBar visible={true} elapsedMs={elapsed} label="Reasoning" onStop={abort} />
+                <InterruptBar
+                  visible={true}
+                  elapsedMs={elapsed}
+                  label={state.activeSkill ? `Skill · ${state.activeSkill.name}` : "Reasoning"}
+                  onStop={abort}
+                />
               ) : null}
             </>
           )}

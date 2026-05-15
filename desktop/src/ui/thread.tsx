@@ -1,7 +1,7 @@
 import { memo, type ReactNode } from "react";
 import { I } from "../icons";
 import { t, useLang } from "../i18n";
-import type { AssistantSegment, ActivePlan, PendingPlan, PendingCheckpoint, PendingRevision, PendingConfirm, PendingChoice } from "../App";
+import type { AssistantSegment, ActivePlan, PendingPlan, PendingCheckpoint, PendingRevision, PendingConfirm, PendingChoice, SkillOrigin } from "../App";
 import { AssistantText, PlanCardView, ReasoningCard, ShellCard, ToolCard, type PlanItem } from "./cards";
 import { ApprovalCard, TaskCard, type TaskStepView } from "./extra-cards";
 
@@ -14,13 +14,27 @@ export function TurnDivider({ label }: { label: string }) {
   );
 }
 
-export const UserMsg = memo(function UserMsg({ text, time }: { text: string; time?: string }) {
+export const UserMsg = memo(function UserMsg({
+  text,
+  time,
+  skill,
+}: {
+  text: string;
+  time?: string;
+  skill?: SkillOrigin;
+}) {
   return (
     <div className="msg user">
       <div className="avatar">YOU</div>
       <div className="body">
         <div className="who">
           <span className="name">你</span>
+          {skill ? (
+            <span className="skill-chip" title={`skill · ${skill.runAs}`}>
+              <I.zap size={10} /> /{skill.name}
+              {skill.runAs === "subagent" ? <span className="sub">subagent</span> : null}
+            </span>
+          ) : null}
           {time ? <span className="time">{time}</span> : null}
         </div>
         <div className="msg-text">{text}</div>
