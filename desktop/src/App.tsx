@@ -8,7 +8,7 @@ import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./Comma
 import { WorkspaceProvider } from "./Markdown";
 import { getLang, setLang, t, useLang } from "./i18n";
 import { I } from "./icons";
-import { THEME, type Theme } from "./theme";
+import { FONT_SCALE, FONT_SCALE_ZOOM, type FontScale, THEME, type Theme, isFontScale } from "./theme";
 import type {
   CheckpointVerdict,
   ChoiceVerdict,
@@ -811,6 +811,8 @@ interface TabRuntimeProps {
   theme: Theme;
   onSetTheme: (theme: Theme) => void;
   onToggleTheme: () => void;
+  fontScale: FontScale;
+  onSetFontScale: (scale: FontScale) => void;
   sideCollapsed: boolean;
   ctxCollapsed: boolean;
   onToggleSide: () => void;
@@ -836,6 +838,8 @@ function TabRuntime({
   theme,
   onSetTheme,
   onToggleTheme,
+  fontScale,
+  onSetFontScale,
   sideCollapsed,
   ctxCollapsed,
   onToggleSide,
@@ -1612,6 +1616,8 @@ function TabRuntime({
             currency={currency}
             theme={theme}
             onSetTheme={onSetTheme}
+            fontScale={fontScale}
+            onSetFontScale={onSetFontScale}
             initialPage={settingsPage}
             mcpSpecs={state.mcpSpecs}
             mcpBridged={state.mcpBridged}
@@ -2144,6 +2150,10 @@ export function App() {
     const v = localStorage.getItem("reasonix.theme");
     return v === THEME.LIGHT ? THEME.LIGHT : THEME.DARK;
   });
+  const [fontScale, setFontScale] = useState<FontScale>(() => {
+    const v = localStorage.getItem("reasonix.fontScale");
+    return isFontScale(v) ? v : FONT_SCALE.MEDIUM;
+  });
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [ctxCollapsed, setCtxCollapsed] = useState(false);
 
@@ -2151,6 +2161,12 @@ export function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("reasonix.theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    // Chromium webview supports `zoom`; scales every px-based size without touching CSS rules.
+    document.documentElement.style.setProperty("zoom", String(FONT_SCALE_ZOOM[fontScale]));
+    localStorage.setItem("reasonix.fontScale", fontScale);
+  }, [fontScale]);
 
   useEffect(() => {
     const onCur = (e: Event) => {
@@ -2418,6 +2434,8 @@ export function App() {
           theme={theme}
           onSetTheme={setTheme}
           onToggleTheme={onToggleTheme}
+          fontScale={fontScale}
+          onSetFontScale={setFontScale}
           sideCollapsed={sideCollapsed}
           ctxCollapsed={ctxCollapsed}
           onToggleSide={() => setSideCollapsed((v) => !v)}

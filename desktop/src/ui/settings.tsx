@@ -3,7 +3,7 @@ import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { t } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, SettingsPatch, SkillInfo } from "../protocol";
-import { THEME, type Theme } from "../theme";
+import { FONT_SCALE, type FontScale, THEME, type Theme } from "../theme";
 
 export type PageId =
   | "general"
@@ -33,6 +33,8 @@ export function SettingsModal({
   currency,
   theme,
   onSetTheme,
+  fontScale,
+  onSetFontScale,
   initialPage,
   mcpSpecs,
   mcpBridged,
@@ -50,6 +52,8 @@ export function SettingsModal({
   currency: "CNY" | "USD";
   theme: Theme;
   onSetTheme: (theme: Theme) => void;
+  fontScale: FontScale;
+  onSetFontScale: (scale: FontScale) => void;
   initialPage?: PageId;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
@@ -105,6 +109,8 @@ export function SettingsModal({
                 settings={settings}
                 theme={theme}
                 onSetTheme={onSetTheme}
+                fontScale={fontScale}
+                onSetFontScale={onSetFontScale}
                 onSave={onSave}
                 onPickWorkspace={onPickWorkspace}
               />
@@ -125,7 +131,7 @@ export function SettingsModal({
               <PageBilling balance={balance} usage={usage} currency={currency} />
             )}
             {page === "shortcuts" && <PageShortcuts />}
-            {page === "general" && settings.baseUrl !== undefined ? (
+            {page === "general" ? (
               <ApiKeySection
                 baseUrl={settings.baseUrl}
                 apiKeyPrefix={settings.apiKeyPrefix}
@@ -144,12 +150,16 @@ function PageGeneral({
   settings,
   theme,
   onSetTheme,
+  fontScale,
+  onSetFontScale,
   onSave,
   onPickWorkspace,
 }: {
   settings: SettingsType;
   theme: Theme;
   onSetTheme: (theme: Theme) => void;
+  fontScale: FontScale;
+  onSetFontScale: (scale: FontScale) => void;
   onSave: (patch: SettingsPatch) => void;
   onPickWorkspace: () => void;
 }) {
@@ -177,6 +187,35 @@ function PageGeneral({
               onClick={() => onSetTheme(THEME.LIGHT)}
             >
               {t("settings.themeLight")}
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.fontScale")}</div>
+            <div className="h">{t("settings.fontScaleHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            <button
+              type="button"
+              data-on={fontScale === FONT_SCALE.SMALL}
+              onClick={() => onSetFontScale(FONT_SCALE.SMALL)}
+            >
+              {t("settings.fontScaleSmall")}
+            </button>
+            <button
+              type="button"
+              data-on={fontScale === FONT_SCALE.MEDIUM}
+              onClick={() => onSetFontScale(FONT_SCALE.MEDIUM)}
+            >
+              {t("settings.fontScaleMedium")}
+            </button>
+            <button
+              type="button"
+              data-on={fontScale === FONT_SCALE.LARGE}
+              onClick={() => onSetFontScale(FONT_SCALE.LARGE)}
+            >
+              {t("settings.fontScaleLarge")}
             </button>
           </div>
         </div>
