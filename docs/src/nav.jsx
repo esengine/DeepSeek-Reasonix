@@ -26,7 +26,7 @@ function Nav({ active }) {
         <a className="brand" href="index.html">
           <span className="brand-mark"></span>
           <span className="brand-name">
-            <b>Reasonix</b><span>DS · v0.42.0-3</span>
+            <b>Reasonix</b><span>DS · v{window.REASONIX_VERSION}</span>
           </span>
         </a>
         <div className="nav-links" role="navigation">

@@ -33,7 +33,7 @@ const PLATFORM_NOTES = {
       en: 'AppImages need an executable bit; some distros also need libfuse2:',
     },
     steps: [
-      { cmd: 'chmod +x Reasonix_0.42.0-3_amd64.AppImage', note: { zh: '赋予可执行权限', en: 'Mark it executable' } },
+      { cmd: `chmod +x Reasonix_${window.REASONIX_VERSION}_amd64.AppImage`, note: { zh: '赋予可执行权限', en: 'Mark it executable' } },
       { cmd: 'sudo apt install libfuse2 # debian/ubuntu', note: { zh: 'AppImage 运行时依赖', en: 'AppImage runtime dependency' } },
     ],
   },
@@ -70,7 +70,7 @@ function DownloadHero() {
       <div className="hero-head">
         <span>§00 · Download</span>
         <span className="rule"></span>
-        <span className="v">Reasonix Desktop · 0.42.0-3</span>
+        <span className="v">Reasonix Desktop · {window.REASONIX_VERSION}</span>
       </div>
       <div className="dl-hero-grid">
         <div>

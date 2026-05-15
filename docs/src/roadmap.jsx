@@ -11,11 +11,11 @@ const ROADMAP = [
       { zh: 'Tool-Call Repair · 工具参数自愈', en: 'Tool-Call Repair · schema-aware self-heal' },
       { zh: 'MCP first-class (stdio / SSE / HTTP)', en: 'MCP first-class (stdio / SSE / HTTP)' },
       { zh: 'Skills · Markdown frontmatter 剧本', en: 'Skills · Markdown frontmatter scripts' },
-      { zh: '原生 Tauri 桌面端 (prerelease)', en: 'Native Tauri desktop (prerelease)' },
+      { zh: '原生 Tauri 桌面端', en: 'Native Tauri desktop' },
     ],
   },
   {
-    key: 'v0.42.x',
+    key: 'v0.44.x',
     title: { zh: '迭代中', en: 'In progress' },
     state: 'now',
     items: [

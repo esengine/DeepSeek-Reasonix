@@ -1,7 +1,7 @@
 // Smart mirror grid — probes R2 / GitHub Releases for fastest TTFB and offers
 // a per-platform installer link from whichever wins.
 
-const VERSION = "0.42.0-3";
+const VERSION = window.REASONIX_VERSION;
 const GH_REPO = "esengine/DeepSeek-Reasonix";
 const R2_BASE = "https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev";
 
@@ -29,7 +29,7 @@ const OS_OPTIONS = [
     id: "mac",
     label: "macOS",
     file: `Reasonix_${VERSION}_universal.dmg`,
-    size: "53 MB",
+    size: "52 MB",
     note: "Universal — Apple Silicon + Intel",
   },
   {
@@ -43,7 +43,7 @@ const OS_OPTIONS = [
     id: "linux",
     label: "Linux",
     file: `Reasonix_${VERSION}_amd64.AppImage`,
-    size: "122 MB",
+    size: "128 MB",
     note: "AppImage · x86_64",
   },
 ];
@@ -208,4 +208,3 @@ function MirrorGrid({ os, setOs }) {
 
 window.MirrorGrid = MirrorGrid;
 window.detectOS = detectOS;
-window.REASONIX_VERSION = VERSION;

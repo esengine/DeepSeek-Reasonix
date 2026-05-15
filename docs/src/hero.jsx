@@ -4,7 +4,7 @@
 // tool calls sandboxed to launch dir.
 const TERM_SCRIPT = [
   { t: 'cmd', text: 'npx reasonix code' },
-  { t: 'out', text: '⏺ reasonix 0.42.0-3 · model: deepseek-v4-flash · workspace: ~/app', cls: 'term-info', delay: 280 },
+  { t: 'out', text: `⏺ reasonix ${window.REASONIX_VERSION} · model: deepseek-v4-flash · workspace: ~/app`, cls: 'term-info', delay: 280 },
   { t: 'out', text: '⏺ cache: 94.2% hit · session: 18m23s · cost: $0.043', cls: 'term-dim', delay: 220 },
   { t: 'blank' },
   { t: 'cmd', text: 'fix the case-sensitivity bug in findByEmail' },
@@ -126,7 +126,7 @@ function Hero() {
       <div className="hero-head">
         <span>§00 · Reasonix</span>
         <span className="rule"></span>
-        <span className="v">v0.42.0-3 · open source</span>
+        <span className="v">v{window.REASONIX_VERSION} · open source</span>
       </div>
       <div className="hero-grid">
         <div>

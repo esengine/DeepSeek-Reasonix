@@ -1,5 +1,7 @@
 // Lang context + t() helper. `t({zh, en})` returns the active-lang string.
 
+window.REASONIX_VERSION = "0.43.0";
+
 const LangCtx = React.createContext({ lang: "zh", setLang: () => {} });
 
 function detectInitialLang() {

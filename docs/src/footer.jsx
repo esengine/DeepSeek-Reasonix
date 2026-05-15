@@ -58,7 +58,7 @@ function Footer() {
           zh: 'Independent open-source project · 与 DeepSeek 官方无关',
           en: 'Independent open-source project · not affiliated with DeepSeek',
         }, lang)}</span>
-        <span style={{marginLeft:18}}>v0.42.0-3 · prerelease</span>
+        <span style={{marginLeft:18}}>v{window.REASONIX_VERSION} · stable</span>
       </div>
     </footer>
   );
