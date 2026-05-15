@@ -232,7 +232,7 @@ function expandPrefix(prefix: string): string {
 
 /** Ensure prefix matches only at directory boundaries (not mid-segment). */
 function pathStartsWithPrefix(normalized: string, prefix: string): boolean {
-  return normalized === prefix || normalized.startsWith(`${prefix}/`);
+  return normalized === prefix || normalized.startsWith(`${prefix}${pathMod.sep}`);
 }
 
 /** Glob-style match: `*.env` matches `foo.env`, `id_rsa*` matches `id_rsa_old`. */

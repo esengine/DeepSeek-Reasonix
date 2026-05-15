@@ -3,6 +3,7 @@ import {
   loadBaseUrl,
   loadEditMode,
   loadProjectShellAllowed,
+  readConfig,
   searchEnabled,
   webSearchEndpoint,
   webSearchEngine,
@@ -41,11 +42,13 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
 
   const registerRooted = (root: string): void => {
     registerFilesystemTools(tools, { rootDir: root });
+    const cfg = readConfig();
     registerShellTools(tools, {
       rootDir: root,
       extraAllowed: () => loadProjectShellAllowed(root),
       allowAll: () => loadEditMode() === "yolo",
       jobs,
+      sensitivePaths: cfg.sensitivePaths,
     });
     registerMemoryTools(tools, { projectRoot: root });
   };
