@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
 import type { ChatMessage } from "../types.js";
 
 /** Best-effort git branch sniff; returns undefined if not a git repo or git missing. */
@@ -198,9 +198,27 @@ export function listSessions(): SessionInfo[] {
   }
 }
 
-/** Strict match — legacy sessions without meta.workspace are hidden; resume by name still works. */
+/** Canonical form for workspace path comparisons — Windows drive-case + separator drift between session writes (yesterday) and reads (today) used to hide sessions from the sidebar. Issue #878. */
+export function normalizeWorkspace(
+  p: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (typeof p !== "string" || p.length === 0) return "";
+  if (platform === "win32") {
+    const resolved = win32Path.resolve(p);
+    return resolved
+      .replace(/\\/g, "/")
+      .replace(/^([A-Z]):/i, (_, d: string) => `${d.toLowerCase()}:`);
+  }
+  return posixPath.resolve(p);
+}
+
+/** Sessions without `meta.workspace` are still hidden — resume by name still works. */
 export function listSessionsForWorkspace(workspace: string): SessionInfo[] {
-  return listSessions().filter((s) => s.meta.workspace === workspace);
+  const want = normalizeWorkspace(workspace);
+  return listSessions().filter(
+    (s) => typeof s.meta.workspace === "string" && normalizeWorkspace(s.meta.workspace) === want,
+  );
 }
 
 function metaPath(name: string): string {

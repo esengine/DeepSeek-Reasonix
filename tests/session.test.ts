@@ -14,6 +14,7 @@ import {
   listSessions,
   listSessionsForWorkspace,
   loadSessionMessages,
+  normalizeWorkspace,
   patchSessionMeta,
   pruneStaleSessions,
   renameSession,
@@ -109,7 +110,7 @@ describe("session persistence", () => {
     expect(names).toEqual(["real"]);
   });
 
-  it("listSessionsForWorkspace strict-matches meta.workspace", () => {
+  it("listSessionsForWorkspace matches meta.workspace and hides untagged sessions", () => {
     appendSessionMessage("here", { role: "user", content: "x" });
     appendSessionMessage("there", { role: "user", content: "x" });
     appendSessionMessage("untagged", { role: "user", content: "x" });
@@ -117,6 +118,13 @@ describe("session persistence", () => {
     patchSessionMeta("there", { workspace: "/proj/b" });
     const names = listSessionsForWorkspace("/proj/a").map((s) => s.name);
     expect(names).toEqual(["here"]);
+  });
+
+  it("listSessionsForWorkspace tolerates trailing-slash drift", () => {
+    appendSessionMessage("a", { role: "user", content: "x" });
+    patchSessionMeta("a", { workspace: "/proj/a/" });
+    const names = listSessionsForWorkspace("/proj/a").map((s) => s.name);
+    expect(names).toEqual(["a"]);
   });
 
   it("renameSession also moves the .events.jsonl sidecar", () => {
@@ -524,5 +532,33 @@ describe("session persistence", () => {
       expect(summary.cacheHitRatio).toBeCloseTo(366976 / (366976 + 109), 4);
       expect(summary.lastPromptTokens).toBe(367085);
     });
+  });
+});
+
+describe("normalizeWorkspace", () => {
+  it("collapses trailing slashes and `.` segments on posix", () => {
+    expect(normalizeWorkspace("/proj/a/", "linux")).toBe("/proj/a");
+    expect(normalizeWorkspace("/proj/./a", "linux")).toBe("/proj/a");
+  });
+
+  it("lowercases drive letter and unifies separators on win32", () => {
+    expect(normalizeWorkspace("C:\\Users\\Foo\\proj", "win32")).toBe("c:/Users/Foo/proj");
+    expect(normalizeWorkspace("c:/users/foo/proj", "win32")).toBe("c:/users/foo/proj");
+  });
+
+  it("yields the same canonical form for win32 drive-case + separator variants", () => {
+    const variants = [
+      "C:\\Users\\foo\\proj",
+      "c:\\Users\\foo\\proj",
+      "C:/Users/foo/proj",
+      "c:/Users/foo/proj/",
+    ];
+    const canonicals = variants.map((v) => normalizeWorkspace(v, "win32"));
+    for (const c of canonicals) expect(c).toBe(canonicals[0]);
+  });
+
+  it("returns empty string for undefined or empty input", () => {
+    expect(normalizeWorkspace(undefined)).toBe("");
+    expect(normalizeWorkspace("")).toBe("");
   });
 });
