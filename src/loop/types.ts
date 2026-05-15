@@ -15,7 +15,9 @@ export type EventRole =
   /** Loop reached its pause interval; state is on disk under `sessionName`, caller may resume. */
   | "paused"
   /** Transient indicator for silent phases; UI clears on next primary event. */
-  | "status";
+  | "status"
+  /** Mid-turn steer injected as a user utterance without aborting the current turn. */
+  | "steer";
 
 export interface LoopEvent {
   turn: number;

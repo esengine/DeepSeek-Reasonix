@@ -1094,6 +1094,7 @@ export const zhCN: TranslationSchema = {
     editorMissing:
       "未设置 $EDITOR / $VISUAL / $GIT_EDITOR — 请导出环境变量（例如 `export EDITOR=nano`）后重试",
     editorExited: "编辑器异常退出，返回码 {code}",
+    typeaheadStaged: "\u25b8 {count} 行已暂存 \u00b7 esc 召回",
   },
   pathConfirm: {
     title: "沙箱外路径",

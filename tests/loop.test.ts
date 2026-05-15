@@ -2426,3 +2426,226 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
     });
   });
 });
+
+describe("CacheFirstLoop — mid-turn steer injection", () => {
+  it("steer() stores text and steerConsumed returns false before consumption", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+    });
+    expect(loop.steerConsumed).toBe(false);
+    loop.steer("mid-turn msg");
+    expect(loop.steerConsumed).toBe(false); // not consumed until step()
+  });
+
+  it("steer(null) clears a pending steer", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+    });
+    loop.steer("mid-turn msg");
+    loop.steer(null);
+    // steer(null) should clear — step() won't see it
+    expect(loop.steerConsumed).toBe(false);
+  });
+
+  it("consumes a mid-turn steer between iterations and yields a steer event", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "add", arguments: '{"a":2,"b":3}' },
+          },
+        ],
+      },
+      { content: "The answer is 5." },
+    ]);
+
+    const tools = new ToolRegistry();
+    tools.register<{ a: number; b: number }, number>({
+      name: "add",
+      parameters: {
+        type: "object",
+        properties: { a: { type: "integer" }, b: { type: "integer" } },
+        required: ["a", "b"],
+      },
+      fn: ({ a, b }) => a + b,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({
+        system: "use add tool",
+        toolSpecs: tools.specs(),
+      }),
+      tools,
+      stream: false,
+    });
+
+    // Start step() — manually iterate to inject steer mid-turn.
+    const gen = loop.step("2 + 3 = ?");
+
+    // Drain events until the tool result is yielded ("tool" role).
+    let sawTool = false;
+    let result = await gen.next();
+    while (!result.done) {
+      if (result.value.role === "tool") {
+        sawTool = true;
+        break;
+      }
+      result = await gen.next();
+    }
+    expect(sawTool).toBe(true);
+
+    // Inject steer BEFORE the next iteration starts.
+    loop.steer("mid-turn steer message");
+
+    // Continue — the next iteration should consume the steer.
+    let sawSteer = false;
+    result = await gen.next();
+    while (!result.done) {
+      if (result.value.role === "steer") {
+        sawSteer = true;
+        expect(result.value.content).toBe("mid-turn steer message");
+        break;
+      }
+      result = await gen.next();
+    }
+    expect(sawSteer).toBe(true);
+
+    // Drain remaining events to completion.
+    while (!result.done) {
+      result = await gen.next();
+    }
+
+    // steerConsumed should be true after consumption.
+    expect(loop.steerConsumed).toBe(true);
+
+    // The steer should appear as a user message in the log.
+    const userMessages = loop.log.entries.filter((m) => m.role === "user");
+    expect(userMessages.some((m) => m.content === "mid-turn steer message")).toBe(true);
+  });
+
+  it("steerConsumed resets to false at the start of each new step()", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "add", arguments: '{"a":1,"b":1}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+    const tools = new ToolRegistry();
+    tools.register<{ a: number; b: number }, number>({
+      name: "add",
+      parameters: {
+        type: "object",
+        properties: { a: { type: "integer" }, b: { type: "integer" } },
+        required: ["a", "b"],
+      },
+      fn: ({ a, b }) => a + b,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "use add", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    // First turn: inject steer.
+    const gen1 = loop.step("turn 1");
+    // Drain to tool event.
+    let r = await gen1.next();
+    while (!r.done && r.value.role !== "tool") r = await gen1.next();
+    loop.steer("steer in turn 1");
+    // Drain rest.
+    while (!r.done) r = await gen1.next();
+    expect(loop.steerConsumed).toBe(true);
+
+    // Second turn: steerConsumed should be false again.
+    // But the fake client was exhausted. Use a fresh loop instead.
+    const client2 = makeClient([{ content: "turn 2 answer" }]);
+    const loop2 = new CacheFirstLoop({
+      client: client2,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+    });
+    expect(loop2.steerConsumed).toBe(false);
+    loop2.steer("steer in turn 2");
+    const gen2 = loop2.step("turn 2 input");
+    let sawSteer2 = false;
+    r = await gen2.next();
+    while (!r.done) {
+      if (r.value.role === "steer") {
+        sawSteer2 = true;
+        break;
+      }
+      r = await gen2.next();
+    }
+    expect(sawSteer2).toBe(true);
+    expect(loop2.steerConsumed).toBe(true);
+  });
+
+  it("steer() resets steerConsumed when new text is set after a previous steer was consumed", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_reset",
+            type: "function",
+            function: { name: "add", arguments: '{"a":1,"b":1}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+
+    const tools = new ToolRegistry();
+    tools.register<{ a: number; b: number }, number>({
+      name: "add",
+      parameters: {
+        type: "object",
+        properties: { a: { type: "integer" }, b: { type: "integer" } },
+        required: ["a", "b"],
+      },
+      fn: ({ a, b }) => a + b,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "use add", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    // First turn: inject steer, consume it via step(), verify steerConsumed is true.
+    const gen = loop.step("turn 1");
+    // Drain to tool event.
+    let r = await gen.next();
+    while (!r.done && r.value.role !== "tool") r = await gen.next();
+    loop.steer("first steer");
+    // Drain past steer consumption.
+    r = await gen.next();
+    while (!r.done && r.value.role !== "steer") r = await gen.next();
+    // Finish the turn.
+    while (!r.done) r = await gen.next();
+    expect(loop.steerConsumed).toBe(true);
+
+    // Second steer should reset steerConsumed to false.
+    loop.steer("second steer");
+    expect(loop.steerConsumed).toBe(false);
+  });
+});

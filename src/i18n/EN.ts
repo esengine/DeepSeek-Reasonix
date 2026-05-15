@@ -1153,6 +1153,7 @@ export const EN: TranslationSchema = {
     editorMissing:
       "no $EDITOR / $VISUAL / $GIT_EDITOR set \u2014 export one (e.g. `export EDITOR=nano`) and retry",
     editorExited: "editor exited with code {code}",
+    typeaheadStaged: "\u25b8 {count} line(s) staged \u00b7 esc recall",
   },
   pathConfirm: {
     title: "Outside-sandbox path",

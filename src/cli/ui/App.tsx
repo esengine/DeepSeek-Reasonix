@@ -1452,6 +1452,15 @@ function AppInner({
       quitProcess();
       return;
     }
+    // Typeahead queue management: Esc recalls for editing.
+    if (queuedSubmit !== null && busy) {
+      if (key.escape) {
+        setInput(queuedSubmit);
+        setQueuedSubmit(null);
+        loop.steer(null);
+        return;
+      }
+    }
     if (key.escape && busy) {
       if (abortedThisTurn.current) return;
       abortedThisTurn.current = true;
@@ -2265,7 +2274,16 @@ function AppInner({
         stopLoop();
       }
       clearFiringFlag();
-      if (busy) return;
+      if (busy) {
+        // Typeahead: append to queued message (merged on submit).
+        // Also write to loop.steer() so the message gets injected
+        // at the next iteration boundary without aborting the turn.
+        setInput("");
+        const merged = queuedSubmit ? `${queuedSubmit}\n${text}` : text;
+        setQueuedSubmit(merged);
+        loop.steer(merged);
+        return;
+      }
 
       // @-mention picker intercept. Enter on either a file or a folder
       // commits the path INTO the buffer (with trailing space) — the
@@ -2853,10 +2871,12 @@ function AppInner({
           // FOR has now arrived, so drop the hint. We do this uniformly
           // at the top of the loop body for every role except "status"
           // itself (which SETS the line).
-          if (ev.role !== "status") {
+          if (ev.role !== "status" && ev.role !== "steer") {
             setStatusLine((cur) => (cur ? null : cur));
           }
-          if (ev.role === "status") {
+          if (ev.role === "steer") {
+            setQueuedSubmit(null);
+          } else if (ev.role === "status") {
             setStatusLine(ev.content);
           } else if (ev.role === "assistant_delta") {
             if (ev.content) contentBuf.current += ev.content;
@@ -3062,6 +3082,7 @@ function AppInner({
       mcpRuntime,
       pushHistory,
       resetCursor,
+      queuedSubmit,
     ],
   );
 
@@ -3152,13 +3173,17 @@ function AppInner({
   // Drain the shell-confirm queue after the in-flight turn tears down.
   // React closure staleness means handleShellConfirm can't just await
   // the abort itself — this effect is the reliable edge detector.
+  // When busy ends, drain any queued typeahead. If the steer was
+  // already consumed mid-turn (the loop yielded a "steer" event),
+  // skip — the message is already in the log.
   useEffect(() => {
     if (!busy && queuedSubmit !== null) {
       const text = queuedSubmit;
       setQueuedSubmit(null);
+      if (loop.steerConsumed) return;
       void handleSubmit(text);
     }
-  }, [busy, queuedSubmit, handleSubmit]);
+  }, [busy, queuedSubmit, handleSubmit, loop]);
 
   /**
    * PlanConfirm callback. Three outcomes, all ending with a synthetic
@@ -3717,8 +3742,11 @@ function AppInner({
       <HistoryTypingCapture
         input={input}
         setInput={setInput}
-        enabled={!modalOpen && !busy}
-        onReturnToBottom={chatScroll.jumpToBottom}
+        enabled={!modalOpen}
+        onReturnToBottom={() => {
+          if (busy && input.trim()) handleSubmit(input);
+          else chatScroll.jumpToBottom();
+        }}
       />
       <TickerProvider disabled={tickerSuspended}>
         <ViewportBudgetProvider>
@@ -4162,11 +4190,20 @@ function AppInner({
                           ) : null}
                           {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
                           <StatusRow statusBar={statusBar} />
+                          {queuedSubmit !== null && busy && (
+                            <Box>
+                              <Text color={FG.faint}>
+                                {t("composer.typeaheadStaged", {
+                                  count: queuedSubmit.split("\n").length,
+                                })}
+                              </Text>
+                            </Box>
+                          )}
                           <PromptInput
                             value={input}
                             onChange={setInput}
                             onSubmit={handleSubmit}
-                            disabled={busy}
+                            disabled={false}
                             onHistoryPrev={handleHistoryPrev}
                             onHistoryNext={handleHistoryNext}
                             onOpenExternalEditor={handleOpenExternalEditor}

@@ -154,6 +154,24 @@ export class CacheFirstLoop {
   /** Authoritative running-id set — UI cards consult this instead of trusting end-event delivery. Insert at dispatch entry, delete in finally. */
   private readonly _inflight = new InflightSet();
 
+  /** Typeahead steer message set by the UI; step() consumes it at the next iter boundary. */
+  private _steer: string | null = null;
+
+  /** Set true when a steer was consumed this turn; cleared on next step() entry. */
+  private _steerConsumed = false;
+
+  /** UI calls this to inject a mid-turn steer message without aborting the current turn.
+   *  New text resets steerConsumed — a fresh steer hasn't been consumed yet. */
+  steer(text: string | null): void {
+    this._steer = text;
+    if (text !== null) this._steerConsumed = false;
+  }
+
+  /** True when a steer was consumed this turn (UI gate to avoid double-submit). */
+  get steerConsumed(): boolean {
+    return this._steerConsumed;
+  }
+
   private _proArmedForNextTurn = false;
   private _escalateThisTurn = false;
   private readonly _turnFailures: TurnFailureTracker;
@@ -548,6 +566,9 @@ export class CacheFirstLoop {
   }
 
   async *step(userInput: string): AsyncGenerator<LoopEvent> {
+    // Reset per-turn flags.
+    this._steerConsumed = false;
+
     // Budget gate runs FIRST, before any per-turn state mutation, so a
     // refusal leaves the loop unchanged and the user can correct the
     // cap and re-issue. Default `null` short-circuits the whole check
@@ -707,6 +728,25 @@ export class CacheFirstLoop {
         };
       }
       let messages = this.buildMessages(pendingUser);
+
+      // Consume a typeahead steer if the UI wrote one between iters.
+      // Injecting as a user message via appendAndPersist means the
+      // next buildMessages() (or the fold rebuild below) will include it.
+      if (this._steer !== null) {
+        const steer = this._steer;
+        this._steer = null;
+        this._steerConsumed = true;
+        this.appendAndPersist({ role: "user", content: steer });
+        messages = this.buildMessages(pendingUser);
+        // Treat the steer as a fresh user utterance — reset pendingUser
+        // since it's already in the log now.
+        pendingUser = null;
+        yield {
+          turn: this._turn,
+          role: "steer",
+          content: steer,
+        };
+      }
 
       // Preflight context check. Local estimate of the outgoing payload
       // catches cases where prior usage didn't warn us (fresh resume, one
@@ -1214,7 +1254,6 @@ export class CacheFirstLoop {
               }),
             };
           }
-
           yield {
             turn: this._turn,
             role: "tool",

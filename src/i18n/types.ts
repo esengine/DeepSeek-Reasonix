@@ -411,6 +411,8 @@ export interface TranslationSchema {
     editorFailed: string;
     editorMissing: string;
     editorExited: string;
+    /** Typeahead queue indicator, e.g. "▸ 3 lines staged · esc recall" */
+    typeaheadStaged: string;
   };
   pathConfirm: {
     title: string;
