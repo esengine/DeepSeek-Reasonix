@@ -99,7 +99,6 @@ export function registerSkillTools(
         return subagentRunner(skill, rawArgs, ctx?.signal);
       }
 
-      // inline path — body becomes the tool result.
       const header = [
         `# Skill: ${skill.name}`,
         skill.description ? `> ${skill.description}` : "",
@@ -108,10 +107,9 @@ export function registerSkillTools(
         .filter(Boolean)
         .join("\n");
       const argsBlock = rawArgs ? `\n\nArguments: ${rawArgs}` : "";
-      // The body is handed to the model verbatim. No truncation — the
-      // user authored it, we trust their length choice. The append-only
-      // log pays the token cost exactly once per invocation.
-      return `${header}\n\n${skill.body}${argsBlock}`;
+      const inner = `${header}\n\n${skill.body}${argsBlock}`;
+      // Sentinel-wrapped so ContextManager.fold preserves the body verbatim instead of paraphrasing it.
+      return `<skill-pin name=${JSON.stringify(skill.name)}>\n${inner}\n</skill-pin>`;
     },
   });
 

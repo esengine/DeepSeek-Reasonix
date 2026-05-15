@@ -31,6 +31,10 @@ export const PREFLIGHT_EMERGENCY_THRESHOLD = 0.95;
 /** Prepended to fold summary content so the model knows it's a synthesized recap. */
 export const HISTORY_FOLD_MARKER =
   "[CONVERSATION HISTORY SUMMARY — earlier turns folded for context efficiency]\n\n";
+/** Header that precedes preserved skill bodies in a fold's synthesized assistant message. */
+export const SKILL_PIN_MEMO_HEADER = "[Active skill memos — preserved verbatim across the fold:]";
+/** Matches the wrapper emitted by `run_skill` so the fold can lift bodies out before summarizing. */
+const SKILL_PIN_REGEX = /<skill-pin name="([^"]+)">\n[\s\S]*?\n<\/skill-pin>/g;
 
 export interface ContextManagerDeps {
   client: DeepSeekClient;
@@ -65,6 +69,26 @@ export interface FoldResult {
   beforeMessages: number;
   afterMessages: number;
   summaryChars: number;
+}
+
+// Stub pins in head so the summarizer doesn't paraphrase them; dedupe by name, last invocation wins.
+function extractPinnedSkills(head: ChatMessage[]): {
+  stubbedHead: ChatMessage[];
+  pinnedBodies: string[];
+} {
+  const pinned = new Map<string, string>();
+  const stubbedHead = head.map((msg) => {
+    if (typeof msg.content !== "string") return msg;
+    let hit = false;
+    const next = msg.content.replace(SKILL_PIN_REGEX, (full, name: string) => {
+      pinned.delete(name);
+      pinned.set(name, full);
+      hit = true;
+      return `[skill ${JSON.stringify(name)} memo — preserved separately, do not summarize.]`;
+    });
+    return hit ? { ...msg, content: next } : msg;
+  });
+  return { stubbedHead, pinnedBodies: [...pinned.values()] };
 }
 
 export class ContextManager {
@@ -148,12 +172,15 @@ export class ContextManager {
     const headTokens = totalTokens - cumTokens;
     if (headTokens < totalTokens * HISTORY_FOLD_MIN_SAVINGS_FRACTION) return noop;
 
-    const summary = await this.summarizeForFold(head);
+    const { stubbedHead, pinnedBodies } = extractPinnedSkills(head);
+    const summary = await this.summarizeForFold(stubbedHead);
     if (!summary) return noop;
 
+    const memoTail =
+      pinnedBodies.length > 0 ? `\n\n${SKILL_PIN_MEMO_HEADER}\n\n${pinnedBodies.join("\n\n")}` : "";
     const summaryMsg: ChatMessage = {
       role: "assistant",
-      content: HISTORY_FOLD_MARKER + summary,
+      content: HISTORY_FOLD_MARKER + summary + memoTail,
     };
     const replacement = [summaryMsg, ...tail];
     this.deps.log.compactInPlace(replacement);
