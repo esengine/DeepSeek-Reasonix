@@ -27,15 +27,12 @@ tauriConf.version = version;
 writeFileSync(tauriConfPath, `${JSON.stringify(tauriConf, null, 2)}\n`);
 
 const cargoToml = readFileSync(cargoTomlPath, "utf8");
-const nextCargo = cargoToml.replace(
-  /^version = ".*"$/m,
-  `version = "${version}"`,
-);
-if (nextCargo === cargoToml) {
+const versionLine = /^version = ".*"$/m;
+if (!versionLine.test(cargoToml)) {
   console.error(`Cargo.toml: no version line matched`);
   process.exit(1);
 }
-writeFileSync(cargoTomlPath, nextCargo);
+writeFileSync(cargoTomlPath, cargoToml.replace(versionLine, `version = "${version}"`));
 
 const desktopPkg = JSON.parse(readFileSync(desktopPkgPath, "utf8"));
 desktopPkg.version = version;
