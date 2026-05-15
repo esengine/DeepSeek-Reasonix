@@ -43,14 +43,16 @@ export class QQBot extends EventEmitter {
   }
 
   private sanitizeHeartbeatInterval(interval: unknown): number | null {
-    if (!Number.isFinite(interval)) {
+    if (typeof interval !== "number" || !Number.isFinite(interval)) {
       return null;
     }
-    const bounded = Math.max(
-      MIN_HEARTBEAT_INTERVAL_MS,
-      Math.min(MAX_HEARTBEAT_INTERVAL_MS, Math.trunc(interval as number)),
-    );
-    return bounded;
+    if (interval < MIN_HEARTBEAT_INTERVAL_MS) {
+      return MIN_HEARTBEAT_INTERVAL_MS;
+    }
+    if (interval > MAX_HEARTBEAT_INTERVAL_MS) {
+      return MAX_HEARTBEAT_INTERVAL_MS;
+    }
+    return Math.trunc(interval);
   }
 
   private validateGatewayUrl(rawUrl: string): string {
@@ -75,7 +77,6 @@ export class QQBot extends EventEmitter {
     if (this.token && Date.now() < this.tokenExpiresAt - 60_000) {
       return this.token;
     }
-    // codeql[js/file-access-to-http]
     const res = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -131,7 +132,6 @@ export class QQBot extends EventEmitter {
         });
         const heartbeatInterval = this.sanitizeHeartbeatInterval(d?.heartbeat_interval);
         if (heartbeatInterval) {
-          // codeql[js/resource-exhaustion]
           this.heartbeatTimer = setInterval(() => {
             this.sendOp(1, this.seq || null);
           }, heartbeatInterval);
@@ -256,7 +256,6 @@ export class QQBot extends EventEmitter {
       msg_type: 0,
     };
     if (msgId) body.msg_id = msgId;
-    // codeql[js/file-access-to-http]
     const res = await fetch(`${this.baseUrl}/v2/users/${encodeURIComponent(openid)}/messages`, {
       method: "POST",
       headers: {
