@@ -1,7 +1,7 @@
 /** Stdin reader CSI parser — drives the state machine via `feed()`; safety net for the input layer. */
 
 import { describe, expect, it } from "vitest";
-import { type KeyEvent, StdinReader } from "../src/cli/ui/stdin-reader.js";
+import { type KeyEvent, StdinReader, sanitizePasteText } from "../src/cli/ui/stdin-reader.js";
 
 function setup() {
   const reader = new StdinReader();
@@ -424,5 +424,50 @@ describe("StdinReader — SGR mouse reports (issue #867)", () => {
     const { reader, events } = setup();
     reader.feed("[<not-a-mouse-report");
     expect(events).toEqual([{ input: "[<not-a-mouse-report" }]);
+  });
+});
+
+describe("sanitizePasteText (issue #849)", () => {
+  it("strips bidi override controls (LRE/RLE/PDF/LRO/RLO/isolates)", () => {
+    const raw = "\u202ahello\u202c \u202bworld\u202c \u2066isolated\u2069";
+    expect(sanitizePasteText(raw)).toBe("hello world isolated");
+  });
+
+  it("strips zero-width spaces, BOM, word joiner", () => {
+    const raw = "\ufefffoo\u200bbar\u2060baz";
+    expect(sanitizePasteText(raw)).toBe("foobarbaz");
+  });
+
+  it("strips soft hyphen", () => {
+    expect(sanitizePasteText("dis\u00adcover")).toBe("discover");
+  });
+
+  it("preserves ZWJ inside emoji sequences (\ud83d\udc68\u200d\ud83d\udcbb)", () => {
+    const family = "\ud83d\udc68\u200d\ud83d\udcbb";
+    expect(sanitizePasteText(family)).toBe(family);
+  });
+
+  it("preserves ZWNJ and combining marks (e + \u0301 = \u00e9)", () => {
+    expect(sanitizePasteText("caf\u00e9 ka\u200cze")).toBe("caf\u00e9 ka\u200cze");
+  });
+
+  it("returns plain ASCII / CJK input unchanged", () => {
+    expect(sanitizePasteText("hello world")).toBe("hello world");
+    expect(sanitizePasteText("\u4f60\u597d\u4e16\u754c")).toBe("\u4f60\u597d\u4e16\u754c");
+  });
+});
+
+describe("StdinReader — paste content sanitization (issue #849)", () => {
+  it("strips invisible controls from a bracketed paste before dispatch", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[200~\u202ahello\u202c \u200bworld\x1b[201~");
+    expect(events).toEqual([{ input: "hello world", paste: true }]);
+  });
+
+  it("keeps ZWJ emoji intact through the paste pipeline", () => {
+    const { reader, events } = setup();
+    const family = "\ud83d\udc68\u200d\ud83d\udcbb";
+    reader.feed(`\x1b[200~${family}\x1b[201~`);
+    expect(events).toEqual([{ input: family, paste: true }]);
   });
 });

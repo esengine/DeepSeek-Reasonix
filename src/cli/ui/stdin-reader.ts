@@ -188,6 +188,13 @@ function tryDecodeGenericCsi(seq: string): KeyEvent | null {
   return null;
 }
 
+// Bidi controls + zero-width invisibles that browsers smuggle into the clipboard (e.g. a B-site tab title with RLE/PDF wrappers). They render as 0 cells but still occupy buffer offsets, so cursor + line-split math drifts. ZWJ / ZWNJ / variation selectors / combining marks are NOT in the class — emoji sequences and accented letters keep their semantics. Issue #849.
+const PASTE_INVISIBLE_RE = /[\u200B\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\u00AD\uFEFF]/g;
+
+export function sanitizePasteText(s: string): string {
+  return s.replace(PASTE_INVISIBLE_RE, "");
+}
+
 /** Heuristic paste-burst detector — wraps raw multi-line chunks when the terminal didn't (#522). */
 export function looksLikeUnbracketedPaste(chunk: string): boolean {
   if (chunk.length < 2) return false;
@@ -350,7 +357,7 @@ export class StdinReader {
           break;
         }
         this.pasteBuf += chunk.slice(i, endIdx);
-        this.dispatch({ input: this.pasteBuf, paste: true });
+        this.dispatch({ input: sanitizePasteText(this.pasteBuf), paste: true });
         this.pasteBuf = "";
         this.state = "idle";
         i = endIdx + endLen;
