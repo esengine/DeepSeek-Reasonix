@@ -11,7 +11,12 @@ export interface TruncationRepairResult {
 export function repairTruncatedJson(input: string): TruncationRepairResult {
   const notes: string[] = [];
   if (!input || !input.trim()) {
-    return { repaired: "{}", changed: input !== "{}", notes: ["empty input → {}"], fallback: false };
+    return {
+      repaired: "{}",
+      changed: input !== "{}",
+      notes: ["empty input → {}"],
+      fallback: false,
+    };
   }
   // Fast path: already parseable.
   try {
@@ -84,8 +89,7 @@ export function repairTruncatedJson(input: string): TruncationRepairResult {
 
   try {
     JSON.parse(s);
-    if (notes.length > 0) return { repaired: s, changed: true, notes, fallback: false };
-    return { repaired: s, changed: false, notes, fallback: false };
+    return { repaired: s, changed: s !== input, notes, fallback: false };
   } catch (err) {
     const preview =
       input.length <= 500 ? input : `${input.slice(0, 500)} …[+${input.length - 500} chars]`;

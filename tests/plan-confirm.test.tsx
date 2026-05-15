@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import { render } from "ink-testing-library";
+// biome-ignore lint/style/useImportType: classic JSX transform requires React in scope
 import React from "react";
 import stripAnsi from "strip-ansi";
 import { describe, expect, it } from "vitest";
