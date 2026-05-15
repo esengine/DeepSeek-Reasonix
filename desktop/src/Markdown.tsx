@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { CodeView } from "./CodeView";
 
@@ -139,7 +140,7 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
   return (
     <div className="markdown">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBreaks]}
         components={{
           pre: ({ children }) => {
             const codeEl = Children.toArray(children).find(

@@ -25,6 +25,7 @@
     "react-dom": "^19.2.0",
     "react-markdown": "^9.0.1",
     "react-virtuoso": "^4.12.5",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
