@@ -53,10 +53,10 @@
 
 ## 安装
 
-```bash
+~~~bash
 cd my-project
 npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
-```
+~~~
 
 要求 Node ≥ 22。在 macOS · Linux · Windows（PowerShell · Git Bash · Windows Terminal）都跑得顺。[去拿 DeepSeek API Key →](https://platform.deepseek.com/api_keys) · 完整 flag 看 `reasonix code --help`。
 
@@ -72,14 +72,41 @@ npx reasonix code   # 首次运行粘贴 DeepSeek API Key，之后会记住
 
 其他子命令（`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`）在 `reasonix --help` 和 [CLI 参考](https://esengine.github.io/DeepSeek-Reasonix/#cli)。
 
+### QQ 通道
+
+Reasonix 可以把 QQ 挂到现有的 `chat` / `code` 会话上，作为远程通信通道使用。它不是一个独立的新模式。
+
+先启动一个会话：
+
+~~~bash
+reasonix code
+# 或
+reasonix chat
+~~~
+
+然后在会话里连接 QQ：
+
+~~~text
+/qq connect
+~~~
+
+可用命令：
+
+- `/qq connect`
+- `/qq status`
+- `/qq disconnect`
+
+启用后，后续的 `chat` / `code` 会话会自动启动 QQ 通道。斜杠命令、确认提示，以及后续助手回复都可以通过 QQ 继续完成，不需要回到终端交互。
+
+详细说明见 [QQ 连接指南](./docs/qq-connect.zh-CN.md)。
 <details>
 <summary><strong>切换工作区 · chat vs. code · 写第一个 Skill</strong></summary>
 
 **切换工作区。** Reasonix 把文件系统工具作用域绑定在启动目录，传 `--dir` 可以指别处。中途切换是有意不支持的（消息日志和 memory 路径会和旧根目录混在一起）—— 退出再启动。
 
-```bash
+~~~bash
 npx reasonix code --dir /path/to/project
-```
+~~~
 
 **`chat` 还是 `code`？** `code` 是默认入口、唯一带文件系统 / shell 工具和 SEARCH/REPLACE 审阅的模式。`chat` 是更轻量的纯对话壳——想要一个挂着 MCP 但没有磁盘权限的“思路助手”时用它。
 
@@ -96,10 +123,10 @@ npx reasonix code --dir /path/to/project
 
 **写第一个 Skill。** 暂无在线市场——自己写。编辑文件（`description:` frontmatter + 正文），然后 `/skill list` 就能看到。frontmatter 加 `runAs: subagent` 会以隔离 subagent 跑，而不是把正文内联进父 prompt。
 
-```bash
+~~~bash
 /skill new my-skill              # <project>/.reasonix/skills/my-skill.md
 /skill new my-skill --global     # ~/.reasonix/skills，跨项目共用
-```
+~~~
 
 </details>
 
@@ -164,6 +191,7 @@ npx reasonix code --dir /path/to/project
 
 - [**架构**](./docs/ARCHITECTURE.md) —— 四大支柱、缓存优先循环、思维提取、脚手架
 - [**CLI 参考**](./docs/CLI-REFERENCE.md) —— 每个 shell 子命令、每个 slash 命令、每个快捷键
+- [**QQ 连接指南**](./docs/qq-connect.zh-CN.md) —— 通道定位、命令、配置流程和 QQ 开放平台凭据
 - [**基准测试**](./benchmarks/) —— τ-bench-lite harness、transcript、成本方法论
 - [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard 设计稿、TUI 设计稿
 - [**贡献指南**](./CONTRIBUTING.md) —— 注释规则、错误处理、用现成库不手写
