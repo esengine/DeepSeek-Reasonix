@@ -98,6 +98,7 @@ export type { TodoItem, TodoStatus, TodoToolOptions } from "./tools/todo.js";
 export { forkRegistryExcluding, registerSubagentTool } from "./tools/subagent.js";
 export type {
   SubagentEvent,
+  SubagentResult,
   SubagentSink,
   SubagentToolOptions,
 } from "./tools/subagent.js";

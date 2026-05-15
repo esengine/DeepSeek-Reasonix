@@ -1,13 +1,15 @@
 /** Subagent tool — registration, child-loop isolation, fork-registry exclusion, abort propagation, plan-mode inheritance. */
 
 import { describe, expect, it, vi } from "vitest";
-import { DeepSeekClient } from "../src/client.js";
+import { DeepSeekClient, Usage } from "../src/client.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
   type SubagentEvent,
+  type SubagentResult,
   type SubagentSink,
   forkRegistryExcluding,
   forkRegistryWithAllowList,
+  formatSubagentResult,
   registerSubagentTool,
   spawnSubagent,
   subagentBudgetHint,
@@ -656,6 +658,76 @@ describe("registerSubagentTool — per-session budget feedback", () => {
     expect(outs[2]).toMatch(/\[note: this session has spawned 3 subagents/);
     expect(outs[3]).toMatch(/\[note: this session has spawned 4 subagents/);
     expect(outs[4]).toMatch(/\[budget: this session has now spawned 5 subagents/);
+  });
+});
+
+describe("formatSubagentResult — forcedSummary path", () => {
+  function baseResult(over: Partial<SubagentResult>): SubagentResult {
+    return {
+      success: false,
+      output: "",
+      turns: 1,
+      toolIters: 4,
+      elapsedMs: 1000,
+      costUsd: 0.0001,
+      model: "deepseek-chat",
+      usage: new Usage(),
+      ...over,
+    };
+  }
+
+  it("renders forcedSummary results with partial:true and `output` carrying the synthesis", () => {
+    const formatted = formatSubagentResult(
+      baseResult({
+        forcedSummary: true,
+        output: "I found X and Y; could not reach Z because the file was truncated.",
+      }),
+    );
+    const parsed = JSON.parse(formatted);
+    expect(parsed.success).toBe(false);
+    expect(parsed.partial).toBe(true);
+    expect(parsed.output).toMatch(/found X and Y/);
+    expect(parsed.note).toMatch(/force-summarized/i);
+  });
+
+  it("forcedSummary takes precedence over the generic !success branch", () => {
+    const formatted = formatSubagentResult(
+      baseResult({
+        forcedSummary: true,
+        output: "partial answer",
+        error: "ignored when forcedSummary is set",
+      }),
+    );
+    const parsed = JSON.parse(formatted);
+    expect(parsed.partial).toBe(true);
+    expect(parsed.output).toBe("partial answer");
+    expect(parsed.error).toBeUndefined();
+  });
+
+  it("paused still takes precedence over forcedSummary", () => {
+    const formatted = formatSubagentResult(
+      baseResult({
+        paused: true,
+        pausedSession: "sub-x-1",
+        forcedSummary: true,
+        output: "shouldn't appear",
+      }),
+    );
+    const parsed = JSON.parse(formatted);
+    expect(parsed.paused).toBe(true);
+    expect(parsed.partial).toBeUndefined();
+    expect(parsed.output).toBeUndefined();
+  });
+
+  it("genuine !success without forcedSummary still uses the error-only shape", () => {
+    const formatted = formatSubagentResult(
+      baseResult({ error: "subagent ended without producing an answer" }),
+    );
+    const parsed = JSON.parse(formatted);
+    expect(parsed.success).toBe(false);
+    expect(parsed.partial).toBeUndefined();
+    expect(parsed.error).toMatch(/ended without producing/);
+    expect(parsed.output).toBeUndefined();
   });
 });
 

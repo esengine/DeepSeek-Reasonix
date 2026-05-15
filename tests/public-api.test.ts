@@ -186,6 +186,7 @@ const PUBLIC_API: readonly string[] = [
   "StreamableHttpTransport",
   "StreamableHttpTransportOptions",
   "SubagentEvent",
+  "SubagentResult",
   "SubagentSink",
   "SubagentToolOptions",
   "TodoItem",
