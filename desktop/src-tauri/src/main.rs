@@ -160,6 +160,16 @@ fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<()
 }
 
 fn main() {
+    // #892: WebKitGTK 2.42+ DMABUF renderer SIGABRTs on some Wayland + Mesa
+    // combos (black screen on launch). Disable it before WebKitWebProcess
+    // spawns; users can opt back in by exporting the var themselves.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
