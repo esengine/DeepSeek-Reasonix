@@ -1,6 +1,4 @@
-/** Encode-only DeepSeek V4 tokenizer port. `estimateConversationTokens` applies
- *  the V4 chat template (BOS, `<｜User｜>`, `<｜Assistant｜>`, DSML tool-calls, EOS,
- *  generation suffix) so the count closely tracks API `prompt_tokens`. */
+/** Encode-only DeepSeek V4 tokenizer port. Applies V4 chat template so token count tracks API `prompt_tokens`. */
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -292,6 +290,8 @@ interface V4Message {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   reasoning_content?: string | null;
+  _toolBlocks?: string[];
+  _textParts?: string[];
 }
 
 function encodeArgumentsToDsml(argsJson: string): string {
@@ -328,7 +328,12 @@ function mergeToolMessages(messages: V4Message[]): V4Message[] {
     if (role === "tool") {
       const toolBlock = TOOL_RESULT_TEMPLATE.replace("{content}", msg.content ?? "");
       const last = merged[merged.length - 1];
-      if (last && last.role === "user" && Array.isArray(last._toolBlocks)) {
+      if (
+        last &&
+        last.role === "user" &&
+        Array.isArray(last._toolBlocks) &&
+        Array.isArray(last._textParts)
+      ) {
         last._toolBlocks.push(toolBlock);
         last.content = `${last._textParts.join("\n\n")}\n\n${last._toolBlocks.join("\n")}`.replace(
           /^\n\n/,
@@ -340,12 +345,17 @@ function mergeToolMessages(messages: V4Message[]): V4Message[] {
           content: toolBlock,
           _textParts: [],
           _toolBlocks: [toolBlock],
-        } as V4Message & { _textParts: string[]; _toolBlocks: string[] });
+        });
       }
     } else if (role === "user") {
       const text = msg.content ?? "";
       const last = merged[merged.length - 1];
-      if (last && last.role === "user" && Array.isArray(last._toolBlocks)) {
+      if (
+        last &&
+        last.role === "user" &&
+        Array.isArray(last._toolBlocks) &&
+        Array.isArray(last._textParts)
+      ) {
         last._textParts.push(text);
         last.content =
           `${last._textParts.join("\n\n")}\n\n${last._toolBlocks.join("\n\n")}`.replace(
@@ -359,25 +369,20 @@ function mergeToolMessages(messages: V4Message[]): V4Message[] {
           content: text,
           _textParts: [text],
           _toolBlocks: [],
-        } as V4Message & { _textParts: string[]; _toolBlocks: string[] });
+        });
       }
     } else {
       merged.push({ ...msg });
     }
   }
   for (const m of merged) {
-    (m as Record<string, unknown>)._textParts = undefined;
-    (m as Record<string, unknown>)._toolBlocks = undefined;
+    m._textParts = undefined;
+    m._toolBlocks = undefined;
   }
   return merged;
 }
 
-/**
- * Drop `reasoning_content` from assistant messages that appear before the
- * last user/developer message. This matches Python `_drop_thinking_messages`
- * — the API only charges thinking tokens for the tail after the latest user
- * turn; earlier reasoning is discarded server-side.
- */
+/** Drop `reasoning_content` from assistant messages before the last user/developer message. Matches Python `_drop_thinking_messages`. */
 function dropThinkingMessages(messages: V4Message[]): V4Message[] {
   let lastUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -406,18 +411,7 @@ function dropThinkingMessages(messages: V4Message[]): V4Message[] {
   return result;
 }
 
-/**
- * Apply DeepSeek V4 chat template to a messages array.
- *
- * Matches the format produced by the official `encoding_dsv4.py`:
- * ```
- * <｜begin▁of▁sentence｜>{system}<｜User｜>{user1}<｜Assistant｜>༚{asst1}<｜end▁of▁sentence｜><｜User｜>{user2}<｜Assistant｜>༚
- * ```
- *
- * Tool results are merged into user messages with `<tool_result>` blocks;
- * assistant tool_calls use DSML format. The generation suffix
- * `<｜Assistant｜>༚` is appended after the last user message.
- */
+/** Apply DeepSeek V4 chat template. Matches `encoding_dsv4.py`: tool results merged into user messages, assistant tool_calls in DSML, generation suffix appended. */
 export function formatDeepSeekPrompt(
   messages: Array<{
     role?: string;
@@ -466,13 +460,7 @@ export function formatDeepSeekPrompt(
   return prompt;
 }
 
-/**
- * Token-count the FULL conversation as the API would see it: wraps
- * messages in DeepSeek V4's chat template, then encodes once.
- *
- * Includes BOS, `<｜User｜>`, `<｜Assistant｜>`, EOS, DSML tool-call
- * framing, and the generation suffix — matching API `prompt_tokens`.
- */
+/** Token-count the FULL conversation as the API would see it: wraps messages in V4 chat template, then encodes once. */
 export function estimateConversationTokens(
   messages: Array<{
     role?: string;
@@ -487,11 +475,7 @@ export function estimateConversationTokens(
   return countTokens(formatDeepSeekPrompt(messages, drop_thinking));
 }
 
-/**
- * Total request tokens (messages + tool specs) as the API counts them.
- * Tool specs are rendered via the V4 TOOLS_TEMPLATE (DSML format with
- * tool schemas) and added to the templated message token count.
- */
+/** Total request tokens (messages + tool specs) as the API counts them. Tool specs rendered via V4 TOOLS_TEMPLATE and added to message token count. */
 export function estimateRequestTokens(
   messages: Array<{
     role?: string;
