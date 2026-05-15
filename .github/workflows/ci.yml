@@ -8,11 +8,12 @@ on:
 
 jobs:
   build:
-    name: build (node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: build (${{ matrix.os }} · node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node: ["22"]
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +46,7 @@ jobs:
       # Smoke-test the bench harnesses themselves. --dry skips all LLM
       # calls, so this catches wiring regressions (task factories, CLI
       # parsing, file IO, checker determinism) without needing a
-      # DEEPSEEK_API_KEY in CI.
+      # DEEPSEEK_API_KEY in CI. RUNNER_TEMP is set on every GH Actions
+      # runner (POSIX + Windows) — beats hardcoding /tmp.
       - name: τ-bench harness dry-run
-        run: npx tsx benchmarks/tau-bench/runner.ts --dry --out /tmp/tau-dry.json
+        run: npx tsx benchmarks/tau-bench/runner.ts --dry --out "${{ runner.temp }}/tau-dry.json"
