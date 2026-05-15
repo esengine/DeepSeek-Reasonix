@@ -34,6 +34,19 @@ export const zhCN: TranslationSchema = {
     update: "检查较新版本的 Reasonix 并安装。",
     index: "构建（或增量刷新）本地语义搜索索引。",
   },
+  stats: {
+    usageHint: "运行 `reasonix chat`、`reasonix code` 或 `reasonix run <task>` — 每次对话都会记录",
+    usageDetail: "每次对话在日志中追加一行，`reasonix stats` 会将其汇总统计。",
+  },
+  run: {
+    missingApiKey:
+      "未设置 DEEPSEEK_API_KEY 且标准输入不是 TTY（无法交互式输入）。\n" +
+      "请设置环境变量，或先运行 `reasonix chat` 交互一次以保存密钥。\n",
+  },
+  sessions: {
+    emptyHint:
+      "暂无已保存的会话 — 运行 `reasonix chat`（会话会自动保存，除非使用了 --no-session）。",
+  },
   ui: {
     welcome: "随时运行 `reasonix` 开始聊天 — 您的设置将被记住。",
     taglineChat: "DeepSeek 原生智能体",

@@ -11,6 +11,7 @@ import {
   saveApiKey,
 } from "../../config.js";
 import { loadDotenv } from "../../env.js";
+import { t } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import { McpClient } from "../../mcp/client.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
@@ -43,10 +44,7 @@ async function ensureApiKey(): Promise<string> {
   if (existing) return existing;
 
   if (!stdin.isTTY) {
-    process.stderr.write(
-      "DEEPSEEK_API_KEY is not set and stdin is not a TTY (cannot prompt).\n" +
-        "Set the env var, or run `reasonix chat` once interactively to save a key.\n",
-    );
+    process.stderr.write(t("run.missingApiKey"));
     process.exit(1);
   }
 
@@ -134,7 +132,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
         // not even touch.
         await mcp?.close().catch(() => undefined);
         process.stderr.write(
-          `${formatMcpLifecycleEvent({ state: "failed", name: label, reason: (err as Error).message })}\n  → run \`reasonix setup\` to remove broken entries from your saved config.\n`,
+          `${formatMcpLifecycleEvent({ state: "failed", name: label, reason: (err as Error).message })}\n  ${t("mcpLifecycle.failedSetupConfigHint")}\n`,
         );
       }
     }
