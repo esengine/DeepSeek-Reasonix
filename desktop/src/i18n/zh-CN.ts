@@ -280,6 +280,7 @@ export const zhCN: typeof en = {
       switchBack: "切回 Review",
     },
     errorLabel: "错误",
+    jumpToBottom: "回到底部",
     connecting: "正在连接 reasonix 内核…",
     langZH: "中文",
     langEN: "English",

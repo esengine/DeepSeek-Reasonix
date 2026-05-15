@@ -759,6 +759,36 @@ button {
   gap: 14px;
 }
 
+/* Jump-to-bottom button — shown when user has scrolled up during streaming */
+.thread-jump-bottom {
+  position: sticky;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  transition: opacity 0.15s, transform 0.15s;
+  opacity: 0.9;
+}
+.thread-jump-bottom:hover {
+  opacity: 1;
+  background: var(--bg-strong);
+  transform: translateX(-50%) scale(1.05);
+}
+[data-theme="light"] .thread-jump-bottom {
+  box-shadow: 0 2px 12px rgba(0,0,0,0.10);
+}
+
 /* ---------- TURN HEADERS ---------- */
 
 .turn-divider {

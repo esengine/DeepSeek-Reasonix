@@ -273,6 +273,7 @@ export const en = {
       switchBack: "Switch to Review",
     },
     errorLabel: "Error",
+    jumpToBottom: "Jump to bottom",
     connecting: "Connecting to reasonix core…",
     langZH: "Chinese",
     langEN: "English",

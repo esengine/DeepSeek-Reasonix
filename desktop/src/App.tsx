@@ -56,6 +56,7 @@ import {
   UserMsg,
 } from "./ui/thread";
 import { WorkdirPop } from "./ui/workdir-pop";
+import { useAutoScroll } from "./ui/useAutoScroll";
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -957,6 +958,7 @@ function TabRuntime({
   >(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const threadInnerRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
   const [jobsOpen, setJobsOpen] = useState(false);
@@ -1167,10 +1169,11 @@ function TabRuntime({
     [sendRpc],
   );
 
-  useEffect(() => {
-    if (!threadRef.current) return;
-    threadRef.current.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
-  }, [state.messages.length]);
+  const { showJumpButton, scrollToBottom } = useAutoScroll(
+    threadRef,
+    threadInnerRef,
+    state.busy,
+  );
 
   useEffect(() => {
     if (!active) return;
@@ -1494,7 +1497,7 @@ function TabRuntime({
               ) : null}
 
               <div className="thread" ref={threadRef}>
-                <div className="thread-inner">
+                <div className="thread-inner" ref={threadInnerRef}>
                   {pendingUpdate ? (
                     <UpdateBanner
                       version={pendingUpdate.version}
@@ -1642,6 +1645,16 @@ function TabRuntime({
                     </div>
                   ) : null}
                 </div>
+                {showJumpButton ? (
+                  <button
+                    className="thread-jump-bottom"
+                    onClick={() => scrollToBottom(true)}
+                    title={t("app.jumpToBottom") ?? "Jump to bottom"}
+                    aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
+                  >
+                    <I.chev size={16} />
+                  </button>
+                ) : null}
               </div>
 
               <Composer
