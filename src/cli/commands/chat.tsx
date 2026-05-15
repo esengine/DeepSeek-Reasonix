@@ -28,6 +28,7 @@ import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
 import { KeystrokeProvider } from "../ui/keystroke-context.js";
+import { type RustKeystrokeReader, createRustKeystrokeReader } from "../ui/scene/input-adapter.js";
 import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import type { McpServerSummary } from "../ui/slash.js";
@@ -137,6 +138,8 @@ interface RootProps extends ChatOptions {
   qqSubmitRef: { current: ((text: string) => void) | null };
   /** App fills this ref on mount so QQ errors appear in the TUI log. */
   qqErrorRef: { current: ((msg: string) => void) | null };
+  /** Custom keystroke source — populated when REASONIX_RENDERER=rust so keys flow from the spawned input child instead of stdin (which is the null stream in that mode). */
+  keystrokeReader?: RustKeystrokeReader;
 }
 
 function Root({
@@ -148,6 +151,7 @@ function Root({
   showPicker,
   mcpRuntime,
   startupInfoHints,
+  keystrokeReader,
   ...appProps
 }: RootProps) {
   const [key, setKey] = useState<string | undefined>(initialKey);
@@ -170,7 +174,7 @@ function Root({
 
   if (pickerOpen) {
     return (
-      <KeystrokeProvider>
+      <KeystrokeProvider reader={keystrokeReader}>
         <SessionPicker
           sessions={sessions}
           workspace={workspaceRoot}
@@ -208,7 +212,7 @@ function Root({
   }
 
   return (
-    <KeystrokeProvider>
+    <KeystrokeProvider reader={keystrokeReader}>
       <App
         // key forces a full remount (and fresh transcript / scrollback / cards) on switch.
         key={activeSession ?? "__new__"}
@@ -341,6 +345,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const rustRendererActive = process.env.REASONIX_RENDERER === "rust";
   const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
   const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
+  const keystrokeReader = rustRendererActive ? createRustKeystrokeReader() : undefined;
 
   const { waitUntilExit } = render(
     <Root
@@ -352,6 +357,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       progressSink={progressSink}
       startupInfoHints={startupInfoHints}
       showPicker={showPicker}
+      keystrokeReader={keystrokeReader}
       {...opts}
       session={resolvedSession}
       qqChannel={qqChannel}
@@ -382,6 +388,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   } finally {
     await runtime.closeAll();
     qqChannel?.stop();
+    if (keystrokeReader) await keystrokeReader.close();
     // Eat any pending terminal-feature-detection responses (#365) so the
     // parent shell doesn't print them as junk after exit.
     await drainTtyResponses();
