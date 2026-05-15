@@ -1,9 +1,9 @@
 import { type ReactNode, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
-import { t } from "../i18n";
+import { setLang, t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, SettingsPatch, SkillInfo } from "../protocol";
-import { FONT_SCALE, type FontScale, THEME, type Theme } from "../theme";
+import { FONT_FAMILY, FONT_SCALE, type FontFamily, type FontScale, THEME, type Theme } from "../theme";
 
 export type PageId =
   | "general"
@@ -35,6 +35,8 @@ export function SettingsModal({
   onSetTheme,
   fontScale,
   onSetFontScale,
+  fontFamily,
+  onSetFontFamily,
   initialPage,
   mcpSpecs,
   mcpBridged,
@@ -54,6 +56,8 @@ export function SettingsModal({
   onSetTheme: (theme: Theme) => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
+  fontFamily: FontFamily;
+  onSetFontFamily: (family: FontFamily) => void;
   initialPage?: PageId;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
@@ -111,6 +115,8 @@ export function SettingsModal({
                 onSetTheme={onSetTheme}
                 fontScale={fontScale}
                 onSetFontScale={onSetFontScale}
+                fontFamily={fontFamily}
+                onSetFontFamily={onSetFontFamily}
                 onSave={onSave}
                 onPickWorkspace={onPickWorkspace}
               />
@@ -152,6 +158,8 @@ function PageGeneral({
   onSetTheme,
   fontScale,
   onSetFontScale,
+  fontFamily,
+  onSetFontFamily,
   onSave,
   onPickWorkspace,
 }: {
@@ -160,10 +168,13 @@ function PageGeneral({
   onSetTheme: (theme: Theme) => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
+  fontFamily: FontFamily;
+  onSetFontFamily: (family: FontFamily) => void;
   onSave: (patch: SettingsPatch) => void;
   onPickWorkspace: () => void;
 }) {
   const [editorDraft, setEditorDraft] = useState(settings.editor ?? "");
+  const lang = useLang();
   return (
     <>
       <section className="section">
@@ -216,6 +227,53 @@ function PageGeneral({
               onClick={() => onSetFontScale(FONT_SCALE.LARGE)}
             >
               {t("settings.fontScaleLarge")}
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.fontFamily")}</div>
+            <div className="h">{t("settings.fontFamilyHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            <button
+              type="button"
+              data-on={fontFamily === FONT_FAMILY.SANS}
+              onClick={() => onSetFontFamily(FONT_FAMILY.SANS)}
+            >
+              {t("settings.fontFamilySans")}
+            </button>
+            <button
+              type="button"
+              data-on={fontFamily === FONT_FAMILY.SYSTEM}
+              onClick={() => onSetFontFamily(FONT_FAMILY.SYSTEM)}
+            >
+              {t("settings.fontFamilySystem")}
+            </button>
+            <button
+              type="button"
+              data-on={fontFamily === FONT_FAMILY.SERIF}
+              onClick={() => onSetFontFamily(FONT_FAMILY.SERIF)}
+            >
+              {t("settings.fontFamilySerif")}
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.language")}</div>
+            <div className="h">{t("settings.languageHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            <button
+              type="button"
+              data-on={lang === "zh-CN"}
+              onClick={() => setLang("zh-CN")}
+            >
+              中文
+            </button>
+            <button type="button" data-on={lang === "en"} onClick={() => setLang("en")}>
+              English
             </button>
           </div>
         </div>

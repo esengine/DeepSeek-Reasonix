@@ -18,7 +18,7 @@ body,
 }
 
 body {
-  font-family: "IBM Plex Sans", -apple-system, system-ui, sans-serif;
+  font-family: var(--font-sans, "IBM Plex Sans", -apple-system, system-ui, sans-serif);
   font-size: 13px;
   line-height: 1.5;
   color: var(--fg);
@@ -1106,7 +1106,7 @@ button {
   font-size: 11.5px;
   color: var(--fg-2);
   flex: 1;
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--font-sans, "IBM Plex Sans", sans-serif);
 }
 .approve-row .why b {
   color: var(--warning);
@@ -1120,7 +1120,7 @@ button {
   border-radius: 6px;
   font-size: 11.5px;
   font-weight: 500;
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--font-sans, "IBM Plex Sans", sans-serif);
   border: 1px solid var(--border-strong);
   background: var(--card);
   color: var(--fg);
@@ -2104,7 +2104,7 @@ button {
   box-shadow: var(--shadow-lg);
   padding: 12px;
   width: 280px;
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--font-sans, "IBM Plex Sans", sans-serif);
   color: var(--fg);
   font-size: 12px;
   z-index: 20;
@@ -4081,7 +4081,7 @@ button {
 [data-theme="light"] .mode-banner .mb-tag { color: oklch(100% 0 0); }
 .mode-banner .mb-msg {
   color: var(--fg);
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--font-sans, "IBM Plex Sans", sans-serif);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4580,7 +4580,7 @@ button {
 
 .splash-wordmark {
   margin: 0;
-  font-family: "IBM Plex Sans", sans-serif;
+  font-family: var(--font-sans, "IBM Plex Sans", sans-serif);
   font-weight: 300;
   font-size: clamp(48px, 7.5vw, 92px);
   letter-spacing: -0.025em;

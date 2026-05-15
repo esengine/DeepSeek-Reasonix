@@ -85,6 +85,11 @@ export const zhCN: typeof en = {
     fontScaleSmall: "小",
     fontScaleMedium: "中",
     fontScaleLarge: "大",
+    fontFamily: "字体",
+    fontFamilyHint: "正文字体；代码块始终用等宽。",
+    fontFamilySans: "无衬线",
+    fontFamilySystem: "系统",
+    fontFamilySerif: "衬线",
     reasoningEffort: "思考深度",
     reasoningEffortHint: "立即生效。",
     effortHigh: "high",
@@ -347,5 +352,19 @@ export const zhCN: typeof en = {
     memoryCountSuffix: "项",
     checkpointRewind: "回到此处",
     planDefaultTitle: "计划",
+  },
+  contextPanel: {
+    reservedKey: "预留",
+    usedKey: "已用",
+    noFilesMsg: "上下文里还没有文件。",
+    noMemoriesMsg: "还没保存任何记忆。",
+  },
+  extraCards: {
+    sessionUsage: "会话用量",
+    sessionCost: "花费 {costLabel}",
+  },
+  thread: {
+    keepSteps: "保留剩余 {n} 步",
+    keepOriginal: "保留原计划",
   },
 };

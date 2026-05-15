@@ -8,7 +8,18 @@ import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./Comma
 import { WorkspaceProvider } from "./Markdown";
 import { getLang, setLang, t, useLang } from "./i18n";
 import { I } from "./icons";
-import { FONT_SCALE, FONT_SCALE_ZOOM, type FontScale, THEME, type Theme, isFontScale } from "./theme";
+import {
+  FONT_FAMILY,
+  FONT_FAMILY_STACK,
+  FONT_SCALE,
+  FONT_SCALE_ZOOM,
+  type FontFamily,
+  type FontScale,
+  THEME,
+  type Theme,
+  isFontFamily,
+  isFontScale,
+} from "./theme";
 import type {
   CheckpointVerdict,
   ChoiceVerdict,
@@ -813,6 +824,8 @@ interface TabRuntimeProps {
   onToggleTheme: () => void;
   fontScale: FontScale;
   onSetFontScale: (scale: FontScale) => void;
+  fontFamily: FontFamily;
+  onSetFontFamily: (family: FontFamily) => void;
   sideCollapsed: boolean;
   ctxCollapsed: boolean;
   onToggleSide: () => void;
@@ -840,6 +853,8 @@ function TabRuntime({
   onToggleTheme,
   fontScale,
   onSetFontScale,
+  fontFamily,
+  onSetFontFamily,
   sideCollapsed,
   ctxCollapsed,
   onToggleSide,
@@ -1618,6 +1633,8 @@ function TabRuntime({
             onSetTheme={onSetTheme}
             fontScale={fontScale}
             onSetFontScale={onSetFontScale}
+            fontFamily={fontFamily}
+            onSetFontFamily={onSetFontFamily}
             initialPage={settingsPage}
             mcpSpecs={state.mcpSpecs}
             mcpBridged={state.mcpBridged}
@@ -1954,7 +1971,7 @@ function EmptyState({
         padding: "48px 16px 24px",
         textAlign: "center",
         color: "var(--muted)",
-        fontFamily: "IBM Plex Sans, sans-serif",
+        fontFamily: "var(--font-sans, 'IBM Plex Sans', sans-serif)",
       }}
     >
       <div
@@ -2154,6 +2171,10 @@ export function App() {
     const v = localStorage.getItem("reasonix.fontScale");
     return isFontScale(v) ? v : FONT_SCALE.MEDIUM;
   });
+  const [fontFamily, setFontFamily] = useState<FontFamily>(() => {
+    const v = localStorage.getItem("reasonix.fontFamily");
+    return isFontFamily(v) ? v : FONT_FAMILY.SANS;
+  });
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [ctxCollapsed, setCtxCollapsed] = useState(false);
 
@@ -2167,6 +2188,12 @@ export function App() {
     document.documentElement.style.setProperty("zoom", String(FONT_SCALE_ZOOM[fontScale]));
     localStorage.setItem("reasonix.fontScale", fontScale);
   }, [fontScale]);
+
+  useEffect(() => {
+    // CSS rules use var(--font-sans); changing it here re-styles every sans surface in one shot. Mono stays put because code/transcripts hardcode "IBM Plex Mono".
+    document.documentElement.style.setProperty("--font-sans", FONT_FAMILY_STACK[fontFamily]);
+    localStorage.setItem("reasonix.fontFamily", fontFamily);
+  }, [fontFamily]);
 
   useEffect(() => {
     const onCur = (e: Event) => {
@@ -2436,6 +2463,8 @@ export function App() {
           onToggleTheme={onToggleTheme}
           fontScale={fontScale}
           onSetFontScale={setFontScale}
+          fontFamily={fontFamily}
+          onSetFontFamily={setFontFamily}
           sideCollapsed={sideCollapsed}
           ctxCollapsed={ctxCollapsed}
           onToggleSide={() => setSideCollapsed((v) => !v)}

@@ -84,6 +84,11 @@ export const en = {
     fontScaleSmall: "small",
     fontScaleMedium: "medium",
     fontScaleLarge: "large",
+    fontFamily: "Font family",
+    fontFamilyHint: "Body type; code blocks stay monospace either way.",
+    fontFamilySans: "sans",
+    fontFamilySystem: "system",
+    fontFamilySerif: "serif",
     reasoningEffort: "Reasoning effort",
     reasoningEffortHint: "Applies live to the running session.",
     effortHigh: "high",
@@ -360,5 +365,19 @@ export const en = {
     offline: "Offline",
     busy: "Running",
     online: "Online",
+  },
+  contextPanel: {
+    reservedKey: "reserved",
+    usedKey: "used",
+    noFilesMsg: "No files in context yet.",
+    noMemoriesMsg: "No memories saved yet.",
+  },
+  extraCards: {
+    sessionUsage: "Session usage",
+    sessionCost: "Cost {costLabel}",
+  },
+  thread: {
+    keepSteps: "Keep {n} remaining step(s)",
+    keepOriginal: "Keep original",
   },
 };
