@@ -380,11 +380,9 @@ describe("user-memory", () => {
     });
 
     it("applyMemoryStack injects no memory blocks when no memory is set", () => {
-      // No REASONIX.md, no HOME memory → no memory blocks. The bundled
-      // builtin skills (`explore`, `research`) still inject a Skills
-      // index, so we assert the absence of the memory-specific blocks
-      // rather than raw equality with BASE.
-      const out = applyMemoryStack(BASE, projectRoot);
+      // homeDir override required — otherwise the helper falls back to the
+      // dev's real ~/.reasonix and bleeds in whatever memory they have.
+      const out = applyMemoryStack(BASE, projectRoot, { homeDir: home });
       expect(out).toContain(BASE);
       expect(out).not.toMatch(/# Project memory/);
       expect(out).not.toMatch(/# User memory/);

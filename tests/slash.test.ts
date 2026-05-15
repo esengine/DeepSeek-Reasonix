@@ -1074,15 +1074,18 @@ describe("handleSlash", () => {
 
   describe("/memory", () => {
     let root: string;
+    let home: string;
     const originalEnv = process.env.REASONIX_MEMORY;
 
     beforeEach(() => {
       root = mkdtempSync(join(tmpdir(), "reasonix-mem-slash-"));
+      home = mkdtempSync(join(tmpdir(), "reasonix-mem-slash-home-"));
       // biome-ignore lint/performance/noDelete: avoid "undefined" in env
       delete process.env.REASONIX_MEMORY;
     });
     afterEach(() => {
       rmSync(root, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
       if (originalEnv === undefined) {
         // biome-ignore lint/performance/noDelete: same reason
         delete process.env.REASONIX_MEMORY;
@@ -1092,7 +1095,7 @@ describe("handleSlash", () => {
     });
 
     it("prints a how-to when no memory (REASONIX.md or ~/.reasonix/memory) exists", () => {
-      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root });
+      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root, homeDir: home });
       expect(r.info).toMatch(/no memory pinned/);
       expect(r.info).toMatch(/REASONIX\.md/);
     });
@@ -1103,7 +1106,7 @@ describe("handleSlash", () => {
         "# House rules\nSnake case only in this repo.\n",
         "utf8",
       );
-      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root });
+      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root, homeDir: home });
       expect(r.info).toMatch(/▸ REASONIX\.md:/);
       expect(r.info).toContain("Snake case only");
       expect(r.info).toMatch(/chars/);
@@ -1112,7 +1115,7 @@ describe("handleSlash", () => {
     it("says memory is disabled when REASONIX_MEMORY=off, even with a file present", () => {
       writeFileSync(join(root, "REASONIX.md"), "content", "utf8");
       process.env.REASONIX_MEMORY = "off";
-      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root });
+      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root, homeDir: home });
       expect(r.info).toMatch(/memory is disabled/);
     });
 

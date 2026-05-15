@@ -410,9 +410,19 @@ export function applyUserMemory(
   return parts.join("\n");
 }
 
-export function applyMemoryStack(basePrompt: string, rootDir: string): string {
+export function applyMemoryStack(
+  basePrompt: string,
+  rootDir: string,
+  opts: { homeDir?: string } = {},
+): string {
   const withProject = applyProjectMemory(basePrompt, rootDir);
-  const withGlobal = applyGlobalReasonixMemory(withProject);
-  const withMemory = applyUserMemory(withGlobal, { projectRoot: rootDir });
-  return applySkillsIndex(withMemory, { projectRoot: rootDir });
+  const withGlobal = applyGlobalReasonixMemory(
+    withProject,
+    opts.homeDir ? join(opts.homeDir, ".reasonix") : undefined,
+  );
+  const withMemory = applyUserMemory(withGlobal, {
+    projectRoot: rootDir,
+    homeDir: opts.homeDir,
+  });
+  return applySkillsIndex(withMemory, { projectRoot: rootDir, homeDir: opts.homeDir });
 }

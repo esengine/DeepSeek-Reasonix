@@ -36,7 +36,7 @@ const memory: SlashHandler = (args, _loop, ctx) => {
   if (!ctx.memoryRoot) {
     return { info: t("handlers.memory.noRoot") };
   }
-  const store = new MemoryStore({ projectRoot: ctx.codeRoot });
+  const store = new MemoryStore({ projectRoot: ctx.codeRoot, homeDir: ctx.homeDir });
   const { type: typeFilter, rest: filteredArgs } = pickTypeFlag(args);
   const sub = (filteredArgs[0] ?? args[0] ?? "").toLowerCase();
 
