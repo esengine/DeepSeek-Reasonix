@@ -6,9 +6,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createRustKeystrokeReader,
   translate,
+  translateMouse,
   translatePaste,
 } from "../src/cli/ui/scene/input-adapter.js";
-import type { KeyInputEvent, PasteInputEvent } from "../src/cli/ui/scene/input-source.js";
+import type {
+  KeyInputEvent,
+  MouseInputEvent,
+  PasteInputEvent,
+} from "../src/cli/ui/scene/input-source.js";
 
 const STUB = "tests/fixtures/input-emit-stub.mjs";
 
@@ -100,7 +105,7 @@ describe("createRustKeystrokeReader", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function writeEvents(events: (KeyInputEvent | PasteInputEvent)[]): void {
+  function writeEvents(events: (KeyInputEvent | PasteInputEvent | MouseInputEvent)[]): void {
     writeFileSync(eventsPath, `${events.map((e) => JSON.stringify(e)).join("\n")}\n`);
   }
 
@@ -192,5 +197,77 @@ describe("translatePaste", () => {
     const result = translatePaste({ event: "paste", text: polluted });
     expect(result.input).toBe("abc");
     expect(result.paste).toBe(true);
+  });
+});
+
+describe("translateMouse", () => {
+  it("click sets mouseClick=true with row/col", () => {
+    expect(translateMouse({ event: "mouse", kind: "click", row: 5, col: 10 })).toEqual({
+      input: "",
+      mouseClick: true,
+      mouseRow: 5,
+      mouseCol: 10,
+    });
+  });
+
+  it("drag sets mouseDrag=true", () => {
+    expect(translateMouse({ event: "mouse", kind: "drag", row: 5, col: 11 }).mouseDrag).toBe(true);
+  });
+
+  it("release sets mouseRelease=true", () => {
+    expect(translateMouse({ event: "mouse", kind: "release", row: 5, col: 11 }).mouseRelease).toBe(
+      true,
+    );
+  });
+
+  it("scroll-up sets mouseScrollUp=true", () => {
+    expect(
+      translateMouse({ event: "mouse", kind: "scroll-up", row: 5, col: 10 }).mouseScrollUp,
+    ).toBe(true);
+  });
+
+  it("scroll-down sets mouseScrollDown=true", () => {
+    expect(
+      translateMouse({ event: "mouse", kind: "scroll-down", row: 5, col: 10 }).mouseScrollDown,
+    ).toBe(true);
+  });
+});
+
+describe("createRustKeystrokeReader forwards mouse events end-to-end", () => {
+  let dir: string;
+  let eventsPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "input-adapter-mouse-"));
+    eventsPath = join(dir, "events.jsonl");
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("delivers click + scroll-up + drag in order via the child", async () => {
+    writeFileSync(
+      eventsPath,
+      `${[
+        '{"event":"mouse","kind":"click","row":3,"col":7}',
+        '{"event":"mouse","kind":"scroll-up","row":3,"col":7}',
+        '{"event":"mouse","kind":"drag","row":4,"col":8}',
+      ].join("\n")}\n`,
+    );
+    const reader = createRustKeystrokeReader({
+      command: [process.execPath, STUB],
+      env: { ...process.env, INPUT_EMIT_FILE: eventsPath },
+    });
+    const received: import("../src/cli/ui/stdin-reader.js").KeyEvent[] = [];
+    reader.subscribe((ev) => received.push(ev));
+    await reader.wait();
+    expect(received).toHaveLength(3);
+    expect(received[0].mouseClick).toBe(true);
+    expect(received[0].mouseRow).toBe(3);
+    expect(received[0].mouseCol).toBe(7);
+    expect(received[1].mouseScrollUp).toBe(true);
+    expect(received[2].mouseDrag).toBe(true);
+    expect(received[2].mouseCol).toBe(8);
   });
 });

@@ -1,4 +1,6 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -77,4 +79,35 @@ pub fn is_quit(event: &KeyEvent) -> bool {
     event.kind == KeyEventKind::Press
         && event.code == KeyCode::Char('c')
         && event.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MouseInputEvent {
+    pub event: &'static str,
+    pub kind: &'static str,
+    /// 1-based row, matching the VT mouse-report convention the JS side expects.
+    pub row: u16,
+    /// 1-based column, same convention as row.
+    pub col: u16,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub modifiers: Vec<&'static str>,
+}
+
+pub fn translate_mouse(event: &MouseEvent) -> Option<MouseInputEvent> {
+    let kind = match event.kind {
+        MouseEventKind::Down(MouseButton::Left) => "click",
+        MouseEventKind::Drag(MouseButton::Left) => "drag",
+        MouseEventKind::Up(_) => "release",
+        MouseEventKind::ScrollUp => "scroll-up",
+        MouseEventKind::ScrollDown => "scroll-down",
+        _ => return None,
+    };
+    Some(MouseInputEvent {
+        event: "mouse",
+        kind,
+        // crossterm reports 0-based row/col; bump to 1-based on the wire.
+        row: event.row.saturating_add(1),
+        col: event.column.saturating_add(1),
+        modifiers: collect_modifiers(event.modifiers),
+    })
 }

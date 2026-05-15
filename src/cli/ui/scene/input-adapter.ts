@@ -2,6 +2,7 @@ import type { KeystrokeHandler, KeystrokeReader } from "../keystroke-context.js"
 import { type KeyEvent, sanitizePasteText } from "../stdin-reader.js";
 import {
   type KeyInputEvent,
+  type MouseInputEvent,
   type PasteInputEvent,
   type SpawnInputSourceOptions,
   spawnInputSource,
@@ -25,6 +26,10 @@ export function createRustKeystrokeReader(opts: SpawnInputSourceOptions = {}): R
   });
   source.onPaste((rust) => {
     const ev = translatePaste(rust);
+    for (const h of handlers) h(ev);
+  });
+  source.onMouse((rust) => {
+    const ev = translateMouse(rust);
     for (const h of handlers) h(ev);
   });
 
@@ -106,4 +111,26 @@ function withMods(ev: KeyEvent, ctrl: boolean, shift: boolean, alt: boolean): Ke
 
 export function translatePaste(rust: PasteInputEvent): KeyEvent {
   return { input: sanitizePasteText(rust.text), paste: true };
+}
+
+export function translateMouse(rust: MouseInputEvent): KeyEvent {
+  const ev: KeyEvent = { input: "", mouseRow: rust.row, mouseCol: rust.col };
+  switch (rust.kind) {
+    case "click":
+      ev.mouseClick = true;
+      break;
+    case "drag":
+      ev.mouseDrag = true;
+      break;
+    case "release":
+      ev.mouseRelease = true;
+      break;
+    case "scroll-up":
+      ev.mouseScrollUp = true;
+      break;
+    case "scroll-down":
+      ev.mouseScrollDown = true;
+      break;
+  }
+  return ev;
 }

@@ -15,9 +15,22 @@ export type PasteInputEvent = {
   text: string;
 };
 
+export type MouseInputKind = "click" | "drag" | "release" | "scroll-up" | "scroll-down";
+
+export type MouseInputEvent = {
+  event: "mouse";
+  kind: MouseInputKind;
+  /** 1-based row, matching the VT mouse-report convention the JS side uses elsewhere. */
+  row: number;
+  /** 1-based column, same convention as row. */
+  col: number;
+  modifiers?: readonly InputModifier[];
+};
+
 export type InputSource = {
   onKey(handler: (event: KeyInputEvent) => void): () => void;
   onPaste(handler: (event: PasteInputEvent) => void): () => void;
+  onMouse(handler: (event: MouseInputEvent) => void): () => void;
   /** Send SIGINT to the child if it's still alive, then await exit. */
   close(): Promise<number | null>;
   /** Await the child's natural exit without signaling. */
@@ -35,6 +48,7 @@ export const DEFAULT_INPUT_COMMAND: readonly string[] = [...DEFAULT_COMMAND, "--
 type Buses = {
   keys: Set<(event: KeyInputEvent) => void>;
   pastes: Set<(event: PasteInputEvent) => void>;
+  mice: Set<(event: MouseInputEvent) => void>;
 };
 
 export function spawnInputSource(opts: SpawnInputSourceOptions = {}): InputSource {
@@ -50,7 +64,7 @@ export function spawnInputSource(opts: SpawnInputSourceOptions = {}): InputSourc
     stdio: ["ignore", "pipe", "inherit"],
   });
 
-  const buses: Buses = { keys: new Set(), pastes: new Set() };
+  const buses: Buses = { keys: new Set(), pastes: new Set(), mice: new Set() };
   let buf = "";
 
   child.stdout?.setEncoding("utf8");
@@ -88,6 +102,12 @@ export function spawnInputSource(opts: SpawnInputSourceOptions = {}): InputSourc
         buses.pastes.delete(handler);
       };
     },
+    onMouse(handler) {
+      buses.mice.add(handler);
+      return () => {
+        buses.mice.delete(handler);
+      };
+    },
     async close(): Promise<number | null> {
       if (child.exitCode === null && !child.killed) {
         child.kill("SIGINT");
@@ -116,6 +136,10 @@ function dispatch(line: string, buses: Buses): void {
     for (const handler of buses.pastes) handler(parsed);
     return;
   }
+  if (isMouseEvent(parsed)) {
+    for (const handler of buses.mice) handler(parsed);
+    return;
+  }
 }
 
 function isKeyEvent(value: unknown): value is KeyInputEvent {
@@ -131,4 +155,22 @@ function isPasteEvent(value: unknown): value is PasteInputEvent {
   if (typeof value !== "object" || value === null) return false;
   const obj = value as Record<string, unknown>;
   return obj.event === "paste" && typeof obj.text === "string";
+}
+
+const MOUSE_KINDS: ReadonlySet<string> = new Set([
+  "click",
+  "drag",
+  "release",
+  "scroll-up",
+  "scroll-down",
+]);
+
+function isMouseEvent(value: unknown): value is MouseInputEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  if (obj.event !== "mouse") return false;
+  if (typeof obj.kind !== "string" || !MOUSE_KINDS.has(obj.kind)) return false;
+  if (typeof obj.row !== "number" || typeof obj.col !== "number") return false;
+  if (obj.modifiers !== undefined && !Array.isArray(obj.modifiers)) return false;
+  return true;
 }

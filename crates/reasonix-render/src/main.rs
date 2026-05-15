@@ -1,7 +1,10 @@
 use std::io::{self, BufRead, Write};
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -10,7 +13,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use reasonix_render::decode_only::run_decode_only;
-use reasonix_render::input::{is_quit, paste_event, translate_key};
+use reasonix_render::input::{is_quit, paste_event, translate_key, translate_mouse};
 use reasonix_render::render::render_frame;
 use reasonix_render::scene::SceneFrame;
 
@@ -59,7 +62,11 @@ fn run_emit_input() -> Result<()> {
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout_for_setup = io::stdout();
     let paste_enabled = execute!(stdout_for_setup, EnableBracketedPaste).is_ok();
+    let mouse_enabled = execute!(stdout_for_setup, EnableMouseCapture).is_ok();
     let result = emit_input_loop();
+    if mouse_enabled {
+        execute!(stdout_for_setup, DisableMouseCapture).ok();
+    }
     if paste_enabled {
         execute!(stdout_for_setup, DisableBracketedPaste).ok();
     }
@@ -87,6 +94,14 @@ fn emit_input_loop() -> Result<()> {
                 let event = paste_event(text);
                 let json = serde_json::to_string(&event).context("serialize paste event")?;
                 writeln!(out, "{json}").context("write paste event")?;
+                out.flush().context("flush stdout")?;
+            }
+            Event::Mouse(m) => {
+                let Some(translated) = translate_mouse(&m) else {
+                    continue;
+                };
+                let json = serde_json::to_string(&translated).context("serialize mouse event")?;
+                writeln!(out, "{json}").context("write mouse event")?;
                 out.flush().context("flush stdout")?;
             }
             _ => {}
