@@ -132,7 +132,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
         // not even touch.
         await mcp?.close().catch(() => undefined);
         process.stderr.write(
-          `${formatMcpLifecycleEvent({ state: "failed", name: label, reason: (err as Error).message })}\n  → ${t("mcpLifecycle.failedSetupConfigHint")}\n`,
+          `${formatMcpLifecycleEvent({ state: "failed", name: label, reason: (err as Error).message })}\n  ${t("mcpLifecycle.failedSetupConfigHint")}\n`,
         );
       }
     }
