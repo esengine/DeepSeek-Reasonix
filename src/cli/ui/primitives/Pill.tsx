@@ -25,7 +25,7 @@ export const PILL_SECTION = {
   taskDone: { bg: "#102815", fg: "#7ee787" },
   taskFailed: { bg: "#2c1416", fg: "#ff8b81" },
   plan: { bg: "#2a1f3d", fg: "#d2a8ff" },
-  user: { bg: "#11141a", fg: "#8b949e" },
+  user: { bg: "#1a2433", fg: "#79c0ff" },
   empty: { bg: "#11141a", fg: "#6e7681" },
 } as const;
 
