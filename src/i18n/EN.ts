@@ -1059,14 +1059,15 @@ export const EN: TranslationSchema = {
       usageSearxng: "  /search-engine searxng            use SearXNG at default endpoint",
       usageSearxngUrl: "  /search-engine searxng <url>      use SearXNG at custom endpoint",
       usageMetaso:
-        "  /search-engine metaso              use Metaso API (100/d free, set METASO_API_KEY for more)",
+        "  /search-engine metaso              use Metaso API (100/d free, configure your own API key for more)",
       alias: "Alias: /se",
       searxngInfo:
         "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
       searxngInstall: "Install it with:  docker run -d -p 8080:8080 searxng/searxng",
       switched: 'Switched web search engine to "{engine}".{note}',
       switchedSearxngNote: " Make sure SearXNG is running at {endpoint}.",
-      switchedMetasoNote: " There is a daily quota of 100 (set METASO_API_KEY for higher limits).",
+      switchedMetasoNote:
+        " There is a daily quota of 100 (configure your own API key for higher limits).",
       confirmed:
         '✓ Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
       confirmedDetail: " ({endpoint})",

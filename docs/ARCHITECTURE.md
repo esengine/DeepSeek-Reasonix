@@ -170,7 +170,7 @@ src/
 │   ├── skills.ts           # list + invoke SKILL.md playbooks
 │   ├── subagent.ts         # spawn_subagent — flash+high by default
 │   ├── plan.ts             # submit_plan (review gate)
-│   └── web.ts              # web_search, web_fetch (multi-engine: Mojeek or SearXNG)
+│   └── web.ts              # web_search, web_fetch (multi-engine: Mojeek, SearXNG or Metaso)
 ├── mcp/                    # MCP client + bridge (stdio + SSE)
 ├── memory.ts               # ImmutablePrefix / AppendOnlyLog / VolatileScratch
 ├── project-memory.ts       # REASONIX.md loader

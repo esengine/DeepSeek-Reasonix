@@ -40,7 +40,7 @@
     "cfg.k.effort": "high | max",
     "cfg.k.theme": "light | dark | auto",
     "cfg.k.search": "enable web_search/web_fetch tools",
-    "cfg.k.engine": "mojeek | searxng",
+    "cfg.k.engine": "mojeek | searxng | metaso",
     "cfg.k.mcp": "MCP server specs",
     "cfg.k.mcpoff": "names skipped at startup",
     "cfg.k.projects": "per-workspace overrides",
@@ -154,9 +154,10 @@
 
     "ws.title": "Web search",
     "ws.body1":
-      "<code>web_search</code> + <code>web_fetch</code> ship in the box. Default backend is <strong>Mojeek</strong> (no setup); switch to a self-hosted <strong>SearXNG</strong> when you want full control over upstream engines.",
+      "<code>web_search</code> + <code>web_fetch</code> ship in the box. Default backend is <strong>Mojeek</strong> (no setup); switch to a self-hosted <strong>SearXNG</strong> when you want full control over upstream engines, or use <strong>Metaso</strong> (100 free searches/day, configure your own API key for more).",
     "ws.body.json": "Equivalent <code>config.json</code>:",
     "ws.body.start": "Start a local SearXNG:",
+    "ws.body.metaso": "Or for Metaso:",
 
     "ix.title": "Semantic index",
     "ix.body1":
@@ -206,7 +207,7 @@
     "cfg.k.effort": "high | max",
     "cfg.k.theme": "light | dark | auto",
     "cfg.k.search": "启用 web_search / web_fetch 工具",
-    "cfg.k.engine": "mojeek | searxng",
+    "cfg.k.engine": "mojeek | searxng | metaso",
     "cfg.k.mcp": "MCP 服务器列表",
     "cfg.k.mcpoff": "启动时跳过的服务器名",
     "cfg.k.projects": "按工作区的覆盖配置",
@@ -326,9 +327,10 @@
 
     "ws.title": "Web 搜索",
     "ws.body1":
-      "<code>web_search</code> + <code>web_fetch</code> 开箱即用。默认走 <strong>Mojeek</strong>（无需配置）；想完全控制上游引擎就切到自托管 <strong>SearXNG</strong>。",
+      "<code>web_search</code> + <code>web_fetch</code> 开箱即用。默认走 <strong>Mojeek</strong>（无需配置）；想完全控制上游引擎就切到自托管 <strong>SearXNG</strong>，或使用 <strong>Metaso</strong>（每天 100 次免费搜索，配置你自己的 API 密钥可提升限额）。",
     "ws.body.json": "等价的 <code>config.json</code>：",
     "ws.body.start": "本机起一个 SearXNG：",
+    "ws.body.metaso": "或使用 Metaso：",
 
     "ix.title": "语义索引",
     "ix.body1":

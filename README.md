@@ -144,7 +144,7 @@ One JSON file at `~/.reasonix/config.json` plus per-project overrides under `<pr
 | [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#memory) | User-private knowledge pinned into the prefix. `user` / `feedback` / `project` / `reference` types. |
 | [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#hooks) | Shell commands on lifecycle events. `PreToolUse` (gating) · `PostToolUse` · `UserPromptSubmit` · `Stop`. |
 | [Permissions](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#permissions) | Per-workspace shell allowlist. Exact-prefix match. |
-| [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Mojeek by default; switch to self-hosted SearXNG with `/search-engine`. |
+| [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Mojeek by default; switch to self-hosted SearXNG or Metaso with `/search-engine`. |
 | [Semantic index](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#index) | `reasonix index` — local Ollama or any OpenAI-compatible embedding endpoint. |
 
 <br/>
@@ -181,7 +181,7 @@ Click through to the full architecture writeup → [Pillar 1 — Cache-first loo
 | Configurable web search engine    | `/search-engine` | —             | —                   | —                  |
 | Persistent per-workspace sessions | yes              | partial           | n/a                 | —                  |
 | Plan mode · MCP · hooks · skills  | yes              | yes               | yes                 | partial            |
-| Web search (Mojeek + SearXNG)      | yes              | yes               | yes                 | yes                |
+| Web search (Mojeek + SearXNG + Metaso)   | yes              | yes               | yes                 | yes                |
 | Open community development        | yes              | —                 | —                   | yes                |
 
 For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmarks/) — the numbers move with model pricing, so they live with the harness, not in the README.

@@ -138,7 +138,7 @@
         "Per-workspace shell allowlist. Exact-prefix match. Interactive \"always allow\" persists.",
       "conf.ws.title": "Web search",
       "conf.ws.body":
-        "Mojeek by default, no setup. Switch to self-hosted SearXNG with <code>/search-engine</code>.",
+        "Mojeek by default, no setup. Switch to self-hosted SearXNG or Metaso with <code>/search-engine</code>.",
       "conf.cta": "Open the configuration guide →",
 
       "cli.title": "CLI at a glance",
@@ -319,7 +319,7 @@
         "按工作区的 shell 白名单。精确前缀匹配。交互式“永久允许”会持久化。",
       "conf.ws.title": "Web 搜索",
       "conf.ws.body":
-        "默认 Mojeek，零配置。要完全控制就用 <code>/search-engine</code> 切自托管 SearXNG。",
+        "默认 Mojeek，零配置。用 <code>/search-engine</code> 切自托管 SearXNG 或 Metaso。",
       "conf.cta": "打开配置指南 →",
 
       "cli.title": "CLI 速览",

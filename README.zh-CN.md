@@ -118,7 +118,7 @@ npx reasonix code --dir /path/to/project
 | [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#memory) | 用户私有的知识，钉进前缀。`user` / `feedback` / `project` / `reference` 四类。 |
 | [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#hooks) | 生命周期事件触发的 shell 命令。`PreToolUse`（拦截）· `PostToolUse` · `UserPromptSubmit` · `Stop`。 |
 | [权限](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#permissions) | 按工作区的 shell 白名单，精确前缀匹配。 |
-| [Web 搜索](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#search) | 默认 Mojeek；用 `/search-engine` 可切到自托管的 SearXNG。 |
+| [Web 搜索](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#search) | 默认 Mojeek；用 `/search-engine` 可切到自托管的 SearXNG 或 Metaso。 |
 | [语义索引](https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh#index) | `reasonix index` —— 本地 Ollama，或任何 OpenAI 兼容的 embedding 接口。 |
 
 <br/>
