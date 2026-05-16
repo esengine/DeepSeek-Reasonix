@@ -97,24 +97,48 @@ fn install_panic_hook() {
 fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
     let stdin = io::stdin();
     let mut logged_first_frame = false;
+    let mut last_size = terminal.size().ok();
     for (lineno, line) in stdin.lock().lines().enumerate() {
         let line = line.with_context(|| format!("read line {}", lineno + 1))?;
         if line.trim().is_empty() {
             continue;
         }
+        let current_size = terminal.size().ok();
+        if current_size != last_size {
+            terminal.clear().ok();
+            last_size = current_size;
+        }
         let frame = decode_to_frame(&line, terminal_size(terminal))
             .with_context(|| format!("decode line {}", lineno + 1))?;
-        terminal.draw(|f| {
+        draw_atomic(terminal, &frame, &mut logged_first_frame)?;
+    }
+    Ok(())
+}
+
+fn draw_atomic(
+    terminal: &mut RenderTerminal,
+    frame: &SceneFrame,
+    logged_first_frame: &mut bool,
+) -> Result<()> {
+    let _ =
+        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::BeginSynchronizedUpdate);
+    let draw_err = terminal
+        .draw(|f| {
             let area = f.area();
-            if !logged_first_frame {
+            if !*logged_first_frame {
                 debug_log(&format!(
                     "first frame area = x={} y={} w={} h={}",
                     area.x, area.y, area.width, area.height
                 ));
+                *logged_first_frame = true;
             }
-            render_frame(&frame, f.buffer_mut(), area);
-        })?;
-        logged_first_frame = true;
+            render_frame(frame, f.buffer_mut(), area);
+        })
+        .err();
+    let _ =
+        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::EndSynchronizedUpdate);
+    if let Some(e) = draw_err {
+        return Err(e).context("terminal draw");
     }
     Ok(())
 }
