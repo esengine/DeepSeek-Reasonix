@@ -1,6 +1,8 @@
 /** cwd pinned to root; non-allowlisted commands throw to a UI confirm gate; spawn is `shell: false`, tokenized argv only. */
 
+import { existsSync } from "node:fs";
 import * as pathMod from "node:path";
+import { fileURLToPath } from "node:url";
 import { addProjectShellAllowed } from "../config.js";
 import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
@@ -9,6 +11,7 @@ import {
   DEFAULT_MAX_OUTPUT_CHARS,
   DEFAULT_TIMEOUT_SEC,
   type RunCommandResult,
+  resolveExecutable,
   runCommand,
 } from "./shell/exec.js";
 import { isCommandAllowed } from "./shell/parse.js";
@@ -46,6 +49,8 @@ export interface ShellToolsOptions {
   jobs?: JobRegistry;
   /** Fired after `run_background` / `stop_job` mutate the registry — used by the desktop popover for near-real-time updates without polling. */
   onJobsChanged?: () => void;
+  /** Path to rtk binary for token-optimized output filtering. Auto-resolved from PATH when set to "rtk". Omit or pass null to disable. */
+  rtkBin?: string | null;
 }
 
 /** Error thrown by `run_command` when the command isn't allowlisted. */
@@ -81,6 +86,40 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   // are wrapped into a thunk for uniformity.
   const isAllowAll: () => boolean =
     typeof opts.allowAll === "function" ? opts.allowAll : () => opts.allowAll === true;
+
+  // Resolve rtk path once at registration time — auto-detect when omitted.
+  // Checks: Reasonix's own bin/ dir → PATH → project-local rtk source build.
+  const rtkBin: string | null =
+    opts.rtkBin === undefined
+      ? (() => {
+          try {
+            // 1) Reasonix 自身目录下的 bin/rtk.exe
+            const moduleDir = pathMod.dirname(fileURLToPath(import.meta.url));
+            // shell.ts 在 src/tools/shell.ts, 项目根在 src/../..
+            const reasonixRoot = pathMod.resolve(moduleDir, "..", "..");
+            const exeName = process.platform === "win32" ? "rtk.exe" : "rtk";
+            const inHouse = pathMod.join(reasonixRoot, "bin", exeName);
+            if (existsSync(inHouse)) return inHouse;
+
+            // 2) PATH 查找
+            const fromPath = resolveExecutable("rtk");
+            if (fromPath && fromPath !== "rtk") return fromPath;
+
+            // 3) 退路: 项目同级 rtk 源码构建目录
+            const localDirs = [
+              pathMod.resolve(rootDir, "..", "rtk", "rtk-install", "bin"),
+              pathMod.resolve(rootDir, "..", "rtk", "target", "release"),
+            ];
+            for (const dir of localDirs) {
+              const candidate = pathMod.join(dir, exeName);
+              if (existsSync(candidate)) return candidate;
+            }
+            return null;
+          } catch {
+            return null;
+          }
+        })()
+      : opts.rtkBin;
 
   registry.register({
     name: "run_command",
@@ -136,6 +175,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         timeoutSec: effectiveTimeout,
         maxOutputChars,
         signal: ctx?.signal,
+        wrapCommand: rtkBin ?? undefined,
       });
       return formatCommandResult(cmd, result);
     },

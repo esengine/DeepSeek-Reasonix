@@ -49,6 +49,8 @@ export async function runCommand(
     timeoutSec?: number;
     maxOutputChars?: number;
     signal?: AbortSignal;
+    /** Prepend this wrapper to the command (e.g. "rtk" for token filtering). */
+    wrapCommand?: string;
   },
 ): Promise<RunCommandResult> {
   const timeoutSec = opts.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
@@ -62,6 +64,7 @@ export async function runCommand(
       timeoutSec,
       maxOutputChars: maxChars,
       signal: opts.signal,
+      wrapCommand: opts.wrapCommand,
     });
   }
   const timeoutMs = timeoutSec * 1000;
@@ -99,7 +102,10 @@ export async function runCommand(
   //      with verbatim args + manual quoting, so shell metacharacters
   //      in arguments stay literal.
   // Unix path is unchanged.
-  const { bin, args, spawnOverrides } = prepareSpawn(argv, { env: normalizedEnv });
+  const { bin, args, spawnOverrides } = prepareSpawn(argv, {
+    env: normalizedEnv,
+    wrapCommand: opts.wrapCommand,
+  });
   const effectiveSpawnOpts = { ...spawnOpts, ...spawnOverrides };
 
   return await new Promise<RunCommandResult>((resolve, reject) => {
@@ -203,6 +209,8 @@ export interface ResolveExecutableOptions {
   env?: { PATH?: string; PATHEXT?: string };
   isFile?: (path: string) => boolean;
   pathDelimiter?: string;
+  /** When set, prepend this wrapper binary to every spawn — e.g. "rtk" for token-optimized output filtering. The original command becomes the wrapper's first argument. */
+  wrapCommand?: string;
 }
 
 /** CreateProcess ignores PATHEXT — bare `npm` fails ENOENT under `shell:false` without this resolver. */
@@ -311,8 +319,22 @@ export function prepareSpawn(
   argv: readonly string[],
   opts: ResolveExecutableOptions = {},
 ): { bin: string; args: string[]; spawnOverrides: SpawnOptions } {
-  const head = argv[0] ?? "";
-  const tail = argv.slice(1);
+  // Apply command wrapper if configured (e.g. rtk for token filtering).
+  // Avoid double-wrapping: skip if the command already is the wrapper.
+  // Apply command wrapper if configured (e.g. rtk for token filtering).
+  // Avoid double-wrapping: skip if the command already is the wrapper.
+  let effectiveArgv = argv;
+  if (opts.wrapCommand && opts.wrapCommand !== "") {
+    const rawHead = argv[0] ?? "";
+    const wrapBase = pathMod.basename(opts.wrapCommand).replace(/\.exe$/i, "");
+    const headBase = pathMod.basename(rawHead).replace(/\.exe$/i, "");
+    if (headBase !== wrapBase) {
+      // Prepend wrapper: ["git", "status"] → ["rtk", "git", "status"]
+      effectiveArgv = [opts.wrapCommand, ...argv];
+    }
+  }
+  const head = effectiveArgv[0] ?? "";
+  const tail = effectiveArgv.slice(1);
   const platform = opts.platform ?? process.platform;
   const resolved = resolveExecutable(head, opts);
 
