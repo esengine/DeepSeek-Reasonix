@@ -42,6 +42,17 @@ import {
 
 export type { McpLifecycleNotice, McpLifecycleSink, McpRuntime, ProgressInfo };
 
+function parseInputCmd(raw: string | undefined): readonly string[] | undefined {
+  if (!raw || raw.length === 0) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((p) => typeof p === "string")) return parsed;
+  } catch {
+    // fall through
+  }
+  return undefined;
+}
+
 export interface ChatOptions {
   model: string;
   system: string;
@@ -345,7 +356,10 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const rustRendererActive = process.env.REASONIX_RENDERER === "rust";
   const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
   const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
-  const keystrokeReader = rustRendererActive ? createRustKeystrokeReader() : undefined;
+  const inputCmdOverride = parseInputCmd(process.env.REASONIX_INPUT_CMD);
+  const keystrokeReader = rustRendererActive
+    ? createRustKeystrokeReader(inputCmdOverride ? { command: inputCmdOverride } : {})
+    : undefined;
 
   const { waitUntilExit } = render(
     <Root
