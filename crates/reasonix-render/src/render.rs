@@ -4,8 +4,15 @@ use ratatui::style::{Color as RColor, Modifier, Style};
 use unicode_width::UnicodeWidthChar;
 
 use crate::scene::{
-    BoxLayout, Color, FlexDirection, NamedColor, SceneFrame, SceneNode, TextRun, TextStyle,
+    BoxLayout, Color, Dim, FillToken, FlexDirection, NamedColor, SceneFrame, SceneNode, TextRun,
+    TextStyle,
 };
+
+#[derive(Clone, Copy)]
+enum Axis {
+    Row,
+    Column,
+}
 
 pub fn render_frame(frame: &SceneFrame, buf: &mut Buffer, area: Rect) {
     render_node(&frame.root, buf, area);
@@ -71,6 +78,7 @@ fn render_box(layout: Option<&BoxLayout>, children: &[SceneNode], buf: &mut Buff
 }
 
 fn render_column(children: &[SceneNode], gap: u16, buf: &mut Buffer, area: Rect) {
+    let sizes = compute_axis_sizes(children, gap, area.height, Axis::Column);
     let mut y = area.y;
     let max_y = area.y.saturating_add(area.height);
     let last = children.len().saturating_sub(1);
@@ -78,8 +86,7 @@ fn render_column(children: &[SceneNode], gap: u16, buf: &mut Buffer, area: Rect)
         if y >= max_y {
             break;
         }
-        let remaining = max_y - y;
-        let h = intrinsic_height(child).min(remaining);
+        let h = sizes[i].min(max_y - y);
         let child_area = Rect {
             x: area.x,
             y,
@@ -95,6 +102,7 @@ fn render_column(children: &[SceneNode], gap: u16, buf: &mut Buffer, area: Rect)
 }
 
 fn render_row(children: &[SceneNode], gap: u16, buf: &mut Buffer, area: Rect) {
+    let sizes = compute_axis_sizes(children, gap, area.width, Axis::Row);
     let mut x = area.x;
     let max_x = area.x.saturating_add(area.width);
     let last = children.len().saturating_sub(1);
@@ -102,8 +110,7 @@ fn render_row(children: &[SceneNode], gap: u16, buf: &mut Buffer, area: Rect) {
         if x >= max_x {
             break;
         }
-        let remaining = max_x - x;
-        let w = intrinsic_width(child).min(remaining);
+        let w = sizes[i].min(max_x - x);
         let child_area = Rect {
             x,
             y: area.y,
@@ -116,6 +123,63 @@ fn render_row(children: &[SceneNode], gap: u16, buf: &mut Buffer, area: Rect) {
             x = x.saturating_add(gap);
         }
     }
+}
+
+fn compute_axis_sizes(children: &[SceneNode], gap: u16, total: u16, axis: Axis) -> Vec<u16> {
+    let n = children.len();
+    if n == 0 {
+        return vec![];
+    }
+    let gap_total = gap.saturating_mul((n.saturating_sub(1)) as u16);
+    let mut available = total.saturating_sub(gap_total);
+    let mut sizes = vec![0u16; n];
+    let mut fill_indices: Vec<usize> = Vec::new();
+
+    for (i, child) in children.iter().enumerate() {
+        match axis_dim(child, axis) {
+            Some(Dim::Cells(c)) => {
+                let want = c.max(0) as u16;
+                let take = want.min(available);
+                sizes[i] = take;
+                available = available.saturating_sub(take);
+            }
+            Some(Dim::Fill(FillToken::Fill)) => {
+                fill_indices.push(i);
+            }
+            None => {
+                let want = match axis {
+                    Axis::Row => intrinsic_width(child),
+                    Axis::Column => intrinsic_height(child),
+                };
+                let take = want.min(available);
+                sizes[i] = take;
+                available = available.saturating_sub(take);
+            }
+        }
+    }
+
+    if !fill_indices.is_empty() && available > 0 {
+        let count = fill_indices.len() as u16;
+        let per = available / count;
+        let remainder = available % count;
+        for (j, &i) in fill_indices.iter().enumerate() {
+            sizes[i] = per + if (j as u16) < remainder { 1 } else { 0 };
+        }
+    }
+
+    sizes
+}
+
+fn axis_dim(node: &SceneNode, axis: Axis) -> Option<Dim> {
+    let layout = match node {
+        SceneNode::Box { layout, .. } => layout.as_ref()?,
+        SceneNode::Text { .. } => return None,
+    };
+    let dim = match axis {
+        Axis::Row => layout.width.as_ref(),
+        Axis::Column => layout.height.as_ref(),
+    };
+    dim.cloned()
 }
 
 fn apply_padding(layout: Option<&BoxLayout>, area: Rect) -> Rect {

@@ -4,8 +4,41 @@ use ratatui::style::{Color as RColor, Modifier};
 
 use reasonix_render::render::render_frame;
 use reasonix_render::scene::{
-    BoxLayout, Color, FlexDirection, NamedColor, SceneFrame, SceneNode, TextRun, TextStyle,
+    BoxLayout, Color, Dim, FillToken, FlexDirection, NamedColor, SceneFrame, SceneNode, TextRun,
+    TextStyle,
 };
+
+fn box_with_width(text: &str, width: Dim) -> SceneNode {
+    SceneNode::Box {
+        layout: Some(BoxLayout {
+            width: Some(width),
+            ..Default::default()
+        }),
+        children: vec![SceneNode::Text {
+            runs: vec![TextRun {
+                text: text.to_string(),
+                style: None,
+            }],
+            wrap: None,
+        }],
+    }
+}
+
+fn box_with_height(text: &str, height: Dim) -> SceneNode {
+    SceneNode::Box {
+        layout: Some(BoxLayout {
+            height: Some(height),
+            ..Default::default()
+        }),
+        children: vec![SceneNode::Text {
+            runs: vec![TextRun {
+                text: text.to_string(),
+                style: None,
+            }],
+            wrap: None,
+        }],
+    }
+}
 
 fn frame_of(root: SceneNode) -> SceneFrame {
     SceneFrame {
@@ -184,6 +217,195 @@ fn truncates_text_overflowing_its_area() {
     let mut buf = Buffer::empty(area);
     render_frame(&frame, &mut buf, area);
     assert_eq!(collect_row(&buf, 0, 4), "abcd");
+}
+
+#[test]
+fn row_with_fixed_cell_widths_reserves_those_widths_first() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Row),
+            ..Default::default()
+        }),
+        children: vec![
+            box_with_width("L", Dim::Cells(4)),
+            box_with_width("R", Dim::Cells(3)),
+        ],
+    });
+    let area = Rect::new(0, 0, 20, 1);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "L");
+    assert_eq!(buf[(4, 0)].symbol(), "R");
+}
+
+#[test]
+fn row_with_one_fill_child_takes_all_remaining_space() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Row),
+            ..Default::default()
+        }),
+        children: vec![
+            box_with_width("L", Dim::Cells(3)),
+            box_with_width("M", Dim::Fill(FillToken::Fill)),
+            box_with_width("R", Dim::Cells(3)),
+        ],
+    });
+    let area = Rect::new(0, 0, 20, 1);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "L");
+    assert_eq!(buf[(3, 0)].symbol(), "M");
+    assert_eq!(buf[(17, 0)].symbol(), "R");
+}
+
+#[test]
+fn row_with_multiple_fill_children_splits_remainder_evenly() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Row),
+            ..Default::default()
+        }),
+        children: vec![
+            box_with_width("A", Dim::Fill(FillToken::Fill)),
+            box_with_width("B", Dim::Fill(FillToken::Fill)),
+            box_with_width("C", Dim::Fill(FillToken::Fill)),
+        ],
+    });
+    let area = Rect::new(0, 0, 12, 1);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "A");
+    assert_eq!(buf[(4, 0)].symbol(), "B");
+    assert_eq!(buf[(8, 0)].symbol(), "C");
+}
+
+#[test]
+fn row_distributes_uneven_remainder_to_leading_fill_children() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Row),
+            ..Default::default()
+        }),
+        children: vec![
+            box_with_width("A", Dim::Fill(FillToken::Fill)),
+            box_with_width("B", Dim::Fill(FillToken::Fill)),
+        ],
+    });
+    let area = Rect::new(0, 0, 11, 1);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "A");
+    assert_eq!(buf[(6, 0)].symbol(), "B");
+}
+
+#[test]
+fn row_caps_a_fixed_width_at_the_remaining_space() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Row),
+            ..Default::default()
+        }),
+        children: vec![
+            box_with_width("ABCDE", Dim::Cells(50)),
+            box_with_width("X", Dim::Cells(3)),
+        ],
+    });
+    let area = Rect::new(0, 0, 8, 1);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "A");
+    assert_eq!(buf[(7, 0)].symbol(), " ");
+}
+
+#[test]
+fn row_unspecified_children_keep_their_intrinsic_widths() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Row),
+            ..Default::default()
+        }),
+        children: vec![
+            SceneNode::Text {
+                runs: vec![TextRun {
+                    text: "ab".to_string(),
+                    style: None,
+                }],
+                wrap: None,
+            },
+            SceneNode::Text {
+                runs: vec![TextRun {
+                    text: "cd".to_string(),
+                    style: None,
+                }],
+                wrap: None,
+            },
+        ],
+    });
+    let area = Rect::new(0, 0, 10, 1);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(collect_row(&buf, 0, 10), "abcd");
+}
+
+#[test]
+fn row_gap_is_subtracted_from_available_before_distributing() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Row),
+            gap: Some(1),
+            ..Default::default()
+        }),
+        children: vec![
+            box_with_width("A", Dim::Fill(FillToken::Fill)),
+            box_with_width("B", Dim::Fill(FillToken::Fill)),
+        ],
+    });
+    let area = Rect::new(0, 0, 9, 1);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "A");
+    assert_eq!(buf[(5, 0)].symbol(), "B");
+}
+
+#[test]
+fn column_with_fixed_cell_heights_reserves_those_heights_first() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Column),
+            ..Default::default()
+        }),
+        children: vec![
+            box_with_height("T", Dim::Cells(2)),
+            box_with_height("B", Dim::Cells(1)),
+        ],
+    });
+    let area = Rect::new(0, 0, 5, 10);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "T");
+    assert_eq!(buf[(0, 2)].symbol(), "B");
+}
+
+#[test]
+fn column_fill_child_consumes_remaining_height() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Column),
+            ..Default::default()
+        }),
+        children: vec![
+            box_with_height("T", Dim::Cells(1)),
+            box_with_height("M", Dim::Fill(FillToken::Fill)),
+            box_with_height("B", Dim::Cells(1)),
+        ],
+    });
+    let area = Rect::new(0, 0, 5, 10);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "T");
+    assert_eq!(buf[(0, 1)].symbol(), "M");
+    assert_eq!(buf[(0, 9)].symbol(), "B");
 }
 
 #[test]

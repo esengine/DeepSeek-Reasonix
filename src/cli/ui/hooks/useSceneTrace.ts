@@ -124,9 +124,13 @@ export function buildTraceFrame(input: BuildInput, cols: number, rows: number): 
 }
 
 function titleRow(s: BuildInput): SceneNode {
-  const runs: TextRun[] = [{ text: "reasonix", style: { bold: true } }];
-  if (s.model) runs.push({ text: ` · ${s.model}`, style: { dim: true } });
-  return text(runs);
+  const left = text([{ text: "reasonix", style: { bold: true } }]);
+  const spacer = box([], { width: "fill" });
+  const children: SceneNode[] = [left, spacer];
+  if (s.model) {
+    children.push(text([{ text: s.model, style: { dim: true } }]));
+  }
+  return box(children, { direction: "row" });
 }
 
 function noCardsRow(): SceneNode {

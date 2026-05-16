@@ -138,15 +138,28 @@ describe("buildTraceFrame", () => {
     expect(f.root.children).toHaveLength(4);
   });
 
-  it("renders the model name in the title row when given", () => {
+  it("renders the title as a row with brand on the left and model on the right separated by a fill spacer", () => {
     const f = buildEmpty({ model: "deepseek-chat" });
-    expect(f.root.kind).toBe("box");
-    if (f.root.kind !== "box") return;
+    if (f.root.kind !== "box") throw new Error("expected box root");
     const title = f.root.children[0];
-    if (title?.kind !== "text") return;
-    const flat = title.runs.map((r) => r.text).join("");
-    expect(flat).toContain("reasonix");
-    expect(flat).toContain("deepseek-chat");
+    if (title?.kind !== "box") throw new Error("expected title to be a box");
+    expect(title.layout?.direction).toBe("row");
+    expect(title.children).toHaveLength(3);
+    const [brand, spacer, model] = title.children;
+    if (brand?.kind !== "text") throw new Error("expected brand text");
+    expect(brand.runs.map((r) => r.text).join("")).toContain("reasonix");
+    if (spacer?.kind !== "box") throw new Error("expected spacer box");
+    expect(spacer.layout?.width).toBe("fill");
+    if (model?.kind !== "text") throw new Error("expected model text");
+    expect(model.runs.map((r) => r.text).join("")).toBe("deepseek-chat");
+  });
+
+  it("omits the model node from the title row when no model is given", () => {
+    const f = buildEmpty();
+    if (f.root.kind !== "box") throw new Error("expected box root");
+    const title = f.root.children[0];
+    if (title?.kind !== "box") throw new Error("expected title to be a box");
+    expect(title.children).toHaveLength(2);
   });
 
   it("shows a placeholder card row when no cards exist", () => {
