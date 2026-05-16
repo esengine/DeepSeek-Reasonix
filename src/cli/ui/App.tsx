@@ -722,6 +722,21 @@ function AppInner({
     !!pendingRevision ||
     !!stagedCheckpointRevise ||
     !!pendingCheckpoint;
+  // Truthy when the live activity rows (ongoing tool, subagent stack, thinking
+  // row, plan live row) can render. Hidden whenever a take-over modal is up so
+  // they don't fight the picker for visual attention. Tighter than `modalOpen` —
+  // doesn't include model/theme/copy-mode pickers that overlay without owning
+  // the bottom rows.
+  const noTakeoverOverlay =
+    !pendingShell &&
+    !pendingPath &&
+    !pendingPlan &&
+    !pendingReviseEditor &&
+    !pendingSessionsPicker &&
+    !pendingCheckpointPicker &&
+    !pendingMcpHub &&
+    !stagedInput &&
+    !pendingEditReview;
   // Plan-mode indicator 闂?displayed in the StatsPanel, mirrored onto
   // the ToolRegistry so dispatch enforces read-only. Toggled via the
   // `/plan` slash and PlanConfirm picker. Ephemeral 闂?not persisted
@@ -3909,41 +3924,13 @@ function AppInner({
           attention. They come back naturally once the user chooses and
           the next turn begins.
         */}
-                  {!pendingShell &&
-                  !pendingPath &&
-                  !pendingPlan &&
-                  !pendingReviseEditor &&
-                  !pendingSessionsPicker &&
-                  !pendingCheckpointPicker &&
-                  !pendingMcpHub &&
-                  !stagedInput &&
-                  !pendingEditReview &&
-                  ongoingTool ? (
+                  {noTakeoverOverlay && ongoingTool ? (
                     <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
                   ) : null}
-                  {!pendingShell &&
-                  !pendingPath &&
-                  !pendingPlan &&
-                  !pendingReviseEditor &&
-                  !pendingSessionsPicker &&
-                  !pendingCheckpointPicker &&
-                  !pendingMcpHub &&
-                  !stagedInput &&
-                  !pendingEditReview &&
-                  subagentActivities.length > 0 ? (
+                  {noTakeoverOverlay && subagentActivities.length > 0 ? (
                     <SubagentLiveStack activities={subagentActivities} max={3} />
                   ) : null}
-                  {!pendingShell &&
-                  !pendingPath &&
-                  !pendingPlan &&
-                  !pendingReviseEditor &&
-                  !pendingSessionsPicker &&
-                  !pendingCheckpointPicker &&
-                  !pendingMcpHub &&
-                  !stagedInput &&
-                  !pendingEditReview &&
-                  !ongoingTool &&
-                  statusLine ? (
+                  {noTakeoverOverlay && !ongoingTool && statusLine ? (
                     <ThinkingRow text={statusLine} />
                   ) : null}
                   {undoBanner &&
@@ -3963,32 +3950,10 @@ function AppInner({
                     <UndoBanner banner={undoBanner} />
                   ) : null}
                   {/* Activity row when no targeted indicator is visible 闂?phase label from useActivityLabel. */}
-                  {!pendingShell &&
-                  !pendingPath &&
-                  !pendingPlan &&
-                  !pendingReviseEditor &&
-                  !pendingSessionsPicker &&
-                  !pendingCheckpointPicker &&
-                  !pendingMcpHub &&
-                  !stagedInput &&
-                  !pendingEditReview &&
-                  busy &&
-                  !isStreaming &&
-                  !ongoingTool &&
-                  !statusLine ? (
+                  {noTakeoverOverlay && busy && !isStreaming && !ongoingTool && !statusLine ? (
                     <ThinkingRow text={activityLabel} />
                   ) : null}
-                  {!pendingShell &&
-                  !pendingPath &&
-                  !pendingPlan &&
-                  !pendingReviseEditor &&
-                  !pendingSessionsPicker &&
-                  !pendingCheckpointPicker &&
-                  !pendingMcpHub &&
-                  !stagedInput &&
-                  !pendingEditReview ? (
-                    <PlanLiveRow />
-                  ) : null}
+                  {noTakeoverOverlay ? <PlanLiveRow /> : null}
                   <ToastRail />
                 </Box>
                 {stagedInput ? (
