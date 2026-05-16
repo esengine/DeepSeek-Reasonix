@@ -230,18 +230,73 @@ describe("buildTraceFrame — v1 single-column layout", () => {
     expect(flatScroll).toContain("hello back");
   });
 
-  it("paints YOU cards with the design accent (ds hex) and bold", () => {
-    const f = buildTraceFrame(
-      { cardCount: 1, busy: false, cards: [{ kind: "user", summary: "hello" }] },
-      142,
-      38,
-    );
-    const row = scrollOf(f)[0];
-    if (row?.kind !== "text") return;
-    const glyph = row.runs[0];
-    expect(glyph?.style?.bold).toBe(true);
-    const color = glyph?.style?.color;
-    expect(typeof color === "object" && color && "hex" in color).toBe(true);
+  it("renders a USER card as a head row + body row(s)", () => {
+    const cards: SceneTraceCard[] = [
+      { kind: "user", summary: "hello world", body: "hello world\nsecond line", ts: 1000 },
+    ];
+    const f = buildTraceFrame({ cardCount: 1, busy: false, cards }, 142, 38);
+    const block = scrollOf(f)[0];
+    if (block?.kind !== "box") throw new Error("expected user card box");
+    expect(block.layout?.direction).toBe("column");
+    expect(block.children.length).toBeGreaterThanOrEqual(3);
+    const head = block.children[0];
+    const flatHead =
+      head?.kind === "text"
+        ? head.runs.map((r) => r.text).join("")
+        : head?.kind === "box"
+          ? head.children
+              .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+              .join("")
+          : "";
+    expect(flatHead).toContain("YOU");
+    const body1 = block.children[1];
+    const body2 = block.children[2];
+    if (body1?.kind !== "text" || body2?.kind !== "text") throw new Error("expected text bodies");
+    expect(body1.runs.map((r) => r.text).join("")).toContain("hello world");
+    expect(body2.runs.map((r) => r.text).join("")).toContain("second line");
+  });
+
+  it("renders a THINKING card with reasoning meta (steps) + italic dim body", () => {
+    const cards: SceneTraceCard[] = [
+      {
+        kind: "reasoning",
+        summary: "first thought",
+        body: "first thought\nsecond thought",
+        meta: "8 steps",
+      },
+    ];
+    const f = buildTraceFrame({ cardCount: 1, busy: false, cards }, 142, 38);
+    const block = scrollOf(f)[0];
+    if (block?.kind !== "box") throw new Error("expected reasoning card box");
+    const headChild = block.children[0];
+    let headFlat = "";
+    if (headChild?.kind === "text") {
+      headFlat = headChild.runs.map((r) => r.text).join("");
+    } else if (headChild?.kind === "box") {
+      headFlat = headChild.children
+        .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+        .join("");
+    }
+    expect(headFlat).toContain("THINKING");
+    expect(headFlat).toContain("8 steps");
+    const body1 = block.children[1];
+    if (body1?.kind !== "text") return;
+    expect(body1.runs[0]?.style?.italic).toBe(true);
+  });
+
+  it("caps long bodies at MAX_CARD_BODY_LINES and skips blank lines", () => {
+    const body = ["a", "", "b", "c", "", "d", "e", "f", "g"].join("\n");
+    const cards: SceneTraceCard[] = [{ kind: "user", summary: "a", body }];
+    const f = buildTraceFrame({ cardCount: 1, busy: false, cards }, 142, 38);
+    const block = scrollOf(f)[0];
+    if (block?.kind !== "box") return;
+    const bodyRows = block.children
+      .slice(1)
+      .filter((c) => c.kind === "text")
+      .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+      .filter((s) => s.trim().length > 0);
+    expect(bodyRows.length).toBeLessThanOrEqual(5);
+    expect(bodyRows.join(" ")).not.toContain("g");
   });
 
   it("dock has composer + meta + status when no overlay is active", () => {
@@ -362,11 +417,29 @@ describe("buildTraceFrame — v1 single-column layout", () => {
 });
 
 describe("toSceneCard — tool card enrichment", () => {
-  it("returns a plain { kind, summary } for non-tool cards", () => {
-    expect(toSceneCard({ id: "u1", ts: 0, kind: "user", text: "hi" })).toEqual({
+  it("returns a head+body shape for user cards (kind / summary / body / ts)", () => {
+    expect(toSceneCard({ id: "u1", ts: 42, kind: "user", text: "hi\nthere" })).toEqual({
       kind: "user",
       summary: "hi",
+      body: "hi\nthere",
+      ts: 42,
     });
+  });
+
+  it("returns a plain { kind, summary } for unhandled kinds", () => {
+    const card = toSceneCard({
+      id: "d1",
+      ts: 0,
+      kind: "diff",
+      file: "src/x.ts",
+      hunks: [],
+      adds: 0,
+      dels: 0,
+    } as Card);
+    expect(card.kind).toBe("diff");
+    expect(card.summary).toBe("src/x.ts");
+    expect(card.body).toBeUndefined();
+    expect(card.ts).toBeUndefined();
   });
 
   it("includes args + status + elapsed + id for a completed tool card", () => {

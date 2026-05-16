@@ -13,7 +13,12 @@ export type SceneTraceCard = {
   status?: "ok" | "err" | "running";
   elapsed?: string;
   id?: string;
+  body?: string;
+  ts?: number;
+  meta?: string;
 };
+
+const MAX_CARD_BODY_LINES = 5;
 export type SceneSlashMatch = { cmd: string; summary: string; argsHint?: string };
 export type SceneSessionItem = { title: string; meta?: string };
 
@@ -94,15 +99,35 @@ export function summarizeCard(card: Card | undefined): string | undefined {
 
 export function toSceneCard(card: Card): SceneTraceCard {
   const summary = summarizeCard(card) ?? "";
-  if (card.kind !== "tool") return { kind: card.kind, summary };
-  return {
-    kind: "tool",
-    summary: card.name,
-    args: extractToolArgs(card.args),
-    status: toolStatus(card),
-    elapsed: card.done ? formatElapsed(card.elapsedMs) : undefined,
-    id: shortenId(card.id),
-  };
+  switch (card.kind) {
+    case "tool":
+      return {
+        kind: "tool",
+        summary: card.name,
+        args: extractToolArgs(card.args),
+        status: toolStatus(card),
+        elapsed: card.done ? formatElapsed(card.elapsedMs) : undefined,
+        id: shortenId(card.id),
+      };
+    case "user":
+      return { kind: "user", summary, body: card.text, ts: card.ts };
+    case "reasoning": {
+      const meta = card.endedAt
+        ? `${card.paragraphs} steps · ${formatElapsed(card.endedAt - card.ts)}`
+        : `${card.paragraphs} steps`;
+      return { kind: "reasoning", summary, body: card.text, ts: card.ts, meta };
+    }
+    case "streaming":
+      return {
+        kind: "streaming",
+        summary,
+        body: card.text,
+        ts: card.ts,
+        meta: card.done ? "done" : "streaming…",
+      };
+    default:
+      return { kind: card.kind, summary };
+  }
 }
 
 function toolStatus(card: Card & { kind: "tool" }): "ok" | "err" | "running" {
@@ -241,6 +266,9 @@ export const REASONIX_LOGO_LINES = LOGO_LINES;
 
 function cardBlock(c: SceneTraceCard): SceneNode {
   if (c.kind === "tool") return toolCardBlock(c);
+  if (c.kind === "user" || c.kind === "reasoning" || c.kind === "streaming") {
+    return messageCardBlock(c);
+  }
   const color = colorFor(c.kind);
   const label = kindLabel(c.kind);
   const runs: TextRun[] = [{ text: glyphFor(c.kind), style: { color, bold: true } }, { text: " " }];
@@ -250,6 +278,60 @@ function cardBlock(c: SceneTraceCard): SceneNode {
   }
   runs.push({ text: c.summary || c.kind, style: { color: PALETTE.fg } });
   return text(runs);
+}
+
+function messageCardBlock(c: SceneTraceCard): SceneNode {
+  const color = colorFor(c.kind);
+  const label = kindLabel(c.kind) ?? c.kind;
+  const head = headRow(c, color, label);
+  const lines = bodyLines(c.body ?? c.summary);
+  const rows: SceneNode[] = [head];
+  for (const line of lines) rows.push(bodyRow(line, c.kind));
+  rows.push(text([{ text: "", style: {} }]));
+  return box(rows, { direction: "column" });
+}
+
+function headRow(c: SceneTraceCard, color: Color, label: string): SceneNode {
+  const leftRuns: TextRun[] = [
+    { text: glyphFor(c.kind), style: { color, bold: true } },
+    { text: " " },
+    { text: label, style: { color, bold: true } },
+  ];
+  const rightRuns: TextRun[] = [];
+  if (c.meta) rightRuns.push({ text: c.meta, style: { color: PALETTE.fg3 } });
+  if (c.ts) {
+    if (rightRuns.length > 0) rightRuns.push({ text: "  ·  ", style: { color: PALETTE.fg3 } });
+    rightRuns.push({ text: formatTs(c.ts), style: { color: PALETTE.fg3 } });
+  }
+  if (rightRuns.length === 0) return text(leftRuns);
+  return box([text(leftRuns), box([], { width: "fill" }), text(rightRuns)], { direction: "row" });
+}
+
+function bodyRow(line: string, kind: string): SceneNode {
+  const dim = kind === "reasoning";
+  const style = dim ? { color: PALETTE.fg1, italic: true } : { color: PALETTE.fg };
+  return text([{ text: `  ${line}`, style }]);
+}
+
+function bodyLines(body: string): string[] {
+  if (!body) return [];
+  const out: string[] = [];
+  for (const raw of body.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    if (line.length === 0) continue;
+    out.push(line);
+    if (out.length >= MAX_CARD_BODY_LINES) break;
+  }
+  return out;
+}
+
+function formatTs(ts: number): string {
+  if (!Number.isFinite(ts)) return "";
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
 }
 
 function toolCardBlock(c: SceneTraceCard): SceneNode {
@@ -685,6 +767,9 @@ export function parseRecentCards(json: string | undefined): SceneTraceCard[] {
     }
     if (typeof obj.elapsed === "string") card.elapsed = obj.elapsed;
     if (typeof obj.id === "string") card.id = obj.id;
+    if (typeof obj.body === "string") card.body = obj.body;
+    if (typeof obj.ts === "number") card.ts = obj.ts;
+    if (typeof obj.meta === "string") card.meta = obj.meta;
     out.push(card);
   }
   return out;
