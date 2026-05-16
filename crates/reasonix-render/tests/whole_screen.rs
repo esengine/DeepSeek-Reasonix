@@ -478,6 +478,64 @@ fn streaming_card_body_reveals_progressively() {
 }
 
 #[test]
+fn shell_prefix_does_not_break_overlay_or_composer() {
+    let mut state = demo_state();
+    state.composer_text = Some("!ls -la".to_string());
+    let rows = draw(&state, 120, 30);
+    let all = joined(&rows);
+    assert!(all.contains("❯"), "prompt missing");
+    assert!(all.contains("!ls -la"), "shell text missing");
+    assert!(!all.contains("SLASH COMMANDS"), "slash overlay should not show for !");
+    assert!(!all.contains("@ ATTACH FILE"), "at overlay should not show for !");
+}
+
+#[test]
+fn empty_cards_state_shows_idle_banner() {
+    let mut state = SceneState::default();
+    state.model = Some("deepseek-v3.2-coder".to_string());
+    let rows = draw(&state, 120, 30);
+    let all = joined(&rows);
+    assert!(all.contains("● idle"), "idle glyph + label missing");
+    assert!(all.contains("ready for next task"));
+    assert!(all.contains("type below"));
+    assert!(all.contains("commands"));
+    assert!(all.contains("file refs"));
+    assert!(all.contains("shell"));
+}
+
+#[test]
+fn composer_caret_renders_at_cursor_index() {
+    let mut state = SceneState::default();
+    state.composer_text = Some("hello world".to_string());
+    state.composer_cursor = Some(5);
+    let backend = TestBackend::new(120, 30);
+    let mut term = Terminal::new(backend).unwrap();
+    term.draw(|f| f.render_widget(WholeScreen::new(&state).with_tick(0), f.area()))
+        .unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut composer_row = None;
+    for y in 0..buf.area.height {
+        let mut line = String::new();
+        let mut x = 0u16;
+        while x < buf.area.width {
+            let sym = buf[(x, y)].symbol();
+            let w = UnicodeWidthStr::width(sym).max(1) as u16;
+            line.push_str(sym);
+            x = x.saturating_add(w);
+        }
+        if line.contains("hello") && line.contains("world") {
+            composer_row = Some(line);
+            break;
+        }
+    }
+    let row = composer_row.expect("composer row missing");
+    assert!(
+        row.contains("hello▮ world") || row.contains("hello▮world"),
+        "caret should sit between hello and world: {row:?}"
+    );
+}
+
+#[test]
 fn composer_caret_blinks_with_tick() {
     let state = demo_state();
     let backend_on = TestBackend::new(120, 30);

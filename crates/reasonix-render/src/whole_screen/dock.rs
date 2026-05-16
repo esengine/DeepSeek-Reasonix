@@ -7,7 +7,7 @@ use crate::state::SceneState;
 
 use super::paint::{paint, paint_str};
 use super::theme::{
-    BG, COMPOSER_PLACEHOLDER, DS_BRIGHT, ERR, FG, FG1, FG2, FG3, OK, WARN,
+    BG, COMPOSER_PLACEHOLDER, DS_BRIGHT, DS_PURPLE, ERR, FG, FG1, FG2, FG3, OK, WARN,
 };
 
 pub fn render_dock(buf: &mut Buffer, area: Rect, state: &SceneState, tick: u32) {
@@ -48,17 +48,32 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
         paint(buf, area.x, mid, '│', FG3, BG, Modifier::empty());
         paint(buf, right, mid, '│', FG3, BG, Modifier::empty());
         let mut col = area.x + 2;
-        col = paint_str(buf, col, mid, "❯ ", DS_BRIGHT, BG, Modifier::BOLD);
+        let prompt_color = match state.composer_text.as_deref().and_then(|s| s.chars().next()) {
+            Some('!') => OK,
+            Some('/') => DS_BRIGHT,
+            Some('@') => DS_PURPLE,
+            _ => DS_BRIGHT,
+        };
+        col = paint_str(buf, col, mid, "❯ ", prompt_color, BG, Modifier::BOLD);
         let text = state.composer_text.as_deref().unwrap_or("");
         let show_caret = (tick / 6) % 2 == 0;
-        let caret_col = if text.is_empty() {
+        if text.is_empty() {
             paint_str(buf, col, mid, COMPOSER_PLACEHOLDER, FG3, BG, Modifier::empty());
-            col
+            if show_caret {
+                paint(buf, col, mid, '▮', DS_BRIGHT, BG, Modifier::empty());
+            }
         } else {
-            paint_str(buf, col, mid, text, FG, BG, Modifier::empty())
-        };
-        if show_caret {
-            paint(buf, caret_col, mid, '▮', DS_BRIGHT, BG, Modifier::empty());
+            let total_chars = text.chars().count();
+            let cursor = state.composer_cursor.unwrap_or(total_chars).min(total_chars);
+            let before: String = text.chars().take(cursor).collect();
+            let after: String = text.chars().skip(cursor).collect();
+            let after_col = paint_str(buf, col, mid, &before, FG, BG, Modifier::empty());
+            if show_caret {
+                paint(buf, after_col, mid, '▮', DS_BRIGHT, BG, Modifier::empty());
+                paint_str(buf, after_col + 1, mid, &after, FG, BG, Modifier::empty());
+            } else {
+                paint_str(buf, after_col, mid, &after, FG, BG, Modifier::empty());
+            }
         }
     }
 

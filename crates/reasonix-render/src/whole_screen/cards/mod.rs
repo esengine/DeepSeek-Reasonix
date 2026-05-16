@@ -15,7 +15,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::state::{SceneCard, SceneState};
 
 use super::paint::{paint, paint_str};
-use super::theme::{BG, FG2, FG3};
+use super::theme::{BG, DS, FG1, FG2, FG3, OK};
 
 pub fn render_cards(
     buf: &mut Buffer,
@@ -26,7 +26,11 @@ pub fn render_cards(
     tick: u32,
 ) {
     let bottom = area.y + area.height;
-    if start_row >= bottom || state.cards.is_empty() {
+    if start_row >= bottom {
+        return;
+    }
+    if state.cards.is_empty() {
+        render_idle_banner(buf, area, start_row);
         return;
     }
     let avail = bottom - start_row;
@@ -96,6 +100,39 @@ fn render_scrollbar(
         let in_thumb = y >= thumb_top && y < thumb_top + thumb_size;
         let (ch, fg) = if in_thumb { ('█', FG2) } else { ('│', FG3) };
         paint(buf, track_x, abs_y, ch, fg, BG, Modifier::empty());
+    }
+}
+
+fn render_idle_banner(buf: &mut Buffer, area: Rect, start_row: u16) {
+    let bottom = area.y + area.height;
+    if start_row >= bottom {
+        return;
+    }
+    paint_rail(buf, area, start_row, OK);
+    let mut col = area.x + 2;
+    col = paint_str(buf, col, start_row, "● ", OK, BG, Modifier::BOLD);
+    col = paint_str(buf, col, start_row, "idle", OK, BG, Modifier::BOLD);
+    let meta = "ready for next task";
+    let mcol = area.x + area.width.saturating_sub(meta.len() as u16 + 1);
+    paint_str(buf, mcol.max(col + 2), start_row, meta, FG3, BG, Modifier::empty());
+
+    let row = start_row + 1;
+    if row >= bottom {
+        return;
+    }
+    paint_rail(buf, area, row, OK);
+    let mut tcol = area.x + 4;
+    tcol = paint_str(buf, tcol, row, "type below", FG1, BG, Modifier::empty());
+    let pairs: [(&str, &str); 3] = [
+        ("/", "commands"),
+        ("@", "file refs"),
+        ("!", "shell"),
+    ];
+    for (key, label) in pairs {
+        tcol = paint_str(buf, tcol, row, "  ·  ", FG3, BG, Modifier::empty());
+        tcol = paint_str(buf, tcol, row, key, DS, BG, Modifier::BOLD);
+        tcol = paint_str(buf, tcol, row, " ", FG2, BG, Modifier::empty());
+        tcol = paint_str(buf, tcol, row, label, FG2, BG, Modifier::empty());
     }
 }
 
