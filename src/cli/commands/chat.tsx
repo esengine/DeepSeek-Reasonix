@@ -1,3 +1,6 @@
+import { closeSync, mkdirSync, openSync, writeSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { render } from "ink";
 import React, { useState } from "react";
 import {
@@ -51,6 +54,34 @@ function parseInputCmd(raw: string | undefined): readonly string[] | undefined {
     // fall through
   }
   return undefined;
+}
+
+// Under REASONIX_RENDERER=rust the alt-screen is owned by the Rust child. Any
+// stderr write from the Node parent overwrites whatever ratatui just drew at
+// the same cells, and stays visible until the next frame redraws — so Node's
+// own warnings (MaxListeners etc.) and any stray library logs all corrupt the
+// view. Redirect stderr to a log file for the duration of the session.
+function redirectStderrToLogFile(): () => void {
+  const dir = join(homedir(), ".reasonix");
+  mkdirSync(dir, { recursive: true });
+  const logPath = join(dir, "rust-render-stderr.log");
+  const fd = openSync(logPath, "a");
+  const origWrite = process.stderr.write.bind(process.stderr);
+  (process.stderr.write as unknown as (chunk: string | Uint8Array) => boolean) = (
+    chunk: string | Uint8Array,
+  ): boolean => {
+    const buf = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : Buffer.from(chunk);
+    writeSync(fd, buf);
+    return true;
+  };
+  return () => {
+    process.stderr.write = origWrite;
+    try {
+      closeSync(fd);
+    } catch {
+      // already closed — ignore
+    }
+  };
 }
 
 export interface ChatOptions {
@@ -360,6 +391,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const keystrokeReader = rustRendererActive
     ? createRustKeystrokeReader(inputCmdOverride ? { command: inputCmdOverride } : {})
     : undefined;
+  const stderrRestore = rustRendererActive ? redirectStderrToLogFile() : undefined;
 
   const { waitUntilExit } = render(
     <Root
@@ -403,6 +435,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     await runtime.closeAll();
     qqChannel?.stop();
     if (keystrokeReader) await keystrokeReader.close();
+    if (stderrRestore) stderrRestore();
     // Eat any pending terminal-feature-detection responses (#365) so the
     // parent shell doesn't print them as junk after exit.
     await drainTtyResponses();

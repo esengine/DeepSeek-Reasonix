@@ -6,6 +6,12 @@ export function makeNullStdout(real: NodeJS.WriteStream = process.stdout): NodeJ
       callback();
     },
   });
+  // Ink consumers — every <Box>/<Text>/useStdout — subscribe to the stdout's
+  // `resize` event. The App tree has 11+ such subscribers, which trips Node's
+  // default 10-listener leak warning. The warning text then writes to stderr
+  // and corrupts the alt-screen the Rust child draws (the user sees garbage
+  // mid-row). Raise the cap above the realistic subscriber count.
+  writable.setMaxListeners(50);
   applyDimensions(writable, real);
   if (typeof real.on === "function") {
     real.on("resize", () => {
