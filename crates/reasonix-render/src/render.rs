@@ -1,11 +1,12 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color as RColor, Modifier, Style};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 use unicode_width::UnicodeWidthChar;
 
 use crate::scene::{
-    BoxLayout, Color, Dim, FillToken, FlexDirection, NamedColor, SceneFrame, SceneNode, TextRun,
-    TextStyle,
+    BorderStyle, BoxLayout, Color, Dim, FillToken, FlexDirection, NamedColor, SceneFrame,
+    SceneNode, TextRun, TextStyle,
 };
 
 #[derive(Clone, Copy)]
@@ -59,6 +60,7 @@ fn display_width(ch: char) -> u16 {
 }
 
 fn render_box(layout: Option<&BoxLayout>, children: &[SceneNode], buf: &mut Buffer, area: Rect) {
+    let area = apply_decoration(layout, buf, area);
     let inner = apply_padding(layout, area);
     if inner.width == 0 || inner.height == 0 {
         return;
@@ -74,6 +76,41 @@ fn render_box(layout: Option<&BoxLayout>, children: &[SceneNode], buf: &mut Buff
     match direction {
         FlexDirection::Column => render_column(children, gap, buf, inner),
         FlexDirection::Row => render_row(children, gap, buf, inner),
+    }
+}
+
+fn apply_decoration(layout: Option<&BoxLayout>, buf: &mut Buffer, area: Rect) -> Rect {
+    let Some(l) = layout else {
+        return area;
+    };
+    let has_border = l.border_style.is_some();
+    let has_bg = l.background.is_some();
+    if !has_border && !has_bg {
+        return area;
+    }
+    let mut block = Block::default();
+    if let Some(bg) = l.background.as_ref() {
+        block = block.style(Style::default().bg(color_to_ratatui(bg)));
+    }
+    if let Some(border_style) = l.border_style {
+        block = block
+            .borders(Borders::ALL)
+            .border_type(border_type_from(border_style));
+        if let Some(border_color) = l.border_color.as_ref() {
+            block = block.border_style(Style::default().fg(color_to_ratatui(border_color)));
+        }
+    }
+    let inner = block.inner(area);
+    block.render(area, buf);
+    inner
+}
+
+fn border_type_from(style: BorderStyle) -> BorderType {
+    match style {
+        BorderStyle::Single => BorderType::Plain,
+        BorderStyle::Double => BorderType::Double,
+        BorderStyle::Round => BorderType::Rounded,
+        BorderStyle::Bold => BorderType::Thick,
     }
 }
 

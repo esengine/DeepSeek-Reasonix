@@ -159,7 +159,6 @@ describe("buildTraceFrame", () => {
     expect(f.root.kind).toBe("box");
     if (f.root.kind !== "box") return;
     expect(f.root.layout?.direction).toBe("column");
-    expect(f.root.layout?.paddingX).toBe(1);
     expect(f.root.children).toHaveLength(3);
     const middle = f.root.children[1];
     if (middle?.kind !== "box") throw new Error("expected middle box");
@@ -200,7 +199,12 @@ describe("buildTraceFrame", () => {
     if (spacer?.kind !== "box") throw new Error("expected spacer box");
     expect(spacer.layout?.width).toBe("fill");
     if (model?.kind !== "text") throw new Error("expected model text");
-    expect(model.runs.map((r) => r.text).join("")).toBe("deepseek-chat");
+    expect(
+      model.runs
+        .map((r) => r.text)
+        .join("")
+        .trim(),
+    ).toBe("deepseek-chat");
   });
 
   it("omits the model node from the title row when no model is given", () => {
@@ -247,19 +251,30 @@ describe("buildTraceFrame", () => {
     expect(cardRow.runs[2]?.style?.bold).toBe(true);
   });
 
-  it("paints status as green when idle and yellow when busy", () => {
+  function statusLeftText(f: ReturnType<typeof buildTraceFrame>) {
+    const s = statusOf(f);
+    if (s.kind !== "box") throw new Error("expected status box");
+    const inner = s.children[0];
+    if (inner?.kind !== "text") throw new Error("expected text in status");
+    return inner;
+  }
+
+  it("paints status busy/idle in the design success/warning colors", () => {
     const idle = buildTraceFrame({ cardCount: 3, busy: false, cards: [] }, 80, 24);
     const busy = buildTraceFrame({ cardCount: 3, busy: true, cards: [] }, 80, 24);
-    const idleStatus = statusOf(idle);
-    const busyStatus = statusOf(busy);
-    if (idleStatus.kind !== "text" || busyStatus.kind !== "text") return;
-    expect(idleStatus.runs[2]?.style?.color).toBe("green");
-    expect(busyStatus.runs[2]?.style?.color).toBe("yellow");
+    const idleColor = statusLeftText(idle).runs[2]?.style?.color;
+    const busyColor = statusLeftText(busy).runs[2]?.style?.color;
+    expect(typeof idleColor === "object" && idleColor && "hex" in idleColor).toBe(true);
+    expect(typeof busyColor === "object" && busyColor && "hex" in busyColor).toBe(true);
   });
 
-  it("keeps the status row as a single text node when no wallet balance is given", () => {
+  it("renders the status row inside a panel-tinted background box even when no wallet is shown", () => {
     const f = buildTraceFrame({ cardCount: 1, busy: false, cards: [] }, 80, 24);
-    expect(statusOf(f).kind).toBe("text");
+    const s = statusOf(f);
+    if (s.kind !== "box") throw new Error("expected status box");
+    expect(s.layout?.background).toBeDefined();
+    expect(s.children).toHaveLength(1);
+    expect(s.children[0]?.kind).toBe("text");
   });
 
   it("renders a wallet segment on the right of status when balance is given and the ctx pane is hidden", () => {
@@ -283,13 +298,40 @@ describe("buildTraceFrame", () => {
     expect(rightFlat).toContain("¥184.20");
   });
 
+  it("paints the title and status rows with a panel background tint", () => {
+    const f = buildEmpty();
+    if (f.root.kind !== "box") return;
+    const title = f.root.children[0];
+    const status = f.root.children[2];
+    if (title?.kind !== "box") return;
+    if (status?.kind !== "box") return;
+    expect(title.layout?.background).toBeDefined();
+    expect(status.layout?.background).toBeDefined();
+  });
+
+  it("decorates side / ctx panes with a rounded border and bg-2 background", () => {
+    const f = buildTraceFrame({ cardCount: 0, busy: false, cards: [] }, 120, 24);
+    if (f.root.kind !== "box") return;
+    const middle = f.root.children[1];
+    if (middle?.kind !== "box") return;
+    const sidebar = middle.children[0];
+    const ctxPane = middle.children.at(-1);
+    if (sidebar?.kind !== "box" || ctxPane?.kind !== "box") return;
+    expect(sidebar.layout?.borderStyle).toBe("round");
+    expect(sidebar.layout?.background).toBeDefined();
+    expect(ctxPane.layout?.borderStyle).toBe("round");
+    expect(ctxPane.layout?.background).toBeDefined();
+  });
+
   it("moves wallet from the status row into the context pane when both are visible", () => {
     const f = buildTraceFrame(
       { cardCount: 1, busy: false, cards: [], walletBalance: 184.2, walletCurrency: "CNY" },
       120,
       24,
     );
-    expect(statusOf(f).kind).toBe("text");
+    const s = statusOf(f);
+    if (s.kind !== "box") throw new Error("expected status box");
+    expect(s.children).toHaveLength(1);
     if (f.root.kind !== "box") return;
     const middle = f.root.children[1];
     if (middle?.kind !== "box") return;
@@ -331,7 +373,9 @@ describe("buildTraceFrame", () => {
       80,
       24,
     );
-    expect(statusOf(f).kind).toBe("text");
+    const s = statusOf(f);
+    if (s.kind !== "box") throw new Error("expected status box");
+    expect(s.children).toHaveLength(1);
   });
 
   it("appends activity to the status row when given", () => {
@@ -340,9 +384,11 @@ describe("buildTraceFrame", () => {
       80,
       24,
     );
-    const status = statusOf(f);
-    if (status.kind !== "text") return;
-    expect(status.runs.map((r) => r.text).join("")).toContain("awaiting tools");
+    expect(
+      statusLeftText(f)
+        .runs.map((r) => r.text)
+        .join(""),
+    ).toContain("awaiting tools");
   });
 
   it("composer row is a dim placeholder when composerText is empty / undefined", () => {

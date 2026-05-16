@@ -125,6 +125,8 @@ pub struct BoxLayout {
         skip_serializing_if = "Option::is_none"
     )]
     pub border_color: Option<Color>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<Color>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

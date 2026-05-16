@@ -49,6 +49,7 @@ export type BoxLayout = {
   justify?: FlexJustify;
   borderStyle?: BorderStyle;
   borderColor?: Color;
+  background?: Color;
 };
 
 export type TextNode = {

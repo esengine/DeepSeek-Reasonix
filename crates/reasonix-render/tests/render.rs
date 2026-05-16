@@ -4,8 +4,8 @@ use ratatui::style::{Color as RColor, Modifier};
 
 use reasonix_render::render::render_frame;
 use reasonix_render::scene::{
-    BoxLayout, Color, Dim, FillToken, FlexDirection, NamedColor, SceneFrame, SceneNode, TextRun,
-    TextStyle,
+    BorderStyle, BoxLayout, Color, Dim, FillToken, FlexDirection, NamedColor, SceneFrame,
+    SceneNode, TextRun, TextStyle,
 };
 
 fn box_with_width(text: &str, width: Dim) -> SceneNode {
@@ -406,6 +406,134 @@ fn column_fill_child_consumes_remaining_height() {
     assert_eq!(buf[(0, 0)].symbol(), "T");
     assert_eq!(buf[(0, 1)].symbol(), "M");
     assert_eq!(buf[(0, 9)].symbol(), "B");
+}
+
+#[test]
+fn box_with_single_border_draws_box_drawing_glyphs_at_the_perimeter() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            border_style: Some(BorderStyle::Single),
+            ..Default::default()
+        }),
+        children: vec![SceneNode::Text {
+            runs: vec![TextRun {
+                text: "x".to_string(),
+                style: None,
+            }],
+            wrap: None,
+        }],
+    });
+    let area = Rect::new(0, 0, 5, 3);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "┌");
+    assert_eq!(buf[(4, 0)].symbol(), "┐");
+    assert_eq!(buf[(0, 2)].symbol(), "└");
+    assert_eq!(buf[(4, 2)].symbol(), "┘");
+    assert_eq!(buf[(1, 0)].symbol(), "─");
+    assert_eq!(buf[(0, 1)].symbol(), "│");
+    assert_eq!(buf[(1, 1)].symbol(), "x");
+}
+
+#[test]
+fn rounded_border_uses_curved_corner_glyphs() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            border_style: Some(BorderStyle::Round),
+            ..Default::default()
+        }),
+        children: vec![],
+    });
+    let area = Rect::new(0, 0, 4, 3);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "╭");
+    assert_eq!(buf[(3, 0)].symbol(), "╮");
+    assert_eq!(buf[(0, 2)].symbol(), "╰");
+    assert_eq!(buf[(3, 2)].symbol(), "╯");
+}
+
+#[test]
+fn double_border_uses_double_line_glyphs() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            border_style: Some(BorderStyle::Double),
+            ..Default::default()
+        }),
+        children: vec![],
+    });
+    let area = Rect::new(0, 0, 4, 3);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].symbol(), "╔");
+    assert_eq!(buf[(3, 0)].symbol(), "╗");
+}
+
+#[test]
+fn border_color_is_applied_to_perimeter_cells() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            border_style: Some(BorderStyle::Single),
+            border_color: Some(Color::Named(NamedColor::Cyan)),
+            ..Default::default()
+        }),
+        children: vec![],
+    });
+    let area = Rect::new(0, 0, 4, 3);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(0, 0)].style().fg, Some(RColor::Cyan));
+    assert_eq!(buf[(1, 0)].style().fg, Some(RColor::Cyan));
+}
+
+#[test]
+fn background_fills_every_cell_inside_the_box() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            background: Some(Color::Hex {
+                hex: "#112233".to_string(),
+            }),
+            ..Default::default()
+        }),
+        children: vec![SceneNode::Text {
+            runs: vec![TextRun {
+                text: "y".to_string(),
+                style: None,
+            }],
+            wrap: None,
+        }],
+    });
+    let area = Rect::new(0, 0, 3, 2);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    let want = RColor::Rgb(0x11, 0x22, 0x33);
+    assert_eq!(buf[(0, 0)].style().bg, Some(want));
+    assert_eq!(buf[(2, 1)].style().bg, Some(want));
+    assert_eq!(buf[(0, 0)].symbol(), "y");
+}
+
+#[test]
+fn border_shrinks_the_inner_area_by_one_cell_on_each_side() {
+    let frame = frame_of(SceneNode::Box {
+        layout: Some(BoxLayout {
+            direction: Some(FlexDirection::Column),
+            border_style: Some(BorderStyle::Single),
+            ..Default::default()
+        }),
+        children: vec![SceneNode::Text {
+            runs: vec![TextRun {
+                text: "abc".to_string(),
+                style: None,
+            }],
+            wrap: None,
+        }],
+    });
+    let area = Rect::new(0, 0, 5, 3);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    assert_eq!(buf[(1, 1)].symbol(), "a");
+    assert_eq!(buf[(2, 1)].symbol(), "b");
+    assert_eq!(buf[(3, 1)].symbol(), "c");
 }
 
 #[test]

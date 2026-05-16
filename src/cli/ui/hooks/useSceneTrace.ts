@@ -1,6 +1,7 @@
 import { useStdout } from "ink";
 import { useEffect } from "react";
 import { box, frame, text } from "../scene/build.js";
+import { PALETTE } from "../scene/theme.js";
 import { emitSceneFrame, isSceneTraceEnabled } from "../scene/trace.js";
 import type { Color, SceneFrame, SceneNode, TextRun } from "../scene/types.js";
 import type { Card } from "../state/cards.js";
@@ -104,7 +105,11 @@ export function buildTraceFrame(input: BuildInput, cols: number, rows: number): 
   middleChildren.push(main);
   if (showCtxPane) middleChildren.push(ctxPane(input));
   const middle = box(middleChildren, { direction: "row", height: "fill", gap: 1 });
-  return frame(cols, rows, box([title, middle, status], { direction: "column", paddingX: 1 }));
+  return frame(
+    cols,
+    rows,
+    box([title, middle, status], { direction: "column", background: PALETTE.bg }),
+  );
 }
 
 function mainPane(input: BuildInput): SceneNode {
@@ -143,17 +148,24 @@ function mainPane(input: BuildInput): SceneNode {
     const hidden = slash.length - shown.length;
     if (hidden > 0) children.push(slashOverflowRow(hidden));
   }
-  return box(children, { direction: "column", width: "fill" });
+  return box(children, { direction: "column", width: "fill", paddingX: 1 });
 }
 
 function sidebarPane(): SceneNode {
   return box(
     [
       sectionHeaderRow("SESSIONS"),
-      text([{ text: "use /sessions", style: { dim: true } }]),
-      text([{ text: "to browse", style: { dim: true } }]),
+      text([{ text: "use /sessions", style: { color: PALETTE.muted } }]),
+      text([{ text: "to browse", style: { color: PALETTE.muted } }]),
     ],
-    { direction: "column", width: SIDEBAR_WIDTH },
+    {
+      direction: "column",
+      width: SIDEBAR_WIDTH,
+      paddingX: 1,
+      borderStyle: "round",
+      borderColor: PALETTE.border,
+      background: PALETTE.bg2,
+    },
   );
 }
 
@@ -162,30 +174,39 @@ function ctxPane(input: BuildInput): SceneNode {
   if (input.model) children.push(keyValueRow("model", input.model));
   children.push(keyValueRow("cards", String(input.cardCount)));
   const wallet = formatWallet(input.walletBalance, input.walletCurrency);
-  if (wallet) children.push(keyValueRow("wallet", wallet));
-  return box(children, { direction: "column", width: CTXPANE_WIDTH });
+  if (wallet) children.push(keyValueRow("wallet", wallet, PALETTE.success));
+  return box(children, {
+    direction: "column",
+    width: CTXPANE_WIDTH,
+    paddingX: 1,
+    borderStyle: "round",
+    borderColor: PALETTE.border,
+    background: PALETTE.bg2,
+  });
 }
 
 function sectionHeaderRow(label: string): SceneNode {
+  return text([{ text: label, style: { bold: true, color: PALETTE.accent } }]);
+}
+
+function keyValueRow(key: string, value: string, valueColor?: Color): SceneNode {
   return text([
-    { text: "─ ", style: { dim: true } },
-    { text: label, style: { bold: true, color: "cyan" } },
-    { text: " ─", style: { dim: true } },
+    { text: key.padEnd(8), style: { color: PALETTE.muted } },
+    valueColor ? { text: value, style: { color: valueColor } } : { text: value },
   ]);
 }
 
-function keyValueRow(key: string, value: string): SceneNode {
-  return text([{ text: key.padEnd(8), style: { dim: true } }, { text: value }]);
-}
-
 function titleRow(s: BuildInput): SceneNode {
-  const left = text([{ text: "reasonix", style: { bold: true } }]);
+  const left = text([
+    { text: " ◆ ", style: { color: PALETTE.accent, bold: true } },
+    { text: "reasonix", style: { bold: true, color: PALETTE.fg } },
+  ]);
   const spacer = box([], { width: "fill" });
   const children: SceneNode[] = [left, spacer];
   if (s.model) {
-    children.push(text([{ text: s.model, style: { dim: true } }]));
+    children.push(text([{ text: `${s.model} `, style: { color: PALETTE.violet } }]));
   }
-  return box(children, { direction: "row" });
+  return box(children, { direction: "row", background: PALETTE.panel, height: 1 });
 }
 
 function noCardsRow(): SceneNode {
@@ -203,23 +224,27 @@ function cardRow(c: SceneTraceCard): SceneNode {
 
 function statusRow(s: BuildInput, opts: { suppressWallet?: boolean } = {}): SceneNode {
   const leftRuns: TextRun[] = [
-    { text: `${s.cardCount} cards`, style: { dim: true } },
-    { text: " · " },
-    { text: s.busy ? "busy" : "idle", style: { color: s.busy ? "yellow" : "green" } },
+    { text: ` ${s.cardCount} cards`, style: { color: PALETTE.muted } },
+    { text: " · ", style: { color: PALETTE.muted } },
+    {
+      text: s.busy ? "busy" : "idle",
+      style: { color: s.busy ? PALETTE.warning : PALETTE.success },
+    },
   ];
-  if (s.activity) leftRuns.push({ text: ` · ${s.activity}`, style: { dim: true } });
+  if (s.activity) leftRuns.push({ text: ` · ${s.activity}`, style: { color: PALETTE.muted } });
   const wallet = opts.suppressWallet ? null : formatWallet(s.walletBalance, s.walletCurrency);
-  if (!wallet) return text(leftRuns);
+  const layout = { direction: "row" as const, background: PALETTE.panel, height: 1 };
+  if (!wallet) return box([text(leftRuns)], layout);
   return box(
     [
       text(leftRuns),
       box([], { width: "fill" }),
       text([
-        { text: "wallet ", style: { dim: true } },
-        { text: wallet, style: { color: "green" } },
+        { text: "wallet ", style: { color: PALETTE.muted } },
+        { text: `${wallet} `, style: { color: PALETTE.success, bold: true } },
       ]),
     ],
-    { direction: "row" },
+    layout,
   );
 }
 
