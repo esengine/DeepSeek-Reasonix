@@ -422,3 +422,52 @@ export function useSceneTrace(input: SceneTraceInput): void {
     sessionsFocusedIndex,
   ]);
 }
+
+export type SetupSceneInput = {
+  bufferLength: number;
+  error?: string;
+};
+
+export function buildSetupFrame(input: SetupSceneInput, cols: number, rows: number): SceneFrame {
+  const children: SceneNode[] = [];
+  children.push(
+    text([
+      { text: "✦ ", style: { color: "cyan", bold: true } },
+      { text: "reasonix", style: { bold: true } },
+      { text: " · welcome", style: { dim: true } },
+    ]),
+  );
+  children.push(text([{ text: "Enter your DeepSeek API key:", style: { color: "cyan" } }]));
+  children.push(
+    text([{ text: "  get one at https://platform.deepseek.com", style: { dim: true } }]),
+  );
+  const maskedRuns: TextRun[] = [{ text: "❯ ", style: { color: "cyan", bold: true } }];
+  if (input.bufferLength === 0) {
+    maskedRuns.push({ text: "(start typing your key)", style: { dim: true } });
+  } else {
+    maskedRuns.push({ text: "•".repeat(input.bufferLength) });
+    maskedRuns.push({ text: "▮", style: { color: "cyan" } });
+  }
+  children.push(text(maskedRuns));
+  if (input.error) {
+    children.push(
+      text([
+        { text: "✗ ", style: { color: "red", bold: true } },
+        { text: input.error, style: { color: "red" } },
+      ]),
+    );
+  }
+  children.push(text([{ text: "Ctrl+C to exit · /exit to quit", style: { dim: true } }]));
+  return frame(cols, rows, box(children, { direction: "column", paddingX: 1 }));
+}
+
+export function useSetupSceneTrace(input: SetupSceneInput): void {
+  const { stdout } = useStdout();
+  const cols = stdout?.columns ?? 80;
+  const rows = stdout?.rows ?? 24;
+  const { bufferLength, error } = input;
+  useEffect(() => {
+    if (!isSceneTraceEnabled()) return;
+    emitSceneFrame(buildSetupFrame({ bufferLength, error }, cols, rows));
+  }, [cols, rows, bufferLength, error]);
+}

@@ -3,6 +3,7 @@ import {
   type SceneSessionItem,
   type SceneSlashMatch,
   type SceneTraceCard,
+  buildSetupFrame,
   buildTraceFrame,
   cardsForHeight,
   parseRecentCards,
@@ -537,6 +538,56 @@ describe("parseSessions", () => {
   it("skips entries missing a title", () => {
     const json = JSON.stringify([{ title: "ok" }, { meta: "no-title" }, null, 42]);
     expect(parseSessions(json)).toEqual([{ title: "ok" }]);
+  });
+});
+
+describe("buildSetupFrame", () => {
+  function flatten(frame: ReturnType<typeof buildSetupFrame>): string[] {
+    if (frame.root.kind !== "box") throw new Error("expected box");
+    return frame.root.children.map((c) =>
+      c.kind === "text" ? c.runs.map((r) => r.text).join("") : "",
+    );
+  }
+
+  it("renders welcome + prompt + masked-input placeholder + exit hint when the buffer is empty", () => {
+    const f = buildSetupFrame({ bufferLength: 0 }, 80, 24);
+    const rows = flatten(f);
+    expect(rows[0]).toContain("reasonix");
+    expect(rows[0]).toContain("welcome");
+    expect(rows[1]).toContain("API key");
+    expect(rows[2]).toContain("platform.deepseek.com");
+    expect(rows[3]).toContain("(start typing your key)");
+    expect(rows[3]).not.toContain("▮");
+    expect(rows.at(-1)).toContain("Ctrl+C");
+  });
+
+  it("masks the buffer with • dots and appends a ▮ cursor when the user has typed", () => {
+    const f = buildSetupFrame({ bufferLength: 5 }, 80, 24);
+    const rows = flatten(f);
+    expect(rows[3]).toContain("•••••");
+    expect(rows[3]).toContain("▮");
+    expect(rows[3]).not.toContain("(start typing");
+  });
+
+  it("never leaks the raw buffer content — bufferLength is the only signal in/out", () => {
+    const f = buildSetupFrame({ bufferLength: 12 }, 80, 24);
+    const rows = flatten(f);
+    expect(rows[3]?.match(/•/g)?.length).toBe(12);
+  });
+
+  it("inserts an error row above the exit hint when an error is set", () => {
+    const f = buildSetupFrame({ bufferLength: 0, error: "key looks malformed" }, 80, 24);
+    const rows = flatten(f);
+    const errIdx = rows.findIndex((r) => r.includes("key looks malformed"));
+    expect(errIdx).toBeGreaterThan(0);
+    expect(rows[errIdx]?.startsWith("✗")).toBe(true);
+    expect(rows.at(-1)).toContain("Ctrl+C");
+  });
+
+  it("omits the error row when error is undefined", () => {
+    const f = buildSetupFrame({ bufferLength: 3 }, 80, 24);
+    const rows = flatten(f);
+    expect(rows.some((r) => r.startsWith("✗"))).toBe(false);
   });
 });
 
