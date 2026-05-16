@@ -206,9 +206,11 @@ describe("buildTraceFrame — v1 single-column layout", () => {
   it("renders a boot block in the scroll area when there are no cards", () => {
     const f = buildEmpty({ model: "deepseek-chat" });
     const flatScroll = flatRows(scrollOf(f));
-    expect(flatScroll).toContain("REASONIX");
+    expect(flatScroll).toContain("██████╗");
+    expect(flatScroll).toContain("DeepSeek code agent");
     expect(flatScroll).toContain("model");
     expect(flatScroll).toContain("deepseek-chat");
+    expect(flatScroll).toContain("tools");
   });
 
   it("renders one card row per card in the scroll area", () => {

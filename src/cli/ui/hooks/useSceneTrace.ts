@@ -112,47 +112,77 @@ function scrollArea(input: BuildInput): SceneNode {
     direction: "column",
     height: "fill",
     width: "fill",
-    paddingX: 1,
+    paddingX: 2,
     paddingY: 1,
   });
 }
 
+const LOGO_LINES: readonly string[] = [
+  "██████╗ ███████╗ █████╗ ███████╗ ██████╗ ███╗   ██╗██╗██╗  ██╗",
+  "██╔══██╗██╔════╝██╔══██╗██╔════╝██╔═══██╗████╗  ██║██║╚██╗██╔╝",
+  "██████╔╝█████╗  ███████║███████╗██║   ██║██╔██╗ ██║██║ ╚███╔╝ ",
+  "██╔══██╗██╔══╝  ██╔══██║╚════██║██║   ██║██║╚██╗██║██║ ██╔██╗ ",
+  "██║  ██║███████╗██║  ██║███████║╚██████╔╝██║ ╚████║██║██╔╝ ██╗",
+  "╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝",
+];
+
 function bootBlock(input: BuildInput): SceneNode[] {
   const rows: SceneNode[] = [];
+  rows.push(blankRow());
+  for (const line of LOGO_LINES) {
+    rows.push(text([{ text: line, style: { color: PALETTE.ds, bold: true } }]));
+  }
+  rows.push(blankRow());
   rows.push(
     text([
-      { text: "● ", style: { color: PALETTE.ds, bold: true } },
-      { text: "REASONIX", style: { bold: true, color: PALETTE.dsBright } },
-      { text: "  DeepSeek code agent", style: { color: PALETTE.fg2 } },
+      { text: " DeepSeek code agent  ", style: { color: PALETTE.fg } },
+      { text: "· terminal-native, cache-first ·", style: { color: PALETTE.fg2 } },
     ]),
   );
-  rows.push(text([{ text: "", style: { color: PALETTE.fg2 } }]));
-  if (input.model) rows.push(bootField("model", input.model, PALETTE.ds));
-  if (input.cwd) rows.push(bootField("cwd", input.cwd, PALETTE.fg1));
-  if (input.mcpServerCount !== undefined) {
-    rows.push(bootField("mcp", `${input.mcpServerCount} server(s)`, PALETTE.fg1));
+  rows.push(blankRow());
+  if (input.model) rows.push(bootField("model", input.model, PALETTE.dsBright));
+  if (input.cwd) rows.push(bootField("workdir", input.cwd, PALETTE.fg));
+  if (input.mcpServerCount !== undefined && input.mcpServerCount > 0) {
+    rows.push(bootField("mcp", `${input.mcpServerCount} server(s) connected`, PALETTE.fg));
   }
-  rows.push(text([{ text: "", style: { color: PALETTE.fg2 } }]));
+  rows.push(bootField("tools", "read · write · edit · bash · grep · fetch · todo", PALETTE.fg));
+  rows.push(blankRow());
   rows.push(
     text([
-      { text: "type to chat · ", style: { color: PALETTE.fg2 } },
-      { text: "/", style: { color: PALETTE.ds } },
-      { text: " commands · ", style: { color: PALETTE.fg2 } },
-      { text: "@", style: { color: PALETTE.ds } },
-      { text: " file refs · ", style: { color: PALETTE.fg2 } },
-      { text: "!", style: { color: PALETTE.ds } },
-      { text: " shell", style: { color: PALETTE.fg2 } },
+      { text: " ", style: {} },
+      { text: "type to chat  ", style: { color: PALETTE.fg2 } },
+      { text: "·  ", style: { color: PALETTE.fg3 } },
+      { text: "/", style: { color: PALETTE.ds, bold: true } },
+      { text: " commands  ", style: { color: PALETTE.fg2 } },
+      { text: "·  ", style: { color: PALETTE.fg3 } },
+      { text: "@", style: { color: PALETTE.ds, bold: true } },
+      { text: " file refs  ", style: { color: PALETTE.fg2 } },
+      { text: "·  ", style: { color: PALETTE.fg3 } },
+      { text: "!", style: { color: PALETTE.ds, bold: true } },
+      { text: " shell  ", style: { color: PALETTE.fg2 } },
+      { text: "·  ", style: { color: PALETTE.fg3 } },
+      { text: "Ctrl+C", style: { color: PALETTE.ds, bold: true } },
+      { text: " cancel  ", style: { color: PALETTE.fg2 } },
+      { text: "·  ", style: { color: PALETTE.fg3 } },
+      { text: "Ctrl+D", style: { color: PALETTE.ds, bold: true } },
+      { text: " exit", style: { color: PALETTE.fg2 } },
     ]),
   );
   return rows;
 }
 
+function blankRow(): SceneNode {
+  return text([{ text: "", style: {} }]);
+}
+
 function bootField(key: string, value: string, valueColor: Color): SceneNode {
   return text([
-    { text: ` ${key.padEnd(8)}`, style: { color: PALETTE.fg2 } },
+    { text: ` ${key.padEnd(10)}`, style: { color: PALETTE.fg2 } },
     { text: value, style: { color: valueColor } },
   ]);
 }
+
+export const REASONIX_LOGO_LINES = LOGO_LINES;
 
 function cardBlock(c: SceneTraceCard): SceneNode {
   const color = colorFor(c.kind);
