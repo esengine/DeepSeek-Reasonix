@@ -53,6 +53,10 @@ export function createChatScrollStore(): ChatScrollStore {
   // While a burst of card-collapse re-measurements arrives, we hold the latest
   // target here and apply it once on a microtask flush, so subscribers see one
   // settled transition instead of N oscillating snaps.
+  // Grows still apply immediately — streaming content should auto-scroll without
+  // latency. Growth oscillation is prevented upstream by the monotonic height
+  // lock in CardStream.MeasuredCard: card heights only increase during streaming,
+  // so maxScroll growth is naturally monotonic.
   let pendingMaxShrink: number | null = null;
   let shrinkTimer: NodeJS.Timeout | null = null;
 
@@ -143,6 +147,9 @@ export function createChatScrollStore(): ChatScrollStore {
       // re-measurements during an Esc-abort would otherwise snap scrollRows N
       // times, producing a visible flicker. Grows still apply immediately so
       // normal streaming output keeps the viewport pinned without latency.
+      // Growth oscillation is prevented upstream by the monotonic height lock
+      // in CardStream.MeasuredCard — card heights only increase during streaming,
+      // so maxScroll growth is naturally monotonic without coalescing.
       const currentMax = pendingMaxShrink ?? state.maxScroll;
       if (state.pinned && m < currentMax) {
         pendingMaxShrink = m;

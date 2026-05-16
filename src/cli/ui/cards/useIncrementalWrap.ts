@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { wrapToCells } from "../../../frame/width.js";
 
 export interface WrapCache {
@@ -70,11 +70,57 @@ export function wrapIncremental(
   };
 }
 
-/** Streaming-aware wrap. Monotonic growth re-wraps only the tail logical line. */
+/** Debounce interval for lineCells changes — holds the previous width during
+ * a terminal resize to avoid breaking monotonicity and triggering a full
+ * re-wrap cascade while streaming tokens are still arriving. */
+const LINE_CELLS_DEBOUNCE_MS = 120;
+
+/** Streaming-aware wrap. Monotonic growth re-wraps only the tail logical line.
+ * Terminal resize is debounced: the previous width is held briefly so streaming
+ * content stays on the fast monotonic path, then snaps to the new width. */
 export function useIncrementalWrap(text: string, lineCells: number): string[] {
   const cacheRef = useRef<WrapCache | null>(null);
+  const stableCellsRef = useRef<number>(lineCells);
+  const cellsTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounce lineCells changes: during a resize, hold the old width briefly
+  // so the incremental wrapper can stay in its fast monotonic path.
+  const effectiveCells = useMemo(() => {
+    if (stableCellsRef.current === lineCells) return lineCells;
+
+    // First time we see a new width, schedule a commit after the debounce
+    // window. Until then, keep using the old width.
+    if (cellsTimerRef.current === null) {
+      cellsTimerRef.current = setTimeout(() => {
+        stableCellsRef.current = lineCells;
+        cellsTimerRef.current = null;
+      }, LINE_CELLS_DEBOUNCE_MS);
+    }
+    // If the width changes again before the timer fires, reset the timer
+    // so we only commit once the width has been stable for the full window.
+    else {
+      clearTimeout(cellsTimerRef.current);
+      cellsTimerRef.current = setTimeout(() => {
+        stableCellsRef.current = lineCells;
+        cellsTimerRef.current = null;
+      }, LINE_CELLS_DEBOUNCE_MS);
+      return stableCellsRef.current;
+    }
+    return stableCellsRef.current;
+  }, [lineCells]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (cellsTimerRef.current !== null) {
+        clearTimeout(cellsTimerRef.current);
+        cellsTimerRef.current = null;
+      }
+    };
+  }, []);
+
   return useMemo(() => {
-    cacheRef.current = wrapIncremental(text, lineCells, cacheRef.current);
+    cacheRef.current = wrapIncremental(text, effectiveCells, cacheRef.current);
     return cacheRef.current.visualLines;
-  }, [text, lineCells]);
+  }, [text, effectiveCells]);
 }

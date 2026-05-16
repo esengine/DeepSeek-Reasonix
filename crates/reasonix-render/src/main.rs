@@ -13,6 +13,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use reasonix_render::decode_only::run_decode_only;
+use reasonix_render::frame_cache::FrameCache;
 use reasonix_render::input::{is_quit, paste_event, translate_key, translate_mouse};
 use reasonix_render::render::render_frame;
 use reasonix_render::scene::SceneFrame;
@@ -43,9 +44,16 @@ fn main() -> Result<()> {
 
 fn run_stream_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     let stdin = io::stdin();
+    let mut cache = FrameCache::default();
     for (lineno, line) in stdin.lock().lines().enumerate() {
         let line = line.with_context(|| format!("read line {}", lineno + 1))?;
         if line.trim().is_empty() {
+            continue;
+        }
+        // Skip deserialization + rendering for byte-identical consecutive
+        // frames. The trace scene only changes when cards, model, or activity
+        // label change, so most frames between streaming deltas are duplicates.
+        if !cache.is_new(&line) {
             continue;
         }
         let frame: SceneFrame =
