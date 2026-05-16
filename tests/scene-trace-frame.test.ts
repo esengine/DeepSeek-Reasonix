@@ -361,6 +361,78 @@ describe("buildTraceFrame", () => {
   });
 });
 
+describe("buildTraceFrame approval modal", () => {
+  function buildWithApproval(kind: string | undefined, prompt: string | undefined) {
+    return buildTraceFrame(
+      {
+        cardCount: 0,
+        busy: false,
+        cards: [],
+        composerText: "typing…",
+        approvalKind: kind,
+        approvalPrompt: prompt,
+      },
+      80,
+      24,
+    );
+  }
+
+  it("replaces the composer row with an approval row when approvalPrompt is set", () => {
+    const f = buildWithApproval("shell", "rm -rf /tmp/x");
+    if (f.root.kind !== "box") return;
+    expect(f.root.children).toHaveLength(4);
+    const row = f.root.children[3];
+    if (row?.kind !== "text") return;
+    const flat = row.runs.map((r) => r.text).join("");
+    expect(flat).toContain("❓");
+    expect(flat).toContain("[shell]");
+    expect(flat).toContain("rm -rf /tmp/x");
+    expect(flat).toContain("[y/n]");
+    expect(flat).not.toContain("❯");
+    expect(flat).not.toContain("typing…");
+  });
+
+  it("clips an overlong approval prompt to 60 chars with an ellipsis", () => {
+    const long = "x".repeat(120);
+    const f = buildWithApproval("shell", long);
+    if (f.root.kind !== "box") return;
+    const row = f.root.children[3];
+    if (row?.kind !== "text") return;
+    const promptRun = row.runs.find((r) => r.text.includes("x"));
+    expect(promptRun?.text).toHaveLength(60);
+    expect(promptRun?.text.endsWith("…")).toBe(true);
+  });
+
+  it("omits the kind tag when approvalKind is undefined", () => {
+    const f = buildWithApproval(undefined, "go ahead?");
+    if (f.root.kind !== "box") return;
+    const row = f.root.children[3];
+    if (row?.kind !== "text") return;
+    const flat = row.runs.map((r) => r.text).join("");
+    expect(flat).not.toContain("[]");
+    expect(flat).toContain("go ahead?");
+  });
+
+  it("hides the slash overlay while an approval is active", () => {
+    const f = buildTraceFrame(
+      {
+        cardCount: 0,
+        busy: false,
+        cards: [],
+        composerText: "/",
+        slashMatches: [{ cmd: "/help", summary: "show help" }],
+        slashSelectedIndex: 0,
+        approvalKind: "shell",
+        approvalPrompt: "rm -rf /tmp/x",
+      },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") return;
+    expect(f.root.children).toHaveLength(4);
+  });
+});
+
 describe("parseSlashMatches", () => {
   it("returns [] for undefined / empty / malformed input", () => {
     expect(parseSlashMatches(undefined)).toEqual([]);

@@ -21,6 +21,9 @@ export type SceneTraceInput = {
   /** JSON-encoded `SceneSlashMatch[]`; undefined/empty hides the overlay. */
   slashMatchesJson?: string;
   slashSelectedIndex?: number;
+  /** When set, replaces the composer row with a `❓ <prompt> [y/n]` modal stub. */
+  approvalKind?: string;
+  approvalPrompt?: string;
 };
 
 type BuildInput = {
@@ -33,7 +36,11 @@ type BuildInput = {
   composerCursor?: number;
   slashMatches?: ReadonlyArray<SceneSlashMatch>;
   slashSelectedIndex?: number;
+  approvalKind?: string;
+  approvalPrompt?: string;
 };
+
+const APPROVAL_PROMPT_MAX = 60;
 
 const SUMMARY_MAX = 70;
 /** Reserved rows for title + status + composer; the rest can hold cards. */
@@ -77,9 +84,13 @@ export function buildTraceFrame(input: BuildInput, cols: number, rows: number): 
     for (const c of input.cards) children.push(cardRow(c));
   }
   children.push(statusRow(input));
-  children.push(composerRow(input));
+  if (input.approvalPrompt) {
+    children.push(approvalRow(input.approvalKind, input.approvalPrompt));
+  } else {
+    children.push(composerRow(input));
+  }
   const slash = input.slashMatches ?? [];
-  if (slash.length > 0) {
+  if (!input.approvalPrompt && slash.length > 0) {
     const sel = Math.max(0, Math.min(slash.length - 1, input.slashSelectedIndex ?? 0));
     const { startIndex, matches: shown } = slashWindow(slash, sel);
     for (let i = 0; i < shown.length; i++) {
@@ -118,6 +129,16 @@ function statusRow(s: BuildInput): SceneNode {
     { text: s.busy ? "busy" : "idle", style: { color: s.busy ? "yellow" : "green" } },
   ];
   if (s.activity) runs.push({ text: ` · ${s.activity}`, style: { dim: true } });
+  return text(runs);
+}
+
+function approvalRow(kind: string | undefined, prompt: string): SceneNode {
+  const clipped =
+    prompt.length > APPROVAL_PROMPT_MAX ? `${prompt.slice(0, APPROVAL_PROMPT_MAX - 1)}…` : prompt;
+  const runs: TextRun[] = [{ text: "❓ ", style: { color: "yellow", bold: true } }];
+  if (kind) runs.push({ text: `[${kind}] `, style: { dim: true } });
+  runs.push({ text: clipped });
+  runs.push({ text: "  [y/n]", style: { color: "yellow", bold: true } });
   return text(runs);
 }
 
@@ -270,6 +291,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
     composerCursor,
     slashMatchesJson,
     slashSelectedIndex,
+    approvalKind,
+    approvalPrompt,
   } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
@@ -288,6 +311,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
           composerCursor,
           slashMatches,
           slashSelectedIndex,
+          approvalKind,
+          approvalPrompt,
         },
         cols,
         rows,
@@ -305,5 +330,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     composerCursor,
     slashMatchesJson,
     slashSelectedIndex,
+    approvalKind,
+    approvalPrompt,
   ]);
 }

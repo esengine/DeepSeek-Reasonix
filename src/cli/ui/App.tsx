@@ -1315,6 +1315,15 @@ function AppInner({
     );
   }, [slashMatches]);
 
+  const sceneApproval = useMemo(() => {
+    if (pendingShell) return { kind: "shell", prompt: pendingShell.command };
+    if (pendingPath) return { kind: "path", prompt: `${pendingPath.intent} ${pendingPath.path}` };
+    if (pendingEditReview) return { kind: "edit", prompt: `review ${pendingEditReview.path}` };
+    if (pendingChoice) return { kind: "choice", prompt: pendingChoice.question };
+    if (pendingPlan) return { kind: "plan", prompt: "approve plan" };
+    return null;
+  }, [pendingShell, pendingPath, pendingEditReview, pendingChoice, pendingPlan]);
+
   useSceneTrace({
     cardCount,
     busy,
@@ -1325,6 +1334,8 @@ function AppInner({
     composerCursor,
     slashMatchesJson,
     slashSelectedIndex: slashMatchesJson ? slashSelected : undefined,
+    approvalKind: sceneApproval?.kind,
+    approvalPrompt: sceneApproval?.prompt,
   });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix
