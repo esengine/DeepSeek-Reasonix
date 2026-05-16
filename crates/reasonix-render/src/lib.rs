@@ -1,5 +1,7 @@
 pub mod decode_only;
+pub mod editor;
 pub mod input;
+pub mod integrated;
 pub mod state;
 pub mod theme;
 pub mod view;

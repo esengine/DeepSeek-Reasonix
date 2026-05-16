@@ -120,3 +120,22 @@ pub enum Message {
     Trace(SceneState),
     Setup(SetupState),
 }
+
+pub enum Payload {
+    Trace(SceneState),
+    Setup(SetupState),
+}
+
+pub fn decode_message(line: &str) -> Result<Payload, serde_json::Error> {
+    if let Ok(msg) = serde_json::from_str::<Message>(line) {
+        return Ok(match msg {
+            Message::Trace(state) => Payload::Trace(state),
+            Message::Setup(state) => Payload::Setup(state),
+        });
+    }
+    if let Ok(state) = serde_json::from_str::<SceneState>(line) {
+        return Ok(Payload::Trace(state));
+    }
+    let state: SetupState = serde_json::from_str(line)?;
+    Ok(Payload::Setup(state))
+}
