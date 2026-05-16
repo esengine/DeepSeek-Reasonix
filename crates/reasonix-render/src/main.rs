@@ -20,10 +20,27 @@ use reasonix_render::scene::SceneFrame;
 use reasonix_render::state::{Message, SceneState, SetupState};
 
 fn debug_log(msg: &str) {
-    if std::env::var("REASONIX_RENDER_DEBUG").is_err() {
+    let Ok(enabled) = std::env::var("REASONIX_RENDER_DEBUG") else {
+        return;
+    };
+    if enabled.is_empty() || enabled == "0" {
         return;
     }
-    let _ = writeln!(io::stderr(), "[reasonix-render] {msg}");
+    let path = std::env::var("REASONIX_RENDER_DEBUG_LOG").unwrap_or_else(|_| {
+        let home =
+            std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
+        if home.is_empty() {
+            "reasonix-render-debug.log".to_string()
+        } else {
+            format!("{home}/.reasonix/rust-render-debug.log")
+        }
+    });
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "[reasonix-render] {msg}");
+    }
 }
 
 fn main() -> Result<()> {
