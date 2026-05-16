@@ -88,14 +88,32 @@ function clip(s: string): string {
   return firstLine.length > SUMMARY_MAX ? `${firstLine.slice(0, SUMMARY_MAX - 1)}…` : firstLine;
 }
 
+const SIDEBAR_WIDTH = 24;
+const CTXPANE_WIDTH = 32;
+const SIDEBAR_MIN_COLS = 60;
+const CTXPANE_MIN_COLS = 100;
+
 export function buildTraceFrame(input: BuildInput, cols: number, rows: number): SceneFrame {
-  const children: SceneNode[] = [titleRow(input)];
+  const showSidebar = cols >= SIDEBAR_MIN_COLS;
+  const showCtxPane = cols >= CTXPANE_MIN_COLS;
+  const title = titleRow(input);
+  const status = statusRow(input, { suppressWallet: showCtxPane });
+  const main = mainPane(input);
+  const middleChildren: SceneNode[] = [];
+  if (showSidebar) middleChildren.push(sidebarPane());
+  middleChildren.push(main);
+  if (showCtxPane) middleChildren.push(ctxPane(input));
+  const middle = box(middleChildren, { direction: "row", height: "fill", gap: 1 });
+  return frame(cols, rows, box([title, middle, status], { direction: "column", paddingX: 1 }));
+}
+
+function mainPane(input: BuildInput): SceneNode {
+  const children: SceneNode[] = [];
   if (input.cards.length === 0) {
     children.push(noCardsRow());
   } else {
     for (const c of input.cards) children.push(cardRow(c));
   }
-  children.push(statusRow(input));
   const sessions = input.sessions ?? [];
   const pickerOwnsBottom = sessions.length > 0;
   if (pickerOwnsBottom) {
@@ -125,7 +143,39 @@ export function buildTraceFrame(input: BuildInput, cols: number, rows: number): 
     const hidden = slash.length - shown.length;
     if (hidden > 0) children.push(slashOverflowRow(hidden));
   }
-  return frame(cols, rows, box(children, { direction: "column", paddingX: 1 }));
+  return box(children, { direction: "column", width: "fill" });
+}
+
+function sidebarPane(): SceneNode {
+  return box(
+    [
+      sectionHeaderRow("SESSIONS"),
+      text([{ text: "use /sessions", style: { dim: true } }]),
+      text([{ text: "to browse", style: { dim: true } }]),
+    ],
+    { direction: "column", width: SIDEBAR_WIDTH },
+  );
+}
+
+function ctxPane(input: BuildInput): SceneNode {
+  const children: SceneNode[] = [sectionHeaderRow("CONTEXT")];
+  if (input.model) children.push(keyValueRow("model", input.model));
+  children.push(keyValueRow("cards", String(input.cardCount)));
+  const wallet = formatWallet(input.walletBalance, input.walletCurrency);
+  if (wallet) children.push(keyValueRow("wallet", wallet));
+  return box(children, { direction: "column", width: CTXPANE_WIDTH });
+}
+
+function sectionHeaderRow(label: string): SceneNode {
+  return text([
+    { text: "─ ", style: { dim: true } },
+    { text: label, style: { bold: true, color: "cyan" } },
+    { text: " ─", style: { dim: true } },
+  ]);
+}
+
+function keyValueRow(key: string, value: string): SceneNode {
+  return text([{ text: key.padEnd(8), style: { dim: true } }, { text: value }]);
 }
 
 function titleRow(s: BuildInput): SceneNode {
@@ -151,14 +201,14 @@ function cardRow(c: SceneTraceCard): SceneNode {
   return text(runs);
 }
 
-function statusRow(s: BuildInput): SceneNode {
+function statusRow(s: BuildInput, opts: { suppressWallet?: boolean } = {}): SceneNode {
   const leftRuns: TextRun[] = [
     { text: `${s.cardCount} cards`, style: { dim: true } },
     { text: " · " },
     { text: s.busy ? "busy" : "idle", style: { color: s.busy ? "yellow" : "green" } },
   ];
   if (s.activity) leftRuns.push({ text: ` · ${s.activity}`, style: { dim: true } });
-  const wallet = formatWallet(s.walletBalance, s.walletCurrency);
+  const wallet = opts.suppressWallet ? null : formatWallet(s.walletBalance, s.walletCurrency);
   if (!wallet) return text(leftRuns);
   return box(
     [
