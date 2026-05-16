@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, BufWriter, Write};
 
 use anyhow::{Context, Result};
 use crossterm::event::{
@@ -6,11 +6,8 @@ use crossterm::event::{
     Event,
 };
 use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
 
 use reasonix_render::decode_only::run_decode_only;
 use reasonix_render::input::{is_quit, paste_event, translate_key, translate_mouse};
@@ -18,6 +15,8 @@ use reasonix_render::producer::{build_setup_frame, build_trace_frame};
 use reasonix_render::render::render_frame;
 use reasonix_render::scene::SceneFrame;
 use reasonix_render::state::{Message, SceneState, SetupState};
+
+type RenderTerminal = ratatui::Terminal<CrosstermBackend<BufWriter<io::Stdout>>>;
 
 fn debug_log(msg: &str) {
     let Ok(enabled) = std::env::var("REASONIX_RENDER_DEBUG") else {
@@ -55,14 +54,10 @@ fn main() -> Result<()> {
         return run_emit_input();
     }
 
-    enable_raw_mode().context("enable raw mode")?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).context("enter alt screen")?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).context("create terminal")?;
+    install_panic_hook();
+    let mut terminal = init_terminal().context("init terminal")?;
     terminal.hide_cursor().ok();
     terminal.clear().ok();
-    terminal.autoresize().ok();
 
     if let Ok(size) = terminal.size() {
         debug_log(&format!("startup terminal.size = {}x{}", size.width, size.height));
@@ -70,13 +65,36 @@ fn main() -> Result<()> {
 
     let result = run_stream_loop(&mut terminal);
 
-    terminal.show_cursor().ok();
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
-    disable_raw_mode().ok();
+    restore_terminal(&mut terminal);
     result
 }
 
-fn run_stream_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+fn init_terminal() -> Result<RenderTerminal> {
+    enable_raw_mode().context("enable raw mode")?;
+    let mut stdout = BufWriter::new(io::stdout());
+    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)
+        .context("enter alt screen")?;
+    let backend = CrosstermBackend::new(stdout);
+    let terminal = ratatui::Terminal::new(backend).context("create terminal")?;
+    Ok(terminal)
+}
+
+fn restore_terminal(terminal: &mut RenderTerminal) {
+    terminal.show_cursor().ok();
+    crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen).ok();
+    disable_raw_mode().ok();
+}
+
+fn install_panic_hook() {
+    let original = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+        original(info);
+    }));
+}
+
+fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
     let stdin = io::stdin();
     let mut logged_first_frame = false;
     for (lineno, line) in stdin.lock().lines().enumerate() {
@@ -101,7 +119,7 @@ fn run_stream_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Res
     Ok(())
 }
 
-fn terminal_size(terminal: &Terminal<CrosstermBackend<io::Stdout>>) -> (u16, u16) {
+fn terminal_size(terminal: &RenderTerminal) -> (u16, u16) {
     match terminal.size() {
         Ok(size) => (size.width, size.height),
         Err(_) => (80, 24),
