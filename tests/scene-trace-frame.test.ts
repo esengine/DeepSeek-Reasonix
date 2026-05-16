@@ -213,6 +213,72 @@ describe("buildTraceFrame", () => {
     expect(busyStatus.runs[2]?.style?.color).toBe("yellow");
   });
 
+  it("keeps the status row as a single text node when no wallet balance is given", () => {
+    const f = buildTraceFrame({ cardCount: 1, busy: false, cards: [] }, 80, 24);
+    if (f.root.kind !== "box") return;
+    const status = f.root.children[2];
+    expect(status?.kind).toBe("text");
+  });
+
+  it("renders a wallet segment on the right when balance + currency are given", () => {
+    const f = buildTraceFrame(
+      { cardCount: 1, busy: false, cards: [], walletBalance: 184.2, walletCurrency: "CNY" },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") return;
+    const status = f.root.children[2];
+    if (status?.kind !== "box") throw new Error("expected row box with wallet");
+    expect(status.layout?.direction).toBe("row");
+    expect(status.children).toHaveLength(3);
+    const [left, spacer, right] = status.children;
+    if (left?.kind !== "text") throw new Error("expected left text");
+    expect(left.runs.map((r) => r.text).join("")).toContain("1 cards");
+    if (spacer?.kind !== "box") throw new Error("expected spacer box");
+    expect(spacer.layout?.width).toBe("fill");
+    if (right?.kind !== "text") throw new Error("expected right text");
+    const rightFlat = right.runs.map((r) => r.text).join("");
+    expect(rightFlat).toContain("wallet");
+    expect(rightFlat).toContain("¥184.20");
+  });
+
+  it("formats USD with $ and falls back to a code prefix for unknown currencies", () => {
+    const usd = buildTraceFrame(
+      { cardCount: 0, busy: false, cards: [], walletBalance: 5, walletCurrency: "USD" },
+      80,
+      24,
+    );
+    if (usd.root.kind !== "box") return;
+    const usdStatus = usd.root.children[2];
+    if (usdStatus?.kind !== "box") return;
+    const usdRight = usdStatus.children[2];
+    if (usdRight?.kind !== "text") return;
+    expect(usdRight.runs.map((r) => r.text).join("")).toContain("$5.00");
+
+    const other = buildTraceFrame(
+      { cardCount: 0, busy: false, cards: [], walletBalance: 5, walletCurrency: "AUD" },
+      80,
+      24,
+    );
+    if (other.root.kind !== "box") return;
+    const otherStatus = other.root.children[2];
+    if (otherStatus?.kind !== "box") return;
+    const otherRight = otherStatus.children[2];
+    if (otherRight?.kind !== "text") return;
+    expect(otherRight.runs.map((r) => r.text).join("")).toContain("AUD 5.00");
+  });
+
+  it("hides the wallet segment when balance is missing even with a currency present", () => {
+    const f = buildTraceFrame(
+      { cardCount: 0, busy: false, cards: [], walletCurrency: "CNY" },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") return;
+    const status = f.root.children[2];
+    expect(status?.kind).toBe("text");
+  });
+
   it("appends activity to the status row when given", () => {
     const f = buildTraceFrame(
       { cardCount: 3, busy: true, cards: [], activity: "awaiting tools" },

@@ -28,6 +28,9 @@ export type SceneTraceInput = {
   /** JSON-encoded `SceneSessionItem[]`; non-empty replaces composer/slash with the picker block. */
   sessionsJson?: string;
   sessionsFocusedIndex?: number;
+  /** Wallet balance — appears right-aligned in the status row. Null/undefined hides the segment. */
+  walletBalance?: number;
+  walletCurrency?: string;
 };
 
 type BuildInput = {
@@ -44,6 +47,8 @@ type BuildInput = {
   approvalPrompt?: string;
   sessions?: ReadonlyArray<SceneSessionItem>;
   sessionsFocusedIndex?: number;
+  walletBalance?: number;
+  walletCurrency?: string;
 };
 
 const APPROVAL_PROMPT_MAX = 60;
@@ -147,13 +152,49 @@ function cardRow(c: SceneTraceCard): SceneNode {
 }
 
 function statusRow(s: BuildInput): SceneNode {
-  const runs: TextRun[] = [
+  const leftRuns: TextRun[] = [
     { text: `${s.cardCount} cards`, style: { dim: true } },
     { text: " · " },
     { text: s.busy ? "busy" : "idle", style: { color: s.busy ? "yellow" : "green" } },
   ];
-  if (s.activity) runs.push({ text: ` · ${s.activity}`, style: { dim: true } });
-  return text(runs);
+  if (s.activity) leftRuns.push({ text: ` · ${s.activity}`, style: { dim: true } });
+  const wallet = formatWallet(s.walletBalance, s.walletCurrency);
+  if (!wallet) return text(leftRuns);
+  return box(
+    [
+      text(leftRuns),
+      box([], { width: "fill" }),
+      text([
+        { text: "wallet ", style: { dim: true } },
+        { text: wallet, style: { color: "green" } },
+      ]),
+    ],
+    { direction: "row" },
+  );
+}
+
+function formatWallet(total: number | undefined, currency: string | undefined): string | null {
+  if (total === undefined || !Number.isFinite(total)) return null;
+  const symbol = currencySymbol(currency);
+  return `${symbol}${total.toFixed(2)}`;
+}
+
+function currencySymbol(currency: string | undefined): string {
+  switch ((currency ?? "").toUpperCase()) {
+    case "CNY":
+    case "RMB":
+      return "¥";
+    case "USD":
+      return "$";
+    case "EUR":
+      return "€";
+    case "GBP":
+      return "£";
+    case "JPY":
+      return "¥";
+    default:
+      return currency ? `${currency} ` : "";
+  }
 }
 
 function approvalRow(kind: string | undefined, prompt: string): SceneNode {
@@ -380,6 +421,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
     approvalPrompt,
     sessionsJson,
     sessionsFocusedIndex,
+    walletBalance,
+    walletCurrency,
   } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
@@ -403,6 +446,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
           approvalPrompt,
           sessions,
           sessionsFocusedIndex,
+          walletBalance,
+          walletCurrency,
         },
         cols,
         rows,
@@ -424,6 +469,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
     approvalPrompt,
     sessionsJson,
     sessionsFocusedIndex,
+    walletBalance,
+    walletCurrency,
   ]);
 }
 

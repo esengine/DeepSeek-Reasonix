@@ -1350,6 +1350,8 @@ function AppInner({
     approvalPrompt: sceneApproval?.prompt,
     sessionsJson,
     sessionsFocusedIndex: sessionsJson ? sessionsPickerFocus : undefined,
+    walletBalance: balance?.total,
+    walletCurrency: balance?.currency,
   });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix
