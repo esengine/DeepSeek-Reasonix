@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { wrapToCells } from "../../../frame/width.js";
 
 export interface WrapCache {
@@ -80,44 +80,18 @@ const LINE_CELLS_DEBOUNCE_MS = 120;
  * content stays on the fast monotonic path, then snaps to the new width. */
 export function useIncrementalWrap(text: string, lineCells: number): string[] {
   const cacheRef = useRef<WrapCache | null>(null);
-  const stableCellsRef = useRef<number>(lineCells);
-  const cellsTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Debounce lineCells changes: during a resize, hold the old width briefly
-  // so the incremental wrapper can stay in its fast monotonic path.
-  const effectiveCells = useMemo(() => {
-    if (stableCellsRef.current === lineCells) return lineCells;
+  // Debounced lineCells value.  useState + useEffect so committing the
+  // new width after the debounce window naturally triggers a re-render.
+  const [effectiveCells, setEffectiveCells] = useState<number>(lineCells);
+  const pendingCellsRef = useRef<number>(lineCells);
 
-    // First time we see a new width, schedule a commit after the debounce
-    // window. Until then, keep using the old width.
-    if (cellsTimerRef.current === null) {
-      cellsTimerRef.current = setTimeout(() => {
-        stableCellsRef.current = lineCells;
-        cellsTimerRef.current = null;
-      }, LINE_CELLS_DEBOUNCE_MS);
-    }
-    // If the width changes again before the timer fires, reset the timer
-    // so we only commit once the width has been stable for the full window.
-    else {
-      clearTimeout(cellsTimerRef.current);
-      cellsTimerRef.current = setTimeout(() => {
-        stableCellsRef.current = lineCells;
-        cellsTimerRef.current = null;
-      }, LINE_CELLS_DEBOUNCE_MS);
-      return stableCellsRef.current;
-    }
-    return stableCellsRef.current;
-  }, [lineCells]);
-
-  // Cleanup timer on unmount
   useEffect(() => {
-    return () => {
-      if (cellsTimerRef.current !== null) {
-        clearTimeout(cellsTimerRef.current);
-        cellsTimerRef.current = null;
-      }
-    };
-  }, []);
+    if (pendingCellsRef.current === lineCells) return;
+    pendingCellsRef.current = lineCells;
+    const id = setTimeout(() => setEffectiveCells(lineCells), LINE_CELLS_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [lineCells]);
 
   return useMemo(() => {
     cacheRef.current = wrapIncremental(text, effectiveCells, cacheRef.current);

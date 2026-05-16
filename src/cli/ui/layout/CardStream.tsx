@@ -205,7 +205,11 @@ function isFullySettled(card: Card): boolean {
 
 /** True when a card's content is final — no more streaming deltas expected.
  * Drives the monotonic height lock in MeasuredCard: settled cards always
- * report their exact height; unsettled cards only report growth. */
+ * report their exact height; unsettled cards only report growth.
+ *
+ * If a future card kind legitimately shrinks in height while still in-flight,
+ * add an explicit entry here — otherwise the monotonic lock won't catch it
+ * and default:true will report the stale larger height. */
 function isCardSettled(card: Card): boolean {
   switch (card.kind) {
     case "reasoning":
