@@ -16,7 +16,7 @@ export interface DashboardContext {
 
   loop?: CacheFirstLoop;
   tools?: ToolRegistry;
-  mcpServers?: McpServerSummary[];
+  getMcpServers?: () => McpServerSummary[];
   jobs?: JobRegistry;
 
   /** Current code-mode root, if any. Drives the project-scoped allowlist. */

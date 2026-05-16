@@ -501,6 +501,8 @@ function AppInner({
   // Live MCP server list: initialized from the boot-time prop, then
   // updated immutably when append-drift adds tools mid-session.
   const [liveMcpServers, setLiveMcpServers] = useState<McpServerSummary[]>(() => mcpServers ?? []);
+  const liveMcpServersRef = useRef(liveMcpServers);
+  liveMcpServersRef.current = liveMcpServers;
   // Tracks whether the current turn has been aborted via Esc, so the
   // Esc handler only fires once per turn (repeated presses would yield
   // stacked warning events).
@@ -1966,7 +1968,7 @@ function AppInner({
           usageLogPath: defaultUsageLogPath(),
           loop,
           tools,
-          mcpServers: liveMcpServers,
+          getMcpServers: () => liveMcpServersRef.current,
           getCurrentCwd: () => (codeMode ? currentRootDirRef.current : undefined),
           getEditMode: () => (codeMode ? editModeRef.current : undefined),
           getPlanMode: () => planModeRef.current,
@@ -2228,7 +2230,6 @@ function AppInner({
   }, [
     loop,
     tools,
-    liveMcpServers,
     codeMode,
     session,
     togglePlanMode,
@@ -3211,7 +3212,6 @@ function AppInner({
       loop,
       latestVersion,
       mcpSpecs,
-      liveMcpServers,
       models,
       planMode,
       session,
@@ -3269,6 +3269,7 @@ function AppInner({
       mcpRuntime,
       pushHistory,
       resetCursor,
+      liveMcpServers,
     ],
   );
 

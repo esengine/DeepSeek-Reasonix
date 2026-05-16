@@ -67,7 +67,7 @@ export async function handleMcp(
 ): Promise<ApiResult> {
   // Bridged-server view (live).
   if (method === "GET" && rest.length === 0) {
-    const servers = (ctx.mcpServers ?? []).map((s) => ({
+    const servers = (ctx.getMcpServers?.() ?? []).map((s) => ({
       label: s.label,
       spec: s.spec,
       toolCount: s.toolCount,

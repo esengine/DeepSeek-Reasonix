@@ -168,6 +168,48 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
             sampleSize: info.sampleSize,
           }),
       });
+      // Tools are registered — record the bridge NOW so the UI shows
+      // "bridged" even if later non-critical steps (inspect, hot-add) fail.
+      const ms = Date.now() - t0;
+      const allSpecs = tools.specs();
+      const registeredSpecs = allSpecs.filter((s) =>
+        bridge.registeredNames.includes(s.function.name),
+      );
+      // Create a provisional record immediately (tools already usable).
+      records.set(raw, {
+        spec: raw,
+        client: mcp,
+        summary: buildMcpServerSummary({
+          label,
+          spec: raw,
+          toolCount: bridge.registeredNames.length,
+          report: {
+            protocolVersion: mcp.protocolVersion,
+            serverInfo: mcp.serverInfo,
+            capabilities: mcp.serverCapabilities ?? {},
+            tools: { supported: true, items: [] },
+            resources: { supported: false, reason: "still inspecting" },
+            prompts: { supported: false, reason: "still inspecting" },
+            elapsedMs: ms,
+          },
+          host,
+          bridgeEnv: bridge.env,
+        }),
+        registeredNames: bridge.registeredNames,
+        registeredSpecs,
+      });
+      insertionOrder.push(raw);
+      resolveReady();
+      sink({
+        kind: "connected",
+        name: label,
+        tools: bridge.registeredNames.length,
+        resources: 0,
+        prompts: 0,
+        ms,
+      });
+
+      // Non-critical: inspect + hot-add. Failures here don't un-bridge.
       let report: InspectionReport;
       try {
         report = await inspectMcpServer(mcp);
@@ -182,18 +224,8 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
           elapsedMs: 0,
         };
       }
-      const ms = Date.now() - t0;
       const resourceCount = report.resources.supported ? report.resources.items.length : 0;
       const promptCount = report.prompts.supported ? report.prompts.items.length : 0;
-      sink({
-        kind: "connected",
-        name: label,
-        tools: bridge.registeredNames.length,
-        resources: resourceCount,
-        prompts: promptCount,
-        ms,
-      });
-      resolveReady();
       const summary = buildMcpServerSummary({
         label,
         spec: raw,
@@ -202,11 +234,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         host,
         bridgeEnv: bridge.env,
       });
-      // Snapshot tool specs AFTER bridge so hot-add can replay them into loop.prefix.
-      const allSpecs = tools.specs();
-      const registeredSpecs = allSpecs.filter((s) =>
-        bridge.registeredNames.includes(s.function.name),
-      );
+      // Replace the provisional record with the fully-inspected summary.
       records.set(raw, {
         spec: raw,
         client: mcp,
@@ -214,17 +242,28 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         registeredNames: bridge.registeredNames,
         registeredSpecs,
       });
-      insertionOrder.push(raw);
       // Hot-add: shift the prefix so the live loop sees the new tools
       // on the very next turn. Each addTool is one cache-miss turn.
-      if (loop) for (const s of registeredSpecs) loop.prefix.addTool(s);
+      if (loop)
+        for (const s of registeredSpecs)
+          try {
+            loop.prefix.addTool(s);
+          } catch {
+            /* non-critical */
+          }
       return { ok: true, summary };
     } catch (err) {
-      await mcp?.close().catch(() => undefined);
+      // If we got far enough to create a provisional record, keep it —
+      // tools are already registered and usable even after a late failure.
+      if (!records.has(raw)) {
+        await mcp?.close().catch(() => undefined);
+        rejectReady(new Error(`MCP server "${label}" failed to start: ${(err as Error).message}`));
+      }
       const reason = (err as Error).message;
       sink({ kind: "failed", name: label, reason });
-      rejectReady(new Error(`MCP server "${label}" failed to start: ${reason}`));
-      return { ok: false, reason };
+      return records.has(raw)
+        ? { ok: true, summary: records.get(raw)!.summary }
+        : { ok: false, reason };
     }
   }
 

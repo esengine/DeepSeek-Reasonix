@@ -57,7 +57,7 @@ export async function handleOverview(
     editMode: ctx.getEditMode?.() ?? null,
     planMode: ctx.getPlanMode?.() ?? null,
     pendingEdits: ctx.getPendingEditCount?.() ?? null,
-    mcpServerCount: ctx.mcpServers?.length ?? null,
+    mcpServerCount: ctx.getMcpServers?.().length ?? null,
     toolCount: ctx.tools ? ctx.tools.size : null,
     preset: cfg.preset ?? "auto",
     reasoningEffort: cfg.reasoningEffort ?? "max",
