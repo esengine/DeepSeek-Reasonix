@@ -7,6 +7,7 @@
 /// state before emitting ANSI. This cache operates one layer above: it avoids
 /// the JSON parse + scene render + ratatui diff pipeline entirely for
 /// unchanged frames, saving CPU on both the JS and Rust sides of the bridge.
+#[derive(Default)]
 pub struct FrameCache {
     /// Raw JSON line from the previous frame.
     prev_raw: String,
@@ -14,16 +15,6 @@ pub struct FrameCache {
     skipped: u64,
     /// False until the first frame is seen — guarantees is_new returns true for frame 0.
     has_prev: bool,
-}
-
-impl Default for FrameCache {
-    fn default() -> Self {
-        Self {
-            prev_raw: String::new(),
-            skipped: 0,
-            has_prev: false,
-        }
-    }
 }
 
 impl FrameCache {
