@@ -20,6 +20,9 @@ export const zhCN = {
     sectionChanges: "变更",
     tabChanges: "变更",
     footer: "仅 127.0.0.1 · Token 保护",
+    themeToggle: "切换主题",
+    themeLight: "浅色",
+    themeDark: "深色",
   },
   changes: {
     chatPlaceholder: "询问代码问题…",

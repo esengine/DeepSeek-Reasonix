@@ -3,10 +3,11 @@
 import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useState } from "preact/hooks";
+import { initLangFromServer, t, useLang } from "./src/i18n";
 import { MODE } from "./src/lib/api";
 import { ToastStack, appBus } from "./src/lib/bus";
 import { ErrorBoundary, ErrorOverlay } from "./src/lib/error-boundary";
-import { initLangFromServer, t, useLang } from "./src/i18n";
+import { ChangesPanel } from "./src/panels/changes";
 import { ChatPanel } from "./src/panels/chat";
 import { HooksPanel } from "./src/panels/hooks";
 import { McpPanel } from "./src/panels/mcp";
@@ -21,9 +22,30 @@ import { SkillsPanel } from "./src/panels/skills";
 import { SystemPanel } from "./src/panels/system";
 import { ToolsPanel } from "./src/panels/tools";
 import { UsagePanel } from "./src/panels/usage";
-import { ChangesPanel } from "./src/panels/changes";
 
 const html = htm.bind(h);
+
+function useTheme() {
+  const [theme, setTheme] = useState(() => {
+    try {
+      const stored = localStorage.getItem("rx.theme");
+      if (stored === "light" || stored === "dark") return stored;
+    } catch {
+      /* private mode */
+    }
+    if (window.matchMedia?.("(prefers-color-scheme: light)").matches) return "light";
+    return "dark";
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem("rx.theme", theme);
+    } catch {
+      /* private mode / disabled storage — ignore */
+    }
+  }, [theme]);
+  return [theme, setTheme];
+}
 
 function tabSections() {
   return [
@@ -32,34 +54,79 @@ function tabSections() {
       tabs: [
         { id: "chat", name: t("app.tabChat"), glyph: "◆", panel: () => html`<${ChatPanel} />` },
         { id: "plans", name: t("app.tabPlans"), glyph: "⊞", panel: () => html`<${PlansPanel} />` },
-        { id: "sessions", name: t("app.tabSessions"), glyph: "›", panel: () => html`<${SessionsPanel} />` },
+        {
+          id: "sessions",
+          name: t("app.tabSessions"),
+          glyph: "›",
+          panel: () => html`<${SessionsPanel} />`,
+        },
       ],
     },
     {
       label: t("app.sectionChanges"),
       tabs: [
-        { id: "changes", name: t("app.tabChanges"), glyph: "▨", panel: () => html`<${ChangesPanel} />` },
+        {
+          id: "changes",
+          name: t("app.tabChanges"),
+          glyph: "▨",
+          panel: () => html`<${ChangesPanel} />`,
+        },
       ],
     },
     {
       label: t("app.sectionObserve"),
       tabs: [
-        { id: "overview", name: t("app.tabOverview"), glyph: "◈", panel: () => html`<${OverviewPanel} />` },
+        {
+          id: "overview",
+          name: t("app.tabOverview"),
+          glyph: "◈",
+          panel: () => html`<${OverviewPanel} />`,
+        },
         { id: "usage", name: t("app.tabUsage"), glyph: "$", panel: () => html`<${UsagePanel} />` },
-        { id: "health", name: t("app.tabSystem"), glyph: "+", panel: () => html`<${SystemPanel} />` },
-        { id: "semantic", name: t("app.tabSemantic"), glyph: "≈", panel: () => html`<${SemanticPanel} />` },
+        {
+          id: "health",
+          name: t("app.tabSystem"),
+          glyph: "+",
+          panel: () => html`<${SystemPanel} />`,
+        },
+        {
+          id: "semantic",
+          name: t("app.tabSemantic"),
+          glyph: "≈",
+          panel: () => html`<${SemanticPanel} />`,
+        },
       ],
     },
     {
       label: t("app.sectionConfigure"),
       tabs: [
         { id: "tools", name: t("app.tabTools"), glyph: "▣", panel: () => html`<${ToolsPanel} />` },
-        { id: "permissions", name: t("app.tabPermissions"), glyph: "▎", panel: () => html`<${PermissionsPanel} />` },
+        {
+          id: "permissions",
+          name: t("app.tabPermissions"),
+          glyph: "▎",
+          panel: () => html`<${PermissionsPanel} />`,
+        },
         { id: "mcp", name: t("app.tabMcp"), glyph: "M", panel: () => html`<${McpPanel} />` },
-        { id: "skills", name: t("app.tabSkills"), glyph: "S", panel: () => html`<${SkillsPanel} />` },
-        { id: "memory", name: t("app.tabMemory"), glyph: "·", panel: () => html`<${MemoryPanel} />` },
+        {
+          id: "skills",
+          name: t("app.tabSkills"),
+          glyph: "S",
+          panel: () => html`<${SkillsPanel} />`,
+        },
+        {
+          id: "memory",
+          name: t("app.tabMemory"),
+          glyph: "·",
+          panel: () => html`<${MemoryPanel} />`,
+        },
         { id: "hooks", name: t("app.tabHooks"), glyph: "H", panel: () => html`<${HooksPanel} />` },
-        { id: "settings", name: t("app.tabSettings"), glyph: "⌘", panel: () => html`<${SettingsPanel} />` },
+        {
+          id: "settings",
+          name: t("app.tabSettings"),
+          glyph: "⌘",
+          panel: () => html`<${SettingsPanel} />`,
+        },
       ],
     },
   ];
@@ -67,7 +134,9 @@ function tabSections() {
 
 function App() {
   useLang();
-  useEffect(() => { initLangFromServer(); }, []);
+  useEffect(() => {
+    initLangFromServer();
+  }, []);
   const [activeId, setActiveId] = useState(() => {
     try {
       return localStorage.getItem("rx.activeTab") ?? "chat";
@@ -75,6 +144,7 @@ function App() {
       return "chat";
     }
   });
+  const [theme, setTheme] = useTheme();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem("rx.sidebarCollapsed") === "1";
@@ -143,6 +213,11 @@ function App() {
         </div>
         <div class="side-foot">
           <span class="label">127.0.0.1</span>
+          <span
+            class="toggle theme-toggle"
+            title=${t("app.themeToggle") + (theme === "dark" ? ` (${t("app.themeLight")})` : ` (${t("app.themeDark")})`)}
+            onClick=${() => setTheme(theme === "dark" ? "light" : "dark")}
+          >${theme === "dark" ? "☀" : "☾"}</span>
           <span
             class="toggle"
             title=${sidebarCollapsed ? "expand" : "collapse"}

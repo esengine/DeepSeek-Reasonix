@@ -20,6 +20,9 @@ export const en = {
     sectionChanges: "Changes",
     tabChanges: "Changes",
     footer: "127.0.0.1 only · token-gated",
+    themeToggle: "Toggle theme",
+    themeLight: "Light",
+    themeDark: "Dark",
   },
   changes: {
     chatPlaceholder: "Ask about your code...",
