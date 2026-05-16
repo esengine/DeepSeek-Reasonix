@@ -1,6 +1,6 @@
 /** Distillation telemetry — measures parent-log growth avoided per spawn. */
 
-import { countTokens } from "../tokenizer.js";
+import { countTokensBounded } from "../tokenizer.js";
 
 /** Minimum shape `computeSpawnDistillation` needs. `SubagentResult` matches structurally; declaring a local interface avoids a stats ↔ subagent ↔ loop import cycle. */
 export interface SubagentResultLike {
@@ -24,7 +24,7 @@ export interface SpawnDistillation {
 }
 
 export function computeSpawnDistillation(result: SubagentResultLike): SpawnDistillation {
-  const outputTokens = countTokens(result.output);
+  const outputTokens = countTokensBounded(result.output);
   const completionTokens = result.usage.completionTokens;
   const savingsTokens = Math.max(0, completionTokens - outputTokens);
   const compressionRatio = completionTokens > 0 ? outputTokens / completionTokens : 1;

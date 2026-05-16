@@ -61,7 +61,7 @@ import {
 } from "../../memory/session.js";
 import { MemoryStore } from "../../memory/user.js";
 import { SkillStore } from "../../skills.js";
-import { countTokens } from "../../tokenizer.js";
+import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
 import { VERSION } from "../../version.js";
@@ -548,8 +548,8 @@ function emitMemory(tab: Tab): void {
 function emitCtxBreakdown(tab: Tab): void {
   if (!tab.runtime) return;
   try {
-    const sys = countTokens(tab.runtime.loop.prefix.system);
-    const tools = countTokens(JSON.stringify(tab.runtime.loop.prefix.toolSpecs));
+    const sys = countTokensBounded(tab.runtime.loop.prefix.system);
+    const tools = countTokensBounded(JSON.stringify(tab.runtime.loop.prefix.toolSpecs));
     emit({ type: "$ctx_breakdown", reservedTokens: sys + tools }, tab.id);
   } catch {
     // tokenizer warmup can throw on first call before the data file loads

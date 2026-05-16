@@ -1,5 +1,5 @@
 import { truncateForModel, truncateForModelByTokens } from "../mcp/registry.js";
-import { countTokens } from "../tokenizer.js";
+import { countTokens, countTokensBounded } from "../tokenizer.js";
 import type { ChatMessage } from "../types.js";
 
 /** UI progress feedback only — NOT a dispatch gate. */
@@ -49,7 +49,7 @@ export function shrinkOversizedToolResultsByTokens(
     const content = typeof msg.content === "string" ? msg.content : "";
     // length ≤ maxTokens ⇒ tokens ≤ maxTokens — skip the per-message tokenize.
     if (content.length <= maxTokens) return msg;
-    const beforeTokens = countTokens(content);
+    const beforeTokens = countTokensBounded(content);
     if (beforeTokens <= maxTokens) return msg;
     const truncated = truncateForModelByTokens(content, maxTokens);
     const afterTokens = countTokens(truncated);
@@ -80,7 +80,7 @@ export function shrinkOversizedToolCallArgsByTokens(
     const newCalls = msg.tool_calls.map((call) => {
       const args = call.function?.arguments;
       if (typeof args !== "string" || args.length <= maxTokens) return call;
-      const beforeTokens = countTokens(args);
+      const beforeTokens = countTokensBounded(args);
       if (beforeTokens <= maxTokens) return call;
       const shrunk = shrinkJsonLongStrings(args);
       const afterTokens = countTokens(shrunk);

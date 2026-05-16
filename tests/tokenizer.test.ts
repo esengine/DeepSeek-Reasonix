@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_BOUNDED_TOKENIZE_CHARS,
   countTokens,
+  countTokensBounded,
   encode,
   estimateConversationTokens,
   estimateRequestTokens,
@@ -280,6 +282,40 @@ describe("estimateRequestTokens", () => {
     const withDrop = estimateConversationTokens(msgs, true);
     const withoutDrop = estimateConversationTokens(msgs, false);
     expect(withDrop).toBeLessThan(withoutDrop);
+  });
+});
+
+describe("countTokensBounded", () => {
+  it("keeps the default sample cap conservative for pathological BPE input", () => {
+    expect(DEFAULT_BOUNDED_TOKENIZE_CHARS).toBeLessThanOrEqual(2048);
+  });
+
+  it("returns the exact token count when input is within the char cap", () => {
+    const text = "Hello world! 你好 deepseek.";
+    expect(countTokensBounded(text, text.length)).toBe(countTokens(text));
+  });
+
+  it("estimates oversized input from a bounded head/tail sample", () => {
+    const head = "Hello world! ".repeat(40);
+    const middle = "A".repeat(100_000);
+    const tail = "你好 deepseek ".repeat(40);
+    const text = head + middle + tail;
+
+    const estimate = countTokensBounded(text, 512);
+
+    expect(estimate).toBeGreaterThan(0);
+    expect(estimate).toBeLessThan(text.length);
+    expect(estimate).toBeGreaterThan(Math.floor(text.length * 0.05));
+  });
+
+  it("bounds pathological repetitive input without multi-second BPE work", () => {
+    const text = "A".repeat(100_000);
+    const t0 = performance.now();
+    const estimate = countTokensBounded(text);
+    const t1 = performance.now();
+
+    expect(estimate).toBeGreaterThan(0);
+    expect(t1 - t0).toBeLessThan(1000);
   });
 });
 

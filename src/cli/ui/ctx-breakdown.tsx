@@ -4,7 +4,7 @@ import React from "react";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS } from "../../telemetry/stats.js";
-import { countTokens } from "../../tokenizer.js";
+import { countTokensBounded } from "../../tokenizer.js";
 import { formatTokens } from "./primitives.js";
 import { COLOR } from "./theme.js";
 
@@ -20,13 +20,13 @@ export interface CtxBreakdownData {
 }
 
 /**
- * Walk the loop's prefix + log and tally tokens per category. Cheap
- * after the tokenizer warm-up (~100 ms first call, sub-ms after).
- * Memoize at the call site if used inside a render path.
+ * Walk the loop's prefix + log and tally tokens per category.
+ * Uses bounded counting because `/context` can inspect oversized tool
+ * results before the next loop-healing pass trims them.
  */
 export function computeCtxBreakdown(loop: CacheFirstLoop): CtxBreakdownData {
-  const systemTokens = countTokens(loop.prefix.system);
-  const toolsTokens = countTokens(JSON.stringify(loop.prefix.toolSpecs));
+  const systemTokens = countTokensBounded(loop.prefix.system);
+  const toolsTokens = countTokensBounded(JSON.stringify(loop.prefix.toolSpecs));
   const entries = loop.log.toMessages();
   let userTokens = 0;
   let assistantTokens = 0;
@@ -37,15 +37,15 @@ export function computeCtxBreakdown(loop: CacheFirstLoop): CtxBreakdownData {
   for (const e of entries) {
     const content = typeof e.content === "string" ? e.content : "";
     if (e.role === "user") {
-      userTokens += countTokens(content);
+      userTokens += countTokensBounded(content);
       logTurn += 1;
     } else if (e.role === "assistant") {
-      assistantTokens += countTokens(content);
+      assistantTokens += countTokensBounded(content);
       if (Array.isArray(e.tool_calls) && e.tool_calls.length > 0) {
-        toolCallTokens += countTokens(JSON.stringify(e.tool_calls));
+        toolCallTokens += countTokensBounded(JSON.stringify(e.tool_calls));
       }
     } else if (e.role === "tool") {
-      const n = countTokens(content);
+      const n = countTokensBounded(content);
       toolResultTokens += n;
       toolBreakdown.push({ name: e.name ?? "?", tokens: n, turn: logTurn });
     }
