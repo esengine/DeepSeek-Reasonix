@@ -11,3 +11,4 @@ crossterm = "0.28"
 ratatui = "0.29"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+unicode-width = "0.2"

@@ -25,6 +25,30 @@ fn collect_row(buf: &Buffer, y: u16, width: u16) -> String {
 }
 
 #[test]
+fn cjk_chars_advance_by_their_display_width_so_neighbors_dont_overlap() {
+    // Smoke test for the wide-char bug seen on 2026-05-15: typing 测试123
+    // showed up as "测 23" because every char advanced x by 1 instead of by
+    // the char's display width.
+    let frame = frame_of(SceneNode::Text {
+        runs: vec![TextRun {
+            text: "测试123".to_string(),
+            style: None,
+        }],
+        wrap: None,
+    });
+    let area = Rect::new(0, 0, 20, 1);
+    let mut buf = Buffer::empty(area);
+    render_frame(&frame, &mut buf, area);
+    // Cell 0 holds 测 (width 2); cell 1 is the continuation. Cell 2 holds 试
+    // (width 2); cell 3 continuation. Cells 4/5/6 hold 1/2/3.
+    assert_eq!(buf[(0, 0)].symbol(), "测");
+    assert_eq!(buf[(2, 0)].symbol(), "试");
+    assert_eq!(buf[(4, 0)].symbol(), "1");
+    assert_eq!(buf[(5, 0)].symbol(), "2");
+    assert_eq!(buf[(6, 0)].symbol(), "3");
+}
+
+#[test]
 fn renders_a_plain_text_frame_at_row_zero() {
     let frame = frame_of(SceneNode::Text {
         runs: vec![TextRun {

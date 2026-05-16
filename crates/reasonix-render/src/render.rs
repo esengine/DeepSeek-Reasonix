@@ -1,6 +1,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color as RColor, Modifier, Style};
+use unicode_width::UnicodeWidthChar;
 
 use crate::scene::{
     BoxLayout, Color, FlexDirection, NamedColor, SceneFrame, SceneNode, TextRun, TextStyle,
@@ -31,15 +32,23 @@ fn render_text_runs(runs: &[TextRun], buf: &mut Buffer, area: Rect) {
         }
         let style = ratatui_style(run.style.as_ref());
         for ch in run.text.chars() {
-            if x >= max_x {
+            let w = display_width(ch);
+            if w == 0 {
+                continue;
+            }
+            if x.saturating_add(w) > max_x {
                 break;
             }
             let cell = &mut buf[(x, area.y)];
             cell.set_char(ch);
             cell.set_style(style);
-            x = x.saturating_add(1);
+            x = x.saturating_add(w);
         }
     }
+}
+
+fn display_width(ch: char) -> u16 {
+    UnicodeWidthChar::width(ch).unwrap_or(0) as u16
 }
 
 fn render_box(layout: Option<&BoxLayout>, children: &[SceneNode], buf: &mut Buffer, area: Rect) {
@@ -173,8 +182,12 @@ fn intrinsic_height(node: &SceneNode) -> u16 {
 fn intrinsic_width(node: &SceneNode) -> u16 {
     match node {
         SceneNode::Text { runs, .. } => {
-            let chars: usize = runs.iter().map(|r| r.text.chars().count()).sum();
-            chars.min(u16::MAX as usize) as u16
+            let cells: usize = runs
+                .iter()
+                .flat_map(|r| r.text.chars())
+                .map(|c| display_width(c) as usize)
+                .sum();
+            cells.min(u16::MAX as usize) as u16
         }
         SceneNode::Box {
             layout, children, ..
