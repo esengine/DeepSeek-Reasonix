@@ -34,6 +34,7 @@ import { KeystrokeProvider } from "../ui/keystroke-context.js";
 import { type RustKeystrokeReader, createRustKeystrokeReader } from "../ui/scene/input-adapter.js";
 import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
+import { isIntegratedRendererRequested, setIntegratedEventHandler } from "../ui/scene/trace.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
   type McpLifecycleNotice,
@@ -399,13 +400,30 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
         "Complete Setup once, then re-launch with the flag.\n",
     );
   }
+  const rustIntegrated = rustRendererActive && isIntegratedRendererRequested();
   const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
   const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
   const inputCmdOverride = parseInputCmd(process.env.REASONIX_INPUT_CMD);
-  const keystrokeReader = rustRendererActive
-    ? createRustKeystrokeReader(inputCmdOverride ? { command: inputCmdOverride } : {})
-    : undefined;
+  // Integrated mode: rust captures the terminal directly, no separate input child.
+  const keystrokeReader =
+    rustRendererActive && !rustIntegrated
+      ? createRustKeystrokeReader(inputCmdOverride ? { command: inputCmdOverride } : {})
+      : undefined;
   const stderrRestore = rustRendererActive ? redirectStderrToLogFile() : undefined;
+
+  if (rustIntegrated) {
+    setIntegratedEventHandler((event) => {
+      if (event.event === "submit") {
+        qqSubmitRef.current?.(event.text);
+      } else if (event.event === "exit") {
+        void (async () => {
+          await stopAndSaveCpuProfile();
+          process.exit(0);
+        })();
+      }
+      // interrupt: no-op for now; terminal SIGINT already reaches Node.
+    });
+  }
 
   const { waitUntilExit } = render(
     <Root

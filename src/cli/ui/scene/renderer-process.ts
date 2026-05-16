@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
 
+export type RustEvent =
+  | { event: "submit"; text: string }
+  | { event: "interrupt" }
+  | { event: "exit" };
+
 export type RendererProcess = {
   emit(message: unknown): void;
   close(): Promise<number | null>;
@@ -9,6 +14,10 @@ export type SpawnRendererOptions = {
   command?: readonly string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** When true the rust child owns keyboard + composer; its stderr is parsed for {event:"submit"|"interrupt"|"exit"} lines. */
+  integrated?: boolean;
+  /** Called for each event line from the rust child's stderr. Only meaningful when `integrated` is true. */
+  onEvent?: (event: RustEvent) => void;
 };
 
 export const DEFAULT_COMMAND: readonly string[] = [
@@ -21,15 +30,21 @@ export const DEFAULT_COMMAND: readonly string[] = [
 
 export function spawnRenderer(opts: SpawnRendererOptions = {}): RendererProcess {
   const command = opts.command ?? DEFAULT_COMMAND;
-  const [cmd, ...args] = command;
+  const baseArgs: string[] = [];
+  const [cmd, ...rest] = command;
+  baseArgs.push(...rest);
+  if (opts.integrated) {
+    baseArgs.push("--integrated");
+  }
   if (!cmd) {
     throw new Error("spawnRenderer: empty command");
   }
 
-  const child = spawn(cmd, args, {
+  const stderrStdio: "inherit" | "pipe" = opts.integrated ? "pipe" : "inherit";
+  const child = spawn(cmd, baseArgs, {
     cwd: opts.cwd,
     env: opts.env ?? process.env,
-    stdio: ["pipe", "inherit", "inherit"],
+    stdio: ["pipe", "inherit", stderrStdio],
   });
 
   let exited = false;
@@ -43,6 +58,29 @@ export function spawnRenderer(opts: SpawnRendererOptions = {}): RendererProcess 
   child.stdin?.on("error", () => {
     exited = true;
   });
+
+  if (opts.integrated && opts.onEvent && child.stderr) {
+    let buf = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      buf += chunk;
+      for (;;) {
+        const nl = buf.indexOf("\n");
+        if (nl === -1) break;
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line.length === 0) continue;
+        try {
+          const parsed = JSON.parse(line) as RustEvent;
+          if (parsed && typeof parsed.event === "string") {
+            opts.onEvent?.(parsed);
+          }
+        } catch {
+          // ignore non-JSON stderr lines (panic output, debug, etc.)
+        }
+      }
+    });
+  }
 
   return {
     emit(message: unknown): void {
