@@ -343,8 +343,8 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   }
 
   const rustRendererActive = process.env.REASONIX_RENDERER === "rust";
-  const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
-  const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
+  const inkStdout = rustRendererActive ? makeNullStdout() : process.stdout;
+  const inkStdin = rustRendererActive ? makeNullStdin() : process.stdin;
   const keystrokeReader = rustRendererActive ? createRustKeystrokeReader() : undefined;
 
   const { waitUntilExit } = render(
