@@ -485,13 +485,15 @@ function AppInner({
     if (!isStreaming && liveExpand) setLiveExpand(false);
   }, [isStreaming, liveExpand]);
   const languageVersion = useLanguageReload();
-  // Splash holds for one full whale-spout cycle (~1.4s) so the brand
-  // mark always lands clean and heavy first-paint cost stays hidden.
-  const [bootReady, setBootReady] = useState(false);
+  // Boot splash: skip when config has banner:false, otherwise show
+  // one full whale-spout cycle (~1.4s) so the brand mark lands clean.
+  const showBanner = useMemo(() => readConfig().banner !== false, []);
+  const [bootReady, setBootReady] = useState(!showBanner);
   useEffect(() => {
+    if (!showBanner) return;
     const t = setTimeout(() => setBootReady(true), 1400);
     return () => clearTimeout(t);
-  }, []);
+  }, [showBanner]);
   useEffect(() => {
     markPhase("first_paint");
     dumpStartupProfile();

@@ -89,6 +89,8 @@ export interface ReasonixConfig {
   editMode?: EditMode;
   editModeHintShown?: boolean;
   mouseClipboardHintShown?: boolean;
+  /** When false, skip the boot splash animation and show the main UI immediately. Default true. */
+  banner?: boolean;
   reasoningEffort?: ReasoningEffort;
   /** Default workspace root for the desktop client. CLI uses cwd. */
   workspaceDir?: string;
