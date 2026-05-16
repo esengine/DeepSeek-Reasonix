@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  type SceneSessionItem,
   type SceneSlashMatch,
   type SceneTraceCard,
   buildTraceFrame,
   cardsForHeight,
   parseRecentCards,
+  parseSessions,
   parseSlashMatches,
   slashWindow,
   summarizeCard,
@@ -430,6 +432,111 @@ describe("buildTraceFrame approval modal", () => {
     );
     if (f.root.kind !== "box") return;
     expect(f.root.children).toHaveLength(4);
+  });
+});
+
+describe("buildTraceFrame sessions picker", () => {
+  function makeSessions(n: number): SceneSessionItem[] {
+    return Array.from({ length: n }, (_, i) => ({
+      title: `session-${i}`,
+      meta: `main · ${i + 1} turns`,
+    }));
+  }
+
+  function buildWithSessions(sessions: SceneSessionItem[], focus: number) {
+    return buildTraceFrame(
+      {
+        cardCount: 0,
+        busy: false,
+        cards: [],
+        composerText: "typing…",
+        sessions,
+        sessionsFocusedIndex: focus,
+      },
+      80,
+      24,
+    );
+  }
+
+  it("replaces composer with a header + one row per session + a hint footer", () => {
+    const f = buildWithSessions(makeSessions(3), 0);
+    if (f.root.kind !== "box") return;
+    expect(f.root.children).toHaveLength(3 + 1 + 3 + 1);
+    const header = f.root.children[3];
+    if (header?.kind !== "text") return;
+    const headerFlat = header.runs.map((r) => r.text).join("");
+    expect(headerFlat).toContain("sessions");
+    expect(headerFlat).toContain("(3 saved)");
+    const row0 = f.root.children[4];
+    if (row0?.kind !== "text") return;
+    expect(row0.runs[0]?.text).toBe("▸ ");
+    expect(row0.runs[1]?.text).toBe("session-0");
+    const hint = f.root.children.at(-1);
+    if (hint?.kind !== "text") return;
+    const hintFlat = hint.runs.map((r) => r.text).join("");
+    expect(hintFlat).toContain("navigate");
+    expect(hintFlat).toContain("open");
+  });
+
+  it("windows a long session list at MAX_SESSION_ROWS (8) with an overflow row", () => {
+    const f = buildWithSessions(makeSessions(20), 15);
+    if (f.root.kind !== "box") return;
+    expect(f.root.children).toHaveLength(3 + 1 + 8 + 1 + 1);
+    const overflow = f.root.children.at(-2);
+    if (overflow?.kind !== "text") return;
+    expect(overflow.runs.map((r) => r.text).join("")).toContain("…12 more");
+  });
+
+  it("suppresses both the composer and the slash overlay while a sessions picker is active", () => {
+    const f = buildTraceFrame(
+      {
+        cardCount: 0,
+        busy: false,
+        cards: [],
+        composerText: "/",
+        slashMatches: [{ cmd: "/help", summary: "show help" }],
+        slashSelectedIndex: 0,
+        sessions: makeSessions(2),
+        sessionsFocusedIndex: 0,
+      },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") return;
+    const flat = f.root.children
+      .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+      .join(" | ");
+    expect(flat).not.toContain("/help");
+    expect(flat).not.toContain("❯");
+  });
+
+  it("renders meta after the title when given", () => {
+    const f = buildWithSessions([{ title: "feat-foo", meta: "feat · 12 turns" }], 0);
+    if (f.root.kind !== "box") return;
+    const row = f.root.children[4];
+    if (row?.kind !== "text") return;
+    const flat = row.runs.map((r) => r.text).join("");
+    expect(flat).toContain("feat-foo");
+    expect(flat).toContain("feat · 12 turns");
+  });
+});
+
+describe("parseSessions", () => {
+  it("returns [] for undefined / malformed input", () => {
+    expect(parseSessions(undefined)).toEqual([]);
+    expect(parseSessions("")).toEqual([]);
+    expect(parseSessions("oops")).toEqual([]);
+    expect(parseSessions('{"not":"array"}')).toEqual([]);
+  });
+
+  it("decodes a JSON array of session items and preserves optional meta", () => {
+    const json = JSON.stringify([{ title: "a", meta: "main · 1 turns" }, { title: "b" }]);
+    expect(parseSessions(json)).toEqual([{ title: "a", meta: "main · 1 turns" }, { title: "b" }]);
+  });
+
+  it("skips entries missing a title", () => {
+    const json = JSON.stringify([{ title: "ok" }, { meta: "no-title" }, null, 42]);
+    expect(parseSessions(json)).toEqual([{ title: "ok" }]);
   });
 });
 

@@ -628,6 +628,7 @@ function AppInner({
   /** True while the SessionPicker is open mid-chat (triggered by `/sessions`). */
   const [pendingSessionsPicker, setPendingSessionsPicker] = useState(false);
   const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>([]);
+  const [sessionsPickerFocus, setSessionsPickerFocus] = useState(0);
   /** True while the CheckpointPicker is open mid-chat (triggered by bare `/restore`). */
   const [pendingCheckpointPicker, setPendingCheckpointPicker] = useState(false);
   const [checkpointPickerList, setCheckpointPickerList] = useState<CheckpointMeta[]>([]);
@@ -1315,6 +1316,17 @@ function AppInner({
     );
   }, [slashMatches]);
 
+  const sessionsJson = useMemo(() => {
+    if (!pendingSessionsPicker || sessionsPickerList.length === 0) return undefined;
+    return JSON.stringify(
+      sessionsPickerList.map((s) => {
+        const branch = s.meta.branch ?? "main";
+        const turns = s.meta.turnCount ?? Math.ceil(s.messageCount / 2);
+        return { title: s.name, meta: `${branch} · ${turns} turns` };
+      }),
+    );
+  }, [pendingSessionsPicker, sessionsPickerList]);
+
   const sceneApproval = useMemo(() => {
     if (pendingShell) return { kind: "shell", prompt: pendingShell.command };
     if (pendingPath) return { kind: "path", prompt: `${pendingPath.intent} ${pendingPath.path}` };
@@ -1336,6 +1348,8 @@ function AppInner({
     slashSelectedIndex: slashMatchesJson ? slashSelected : undefined,
     approvalKind: sceneApproval?.kind,
     approvalPrompt: sceneApproval?.prompt,
+    sessionsJson,
+    sessionsFocusedIndex: sessionsJson ? sessionsPickerFocus : undefined,
   });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix
@@ -4079,6 +4093,7 @@ function AppInner({
                     workspace={currentRootDir}
                     walletCurrency={walletCurrencyRef.current}
                     pickerPorts={pickerPorts}
+                    onFocusChange={setSessionsPickerFocus}
                     onChoose={(outcome) => {
                       if (outcome.kind === "open") {
                         setPendingSessionsPicker(false);

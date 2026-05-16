@@ -7,6 +7,7 @@ import type { Card } from "../state/cards.js";
 
 export type SceneTraceCard = { kind: string; summary: string };
 export type SceneSlashMatch = { cmd: string; summary: string; argsHint?: string };
+export type SceneSessionItem = { title: string; meta?: string };
 
 export type SceneTraceInput = {
   model?: string;
@@ -24,6 +25,9 @@ export type SceneTraceInput = {
   /** When set, replaces the composer row with a `❓ <prompt> [y/n]` modal stub. */
   approvalKind?: string;
   approvalPrompt?: string;
+  /** JSON-encoded `SceneSessionItem[]`; non-empty replaces composer/slash with the picker block. */
+  sessionsJson?: string;
+  sessionsFocusedIndex?: number;
 };
 
 type BuildInput = {
@@ -38,9 +42,12 @@ type BuildInput = {
   slashSelectedIndex?: number;
   approvalKind?: string;
   approvalPrompt?: string;
+  sessions?: ReadonlyArray<SceneSessionItem>;
+  sessionsFocusedIndex?: number;
 };
 
 const APPROVAL_PROMPT_MAX = 60;
+const MAX_SESSION_ROWS = 8;
 
 const SUMMARY_MAX = 70;
 /** Reserved rows for title + status + composer; the rest can hold cards. */
@@ -84,15 +91,28 @@ export function buildTraceFrame(input: BuildInput, cols: number, rows: number): 
     for (const c of input.cards) children.push(cardRow(c));
   }
   children.push(statusRow(input));
-  if (input.approvalPrompt) {
+  const sessions = input.sessions ?? [];
+  const pickerOwnsBottom = sessions.length > 0;
+  if (pickerOwnsBottom) {
+    children.push(sessionsHeaderRow(sessions.length));
+    const sel = Math.max(0, Math.min(sessions.length - 1, input.sessionsFocusedIndex ?? 0));
+    const { startIndex, matches: shown } = listWindow(sessions, sel, MAX_SESSION_ROWS);
+    for (let i = 0; i < shown.length; i++) {
+      const item = shown[i] as SceneSessionItem;
+      children.push(sessionRow(item, startIndex + i === sel));
+    }
+    const hidden = sessions.length - shown.length;
+    if (hidden > 0) children.push(slashOverflowRow(hidden));
+    children.push(sessionsHintRow());
+  } else if (input.approvalPrompt) {
     children.push(approvalRow(input.approvalKind, input.approvalPrompt));
   } else {
     children.push(composerRow(input));
   }
   const slash = input.slashMatches ?? [];
-  if (!input.approvalPrompt && slash.length > 0) {
+  if (!pickerOwnsBottom && !input.approvalPrompt && slash.length > 0) {
     const sel = Math.max(0, Math.min(slash.length - 1, input.slashSelectedIndex ?? 0));
-    const { startIndex, matches: shown } = slashWindow(slash, sel);
+    const { startIndex, matches: shown } = listWindow(slash, sel, MAX_SLASH_ROWS);
     for (let i = 0; i < shown.length; i++) {
       const absoluteIndex = startIndex + i;
       children.push(slashRow(shown[i] as SceneSlashMatch, absoluteIndex === sel));
@@ -158,15 +178,55 @@ function slashOverflowRow(hidden: number): SceneNode {
   return text([{ text: `…${hidden} more`, style: { dim: true } }]);
 }
 
+export function listWindow<T>(
+  items: ReadonlyArray<T>,
+  selected: number,
+  windowSize: number,
+): { startIndex: number; matches: ReadonlyArray<T> } {
+  if (items.length <= windowSize) return { startIndex: 0, matches: items };
+  const half = Math.floor(windowSize / 2);
+  const maxStart = items.length - windowSize;
+  const startIndex = Math.max(0, Math.min(maxStart, selected - half));
+  return { startIndex, matches: items.slice(startIndex, startIndex + windowSize) };
+}
+
 export function slashWindow(
   matches: ReadonlyArray<SceneSlashMatch>,
   selected: number,
 ): { startIndex: number; matches: ReadonlyArray<SceneSlashMatch> } {
-  if (matches.length <= MAX_SLASH_ROWS) return { startIndex: 0, matches };
-  const half = Math.floor(MAX_SLASH_ROWS / 2);
-  const maxStart = matches.length - MAX_SLASH_ROWS;
-  const startIndex = Math.max(0, Math.min(maxStart, selected - half));
-  return { startIndex, matches: matches.slice(startIndex, startIndex + MAX_SLASH_ROWS) };
+  return listWindow(matches, selected, MAX_SLASH_ROWS);
+}
+
+function sessionsHeaderRow(total: number): SceneNode {
+  return text([
+    { text: "📂 ", style: { color: "cyan", bold: true } },
+    { text: "sessions", style: { bold: true } },
+    { text: ` (${total} saved)`, style: { dim: true } },
+  ]);
+}
+
+function sessionRow(item: SceneSessionItem, focused: boolean): SceneNode {
+  const runs: TextRun[] = [];
+  runs.push({ text: focused ? "▸ " : "  ", style: { color: "cyan" } });
+  runs.push({ text: item.title, style: focused ? { bold: true, color: "cyan" } : undefined });
+  if (item.meta) {
+    runs.push({ text: "  " });
+    runs.push({ text: item.meta, style: { dim: true } });
+  }
+  return text(runs);
+}
+
+function sessionsHintRow(): SceneNode {
+  return text([
+    { text: "↑↓ ", style: { color: "cyan" } },
+    { text: "navigate · ", style: { dim: true } },
+    { text: "⏎ ", style: { color: "cyan" } },
+    { text: "open · ", style: { dim: true } },
+    { text: "n ", style: { color: "cyan" } },
+    { text: "new · ", style: { dim: true } },
+    { text: "esc ", style: { color: "cyan" } },
+    { text: "cancel", style: { dim: true } },
+  ]);
 }
 
 function composerRow(s: BuildInput): SceneNode {
@@ -227,6 +287,27 @@ function colorFor(kind: string): Color {
     default:
       return "default";
   }
+}
+
+export function parseSessions(json: string | undefined): SceneSessionItem[] {
+  if (!json || json.length === 0) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: SceneSessionItem[] = [];
+  for (const item of parsed) {
+    if (typeof item !== "object" || item === null) continue;
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.title !== "string") continue;
+    const s: SceneSessionItem = { title: obj.title };
+    if (typeof obj.meta === "string") s.meta = obj.meta;
+    out.push(s);
+  }
+  return out;
 }
 
 export function parseSlashMatches(json: string | undefined): SceneSlashMatch[] {
@@ -293,12 +374,15 @@ export function useSceneTrace(input: SceneTraceInput): void {
     slashSelectedIndex,
     approvalKind,
     approvalPrompt,
+    sessionsJson,
+    sessionsFocusedIndex,
   } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
     const parsed = parseRecentCards(recentCardsJson);
     const cards = cardsForHeight(parsed, rows);
     const slashMatches = parseSlashMatches(slashMatchesJson);
+    const sessions = parseSessions(sessionsJson);
     emitSceneFrame(
       buildTraceFrame(
         {
@@ -313,6 +397,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
           slashSelectedIndex,
           approvalKind,
           approvalPrompt,
+          sessions,
+          sessionsFocusedIndex,
         },
         cols,
         rows,
@@ -332,5 +418,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     slashSelectedIndex,
     approvalKind,
     approvalPrompt,
+    sessionsJson,
+    sessionsFocusedIndex,
   ]);
 }
