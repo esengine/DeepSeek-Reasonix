@@ -39,7 +39,6 @@ bun.lock
 # Local portable Node/npm used for development on machines without npm.
 .tools/
 .npm-cache/
-nodejs/
 
 # Tauri desktop shell build artifacts.
 desktop/src-tauri/target/
