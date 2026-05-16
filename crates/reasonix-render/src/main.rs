@@ -19,6 +19,13 @@ use reasonix_render::render::render_frame;
 use reasonix_render::scene::SceneFrame;
 use reasonix_render::state::{Message, SceneState, SetupState};
 
+fn debug_log(msg: &str) {
+    if std::env::var("REASONIX_RENDER_DEBUG").is_err() {
+        return;
+    }
+    let _ = writeln!(io::stderr(), "[reasonix-render] {msg}");
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--decode-only") {
@@ -31,20 +38,29 @@ fn main() -> Result<()> {
         return run_emit_input();
     }
 
+    enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("enter alt screen")?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("create terminal")?;
+    terminal.hide_cursor().ok();
+    terminal.clear().ok();
+
+    if let Ok(size) = terminal.size() {
+        debug_log(&format!("startup terminal.size = {}x{}", size.width, size.height));
+    }
 
     let result = run_stream_loop(&mut terminal);
 
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
+    execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
+    disable_raw_mode().ok();
     result
 }
 
 fn run_stream_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     let stdin = io::stdin();
+    let mut logged_first_frame = false;
     for (lineno, line) in stdin.lock().lines().enumerate() {
         let line = line.with_context(|| format!("read line {}", lineno + 1))?;
         if line.trim().is_empty() {
@@ -54,8 +70,15 @@ fn run_stream_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Res
             .with_context(|| format!("decode line {}", lineno + 1))?;
         terminal.draw(|f| {
             let area = f.area();
+            if !logged_first_frame {
+                debug_log(&format!(
+                    "first frame area = x={} y={} w={} h={}",
+                    area.x, area.y, area.width, area.height
+                ));
+            }
             render_frame(&frame, f.buffer_mut(), area);
         })?;
+        logged_first_frame = true;
     }
     Ok(())
 }

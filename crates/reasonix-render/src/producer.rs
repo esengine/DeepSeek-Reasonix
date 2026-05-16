@@ -62,8 +62,6 @@ fn scroll_area(state: &SceneState) -> SceneNode {
         BoxLayout {
             height: Some(Dim::Fill(FillToken::Fill)),
             width: Some(Dim::Fill(FillToken::Fill)),
-            padding_x: Some(2),
-            padding_y: Some(1),
             ..Default::default()
         },
     )
