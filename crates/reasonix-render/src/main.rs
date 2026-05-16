@@ -100,6 +100,51 @@ fn install_panic_hook() {
     }));
 }
 
+fn insert_char_at(buffer: &mut String, char_idx: usize, ch: char) {
+    let byte_idx = char_to_byte(buffer, char_idx);
+    buffer.insert(byte_idx, ch);
+}
+
+fn remove_char_at(buffer: &mut String, char_idx: usize) {
+    let Some((byte_idx, _)) = buffer.char_indices().nth(char_idx) else {
+        return;
+    };
+    buffer.remove(byte_idx);
+}
+
+fn char_to_byte(buffer: &str, char_idx: usize) -> usize {
+    buffer
+        .char_indices()
+        .nth(char_idx)
+        .map(|(b, _)| b)
+        .unwrap_or(buffer.len())
+}
+
+fn prev_word_boundary(buffer: &str, from: usize) -> usize {
+    let chars: Vec<char> = buffer.chars().collect();
+    let mut i = from.min(chars.len());
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    while i > 0 && !chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    i
+}
+
+fn next_word_boundary(buffer: &str, from: usize) -> usize {
+    let chars: Vec<char> = buffer.chars().collect();
+    let mut i = from.min(chars.len());
+    let n = chars.len();
+    while i < n && !chars[i].is_whitespace() {
+        i += 1;
+    }
+    while i < n && chars[i].is_whitespace() {
+        i += 1;
+    }
+    i
+}
+
 fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
     use crossterm::event::{
         DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind, KeyModifiers,
@@ -112,6 +157,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
 
     let mut state = demo_state();
     let mut buffer = String::new();
+    let mut cursor: usize = 0;
     let mut scroll_offset: u16 = 0;
     let mut selection: Option<Selection> = None;
     let mut dragging = false;
@@ -123,8 +169,12 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
     let page_step: u16 = 10;
 
     let result: Result<()> = (|| loop {
+        let buf_chars = buffer.chars().count();
+        if cursor > buf_chars {
+            cursor = buf_chars;
+        }
         state.composer_text = Some(buffer.clone());
-        state.composer_cursor = Some(buffer.chars().count());
+        state.composer_cursor = Some(cursor);
 
         let slash_count = slash_match_count(&buffer);
         if slash_count == 0 {
@@ -225,6 +275,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                             selection = None;
                         } else {
                             buffer.clear();
+                            cursor = 0;
                             slash_idx = 0;
                             at_idx = 0;
                         }
@@ -235,22 +286,55 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     KeyCode::PageDown => {
                         scroll_offset = scroll_offset.saturating_sub(page_step);
                     }
+                    KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        cursor = prev_word_boundary(&buffer, cursor);
+                    }
+                    KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        cursor = next_word_boundary(&buffer, cursor);
+                    }
+                    KeyCode::Left => {
+                        cursor = cursor.saturating_sub(1);
+                    }
+                    KeyCode::Right => {
+                        cursor = (cursor + 1).min(buffer.chars().count());
+                    }
                     KeyCode::Home => {
-                        scroll_offset = u16::MAX;
+                        cursor = 0;
                     }
                     KeyCode::End => {
-                        scroll_offset = 0;
+                        cursor = buffer.chars().count();
                     }
                     KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                         selection = None;
-                        buffer.push(c);
+                        insert_char_at(&mut buffer, cursor, c);
+                        cursor += 1;
                         slash_idx = 0;
                         at_idx = 0;
                         scroll_offset = 0;
                     }
+                    KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        selection = None;
+                        let new_cursor = prev_word_boundary(&buffer, cursor);
+                        let from_byte = char_to_byte(&buffer, new_cursor);
+                        let to_byte = char_to_byte(&buffer, cursor);
+                        buffer.drain(from_byte..to_byte);
+                        cursor = new_cursor;
+                        slash_idx = 0;
+                        at_idx = 0;
+                    }
                     KeyCode::Backspace => {
                         selection = None;
-                        buffer.pop();
+                        if cursor > 0 {
+                            remove_char_at(&mut buffer, cursor - 1);
+                            cursor -= 1;
+                        }
+                        slash_idx = 0;
+                        at_idx = 0;
+                    }
+                    KeyCode::Delete => {
+                        if cursor < buffer.chars().count() {
+                            remove_char_at(&mut buffer, cursor);
+                        }
                         slash_idx = 0;
                         at_idx = 0;
                     }
@@ -266,6 +350,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                             });
                         }
                         buffer.clear();
+                        cursor = 0;
                         slash_idx = 0;
                         at_idx = 0;
                         scroll_offset = 0;
