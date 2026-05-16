@@ -1,6 +1,7 @@
-import { Text, useInput } from "ink";
+import { Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useRef } from "react";
+import { useKeystroke } from "./keystroke-context.js";
 import { FG } from "./theme/tokens.js";
 
 export interface MaskedInputProps {
@@ -27,20 +28,20 @@ export function MaskedInput({
   const valueRef = useRef(value);
   valueRef.current = value;
 
-  useInput((input, key) => {
-    if (key.return) {
+  useKeystroke((ev) => {
+    if (ev.return) {
       onSubmit(stripPasteMarkers(valueRef.current));
       return;
     }
-    if (key.backspace || key.delete) {
+    if (ev.backspace || ev.delete) {
       if (valueRef.current.length === 0) return;
       const next = valueRef.current.slice(0, -1);
       valueRef.current = next;
       onChange(next);
       return;
     }
-    if (input && !key.ctrl && !key.meta && !key.escape) {
-      const cleaned = stripPasteMarkers(input);
+    if (ev.input && !ev.ctrl && !ev.meta && !ev.escape) {
+      const cleaned = stripPasteMarkers(ev.input);
       if (cleaned.length === 0) return;
       const next = stripPasteMarkers(valueRef.current + cleaned);
       valueRef.current = next;

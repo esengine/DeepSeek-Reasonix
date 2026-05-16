@@ -204,12 +204,14 @@ function Root({
 
   if (!key) {
     return (
-      <Setup
-        onReady={(k) => {
-          process.env.DEEPSEEK_API_KEY = k;
-          setKey(k);
-        }}
-      />
+      <KeystrokeProvider reader={keystrokeReader}>
+        <Setup
+          onReady={(k) => {
+            process.env.DEEPSEEK_API_KEY = k;
+            setKey(k);
+          }}
+        />
+      </KeystrokeProvider>
     );
   }
   process.env.DEEPSEEK_API_KEY = key;
