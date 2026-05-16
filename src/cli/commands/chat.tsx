@@ -353,7 +353,19 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     }
   }
 
-  const rustRendererActive = process.env.REASONIX_RENDERER === "rust";
+  const rustRendererRequested = process.env.REASONIX_RENDERER === "rust";
+  // If REASONIX_RENDERER=rust is set but no API key is saved, the first screen
+  // is Setup — which renders to Ink's stdout and reads stdin directly. Under
+  // the Rust path both would be the null streams, leaving the user typing their
+  // key blind. Fall back to the Ink renderer for this launch; the next launch
+  // (with the key saved) gets the Rust path.
+  const rustRendererActive = rustRendererRequested && initialKey !== undefined;
+  if (rustRendererRequested && !rustRendererActive) {
+    process.stderr.write(
+      "REASONIX_RENDERER=rust ignored for this launch: no saved API key. " +
+        "Complete Setup once, then re-launch with the flag.\n",
+    );
+  }
   const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
   const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
   const inputCmdOverride = parseInputCmd(process.env.REASONIX_INPUT_CMD);
