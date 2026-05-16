@@ -176,7 +176,8 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argsHint:
       "[list|paths|paths add <path>|paths remove <path|N>|show <name>|new <name>|<name> [args]]",
     summary: "list / run / scaffold skills (project + custom + global + builtin)",
-    argCompleter: "skills",
+    argCompleter: ["list", "show", "new", "paths"],
+    colonCompleter: "skills",
   },
   {
     cmd: "qq",
@@ -421,9 +422,16 @@ export function resolveSlashAlias(name: string): string {
   return ALIAS_TO_CMD[name] ?? name;
 }
 
-/** Picker fires only when arg tail has no internal whitespace; past that it's a usage hint. */
+/** Picker fires only when arg tail has no internal whitespace; past that it's a usage hint.
+ *  Space-separated (`/cmd arg`) vs colon-separated (`/cmd:arg`) each drive their own completer. */
 export function detectSlashArgContext(input: string, codeMode = false): SlashArgContext | null {
-  const m = /^\/(\S+) ([\s\S]*)$/.exec(input);
+  // Try space-separated first, then colon-separated.
+  let m = /^\/(\S+) ([\s\S]*)$/.exec(input);
+  let separator: " " | ":" = " ";
+  if (!m) {
+    m = /^\/(\S+):([\s\S]*)$/.exec(input);
+    separator = ":";
+  }
   if (!m) return null;
   const cmdName = resolveSlashAlias(m[1]!.toLowerCase());
   const tail = m[2] ?? "";
@@ -431,23 +439,38 @@ export function detectSlashArgContext(input: string, codeMode = false): SlashArg
     (s) => s.cmd === cmdName && (s.contextual !== "code" || codeMode),
   );
   if (!spec) return null;
+  const effectiveCompleter = separator === ":" ? spec.colonCompleter : spec.argCompleter;
   const hasInternalSpace = /\s/.test(tail);
   const partialOffset = input.length - tail.length;
   if (hasInternalSpace) {
-    return { spec, partial: tail, partialOffset, kind: "hint" };
+    return { spec, partial: tail, partialOffset, kind: "hint", separator };
   }
   return {
     spec,
     partial: tail,
     partialOffset,
-    kind: spec.argCompleter ? "picker" : "hint",
+    kind: effectiveCompleter ? "picker" : "hint",
+    separator,
   };
 }
 
 export function parseSlash(text: string): { cmd: string; args: string[] } | null {
   if (!text.startsWith("/")) return null;
   const parts = text.slice(1).trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase() ?? "";
+  const first = parts[0] ?? "";
+  if (!first) return null;
+  const colonIdx = first.indexOf(":");
+  let cmd: string;
+  let args: string[];
+  if (colonIdx >= 0) {
+    cmd = first.slice(0, colonIdx).toLowerCase();
+    const firstArg = first.slice(colonIdx + 1);
+    const rest = parts.slice(1);
+    args = firstArg ? [firstArg, ...rest] : rest;
+  } else {
+    cmd = first.toLowerCase();
+    args = parts.slice(1);
+  }
   if (!cmd) return null;
-  return { cmd, args: parts.slice(1) };
+  return { cmd, args };
 }

@@ -99,7 +99,7 @@ export function useCompletionPickers({
   // ── slash-name picker ──
   const [slashSelected, setSlashSelected] = useState(0);
   const slashMatches = useMemo(() => {
-    if (!input.startsWith("/") || input.includes(" ")) return null;
+    if (!input.startsWith("/") || input.includes(" ") || input.includes(":")) return null;
     return suggestSlashCommands(input.slice(1), !!codeMode, slashUsage);
   }, [input, codeMode, slashUsage]);
   const slashGroupMode = input === "/";
@@ -198,18 +198,25 @@ export function useCompletionPickers({
     return detectSlashArgContext(input, !!codeMode);
   }, [input, slashMatches, codeMode]);
 
-  // Path completion: async directory listing for `argCompleter: "path"`.
+  // Path completion: async directory listing for `argCompleter: "path"` or `colonCompleter: "path"`.
   const slashArgPathCandidates = usePathCandidates(
     rootDir,
-    slashArgContext?.kind === "picker" && slashArgContext.spec.argCompleter === "path"
+    slashArgContext?.kind === "picker" &&
+      (slashArgContext.spec.argCompleter === "path" ||
+        slashArgContext.spec.colonCompleter === "path")
       ? slashArgContext.partial
       : null,
-    slashArgContext?.kind === "picker" && slashArgContext.spec.argCompleter === "path",
+    slashArgContext?.kind === "picker" &&
+      (slashArgContext.spec.argCompleter === "path" ||
+        slashArgContext.spec.colonCompleter === "path"),
   );
 
   const slashArgMatches = useMemo<readonly string[] | null>(() => {
     if (!slashArgContext || slashArgContext.kind !== "picker") return null;
-    const completer = slashArgContext.spec.argCompleter;
+    const completer =
+      slashArgContext.separator === ":"
+        ? slashArgContext.spec.colonCompleter
+        : slashArgContext.spec.argCompleter;
     const partial = slashArgContext.partial;
     const needle = partial.toLowerCase();
     if (Array.isArray(completer)) {

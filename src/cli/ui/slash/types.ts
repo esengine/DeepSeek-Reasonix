@@ -174,6 +174,14 @@ export interface SlashCommandSpec {
   argsHint?: string;
   /** First-arg picker source. `"path"` async-lists the filesystem for directory completion (used by `/cwd`). */
   argCompleter?: "models" | "mcp-resources" | "mcp-prompts" | "skills" | "path" | readonly string[];
+  /** Same as `argCompleter`, but triggered by `:<arg>` after the command instead of ` <arg>`. */
+  colonCompleter?:
+    | "models"
+    | "mcp-resources"
+    | "mcp-prompts"
+    | "skills"
+    | "path"
+    | readonly string[];
   /** Alternate names — typing any of these resolves to `cmd` for dispatch / suggestion / arg-context. */
   aliases?: readonly string[];
 }
@@ -183,4 +191,6 @@ export interface SlashArgContext {
   partial: string;
   partialOffset: number;
   kind: "picker" | "hint";
+  /** How the user separated the arg from the command: `" "` for `/cmd arg`, `":"` for `/cmd:arg`. */
+  separator: " " | ":";
 }

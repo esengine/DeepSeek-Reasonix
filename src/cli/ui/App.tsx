@@ -2484,7 +2484,7 @@ function AppInner({
       // + Enter, one keystroke less. Skip substitution if the user
       // already typed a full, exact command name (respect verbatim
       // input when they know what they want).
-      if (text.startsWith("/") && !text.includes(" ")) {
+      if (text.startsWith("/") && !text.includes(" ") && !text.includes(":")) {
         const typed = text.slice(1).toLowerCase();
         const matches = suggestSlashCommands(typed, !!codeMode, slashUsage);
         const exact = matches.find((m) => m.cmd === typed);
