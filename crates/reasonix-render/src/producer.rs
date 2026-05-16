@@ -39,13 +39,7 @@ pub fn build_setup_frame(state: &SetupState, cols: u16, rows: u16) -> SceneFrame
 }
 
 fn outer_box(state: &SceneState) -> SceneNode {
-    column(
-        vec![scroll_area(state), dock(state)],
-        BoxLayout {
-            background: Some(palette::bg()),
-            ..Default::default()
-        },
-    )
+    column(vec![scroll_area(state), dock(state)], BoxLayout::default())
 }
 
 fn scroll_area(state: &SceneState) -> SceneNode {
@@ -1328,13 +1322,7 @@ fn setup_root(state: &SetupState) -> SceneNode {
             ..Default::default()
         },
     )]));
-    column(
-        children,
-        BoxLayout {
-            background: Some(palette::bg()),
-            ..Default::default()
-        },
-    )
+    column(children, BoxLayout::default())
 }
 
 fn column(children: Vec<SceneNode>, mut layout: BoxLayout) -> SceneNode {
