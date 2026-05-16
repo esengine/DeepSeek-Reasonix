@@ -6,7 +6,14 @@ import { emitSceneFrame, isSceneTraceEnabled } from "../scene/trace.js";
 import type { Color, SceneFrame, SceneNode, TextRun } from "../scene/types.js";
 import type { Card } from "../state/cards.js";
 
-export type SceneTraceCard = { kind: string; summary: string };
+export type SceneTraceCard = {
+  kind: string;
+  summary: string;
+  args?: string;
+  status?: "ok" | "err" | "running";
+  elapsed?: string;
+  id?: string;
+};
 export type SceneSlashMatch = { cmd: string; summary: string; argsHint?: string };
 export type SceneSessionItem = { title: string; meta?: string };
 
@@ -83,6 +90,54 @@ export function summarizeCard(card: Card | undefined): string | undefined {
     default:
       return card.kind;
   }
+}
+
+export function toSceneCard(card: Card): SceneTraceCard {
+  const summary = summarizeCard(card) ?? "";
+  if (card.kind !== "tool") return { kind: card.kind, summary };
+  return {
+    kind: "tool",
+    summary: card.name,
+    args: extractToolArgs(card.args),
+    status: toolStatus(card),
+    elapsed: card.done ? formatElapsed(card.elapsedMs) : undefined,
+    id: shortenId(card.id),
+  };
+}
+
+function toolStatus(card: Card & { kind: "tool" }): "ok" | "err" | "running" {
+  if (!card.done) return "running";
+  if (card.rejected || card.aborted || (card.exitCode !== undefined && card.exitCode !== 0)) {
+    return "err";
+  }
+  return "ok";
+}
+
+function extractToolArgs(args: unknown): string | undefined {
+  if (args === null || args === undefined) return undefined;
+  if (typeof args === "string") return clip(args);
+  if (typeof args !== "object") return clip(String(args));
+  const obj = args as Record<string, unknown>;
+  for (const key of ["path", "file", "command", "cmd", "pattern", "query", "url"]) {
+    const v = obj[key];
+    if (typeof v === "string" && v.length > 0) return clip(v);
+  }
+  for (const v of Object.values(obj)) {
+    if (typeof v === "string" && v.length > 0) return clip(v);
+  }
+  return undefined;
+}
+
+function formatElapsed(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function shortenId(id: string): string | undefined {
+  if (!id) return undefined;
+  const tail = id.replace(/[^a-z0-9]/gi, "").slice(-4);
+  return tail ? `#${tail}` : undefined;
 }
 
 function clip(s: string): string {
@@ -185,6 +240,7 @@ function bootField(key: string, value: string, valueColor: Color): SceneNode {
 export const REASONIX_LOGO_LINES = LOGO_LINES;
 
 function cardBlock(c: SceneTraceCard): SceneNode {
+  if (c.kind === "tool") return toolCardBlock(c);
   const color = colorFor(c.kind);
   const label = kindLabel(c.kind);
   const runs: TextRun[] = [{ text: glyphFor(c.kind), style: { color, bold: true } }, { text: " " }];
@@ -193,6 +249,29 @@ function cardBlock(c: SceneTraceCard): SceneNode {
     runs.push({ text: "  " });
   }
   runs.push({ text: c.summary || c.kind, style: { color: PALETTE.fg } });
+  return text(runs);
+}
+
+function toolCardBlock(c: SceneTraceCard): SceneNode {
+  const runs: TextRun[] = [
+    { text: "▸ ", style: { color: PALETTE.fg2 } },
+    { text: c.summary || "tool", style: { color: PALETTE.fg, bold: true } },
+  ];
+  if (c.args) {
+    runs.push({ text: " (", style: { color: PALETTE.fg2 } });
+    runs.push({ text: c.args, style: { color: PALETTE.dsBright } });
+    runs.push({ text: ")", style: { color: PALETTE.fg2 } });
+  }
+  runs.push({ text: "  ", style: {} });
+  if (c.status === "ok") {
+    runs.push({ text: "✓", style: { color: PALETTE.ok, bold: true } });
+  } else if (c.status === "err") {
+    runs.push({ text: "✗", style: { color: PALETTE.err, bold: true } });
+  } else {
+    runs.push({ text: "…", style: { color: PALETTE.warn } });
+  }
+  if (c.elapsed) runs.push({ text: ` ${c.elapsed}`, style: { color: PALETTE.fg2 } });
+  if (c.id) runs.push({ text: `  ${c.id}`, style: { color: PALETTE.fg3 } });
   return text(runs);
 }
 
@@ -599,7 +678,14 @@ export function parseRecentCards(json: string | undefined): SceneTraceCard[] {
     if (typeof item !== "object" || item === null) continue;
     const obj = item as Record<string, unknown>;
     if (typeof obj.kind !== "string" || typeof obj.summary !== "string") continue;
-    out.push({ kind: obj.kind, summary: obj.summary });
+    const card: SceneTraceCard = { kind: obj.kind, summary: obj.summary };
+    if (typeof obj.args === "string") card.args = obj.args;
+    if (obj.status === "ok" || obj.status === "err" || obj.status === "running") {
+      card.status = obj.status;
+    }
+    if (typeof obj.elapsed === "string") card.elapsed = obj.elapsed;
+    if (typeof obj.id === "string") card.id = obj.id;
+    out.push(card);
   }
   return out;
 }

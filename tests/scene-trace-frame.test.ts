@@ -11,6 +11,7 @@ import {
   parseSlashMatches,
   slashWindow,
   summarizeCard,
+  toSceneCard,
 } from "../src/cli/ui/hooks/useSceneTrace.js";
 import type { SceneNode } from "../src/cli/ui/scene/types.js";
 import type { Card } from "../src/cli/ui/state/cards.js";
@@ -357,6 +358,162 @@ describe("buildTraceFrame — v1 single-column layout", () => {
       .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
       .join(" | ");
     expect(flatRow).not.toContain("cwd ");
+  });
+});
+
+describe("toSceneCard — tool card enrichment", () => {
+  it("returns a plain { kind, summary } for non-tool cards", () => {
+    expect(toSceneCard({ id: "u1", ts: 0, kind: "user", text: "hi" })).toEqual({
+      kind: "user",
+      summary: "hi",
+    });
+  });
+
+  it("includes args + status + elapsed + id for a completed tool card", () => {
+    const card = toSceneCard({
+      id: "tool-abc123def4",
+      ts: 0,
+      kind: "tool",
+      name: "Read",
+      args: { path: "src/parser.ts" },
+      output: "",
+      done: true,
+      exitCode: 0,
+      elapsedMs: 120,
+    });
+    expect(card.kind).toBe("tool");
+    expect(card.summary).toBe("Read");
+    expect(card.args).toBe("src/parser.ts");
+    expect(card.status).toBe("ok");
+    expect(card.elapsed).toBe("120ms");
+    expect(card.id).toBe("#def4");
+  });
+
+  it("marks running tool cards with status=running and omits elapsed", () => {
+    const card = toSceneCard({
+      id: "t1",
+      ts: 0,
+      kind: "tool",
+      name: "Bash",
+      args: { command: "pnpm test" },
+      output: "",
+      done: false,
+      elapsedMs: 0,
+    });
+    expect(card.status).toBe("running");
+    expect(card.args).toBe("pnpm test");
+    expect(card.elapsed).toBeUndefined();
+  });
+
+  it("marks rejected / non-zero exit tool cards as status=err", () => {
+    const failed = toSceneCard({
+      id: "t1",
+      ts: 0,
+      kind: "tool",
+      name: "Bash",
+      args: { command: "false" },
+      output: "",
+      done: true,
+      exitCode: 1,
+      elapsedMs: 10,
+    });
+    expect(failed.status).toBe("err");
+
+    const rejected = toSceneCard({
+      id: "t1",
+      ts: 0,
+      kind: "tool",
+      name: "Bash",
+      args: {},
+      output: "",
+      done: true,
+      elapsedMs: 5,
+      rejected: true,
+    });
+    expect(rejected.status).toBe("err");
+  });
+
+  it("formats elapsed >= 1000ms in seconds with 2 decimals", () => {
+    const c = toSceneCard({
+      id: "t",
+      ts: 0,
+      kind: "tool",
+      name: "x",
+      args: {},
+      output: "",
+      done: true,
+      elapsedMs: 2123,
+    });
+    expect(c.elapsed).toBe("2.12s");
+  });
+
+  it("extracts the primary arg by common key preference (path / file / pattern)", () => {
+    const withPath = toSceneCard({
+      id: "t",
+      ts: 0,
+      kind: "tool",
+      name: "x",
+      args: { foo: "bar", path: "src/x.ts" },
+      output: "",
+      done: true,
+      elapsedMs: 0,
+    });
+    expect(withPath.args).toBe("src/x.ts");
+    const withPattern = toSceneCard({
+      id: "t",
+      ts: 0,
+      kind: "tool",
+      name: "x",
+      args: { pattern: "foo", in: "src/" },
+      output: "",
+      done: true,
+      elapsedMs: 0,
+    });
+    expect(withPattern.args).toBe("foo");
+  });
+});
+
+describe("buildTraceFrame — tool cards render in rich format", () => {
+  it("renders a tool card as ▸ name (args) ✓ elapsed #id", () => {
+    const cards: SceneTraceCard[] = [
+      {
+        kind: "tool",
+        summary: "Read",
+        args: "src/parser.ts",
+        status: "ok",
+        elapsed: "120ms",
+        id: "#a4f1",
+      },
+    ];
+    const f = buildTraceFrame({ cardCount: 1, busy: false, cards }, 142, 38);
+    const row = scrollOf(f)[0];
+    if (row?.kind !== "text") throw new Error("expected text row");
+    const flatRow = row.runs.map((r) => r.text).join("");
+    expect(flatRow.trimStart().startsWith("▸ Read")).toBe(true);
+    expect(flatRow).toContain("(src/parser.ts)");
+    expect(flatRow).toContain("✓");
+    expect(flatRow).toContain("120ms");
+    expect(flatRow).toContain("#a4f1");
+  });
+
+  it("renders a failed tool card with ✗", () => {
+    const cards: SceneTraceCard[] = [
+      { kind: "tool", summary: "Bash", args: "false", status: "err", elapsed: "10ms" },
+    ];
+    const f = buildTraceFrame({ cardCount: 1, busy: false, cards }, 142, 38);
+    const row = scrollOf(f)[0];
+    if (row?.kind !== "text") throw new Error("expected text row");
+    expect(row.runs.map((r) => r.text).join("")).toContain("✗");
+  });
+
+  it("renders a running tool card with … instead of a check mark", () => {
+    const cards: SceneTraceCard[] = [
+      { kind: "tool", summary: "Bash", args: "pnpm test", status: "running" },
+    ];
+    const f = buildTraceFrame({ cardCount: 1, busy: false, cards }, 142, 38);
+    const row = scrollOf(f)[0];
+    if (row?.kind !== "text") throw new Error("expected text row");
+    expect(row.runs.map((r) => r.text).join("")).toContain("…");
   });
 });
 
