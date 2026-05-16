@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  type SceneSlashMatch,
   type SceneTraceCard,
   buildTraceFrame,
   cardsForHeight,
   parseRecentCards,
+  parseSlashMatches,
+  slashWindow,
   summarizeCard,
 } from "../src/cli/ui/hooks/useSceneTrace.js";
 import type { Card } from "../src/cli/ui/state/cards.js";
@@ -263,5 +266,128 @@ describe("buildTraceFrame", () => {
 
   it("falls back to end-of-text when composerCursor is undefined", () => {
     expect(composerRunsAt(undefined)).toEqual(["❯ ", "hello", "▮"]);
+  });
+
+  function makeMatches(n: number): SceneSlashMatch[] {
+    return Array.from({ length: n }, (_, i) => ({
+      cmd: `/cmd${i}`,
+      summary: `summary ${i}`,
+    }));
+  }
+
+  function buildWithSlash(matches: SceneSlashMatch[], selected: number) {
+    return buildTraceFrame(
+      {
+        cardCount: 0,
+        busy: false,
+        cards: [],
+        composerText: "/",
+        slashMatches: matches,
+        slashSelectedIndex: selected,
+      },
+      80,
+      24,
+    );
+  }
+
+  it("omits slash rows when slashMatches is empty / undefined", () => {
+    const f = buildEmpty();
+    if (f.root.kind !== "box") return;
+    expect(f.root.children).toHaveLength(4);
+  });
+
+  it("appends one slash row per match below the composer with a ▸ on the selected one", () => {
+    const f = buildWithSlash(makeMatches(3), 1);
+    if (f.root.kind !== "box") return;
+    expect(f.root.children).toHaveLength(4 + 3);
+    const rows = f.root.children.slice(4);
+    const rendered = rows.map((r) => (r.kind === "text" ? r.runs.map((x) => x.text).join("") : ""));
+    expect(rendered[0]?.startsWith("  /cmd0")).toBe(true);
+    expect(rendered[1]?.startsWith("▸ /cmd1")).toBe(true);
+    expect(rendered[2]?.startsWith("  /cmd2")).toBe(true);
+  });
+
+  it("includes argsHint after the cmd when given", () => {
+    const f = buildWithSlash([{ cmd: "/model", summary: "switch model", argsHint: "<name>" }], 0);
+    if (f.root.kind !== "box") return;
+    const row = f.root.children[4];
+    if (row?.kind !== "text") return;
+    const flat = row.runs.map((r) => r.text).join("");
+    expect(flat).toContain("/model");
+    expect(flat).toContain("<name>");
+    expect(flat).toContain("switch model");
+  });
+
+  it("windows long match lists and shows an overflow row with the hidden count", () => {
+    const f = buildWithSlash(makeMatches(20), 0);
+    if (f.root.kind !== "box") return;
+    expect(f.root.children).toHaveLength(4 + 6 + 1);
+    const overflow = f.root.children.at(-1);
+    if (overflow?.kind !== "text") return;
+    expect(overflow.runs.map((r) => r.text).join("")).toContain("…14 more");
+  });
+
+  it("keeps the selected match inside the window", () => {
+    const w = slashWindow(makeMatches(20), 15);
+    expect(w.startIndex).toBe(12);
+    expect(w.matches.map((m) => m.cmd)).toEqual([
+      "/cmd12",
+      "/cmd13",
+      "/cmd14",
+      "/cmd15",
+      "/cmd16",
+      "/cmd17",
+    ]);
+  });
+
+  it("anchors the window at the end when the selection is near the tail", () => {
+    const w = slashWindow(makeMatches(20), 19);
+    expect(w.startIndex).toBe(14);
+    expect(w.matches.map((m) => m.cmd).at(-1)).toBe("/cmd19");
+  });
+
+  it("anchors the window at the start when the selection is at index 0", () => {
+    const w = slashWindow(makeMatches(20), 0);
+    expect(w.startIndex).toBe(0);
+    expect(w.matches.map((m) => m.cmd)[0]).toBe("/cmd0");
+  });
+
+  it("clamps an out-of-range slashSelectedIndex", () => {
+    const f = buildWithSlash(makeMatches(3), 99);
+    if (f.root.kind !== "box") return;
+    const rows = f.root.children.slice(4);
+    const flat = rows.map((r) => (r.kind === "text" ? r.runs.map((x) => x.text).join("") : ""));
+    expect(flat[2]?.startsWith("▸ /cmd2")).toBe(true);
+  });
+});
+
+describe("parseSlashMatches", () => {
+  it("returns [] for undefined / empty / malformed input", () => {
+    expect(parseSlashMatches(undefined)).toEqual([]);
+    expect(parseSlashMatches("")).toEqual([]);
+    expect(parseSlashMatches("not-json")).toEqual([]);
+    expect(parseSlashMatches('{"not":"array"}')).toEqual([]);
+  });
+
+  it("decodes a JSON array of slash specs and preserves optional argsHint", () => {
+    const json = JSON.stringify([
+      { cmd: "/help", summary: "show help" },
+      { cmd: "/model", summary: "switch model", argsHint: "<name>" },
+    ]);
+    expect(parseSlashMatches(json)).toEqual([
+      { cmd: "/help", summary: "show help" },
+      { cmd: "/model", summary: "switch model", argsHint: "<name>" },
+    ]);
+  });
+
+  it("skips entries missing cmd or summary", () => {
+    const json = JSON.stringify([
+      { cmd: "/ok", summary: "ok" },
+      { cmd: "/no-summary" },
+      { summary: "no-cmd" },
+      null,
+      "string",
+    ]);
+    expect(parseSlashMatches(json)).toEqual([{ cmd: "/ok", summary: "ok" }]);
   });
 });

@@ -513,15 +513,6 @@ function AppInner({
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
-  useSceneTrace({
-    cardCount,
-    busy,
-    activity: activityLabel,
-    model,
-    recentCardsJson,
-    composerText: input,
-    composerCursor,
-  });
   const {
     ongoingTool,
     setOngoingTool,
@@ -1311,6 +1302,29 @@ function AppInner({
     models,
     mcpServers: liveMcpServers,
     slashUsage,
+  });
+
+  const slashMatchesJson = useMemo(() => {
+    if (!slashMatches || slashMatches.length === 0) return undefined;
+    return JSON.stringify(
+      slashMatches.map((m) => ({
+        cmd: m.cmd,
+        summary: m.summary,
+        ...(m.argsHint !== undefined ? { argsHint: m.argsHint } : {}),
+      })),
+    );
+  }, [slashMatches]);
+
+  useSceneTrace({
+    cardCount,
+    busy,
+    activity: activityLabel,
+    model,
+    recentCardsJson,
+    composerText: input,
+    composerCursor,
+    slashMatchesJson,
+    slashSelectedIndex: slashMatchesJson ? slashSelected : undefined,
   });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix
