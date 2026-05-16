@@ -1,5 +1,5 @@
 import { Box, Text, useStdout } from "ink";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { useReserveRows } from "./layout/viewport-budget.js";
@@ -38,6 +38,7 @@ export interface PromptInputProps {
   onHistoryNext?: () => void;
   /** Ctrl+X — parent spawns $EDITOR with the current buffer and re-injects on exit. */
   onOpenExternalEditor?: () => void;
+  onCursorChange?: (cursor: number) => void;
 }
 
 export function PromptInput({
@@ -49,6 +50,7 @@ export function PromptInput({
   onHistoryPrev,
   onHistoryNext,
   onOpenExternalEditor,
+  onCursorChange,
 }: PromptInputProps) {
   // Cap at 24 — collapseLinesForDisplay hides content past ~20 logical lines.
   // Quantize spec.max to 4-row buckets so per-keystroke line-count changes
@@ -59,6 +61,10 @@ export function PromptInput({
   useReserveRows("input", { min: 1, max: reserveMax });
 
   const [cursor, setCursor] = useState(value.length);
+
+  useEffect(() => {
+    onCursorChange?.(cursor);
+  }, [cursor, onCursorChange]);
 
   // Paste registry — keyed by sentinel id, holds original content.
   const pastesRef = useRef<Map<number, PasteEntry>>(new Map());

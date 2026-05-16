@@ -16,6 +16,7 @@ export type SceneTraceInput = {
   activity?: string;
   /** Current composer text — what the user is typing but has not yet submitted. */
   composerText?: string;
+  composerCursor?: number;
 };
 
 type BuildInput = {
@@ -25,6 +26,7 @@ type BuildInput = {
   busy: boolean;
   activity?: string;
   composerText?: string;
+  composerCursor?: number;
 };
 
 const SUMMARY_MAX = 70;
@@ -106,10 +108,12 @@ function composerRow(s: BuildInput): SceneNode {
   const t = s.composerText ?? "";
   if (t.length === 0) {
     runs.push({ text: "(type a message)", style: { dim: true } });
-  } else {
-    runs.push({ text: t });
-    runs.push({ text: "▮", style: { color: "cyan" } });
+    return text(runs);
   }
+  const cur = Math.max(0, Math.min(t.length, s.composerCursor ?? t.length));
+  if (cur > 0) runs.push({ text: t.slice(0, cur) });
+  runs.push({ text: "▮", style: { color: "cyan" } });
+  if (cur < t.length) runs.push({ text: t.slice(cur) });
   return text(runs);
 }
 
@@ -190,13 +194,17 @@ export function useSceneTrace(input: SceneTraceInput): void {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
-  const { model, cardCount, recentCardsJson, busy, activity, composerText } = input;
+  const { model, cardCount, recentCardsJson, busy, activity, composerText, composerCursor } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
     const parsed = parseRecentCards(recentCardsJson);
     const cards = cardsForHeight(parsed, rows);
     emitSceneFrame(
-      buildTraceFrame({ model, cardCount, cards, busy, activity, composerText }, cols, rows),
+      buildTraceFrame(
+        { model, cardCount, cards, busy, activity, composerText, composerCursor },
+        cols,
+        rows,
+      ),
     );
-  }, [cols, rows, model, cardCount, recentCardsJson, busy, activity, composerText]);
+  }, [cols, rows, model, cardCount, recentCardsJson, busy, activity, composerText, composerCursor]);
 }

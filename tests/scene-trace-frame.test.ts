@@ -231,4 +231,37 @@ describe("buildTraceFrame", () => {
     expect(composer.runs[2]?.text).toBe("▮");
     expect(composer.runs[2]?.style?.color).toBe("cyan");
   });
+
+  function composerRunsAt(cursor: number | undefined): string[] {
+    const f = buildTraceFrame(
+      { cardCount: 1, busy: false, cards: [], composerText: "hello", composerCursor: cursor },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") throw new Error("expected box");
+    const composer = f.root.children[3];
+    if (composer?.kind !== "text") throw new Error("expected text");
+    return composer.runs.map((r) => r.text);
+  }
+
+  it("splits composer text around the cursor block at an interior offset", () => {
+    expect(composerRunsAt(2)).toEqual(["❯ ", "he", "▮", "llo"]);
+  });
+
+  it("places the cursor at the start when offset is 0", () => {
+    expect(composerRunsAt(0)).toEqual(["❯ ", "▮", "hello"]);
+  });
+
+  it("places the cursor at the end when offset equals text length", () => {
+    expect(composerRunsAt(5)).toEqual(["❯ ", "hello", "▮"]);
+  });
+
+  it("clamps an out-of-range cursor to the text bounds", () => {
+    expect(composerRunsAt(99)).toEqual(["❯ ", "hello", "▮"]);
+    expect(composerRunsAt(-3)).toEqual(["❯ ", "▮", "hello"]);
+  });
+
+  it("falls back to end-of-text when composerCursor is undefined", () => {
+    expect(composerRunsAt(undefined)).toEqual(["❯ ", "hello", "▮"]);
+  });
 });

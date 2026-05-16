@@ -477,6 +477,7 @@ function AppInner({
   const activityLabel = useActivityLabel();
   const chatScroll = useChatScrollActions();
   const [input, setInput] = useState("");
+  const [composerCursor, setComposerCursor] = useState(0);
   const [busy, setBusy] = useState(false);
   const [slashUsage, setSlashUsage] = useState<Readonly<Record<string, number>>>(() =>
     loadSlashUsage(),
@@ -519,6 +520,7 @@ function AppInner({
     model,
     recentCardsJson,
     composerText: input,
+    composerCursor,
   });
   const {
     ongoingTool,
@@ -4294,6 +4296,7 @@ function AppInner({
                             onHistoryPrev={handleHistoryPrev}
                             onHistoryNext={handleHistoryNext}
                             onOpenExternalEditor={handleOpenExternalEditor}
+                            onCursorChange={setComposerCursor}
                           />
                         </Box>
                         <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
