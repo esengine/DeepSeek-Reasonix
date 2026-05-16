@@ -423,8 +423,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       qqErrorRef={qqErrorRef}
     />,
     {
-      stdout: inkStdout,
-      stdin: inkStdin,
+      ...(rustRendererActive ? { stdout: inkStdout, stdin: inkStdin } : {}),
       exitOnCtrlC: true,
       // patchConsole:false — winpty/MINTTY redraw-glitch source.
       patchConsole: false,
