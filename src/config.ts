@@ -10,6 +10,7 @@ import {
   type ResolvedIndexConfig,
   resolveIndexConfig,
 } from "./index/config.js";
+import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 
 /** Legacy `fast|smart|max` kept for back-compat with existing config.json files. */
 export type PresetName = "auto" | "flash" | "pro" | "fast" | "smart" | "max";
@@ -74,6 +75,16 @@ export interface SemanticEmbeddingConfigView {
   };
 }
 
+export interface McpServerConfig {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  transport?: "stdio" | "sse" | "streamable-http";
+  url?: string;
+  headers?: Record<string, string>;
+  disabled?: boolean;
+}
+
 export interface QQBotConfig {
   appId?: string;
   appSecret?: string;
@@ -105,6 +116,8 @@ export interface ReasonixConfig {
   mcpDisabled?: string[];
   /** Env overlay per MCP server name (matches the `name=` prefix of the spec). Stdio transports merge this over process.env; SSE/HTTP ignore it. */
   mcpEnv?: Record<string, Record<string, string>>;
+  /** Canonical MCP server configuration — merges with and overrides legacy `mcp`/`mcpEnv`/`mcpDisabled`. */
+  mcpServers?: Record<string, McpServerConfig>;
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
@@ -268,6 +281,113 @@ export function mcpEnvFor(
     if (typeof v === "string" && v.length > 0) filtered[k] = v;
   }
   return Object.keys(filtered).length > 0 ? filtered : undefined;
+}
+
+function inferMcpTransport(cfg: McpServerConfig): "stdio" | "sse" | "streamable-http" {
+  if (cfg.transport) return cfg.transport;
+  const url = cfg.url?.trim() ?? "";
+  if (/^streamable\+https?:\/\//i.test(url)) return "streamable-http";
+  if (/^https?:\/\//i.test(url)) return "sse";
+  return "stdio";
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof v === "string" && v.length > 0) out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]): McpServerSpec[] {
+  const result: McpServerSpec[] = [];
+  const seen = new Set<string>();
+
+  // 1. Legacy specs first.
+  const disabledFromLegacy = new Set(cfg.mcpDisabled ?? []);
+  const legacySpecs = extraLegacy && extraLegacy.length > 0 ? extraLegacy : (cfg.mcp ?? []);
+  for (const raw of legacySpecs) {
+    if (typeof raw !== "string") continue;
+    try {
+      const spec = parseMcpSpec(raw);
+      const env = spec.name ? normalizeStringRecord(cfg.mcpEnv?.[spec.name]) : undefined;
+      const disabled = spec.name ? disabledFromLegacy.has(spec.name) : false;
+      if (spec.transport === "stdio") {
+        result.push({ ...spec, env, disabled });
+      } else if (spec.transport === "sse") {
+        result.push({ ...spec, disabled });
+      } else {
+        result.push({ ...spec, disabled });
+      }
+      if (spec.name) seen.add(spec.name);
+    } catch {
+      /* skip invalid legacy specs */
+    }
+  }
+
+  // 2. mcpServers objects override on name conflict.
+  for (const [name, serverCfg] of Object.entries(cfg.mcpServers ?? {})) {
+    if (!serverCfg || typeof serverCfg !== "object") continue;
+    const transport = inferMcpTransport(serverCfg as McpServerConfig);
+    const disabled = (serverCfg as McpServerConfig).disabled === true;
+    if (transport === "stdio") {
+      const env = normalizeStringRecord((serverCfg as McpServerConfig).env);
+      const spec: McpServerSpec = {
+        transport: "stdio",
+        name,
+        command: (serverCfg as McpServerConfig).command ?? "",
+        args: (serverCfg as McpServerConfig).args ?? [],
+        env,
+        disabled,
+      };
+      if (seen.has(name)) {
+        const idx = result.findIndex((s) => s.name === name);
+        if (idx >= 0) result[idx] = spec;
+      } else {
+        seen.add(name);
+        result.push(spec);
+      }
+    } else {
+      let url = (serverCfg as McpServerConfig).url ?? "";
+      const streamMatch = /^streamable\+(https?:\/\/.+)$/i.exec(url);
+      if (streamMatch) url = streamMatch[1]!;
+      const headers = normalizeStringRecord((serverCfg as McpServerConfig).headers);
+      if (transport === "sse") {
+        const spec: McpServerSpec = {
+          transport: "sse",
+          name,
+          url,
+          headers,
+          disabled,
+        };
+        if (seen.has(name)) {
+          const idx = result.findIndex((s) => s.name === name);
+          if (idx >= 0) result[idx] = spec;
+        } else {
+          seen.add(name);
+          result.push(spec);
+        }
+      } else {
+        const spec: McpServerSpec = {
+          transport: "streamable-http",
+          name,
+          url,
+          headers,
+          disabled,
+        };
+        if (seen.has(name)) {
+          const idx = result.findIndex((s) => s.name === name);
+          if (idx >= 0) result[idx] = spec;
+        } else {
+          seen.add(name);
+          result.push(spec);
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 /** Persist the language so it survives a relaunch. */

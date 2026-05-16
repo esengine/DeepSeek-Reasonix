@@ -2,7 +2,8 @@
 
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { type PresetName, type ReasonixConfig, readConfig } from "../config.js";
+import { type PresetName, type ReasonixConfig, normalizeMcpConfig, readConfig } from "../config.js";
+import { specToRaw } from "../mcp/spec.js";
 import { resolvePreset } from "./ui/presets.js";
 
 export interface ResolvedDefaults {
@@ -34,7 +35,11 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
   // `--mcp` accumulator is [] when absent. Treat empty from flags as
   // "user didn't pass" → fall through to config. Users who explicitly
   // want zero MCP servers can pass `--no-config` or edit the file.
-  const mcp = flags.mcp && flags.mcp.length > 0 ? flags.mcp : (cfg.mcp ?? []);
+  const normalizedMcp = normalizeMcpConfig(
+    cfg,
+    flags.mcp && flags.mcp.length > 0 ? flags.mcp : undefined,
+  );
+  const mcp = normalizedMcp.map(specToRaw);
 
   const session = resolveSession(flags.session, cfg.session);
 

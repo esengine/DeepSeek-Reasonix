@@ -203,7 +203,8 @@
   "search": false,                    <span class="hash"># <span data-i18n="cfg.k.search">enable web_search/web_fetch tools</span></span>
   "webSearchEngine": "mojeek",        <span class="hash"># <span data-i18n="cfg.k.engine">mojeek | searxng | metaso</span></span>
   "webSearchEndpoint": "http://localhost:8080",
-  "mcp": [],                          <span class="hash"># <span data-i18n="cfg.k.mcp">MCP server specs</span></span>
+  "mcp": [],                          <span class="hash"># <span data-i18n="cfg.k.mcp">MCP server specs (legacy string format)</span></span>
+  "mcpServers": {},                   <span class="hash"># <span data-i18n="cfg.k.mcpsrv">MCP server objects (canonical format)</span></span>
   "mcpDisabled": [],                  <span class="hash"># <span data-i18n="cfg.k.mcpoff">names skipped at startup</span></span>
   "projects": {                       <span class="hash"># <span data-i18n="cfg.k.projects">per-workspace overrides</span></span>
     "/abs/path": {
@@ -267,6 +268,36 @@
             <p data-i18n="mcp.body.streamable">
               Opt in with the <code>streamable+</code> URL prefix.
             </p>
+
+            <h3 data-i18n="mcp.h.servers">mcpServers (canonical format)</h3>
+            <pre class="code"><code>{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "ghp_***" }
+    },
+    "postgres": {
+      "transport": "sse",
+      "url": "https://mcp.internal/pg/sse",
+      "headers": { "Authorization": "Bearer ***" }
+    },
+    "edge": {
+      "transport": "streamable-http",
+      "url": "https://edge.example.com/mcp",
+      "headers": { "X-API-Key": "key_***" }
+    }
+  }
+}</code></pre>
+            <p data-i18n="mcp.body.servers">
+              The <code>mcpServers</code> object format is the canonical way to declare
+              MCP servers. Each key is the server name; the value is an object with
+              <code>command</code> + <code>args</code> (stdio), <code>url</code> (SSE /
+              Streamable HTTP), optional <code>transport</code> (auto-detected from url
+              when omitted), <code>env</code> (stdio only), <code>headers</code> (SSE /
+              Streamable HTTP only), and <code>disabled</code> (declarative toggle).
+              When both <code>mcp</code> and <code>mcpServers</code> are present and a
+              name overlaps, <code>mcpServers</code> wins silently.
 
             <h3 data-i18n="mcp.h.cli">CLI flags &amp; slash commands</h3>
             <pre class="code"><code>npx reasonix code --mcp "fs=npx -y @mcp/server-filesystem /tmp"

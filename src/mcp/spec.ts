@@ -28,6 +28,40 @@ export interface StreamableHttpMcpSpec {
 
 export type McpSpec = StdioMcpSpec | SseMcpSpec | StreamableHttpMcpSpec;
 
+export type McpServerSpec =
+  | (StdioMcpSpec & { env?: Record<string, string>; disabled?: boolean })
+  | (SseMcpSpec & { headers?: Record<string, string>; disabled?: boolean })
+  | (StreamableHttpMcpSpec & { headers?: Record<string, string>; disabled?: boolean });
+
+export function getMcpServerEnv(spec: McpServerSpec): Record<string, string> | undefined {
+  return spec.transport === "stdio" ? spec.env : undefined;
+}
+
+export function getMcpServerHeaders(spec: McpServerSpec): Record<string, string> | undefined {
+  return spec.transport !== "stdio" ? spec.headers : undefined;
+}
+
+/** Serialize a normalized spec back to the `--mcp` string format. Round-trips through `parseMcpSpec`. */
+export function specToRaw(spec: McpServerSpec): string {
+  if (spec.transport === "stdio") {
+    const args = spec.args
+      .map((a) => {
+        if (a.includes(" ") || a.includes('"') || a.includes("\t")) {
+          // Double-quote and escape internal double quotes + backslashes.
+          return `"${a.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+        }
+        return a;
+      })
+      .join(" ");
+    const body = args ? `${spec.command} ${args}` : spec.command;
+    return spec.name ? `${spec.name}=${body}` : body;
+  }
+  if (spec.transport === "sse") {
+    return spec.name ? `${spec.name}=${spec.url}` : spec.url;
+  }
+  return spec.name ? `${spec.name}=streamable+${spec.url}` : `streamable+${spec.url}`;
+}
+
 const NAME_PREFIX = /^([a-zA-Z_][a-zA-Z0-9_-]*)=(.*)$/;
 const HTTP_URL = /^https?:\/\//i;
 const STREAMABLE_PREFIX = /^streamable\+(https?:\/\/.+)$/i;

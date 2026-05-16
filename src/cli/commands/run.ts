@@ -6,7 +6,7 @@ import {
   isPlausibleKey,
   loadApiKey,
   loadBaseUrl,
-  mcpEnvFor,
+  normalizeMcpConfig,
   readConfig,
   saveApiKey,
 } from "../../config.js";
@@ -16,7 +16,6 @@ import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js"
 import { McpClient } from "../../mcp/client.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { bridgeMcpTools } from "../../mcp/registry.js";
-import { parseMcpSpec } from "../../mcp/spec.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import { appendUsage } from "../../telemetry/usage.js";
 import { ToolRegistry } from "../../tools.js";
@@ -76,20 +75,22 @@ export async function runCommand(opts: RunOptions): Promise<void> {
 
   // Optional MCP setup — mirrors chat's flow. Must happen before loop
   // construction so the tools make it into the prefix.
-  const requestedSpecs = opts.mcp ?? [];
+  const cfg = readConfig();
+  const normalizedSpecs = normalizeMcpConfig(
+    cfg,
+    opts.mcp && opts.mcp.length > 0 ? opts.mcp : undefined,
+  );
   const clients: McpClient[] = [];
   let tools: ToolRegistry | undefined;
   let successCount = 0;
-  const disabledNames = new Set(readConfig().mcpDisabled ?? []);
-  if (requestedSpecs.length > 0) {
+  if (normalizedSpecs.length > 0) {
     tools = new ToolRegistry();
-    for (const raw of requestedSpecs) {
+    for (const spec of normalizedSpecs) {
       let label = "anon";
       let mcp: McpClient | undefined;
       try {
-        const spec = parseMcpSpec(raw);
         label = spec.name ?? "anon";
-        if (spec.name && disabledNames.has(spec.name)) {
+        if (spec.disabled) {
           process.stderr.write(`${formatMcpLifecycleEvent({ state: "disabled", name: label })}\n`);
           continue;
         }
@@ -97,13 +98,11 @@ export async function runCommand(opts: RunOptions): Promise<void> {
         const t0 = Date.now();
         const prefix = spec.name
           ? `${spec.name}_`
-          : requestedSpecs.length === 1 && opts.mcpPrefix
+          : normalizedSpecs.length === 1 && opts.mcpPrefix
             ? opts.mcpPrefix
             : "";
         if (spec.transport === "stdio") preflightStdioSpec(spec);
-        const transport = buildTransportFromSpec(spec, {
-          env: mcpEnvFor(spec.name, readConfig()),
-        });
+        const transport = buildTransportFromSpec(spec);
         mcp = new McpClient({ transport });
         await mcp.initialize();
         const bridge = await bridgeMcpTools(mcp, {
