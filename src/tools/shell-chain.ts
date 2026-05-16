@@ -293,6 +293,8 @@ export interface RunChainOptions {
   timeoutSec: number;
   maxOutputChars: number;
   signal?: AbortSignal;
+  /** Prepend this wrapper to each segment (e.g. "rtk" for token filtering). */
+  wrapCommand?: string;
 }
 
 export async function runChain(chain: CommandChain, opts: RunChainOptions): Promise<ChainResult> {
@@ -314,6 +316,7 @@ export async function runChain(chain: CommandChain, opts: RunChainOptions): Prom
       timeoutMs: remainingMs,
       buf,
       signal: opts.signal,
+      wrapCommand: opts.wrapCommand,
     });
     lastExit = result.exitCode;
     if (result.timedOut) {
@@ -340,6 +343,7 @@ interface PipeGroupOptions {
   timeoutMs: number;
   buf: OutputBuffer;
   signal?: AbortSignal;
+  wrapCommand?: string;
 }
 
 interface SegmentStdio {
@@ -419,7 +423,9 @@ async function runPipeGroup(
       const seg = segments[i]!;
       const io = openRedirects(seg.redirects, opts.cwd);
       allFds.push(...io.toClose);
-      const { bin, args, spawnOverrides } = prepareSpawn(seg.argv);
+      const { bin, args, spawnOverrides } = prepareSpawn(seg.argv, {
+        wrapCommand: opts.wrapCommand,
+      });
       const stdoutSpec = io.stdoutFd !== null ? io.stdoutFd : "pipe";
       const stderrSpec =
         io.stderrFd !== null ? io.stderrFd : io.mergeStderrToStdout ? stdoutSpec : "pipe";
