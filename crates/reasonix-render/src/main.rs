@@ -62,6 +62,7 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend).context("create terminal")?;
     terminal.hide_cursor().ok();
     terminal.clear().ok();
+    terminal.autoresize().ok();
 
     if let Ok(size) = terminal.size() {
         debug_log(&format!("startup terminal.size = {}x{}", size.width, size.height));
