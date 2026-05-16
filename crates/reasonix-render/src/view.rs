@@ -2,7 +2,7 @@ use chrono::{Local, TimeZone};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color as RColor, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::widgets::{Block, Padding, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::state::{
@@ -115,14 +115,11 @@ fn render_scroll(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
     } else {
         Text::from(scroll_lines(state, area.height as usize))
     };
-    let inner = Rect {
-        x: area.x.saturating_add(2),
-        y: area.y.saturating_add(1),
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(2),
-    };
-    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, inner);
+    let block = Block::default()
+        .padding(Padding::new(2, 2, 1, 1))
+        .style(Style::default().bg(to_rcolor(palette::bg())));
+    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false }).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn boot_lines(state: &SceneState) -> Vec<Line<'_>> {
