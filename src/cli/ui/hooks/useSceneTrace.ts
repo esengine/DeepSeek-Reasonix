@@ -12,6 +12,8 @@ export type SceneTraceInput = {
   lastCardSummary?: string;
   busy: boolean;
   activity?: string;
+  /** Current composer text — what the user is typing but has not yet submitted. */
+  composerText?: string;
 };
 
 const SUMMARY_MAX = 70;
@@ -47,7 +49,7 @@ export function buildTraceFrame(input: SceneTraceInput, cols: number, rows: numb
   return frame(
     cols,
     rows,
-    box([titleRow(input), cardRow(input), statusRow(input)], {
+    box([titleRow(input), cardRow(input), statusRow(input), composerRow(input)], {
       direction: "column",
       paddingX: 1,
     }),
@@ -82,6 +84,18 @@ function statusRow(s: SceneTraceInput): SceneNode {
     { text: s.busy ? "busy" : "idle", style: { color: s.busy ? "yellow" : "green" } },
   ];
   if (s.activity) runs.push({ text: ` · ${s.activity}`, style: { dim: true } });
+  return text(runs);
+}
+
+function composerRow(s: SceneTraceInput): SceneNode {
+  const runs: TextRun[] = [{ text: "❯ ", style: { color: "cyan", bold: true } }];
+  const t = s.composerText ?? "";
+  if (t.length === 0) {
+    runs.push({ text: "(type a message)", style: { dim: true } });
+  } else {
+    runs.push({ text: t });
+    runs.push({ text: "▮", style: { color: "cyan" } });
+  }
   return text(runs);
 }
 
@@ -135,15 +149,15 @@ export function useSceneTrace(input: SceneTraceInput): void {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
-  const { model, cardCount, lastCardKind, lastCardSummary, busy, activity } = input;
+  const { model, cardCount, lastCardKind, lastCardSummary, busy, activity, composerText } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
     emitSceneFrame(
       buildTraceFrame(
-        { model, cardCount, lastCardKind, lastCardSummary, busy, activity },
+        { model, cardCount, lastCardKind, lastCardSummary, busy, activity, composerText },
         cols,
         rows,
       ),
     );
-  }, [cols, rows, model, cardCount, lastCardKind, lastCardSummary, busy, activity]);
+  }, [cols, rows, model, cardCount, lastCardKind, lastCardSummary, busy, activity, composerText]);
 }

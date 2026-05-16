@@ -516,6 +516,7 @@ function AppInner({
     model,
     lastCardKind,
     lastCardSummary,
+    composerText: input,
   });
   const {
     ongoingTool,

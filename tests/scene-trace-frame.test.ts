@@ -44,7 +44,7 @@ describe("summarizeCard", () => {
 });
 
 describe("buildTraceFrame", () => {
-  it("returns a column box with three children: title, card, status", () => {
+  it("returns a column box with four children: title, card, status, composer", () => {
     const f = buildTraceFrame({ cardCount: 0, busy: false }, 80, 24);
     expect(f.schemaVersion).toBe(1);
     expect(f.cols).toBe(80);
@@ -53,7 +53,7 @@ describe("buildTraceFrame", () => {
     if (f.root.kind !== "box") return;
     expect(f.root.layout?.direction).toBe("column");
     expect(f.root.layout?.paddingX).toBe(1);
-    expect(f.root.children).toHaveLength(3);
+    expect(f.root.children).toHaveLength(4);
   });
 
   it("renders the model name in the title row when given", () => {
@@ -115,5 +115,30 @@ describe("buildTraceFrame", () => {
     if (status?.kind !== "text") return;
     const flat = status.runs.map((r) => r.text).join("");
     expect(flat).toContain("awaiting tools");
+  });
+
+  it("composer row is a dim placeholder when composerText is empty / undefined", () => {
+    for (const f of [
+      buildTraceFrame({ cardCount: 0, busy: false }, 80, 24),
+      buildTraceFrame({ cardCount: 0, busy: false, composerText: "" }, 80, 24),
+    ]) {
+      if (f.root.kind !== "box") return;
+      const composer = f.root.children[3];
+      if (composer?.kind !== "text") return;
+      expect(composer.runs[0]?.text).toBe("❯ ");
+      expect(composer.runs[0]?.style?.color).toBe("cyan");
+      expect(composer.runs[1]?.style?.dim).toBe(true);
+    }
+  });
+
+  it("composer row shows typed text plus a cursor block when composerText is non-empty", () => {
+    const f = buildTraceFrame({ cardCount: 1, busy: false, composerText: "hello" }, 80, 24);
+    if (f.root.kind !== "box") return;
+    const composer = f.root.children[3];
+    if (composer?.kind !== "text") return;
+    expect(composer.runs[0]?.text).toBe("❯ ");
+    expect(composer.runs[1]?.text).toBe("hello");
+    expect(composer.runs[2]?.text).toBe("▮");
+    expect(composer.runs[2]?.style?.color).toBe("cyan");
   });
 });
