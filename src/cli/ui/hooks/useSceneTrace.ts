@@ -36,6 +36,10 @@ export type SceneTraceInput = {
   sidebarSessionsJson?: string;
   /** Name of the currently-active session — highlighted in the sidebar list. */
   sidebarActiveSession?: string;
+  /** Number of live MCP servers, surfaced in the sidebar footer. */
+  mcpServerCount?: number;
+  /** Edit mode (`review` / `auto` / `yolo`) — drives the composer mode segment. */
+  editMode?: "review" | "auto" | "yolo";
 };
 
 type BuildInput = {
@@ -56,9 +60,11 @@ type BuildInput = {
   walletCurrency?: string;
   sidebarSessions?: ReadonlyArray<SceneSessionItem>;
   sidebarActiveSession?: string;
+  mcpServerCount?: number;
+  editMode?: "review" | "auto" | "yolo";
 };
 
-const MAX_SIDEBAR_SESSIONS = 8;
+const MAX_SIDEBAR_SESSIONS = 6;
 
 const APPROVAL_PROMPT_MAX = 60;
 const MAX_SESSION_ROWS = 8;
@@ -143,7 +149,9 @@ function mainPane(input: BuildInput): SceneNode {
   } else if (input.approvalPrompt) {
     children.push(approvalRow(input.approvalKind, input.approvalPrompt));
   } else {
+    children.push(modeSelectorRow(input.editMode));
     children.push(composerRow(input));
+    children.push(composerHintRow());
   }
   const slash = input.slashMatches ?? [];
   if (!pickerOwnsBottom && !input.approvalPrompt && slash.length > 0) {
@@ -160,11 +168,18 @@ function mainPane(input: BuildInput): SceneNode {
 }
 
 function sidebarPane(input: BuildInput): SceneNode {
-  const children: SceneNode[] = [sectionHeaderRow("SESSIONS")];
+  const children: SceneNode[] = [];
+  children.push(
+    text([
+      { text: " ＋ new chat ", style: { bold: true, color: PALETTE.fg, bg: PALETTE.accent } },
+      { text: "  ⌘N", style: { color: PALETTE.muted } },
+    ]),
+  );
+  children.push(text([{ text: "", style: { color: PALETTE.muted } }]));
+  children.push(sectionHeaderRow("HISTORY"));
   const list = input.sidebarSessions ?? [];
   if (list.length === 0) {
     children.push(text([{ text: "no saved sessions", style: { color: PALETTE.muted } }]));
-    children.push(text([{ text: "type to start one", style: { color: PALETTE.muted } }]));
   } else {
     const shown = list.slice(0, MAX_SIDEBAR_SESSIONS);
     for (const s of shown) {
@@ -175,6 +190,11 @@ function sidebarPane(input: BuildInput): SceneNode {
     if (hidden > 0) {
       children.push(text([{ text: `…${hidden} more`, style: { color: PALETTE.muted } }]));
     }
+  }
+  children.push(box([], { height: "fill" }));
+  children.push(sidebarFooterRow("⚙ ", "settings", "⌘,"));
+  if (input.mcpServerCount !== undefined) {
+    children.push(sidebarFooterRow("◈ ", "mcp servers", String(input.mcpServerCount)));
   }
   return box(children, {
     direction: "column",
@@ -189,22 +209,42 @@ function sidebarPane(input: BuildInput): SceneNode {
 function sidebarSessionRow(item: SceneSessionItem, active: boolean): SceneNode {
   const runs: TextRun[] = [];
   runs.push({
-    text: active ? "▸ " : "  ",
+    text: active ? "● " : "○ ",
     style: { color: active ? PALETTE.accent : PALETTE.muted },
   });
   runs.push({
     text: item.title,
-    style: active ? { bold: true, color: PALETTE.accent } : { color: PALETTE.fg2 },
+    style: active ? { bold: true, color: PALETTE.fg } : { color: PALETTE.fg2 },
   });
+  if (item.meta) runs.push({ text: ` ${item.meta}`, style: { color: PALETTE.muted } });
   return text(runs);
 }
 
+function sidebarFooterRow(icon: string, label: string, right: string): SceneNode {
+  return box(
+    [
+      text([
+        { text: icon, style: { color: PALETTE.muted } },
+        { text: label, style: { color: PALETTE.fg2 } },
+      ]),
+      box([], { width: "fill" }),
+      text([{ text: right, style: { color: PALETTE.muted } }]),
+    ],
+    { direction: "row" },
+  );
+}
+
 function ctxPane(input: BuildInput): SceneNode {
-  const children: SceneNode[] = [sectionHeaderRow("CONTEXT")];
+  const children: SceneNode[] = [];
+  children.push(ctxTabRow());
+  children.push(sectionHeaderRow("CONTEXT"));
   if (input.model) children.push(keyValueRow("model", input.model));
   children.push(keyValueRow("cards", String(input.cardCount)));
   const wallet = formatWallet(input.walletBalance, input.walletCurrency);
   if (wallet) children.push(keyValueRow("wallet", wallet, PALETTE.success));
+  if (input.mcpServerCount !== undefined && input.mcpServerCount > 0) {
+    children.push(keyValueRow("mcp", String(input.mcpServerCount)));
+  }
   return box(children, {
     direction: "column",
     width: CTXPANE_WIDTH,
@@ -213,6 +253,15 @@ function ctxPane(input: BuildInput): SceneNode {
     borderColor: PALETTE.border,
     background: PALETTE.bg2,
   });
+}
+
+function ctxTabRow(): SceneNode {
+  return text([
+    { text: "files", style: { bold: true, color: PALETTE.accent } },
+    { text: "  tools", style: { color: PALETTE.muted } },
+    { text: "  memory", style: { color: PALETTE.muted } },
+    { text: "  rules", style: { color: PALETTE.muted } },
+  ]);
 }
 
 function sectionHeaderRow(label: string): SceneNode {
@@ -379,6 +428,37 @@ function sessionsHintRow(): SceneNode {
   ]);
 }
 
+function modeSelectorRow(mode: "review" | "auto" | "yolo" | undefined): SceneNode {
+  const active = mode ?? "review";
+  const seg = (label: "review" | "auto" | "yolo"): TextRun => {
+    if (label === active) {
+      const color =
+        label === "yolo" ? PALETTE.danger : label === "auto" ? PALETTE.warning : PALETTE.accent;
+      return { text: ` ${label} `, style: { bold: true, color: PALETTE.fg, bg: color } };
+    }
+    return { text: ` ${label} `, style: { color: PALETTE.muted } };
+  };
+  return text([
+    { text: "mode ", style: { color: PALETTE.muted } },
+    seg("review"),
+    seg("auto"),
+    seg("yolo"),
+  ]);
+}
+
+function composerHintRow(): SceneNode {
+  return text([
+    { text: "⏎ ", style: { color: PALETTE.accent } },
+    { text: "send  ", style: { color: PALETTE.muted } },
+    { text: "⇧⏎ ", style: { color: PALETTE.accent } },
+    { text: "newline  ", style: { color: PALETTE.muted } },
+    { text: "/ ", style: { color: PALETTE.accent } },
+    { text: "commands  ", style: { color: PALETTE.muted } },
+    { text: "@ ", style: { color: PALETTE.accent } },
+    { text: "mention", style: { color: PALETTE.muted } },
+  ]);
+}
+
 function composerRow(s: BuildInput): SceneNode {
   const runs: TextRun[] = [{ text: "❯ ", style: { color: "cyan", bold: true } }];
   const t = s.composerText ?? "";
@@ -530,6 +610,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
     walletCurrency,
     sidebarSessionsJson,
     sidebarActiveSession,
+    mcpServerCount,
+    editMode,
   } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
@@ -558,6 +640,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
           walletCurrency,
           sidebarSessions,
           sidebarActiveSession,
+          mcpServerCount,
+          editMode,
         },
         cols,
         rows,
@@ -583,6 +667,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
     walletCurrency,
     sidebarSessionsJson,
     sidebarActiveSession,
+    mcpServerCount,
+    editMode,
   ]);
 }
 

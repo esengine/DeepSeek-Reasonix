@@ -1370,6 +1370,8 @@ function AppInner({
     walletCurrency: balance?.currency,
     sidebarSessionsJson,
     sidebarActiveSession: session ?? undefined,
+    mcpServerCount: liveMcpServers.length,
+    editMode,
   });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix

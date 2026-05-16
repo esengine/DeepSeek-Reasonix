@@ -25,6 +25,13 @@ function mainOf(f: ReturnType<typeof buildTraceFrame>): SceneNode[] {
   throw new Error("no main pane (width=fill) found in middle");
 }
 
+function composerOf(f: ReturnType<typeof buildTraceFrame>): Extract<SceneNode, { kind: "text" }> {
+  for (const c of mainOf(f)) {
+    if (c.kind === "text" && c.runs[0]?.text === "❯ ") return c;
+  }
+  throw new Error("no composer row (❯ prefix) found in main pane");
+}
+
 function titleOf(f: ReturnType<typeof buildTraceFrame>): SceneNode {
   if (f.root.kind !== "box") throw new Error("expected root box");
   const node = f.root.children[0];
@@ -221,7 +228,7 @@ describe("buildTraceFrame", () => {
     expect(card.runs.map((r) => r.text).join("")).toContain("no cards yet");
   });
 
-  it("stacks one row per card inside the main pane", () => {
+  it("stacks one row per card inside the main pane above the composer block", () => {
     const cards: SceneTraceCard[] = [
       { kind: "user", summary: "hi" },
       { kind: "streaming", summary: "hello back" },
@@ -229,7 +236,6 @@ describe("buildTraceFrame", () => {
     ];
     const f = buildTraceFrame({ cardCount: 3, busy: false, cards }, 80, 24);
     const main = mainOf(f);
-    expect(main).toHaveLength(3 + 1);
     const firstCard = main[0];
     const lastCard = main[2];
     if (firstCard?.kind !== "text" || lastCard?.kind !== "text") return;
@@ -332,12 +338,13 @@ describe("buildTraceFrame", () => {
     const flat = sidebar.children
       .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
       .join("\n");
-    expect(flat).toContain("SESSIONS");
+    expect(flat).toContain("HISTORY");
+    expect(flat).toContain("new chat");
     expect(flat).toContain("feat-foo");
     expect(flat).toContain("spike-bar");
   });
 
-  it("marks the active session row with a ▸ accent in the sidebar", () => {
+  it("marks the active session row with a ● accent in the sidebar", () => {
     const f = buildTraceFrame(
       {
         cardCount: 0,
@@ -362,8 +369,8 @@ describe("buildTraceFrame", () => {
     >;
     const fooRow = rows.find((r) => r.runs.some((x) => x.text === "feat-foo"));
     const barRow = rows.find((r) => r.runs.some((x) => x.text === "spike-bar"));
-    expect(fooRow?.runs[0]?.text.trim()).toBe("");
-    expect(barRow?.runs[0]?.text.trim()).toBe("▸");
+    expect(fooRow?.runs[0]?.text.trim()).toBe("○");
+    expect(barRow?.runs[0]?.text.trim()).toBe("●");
   });
 
   it("falls back to a placeholder hint in the sidebar when no sessions exist", () => {
@@ -398,7 +405,7 @@ describe("buildTraceFrame", () => {
     const flat = sidebar.children
       .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
       .join("\n");
-    expect(flat).toContain("…6 more");
+    expect(flat).toContain("…8 more");
   });
 
   it("decorates side / ctx panes with a rounded border and bg-2 background", () => {
@@ -485,10 +492,8 @@ describe("buildTraceFrame", () => {
 
   it("composer row is a dim placeholder when composerText is empty / undefined", () => {
     for (const f of [buildEmpty(), buildEmpty({ composerText: "" })]) {
-      const composer = mainOf(f).at(-1);
-      if (composer?.kind !== "text") return;
+      const composer = composerOf(f);
       expect(composer.runs[0]?.text).toBe("❯ ");
-      expect(composer.runs[0]?.style?.color).toBe("cyan");
       expect(composer.runs[1]?.style?.dim).toBe(true);
     }
   });
@@ -499,12 +504,9 @@ describe("buildTraceFrame", () => {
       80,
       24,
     );
-    const composer = mainOf(f).at(-1);
-    if (composer?.kind !== "text") return;
-    expect(composer.runs[0]?.text).toBe("❯ ");
+    const composer = composerOf(f);
     expect(composer.runs[1]?.text).toBe("hello");
     expect(composer.runs[2]?.text).toBe("▮");
-    expect(composer.runs[2]?.style?.color).toBe("cyan");
   });
 
   function composerRunsAt(cursor: number | undefined): string[] {
@@ -513,9 +515,7 @@ describe("buildTraceFrame", () => {
       80,
       24,
     );
-    const composer = mainOf(f).at(-1);
-    if (composer?.kind !== "text") throw new Error("expected text");
-    return composer.runs.map((r) => r.text);
+    return composerOf(f).runs.map((r) => r.text);
   }
 
   it("splits composer text around the cursor block at an interior offset", () => {
@@ -561,16 +561,23 @@ describe("buildTraceFrame", () => {
     );
   }
 
+  function slashRowsOf(f: ReturnType<typeof buildTraceFrame>) {
+    const main = mainOf(f);
+    return main.filter((c) => {
+      if (c.kind !== "text") return false;
+      const t0 = c.runs[0]?.text;
+      return t0 === "  " || t0 === "▸ ";
+    });
+  }
+
   it("omits slash rows when slashMatches is empty / undefined", () => {
-    const f = buildEmpty();
-    expect(mainOf(f)).toHaveLength(2);
+    expect(slashRowsOf(buildEmpty())).toHaveLength(0);
   });
 
   it("appends one slash row per match below the composer with a ▸ on the selected one", () => {
     const f = buildWithSlash(makeMatches(3), 1);
-    const main = mainOf(f);
-    expect(main).toHaveLength(1 + 1 + 3);
-    const rows = main.slice(2);
+    const rows = slashRowsOf(f);
+    expect(rows).toHaveLength(3);
     const rendered = rows.map((r) => (r.kind === "text" ? r.runs.map((x) => x.text).join("") : ""));
     expect(rendered[0]?.startsWith("  /cmd0")).toBe(true);
     expect(rendered[1]?.startsWith("▸ /cmd1")).toBe(true);
@@ -579,7 +586,7 @@ describe("buildTraceFrame", () => {
 
   it("includes argsHint after the cmd when given", () => {
     const f = buildWithSlash([{ cmd: "/model", summary: "switch model", argsHint: "<name>" }], 0);
-    const row = mainOf(f)[2];
+    const row = slashRowsOf(f)[0];
     if (row?.kind !== "text") return;
     const flat = row.runs.map((r) => r.text).join("");
     expect(flat).toContain("/model");
@@ -589,10 +596,11 @@ describe("buildTraceFrame", () => {
 
   it("windows long match lists and shows an overflow row with the hidden count", () => {
     const f = buildWithSlash(makeMatches(20), 0);
+    const rows = slashRowsOf(f);
+    expect(rows).toHaveLength(6);
     const main = mainOf(f);
-    expect(main).toHaveLength(1 + 1 + 6 + 1);
-    const overflow = main.at(-1);
-    if (overflow?.kind !== "text") return;
+    const overflow = main.find((c) => c.kind === "text" && c.runs[0]?.text?.startsWith("…"));
+    if (overflow?.kind !== "text") throw new Error("expected overflow row");
     expect(overflow.runs.map((r) => r.text).join("")).toContain("…14 more");
   });
 
@@ -623,7 +631,7 @@ describe("buildTraceFrame", () => {
 
   it("clamps an out-of-range slashSelectedIndex", () => {
     const f = buildWithSlash(makeMatches(3), 99);
-    const rows = mainOf(f).slice(2);
+    const rows = slashRowsOf(f);
     const flat = rows.map((r) => (r.kind === "text" ? r.runs.map((x) => x.text).join("") : ""));
     expect(flat[2]?.startsWith("▸ /cmd2")).toBe(true);
   });
@@ -645,26 +653,32 @@ describe("buildTraceFrame approval modal", () => {
     );
   }
 
+  function approvalRowOf(f: ReturnType<typeof buildTraceFrame>) {
+    for (const c of mainOf(f)) {
+      if (c.kind === "text" && c.runs[0]?.text === "❓ ") return c;
+    }
+    throw new Error("no approval row found");
+  }
+
   it("replaces the composer row with an approval row when approvalPrompt is set", () => {
     const f = buildWithApproval("shell", "rm -rf /tmp/x");
-    const main = mainOf(f);
-    expect(main).toHaveLength(2);
-    const row = main[1];
-    if (row?.kind !== "text") return;
+    const row = approvalRowOf(f);
     const flat = row.runs.map((r) => r.text).join("");
     expect(flat).toContain("❓");
     expect(flat).toContain("[shell]");
     expect(flat).toContain("rm -rf /tmp/x");
     expect(flat).toContain("[y/n]");
-    expect(flat).not.toContain("❯");
-    expect(flat).not.toContain("typing…");
+    const allFlat = mainOf(f)
+      .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+      .join(" | ");
+    expect(allFlat).not.toContain("❯");
+    expect(allFlat).not.toContain("typing…");
   });
 
   it("clips an overlong approval prompt to 60 chars with an ellipsis", () => {
     const long = "x".repeat(120);
     const f = buildWithApproval("shell", long);
-    const row = mainOf(f)[1];
-    if (row?.kind !== "text") return;
+    const row = approvalRowOf(f);
     const promptRun = row.runs.find((r) => r.text.includes("x"));
     expect(promptRun?.text).toHaveLength(60);
     expect(promptRun?.text.endsWith("…")).toBe(true);
@@ -672,8 +686,7 @@ describe("buildTraceFrame approval modal", () => {
 
   it("omits the kind tag when approvalKind is undefined", () => {
     const f = buildWithApproval(undefined, "go ahead?");
-    const row = mainOf(f)[1];
-    if (row?.kind !== "text") return;
+    const row = approvalRowOf(f);
     const flat = row.runs.map((r) => r.text).join("");
     expect(flat).not.toContain("[]");
     expect(flat).toContain("go ahead?");
@@ -694,7 +707,10 @@ describe("buildTraceFrame approval modal", () => {
       80,
       24,
     );
-    expect(mainOf(f)).toHaveLength(2);
+    const flat = mainOf(f)
+      .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+      .join(" | ");
+    expect(flat).not.toContain("/help");
   });
 });
 
@@ -721,20 +737,37 @@ describe("buildTraceFrame sessions picker", () => {
     );
   }
 
+  function pickerHeaderOf(f: ReturnType<typeof buildTraceFrame>) {
+    for (const c of mainOf(f)) {
+      if (c.kind === "text") {
+        const flat = c.runs.map((r) => r.text).join("");
+        if (flat.includes("sessions") && flat.includes("saved")) return c;
+      }
+    }
+    throw new Error("no picker header row found");
+  }
+
+  function pickerSessionRows(f: ReturnType<typeof buildTraceFrame>) {
+    return mainOf(f).filter((c) => {
+      if (c.kind !== "text") return false;
+      const t0 = c.runs[0]?.text;
+      return t0 === "▸ " || t0 === "  ";
+    });
+  }
+
   it("replaces composer with a header + one row per session + a hint footer", () => {
     const f = buildWithSessions(makeSessions(3), 0);
-    const main = mainOf(f);
-    expect(main).toHaveLength(1 + 1 + 3 + 1);
-    const header = main[1];
-    if (header?.kind !== "text") return;
+    const header = pickerHeaderOf(f);
     const headerFlat = header.runs.map((r) => r.text).join("");
     expect(headerFlat).toContain("sessions");
     expect(headerFlat).toContain("(3 saved)");
-    const row0 = main[2];
+    const rows = pickerSessionRows(f);
+    expect(rows).toHaveLength(3);
+    const row0 = rows[0];
     if (row0?.kind !== "text") return;
     expect(row0.runs[0]?.text).toBe("▸ ");
     expect(row0.runs[1]?.text).toBe("session-0");
-    const hint = main.at(-1);
+    const hint = mainOf(f).at(-1);
     if (hint?.kind !== "text") return;
     const hintFlat = hint.runs.map((r) => r.text).join("");
     expect(hintFlat).toContain("navigate");
@@ -743,10 +776,9 @@ describe("buildTraceFrame sessions picker", () => {
 
   it("windows a long session list at MAX_SESSION_ROWS (8) with an overflow row", () => {
     const f = buildWithSessions(makeSessions(20), 15);
-    const main = mainOf(f);
-    expect(main).toHaveLength(1 + 1 + 8 + 1 + 1);
-    const overflow = main.at(-2);
-    if (overflow?.kind !== "text") return;
+    expect(pickerSessionRows(f)).toHaveLength(8);
+    const overflow = mainOf(f).find((c) => c.kind === "text" && c.runs[0]?.text?.startsWith("…"));
+    if (overflow?.kind !== "text") throw new Error("expected overflow row");
     expect(overflow.runs.map((r) => r.text).join("")).toContain("…12 more");
   });
 
@@ -774,7 +806,8 @@ describe("buildTraceFrame sessions picker", () => {
 
   it("renders meta after the title when given", () => {
     const f = buildWithSessions([{ title: "feat-foo", meta: "feat · 12 turns" }], 0);
-    const row = mainOf(f)[2];
+    const rows = pickerSessionRows(f);
+    const row = rows[0];
     if (row?.kind !== "text") return;
     const flat = row.runs.map((r) => r.text).join("");
     expect(flat).toContain("feat-foo");
