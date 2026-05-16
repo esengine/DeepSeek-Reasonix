@@ -6,7 +6,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::state::SceneState;
 
 use super::cards::{render_card_to, total_cards_height};
-use super::theme::{DOCK_HEIGHT, SIDEBAR_WIDTH};
+use super::dock_height_for;
+use super::theme::SIDEBAR_WIDTH;
 
 const BOOT_HEIGHT: u16 = 15;
 
@@ -101,7 +102,7 @@ pub fn cards_layout(terminal: Rect, state: &SceneState, scroll_offset: u16) -> C
     } else {
         terminal.width
     };
-    let dock_h = DOCK_HEIGHT.min(terminal.height);
+    let dock_h = dock_height_for(state).min(terminal.height);
     let scroll_h = terminal.height.saturating_sub(dock_h);
     let boot = BOOT_HEIGHT.min(scroll_h);
     let cards_y = terminal.y + boot;

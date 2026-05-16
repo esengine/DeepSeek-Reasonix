@@ -145,6 +145,64 @@ fn next_word_boundary(buffer: &str, from: usize) -> usize {
     i
 }
 
+fn locate_cursor_in(buffer: &str, cursor: usize) -> (usize, usize) {
+    let mut line = 0usize;
+    let mut col = 0usize;
+    let mut idx = 0usize;
+    for ch in buffer.chars() {
+        if idx == cursor {
+            return (line, col);
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+        idx += 1;
+    }
+    (line, col)
+}
+
+fn line_col_to_cursor(buffer: &str, target_line: usize, target_col: usize) -> usize {
+    let mut line = 0usize;
+    let mut col = 0usize;
+    let mut idx = 0usize;
+    for ch in buffer.chars() {
+        if line == target_line && col == target_col {
+            return idx;
+        }
+        if ch == '\n' {
+            if line == target_line {
+                return idx;
+            }
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+        idx += 1;
+    }
+    idx
+}
+
+fn move_cursor_line(buffer: &str, cursor: usize, delta: isize) -> usize {
+    let (line, col) = locate_cursor_in(buffer, cursor);
+    let new_line = if delta < 0 {
+        line.saturating_sub((-delta) as usize)
+    } else {
+        line + delta as usize
+    };
+    let max_line = buffer.chars().filter(|c| *c == '\n').count();
+    if new_line > max_line {
+        return buffer.chars().count();
+    }
+    if new_line == line {
+        return cursor;
+    }
+    line_col_to_cursor(buffer, new_line, col)
+}
+
 fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
     use crossterm::event::{
         DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind, KeyModifiers,
@@ -256,6 +314,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     }
                     KeyCode::Enter if slash_active => {
                         if let Some(completion) = slash_completion(&buffer, slash_idx) {
+                            cursor = completion.chars().count();
                             buffer = completion;
                         }
                     }
@@ -267,8 +326,15 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     }
                     KeyCode::Enter if at_active => {
                         if let Some(completion) = at_completion(&buffer, at_idx) {
+                            cursor = completion.chars().count();
                             buffer = completion;
                         }
+                    }
+                    KeyCode::Up => {
+                        cursor = move_cursor_line(&buffer, cursor, -1);
+                    }
+                    KeyCode::Down => {
+                        cursor = move_cursor_line(&buffer, cursor, 1);
                     }
                     KeyCode::Esc => {
                         if selection.is_some() {
@@ -335,6 +401,13 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                         if cursor < buffer.chars().count() {
                             remove_char_at(&mut buffer, cursor);
                         }
+                        slash_idx = 0;
+                        at_idx = 0;
+                    }
+                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                        selection = None;
+                        insert_char_at(&mut buffer, cursor, '\n');
+                        cursor += 1;
                         slash_idx = 0;
                         at_idx = 0;
                     }

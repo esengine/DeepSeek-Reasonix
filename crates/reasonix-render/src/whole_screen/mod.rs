@@ -28,7 +28,7 @@ use overlay_at::render_at_overlay;
 use paint::fill_bg;
 use selection::apply_highlight;
 use sidebar::render_sidebar;
-use theme::{BG, DOCK_HEIGHT, SIDEBAR_WIDTH};
+use theme::{BG, DOCK_HEIGHT, MAX_COMPOSER_ROWS, SIDEBAR_WIDTH};
 
 pub struct WholeScreen<'a> {
     state: &'a SceneState,
@@ -119,7 +119,7 @@ fn render_main(
     at_idx: usize,
     tick: u32,
 ) {
-    let dock_h = DOCK_HEIGHT.min(area.height);
+    let dock_h = dock_height_for(state).min(area.height);
     let scroll_h = area.height.saturating_sub(dock_h);
     let scroll = Rect::new(area.x, area.y, area.width, scroll_h);
     let dock = Rect::new(area.x, area.y + scroll_h, area.width, dock_h);
@@ -127,4 +127,14 @@ fn render_main(
     render_dock(buf, dock, state, tick);
     render_slash_overlay(buf, dock, state, slash_idx);
     render_at_overlay(buf, dock, state, at_idx);
+}
+
+pub(super) fn dock_height_for(state: &SceneState) -> u16 {
+    let text = state.composer_text.as_deref().unwrap_or("");
+    let lines = if text.is_empty() {
+        1u16
+    } else {
+        text.split('\n').count().clamp(1, MAX_COMPOSER_ROWS as usize) as u16
+    };
+    DOCK_HEIGHT + lines.saturating_sub(1)
 }

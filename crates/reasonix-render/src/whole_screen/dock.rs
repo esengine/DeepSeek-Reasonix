@@ -15,10 +15,10 @@ pub fn render_dock(buf: &mut Buffer, area: Rect, state: &SceneState, tick: u32) 
         return;
     }
     let inner_w = area.width;
-    let composer_rows = 3u16.min(area.height);
-    render_input_box(buf, area, composer_rows, state, tick);
+    let box_h = area.height.saturating_sub(2).max(3);
+    render_input_box(buf, area, box_h, state, tick);
 
-    let mut row = area.y + composer_rows;
+    let mut row = area.y + box_h;
     if row < area.y + area.height {
         render_input_meta(buf, area, row, inner_w);
         row += 1;
@@ -30,11 +30,10 @@ pub fn render_dock(buf: &mut Buffer, area: Rect, state: &SceneState, tick: u32) 
 
 fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState, tick: u32) {
     let w = area.width;
-    if w < 4 || rows == 0 {
+    if w < 4 || rows < 3 {
         return;
     }
     let top = area.y;
-    let mid = top + 1;
     let bot = top + rows.saturating_sub(1);
     let right = area.x + w - 1;
 
@@ -44,46 +43,102 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
     }
     paint(buf, right, top, '╮', FG3, BG, Modifier::empty());
 
-    if rows >= 2 {
-        paint(buf, area.x, mid, '│', FG3, BG, Modifier::empty());
-        paint(buf, right, mid, '│', FG3, BG, Modifier::empty());
-        let mut col = area.x + 2;
-        let prompt_color = match state.composer_text.as_deref().and_then(|s| s.chars().next()) {
-            Some('!') => OK,
-            Some('/') => DS_BRIGHT,
-            Some('@') => DS_PURPLE,
-            _ => DS_BRIGHT,
-        };
-        col = paint_str(buf, col, mid, "❯ ", prompt_color, BG, Modifier::BOLD);
-        let text = state.composer_text.as_deref().unwrap_or("");
-        let show_caret = (tick / 6) % 2 == 0;
-        if text.is_empty() {
-            paint_str(buf, col, mid, COMPOSER_PLACEHOLDER, FG3, BG, Modifier::empty());
+    for y in (top + 1)..bot {
+        paint(buf, area.x, y, '│', FG3, BG, Modifier::empty());
+        paint(buf, right, y, '│', FG3, BG, Modifier::empty());
+    }
+
+    paint(buf, area.x, bot, '╰', FG3, BG, Modifier::empty());
+    for x in 1..w - 1 {
+        paint(buf, area.x + x, bot, '─', FG3, BG, Modifier::empty());
+    }
+    paint(buf, right, bot, '╯', FG3, BG, Modifier::empty());
+
+    let content_rows = rows.saturating_sub(2);
+    let prompt_color = match state.composer_text.as_deref().and_then(|s| s.chars().next()) {
+        Some('!') => OK,
+        Some('/') => DS_BRIGHT,
+        Some('@') => DS_PURPLE,
+        _ => DS_BRIGHT,
+    };
+    let text = state.composer_text.as_deref().unwrap_or("");
+    let show_caret = (tick / 6) % 2 == 0;
+    let total_chars = text.chars().count();
+    let cursor = state.composer_cursor.unwrap_or(total_chars).min(total_chars);
+    let (cursor_line, cursor_col) = locate_cursor(text, cursor);
+
+    let lines: Vec<&str> = if text.is_empty() {
+        Vec::new()
+    } else {
+        text.split('\n').collect()
+    };
+
+    let scroll_off = if cursor_line + 1 > content_rows as usize {
+        cursor_line + 1 - content_rows as usize
+    } else {
+        0
+    };
+    let has_more_above = scroll_off > 0;
+    let has_more_below = scroll_off + (content_rows as usize) < lines.len();
+
+    for i in 0..content_rows {
+        let y = top + 1 + i;
+        let col_start = area.x + 2;
+        if i == 0 {
+            paint_str(buf, col_start, y, "❯ ", prompt_color, BG, Modifier::BOLD);
+        }
+        let text_start = col_start + 2;
+        let line_idx = scroll_off + i as usize;
+        if text.is_empty() && i == 0 {
+            paint_str(buf, text_start, y, COMPOSER_PLACEHOLDER, FG3, BG, Modifier::empty());
             if show_caret {
-                paint(buf, col, mid, '▮', DS_BRIGHT, BG, Modifier::empty());
+                paint(buf, text_start, y, '▮', DS_BRIGHT, BG, Modifier::empty());
+            }
+            continue;
+        }
+        let Some(line) = lines.get(line_idx) else {
+            continue;
+        };
+        if line_idx == cursor_line {
+            let before: String = line.chars().take(cursor_col).collect();
+            let after: String = line.chars().skip(cursor_col).collect();
+            let after_col = paint_str(buf, text_start, y, &before, FG, BG, Modifier::empty());
+            if show_caret {
+                paint(buf, after_col, y, '▮', DS_BRIGHT, BG, Modifier::empty());
+                paint_str(buf, after_col + 1, y, &after, FG, BG, Modifier::empty());
+            } else {
+                paint_str(buf, after_col, y, &after, FG, BG, Modifier::empty());
             }
         } else {
-            let total_chars = text.chars().count();
-            let cursor = state.composer_cursor.unwrap_or(total_chars).min(total_chars);
-            let before: String = text.chars().take(cursor).collect();
-            let after: String = text.chars().skip(cursor).collect();
-            let after_col = paint_str(buf, col, mid, &before, FG, BG, Modifier::empty());
-            if show_caret {
-                paint(buf, after_col, mid, '▮', DS_BRIGHT, BG, Modifier::empty());
-                paint_str(buf, after_col + 1, mid, &after, FG, BG, Modifier::empty());
-            } else {
-                paint_str(buf, after_col, mid, &after, FG, BG, Modifier::empty());
-            }
+            paint_str(buf, text_start, y, line, FG, BG, Modifier::empty());
         }
     }
 
-    if rows >= 3 {
-        paint(buf, area.x, bot, '╰', FG3, BG, Modifier::empty());
-        for x in 1..w - 1 {
-            paint(buf, area.x + x, bot, '─', FG3, BG, Modifier::empty());
-        }
-        paint(buf, right, bot, '╯', FG3, BG, Modifier::empty());
+    if has_more_above && rows >= 3 {
+        paint(buf, right.saturating_sub(1), top + 1, '↑', FG3, BG, Modifier::empty());
     }
+    if has_more_below && rows >= 3 {
+        paint(buf, right.saturating_sub(1), bot.saturating_sub(1), '↓', FG3, BG, Modifier::empty());
+    }
+}
+
+fn locate_cursor(text: &str, cursor: usize) -> (usize, usize) {
+    let mut line = 0usize;
+    let mut col = 0usize;
+    let mut count = 0usize;
+    for ch in text.chars() {
+        if count == cursor {
+            return (line, col);
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+        count += 1;
+    }
+    (line, col)
 }
 
 fn render_input_meta(buf: &mut Buffer, area: Rect, row: u16, w: u16) {

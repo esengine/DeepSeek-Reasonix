@@ -478,6 +478,72 @@ fn streaming_card_body_reveals_progressively() {
 }
 
 #[test]
+fn composer_scrolls_to_keep_cursor_visible() {
+    let mut state = SceneState::default();
+    let body = (1..=8)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let cursor_at_end = body.chars().count();
+    state.composer_text = Some(body);
+    state.composer_cursor = Some(cursor_at_end);
+    let backend = TestBackend::new(120, 40);
+    let mut term = Terminal::new(backend).unwrap();
+    term.draw(|f| f.render_widget(WholeScreen::new(&state).with_tick(0), f.area()))
+        .unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut all = String::new();
+    for y in 0..buf.area.height {
+        let mut x = 0u16;
+        while x < buf.area.width {
+            let sym = buf[(x, y)].symbol();
+            let w = UnicodeWidthStr::width(sym).max(1) as u16;
+            all.push_str(sym);
+            x = x.saturating_add(w);
+        }
+        all.push('\n');
+    }
+    assert!(all.contains("line 8"), "last line (cursor row) must be visible");
+    assert!(all.contains("line 4"), "line 4 should still fit (cap 5)");
+    assert!(!all.contains("line 1"), "earliest line should be scrolled out");
+    assert!(all.contains('↑'), "scroll indicator up missing");
+}
+
+#[test]
+fn composer_box_grows_for_multi_line_text() {
+    let mut state = SceneState::default();
+    state.composer_text = Some("line one\nline two\nline three".to_string());
+    state.composer_cursor = Some(0);
+    let backend = TestBackend::new(120, 40);
+    let mut term = Terminal::new(backend).unwrap();
+    term.draw(|f| f.render_widget(WholeScreen::new(&state).with_tick(0), f.area()))
+        .unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut lines_found = vec![false; 3];
+    for y in 0..buf.area.height {
+        let mut line = String::new();
+        let mut x = 0u16;
+        while x < buf.area.width {
+            let sym = buf[(x, y)].symbol();
+            let w = UnicodeWidthStr::width(sym).max(1) as u16;
+            line.push_str(sym);
+            x = x.saturating_add(w);
+        }
+        if line.contains("line one") {
+            lines_found[0] = true;
+        }
+        if line.contains("line two") {
+            lines_found[1] = true;
+        }
+        if line.contains("line three") {
+            lines_found[2] = true;
+        }
+    }
+    assert!(lines_found[0] && lines_found[1] && lines_found[2],
+        "all 3 composer lines should render: {lines_found:?}");
+}
+
+#[test]
 fn shell_prefix_does_not_break_overlay_or_composer() {
     let mut state = demo_state();
     state.composer_text = Some("!ls -la".to_string());

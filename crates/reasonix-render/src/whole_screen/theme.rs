@@ -24,4 +24,5 @@ pub const LOGO: [&str; 6] = [
 
 pub const SIDEBAR_WIDTH: u16 = 34;
 pub const DOCK_HEIGHT: u16 = 5;
+pub const MAX_COMPOSER_ROWS: u16 = 5;
 pub const COMPOSER_PLACEHOLDER: &str = "type to chat   / for commands   @ for files";
