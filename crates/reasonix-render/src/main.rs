@@ -312,6 +312,20 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     KeyCode::Down if slash_active => {
                         slash_idx = (slash_idx + 1).min(slash_count - 1);
                     }
+                    KeyCode::Tab if slash_active => {
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            slash_idx = slash_idx.saturating_sub(1);
+                        } else {
+                            slash_idx = (slash_idx + 1) % slash_count;
+                        }
+                    }
+                    KeyCode::BackTab if slash_active => {
+                        slash_idx = if slash_idx == 0 {
+                            slash_count - 1
+                        } else {
+                            slash_idx - 1
+                        };
+                    }
                     KeyCode::Enter if slash_active => {
                         if let Some(completion) = slash_completion(&buffer, slash_idx) {
                             cursor = completion.chars().count();
@@ -323,6 +337,20 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     }
                     KeyCode::Down if at_active => {
                         at_idx = (at_idx + 1).min(at_count - 1);
+                    }
+                    KeyCode::Tab if at_active => {
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            at_idx = at_idx.saturating_sub(1);
+                        } else {
+                            at_idx = (at_idx + 1) % at_count;
+                        }
+                    }
+                    KeyCode::BackTab if at_active => {
+                        at_idx = if at_idx == 0 {
+                            at_count - 1
+                        } else {
+                            at_idx - 1
+                        };
                     }
                     KeyCode::Enter if at_active => {
                         if let Some(completion) = at_completion(&buffer, at_idx) {

@@ -116,7 +116,7 @@ fn draw_box(buf: &mut Buffer, area: Rect) {
 fn draw_header(buf: &mut Buffer, area: Rect, count: usize) {
     let row = area.y + 1;
     paint_str(buf, area.x + 2, row, "@ ATTACH FILE", DS_PURPLE, BG, Modifier::BOLD);
-    let hint = format!("{count} matches  ↑↓ navigate  ↵ select  esc dismiss");
+    let hint = format!("{count} matches  ↑↓/Tab navigate  ↵ select  esc dismiss");
     let hcol = area.x + area.width.saturating_sub(hint.width() as u16 + 2);
     paint_str(buf, hcol, row, &hint, FG2, BG, Modifier::empty());
 }

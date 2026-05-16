@@ -114,7 +114,7 @@ fn draw_box(buf: &mut Buffer, area: Rect) {
 fn draw_header(buf: &mut Buffer, area: Rect) {
     let row = area.y + 1;
     paint_str(buf, area.x + 2, row, "/ SLASH COMMANDS", DS_BRIGHT, BG, Modifier::BOLD);
-    let hint = "↑↓ navigate  ↵ select  esc dismiss";
+    let hint = "↑↓/Tab navigate  ↵ select  esc dismiss";
     let hcol = area.x + area.width.saturating_sub(hint.width() as u16 + 2);
     paint_str(buf, hcol, row, hint, FG2, BG, Modifier::empty());
 }
