@@ -80,7 +80,9 @@ pub fn render_setup(state: &SetupState, frame: &mut Frame<'_>) {
         palette::fg2(),
         Modifier::empty(),
     )));
-    let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(Text::from(lines))
+        .wrap(Wrap { trim: false })
+        .style(Style::default().bg(to_rcolor(palette::bg())));
     frame.render_widget(paragraph, area);
 }
 
@@ -110,15 +112,18 @@ fn dock_height(state: &SceneState) -> u16 {
 }
 
 fn render_scroll(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
+    let inner_height = area.height.saturating_sub(2) as usize;
     let text = if state.cards.is_empty() {
         Text::from(boot_lines(state))
     } else {
-        Text::from(scroll_lines(state, area.height as usize))
+        Text::from(scroll_lines(state, inner_height))
     };
-    let block = Block::default()
-        .padding(Padding::new(2, 2, 1, 1))
-        .style(Style::default().bg(to_rcolor(palette::bg())));
-    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false }).block(block);
+    let bg_style = Style::default().bg(to_rcolor(palette::bg()));
+    let block = Block::default().padding(Padding::new(2, 2, 1, 1)).style(bg_style);
+    let paragraph = Paragraph::new(text)
+        .wrap(Wrap { trim: false })
+        .style(bg_style)
+        .block(block);
     frame.render_widget(paragraph, area);
 }
 
@@ -200,15 +205,19 @@ fn boot_field(key: &str, value: &str, value_color: Color) -> Line<'static> {
     ])
 }
 
-fn scroll_lines(state: &SceneState, available_height: usize) -> Vec<Line<'_>> {
+fn scroll_lines(state: &SceneState, inner_height: usize) -> Vec<Line<'_>> {
     let mut lines: Vec<Line<'_>> = Vec::new();
     for card in &state.cards {
         append_card_lines(&mut lines, card);
     }
-    let inner_height = available_height.saturating_sub(2);
     if lines.len() > inner_height && inner_height > 0 {
         let drop = lines.len() - inner_height;
         lines.drain(0..drop);
+    } else if lines.len() < inner_height {
+        let pad = inner_height - lines.len();
+        let mut padded: Vec<Line<'_>> = (0..pad).map(|_| Line::raw("")).collect();
+        padded.append(&mut lines);
+        lines = padded;
     }
     lines
 }
@@ -410,8 +419,6 @@ fn render_dock(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
 }
 
 fn render_composer(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
-    let bg = Block::default().style(Style::default().bg(to_rcolor(palette::bg2())));
-    frame.render_widget(bg, area);
     let mut spans: Vec<Span<'_>> = vec![
         Span::raw(" "),
         styled("❯ ", palette::ds(), Modifier::BOLD),
@@ -436,13 +443,11 @@ fn render_composer(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
             spans.push(styled(after, palette::fg(), Modifier::empty()));
         }
     }
-    let p = Paragraph::new(Line::from(spans));
+    let p = Paragraph::new(Line::from(spans)).style(Style::default().bg(to_rcolor(palette::bg2())));
     frame.render_widget(p, area);
 }
 
 fn render_approval(kind: Option<&str>, prompt: &str, frame: &mut Frame<'_>, area: Rect) {
-    let bg = Block::default().style(Style::default().bg(to_rcolor(palette::bg2())));
-    frame.render_widget(bg, area);
     let clipped: String = if prompt.chars().count() > APPROVAL_PROMPT_MAX {
         let head: String = prompt.chars().take(APPROVAL_PROMPT_MAX - 1).collect();
         format!("{}…", head)
@@ -459,7 +464,7 @@ fn render_approval(kind: Option<&str>, prompt: &str, frame: &mut Frame<'_>, area
     }
     spans.push(styled(clipped, palette::fg(), Modifier::empty()));
     spans.push(styled("  [y/n]", palette::warn(), Modifier::BOLD));
-    let p = Paragraph::new(Line::from(spans));
+    let p = Paragraph::new(Line::from(spans)).style(Style::default().bg(to_rcolor(palette::bg2())));
     frame.render_widget(p, area);
 }
 
@@ -483,12 +488,10 @@ fn render_meta(frame: &mut Frame<'_>, area: Rect) {
         styled("↑", palette::ds(), Modifier::empty()),
         styled(" history ", palette::fg2(), Modifier::empty()),
     ]);
-    render_row_split(frame, area, left, right);
+    render_row_split(frame, area, left, right, palette::bg());
 }
 
 fn render_status(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
-    let bg = Block::default().style(Style::default().bg(to_rcolor(palette::bg2())));
-    frame.render_widget(bg, area);
     let mut left_spans: Vec<Span<'_>> = vec![
         styled(" ●", palette::ok(), Modifier::empty()),
         styled(" reasonix", palette::fg(), Modifier::BOLD),
@@ -538,18 +541,31 @@ fn render_status(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
         ));
     }
 
-    render_row_split(frame, area, Line::from(left_spans), Line::from(right_spans));
+    render_row_split(
+        frame,
+        area,
+        Line::from(left_spans),
+        Line::from(right_spans),
+        palette::bg2(),
+    );
 }
 
-fn render_row_split(frame: &mut Frame<'_>, area: Rect, left: Line<'_>, right: Line<'_>) {
+fn render_row_split(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    left: Line<'_>,
+    right: Line<'_>,
+    bg: Color,
+) {
+    let bg_style = Style::default().bg(to_rcolor(bg));
     let right_width = right.width() as u16;
     let left_width = area.width.saturating_sub(right_width);
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(left_width), Constraint::Length(right_width)])
         .split(area);
-    frame.render_widget(Paragraph::new(left), chunks[0]);
-    frame.render_widget(Paragraph::new(right), chunks[1]);
+    frame.render_widget(Paragraph::new(left).style(bg_style), chunks[0]);
+    frame.render_widget(Paragraph::new(right).style(bg_style), chunks[1]);
 }
 
 fn render_slash_overlay(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
@@ -578,7 +594,9 @@ fn render_slash_overlay(state: &SceneState, frame: &mut Frame<'_>, area: Rect) {
     if hidden > 0 {
         lines.push(overflow_line(hidden));
     }
-    let p = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
+    let p = Paragraph::new(Text::from(lines))
+        .wrap(Wrap { trim: false })
+        .style(Style::default().bg(to_rcolor(palette::bg())));
     frame.render_widget(p, area);
 }
 
@@ -648,7 +666,9 @@ fn render_sessions_picker(state: &SceneState, frame: &mut Frame<'_>, area: Rect)
         styled("esc", palette::ds(), Modifier::empty()),
         styled(" cancel", palette::fg2(), Modifier::empty()),
     ]));
-    let p = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
+    let p = Paragraph::new(Text::from(lines))
+        .wrap(Wrap { trim: false })
+        .style(Style::default().bg(to_rcolor(palette::bg())));
     frame.render_widget(p, area);
 }
 
