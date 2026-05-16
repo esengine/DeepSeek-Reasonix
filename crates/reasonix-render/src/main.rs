@@ -12,7 +12,11 @@ use ratatui::backend::CrosstermBackend;
 use reasonix_render::decode_only::run_decode_only;
 use reasonix_render::input::{is_quit, paste_event, translate_key, translate_mouse};
 use reasonix_render::state::{Message, SceneState, SetupState};
-use reasonix_render::view::{render_setup, render_trace};
+use reasonix_render::view::render_setup;
+use reasonix_render::whole_screen::{
+    at_completion, at_match_count, cards_layout, demo_state, extract_text, slash_completion,
+    slash_match_count, Selection, WholeScreen,
+};
 
 type RenderTerminal = ratatui::Terminal<CrosstermBackend<BufWriter<io::Stdout>>>;
 
@@ -61,7 +65,11 @@ fn main() -> Result<()> {
         debug_log(&format!("startup terminal.size = {}x{}", size.width, size.height));
     }
 
-    let result = run_stream_loop(&mut terminal);
+    let result = if args.iter().any(|a| a == "--demo") {
+        run_demo_loop(&mut terminal)
+    } else {
+        run_stream_loop(&mut terminal)
+    };
 
     restore_terminal(&mut terminal);
     result
@@ -92,23 +100,466 @@ fn install_panic_hook() {
     }));
 }
 
-fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
-    let stdin = io::stdin();
-    let mut logged_first_frame = false;
-    let mut last_size = terminal.size().ok();
-    for (lineno, line) in stdin.lock().lines().enumerate() {
-        let line = line.with_context(|| format!("read line {}", lineno + 1))?;
-        if line.trim().is_empty() {
+fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
+    use crossterm::event::{
+        DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind, KeyModifiers,
+        MouseButton, MouseEventKind,
+    };
+    use reasonix_render::state::SceneCard;
+
+    let mut stdout = io::stdout();
+    let mouse_enabled = crossterm::execute!(stdout, EnableMouseCapture).is_ok();
+
+    let mut state = demo_state();
+    let mut buffer = String::new();
+    let mut scroll_offset: u16 = 0;
+    let mut selection: Option<Selection> = None;
+    let mut dragging = false;
+    let mut slash_idx: usize = 0;
+    let mut at_idx: usize = 0;
+    let mut tick: u32 = 0;
+    let tick_period = std::time::Duration::from_millis(80);
+    let scroll_step: u16 = 3;
+    let page_step: u16 = 10;
+
+    let result: Result<()> = (|| loop {
+        state.composer_text = Some(buffer.clone());
+        state.composer_cursor = Some(buffer.chars().count());
+
+        let slash_count = slash_match_count(&buffer);
+        if slash_count == 0 {
+            slash_idx = 0;
+        } else if slash_idx >= slash_count {
+            slash_idx = slash_count - 1;
+        }
+        let at_count = if slash_count > 0 {
+            0
+        } else {
+            at_match_count(&buffer)
+        };
+        if at_count == 0 {
+            at_idx = 0;
+        } else if at_idx >= at_count {
+            at_idx = at_count - 1;
+        }
+
+        let _ = crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::BeginSynchronizedUpdate
+        );
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                f.render_widget(
+                    WholeScreen::new(&state)
+                        .with_scroll(scroll_offset)
+                        .with_selection(selection)
+                        .with_slash_index(slash_idx)
+                        .with_at_index(at_idx)
+                        .with_tick(tick),
+                    area,
+                );
+            })
+            .context("terminal draw")?;
+        let _ = crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::EndSynchronizedUpdate
+        );
+
+        if !event::poll(tick_period)? {
+            tick = tick.wrapping_add(1);
             continue;
         }
+
+        match event::read()? {
+            Event::Key(key) if key.kind != KeyEventKind::Press => continue,
+            Event::Key(key) => {
+                if is_quit(&key) {
+                    if let Some(sel) = selection {
+                        if let Ok(size) = terminal.size() {
+                            let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                            let text = extract_text(&state, scroll_offset, rect, sel);
+                            if !text.is_empty() {
+                                if let Ok(mut cb) = arboard::Clipboard::new() {
+                                    let _ = cb.set_text(text);
+                                }
+                            }
+                        }
+                        selection = None;
+                        continue;
+                    }
+                    return Ok(());
+                }
+                if key.code == KeyCode::Char('d')
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    return Ok(());
+                }
+                let slash_active = slash_count > 0;
+                let at_active = !slash_active && at_count > 0;
+                match key.code {
+                    KeyCode::Up if slash_active => {
+                        slash_idx = slash_idx.saturating_sub(1);
+                    }
+                    KeyCode::Down if slash_active => {
+                        slash_idx = (slash_idx + 1).min(slash_count - 1);
+                    }
+                    KeyCode::Enter if slash_active => {
+                        if let Some(completion) = slash_completion(&buffer, slash_idx) {
+                            buffer = completion;
+                        }
+                    }
+                    KeyCode::Up if at_active => {
+                        at_idx = at_idx.saturating_sub(1);
+                    }
+                    KeyCode::Down if at_active => {
+                        at_idx = (at_idx + 1).min(at_count - 1);
+                    }
+                    KeyCode::Enter if at_active => {
+                        if let Some(completion) = at_completion(&buffer, at_idx) {
+                            buffer = completion;
+                        }
+                    }
+                    KeyCode::Esc => {
+                        if selection.is_some() {
+                            selection = None;
+                        } else {
+                            buffer.clear();
+                            slash_idx = 0;
+                            at_idx = 0;
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        scroll_offset = scroll_offset.saturating_add(page_step);
+                    }
+                    KeyCode::PageDown => {
+                        scroll_offset = scroll_offset.saturating_sub(page_step);
+                    }
+                    KeyCode::Home => {
+                        scroll_offset = u16::MAX;
+                    }
+                    KeyCode::End => {
+                        scroll_offset = 0;
+                    }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        selection = None;
+                        buffer.push(c);
+                        slash_idx = 0;
+                        at_idx = 0;
+                        scroll_offset = 0;
+                    }
+                    KeyCode::Backspace => {
+                        selection = None;
+                        buffer.pop();
+                        slash_idx = 0;
+                        at_idx = 0;
+                    }
+                    KeyCode::Enter => {
+                        selection = None;
+                        let text = buffer.trim().to_string();
+                        if !text.is_empty() {
+                            state.cards.push(SceneCard {
+                                kind: "user".to_string(),
+                                body: Some(text),
+                                ts: Some(chrono::Local::now().timestamp()),
+                                ..Default::default()
+                            });
+                        }
+                        buffer.clear();
+                        slash_idx = 0;
+                        at_idx = 0;
+                        scroll_offset = 0;
+                    }
+                    _ => {}
+                }
+            }
+            Event::Mouse(m) => {
+                let term_size = terminal.size().ok();
+                let term_rect = term_size.map(|s| {
+                    ratatui::layout::Rect::new(0, 0, s.width, s.height)
+                });
+                match m.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(rect) = term_rect {
+                            let layout = cards_layout(rect, &state, scroll_offset);
+                            if layout.contains_screen(m.column, m.row) {
+                                let (col, virt_y) = layout.project_clamped(m.column, m.row);
+                                selection = Some(Selection::new(col, virt_y));
+                                dragging = true;
+                            } else {
+                                selection = None;
+                                dragging = false;
+                            }
+                        }
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) if dragging => {
+                        if let Some(rect) = term_rect {
+                            let layout = cards_layout(rect, &state, scroll_offset);
+                            let (col, virt_y) = layout.project_clamped(m.column, m.row);
+                            if let Some(s) = selection.as_mut() {
+                                s.extend(col, virt_y);
+                            }
+                            let top = layout.screen_rect.y;
+                            let bottom = layout.screen_rect.bottom();
+                            if m.row < top {
+                                scroll_offset = scroll_offset.saturating_add(1);
+                            } else if bottom > 0 && m.row >= bottom.saturating_sub(1) {
+                                scroll_offset = scroll_offset.saturating_sub(1);
+                            }
+                        }
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        dragging = false;
+                        if let Some(sel) = selection {
+                            if !sel.is_empty() {
+                                if let Ok(size) = terminal.size() {
+                                    let rect = ratatui::layout::Rect::new(
+                                        0,
+                                        0,
+                                        size.width,
+                                        size.height,
+                                    );
+                                    let text = extract_text(&state, scroll_offset, rect, sel);
+                                    if !text.is_empty() {
+                                        if let Ok(mut cb) = arboard::Clipboard::new() {
+                                            let _ = cb.set_text(text);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    MouseEventKind::ScrollUp => {
+                        scroll_offset = scroll_offset.saturating_add(scroll_step);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        scroll_offset = scroll_offset.saturating_sub(scroll_step);
+                    }
+                    _ => {}
+                }
+            }
+            Event::Resize(_, _) => {}
+            _ => {}
+        }
+        tick = tick.wrapping_add(1);
+    })();
+
+    if mouse_enabled {
+        let _ = crossterm::execute!(io::stdout(), DisableMouseCapture);
+    }
+    result
+}
+
+fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
+    use crossterm::event::{
+        DisableMouseCapture, EnableMouseCapture, MouseButton, MouseEventKind,
+    };
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let mouse_enabled = crossterm::execute!(io::stdout(), EnableMouseCapture).is_ok();
+
+    let (tx, rx) = mpsc::channel::<String>();
+    let _reader = thread::spawn(move || {
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            let Ok(l) = line else {
+                break;
+            };
+            if tx.send(l).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut logged_first_frame = false;
+    let mut last_size = terminal.size().ok();
+    let mut current_state: Option<Payload> = None;
+    let mut scroll_offset: u16 = 0;
+    let mut selection: Option<Selection> = None;
+    let mut dragging = false;
+    let mut tick: u32 = 0;
+    let tick_period = Duration::from_millis(80);
+    let scroll_step: u16 = 3;
+
+    let result: Result<()> = (|| loop {
+        let mut state_changed = false;
+        let mut stdin_closed = false;
+        loop {
+            match rx.try_recv() {
+                Ok(line) => {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(p) = decode_message(&line) {
+                        current_state = Some(p);
+                        state_changed = true;
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    stdin_closed = true;
+                    break;
+                }
+            }
+        }
+
         let current_size = terminal.size().ok();
         if current_size != last_size {
             terminal.clear().ok();
             last_size = current_size;
+            state_changed = true;
         }
-        let payload = decode_message(&line)
-            .with_context(|| format!("decode line {}", lineno + 1))?;
-        draw_atomic(terminal, &payload, &mut logged_first_frame)?;
+
+        if state_changed {
+            if let Some(payload) = &current_state {
+                draw_atomic_with_ui(
+                    terminal,
+                    payload,
+                    &mut logged_first_frame,
+                    scroll_offset,
+                    selection,
+                    tick,
+                )?;
+            }
+        }
+
+        if stdin_closed && current_state.is_none() {
+            return Ok(());
+        }
+
+        if crossterm::event::poll(tick_period)? {
+            let evt = crossterm::event::read()?;
+            let mut dirty = false;
+            if let Event::Mouse(m) = evt {
+                if let Some(Payload::Trace(state)) = current_state.as_ref() {
+                    if let Ok(size) = terminal.size() {
+                        let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                        let layout = cards_layout(rect, state, scroll_offset);
+                        match m.kind {
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                if layout.contains_screen(m.column, m.row) {
+                                    let (col, virt_y) = layout.project_clamped(m.column, m.row);
+                                    selection = Some(Selection::new(col, virt_y));
+                                    dragging = true;
+                                } else {
+                                    selection = None;
+                                    dragging = false;
+                                }
+                                dirty = true;
+                            }
+                            MouseEventKind::Drag(MouseButton::Left) if dragging => {
+                                let (col, virt_y) = layout.project_clamped(m.column, m.row);
+                                if let Some(s) = selection.as_mut() {
+                                    s.extend(col, virt_y);
+                                }
+                                let top = layout.screen_rect.y;
+                                let bottom = layout.screen_rect.bottom();
+                                if m.row < top {
+                                    scroll_offset = scroll_offset.saturating_add(1);
+                                } else if bottom > 0 && m.row >= bottom.saturating_sub(1) {
+                                    scroll_offset = scroll_offset.saturating_sub(1);
+                                }
+                                dirty = true;
+                            }
+                            MouseEventKind::Up(MouseButton::Left) => {
+                                dragging = false;
+                                if let Some(sel) = selection {
+                                    if !sel.is_empty() {
+                                        let text = extract_text(state, scroll_offset, rect, sel);
+                                        if !text.is_empty() {
+                                            if let Ok(mut cb) = arboard::Clipboard::new() {
+                                                let _ = cb.set_text(text);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            MouseEventKind::ScrollUp => {
+                                scroll_offset = scroll_offset.saturating_add(scroll_step);
+                                dirty = true;
+                            }
+                            MouseEventKind::ScrollDown => {
+                                scroll_offset = scroll_offset.saturating_sub(scroll_step);
+                                dirty = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            if dirty {
+                if let Some(payload) = &current_state {
+                    draw_atomic_with_ui(
+                        terminal,
+                        payload,
+                        &mut logged_first_frame,
+                        scroll_offset,
+                        selection,
+                        tick,
+                    )?;
+                }
+            }
+        } else if let Some(payload) = &current_state {
+            tick = tick.wrapping_add(1);
+            draw_atomic_with_ui(
+                terminal,
+                payload,
+                &mut logged_first_frame,
+                scroll_offset,
+                selection,
+                tick,
+            )?;
+        }
+    })();
+
+    if mouse_enabled {
+        let _ = crossterm::execute!(io::stdout(), DisableMouseCapture);
+    }
+    result
+}
+
+fn draw_atomic_with_ui(
+    terminal: &mut RenderTerminal,
+    payload: &Payload,
+    logged_first_frame: &mut bool,
+    scroll_offset: u16,
+    selection: Option<Selection>,
+    tick: u32,
+) -> Result<()> {
+    let _ = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::BeginSynchronizedUpdate
+    );
+    let draw_err = terminal
+        .draw(|f| {
+            let area = f.area();
+            if !*logged_first_frame {
+                debug_log(&format!(
+                    "first frame area = x={} y={} w={} h={}",
+                    area.x, area.y, area.width, area.height
+                ));
+                *logged_first_frame = true;
+            }
+            match payload {
+                Payload::Trace(state) => {
+                    f.render_widget(
+                        WholeScreen::new(state)
+                            .with_scroll(scroll_offset)
+                            .with_selection(selection)
+                            .with_tick(tick),
+                        area,
+                    );
+                }
+                Payload::Setup(state) => render_setup(state, f),
+            }
+        })
+        .err();
+    let _ =
+        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::EndSynchronizedUpdate);
+    if let Some(e) = draw_err {
+        return Err(e).context("terminal draw");
     }
     Ok(())
 }
@@ -130,37 +581,6 @@ fn decode_message(line: &str) -> Result<Payload> {
     }
     let state: SetupState = serde_json::from_str(line)?;
     Ok(Payload::Setup(state))
-}
-
-fn draw_atomic(
-    terminal: &mut RenderTerminal,
-    payload: &Payload,
-    logged_first_frame: &mut bool,
-) -> Result<()> {
-    let _ =
-        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::BeginSynchronizedUpdate);
-    let draw_err = terminal
-        .draw(|f| {
-            let area = f.area();
-            if !*logged_first_frame {
-                debug_log(&format!(
-                    "first frame area = x={} y={} w={} h={}",
-                    area.x, area.y, area.width, area.height
-                ));
-                *logged_first_frame = true;
-            }
-            match payload {
-                Payload::Trace(state) => render_trace(state, f),
-                Payload::Setup(state) => render_setup(state, f),
-            }
-        })
-        .err();
-    let _ =
-        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::EndSynchronizedUpdate);
-    if let Some(e) = draw_err {
-        return Err(e).context("terminal draw");
-    }
-    Ok(())
 }
 
 fn run_emit_input() -> Result<()> {
