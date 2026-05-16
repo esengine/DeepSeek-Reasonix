@@ -469,8 +469,11 @@ function AppInner({
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const cardCount = useAgentState((s) => s.cards.length);
-  const lastCardKind = useAgentState((s) => s.cards.at(-1)?.kind);
-  const lastCardSummary = useAgentState((s) => summarizeCard(s.cards.at(-1)));
+  const recentCardsJson = useAgentState((s) =>
+    JSON.stringify(
+      s.cards.slice(-24).map((c) => ({ kind: c.kind, summary: summarizeCard(c) ?? "" })),
+    ),
+  );
   const activityLabel = useActivityLabel();
   const chatScroll = useChatScrollActions();
   const [input, setInput] = useState("");
@@ -514,8 +517,7 @@ function AppInner({
     busy,
     activity: activityLabel,
     model,
-    lastCardKind,
-    lastCardSummary,
+    recentCardsJson,
     composerText: input,
   });
   const {

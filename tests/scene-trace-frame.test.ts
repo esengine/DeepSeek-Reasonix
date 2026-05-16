@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildTraceFrame, summarizeCard } from "../src/cli/ui/hooks/useSceneTrace.js";
+import {
+  type SceneTraceCard,
+  buildTraceFrame,
+  cardsForHeight,
+  parseRecentCards,
+  summarizeCard,
+} from "../src/cli/ui/hooks/useSceneTrace.js";
 import type { Card } from "../src/cli/ui/state/cards.js";
 
 function userCard(text: string): Card {
@@ -17,6 +23,10 @@ function toolCard(name: string, done: boolean): Card {
     done,
     elapsedMs: 0,
   };
+}
+
+function buildEmpty(extra: Partial<{ model: string; busy: boolean; composerText: string }> = {}) {
+  return buildTraceFrame({ cardCount: 0, busy: false, cards: [], ...extra }, 80, 24);
 }
 
 describe("summarizeCard", () => {
@@ -43,9 +53,75 @@ describe("summarizeCard", () => {
   });
 });
 
+describe("parseRecentCards", () => {
+  it("returns [] for undefined / empty / malformed input", () => {
+    expect(parseRecentCards(undefined)).toEqual([]);
+    expect(parseRecentCards("")).toEqual([]);
+    expect(parseRecentCards("not-json")).toEqual([]);
+    expect(parseRecentCards('{"not":"array"}')).toEqual([]);
+  });
+
+  it("decodes a JSON array of {kind, summary} objects", () => {
+    const json = JSON.stringify([
+      { kind: "user", summary: "hi" },
+      { kind: "streaming", summary: "hello back" },
+    ]);
+    expect(parseRecentCards(json)).toEqual([
+      { kind: "user", summary: "hi" },
+      { kind: "streaming", summary: "hello back" },
+    ]);
+  });
+
+  it("skips items missing kind or summary fields", () => {
+    const json = JSON.stringify([
+      { kind: "user", summary: "ok" },
+      { kind: "tool" }, // missing summary
+      { summary: "no kind" }, // missing kind
+      "string item",
+      null,
+      { kind: "warn", summary: "trailer" },
+    ]);
+    expect(parseRecentCards(json)).toEqual([
+      { kind: "user", summary: "ok" },
+      { kind: "warn", summary: "trailer" },
+    ]);
+  });
+});
+
+describe("cardsForHeight", () => {
+  function makeCards(n: number): SceneTraceCard[] {
+    return Array.from({ length: n }, (_, i) => ({ kind: "user", summary: String(i) }));
+  }
+
+  it("returns the last (rows - 3) cards by default", () => {
+    const cards = makeCards(30);
+    const fit = cardsForHeight(cards, 24);
+    expect(fit).toHaveLength(21);
+    expect(fit[0]?.summary).toBe("9");
+    expect(fit.at(-1)?.summary).toBe("29");
+  });
+
+  it("caps at the hard ceiling (24) even on tall terminals", () => {
+    const cards = makeCards(100);
+    const fit = cardsForHeight(cards, 200);
+    expect(fit).toHaveLength(24);
+  });
+
+  it("returns at least 1 card slot even on absurdly short terminals", () => {
+    const cards = makeCards(5);
+    expect(cardsForHeight(cards, 0)).toHaveLength(1);
+    expect(cardsForHeight(cards, 2)).toHaveLength(1);
+  });
+
+  it("returns all cards when there are fewer than the available slots", () => {
+    const cards = makeCards(3);
+    expect(cardsForHeight(cards, 24)).toHaveLength(3);
+  });
+});
+
 describe("buildTraceFrame", () => {
-  it("returns a column box with four children: title, card, status, composer", () => {
-    const f = buildTraceFrame({ cardCount: 0, busy: false }, 80, 24);
+  it("returns a column box with title + placeholder + status + composer when no cards", () => {
+    const f = buildEmpty();
     expect(f.schemaVersion).toBe(1);
     expect(f.cols).toBe(80);
     expect(f.rows).toBe(24);
@@ -57,11 +133,10 @@ describe("buildTraceFrame", () => {
   });
 
   it("renders the model name in the title row when given", () => {
-    const f = buildTraceFrame({ cardCount: 0, busy: false, model: "deepseek-chat" }, 80, 24);
+    const f = buildEmpty({ model: "deepseek-chat" });
     expect(f.root.kind).toBe("box");
     if (f.root.kind !== "box") return;
     const title = f.root.children[0];
-    expect(title?.kind).toBe("text");
     if (title?.kind !== "text") return;
     const flat = title.runs.map((r) => r.text).join("");
     expect(flat).toContain("reasonix");
@@ -69,22 +144,32 @@ describe("buildTraceFrame", () => {
   });
 
   it("shows a placeholder card row when no cards exist", () => {
-    const f = buildTraceFrame({ cardCount: 0, busy: false }, 80, 24);
+    const f = buildEmpty();
     if (f.root.kind !== "box") return;
     const card = f.root.children[1];
     if (card?.kind !== "text") return;
-    const flat = card.runs.map((r) => r.text).join("");
-    expect(flat).toContain("no cards yet");
+    expect(card.runs.map((r) => r.text).join("")).toContain("no cards yet");
+  });
+
+  it("stacks one row per card between the title and status rows", () => {
+    const cards: SceneTraceCard[] = [
+      { kind: "user", summary: "hi" },
+      { kind: "streaming", summary: "hello back" },
+      { kind: "user", summary: "follow up" },
+    ];
+    const f = buildTraceFrame({ cardCount: 3, busy: false, cards }, 80, 24);
+    if (f.root.kind !== "box") return;
+    expect(f.root.children).toHaveLength(3 + 3);
+    const firstCard = f.root.children[1];
+    const lastCard = f.root.children[3];
+    if (firstCard?.kind !== "text" || lastCard?.kind !== "text") return;
+    expect(firstCard.runs[2]?.text).toBe("hi");
+    expect(lastCard.runs[2]?.text).toBe("follow up");
   });
 
   it("paints the user-card icon cyan and the text bold", () => {
     const f = buildTraceFrame(
-      {
-        cardCount: 1,
-        busy: false,
-        lastCardKind: "user",
-        lastCardSummary: "hello",
-      },
+      { cardCount: 1, busy: false, cards: [{ kind: "user", summary: "hello" }] },
       80,
       24,
     );
@@ -98,9 +183,10 @@ describe("buildTraceFrame", () => {
   });
 
   it("paints status as green when idle and yellow when busy", () => {
-    const idle = buildTraceFrame({ cardCount: 3, busy: false }, 80, 24);
-    const busy = buildTraceFrame({ cardCount: 3, busy: true }, 80, 24);
+    const idle = buildTraceFrame({ cardCount: 3, busy: false, cards: [] }, 80, 24);
+    const busy = buildTraceFrame({ cardCount: 3, busy: true, cards: [] }, 80, 24);
     if (idle.root.kind !== "box" || busy.root.kind !== "box") return;
+    // children: title, placeholder, status, composer
     const idleStatus = idle.root.children[2];
     const busyStatus = busy.root.children[2];
     if (idleStatus?.kind !== "text" || busyStatus?.kind !== "text") return;
@@ -109,19 +195,19 @@ describe("buildTraceFrame", () => {
   });
 
   it("appends activity to the status row when given", () => {
-    const f = buildTraceFrame({ cardCount: 3, busy: true, activity: "awaiting tools" }, 80, 24);
+    const f = buildTraceFrame(
+      { cardCount: 3, busy: true, cards: [], activity: "awaiting tools" },
+      80,
+      24,
+    );
     if (f.root.kind !== "box") return;
     const status = f.root.children[2];
     if (status?.kind !== "text") return;
-    const flat = status.runs.map((r) => r.text).join("");
-    expect(flat).toContain("awaiting tools");
+    expect(status.runs.map((r) => r.text).join("")).toContain("awaiting tools");
   });
 
   it("composer row is a dim placeholder when composerText is empty / undefined", () => {
-    for (const f of [
-      buildTraceFrame({ cardCount: 0, busy: false }, 80, 24),
-      buildTraceFrame({ cardCount: 0, busy: false, composerText: "" }, 80, 24),
-    ]) {
+    for (const f of [buildEmpty(), buildEmpty({ composerText: "" })]) {
       if (f.root.kind !== "box") return;
       const composer = f.root.children[3];
       if (composer?.kind !== "text") return;
@@ -132,7 +218,11 @@ describe("buildTraceFrame", () => {
   });
 
   it("composer row shows typed text plus a cursor block when composerText is non-empty", () => {
-    const f = buildTraceFrame({ cardCount: 1, busy: false, composerText: "hello" }, 80, 24);
+    const f = buildTraceFrame(
+      { cardCount: 1, busy: false, cards: [], composerText: "hello" },
+      80,
+      24,
+    );
     if (f.root.kind !== "box") return;
     const composer = f.root.children[3];
     if (composer?.kind !== "text") return;

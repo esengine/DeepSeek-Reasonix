@@ -5,18 +5,33 @@ import { emitSceneFrame, isSceneTraceEnabled } from "../scene/trace.js";
 import type { Color, SceneFrame, SceneNode, TextRun } from "../scene/types.js";
 import type { Card } from "../state/cards.js";
 
+export type SceneTraceCard = { kind: string; summary: string };
+
 export type SceneTraceInput = {
   model?: string;
   cardCount: number;
-  lastCardKind?: string;
-  lastCardSummary?: string;
+  /** JSON-encoded `SceneTraceCard[]`, most recent last. Passed as a string so React deps stay primitive — array refs would re-fire the effect every render. */
+  recentCardsJson?: string;
   busy: boolean;
   activity?: string;
   /** Current composer text — what the user is typing but has not yet submitted. */
   composerText?: string;
 };
 
+type BuildInput = {
+  model?: string;
+  cardCount: number;
+  cards: ReadonlyArray<SceneTraceCard>;
+  busy: boolean;
+  activity?: string;
+  composerText?: string;
+};
+
 const SUMMARY_MAX = 70;
+/** Reserved rows for title + status + composer; the rest can hold cards. */
+const RESERVED_ROWS = 3;
+/** Hard cap so a tall terminal doesn't make the payload absurd. */
+const MAX_CARDS = 24;
 
 export function summarizeCard(card: Card | undefined): string | undefined {
   if (!card) return undefined;
@@ -45,39 +60,38 @@ function clip(s: string): string {
   return firstLine.length > SUMMARY_MAX ? `${firstLine.slice(0, SUMMARY_MAX - 1)}…` : firstLine;
 }
 
-export function buildTraceFrame(input: SceneTraceInput, cols: number, rows: number): SceneFrame {
-  return frame(
-    cols,
-    rows,
-    box([titleRow(input), cardRow(input), statusRow(input), composerRow(input)], {
-      direction: "column",
-      paddingX: 1,
-    }),
-  );
+export function buildTraceFrame(input: BuildInput, cols: number, rows: number): SceneFrame {
+  const children: SceneNode[] = [titleRow(input)];
+  if (input.cards.length === 0) {
+    children.push(noCardsRow());
+  } else {
+    for (const c of input.cards) children.push(cardRow(c));
+  }
+  children.push(statusRow(input));
+  children.push(composerRow(input));
+  return frame(cols, rows, box(children, { direction: "column", paddingX: 1 }));
 }
 
-function titleRow(s: SceneTraceInput): SceneNode {
+function titleRow(s: BuildInput): SceneNode {
   const runs: TextRun[] = [{ text: "reasonix", style: { bold: true } }];
   if (s.model) runs.push({ text: ` · ${s.model}`, style: { dim: true } });
   return text(runs);
 }
 
-function cardRow(s: SceneTraceInput): SceneNode {
-  if (!s.lastCardKind) {
-    return text([{ text: "(no cards yet)", style: { dim: true } }]);
-  }
+function noCardsRow(): SceneNode {
+  return text([{ text: "(no cards yet)", style: { dim: true } }]);
+}
+
+function cardRow(c: SceneTraceCard): SceneNode {
   const runs: TextRun[] = [
-    { text: iconFor(s.lastCardKind), style: { color: colorFor(s.lastCardKind) } },
+    { text: iconFor(c.kind), style: { color: colorFor(c.kind) } },
     { text: " " },
-    {
-      text: s.lastCardSummary ?? s.lastCardKind,
-      style: s.lastCardKind === "user" ? { bold: true } : undefined,
-    },
+    { text: c.summary || c.kind, style: c.kind === "user" ? { bold: true } : undefined },
   ];
   return text(runs);
 }
 
-function statusRow(s: SceneTraceInput): SceneNode {
+function statusRow(s: BuildInput): SceneNode {
   const runs: TextRun[] = [
     { text: `${s.cardCount} cards`, style: { dim: true } },
     { text: " · " },
@@ -87,7 +101,7 @@ function statusRow(s: SceneTraceInput): SceneNode {
   return text(runs);
 }
 
-function composerRow(s: SceneTraceInput): SceneNode {
+function composerRow(s: BuildInput): SceneNode {
   const runs: TextRun[] = [{ text: "❯ ", style: { color: "cyan", bold: true } }];
   const t = s.composerText ?? "";
   if (t.length === 0) {
@@ -145,19 +159,44 @@ function colorFor(kind: string): Color {
   }
 }
 
+export function parseRecentCards(json: string | undefined): SceneTraceCard[] {
+  if (!json || json.length === 0) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: SceneTraceCard[] = [];
+  for (const item of parsed) {
+    if (typeof item !== "object" || item === null) continue;
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.kind !== "string" || typeof obj.summary !== "string") continue;
+    out.push({ kind: obj.kind, summary: obj.summary });
+  }
+  return out;
+}
+
+export function cardsForHeight(
+  cards: ReadonlyArray<SceneTraceCard>,
+  rows: number,
+): SceneTraceCard[] {
+  const room = Math.max(1, Math.min(MAX_CARDS, rows - RESERVED_ROWS));
+  return cards.slice(-room);
+}
+
 export function useSceneTrace(input: SceneTraceInput): void {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
-  const { model, cardCount, lastCardKind, lastCardSummary, busy, activity, composerText } = input;
+  const { model, cardCount, recentCardsJson, busy, activity, composerText } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
+    const parsed = parseRecentCards(recentCardsJson);
+    const cards = cardsForHeight(parsed, rows);
     emitSceneFrame(
-      buildTraceFrame(
-        { model, cardCount, lastCardKind, lastCardSummary, busy, activity, composerText },
-        cols,
-        rows,
-      ),
+      buildTraceFrame({ model, cardCount, cards, busy, activity, composerText }, cols, rows),
     );
-  }, [cols, rows, model, cardCount, lastCardKind, lastCardSummary, busy, activity, composerText]);
+  }, [cols, rows, model, cardCount, recentCardsJson, busy, activity, composerText]);
 }
