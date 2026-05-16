@@ -627,7 +627,9 @@ function AppInner({
   const [pendingReviseEditor, setPendingReviseEditor] = useState<string | null>(null);
   /** True while the SessionPicker is open mid-chat (triggered by `/sessions`). */
   const [pendingSessionsPicker, setPendingSessionsPicker] = useState(false);
-  const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>([]);
+  const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>(
+    () => listSessionsForWorkspace(currentRootDir),
+  );
   const [sessionsPickerFocus, setSessionsPickerFocus] = useState(0);
   /** True while the CheckpointPicker is open mid-chat (triggered by bare `/restore`). */
   const [pendingCheckpointPicker, setPendingCheckpointPicker] = useState(false);
@@ -1316,6 +1318,10 @@ function AppInner({
     );
   }, [slashMatches]);
 
+  useEffect(() => {
+    setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
+  }, [currentRootDir]);
+
   const sessionsJson = useMemo(() => {
     if (!pendingSessionsPicker || sessionsPickerList.length === 0) return undefined;
     return JSON.stringify(
@@ -1326,6 +1332,16 @@ function AppInner({
       }),
     );
   }, [pendingSessionsPicker, sessionsPickerList]);
+
+  const sidebarSessionsJson = useMemo(() => {
+    if (sessionsPickerList.length === 0) return undefined;
+    return JSON.stringify(
+      sessionsPickerList.map((s) => ({
+        title: s.name,
+        meta: s.meta.branch ?? "main",
+      })),
+    );
+  }, [sessionsPickerList]);
 
   const sceneApproval = useMemo(() => {
     if (pendingShell) return { kind: "shell", prompt: pendingShell.command };
@@ -1352,6 +1368,8 @@ function AppInner({
     sessionsFocusedIndex: sessionsJson ? sessionsPickerFocus : undefined,
     walletBalance: balance?.total,
     walletCurrency: balance?.currency,
+    sidebarSessionsJson,
+    sidebarActiveSession: session ?? undefined,
   });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix

@@ -309,6 +309,98 @@ describe("buildTraceFrame", () => {
     expect(status.layout?.background).toBeDefined();
   });
 
+  it("renders the persistent sessions list in the sidebar when sidebarSessions is given", () => {
+    const f = buildTraceFrame(
+      {
+        cardCount: 0,
+        busy: false,
+        cards: [],
+        sidebarSessions: [
+          { title: "feat-foo", meta: "main" },
+          { title: "spike-bar", meta: "release/4.5" },
+        ],
+        sidebarActiveSession: "feat-foo",
+      },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") return;
+    const middle = f.root.children[1];
+    if (middle?.kind !== "box") return;
+    const sidebar = middle.children[0];
+    if (sidebar?.kind !== "box") return;
+    const flat = sidebar.children
+      .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+      .join("\n");
+    expect(flat).toContain("SESSIONS");
+    expect(flat).toContain("feat-foo");
+    expect(flat).toContain("spike-bar");
+  });
+
+  it("marks the active session row with a ▸ accent in the sidebar", () => {
+    const f = buildTraceFrame(
+      {
+        cardCount: 0,
+        busy: false,
+        cards: [],
+        sidebarSessions: [
+          { title: "feat-foo", meta: "main" },
+          { title: "spike-bar", meta: "release/4.5" },
+        ],
+        sidebarActiveSession: "spike-bar",
+      },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") return;
+    const middle = f.root.children[1];
+    if (middle?.kind !== "box") return;
+    const sidebar = middle.children[0];
+    if (sidebar?.kind !== "box") return;
+    const rows = sidebar.children.filter((c) => c.kind === "text") as ReadonlyArray<
+      Extract<SceneNode, { kind: "text" }>
+    >;
+    const fooRow = rows.find((r) => r.runs.some((x) => x.text === "feat-foo"));
+    const barRow = rows.find((r) => r.runs.some((x) => x.text === "spike-bar"));
+    expect(fooRow?.runs[0]?.text.trim()).toBe("");
+    expect(barRow?.runs[0]?.text.trim()).toBe("▸");
+  });
+
+  it("falls back to a placeholder hint in the sidebar when no sessions exist", () => {
+    const f = buildTraceFrame(
+      { cardCount: 0, busy: false, cards: [], sidebarSessions: [] },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") return;
+    const middle = f.root.children[1];
+    if (middle?.kind !== "box") return;
+    const sidebar = middle.children[0];
+    if (sidebar?.kind !== "box") return;
+    const flat = sidebar.children
+      .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+      .join("\n");
+    expect(flat).toContain("no saved sessions");
+  });
+
+  it("caps the sidebar list and emits an overflow row when there are too many sessions", () => {
+    const sessions = Array.from({ length: 14 }, (_, i) => ({ title: `s${i}`, meta: "main" }));
+    const f = buildTraceFrame(
+      { cardCount: 0, busy: false, cards: [], sidebarSessions: sessions },
+      80,
+      24,
+    );
+    if (f.root.kind !== "box") return;
+    const middle = f.root.children[1];
+    if (middle?.kind !== "box") return;
+    const sidebar = middle.children[0];
+    if (sidebar?.kind !== "box") return;
+    const flat = sidebar.children
+      .map((c) => (c.kind === "text" ? c.runs.map((r) => r.text).join("") : ""))
+      .join("\n");
+    expect(flat).toContain("…6 more");
+  });
+
   it("decorates side / ctx panes with a rounded border and bg-2 background", () => {
     const f = buildTraceFrame({ cardCount: 0, busy: false, cards: [] }, 120, 24);
     if (f.root.kind !== "box") return;

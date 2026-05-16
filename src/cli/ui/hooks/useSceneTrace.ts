@@ -32,6 +32,10 @@ export type SceneTraceInput = {
   /** Wallet balance — appears right-aligned in the status row. Null/undefined hides the segment. */
   walletBalance?: number;
   walletCurrency?: string;
+  /** JSON-encoded `SceneSessionItem[]` for the persistent sidebar list. */
+  sidebarSessionsJson?: string;
+  /** Name of the currently-active session — highlighted in the sidebar list. */
+  sidebarActiveSession?: string;
 };
 
 type BuildInput = {
@@ -50,7 +54,11 @@ type BuildInput = {
   sessionsFocusedIndex?: number;
   walletBalance?: number;
   walletCurrency?: string;
+  sidebarSessions?: ReadonlyArray<SceneSessionItem>;
+  sidebarActiveSession?: string;
 };
+
+const MAX_SIDEBAR_SESSIONS = 8;
 
 const APPROVAL_PROMPT_MAX = 60;
 const MAX_SESSION_ROWS = 8;
@@ -101,7 +109,7 @@ export function buildTraceFrame(input: BuildInput, cols: number, rows: number): 
   const status = statusRow(input, { suppressWallet: showCtxPane });
   const main = mainPane(input);
   const middleChildren: SceneNode[] = [];
-  if (showSidebar) middleChildren.push(sidebarPane());
+  if (showSidebar) middleChildren.push(sidebarPane(input));
   middleChildren.push(main);
   if (showCtxPane) middleChildren.push(ctxPane(input));
   const middle = box(middleChildren, { direction: "row", height: "fill", gap: 1 });
@@ -151,22 +159,44 @@ function mainPane(input: BuildInput): SceneNode {
   return box(children, { direction: "column", width: "fill", paddingX: 1 });
 }
 
-function sidebarPane(): SceneNode {
-  return box(
-    [
-      sectionHeaderRow("SESSIONS"),
-      text([{ text: "use /sessions", style: { color: PALETTE.muted } }]),
-      text([{ text: "to browse", style: { color: PALETTE.muted } }]),
-    ],
-    {
-      direction: "column",
-      width: SIDEBAR_WIDTH,
-      paddingX: 1,
-      borderStyle: "round",
-      borderColor: PALETTE.border,
-      background: PALETTE.bg2,
-    },
-  );
+function sidebarPane(input: BuildInput): SceneNode {
+  const children: SceneNode[] = [sectionHeaderRow("SESSIONS")];
+  const list = input.sidebarSessions ?? [];
+  if (list.length === 0) {
+    children.push(text([{ text: "no saved sessions", style: { color: PALETTE.muted } }]));
+    children.push(text([{ text: "type to start one", style: { color: PALETTE.muted } }]));
+  } else {
+    const shown = list.slice(0, MAX_SIDEBAR_SESSIONS);
+    for (const s of shown) {
+      const isActive = !!input.sidebarActiveSession && s.title === input.sidebarActiveSession;
+      children.push(sidebarSessionRow(s, isActive));
+    }
+    const hidden = list.length - shown.length;
+    if (hidden > 0) {
+      children.push(text([{ text: `…${hidden} more`, style: { color: PALETTE.muted } }]));
+    }
+  }
+  return box(children, {
+    direction: "column",
+    width: SIDEBAR_WIDTH,
+    paddingX: 1,
+    borderStyle: "round",
+    borderColor: PALETTE.border,
+    background: PALETTE.bg2,
+  });
+}
+
+function sidebarSessionRow(item: SceneSessionItem, active: boolean): SceneNode {
+  const runs: TextRun[] = [];
+  runs.push({
+    text: active ? "▸ " : "  ",
+    style: { color: active ? PALETTE.accent : PALETTE.muted },
+  });
+  runs.push({
+    text: item.title,
+    style: active ? { bold: true, color: PALETTE.accent } : { color: PALETTE.fg2 },
+  });
+  return text(runs);
 }
 
 function ctxPane(input: BuildInput): SceneNode {
@@ -498,6 +528,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
     sessionsFocusedIndex,
     walletBalance,
     walletCurrency,
+    sidebarSessionsJson,
+    sidebarActiveSession,
   } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
@@ -505,6 +537,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     const cards = cardsForHeight(parsed, rows);
     const slashMatches = parseSlashMatches(slashMatchesJson);
     const sessions = parseSessions(sessionsJson);
+    const sidebarSessions = parseSessions(sidebarSessionsJson);
     emitSceneFrame(
       buildTraceFrame(
         {
@@ -523,6 +556,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
           sessionsFocusedIndex,
           walletBalance,
           walletCurrency,
+          sidebarSessions,
+          sidebarActiveSession,
         },
         cols,
         rows,
@@ -546,6 +581,8 @@ export function useSceneTrace(input: SceneTraceInput): void {
     sessionsFocusedIndex,
     walletBalance,
     walletCurrency,
+    sidebarSessionsJson,
+    sidebarActiveSession,
   ]);
 }
 
