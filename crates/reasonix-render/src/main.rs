@@ -11,10 +11,8 @@ use ratatui::backend::CrosstermBackend;
 
 use reasonix_render::decode_only::run_decode_only;
 use reasonix_render::input::{is_quit, paste_event, translate_key, translate_mouse};
-use reasonix_render::producer::{build_setup_frame, build_trace_frame};
-use reasonix_render::render::render_frame;
-use reasonix_render::scene::SceneFrame;
 use reasonix_render::state::{Message, SceneState, SetupState};
+use reasonix_render::view::{render_setup, render_trace};
 
 type RenderTerminal = ratatui::Terminal<CrosstermBackend<BufWriter<io::Stdout>>>;
 
@@ -108,16 +106,35 @@ fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
             terminal.clear().ok();
             last_size = current_size;
         }
-        let frame = decode_to_frame(&line, terminal_size(terminal))
+        let payload = decode_message(&line)
             .with_context(|| format!("decode line {}", lineno + 1))?;
-        draw_atomic(terminal, &frame, &mut logged_first_frame)?;
+        draw_atomic(terminal, &payload, &mut logged_first_frame)?;
     }
     Ok(())
 }
 
+enum Payload {
+    Trace(SceneState),
+    Setup(SetupState),
+}
+
+fn decode_message(line: &str) -> Result<Payload> {
+    if let Ok(msg) = serde_json::from_str::<Message>(line) {
+        return Ok(match msg {
+            Message::Trace(state) => Payload::Trace(state),
+            Message::Setup(state) => Payload::Setup(state),
+        });
+    }
+    if let Ok(state) = serde_json::from_str::<SceneState>(line) {
+        return Ok(Payload::Trace(state));
+    }
+    let state: SetupState = serde_json::from_str(line)?;
+    Ok(Payload::Setup(state))
+}
+
 fn draw_atomic(
     terminal: &mut RenderTerminal,
-    frame: &SceneFrame,
+    payload: &Payload,
     logged_first_frame: &mut bool,
 ) -> Result<()> {
     let _ =
@@ -132,7 +149,10 @@ fn draw_atomic(
                 ));
                 *logged_first_frame = true;
             }
-            render_frame(frame, f.buffer_mut(), area);
+            match payload {
+                Payload::Trace(state) => render_trace(state, f),
+                Payload::Setup(state) => render_setup(state, f),
+            }
         })
         .err();
     let _ =
@@ -141,30 +161,6 @@ fn draw_atomic(
         return Err(e).context("terminal draw");
     }
     Ok(())
-}
-
-fn terminal_size(terminal: &RenderTerminal) -> (u16, u16) {
-    match terminal.size() {
-        Ok(size) => (size.width, size.height),
-        Err(_) => (80, 24),
-    }
-}
-
-fn decode_to_frame(line: &str, (cols, rows): (u16, u16)) -> Result<SceneFrame> {
-    if let Ok(msg) = serde_json::from_str::<Message>(line) {
-        return Ok(match msg {
-            Message::Trace(state) => build_trace_frame(&state, cols, rows),
-            Message::Setup(state) => build_setup_frame(&state, cols, rows),
-        });
-    }
-    if let Ok(state) = serde_json::from_str::<SceneState>(line) {
-        return Ok(build_trace_frame(&state, cols, rows));
-    }
-    if let Ok(state) = serde_json::from_str::<SetupState>(line) {
-        return Ok(build_setup_frame(&state, cols, rows));
-    }
-    let legacy: SceneFrame = serde_json::from_str(line)?;
-    Ok(legacy)
 }
 
 fn run_emit_input() -> Result<()> {

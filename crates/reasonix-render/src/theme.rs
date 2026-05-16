@@ -1,16 +1,33 @@
-use crate::scene::{Color, NamedColor};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Color {
+    Named(NamedColor),
+    Hex { hex: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NamedColor {
+    Default,
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    White,
+    Gray,
+}
 
 pub fn hex(s: &'static str) -> Color {
     Color::Hex { hex: s.to_string() }
 }
 
-pub fn default_color() -> Color {
-    Color::Named(NamedColor::Default)
-}
-
 pub mod palette {
-    use super::hex;
-    use crate::scene::Color;
+    use super::{hex, Color};
 
     pub fn bg() -> Color {
         hex("#0f1018")

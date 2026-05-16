@@ -36,7 +36,7 @@ fn surfaces_decode_errors_with_line_context() {
     let input = concat!(
         r#"{"schemaVersion":1,"cols":80,"rows":24,"root":{"kind":"text","runs":[{"text":"a"}]}}"#,
         "\n",
-        r#"{"kind":"text"}"#,
+        r#"{not valid json"#,
         "\n",
     );
     let mut out = Vec::<u8>::new();
