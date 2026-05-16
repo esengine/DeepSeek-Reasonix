@@ -31,7 +31,6 @@ impl FrameCache {
     }
 
     /// Number of consecutive frames skipped since the last rendered frame.
-    #[allow(dead_code)]
     pub fn skipped_count(&self) -> u64 {
         self.skipped
     }
