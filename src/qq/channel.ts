@@ -6,18 +6,45 @@ import { loadDotenv } from "../env.js";
 import { type C2CMessage, QQBot } from "./bot.js";
 
 const QQ_LOCK_FILE = join(homedir(), ".reasonix", "qq-channel.pid");
+const QQ_MAX_CHUNK_BYTES = 1500;
+const NATURAL_SPLIT_MIN_FRACTION = 0.6;
 
-function chunkMessage(text: string, maxLen = 1500): string[] {
+function fitUtf8Slice(text: string, maxBytes: number): string {
+  let end = 0;
+  let bytes = 0;
+  for (const char of text) {
+    const nextBytes = Buffer.byteLength(char, "utf8");
+    if (bytes > 0 && bytes + nextBytes > maxBytes) break;
+    end += char.length;
+    bytes += nextBytes;
+  }
+  return end > 0 ? text.slice(0, end) : text.slice(0, 1);
+}
+
+function pickNaturalSplit(candidate: string): number {
+  const minSplit = Math.floor(candidate.length * NATURAL_SPLIT_MIN_FRACTION);
+  const splitters = ["\n\n", "\n", " "];
+  for (const splitter of splitters) {
+    const at = candidate.lastIndexOf(splitter);
+    if (at >= minSplit) return at + splitter.length;
+  }
+  return candidate.length;
+}
+
+export function splitQQMessage(text: string, maxBytes = QQ_MAX_CHUNK_BYTES): string[] {
   const chunks: string[] = [];
   let remaining = text;
-  while (remaining.length > maxLen) {
-    let splitAt = remaining.lastIndexOf("\n", maxLen);
-    if (splitAt < 0) splitAt = remaining.lastIndexOf(" ", maxLen);
-    if (splitAt < 0) splitAt = maxLen;
-    chunks.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt).trim();
+  while (remaining.length > 0) {
+    if (Buffer.byteLength(remaining, "utf8") <= maxBytes) {
+      chunks.push(remaining);
+      break;
+    }
+
+    const candidate = fitUtf8Slice(remaining, maxBytes);
+    const splitAt = pickNaturalSplit(candidate);
+    chunks.push(candidate.slice(0, splitAt));
+    remaining = remaining.slice(splitAt).trimStart();
   }
-  if (remaining.length > 0) chunks.push(remaining);
   return chunks;
 }
 
@@ -28,6 +55,7 @@ export class QQChannel {
   private processedMsgIds = new Set<string>();
   private processedMsgIdQueue: string[] = [];
   private lockAcquired = false;
+  private nextOutboundMsgSeq = 1;
 
   constructor(
     private callbacks: {
@@ -142,13 +170,21 @@ export class QQChannel {
 
   async sendResponse(text: string): Promise<void> {
     if (!this.bot || !this.qqUserId) return;
-    const chunks = chunkMessage(text);
-    for (const chunk of chunks) {
+    const chunks = splitQQMessage(text);
+    for (let index = 0; index < chunks.length; index++) {
+      const chunk = chunks[index];
+      if (!chunk) continue;
       try {
-        await this.bot.sendPrivateMessage(this.qqUserId, chunk, this.qqMessageId ?? undefined);
+        await this.bot.sendPrivateMessage(
+          this.qqUserId,
+          chunk,
+          this.qqMessageId ?? undefined,
+          this.nextOutboundMsgSeq++,
+        );
       } catch (err) {
-        const msg = `QQ sendResponse error: ${(err as Error).message}`;
+        const msg = `QQ sendResponse chunk ${index + 1}/${chunks.length} failed: ${(err as Error).message}`;
         this.callbacks.onError?.(msg);
+        break;
       }
     }
   }
