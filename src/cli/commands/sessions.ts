@@ -1,6 +1,6 @@
 import { t } from "../../i18n/index.js";
 import { listSessions, loadSessionMessages, sessionPath } from "../../index.js";
-import type { ChatMessage } from "../../index.js";
+import type { ChatMessage, SessionInfo } from "../../index.js";
 
 export interface SessionsOptions {
   /** When present, inspect that session instead of listing. */
@@ -33,6 +33,8 @@ function listAll(): void {
     console.log(
       `  ${s.name.padEnd(22)} ${String(s.messageCount).padStart(6)}  ${sizeKb.padStart(8)}  ${when}`,
     );
+    const details = sessionDetails(s);
+    if (details.length > 0) console.log(`      ${details.join(" · ")}`);
   }
   console.log("");
   console.log("Inspect:  reasonix sessions <name>");
@@ -88,6 +90,20 @@ function renderMessage(msg: ChatMessage, turnIdx: number, verbose: boolean): voi
 function oneLine(s: string, max = 200): string {
   const collapsed = s.replace(/\s+/g, " ").trim();
   return collapsed.length > max ? `${collapsed.slice(0, max)}…` : collapsed;
+}
+
+function sessionDetails(s: SessionInfo): string[] {
+  const details: string[] = [];
+  if (s.meta.summary) details.push(`summary: ${oneLine(s.meta.summary, 88)}`);
+  if (s.meta.workspace) details.push(`workspace: ${workspaceLabel(s.meta.workspace)}`);
+  if (s.meta.branch) details.push(`branch: ${truncate(s.meta.branch, 40)}`);
+  return details;
+}
+
+function workspaceLabel(workspace: string): string {
+  const trimmed = workspace.replace(/[\\/]+$/, "");
+  const label = trimmed.split(/[\\/]+/).at(-1) ?? trimmed;
+  return truncate(label || workspace, 40);
 }
 
 function truncate(s: string, max: number): string {

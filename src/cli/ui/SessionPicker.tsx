@@ -36,6 +36,24 @@ export function SessionPicker({
   onFocusChange,
 }: SessionPickerProps): React.ReactElement {
   const [focus, setFocus] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  const hasSearch = searching || query.length > 0;
+  const filteredSessions = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return sessions;
+    return sessions.filter((s) =>
+      [s.name, s.meta.summary, s.meta.branch, s.meta.workspace, s.meta.balanceCurrency].some(
+        (value) => value?.toLowerCase().includes(needle),
+      ),
+    );
+  }, [sessions, query]);
+  const activeSessions = hasSearch ? filteredSessions : sessions;
+  const maxFocus = hasSearch ? Math.max(0, activeSessions.length - 1) : activeSessions.length;
+
+  useEffect(() => {
+    setFocus((f) => Math.max(0, Math.min(f, maxFocus)));
+  }, [maxFocus]);
 
   useEffect(() => {
     onFocusChange?.(focus);
@@ -99,6 +117,7 @@ export function SessionPicker({
   useKeystroke((ev) => {
     if (ev.paste) {
       if (renaming) setRenaming({ ...renaming, buf: renaming.buf + ev.input });
+      else if (searching) setQuery((q) => `${q}${oneLine(ev.input)}`);
       return;
     }
     if (renaming) {
@@ -122,15 +141,48 @@ export function SessionPicker({
       }
       return;
     }
+    if (searching) {
+      if (ev.escape) {
+        setSearching(false);
+        setQuery("");
+        setFocus(0);
+        return;
+      }
+      if (ev.upArrow) return setFocus((f) => Math.max(0, f - 1));
+      if (ev.downArrow) return setFocus((f) => Math.min(maxFocus, f + 1));
+      if (ev.return) {
+        const target = activeSessions[focus];
+        if (target) return onChoose({ kind: "open", name: target.name });
+        return;
+      }
+      if (ev.backspace) {
+        if (query.length === 0) {
+          setSearching(false);
+          return;
+        }
+        setQuery((q) => q.slice(0, -1));
+        return;
+      }
+      if (ev.input && !ev.ctrl && !ev.meta && !ev.tab) {
+        setQuery((q) => `${q}${ev.input}`);
+      }
+      return;
+    }
     if (ev.escape) return onChoose({ kind: "quit" });
     if (ev.upArrow) return setFocus((f) => Math.max(0, f - 1));
-    if (ev.downArrow) return setFocus((f) => Math.min(sessions.length, f + 1));
+    if (ev.downArrow) return setFocus((f) => Math.min(maxFocus, f + 1));
     if (ev.return) {
       if (sessions.length === 0 || focus === sessions.length) return onChoose({ kind: "new" });
       const target = sessions[focus]!;
       return onChoose({ kind: "open", name: target.name });
     }
     if (!ev.input) return;
+    if (ev.input === "/") {
+      setSearching(true);
+      setQuery("");
+      setFocus(0);
+      return;
+    }
     if (ev.input === "n") return onChoose({ kind: "new" });
     if (ev.input === "q") return onChoose({ kind: "quit" });
     if (sessions.length === 0) return;
@@ -142,11 +194,11 @@ export function SessionPicker({
 
   const start = Math.max(
     0,
-    Math.min(focus - Math.floor(visibleCount / 2), sessions.length - visibleCount),
+    Math.min(focus - Math.floor(visibleCount / 2), activeSessions.length - visibleCount),
   );
-  const end = Math.min(sessions.length, start + visibleCount);
-  const shown = sessions.slice(start, end);
-  const hiddenBelow = sessions.length - end;
+  const end = Math.min(activeSessions.length, start + visibleCount);
+  const shown = activeSessions.slice(start, end);
+  const hiddenBelow = activeSessions.length - end;
 
   return (
     <Box flexDirection="column" marginY={1}>
@@ -155,6 +207,11 @@ export function SessionPicker({
           {t("sessionPicker.header")}
         </Text>
         <Text color={FG.meta}>{`  ·  ${workspace}`}</Text>
+        {hasSearch ? (
+          <Text
+            color={FG.meta}
+          >{`  ·  /${query} (${activeSessions.length}/${sessions.length})`}</Text>
+        ) : null}
       </Box>
       <Box height={1} />
       {sessions.length === 0 ? (
@@ -164,6 +221,10 @@ export function SessionPicker({
             {"⏎"}
           </Text>
           <Text color={FG.faint}>{t("sessionPicker.emptyNew")}</Text>
+        </Box>
+      ) : activeSessions.length === 0 ? (
+        <Box>
+          <Text color={FG.faint}>{t("sessionPicker.searchEmpty")}</Text>
         </Box>
       ) : (
         shown.map((s, i) => (
@@ -191,13 +252,26 @@ export function SessionPicker({
           </Text>
         </Box>
       ) : null}
+      {searching ? (
+        <Box marginTop={1}>
+          <Text color={FG.faint}>{t("sessionPicker.searchPrompt")}</Text>
+          <Text bold color={TONE.brand}>
+            {query}
+          </Text>
+          <Text backgroundColor={TONE.brand} color="black">
+            {" "}
+          </Text>
+        </Box>
+      ) : null}
       <Box marginTop={1}>
         <Text color={FG.faint}>
           {renaming
             ? t("sessionPicker.renameHint")
-            : sessions.length === 0
-              ? t("sessionPicker.emptyHint")
-              : t("sessionPicker.pickerHint")}
+            : searching
+              ? t("sessionPicker.searchHint")
+              : sessions.length === 0
+                ? t("sessionPicker.emptyHint")
+                : t("sessionPicker.pickerHint")}
         </Text>
       </Box>
     </Box>
@@ -242,6 +316,10 @@ function SessionRow({
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max - 1)}…`;
+}
+
+function oneLine(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
 }
 
 function relativeTime(date: Date): string {

@@ -497,6 +497,9 @@ export interface TranslationSchema {
     emptyNew: string;
     renamePrompt: string;
     renameHint: string;
+    searchPrompt: string;
+    searchHint: string;
+    searchEmpty: string;
     emptyHint: string;
     justNow: string;
     minAgo: string;
