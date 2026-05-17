@@ -3,6 +3,23 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.2-rc.1] — 2026-05-17
+
+**Fix:** macOS `npx reasonix code` (default rust + integrated TUI) exited
+back to the shell prompt immediately without rendering. Root cause:
+`makeNullStdin` / `makeNullStdout` are pure-JS Node streams with no
+underlying libuv handles, so they don't keep the event loop alive. The
+rust trace child is spawned by a React `useEffect` (via `useSceneTrace`
+→ `emitSceneMessage`) — that effect is enqueued microseconds AFTER
+`render()` returns, but on macOS the event loop sees no active handles
+in that window and exits before the effect runs. Linux/Windows happen
+to keep the loop alive via other handles in the boot path; macOS
+doesn't.
+
+Defensive `setInterval(()=>{}, 0x7fffffff)` keep-alive held for the
+lifetime of `waitUntilExit()` and cleared in `finally`. Same renderer
+binary as 0.44.0; only chat.tsx changed.
+
 ## [0.44.1] — 2026-05-17
 
 **Fix:** Mac/Linux `npx reasonix@latest` failed with `EACCES` when spawning
