@@ -59,6 +59,10 @@ export interface SpawnSubagentOptions {
   allowedTools?: readonly string[];
   /** Continue an earlier session instead of starting fresh — loads the prior messages from disk; `task` is treated as a continuation nudge. */
   resumeSession?: string;
+  /** Share an ImmutablePrefix across parallel subagent spawns so DeepSeek's prefix-cache activates on the second spawn onward.  When set, the child loop reuses this prefix instead of constructing a new one. */
+  sharedPrefix?: ImmutablePrefix;
+  /** Override the subagent thinking effort (default "high").  Passed through from the orchestrator. */
+  reasoningEffort?: "high" | "max";
 }
 
 export interface SubagentResult {
@@ -199,10 +203,12 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         NEVER_INHERITED_TOOLS,
       )
     : forkRegistryExcluding(opts.parentRegistry, NEVER_INHERITED_TOOLS);
-  const childPrefix = new ImmutablePrefix({
-    system: opts.system,
-    toolSpecs: childTools.specs(),
-  });
+  const childPrefix =
+    opts.sharedPrefix ??
+    new ImmutablePrefix({
+      system: opts.system,
+      toolSpecs: childTools.specs(),
+    });
   const childLoop = new CacheFirstLoop({
     client: opts.client,
     prefix: childPrefix,
@@ -211,7 +217,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
     // Subagents run on a constrained thinking budget by default — the
     // task is already narrow by construction, and `high` cuts output
     // tokens substantially vs `max`.
-    reasoningEffort: DEFAULT_SUBAGENT_EFFORT,
+    reasoningEffort: opts.reasoningEffort ?? DEFAULT_SUBAGENT_EFFORT,
     hooks: [],
     stream: true,
     session: sessionName,
