@@ -3,6 +3,11 @@ import { t, useLang } from "../i18n/index.js";
 import { api } from "../lib/api.js";
 import { fmtNum } from "../lib/format.js";
 import { html } from "../lib/html.js";
+import {
+  normalizeMcpSpec,
+  mcpSpecCommand as specCommand,
+  mcpSpecLabel as specLabel,
+} from "../lib/mcp-spec.js";
 
 interface McpServer {
   label: string;
@@ -63,6 +68,10 @@ function specForEntry(e: RegistryEntryDto): string | null {
   return null;
 }
 
+function hideBrokenIcon(ev: Event): void {
+  (ev.target as HTMLImageElement).style.display = "none";
+}
+
 interface RegistryListResponse {
   source: "official" | "smithery" | "local";
   fromCache: boolean;
@@ -72,16 +81,6 @@ interface RegistryListResponse {
   matched: number;
   entries: RegistryEntryDto[];
   errors: string[];
-}
-
-function specLabel(spec: string): string {
-  const eq = spec.indexOf("=");
-  return eq > 0 ? spec.slice(0, eq) : spec;
-}
-
-function specCommand(spec: string): string {
-  const eq = spec.indexOf("=");
-  return eq > 0 ? spec.slice(eq + 1) : spec;
 }
 
 type McpFilter = "all" | "live" | "unbridged" | "marketplace";
@@ -164,8 +163,19 @@ export function McpPanel() {
 
   const load = useCallback(async () => {
     try {
-      setData(await api<McpData>("/mcp"));
-      setSpecs((await api<{ specs: string[] }>("/mcp/specs")).specs);
+      const mcpData = await api<McpData>("/mcp");
+      setData({
+        ...mcpData,
+        servers: (Array.isArray(mcpData.servers) ? mcpData.servers : []).map((server) => ({
+          ...server,
+          spec: normalizeMcpSpec(server.spec) ?? "",
+        })),
+      });
+      const specResponse = await api<{ specs?: unknown[] }>("/mcp/specs");
+      const normalized = (Array.isArray(specResponse.specs) ? specResponse.specs : [])
+        .map(normalizeMcpSpec)
+        .filter((spec): spec is string => spec !== null && spec.length > 0);
+      setSpecs(normalized);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -551,7 +561,7 @@ function renderMarketplaceRows({
           ? html` <span class="dim">· ${fmtNum(e.popularity)}</span>`
           : null;
       const icon = e.iconUrl
-        ? html`<img src=${e.iconUrl} alt="" style="width:16px;height:16px;border-radius:3px;margin-right:6px;vertical-align:middle;object-fit:cover" loading="lazy" referrerpolicy="no-referrer" onError=${(ev: Event) => ((ev.target as HTMLImageElement).style.display = "none")} />`
+        ? html`<img src=${e.iconUrl} alt="" style="width:16px;height:16px;border-radius:3px;margin-right:6px;vertical-align:middle;object-fit:cover" loading="lazy" referrerpolicy="no-referrer" onError=${hideBrokenIcon} />`
         : null;
       return html`
         <div class=${`ssl-row ${sel ? "sel" : ""}`} onClick=${() => setOpenRegistry(e)}>
@@ -594,7 +604,7 @@ function renderRegistryDetail({
       }${entry.install.version ? `@${entry.install.version}` : ""}`
     : "";
   const icon = entry.iconUrl
-    ? html`<img src=${entry.iconUrl} alt="" style="width:24px;height:24px;border-radius:4px;margin-right:8px;vertical-align:middle;object-fit:cover" loading="lazy" referrerpolicy="no-referrer" onError=${(ev: Event) => ((ev.target as HTMLImageElement).style.display = "none")} />`
+    ? html`<img src=${entry.iconUrl} alt="" style="width:24px;height:24px;border-radius:4px;margin-right:8px;vertical-align:middle;object-fit:cover" loading="lazy" referrerpolicy="no-referrer" onError=${hideBrokenIcon} />`
     : null;
   return html`
     <div class="sessions-detail-h">
