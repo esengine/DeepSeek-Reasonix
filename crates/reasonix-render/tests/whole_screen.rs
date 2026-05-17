@@ -308,6 +308,26 @@ fn catalog_state() -> reasonix_render::state::SceneState {
 }
 
 #[test]
+fn double_slash_does_not_match_anything() {
+    let state = catalog_state();
+    // Bare "/" is browse mode — every catalog entry surfaces.
+    assert_eq!(slash_match_count("/", &state), 6, "bare slash shows all");
+    // "//" is two literal slashes, not "bare slash with prefix" — the
+    // user is most likely typing a chat message starting with //, so the
+    // overlay should NOT explode into the whole catalog.
+    assert_eq!(
+        slash_match_count("//", &state),
+        0,
+        "double slash matches nothing"
+    );
+    assert_eq!(
+        slash_match_count("///c", &state),
+        0,
+        "triple slash also matches nothing"
+    );
+}
+
+#[test]
 fn slash_arg_picker_static_completer() {
     use reasonix_render::state::{SceneState, SlashMatch};
     let state = SceneState {

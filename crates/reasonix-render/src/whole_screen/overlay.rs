@@ -120,7 +120,11 @@ fn split_slash_arg(query: &str) -> Option<(&str, &str)> {
 }
 
 fn match_iter<'a>(query: &'a str, state: &'a SceneState) -> Box<dyn Iterator<Item = &'a str> + 'a> {
-    let needle = query.trim_start_matches('/').to_lowercase();
+    // strip_prefix removes ONE leading '/', not all of them — so "//" has
+    // needle "/" which matches nothing (intended: user typed two slashes
+    // as literal punctuation). trim_start_matches('/') would collapse
+    // them and surface the whole catalog instead.
+    let needle = query.strip_prefix('/').unwrap_or("").to_lowercase();
     if let Some(catalog) = state.slash_catalog.as_ref() {
         return Box::new(
             catalog
@@ -500,7 +504,8 @@ struct SlashRow {
 }
 
 fn collect_rows(query: &str, state: &SceneState) -> Vec<SlashRow> {
-    let needle = query.trim_start_matches('/').to_lowercase();
+    // See match_iter for why strip_prefix instead of trim_start_matches.
+    let needle = query.strip_prefix('/').unwrap_or("").to_lowercase();
     let group_mode = needle.is_empty();
     let raw: Vec<SlashRow> = if let Some(catalog) = state.slash_catalog.as_ref() {
         catalog
