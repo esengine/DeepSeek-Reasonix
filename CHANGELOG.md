@@ -3,6 +3,27 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.2-rc.2] — 2026-05-17
+
+**Fix:** macOS hang on `npx reasonix@next code` — keep-alive interval
+from rc.1 prevented Node from exiting, but the rust child was never
+actually spawned. Root cause: spawn was triggered by a React
+`useEffect` (`useSceneTrace` → `emitSceneMessage` → `trace.ts`
+`ensureInitialized`), and that effect simply never fired in some
+macOS npx contexts. Node sat alive with the keep-alive holding the
+event loop open, nothing on screen, no rust process.
+
+Fix: spawn rust eagerly in `chat.tsx` via new
+`ensureSceneTraceReady()` export, after `setIntegratedEventHandler` so
+the integrated event callback is wired before spawn. Also:
+- `renderer-process.ts` synthesizes an `exit` event when the rust child
+  dies on its own (panic / SIGKILL / terminal close) so the integrated
+  event handler tears Node down instead of hanging forever.
+- `trace.ts` now logs a clear warning to stderr when `resolveRenderer`
+  returns no usable command, instead of bailing silently — anyone
+  hitting "TUI never appears" can find the cause in
+  `~/.reasonix/rust-render-stderr.log`.
+
 ## [0.44.2-rc.1] — 2026-05-17
 
 **Fix:** macOS `npx reasonix code` (default rust + integrated TUI) exited

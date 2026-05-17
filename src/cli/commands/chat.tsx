@@ -41,7 +41,11 @@ import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import { cancelAllPromptInputs, resolvePromptInput } from "../ui/scene/prompt-input-store.js";
 import { resolveRenderer } from "../ui/scene/renderer-resolver.js";
-import { isIntegratedRendererRequested, setIntegratedEventHandler } from "../ui/scene/trace.js";
+import {
+  ensureSceneTraceReady,
+  isIntegratedRendererRequested,
+  setIntegratedEventHandler,
+} from "../ui/scene/trace.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
   type McpLifecycleNotice,
@@ -473,6 +477,13 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       }
       // interrupt: no-op for now; terminal SIGINT already reaches Node.
     });
+    // Eagerly spawn the rust child now that the event handler is set.
+    // Previously we relied on a React useEffect (useSceneTrace →
+    // emitSceneMessage → trace.ts ensureInitialized) to trigger spawn,
+    // but on macOS that effect simply never fired in some npx contexts
+    // — Node held the event loop open (via the keep-alive interval) but
+    // the rust child was never spawned and nothing rendered.
+    ensureSceneTraceReady();
   }
 
   const { waitUntilExit } = render(

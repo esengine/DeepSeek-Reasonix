@@ -68,6 +68,11 @@ export async function flushSceneTrace(): Promise<void> {
   }
 }
 
+/** Force the trace child to spawn now — React useEffect in useSceneTrace was unreliable on macOS (sometimes never fired under npx). */
+export function ensureSceneTraceReady(): void {
+  ensureInitialized();
+}
+
 function ensureInitialized(): void {
   if (state.opened) return;
   state.opened = true;
@@ -82,7 +87,15 @@ function ensureInitialized(): void {
   }
   if (process.env[RENDERER_VAR] === "node") return;
   const { command, source } = resolveRenderer();
-  if (source === null || command.length === 0) return;
+  if (source === null || command.length === 0) {
+    // Surface the bail so users hitting "TUI never appears" can grep
+    // the stderr log file for the cause.
+    process.stderr.write(
+      "▲ trace.ts: resolveRenderer() returned no usable command — scene trace stays off. " +
+        "Check optional-dep install (`ls node_modules/@reasonix/render-*`) or set REASONIX_RENDER_BIN.\n",
+    );
+    return;
+  }
   const integrated = process.env[INTEGRATED_VAR] !== "0";
   state.mode = "child";
   state.child = spawnRenderer({

@@ -50,6 +50,18 @@ export function spawnRenderer(opts: SpawnRendererOptions): RendererProcess {
     child.once("exit", (code) => {
       exited = true;
       resolve(code);
+      // Synthesize an exit event for integrated mode so the Node parent
+      // tears down cleanly when the rust child dies on its own (panic,
+      // SIGKILL, terminal close). Without this, Node's keep-alive +
+      // unread event-handler combo would leave the process hanging
+      // forever waiting for a child that's already gone.
+      if (opts.integrated && opts.onEvent) {
+        try {
+          opts.onEvent({ event: "exit" });
+        } catch {
+          // handler errors mustn't block the close pipeline
+        }
+      }
     });
   });
 
