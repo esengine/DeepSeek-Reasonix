@@ -253,7 +253,7 @@ export function Composer({
       const cmd = (it as SlashCmd).cmd;
       const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
       setDraft(next);
-      setChips((c) => [...c, { kind: "slash", label: cmd }]);
+      setChips((c) => [...c, { kind: "slash", label: cmd.replace(/^\//, "") }]);
       (it as SlashCmd).run();
     } else {
       const mention = it as MentionItem;
