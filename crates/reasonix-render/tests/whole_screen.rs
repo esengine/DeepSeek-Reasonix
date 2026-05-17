@@ -3,7 +3,7 @@ use ratatui::Terminal;
 use reasonix_render::state::{SceneCard, SceneState};
 use reasonix_render::whole_screen::{
     at_completion, at_match_count, cards_layout, demo_state, extract_text, slash_completion,
-    slash_match_count, Selection, WholeScreen,
+    slash_is_exact, slash_match_count, Selection, WholeScreen,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -302,6 +302,25 @@ fn catalog_state() -> reasonix_render::state::SceneState {
         ),
         ..Default::default()
     }
+}
+
+#[test]
+fn slash_is_exact_matches_full_command_only() {
+    let state = catalog_state();
+    assert!(slash_is_exact("/clear", &state), "full name matches");
+    assert!(slash_is_exact("/CLEAR", &state), "case-insensitive");
+    assert!(!slash_is_exact("/cl", &state), "prefix is not exact");
+    assert!(
+        !slash_is_exact("/clear ", &state),
+        "trailing space is not exact"
+    );
+    assert!(
+        !slash_is_exact("/clear foo", &state),
+        "with args is not exact"
+    );
+    assert!(!slash_is_exact("clear", &state), "no leading slash");
+    assert!(!slash_is_exact("/zzz", &state), "unknown command");
+    assert!(!slash_is_exact("/", &state), "empty cmd");
 }
 
 #[test]

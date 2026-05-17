@@ -23,6 +23,30 @@ pub fn slash_match_count(query: &str, state: &SceneState) -> usize {
     match_iter(query, state).count()
 }
 
+/// True when `query` is `/<cmd>` for a `<cmd>` that exists in the catalog
+/// (case-insensitive). The composer uses this to decide whether Enter
+/// should auto-complete the highlighted match or submit the typed command
+/// directly. Without this, typing the full name (e.g. `/cost`) re-completes
+/// to `/cost ` and the user has to press Enter twice.
+pub fn slash_is_exact(query: &str, state: &SceneState) -> bool {
+    let Some(needle) = query.strip_prefix('/') else {
+        return false;
+    };
+    if needle.is_empty() || needle.contains(' ') {
+        return false;
+    }
+    let needle_lower = needle.to_lowercase();
+    if let Some(catalog) = state.slash_catalog.as_ref() {
+        return catalog
+            .iter()
+            .any(|m| m.cmd.eq_ignore_ascii_case(&needle_lower));
+    }
+    FALLBACK_COMMANDS.iter().any(|(name, _)| {
+        name.trim_start_matches('/')
+            .eq_ignore_ascii_case(&needle_lower)
+    })
+}
+
 pub fn slash_completion(query: &str, idx: usize, state: &SceneState) -> Option<String> {
     if !query.starts_with('/') {
         return None;

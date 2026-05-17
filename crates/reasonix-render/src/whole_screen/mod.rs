@@ -20,7 +20,7 @@ use ratatui::widgets::Widget;
 use crate::state::SceneState;
 
 pub use demo::demo_state;
-pub use overlay::{slash_completion, slash_match_count};
+pub use overlay::{slash_completion, slash_is_exact, slash_match_count};
 pub use overlay_at::{at_completion, at_match_count};
 pub use paint::{paint, paint_str};
 pub use selection::{cards_layout, extract_text, CardsLayout, ScrollbarGeom, Selection};

@@ -19,8 +19,8 @@ use crate::input::is_quit;
 use crate::state::{decode_message, Payload, SceneState};
 use crate::view::render_setup;
 use crate::whole_screen::{
-    at_completion, at_match_count, cards_layout, extract_text, slash_completion, slash_match_count,
-    Selection, WholeScreen,
+    at_completion, at_match_count, cards_layout, extract_text, slash_completion, slash_is_exact,
+    slash_match_count, Selection, WholeScreen,
 };
 
 type Terminal = ratatui::Terminal<CrosstermBackend<BufWriter<io::Stdout>>>;
@@ -321,6 +321,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                 }
                 let slash_active = slash_count > 0;
                 let at_active = !slash_active && at_count > 0;
+                let slash_complete_only = slash_active && !slash_is_exact(&buffer, &scene);
                 match key.code {
                     KeyCode::Up if slash_active => {
                         slash_idx = slash_idx.saturating_sub(1);
@@ -342,7 +343,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                             slash_idx - 1
                         };
                     }
-                    KeyCode::Enter if slash_active => {
+                    KeyCode::Enter if slash_complete_only => {
                         if let Some(completion) = slash_completion(&buffer, slash_idx, &scene) {
                             cursor = completion.chars().count();
                             buffer = completion;
