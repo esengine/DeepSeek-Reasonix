@@ -115,7 +115,7 @@ export class QQChannel {
     if (verdict.bindRuntime) {
       this.runtimeBoundOpenId = openid;
       this.callbacks.onError?.(
-        `QQ temporarily bound this run to first sender ${redactQQOpenId(openid)}. Set \`/qq owner ${openid}\` to persist access.`,
+        `QQ temporarily bound this run to first sender ${redactQQOpenId(openid)}. Set \`qq.ownerOpenId\` in config to persist access.`,
       );
     }
 

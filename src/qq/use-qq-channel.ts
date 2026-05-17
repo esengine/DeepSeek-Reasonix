@@ -10,12 +10,7 @@ import { loadQQConfig, resolveThemePreference, saveQQConfig } from "../config.js
 import { type SessionInfo, freshSessionName } from "../memory/session.js";
 import type { ChoiceOption } from "../tools/choice.js";
 import type { PlanStep } from "../tools/plan.js";
-import {
-  describeQQAccess,
-  normalizeQQAllowlist,
-  normalizeQQOpenId,
-  redactQQOpenId,
-} from "./access.js";
+import { describeQQAccess } from "./access.js";
 import { QQChannel } from "./channel.js";
 
 type QQInteractionKind =
@@ -321,80 +316,6 @@ export function useQQChannel({
       });
     return `QQ: ${connected}, auto-start ${enabled}, credentials ${configured}, appId ${appId}, ${sandbox}, access ${access}, current mode ${codeMode ? "code" : "chat"}.`;
   }, [codeMode]);
-
-  const owner = useCallback(async (args: readonly string[]): Promise<string> => {
-    const existing = loadQQConfig();
-    const next = args[0]?.trim();
-    if (!next) {
-      const ownerText = existing.ownerOpenId ? redactQQOpenId(existing.ownerOpenId) : "none";
-      const liveAccess =
-        channelRef.current?.describeAccess() ??
-        describeQQAccess({
-          ownerOpenId: existing.ownerOpenId,
-          allowlist: existing.allowlist,
-        });
-      return `QQ owner: ${ownerText}. Access: ${liveAccess}.`;
-    }
-
-    const cleared = ["clear", "off", "none"].includes(next.toLowerCase());
-    const ownerOpenId = cleared ? undefined : normalizeQQOpenId(next);
-    if (!cleared && !ownerOpenId) {
-      throw new Error("QQ ownerOpenId must be a non-empty openid.");
-    }
-
-    saveQQConfig({
-      ...existing,
-      ownerOpenId,
-      allowlist: existing.allowlist,
-    });
-    channelRef.current?.refreshAccessConfig();
-    if (cleared) return "QQ owner binding cleared.";
-    return `QQ ownerOpenId set to ${redactQQOpenId(ownerOpenId)}.`;
-  }, []);
-
-  const allow = useCallback(async (args: readonly string[]): Promise<string> => {
-    const existing = loadQQConfig();
-    const next = normalizeQQOpenId(args.join(" ").trim());
-    if (!next) {
-      const allowlist = normalizeQQAllowlist(existing.allowlist) ?? [];
-      return allowlist.length > 0
-        ? `QQ allowlist (${allowlist.length}): ${allowlist.map(redactQQOpenId).join(", ")}`
-        : "QQ allowlist is empty.";
-    }
-
-    const allowlist = normalizeQQAllowlist([...(existing.allowlist ?? []), next]) ?? [];
-    saveQQConfig({
-      ...existing,
-      ownerOpenId: existing.ownerOpenId,
-      allowlist,
-    });
-    channelRef.current?.refreshAccessConfig();
-    return `Added ${redactQQOpenId(next)} to the QQ allowlist (${allowlist.length}).`;
-  }, []);
-
-  const unallow = useCallback(async (args: readonly string[]): Promise<string> => {
-    const existing = loadQQConfig();
-    const next = normalizeQQOpenId(args.join(" ").trim());
-    if (!next) {
-      throw new Error("Usage: /qq unallow <openid>");
-    }
-
-    const current = normalizeQQAllowlist(existing.allowlist) ?? [];
-    const allowlist = current.filter((openid) => openid !== next);
-    if (allowlist.length === current.length) {
-      return `QQ allowlist did not contain ${redactQQOpenId(next)}.`;
-    }
-
-    saveQQConfig({
-      ...existing,
-      ownerOpenId: existing.ownerOpenId,
-      allowlist,
-    });
-    channelRef.current?.refreshAccessConfig();
-    return allowlist.length > 0
-      ? `Removed ${redactQQOpenId(next)} from the QQ allowlist (${allowlist.length} left).`
-      : `Removed ${redactQQOpenId(next)} from the QQ allowlist. It is now empty.`;
-  }, []);
 
   const resetInteractions = useCallback(() => {
     interactionRef.current = { kind: null, payload: null };
@@ -829,9 +750,6 @@ export function useQQChannel({
       connect,
       disconnect,
       status,
-      owner,
-      allow,
-      unallow,
       sendInfo,
       sendText,
       resetInteractions,
@@ -872,14 +790,11 @@ export function useQQChannel({
       maybeSendFinalReply,
       noteTurnFromQQ,
       notifyTerminalOnly,
-      owner,
       parseSubmit,
       resetInteractions,
-      allow,
       sendInfo,
       sendText,
       status,
-      unallow,
     ],
   );
 }

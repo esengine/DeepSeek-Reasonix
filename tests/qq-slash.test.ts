@@ -24,59 +24,34 @@ describe("/qq slash handler", () => {
     vi.restoreAllMocks();
   });
 
-  it("routes /qq owner through the qq host surface", async () => {
-    const owner = vi.fn(async () => "QQ ownerOpenId set to abcdef...7890.");
-    const result = handleSlash("qq", ["owner", "openid-123"], makeLoop(), {
+  it("routes /qq connect through the qq host surface", async () => {
+    const connect = vi.fn(async () => "QQ connected.");
+    const result = handleSlash("qq", ["connect", "appid", "secret"], makeLoop(), {
       postInfo: (msg) => posts.push(msg),
       qq: {
-        connect: async () => "",
+        connect,
         disconnect: async () => "",
         status: () => "",
-        owner,
-        allow: async () => "",
-        unallow: async () => "",
       },
     });
     expect(result).toEqual({});
     await Promise.resolve();
-    expect(owner).toHaveBeenCalledWith(["openid-123"]);
-    expect(posts).toContain("QQ ownerOpenId set to abcdef...7890.");
+    expect(connect).toHaveBeenCalledWith(["appid", "secret"]);
+    expect(posts).toContain("QQ: connecting...");
+    expect(posts).toContain("QQ connected.");
   });
 
-  it("routes /qq allow and /qq unallow through the qq host surface", async () => {
-    const allow = vi.fn(async () => "Added abcdef...7890 to the QQ allowlist (1).");
-    const unallow = vi.fn(
-      async () => "Removed abcdef...7890 from the QQ allowlist. It is now empty.",
+  it("invalid /qq subcommands now return the compact usage string", () => {
+    const result = handleSlash("qq", ["owner", "openid-123"], makeLoop(), {
+      qq: {
+        connect: async () => "",
+        disconnect: async () => "",
+        status: () => "",
+      },
+    });
+    expect(result.info).toBe(
+      "Usage: /qq connect [appId appSecret [sandbox]] | /qq status | /qq disconnect",
     );
-    handleSlash("qq", ["allow", "openid-123"], makeLoop(), {
-      postInfo: (msg) => posts.push(msg),
-      qq: {
-        connect: async () => "",
-        disconnect: async () => "",
-        status: () => "",
-        owner: async () => "",
-        allow,
-        unallow,
-      },
-    });
-    await Promise.resolve();
-    handleSlash("qq", ["unallow", "openid-123"], makeLoop(), {
-      postInfo: (msg) => posts.push(msg),
-      qq: {
-        connect: async () => "",
-        disconnect: async () => "",
-        status: () => "",
-        owner: async () => "",
-        allow: async () => "",
-        unallow,
-      },
-    });
-    await Promise.resolve();
-
-    expect(allow).toHaveBeenCalledWith(["openid-123"]);
-    expect(unallow).toHaveBeenCalledWith(["openid-123"]);
-    expect(posts[0]).toMatch(/allowlist/);
-    expect(posts[1]).toMatch(/allowlist/);
   });
 
   it("bare /qq status still returns synchronously", () => {
@@ -85,9 +60,6 @@ describe("/qq slash handler", () => {
         connect: async () => "",
         disconnect: async () => "",
         status: () => "QQ: connected, access owner abcdef...7890.",
-        owner: async () => "",
-        allow: async () => "",
-        unallow: async () => "",
       },
     });
     expect(result.info).toMatch(/access owner/);
