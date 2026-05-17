@@ -5,7 +5,7 @@ use ratatui::style::Modifier;
 use crate::state::SceneState;
 
 use super::cards::render_cards;
-use super::paint::{paint_link, paint_str_to};
+use super::paint::{paint_link_wrapped, paint_str_to};
 use super::theme::{DS, FG, FG2, FG3, LOGO};
 
 pub fn render_scroll(
@@ -135,8 +135,8 @@ fn render_boot_meta(buf: &mut Buffer, area: Rect, start_row: u16, state: &SceneS
                 BG,
                 Modifier::empty(),
             );
-            paint_link(buf, val_col, row, url, url, DS_BRIGHT, BG);
-            row += 1;
+            let used = paint_link_wrapped(buf, val_col, row, end_x, bottom, url, url, DS_BRIGHT, BG);
+            row += used.max(1);
         }
     }
 

@@ -17,7 +17,7 @@ export type RendererProcess = {
 };
 
 export type SpawnRendererOptions = {
-  command?: readonly string[];
+  command: readonly string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   /** When true the rust child owns keyboard + composer; its stderr is parsed for {event:"submit"|"interrupt"|"exit"} lines. */
@@ -26,16 +26,8 @@ export type SpawnRendererOptions = {
   onEvent?: (event: RustEvent) => void;
 };
 
-export const DEFAULT_COMMAND: readonly string[] = [
-  "cargo",
-  "run",
-  "--quiet",
-  "--bin",
-  "reasonix-render",
-];
-
-export function spawnRenderer(opts: SpawnRendererOptions = {}): RendererProcess {
-  const command = opts.command ?? DEFAULT_COMMAND;
+export function spawnRenderer(opts: SpawnRendererOptions): RendererProcess {
+  const command = opts.command;
   const baseArgs: string[] = [];
   const [cmd, ...rest] = command;
   baseArgs.push(...rest);

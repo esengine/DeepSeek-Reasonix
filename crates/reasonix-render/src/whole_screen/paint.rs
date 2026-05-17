@@ -136,6 +136,55 @@ pub fn paint_link(
     x + width
 }
 
+/// Multi-row variant of `paint_link`. Splits `visible` into chunks that fit
+/// `[x, end_x)` and stacks them on consecutive rows, each chunk a clickable
+/// link to the full `url`. Returns rows consumed (0 if nothing fit).
+#[allow(clippy::too_many_arguments)]
+pub fn paint_link_wrapped(
+    buf: &mut Buffer,
+    x: u16,
+    y: u16,
+    end_x: u16,
+    bottom: u16,
+    url: &str,
+    visible: &str,
+    fg: Color,
+    bg: Color,
+) -> u16 {
+    use unicode_width::UnicodeWidthChar;
+    let limit = end_x.min(buf.area.right());
+    let bottom = bottom.min(buf.area.bottom());
+    if x >= limit || y >= bottom {
+        return 0;
+    }
+    let max_w = (limit - x) as usize;
+    if max_w == 0 {
+        return 0;
+    }
+    let mut row = y;
+    let mut chunk = String::new();
+    let mut chunk_w = 0usize;
+    for ch in visible.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(1);
+        if chunk_w + cw > max_w && !chunk.is_empty() {
+            paint_link(buf, x, row, url, &chunk, fg, bg);
+            row += 1;
+            if row >= bottom {
+                return row - y;
+            }
+            chunk.clear();
+            chunk_w = 0;
+        }
+        chunk.push(ch);
+        chunk_w += cw;
+    }
+    if !chunk.is_empty() {
+        paint_link(buf, x, row, url, &chunk, fg, bg);
+        row += 1;
+    }
+    row - y
+}
+
 pub fn fill_bg(buf: &mut Buffer, area: Rect, bg: Color) {
     let style = Style::default().bg(bg);
     for y in area.y..area.y.saturating_add(area.height) {

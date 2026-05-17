@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { DEFAULT_COMMAND } from "./renderer-process.js";
 
 export type InputModifier = "ctrl" | "alt" | "shift" | "super";
 
@@ -38,12 +37,10 @@ export type InputSource = {
 };
 
 export type SpawnInputSourceOptions = {
-  command?: readonly string[];
+  command: readonly string[];
   cwd?: string;
   env?: NodeJS.ProcessEnv;
 };
-
-export const DEFAULT_INPUT_COMMAND: readonly string[] = [...DEFAULT_COMMAND, "--", "--emit-input"];
 
 type Buses = {
   keys: Set<(event: KeyInputEvent) => void>;
@@ -51,8 +48,8 @@ type Buses = {
   mice: Set<(event: MouseInputEvent) => void>;
 };
 
-export function spawnInputSource(opts: SpawnInputSourceOptions = {}): InputSource {
-  const command = opts.command ?? DEFAULT_INPUT_COMMAND;
+export function spawnInputSource(opts: SpawnInputSourceOptions): InputSource {
+  const command = opts.command;
   const [cmd, ...args] = command;
   if (!cmd) {
     throw new Error("spawnInputSource: empty command");

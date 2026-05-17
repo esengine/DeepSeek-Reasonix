@@ -424,6 +424,26 @@ fn dashboard_url_renders_in_boot_block() {
 }
 
 #[test]
+fn long_dashboard_url_wraps_within_main_panel() {
+    let url = "http://127.0.0.1:54321/?token=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let state = SceneState {
+        model: Some("deepseek-v3.2-coder".to_string()),
+        cwd: Some("~/work/reasonix-core".to_string()),
+        dashboard_url: Some(url.to_string()),
+        ..Default::default()
+    };
+    let rows = draw(&state, 120, 40);
+    let all = joined(&rows);
+    assert!(all.contains("dashboard"), "dashboard label missing");
+    let occurrences = all.matches(url).count();
+    assert!(
+        occurrences >= 2,
+        "expected long URL to wrap across multiple rows (got {occurrences} OSC 8 entries)"
+    );
+    assert!(all.contains("MISSION CONTROL"), "sidebar should still render alongside wrapped URL");
+}
+
+#[test]
 fn dashboard_line_hidden_when_url_absent() {
     let state = SceneState {
         model: Some("deepseek-v3.2-coder".to_string()),

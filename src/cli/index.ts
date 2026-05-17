@@ -155,47 +155,23 @@ program
   .version(VERSION)
   .option("-c, --continue", t("cli.continue"));
 
-// `reasonix` with no subcommand → launch the friendliest flow.
-// First run (no config yet) → interactive setup wizard.
-// Otherwise → chat with saved defaults. This is the "one command to
-// rule them all" entry for non-power-users: they don't need to learn
-// `chat` / `setup` / `--mcp` — just type `reasonix`.
-program.action(async (opts: { continue?: boolean }) => {
-  const cfg = readConfig();
-  const cwd = process.cwd();
-  const mode = resolveBareCommandMode(cwd, cfg);
-  if (mode === "setup") {
-    const { setupCommand } = await import("./commands/setup.js");
-    await setupCommand({ forceKeyStep: true });
-    return;
-  }
-  if (mode === "code") {
+// `reasonix` with no subcommand → setup wizard on first run, otherwise `code`
+// in the current directory. Filesystem-less chat stays reachable via
+// `reasonix chat`.
+program
+  .option("--node", "use the legacy Node/Ink TUI (default is the Rust renderer)")
+  .action(async (opts: { continue?: boolean; node?: boolean }) => {
+    if (opts.node) process.env.REASONIX_RENDERER = "node";
+    const cfg = readConfig();
+    const mode = resolveBareCommandMode(cfg);
+    if (mode === "setup") {
+      const { setupCommand } = await import("./commands/setup.js");
+      await setupCommand({ forceKeyStep: true });
+      return;
+    }
     const { codeCommand } = await import("./commands/code.js");
-    await codeCommand({ dir: cwd });
-    return;
-  }
-  const defaults = resolveDefaults({});
-  const continueOpts = resolveContinueFlag(
-    opts.continue,
-    defaults.session,
-    () => listSessions()[0],
-    (msg) => process.stderr.write(`${msg}\n`),
-  );
-  process.stderr.write(
-    "ℹ chat mode (no filesystem tools). Run `reasonix code` to work on files in this folder.\n",
-  );
-  const { chatCommand } = await import("./commands/chat.js");
-  const defaultBase = defaultSystemPrompt(defaults.model);
-  const defaultRebuildSystem = () => applyMemoryStack(defaultBase, cwd);
-  await chatCommand({
-    model: defaults.model,
-    system: defaultRebuildSystem(),
-    rebuildSystem: defaultRebuildSystem,
-    session: continueOpts.session,
-    mcp: defaults.mcp,
-    forceResume: continueOpts.forceResume,
+    await codeCommand({ dir: process.cwd(), forceResume: !!opts.continue });
   });
-});
 
 program
   .command("setup")
@@ -234,7 +210,9 @@ program
     "--profile [path]",
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
+  .option("--node", "use the legacy Node/Ink TUI (default is the Rust renderer)")
   .action(async (dir: string | undefined, opts) => {
+    if (opts.node) process.env.REASONIX_RENDERER = "node";
     const profiling = await maybeStartCpuProfile(opts.profile);
     try {
       const { codeCommand } = await import("./commands/code.js");
@@ -304,7 +282,9 @@ program
     "--profile [path]",
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
+  .option("--node", "use the legacy Node/Ink TUI (default is the Rust renderer)")
   .action(async (opts) => {
+    if (opts.node) process.env.REASONIX_RENDERER = "node";
     const profiling = await maybeStartCpuProfile(opts.profile);
     try {
       const defaults = resolveDefaults({

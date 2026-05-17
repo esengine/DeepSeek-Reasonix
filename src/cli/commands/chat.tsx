@@ -40,6 +40,7 @@ import { cancelAllListPickers, resolveListPicker } from "../ui/scene/list-picker
 import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import { cancelAllPromptInputs, resolvePromptInput } from "../ui/scene/prompt-input-store.js";
+import { resolveRenderer } from "../ui/scene/renderer-resolver.js";
 import { isIntegratedRendererRequested, setIntegratedEventHandler } from "../ui/scene/trace.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
@@ -52,20 +53,9 @@ import {
 
 export type { McpLifecycleNotice, McpLifecycleSink, McpRuntime, ProgressInfo };
 
-function parseInputCmd(raw: string | undefined): readonly string[] | undefined {
-  if (!raw || raw.length === 0) return undefined;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every((p) => typeof p === "string")) return parsed;
-  } catch {
-    // fall through
-  }
-  return undefined;
-}
-
-// Under REASONIX_RENDERER=rust the alt-screen is owned by the Rust child. Any
-// stderr write from the Node parent overwrites whatever ratatui just drew at
-// the same cells, and stays visible until the next frame redraws — so Node's
+// When the Rust renderer is active the alt-screen is owned by the Rust child.
+// Any stderr write from the Node parent overwrites whatever ratatui just drew
+// at the same cells and stays visible until the next frame redraws — so Node's
 // own warnings (MaxListeners etc.) and any stray library logs all corrupt the
 // view. Redirect stderr to a log file for the duration of the session.
 function redirectStderrToLogFile(): () => void {
@@ -203,7 +193,7 @@ interface RootProps extends ChatOptions {
   };
   /** App fills this ref on mount so QQ errors appear in the TUI log. */
   qqErrorRef: { current: ((msg: string) => void) | null };
-  /** Custom keystroke source — populated when REASONIX_RENDERER=rust so keys flow from the spawned input child (or a no-op reader in integrated mode) instead of process.stdin. */
+  /** Custom keystroke source — populated when the Rust renderer is active so keys flow from the spawned input child (or a no-op reader in integrated mode) instead of process.stdin. */
   keystrokeReader?: KeystrokeReader;
 }
 
@@ -425,26 +415,22 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     }
   }
 
-  const rustRendererRequested = process.env.REASONIX_RENDERER === "rust";
-  // If REASONIX_RENDERER=rust is set but no API key is saved, the first screen
-  // is Setup — which renders to Ink's stdout and reads stdin directly. Under
-  // the Rust path both would be the null streams, leaving the user typing their
-  // key blind. Fall back to the Ink renderer for this launch; the next launch
-  // (with the key saved) gets the Rust path.
-  const rustRendererActive = rustRendererRequested && initialKey !== undefined;
-  if (rustRendererRequested && !rustRendererActive) {
+  let rustRendererActive = process.env.REASONIX_RENDERER !== "node";
+  let resolved = rustRendererActive ? resolveRenderer() : undefined;
+  if (rustRendererActive && (!resolved || resolved.source === null)) {
     process.stderr.write(
-      "REASONIX_RENDERER=rust ignored for this launch: no saved API key. " +
-        "Complete Setup once, then re-launch with the flag.\n",
+      `▲ Rust renderer binary not found — falling back to the Node/Ink TUI.\n  Install @reasonix/render-${process.platform}-${process.arch}, set REASONIX_RENDER_BIN to a built binary, or run from source with cargo on PATH.\n`,
     );
+    process.env.REASONIX_RENDERER = "node";
+    rustRendererActive = false;
+    resolved = undefined;
   }
   const rustIntegrated = rustRendererActive && isIntegratedRendererRequested();
   const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
   const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
-  const inputCmdOverride = parseInputCmd(process.env.REASONIX_INPUT_CMD);
   const rustInputChild: RustKeystrokeReader | undefined =
-    rustRendererActive && !rustIntegrated
-      ? createRustKeystrokeReader(inputCmdOverride ? { command: inputCmdOverride } : {})
+    rustRendererActive && !rustIntegrated && resolved
+      ? createRustKeystrokeReader({ command: resolved.inputCommand })
       : undefined;
   const keystrokeReader: KeystrokeReader | undefined = rustIntegrated
     ? nullKeystrokeReader

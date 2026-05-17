@@ -23,7 +23,7 @@ export const nullKeystrokeReader: KeystrokeReader = {
   },
 };
 
-export function createRustKeystrokeReader(opts: SpawnInputSourceOptions = {}): RustKeystrokeReader {
+export function createRustKeystrokeReader(opts: SpawnInputSourceOptions): RustKeystrokeReader {
   const source = spawnInputSource(opts);
   const handlers = new Set<KeystrokeHandler>();
 

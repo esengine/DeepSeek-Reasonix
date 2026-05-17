@@ -45,10 +45,10 @@ export interface KeystrokeProviderProps {
   /**
    * Optional reader override. Tests inject a synthetic reader so
    * they can `feed()` chunks instead of touching real stdin; the
-   * Rust input adapter (when `REASONIX_RENDERER=rust`) injects one
-   * that receives events from a spawned `reasonix-render --emit-input`
-   * child. Production stdin callers leave this unset and get the
-   * singleton.
+   * Rust input adapter (active by default; off under `--node` /
+   * `REASONIX_RENDERER=node`) injects one that receives events from
+   * a spawned `reasonix-render --emit-input` child. Production stdin
+   * callers leave this unset and get the singleton.
    */
   reader?: KeystrokeReader;
 }
