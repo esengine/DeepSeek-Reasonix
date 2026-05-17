@@ -319,8 +319,37 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
   }
 }
 
+/** Tool outputs older than this many cards get stubbed so a 7-hour session doesn't drag GBs of one-off file reads / search results / screenshots through the heap (issue #1031). */
+const RECENT_CARDS_WINDOW = 200;
+/** Don't bother eliding tiny outputs — the stub is itself ~150 chars and the savings aren't worth the lost context. */
+const MIN_ELIDE_OUTPUT_LENGTH = 4096;
+/** Marker for already-elided outputs so we don't re-stub on every subsequent append. */
+const ELIDED_TOOL_OUTPUT_PREFIX = "[elided — older than the last ";
+
+function elideOldToolOutputs(cards: ReadonlyArray<Card>): ReadonlyArray<Card> {
+  // Caller is about to append a new card. Anticipate that — so once
+  // cards.length hits the window, the very next append starts eliding.
+  if (cards.length < RECENT_CARDS_WINDOW) return cards;
+  const cutoff = cards.length + 1 - RECENT_CARDS_WINDOW;
+  let next: Card[] | null = null;
+  for (let i = 0; i < cutoff; i++) {
+    const c = cards[i]!;
+    if (c.kind !== "tool") continue;
+    const out = (c as ToolCard).output;
+    if (typeof out !== "string") continue;
+    if (out.length <= MIN_ELIDE_OUTPUT_LENGTH) continue;
+    if (out.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) continue;
+    if (next === null) next = cards.slice();
+    next[i] = {
+      ...(c as ToolCard),
+      output: `${ELIDED_TOOL_OUTPUT_PREFIX}${RECENT_CARDS_WINDOW} cards; ${out.length.toLocaleString()} chars dropped to save memory. Full output is on disk in the session log.]`,
+    };
+  }
+  return next ?? cards;
+}
+
 function appendCard(state: AgentState, card: Card): AgentState {
-  return { ...state, cards: [...state.cards, card] };
+  return { ...state, cards: [...elideOldToolOutputs(state.cards), card] };
 }
 
 function mutateCard<K extends Card["kind"]>(
