@@ -269,14 +269,26 @@ const INVOKE_END = `</${DSML}invoke>`;
 const PARAM_TEMPLATE = `<${DSML}parameter name="{key}" string="{is_str}">{value}</${DSML}parameter>`;
 const TOOL_RESULT_TEMPLATE = "<tool_result>{content}</tool_result>";
 
+/** Tools template cache.  toolSpecs arrays are reference-stable across turns
+ *  (ImmutablePrefix._toolSpecs), so a WeakMap keyed on the array pointer
+ *  avoids re-JSONifying 20-40 schema objects and re-allocating the ~1.5 KB
+ *  template string on every `decidePreflight` call. */
+const toolsTemplateCache = new WeakMap<ReadonlyArray<unknown>, string>();
+
 function renderTools(tools: ReadonlyArray<unknown>): string {
+  const cached = toolsTemplateCache.get(tools);
+  if (cached !== undefined) return cached;
+
   const schemas = tools
     .map((t) => {
       const fn = (t as { function?: unknown }).function ?? t;
       return JSON.stringify(fn);
     })
     .join("\n");
-  return `## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<${DSML}tool_calls>" block like the following:\n\n<${DSML}tool_calls>\n<${DSML}invoke name="$TOOL_NAME">\n<${DSML}parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</${DSML}parameter>\n...\n</${DSML}invoke>\n<${DSML}invoke name="$TOOL_NAME2">\n...\n</${DSML}invoke>\n</${DSML}tool_calls>\n\nString parameters should be specified as is and set \`string="true"\`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set \`string="false"\`.\n\nIf thinking_mode is enabled (triggered by ${THINK_START}), you MUST output your complete reasoning inside ${THINK_START}...${THINK_END} BEFORE any tool calls or final response.\n\nOtherwise, output directly after ${THINK_END} with tool calls or final response.\n\n### Available Tool Schemas\n\n${schemas}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.`;
+  const rendered = `## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<${DSML}tool_calls>" block like the following:\n\n<${DSML}tool_calls>\n<${DSML}invoke name="$TOOL_NAME">\n<${DSML}parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</${DSML}parameter>\n...\n</${DSML}invoke>\n<${DSML}invoke name="$TOOL_NAME2">\n...\n</${DSML}invoke>\n</${DSML}tool_calls>\n\nString parameters should be specified as is and set \`string="true"\`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set \`string="false"\`.\n\nIf thinking_mode is enabled (triggered by ${THINK_START}), you MUST output your complete reasoning inside ${THINK_START}...${THINK_END} BEFORE any tool calls or final response.\n\nOtherwise, output directly after ${THINK_END} with tool calls or final response.\n\n### Available Tool Schemas\n\n${schemas}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.`;
+
+  toolsTemplateCache.set(tools, rendered);
+  return rendered;
 }
 
 interface ToolCall {
