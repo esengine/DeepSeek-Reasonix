@@ -6,7 +6,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::state::{SceneState, SlashMatch};
 
 use super::paint::{paint, paint_str};
-use super::theme::{BG, DS, DS_BRIGHT, FG, FG2};
+use super::theme::{BG, DS, DS_BRIGHT, FG, FG2, FG3};
 
 const FALLBACK_COMMANDS: &[(&str, &str)] = &[
     ("/clear", "reset conversation context"),
@@ -95,6 +95,7 @@ pub fn render_slash_overlay(
     }
     let all_rows: Vec<SlashRow> = collect_rows(text, state);
     if all_rows.is_empty() {
+        render_no_match(buf, dock_area, text);
         return;
     }
     let total = all_rows.len();
@@ -273,11 +274,12 @@ fn description_with_aliases(row: &SlashRow) -> String {
 }
 
 fn row_visual_height(row: &SlashRow, layout: &ColumnLayout, selected: bool) -> usize {
+    let header = if row.header_above { 1 } else { 0 };
     if !selected {
-        return 1;
+        return header + 1;
     }
     let desc = description_with_aliases(row);
-    wrap_desc(&desc, layout.desc_w as usize).len().max(1)
+    header + wrap_desc(&desc, layout.desc_w as usize).len().max(1)
 }
 
 fn wrap_desc(text: &str, width: usize) -> Vec<String> {
@@ -327,12 +329,18 @@ struct SlashRow {
     desc: String,
     args_hint: Option<String>,
     aliases: Vec<String>,
+    group: Option<String>,
+    /// Render a group header row just above this command. Set true for
+    /// the first row of each group when the user is browsing the bare
+    /// `/` menu (group mode); always false in search mode.
+    header_above: bool,
 }
 
 fn collect_rows(query: &str, state: &SceneState) -> Vec<SlashRow> {
     let needle = query.trim_start_matches('/').to_lowercase();
-    if let Some(catalog) = state.slash_catalog.as_ref() {
-        return catalog
+    let group_mode = needle.is_empty();
+    let raw: Vec<SlashRow> = if let Some(catalog) = state.slash_catalog.as_ref() {
+        catalog
             .iter()
             .filter(|m| matches_query(&m.cmd, &needle))
             .map(|m: &SlashMatch| SlashRow {
@@ -340,19 +348,77 @@ fn collect_rows(query: &str, state: &SceneState) -> Vec<SlashRow> {
                 desc: m.summary.clone(),
                 args_hint: m.args_hint.clone(),
                 aliases: m.aliases.clone(),
+                group: m.group.clone(),
+                header_above: false,
             })
-            .collect();
+            .collect()
+    } else {
+        FALLBACK_COMMANDS
+            .iter()
+            .filter(|(name, _)| matches_query(name.trim_start_matches('/'), &needle))
+            .map(|(name, desc)| SlashRow {
+                name: (*name).to_string(),
+                desc: (*desc).to_string(),
+                args_hint: None,
+                aliases: Vec::new(),
+                group: None,
+                header_above: false,
+            })
+            .collect()
+    };
+    if !group_mode {
+        return raw;
     }
-    FALLBACK_COMMANDS
-        .iter()
-        .filter(|(name, _)| matches_query(name.trim_start_matches('/'), &needle))
-        .map(|(name, desc)| SlashRow {
-            name: (*name).to_string(),
-            desc: (*desc).to_string(),
-            args_hint: None,
-            aliases: Vec::new(),
-        })
-        .collect()
+    let mut out = raw;
+    let mut prev_group: Option<&str> = None;
+    for row in out.iter_mut() {
+        let g = row.group.as_deref();
+        if g != prev_group {
+            row.header_above = true;
+            prev_group = g;
+        }
+    }
+    out
+}
+
+fn render_no_match(buf: &mut Buffer, dock_area: Rect, query: &str) {
+    let popup_w = dock_area.width.saturating_sub(4).min(80);
+    if popup_w < 30 {
+        return;
+    }
+    let popup_h: u16 = 3;
+    if popup_h > dock_area.y {
+        return;
+    }
+    let popup_x = dock_area.x + 2;
+    let popup_y = dock_area.y - popup_h;
+    let popup = Rect::new(popup_x, popup_y, popup_w, popup_h);
+    draw_box(buf, popup);
+    let msg = format!("no command matches '{query}'");
+    paint_str(buf, popup.x + 2, popup.y + 1, "▲", FG2, BG, Modifier::BOLD);
+    paint_str(
+        buf,
+        popup.x + 4,
+        popup.y + 1,
+        &msg,
+        FG2,
+        BG,
+        Modifier::empty(),
+    );
+}
+
+fn group_label(group: &str) -> &'static str {
+    match group {
+        "setup" => "SETUP",
+        "info" => "INFO",
+        "chat" => "CHAT",
+        "extend" => "EXTEND",
+        "session" => "SESSION",
+        "code" => "CODE",
+        "jobs" => "JOBS",
+        "advanced" => "ADVANCED",
+        _ => "OTHER",
+    }
 }
 
 fn draw_box(buf: &mut Buffer, area: Rect) {
@@ -429,6 +495,18 @@ fn draw_rows_wrapped(
     for (i, row_data) in rows_data.iter().enumerate() {
         if row >= bottom {
             break;
+        }
+        if row_data.header_above {
+            let label = row_data
+                .group
+                .as_deref()
+                .map(group_label)
+                .unwrap_or("OTHER");
+            paint_str(buf, area.x + 2, row, label, FG3, BG, Modifier::BOLD);
+            row += 1;
+            if row >= bottom {
+                break;
+            }
         }
         let selected = i == selected_idx;
 

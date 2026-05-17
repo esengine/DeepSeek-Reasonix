@@ -35,8 +35,10 @@ pub fn demo_state() -> SceneState {
             .map(|(cmd, summary)| SlashMatch {
                 cmd: (*cmd).to_string(),
                 summary: (*summary).to_string(),
+                group: Some("chat".to_string()),
                 args_hint: None,
                 aliases: Vec::new(),
+                arg_completer: None,
             })
             .collect(),
         ),

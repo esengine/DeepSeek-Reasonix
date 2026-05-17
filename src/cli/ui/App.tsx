@@ -1381,12 +1381,20 @@ function AppInner({
   const slashCatalogJson = useMemo(() => {
     const all = suggestSlashCommands("", !!codeMode);
     return JSON.stringify(
-      all.map((m) => ({
-        cmd: m.cmd,
-        summary: m.summary,
-        ...(m.argsHint !== undefined ? { argsHint: m.argsHint } : {}),
-        ...(m.aliases && m.aliases.length > 0 ? { aliases: m.aliases } : {}),
-      })),
+      all.map((m) => {
+        const i18nKey = `slash.${m.cmd}.description`;
+        const translated = t(i18nKey);
+        const summary = translated === i18nKey ? m.summary : translated;
+        const argCompleter = Array.isArray(m.argCompleter) ? [...m.argCompleter] : undefined;
+        return {
+          cmd: m.cmd,
+          summary,
+          group: m.group,
+          ...(m.argsHint !== undefined ? { argsHint: m.argsHint } : {}),
+          ...(m.aliases && m.aliases.length > 0 ? { aliases: [...m.aliases] } : {}),
+          ...(argCompleter ? { argCompleter } : {}),
+        };
+      }),
     );
   }, [codeMode]);
 

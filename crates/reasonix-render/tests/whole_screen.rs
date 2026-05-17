@@ -295,8 +295,10 @@ fn catalog_state() -> reasonix_render::state::SceneState {
                 .map(|cmd| SlashMatch {
                     cmd: (*cmd).to_string(),
                     summary: String::new(),
+                    group: None,
                     args_hint: None,
                     aliases: Vec::new(),
+                    arg_completer: None,
                 })
                 .collect(),
         ),

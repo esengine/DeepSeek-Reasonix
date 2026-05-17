@@ -182,10 +182,14 @@ pub struct SlashMatch {
     pub cmd: String,
     #[serde(default)]
     pub summary: String,
+    #[serde(default)]
+    pub group: Option<String>,
     #[serde(default, rename = "argsHint")]
     pub args_hint: Option<String>,
     #[serde(default)]
     pub aliases: Vec<String>,
+    #[serde(default, rename = "argCompleter")]
+    pub arg_completer: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
