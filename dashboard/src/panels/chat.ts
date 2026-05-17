@@ -109,7 +109,6 @@ export function ChatPanel() {
   const [streaming, setStreaming] = useState<StreamingState | null>(null);
   const [activeTool, setActiveTool] = useState<ActiveToolState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [statusLine, setStatusLine] = useState<string | null>(null);
@@ -123,9 +122,6 @@ export function ChatPanel() {
   const [activePlan, setActivePlan] = useState<RailPlan | null>(null);
   const [semanticIndex, setSemanticIndex] = useState<boolean | null>(null);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
-  const [popoverKind, setPopoverKind] = useState<PopoverKind>(null);
-  const [popoverItems, setPopoverItems] = useState<PopoverItem[]>([]);
-  const [popoverSel, setPopoverSel] = useState(0);
   const [semanticBannerDismissed, setSemanticBannerDismissed] = useState<boolean>(() => {
     try {
       return localStorage.getItem("rx.semanticBannerDismissed") === "1";
@@ -334,24 +330,32 @@ export function ChatPanel() {
     };
   }, [refetchCanonicalState, cancelStreamingRaf]);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
-    if (!text || busy) return;
-    setError(null);
-    try {
-      const res = await api<{ accepted: boolean; reason?: string }>("/submit", {
-        method: "POST",
-        body: { prompt: text },
-      });
-      if (!res.accepted) {
-        setError(res.reason ?? "rejected");
-        return;
+  // Stable callbacks so the memo'd <ChatInput/> doesn't re-render on every
+  // unrelated parent state change. Live values (busy, messages.length) flow
+  // through refs instead of dep arrays.
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  const onSubmit = useCallback(
+    async (text: string): Promise<{ accepted: boolean; reason?: string }> => {
+      setError(null);
+      try {
+        const res = await api<{ accepted: boolean; reason?: string }>("/submit", {
+          method: "POST",
+          body: { prompt: text },
+        });
+        if (!res.accepted) setError(res.reason ?? "rejected");
+        return res;
+      } catch (err) {
+        const msg = (err as Error).message;
+        setError(msg);
+        return { accepted: false, reason: msg };
       }
-      setInput("");
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [input, busy]);
+    },
+    [],
+  );
 
   const abort = useCallback(async () => {
     try {
@@ -362,9 +366,9 @@ export function ChatPanel() {
   }, []);
 
   const newConversation = useCallback(async () => {
-    if (busy) {
+    if (busyRef.current) {
       if (!confirm(t("chat.newConfirmBusy"))) return;
-    } else if (messages.length > 0 && !confirm(t("chat.newConfirm"))) {
+    } else if (messagesRef.current.length > 0 && !confirm(t("chat.newConfirm"))) {
       return;
     }
     try {
@@ -384,7 +388,7 @@ export function ChatPanel() {
     } catch (err) {
       setError(t("chat.newFailed", { error: (err as Error).message }));
     }
-  }, [busy, messages.length]);
+  }, []);
 
   const clearScrollback = useCallback(async () => {
     try {
@@ -405,107 +409,6 @@ export function ChatPanel() {
       setError(t("chat.clearFailed", { error: (err as Error).message }));
     }
   }, []);
-
-  const updatePopover = useCallback(
-    async (text: string) => {
-      const slashMatch = /^\/([A-Za-z0-9_-]*)$/.exec(text);
-      if (slashMatch) {
-        const prefix = slashMatch[1]!.toLowerCase();
-        const items: PopoverItem[] = slashCommands
-          .filter((c) => c.cmd.startsWith(prefix))
-          .slice(0, 12)
-          .map((c) => ({
-            label: `/${c.cmd}`,
-            meta: c.summary,
-            insert: `/${c.cmd}${c.argsHint ? " " : ""}`,
-          }));
-        setPopoverKind("slash");
-        setPopoverItems(items);
-        setPopoverSel(0);
-        return;
-      }
-      const mentionMatch = /(?:^|\s)@([^\s@]*)$/.exec(text);
-      if (mentionMatch && MODE === "attached") {
-        const prefix = mentionMatch[1] ?? "";
-        try {
-          const r = await api<{ files: string[] }>("/files", {
-            method: "POST",
-            body: { prefix },
-          });
-          const items: PopoverItem[] = r.files.slice(0, 12).map((f) => ({
-            label: f,
-            insert: `@${f} `,
-          }));
-          setPopoverKind("mention");
-          setPopoverItems(items);
-          setPopoverSel(0);
-        } catch {
-          setPopoverKind(null);
-        }
-        return;
-      }
-      setPopoverKind(null);
-    },
-    [slashCommands],
-  );
-
-  const applyPopover = useCallback(() => {
-    const item = popoverItems[popoverSel];
-    if (!item) return false;
-    if (popoverKind === "slash") {
-      setInput(item.insert);
-    } else if (popoverKind === "mention") {
-      const m = /(?:^|\s)@([^\s@]*)$/.exec(input);
-      if (!m) return false;
-      const start = input.length - m[0].length + (m[0].startsWith(" ") ? 1 : 0);
-      setInput(`${input.slice(0, start)}${item.insert}`);
-    }
-    setPopoverKind(null);
-    return true;
-  }, [popoverItems, popoverSel, popoverKind, input]);
-
-  const onInput = useCallback(
-    (e: Event) => {
-      const v = (e.target as HTMLTextAreaElement).value;
-      setInput(v);
-      updatePopover(v);
-    },
-    [updatePopover],
-  );
-
-  const onKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (popoverKind && popoverItems.length > 0) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setPopoverSel((i) => (i + 1) % popoverItems.length);
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setPopoverSel((i) => (i - 1 + popoverItems.length) % popoverItems.length);
-          return;
-        }
-        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-          e.preventDefault();
-          if (applyPopover() && e.key === "Enter" && popoverKind === "slash") {
-            send();
-          }
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setPopoverKind(null);
-          return;
-        }
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        send();
-      }
-    },
-    [send, popoverKind, popoverItems, applyPopover],
-  );
 
   if (bootError) {
     return html`<div class="notice err">${t("common.loadingFailed", { name: "chat", error: bootError })}</div>`;
@@ -747,53 +650,13 @@ export function ChatPanel() {
         <div class="chat-main">
           <${ChatFeed} messages=${messages} streaming=${streaming} innerRef=${feedRef} />
 
-          <div class="chat-input-area" style="position:relative">
-            ${
-              popoverKind && popoverItems.length > 0
-                ? html`
-                  <div class="popover" style="position:absolute;bottom:calc(100% + 6px);left:0;width:380px;max-height:280px;overflow-y:auto;z-index:10">
-                    <div class="popover-h">${popoverKind === "slash" ? t("chat.slashCommands") : t("chat.projectFiles")}</div>
-                    ${popoverItems.map(
-                      (it, i) => html`
-                        <div
-                          class=${`popover-row ${i === popoverSel ? "sel" : ""}`}
-                          onMouseDown=${(e: Event) => {
-                            e.preventDefault();
-                            setPopoverSel(i);
-                            applyPopover();
-                          }}
-                        >
-                          <span class="g">${popoverKind === "slash" ? "/" : "@"}</span>
-                          <span class="name">${it.label}</span>
-                          ${it.meta ? html`<span class="meta">${it.meta}</span>` : null}
-                        </div>
-                      `,
-                    )}
-                  </div>
-                `
-                : null
-            }
-            <textarea
-              placeholder=${busy ? t("chat.placeholderBusy") : t("chat.placeholder")}
-              value=${input}
-              onInput=${onInput}
-              onKeyDown=${onKeyDown}
-              onBlur=${() => setTimeout(() => setPopoverKind(null), 150)}
-              disabled=${busy}
-              rows="2"
-            ></textarea>
-            <div style="display: flex; flex-direction: column; gap: 6px; align-self: stretch; justify-content: flex-end;">
-              <button
-                class="primary"
-                onClick=${send}
-                disabled=${busy || !input.trim()}
-              >${t("chat.send")}</button>
-              <div style="display: flex; gap: 6px;">
-                <button onClick=${newConversation} title=${t("chat.newTitle")}>${t("chat.new")}</button>
-                <button onClick=${clearScrollback} title=${t("chat.clearTitle")}>${t("chat.clear")}</button>
-              </div>
-            </div>
-          </div>
+          <${ChatInput}
+            busy=${busy}
+            slashCommands=${slashCommands}
+            onSubmit=${onSubmit}
+            onNew=${newConversation}
+            onClear=${clearScrollback}
+          />
 
           ${
             busy
@@ -815,6 +678,207 @@ export function ChatPanel() {
     </div>
   `;
 }
+
+interface ChatInputProps {
+  busy: boolean;
+  slashCommands: SlashCommand[];
+  onSubmit: (text: string) => Promise<{ accepted: boolean; reason?: string }>;
+  onNew: () => void;
+  onClear: () => void;
+}
+
+/** Owns its own input + popover state so keystrokes never re-render the parent (status bar, rail, mode pickers, chat feed). Memo'd against stable parent callbacks. Fixes #1031 — Chinese / Japanese IME typing felt laggy because every input event triggered a full ChatPanel re-render plus a popover-update walk over long transcripts. */
+const ChatInput = memo(function ChatInput({
+  busy,
+  slashCommands,
+  onSubmit,
+  onNew,
+  onClear,
+}: ChatInputProps) {
+  useLang();
+  const [input, setInput] = useState("");
+  const [popoverKind, setPopoverKind] = useState<PopoverKind>(null);
+  const [popoverItems, setPopoverItems] = useState<PopoverItem[]>([]);
+  const [popoverSel, setPopoverSel] = useState(0);
+  /** Suppress popover work and Enter-submission while an IME is mid-composition — input events fire for every intermediate code point on Chinese / Japanese / Korean typing and the regex / async fetch on each one is what made the textarea lag. */
+  const composing = useRef(false);
+
+  const updatePopover = useCallback(
+    async (text: string) => {
+      const slashMatch = /^\/([A-Za-z0-9_-]*)$/.exec(text);
+      if (slashMatch) {
+        const prefix = slashMatch[1]!.toLowerCase();
+        const items: PopoverItem[] = slashCommands
+          .filter((c) => c.cmd.startsWith(prefix))
+          .slice(0, 12)
+          .map((c) => ({
+            label: `/${c.cmd}`,
+            meta: c.summary,
+            insert: `/${c.cmd}${c.argsHint ? " " : ""}`,
+          }));
+        setPopoverKind("slash");
+        setPopoverItems(items);
+        setPopoverSel(0);
+        return;
+      }
+      const mentionMatch = /(?:^|\s)@([^\s@]*)$/.exec(text);
+      if (mentionMatch && MODE === "attached") {
+        const prefix = mentionMatch[1] ?? "";
+        try {
+          const r = await api<{ files: string[] }>("/files", {
+            method: "POST",
+            body: { prefix },
+          });
+          const items: PopoverItem[] = r.files.slice(0, 12).map((f) => ({
+            label: f,
+            insert: `@${f} `,
+          }));
+          setPopoverKind("mention");
+          setPopoverItems(items);
+          setPopoverSel(0);
+        } catch {
+          setPopoverKind(null);
+        }
+        return;
+      }
+      setPopoverKind(null);
+    },
+    [slashCommands],
+  );
+
+  const applyPopover = useCallback(() => {
+    const item = popoverItems[popoverSel];
+    if (!item) return false;
+    if (popoverKind === "slash") {
+      setInput(item.insert);
+    } else if (popoverKind === "mention") {
+      const m = /(?:^|\s)@([^\s@]*)$/.exec(input);
+      if (!m) return false;
+      const start = input.length - m[0].length + (m[0].startsWith(" ") ? 1 : 0);
+      setInput(`${input.slice(0, start)}${item.insert}`);
+    }
+    setPopoverKind(null);
+    return true;
+  }, [popoverItems, popoverSel, popoverKind, input]);
+
+  const send = useCallback(async () => {
+    const text = input.trim();
+    if (!text || busy) return;
+    const res = await onSubmit(text);
+    if (res.accepted) setInput("");
+  }, [input, busy, onSubmit]);
+
+  const onInput = useCallback(
+    (e: Event) => {
+      const v = (e.target as HTMLTextAreaElement).value;
+      setInput(v);
+      if (composing.current) return;
+      void updatePopover(v);
+    },
+    [updatePopover],
+  );
+
+  const onKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      // Don't intercept Enter while an IME is mid-composition — both Chrome
+      // and Firefox fire keyDown for the IME's "commit" Enter and short-
+      // circuiting it would swallow the chosen candidate.
+      if (composing.current) return;
+      if (popoverKind && popoverItems.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setPopoverSel((i) => (i + 1) % popoverItems.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setPopoverSel((i) => (i - 1 + popoverItems.length) % popoverItems.length);
+          return;
+        }
+        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+          e.preventDefault();
+          if (applyPopover() && e.key === "Enter" && popoverKind === "slash") {
+            send();
+          }
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setPopoverKind(null);
+          return;
+        }
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    },
+    [send, popoverKind, popoverItems, applyPopover],
+  );
+
+  const onCompositionStart = useCallback(() => {
+    composing.current = true;
+  }, []);
+  const onCompositionEnd = useCallback(
+    (e: CompositionEvent) => {
+      composing.current = false;
+      void updatePopover((e.target as HTMLTextAreaElement).value);
+    },
+    [updatePopover],
+  );
+
+  return html`
+    <div class="chat-input-area" style="position:relative">
+      ${
+        popoverKind && popoverItems.length > 0
+          ? html`
+            <div class="popover" style="position:absolute;bottom:calc(100% + 6px);left:0;width:380px;max-height:280px;overflow-y:auto;z-index:10">
+              <div class="popover-h">${popoverKind === "slash" ? t("chat.slashCommands") : t("chat.projectFiles")}</div>
+              ${popoverItems.map(
+                (it, i) => html`
+                  <div
+                    class=${`popover-row ${i === popoverSel ? "sel" : ""}`}
+                    onMouseDown=${(e: Event) => {
+                      e.preventDefault();
+                      setPopoverSel(i);
+                      applyPopover();
+                    }}
+                  >
+                    <span class="g">${popoverKind === "slash" ? "/" : "@"}</span>
+                    <span class="name">${it.label}</span>
+                    ${it.meta ? html`<span class="meta">${it.meta}</span>` : null}
+                  </div>
+                `,
+              )}
+            </div>
+          `
+          : null
+      }
+      <textarea
+        placeholder=${busy ? t("chat.placeholderBusy") : t("chat.placeholder")}
+        value=${input}
+        onInput=${onInput}
+        onKeyDown=${onKeyDown}
+        onCompositionStart=${onCompositionStart}
+        onCompositionEnd=${onCompositionEnd}
+        onBlur=${() => setTimeout(() => setPopoverKind(null), 150)}
+        disabled=${busy}
+        rows="2"
+      ></textarea>
+      <div style="display: flex; flex-direction: column; gap: 6px; align-self: stretch; justify-content: flex-end;">
+        <button
+          class="primary"
+          onClick=${send}
+          disabled=${busy || !input.trim()}
+        >${t("chat.send")}</button>
+        <div style="display: flex; gap: 6px;">
+          <button onClick=${onNew} title=${t("chat.newTitle")}>${t("chat.new")}</button>
+          <button onClick=${onClear} title=${t("chat.clearTitle")}>${t("chat.clear")}</button>
+        </div>
+      </div>
+    </div>
+  `;
+});
 
 interface ChatFeedProps {
   messages: ChatMsg[];
