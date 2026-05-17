@@ -95,6 +95,18 @@ function slashIcon(cmd: string) {
   return m[cmd] || <I.slash size={12} />;
 }
 
+/** Parent dir of the current @ query, with trailing slash. `null` = no parent to show (at workspace root). */
+function parentOfAtQuery(query: string): string | null {
+  const normalized = query.replace(/\\/g, "/");
+  const trailingSlash = normalized.endsWith("/");
+  const lastSlash = normalized.lastIndexOf("/");
+  if (lastSlash < 0) return null;
+  const dirContext = trailingSlash ? normalized.slice(0, -1) : normalized.slice(0, lastSlash);
+  if (!dirContext) return null;
+  const parentIdx = dirContext.lastIndexOf("/");
+  return parentIdx >= 0 ? `${dirContext.slice(0, parentIdx)}/` : "";
+}
+
 function atIcon(k: MentionItem["kind"]) {
   if (k === "file") return <I.file size={12} />;
   if (k === "dir") return <I.folder size={12} />;
@@ -218,11 +230,21 @@ export function Composer({
   const atItems = useMemo<MentionItem[]>(() => {
     if (!popup || popup.kind !== "at") return [];
     if (!mentionResults || mentionResults.nonce !== popup.nonce) return [];
-    return mentionResults.results.map((path) => ({
+    const base: MentionItem[] = mentionResults.results.map((path) => ({
       name: path,
       kind: path.endsWith("/") || path.endsWith("\\") ? "dir" : "file",
       desc: path,
     }));
+    // "../" entry (#1019): one level up whenever the @ query is inside a subdir.
+    const parent = parentOfAtQuery(popup.query);
+    if (parent !== null) {
+      base.unshift({
+        name: "..",
+        kind: "dir",
+        desc: parent ? `↑ ${parent}` : "↑ workspace root",
+      });
+    }
+    return base;
   }, [popup, mentionResults]);
 
   const items = popup?.kind === "slash" ? slashItems : popup?.kind === "at" ? atItems : [];
@@ -267,6 +289,15 @@ export function Composer({
       (it as SlashCmd).run();
     } else {
       const mention = it as MentionItem;
+      if (mention.name === "..") {
+        const parent = parentOfAtQuery(popup.query) ?? "";
+        const next = draft.replace(/[@][^\s]*$/, `@${parent}`);
+        setDraft(next);
+        const nonce = ++nonceRef.current;
+        setPopup({ kind: "at", query: parent, nonce });
+        textareaRef.current?.focus();
+        return;
+      }
       const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
       setDraft(next ? `${next} @${mention.name} ` : `@${mention.name} `);
       setChips((c) => [...c, { kind: "at", label: mention.name }]);
@@ -296,10 +327,21 @@ export function Composer({
       if (e.key === "Tab" && popup.kind === "at" && items.length > 0) {
         // Tab on a directory enters it — replaces `@src` with `@src/`
         // and re-queries so the popup shows that directory's children.
+        // `..` is the synthetic parent-dir entry (#1019); same shape
+        // but rewrites to the parent path.
         const it = items[activeIdx];
         if (it && (it as MentionItem).kind === "dir") {
           e.preventDefault();
-          const dirPath = (it as MentionItem).name.replace(/\/+$/, "");
+          const mention = it as MentionItem;
+          if (mention.name === "..") {
+            const parent = parentOfAtQuery(popup.query) ?? "";
+            const next = draft.replace(/[@][^\s]*$/, `@${parent}`);
+            setDraft(next);
+            const nonce = ++nonceRef.current;
+            setPopup({ kind: "at", query: parent, nonce });
+            return;
+          }
+          const dirPath = mention.name.replace(/\/+$/, "");
           const next = draft.replace(/[@][^\s]*$/, `@${dirPath}/`);
           setDraft(next);
           const nonce = ++nonceRef.current;

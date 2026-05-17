@@ -41,6 +41,8 @@ export interface AtPickerEntry {
   /** Dim suffix shown after the label ("src/auth/" for "src/auth/login.ts" search hits). Empty in browse mode. */
   dirSuffix: string;
   isDir: boolean;
+  /** Synthetic parent-nav entry (#1019) — always drills regardless of pick action so Enter doesn't commit "@<parent> " as a literal mention. */
+  synthetic?: "parent";
 }
 
 export type AtPickerState =
@@ -154,10 +156,13 @@ export function useCompletionPickers({
   const atState = useMemo<AtPickerState | null>(() => {
     if (!parsed) return null;
     if (atMode === "browse") {
+      const entries = browseDir
+        ? ([parentBrowseEntry(browseDir), ...browse.entries] as readonly AtPickerEntry[])
+        : browse.entries;
       return {
         kind: "browse",
         baseDir: browseDir,
-        entries: browse.entries,
+        entries,
         loading: browse.loading,
       };
     }
@@ -183,8 +188,8 @@ export function useCompletionPickers({
     (entry: AtPickerEntry, action: "commit" | "drill") => {
       if (!atPicker) return;
       const before = input.slice(0, atPicker.atOffset);
-      const tail =
-        action === "drill" && entry.isDir ? `${entry.insertPath}/` : `${entry.insertPath} `;
+      const shouldDrill = entry.synthetic === "parent" || (action === "drill" && entry.isDir);
+      const tail = shouldDrill ? `${entry.insertPath}/` : `${entry.insertPath} `;
       setInput(`${before}@${tail}`);
     },
     [atPicker, input, setInput],
@@ -451,6 +456,19 @@ function useBrowseListing(rootDir: string, dir: string | null) {
 
 function toBrowseEntry(d: DirEntry): AtPickerEntry {
   return { label: d.name, insertPath: d.path, dirSuffix: "", isDir: d.isDir };
+}
+
+/** Synthetic "go to parent" entry for browse mode (#1019). insertPath = "" routes drill back to the workspace root. */
+function parentBrowseEntry(currentDir: string): AtPickerEntry {
+  const idx = currentDir.lastIndexOf("/");
+  const parentDir = idx >= 0 ? currentDir.slice(0, idx) : "";
+  return {
+    label: "..",
+    insertPath: parentDir,
+    dirSuffix: parentDir ? `↑ ${parentDir}/` : "↑ /",
+    isDir: true,
+    synthetic: "parent",
+  };
 }
 
 function useStreamingSearch(
