@@ -28,6 +28,7 @@ pub use overlay::{
 pub use overlay_at::{at_completion, at_match_count};
 pub use paint::{paint, paint_str};
 pub use selection::{cards_layout, extract_text, CardsLayout, ScrollbarGeom, Selection};
+pub use self::composer_cursor_position;
 
 use approval::render_approval;
 use boot::render_scroll;
@@ -198,6 +199,38 @@ fn render_main(buf: &mut Buffer, area: Rect, state: &SceneState, scroll_offset: 
     render_scroll(buf, scroll, state, scroll_offset, tick);
     render_dock(buf, dock, state, tick);
 }
+
+
+/// Compute the terminal cursor screen position for the composer input box.
+/// Returns `(column, row)` suitable for `frame.set_cursor()`.
+/// Returns `None` when there is no composer text or no cursor position.
+pub fn composer_cursor_position(state: &SceneState, area: Rect) -> Option<(u16, u16)> {
+    let text = state.composer_text.as_deref()?;
+    let cursor = state.composer_cursor?;
+    let dock_h = dock_height_for(state).min(area.height);
+    if dock_h < 3 {
+        return None;
+    }
+    let scroll_h = area.height.saturating_sub(dock_h);
+    let dock_area = Rect::new(area.x, area.y + scroll_h, area.width, dock_h);
+    let w = dock_area.width;
+    let right = dock_area.x + w - 1;
+    let text_start = dock_area.x + 4; // col_start(area.x+2) + 2 for "❯ "
+    let inner_w = (right.saturating_sub(text_start + 1)).max(1) as usize;
+    let content_rows = dock_area.height.saturating_sub(2).max(1);
+
+    let (visual_lines, cursor_visual_row, cursor_visual_col) =
+        build_composer_visual_lines(text, cursor, inner_w);
+
+    let scroll_off = (cursor_visual_row + 1).saturating_sub(content_rows as usize);
+    let screen_row = dock_area.y + 1 + (cursor_visual_row.saturating_sub(scroll_off)) as u16;
+    let line = visual_lines.get(cursor_visual_row)?;
+    let before: String = line.chars().take(cursor_visual_col).collect();
+    let col = text_start + unicode_width::UnicodeWidthStr::width(&before) as u16;
+
+    Some((col, screen_row))
+}
+
 
 pub(super) fn dock_height_for(state: &SceneState) -> u16 {
     let text = state.composer_text.as_deref().unwrap_or("");
