@@ -10,6 +10,8 @@ export interface SlashResult {
   info?: string;
   /** Open the SessionPicker modal mid-chat — used by `/sessions` slash. */
   openSessionsPicker?: boolean;
+  /** Open the WorkspacePicker modal mid-chat — bare `/cwd` in code mode. */
+  openWorkspacePicker?: boolean;
   /** Open the CheckpointPicker modal — bare `/restore` (no name argument). */
   openCheckpointPicker?: boolean;
   /** Open the ModelPicker modal — bare `/model` (no id) opens it. */

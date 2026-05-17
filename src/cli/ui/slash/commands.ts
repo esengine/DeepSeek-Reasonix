@@ -285,7 +285,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "cwd",
     group: "code",
-    argsHint: "<path>",
+    argsHint: "[path]",
     summary:
       "switch the workspace root mid-session — re-points fs / shell / memory tools, reloads project hooks, refreshes the at-mention walker",
     contextual: "code",

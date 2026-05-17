@@ -320,7 +320,7 @@ export const zhCN: TranslationSchema = {
     cwd: {
       description:
         "切换工作区根目录 — 重新指向文件/Shell/记忆工具，重载项目 hooks，刷新 @ 引用遍历器",
-      argsHint: "<path>",
+      argsHint: "[path]",
     },
     stop: { description: "中止当前模型回合（按 Esc 的替代方式）" },
     feedback: { description: "打开 GitHub Issue，诊断信息已复制到剪贴板" },
@@ -584,6 +584,10 @@ export const zhCN: TranslationSchema = {
     sessionTitleRenameFailed: '▸ 无法按标题 "{title}" 重命名会话。',
     sessionTitleRenamed: '▸ 会话已重命名为 "{name}" — {title}',
     sessionTitleAutoRenamed: '▸ 已自动命名会话 "{name}" — {title}',
+    workspaceSwitched: "▸ 工作区已切换到 {root}",
+    semanticRepointed: "▸ semantic_search 已指向 {root}",
+    semanticDisabledForRoot: "▸ semantic_search 已禁用（{root} 没有兼容索引）",
+    semanticRebootstrapFailed: "▸ semantic_search 重新初始化失败：{reason}",
     denied: "▸ 已拒绝：{cmd}{context}",
     alwaysAllowed: '▸ 已对 {dir} 永久允许 "{prefix}"',
     runningCommand: "▸ 正在执行：{cmd}",
@@ -1199,6 +1203,18 @@ export const zhCN: TranslationSchema = {
     yesterday: "昨天",
     hoursAgo: "{count} 小时前",
     daysAgo: "{count} 天前",
+  },
+  workspacePicker: {
+    header: " ◈ REASONIX · 选择工作区 ",
+    title: "选择工作区 — {workspace}",
+    sessions: "{count} 个会话",
+    sessionsPlural: "{count} 个会话",
+    current: "当前",
+    pickerHint: "↑↓ 选择 · / 搜索 · ⏎ 切换并选择会话 · Esc 退出 · /cwd <path> 添加",
+    empty: "  暂无已知工作区 — 先运行一次 /cwd <path> 添加",
+    searchPrompt: "  搜索工作区：/",
+    searchHint: "  输入过滤 · ⏎ 切换并选择会话 · Esc 清除",
+    searchEmpty: "  没有匹配的工作区",
   },
   modelPicker: {
     header: " ◈ REASONIX · 选择配置 ",

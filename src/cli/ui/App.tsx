@@ -96,6 +96,7 @@ import { registerSkillTools } from "../../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
 import { webFetch } from "../../tools/web.js";
 import { openTranscriptFile } from "../../transcript/log.js";
+import { listKnownWorkspaces, rememberWorkspace } from "../../workspaces.js";
 import { openInExternalEditor } from "../edit/external-editor.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
@@ -120,6 +121,7 @@ import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
 import { type ThemeChoice, ThemePicker } from "./ThemePicker.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
+import { WorkspacePicker } from "./WorkspacePicker.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
 import { CopyMode } from "./copy-mode/CopyMode.js";
 import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broadcast.js";
@@ -253,6 +255,8 @@ export interface AppProps {
      * isn't blocked on disk I/O.
      */
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
+    /** Notify the launcher/root wrapper that the workspace root changed so session switches remount into the new root. */
+    onRootChange?: (newRoot: string) => void;
   };
   /**
    * When `true`, suppress the auto-launch of the embedded web dashboard
@@ -632,6 +636,11 @@ function AppInner({
     () => listSessionsForWorkspace(currentRootDir),
   );
   const [sessionsPickerFocus, setSessionsPickerFocus] = useState(0);
+  /** True while the WorkspacePicker is open mid-chat (triggered by bare `/cwd`). */
+  const [pendingWorkspacePicker, setPendingWorkspacePicker] = useState(false);
+  const [workspacePickerList, setWorkspacePickerList] = useState<
+    ReturnType<typeof listKnownWorkspaces>
+  >(() => listKnownWorkspaces(currentRootDir));
   /** True while the CheckpointPicker is open mid-chat (triggered by bare `/restore`). */
   const [pendingCheckpointPicker, setPendingCheckpointPicker] = useState(false);
   const [checkpointPickerList, setCheckpointPickerList] = useState<CheckpointMeta[]>([]);
@@ -706,6 +715,7 @@ function AppInner({
     !!pendingPlan ||
     !!pendingReviseEditor ||
     !!pendingSessionsPicker ||
+    !!pendingWorkspacePicker ||
     !!pendingCheckpointPicker ||
     !!pendingMcpHub ||
     pendingModelPicker ||
@@ -730,6 +740,7 @@ function AppInner({
     !pendingPlan &&
     !pendingReviseEditor &&
     !pendingSessionsPicker &&
+    !pendingWorkspacePicker &&
     !pendingCheckpointPicker &&
     !pendingMcpHub &&
     !stagedInput &&
@@ -998,6 +1009,46 @@ function AppInner({
       });
     },
     [currentRootDir, loop.client, loop.log.entries, loop.model, model, onSwitchSession, session],
+  );
+
+  const switchWorkspaceRoot = useCallback(
+    (newPath: string) => {
+      if (!codeMode?.reregisterTools) return { ok: false, info: t("handlers.edits.cwdCodeOnly") };
+      const resolved = resolve(newPath);
+      let stat: ReturnType<typeof statSync>;
+      try {
+        stat = statSync(resolved);
+      } catch (err) {
+        return { ok: false, info: `/cwd: ${(err as Error).message}` };
+      }
+      if (!stat.isDirectory()) {
+        return { ok: false, info: `/cwd: ${resolved} is not a directory` };
+      }
+      codeMode.reregisterTools(resolved);
+      codeMode.onRootChange?.(resolved);
+      rememberWorkspace(resolved);
+      setCurrentRootDir(resolved);
+      setSessionsPickerList(listSessionsForWorkspace(resolved));
+      setWorkspacePickerList(listKnownWorkspaces(resolved));
+      reloadHooks(resolved);
+      const reBootstrap = codeMode.reBootstrapSemantic;
+      if (reBootstrap) {
+        void reBootstrap(resolved).then(
+          (r) => {
+            log.pushInfo(
+              r.enabled
+                ? t("app.semanticRepointed", { root: resolved })
+                : t("app.semanticDisabledForRoot", { root: resolved }),
+            );
+          },
+          (err) => {
+            log.pushInfo(t("app.semanticRebootstrapFailed", { reason: (err as Error).message }));
+          },
+        );
+      }
+      return { ok: true, info: t("app.workspaceSwitched", { root: resolved }) };
+    },
+    [codeMode, log, reloadHooks, setCurrentRootDir],
   );
 
   useEffect(() => {
@@ -1374,6 +1425,7 @@ function AppInner({
 
   useEffect(() => {
     setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
+    setWorkspacePickerList(listKnownWorkspaces(currentRootDir));
   }, [currentRootDir]);
 
   const [dashboardUrl, setDashboardUrlState] = useState<string | null>(null);
@@ -2745,41 +2797,7 @@ function AppInner({
             return added;
           },
           reloadHooks: () => reloadHooks(codeMode ? currentRootDir : undefined),
-          switchCwd: codeMode?.reregisterTools
-            ? (newPath: string) => {
-                const resolved = resolve(newPath);
-                let stat: ReturnType<typeof statSync>;
-                try {
-                  stat = statSync(resolved);
-                } catch (err) {
-                  return { ok: false, info: `/cwd: ${(err as Error).message}` };
-                }
-                if (!stat.isDirectory()) {
-                  return { ok: false, info: `/cwd: ${resolved} is not a directory` };
-                }
-                codeMode.reregisterTools?.(resolved);
-                setCurrentRootDir(resolved);
-                reloadHooks(resolved);
-                const reBootstrap = codeMode.reBootstrapSemantic;
-                if (reBootstrap) {
-                  void reBootstrap(resolved).then(
-                    (r) => {
-                      log.pushInfo(
-                        r.enabled
-                          ? `semantic_search re-pointed at ${resolved}`
-                          : `semantic_search disabled (no compatible index in ${resolved})`,
-                      );
-                    },
-                    (err) => {
-                      log.pushInfo(
-                        `semantic_search re-bootstrap failed: ${(err as Error).message}`,
-                      );
-                    },
-                  );
-                }
-                return { ok: true, info: `workspace switched to ${resolved}` };
-              }
-            : undefined,
+          switchCwd: codeMode?.reregisterTools ? switchWorkspaceRoot : undefined,
           reloadMcp: mcpRuntime
             ? async () => {
                 const r = await mcpRuntime.reloadFromConfig(loop);
@@ -2811,6 +2829,12 @@ function AppInner({
           const sessions = listSessionsForWorkspace(currentRootDir);
           setSessionsPickerList(sessions);
           setPendingSessionsPicker(true);
+          pushHistory(text);
+          return;
+        }
+        if (result.openWorkspacePicker) {
+          setWorkspacePickerList(listKnownWorkspaces(currentRootDir));
+          setPendingWorkspacePicker(true);
           pushHistory(text);
           return;
         }
@@ -3268,7 +3292,6 @@ function AppInner({
       setEditMode,
       pendingEdits,
       syncPendingCount,
-      setCurrentRootDir,
       reloadHooks,
       setOngoingTool,
       setToolProgress,
@@ -3304,6 +3327,7 @@ function AppInner({
       resetCursor,
       liveMcpServers,
       generateCurrentSessionTitle,
+      switchWorkspaceRoot,
     ],
   );
 
@@ -4135,6 +4159,20 @@ function AppInner({
                         deleteCheckpoint(currentRootDir, target.id);
                         setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
                       }
+                    }}
+                  />
+                ) : pendingWorkspacePicker ? (
+                  <WorkspacePicker
+                    workspaces={workspacePickerList}
+                    currentWorkspace={currentRootDir}
+                    onChoose={(outcome) => {
+                      setPendingWorkspacePicker(false);
+                      if (outcome.kind === "quit") return;
+                      const result = switchWorkspaceRoot(outcome.path);
+                      log.pushInfo(result.info);
+                      if (!result.ok) return;
+                      setSessionsPickerList(listSessionsForWorkspace(outcome.path));
+                      setPendingSessionsPicker(true);
                     }}
                   />
                 ) : pendingSessionsPicker ? (

@@ -458,13 +458,12 @@ describe("handleSlash", () => {
       expect(r.info).toMatch(/only available inside/);
     });
 
-    it("shows usage when called without arguments", () => {
+    it("opens the workspace picker when called without arguments", () => {
       const r = handleSlash("cwd", [], makeLoop(), {
         codeRoot: "/proj",
         switchCwd: () => ({ ok: true, info: "" }),
       });
-      expect(r.info).toMatch(/usage:/);
-      expect(r.info).toMatch(/\/proj/);
+      expect(r.openWorkspacePicker).toBe(true);
     });
 
     it("calls switchCwd and surfaces its info string", () => {

@@ -1,5 +1,5 @@
 import { render } from "ink";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   loadApiKey,
   readConfig,
@@ -140,8 +140,23 @@ function Root({
   const [key, setKey] = useState<string | undefined>(initialKey);
   const [pickerOpen, setPickerOpen] = useState(showPicker);
   const [activeSession, setActiveSession] = useState<string | undefined>(appProps.session);
-  const workspaceRoot = appProps.codeMode?.rootDir ?? process.cwd();
+  const [activeRoot, setActiveRoot] = useState<string>(
+    () => appProps.codeMode?.rootDir ?? process.cwd(),
+  );
+  const workspaceRoot = activeRoot;
   const [sessions, setSessions] = useState(() => listSessionsForWorkspace(workspaceRoot));
+  const codeMode = useMemo(() => {
+    if (!appProps.codeMode) return undefined;
+    return {
+      ...appProps.codeMode,
+      rootDir: activeRoot,
+      onRootChange: (newRoot: string) => {
+        appProps.codeMode?.onRootChange?.(newRoot);
+        setActiveRoot(newRoot);
+        setSessions(listSessionsForWorkspace(newRoot));
+      },
+    };
+  }, [appProps.codeMode, activeRoot]);
 
   if (!key) {
     return (
@@ -213,7 +228,7 @@ function Root({
         mcpRuntime={mcpRuntime}
         progressSink={progressSink}
         startupInfoHints={startupInfoHints}
-        codeMode={appProps.codeMode}
+        codeMode={codeMode}
         noDashboard={appProps.noDashboard}
         openDashboard={appProps.openDashboard}
         dashboardPort={appProps.dashboardPort}

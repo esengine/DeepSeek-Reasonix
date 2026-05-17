@@ -328,7 +328,7 @@ export const EN: TranslationSchema = {
     cwd: {
       description:
         "switch the workspace root mid-session — re-points fs / shell / memory tools, reloads project hooks, refreshes the at-mention walker",
-      argsHint: "<path>",
+      argsHint: "[path]",
     },
     stop: { description: "abort the current model turn (typed alternative to Esc)" },
     feedback: { description: "open a GitHub issue with diagnostic info copied to clipboard" },
@@ -598,6 +598,10 @@ export const EN: TranslationSchema = {
     sessionTitleRenameFailed: '▸ could not rename the session for title "{title}".',
     sessionTitleRenamed: '▸ session renamed to "{name}" — {title}',
     sessionTitleAutoRenamed: '▸ auto-named session "{name}" — {title}',
+    workspaceSwitched: "▸ workspace switched to {root}",
+    semanticRepointed: "▸ semantic_search re-pointed at {root}",
+    semanticDisabledForRoot: "▸ semantic_search disabled (no compatible index in {root})",
+    semanticRebootstrapFailed: "▸ semantic_search re-bootstrap failed: {reason}",
     denied: "▸ denied: {cmd}{context}",
     alwaysAllowed: '▸ always allowed "{prefix}" for {dir}',
     runningCommand: "▸ running: {cmd}",
@@ -1265,6 +1269,18 @@ export const EN: TranslationSchema = {
     yesterday: "yesterday",
     hoursAgo: "{count}h ago",
     daysAgo: "{count} days ago",
+  },
+  workspacePicker: {
+    header: " ◈ REASONIX · pick a workspace ",
+    title: "pick a workspace — {workspace}",
+    sessions: "{count} session",
+    sessionsPlural: "{count} sessions",
+    current: "current",
+    pickerHint: "↑↓ pick · / search · ⏎ switch + pick session · esc quit · /cwd <path> adds one",
+    empty: "  no known workspaces yet — run /cwd <path> once to add one",
+    searchPrompt: "  search workspaces: /",
+    searchHint: "  type to filter  ·  ⏎ switch + pick session  ·  esc clear",
+    searchEmpty: "  no workspaces match this search",
   },
   modelPicker: {
     header: " \u25c8 REASONIX \u00b7 pick a setup ",

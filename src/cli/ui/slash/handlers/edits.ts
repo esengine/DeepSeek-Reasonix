@@ -246,12 +246,7 @@ const cwd: SlashHandler = (args, _loop, ctx) => {
   }
   const target = args.join(" ").trim();
   if (!target) {
-    return {
-      info:
-        ctx.codeRoot != null
-          ? t("handlers.edits.cwdUsage", { current: ctx.codeRoot })
-          : t("handlers.edits.cwdUsageNoCurrent"),
-    };
+    return { openWorkspacePicker: true };
   }
   const result = ctx.switchCwd(stripOuterQuotes(target));
   return result.clear ? { info: result.info, clear: true } : { info: result.info };

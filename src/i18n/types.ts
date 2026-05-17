@@ -199,6 +199,10 @@ export interface TranslationSchema {
     sessionTitleRenameFailed: string;
     sessionTitleRenamed: string;
     sessionTitleAutoRenamed: string;
+    workspaceSwitched: string;
+    semanticRepointed: string;
+    semanticDisabledForRoot: string;
+    semanticRebootstrapFailed: string;
     denied: string;
     alwaysAllowed: string;
     runningCommand: string;
@@ -503,6 +507,18 @@ export interface TranslationSchema {
     yesterday: string;
     hoursAgo: string;
     daysAgo: string;
+  };
+  workspacePicker: {
+    header: string;
+    title: string;
+    sessions: string;
+    sessionsPlural: string;
+    current: string;
+    pickerHint: string;
+    empty: string;
+    searchPrompt: string;
+    searchHint: string;
+    searchEmpty: string;
   };
   modelPicker: {
     header: string;
