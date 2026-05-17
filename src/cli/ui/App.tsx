@@ -1,5 +1,5 @@
 import { type WriteStream, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { Box, Text, useStdin, useStdout } from "ink";
 import React, {
   useCallback,
@@ -90,6 +90,7 @@ import {
 import { defaultUsageLogPath } from "../../telemetry/usage.js";
 import type { ToolRegistry } from "../../tools.js";
 import type { ChoiceOption } from "../../tools/choice.js";
+import { looksLikeAbsoluteSystemPath, pathIsUnder } from "../../tools/filesystem.js";
 import type { PlanStep } from "../../tools/plan.js";
 import { formatCommandResult, runCommand } from "../../tools/shell.js";
 import { registerSkillTools } from "../../tools/skills.js";
@@ -2002,19 +2003,30 @@ function AppInner({
       if (name !== "edit_file" && name !== "write_file") return null;
       const rawPath = typeof args.path === "string" ? args.path : "";
       if (!rawPath) return null;
-      // Mirror filesystem.ts safePath's leading-slash tolerance so
-      // `/src/foo.ts` doesn't get misrouted through applyEditBlock's
-      // rootDir-escape check.
-      let relPath = rawPath;
-      while (relPath.startsWith("/") || relPath.startsWith("\\")) {
-        relPath = relPath.slice(1);
-      }
-      if (!relPath) return null;
 
       // Read root via ref so a workspace swap (which runs reregisterTools
-      // for read_file/run_command) is also visible to this interceptor 闂?      // otherwise edit_file writes to the OLD root while read_file looks in
+      // for read_file/run_command) is also visible to this interceptor
+      // otherwise edit_file writes to the OLD root while read_file looks in
       // the NEW one, producing ENOENT on the next read of a just-edited file.
       const rootForEdit = currentRootDirRef.current;
+      const absRoot = resolve(rootForEdit);
+
+      // Absolute system paths (issue #942): defer outside-rootDir writes to the tool fn's safePath gate instead of stripping the leading slash and silently rewriting to <rootDir>/...
+      let relPath: string;
+      if (looksLikeAbsoluteSystemPath(rawPath)) {
+        const abs = resolve(rawPath);
+        if (!pathIsUnder(abs, absRoot)) return null;
+        const rel = relative(absRoot, abs);
+        if (!rel) return null;
+        relPath = rel;
+      } else {
+        let stripped = rawPath;
+        while (stripped.startsWith("/") || stripped.startsWith("\\")) {
+          stripped = stripped.slice(1);
+        }
+        if (!stripped) return null;
+        relPath = stripped;
+      }
       let block: EditBlock;
       if (name === "edit_file") {
         const search = typeof args.search === "string" ? args.search : "";

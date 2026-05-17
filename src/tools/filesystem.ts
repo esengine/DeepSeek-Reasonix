@@ -44,6 +44,19 @@ export function displayRel(rootDir: string, full: string): string {
   return pathMod.relative(rootDir, full).replaceAll("\\", "/");
 }
 
+/** Windows drive-letter prefixes always count; POSIX absolutes only count when their first segment is a known system root. */
+export function looksLikeAbsoluteSystemPath(raw: string): boolean {
+  if (/^[A-Za-z]:[\\/]/.test(raw)) return true;
+  return /^\/(?:home|Users|etc|var|opt|tmp|usr|mnt|Library|Volumes|proc|sys|dev|run|srv|media|Applications|System|root|boot|private)(?:[/\\]|$)/.test(
+    raw,
+  );
+}
+
+export function pathIsUnder(child: string, parent: string): boolean {
+  const rel = pathMod.relative(parent, child);
+  return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
+}
+
 const GLOB_METACHARS = /[*?{[]/;
 
 /** Glob via picomatch when metachars present, else case-insensitive substring — keeps `.ts` / `test` callers working. Slash in pattern → match rel-path; otherwise basename. */
@@ -96,19 +109,6 @@ export function registerFilesystemTools(
   const sessionApproved = new Set<string>();
   /** In-flight gate prompts keyed by `allowPrefix` so parallel reads under the same dir only fire one modal. */
   const inflightGate = new Map<string, Promise<ConfirmationChoice>>();
-
-  function pathIsUnder(child: string, parent: string): boolean {
-    const rel = pathMod.relative(parent, child);
-    return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
-  }
-
-  /** Heuristic: does the raw input express "I really mean this absolute system path" rather than the model-convention sandbox-relative form? Windows drive-letter prefixes always count; POSIX absolutes only count when their first segment is a known system root. */
-  function looksLikeAbsoluteSystemPath(raw: string): boolean {
-    if (/^[A-Za-z]:[\\/]/.test(raw)) return true;
-    return /^\/(?:home|Users|etc|var|opt|tmp|usr|mnt|Library|Volumes|proc|sys|dev|run|srv|media|Applications|System|root|boot|private)(?:[/\\]|$)/.test(
-      raw,
-    );
-  }
 
   async function ensureOutsideSandboxAllowed(
     abs: string,
