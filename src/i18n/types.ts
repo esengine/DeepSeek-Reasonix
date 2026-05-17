@@ -221,7 +221,6 @@ export interface TranslationSchema {
     proArmed: string;
     abortedAtIter: string;
     toolUploadStatus: string;
-    toolBudgetWarning: string;
     preflightFoldStatus: string;
     preflightFolded: string;
     preflightNoFold: string;
@@ -253,11 +252,9 @@ export interface TranslationSchema {
     reasonAborted: string;
     reasonContextGuard: string;
     reasonStuck: string;
-    reasonBudget: string;
     labelAborted: string;
     labelContextGuard: string;
     labelStuck: string;
-    labelBudget: string;
   };
   handlers: {
     [group: string]: {

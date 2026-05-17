@@ -227,42 +227,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(msgs2.length).toBeGreaterThan(msgs1.length);
   });
 
-  it("yields a warning event once when tool-call count crosses 70% of budget", async () => {
-    const reg = new ToolRegistry();
-    reg.register({
-      name: "probe",
-      description: "no-op",
-      parameters: { type: "object", properties: {} },
-      fn: async () => "ok",
-    });
-    const callAgain = {
-      content: "",
-      tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
-    };
-    const summary = { content: "all done" };
-    const responses: FakeResponseShape[] = [callAgain, callAgain, callAgain, callAgain, summary];
-    const client = makeClient(responses);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
-      tools: reg,
-      stream: false,
-      maxToolIters: 4, // 70% → warn starting at iter >= 2
-    });
-
-    const warnings: string[] = [];
-    for await (const ev of loop.step("go")) {
-      if (ev.role === "warning") warnings.push(ev.content);
-    }
-    // Identical fixture calls also trip the storm breaker in 0.4.19+,
-    // which emits its own warning. Filter for the iter-budget warning
-    // specifically — that's what this test guards (once-per-turn flag).
-    const iterBudgetWarnings = warnings.filter((w) => /tool calls used/.test(w));
-    expect(iterBudgetWarnings).toHaveLength(1);
-    expect(iterBudgetWarnings[0]).toMatch(/\d+\/4 tool calls used/);
-    expect(iterBudgetWarnings[0]).toMatch(/Esc/);
-  });
-
   it("abort() mid-step stops immediately without a follow-up API call", async () => {
     const reg = new ToolRegistry();
     reg.register({
@@ -378,59 +342,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(
       turn2Events.some((e) => e.role === "warning" && /aborted at iter/.test(e.content ?? "")),
     ).toBe(false);
-  });
-
-  it("forces a summary when maxToolIters is exhausted, instead of stopping silently", async () => {
-    // Give a registered tool so the repair layer doesn't strip the fake
-    // tool_calls for referring to an unknown name.
-    const reg = new ToolRegistry();
-    reg.register({
-      name: "probe",
-      description: "no-op",
-      parameters: { type: "object", properties: {} },
-      fn: async () => "ok",
-    });
-    // Every tool-iter response says "call probe again" — infinite loop
-    // absent the iter cap. The (N+1)th response is the forced-summary
-    // call (no tools, returns text).
-    const chainingToolCall = {
-      content: "",
-      tool_calls: [
-        {
-          id: "call_1",
-          type: "function",
-          function: { name: "probe", arguments: "{}" },
-        },
-      ],
-    };
-    const responses: FakeResponseShape[] = [
-      chainingToolCall,
-      chainingToolCall,
-      { content: "done — here's what I found." }, // summary call
-    ];
-    const client = makeClient(responses);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
-      tools: reg,
-      stream: false,
-      maxToolIters: 2, // deliberately tight so we hit the cap fast
-    });
-
-    const events: { role: string; content?: string }[] = [];
-    for await (const ev of loop.step("go")) {
-      events.push({ role: ev.role, content: ev.content });
-    }
-
-    // Multiple assistant_final events are yielded (one per iter) — the
-    // summary is the LAST one, carrying the "tool-call budget" prefix.
-    const finals = events.filter((e) => e.role === "assistant_final");
-    const summary = finals[finals.length - 1];
-    expect(summary).toBeDefined();
-    expect(summary!.content).toMatch(/tool-call budget/);
-    expect(summary!.content).toContain("done — here's what I found.");
-    // Last event is still `done`, preserving the contract used by run().
-    expect(events[events.length - 1]!.role).toBe("done");
   });
 
   it("first all-suppressed storm self-corrects in-turn instead of stopping", async () => {

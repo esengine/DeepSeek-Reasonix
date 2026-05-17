@@ -924,7 +924,6 @@ function AppInner({
             // Stamped onto every event so the TUI sink + usage log can
             // attribute the run to a skill without extra bookkeeping.
             skillName: skill.name,
-            maxToolIters: skill.maxToolIters,
           });
           return formatSubagentResult(result);
         },

@@ -15,12 +15,11 @@ function fakeResult(opts: {
   output: string;
   completionTokens?: number;
   costUsd?: number;
-  paused?: boolean;
 }): SubagentResult {
   const usage = new Usage();
   usage.completionTokens = opts.completionTokens ?? 0;
   return {
-    success: !opts.paused,
+    success: true,
     output: opts.output,
     turns: 1,
     toolIters: 0,
@@ -28,7 +27,6 @@ function fakeResult(opts: {
     costUsd: opts.costUsd ?? 0,
     model: "deepseek-chat",
     usage,
-    paused: opts.paused,
   };
 }
 
@@ -43,7 +41,6 @@ describe("computeSpawnDistillation", () => {
     expect(d.savingsTokens).toBeGreaterThan(900);
     expect(d.compressionRatio).toBeLessThan(0.1);
     expect(d.hasOutput).toBe(true);
-    expect(d.paused).toBe(false);
   });
 
   it("computes the write-heavy near-1 case", () => {
@@ -55,12 +52,9 @@ describe("computeSpawnDistillation", () => {
     expect(d.savingsTokens).toBe(0);
   });
 
-  it("flags empty output as not useful, regardless of `success` field", () => {
-    const d = computeSpawnDistillation(
-      fakeResult({ output: "", completionTokens: 500, paused: true }),
-    );
+  it("flags empty output as not useful", () => {
+    const d = computeSpawnDistillation(fakeResult({ output: "", completionTokens: 500 }));
     expect(d.hasOutput).toBe(false);
-    expect(d.paused).toBe(true);
     expect(d.outputTokens).toBe(0);
     expect(d.savingsTokens).toBe(500);
   });
@@ -96,13 +90,12 @@ describe("summarizeSubagentSession", () => {
   it("aggregates per-spawn distillations into a session summary", () => {
     const spawns: SpawnDistillation[] = [
       mkSpawn({ completion: 1000, output: 50, cost: 0.003, useful: true }),
-      mkSpawn({ completion: 800, output: 0, cost: 0.002, useful: false, paused: true }),
+      mkSpawn({ completion: 800, output: 0, cost: 0.002, useful: false }),
       mkSpawn({ completion: 600, output: 30, cost: 0.001, useful: true }),
     ];
     const s = summarizeSubagentSession(spawns);
     expect(s.spawnCount).toBe(3);
     expect(s.usefulSpawnCount).toBe(2);
-    expect(s.pausedSpawnCount).toBe(1);
     expect(s.successRate).toBeCloseTo(2 / 3);
     expect(s.totalCompletionTokens).toBe(2400);
     expect(s.totalOutputTokens).toBe(80);
@@ -192,10 +185,9 @@ describe("SubagentTelemetry", () => {
     const t = new SubagentTelemetry();
     t.record(fakeResult({ output: "first", completionTokens: 200, costUsd: 0.002 }));
     expect(t.summary.spawnCount).toBe(1);
-    t.record(fakeResult({ output: "", completionTokens: 300, costUsd: 0.003, paused: true }));
+    t.record(fakeResult({ output: "", completionTokens: 300, costUsd: 0.003 }));
     expect(t.summary.spawnCount).toBe(2);
     expect(t.summary.usefulSpawnCount).toBe(1);
-    expect(t.summary.pausedSpawnCount).toBe(1);
     expect(t.summary.totalCostUsd).toBeCloseTo(0.005);
   });
 });
@@ -205,7 +197,6 @@ function mkSpawn(opts: {
   output: number;
   cost: number;
   useful: boolean;
-  paused?: boolean;
 }): SpawnDistillation {
   return {
     completionTokens: opts.completion,
@@ -214,6 +205,5 @@ function mkSpawn(opts: {
     compressionRatio: opts.completion > 0 ? opts.output / opts.completion : 1,
     hasOutput: opts.useful,
     costUsd: opts.cost,
-    paused: opts.paused ?? false,
   };
 }

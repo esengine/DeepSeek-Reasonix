@@ -45,8 +45,6 @@ export interface Skill {
   runAs: SkillRunAs;
   /** Subagent model override; only meaningful when `runAs === "subagent"`. */
   model?: string;
-  /** Subagent tool-call budget; only meaningful when `runAs === "subagent"`. Clamped to [1, 32]. */
-  maxToolIters?: number;
 }
 
 export interface SkillRoot {
@@ -90,14 +88,6 @@ function parseAllowedTools(raw: string | undefined): readonly string[] | undefin
     .map((s) => s.trim())
     .filter(Boolean);
   return names.length > 0 ? Object.freeze(names) : undefined;
-}
-
-/** `max-iters` is checkpoint cadence, not a budget — work continues across pauses via resume_session. No upper bound; values below 1 fall back to the subagent default. */
-function parseMaxToolIters(raw: string | undefined): number | undefined {
-  if (raw === undefined) return undefined;
-  const n = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(n) || n < 1) return undefined;
-  return n;
 }
 
 export class SkillStore {
@@ -265,7 +255,6 @@ export class SkillStore {
       allowedTools: parseAllowedTools(data["allowed-tools"]),
       runAs: parseRunAs(data.runAs),
       model: data.model?.startsWith("deepseek-") ? data.model : undefined,
-      maxToolIters: parseMaxToolIters(data["max-iters"]),
     };
   }
 }
@@ -326,7 +315,6 @@ Tips:
 - Reference tools by name (run_command, edit_file, search_content, ...)
 - Add \`runAs: subagent\` to frontmatter to spawn an isolated subagent loop
 - Add \`allowed-tools: read_file, search_content\` to scope a subagent's tools
-- Add \`max-iters: N\` to change the subagent's pause cadence (default 16). This isn't a budget — the parent resumes on pause, so N is how often the parent gets a checkpoint, not how much total work the subagent gets.
 `;
 }
 

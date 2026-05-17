@@ -515,58 +515,6 @@ describe("Skill frontmatter — runAs", () => {
     const store = new SkillStore({ homeDir: home, disableBuiltins: true });
     expect(store.read("empty")?.allowedTools).toBeUndefined();
   });
-
-  it("parses max-iters and passes it through as maxToolIters", () => {
-    writeSkillDir(
-      home,
-      "global",
-      "big",
-      { description: "...", runAs: "subagent", "max-iters": "32" },
-      "body",
-      home,
-    );
-    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("big")?.maxToolIters).toBe(32);
-  });
-
-  it("passes large max-iters values through unchanged (no upper clamp)", () => {
-    writeSkillDir(
-      home,
-      "global",
-      "bigger",
-      { description: "...", runAs: "subagent", "max-iters": "9999" },
-      "body",
-      home,
-    );
-    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("bigger")?.maxToolIters).toBe(9999);
-  });
-
-  it("ignores max-iters below 1 (falls back to subagent default)", () => {
-    writeSkillDir(
-      home,
-      "global",
-      "toosmall",
-      { description: "...", runAs: "subagent", "max-iters": "0" },
-      "body",
-      home,
-    );
-    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("toosmall")?.maxToolIters).toBeUndefined();
-  });
-
-  it("ignores max-iters that isn't a number", () => {
-    writeSkillDir(
-      home,
-      "global",
-      "junk",
-      { description: "...", runAs: "subagent", "max-iters": "many" },
-      "body",
-      home,
-    );
-    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("junk")?.maxToolIters).toBeUndefined();
-  });
 });
 
 describe("Built-in skills", () => {

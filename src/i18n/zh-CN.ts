@@ -606,10 +606,8 @@ export const zhCN: TranslationSchema = {
       "会话预算已用完 — 已花费 ${spent} ≥ 上限 ${cap}。用 /budget <usd> 提高上限，/budget off 清除上限，或结束会话。",
     budget80Pct: "▲ 预算已用 80% — ${spent} / ${cap}。下一两轮可能就触顶。",
     proArmed: "⇧ /pro 已装备 — 本轮使用 deepseek-v4-pro（一次性 · 本轮后自动解除）",
-    abortedAtIter:
-      "在第 {iter}/{cap} 次工具调用处中断 — 未生成总结即停止（按 ↑ + Enter 或 /retry 恢复）",
+    abortedAtIter: "在第 {iter} 次工具调用处中断 — 未生成总结即停止（按 ↑ + Enter 或 /retry 恢复）",
     toolUploadStatus: "工具结果已上传 · 模型在生成下一条响应前思考中…",
-    toolBudgetWarning: "已用 {iter}/{cap} 次工具调用 — 接近上限。按 Esc 立即强制总结。",
     preflightFoldStatus: "预检：上下文接近上限，尝试折叠…",
     preflightFolded:
       "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）— 已折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。发送中。",
@@ -656,11 +654,9 @@ export const zhCN: TranslationSchema = {
     reasonAborted: "[用户已中断（Esc） — 正在总结到目前为止的发现]",
     reasonContextGuard: "[上下文额度即将耗尽 — 在下一次调用溢出之前先总结]",
     reasonStuck: "[卡在重复的工具调用上 — 说明已尝试的方法以及阻塞点]",
-    reasonBudget: "[工具调用配额（{iterCap}）已用尽 — 基于已发现的内容强制总结]",
     labelAborted: "用户中断",
     labelContextGuard: "触发上下文保护（prompt > 80% 窗口）",
     labelStuck: "卡死（重复工具调用被反风暴机制抑制）",
-    labelBudget: "工具调用配额（{iterCap}）已用尽",
   },
   handlers: {
     basic: {

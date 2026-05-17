@@ -168,11 +168,6 @@ export function registerSkillTools(
           description:
             "Optional model override for subagent skills (e.g. 'deepseek-chat'). Ignored for runAs=inline. Only `deepseek-*` ids are honored.",
         },
-        maxToolIters: {
-          type: "number",
-          description:
-            "Optional pause cadence for subagent skills (default 16). Not a hard budget — the parent gets a checkpoint every N tool calls and may resume. Ignored for runAs=inline.",
-        },
         allowedTools: {
           type: "array",
           items: { type: "string" },
@@ -189,7 +184,6 @@ export function registerSkillTools(
       scope?: unknown;
       runAs?: unknown;
       model?: unknown;
-      maxToolIters?: unknown;
       allowedTools?: unknown;
     }) => {
       const name = typeof args.name === "string" ? args.name.trim() : "";
@@ -232,11 +226,6 @@ export function registerSkillTools(
         fmLines.push("runAs: subagent");
         const model = typeof args.model === "string" ? args.model.trim() : "";
         if (model) fmLines.push(`model: ${model}`);
-        const maxToolIters =
-          typeof args.maxToolIters === "number" && Number.isFinite(args.maxToolIters)
-            ? Math.max(1, Math.floor(args.maxToolIters))
-            : undefined;
-        if (maxToolIters !== undefined) fmLines.push(`max-iters: ${maxToolIters}`);
         if (Array.isArray(args.allowedTools)) {
           const tools = args.allowedTools
             .filter((t): t is string => typeof t === "string")

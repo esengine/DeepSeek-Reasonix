@@ -622,10 +622,8 @@ export const EN: TranslationSchema = {
     budget80Pct: "▲ budget 80% used — ${spent} of ${cap}. Next turn or two likely trips the cap.",
     proArmed: "⇧ /pro armed — this turn runs on deepseek-v4-pro (one-shot · disarms after turn)",
     abortedAtIter:
-      "aborted at iter {iter}/{cap} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
+      "aborted at iter {iter} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
-    toolBudgetWarning:
-      "{iter}/{cap} tool calls used — approaching budget. Press Esc to force a summary now.",
     preflightFoldStatus: "preflight: context near full, attempting fold…",
     preflightFolded:
       "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Sending.",
@@ -675,11 +673,9 @@ export const EN: TranslationSchema = {
       "[context budget running low — summarizing before the next call would overflow]",
     reasonStuck:
       "[stuck on a repeated tool call — explaining what was tried and what's blocking progress]",
-    reasonBudget: "[tool-call budget ({iterCap}) reached — forcing summary from what I found]",
     labelAborted: "aborted by user",
     labelContextGuard: "context-guard triggered (prompt > 80% of window)",
     labelStuck: "stuck (repeated tool call suppressed by storm-breaker)",
-    labelBudget: "tool-call budget ({iterCap}) reached",
   },
   handlers: {
     basic: {

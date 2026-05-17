@@ -7,7 +7,6 @@ export interface SubagentResultLike {
   output: string;
   costUsd: number;
   usage: { completionTokens: number };
-  paused?: boolean;
 }
 
 export interface SpawnDistillation {
@@ -17,10 +16,9 @@ export interface SpawnDistillation {
   savingsTokens: number;
   /** `outputTokens / completionTokens`; 1 when completion is 0. Lower is more distilled; ≥1 means writes / passthrough. */
   compressionRatio: number;
-  /** True iff `output.trim().length > 0`. Decouples "we got something usable" from `SubagentResult.success`, which doesn't distinguish empty pause from real failure. */
+  /** True iff `output.trim().length > 0`. */
   hasOutput: boolean;
   costUsd: number;
-  paused: boolean;
 }
 
 export function computeSpawnDistillation(result: SubagentResultLike): SpawnDistillation {
@@ -35,14 +33,12 @@ export function computeSpawnDistillation(result: SubagentResultLike): SpawnDisti
     compressionRatio,
     hasOutput: result.output.trim().length > 0,
     costUsd: result.costUsd,
-    paused: result.paused === true,
   };
 }
 
 export interface SubagentSessionSummary {
   spawnCount: number;
   usefulSpawnCount: number;
-  pausedSpawnCount: number;
   /** `usefulSpawnCount / spawnCount`; 0 when no spawns. */
   successRate: number;
   totalCompletionTokens: number;
@@ -59,7 +55,6 @@ export function summarizeSubagentSession(spawns: SpawnDistillation[]): SubagentS
     return {
       spawnCount: 0,
       usefulSpawnCount: 0,
-      pausedSpawnCount: 0,
       successRate: 0,
       totalCompletionTokens: 0,
       totalOutputTokens: 0,
@@ -69,14 +64,12 @@ export function summarizeSubagentSession(spawns: SpawnDistillation[]): SubagentS
     };
   }
   let usefulSpawnCount = 0;
-  let pausedSpawnCount = 0;
   let totalCompletionTokens = 0;
   let totalOutputTokens = 0;
   let totalSavingsTokens = 0;
   let totalCostUsd = 0;
   for (const s of spawns) {
     if (s.hasOutput) usefulSpawnCount++;
-    if (s.paused) pausedSpawnCount++;
     totalCompletionTokens += s.completionTokens;
     totalOutputTokens += s.outputTokens;
     totalSavingsTokens += s.savingsTokens;
@@ -87,7 +80,6 @@ export function summarizeSubagentSession(spawns: SpawnDistillation[]): SubagentS
   return {
     spawnCount,
     usefulSpawnCount,
-    pausedSpawnCount,
     successRate: usefulSpawnCount / spawnCount,
     totalCompletionTokens,
     totalOutputTokens,

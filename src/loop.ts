@@ -19,11 +19,7 @@ import {
   looksLikePartialEscalationMarker,
   parseEscalationMarker,
 } from "./loop/escalation.js";
-import {
-  type ForceSummaryContext,
-  forceSummaryAfterIterLimit,
-  summarizePartialProgress,
-} from "./loop/force-summary.js";
+import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "./loop/force-summary.js";
 import {
   fixToolCallPairing,
   healLoadedMessages,
@@ -60,8 +56,6 @@ import { ToolRegistry } from "./tools.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
 const ESCALATION_MODEL = "deepseek-v4-pro";
-/** Iters-from-cap at which the parent loop starts injecting a remaining-budget tail into tool results. Subagent uses 3 against a 16-cap; parent's default 64-cap means this fires only at iter ≥ 60. */
-const PARENT_BUDGET_WARN_THRESHOLD = 5;
 
 export {
   fixToolCallPairing,
@@ -84,7 +78,6 @@ export interface CacheFirstLoopOptions {
   prefix: ImmutablePrefix;
   tools?: ToolRegistry;
   model?: string;
-  maxToolIters?: number;
   stream?: boolean;
   reasoningEffort?: "high" | "max";
   autoEscalate?: boolean;
@@ -101,8 +94,6 @@ export interface CacheFirstLoopOptions {
   confirmationGate?: PauseGate;
   /** Re-runs the prompt builder (applyMemoryStack / codeSystemPrompt) on /new so REASONIX.md edits take effect without a restart. Accepting a cache miss is the price. */
   rebuildSystem?: () => string;
-  /** What to do when the per-step iter budget is exhausted. "summarize" (default) fires a no-tools call so the user sees an answer — right for top-level chat. "pause" yields a `paused` event leaving the session intact — right for subagents whose parent can decide to resume or accept partial state. */
-  onIterBudgetExhausted?: "summarize" | "pause";
 }
 
 export interface ReconfigurableOptions {
@@ -118,7 +109,6 @@ export class CacheFirstLoop {
   readonly client: DeepSeekClient;
   readonly prefix: ImmutablePrefix;
   readonly tools: ToolRegistry;
-  readonly maxToolIters: number;
   readonly log = new AppendOnlyLog();
   readonly scratch = new VolatileScratch();
   readonly stats = new SessionStats();
@@ -134,7 +124,6 @@ export class CacheFirstLoop {
   /** One-shot 80% warning latch — cleared by setBudget so a bump re-arms at the new boundary. */
   private _budgetWarned = false;
   sessionName: string | null;
-  readonly onIterBudgetExhausted: "summarize" | "pause";
 
   hooks: ResolvedHook[];
   hookCwd: string;
@@ -177,7 +166,6 @@ export class CacheFirstLoop {
   private readonly _turnFailures: TurnFailureTracker;
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
-  private _toolDispatchesThisStep = 0;
   private context!: ContextManager;
 
   /** Subscribe API so UI hooks can derive `running` from finally-guaranteed insertions. */
@@ -202,9 +190,6 @@ export class CacheFirstLoop {
       resolveFailureThreshold(opts.failureThreshold, FAILURE_ESCALATION_THRESHOLD),
     );
 
-    // Last-resort backstop — primary stop is the token-context guard inside step().
-    this.maxToolIters = opts.maxToolIters ?? 64;
-    this.onIterBudgetExhausted = opts.onIterBudgetExhausted ?? "summarize";
     this.hooks = opts.hooks ?? [];
     this.hookCwd = opts.hookCwd ?? process.cwd();
     this.confirmationGate = opts.confirmationGate ?? defaultPauseGate;
@@ -228,21 +213,6 @@ export class CacheFirstLoop {
       stormThreshold: parsePositiveIntEnv(process.env.REASONIX_STORM_THRESHOLD),
       stormWindow: parsePositiveIntEnv(process.env.REASONIX_STORM_WINDOW),
     });
-
-    // Inject a remaining-iter hint into tool results when closing in on the per-turn cap. Subagent's child registry pre-installs its own augmenter before constructing the child loop — preserve it instead of clobbering.
-    if (!this.tools.hasResultAugmenter) {
-      this.tools.setResultAugmenter((_name, _args, result) => {
-        this._toolDispatchesThisStep++;
-        const remaining = this.maxToolIters - this._toolDispatchesThisStep;
-        if (remaining <= 0) {
-          return `${result}\n\n[budget: 0 of ${this.maxToolIters} tool calls left this turn — finalize NOW; the next iter forces a summary]`;
-        }
-        if (remaining <= PARENT_BUDGET_WARN_THRESHOLD) {
-          return `${result}\n\n[budget: ${remaining} of ${this.maxToolIters} tool calls left this turn — wrap up soon]`;
-        }
-        return result;
-      });
-    }
 
     // Heal-on-load: oversized tool results would 400 the next call before the user types.
     this.sessionName = opts.session ?? null;
@@ -618,7 +588,6 @@ export class CacheFirstLoop {
     this._turnSelfCorrected = false;
     this._escalateThisTurn = false;
     this._foldedThisTurn = false;
-    this._toolDispatchesThisStep = 0;
     let armedConsumed = false;
     if (this._proArmedForNextTurn) {
       this._escalateThisTurn = true;
@@ -650,13 +619,8 @@ export class CacheFirstLoop {
     }
     let pendingUser: string | null = userInput;
     const toolSpecs = this.prefix.tools();
-    // 70% of the iter budget is the "you're getting close" threshold. We
-    // only warn once per step so the user sees a single signal, not a
-    // string of identical yellow lines stacked up.
-    const warnAt = Math.max(1, Math.floor(this.maxToolIters * 0.7));
-    let warnedForIterBudget = false;
 
-    for (let iter = 0; iter < this.maxToolIters; iter++) {
+    for (let iter = 0; ; iter++) {
       if (signal.aborted) {
         // Esc means "stop now" — not "stop and force another 30-90s
         // reasoner call to produce a summary I didn't ask for". The
@@ -667,14 +631,13 @@ export class CacheFirstLoop {
         // the log if the user wants to continue — asking again
         // will hit a warm cache and be cheap.
         //
-        // Budget / context-guard still call forceSummaryAfterIterLimit
-        // because there the USER didn't choose to stop — we did —
-        // and leaving them staring at nothing is worse than one extra
-        // call.
+        // Context-guard still calls forceSummary because there the USER
+        // didn't choose to stop — we did — and leaving them staring at
+        // nothing is worse than one extra call.
         yield {
           turn: this._turn,
           role: "warning",
-          content: t("loop.abortedAtIter", { iter, cap: this.maxToolIters }),
+          content: t("loop.abortedAtIter", { iter }),
         };
         const stoppedMsg =
           "[aborted by user (Esc) — no summary produced. Ask again or /retry when ready; prior tool output is still in the log.]";
@@ -721,14 +684,6 @@ export class CacheFirstLoop {
           turn: this._turn,
           role: "status",
           content: t("loop.toolUploadStatus"),
-        };
-      }
-      if (!warnedForIterBudget && iter >= warnAt) {
-        warnedForIterBudget = true;
-        yield {
-          turn: this._turn,
-          role: "warning",
-          content: t("loop.toolBudgetWarning", { iter, cap: this.maxToolIters }),
         };
       }
       let messages = this.buildMessages(pendingUser);
@@ -1269,25 +1224,10 @@ export class CacheFirstLoop {
         }
       }
     }
-
-    // Iter budget exhausted while the model still wanted more tools.
-    // Top-level chat → force a no-tools summary call so the user sees
-    // SOMETHING. Subagents → emit `paused`, leaving session messages
-    // intact so the parent can resume by passing the session name back.
-    if (this.onIterBudgetExhausted === "pause") {
-      const partial = await summarizePartialProgress(this.summaryContext());
-      yield {
-        turn: this._turn,
-        role: "paused",
-        content: "",
-        sessionName: this.sessionName ?? undefined,
-        pausedAtIter: this.maxToolIters,
-        partialSummary: partial?.summary,
-      };
-      yield { turn: this._turn, role: "done", content: "" };
-      return;
-    }
-    yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "budget" });
+    // Unreachable — the for-loop above is unbounded. The model exits the
+    // loop via return statements when it produces no more tool calls,
+    // when the context guard fires, when an abort fires, or when a fatal
+    // error escapes the inner try blocks.
   }
 
   private summaryContext(): ForceSummaryContext {
@@ -1298,7 +1238,6 @@ export class CacheFirstLoop {
       appendAndPersist: (m) => this.appendAndPersist(m),
       recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
       turn: this._turn,
-      maxToolIters: this.maxToolIters,
     };
   }
 

@@ -389,7 +389,7 @@ describe("install_skill tool", () => {
     expect(calls[0]?.path).toContain(projectRoot);
   });
 
-  it("writes subagent frontmatter (runAs/model/max-iters/allowed-tools) when runAs=subagent", async () => {
+  it("writes subagent frontmatter (runAs/model/allowed-tools) when runAs=subagent", async () => {
     const reg = new ToolRegistry();
     registerSkillTools(reg, { homeDir: home, projectRoot, disableBuiltins: true });
     const out = await reg.dispatch("install_skill", {
@@ -398,7 +398,6 @@ describe("install_skill tool", () => {
       body: "You are a research subagent. Investigate and answer.",
       runAs: "subagent",
       model: "deepseek-chat",
-      maxToolIters: 24,
       allowedTools: ["read_file", "search_content"],
     });
     const parsed = JSON.parse(out);
@@ -406,14 +405,12 @@ describe("install_skill tool", () => {
     const raw = readFileSync(parsed.path, "utf8");
     expect(raw).toContain("runAs: subagent");
     expect(raw).toContain("model: deepseek-chat");
-    expect(raw).toContain("max-iters: 24");
     expect(raw).toContain("allowed-tools: read_file, search_content");
 
     const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
     const skill = store.read("deep-research");
     expect(skill?.runAs).toBe("subagent");
     expect(skill?.model).toBe("deepseek-chat");
-    expect(skill?.maxToolIters).toBe(24);
     expect(skill?.allowedTools).toEqual(["read_file", "search_content"]);
   });
 
@@ -425,13 +422,11 @@ describe("install_skill tool", () => {
       description: "inline skill",
       body: "do the thing",
       model: "deepseek-chat",
-      maxToolIters: 42,
       allowedTools: ["read_file"],
     });
     const raw = readFileSync(JSON.parse(out).path, "utf8");
     expect(raw).not.toContain("runAs:");
     expect(raw).not.toContain("model:");
-    expect(raw).not.toContain("max-iters:");
     expect(raw).not.toContain("allowed-tools:");
   });
 
