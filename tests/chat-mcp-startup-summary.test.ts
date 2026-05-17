@@ -213,12 +213,19 @@ async function captureStartupState(opts?: {
 // isolation. 15s leaves headroom for cold module-cache + slow CI hosts
 // without making the suite noticeably slower in the happy path.
 describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
+  let savedRenderer: string | undefined;
   beforeEach(() => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    savedRenderer = process.env.REASONIX_RENDERER;
+    // Renderer takes over the TTY + holds a singleton; tests probe chat
+    // startup state only, no real renderer needed.
+    process.env.REASONIX_RENDERER = "node";
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    if (savedRenderer === undefined) process.env.REASONIX_RENDERER = undefined;
+    else process.env.REASONIX_RENDERER = savedRenderer;
   });
 
   it("passes mcpSpecs through with empty initial mcpServers — bridging is deferred to App mount", async () => {

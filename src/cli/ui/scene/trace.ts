@@ -1,10 +1,14 @@
 import { appendFileSync, closeSync, openSync } from "node:fs";
-import { type RendererProcess, type RustEvent, spawnRenderer } from "./renderer-process.js";
-import { resolveRenderer } from "./renderer-resolver.js";
+import {
+  type CreateRendererOptions,
+  type Renderer,
+  type RustEvent,
+  createRenderer,
+  isRendererAvailable,
+} from "./renderer.js";
 
 const FILE_VAR = "REASONIX_SCENE_TRACE";
 const RENDERER_VAR = "REASONIX_RENDERER";
-const INTEGRATED_VAR = "REASONIX_RENDERER_INTEGRATED";
 
 let integratedHandler: ((event: RustEvent) => void) | null = null;
 
@@ -12,9 +16,11 @@ export function setIntegratedEventHandler(handler: (event: RustEvent) => void): 
   integratedHandler = handler;
 }
 
-/** Default-on when the rust renderer is active; set REASONIX_RENDERER_INTEGRATED=0 to opt back to the --emit-input split. */
+/** True when the rust renderer is selected and a native binding is loadable.
+ * Set REASONIX_RENDERER=node to opt out to the legacy Ink TUI. */
 export function isIntegratedRendererRequested(): boolean {
-  return process.env[RENDERER_VAR] !== "node" && process.env[INTEGRATED_VAR] !== "0";
+  if (process.env[RENDERER_VAR] === "node") return false;
+  return isRendererAvailable();
 }
 
 type Mode = "off" | "file" | "child";
@@ -23,7 +29,7 @@ type TraceState = {
   mode: Mode;
   opened: boolean;
   path: string | null;
-  child: RendererProcess | null;
+  child: Renderer | null;
 };
 
 const state: TraceState = { mode: "off", opened: false, path: null, child: null };
@@ -39,9 +45,7 @@ export function emitSceneMessage(message: unknown): void {
     case "off":
       return;
     case "file":
-      if (state.path) {
-        appendFileSync(state.path, `${JSON.stringify(message)}\n`);
-      }
+      if (state.path) appendFileSync(state.path, `${JSON.stringify(message)}\n`);
       return;
     case "child":
       state.child?.emit(message);
@@ -54,7 +58,7 @@ export const emitSceneFrame = emitSceneMessage;
 
 export function resetSceneTrace(): void {
   if (state.child) {
-    state.child.close();
+    void state.child.close();
   }
   state.mode = "off";
   state.opened = false;
@@ -63,29 +67,19 @@ export function resetSceneTrace(): void {
 }
 
 export async function flushSceneTrace(): Promise<void> {
-  if (state.child) {
-    await state.child.close();
-  }
+  if (state.child) await state.child.close();
 }
 
-/** Force the trace child to spawn now — React useEffect in useSceneTrace was unreliable on macOS (sometimes never fired under npx). */
+/** Force the renderer to be created now. Same single-process model as the
+ * rest of the app, so no spawn race — just makes the timing explicit at the
+ * chat boot site instead of relying on a React effect to fire first. */
 export function ensureSceneTraceReady(): void {
   ensureInitialized();
-  // Seed an empty trace frame so the rust integrated loop has `have_state=true`
-  // immediately — without this, if the stdin pipe closes before the first
-  // useSceneTrace effect fires (Ink unmount cascade on macOS), rust hits its
-  // `if stdin_closed && !have_state { return Ok(()) }` early-exit at ~100ms.
-  if (state.mode === "child" && state.child) {
-    state.child.emit({ type: "trace" });
-    process.stderr.write("[trace] seed frame written\n");
-  }
 }
 
 function ensureInitialized(): void {
   if (state.opened) return;
   state.opened = true;
-  // Explicit file-trace opt-in wins over the renderer choice — it's the
-  // dev/replay surface and the user has clearly asked for it.
   const raw = process.env[FILE_VAR];
   if (raw && raw.length > 0) {
     state.mode = "file";
@@ -94,23 +88,11 @@ function ensureInitialized(): void {
     return;
   }
   if (process.env[RENDERER_VAR] === "node") return;
-  const { command, source } = resolveRenderer();
-  process.stderr.write(`[trace] resolver source=${source} command=${JSON.stringify(command)}\n`);
-  if (source === null || command.length === 0) {
-    process.stderr.write(
-      "▲ trace.ts: resolveRenderer() returned no usable command — scene trace stays off. " +
-        "Check optional-dep install (`ls node_modules/@reasonix/render-*`) or set REASONIX_RENDER_BIN.\n",
-    );
-    return;
-  }
-  const integrated = process.env[INTEGRATED_VAR] !== "0";
-  process.stderr.write(`[trace] spawning rust child (integrated=${integrated})\n`);
+  if (!isRendererAvailable()) return;
+  const opts: CreateRendererOptions = {};
+  if (integratedHandler) opts.onEvent = integratedHandler;
   state.mode = "child";
-  state.child = spawnRenderer({
-    command,
-    integrated,
-    onEvent: integrated && integratedHandler ? integratedHandler : undefined,
-  });
+  state.child = createRenderer(opts);
 }
 
 function truncate(path: string): void {

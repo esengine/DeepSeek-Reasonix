@@ -48,6 +48,11 @@ desktop/src-tauri/binaries/
 # Cargo build artifacts for the workspace at the repo root.
 /target/
 
+# NAPI build artifacts — produced by `napi build`, never committed.
+crates/reasonix-render/*.node
+crates/reasonix-render/npm/**/*.node
+subpackages/render-*/*.node
+
 # Design mock-up reference (local, not part of repo)
 .design-ref/
 *.cpuprofile

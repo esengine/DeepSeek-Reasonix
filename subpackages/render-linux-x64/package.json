@@ -1,7 +1,7 @@
 {
   "name": "@reasonix/render-linux-x64",
-  "version": "0.44.2-rc.4",
-  "description": "Reasonix ratatui renderer — Linux x64 (glibc) binary. Installed automatically as an optional dependency of the main `reasonix` package; do not depend on it directly.",
+  "version": "0.45.0-rc.0",
+  "description": "Reasonix ratatui renderer — Linux x64 (glibc) native Node addon. Installed automatically as an optional dependency of the main `reasonix` package; do not depend on it directly.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,10 +17,8 @@
   "libc": [
     "glibc"
   ],
+  "main": "reasonix-render.linux-x64-gnu.node",
   "files": [
-    "bin/"
-  ],
-  "bin": {
-    "reasonix-render": "bin/reasonix-render"
-  }
+    "reasonix-render.linux-x64-gnu.node"
+  ]
 }

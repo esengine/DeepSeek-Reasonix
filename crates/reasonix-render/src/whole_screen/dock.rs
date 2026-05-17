@@ -88,7 +88,12 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
         COMPOSER_PLACEHOLDER
     };
     let prompt_glyph: &str = if prompt_input.is_some() { "? " } else { "❯ " };
-    let show_caret = (tick / 6).is_multiple_of(2);
+    // Caret stays solid — a blinking caret triggers a full-frame sync-update
+    // ANSI burst every 480ms (BeginSynchronizedUpdate/EndSynchronizedUpdate),
+    // which on Windows Terminal evicts the IME composition overlay drawn at
+    // the cursor position and produces visible flicker while typing CJK.
+    let _ = tick;
+    let show_caret = true;
     let total_chars = text.chars().count();
     let cursor = state
         .composer_cursor

@@ -82,8 +82,6 @@ fn main() -> Result<()> {
 
     let result = if args.iter().any(|a| a == "--demo") {
         run_demo_loop(&mut terminal)
-    } else if args.iter().any(|a| a == "--integrated") {
-        reasonix_render::integrated::run_integrated_loop(&mut terminal)
     } else {
         run_stream_loop(&mut terminal)
     };

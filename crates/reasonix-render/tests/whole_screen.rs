@@ -1029,25 +1029,26 @@ fn composer_caret_renders_at_cursor_index() {
 }
 
 #[test]
-fn composer_caret_blinks_with_tick() {
+fn composer_caret_stays_solid_across_ticks() {
     let state = demo_state();
-    let backend_on = TestBackend::new(120, 30);
-    let mut term_on = Terminal::new(backend_on).unwrap();
-    term_on
+    let backend_a = TestBackend::new(120, 30);
+    let mut term_a = Terminal::new(backend_a).unwrap();
+    term_a
         .draw(|f| f.render_widget(WholeScreen::new(&state).with_tick(0), f.area()))
         .unwrap();
-    let backend_off = TestBackend::new(120, 30);
-    let mut term_off = Terminal::new(backend_off).unwrap();
-    term_off
+    let backend_b = TestBackend::new(120, 30);
+    let mut term_b = Terminal::new(backend_b).unwrap();
+    term_b
         .draw(|f| f.render_widget(WholeScreen::new(&state).with_tick(6), f.area()))
         .unwrap();
-    let on = buffer_string(term_on.backend().buffer());
-    let off = buffer_string(term_off.backend().buffer());
-    let on_count = on.matches('▮').count();
-    let off_count = off.matches('▮').count();
-    assert!(
-        on_count > off_count,
-        "caret should be visible at tick 0 (on={on_count}, off={off_count})"
+    let a = buffer_string(term_a.backend().buffer());
+    let b = buffer_string(term_b.backend().buffer());
+    let a_count = a.matches('▮').count();
+    let b_count = b.matches('▮').count();
+    assert!(a_count >= 1, "caret should be visible at tick 0 (count={a_count})");
+    assert_eq!(
+        a_count, b_count,
+        "caret must not blink — same visibility across ticks (a={a_count}, b={b_count})"
     );
 }
 

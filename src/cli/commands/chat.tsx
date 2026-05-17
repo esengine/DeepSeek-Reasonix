@@ -31,16 +31,11 @@ import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
 import { KeystrokeProvider, type KeystrokeReader } from "../ui/keystroke-context.js";
-import {
-  type RustKeystrokeReader,
-  createRustKeystrokeReader,
-  nullKeystrokeReader,
-} from "../ui/scene/input-adapter.js";
+import { nullKeystrokeReader } from "../ui/scene/input-adapter.js";
 import { cancelAllListPickers, resolveListPicker } from "../ui/scene/list-picker-store.js";
 import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import { cancelAllPromptInputs, resolvePromptInput } from "../ui/scene/prompt-input-store.js";
-import { resolveRenderer } from "../ui/scene/renderer-resolver.js";
 import {
   ensureSceneTraceReady,
   isIntegratedRendererRequested,
@@ -419,39 +414,22 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     }
   }
 
-  let rustRendererActive = process.env.REASONIX_RENDERER !== "node";
-  let resolved = rustRendererActive ? resolveRenderer() : undefined;
-  if (rustRendererActive && (!resolved || resolved.source === null)) {
+  let rustRendererActive = isIntegratedRendererRequested();
+  if (process.env.REASONIX_RENDERER !== "node" && !rustRendererActive) {
     process.stderr.write(
-      `▲ Rust renderer binary not found — falling back to the Node/Ink TUI.\n  Install @reasonix/render-${process.platform}-${process.arch}, set REASONIX_RENDER_BIN to a built binary, or run from source with cargo on PATH.\n`,
+      `▲ Rust renderer native binding not loadable for ${process.platform}-${process.arch} — falling back to the Node/Ink TUI.\n  Run \`npm run build:rust\` for a source build, or reinstall reasonix to fetch the optional dep.\n`,
     );
     process.env.REASONIX_RENDERER = "node";
     rustRendererActive = false;
-    resolved = undefined;
   }
-  const rustIntegrated = rustRendererActive && isIntegratedRendererRequested();
   const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
   const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
-  const rustInputChild: RustKeystrokeReader | undefined =
-    rustRendererActive && !rustIntegrated && resolved
-      ? createRustKeystrokeReader({ command: resolved.inputCommand })
-      : undefined;
-  const keystrokeReader: KeystrokeReader | undefined = rustIntegrated
+  const keystrokeReader: KeystrokeReader | undefined = rustRendererActive
     ? nullKeystrokeReader
-    : rustInputChild;
+    : undefined;
   const stderrRestore = rustRendererActive ? redirectStderrToLogFile() : undefined;
 
-  // makeNullStdin / makeNullStdout are pure JS streams with no libuv handles —
-  // they don't keep the event loop alive. On macOS the React-effect-driven
-  // rust trace child spawn (useSceneTrace → emitSceneMessage) is enqueued
-  // microseconds AFTER render() returns, but the event loop sees no handles
-  // and exits before the effect runs. Linux/Windows happen to keep the loop
-  // alive via other handles in the boot path; mac doesn't. Defensive
-  // setInterval holds the loop open until waitUntilExit returns; cleared in
-  // finally below.
-  const rustKeepAlive = rustRendererActive ? setInterval(() => {}, 0x7fffffff) : undefined;
-
-  if (rustIntegrated) {
+  if (rustRendererActive) {
     setIntegratedEventHandler((event) => {
       if (event.event === "submit") {
         qqSubmitRef.current?.(event.text);
@@ -477,12 +455,9 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       }
       // interrupt: no-op for now; terminal SIGINT already reaches Node.
     });
-    // Eagerly spawn the rust child now that the event handler is set.
-    // Previously we relied on a React useEffect (useSceneTrace →
-    // emitSceneMessage → trace.ts ensureInitialized) to trigger spawn,
-    // but on macOS that effect simply never fired in some npx contexts
-    // — Node held the event loop open (via the keep-alive interval) but
-    // the rust child was never spawned and nothing rendered.
+    // Synchronous create_renderer install — registers the ThreadsafeFunction
+    // before render() returns, so libuv has a ref'd handle and the event
+    // loop stays alive across all platforms.
     ensureSceneTraceReady();
   }
 
@@ -528,10 +503,8 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   try {
     await waitUntilExit();
   } finally {
-    if (rustKeepAlive) clearInterval(rustKeepAlive);
     await runtime.closeAll();
     qqChannel?.stop();
-    if (rustInputChild) await rustInputChild.close();
     if (stderrRestore) stderrRestore();
     // Eat any pending terminal-feature-detection responses (#365) so the
     // parent shell doesn't print them as junk after exit.

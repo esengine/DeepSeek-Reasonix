@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -27,35 +27,38 @@ use crate::whole_screen::{
 type Terminal = ratatui::Terminal<CrosstermBackend<BufWriter<io::Stdout>>>;
 
 enum Evt {
-    Stdin(String),
-    StdinClosed,
+    Scene(String),
+    SceneClosed,
     Term(Event),
     TermClosed,
 }
 
-pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
+/// Run the integrated event loop. `scene_rx` carries newline-delimited JSON
+/// scene messages (Node → Rust via NAPI `Renderer::emit`). The loop exits
+/// when the user quits, the channel disconnects, or a fatal terminal error
+/// occurs.
+pub fn run_integrated_loop(
+    terminal: &mut Terminal,
+    scene_rx: mpsc::Receiver<String>,
+) -> Result<()> {
     let mut stdout = io::stdout();
     let mouse_enabled = crossterm::execute!(stdout, EnableMouseCapture).is_ok();
     let paste_enabled = crossterm::execute!(stdout, EnableBracketedPaste).is_ok();
 
     let (tx, rx) = mpsc::channel::<Evt>();
-    let tx_stdin = tx.clone();
-    let _stdin_reader = thread::spawn(move || {
-        let stdin = io::stdin();
-        for line in stdin.lock().lines() {
-            match line {
-                Ok(l) => {
-                    if tx_stdin.send(Evt::Stdin(l)).is_err() {
-                        return;
-                    }
-                }
-                Err(_) => {
-                    let _ = tx_stdin.send(Evt::StdinClosed);
+    let tx_scene = tx.clone();
+    let _scene_reader = thread::spawn(move || loop {
+        match scene_rx.recv() {
+            Ok(line) => {
+                if tx_scene.send(Evt::Scene(line)).is_err() {
                     return;
                 }
             }
+            Err(_) => {
+                let _ = tx_scene.send(Evt::SceneClosed);
+                return;
+            }
         }
-        let _ = tx_stdin.send(Evt::StdinClosed);
     });
     let tx_term = tx.clone();
     let _term_reader = thread::spawn(move || loop {
@@ -100,15 +103,18 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
     let scroll_step: u16 = 3;
     let page_step: u16 = 10;
     let mut last_size = terminal.size().ok();
-    let mut stdin_closed = false;
     let mut should_exit = false;
     let mut pending_term: Option<Event> = None;
     let mut prev_emitted_buffer: String = String::new();
+    // Suppress unused warnings on `have_state` — it's the historical
+    // first-frame marker; kept so future "render placeholder until first
+    // scene frame lands" logic can re-attach without re-plumbing.
+    let _ = have_state;
 
     let result: Result<()> = (|| loop {
         while let Ok(evt) = rx.try_recv() {
             match evt {
-                Evt::Stdin(line) => {
+                Evt::Scene(line) => {
                     if line.trim().is_empty() {
                         continue;
                     }
@@ -131,8 +137,9 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                         dirty = true;
                     }
                 }
-                Evt::StdinClosed => {
-                    stdin_closed = true;
+                Evt::SceneClosed => {
+                    should_exit = true;
+                    break;
                 }
                 Evt::Term(e) => {
                     pending_term = Some(e);
@@ -262,7 +269,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
             dirty = false;
         }
 
-        if (stdin_closed && !have_state) || should_exit {
+        if should_exit {
             return Ok(());
         }
 
@@ -274,7 +281,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                 .max(Duration::from_millis(1));
             match rx.recv_timeout(wait) {
                 Ok(Evt::Term(e)) => e,
-                Ok(Evt::Stdin(line)) => {
+                Ok(Evt::Scene(line)) => {
                     if !line.trim().is_empty() {
                         if let Ok(p) = decode_message(&line) {
                             match p {
@@ -297,10 +304,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                     }
                     continue;
                 }
-                Ok(Evt::StdinClosed) => {
-                    stdin_closed = true;
-                    continue;
-                }
+                Ok(Evt::SceneClosed) => return Ok(()),
                 Ok(Evt::TermClosed) => return Ok(()),
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
@@ -721,8 +725,15 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
     result
 }
 
-fn needs_animation(_scene: &SceneState, setup_pending: bool, has_selection: bool) -> bool {
-    !setup_pending && !has_selection
+fn needs_animation(scene: &SceneState, setup_pending: bool, has_selection: bool) -> bool {
+    if setup_pending || has_selection {
+        return false;
+    }
+    // Only redraw on the anim tick when something is actually moving
+    // (spinner / streaming reveal). Idle scenes leave the frame buffer
+    // alone so IME composition isn't repeatedly overwritten by sync-update
+    // bursts. User keypresses still mark dirty via the event branch below.
+    scene.busy
 }
 
 fn history_prev(scene: &SceneState, cursor: &mut i32) -> Option<String> {
@@ -749,6 +760,16 @@ fn history_next(scene: &SceneState, cursor: &mut i32) -> Option<String> {
 }
 
 fn emit_event(event: serde_json::Value) {
+    // NAPI path: in-process JS callback installed by `create_renderer`.
+    // Falls back to stderr (one-line JSON) for standalone debug / replay
+    // runs that don't go through the renderer.
+    if let Some(emitter) = crate::napi_api::active_emitter() {
+        emitter.emit(&event);
+        if let Ok(s) = serde_json::to_string(&event) {
+            approval_log(&format!("emit {s}"));
+        }
+        return;
+    }
     if let Ok(s) = serde_json::to_string(&event) {
         approval_log(&format!("emit {s}"));
         let mut out = io::stderr().lock();

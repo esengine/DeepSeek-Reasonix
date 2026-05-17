@@ -1,6 +1,6 @@
 {
   "name": "reasonix",
-  "version": "0.44.2-rc.4",
+  "version": "0.45.0-rc.0",
   "description": "DeepSeek-native coding agent: cache-first loop, flash-first cost control, tool-call repair.",
   "type": "module",
   "bin": {
@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "build": "tsup && node scripts/copy-dashboard-vendor-css.mjs",
-    "rust:build": "cargo build --release --bin reasonix-render",
+    "rust:build": "node scripts/dev-prepare.mjs",
     "render:versions:sync": "node scripts/sync-render-versions.mjs",
     "render:versions:check": "node scripts/sync-render-versions.mjs --check",
     "dev:prepare": "node scripts/dev-prepare.mjs",
@@ -110,10 +110,10 @@
     "vitest": "^2.1.5"
   },
   "optionalDependencies": {
-    "@reasonix/render-darwin-arm64": "0.44.2-rc.4",
-    "@reasonix/render-darwin-x64": "0.44.2-rc.4",
-    "@reasonix/render-linux-arm64": "0.44.2-rc.4",
-    "@reasonix/render-linux-x64": "0.44.2-rc.4",
-    "@reasonix/render-win32-x64": "0.44.2-rc.4"
+    "@reasonix/render-darwin-arm64": "0.45.0-rc.0",
+    "@reasonix/render-darwin-x64": "0.45.0-rc.0",
+    "@reasonix/render-linux-arm64": "0.45.0-rc.0",
+    "@reasonix/render-linux-x64": "0.45.0-rc.0",
+    "@reasonix/render-win32-x64": "0.45.0-rc.0"
   }
 }
