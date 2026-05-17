@@ -1,14 +1,5 @@
-/**
- * Orchestrate — split a complex task into independent subtasks, fan out
- * parallel subagents for each, and merge results.
- *
- * Engineered around Reasonix's cache-first architecture: all subagents
- * share one ImmutablePrefix so the second and later subagents hit
- * DeepSeek's prefix-cache (~90% cost reduction on subsequent spawns).
- *
- * No "Lead Agent" LLM call — the decomposition is data parallel (one
- * subagent per task[] entry), and the merge is a pure string formatter.
- */
+// Orchestrate: parallel subagent fan-out with shared prefix-cache.
+// No Lead-Agent LLM call — decomposition is data-parallel, merge is pure formatter.
 
 import type { DeepSeekClient } from "../client.js";
 import { ImmutablePrefix } from "../memory/runtime.js";
