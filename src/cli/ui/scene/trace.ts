@@ -12,8 +12,9 @@ export function setIntegratedEventHandler(handler: (event: RustEvent) => void): 
   integratedHandler = handler;
 }
 
+/** Default-on when the rust renderer is active; set REASONIX_RENDERER_INTEGRATED=0 to opt back to the --emit-input split. */
 export function isIntegratedRendererRequested(): boolean {
-  return process.env[RENDERER_VAR] !== "node" && process.env[INTEGRATED_VAR] === "1";
+  return process.env[RENDERER_VAR] !== "node" && process.env[INTEGRATED_VAR] !== "0";
 }
 
 type Mode = "off" | "file" | "child";
@@ -82,7 +83,7 @@ function ensureInitialized(): void {
   if (process.env[RENDERER_VAR] === "node") return;
   const { command, source } = resolveRenderer();
   if (source === null || command.length === 0) return;
-  const integrated = process.env[INTEGRATED_VAR] === "1";
+  const integrated = process.env[INTEGRATED_VAR] !== "0";
   state.mode = "child";
   state.child = spawnRenderer({
     command,
