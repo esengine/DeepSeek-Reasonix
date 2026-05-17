@@ -93,7 +93,7 @@ export interface Scrollback {
       cacheHit: number;
       cost: number;
     },
-    extras?: { promptCap?: number; elapsedMs?: number },
+    extras?: { promptCap?: number; elapsedMs?: number; sessionCacheHit?: number },
   ): void;
   /** Wipe every card + toast — used by /clear and /new. */
   reset(): void;
@@ -306,6 +306,7 @@ export function useScrollback(): Scrollback {
           usage,
           promptCap: extras?.promptCap,
           elapsedMs: extras?.elapsedMs,
+          sessionCacheHit: extras?.sessionCacheHit,
         });
       },
       reset() {

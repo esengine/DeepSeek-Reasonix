@@ -201,7 +201,7 @@ describe("StatusRow — statusBar config toggles", () => {
     );
     expect(text).toContain("ctx");
     expect(text).toContain("72%");
-    expect(text).toContain("703K/977K");
+    expect(text).toContain("720K/1000K");
   });
 
   it("showCtxUsage=false hides ctx pill", async () => {

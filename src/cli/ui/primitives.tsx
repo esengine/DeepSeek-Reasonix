@@ -17,10 +17,10 @@ export function ChromeRule(): React.ReactElement {
   return <Text dimColor>{"─".repeat(w)}</Text>;
 }
 
-/** Compact binary-K formatter — `1234 → "1.2K"`, `131072 → "128K"`. */
+/** Compact decimal-K token formatter — `1234 → "1.2K"`, `131000 → "131K"`. Base-1000 matches DeepSeek's "1M context" / "128K" wording and the web dashboard's display, so the CLI bottom bar and the web bar agree on ctx capacity. */
 export function formatTokens(n: number): string {
-  if (n < 1024) return String(n);
-  const k = n / 1024;
+  if (n < 1000) return String(n);
+  const k = n / 1000;
   return k >= 100 ? `${k.toFixed(0)}K` : `${k.toFixed(1)}K`;
 }
 

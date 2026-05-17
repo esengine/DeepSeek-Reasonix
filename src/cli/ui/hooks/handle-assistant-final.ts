@@ -69,8 +69,12 @@ export function handleAssistantFinal(ev: LoopEvent, ctx: AssistantFinalContext):
       model: ev.stats.model,
       usage: ev.stats.usage,
     });
+    // Pass the session-aggregate cache-hit so the persistent status bar
+    // mirrors what the web dashboard reads from `loop.stats.summary()`
+    // (issue #1028) instead of showing this single turn's ratio.
     ctx.translator.turnEnd(ev.stats, ctx.streamRef.reasoning, {
       promptCap: ctx.ctxMax > 0 ? ctx.ctxMax : undefined,
+      sessionCacheHit: ctx.getSessionSummary().cacheHitRatio,
     });
     if (ctx.ctxMax > 0) {
       ctx.log.pushCtxPressureIfHigh(ev.stats.usage.promptTokens, ctx.ctxMax);

@@ -165,6 +165,27 @@ describe("ui reducer", () => {
     expect(s.status.cacheHit).toBeCloseTo(0.92);
   });
 
+  it("turn.end routes sessionCacheHit (when provided) into status.cacheHit so the bar matches the web aggregate (issue #1028)", () => {
+    const s = run([
+      {
+        type: "turn.end",
+        usage: { prompt: 1000, reason: 0, output: 50, cacheHit: 0.98, cost: 0.001 },
+        sessionCacheHit: 0.951,
+      },
+    ]);
+    expect(s.status.cacheHit).toBeCloseTo(0.951);
+  });
+
+  it("turn.end falls back to per-turn usage.cacheHit when sessionCacheHit is absent (back-compat)", () => {
+    const s = run([
+      {
+        type: "turn.end",
+        usage: { prompt: 1000, reason: 0, output: 50, cacheHit: 0.85, cost: 0.001 },
+      },
+    ]);
+    expect(s.status.cacheHit).toBeCloseTo(0.85);
+  });
+
   it("turn.end records promptTokens and remembers promptCap across turns", () => {
     const s = run([
       {

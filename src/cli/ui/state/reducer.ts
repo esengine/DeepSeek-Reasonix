@@ -98,7 +98,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
           ...state.status,
           cost: event.usage.cost,
           sessionCost,
-          cacheHit: event.usage.cacheHit,
+          cacheHit: event.sessionCacheHit ?? event.usage.cacheHit,
           promptTokens: event.usage.prompt,
           promptCap: event.promptCap ?? state.status.promptCap,
           sessionInputTokens,

@@ -69,7 +69,7 @@ export class TurnTranslator {
   turnEnd(
     stats: TurnStats,
     reasoningText: string,
-    extras?: { promptCap?: number; elapsedMs?: number },
+    extras?: { promptCap?: number; elapsedMs?: number; sessionCacheHit?: number },
   ): void {
     this.log.endTurn(
       {

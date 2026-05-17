@@ -100,6 +100,8 @@ const turnEnd = z.object({
   /** Model context window — drives the prompt-bar denominator on the auto-emitted UsageCard. */
   promptCap: z.number().int().positive().optional(),
   elapsedMs: z.number().nonnegative().optional(),
+  /** Session-aggregate cache-hit ratio routed into `status.cacheHit` so the persistent bottom bar matches the web dashboard's number. When absent, the reducer falls back to the per-turn `usage.cacheHit`. */
+  sessionCacheHit: z.number().min(0).max(1).optional(),
 });
 
 const modeChange = z.object({
