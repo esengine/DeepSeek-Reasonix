@@ -68,6 +68,19 @@ export async function flushSceneTrace(): Promise<void> {
   }
 }
 
+/** Force the trace child to spawn now — React useEffect in useSceneTrace was unreliable on macOS (sometimes never fired under npx). */
+export function ensureSceneTraceReady(): void {
+  ensureInitialized();
+  // Seed an empty trace frame so the rust integrated loop has `have_state=true`
+  // immediately — without this, if the stdin pipe closes before the first
+  // useSceneTrace effect fires (Ink unmount cascade on macOS), rust hits its
+  // `if stdin_closed && !have_state { return Ok(()) }` early-exit at ~100ms.
+  if (state.mode === "child" && state.child) {
+    state.child.emit({ type: "trace" });
+    process.stderr.write("[trace] seed frame written\n");
+  }
+}
+
 function ensureInitialized(): void {
   if (state.opened) return;
   state.opened = true;
@@ -82,8 +95,16 @@ function ensureInitialized(): void {
   }
   if (process.env[RENDERER_VAR] === "node") return;
   const { command, source } = resolveRenderer();
-  if (source === null || command.length === 0) return;
+  process.stderr.write(`[trace] resolver source=${source} command=${JSON.stringify(command)}\n`);
+  if (source === null || command.length === 0) {
+    process.stderr.write(
+      "▲ trace.ts: resolveRenderer() returned no usable command — scene trace stays off. " +
+        "Check optional-dep install (`ls node_modules/@reasonix/render-*`) or set REASONIX_RENDER_BIN.\n",
+    );
+    return;
+  }
   const integrated = process.env[INTEGRATED_VAR] !== "0";
+  process.stderr.write(`[trace] spawning rust child (integrated=${integrated})\n`);
   state.mode = "child";
   state.child = spawnRenderer({
     command,

@@ -339,6 +339,7 @@ export const EN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "list saved sessions (current marked with ▸)" },
+    title: { description: "ask the model to rename this session from the conversation" },
     qq: {
       description: "connect, inspect, or disconnect the QQ channel for this session",
       argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
@@ -590,6 +591,13 @@ export const EN: TranslationSchema = {
     atMentions: "▸ @mentions: {parts}",
     atUrl: "▸ @url: {parts}",
     atUrlFailed: "@url expansion failed",
+    sessionTitleNoSession: "▸ no persisted session is active, so there is nothing to rename.",
+    sessionTitleNoContent: "▸ not enough conversation content to name this session yet.",
+    sessionTitleNoTitle: "▸ the model did not return a usable session title.",
+    sessionTitleUpdated: '▸ session title updated: "{title}"',
+    sessionTitleRenameFailed: '▸ could not rename the session for title "{title}".',
+    sessionTitleRenamed: '▸ session renamed to "{name}" — {title}',
+    sessionTitleAutoRenamed: '▸ auto-named session "{name}" — {title}',
     denied: "▸ denied: {cmd}{context}",
     alwaysAllowed: '▸ always allowed "{prefix}" for {dir}',
     runningCommand: "▸ running: {cmd}",
@@ -740,6 +748,11 @@ export const EN: TranslationSchema = {
       keysNeedsTui: "/keys needs a TUI context (postKeys wired).",
       unknownCommand: "unknown command: /{cmd} — did you mean {list}?",
       unknownCommandShort: "unknown command: /{cmd}  (try /help)",
+    },
+    sessions: {
+      titleUnavailable: "/title is only available in an active persisted TUI session.",
+      titleStarted: "▸ naming session…",
+      titleFailed: "▸ session title failed: {reason}",
     },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",

@@ -55,6 +55,8 @@ export interface SessionMeta {
   cacheMissTokens?: number;
   /** Last turn's promptTokens — lets /status render the context bar before the next turn fires. */
   lastPromptTokens?: number;
+  /** True when the session filename/summary was generated from conversation content. */
+  autoTitleGenerated?: boolean;
 }
 
 export function sessionsDir(): string {

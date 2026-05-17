@@ -41,7 +41,11 @@ import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import { cancelAllPromptInputs, resolvePromptInput } from "../ui/scene/prompt-input-store.js";
 import { resolveRenderer } from "../ui/scene/renderer-resolver.js";
-import { isIntegratedRendererRequested, setIntegratedEventHandler } from "../ui/scene/trace.js";
+import {
+  ensureSceneTraceReady,
+  isIntegratedRendererRequested,
+  setIntegratedEventHandler,
+} from "../ui/scene/trace.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
   type McpLifecycleNotice,
@@ -437,6 +441,16 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     : rustInputChild;
   const stderrRestore = rustRendererActive ? redirectStderrToLogFile() : undefined;
 
+  // makeNullStdin / makeNullStdout are pure JS streams with no libuv handles —
+  // they don't keep the event loop alive. On macOS the React-effect-driven
+  // rust trace child spawn (useSceneTrace → emitSceneMessage) is enqueued
+  // microseconds AFTER render() returns, but the event loop sees no handles
+  // and exits before the effect runs. Linux/Windows happen to keep the loop
+  // alive via other handles in the boot path; mac doesn't. Defensive
+  // setInterval holds the loop open until waitUntilExit returns; cleared in
+  // finally below.
+  const rustKeepAlive = rustRendererActive ? setInterval(() => {}, 0x7fffffff) : undefined;
+
   if (rustIntegrated) {
     setIntegratedEventHandler((event) => {
       if (event.event === "submit") {
@@ -463,6 +477,13 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       }
       // interrupt: no-op for now; terminal SIGINT already reaches Node.
     });
+    // Eagerly spawn the rust child now that the event handler is set.
+    // Previously we relied on a React useEffect (useSceneTrace →
+    // emitSceneMessage → trace.ts ensureInitialized) to trigger spawn,
+    // but on macOS that effect simply never fired in some npx contexts
+    // — Node held the event loop open (via the keep-alive interval) but
+    // the rust child was never spawned and nothing rendered.
+    ensureSceneTraceReady();
   }
 
   const { waitUntilExit } = render(
@@ -507,6 +528,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   try {
     await waitUntilExit();
   } finally {
+    if (rustKeepAlive) clearInterval(rustKeepAlive);
     await runtime.closeAll();
     qqChannel?.stop();
     if (rustInputChild) await rustInputChild.close();
