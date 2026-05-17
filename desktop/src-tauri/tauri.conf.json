@@ -42,7 +42,16 @@
       "../../dist": "dist",
       "../../data": "data"
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "languages": ["English", "SimpChinese"],
+        "languageFiles": {
+          "English": "nsis/English.nsh",
+          "SimpChinese": "nsis/SimpChinese.nsh"
+        }
+      }
+    }
   },
   "plugins": {
     "updater": {
