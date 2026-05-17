@@ -27,6 +27,8 @@
   "scripts": {
     "build": "tsup && node scripts/copy-dashboard-vendor-css.mjs",
     "rust:build": "cargo build --release --bin reasonix-render",
+    "render:versions:sync": "node scripts/sync-render-versions.mjs",
+    "render:versions:check": "node scripts/sync-render-versions.mjs --check",
     "dev:prepare": "node scripts/dev-prepare.mjs",
     "dev": "npm run dev:prepare && tsx src/cli/index.ts",
     "chat": "npm run dev:prepare && tsx src/cli/index.ts chat",
@@ -38,9 +40,9 @@
     "lint:fix": "biome check --write src tests",
     "format": "biome format --write src tests",
     "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard",
-    "verify": "npm run build && npm run lint && npm run typecheck && npm run test --silent",
+    "verify": "npm run render:versions:check && npm run build && npm run lint && npm run typecheck && npm run test --silent",
     "prepare": "simple-git-hooks || true",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "prepublishOnly": "npm run render:versions:check && npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "simple-git-hooks": {
     "pre-commit": "npm run lint",
@@ -106,5 +108,12 @@
     "typescript": "^5.6.3",
     "uplot": "^1.6.31",
     "vitest": "^2.1.5"
+  },
+  "optionalDependencies": {
+    "@reasonix/render-darwin-arm64": "0.43.0",
+    "@reasonix/render-darwin-x64": "0.43.0",
+    "@reasonix/render-linux-arm64": "0.43.0",
+    "@reasonix/render-linux-x64": "0.43.0",
+    "@reasonix/render-win32-x64": "0.43.0"
   }
 }

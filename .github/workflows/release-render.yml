@@ -1,0 +1,134 @@
+name: Release render binaries
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.44.0). Required when running manually."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { label: "win32-x64",    rust: "x86_64-pc-windows-msvc",      os: "windows-latest", bin: "reasonix-render.exe" }
+          - { label: "linux-x64",    rust: "x86_64-unknown-linux-gnu",    os: "ubuntu-22.04",   bin: "reasonix-render" }
+          - { label: "linux-arm64",  rust: "aarch64-unknown-linux-gnu",   os: "ubuntu-22.04",   bin: "reasonix-render", cross: true }
+          - { label: "darwin-x64",   rust: "x86_64-apple-darwin",         os: "macos-13",       bin: "reasonix-render" }
+          - { label: "darwin-arm64", rust: "aarch64-apple-darwin",        os: "macos-14",       bin: "reasonix-render" }
+    runs-on: ${{ matrix.target.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust (${{ matrix.target.rust }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target.rust }}
+
+      - name: Install cross-compile linker (linux-arm64 only)
+        if: matrix.target.label == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: render-${{ matrix.target.label }}
+
+      - name: Build reasonix-render
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target.rust }} --bin reasonix-render
+
+      - name: Stage subpackage binary
+        shell: bash
+        run: |
+          mkdir -p subpackages/render-${{ matrix.target.label }}/bin
+          cp target/${{ matrix.target.rust }}/release/${{ matrix.target.bin }} subpackages/render-${{ matrix.target.label }}/bin/${{ matrix.target.bin }}
+
+      - name: Upload subpackage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: subpackage-${{ matrix.target.label }}
+          path: subpackages/render-${{ matrix.target.label }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            raw="${{ inputs.tag }}"
+          else
+            raw="${GITHUB_REF_NAME}"
+          fi
+          # Strip leading v if present so npm sees a clean SemVer.
+          echo "version=${raw#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync subpackage + optionalDependencies versions to tag
+        run: node scripts/sync-render-versions.mjs ${{ steps.tag.outputs.version }}
+
+      - name: Verify versions are in sync
+        run: node scripts/sync-render-versions.mjs --check
+
+      - name: Download all subpackage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Stage subpackage binaries back into tree
+        shell: bash
+        run: |
+          for d in artifacts/subpackage-*; do
+            label="${d#artifacts/subpackage-}"
+            mkdir -p subpackages/render-${label}/bin
+            cp -r "$d"/bin/* subpackages/render-${label}/bin/
+          done
+          ls -la subpackages/*/bin/
+
+      - name: Build main package dist/
+        run: npm run build
+
+      - name: Publish subpackages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -e
+          for d in subpackages/render-*; do
+            echo "↑ publishing $d"
+            (cd "$d" && npm publish --access public --provenance)
+          done
+
+      - name: Publish main reasonix package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance

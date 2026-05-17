@@ -1,0 +1,23 @@
+{
+  "name": "@reasonix/render-linux-arm64",
+  "version": "0.43.0",
+  "description": "Reasonix ratatui renderer — Linux ARM64 (glibc) binary. Installed automatically as an optional dependency of the main `reasonix` package; do not depend on it directly.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/esengine/reasonix.git",
+    "directory": "subpackages/render-linux-arm64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "bin/"
+  ]
+}
