@@ -192,6 +192,13 @@ export interface TranslationSchema {
     atMentions: string;
     atUrl: string;
     atUrlFailed: string;
+    sessionTitleNoSession: string;
+    sessionTitleNoContent: string;
+    sessionTitleNoTitle: string;
+    sessionTitleUpdated: string;
+    sessionTitleRenameFailed: string;
+    sessionTitleRenamed: string;
+    sessionTitleAutoRenamed: string;
     denied: string;
     alwaysAllowed: string;
     runningCommand: string;

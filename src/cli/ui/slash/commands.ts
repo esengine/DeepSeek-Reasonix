@@ -148,6 +148,12 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   },
 
   { cmd: "sessions", group: "session", summary: "list saved sessions (current marked with ▸)" },
+  {
+    cmd: "title",
+    group: "session",
+    summary: "ask the model to rename this session from the conversation",
+    aliases: ["retitle"],
+  },
 
   { cmd: "mcp", group: "extend", summary: "list MCP servers + tools attached to this session" },
   {

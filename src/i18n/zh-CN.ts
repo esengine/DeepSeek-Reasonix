@@ -330,6 +330,7 @@ export const zhCN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "列出已保存的会话（当前标记为 ▸）" },
+    title: { description: "让模型根据当前对话重命名此会话" },
     qq: {
       description: "连接、查看或断开当前会话的 QQ 通道",
       argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
@@ -576,6 +577,13 @@ export const zhCN: TranslationSchema = {
     atMentions: "▸ @mentions：{parts}",
     atUrl: "▸ @url：{parts}",
     atUrlFailed: "@url 展开失败",
+    sessionTitleNoSession: "▸ 当前没有启用持久化会话，无法重命名。",
+    sessionTitleNoContent: "▸ 当前对话内容还不够，暂时无法命名会话。",
+    sessionTitleNoTitle: "▸ 模型没有返回可用的会话标题。",
+    sessionTitleUpdated: '▸ 会话标题已更新："{title}"',
+    sessionTitleRenameFailed: '▸ 无法按标题 "{title}" 重命名会话。',
+    sessionTitleRenamed: '▸ 会话已重命名为 "{name}" — {title}',
+    sessionTitleAutoRenamed: '▸ 已自动命名会话 "{name}" — {title}',
     denied: "▸ 已拒绝：{cmd}{context}",
     alwaysAllowed: '▸ 已对 {dir} 永久允许 "{prefix}"',
     runningCommand: "▸ 正在执行：{cmd}",
@@ -710,6 +718,11 @@ export const zhCN: TranslationSchema = {
       keysNeedsTui: "/keys 需要 TUI 上下文（postKeys 已连接）。",
       unknownCommand: "未知命令：/{cmd} — 你是不是想用 {list}？",
       unknownCommandShort: "未知命令：/{cmd}  （试试 /help）",
+    },
+    sessions: {
+      titleUnavailable: "/title 只能在已启用会话持久化的 TUI 会话中使用。",
+      titleStarted: "▸ 正在命名会话…",
+      titleFailed: "▸ 会话命名失败：{reason}",
     },
     admin: {
       doctorNeedsTui: "/doctor 需要 TUI 上下文（postDoctor 已连接）。",

@@ -70,6 +70,7 @@ import {
   loadSessionMeta,
   patchSessionMeta,
   renameSession,
+  sanitizeName,
 } from "../../memory/session.js";
 import type { QQChannel } from "../../qq/channel.js";
 import { useQQChannel } from "../../qq/use-qq-channel.js";
@@ -81,6 +82,11 @@ import type {
   SubmitResult,
 } from "../../server/context.js";
 import type { DashboardServerHandle } from "../../server/index.js";
+import {
+  generateSessionTitle,
+  makeSessionNameFromTitle,
+  shouldAutoNameSession,
+} from "../../session-title.js";
 import { loadSlashUsage, recordSlashUse } from "../../slash-usage.js";
 import {
   DEEPSEEK_CONTEXT_TOKENS,
@@ -405,6 +411,19 @@ function LoopStatusRow({
       <Text color="cyan">{`闂?${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} 闂?/loop stop or type to cancel`}</Text>
     </Box>
   );
+}
+
+function lastMessageContent(
+  entries: ReadonlyArray<{ role: string; content?: string | null }>,
+  role: "user" | "assistant",
+): string {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry?.role !== role || typeof entry.content !== "string") continue;
+    const text = entry.content.trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 interface StreamingState {
@@ -1033,6 +1052,46 @@ function AppInner({
     loopRef.current = l;
     return l;
   }, [model, system, rebuildSystem, budgetUsd, failureThreshold, session, tools, codeMode]);
+
+  const generateCurrentSessionTitle = useCallback(
+    async (seed?: { userText?: string; assistantText?: string; auto?: boolean }) => {
+      if (!session || !onSwitchSession) return t("app.sessionTitleNoSession");
+      const userText = seed?.userText ?? lastMessageContent(loop.log.entries, "user");
+      const assistantText =
+        seed?.assistantText ?? lastMessageContent(loop.log.entries, "assistant");
+      if (!userText) return t("app.sessionTitleNoContent");
+
+      const title = await generateSessionTitle(loop.client, loop.model ?? model, {
+        workspace: currentRootDir,
+        userText,
+        assistantText,
+      });
+      if (!title) return t("app.sessionTitleNoTitle");
+
+      const nextName = makeSessionNameFromTitle(title, { currentName: session });
+      if (!nextName) return t("app.sessionTitleNoTitle");
+      if (sanitizeName(nextName) === sanitizeName(session)) {
+        patchSessionMeta(session, { summary: title, autoTitleGenerated: true });
+        return t("app.sessionTitleUpdated", { title });
+      }
+
+      const renamed = renameSession(session, nextName);
+      if (!renamed) return t("app.sessionTitleRenameFailed", { title });
+      const meta = loadSessionMeta(nextName);
+      patchSessionMeta(nextName, {
+        summary: title,
+        autoTitleGenerated: true,
+        ...(!meta.workspace ? { workspace: currentRootDir } : {}),
+        ...(!meta.branch ? { branch: detectGitBranch(currentRootDir) } : {}),
+      });
+      setTimeout(() => onSwitchSession(nextName), 0);
+      return t(seed?.auto ? "app.sessionTitleAutoRenamed" : "app.sessionTitleRenamed", {
+        name: nextName,
+        title,
+      });
+    },
+    [currentRootDir, loop.client, loop.log.entries, loop.model, model, onSwitchSession, session],
+  );
 
   useEffect(() => {
     if (!session || !tools) return;
@@ -3291,6 +3350,7 @@ function AppInner({
           refreshLatestVersion,
           models,
           refreshModels,
+          generateSessionTitle: generateCurrentSessionTitle,
         });
         if (
           fromQQ &&
@@ -3413,8 +3473,9 @@ function AppInner({
       const pasteDisplay = formatLongPaste(text);
       const userId = log.pushUser(pasteDisplay.displayText);
       broadcastDashboardEvent({ kind: "user", id: userId, text });
+      const sessionMetaBeforeTurn = session ? loadSessionMeta(session) : {};
       if (session) {
-        const existing = loadSessionMeta(session);
+        const existing = sessionMetaBeforeTurn;
         const patch: Parameters<typeof patchSessionMeta>[1] = {};
         if (!existing.summary) patch.summary = text.replace(/\s+/g, " ").slice(0, 80);
         if (!existing.branch) patch.branch = detectGitBranch(currentRootDir);
@@ -3670,6 +3731,24 @@ function AppInner({
           }
         }
         flush();
+        if (
+          session &&
+          lastAssistantText.trim() &&
+          shouldAutoNameSession(
+            session,
+            sessionMetaBeforeTurn,
+            loadSessionMeta(session).turnCount ?? 0,
+          )
+        ) {
+          void generateCurrentSessionTitle({
+            userText: text,
+            assistantText: lastAssistantText,
+            auto: true,
+          }).then(
+            (info) => log.pushInfo(info),
+            () => undefined,
+          );
+        }
 
         // Stop hooks 闂?turn has ended (or aborted). Block decisions are
         // meaningless past this point so we treat every non-pass as a
@@ -3783,6 +3862,7 @@ function AppInner({
       pushHistory,
       resetCursor,
       liveMcpServers,
+      generateCurrentSessionTitle,
     ],
   );
 
