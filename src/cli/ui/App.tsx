@@ -1403,6 +1403,16 @@ function AppInner({
     return JSON.stringify(atState);
   }, [atState]);
 
+  const slashArgStateJson = useMemo(() => {
+    if (!slashArgContext || slashArgContext.kind !== "picker") return undefined;
+    if (!slashArgMatches || slashArgMatches.length === 0) return undefined;
+    return JSON.stringify({
+      cmd: slashArgContext.spec.cmd,
+      partial: slashArgContext.partial,
+      matches: [...slashArgMatches],
+    });
+  }, [slashArgContext, slashArgMatches]);
+
   const promptHistoryJson = useMemo(
     () => (promptHistory.length === 0 ? undefined : JSON.stringify(promptHistory)),
     [promptHistory],
@@ -1530,6 +1540,7 @@ function AppInner({
     sessionOutputTokens,
     lastTurnMs: lastTurnMs > 0 ? lastTurnMs : undefined,
     slashCatalogJson,
+    slashArgStateJson,
     promptHistoryJson,
     approvalJson,
     atStateJson,

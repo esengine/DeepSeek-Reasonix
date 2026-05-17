@@ -376,6 +376,50 @@ fn slash_arg_picker_static_completer() {
 }
 
 #[test]
+fn slash_arg_state_overrides_catalog_for_dynamic_completers() {
+    use reasonix_render::state::{SceneState, SlashArgState, SlashMatch};
+    let state = SceneState {
+        slash_catalog: Some(vec![SlashMatch {
+            cmd: "model".to_string(),
+            summary: String::new(),
+            group: Some("setup".to_string()),
+            args_hint: Some("<id>".to_string()),
+            aliases: Vec::new(),
+            arg_completer: None,
+        }]),
+        slash_arg_state: Some(SlashArgState {
+            cmd: "model".to_string(),
+            partial: "ds".to_string(),
+            matches: vec!["deepseek-v3.2-coder".to_string(), "deepseek-r1".to_string()],
+        }),
+        ..Default::default()
+    };
+    assert_eq!(
+        slash_arg_match_count("/model ds", &state),
+        2,
+        "scene picks up dynamic matches"
+    );
+    assert_eq!(
+        slash_arg_completion("/model ds", 0, &state).as_deref(),
+        Some("/model deepseek-v3.2-coder"),
+    );
+    let no_match = SceneState {
+        slash_catalog: state.slash_catalog.clone(),
+        slash_arg_state: Some(SlashArgState {
+            cmd: "model".to_string(),
+            partial: "old".to_string(),
+            matches: vec!["irrelevant".to_string()],
+        }),
+        ..Default::default()
+    };
+    assert_eq!(
+        slash_arg_match_count("/model ds", &no_match),
+        0,
+        "stale scene partial does not leak in",
+    );
+}
+
+#[test]
 fn slash_is_exact_matches_full_command_only() {
     let state = catalog_state();
     assert!(slash_is_exact("/clear", &state), "full name matches");

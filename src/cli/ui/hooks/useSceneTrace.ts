@@ -51,6 +51,8 @@ export type SceneTraceInput = {
   sessionInputTokens?: number;
   sessionOutputTokens?: number;
   slashCatalogJson?: string;
+  /** Resolved {cmd, partial, matches} for the active slash-arg picker — covers static AND dynamic completers (models / path / mcp-resources / mcp-prompts / skills) since Node has the data to resolve them. */
+  slashArgStateJson?: string;
   promptHistoryJson?: string;
   approvalJson?: string;
   atStateJson?: string;
@@ -303,6 +305,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     sessionInputTokens,
     sessionOutputTokens,
     slashCatalogJson,
+    slashArgStateJson,
     promptHistoryJson,
     approvalJson,
     atStateJson,
@@ -339,6 +342,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
       sessionInputTokens,
       sessionOutputTokens,
       slashCatalog: parseSlashMatches(slashCatalogJson),
+      slashArgState: parseApproval(slashArgStateJson),
       promptHistory: parseStringArray(promptHistoryJson),
       approval: parseApproval(approvalJson),
       atState: parseApproval(atStateJson),
@@ -376,6 +380,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     sessionInputTokens,
     sessionOutputTokens,
     slashCatalogJson,
+    slashArgStateJson,
     promptHistoryJson,
     approvalJson,
     atStateJson,

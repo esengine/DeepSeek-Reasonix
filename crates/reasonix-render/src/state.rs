@@ -60,11 +60,23 @@ pub struct SceneState {
     #[serde(default)]
     pub slash_catalog: Option<Vec<SlashMatch>>,
     #[serde(default)]
+    pub slash_arg_state: Option<SlashArgState>,
+    #[serde(default)]
     pub prompt_history: Option<Vec<String>>,
     #[serde(default)]
     pub approval: Option<Approval>,
     #[serde(default)]
     pub at_state: Option<AtState>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SlashArgState {
+    #[serde(default)]
+    pub cmd: String,
+    #[serde(default)]
+    pub partial: String,
+    #[serde(default)]
+    pub matches: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -83,6 +83,15 @@ fn slash_arg_matches(query: &str, state: &SceneState) -> Option<Vec<String>> {
     if partial.contains(' ') {
         return None;
     }
+    // Prefer the Node-resolved scene field: it's the only way to surface
+    // dynamic completers (models / path / mcp-resources / mcp-prompts /
+    // skills) because rust can't read MCP catalogs or the filesystem from
+    // here. Match by cmd + partial so a stale push doesn't leak in.
+    if let Some(s) = state.slash_arg_state.as_ref() {
+        if s.cmd.eq_ignore_ascii_case(cmd) && s.partial == partial && !s.matches.is_empty() {
+            return Some(s.matches.clone());
+        }
+    }
     let catalog = state.slash_catalog.as_ref()?;
     let m = catalog.iter().find(|m| m.cmd.eq_ignore_ascii_case(cmd))?;
     let completer = m.arg_completer.as_ref()?;
