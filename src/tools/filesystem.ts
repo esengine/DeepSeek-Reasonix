@@ -6,6 +6,12 @@ import picomatch from "picomatch";
 import { addProjectPathAllowed, loadProjectPathAllowed } from "../config.js";
 import { type ConfirmationChoice, pauseGate as defaultPauseGate } from "../core/pause-gate.js";
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
+import { memoryEnabled } from "../memory/project.js";
+import {
+  findSubdirMemoryAncestors,
+  formatSubdirMemorySection,
+  readSubdirMemoryContent,
+} from "../memory/subdir.js";
 import type { ToolCallContext, ToolRegistry } from "../tools.js";
 import { applyEdit, applyMultiEdit } from "./fs/edit.js";
 import { globFiles } from "./fs/glob.js";
@@ -107,6 +113,25 @@ export function registerFilesystemTools(
   const normRoot = pathMod.resolve(rootDir);
   /** Approved-this-session directory prefixes — `run_once` keeps the user from being asked twice for follow-up reads in the same dir. Wiped on process exit, not persisted. */
   const sessionApproved = new Set<string>();
+  /** Subdir REASONIX.md paths already injected this session (#1033). Reset per toolset, so each tab/session re-injects on first relevant read. */
+  const shownSubdirMemory = new Set<string>();
+
+  /** Prepend any not-yet-shown ancestor REASONIX.md (between absPath's dir and rootDir) to a read_file body. Outer dirs first so broad rules read before specific overrides. */
+  function withSubdirMemory(absPath: string, body: string): string {
+    if (!memoryEnabled()) return body;
+    const ancestors = findSubdirMemoryAncestors(absPath, rootDir);
+    if (ancestors.length === 0) return body;
+    const sections: string[] = [];
+    for (const memPath of [...ancestors].reverse()) {
+      if (shownSubdirMemory.has(memPath)) continue;
+      const content = readSubdirMemoryContent(memPath);
+      if (!content) continue;
+      shownSubdirMemory.add(memPath);
+      sections.push(formatSubdirMemorySection(displayRel(rootDir, memPath), content));
+    }
+    if (sections.length === 0) return body;
+    return `${sections.join("\n\n")}\n\n${body}`;
+  }
   /** In-flight gate prompts keyed by `allowPrefix` so parallel reads under the same dir only fire one modal. */
   const inflightGate = new Map<string, Promise<ConfirmationChoice>>();
 
@@ -264,7 +289,7 @@ Files OVER the threshold auto-switch to outline mode: file metadata + first ${OU
         const end = Math.min(totalLines, Math.max(start, rawEnd ?? totalLines));
         const slice = lines.slice(start - 1, end);
         const label = `[range ${start}-${end} of ${totalLines} lines]`;
-        return `${label}\n${slice.join("\n")}`;
+        return withSubdirMemory(abs, `${label}\n${slice.join("\n")}`);
       }
       if (typeof args.head === "number" && args.head > 0) {
         const count = Math.min(args.head, totalLines);
@@ -273,7 +298,7 @@ Files OVER the threshold auto-switch to outline mode: file metadata + first ${OU
           count < totalLines
             ? `\n\n[…head ${count} of ${totalLines} lines — call again with range / tail for more]`
             : "";
-        return slice.join("\n") + marker;
+        return withSubdirMemory(abs, slice.join("\n") + marker);
       }
       if (typeof args.tail === "number" && args.tail > 0) {
         const count = Math.min(args.tail, totalLines);
@@ -282,13 +307,13 @@ Files OVER the threshold auto-switch to outline mode: file metadata + first ${OU
           count < totalLines
             ? `[…tail ${count} of ${totalLines} lines — call again with range / head for more]\n\n`
             : "";
-        return marker + slice.join("\n");
+        return withSubdirMemory(abs, marker + slice.join("\n"));
       }
 
       // No explicit scope + file fits the threshold → full content.
       // Trust the prompt cache: a 100K-token file read once amortizes
       // across every turn of the same conversation.
-      if (sizeBytes <= outlineThresholdBytes) return lines.join("\n");
+      if (sizeBytes <= outlineThresholdBytes) return withSubdirMemory(abs, lines.join("\n"));
 
       // No explicit scope + file is over the threshold → outline mode.
       // Return enough for the model to orient (head + symbol map) plus
@@ -310,7 +335,7 @@ Files OVER the threshold auto-switch to outline mode: file metadata + first ${OU
         `  - read_file path:"${rel}" head:N  /  tail:N    — first/last N lines`,
         `  - search_content path:"${rel}" pattern:"..."   — grep within this file]`,
       );
-      return parts.join("\n");
+      return withSubdirMemory(abs, parts.join("\n"));
     },
   });
 
