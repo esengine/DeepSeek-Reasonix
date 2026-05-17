@@ -141,6 +141,27 @@ fn render_idle_banner(buf: &mut Buffer, area: Rect, start_row: u16) {
         tcol = paint_str(buf, tcol, row, " ", FG2, BG, Modifier::empty());
         tcol = paint_str(buf, tcol, row, label, FG2, BG, Modifier::empty());
     }
+
+    // Starter hints — surfaces the most-likely-useful slash commands
+    // upfront, matches the Node TUI WelcomeBanner; helps brand-new
+    // users discover the surface without /help.
+    let starters: [(&str, &str); 4] = [
+        ("/help", "see all commands"),
+        ("/cost", "session spend + tokens"),
+        ("/init", "scan repo into REASONIX.md"),
+        ("/sessions", "switch / resume past sessions"),
+    ];
+    for (i, (cmd, desc)) in starters.iter().enumerate() {
+        let r = start_row + 3 + i as u16;
+        if r >= bottom {
+            break;
+        }
+        paint_rail(buf, area, r, OK);
+        let mut sc = area.x + 4;
+        sc = paint_str(buf, sc, r, cmd, DS, BG, Modifier::BOLD);
+        sc = paint_str(buf, sc, r, "  ", FG3, BG, Modifier::empty());
+        paint_str(buf, sc, r, desc, FG2, BG, Modifier::empty());
+    }
 }
 
 pub(super) fn total_cards_height(state: &SceneState, body_width: u16) -> u16 {

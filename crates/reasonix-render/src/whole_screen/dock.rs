@@ -279,9 +279,19 @@ fn right_block_width(pairs: &[(&str, &str)]) -> u16 {
 fn render_status_bar(buf: &mut Buffer, area: Rect, row: u16, w: u16, state: &SceneState) {
     let mut col = area.x + 1;
 
-    paint(buf, col, row, '●', OK, BG, Modifier::BOLD);
+    // Brand dot pulses to a brighter color while busy so the user can
+    // tell the agent is actually doing something even when the cards
+    // pane is scrolled off-screen. Visual width stays at 1 cell so the
+    // rest of the status bar layout doesn't shift.
+    let dot_color = if state.busy { DS_BRIGHT } else { OK };
+    paint(buf, col, row, '●', dot_color, BG, Modifier::BOLD);
     col = col.saturating_add(2);
-    col = paint_str(buf, col, row, "reasonix", DS_BRIGHT, BG, Modifier::BOLD);
+    let label = if state.busy {
+        activity_label(state.activity.as_deref())
+    } else {
+        "reasonix"
+    };
+    col = paint_str(buf, col, row, label, DS_BRIGHT, BG, Modifier::BOLD);
     col = col.saturating_add(2);
 
     if let Some(mode) = state.edit_mode.as_ref() {
@@ -359,6 +369,18 @@ fn render_status_bar(buf: &mut Buffer, area: Rect, row: u16, w: u16, state: &Sce
             let rcol = area.x + w.saturating_sub(bal_w);
             paint_str(buf, rcol, row, &bal_text, FG2, BG, Modifier::empty());
         }
+    }
+}
+
+fn activity_label(activity: Option<&str>) -> &'static str {
+    match activity.unwrap_or("") {
+        "reasoning" | "thinking" => "reasoning…",
+        "streaming" => "streaming…",
+        "tool" | "tools" => "running tool…",
+        "planning" | "plan" => "planning…",
+        "compacting" | "compact" => "compacting context…",
+        "" => "working…",
+        _ => "working…",
     }
 }
 

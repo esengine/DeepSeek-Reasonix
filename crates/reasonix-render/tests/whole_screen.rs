@@ -68,17 +68,16 @@ fn homepage_input_box_drawn_with_corners() {
 #[test]
 fn homepage_status_bar_has_segments_and_ctx_meter() {
     let rows = draw(&demo_state(), 120, 36);
+    // Status row carries "ctx" + a context bar + cost — find by ctx
+    // since the brand cell now swaps to an activity label when busy.
     let last = rows
         .iter()
         .rev()
-        .find(|r| r.contains("reasonix"))
+        .find(|r| r.contains("ctx") && r.contains("cache"))
         .expect("status row");
     assert!(last.contains("●"), "brand dot missing");
-    assert!(last.contains("ctx"));
     assert!(last.contains("19.2k/128k"));
-    assert!(last.contains("cache"));
     assert!(last.contains("87%"));
-    assert!(last.contains("cost"));
     assert!(last.contains("$0.043"));
     assert!(last.contains("▰") && last.contains("▱"), "ctx bar segments");
 }
@@ -305,6 +304,33 @@ fn catalog_state() -> reasonix_render::state::SceneState {
         ),
         ..Default::default()
     }
+}
+
+#[test]
+fn idle_banner_includes_starter_command_hints() {
+    let rows = draw(&SceneState::default(), 120, 30);
+    let all = joined(&rows);
+    assert!(all.contains("● idle"), "idle marker");
+    assert!(all.contains("/help"), "starter /help");
+    assert!(all.contains("/cost"), "starter /cost");
+    assert!(all.contains("/init"), "starter /init");
+    assert!(all.contains("/sessions"), "starter /sessions");
+}
+
+#[test]
+fn status_bar_shows_activity_phase_when_busy() {
+    let state = SceneState {
+        busy: true,
+        activity: Some("reasoning".to_string()),
+        ..Default::default()
+    };
+    let rows = draw(&state, 140, 36);
+    let last = rows
+        .iter()
+        .rev()
+        .find(|r| r.contains("reasoning"))
+        .expect("status row with phase label");
+    assert!(last.contains("●"), "brand dot visible: {last}");
 }
 
 #[test]

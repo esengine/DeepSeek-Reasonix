@@ -2635,6 +2635,34 @@ function AppInner({
     };
   }, [pendingModelPicker, models, loop, agentStore, setPreset, log]);
 
+  // MCP hub: the full Live/Marketplace tabbed modal is heavy and
+  // interactive (install / configure flows). Under integrated mode
+  // dump a read-only inventory of currently-connected servers so the
+  // user at least sees what's wired up; full hub still works in non-
+  // integrated mode for now.
+  useEffect(() => {
+    if (!pendingMcpHub) return;
+    if (!isIntegratedRendererRequested()) return;
+    const lines: string[] = [];
+    if (liveMcpServers.length === 0) {
+      lines.push("(no MCP servers connected)");
+    } else {
+      for (const s of liveMcpServers) {
+        const tools = s.report.tools.supported ? s.report.tools.items.length : 0;
+        const res = s.report.resources.supported ? s.report.resources.items.length : 0;
+        const prompts = s.report.prompts.supported ? s.report.prompts.items.length : 0;
+        lines.push(
+          `· ${s.label}  —  ${tools} tool${tools === 1 ? "" : "s"}, ${res} resource${res === 1 ? "" : "s"}, ${prompts} prompt${prompts === 1 ? "" : "s"}`,
+        );
+        lines.push(`    ${s.spec}`);
+      }
+    }
+    lines.push("");
+    lines.push("Install / configure flows are only available in non-integrated mode.");
+    log.pushInfo(`MCP hub (live)\n${lines.join("\n")}`);
+    setPendingMcpHub(null);
+  }, [pendingMcpHub, liveMcpServers, log]);
+
   // Auto-start the dashboard once the TUI is mounted unless the user
   // opted out with --no-dashboard. The whole point is discoverability:
   // most users had no idea /dashboard existed, so the URL needs to be
