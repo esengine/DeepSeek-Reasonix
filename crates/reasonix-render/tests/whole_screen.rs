@@ -1268,3 +1268,112 @@ fn main_panel_content_does_not_leak_into_sidebar_columns() {
         }
     }
 }
+
+// ── Unicode rendering ──────────────────────────────────────────────
+
+#[test]
+fn emoji_characters_consume_two_cells() {
+    let state = SceneState {
+        cards: vec![SceneCard {
+            kind: "streaming".to_string(),
+            body: Some("🤖🚀".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rows = draw(&state, 80, 20);
+    let all = joined(&rows);
+    // Each emoji is 2 cells wide; total string "🤖🚀" = 4 cells.
+    // The two emoji should appear as 4 visible cells, not overwritten.
+    assert!(all.contains("🤖"), "robot emoji missing");
+    assert!(all.contains("🚀"), "rocket emoji missing");
+}
+
+#[test]
+fn zero_width_chars_are_skipped_not_overwritten() {
+    // Zero-width joiner between two chars: the ZWJ should be skipped,
+    // not overwrite the next character's cell.
+    let state = SceneState {
+        cards: vec![SceneCard {
+            kind: "streaming".to_string(),
+            // "a" + ZWJ (U+200D, width 0) + "b"
+            body: Some("a\u{200D}b".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rows = draw(&state, 80, 20);
+    let all = joined(&rows);
+    // ZWJ is zero-width and should be skipped. Result: "ab".
+    assert!(all.contains("ab"), "ZWJ should be skipped, rendering 'ab' as neighbors");
+}
+
+#[test]
+fn combining_marks_are_skipped() {
+    // Combining acute accent (U+0301, width 0) after 'e' — the accent
+    // should be skipped rather than landing on the next char's cell.
+    let state = SceneState {
+        cards: vec![SceneCard {
+            kind: "streaming".to_string(),
+            body: Some("e\u{0301}x".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rows = draw(&state, 80, 20);
+    let all = joined(&rows);
+    // Combining mark skipped: 'e' and 'x' should appear as neighbors.
+    assert!(all.contains("ex") || all.contains("e x"),
+        "combining mark should not corrupt adjacent chars; got: {all}");
+}
+
+#[test]
+fn tab_char_expands_to_spaces() {
+    let state = SceneState {
+        cards: vec![SceneCard {
+            kind: "streaming".to_string(),
+            body: Some("a\tb".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rows = draw(&state, 80, 20);
+    let all = joined(&rows);
+    // Tab → 2 spaces: "a  b"
+    assert!(all.contains("a  b"), "tab should expand to 2 spaces; got: {all}");
+}
+
+#[test]
+fn control_characters_are_filtered() {
+    // \r, \x00, \x01 — all control chars with width None from unicode-width.
+    // The old unwrap_or(1) gave them width 1; char_width() gives 0 → skip.
+    let state = SceneState {
+        cards: vec![SceneCard {
+            kind: "streaming".to_string(),
+            body: Some("a\x00b\x01c".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rows = draw(&state, 80, 20);
+    let all = joined(&rows);
+    // Control chars skipped: "abc".
+    assert!(all.contains("abc"), "control chars should be filtered; got: {all}");
+}
+
+#[test]
+fn cjk_and_emoji_mixed_preserve_each_other() {
+    let state = SceneState {
+        cards: vec![SceneCard {
+            kind: "streaming".to_string(),
+            body: Some("你好🤖世界".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rows = draw(&state, 80, 20);
+    let all = joined(&rows);
+    assert!(all.contains("你好"), "CJK greeting missing");
+    assert!(all.contains("🤖"), "emoji between CJK missing");
+    assert!(all.contains("世界"), "CJK world missing");
+}
