@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectEditor } from "../src/cli/edit/external-editor.js";
+import { detectEditor, normalizeEditorBuffer } from "../src/cli/edit/external-editor.js";
 
 describe("detectEditor (issue #647)", () => {
   it("returns null when no editor env var is set", () => {
@@ -31,5 +31,11 @@ describe("detectEditor (issue #647)", () => {
   it("treats an empty / whitespace-only var as unset", () => {
     expect(detectEditor({ EDITOR: "   " })).toBeNull();
     expect(detectEditor({ EDITOR: "" })).toBeNull();
+  });
+});
+
+describe("normalizeEditorBuffer", () => {
+  it("normalizes Windows CRLF and bare CR while preserving the existing one-trailing-newline strip", () => {
+    expect(normalizeEditorBuffer("first\r\nsecond\rthird\r\n")).toBe("first\nsecond\nthird");
   });
 });

@@ -226,6 +226,12 @@ describe("StdinReader — bracketed paste", () => {
     expect(events).toEqual([{ input: "hello\nworld", paste: true }]);
   });
 
+  it("normalizes Windows CRLF and bare CR line endings inside paste events", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[200~first\r\nsecond\rthird\x1b[201~");
+    expect(events).toEqual([{ input: "first\nsecond\nthird", paste: true }]);
+  });
+
   it("paste content is collected across multiple feed calls (chunked stdin)", () => {
     const { reader, events } = setup();
     reader.feed("\x1b[200~hello\n");
@@ -266,13 +272,13 @@ describe("StdinReader — heuristic paste rescue (#522)", () => {
     // multi-line content used to fire one Enter per \r and submit N times.
     const { reader, events } = setup();
     reader.feed("first line\rsecond line\rthird line");
-    expect(events).toEqual([{ input: "first line\rsecond line\rthird line", paste: true }]);
+    expect(events).toEqual([{ input: "first line\nsecond line\nthird line", paste: true }]);
   });
 
   it("treats a single-break chunk with text on both sides as a paste", () => {
     const { reader, events } = setup();
     reader.feed("hello\rworld");
-    expect(events).toEqual([{ input: "hello\rworld", paste: true }]);
+    expect(events).toEqual([{ input: "hello\nworld", paste: true }]);
   });
 
   it("leaves a bare Enter alone (\\r submits as before)", () => {
@@ -324,8 +330,8 @@ describe("StdinReader — heuristic paste rescue (#522)", () => {
   it("normalizes \\r\\n line endings inside the heuristic so Windows pastes still get one event", () => {
     const { reader, events } = setup();
     reader.feed("first\r\nsecond\r\nthird");
-    // Whole chunk wrapped → paste accumulator delivers verbatim
-    expect(events).toEqual([{ input: "first\r\nsecond\r\nthird", paste: true }]);
+    // Whole chunk wrapped → paste accumulator delivers normalized logical lines.
+    expect(events).toEqual([{ input: "first\nsecond\nthird", paste: true }]);
   });
 });
 
@@ -428,6 +434,10 @@ describe("StdinReader — SGR mouse reports (issue #867)", () => {
 });
 
 describe("sanitizePasteText (issue #849)", () => {
+  it("normalizes Windows CRLF and bare CR line endings (issue #1030)", () => {
+    expect(sanitizePasteText("first\r\nsecond\rthird")).toBe("first\nsecond\nthird");
+  });
+
   it("strips bidi override controls (LRE/RLE/PDF/LRO/RLO/isolates)", () => {
     const raw = "\u202ahello\u202c \u202bworld\u202c \u2066isolated\u2069";
     expect(sanitizePasteText(raw)).toBe("hello world isolated");

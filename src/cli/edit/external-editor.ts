@@ -40,7 +40,7 @@ export async function openInExternalEditor(initial: string): Promise<OpenEditorR
     writeFileSync(path, initial, "utf8");
     await spawnEditor(editor, path);
     const raw = readFileSync(path, "utf8");
-    return { kind: "ok", content: stripTrailingNewline(raw) };
+    return { kind: "ok", content: normalizeEditorBuffer(raw) };
   } catch (err) {
     return {
       kind: "failed",
@@ -73,8 +73,8 @@ function spawnEditor(editor: string, path: string): Promise<void> {
   });
 }
 
-function stripTrailingNewline(s: string): string {
-  if (s.endsWith("\r\n")) return s.slice(0, -2);
-  if (s.endsWith("\n")) return s.slice(0, -1);
-  return s;
+export function normalizeEditorBuffer(s: string): string {
+  const normalized = s.replace(/\r\n?/g, "\n");
+  if (normalized.endsWith("\n")) return normalized.slice(0, -1);
+  return normalized;
 }

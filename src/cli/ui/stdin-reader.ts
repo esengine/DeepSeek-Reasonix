@@ -192,7 +192,9 @@ function tryDecodeGenericCsi(seq: string): KeyEvent | null {
 const PASTE_INVISIBLE_RE = /[\u200B\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\u00AD\uFEFF]/g;
 
 export function sanitizePasteText(s: string): string {
-  return s.replace(PASTE_INVISIBLE_RE, "");
+  // `ev.paste` bypasses the multiline reducer, so normalize Windows
+  // clipboard line endings here before raw CR can reach Ink's <Text>.
+  return s.replace(PASTE_INVISIBLE_RE, "").replace(/\r\n?/g, "\n");
 }
 
 /** Heuristic paste-burst detector — wraps raw multi-line chunks when the terminal didn't (#522). */
