@@ -1,6 +1,6 @@
 {
   "name": "@reasonix/render-darwin-x64",
-  "version": "0.45.0-rc.0",
+  "version": "0.45.0",
   "description": "Reasonix ratatui renderer — macOS Intel x64 native Node addon. Installed automatically as an optional dependency of the main `reasonix` package; do not depend on it directly.",
   "license": "MIT",
   "repository": {
