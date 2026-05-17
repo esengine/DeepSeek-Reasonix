@@ -58,6 +58,15 @@ pub fn render_cards(
     let view_top = total.saturating_sub(view_h).saturating_sub(offset);
     let dest_top = bottom.saturating_sub(view_h);
 
+    // ── Clear gap between boot content and visible card view ──
+    for y in start_row..dest_top {
+        for x in 0..scroll_w {
+            let cell = &mut buf[(area.x + x, y)];
+            cell.set_symbol(" ");
+            cell.set_skip(false);
+        }
+    }
+
     for dy in 0..view_h {
         let src_y = view_top + dy;
         if src_y >= total {
