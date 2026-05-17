@@ -1,5 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { _resetForTests, detectProxyUrl, installProxyIfConfigured } from "../src/net/proxy.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  _resetForTests,
+  detectProxyUrl,
+  installProxyIfConfigured,
+  normalizeProxyUrl,
+} from "../src/net/proxy.js";
 
 describe("detectProxyUrl (issue #646)", () => {
   it("returns null when no proxy env var is set", () => {
@@ -65,13 +70,57 @@ describe("installProxyIfConfigured", () => {
 
   it("returns the detected url + reinstalled=false on the first install", () => {
     const result = installProxyIfConfigured({ HTTPS_PROXY: "http://example:8080" });
-    expect(result).toEqual({ url: "http://example:8080", reinstalled: false });
+    expect(result).toEqual({ url: "http://example:8080/", reinstalled: false });
   });
 
   it("returns reinstalled=true on subsequent installs (idempotent at the env-detect level)", () => {
     installProxyIfConfigured({ HTTPS_PROXY: "http://first:8080" });
     const second = installProxyIfConfigured({ HTTPS_PROXY: "http://second:8080" });
     expect(second?.reinstalled).toBe(true);
-    expect(second?.url).toBe("http://second:8080");
+    expect(second?.url).toBe("http://second:8080/");
+  });
+
+  it("auto-prefixes http:// for bare host:port (issue #1034)", () => {
+    const result = installProxyIfConfigured({ HTTPS_PROXY: "127.0.0.1:10888" });
+    expect(result?.url).toBe("http://127.0.0.1:10888/");
+  });
+
+  it("does not throw on a malformed env value — warns to stderr and returns null", () => {
+    const writes: string[] = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ): boolean => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      expect(installProxyIfConfigured({ HTTPS_PROXY: "http://[invalid:::" })).toBeNull();
+      expect(writes.join("")).toMatch(/ignoring proxy env value/);
+    } finally {
+      spy.mockRestore();
+      process.stderr.write = orig;
+    }
+  });
+});
+
+describe("normalizeProxyUrl (issue #1034)", () => {
+  it("returns null for empty / whitespace input", () => {
+    expect(normalizeProxyUrl("")).toBeNull();
+    expect(normalizeProxyUrl("   ")).toBeNull();
+  });
+
+  it("auto-prefixes http:// when the scheme is missing", () => {
+    expect(normalizeProxyUrl("127.0.0.1:10888")).toBe("http://127.0.0.1:10888/");
+    expect(normalizeProxyUrl("proxy.example:8080")).toBe("http://proxy.example:8080/");
+  });
+
+  it("leaves an already-prefixed URL intact", () => {
+    expect(normalizeProxyUrl("http://example:8080")).toBe("http://example:8080/");
+    expect(normalizeProxyUrl("socks5://example:1080")).toBe("socks5://example:1080");
+  });
+
+  it("returns null for unparseable values", () => {
+    expect(normalizeProxyUrl("http://[invalid:::")).toBeNull();
   });
 });
