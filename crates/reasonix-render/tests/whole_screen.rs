@@ -1045,7 +1045,10 @@ fn composer_caret_stays_solid_across_ticks() {
     let b = buffer_string(term_b.backend().buffer());
     let a_count = a.matches('▮').count();
     let b_count = b.matches('▮').count();
-    assert!(a_count >= 1, "caret should be visible at tick 0 (count={a_count})");
+    assert!(
+        a_count >= 1,
+        "caret should be visible at tick 0 (count={a_count})"
+    );
     assert_eq!(
         a_count, b_count,
         "caret must not blink — same visibility across ticks (a={a_count}, b={b_count})"

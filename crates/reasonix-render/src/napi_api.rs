@@ -61,7 +61,8 @@ impl Renderer {
         let Some(tx) = guard.as_ref() else {
             return Err(napi::Error::from_reason("renderer closed"));
         };
-        tx.send(message).map_err(|_| napi::Error::from_reason("renderer channel dropped"))?;
+        tx.send(message)
+            .map_err(|_| napi::Error::from_reason("renderer channel dropped"))?;
         Ok(())
     }
 
