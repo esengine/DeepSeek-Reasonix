@@ -4,15 +4,26 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use unicode_width::UnicodeWidthChar;
 
+/// Display width of a character.  Returns 0 for control characters
+/// (where unicode-width returns None) and combining marks, so the
+/// layout engine skips them instead of giving them a spurious width-1
+/// cell that overwrites the next character.
+pub fn char_width(ch: char) -> u16 {
+    UnicodeWidthChar::width(ch).unwrap_or(0) as u16
+}
+
 pub fn paint(buf: &mut Buffer, x: u16, y: u16, ch: char, fg: Color, bg: Color, modifier: Modifier) {
     if x >= buf.area.right() || y >= buf.area.bottom() {
+        return;
+    }
+    let w = char_width(ch);
+    if w == 0 {
         return;
     }
     let mut tmp = [0u8; 4];
     let s = ch.encode_utf8(&mut tmp);
     let style = Style::default().fg(fg).bg(bg).add_modifier(modifier);
     buf[(x, y)].set_symbol(s).set_style(style).set_skip(false);
-    let w = UnicodeWidthChar::width(ch).unwrap_or(1) as u16;
     for off in 1..w {
         let cx = x + off;
         if cx >= buf.area.right() {
@@ -51,7 +62,24 @@ pub fn paint_str_to(
     let limit = end_x.min(buf.area.right());
     let mut col = x;
     for ch in s.chars() {
-        let w = UnicodeWidthChar::width(ch).unwrap_or(1) as u16;
+        // Tab → 2 spaces (terminal convention, matches common tab-stop width).
+        if ch == '\t' {
+            for _ in 0..2 {
+                if col >= limit {
+                    break;
+                }
+                paint(buf, col, y, ' ', fg, bg, modifier);
+                col += 1;
+            }
+            continue;
+        }
+        let w = char_width(ch);
+        // Zero-width characters (control chars, combining marks, ZWJ/ZWNJ,
+        // variation selectors) are skipped — they'd otherwise land at the
+        // same column as the next character and cause overwrite artifacts.
+        if w == 0 {
+            continue;
+        }
         if col.saturating_add(w) > limit {
             break;
         }

@@ -326,7 +326,7 @@ fn paint_clipped(
     let mut w = 0u16;
     let mut clipped = String::new();
     for ch in s.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1) as u16;
+        let cw = crate::whole_screen::paint::char_width(ch);
         if w + cw > *budget {
             break;
         }
