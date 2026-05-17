@@ -290,8 +290,7 @@ const INVOKE_END = `</${DSML}invoke>`;
 const PARAM_TEMPLATE = `<${DSML}parameter name="{key}" string="{is_str}">{value}</${DSML}parameter>`;
 const TOOL_RESULT_TEMPLATE = "<tool_result>{content}</tool_result>";
 
-// toolSpecs arrays are reference-stable across turns (ImmutablePrefix._toolSpecs).
-// WeakMap keyed on array pointer avoids re-JSONifying schemas + template on every call.
+/** Keyed by `ImmutablePrefix._toolSpecs` identity — stable for the prefix's lifetime. */
 const toolsTemplateCache = new WeakMap<ReadonlyArray<unknown>, string>();
 
 function renderTools(tools: ReadonlyArray<unknown>): string {
