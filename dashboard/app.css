@@ -59,7 +59,14 @@
 
   /* Spacing / radius — tiny radius (2px) keeps web feel without going SaaS */
   --r:    2px;
+  --r-sm: 4px;
   --r-md: 4px;
+
+  /* Inline elevation step above --bg-elev-2 for nested cards/dropdowns. */
+  --bg-elev-3: #1d2230;
+
+  /* Brand sweep — used by .md hr and the mini status bar fill. */
+  --gradient-rule: linear-gradient(90deg, var(--c-brand), var(--c-accent));
 }
 
 * { box-sizing: border-box; }
@@ -1157,7 +1164,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--c-brand); }
   font-size: 16px;
 }
 .md h3 {
-  background: var(--grad-8);
+  background: var(--s2);
   font-size: 14px;
 }
 
@@ -2064,7 +2071,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--c-brand); }
 }
 
 .modal-picker-row.selected {
-  border-color: var(--accent, #fcd34d);
+  border-color: var(--c-accent);
   background: var(--bg-elev-3, var(--bg-elev-2));
 }
 
@@ -2079,7 +2086,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--c-brand); }
   color: var(--fg-2);
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--bg-elev-1, var(--bg-elev-2));
+  background: var(--bg-elev);
 }
 
 .modal-picker-subtitle {
@@ -2669,7 +2676,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--c-brand); }
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev);
   border: 1px solid var(--bd);
   border-radius: 6px;
   padding: 6px 10px;
@@ -3054,6 +3061,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--c-brand); }
   /* Borders */
   --bd:         #e4e7ed;
   --bd-strong:  #dcdfe6;
+
+  /* Elevation step above --bg-elev-2 in light mode — matches the surface scale. */
+  --bg-elev-3: #e4e7ed;
 }
 
 /* ── Light-theme fixups for hardcoded hex / rgba values ────────────────
