@@ -3,6 +3,24 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.1] — 2026-05-17
+
+**Fix:** Mac/Linux `npx reasonix@latest` failed with `EACCES` when spawning
+the rust renderer (`spawn ... reasonix-render EACCES`). `actions/download-artifact@v4`
+strips Unix file modes during the release pipeline's artifact round-trip,
+so the binaries in the published 0.44.0 subpackages landed without the
+executable bit. Two-layer fix:
+
+- Each `@reasonix/render-*` subpackage now declares its binary in the
+  `bin` field of `package.json`, so `npm install` chmod +x's the file
+  during extraction (standard npm behavior for bin-declared files).
+- The publish workflow explicitly `chmod +x`'s the non-Windows binaries
+  after staging from artifacts, so the tarball itself ships with the
+  right mode regardless of npm version.
+
+No code changes — same renderer binary as 0.44.0, just a republish with
+correct file modes.
+
 ## [0.44.0] — 2026-05-17
 
 **Headline:** The Rust TUI is now the default TUI. `npx reasonix@latest`

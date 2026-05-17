@@ -125,6 +125,14 @@ jobs:
             mkdir -p subpackages/render-${label}/bin
             cp -r "$d"/bin/* subpackages/render-${label}/bin/
           done
+          # actions/download-artifact@v4 strips Unix file modes — restore +x
+          # on the non-Windows binaries so users hitting them via spawn() (not
+          # via npm's bin symlink) don't EACCES. The bin field in each
+          # subpackage's package.json is a second layer for the normal
+          # install path.
+          for bin in subpackages/render-{linux,darwin}-*/bin/reasonix-render; do
+            [ -f "$bin" ] && chmod +x "$bin"
+          done
           ls -la subpackages/*/bin/
 
       - name: Build main package dist/

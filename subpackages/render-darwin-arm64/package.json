@@ -1,6 +1,6 @@
 {
   "name": "@reasonix/render-darwin-arm64",
-  "version": "0.44.0",
+  "version": "0.44.1",
   "description": "Reasonix ratatui renderer — macOS Apple Silicon (M-series) binary. Installed automatically as an optional dependency of the main `reasonix` package; do not depend on it directly.",
   "license": "MIT",
   "repository": {
@@ -16,5 +16,8 @@
   ],
   "files": [
     "bin/"
-  ]
+  ],
+  "bin": {
+    "reasonix-render": "bin/reasonix-render"
+  }
 }
