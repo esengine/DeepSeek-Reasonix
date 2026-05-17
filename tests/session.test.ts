@@ -19,6 +19,7 @@ import {
   pruneStaleSessions,
   renameSession,
   resolveSession,
+  rewriteSession,
   sanitizeName,
   sessionPath,
   sessionsDir,
@@ -89,6 +90,42 @@ describe("session persistence", () => {
     expect(msgs.length).toBe(2);
   });
 
+  it("rewriteSession snapshots a non-empty live transcript before replacing it", () => {
+    appendSessionMessage("safe-rewrite", { role: "user", content: "old" });
+
+    rewriteSession("safe-rewrite", [{ role: "user", content: "new" }]);
+
+    expect(loadSessionMessages("safe-rewrite")).toEqual([{ role: "user", content: "new" }]);
+    expect(readFileSync(`${sessionPath("safe-rewrite")}.bak`, "utf8")).toBe(
+      `${JSON.stringify({ role: "user", content: "old" })}\n`,
+    );
+  });
+
+  it("loadSessionMessages falls back to backup when the live transcript has no valid entries", () => {
+    appendSessionMessage("recover-corrupt", { role: "user", content: "saved" });
+    const p = sessionPath("recover-corrupt");
+    writeFileSync(`${p}.bak`, readFileSync(p, "utf8"));
+    writeFileSync(p, "not json\nalso not json\n");
+
+    expect(loadSessionMessages("recover-corrupt")).toEqual([{ role: "user", content: "saved" }]);
+  });
+
+  it("loadSessionMessages does not resurrect backup when the live transcript is empty", () => {
+    appendSessionMessage("empty-live", { role: "user", content: "old" });
+    const p = sessionPath("empty-live");
+    writeFileSync(`${p}.bak`, readFileSync(p, "utf8"));
+    writeFileSync(p, "");
+
+    expect(loadSessionMessages("empty-live")).toEqual([]);
+  });
+
+  it("listSessions ignores jsonl backup sidecars", () => {
+    appendSessionMessage("visible", { role: "user", content: "x" });
+    writeFileSync(`${sessionPath("visible")}.bak`, `${JSON.stringify({ role: "user" })}\n`);
+
+    expect(listSessions().map((s) => s.name)).toEqual(["visible"]);
+  });
+
   it("listSessions returns metadata sorted by mtime desc", () => {
     appendSessionMessage("alpha", { role: "user", content: "x" });
     appendSessionMessage("beta", { role: "user", content: "y" });
@@ -136,12 +173,33 @@ describe("session persistence", () => {
     expect(existsSync(sessionPath("renamed").replace(/\.jsonl$/, ".events.jsonl"))).toBe(true);
   });
 
+  it("renameSession also moves the .jsonl.bak recovery sidecar", () => {
+    appendSessionMessage("bak-orig", { role: "user", content: "x" });
+    const oldBackup = `${sessionPath("bak-orig")}.bak`;
+    writeFileSync(oldBackup, `${JSON.stringify({ role: "user", content: "backup" })}\n`);
+
+    expect(renameSession("bak-orig", "bak-renamed")).toBe(true);
+
+    expect(existsSync(oldBackup)).toBe(false);
+    expect(existsSync(`${sessionPath("bak-renamed")}.bak`)).toBe(true);
+  });
+
   it("deleteSession removes the .events.jsonl sidecar too", () => {
     appendSessionMessage("trash", { role: "user", content: "x" });
     const events = sessionPath("trash").replace(/\.jsonl$/, ".events.jsonl");
     writeFileSync(events, '{"id":1}\n');
     deleteSession("trash");
     expect(existsSync(events)).toBe(false);
+  });
+
+  it("deleteSession removes the .jsonl.bak recovery sidecar too", () => {
+    appendSessionMessage("backup-trash", { role: "user", content: "x" });
+    const backup = `${sessionPath("backup-trash")}.bak`;
+    writeFileSync(backup, `${JSON.stringify({ role: "user", content: "backup" })}\n`);
+
+    deleteSession("backup-trash");
+
+    expect(existsSync(backup)).toBe(false);
   });
 
   it("deleteSession removes the file", () => {
@@ -215,8 +273,10 @@ describe("session persistence", () => {
       appendSessionMessage("live", { role: "user", content: "hi" });
       const events = sessionPath("live").replace(/\.jsonl$/, ".events.jsonl");
       const meta = sessionPath("live").replace(/\.jsonl$/, ".meta.json");
+      const backup = `${sessionPath("live")}.bak`;
       writeFileSync(events, '{"id":1}\n');
       writeFileSync(meta, "{}");
+      writeFileSync(backup, `${JSON.stringify({ role: "user", content: "backup" })}\n`);
 
       const archived = archiveSession("live");
       expect(archived).toMatch(/^live__archive_\d{12}/);
@@ -224,8 +284,10 @@ describe("session persistence", () => {
       expect(existsSync(sessionPath(archived!))).toBe(true);
       expect(existsSync(events)).toBe(false);
       expect(existsSync(meta)).toBe(false);
+      expect(existsSync(backup)).toBe(false);
       expect(existsSync(sessionPath(archived!).replace(/\.jsonl$/, ".events.jsonl"))).toBe(true);
       expect(existsSync(sessionPath(archived!).replace(/\.jsonl$/, ".meta.json"))).toBe(true);
+      expect(existsSync(`${sessionPath(archived!)}.bak`)).toBe(true);
       expect(loadSessionMessages(archived!)).toEqual([{ role: "user", content: "hi" }]);
     });
 
