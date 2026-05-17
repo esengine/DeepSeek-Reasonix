@@ -4,7 +4,14 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type RendererSource = "env-cmd" | "env-bin" | "optional-dep" | "cargo" | null;
+export type RendererSource =
+  | "env-cmd"
+  | "env-bin"
+  | "optional-dep"
+  | "prebuilt-release"
+  | "prebuilt-debug"
+  | "cargo"
+  | null;
 
 export interface ResolvedRenderer {
   command: readonly string[];
@@ -17,7 +24,7 @@ export interface ResolverIO {
   envBin(): string | undefined;
   hasFile(path: string): boolean;
   resolveOptionalDep(platform: string, arch: string): string | undefined;
-  hasReasonixSourceTree(): boolean;
+  findReasonixSourceTree(): string | undefined;
   hasCargo(): boolean;
   platform: NodeJS.Platform;
 }
@@ -53,7 +60,15 @@ function pickBase(io: ResolverIO): ResolvedRenderer {
   const optional = io.resolveOptionalDep(io.platform, process.arch);
   if (optional) return fromBinary(optional, "optional-dep");
 
-  if (io.hasReasonixSourceTree() && io.hasCargo()) return fromCargo();
+  const sourceRoot = io.findReasonixSourceTree();
+  if (sourceRoot) {
+    const binName = io.platform === "win32" ? "reasonix-render.exe" : "reasonix-render";
+    const release = join(sourceRoot, "target", "release", binName);
+    if (io.hasFile(release)) return fromBinary(release, "prebuilt-release");
+    const debug = join(sourceRoot, "target", "debug", binName);
+    if (io.hasFile(debug)) return fromBinary(debug, "prebuilt-debug");
+    if (io.hasCargo()) return fromCargo();
+  }
 
   return { command: [], inputCommand: [], source: null };
 }
@@ -73,7 +88,7 @@ function defaultIO(): ResolverIO {
     envBin: () => process.env.REASONIX_RENDER_BIN,
     hasFile: existsSync,
     resolveOptionalDep: locateOptionalDepBinary,
-    hasReasonixSourceTree: detectReasonixSourceTree,
+    findReasonixSourceTree: detectReasonixSourceTree,
     hasCargo: detectCargo,
     platform: process.platform,
   };
@@ -104,15 +119,15 @@ function locateOptionalDepBinary(platform: NodeJS.Platform, arch: string): strin
   }
 }
 
-function detectReasonixSourceTree(): boolean {
+function detectReasonixSourceTree(): string | undefined {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 12; i++) {
-    if (existsSync(join(dir, "crates", "reasonix-render", "Cargo.toml"))) return true;
+    if (existsSync(join(dir, "crates", "reasonix-render", "Cargo.toml"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return false;
+  return undefined;
 }
 
 function detectCargo(): boolean {

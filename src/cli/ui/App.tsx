@@ -1746,6 +1746,12 @@ function AppInner({
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
 
+  // Ctrl+D = standard TUI exit (matches the boot-banner hint). Always-on
+  // — no modal / picker should swallow it.
+  useKeystroke((ev) => {
+    if (ev.ctrl && ev.input === "d") quitProcess();
+  });
+
   // 闂?闂?PgUp/PgDn always scroll chat; wheel arrives as 闂?闂?via
   // DECSET 1007 alternate-scroll so it joins the same path. Pickers
   // (slash / @-mention / slash-arg / shell-confirm) own 闂?闂?闂?when

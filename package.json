@@ -26,8 +26,10 @@
   ],
   "scripts": {
     "build": "tsup && node scripts/copy-dashboard-vendor-css.mjs",
-    "dev": "tsx src/cli/index.ts",
-    "chat": "tsx src/cli/index.ts chat",
+    "rust:build": "cargo build --release --bin reasonix-render",
+    "dev:prepare": "node scripts/dev-prepare.mjs",
+    "dev": "npm run dev:prepare && tsx src/cli/index.ts",
+    "chat": "npm run dev:prepare && tsx src/cli/index.ts chat",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

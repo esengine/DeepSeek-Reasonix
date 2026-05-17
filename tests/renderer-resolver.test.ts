@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type ResolverIO, resolveRendererWith } from "../src/cli/ui/scene/renderer-resolver.js";
 
@@ -9,7 +10,7 @@ function makeIO(overrides: IOOverrides = {}): ResolverIO {
     envBin: () => undefined,
     hasFile: () => false,
     resolveOptionalDep: () => undefined,
-    hasReasonixSourceTree: () => false,
+    findReasonixSourceTree: () => undefined,
     hasCargo: () => false,
     platform: "linux",
     ...overrides,
@@ -58,17 +59,40 @@ describe("resolveRendererWith", () => {
     expect(r.source).toBe("optional-dep");
   });
 
-  it("falls back to cargo only when source tree AND cargo are both present", () => {
-    expect(
-      resolveRendererWith(makeIO({ hasReasonixSourceTree: () => true, hasCargo: () => false }))
-        .source,
-    ).toBeNull();
-    expect(
-      resolveRendererWith(makeIO({ hasReasonixSourceTree: () => false, hasCargo: () => true }))
-        .source,
-    ).toBeNull();
+  it("prefers source-tree target/release over cargo run", () => {
+    const releasePath = join("/repo", "target", "release", "reasonix-render");
     const r = resolveRendererWith(
-      makeIO({ hasReasonixSourceTree: () => true, hasCargo: () => true }),
+      makeIO({
+        findReasonixSourceTree: () => "/repo",
+        hasCargo: () => true,
+        hasFile: (p) => p === releasePath,
+      }),
+    );
+    expect(r.source).toBe("prebuilt-release");
+    expect(r.command).toEqual([releasePath]);
+    expect(r.inputCommand).toEqual([releasePath, "--emit-input"]);
+  });
+
+  it("falls back to source-tree target/debug when release is absent", () => {
+    const debugPath = join("/repo", "target", "debug", "reasonix-render");
+    const r = resolveRendererWith(
+      makeIO({
+        findReasonixSourceTree: () => "/repo",
+        hasCargo: () => true,
+        hasFile: (p) => p === debugPath,
+      }),
+    );
+    expect(r.source).toBe("prebuilt-debug");
+    expect(r.command).toEqual([debugPath]);
+  });
+
+  it("falls back to cargo run only when no prebuilt binary exists", () => {
+    const r = resolveRendererWith(
+      makeIO({
+        findReasonixSourceTree: () => "/repo",
+        hasCargo: () => true,
+        hasFile: () => false,
+      }),
     );
     expect(r.source).toBe("cargo");
     expect(r.command).toEqual(["cargo", "run", "--quiet", "--bin", "reasonix-render"]);
@@ -83,17 +107,36 @@ describe("resolveRendererWith", () => {
     ]);
   });
 
-  it("uses .exe suffix correctly via the optional-dep callback", () => {
+  it("requires source tree for cargo fallback", () => {
+    expect(
+      resolveRendererWith(makeIO({ findReasonixSourceTree: () => undefined, hasCargo: () => true }))
+        .source,
+    ).toBeNull();
+  });
+
+  it("requires cargo for cargo fallback", () => {
+    expect(
+      resolveRendererWith(
+        makeIO({
+          findReasonixSourceTree: () => "/repo",
+          hasCargo: () => false,
+          hasFile: () => false,
+        }),
+      ).source,
+    ).toBeNull();
+  });
+
+  it("uses .exe suffix on win32", () => {
+    const releasePath = "C:\\repo\\target\\release\\reasonix-render.exe";
     const r = resolveRendererWith(
       makeIO({
         platform: "win32",
-        resolveOptionalDep: (platform) => {
-          expect(platform).toBe("win32");
-          return "C:/x/reasonix-render.exe";
-        },
+        findReasonixSourceTree: () => "C:\\repo",
+        hasFile: (p) => p === releasePath,
       }),
     );
-    expect(r.command).toEqual(["C:/x/reasonix-render.exe"]);
+    expect(r.source).toBe("prebuilt-release");
+    expect(r.command[0]).toBe(releasePath);
   });
 
   it("REASONIX_RENDER_CMD overrides only the renderer channel; input falls back to base", () => {
