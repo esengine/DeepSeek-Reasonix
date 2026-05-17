@@ -5,7 +5,7 @@ use ratatui::style::Modifier;
 use crate::state::SceneState;
 
 use super::cards::render_cards;
-use super::paint::paint_str_to;
+use super::paint::{paint_link, paint_str_to};
 use super::theme::{DS, FG, FG2, FG3, LOGO};
 
 pub fn render_scroll(
@@ -135,21 +135,7 @@ fn render_boot_meta(buf: &mut Buffer, area: Rect, start_row: u16, state: &SceneS
                 BG,
                 Modifier::empty(),
             );
-            // Most modern terminals (Windows Terminal, iTerm2, WezTerm,
-            // gnome-terminal ≥3.26) auto-detect URLs and make them
-            // Ctrl+click-able without needing OSC 8. Render as plain
-            // text in the accent color so it's obvious where the web UI
-            // lives — and selectable with the mouse for copy/paste.
-            paint_str_to(
-                buf,
-                val_col,
-                row,
-                url,
-                end_x,
-                DS_BRIGHT,
-                BG,
-                Modifier::UNDERLINED,
-            );
+            paint_link(buf, val_col, row, url, url, DS_BRIGHT, BG);
             row += 1;
         }
     }
