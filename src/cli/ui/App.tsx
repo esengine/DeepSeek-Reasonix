@@ -1060,6 +1060,25 @@ function AppInner({
           `${notice.reason}\n闂?run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).`,
         );
         bumpReady();
+      } else if (notice.kind === "tools-ready") {
+        log.pushInfo(
+          formatMcpLifecycleEvent({
+            state: "tools-ready",
+            name: notice.name,
+            tools: notice.tools,
+            ms: notice.ms,
+          }),
+        );
+        bumpReady();
+      } else if (notice.kind === "warn") {
+        log.pushWarning(
+          `MCP ${notice.name} warn`,
+          formatMcpLifecycleEvent({
+            state: "warn",
+            name: notice.name,
+            reason: notice.reason,
+          }),
+        );
       } else if (notice.kind === "slow") {
         log.pushInfo(
           formatMcpSlowToast({

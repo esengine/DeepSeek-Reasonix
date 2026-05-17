@@ -14,7 +14,9 @@ export type McpLifecycleEvent =
     }
   | { state: "failed"; name: string; reason: string }
   | { state: "disabled"; name: string }
-  | { state: "reconnect"; name: string };
+  | { state: "reconnect"; name: string }
+  | { state: "tools-ready"; name: string; tools: number; ms: number }
+  | { state: "warn"; name: string; reason: string };
 
 const STATE: Record<McpLifecycleEvent["state"], { glyph: string; label: () => string }> = {
   handshake: { glyph: "↻", label: () => t("mcpLifecycle.handshake") },
@@ -22,6 +24,8 @@ const STATE: Record<McpLifecycleEvent["state"], { glyph: string; label: () => st
   failed: { glyph: "✖", label: () => t("mcpLifecycle.failed") },
   disabled: { glyph: "○", label: () => t("mcpLifecycle.disabled") },
   reconnect: { glyph: "↻", label: () => t("mcpLifecycle.reconnect") },
+  "tools-ready": { glyph: "⚡", label: () => "tools ready" },
+  warn: { glyph: "⚠", label: () => "warn" },
 };
 
 const NAME_COL = 22;
@@ -40,6 +44,8 @@ function describeDetail(ev: McpLifecycleEvent): string {
   if (ev.state === "failed") return ev.reason;
   if (ev.state === "disabled") return t("mcpLifecycle.disabledDetail", { name: ev.name });
   if (ev.state === "reconnect") return t("mcpLifecycle.reconnectDetail");
+  if (ev.state === "tools-ready") return `${ev.tools} tools · ${ev.ms}ms`;
+  if (ev.state === "warn") return ev.reason;
   const parts: string[] = [`${ev.tools} tools`];
   if (ev.resources && ev.resources > 0) parts.push(`${ev.resources} resources`);
   if (ev.prompts && ev.prompts > 0) parts.push(`${ev.prompts} prompts`);
