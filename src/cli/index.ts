@@ -1,3 +1,8 @@
+// First import — re-execs the process with a bigger V8 heap when Node's
+// stock 2 GiB cap is in force (issue #1011). Side-effect on module load,
+// before any heavy import below runs.
+import "./heap-limit-launch.js";
+
 import { Command } from "commander";
 import { readConfig } from "../config.js";
 import { t } from "../i18n/index.js";
