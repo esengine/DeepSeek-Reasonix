@@ -56,7 +56,7 @@ jobs:
       - name: Build reasonix-render cdylib
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --target ${{ matrix.target.rust }} --lib --manifest-path crates/reasonix-render/Cargo.toml
+        run: cargo build --release --target ${{ matrix.target.rust }} --lib --features napi --manifest-path crates/reasonix-render/Cargo.toml
 
       - name: Stage subpackage .node
         shell: bash

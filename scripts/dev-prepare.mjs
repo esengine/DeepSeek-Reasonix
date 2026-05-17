@@ -25,6 +25,8 @@ const build = spawnSync(
     "--release",
     "--quiet",
     "--lib",
+    "--features",
+    "napi",
     "--manifest-path",
     "crates/reasonix-render/Cargo.toml",
   ],

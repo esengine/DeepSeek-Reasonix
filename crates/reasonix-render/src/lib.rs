@@ -3,6 +3,7 @@ pub mod editor;
 pub mod frame_cache;
 pub mod input;
 pub mod integrated;
+#[cfg(feature = "napi")]
 pub mod napi_api;
 pub mod state;
 pub mod theme;

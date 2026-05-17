@@ -762,13 +762,17 @@ fn history_next(scene: &SceneState, cursor: &mut i32) -> Option<String> {
 fn emit_event(event: serde_json::Value) {
     // NAPI path: in-process JS callback installed by `create_renderer`.
     // Falls back to stderr (one-line JSON) for standalone debug / replay
-    // runs that don't go through the renderer.
-    if let Some(emitter) = crate::napi_api::active_emitter() {
-        emitter.emit(&event);
-        if let Ok(s) = serde_json::to_string(&event) {
-            approval_log(&format!("emit {s}"));
+    // runs that don't go through the renderer (the napi feature is off
+    // for `cargo test` / clippy / the standalone bin).
+    #[cfg(feature = "napi")]
+    {
+        if let Some(emitter) = crate::napi_api::active_emitter() {
+            emitter.emit(&event);
+            if let Ok(s) = serde_json::to_string(&event) {
+                approval_log(&format!("emit {s}"));
+            }
+            return;
         }
-        return;
     }
     if let Ok(s) = serde_json::to_string(&event) {
         approval_log(&format!("emit {s}"));
