@@ -138,10 +138,16 @@ jobs:
           set -e
           for d in subpackages/render-*; do
             echo "↑ publishing $d under dist-tag ${{ steps.tag.outputs.dist_tag }}"
-            (cd "$d" && npm publish --access public --provenance --tag ${{ steps.tag.outputs.dist_tag }})
+            (cd "$d" && npm publish --access public --provenance --tag ${{ steps.tag.outputs.dist_tag }} --ignore-scripts)
           done
 
       - name: Publish main reasonix package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance --tag ${{ steps.tag.outputs.dist_tag }}
+        # --ignore-scripts: the explicit `npm run build` step above already
+        # produces dist/, and CI's build job already ran the full test +
+        # typecheck + lint matrix on every push. Re-running prepublishOnly's
+        # entire pipeline here just doubles latency and re-exposes us to
+        # flaky tests (ink stdout rendering, etc.) that have nothing to do
+        # with publishability.
+        run: npm publish --access public --provenance --tag ${{ steps.tag.outputs.dist_tag }} --ignore-scripts
