@@ -269,10 +269,8 @@ const INVOKE_END = `</${DSML}invoke>`;
 const PARAM_TEMPLATE = `<${DSML}parameter name="{key}" string="{is_str}">{value}</${DSML}parameter>`;
 const TOOL_RESULT_TEMPLATE = "<tool_result>{content}</tool_result>";
 
-/** Tools template cache.  toolSpecs arrays are reference-stable across turns
- *  (ImmutablePrefix._toolSpecs), so a WeakMap keyed on the array pointer
- *  avoids re-JSONifying 20-40 schema objects and re-allocating the ~1.5 KB
- *  template string on every `decidePreflight` call. */
+// toolSpecs arrays are reference-stable across turns (ImmutablePrefix._toolSpecs).
+// WeakMap keyed on array pointer avoids re-JSONifying schemas + template on every call.
 const toolsTemplateCache = new WeakMap<ReadonlyArray<unknown>, string>();
 
 function renderTools(tools: ReadonlyArray<unknown>): string {
