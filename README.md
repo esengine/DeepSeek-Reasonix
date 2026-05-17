@@ -76,13 +76,23 @@ Grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reason
 
 If you use Reasonix daily, global install is the simplest path. If you just want to try it, use `npx`.
 
+Bare `reasonix` (no subcommand) launches `code` in the current directory — typing `reasonix` and `reasonix code` are equivalent.
+
 | Command | When |
 |---|---|
-| `reasonix code [dir]` | The coding agent. **Start here.** |
+| `reasonix` / `reasonix code [dir]` | The coding agent. **Start here.** |
 | `reasonix chat` | Plain chat — no filesystem or shell tools. |
 | `reasonix run "task"` | One-shot, streams to stdout. Good for pipes. |
 | `reasonix doctor` | Health check: Node, API key, MCP wiring. |
 | `reasonix update` | Upgrade Reasonix itself. |
+
+### Terminal renderer (Rust by default)
+
+Since 0.44.0, Reasonix ships a native ratatui renderer (`reasonix-render`) as the default TUI. `npm install` resolves one of five pre-built `@reasonix/render-{platform}-{arch}` sub-packages via `optionalDependencies` so install is zero-config on **win32-x64 · linux-x64 · linux-arm64 · darwin-x64 · darwin-arm64**. No cargo, no toolchain, nothing extra to fetch.
+
+- Want the old Ink/Node TUI back? Pass `--node` to any subcommand (`reasonix --node`, `reasonix code --node`, `reasonix chat --node`) or set `REASONIX_RENDERER=node` in your shell.
+- Running on a platform without a published sub-package (Linux musl, FreeBSD, ARM v7, etc.)? Reasonix prints a one-line warning and auto-falls-back to the Ink renderer — nothing breaks.
+- Building rust from source? `cargo build --release --bin reasonix-render` inside the repo; the dev flow (`npm run dev`) does this automatically. The resolver also accepts `REASONIX_RENDER_BIN=/path/to/binary` to pin a specific build for testing.
 
 Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`) are in `reasonix --help` and the [CLI reference](https://esengine.github.io/DeepSeek-Reasonix/#cli).
 
