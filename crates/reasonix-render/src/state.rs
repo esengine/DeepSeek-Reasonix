@@ -67,6 +67,20 @@ pub struct SceneState {
     pub approval: Option<Approval>,
     #[serde(default)]
     pub at_state: Option<AtState>,
+    #[serde(default)]
+    pub prompt_input: Option<PromptInput>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct PromptInput {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default, rename = "defaultValue")]
+    pub default_value: Option<String>,
+    #[serde(default)]
+    pub secret: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

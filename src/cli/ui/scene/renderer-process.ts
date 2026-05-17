@@ -7,7 +7,8 @@ export type RustEvent =
   | { event: "approval-response"; kind: string; choice: unknown }
   | { event: "composer"; text: string }
   | { event: "mode-set"; value: "review" | "auto" | "yolo" }
-  | { event: "preset-set"; value: "auto" | "flash" | "pro" };
+  | { event: "preset-set"; value: "auto" | "flash" | "pro" }
+  | { event: "prompt-response"; id: string; text?: string; cancelled?: boolean };
 
 export type RendererProcess = {
   emit(message: unknown): void;

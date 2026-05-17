@@ -188,7 +188,11 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
             }
         }
 
-        if buffer != prev_emitted_buffer {
+        // While a prompt-input is active the composer buffer is a
+        // private text answer (e.g. an API secret), not a chat draft.
+        // Don't echo it back to Node — handle_prompt_input_key emits a
+        // single `prompt-response` on Enter instead.
+        if scene.prompt_input.is_none() && buffer != prev_emitted_buffer {
             emit_event(serde_json::json!({
                 "event": "composer",
                 "text": buffer.clone(),
@@ -320,6 +324,10 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                 }
                 if mode_picker.is_some() || preset_picker.is_some() {
                     handle_mode_picker_key(&key, &mut mode_picker, &mut preset_picker);
+                    continue;
+                }
+                if let Some(prompt) = scene.prompt_input.as_ref() {
+                    handle_prompt_input_key(&key, prompt, &mut buffer, &mut cursor);
                     continue;
                 }
                 if let Some(approval) = scene.approval.as_ref() {
@@ -724,6 +732,55 @@ fn current_preset_idx(scene: &SceneState) -> usize {
         Some("flash") => 1,
         Some("pro") => 2,
         _ => 0,
+    }
+}
+
+fn handle_prompt_input_key(
+    key: &crossterm::event::KeyEvent,
+    prompt: &crate::state::PromptInput,
+    buffer: &mut String,
+    cursor: &mut usize,
+) {
+    match key.code {
+        KeyCode::Enter => {
+            let answer = if buffer.is_empty() {
+                prompt.default_value.clone().unwrap_or_default()
+            } else {
+                std::mem::take(buffer)
+            };
+            *cursor = 0;
+            emit_event(serde_json::json!({
+                "event": "prompt-response",
+                "id": prompt.id,
+                "text": answer,
+            }));
+        }
+        KeyCode::Esc => {
+            buffer.clear();
+            *cursor = 0;
+            emit_event(serde_json::json!({
+                "event": "prompt-response",
+                "id": prompt.id,
+                "cancelled": true,
+            }));
+        }
+        KeyCode::Backspace if *cursor > 0 => {
+            remove_char_at(buffer, *cursor - 1);
+            *cursor -= 1;
+        }
+        KeyCode::Left => {
+            *cursor = cursor.saturating_sub(1);
+        }
+        KeyCode::Right => {
+            *cursor = (*cursor + 1).min(buffer.chars().count());
+        }
+        KeyCode::Home => *cursor = 0,
+        KeyCode::End => *cursor = buffer.chars().count(),
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            insert_char_at(buffer, *cursor, c);
+            *cursor += 1;
+        }
+        _ => {}
     }
 }
 

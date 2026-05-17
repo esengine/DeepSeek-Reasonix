@@ -56,6 +56,8 @@ export type SceneTraceInput = {
   promptHistoryJson?: string;
   approvalJson?: string;
   atStateJson?: string;
+  /** Active text-input prompt — rust intercepts composer Enter to send the answer back as `prompt-response` instead of submitting it as a chat message. Used by /qq connect and friends under integrated mode. */
+  promptInputJson?: string;
 };
 
 export type SetupSceneInput = {
@@ -309,6 +311,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     promptHistoryJson,
     approvalJson,
     atStateJson,
+    promptInputJson,
   } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
@@ -346,6 +349,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
       promptHistory: parseStringArray(promptHistoryJson),
       approval: parseApproval(approvalJson),
       atState: parseApproval(atStateJson),
+      promptInput: parseApproval(promptInputJson),
       fallbackCols,
       fallbackRows,
     });
@@ -384,6 +388,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     promptHistoryJson,
     approvalJson,
     atStateJson,
+    promptInputJson,
   ]);
 }
 

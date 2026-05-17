@@ -55,17 +55,39 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
     paint(buf, right, bot, '╯', FG3, BG, Modifier::empty());
 
     let content_rows = rows.saturating_sub(2);
-    let prompt_color = match state
-        .composer_text
-        .as_deref()
-        .and_then(|s| s.chars().next())
-    {
-        Some('!') => OK,
-        Some('/') => DS_BRIGHT,
-        Some('@') => DS_PURPLE,
-        _ => DS_BRIGHT,
+    let prompt_input = state.prompt_input.as_ref();
+    let prompt_color = if prompt_input.is_some() {
+        WARN
+    } else {
+        match state
+            .composer_text
+            .as_deref()
+            .and_then(|s| s.chars().next())
+        {
+            Some('!') => OK,
+            Some('/') => DS_BRIGHT,
+            Some('@') => DS_PURPLE,
+            _ => DS_BRIGHT,
+        }
     };
-    let text = state.composer_text.as_deref().unwrap_or("");
+    let raw_text = state.composer_text.as_deref().unwrap_or("");
+    let masked_storage: String;
+    let text: &str = if let Some(p) = prompt_input {
+        if p.secret {
+            masked_storage = "•".repeat(raw_text.chars().count());
+            &masked_storage
+        } else {
+            raw_text
+        }
+    } else {
+        raw_text
+    };
+    let placeholder: &str = if let Some(p) = prompt_input {
+        &p.label
+    } else {
+        COMPOSER_PLACEHOLDER
+    };
+    let prompt_glyph: &str = if prompt_input.is_some() { "? " } else { "❯ " };
     let show_caret = (tick / 6).is_multiple_of(2);
     let total_chars = text.chars().count();
     let cursor = state
@@ -91,19 +113,19 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
     for i in 0..content_rows {
         let y = top + 1 + i;
         if i == 0 {
-            paint_str(buf, col_start, y, "❯ ", prompt_color, BG, Modifier::BOLD);
+            paint_str(
+                buf,
+                col_start,
+                y,
+                prompt_glyph,
+                prompt_color,
+                BG,
+                Modifier::BOLD,
+            );
         }
         let vidx = scroll_off + i as usize;
         if text.is_empty() && i == 0 {
-            paint_str(
-                buf,
-                text_start,
-                y,
-                COMPOSER_PLACEHOLDER,
-                FG3,
-                BG,
-                Modifier::empty(),
-            );
+            paint_str(buf, text_start, y, placeholder, FG3, BG, Modifier::empty());
             if show_caret {
                 paint(buf, text_start, y, '▮', DS_BRIGHT, BG, Modifier::empty());
             }

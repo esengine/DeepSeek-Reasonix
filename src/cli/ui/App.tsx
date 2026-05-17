@@ -1,7 +1,14 @@
 import { type WriteStream, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { Box, Text, useStdin, useStdout } from "ink";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   type JsonlEventSink,
   eventLogPath,
@@ -167,6 +174,7 @@ import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
+import { getActivePromptInput, subscribePromptInput } from "./scene/prompt-input-store.js";
 import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
@@ -1418,6 +1426,16 @@ function AppInner({
     [promptHistory],
   );
 
+  const activePromptInput = useSyncExternalStore(
+    subscribePromptInput,
+    getActivePromptInput,
+    getActivePromptInput,
+  );
+  const promptInputJson = useMemo(
+    () => (activePromptInput ? JSON.stringify(activePromptInput) : undefined),
+    [activePromptInput],
+  );
+
   useEffect(() => {
     setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
   }, [currentRootDir]);
@@ -1544,6 +1562,7 @@ function AppInner({
     promptHistoryJson,
     approvalJson,
     atStateJson,
+    promptInputJson,
   });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix

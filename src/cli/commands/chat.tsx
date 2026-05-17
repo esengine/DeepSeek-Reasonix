@@ -38,6 +38,7 @@ import {
 } from "../ui/scene/input-adapter.js";
 import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
+import { cancelAllPromptInputs, resolvePromptInput } from "../ui/scene/prompt-input-store.js";
 import { isIntegratedRendererRequested, setIntegratedEventHandler } from "../ui/scene/trace.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
@@ -449,6 +450,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
         qqSubmitRef.current?.(event.text);
       } else if (event.event === "exit") {
         void (async () => {
+          cancelAllPromptInputs();
           await stopAndSaveCpuProfile();
           process.exit(0);
         })();
@@ -460,6 +462,8 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
         modeSetRef.current?.(event.value);
       } else if (event.event === "preset-set") {
         presetSetRef.current?.(event.value);
+      } else if (event.event === "prompt-response") {
+        resolvePromptInput(event.id, event.cancelled ? null : (event.text ?? ""));
       }
       // interrupt: no-op for now; terminal SIGINT already reaches Node.
     });
