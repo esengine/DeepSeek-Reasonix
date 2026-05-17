@@ -56,6 +56,60 @@ pub fn slash_completion(query: &str, idx: usize, state: &SceneState) -> Option<S
         .map(|name| format!("/{name} "))
 }
 
+/// Number of arg-completer matches for `/<cmd> <partial>`. Returns 0 when
+/// the command has no static argCompleter, partial already exact-matches a
+/// value, or partial has progressed past the first argument (contains a
+/// space). Dynamic completers (`"models"`, `"path"`, `"mcp-resources"`,
+/// `"mcp-prompts"`, `"skills"`) are not surfaced here yet — those live on
+/// the Node side.
+pub fn slash_arg_match_count(query: &str, state: &SceneState) -> usize {
+    slash_arg_matches(query, state)
+        .map(|v| v.len())
+        .unwrap_or(0)
+}
+
+/// Build the full composer text after picking arg `idx` — replaces the
+/// trailing partial with the chosen value. Returns None when there are
+/// no matches.
+pub fn slash_arg_completion(query: &str, idx: usize, state: &SceneState) -> Option<String> {
+    let matches = slash_arg_matches(query, state)?;
+    let chosen = matches.get(idx)?;
+    let (cmd, _partial) = split_slash_arg(query)?;
+    Some(format!("/{cmd} {chosen}"))
+}
+
+fn slash_arg_matches(query: &str, state: &SceneState) -> Option<Vec<String>> {
+    let (cmd, partial) = split_slash_arg(query)?;
+    if partial.contains(' ') {
+        return None;
+    }
+    let catalog = state.slash_catalog.as_ref()?;
+    let m = catalog.iter().find(|m| m.cmd.eq_ignore_ascii_case(cmd))?;
+    let completer = m.arg_completer.as_ref()?;
+    let needle = partial.to_lowercase();
+    if !partial.is_empty() && completer.iter().any(|v| v.to_lowercase() == needle) {
+        return None;
+    }
+    if partial.is_empty() {
+        return Some(completer.clone());
+    }
+    Some(
+        completer
+            .iter()
+            .filter(|v| v.to_lowercase().starts_with(&needle))
+            .cloned()
+            .collect(),
+    )
+}
+
+fn split_slash_arg(query: &str) -> Option<(&str, &str)> {
+    let stripped = query.strip_prefix('/')?;
+    let space_pos = stripped.find(' ')?;
+    let cmd = &stripped[..space_pos];
+    let partial = &stripped[space_pos + 1..];
+    Some((cmd, partial))
+}
+
 fn match_iter<'a>(query: &'a str, state: &'a SceneState) -> Box<dyn Iterator<Item = &'a str> + 'a> {
     let needle = query.trim_start_matches('/').to_lowercase();
     if let Some(catalog) = state.slash_catalog.as_ref() {
@@ -79,6 +133,106 @@ fn matches_query(cmd: &str, needle_lower: &str) -> bool {
         return true;
     }
     cmd.to_lowercase().starts_with(needle_lower)
+}
+
+pub fn render_slash_arg_overlay(
+    buf: &mut Buffer,
+    dock_area: Rect,
+    state: &SceneState,
+    selected_idx: usize,
+) {
+    let Some(text) = state.composer_text.as_deref() else {
+        return;
+    };
+    let Some(matches) = slash_arg_matches(text, state) else {
+        return;
+    };
+    if matches.is_empty() {
+        return;
+    }
+    let Some((cmd, partial)) = split_slash_arg(text) else {
+        return;
+    };
+    let max_value_w = matches.iter().map(|s| s.width()).max().unwrap_or(8);
+    let header = format!("/{cmd} <arg>");
+    let header_w = header.width();
+    let popup_w = (header_w.max(max_value_w + 4) as u16 + 4).min(dock_area.width.saturating_sub(4));
+    if popup_w < 12 {
+        return;
+    }
+    let cap = (dock_area.y as usize).saturating_sub(3).clamp(1, 10);
+    let visible = matches.len().min(cap) as u16;
+    let popup_h = 3 + visible;
+    if popup_h > dock_area.y {
+        return;
+    }
+    let popup_x = dock_area.x + 2;
+    let popup_y = dock_area.y - popup_h;
+    let popup = Rect::new(popup_x, popup_y, popup_w, popup_h);
+    draw_box(buf, popup);
+    paint_str(
+        buf,
+        popup.x + 2,
+        popup.y + 1,
+        &header,
+        DS_BRIGHT,
+        BG,
+        Modifier::BOLD,
+    );
+    let count_text = if matches.len() == 1 {
+        "1 option".to_string()
+    } else {
+        format!("{} options", matches.len())
+    };
+    let ccol = popup.x + popup.width.saturating_sub(count_text.width() as u16 + 2);
+    paint_str(
+        buf,
+        ccol,
+        popup.y + 1,
+        &count_text,
+        FG3,
+        BG,
+        Modifier::empty(),
+    );
+    let selected = selected_idx.min(matches.len().saturating_sub(1));
+    let start = if selected >= visible as usize {
+        selected + 1 - visible as usize
+    } else {
+        0
+    };
+    let needle = partial.to_lowercase();
+    for (i, value) in matches
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(visible as usize)
+    {
+        let row = popup.y + 2 + (i - start) as u16;
+        let is_sel = i == selected;
+        if is_sel {
+            paint_str(buf, popup.x + 2, row, "▸", DS_BRIGHT, BG, Modifier::BOLD);
+        }
+        let fg = if is_sel { FG } else { DS_BRIGHT };
+        let modifier = if is_sel {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
+        paint_str(buf, popup.x + 4, row, value, fg, BG, modifier);
+        if !partial.is_empty() && value.to_lowercase().starts_with(&needle) {
+            let suffix: String = value.chars().skip(partial.chars().count()).collect();
+            let typed_w = partial.width() as u16;
+            paint_str(
+                buf,
+                popup.x + 4 + typed_w,
+                row,
+                &suffix,
+                FG2,
+                BG,
+                Modifier::empty(),
+            );
+        }
+    }
 }
 
 pub fn render_slash_overlay(

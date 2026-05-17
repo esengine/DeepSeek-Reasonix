@@ -19,8 +19,9 @@ use crate::input::is_quit;
 use crate::state::{decode_message, Payload, SceneState};
 use crate::view::render_setup;
 use crate::whole_screen::{
-    at_completion, at_match_count, cards_layout, extract_text, slash_completion, slash_is_exact,
-    slash_match_count, Selection, WholeScreen,
+    at_completion, at_match_count, cards_layout, extract_text, slash_arg_completion,
+    slash_arg_match_count, slash_completion, slash_is_exact, slash_match_count, Selection,
+    WholeScreen,
 };
 
 type Terminal = ratatui::Terminal<CrosstermBackend<BufWriter<io::Stdout>>>;
@@ -81,6 +82,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
     let mut dragging = false;
     let mut scrollbar_drag: Option<i32> = None;
     let mut slash_idx: usize = 0;
+    let mut slash_arg_idx: usize = 0;
     let mut at_idx: usize = 0;
     let mut history_cursor: i32 = -1;
     let mut approval_idx: usize = 0;
@@ -157,7 +159,17 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
         } else if slash_idx >= slash_count {
             slash_idx = slash_count - 1;
         }
-        let at_count = if slash_count > 0 {
+        let slash_arg_count = if slash_count > 0 {
+            0
+        } else {
+            slash_arg_match_count(&buffer, &scene)
+        };
+        if slash_arg_count == 0 {
+            slash_arg_idx = 0;
+        } else if slash_arg_idx >= slash_arg_count {
+            slash_arg_idx = slash_arg_count - 1;
+        }
+        let at_count = if slash_count > 0 || slash_arg_count > 0 {
             0
         } else {
             at_match_count(&buffer, &scene)
@@ -205,6 +217,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                                 .with_scroll(scroll_offset)
                                 .with_selection(selection)
                                 .with_slash_index(slash_idx)
+                                .with_slash_arg_index(slash_arg_idx)
                                 .with_at_index(at_idx)
                                 .with_approval_index(approval_idx)
                                 .with_mode_picker(mode_picker)
@@ -320,7 +333,8 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                     continue;
                 }
                 let slash_active = slash_count > 0;
-                let at_active = !slash_active && at_count > 0;
+                let slash_arg_active = !slash_active && slash_arg_count > 0;
+                let at_active = !slash_active && !slash_arg_active && at_count > 0;
                 let slash_complete_only = slash_active && !slash_is_exact(&buffer, &scene);
                 match key.code {
                     KeyCode::Up if slash_active => {
@@ -344,6 +358,35 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                     }
                     KeyCode::Enter if slash_complete_only => {
                         if let Some(completion) = slash_completion(&buffer, slash_idx, &scene) {
+                            cursor = completion.chars().count();
+                            buffer = completion;
+                        }
+                    }
+                    KeyCode::Up if slash_arg_active => {
+                        slash_arg_idx = slash_arg_idx.saturating_sub(1);
+                    }
+                    KeyCode::Down if slash_arg_active => {
+                        slash_arg_idx = (slash_arg_idx + 1).min(slash_arg_count - 1);
+                    }
+                    KeyCode::Tab if slash_arg_active => {
+                        if let Some(completion) =
+                            slash_arg_completion(&buffer, slash_arg_idx, &scene)
+                        {
+                            cursor = completion.chars().count();
+                            buffer = completion;
+                        }
+                    }
+                    KeyCode::BackTab if slash_arg_active => {
+                        slash_arg_idx = if slash_arg_idx == 0 {
+                            slash_arg_count - 1
+                        } else {
+                            slash_arg_idx - 1
+                        };
+                    }
+                    KeyCode::Enter if slash_arg_active => {
+                        if let Some(completion) =
+                            slash_arg_completion(&buffer, slash_arg_idx, &scene)
+                        {
                             cursor = completion.chars().count();
                             buffer = completion;
                         }

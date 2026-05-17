@@ -20,7 +20,10 @@ use ratatui::widgets::Widget;
 use crate::state::SceneState;
 
 pub use demo::demo_state;
-pub use overlay::{slash_completion, slash_is_exact, slash_match_count};
+pub use overlay::{
+    slash_arg_completion, slash_arg_match_count, slash_completion, slash_is_exact,
+    slash_match_count,
+};
 pub use overlay_at::{at_completion, at_match_count};
 pub use paint::{paint, paint_str};
 pub use selection::{cards_layout, extract_text, CardsLayout, ScrollbarGeom, Selection};
@@ -29,7 +32,7 @@ use approval::render_approval;
 use boot::render_scroll;
 use dock::render_dock;
 use mode_picker::{mode_picker_options, preset_picker_options, render_picker};
-use overlay::render_slash_overlay;
+use overlay::{render_slash_arg_overlay, render_slash_overlay};
 use overlay_at::render_at_overlay;
 use paint::fill_bg;
 use selection::apply_highlight;
@@ -42,6 +45,7 @@ pub struct WholeScreen<'a> {
     scroll_offset: u16,
     selection: Option<Selection>,
     slash_idx: usize,
+    slash_arg_idx: usize,
     at_idx: usize,
     approval_idx: usize,
     mode_picker_idx: Option<usize>,
@@ -57,6 +61,7 @@ impl<'a> WholeScreen<'a> {
             scroll_offset: 0,
             selection: None,
             slash_idx: 0,
+            slash_arg_idx: 0,
             at_idx: 0,
             approval_idx: 0,
             mode_picker_idx: None,
@@ -96,6 +101,11 @@ impl<'a> WholeScreen<'a> {
         self
     }
 
+    pub fn with_slash_arg_index(mut self, idx: usize) -> Self {
+        self.slash_arg_idx = idx;
+        self
+    }
+
     pub fn with_approval_index(mut self, idx: usize) -> Self {
         self.approval_idx = idx;
         self
@@ -127,6 +137,7 @@ impl Widget for WholeScreen<'_> {
         let dock_h = dock_height_for(self.state).min(area.height);
         let full_dock = Rect::new(area.x, area.y + area.height - dock_h, area.width, dock_h);
         render_slash_overlay(buf, full_dock, self.state, self.slash_idx);
+        render_slash_arg_overlay(buf, full_dock, self.state, self.slash_arg_idx);
         render_at_overlay(buf, full_dock, self.state, self.at_idx);
         if let Some(approval) = self.state.approval.as_ref() {
             render_approval(buf, area, approval, self.approval_idx, dock_h);

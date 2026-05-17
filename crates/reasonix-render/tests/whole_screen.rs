@@ -2,8 +2,9 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use reasonix_render::state::{SceneCard, SceneState};
 use reasonix_render::whole_screen::{
-    at_completion, at_match_count, cards_layout, demo_state, extract_text, slash_completion,
-    slash_is_exact, slash_match_count, Selection, WholeScreen,
+    at_completion, at_match_count, cards_layout, demo_state, extract_text, slash_arg_completion,
+    slash_arg_match_count, slash_completion, slash_is_exact, slash_match_count, Selection,
+    WholeScreen,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -304,6 +305,74 @@ fn catalog_state() -> reasonix_render::state::SceneState {
         ),
         ..Default::default()
     }
+}
+
+#[test]
+fn slash_arg_picker_static_completer() {
+    use reasonix_render::state::{SceneState, SlashMatch};
+    let state = SceneState {
+        slash_catalog: Some(vec![
+            SlashMatch {
+                cmd: "preset".to_string(),
+                summary: String::new(),
+                group: Some("setup".to_string()),
+                args_hint: Some("<auto|flash|pro>".to_string()),
+                aliases: Vec::new(),
+                arg_completer: Some(vec![
+                    "auto".to_string(),
+                    "flash".to_string(),
+                    "pro".to_string(),
+                ]),
+            },
+            SlashMatch {
+                cmd: "language".to_string(),
+                summary: String::new(),
+                group: Some("setup".to_string()),
+                args_hint: Some("<EN|zh-CN>".to_string()),
+                aliases: Vec::new(),
+                arg_completer: Some(vec!["EN".to_string(), "zh-CN".to_string()]),
+            },
+            SlashMatch {
+                cmd: "help".to_string(),
+                summary: String::new(),
+                group: Some("chat".to_string()),
+                args_hint: None,
+                aliases: Vec::new(),
+                arg_completer: None,
+            },
+        ]),
+        ..Default::default()
+    };
+    assert_eq!(
+        slash_arg_match_count("/preset ", &state),
+        3,
+        "bare arg shows all"
+    );
+    assert_eq!(
+        slash_arg_match_count("/preset fl", &state),
+        1,
+        "prefix filters"
+    );
+    assert_eq!(
+        slash_arg_match_count("/preset flash", &state),
+        0,
+        "exact dismisses"
+    );
+    assert_eq!(slash_arg_match_count("/help ", &state), 0, "no completer");
+    assert_eq!(
+        slash_arg_match_count("/preset auto x", &state),
+        0,
+        "past first arg"
+    );
+    assert_eq!(slash_arg_match_count("/zzz ", &state), 0, "unknown cmd");
+    assert_eq!(
+        slash_arg_completion("/preset fl", 0, &state).as_deref(),
+        Some("/preset flash"),
+    );
+    assert_eq!(
+        slash_arg_completion("/language ", 1, &state).as_deref(),
+        Some("/language zh-CN"),
+    );
 }
 
 #[test]
