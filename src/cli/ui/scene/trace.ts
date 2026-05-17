@@ -71,6 +71,14 @@ export async function flushSceneTrace(): Promise<void> {
 /** Force the trace child to spawn now — React useEffect in useSceneTrace was unreliable on macOS (sometimes never fired under npx). */
 export function ensureSceneTraceReady(): void {
   ensureInitialized();
+  // Seed an empty trace frame so the rust integrated loop has `have_state=true`
+  // immediately — without this, if the stdin pipe closes before the first
+  // useSceneTrace effect fires (Ink unmount cascade on macOS), rust hits its
+  // `if stdin_closed && !have_state { return Ok(()) }` early-exit at ~100ms.
+  if (state.mode === "child" && state.child) {
+    state.child.emit({ type: "trace" });
+    process.stderr.write("[trace] seed frame written\n");
+  }
 }
 
 function ensureInitialized(): void {
