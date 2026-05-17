@@ -103,6 +103,7 @@ import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { BootSplash } from "./BootSplash.js";
 import { CheckpointPicker } from "./CheckpointPicker.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
+import { ComposerArea } from "./ComposerArea.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
 import { LiveActivityArea } from "./LiveActivityArea.js";
 import { McpHub } from "./McpHub.js";
@@ -4820,58 +4821,32 @@ function AppInner({
                     onChoose={handleWalkChoice}
                   />
                 ) : (
-                  <InputAreaWithHistoryHint
-                    inputArea={
-                      <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                        <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                          {codeMode ? (
-                            <ModeStatusBar
-                              editMode={editMode}
-                              pendingCount={pendingCount}
-                              flash={modeFlash}
-                              planMode={planMode}
-                              undoArmed={!!undoBanner || hasUndoable()}
-                              jobs={codeMode.jobs}
-                            />
-                          ) : null}
-                          {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
-                          <StatusRow statusBar={statusBar} />
-                          <PromptInput
-                            value={input}
-                            onChange={setInput}
-                            onSubmit={handleSubmit}
-                            disabled={busy}
-                            onHistoryPrev={handleHistoryPrev}
-                            onHistoryNext={handleHistoryNext}
-                            onOpenExternalEditor={handleOpenExternalEditor}
-                            onCursorChange={setComposerCursor}
-                          />
-                        </Box>
-                        <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                          {slashMatches !== null ? (
-                            <SlashSuggestions
-                              key={`slash-suggestions:${slashGroupMode ? "group" : "search"}`}
-                              matches={slashMatches}
-                              selectedIndex={slashSelected}
-                              groupMode={slashGroupMode}
-                              advancedHidden={slashAdvancedHidden}
-                            />
-                          ) : null}
-                          {atState !== null ? (
-                            <AtMentionSuggestions state={atState} selectedIndex={atSelected} />
-                          ) : null}
-                        </Box>
-                        {slashArgContext ? (
-                          <SlashArgPicker
-                            matches={slashArgMatches}
-                            selectedIndex={slashArgSelected}
-                            spec={slashArgContext.spec}
-                            kind={slashArgContext.kind}
-                            partial={slashArgContext.partial}
-                          />
-                        ) : null}
-                      </Box>
-                    }
+                  <ComposerArea
+                    editMode={editMode}
+                    pendingCount={pendingCount}
+                    modeFlash={modeFlash}
+                    planMode={planMode}
+                    undoArmed={!!undoBanner || hasUndoable()}
+                    jobs={codeMode ? codeMode.jobs : undefined}
+                    activeLoop={activeLoop}
+                    statusBar={statusBar}
+                    input={input}
+                    setInput={setInput}
+                    busy={busy}
+                    onSubmit={handleSubmit}
+                    onHistoryPrev={handleHistoryPrev}
+                    onHistoryNext={handleHistoryNext}
+                    onOpenExternalEditor={handleOpenExternalEditor}
+                    onCursorChange={setComposerCursor}
+                    slashMatches={slashMatches}
+                    slashSelected={slashSelected}
+                    slashGroupMode={slashGroupMode}
+                    slashAdvancedHidden={slashAdvancedHidden}
+                    atState={atState}
+                    atSelected={atSelected}
+                    slashArgContext={slashArgContext}
+                    slashArgMatches={slashArgMatches}
+                    slashArgSelected={slashArgSelected}
                   />
                 )}
               </Box>
