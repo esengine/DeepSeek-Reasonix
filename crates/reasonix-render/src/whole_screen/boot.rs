@@ -135,7 +135,8 @@ fn render_boot_meta(buf: &mut Buffer, area: Rect, start_row: u16, state: &SceneS
                 BG,
                 Modifier::empty(),
             );
-            let used = paint_link_wrapped(buf, val_col, row, end_x, bottom, url, url, DS_BRIGHT, BG);
+            let used =
+                paint_link_wrapped(buf, val_col, row, end_x, bottom, url, url, DS_BRIGHT, BG);
             row += used.max(1);
         }
     }

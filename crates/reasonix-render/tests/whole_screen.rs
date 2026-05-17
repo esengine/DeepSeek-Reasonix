@@ -440,7 +440,10 @@ fn long_dashboard_url_wraps_within_main_panel() {
         occurrences >= 2,
         "expected long URL to wrap across multiple rows (got {occurrences} OSC 8 entries)"
     );
-    assert!(all.contains("MISSION CONTROL"), "sidebar should still render alongside wrapped URL");
+    assert!(
+        all.contains("MISSION CONTROL"),
+        "sidebar should still render alongside wrapped URL"
+    );
 }
 
 #[test]
