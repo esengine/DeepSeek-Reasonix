@@ -61,6 +61,9 @@ export const zhCN: typeof en = {
     newline: "换行",
     commands: "命令",
   },
+  dragDrop: {
+    overlay: "松开以作为 @ 提及附加",
+  },
   settings: {
     title: "设置",
     close: "关闭",

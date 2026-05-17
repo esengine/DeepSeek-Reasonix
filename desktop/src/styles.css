@@ -28,7 +28,7 @@ body {
 }
 
 body[data-drag-over="1"]::after {
-  content: "Drop to attach as @-mention";
+  content: var(--drop-overlay-label, "Drop to attach as @-mention");
   position: fixed;
   inset: 0;
   display: grid;

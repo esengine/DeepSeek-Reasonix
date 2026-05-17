@@ -1039,8 +1039,12 @@ function TabRuntime({
 
   // Drag-and-drop: dropping files/folders onto the window inserts them
   // as @-mentions in the draft (relative to workspaceDir when inside it).
-  // Tauri's webview API gives us absolute paths; converting to relative
-  // matches what the file-picker dialog does in composer.attachFile.
+  // activeRef gates the handler — without it, a single drop hits every
+  // mounted tab's draft (issue #1027, exposed once #1063 restored tabs).
+  const dropActiveRef = useRef(active);
+  useEffect(() => {
+    dropActiveRef.current = active;
+  }, [active]);
   useEffect(() => {
     const ws = state.settings?.workspaceDir;
     let unlisten: (() => void) | null = null;
@@ -1050,7 +1054,12 @@ function TabRuntime({
         const mod = await import("@tauri-apps/api/webview");
         const webview = mod.getCurrentWebview();
         const handle = await webview.onDragDropEvent((event) => {
+          if (!dropActiveRef.current) return;
           if (event.payload.type === "enter") {
+            document.body.style.setProperty(
+              "--drop-overlay-label",
+              `"${t("dragDrop.overlay")}"`,
+            );
             document.body.dataset.dragOver = "1";
             return;
           }

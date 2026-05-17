@@ -59,6 +59,9 @@ export const en = {
     newline: "newline",
     commands: "commands",
   },
+  dragDrop: {
+    overlay: "Drop to attach as @-mention",
+  },
   settings: {
     title: "Settings",
     close: "close",
