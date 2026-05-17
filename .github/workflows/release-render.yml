@@ -81,8 +81,18 @@ jobs:
           else
             raw="${GITHUB_REF_NAME}"
           fi
-          # Strip leading v if present so npm sees a clean SemVer.
-          echo "version=${raw#v}" >> "$GITHUB_OUTPUT"
+          # Strip leading v so npm sees a clean SemVer.
+          version="${raw#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # Prereleases (0.44.0-rc.1, 0.44.0-beta.2, ...) ship under
+          # dist-tag 'next' so `npx reasonix@latest` keeps pointing at
+          # the most recent stable. Stable versions get 'latest' (npm's
+          # default — leave the flag empty).
+          if [[ "$version" == *-* ]]; then
+            echo "dist_tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Node 22
         uses: actions/setup-node@v4
@@ -124,11 +134,11 @@ jobs:
         run: |
           set -e
           for d in subpackages/render-*; do
-            echo "↑ publishing $d"
-            (cd "$d" && npm publish --access public --provenance)
+            echo "↑ publishing $d under dist-tag ${{ steps.tag.outputs.dist_tag }}"
+            (cd "$d" && npm publish --access public --provenance --tag ${{ steps.tag.outputs.dist_tag }})
           done
 
       - name: Publish main reasonix package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: npm publish --access public --provenance --tag ${{ steps.tag.outputs.dist_tag }}
