@@ -502,11 +502,25 @@ export class CacheFirstLoop {
   private _inflightCounter = 0;
 
   private buildMessages(pendingUser: string | null): ChatMessage[] {
-    // DeepSeek 400s on either unpaired tool_calls or stray tool entries — heal before sending.
-    const healed = healLoadedMessages(this.log.toMessages(), DEFAULT_MAX_RESULT_CHARS);
-    const msgs: ChatMessage[] = [...this.prefix.toMessages(), ...healed.messages];
+    const healedMessages = this.healActiveLogBeforeSend();
+    const msgs: ChatMessage[] = [...this.prefix.toMessages(), ...healedMessages];
     if (pendingUser !== null) msgs.push({ role: "user", content: pendingUser });
     return msgs;
+  }
+
+  private healActiveLogBeforeSend(): ChatMessage[] {
+    const current = this.log.toMessages();
+    const healed = healLoadedMessages(current, DEFAULT_MAX_RESULT_CHARS);
+    if (healed.healedCount === 0) return current;
+    this.log.compactInPlace(healed.messages);
+    if (this.sessionName) {
+      try {
+        rewriteSession(this.sessionName, healed.messages);
+      } catch {
+        /* disk issue shouldn't block the in-memory heal */
+      }
+    }
+    return healed.messages;
   }
 
   abort(): void {
