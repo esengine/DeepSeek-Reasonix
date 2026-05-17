@@ -3,7 +3,11 @@ import { spawn } from "node:child_process";
 export type RustEvent =
   | { event: "submit"; text: string }
   | { event: "interrupt" }
-  | { event: "exit" };
+  | { event: "exit" }
+  | { event: "approval-response"; kind: string; choice: unknown }
+  | { event: "composer"; text: string }
+  | { event: "mode-set"; value: "review" | "auto" | "yolo" }
+  | { event: "preset-set"; value: "auto" | "flash" | "pro" };
 
 export type RendererProcess = {
   emit(message: unknown): void;

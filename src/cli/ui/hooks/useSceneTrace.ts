@@ -40,7 +40,20 @@ export type SceneTraceInput = {
   sidebarActiveSession?: string;
   mcpServerCount?: number;
   editMode?: "review" | "auto" | "yolo";
+  preset?: "auto" | "flash" | "pro";
   cwd?: string;
+  ctxTokens?: number;
+  ctxCap?: number;
+  sessionCostUsd?: number;
+  lastTurnCostUsd?: number;
+  cacheHitRatio?: number;
+  lastTurnMs?: number;
+  sessionInputTokens?: number;
+  sessionOutputTokens?: number;
+  slashCatalogJson?: string;
+  promptHistoryJson?: string;
+  approvalJson?: string;
+  atStateJson?: string;
 };
 
 export type SetupSceneInput = {
@@ -223,7 +236,20 @@ export function useSceneTrace(input: SceneTraceInput): void {
     walletCurrency,
     mcpServerCount,
     editMode,
+    preset,
     cwd,
+    ctxTokens,
+    ctxCap,
+    sessionCostUsd,
+    lastTurnCostUsd,
+    cacheHitRatio,
+    lastTurnMs,
+    sessionInputTokens,
+    sessionOutputTokens,
+    slashCatalogJson,
+    promptHistoryJson,
+    approvalJson,
+    atStateJson,
   } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
@@ -246,7 +272,20 @@ export function useSceneTrace(input: SceneTraceInput): void {
       walletCurrency,
       mcpServerCount,
       editMode,
+      preset,
       cwd,
+      ctxTokens,
+      ctxCap,
+      sessionCostUsd,
+      lastTurnCostUsd,
+      cacheHitRatio,
+      lastTurnMs,
+      sessionInputTokens,
+      sessionOutputTokens,
+      slashCatalog: parseSlashMatches(slashCatalogJson),
+      promptHistory: parseStringArray(promptHistoryJson),
+      approval: parseApproval(approvalJson),
+      atState: parseApproval(atStateJson),
       fallbackCols,
       fallbackRows,
     });
@@ -270,8 +309,41 @@ export function useSceneTrace(input: SceneTraceInput): void {
     walletCurrency,
     mcpServerCount,
     editMode,
+    preset,
     cwd,
+    ctxTokens,
+    ctxCap,
+    sessionCostUsd,
+    lastTurnCostUsd,
+    cacheHitRatio,
+    lastTurnMs,
+    sessionInputTokens,
+    sessionOutputTokens,
+    slashCatalogJson,
+    promptHistoryJson,
+    approvalJson,
+    atStateJson,
   ]);
+}
+
+function parseApproval(json: string | undefined): unknown {
+  if (!json || json.length === 0) return undefined;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseStringArray(json: string | undefined): string[] {
+  if (!json || json.length === 0) return [];
+  try {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((s): s is string => typeof s === "string");
+  } catch {
+    return [];
+  }
 }
 
 export function useSetupSceneTrace(input: SetupSceneInput): void {

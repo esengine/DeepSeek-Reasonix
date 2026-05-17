@@ -15,6 +15,14 @@ export type RustKeystrokeReader = KeystrokeReader & {
   wait(): Promise<number | null>;
 };
 
+/** Integrated mode: rust owns CONIN$; Node calling setRawMode on process.stdin would race it on Windows. */
+export const nullKeystrokeReader: KeystrokeReader = {
+  start() {},
+  subscribe() {
+    return () => {};
+  },
+};
+
 export function createRustKeystrokeReader(opts: SpawnInputSourceOptions = {}): RustKeystrokeReader {
   const source = spawnInputSource(opts);
   const handlers = new Set<KeystrokeHandler>();

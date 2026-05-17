@@ -30,8 +30,12 @@ import { App } from "../ui/App.js";
 import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
-import { KeystrokeProvider } from "../ui/keystroke-context.js";
-import { type RustKeystrokeReader, createRustKeystrokeReader } from "../ui/scene/input-adapter.js";
+import { KeystrokeProvider, type KeystrokeReader } from "../ui/keystroke-context.js";
+import {
+  type RustKeystrokeReader,
+  createRustKeystrokeReader,
+  nullKeystrokeReader,
+} from "../ui/scene/input-adapter.js";
 import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import { isIntegratedRendererRequested, setIntegratedEventHandler } from "../ui/scene/trace.js";
@@ -179,10 +183,22 @@ interface RootProps extends ChatOptions {
   qqChannel?: QQChannel;
   /** App fills this ref on mount so QQ messages flow into the TUI input queue. */
   qqSubmitRef: { current: ((text: string) => void) | null };
+  /** Set by App on mount so Rust approval-response events route to the right handler ref. */
+  approvalDispatchRef?: { current: ((kind: string, choice: unknown) => void) | null };
+  /** Set by App on mount; chat.tsx calls it with the Rust child's composer text so Ink pickers (@ / slash) recompute. */
+  rustComposerRef?: { current: ((text: string) => void) | null };
+  /** Apply edit-mode value when Rust emits mode-set (Shift+Tab cycle or picker selection). */
+  modeSetRef?: {
+    current: ((value: "review" | "auto" | "yolo") => void) | null;
+  };
+  /** Apply preset value when Rust emits preset-set (picker selection). */
+  presetSetRef?: {
+    current: ((value: "auto" | "flash" | "pro") => void) | null;
+  };
   /** App fills this ref on mount so QQ errors appear in the TUI log. */
   qqErrorRef: { current: ((msg: string) => void) | null };
-  /** Custom keystroke source — populated when REASONIX_RENDERER=rust so keys flow from the spawned input child instead of stdin (which is the null stream in that mode). */
-  keystrokeReader?: RustKeystrokeReader;
+  /** Custom keystroke source — populated when REASONIX_RENDERER=rust so keys flow from the spawned input child (or a no-op reader in integrated mode) instead of process.stdin. */
+  keystrokeReader?: KeystrokeReader;
 }
 
 function Root({
@@ -282,6 +298,10 @@ function Root({
         qqChannel={appProps.qqChannel}
         qqSubmitRef={appProps.qqSubmitRef}
         qqErrorRef={appProps.qqErrorRef}
+        approvalDispatchRef={appProps.approvalDispatchRef}
+        rustComposerRef={appProps.rustComposerRef}
+        modeSetRef={appProps.modeSetRef}
+        presetSetRef={appProps.presetSetRef}
         onSwitchSession={setActiveSession}
       />
     </KeystrokeProvider>
@@ -370,6 +390,16 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // deterministic.
   const qqSubmitRef: { current: ((text: string) => void) | null } = { current: null };
   const qqErrorRef: { current: ((msg: string) => void) | null } = { current: null };
+  const approvalDispatchRef: {
+    current: ((kind: string, choice: unknown) => void) | null;
+  } = { current: null };
+  const rustComposerRef: { current: ((text: string) => void) | null } = { current: null };
+  const modeSetRef: {
+    current: ((value: "review" | "auto" | "yolo") => void) | null;
+  } = { current: null };
+  const presetSetRef: {
+    current: ((value: "auto" | "flash" | "pro") => void) | null;
+  } = { current: null };
   const qqRequested = cfg.qq?.enabled === true;
   let qqChannel: QQChannel | undefined;
   if (qqRequested) {
@@ -404,11 +434,13 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
   const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
   const inputCmdOverride = parseInputCmd(process.env.REASONIX_INPUT_CMD);
-  // Integrated mode: rust captures the terminal directly, no separate input child.
-  const keystrokeReader =
+  const rustInputChild: RustKeystrokeReader | undefined =
     rustRendererActive && !rustIntegrated
       ? createRustKeystrokeReader(inputCmdOverride ? { command: inputCmdOverride } : {})
       : undefined;
+  const keystrokeReader: KeystrokeReader | undefined = rustIntegrated
+    ? nullKeystrokeReader
+    : rustInputChild;
   const stderrRestore = rustRendererActive ? redirectStderrToLogFile() : undefined;
 
   if (rustIntegrated) {
@@ -420,6 +452,14 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
           await stopAndSaveCpuProfile();
           process.exit(0);
         })();
+      } else if (event.event === "approval-response") {
+        approvalDispatchRef.current?.(event.kind, event.choice);
+      } else if (event.event === "composer") {
+        rustComposerRef.current?.(event.text);
+      } else if (event.event === "mode-set") {
+        modeSetRef.current?.(event.value);
+      } else if (event.event === "preset-set") {
+        presetSetRef.current?.(event.value);
       }
       // interrupt: no-op for now; terminal SIGINT already reaches Node.
     });
@@ -440,6 +480,10 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       session={resolvedSession}
       qqChannel={qqChannel}
       qqSubmitRef={qqSubmitRef}
+      approvalDispatchRef={approvalDispatchRef}
+      rustComposerRef={rustComposerRef}
+      modeSetRef={modeSetRef}
+      presetSetRef={presetSetRef}
       qqErrorRef={qqErrorRef}
     />,
     {
@@ -465,7 +509,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   } finally {
     await runtime.closeAll();
     qqChannel?.stop();
-    if (keystrokeReader) await keystrokeReader.close();
+    if (rustInputChild) await rustInputChild.close();
     if (stderrRestore) stderrRestore();
     // Eat any pending terminal-feature-detection responses (#365) so the
     // parent shell doesn't print them as junk after exit.
