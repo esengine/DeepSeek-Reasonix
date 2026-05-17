@@ -708,10 +708,8 @@ export class CacheFirstLoop {
 
       // Preflight context check. Local estimate of the outgoing payload
       // catches cases where prior usage didn't warn us (fresh resume, one
-      // huge tool result). Above 95% we attempt a fold as a last resort —
-      // it costs one summary call but stays cache-friendly. If the fold
-      // can't shrink anything, we surface a warning and let the request
-      // go (and likely 400) so the user knows to /clear.
+      // huge tool result). Above 95% we truncate locally instead of making
+      // the user wait on another model call before their request goes out.
       {
         const decision = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
         if (decision.needsAction) {
@@ -719,24 +717,29 @@ export class CacheFirstLoop {
           yield {
             turn: this._turn,
             role: "status",
-            content: t("loop.preflightFoldStatus"),
+            content: t("loop.preflightTruncateStatus"),
           };
-          const result = await this.context.fold(this.model);
+          const result = this.context.mechanicalTruncate(this.model, {
+            allowEmpty: pendingUser !== null,
+          });
           if (result.folded) {
+            messages = this.buildMessages(pendingUser);
+            const after = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
+            const stillFull = after.needsAction;
             yield {
               turn: this._turn,
               role: "warning",
-              content: t("loop.preflightFolded", {
-                estimate: estimate.toLocaleString(),
-                ctxMax: ctxMax.toLocaleString(),
-                pct: Math.round((estimate / ctxMax) * 100),
-                beforeMessages: result.beforeMessages,
-                afterMessages: result.afterMessages,
-                summaryChars: result.summaryChars,
-              }),
+              content: t(
+                stillFull ? "loop.preflightTruncatedStillFull" : "loop.preflightTruncated",
+                {
+                  estimate: after.estimateTokens.toLocaleString(),
+                  ctxMax: after.ctxMax.toLocaleString(),
+                  pct: Math.round((after.estimateTokens / after.ctxMax) * 100),
+                  beforeMessages: result.beforeMessages,
+                  afterMessages: result.afterMessages,
+                },
+              ),
             };
-            // Rebuild with the folded log so we send the smaller payload.
-            messages = this.buildMessages(pendingUser);
           } else {
             yield {
               turn: this._turn,

@@ -608,11 +608,13 @@ export const zhCN: TranslationSchema = {
     proArmed: "⇧ /pro 已装备 — 本轮使用 deepseek-v4-pro（一次性 · 本轮后自动解除）",
     abortedAtIter: "在第 {iter} 次工具调用处中断 — 未生成总结即停止（按 ↑ + Enter 或 /retry 恢复）",
     toolUploadStatus: "工具结果已上传 · 模型在生成下一条响应前思考中…",
-    preflightFoldStatus: "预检：上下文接近上限，尝试折叠…",
-    preflightFolded:
-      "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）— 已折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。发送中。",
+    preflightTruncateStatus: "预检：上下文接近上限，正在裁剪最早历史…",
+    preflightTruncated:
+      "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）— 已裁剪 {beforeMessages} 条消息 → {afterMessages}。发送中。",
+    preflightTruncatedStillFull:
+      "预检：裁剪 {beforeMessages} 条消息 → {afterMessages} 后，请求仍约 {estimate}/{ctxMax} tokens（{pct}%）— DeepSeek 大概率会返回 400。请运行 /clear 或 /new 重新开始。",
     preflightNoFold:
-      "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）且没有可折叠的内容 — DeepSeek 大概率会返回 400。请运行 /clear 或 /new 重新开始。",
+      "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）且没有可裁剪的内容 — DeepSeek 大概率会返回 400。请运行 /clear 或 /new 重新开始。",
     flashEscalation: "⇧ flash 请求升级 — 本轮改用 {model}{reasonSuffix}",
     harvestStatus: "正在从推理过程提取计划状态…",
     autoEscalation:

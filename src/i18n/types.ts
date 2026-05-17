@@ -221,8 +221,9 @@ export interface TranslationSchema {
     proArmed: string;
     abortedAtIter: string;
     toolUploadStatus: string;
-    preflightFoldStatus: string;
-    preflightFolded: string;
+    preflightTruncateStatus: string;
+    preflightTruncated: string;
+    preflightTruncatedStillFull: string;
     preflightNoFold: string;
     flashEscalation: string;
     harvestStatus: string;

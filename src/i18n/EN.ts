@@ -624,11 +624,13 @@ export const EN: TranslationSchema = {
     abortedAtIter:
       "aborted at iter {iter} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
-    preflightFoldStatus: "preflight: context near full, attempting fold…",
-    preflightFolded:
-      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Sending.",
+    preflightTruncateStatus: "preflight: context near full, truncating oldest history…",
+    preflightTruncated:
+      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) — truncated {beforeMessages} messages → {afterMessages}. Sending.",
+    preflightTruncatedStillFull:
+      "preflight: request still ~{estimate}/{ctxMax} tokens ({pct}%) after truncating {beforeMessages} messages → {afterMessages}. DeepSeek will likely 400. Run /clear or /new to start fresh.",
     preflightNoFold:
-      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) and nothing left to fold — DeepSeek will likely 400. Run /clear or /new to start fresh.",
+      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) and nothing left to truncate — DeepSeek will likely 400. Run /clear or /new to start fresh.",
     flashEscalation: "⇧ flash requested escalation — retrying this turn on {model}{reasonSuffix}",
     harvestStatus: "extracting plan state from reasoning…",
     autoEscalation:

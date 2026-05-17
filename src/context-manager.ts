@@ -12,7 +12,11 @@ import {
   DEFAULT_CONTEXT_TOKENS,
   type SessionStats,
 } from "./telemetry/stats.js";
-import { countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
+import {
+  countTokensBounded,
+  estimateConversationTokens,
+  estimateRequestTokens,
+} from "./tokenizer.js";
 import type { ChatMessage } from "./types.js";
 
 /** Auto-fold when a turn's response shows promptTokens above this fraction of ctxMax. */
@@ -29,6 +33,10 @@ export const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
 export const FORCE_SUMMARY_THRESHOLD = 0.8;
 /** Local preflight estimate above this fraction trips the emergency in-place compact path. */
 export const PREFLIGHT_EMERGENCY_THRESHOLD = 0.95;
+/** Emergency preflight target after local truncation, as a fraction of ctxMax. */
+export const PREFLIGHT_MECHANICAL_TARGET_FRACTION = 0.7;
+/** Hard deadline for semantic fold summaries so a hung request cannot stall the turn loop. */
+export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
 /** Prepended to fold summary content so the model knows it's a synthesized recap. */
 export const HISTORY_FOLD_MARKER =
   "[CONVERSATION HISTORY SUMMARY — earlier turns folded for context efficiency]\n\n";
@@ -202,6 +210,63 @@ export class ContextManager {
     };
   }
 
+  /** Pure local emergency compaction for preflight: drop oldest log entries and keep a valid tail. */
+  mechanicalTruncate(
+    model: string,
+    opts?: { targetTokens?: number; allowEmpty?: boolean },
+  ): FoldResult {
+    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+    const targetTokens =
+      opts?.targetTokens ?? Math.floor(ctxMax * PREFLIGHT_MECHANICAL_TARGET_FRACTION);
+    const all = this.deps.log.toMessages();
+    const noop: FoldResult = {
+      folded: false,
+      beforeMessages: all.length,
+      afterMessages: all.length,
+      summaryChars: 0,
+    };
+    if (all.length === 0) return noop;
+
+    const tokenCounts = all.map((m) => estimateConversationTokens([m], true));
+    let latestUserBoundary = -1;
+    for (let i = all.length - 1; i >= 0; i--) {
+      if (all[i]!.role === "user") {
+        latestUserBoundary = i;
+        break;
+      }
+    }
+    let cumTokens = 0;
+    let boundary = all.length;
+    let foundSafeBoundary = false;
+    for (let i = all.length - 1; i >= 0; i--) {
+      const next = cumTokens + tokenCounts[i]!;
+      if (next > targetTokens) break;
+      cumTokens = next;
+      if (all[i]!.role === "user") {
+        boundary = i;
+        foundSafeBoundary = true;
+      }
+    }
+    if (boundary <= 0) return noop;
+
+    const replacement = foundSafeBoundary
+      ? all.slice(boundary)
+      : opts?.allowEmpty
+        ? []
+        : latestUserBoundary >= 0
+          ? all.slice(latestUserBoundary)
+          : all;
+    if (replacement.length === all.length) return noop;
+    this.deps.log.compactInPlace(replacement);
+    this.persistRewrite(replacement);
+    return {
+      folded: true,
+      beforeMessages: all.length,
+      afterMessages: replacement.length,
+      summaryChars: 0,
+    };
+  }
+
   /** Drop a trailing in-flight assistant-with-tool_calls before a forced summary. Tail-only mutation; prefix cache safe. */
   trimTrailingToolCalls(): boolean {
     const tail = this.deps.log.entries[this.deps.log.entries.length - 1];
@@ -235,14 +300,40 @@ export class ContextManager {
           "Summarize the conversation above as plain prose. This summary replaces the original turns to free context — make it self-contained.",
       },
     ];
+    const turnSignal = this.deps.getAbortSignal();
+    const foldCtrl = new AbortController();
+    let cleanupAbort = (): void => {};
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const resp = await this.deps.client.chat({
-        model: summaryModel,
-        messages,
-        signal: this.deps.getAbortSignal(),
-        thinking: thinkingModeForModel(summaryModel),
-        reasoningEffort: "high",
+      const abortPromise = new Promise<never>((_, reject) => {
+        const abort = () => {
+          foldCtrl.abort();
+          reject(new Error("fold-aborted"));
+        };
+        if (turnSignal.aborted) {
+          abort();
+        } else {
+          turnSignal.addEventListener("abort", abort, { once: true });
+          cleanupAbort = () => turnSignal.removeEventListener("abort", abort);
+        }
       });
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          foldCtrl.abort();
+          reject(new Error("fold-timeout"));
+        }, HISTORY_FOLD_SUMMARY_TIMEOUT_MS);
+      });
+      const resp = await Promise.race([
+        this.deps.client.chat({
+          model: summaryModel,
+          messages,
+          signal: foldCtrl.signal,
+          thinking: thinkingModeForModel(summaryModel),
+          reasoningEffort: "high",
+        }),
+        abortPromise,
+        timeoutPromise,
+      ]);
       this.deps.stats.record(this.deps.getCurrentTurn(), summaryModel, resp.usage ?? new Usage());
       return {
         content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
@@ -250,6 +341,9 @@ export class ContextManager {
       };
     } catch {
       return { content: "", reasoningContent: "" };
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      cleanupAbort();
     }
   }
 
