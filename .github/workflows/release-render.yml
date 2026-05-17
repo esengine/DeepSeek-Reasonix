@@ -24,7 +24,10 @@ jobs:
           - { label: "win32-x64",    rust: "x86_64-pc-windows-msvc",      os: "windows-latest", bin: "reasonix-render.exe" }
           - { label: "linux-x64",    rust: "x86_64-unknown-linux-gnu",    os: "ubuntu-22.04",   bin: "reasonix-render" }
           - { label: "linux-arm64",  rust: "aarch64-unknown-linux-gnu",   os: "ubuntu-22.04",   bin: "reasonix-render", cross: true }
-          - { label: "darwin-x64",   rust: "x86_64-apple-darwin",         os: "macos-13",       bin: "reasonix-render" }
+          # darwin-x64 cross-built from Apple Silicon — GH's macos-13 Intel pool was retired
+          # in 2025 and queues run to hours. rustc on macos-14 supports x86_64-apple-darwin
+          # natively via the `targets:` install; no codesign or runtime needed at build time.
+          - { label: "darwin-x64",   rust: "x86_64-apple-darwin",         os: "macos-14",       bin: "reasonix-render" }
           - { label: "darwin-arm64", rust: "aarch64-apple-darwin",        os: "macos-14",       bin: "reasonix-render" }
     runs-on: ${{ matrix.target.os }}
     steps:
