@@ -279,6 +279,10 @@ export interface AppProps {
   openDashboard?: boolean;
   /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
   dashboardPort?: number;
+  /** Dashboard bind address (#968). `undefined` keeps the default 127.0.0.1. */
+  dashboardHost?: string;
+  /** Stable dashboard URL token (#968). `undefined` mints a fresh per-boot token. */
+  dashboardToken?: string;
   /** Mid-chat session swap 闂?Root remounts App with the new session via key. */
   onSwitchSession?: (name: string | undefined) => void;
   /**
@@ -475,6 +479,8 @@ function AppInner({
   noDashboard,
   openDashboard,
   dashboardPort,
+  dashboardHost,
+  dashboardToken,
   onSwitchSession,
   mouse = true,
   startupInfoHints,
@@ -2458,7 +2464,7 @@ function AppInner({
               }
             : undefined,
         },
-        { port: dashboardPort },
+        { port: dashboardPort, host: dashboardHost, token: dashboardToken },
       );
       dashboardRef.current = handle;
       setDashboardUrlState(handle.url);
@@ -2493,6 +2499,8 @@ function AppInner({
     reloadHooks,
     setPreset,
     dashboardPort,
+    dashboardHost,
+    dashboardToken,
   ]);
 
   const stopDashboard = useCallback(async (): Promise<void> => {

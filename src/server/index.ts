@@ -1,4 +1,4 @@
-/** Dashboard HTTP server — pinned to 127.0.0.1, ephemeral per-boot token; mutations require the token in the header (CSRF). */
+/** Dashboard HTTP server — defaults to 127.0.0.1 with an ephemeral per-boot token; mutations require the token in the header (CSRF). Host + token can be pinned for LAN / mobile access (#968). */
 
 import { randomBytes } from "node:crypto";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
@@ -8,11 +8,15 @@ import { renderIndexHtml, serveAsset } from "./assets.js";
 import type { DashboardContext } from "./context.js";
 import { handleApi } from "./router.js";
 
+/** Strict loopback set — anything outside this gets the LAN-exposure warning. */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+
 export interface StartDashboardOptions {
   /** Force a specific port. 0 = ephemeral. Default: 0. */
   port?: number;
-  /** Host to bind. Argument exists for tests; production must keep 127.0.0.1 (no remote auth). */
+  /** Host to bind. Default 127.0.0.1. Set to 0.0.0.0 / :: / a LAN IP to expose to other devices (#968) — the URL token then becomes the only auth. */
   host?: string;
+  /** Pin a token across boots (#968). When unset, mintToken() generates a fresh 32-byte hex string. Min 16 chars; the caller enforces. */
   token?: string;
 }
 
@@ -212,6 +216,11 @@ export function startDashboardServer(
       const addr = server.address() as AddressInfo;
       const finalPort = addr.port;
       const url = `http://${host}:${finalPort}/?token=${token}`;
+      if (!LOOPBACK_HOSTS.has(host)) {
+        process.stderr.write(
+          `▲ Dashboard bound to ${host}:${finalPort} (non-loopback). The URL token is the only auth — keep it secret.\n`,
+        );
+      }
 
       let closed = false;
       const close = (): Promise<void> =>

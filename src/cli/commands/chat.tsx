@@ -151,6 +151,10 @@ export interface ChatOptions {
   openDashboard?: boolean;
   /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
   dashboardPort?: number;
+  /** Dashboard bind address (#968). `undefined` keeps the default 127.0.0.1. */
+  dashboardHost?: string;
+  /** Stable dashboard URL token (#968). `undefined` mints a fresh per-boot token. */
+  dashboardToken?: string;
   /**
    * Render into the terminal's alternate screen buffer. Default true —
    * alt-screen avoids the scrollback-mode resize/wrap ghost class. Pass
@@ -296,6 +300,8 @@ function Root({
         noDashboard={appProps.noDashboard}
         openDashboard={appProps.openDashboard}
         dashboardPort={appProps.dashboardPort}
+        dashboardHost={appProps.dashboardHost}
+        dashboardToken={appProps.dashboardToken}
         mouse={appProps.mouse}
         qqChannel={appProps.qqChannel}
         qqSubmitRef={appProps.qqSubmitRef}

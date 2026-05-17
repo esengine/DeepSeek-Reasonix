@@ -57,6 +57,10 @@ export interface CodeOptions {
   openDashboard?: boolean;
   /** Pin the dashboard to a fixed port. `undefined` keeps ephemeral assignment. */
   dashboardPort?: number;
+  /** Dashboard bind address (#968). `undefined` keeps the default 127.0.0.1. */
+  dashboardHost?: string;
+  /** Stable dashboard URL token (#968). `undefined` mints a fresh per-boot token. */
+  dashboardToken?: string;
   /** Inline string appended to the code system prompt after the generated base prompt. */
   systemAppend?: string;
   /** Path to a UTF-8 text file whose contents are appended to the code system prompt. */
@@ -178,6 +182,8 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     noDashboard: opts.noDashboard,
     openDashboard: opts.openDashboard,
     dashboardPort: opts.dashboardPort,
+    dashboardHost: opts.dashboardHost,
+    dashboardToken: opts.dashboardToken,
     altScreen: opts.altScreen,
     mouse: opts.mouse,
   });

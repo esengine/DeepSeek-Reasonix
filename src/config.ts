@@ -132,6 +132,10 @@ export interface ReasonixConfig {
   dashboard?: {
     /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
     port?: number;
+    /** Bind address (#968). Defaults to 127.0.0.1 (loopback only). Set to 0.0.0.0 / :: / a LAN IP to expose to other devices; the URL token is then the only auth, so keep it secret. */
+    host?: string;
+    /** Stable URL token (#968). If unset, a fresh token is minted each boot. Min 16 chars enforced at load time. */
+    token?: string;
   };
   escalation?: {
     /** Per-turn repair/error signal count required to escalate flash→pro. Defaults to 3. Out-of-range → default. */
