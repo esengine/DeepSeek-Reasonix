@@ -10,6 +10,16 @@ use super::paint::{paint, paint_str};
 use super::theme::{BG, DS_BRIGHT, DS_PURPLE, ERR, FG, FG1, FG2, FG3, OK, WARN};
 
 pub fn render_sidebar(buf: &mut Buffer, area: Rect, state: &SceneState) {
+    // ── Clear every cell symbol in the sidebar area before painting ──
+    let right = (area.x + area.width).min(buf.area.right());
+    for y in area.y..(area.y + area.height).min(buf.area.bottom()) {
+        for x in area.x..right {
+            let cell = &mut buf[(x, y)];
+            cell.set_symbol(" ");
+            cell.set_skip(false);
+        }
+    }
+
     for y in area.y..area.y + area.height {
         paint(buf, area.x, y, '│', FG3, BG, Modifier::empty());
     }

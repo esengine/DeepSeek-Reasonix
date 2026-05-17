@@ -178,7 +178,7 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
     }
 }
 
-fn build_composer_visual_lines(
+pub(super) fn build_composer_visual_lines(
     text: &str,
     cursor: usize,
     width: usize,
