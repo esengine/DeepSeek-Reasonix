@@ -177,6 +177,44 @@ fn paint_await_option(buf: &mut Buffer, x: u16, row: u16, line: &str) {
     }
 }
 
+pub(super) fn render_info_card(
+    buf: &mut Buffer,
+    area: Rect,
+    start_row: u16,
+    card: &SceneCard,
+    accent: ratatui::style::Color,
+    glyph: &str,
+) -> u16 {
+    let bottom = area.y + area.height;
+    let mut row = start_row;
+    let meta = card.meta.as_deref().map(|m| (m, FG2));
+    render_card_header(
+        buf,
+        area,
+        row,
+        accent,
+        glyph,
+        accent,
+        &card.summary,
+        accent,
+        meta,
+    );
+    row += 1;
+    if let Some(body) = card.body.as_deref() {
+        let width = body_width_for(area);
+        for raw in body.split('\n') {
+            for line in wrap_visual(raw, width) {
+                if row >= bottom {
+                    return row;
+                }
+                paint_body_line(buf, area, row, accent, &line, FG1, Modifier::empty());
+                row += 1;
+            }
+        }
+    }
+    paint_blank_after(buf, area, row, accent)
+}
+
 pub(super) fn render_error_card(
     buf: &mut Buffer,
     area: Rect,

@@ -118,9 +118,65 @@ export function toSceneCard(card: Card): SceneCard {
         ts: card.ts,
         meta: card.done ? "done" : "streaming…",
       };
+    case "live":
+      return { kind: "info", summary, body: card.text, ts: card.ts, meta: card.meta };
+    case "warn":
+      return {
+        kind: "warn",
+        summary: card.title,
+        body: card.message,
+        ts: card.ts,
+        meta: card.detail,
+      };
+    case "usage":
+      return {
+        kind: "usage",
+        summary: `cost · turn ${card.turn}`,
+        body: formatUsageBody(card),
+        ts: card.ts,
+        meta: card.elapsedMs ? formatElapsed(card.elapsedMs) : undefined,
+      };
+    case "tip":
+      return { kind: "info", summary, body: formatTipBody(card), ts: card.ts };
     default:
       return { kind: card.kind, summary };
   }
+}
+
+function formatUsageBody(card: Extract<Card, { kind: "usage" }>): string {
+  const { tokens } = card;
+  const pct = Math.round(card.cacheHit * 100);
+  const lines = [
+    `turn ${card.turn} · this ${formatCost(card.cost)} · session ${formatCost(card.sessionCost)}`,
+    `prompt ${formatTokens(tokens.prompt)} / ${formatTokens(tokens.promptCap)}    output ${formatTokens(tokens.output)} (reason ${formatTokens(tokens.reason)})`,
+    `cache ${pct}%`,
+  ];
+  if (card.balance !== undefined) {
+    lines.push(`balance ${card.balance.toFixed(2)} ${card.balanceCurrency ?? ""}`.trim());
+  }
+  return lines.join("\n");
+}
+
+function formatTipBody(card: Extract<Card, { kind: "tip" }>): string {
+  const parts: string[] = [];
+  for (const sec of card.sections) {
+    if (sec.title) parts.push(sec.title);
+    for (const r of sec.rows) {
+      parts.push(r.key ? `  ${r.key}  ${r.text}` : `  ${r.text}`);
+    }
+  }
+  if (card.footer) parts.push(card.footer);
+  return parts.join("\n");
+}
+
+function formatCost(usd: number): string {
+  return usd < 0.01 ? `$${usd.toFixed(5)}` : `$${usd.toFixed(4)}`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
 
 function toolStatus(card: Card & { kind: "tool" }): "ok" | "err" | "running" {

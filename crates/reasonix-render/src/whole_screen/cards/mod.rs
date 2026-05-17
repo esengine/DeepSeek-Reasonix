@@ -218,7 +218,7 @@ fn card_height(card: &SceneCard, body_width: u16) -> u16 {
     match card.kind.as_str() {
         "user" | "reasoning" | "think" | "thinking" | "assistant" | "streaming" | "diff"
         | "cmd" | "fileview" | "search" | "subagent" | "confirm" | "await" | "await_input"
-        | "error" => 1 + body_lines + 1,
+        | "error" | "info" | "warn" | "usage" => 1 + body_lines + 1,
         "todo" | "plan" => {
             let items = card
                 .body
@@ -256,6 +256,9 @@ fn render_card(
         "confirm" => notify::render_confirm_card(buf, area, row, card),
         "await" | "await_input" => notify::render_await_card(buf, area, row, card),
         "error" => notify::render_error_card(buf, area, row, card),
+        "info" => notify::render_info_card(buf, area, row, card, super::theme::INFO, "ⓘ"),
+        "warn" => notify::render_info_card(buf, area, row, card, super::theme::WARN, "▲"),
+        "usage" => notify::render_info_card(buf, area, row, card, super::theme::DS_BRIGHT, "$"),
         _ => row,
     }
 }
