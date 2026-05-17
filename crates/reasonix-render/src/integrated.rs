@@ -370,9 +370,7 @@ pub fn run_integrated_loop(
                                 setup_buffer.truncate(idx);
                             }
                         }
-                        KeyCode::Char(c)
-                            if !key.modifiers.contains(KeyModifiers::CONTROL) =>
-                        {
+                        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                             setup_buffer.push(c);
                         }
                         _ => {}
