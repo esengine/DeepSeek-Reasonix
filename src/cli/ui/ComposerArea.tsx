@@ -6,6 +6,9 @@
 import { Box, Text } from "ink";
 import React from "react";
 
+import type { EditMode } from "../../config.js";
+import type { JobRegistry } from "../../tools/jobs.js";
+
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { PromptInput } from "./PromptInput.js";
 import type { SlashArgPickerProps } from "./SlashArgPicker.js";
@@ -24,24 +27,20 @@ import type { StatusBarConfig } from "./layout/StatusRow.js";
 
 export interface ComposerAreaProps {
   // ── status / mode — types flow from ModeStatusBar + StatusRow ────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  editMode: any;
+  editMode: EditMode;
   pendingCount: number;
   modeFlash: boolean;
   planMode: boolean;
   undoArmed: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  jobs?: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  activeLoop?: any;
+  jobs?: JobRegistry;
+  activeLoop?: Parameters<typeof LoopStatusRow>[0]["loop"] | null;
   statusBar: StatusBarConfig;
 
   // ── prompt ───────────────────────────────────────────────────────
   input: string;
   setInput: (next: string) => void;
   busy: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onSubmit: any;
+  onSubmit: (raw: string) => Promise<void>;
   onHistoryPrev: () => void;
   onHistoryNext: () => void;
   onOpenExternalEditor: () => void;
@@ -56,10 +55,12 @@ export interface ComposerAreaProps {
   atState: React.ComponentProps<typeof AtMentionSuggestions>["state"] | null;
   atSelected: React.ComponentProps<typeof AtMentionSuggestions>["selectedIndex"];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  slashArgContext: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  slashArgMatches: any;
+  slashArgContext: {
+    spec: SlashArgPickerProps["spec"];
+    kind: SlashArgPickerProps["kind"];
+    partial: string;
+  } | null;
+  slashArgMatches: Parameters<typeof SlashArgPicker>[0]["matches"];
   slashArgSelected: number;
 }
 
