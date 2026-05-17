@@ -616,7 +616,15 @@ export class CacheFirstLoop {
         content: t("loop.proArmed"),
       };
     }
-    let pendingUser: string | null = userInput;
+    // Persist the user message before the first API round-trip so a
+    // mid-stream abort or a session switch doesn't drop the prompt and
+    // leave a new session orphaned without a .jsonl on disk (issue #943
+    // — sidebar globs .jsonl files, so an unpersisted new session vanishes
+    // when the user navigates away before the model responds). A failed
+    // first round-trip still leaves the message in the log; the user can
+    // /retry without re-typing.
+    this.appendAndPersist({ role: "user", content: userInput });
+    let pendingUser: string | null = null;
     const toolSpecs = this.prefix.tools();
 
     for (let iter = 0; ; iter++) {
@@ -972,12 +980,6 @@ export class CacheFirstLoop {
         this.modelForCurrentCall(),
         usage ?? new Usage(),
       );
-
-      // Commit the user turn to the log only on success of the first round-trip.
-      if (pendingUser !== null) {
-        this.appendAndPersist({ role: "user", content: pendingUser });
-        pendingUser = null;
-      }
 
       this.scratch.reasoning = reasoningContent || null;
 
