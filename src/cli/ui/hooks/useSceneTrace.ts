@@ -60,6 +60,8 @@ export type SceneTraceInput = {
   atStateJson?: string;
   /** Active text-input prompt — rust intercepts composer Enter to send the answer back as `prompt-response` instead of submitting it as a chat message. Used by /qq connect and friends under integrated mode. */
   promptInputJson?: string;
+  /** Active list picker — rust renders a modal of {key,label} options and posts the chosen key back as `list-picker-response`. Used by /sessions, /theme, /model, /restore under integrated mode. */
+  listPickerJson?: string;
 };
 
 export type SetupSceneInput = {
@@ -429,6 +431,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     approvalJson,
     atStateJson,
     promptInputJson,
+    listPickerJson,
   } = input;
   useEffect(() => {
     if (!isSceneTraceEnabled()) return;
@@ -468,6 +471,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
       approval: parseApproval(approvalJson),
       atState: parseApproval(atStateJson),
       promptInput: parseApproval(promptInputJson),
+      listPicker: parseApproval(listPickerJson),
       fallbackCols,
       fallbackRows,
     });
@@ -508,6 +512,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     approvalJson,
     atStateJson,
     promptInputJson,
+    listPickerJson,
   ]);
 }
 

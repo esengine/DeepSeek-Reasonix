@@ -308,6 +308,41 @@ fn catalog_state() -> reasonix_render::state::SceneState {
 }
 
 #[test]
+fn list_picker_modal_renders_when_scene_carries_one() {
+    use reasonix_render::state::{ListPicker, ListPickerOption, SceneState};
+    let state = SceneState {
+        list_picker: Some(ListPicker {
+            id: "pick-1".to_string(),
+            title: "switch session".to_string(),
+            hint: Some("↑↓ move  ↵ open".to_string()),
+            options: vec![
+                ListPickerOption {
+                    key: "s-2026-05-17".to_string(),
+                    label: "s-2026-05-17".to_string(),
+                    sublabel: Some("branch main".to_string()),
+                    meta: Some("2h ago".to_string()),
+                },
+                ListPickerOption {
+                    key: "s-2026-05-16".to_string(),
+                    label: "s-2026-05-16".to_string(),
+                    sublabel: None,
+                    meta: Some("1d ago".to_string()),
+                },
+            ],
+        }),
+        ..Default::default()
+    };
+    let rows = draw(&state, 120, 30);
+    let all = joined(&rows);
+    assert!(all.contains("switch session"), "picker title missing");
+    assert!(all.contains("s-2026-05-17"), "first option missing");
+    assert!(all.contains("s-2026-05-16"), "second option missing");
+    assert!(all.contains("branch main"), "sublabel missing");
+    assert!(all.contains("2h ago"), "meta missing");
+    assert!(all.contains("↵"), "hint visible");
+}
+
+#[test]
 fn renders_doctor_memory_ctx_plan_card_task_kinds() {
     let cards = [
         ("doctor", "/doctor", "✓ git\n✕ docker"),

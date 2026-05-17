@@ -3,6 +3,7 @@ mod boot;
 mod cards;
 mod demo;
 mod dock;
+mod list_picker;
 mod markdown;
 mod md_render;
 mod mode_picker;
@@ -31,6 +32,7 @@ pub use selection::{cards_layout, extract_text, CardsLayout, ScrollbarGeom, Sele
 use approval::render_approval;
 use boot::render_scroll;
 use dock::render_dock;
+use list_picker::render_list_picker;
 use mode_picker::{mode_picker_options, preset_picker_options, render_picker};
 use overlay::{render_slash_arg_overlay, render_slash_overlay};
 use overlay_at::render_at_overlay;
@@ -50,6 +52,7 @@ pub struct WholeScreen<'a> {
     approval_idx: usize,
     mode_picker_idx: Option<usize>,
     preset_picker_idx: Option<usize>,
+    list_picker_idx: usize,
     sidebar_visible: bool,
     tick: u32,
 }
@@ -66,6 +69,7 @@ impl<'a> WholeScreen<'a> {
             approval_idx: 0,
             mode_picker_idx: None,
             preset_picker_idx: None,
+            list_picker_idx: 0,
             sidebar_visible: true,
             tick: 0,
         }
@@ -120,6 +124,11 @@ impl<'a> WholeScreen<'a> {
         self.preset_picker_idx = idx;
         self
     }
+
+    pub fn with_list_picker_index(mut self, idx: usize) -> Self {
+        self.list_picker_idx = idx;
+        self
+    }
 }
 
 impl Widget for WholeScreen<'_> {
@@ -164,6 +173,9 @@ impl Widget for WholeScreen<'_> {
                 &opts,
                 idx,
             );
+        }
+        if let Some(picker) = self.state.list_picker.as_ref() {
+            render_list_picker(buf, area, picker, self.list_picker_idx);
         }
     }
 }

@@ -90,6 +90,8 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
     let mut last_approval_signature: Option<String> = None;
     let mut mode_picker: Option<usize> = None;
     let mut preset_picker: Option<usize> = None;
+    let mut list_picker_idx: usize = 0;
+    let mut last_list_picker_id: Option<String> = None;
     let mut sidebar_visible = true;
     let mut tick: u32 = 0;
     let anim_interval = Duration::from_millis(80);
@@ -180,6 +182,24 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
         } else if at_idx >= at_count {
             at_idx = at_count - 1;
         }
+        // Reset list-picker selection when a new picker shows up (id
+        // changes) so the cursor doesn't carry over from the previous
+        // session into a totally different option set.
+        let lp_id = scene.list_picker.as_ref().map(|p| p.id.clone());
+        if lp_id != last_list_picker_id {
+            list_picker_idx = 0;
+            last_list_picker_id = lp_id.clone();
+        }
+        let list_picker_len = scene
+            .list_picker
+            .as_ref()
+            .map(|p| p.options.len())
+            .unwrap_or(0);
+        if list_picker_len == 0 {
+            list_picker_idx = 0;
+        } else if list_picker_idx >= list_picker_len {
+            list_picker_idx = list_picker_len - 1;
+        }
 
         if last_anim_at.elapsed() >= anim_interval {
             last_anim_at = Instant::now();
@@ -227,6 +247,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                                 .with_approval_index(approval_idx)
                                 .with_mode_picker(mode_picker)
                                 .with_preset_picker(preset_picker)
+                                .with_list_picker_index(list_picker_idx)
                                 .with_sidebar_visible(sidebar_visible)
                                 .with_tick(tick),
                             area,
@@ -325,6 +346,10 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                 }
                 if mode_picker.is_some() || preset_picker.is_some() {
                     handle_mode_picker_key(&key, &mut mode_picker, &mut preset_picker);
+                    continue;
+                }
+                if let Some(picker) = scene.list_picker.as_ref() {
+                    handle_list_picker_key(&key, picker, &mut list_picker_idx);
                     continue;
                 }
                 if let Some(prompt) = scene.prompt_input.as_ref() {
@@ -771,6 +796,54 @@ fn current_preset_idx(scene: &SceneState) -> usize {
         Some("flash") => 1,
         Some("pro") => 2,
         _ => 0,
+    }
+}
+
+fn handle_list_picker_key(
+    key: &crossterm::event::KeyEvent,
+    picker: &crate::state::ListPicker,
+    selected: &mut usize,
+) {
+    let n = picker.options.len();
+    if n == 0 {
+        if matches!(key.code, KeyCode::Esc) {
+            emit_event(serde_json::json!({
+                "event": "list-picker-response",
+                "id": picker.id,
+                "cancelled": true,
+            }));
+        }
+        return;
+    }
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            *selected = if *selected == 0 { n - 1 } else { *selected - 1 };
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            *selected = (*selected + 1) % n;
+        }
+        KeyCode::Char(d) if d.is_ascii_digit() => {
+            let pick = d.to_digit(10).unwrap_or(0) as usize;
+            if pick >= 1 && pick <= n {
+                *selected = pick - 1;
+            }
+        }
+        KeyCode::Enter => {
+            let chosen = (*selected).min(n - 1);
+            emit_event(serde_json::json!({
+                "event": "list-picker-response",
+                "id": picker.id,
+                "key": picker.options[chosen].key,
+            }));
+        }
+        KeyCode::Esc => {
+            emit_event(serde_json::json!({
+                "event": "list-picker-response",
+                "id": picker.id,
+                "cancelled": true,
+            }));
+        }
+        _ => {}
     }
 }
 

@@ -71,6 +71,32 @@ pub struct SceneState {
     pub at_state: Option<AtState>,
     #[serde(default)]
     pub prompt_input: Option<PromptInput>,
+    #[serde(default)]
+    pub list_picker: Option<ListPicker>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ListPicker {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub hint: Option<String>,
+    #[serde(default)]
+    pub options: Vec<ListPickerOption>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ListPickerOption {
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub sublabel: Option<String>,
+    #[serde(default)]
+    pub meta: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]

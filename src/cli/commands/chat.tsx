@@ -36,6 +36,7 @@ import {
   createRustKeystrokeReader,
   nullKeystrokeReader,
 } from "../ui/scene/input-adapter.js";
+import { cancelAllListPickers, resolveListPicker } from "../ui/scene/list-picker-store.js";
 import { makeNullStdin } from "../ui/scene/null-stdin.js";
 import { makeNullStdout } from "../ui/scene/null-stdout.js";
 import { cancelAllPromptInputs, resolvePromptInput } from "../ui/scene/prompt-input-store.js";
@@ -451,6 +452,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       } else if (event.event === "exit") {
         void (async () => {
           cancelAllPromptInputs();
+          cancelAllListPickers();
           await stopAndSaveCpuProfile();
           process.exit(0);
         })();
@@ -464,6 +466,8 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
         presetSetRef.current?.(event.value);
       } else if (event.event === "prompt-response") {
         resolvePromptInput(event.id, event.cancelled ? null : (event.text ?? ""));
+      } else if (event.event === "list-picker-response") {
+        resolveListPicker(event.id, event.cancelled ? null : (event.key ?? null));
       }
       // interrupt: no-op for now; terminal SIGINT already reaches Node.
     });
