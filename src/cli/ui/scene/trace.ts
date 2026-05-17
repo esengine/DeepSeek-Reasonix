@@ -87,9 +87,8 @@ function ensureInitialized(): void {
   }
   if (process.env[RENDERER_VAR] === "node") return;
   const { command, source } = resolveRenderer();
+  process.stderr.write(`[trace] resolver source=${source} command=${JSON.stringify(command)}\n`);
   if (source === null || command.length === 0) {
-    // Surface the bail so users hitting "TUI never appears" can grep
-    // the stderr log file for the cause.
     process.stderr.write(
       "▲ trace.ts: resolveRenderer() returned no usable command — scene trace stays off. " +
         "Check optional-dep install (`ls node_modules/@reasonix/render-*`) or set REASONIX_RENDER_BIN.\n",
@@ -97,6 +96,7 @@ function ensureInitialized(): void {
     return;
   }
   const integrated = process.env[INTEGRATED_VAR] !== "0";
+  process.stderr.write(`[trace] spawning rust child (integrated=${integrated})\n`);
   state.mode = "child";
   state.child = spawnRenderer({
     command,

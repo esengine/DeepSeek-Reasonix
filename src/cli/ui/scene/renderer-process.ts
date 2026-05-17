@@ -45,17 +45,28 @@ export function spawnRenderer(opts: SpawnRendererOptions): RendererProcess {
     stdio: ["pipe", "inherit", stderrStdio],
   });
 
+  child.on("error", (err) => {
+    process.stderr.write(`[spawnRenderer] child error: ${err.message}\n`);
+  });
+
   let exited = false;
+  let aliveMs = 0;
+  const spawnedAt = Date.now();
   const exitPromise = new Promise<number | null>((resolve) => {
-    child.once("exit", (code) => {
+    child.once("exit", (code, signal) => {
       exited = true;
+      aliveMs = Date.now() - spawnedAt;
+      process.stderr.write(
+        `[spawnRenderer] child exit: code=${code} signal=${signal} aliveMs=${aliveMs}\n`,
+      );
       resolve(code);
-      // Synthesize an exit event for integrated mode so the Node parent
-      // tears down cleanly when the rust child dies on its own (panic,
-      // SIGKILL, terminal close). Without this, Node's keep-alive +
-      // unread event-handler combo would leave the process hanging
-      // forever waiting for a child that's already gone.
-      if (opts.integrated && opts.onEvent) {
+      // Only propagate exit event AFTER the child has been alive long enough
+      // that this is plausibly an "intentional exit" (user pressed Ctrl+D,
+      // /exit slash, etc.). A sub-second death = startup crash; synthesizing
+      // exit there would cascade Node into immediately killing itself and
+      // mask the real error. Let Node stay alive so the user can grep the
+      // stderr log file for what the rust child wrote before dying.
+      if (opts.integrated && opts.onEvent && aliveMs >= 1500) {
         try {
           opts.onEvent({ event: "exit" });
         } catch {
@@ -84,10 +95,15 @@ export function spawnRenderer(opts: SpawnRendererOptions): RendererProcess {
           const parsed = JSON.parse(line) as RustEvent;
           if (parsed && typeof parsed.event === "string") {
             opts.onEvent?.(parsed);
+            continue;
           }
         } catch {
-          // ignore non-JSON stderr lines (panic output, debug, etc.)
+          // not JSON; fall through to log as raw stderr
         }
+        // Surface non-event stderr lines (rust panics, debug prints, anything
+        // crossterm spat out before alt-screen took over). Previously silently
+        // dropped — making "rust child dies immediately" undebuggable.
+        process.stderr.write(`[rust-stderr] ${line}\n`);
       }
     });
   }
