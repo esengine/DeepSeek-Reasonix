@@ -7,7 +7,10 @@ use crate::state::SceneCard;
 
 use super::super::paint::{paint, paint_str};
 use super::super::theme::{BG, DS_BRIGHT, ERR, FG, FG1, FG2, FG3, INFO, WARN};
-use super::{body_indent_col, paint_blank_after, paint_body_line, paint_rail, render_card_header};
+use super::{
+    body_indent_col, body_width_for, paint_blank_after, paint_body_line, paint_rail,
+    render_card_header, wrap_visual,
+};
 
 pub(super) fn render_subagent_card(buf: &mut Buffer, area: Rect, start_row: u16, card: &SceneCard) -> u16 {
     let bottom = area.y + area.height;
@@ -24,20 +27,24 @@ pub(super) fn render_subagent_card(buf: &mut Buffer, area: Rect, start_row: u16,
         card.meta.as_deref().map(|s| (s, FG3)),
     );
     row += 1;
+    let width = body_width_for(area);
     if let Some(body) = card.body.as_deref() {
-        for (i, line) in body.split('\n').enumerate() {
-            if row >= bottom {
-                return row;
+        for (i, raw) in body.split('\n').enumerate() {
+            let wrap_w = if i == 0 { width } else { width.saturating_sub(2) };
+            for (wi, line) in wrap_visual(raw, wrap_w).iter().enumerate() {
+                if row >= bottom {
+                    return row;
+                }
+                if i == 0 || wi > 0 {
+                    paint_body_line(buf, area, row, INFO, line, FG1, Modifier::empty());
+                } else {
+                    paint_rail(buf, area, row, INFO);
+                    let col = body_indent_col(area);
+                    paint(buf, col, row, '→', INFO, BG, Modifier::BOLD);
+                    paint_str(buf, col + 2, row, line, FG1, BG, Modifier::empty());
+                }
+                row += 1;
             }
-            if i == 0 {
-                paint_body_line(buf, area, row, INFO, line, FG1, Modifier::empty());
-            } else {
-                paint_rail(buf, area, row, INFO);
-                let col = body_indent_col(area);
-                paint(buf, col, row, '→', INFO, BG, Modifier::BOLD);
-                paint_str(buf, col + 2, row, line, FG1, BG, Modifier::empty());
-            }
-            row += 1;
         }
     }
     paint_blank_after(buf, area, row, INFO)
@@ -177,17 +184,16 @@ pub(super) fn render_error_card(buf: &mut Buffer, area: Rect, start_row: u16, ca
     );
     row += 1;
     if let Some(body) = card.body.as_deref() {
-        for line in body.split('\n') {
-            if row >= bottom {
-                return row;
+        let width = body_width_for(area);
+        for raw in body.split('\n') {
+            let fg = if raw.trim_start().starts_with("at ") { FG2 } else { FG };
+            for line in wrap_visual(raw, width) {
+                if row >= bottom {
+                    return row;
+                }
+                paint_body_line(buf, area, row, ERR, &line, fg, Modifier::empty());
+                row += 1;
             }
-            let fg = if line.trim_start().starts_with("at ") {
-                FG2
-            } else {
-                FG
-            };
-            paint_body_line(buf, area, row, ERR, line, fg, Modifier::empty());
-            row += 1;
         }
     }
     paint_blank_after(buf, area, row, ERR)

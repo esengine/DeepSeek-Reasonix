@@ -7,7 +7,7 @@ use crate::state::SceneCard;
 
 use super::super::paint::paint_str;
 use super::super::theme::{BG, DS_BRIGHT, ERR, FG, FG1, FG2, FG3, INFO, OK};
-use super::{paint_blank_after, paint_body_line, paint_rail, render_card_header};
+use super::{body_width_for, paint_blank_after, paint_body_line, paint_rail, render_card_header, wrap_visual};
 
 pub(super) fn render_cmd_card(
     buf: &mut Buffer,
@@ -35,11 +35,9 @@ pub(super) fn render_cmd_card(
     }
     row += 1;
     if let Some(body) = card.body.as_deref() {
-        for line in body.split('\n') {
-            if row >= bottom {
-                return row;
-            }
-            let trimmed = line.trim_end();
+        let width = body_width_for(area);
+        for raw in body.split('\n') {
+            let trimmed = raw.trim_end();
             let fg = if trimmed.starts_with("  ✓") || trimmed.contains("passed") {
                 OK
             } else if trimmed.starts_with("  ✕") || trimmed.contains("failed") {
@@ -52,8 +50,13 @@ pub(super) fn render_cmd_card(
             } else {
                 FG1
             };
-            paint_body_line(buf, area, row, OK, trimmed, fg, Modifier::empty());
-            row += 1;
+            for line in wrap_visual(trimmed, width) {
+                if row >= bottom {
+                    return row;
+                }
+                paint_body_line(buf, area, row, OK, &line, fg, Modifier::empty());
+                row += 1;
+            }
         }
     }
     paint_blank_after(buf, area, row, OK)

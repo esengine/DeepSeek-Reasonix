@@ -7,7 +7,8 @@ use crate::state::SceneCard;
 
 use super::super::paint::{format_ts, paint};
 use super::super::theme::{BG, DS_BRIGHT, DS_PURPLE, FG, FG1, FG3};
-use super::{body_indent_col, paint_blank_after, paint_body_line, render_card_header};
+use super::{body_indent_col, body_width_for, paint_blank_after, paint_body_line, paint_rail, render_card_header, wrap_visual};
+use super::super::md_render::{count_visual_rows, render_markdown};
 
 pub(super) fn render_user_card(
     buf: &mut Buffer,
@@ -30,13 +31,16 @@ pub(super) fn render_user_card(
         ts.as_deref().map(|s| (s, FG3)),
     );
     row += 1;
+    let width = body_width_for(area);
     if let Some(body) = card.body.as_deref() {
-        for line in body.split('\n') {
-            if row >= bottom {
-                return row;
+        for raw in body.split('\n') {
+            for line in wrap_visual(raw, width) {
+                if row >= bottom {
+                    return row;
+                }
+                paint_body_line(buf, area, row, FG, &line, FG, Modifier::empty());
+                row += 1;
             }
-            paint_body_line(buf, area, row, FG, line, FG, Modifier::empty());
-            row += 1;
         }
     }
     paint_blank_after(buf, area, row, FG)
@@ -62,13 +66,16 @@ pub(super) fn render_reasoning_card(
         card.meta.as_deref().map(|s| (s, FG3)),
     );
     row += 1;
+    let width = body_width_for(area);
     if let Some(body) = card.body.as_deref() {
-        for line in body.split('\n') {
-            if row >= bottom {
-                return row;
+        for raw in body.split('\n') {
+            for line in wrap_visual(raw, width) {
+                if row >= bottom {
+                    return row;
+                }
+                paint_body_line(buf, area, row, DS_PURPLE, &line, FG1, Modifier::ITALIC);
+                row += 1;
             }
-            paint_body_line(buf, area, row, DS_PURPLE, line, FG1, Modifier::ITALIC);
-            row += 1;
         }
     }
     paint_blank_after(buf, area, row, DS_PURPLE)
@@ -109,19 +116,19 @@ pub(super) fn render_assistant_card(
         } else {
             body.to_string()
         };
-        let lines: Vec<&str> = revealed.split('\n').collect();
-        let last = lines.len().saturating_sub(1);
-        for (i, line) in lines.iter().enumerate() {
-            if row >= bottom {
-                return row;
+        let prev_row = row;
+        row = render_markdown(buf, area, row, bottom, DS_BRIGHT, FG, &revealed);
+        if streaming && (tick / 6) % 2 == 0 {
+            let caret_row = if row > prev_row { row - 1 } else { prev_row };
+            if caret_row < bottom {
+                let col = body_indent_col(area) + 4;
+                paint(buf, col, caret_row, '▊', DS_BRIGHT, BG, Modifier::empty());
             }
-            paint_body_line(buf, area, row, DS_BRIGHT, line, FG, Modifier::empty());
-            if streaming && i == last && (tick / 6) % 2 == 0 {
-                let after = body_indent_col(area) + line.width() as u16;
-                paint(buf, after, row, '▊', DS_BRIGHT, BG, Modifier::empty());
-            }
-            row += 1;
+        }
+        if streaming && row == prev_row {
+            row = (prev_row + 1).min(bottom);
         }
     }
     paint_blank_after(buf, area, row, DS_BRIGHT)
 }
+

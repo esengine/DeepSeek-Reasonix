@@ -35,11 +35,14 @@ pub fn render_cards(
     }
     let avail = bottom - start_row;
     let scroll_w = if area.width > 0 { area.width - 1 } else { 0 };
-    let total: u16 = state.cards.iter().map(card_height).sum();
-    if total == 0 || scroll_w == 0 {
+    if scroll_w == 0 {
         return;
     }
-
+    let body_w = body_width_for(Rect::new(0, 0, scroll_w, 1));
+    let total: u16 = state.cards.iter().map(|c| card_height(c, body_w)).sum();
+    if total == 0 {
+        return;
+    }
     let virt_rect = Rect::new(0, 0, scroll_w, total);
     let mut virt = Buffer::empty(virt_rect);
     let mut row = 0u16;
@@ -136,8 +139,8 @@ fn render_idle_banner(buf: &mut Buffer, area: Rect, start_row: u16) {
     }
 }
 
-pub(super) fn total_cards_height(state: &SceneState) -> u16 {
-    state.cards.iter().map(card_height).sum()
+pub(super) fn total_cards_height(state: &SceneState, body_width: u16) -> u16 {
+    state.cards.iter().map(|c| card_height(c, body_width)).sum()
 }
 
 pub(super) fn render_card_to(
@@ -150,11 +153,64 @@ pub(super) fn render_card_to(
     render_card(buf, area, row, card, streaming, u32::MAX)
 }
 
-fn card_height(card: &SceneCard) -> u16 {
+pub(super) fn body_width_for(area: Rect) -> u16 {
+    area.width.saturating_sub(4)
+}
+
+pub(super) fn wrap_visual(line: &str, width: u16) -> Vec<String> {
+    let w = width as usize;
+    if w == 0 {
+        return vec![String::new()];
+    }
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+    if UnicodeWidthStr::width(line) <= w {
+        return vec![line.to_string()];
+    }
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut current_w = 0usize;
+    for ch in line.chars() {
+        let ch_w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if current_w + ch_w > w && !current.is_empty() {
+            out.push(std::mem::take(&mut current));
+            current_w = 0;
+        }
+        current.push(ch);
+        current_w += ch_w;
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+fn body_lines_height(body: &str, width: u16) -> u16 {
+    let mut total = 0u32;
+    for line in body.split('\n') {
+        let count = wrap_visual(line, width).len().max(1) as u32;
+        total += count;
+    }
+    total.min(u16::MAX as u32) as u16
+}
+
+fn card_height(card: &SceneCard, body_width: u16) -> u16 {
+    let is_md = matches!(card.kind.as_str(), "assistant" | "streaming");
     let body_lines = card
         .body
         .as_deref()
-        .map(|b| b.split('\n').count() as u16)
+        .map(|b| {
+            if is_md {
+                super::md_render::count_visual_rows(b, body_width)
+                    .min(u16::MAX as usize) as u16
+            } else {
+                body_lines_height(b, body_width)
+            }
+        })
         .unwrap_or(0);
     match card.kind.as_str() {
         "user"
