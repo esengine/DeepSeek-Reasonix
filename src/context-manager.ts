@@ -3,6 +3,7 @@ import { Usage } from "./client.js";
 import { healLoadedMessages } from "./loop.js";
 import { thinkingModeForModel } from "./loop.js";
 import { stripHallucinatedToolMarkup } from "./loop.js";
+import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
 import { rewriteSession } from "./memory/session.js";
@@ -175,14 +176,21 @@ export class ContextManager {
 
     const { stubbedHead, pinnedBodies } = extractPinnedSkills(head);
     const summary = await this.summarizeForFold(stubbedHead);
-    if (!summary) return noop;
+    if (!summary.content) return noop;
 
     const memoTail =
       pinnedBodies.length > 0 ? `\n\n${SKILL_PIN_MEMO_HEADER}\n\n${pinnedBodies.join("\n\n")}` : "";
-    const summaryMsg: ChatMessage = {
-      role: "assistant",
-      content: HISTORY_FOLD_MARKER + summary + memoTail,
-    };
+    // Route via buildAssistantMessage so the synthetic summary carries
+    // reasoning_content under thinking-mode sessions — without it the
+    // next API call 400s with "must be passed back" (#1042). Stamp uses
+    // the SESSION model so an empty placeholder is added even when the
+    // summarizer call somehow returned no reasoning.
+    const summaryMsg = buildAssistantMessage(
+      HISTORY_FOLD_MARKER + summary.content + memoTail,
+      [],
+      model,
+      summary.reasoningContent,
+    );
     const replacement = [summaryMsg, ...tail];
     this.deps.log.compactInPlace(replacement);
     this.persistRewrite(replacement);
@@ -190,7 +198,7 @@ export class ContextManager {
       folded: true,
       beforeMessages: all.length,
       afterMessages: replacement.length,
-      summaryChars: summary.length,
+      summaryChars: summary.content.length,
     };
   }
 
@@ -211,7 +219,9 @@ export class ContextManager {
     return true;
   }
 
-  private async summarizeForFold(messagesToSummarize: ChatMessage[]): Promise<string> {
+  private async summarizeForFold(
+    messagesToSummarize: ChatMessage[],
+  ): Promise<{ content: string; reasoningContent: string }> {
     const summaryModel = "deepseek-v4-flash";
     const systemPrompt =
       "You compress conversation history for a coding agent. Output one prose recap that preserves: the user's overall goal, decisions and conclusions reached, files inspected or modified, important tool results still relevant to ongoing work, and any open todos. Skip turn-by-turn play-by-play. No tool calls, no markdown headings, no SEARCH/REPLACE blocks — plain prose only.";
@@ -234,9 +244,12 @@ export class ContextManager {
         reasoningEffort: "high",
       });
       this.deps.stats.record(this.deps.getCurrentTurn(), summaryModel, resp.usage ?? new Usage());
-      return stripHallucinatedToolMarkup((resp.content ?? "").trim());
+      return {
+        content: stripHallucinatedToolMarkup((resp.content ?? "").trim()),
+        reasoningContent: resp.reasoningContent ?? "",
+      };
     } catch {
-      return "";
+      return { content: "", reasoningContent: "" };
     }
   }
 
