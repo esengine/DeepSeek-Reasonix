@@ -2555,6 +2555,86 @@ function AppInner({
     };
   }, [pendingThemePicker, themeName, setThemeName, log]);
 
+  useEffect(() => {
+    if (!pendingCheckpointPicker) return;
+    if (!isIntegratedRendererRequested()) return;
+    if (checkpointPickerList.length === 0) return;
+    let cancelled = false;
+    requestListPicker({
+      title: "restore checkpoint",
+      hint: "↑↓ move  ↵ restore  esc cancel",
+      options: checkpointPickerList.map((c) => ({
+        key: c.id,
+        label: c.name,
+        sublabel: c.id.slice(0, 7),
+        meta: fmtAgo(c.createdAt),
+      })),
+    })
+      .then((picked) => {
+        if (cancelled) return;
+        setPendingCheckpointPicker(false);
+        if (!picked) return;
+        const target = checkpointPickerList.find((c) => c.id === picked);
+        if (!target) return;
+        const result = restoreCheckpoint(currentRootDir, target.id);
+        const lines = [
+          `restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
+        ];
+        if (result.restored.length > 0) {
+          lines.push(`  wrote ${result.restored.length} file(s)`);
+        }
+        if (result.removed.length > 0) {
+          lines.push(`  removed ${result.removed.length} file(s)`);
+        }
+        if (result.skipped.length > 0) {
+          lines.push(`  skipped ${result.skipped.length} file(s)`);
+        }
+        log.pushInfo(lines.join("\n"));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingCheckpointPicker, checkpointPickerList, currentRootDir, log]);
+
+  useEffect(() => {
+    if (!pendingModelPicker) return;
+    if (!isIntegratedRendererRequested()) return;
+    const modelList = models ?? [];
+    if (modelList.length === 0) return;
+    let cancelled = false;
+    requestListPicker({
+      title: "pick model",
+      hint: "↑↓ move  ↵ select  esc cancel",
+      options: modelList.map((m) => ({
+        key: m,
+        label: m,
+        sublabel: m === loop.model ? "current" : undefined,
+      })),
+    })
+      .then((picked) => {
+        if (cancelled) return;
+        setPendingModelPicker(false);
+        if (!picked) return;
+        loop.configure({ model: picked, autoEscalate: false });
+        agentStore.dispatch({ type: "session.model.change", model: picked });
+        const inferred =
+          picked === "deepseek-v4-pro" ? "pro" : picked === "deepseek-v4-flash" ? "flash" : null;
+        setPreset(inferred ?? "flash");
+        agentStore.dispatch({ type: "session.preset.change", preset: inferred });
+        if (inferred) {
+          try {
+            savePreset(inferred);
+          } catch {}
+        }
+        log.pushInfo(`model: ${picked}`);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingModelPicker, models, loop, agentStore, setPreset, log]);
+
   // Auto-start the dashboard once the TUI is mounted unless the user
   // opted out with --no-dashboard. The whole point is discoverability:
   // most users had no idea /dashboard existed, so the URL needs to be
