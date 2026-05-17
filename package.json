@@ -1,6 +1,6 @@
 {
   "name": "reasonix",
-  "version": "0.45.0",
+  "version": "0.45.1",
   "description": "DeepSeek-native coding agent: cache-first loop, flash-first cost control, tool-call repair.",
   "type": "module",
   "bin": {
@@ -110,10 +110,10 @@
     "vitest": "^2.1.5"
   },
   "optionalDependencies": {
-    "@reasonix/render-darwin-arm64": "0.45.0",
-    "@reasonix/render-darwin-x64": "0.45.0",
-    "@reasonix/render-linux-arm64": "0.45.0",
-    "@reasonix/render-linux-x64": "0.45.0",
-    "@reasonix/render-win32-x64": "0.45.0"
+    "@reasonix/render-darwin-arm64": "0.45.1",
+    "@reasonix/render-darwin-x64": "0.45.1",
+    "@reasonix/render-linux-arm64": "0.45.1",
+    "@reasonix/render-linux-x64": "0.45.1",
+    "@reasonix/render-win32-x64": "0.45.1"
   }
 }
