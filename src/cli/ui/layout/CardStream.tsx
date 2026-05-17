@@ -126,16 +126,34 @@ export function CardStream({
 
 /** Thin wrapper that captures a card's row height on every render and reports
  * it to the scroll store. Wrapping in React.memo would defeat the purpose —
- * we *want* the effect to re-run when the streaming card grows. */
+ * we *want* the effect to re-run when the streaming card grows.
+ *
+ * Monotonic height lock (#549 / #700): for unsettled (streaming/reasoning)
+ * cards, height is only reported when it INCREASES. Yoga can emit intermediate
+ * shrink measurements during re-layout that would otherwise cause the virtual
+ * window to oscillate. Settled cards always report the exact final height. */
 function MeasuredCard({
   card,
   report,
 }: { card: Card; report: (id: string, rows: number) => void }): React.ReactElement {
   const ref = useRef<DOMElement>(null!);
   const m = useBoxMetrics(ref);
+  const lastReportedRef = useRef<number>(0);
+  const settled = isCardSettled(card);
+
   useEffect(() => {
-    if (m.height > 0) report(card.id, m.height);
-  }, [card.id, m.height, report]);
+    const h = m.height;
+    if (h <= 0) return;
+    // Dedup: skip if height hasn't changed since last report.
+    if (h === lastReportedRef.current) return;
+    // Monotonic lock: for unsettled cards, only report growth.
+    // Yoga may emit transient shrink values during streaming re-layout
+    // that would otherwise feed back into scroll position oscillation.
+    if (!settled && h < lastReportedRef.current) return;
+    lastReportedRef.current = h;
+    report(card.id, h);
+  }, [card.id, m.height, report, settled]);
+
   return (
     <Box ref={ref} flexDirection="column" flexShrink={0}>
       <CardRenderer card={card} />
@@ -180,6 +198,29 @@ function isFullySettled(card: Card): boolean {
       return card.status !== "running";
     case "plan":
       return card.steps.every((s) => s.status === "done" || s.status === "skipped");
+    default:
+      return true;
+  }
+}
+
+/** True when a card's content is final — no more streaming deltas expected.
+ * Drives the monotonic height lock in MeasuredCard: settled cards always
+ * report their exact height; unsettled cards only report growth.
+ *
+ * If a future card kind legitimately shrinks in height while still in-flight,
+ * add an explicit entry here — otherwise the monotonic lock won't catch it
+ * and default:true will report the stale larger height. */
+function isCardSettled(card: Card): boolean {
+  switch (card.kind) {
+    case "reasoning":
+      return !card.streaming || !!card.aborted;
+    case "streaming":
+      return card.done || !!card.aborted;
+    case "tool":
+      return card.done || !!card.aborted;
+    case "task":
+    case "subagent":
+      return card.status !== "running";
     default:
       return true;
   }

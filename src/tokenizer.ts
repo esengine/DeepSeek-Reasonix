@@ -254,6 +254,27 @@ export function countTokens(text: string): number {
   return encode(text).length;
 }
 
+export const DEFAULT_BOUNDED_TOKENIZE_CHARS = 2 * 1024;
+
+export function countTokensBounded(
+  text: string,
+  maxChars = DEFAULT_BOUNDED_TOKENIZE_CHARS,
+): number {
+  if (text.length === 0) return 0;
+  const cap = Math.floor(maxChars);
+  if (cap > 0 && text.length <= cap) return countTokens(text);
+  if (cap <= 0) return Math.max(1, Math.ceil(text.length * 0.3));
+
+  const headChars = Math.ceil(cap / 2);
+  const tailChars = Math.floor(cap / 2);
+  const head = text.slice(0, headChars);
+  const tail = tailChars > 0 ? text.slice(-tailChars) : "";
+  const sampleChars = head.length + tail.length;
+  const sampleTokens = countTokens(head) + countTokens(tail);
+  const ratio = sampleChars > 0 ? sampleTokens / sampleChars : 0.3;
+  return Math.max(1, Math.ceil(text.length * ratio));
+}
+
 const BOS = "<｜begin▁of▁sentence｜>";
 const EOS = "<｜end▁of▁sentence｜>";
 const USER_SP = "<｜User｜>";
@@ -472,7 +493,7 @@ export function estimateConversationTokens(
   drop_thinking = false,
 ): number {
   if (messages.length === 0) return 0;
-  return countTokens(formatDeepSeekPrompt(messages, drop_thinking));
+  return countTokensBounded(formatDeepSeekPrompt(messages, drop_thinking));
 }
 
 /** Total request tokens (messages + tool specs) as the API counts them. Tool specs rendered via V4 TOOLS_TEMPLATE and added to message token count. */
@@ -489,7 +510,7 @@ export function estimateRequestTokens(
 ): number {
   let total = estimateConversationTokens(messages, drop_thinking);
   if (toolSpecs && toolSpecs.length > 0) {
-    total += countTokens(renderTools(toolSpecs));
+    total += countTokensBounded(renderTools(toolSpecs));
   }
   return total;
 }

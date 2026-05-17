@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { wrapToCells } from "../../../frame/width.js";
 
 export interface WrapCache {
@@ -70,11 +70,31 @@ export function wrapIncremental(
   };
 }
 
-/** Streaming-aware wrap. Monotonic growth re-wraps only the tail logical line. */
+/** Debounce interval for lineCells changes — holds the previous width during
+ * a terminal resize to avoid breaking monotonicity and triggering a full
+ * re-wrap cascade while streaming tokens are still arriving. */
+const LINE_CELLS_DEBOUNCE_MS = 120;
+
+/** Streaming-aware wrap. Monotonic growth re-wraps only the tail logical line.
+ * Terminal resize is debounced: the previous width is held briefly so streaming
+ * content stays on the fast monotonic path, then snaps to the new width. */
 export function useIncrementalWrap(text: string, lineCells: number): string[] {
   const cacheRef = useRef<WrapCache | null>(null);
+
+  // Debounced lineCells value.  useState + useEffect so committing the
+  // new width after the debounce window naturally triggers a re-render.
+  const [effectiveCells, setEffectiveCells] = useState<number>(lineCells);
+  const pendingCellsRef = useRef<number>(lineCells);
+
+  useEffect(() => {
+    if (pendingCellsRef.current === lineCells) return;
+    pendingCellsRef.current = lineCells;
+    const id = setTimeout(() => setEffectiveCells(lineCells), LINE_CELLS_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [lineCells]);
+
   return useMemo(() => {
-    cacheRef.current = wrapIncremental(text, lineCells, cacheRef.current);
+    cacheRef.current = wrapIncremental(text, effectiveCells, cacheRef.current);
     return cacheRef.current.visualLines;
-  }, [text, lineCells]);
+  }, [text, effectiveCells]);
 }

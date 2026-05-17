@@ -1,5 +1,6 @@
 pub mod decode_only;
 pub mod editor;
+pub mod frame_cache;
 pub mod input;
 pub mod integrated;
 pub mod state;

@@ -2,7 +2,7 @@ import { Box, Text, useStdout } from "ink";
 import React, { useContext } from "react";
 import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
-import { countTokens } from "../../../tokenizer.js";
+import { countTokensBounded } from "../../../tokenizer.js";
 import { LiveExpandContext } from "../layout/LiveExpandContext.js";
 import { useReserveRows } from "../layout/viewport-budget.js";
 import { Markdown } from "../markdown.js";
@@ -51,14 +51,14 @@ function rateFromTokens(tokens: number, startTs: number, endTs: number): TokenRa
 }
 
 function tokenRate(text: string, startTs: number, endTs: number): TokenRate {
-  return rateFromTokens(countTokens(text), startTs, endTs);
+  return rateFromTokens(countTokensBounded(text), startTs, endTs);
 }
 
 export function estimateLiveTokenCount(
   text: string,
   cardId: string,
   calibration: LiveTokenCalibration | null,
-  countFn: (value: string) => number = countTokens,
+  countFn: (value: string) => number = countTokensBounded,
 ): { tokens: number; calibration: LiveTokenCalibration; exact: boolean } {
   const chars = text.length;
   const shouldCalibrate =

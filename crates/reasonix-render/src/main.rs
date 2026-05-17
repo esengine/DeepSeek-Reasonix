@@ -14,6 +14,7 @@ use reasonix_render::editor::{
     char_to_byte, insert_char_at, move_cursor_line, next_word_boundary, prev_word_boundary,
     remove_char_at,
 };
+use reasonix_render::frame_cache::FrameCache;
 use reasonix_render::input::{is_quit, paste_event, translate_key, translate_mouse};
 use reasonix_render::state::{decode_message, Payload};
 use reasonix_render::view::render_setup;
@@ -496,6 +497,7 @@ fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
     let mut tick: u32 = 0;
     let tick_period = Duration::from_millis(80);
     let scroll_step: u16 = 3;
+    let mut frame_cache = FrameCache::default();
 
     let result: Result<()> = (|| loop {
         let mut state_changed = false;
@@ -504,6 +506,9 @@ fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
             match rx.try_recv() {
                 Ok(line) => {
                     if line.trim().is_empty() {
+                        continue;
+                    }
+                    if !frame_cache.is_new(&line) {
                         continue;
                     }
                     if let Ok(p) = decode_message(&line) {

@@ -6,7 +6,7 @@ import {
   DEEPSEEK_PRICING,
   DEFAULT_CONTEXT_TOKENS,
 } from "@/telemetry/stats.js";
-import { countTokens } from "@/tokenizer.js";
+import { countTokensBounded } from "@/tokenizer.js";
 import { VERSION } from "@/version.js";
 import { writeClipboard } from "../../clipboard.js";
 import { computeCtxBreakdown } from "../../ctx-breakdown.js";
@@ -185,7 +185,7 @@ function estimateCost(userText: string, loop: import("@/loop.js").CacheFirstLoop
   if (!pricing) {
     return { info: t("handlers.observability.costNoPricing", { model: loop.model }) };
   }
-  const userTokens = countTokens(userText);
+  const userTokens = countTokensBounded(userText);
   const breakdown = computeCtxBreakdown(loop);
   const promptTokens =
     breakdown.systemTokens + breakdown.toolsTokens + breakdown.logTokens + userTokens;
