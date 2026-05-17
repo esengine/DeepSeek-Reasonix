@@ -77,84 +77,122 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toContain("line 3");
     });
 
-    it("auto-previews large files when no scope is given", async () => {
-      // File larger than DEFAULT_AUTO_PREVIEW_LINES (200) triggers the
-      // head+tail preview + omitted-lines marker.
-      const bigLines = Array.from({ length: 250 }, (_, i) => `line ${i + 1}`);
+    it("returns full content for many-line files when bytes fit under the threshold", async () => {
+      const bigLines = Array.from({ length: 1000 }, (_, i) => `line ${i + 1}`);
       await fs.writeFile(join(root, "huge.txt"), bigLines.join("\n"));
       const out = await tools.dispatch("read_file", JSON.stringify({ path: "huge.txt" }));
-      expect(out).toMatch(/auto-preview: head 80 \+ tail 40 of 250 lines/);
-      expect(out).toMatch(/130 lines omitted/);
+      expect(out).toContain("line 1");
+      expect(out).toContain("line 500");
+      expect(out).toContain("line 1000");
+      expect(out).not.toMatch(/outline mode/);
+      expect(out).not.toMatch(/omitted/);
+    });
+
+    it("switches to outline mode when file size exceeds outlineThresholdBytes", async () => {
+      const reg = new ToolRegistry();
+      registerFilesystemTools(reg, { rootDir: root, outlineThresholdBytes: 200 });
+      const bigLines = Array.from({ length: 250 }, (_, i) => `line ${i + 1}`);
+      await fs.writeFile(join(root, "big.txt"), bigLines.join("\n"));
+      const out = await reg.dispatch("read_file", JSON.stringify({ path: "big.txt" }));
+      expect(out).toMatch(/large file:.*outline mode/);
+      expect(out).toMatch(/head \d+ lines for orientation/);
       expect(out).toContain("line 1");
       expect(out).toContain("line 80");
-      expect(out).toContain("line 211");
-      expect(out).toContain("line 250");
-      expect(out).not.toContain("line 100");
       expect(out).not.toContain("line 200");
+      expect(out).toMatch(/search_content path:"big\.txt"/);
+      expect(out).toMatch(/read_file path:"big\.txt" range:"A-B"/);
     });
 
-    it("auto-preview embeds a top-level export outline for TS-shaped files", async () => {
+    it("outline mode surfaces TS exports as the symbol map", async () => {
+      const reg = new ToolRegistry();
+      registerFilesystemTools(reg, { rootDir: root, outlineThresholdBytes: 200 });
       const filler = (n: number) => Array.from({ length: n }, () => "  // filler").join("\n");
       const src = [
-        'import { foo } from "./foo";',
-        'import { bar } from "./bar";',
-        "",
-        "export interface AppProps {",
-        "  id: string;",
-        "}",
-        "",
-        filler(120),
-        "export function AppInner(props: AppProps) {",
-        "  return null;",
-        "}",
-        filler(80),
+        "export interface AppProps {}",
+        filler(40),
+        "export function AppInner() {}",
+        filler(40),
         "export const handleSubmit = () => {};",
-        filler(38),
-        "export default AppInner;",
       ].join("\n");
       await fs.writeFile(join(root, "App.tsx"), src);
-      const out = await tools.dispatch("read_file", JSON.stringify({ path: "App.tsx" }));
+      const out = await reg.dispatch("read_file", JSON.stringify({ path: "App.tsx" }));
       expect(out).toMatch(/\[outline: 3 symbols\]/);
-      expect(out).toMatch(/L\s*4\s+export interface AppProps/);
-      expect(out).toMatch(/L128\s+export function AppInner/);
-      expect(out).toMatch(/L211\s+export const handleSubmit/);
+      expect(out).toMatch(/export interface AppProps/);
+      expect(out).toMatch(/export function AppInner/);
+      expect(out).toMatch(/export const handleSubmit/);
     });
 
-    it("auto-preview omits the outline when no top-level exports are present", async () => {
-      const src = Array.from({ length: 220 }, (_, i) => `line ${i + 1}`).join("\n");
-      await fs.writeFile(join(root, "plain.txt"), src);
-      const out = await tools.dispatch("read_file", JSON.stringify({ path: "plain.txt" }));
-      expect(out).toMatch(/auto-preview: /);
+    it("outline mode surfaces protobuf messages, services, and rpcs", async () => {
+      const reg = new ToolRegistry();
+      registerFilesystemTools(reg, { rootDir: root, outlineThresholdBytes: 200 });
+      const src = [
+        'syntax = "proto3";',
+        "package demo;",
+        "",
+        "message User {",
+        "  string id = 1;",
+        "}",
+        "",
+        "message Account {",
+        "  string owner = 1;",
+        "}",
+        "",
+        "service AccountService {",
+        "  rpc GetAccount(GetReq) returns (Account);",
+        "  rpc ListAccounts(ListReq) returns (ListResp);",
+        "}",
+      ].join("\n");
+      await fs.writeFile(join(root, "demo.proto"), src);
+      const out = await reg.dispatch("read_file", JSON.stringify({ path: "demo.proto" }));
+      expect(out).toMatch(/large file:.*outline mode/);
+      expect(out).toMatch(/message User/);
+      expect(out).toMatch(/message Account/);
+      expect(out).toMatch(/service AccountService/);
+      expect(out).toMatch(/rpc GetAccount/);
+      expect(out).toMatch(/rpc ListAccounts/);
+    });
+
+    it("outline mode surfaces chapter markers in a Chinese novel .txt", async () => {
+      const reg = new ToolRegistry();
+      registerFilesystemTools(reg, { rootDir: root, outlineThresholdBytes: 200 });
+      const filler = Array.from({ length: 20 }, (_, i) => `这是第${i + 1}段普通正文内容。`).join(
+        "\n",
+      );
+      const src = [
+        "楔子",
+        filler,
+        "第一章 启程",
+        filler,
+        "第二章 风雪",
+        filler,
+        "卷二 江湖",
+        filler,
+        "Chapter 3 The Return",
+        filler,
+      ].join("\n");
+      await fs.writeFile(join(root, "novel.txt"), src);
+      const out = await reg.dispatch("read_file", JSON.stringify({ path: "novel.txt" }));
+      expect(out).toMatch(/large file:.*outline mode/);
+      expect(out).toMatch(/楔子/);
+      expect(out).toMatch(/第一章 启程/);
+      expect(out).toMatch(/第二章 风雪/);
+      expect(out).toMatch(/卷二 江湖/);
+      expect(out).toMatch(/Chapter 3 The Return/);
+    });
+
+    it("outline mode skips the outline section when no symbols match the file type", async () => {
+      const reg = new ToolRegistry();
+      registerFilesystemTools(reg, { rootDir: root, outlineThresholdBytes: 200 });
+      const src = Array.from({ length: 50 }, (_, i) => `prose line ${i + 1}`).join("\n");
+      await fs.writeFile(join(root, "plain.log"), src);
+      const out = await reg.dispatch("read_file", JSON.stringify({ path: "plain.log" }));
+      expect(out).toMatch(/large file:.*outline mode/);
       expect(out).not.toMatch(/\[outline:/);
+      expect(out).toContain("prose line 1");
+      expect(out).toMatch(/search_content/);
     });
 
-    it("auto-preview outline elides the middle when more than 30 exports", async () => {
-      // Spread the 35 exports out so head/tail slices don't mask the elision.
-      const lines: string[] = [];
-      const exportPositions: number[] = [];
-      for (let i = 0; i < 35; i++) {
-        for (let f = 0; f < 6; f++) lines.push(`// filler block ${i}-${f}`);
-        exportPositions.push(lines.length + 1);
-        lines.push(`export const sym${String(i + 1).padStart(2, "0")} = ${i + 1};`);
-      }
-      for (let i = 0; i < 60; i++) lines.push(`// trailer ${i}`);
-      await fs.writeFile(join(root, "many.ts"), lines.join("\n"));
-      const out = await tools.dispatch("read_file", JSON.stringify({ path: "many.ts" }));
-      const outlineMatch = /\[outline: 35 symbols\]([\s\S]*?)\n\n/.exec(out);
-      expect(outlineMatch).not.toBeNull();
-      const outlineBlock = outlineMatch![1]!;
-      expect(outlineBlock).toMatch(/export const sym01/);
-      expect(outlineBlock).toMatch(/export const sym25/);
-      expect(outlineBlock).not.toMatch(/export const sym26/);
-      expect(outlineBlock).not.toMatch(/export const sym30/);
-      expect(outlineBlock).toMatch(/export const sym31/);
-      expect(outlineBlock).toMatch(/export const sym35/);
-      const gapStart = exportPositions[24]!;
-      const gapEnd = exportPositions[30]!;
-      expect(outlineBlock).toContain(`[… 5 more symbols between L${gapStart} and L${gapEnd} …]`);
-    });
-
-    it("returns full content when file is at or below the auto-preview threshold", async () => {
+    it("returns full content for small files at or below the threshold", async () => {
       const out = await tools.dispatch("read_file", JSON.stringify({ path: "hello.txt" }));
       expect(out).toBe("line 1\nline 2\nline 3");
     });
@@ -180,11 +218,20 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toContain("line 1");
     });
 
-    it("returns a truncation notice when file exceeds maxReadBytes", async () => {
+    it("triggers outline mode when file exceeds outlineThresholdBytes", async () => {
       const tiny = new ToolRegistry();
-      registerFilesystemTools(tiny, { rootDir: root, maxReadBytes: 10 });
+      registerFilesystemTools(tiny, { rootDir: root, outlineThresholdBytes: 10 });
       const out = await tiny.dispatch("read_file", JSON.stringify({ path: "hello.txt" }));
-      expect(out).toMatch(/truncated/);
+      expect(out).toMatch(/outline mode/);
+      expect(out).toMatch(/threshold 10 B/);
+    });
+
+    it("refuses binary files (NUL byte in first 8 KiB)", async () => {
+      const buf = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x00, 0x01, 0x02, 0x03]);
+      await fs.writeFile(join(root, "fake.png"), buf);
+      const out = await tools.dispatch("read_file", JSON.stringify({ path: "fake.png" }));
+      expect(out).toMatch(/appears to be binary/);
+      expect(out).toMatch(/get_file_info/);
     });
 
     it("refuses to read a directory as a file", async () => {

@@ -23,7 +23,23 @@ const MD_HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 
 const MD_FENCE_RE = /^```/;
 
-type Lang = "ts" | "py" | "go" | "rust" | "md";
+const PROTO_TOP_RE = /^(message|service|enum|extend)\s+(\w+)/;
+
+const PROTO_RPC_RE = /^\s+rpc\s+(\w+)/;
+
+const CN_NUM = "[\\d零一二三四五六七八九十百千万０-９]+";
+
+const TXT_CHAPTER_PATTERNS: readonly RegExp[] = [
+  new RegExp(`^第${CN_NUM}[章节回].{0,80}$`),
+  new RegExp(`^卷${CN_NUM}.{0,80}$`),
+  /^(?:序章|楔子|番外篇?|前言|后记|尾声|引子)(?:[\s\u3000：:、—\-.].{0,80})?$/,
+  /^Chapter\s+(?:\d+|[IVXLCDMivxlcdm]+|[A-Za-z]+)\b.{0,80}$/,
+  /^CHAPTER\s+.{1,80}$/,
+  /^Part\s+(?:\d+|[IVXLCDMivxlcdm]+)\b.{0,80}$/,
+  /^PART\s+.{1,80}$/,
+];
+
+type Lang = "ts" | "py" | "go" | "rust" | "md" | "proto" | "txt";
 
 const EXT_TO_LANG: Record<string, Lang> = {
   ".ts": "ts",
@@ -41,6 +57,9 @@ const EXT_TO_LANG: Record<string, Lang> = {
   ".md": "md",
   ".markdown": "md",
   ".mdx": "md",
+  ".proto": "proto",
+  ".txt": "txt",
+  ".text": "txt",
 };
 
 export function extractOutline(filename: string, lines: readonly string[]): OutlineEntry[] {
@@ -58,6 +77,10 @@ export function extractOutline(filename: string, lines: readonly string[]): Outl
       return extractRust(lines);
     case "md":
       return extractMarkdown(lines);
+    case "proto":
+      return extractProto(lines);
+    case "txt":
+      return extractText(lines);
   }
 }
 
@@ -110,6 +133,38 @@ function extractRust(lines: readonly string[]): OutlineEntry[] {
     const m = RUST_DECL_RE.exec(line);
     if (!m) continue;
     out.push({ line: i + 1, text: `${m[1]} ${m[2]}` });
+  }
+  return out;
+}
+
+function extractProto(lines: readonly string[]): OutlineEntry[] {
+  const out: OutlineEntry[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.startsWith(" ") && !line.startsWith("\t")) {
+      const m = PROTO_TOP_RE.exec(line);
+      if (m) {
+        out.push({ line: i + 1, text: `${m[1]} ${m[2]}` });
+        continue;
+      }
+    }
+    const rpc = PROTO_RPC_RE.exec(line);
+    if (rpc) out.push({ line: i + 1, text: `rpc ${rpc[1]}` });
+  }
+  return out;
+}
+
+function extractText(lines: readonly string[]): OutlineEntry[] {
+  const out: OutlineEntry[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (line.length === 0 || line.length > 100) continue;
+    for (const re of TXT_CHAPTER_PATTERNS) {
+      if (re.test(line)) {
+        out.push({ line: i + 1, text: line });
+        break;
+      }
+    }
   }
   return out;
 }
