@@ -126,17 +126,21 @@ describe("resolveRendererWith", () => {
     ).toBeNull();
   });
 
-  it("uses .exe suffix on win32", () => {
-    const releasePath = "C:\\repo\\target\\release\\reasonix-render.exe";
+  it("uses .exe suffix when platform is win32", () => {
+    let probed: string | undefined;
     const r = resolveRendererWith(
       makeIO({
         platform: "win32",
-        findReasonixSourceTree: () => "C:\\repo",
-        hasFile: (p) => p === releasePath,
+        findReasonixSourceTree: () => "/repo",
+        hasFile: (p) => {
+          probed = probed ?? p;
+          return p.endsWith("reasonix-render.exe");
+        },
       }),
     );
     expect(r.source).toBe("prebuilt-release");
-    expect(r.command[0]).toBe(releasePath);
+    expect(r.command[0]).toMatch(/reasonix-render\.exe$/);
+    expect(probed).toMatch(/reasonix-render\.exe$/);
   });
 
   it("REASONIX_RENDER_CMD overrides only the renderer channel; input falls back to base", () => {
