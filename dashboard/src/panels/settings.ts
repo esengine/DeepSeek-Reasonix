@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { type DashboardLang, getLang, setLang, t, useLang } from "../i18n/index.js";
 import { api } from "../lib/api.js";
 import {
   type BudgetState,
@@ -15,7 +16,6 @@ import {
   formatRemaining,
   parseCustomInterval,
 } from "../lib/loop-control.js";
-import { type DashboardLang, getLang, setLang, t, useLang } from "../i18n/index.js";
 
 interface SettingsData {
   apiKey?: string | null;
@@ -29,6 +29,7 @@ interface SettingsData {
   budgetUsd?: number | null;
   /** Cumulative session spend (USD); null when no session is attached. */
   sessionSpendUsd?: number | null;
+  skillPaths?: string[];
 }
 
 function fmtUsd2(n: number): string {
@@ -498,6 +499,11 @@ export function SettingsPanel() {
     [load],
   );
 
+  const skillPathsDraft = draft.skillPaths ?? data?.skillPaths ?? [];
+  const skillPathsText = Array.isArray(skillPathsDraft)
+    ? skillPathsDraft.join(", ")
+    : String(skillPathsDraft ?? "");
+
   if (!data && !error)
     return html`<div class="card" style="color:var(--fg-3)">${t("settings.loading")}</div>`;
   if (error && !data) return html`<div class="card accent-err">${error}</div>`;
@@ -507,11 +513,7 @@ export function SettingsPanel() {
   const sectionH3 = (text: string) => html`
     <h3 style="margin:18px 0 8px;font-family:var(--font-mono);font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.1em">${text}</h3>
   `;
-  const fieldRow = (
-    label: string,
-    control: unknown,
-    note?: string,
-  ) => html`
+  const fieldRow = (label: string, control: unknown, note?: string) => html`
     <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
       <span style="flex:0 0 110px;font-family:var(--font-mono);font-size:11.5px;color:var(--fg-3)">${label}</span>
       <div style="flex:1;display:flex;align-items:center;gap:8px">${control}</div>
@@ -523,12 +525,8 @@ export function SettingsPanel() {
 
   return html`
     <div style="max-width:760px;display:flex;flex-direction:column;gap:6px">
-      ${
-        saved ? html`<div><span class="pill ok">${saved}</span></div>` : null
-      }
-      ${
-        error ? html`<div class="card accent-err">${error}</div>` : null
-      }
+      ${saved ? html`<div><span class="pill ok">${saved}</span></div>` : null}
+      ${error ? html`<div class="card accent-err">${error}</div>` : null}
 
       ${sectionH3(t("settings.sectionLanguage"))}
       <div class="card">
@@ -632,6 +630,35 @@ export function SettingsPanel() {
             >${v.search ? t("common.on") : t("common.off")}</button>
           `,
           t("settings.webSearchNote"),
+        )}
+      </div>
+
+      ${sectionH3(t("settings.sectionSkills"))}
+      <div class="card">
+        ${fieldRow(
+          t("settings.skillPaths"),
+          html`
+            <input
+              type="text"
+              value=${skillPathsText}
+              placeholder=${t("settings.skillPathsPlaceholder")}
+              onInput=${(e: Event) =>
+                setDraft({
+                  ...draft,
+                  skillPaths: (e.target as HTMLInputElement).value
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })}
+              style="flex:1;font-family:var(--font-mono)"
+            />
+            <button
+              class="btn"
+              disabled=${saving || skillPathsText === (v.skillPaths ?? []).join(", ")}
+              onClick=${() => save({ skillPaths: draft.skillPaths ?? [] })}
+            >${t("common.save")}</button>
+          `,
+          t("settings.skillPathsNote"),
         )}
       </div>
 

@@ -1,6 +1,6 @@
 import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { t } from "../../i18n/index.js";
 import type { SessionInfo } from "../../memory/session.js";
 import { type PickerBroadcastPorts, usePickerBroadcast } from "./dashboard/use-picker-broadcast.js";
@@ -22,6 +22,7 @@ export interface SessionPickerProps {
   walletCurrency?: string;
   /** When provided, broadcasts to the web dashboard so it can resolve via `/api/modal/resolve`. */
   pickerPorts?: PickerBroadcastPorts;
+  onFocusChange?: (focus: number) => void;
 }
 
 const PAGE_MARGIN = 6;
@@ -32,8 +33,13 @@ export function SessionPicker({
   onChoose,
   walletCurrency,
   pickerPorts,
+  onFocusChange,
 }: SessionPickerProps): React.ReactElement {
   const [focus, setFocus] = useState(0);
+
+  useEffect(() => {
+    onFocusChange?.(focus);
+  }, [focus, onFocusChange]);
   const [renaming, setRenaming] = useState<{ from: string; buf: string } | null>(null);
   const { stdout } = useStdout();
   const rows = stdout?.rows ?? 40;

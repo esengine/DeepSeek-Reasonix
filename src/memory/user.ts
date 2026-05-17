@@ -11,7 +11,12 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { type ReasonixConfig, memoryTypeDefaults } from "../config.js";
+import {
+  type ReasonixConfig,
+  loadResolvedSkillPaths,
+  memoryTypeDefaults,
+  resolveSkillPaths,
+} from "../config.js";
 import { parseFrontmatter } from "../frontmatter.js";
 import { applySkillsIndex } from "../skills.js";
 import { applyProjectMemory, memoryEnabled } from "./project.js";
@@ -413,16 +418,18 @@ export function applyUserMemory(
 export function applyMemoryStack(
   basePrompt: string,
   rootDir: string,
-  opts: { homeDir?: string } = {},
+  opts: { homeDir?: string; cfg?: ReasonixConfig } = {},
 ): string {
+  const homeDir = opts.homeDir;
+  const cfg = opts.cfg;
   const withProject = applyProjectMemory(basePrompt, rootDir);
   const withGlobal = applyGlobalReasonixMemory(
     withProject,
-    opts.homeDir ? join(opts.homeDir, ".reasonix") : undefined,
+    homeDir ? join(homeDir, ".reasonix") : undefined,
   );
-  const withMemory = applyUserMemory(withGlobal, {
-    projectRoot: rootDir,
-    homeDir: opts.homeDir,
-  });
-  return applySkillsIndex(withMemory, { projectRoot: rootDir, homeDir: opts.homeDir });
+  const withMemory = applyUserMemory(withGlobal, { projectRoot: rootDir, homeDir, cfg });
+  const customSkillPaths = cfg?.skills?.paths
+    ? resolveSkillPaths(cfg.skills.paths, rootDir)
+    : loadResolvedSkillPaths(rootDir);
+  return applySkillsIndex(withMemory, { projectRoot: rootDir, homeDir, customSkillPaths });
 }

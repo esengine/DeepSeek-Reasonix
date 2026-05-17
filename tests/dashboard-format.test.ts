@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.hoisted(() => {
+  vi.stubGlobal("document", { querySelector: () => null });
+});
+
 import {
   fmtBytes,
   fmtCompactNum,

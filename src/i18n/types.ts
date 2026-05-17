@@ -34,6 +34,16 @@ export interface TranslationSchema {
     update: string;
     index: string;
   };
+  stats: {
+    usageHint: string;
+    usageDetail: string;
+  };
+  run: {
+    missingApiKey: string;
+  };
+  sessions: {
+    emptyHint: string;
+  };
   ui: {
     welcome: string;
     taglineChat: string;
@@ -211,7 +221,6 @@ export interface TranslationSchema {
     proArmed: string;
     abortedAtIter: string;
     toolUploadStatus: string;
-    toolBudgetWarning: string;
     preflightFoldStatus: string;
     preflightFolded: string;
     preflightNoFold: string;
@@ -243,11 +252,9 @@ export interface TranslationSchema {
     reasonAborted: string;
     reasonContextGuard: string;
     reasonStuck: string;
-    reasonBudget: string;
     labelAborted: string;
     labelContextGuard: string;
     labelStuck: string;
-    labelBudget: string;
   };
   handlers: {
     [group: string]: {
@@ -411,6 +418,8 @@ export interface TranslationSchema {
     editorFailed: string;
     editorMissing: string;
     editorExited: string;
+    /** Typeahead queue indicator, e.g. "▸ 3 lines staged · esc recall" */
+    typeaheadStaged: string;
   };
   pathConfirm: {
     title: string;

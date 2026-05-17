@@ -1,6 +1,7 @@
 import { I } from "../icons";
 import { t } from "../i18n";
 import type { Balance, Settings, UsageStats } from "../App";
+import type { JobInfo } from "../protocol";
 import { THEME, type Theme } from "../theme";
 
 function formatMoney(amount: number, currency: "CNY" | "USD"): string {
@@ -21,6 +22,9 @@ export function StatusBar({
   ready,
   currency,
   theme,
+  jobs,
+  jobsOpen,
+  onToggleJobs,
   onToggleTheme,
   onToggleCurrency,
   onOpenSettings,
@@ -33,6 +37,9 @@ export function StatusBar({
   ready: boolean;
   currency: "CNY" | "USD";
   theme: Theme;
+  jobs: JobInfo[];
+  jobsOpen: boolean;
+  onToggleJobs: () => void;
   onToggleTheme: () => void;
   onToggleCurrency: () => void;
   onOpenSettings: () => void;
@@ -40,6 +47,7 @@ export function StatusBar({
 }) {
   const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
   const cacheHitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
+  const runningJobs = jobs.filter((j) => j.running).length;
   const spent = formatMoney(usage.totalCostUsd, currency);
   const balanceLabel = balance
     ? `${balance.currency === "USD" ? "$" : "¥"} ${balance.total.toFixed(2)}`
@@ -72,6 +80,16 @@ export function StatusBar({
       </span>
 
       <span className="grow" />
+
+      <span
+        className={`seg jobs ${jobsOpen ? "active" : ""}`}
+        onClick={onToggleJobs}
+        title={t("statusbar.jobsTip")}
+      >
+        <I.cpu size={11} />
+        <span>{t("statusbar.jobs")}</span>
+        <span className={runningJobs > 0 ? "v acc" : "v"}>{runningJobs}</span>
+      </span>
 
       {settings?.workspaceDir ? (
         <span

@@ -60,17 +60,17 @@ Requires Node ≥ 22. Works on macOS · Linux · Windows (PowerShell · Git Bash
 
 Install Reasonix globally if you want the `reasonix` command available on your `PATH`:
 
-```bash
+~~~bash
 npm install -g reasonix
 reasonix code my-project   # paste a DeepSeek API key on first run; persists after
-```
+~~~
 
 Or run it once without installing globally:
 
-```bash
+~~~bash
 cd my-project
 npx reasonix code          # always uses the latest package by default
-```
+~~~
 
 Grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reasonix code --help` for flags.
 
@@ -86,6 +86,33 @@ If you use Reasonix daily, global install is the simplest path. If you just want
 
 Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp` · `prune-sessions`) are in `reasonix --help` and the [CLI reference](https://esengine.github.io/DeepSeek-Reasonix/#cli).
 
+### QQ channel
+
+Reasonix can attach QQ as a remote communication channel for existing `chat` and `code` sessions. It is not a separate runtime mode.
+
+Start a session first:
+
+~~~bash
+reasonix code
+# or
+reasonix chat
+~~~
+
+Then connect QQ from inside the session:
+
+~~~text
+/qq connect
+~~~
+
+Available commands:
+
+- `/qq connect`
+- `/qq status`
+- `/qq disconnect`
+
+Once enabled, later `chat` / `code` sessions auto-start the QQ channel. Slash commands, confirmation prompts, and follow-up assistant replies can continue through QQ without terminal-side input.
+
+See [QQ channel setup](./docs/qq-connect.md) for setup details and QQ Open Platform bot registration.
 ### Desktop client (prerelease)
 
 A native Tauri client for users who want a GUI over the same loop. Multi-tab, the right-panel shows files the agent has read or edited this session, the same cost / cache / token meters live at the bottom. Same DeepSeek API key, same `~/.reasonix` config — the desktop bundles its own Node runtime, no separate `npm install` step.
@@ -103,9 +130,9 @@ The CLI remains the canonical surface. Anything that lands in the CLI is also av
 
 **Working in a different folder.** Reasonix scopes filesystem tools to the launch directory; pass `--dir` to retarget. Mid-session switching isn't supported by design (memory paths would tangle with stale roots) — quit and relaunch.
 
-```bash
+~~~bash
 npx reasonix code --dir /path/to/project
-```
+~~~
 
 **Picking `chat` vs `code`.** `code` is the default and the only mode with filesystem / shell tools and SEARCH/REPLACE review. `chat` is the lighter, tools-off shell — reach for it when you want a thinking partner with MCP attached but no disk access.
 
@@ -122,10 +149,10 @@ npx reasonix code --dir /path/to/project
 
 **Author your first skill.** No remote registry — write them directly. Edit the file (`description:` frontmatter + body), then `/skill list`. Add `runAs: subagent` to spawn an isolated subagent loop instead of inlining the body.
 
-```bash
+~~~bash
 /skill new my-skill              # <project>/.reasonix/skills/my-skill.md
 /skill new my-skill --global     # ~/.reasonix/skills for cross-project use
-```
+~~~
 
 </details>
 
@@ -144,7 +171,7 @@ One JSON file at `~/.reasonix/config.json` plus per-project overrides under `<pr
 | [Memory](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#memory) | User-private knowledge pinned into the prefix. `user` / `feedback` / `project` / `reference` types. |
 | [Hooks](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#hooks) | Shell commands on lifecycle events. `PreToolUse` (gating) · `PostToolUse` · `UserPromptSubmit` · `Stop`. |
 | [Permissions](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#permissions) | Per-workspace shell allowlist. Exact-prefix match. |
-| [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Mojeek by default; switch to self-hosted SearXNG with `/search-engine`. |
+| [Web search](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#search) | Mojeek by default; switch to self-hosted SearXNG or Metaso with `/search-engine`. |
 | [Semantic index](https://esengine.github.io/DeepSeek-Reasonix/configuration.html#index) | `reasonix index` — local Ollama or any OpenAI-compatible embedding endpoint. |
 
 <br/>
@@ -181,7 +208,7 @@ Click through to the full architecture writeup → [Pillar 1 — Cache-first loo
 | Configurable web search engine    | `/search-engine` | —             | —                   | —                  |
 | Persistent per-workspace sessions | yes              | partial           | n/a                 | —                  |
 | Plan mode · MCP · hooks · skills  | yes              | yes               | yes                 | partial            |
-| Web search (Mojeek + SearXNG)      | yes              | yes               | yes                 | yes                |
+| Web search (Mojeek + SearXNG + Metaso)   | yes              | yes               | yes                 | yes                |
 | Open community development        | yes              | —                 | —                   | yes                |
 
 For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmarks/) — the numbers move with model pricing, so they live with the harness, not in the README.
@@ -192,6 +219,7 @@ For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmar
 
 - [**Architecture**](./docs/ARCHITECTURE.md) — three pillars: cache-first loop, tool-call repair, cost control
 - [**CLI Reference**](./docs/CLI-REFERENCE.md) — every shell subcommand, every slash command, every keybinding
+- [**QQ channel setup**](./docs/qq-connect.md) — what it is, commands, setup flow, and QQ Open Platform credentials
 - [**Benchmarks**](./benchmarks/) — τ-bench-lite harness, transcripts, cost methodology
 - [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard mockup, TUI mockup
 - [**Contributing**](./CONTRIBUTING.md) — comment policy, error-handling rules, library-over-hand-rolled

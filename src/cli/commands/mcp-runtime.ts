@@ -1,11 +1,11 @@
-import { mcpEnvFor, readConfig } from "../../config.js";
+import { normalizeMcpConfig, readConfig } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
 import { McpClient } from "../../mcp/client.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { type McpClientHost, bridgeMcpTools } from "../../mcp/registry.js";
-import { parseMcpSpec } from "../../mcp/spec.js";
+import { overlayMatchedSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import { buildMcpServerSummary } from "../../mcp/summary.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import type { ToolRegistry } from "../../tools.js";
@@ -117,7 +117,8 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     }
     const tools = ctx.getTools();
     if (!tools) return { ok: false, reason: "no tool registry available" };
-    const disabledNames = new Set(readConfig().mcpDisabled ?? []);
+    const cfg = readConfig();
+    const normalized = normalizeMcpConfig(cfg);
     let label = "anon";
     let mcp: McpClient | undefined;
     // Per-server readiness gate — tool dispatches via the bridge await
@@ -134,9 +135,11 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     // Avoid unhandledRejection if no consumer awaits `ready` yet.
     ready.catch(() => undefined);
     try {
-      const spec = parseMcpSpec(raw);
-      label = spec.name ?? "anon";
-      if (spec.name && disabledNames.has(spec.name)) {
+      const parsed = parseMcpSpec(raw);
+      label = parsed.name ?? "anon";
+      const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
+      const spec = overlayMatchedSpec(parsed, matched);
+      if (spec.disabled) {
         sink({ kind: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));
         return { ok: false, reason: "disabled by user" };
@@ -149,7 +152,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
           ? (ctx.getMcpPrefix() as string)
           : "";
       if (spec.transport === "stdio") preflightStdioSpec(spec);
-      const transport = buildTransportFromSpec(spec, { env: mcpEnvFor(spec.name, readConfig()) });
+      const transport = buildTransportFromSpec(spec);
       mcp = new McpClient({ transport });
       await mcp.initialize();
       const host: McpClientHost = { client: mcp };
@@ -249,7 +252,8 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     failed: Array<{ spec: string; reason: string }>;
     summaries: McpServerSummary[];
   }> {
-    const desired = readConfig().mcp ?? [];
+    const normalized = normalizeMcpConfig(readConfig());
+    const desired = normalized.map(specToRaw);
     const desiredSet = new Set(desired);
     const currentSet = new Set(records.keys());
     const added: string[] = [];

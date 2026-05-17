@@ -1,13 +1,15 @@
 /** Subagent tool — registration, child-loop isolation, fork-registry exclusion, abort propagation, plan-mode inheritance. */
 
 import { describe, expect, it, vi } from "vitest";
-import { DeepSeekClient } from "../src/client.js";
+import { DeepSeekClient, Usage } from "../src/client.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
   type SubagentEvent,
+  type SubagentResult,
   type SubagentSink,
   forkRegistryExcluding,
   forkRegistryWithAllowList,
+  formatSubagentResult,
   registerSubagentTool,
   spawnSubagent,
   subagentBudgetHint,
@@ -290,7 +292,6 @@ describe("registerSubagentTool", () => {
       JSON.stringify({ task: "go", system: "You are a custom subagent." }),
     );
     expect(seenSystems[0]).toContain("You are a custom subagent.");
-    expect(seenSystems[0]).toMatch(/Tool budget: you have \d+ tool calls/);
   });
 
   it("falls back to the default model when the model arg is invalid", async () => {
@@ -397,98 +398,7 @@ describe("registerSubagentTool", () => {
     expect(fetchCalls).toBe(0);
   });
 
-  it("exposes max_iters in the tool schema without an upper bound (checkpoint cadence, not budget)", () => {
-    const parent = new ToolRegistry();
-    const client = makeClient([{ content: "ok" }]);
-    registerSubagentTool(parent, { client });
-    const spec = parent.specs().find((s) => s.function.name === "spawn_subagent");
-    const params = spec?.function.parameters as {
-      properties: { max_iters: { type: string; minimum?: number; maximum?: number } };
-    };
-    expect(params.properties.max_iters.type).toBe("integer");
-    expect(params.properties.max_iters.maximum).toBeUndefined();
-  });
-
-  it("paces the child loop at the caller-supplied max_iters (pauses on reaching it)", async () => {
-    const parent = new ToolRegistry();
-    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const client = makeClient(makeToolCallResponses(50));
-    registerSubagentTool(parent, { client });
-    const out = await parent.dispatch(
-      "spawn_subagent",
-      JSON.stringify({ task: "loop forever", max_iters: 3 }),
-    );
-    const parsed = JSON.parse(out);
-    expect(parsed.tool_iters).toBe(3);
-    expect(parsed.paused).toBe(true);
-    expect(typeof parsed.resume_session).toBe("string");
-  });
-
-  it("paused result carries partial_summary so the parent can decide informed", async () => {
-    const parent = new ToolRegistry();
-    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const responses: FakeResponseShape[] = [
-      ...makeToolCallResponses(2),
-      {
-        content:
-          "Read 2 files, mapped the auth flow; still need to wire the refresh-token path; blocked on the token-store interface choice.",
-      },
-    ];
-    const client = makeClient(responses);
-    registerSubagentTool(parent, { client });
-    const out = await parent.dispatch(
-      "spawn_subagent",
-      JSON.stringify({ task: "trace the auth flow", max_iters: 2 }),
-    );
-    const parsed = JSON.parse(out);
-    expect(parsed.paused).toBe(true);
-    expect(parsed.partial_summary).toMatch(/Read 2 files/);
-    expect(parsed.partial_summary).toMatch(/blocked/);
-  });
-
-  it("paused result still works when the summary call returns empty content", async () => {
-    const parent = new ToolRegistry();
-    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const responses: FakeResponseShape[] = [...makeToolCallResponses(2), { content: "" }];
-    const client = makeClient(responses);
-    registerSubagentTool(parent, { client });
-    const out = await parent.dispatch(
-      "spawn_subagent",
-      JSON.stringify({ task: "loop forever", max_iters: 2 }),
-    );
-    const parsed = JSON.parse(out);
-    expect(parsed.paused).toBe(true);
-    expect(parsed.partial_summary).toBeUndefined();
-  });
-
-  it("passes large max_iters values through without clamping", async () => {
-    const parent = new ToolRegistry();
-    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const client = makeClient(makeToolCallResponses(60));
-    registerSubagentTool(parent, { client });
-    const out = await parent.dispatch(
-      "spawn_subagent",
-      JSON.stringify({ task: "loop forever", max_iters: 50 }),
-    );
-    const parsed = JSON.parse(out);
-    expect(parsed.tool_iters).toBe(50);
-    expect(parsed.paused).toBe(true);
-  });
-
-  it("ignores non-numeric max_iters and falls back to the default", async () => {
-    const parent = new ToolRegistry();
-    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const client = makeClient(makeToolCallResponses(50));
-    registerSubagentTool(parent, { client, maxToolIters: 4 });
-    const out = await parent.dispatch(
-      "spawn_subagent",
-      JSON.stringify({ task: "loop forever", max_iters: "lots" }),
-    );
-    const parsed = JSON.parse(out);
-    expect(parsed.tool_iters).toBe(4);
-  });
-
-  it("type=explore uses the explore persona and 20-iter budget", async () => {
+  it("type=explore uses the explore persona", async () => {
     const seenSystems: string[] = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
@@ -514,32 +424,6 @@ describe("registerSubagentTool", () => {
       JSON.stringify({ task: "find all callers of foo()", type: "explore" }),
     );
     expect(seenSystems[0]).toMatch(/exploration subagent/);
-  });
-
-  it("type=verify caps the child loop at the verify budget (8)", async () => {
-    const parent = new ToolRegistry();
-    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const client = makeClient(makeToolCallResponses(50));
-    registerSubagentTool(parent, { client });
-    const out = await parent.dispatch(
-      "spawn_subagent",
-      JSON.stringify({ task: "verify foo", type: "verify" }),
-    );
-    const parsed = JSON.parse(out);
-    expect(parsed.tool_iters).toBe(8);
-  });
-
-  it("explicit max_iters overrides the type's default budget", async () => {
-    const parent = new ToolRegistry();
-    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const client = makeClient(makeToolCallResponses(50));
-    registerSubagentTool(parent, { client });
-    const out = await parent.dispatch(
-      "spawn_subagent",
-      JSON.stringify({ task: "verify foo", type: "verify", max_iters: 4 }),
-    );
-    const parsed = JSON.parse(out);
-    expect(parsed.tool_iters).toBe(4);
   });
 
   it("explicit system overrides the type's default prompt", async () => {
@@ -568,51 +452,43 @@ describe("registerSubagentTool", () => {
       JSON.stringify({ task: "go", type: "explore", system: "I am a custom prompt." }),
     );
     expect(seenSystems[0]).toContain("I am a custom prompt.");
-    expect(seenSystems[0]).toMatch(/Tool budget: you have 20 tool calls/);
   });
 
-  it("omitted type leaves the default persona and budget unchanged", async () => {
+  it("fires onSpawnComplete once per dispatch with the full SubagentResult", async () => {
     const parent = new ToolRegistry();
     parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    const client = makeClient(makeToolCallResponses(50));
-    registerSubagentTool(parent, { client, maxToolIters: 5 });
-    const out = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "loop please" }));
+    const client = makeClient([{ content: "the distilled answer" }]);
+    const captured: { output: string; costUsd: number; usage: { completionTokens: number } }[] = [];
+    registerSubagentTool(parent, {
+      client,
+      onSpawnComplete: (result) => {
+        captured.push({
+          output: result.output,
+          costUsd: result.costUsd,
+          usage: { completionTokens: result.usage.completionTokens },
+        });
+      },
+    });
+    await parent.dispatch("spawn_subagent", JSON.stringify({ task: "say something" }));
+    expect(captured).toHaveLength(1);
+    expect(captured[0]!.output).toBe("the distilled answer");
+    expect(captured[0]!.usage.completionTokens).toBeGreaterThan(0);
+  });
+
+  it("does not propagate onSpawnComplete errors out of the spawn tool dispatch", async () => {
+    const parent = new ToolRegistry();
+    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
+    const client = makeClient([{ content: "ok" }]);
+    registerSubagentTool(parent, {
+      client,
+      onSpawnComplete: () => {
+        throw new Error("telemetry boom");
+      },
+    });
+    const out = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "anything" }));
     const parsed = JSON.parse(out);
-    expect(parsed.tool_iters).toBe(5);
-  });
-
-  it("appends a remaining-budget hint to tool results within 3 iters of the cap", async () => {
-    // Drive 5 tool calls. The augmenter appends a hint starting at iter 2
-    // (remaining=3). After iter 5 the loop pauses; the partial-summary call
-    // (one extra no-tools fetch) then sees all 5 results in the session —
-    // including the iter-5 "0 of 5 left — finalize NOW" form.
-    const responses = makeToolCallResponses(5);
-    const innerFetch = fakeFetch(responses);
-    const seenToolResults: string[] = [];
-    const fetchSpy = vi.fn(async (url: any, init: any) => {
-      const body = init?.body ? JSON.parse(init.body) : {};
-      for (const m of body.messages ?? []) {
-        if (m.role === "tool") seenToolResults.push(m.content);
-      }
-      return innerFetch(url, init);
-    });
-    const client = new DeepSeekClient({
-      apiKey: "sk-test",
-      fetch: fetchSpy as any,
-    });
-    const parent = new ToolRegistry();
-    parent.register({ name: "noop", readOnly: true, fn: () => "noop-result" });
-    registerSubagentTool(parent, { client, maxToolIters: 5 });
-    await parent.dispatch("spawn_subagent", JSON.stringify({ task: "go" }));
-    expect(seenToolResults.length).toBeGreaterThanOrEqual(5);
-    const unique = Array.from(new Set(seenToolResults));
-    expect(unique).toHaveLength(5);
-    expect(unique[0]).not.toMatch(/budget:/);
-    expect(unique[0]).toBe("noop-result");
-    expect(unique[1]).toMatch(/\[budget: 3 of 5 tool calls left/);
-    expect(unique[2]).toMatch(/\[budget: 2 of 5 tool calls left/);
-    expect(unique[3]).toMatch(/\[budget: 1 of 5 tool call left/);
-    expect(unique[4]).toMatch(/\[budget: 0 of 5 tool calls left — finalize NOW/);
+    expect(parsed.success).toBe(true);
+    expect(parsed.output).toBe("ok");
   });
 });
 
@@ -656,6 +532,61 @@ describe("registerSubagentTool — per-session budget feedback", () => {
     expect(outs[2]).toMatch(/\[note: this session has spawned 3 subagents/);
     expect(outs[3]).toMatch(/\[note: this session has spawned 4 subagents/);
     expect(outs[4]).toMatch(/\[budget: this session has now spawned 5 subagents/);
+  });
+});
+
+describe("formatSubagentResult — forcedSummary path", () => {
+  function baseResult(over: Partial<SubagentResult>): SubagentResult {
+    return {
+      success: false,
+      output: "",
+      turns: 1,
+      toolIters: 4,
+      elapsedMs: 1000,
+      costUsd: 0.0001,
+      model: "deepseek-chat",
+      usage: new Usage(),
+      ...over,
+    };
+  }
+
+  it("renders forcedSummary results with partial:true and `output` carrying the synthesis", () => {
+    const formatted = formatSubagentResult(
+      baseResult({
+        forcedSummary: true,
+        output: "I found X and Y; could not reach Z because the file was truncated.",
+      }),
+    );
+    const parsed = JSON.parse(formatted);
+    expect(parsed.success).toBe(false);
+    expect(parsed.partial).toBe(true);
+    expect(parsed.output).toMatch(/found X and Y/);
+    expect(parsed.note).toMatch(/force-summarized/i);
+  });
+
+  it("forcedSummary takes precedence over the generic !success branch", () => {
+    const formatted = formatSubagentResult(
+      baseResult({
+        forcedSummary: true,
+        output: "partial answer",
+        error: "ignored when forcedSummary is set",
+      }),
+    );
+    const parsed = JSON.parse(formatted);
+    expect(parsed.partial).toBe(true);
+    expect(parsed.output).toBe("partial answer");
+    expect(parsed.error).toBeUndefined();
+  });
+
+  it("genuine !success without forcedSummary still uses the error-only shape", () => {
+    const formatted = formatSubagentResult(
+      baseResult({ error: "subagent ended without producing an answer" }),
+    );
+    const parsed = JSON.parse(formatted);
+    expect(parsed.success).toBe(false);
+    expect(parsed.partial).toBeUndefined();
+    expect(parsed.error).toMatch(/ended without producing/);
+    expect(parsed.output).toBeUndefined();
   });
 });
 

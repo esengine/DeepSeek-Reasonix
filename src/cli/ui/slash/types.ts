@@ -58,6 +58,7 @@ export interface SlashResult {
 }
 
 export interface SlashContext {
+  configPath?: string;
   mcpSpecs?: string[];
   codeUndo?: (args: readonly string[]) => string;
   codeApply?: (indices?: readonly number[]) => string;
@@ -144,6 +145,11 @@ export interface SlashContext {
   stopDashboard?: () => Promise<void>;
   /** Snapshot the dashboard's URL when running, null otherwise. */
   getDashboardUrl?: () => string | null;
+  qq?: {
+    connect: (args: readonly string[]) => Promise<string>;
+    disconnect: () => Promise<string>;
+    status: () => string;
+  };
   /** Current session id — included in `/feedback`'s diagnostic block when present. */
   sessionId?: string;
 }
@@ -166,8 +172,8 @@ export interface SlashCommandSpec {
   group: SlashGroup;
   /** If the command takes args, hint text shown after the name. */
   argsHint?: string;
-  /** First-arg picker source — file paths intentionally absent (use `@path` mentions instead). */
-  argCompleter?: "models" | "mcp-resources" | "mcp-prompts" | "skills" | readonly string[];
+  /** First-arg picker source. `"path"` async-lists the filesystem for directory completion (used by `/cwd`). */
+  argCompleter?: "models" | "mcp-resources" | "mcp-prompts" | "skills" | "path" | readonly string[];
   /** Alternate names — typing any of these resolves to `cmd` for dispatch / suggestion / arg-context. */
   aliases?: readonly string[];
 }

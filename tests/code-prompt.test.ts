@@ -42,7 +42,7 @@ describe("codeSystemPrompt", () => {
     // The .gitignore block (base + truncated + fences) is bounded.
     // Allow extra slack for the builtin Skills index that applyMemoryStack
     // also injects — that's a fixed-size addition, not unbounded.
-    expect(out.length).toBeLessThan(CODE_SYSTEM_PROMPT.length + 4500);
+    expect(out.length).toBeLessThan(CODE_SYSTEM_PROMPT.length + 5000);
   });
 
   it("reminds the model to skip dependency / build / VCS dirs", () => {

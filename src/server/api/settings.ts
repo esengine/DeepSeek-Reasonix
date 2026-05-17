@@ -1,6 +1,14 @@
 /** apiKey is write-only on the wire; GET always returns a redacted form so dashboard screenshots don't leak credentials. */
 
-import { isPlausibleKey, readConfig, redactKey, saveEditMode, writeConfig } from "../../config.js";
+import {
+  isPlausibleKey,
+  normalizeSkillPathEntries,
+  normalizeSkillPaths,
+  readConfig,
+  redactKey,
+  saveEditMode,
+  writeConfig,
+} from "../../config.js";
 import { getLanguage, getSupportedLanguages, setLanguage } from "../../i18n/index.js";
 import type { LanguageCode } from "../../i18n/types.js";
 import type { DashboardContext } from "../context.js";
@@ -16,6 +24,7 @@ interface SettingsBody {
   model?: unknown;
   proNext?: unknown;
   budgetUsd?: unknown;
+  skillPaths?: unknown;
 }
 
 function parseBody(raw: string): SettingsBody {
@@ -63,6 +72,14 @@ export async function handleSettings(
         proNext: live?.proArmed ?? false,
         budgetUsd: live?.budgetUsd ?? null,
         sessionSpendUsd: ctx.getStats?.()?.totalCostUsd ?? null,
+        skillPaths: normalizeSkillPaths(
+          cfg.skills?.paths ?? [],
+          ctx.getCurrentCwd?.() ?? process.cwd(),
+        ),
+        skillPathEntries: normalizeSkillPathEntries(
+          cfg.skills?.paths ?? [],
+          ctx.getCurrentCwd?.() ?? process.cwd(),
+        ),
         // Hint to the SPA which fields require restart.
         appliesAt: {
           apiKey: "next-session",
@@ -73,6 +90,7 @@ export async function handleSettings(
           model: "next-turn",
           proNext: "next-turn",
           budgetUsd: "live",
+          skillPaths: "next-session",
         },
       },
     };
@@ -177,6 +195,22 @@ export async function handleSettings(
         };
       }
       changed.push("budgetUsd");
+    }
+
+    if (fields.skillPaths !== undefined) {
+      const raw = Array.isArray(fields.skillPaths)
+        ? fields.skillPaths
+        : typeof fields.skillPaths === "string"
+          ? fields.skillPaths.split(",")
+          : null;
+      if (!raw) {
+        return { status: 400, body: { error: "skillPaths must be a string or string[]" } };
+      }
+      cfg.skills = {
+        ...(cfg.skills ?? {}),
+        paths: normalizeSkillPaths(raw, ctx.getCurrentCwd?.() ?? process.cwd()),
+      };
+      changed.push("skillPaths");
     }
 
     if (changed.length > 0) {

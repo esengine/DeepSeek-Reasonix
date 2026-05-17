@@ -69,8 +69,16 @@ export async function runCommand(
 
   const spawnOpts: SpawnOptions = {
     cwd: opts.cwd,
-    shell: false, // no shell-expansion — see header comment
+    shell: false,
     windowsHide: true,
+    // POSIX: detach so the child becomes its own process-group leader.
+    // Required for `process.kill(-pid, …)` in killProcessTree to
+    // terminate the whole subtree (child + grandchildren) instead of
+    // only the leader — without this grandchildren like npm→node→esbuild
+    // become orphaned.
+    // Windows: detached would spawn a new console window; leave the
+    // default and use taskkill /T for tree termination (see killProcessTree).
+    detached: process.platform !== "win32",
     // PYTHONIOENCODING + PYTHONUTF8 force any spawned Python child
     // (run_command running `python script.py`, etc.) to emit UTF-8
     // on stdout/stderr. Without this, Chinese-Windows defaults

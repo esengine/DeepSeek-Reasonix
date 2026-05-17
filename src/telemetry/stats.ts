@@ -1,15 +1,15 @@
 import type { Usage } from "../client.js";
 
-/** USD per 1M tokens; CNY sheet converted at fixed 7.2 — revisit if FX moves >±5%. */
+/** USD per 1M tokens; display currency conversion happens at the UI boundary. */
 export const DEEPSEEK_PRICING: Record<
   string,
   { inputCacheHit: number; inputCacheMiss: number; output: number }
 > = {
-  "deepseek-v4-flash": { inputCacheHit: 0.028, inputCacheMiss: 0.139, output: 0.278 },
-  "deepseek-v4-pro": { inputCacheHit: 0.139, inputCacheMiss: 1.667, output: 3.333 },
+  "deepseek-v4-flash": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
+  "deepseek-v4-pro": { inputCacheHit: 0.003625, inputCacheMiss: 0.435, output: 0.87 },
   // Compat aliases — priced as v4-flash per the deprecation notice.
-  "deepseek-chat": { inputCacheHit: 0.028, inputCacheMiss: 0.139, output: 0.278 },
-  "deepseek-reasoner": { inputCacheHit: 0.028, inputCacheMiss: 0.139, output: 0.278 },
+  "deepseek-chat": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
+  "deepseek-reasoner": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
 };
 
 /** Reference Claude Sonnet 4.6 pricing (USD per 1M tokens). */
@@ -128,6 +128,15 @@ export class SessionStats {
     if (typeof opts.lastPromptTokens === "number" && opts.lastPromptTokens > 0) {
       this._carryoverLastPromptTokens = opts.lastPromptTokens;
     }
+  }
+
+  reset(): void {
+    this.turns.length = 0;
+    this._carryoverCost = 0;
+    this._carryoverTurns = 0;
+    this._carryoverCacheHit = 0;
+    this._carryoverCacheMiss = 0;
+    this._carryoverLastPromptTokens = 0;
   }
 
   record(turn: number, model: string, usage: Usage): TurnStats {

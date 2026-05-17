@@ -34,6 +34,19 @@ export const EN: TranslationSchema = {
     update: "Check for a newer Reasonix and install it.",
     index: "Build (or incrementally refresh) a local semantic search index.",
   },
+  stats: {
+    usageHint: "run `reasonix chat`, `reasonix code`, or `reasonix run <task>` — every turn",
+    usageDetail: "appends one line to the log and `reasonix stats` will roll it up.",
+  },
+  run: {
+    missingApiKey:
+      "DEEPSEEK_API_KEY is not set and stdin is not a TTY (cannot prompt).\n" +
+      "Set the env var, or run `reasonix chat` once interactively to save a key.\n",
+  },
+  sessions: {
+    emptyHint:
+      "no saved sessions yet — run `reasonix chat` (sessions are auto-saved unless --no-session).",
+  },
   ui: {
     welcome: "Run `reasonix` any time to start chatting — your settings are remembered.",
     taglineChat: "DeepSeek-native agent",
@@ -278,8 +291,8 @@ export const EN: TranslationSchema = {
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
     },
     skill: {
-      description: "list / run user skills (<project>/.reasonix/skills + ~/.reasonix/skills)",
-      argsHint: "[list|show <name>|<name> [args]]",
+      description: "list / run user skills (project + custom + global + builtin)",
+      argsHint: "[list|paths|show <name>|<name> [args]]",
     },
     hooks: {
       description: "list active hooks (settings.json under .reasonix/) · reload re-reads from disk",
@@ -326,6 +339,10 @@ export const EN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "list saved sessions (current marked with ▸)" },
+    qq: {
+      description: "connect, inspect, or disconnect the QQ channel for this session",
+      argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
+    },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
       description: "show semantic_search status — built? Ollama installed? how to enable",
@@ -605,10 +622,8 @@ export const EN: TranslationSchema = {
     budget80Pct: "▲ budget 80% used — ${spent} of ${cap}. Next turn or two likely trips the cap.",
     proArmed: "⇧ /pro armed — this turn runs on deepseek-v4-pro (one-shot · disarms after turn)",
     abortedAtIter:
-      "aborted at iter {iter}/{cap} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
+      "aborted at iter {iter} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
-    toolBudgetWarning:
-      "{iter}/{cap} tool calls used — approaching budget. Press Esc to force a summary now.",
     preflightFoldStatus: "preflight: context near full, attempting fold…",
     preflightFolded:
       "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) — folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Sending.",
@@ -658,11 +673,9 @@ export const EN: TranslationSchema = {
       "[context budget running low — summarizing before the next call would overflow]",
     reasonStuck:
       "[stuck on a repeated tool call — explaining what was tried and what's blocking progress]",
-    reasonBudget: "[tool-call budget ({iterCap}) reached — forcing summary from what I found]",
     labelAborted: "aborted by user",
     labelContextGuard: "context-guard triggered (prompt > 80% of window)",
     labelStuck: "stuck (repeated tool call suppressed by storm-breaker)",
-    labelBudget: "tool-call budget ({iterCap}) reached",
   },
   handlers: {
     basic: {
@@ -1059,14 +1072,15 @@ export const EN: TranslationSchema = {
       usageSearxng: "  /search-engine searxng            use SearXNG at default endpoint",
       usageSearxngUrl: "  /search-engine searxng <url>      use SearXNG at custom endpoint",
       usageMetaso:
-        "  /search-engine metaso              use Metaso API (100/d free, set METASO_API_KEY for more)",
+        "  /search-engine metaso              use Metaso API (100/d free, configure your own API key for more)",
       alias: "Alias: /se",
       searxngInfo:
         "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
       searxngInstall: "Install it with:  docker run -d -p 8080:8080 searxng/searxng",
       switched: 'Switched web search engine to "{engine}".{note}',
       switchedSearxngNote: " Make sure SearXNG is running at {endpoint}.",
-      switchedMetasoNote: " There is a daily quota of 100 (set METASO_API_KEY for higher limits).",
+      switchedMetasoNote:
+        " There is a daily quota of 100 (configure your own API key for higher limits).",
       confirmed:
         '✓ Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
       confirmedDetail: " ({endpoint})",
@@ -1091,6 +1105,19 @@ export const EN: TranslationSchema = {
       newUsage: "usage: /skill new <name> [--global]",
       newCreated: "▸ created skill: {name}\n  {path}\n  edit it, then `/skill {name}` to invoke",
       newError: "▲ /skill new failed: {reason}",
+      pathsHeader: "Skill paths (priority order):",
+      pathsPriority:
+        "Priority: project > custom paths in config order > global > builtin. Changes affect the system prompt on next /new or new session.",
+      pathsUsage:
+        "usage: /skill paths [list]\n       /skill paths add <path>\n       /skill paths remove <path|N>",
+      pathsAddUsage: "usage: /skill paths add <path>",
+      pathsRemoveUsage: "usage: /skill paths remove <path|N>",
+      pathsAdded: "▸ added custom skills path: {path}",
+      pathsAlready: "▸ custom skills path already configured: {path}",
+      pathsRemoved: "▸ removed custom skills path: {path}",
+      pathsRemoveNotFound: "▸ no custom skills path matches: {target}",
+      pathsRestartHint:
+        "The current session's system prompt is unchanged; run /new or start a new session to refresh the skills index.",
     },
   },
   statusBar: {
@@ -1140,6 +1167,7 @@ export const EN: TranslationSchema = {
     editorMissing:
       "no $EDITOR / $VISUAL / $GIT_EDITOR set \u2014 export one (e.g. `export EDITOR=nano`) and retry",
     editorExited: "editor exited with code {code}",
+    typeaheadStaged: "\u25b8 {count} line(s) staged \u00b7 esc recall",
   },
   pathConfirm: {
     title: "Outside-sandbox path",

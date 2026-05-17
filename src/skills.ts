@@ -1,8 +1,17 @@
 /** Project scope wins over global. Only names+descriptions enter the prefix; bodies load lazily into the append-only log. */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  constants,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { accessSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
 import { NEGATIVE_CLAIM_RULE, TUI_FORMATTING_RULES } from "./prompt-fragments.js";
 
@@ -13,7 +22,9 @@ export const SKILLS_INDEX_MAX_CHARS = 4000;
 /** Skill identifier shape — alnum + `_` + `-` + interior `.`, 1-64 chars. */
 const VALID_SKILL_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
-export type SkillScope = "project" | "global" | "builtin";
+export type SkillScope = "project" | "custom" | "global" | "builtin";
+
+export type SkillPathStatus = "ok" | "missing" | "not-directory" | "unreadable";
 
 /** inline = body enters parent log; subagent = isolated child loop, only final answer returns. */
 export type SkillRunAs = "inline" | "subagent";
@@ -34,8 +45,13 @@ export interface Skill {
   runAs: SkillRunAs;
   /** Subagent model override; only meaningful when `runAs === "subagent"`. */
   model?: string;
-  /** Subagent tool-call budget; only meaningful when `runAs === "subagent"`. Clamped to [1, 32]. */
-  maxToolIters?: number;
+}
+
+export interface SkillRoot {
+  dir: string;
+  scope: Exclude<SkillScope, "builtin">;
+  status: SkillPathStatus;
+  priority: number;
 }
 
 export interface SkillStoreOptions {
@@ -43,6 +59,7 @@ export interface SkillStoreOptions {
   homeDir?: string;
   /** Required for project-scope skills; omit to read only the global scope. */
   projectRoot?: string;
+  customSkillPaths?: readonly string[];
   /** Suppress bundled built-ins — for tests asserting exact list contents. */
   disableBuiltins?: boolean;
 }
@@ -73,22 +90,19 @@ function parseAllowedTools(raw: string | undefined): readonly string[] | undefin
   return names.length > 0 ? Object.freeze(names) : undefined;
 }
 
-/** `max-iters` is checkpoint cadence, not a budget — work continues across pauses via resume_session. No upper bound; values below 1 fall back to the subagent default. */
-function parseMaxToolIters(raw: string | undefined): number | undefined {
-  if (raw === undefined) return undefined;
-  const n = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(n) || n < 1) return undefined;
-  return n;
-}
-
 export class SkillStore {
   private readonly homeDir: string;
   private readonly projectRoot: string | undefined;
+  private readonly customSkillPaths: readonly string[];
   private readonly disableBuiltins: boolean;
 
   constructor(opts: SkillStoreOptions = {}) {
     this.homeDir = opts.homeDir ?? homedir();
     this.projectRoot = opts.projectRoot ? resolve(opts.projectRoot) : undefined;
+    const baseDir = this.projectRoot ?? process.cwd();
+    this.customSkillPaths = dedupePaths(
+      opts.customSkillPaths?.map((p) => resolveCustomSkillPath(p, baseDir, this.homeDir)) ?? [],
+    );
     this.disableBuiltins = opts.disableBuiltins === true;
   }
 
@@ -97,24 +111,36 @@ export class SkillStore {
     return this.projectRoot !== undefined;
   }
 
-  /** Project scope first so per-repo skill overrides a global with the same name. */
-  roots(): Array<{ dir: string; scope: SkillScope }> {
-    const out: Array<{ dir: string; scope: SkillScope }> = [];
+  /** Project scope first so per-repo skill overrides custom/global entries with the same name. */
+  roots(): SkillRoot[] {
+    const out: Array<{ dir: string; scope: Exclude<SkillScope, "builtin"> }> = [];
     if (this.projectRoot) {
       out.push({
         dir: join(this.projectRoot, ".reasonix", SKILLS_DIRNAME),
         scope: "project",
       });
+      // #870: pick up `.agents/skills` automatically — common convention shared
+      // by skills.sh-style tooling, no config required.
+      out.push({
+        dir: join(this.projectRoot, ".agents", SKILLS_DIRNAME),
+        scope: "project",
+      });
     }
+    for (const dir of this.customSkillPaths) out.push({ dir, scope: "custom" });
     out.push({ dir: join(this.homeDir, ".reasonix", SKILLS_DIRNAME), scope: "global" });
-    return out;
+    out.push({ dir: join(this.homeDir, ".agents", SKILLS_DIRNAME), scope: "global" });
+    return out.map((root, priority) => ({ ...root, priority, status: skillPathStatus(root.dir) }));
   }
 
-  /** Higher-priority root wins on collision (project > global > builtin); sorted for stable prefix hash. */
+  customRoots(): SkillRoot[] {
+    return this.roots().filter((root) => root.scope === "custom");
+  }
+
+  /** Higher-priority root wins on collision (project > custom > global > builtin); sorted for stable prefix hash. */
   list(): Skill[] {
     const byName = new Map<string, Skill>();
-    for (const { dir, scope } of this.roots()) {
-      if (!existsSync(dir)) continue;
+    for (const { dir, scope, status } of this.roots()) {
+      if (status !== "ok") continue;
       let entries: import("node:fs").Dirent[];
       try {
         entries = readdirSync(dir, { withFileTypes: true });
@@ -177,8 +203,8 @@ export class SkillStore {
   /** Resolve one skill by name. Returns `null` if not found or malformed. */
   read(name: string): Skill | null {
     if (!isValidSkillName(name)) return null;
-    for (const { dir, scope } of this.roots()) {
-      if (!existsSync(dir)) continue;
+    for (const { dir, scope, status } of this.roots()) {
+      if (status !== "ok") continue;
       const dirCandidate = join(dir, name, SKILL_FILE);
       if (existsSync(dirCandidate) && statSync(dirCandidate).isFile()) {
         return this.parse(dirCandidate, name, scope);
@@ -229,8 +255,43 @@ export class SkillStore {
       allowedTools: parseAllowedTools(data["allowed-tools"]),
       runAs: parseRunAs(data.runAs),
       model: data.model?.startsWith("deepseek-") ? data.model : undefined,
-      maxToolIters: parseMaxToolIters(data["max-iters"]),
     };
+  }
+}
+
+function dedupePaths(paths: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    const key = process.platform === "win32" ? path.toLowerCase() : path;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(path);
+  }
+  return out;
+}
+
+function resolveCustomSkillPath(path: string, baseDir: string, homeDir: string): string {
+  const trimmed = path.trim();
+  const expanded =
+    trimmed === "~"
+      ? homeDir
+      : trimmed.startsWith("~/") || trimmed.startsWith("~\\")
+        ? join(homeDir, trimmed.slice(2))
+        : trimmed;
+  return resolve(isAbsolute(expanded) ? expanded : join(baseDir, expanded));
+}
+
+export function skillPathStatus(dir: string): SkillPathStatus {
+  try {
+    const stat = statSync(dir);
+    if (!stat.isDirectory()) return "not-directory";
+    accessSync(dir, constants.R_OK);
+    return "ok";
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return "missing";
+    return "unreadable";
   }
 }
 
@@ -254,7 +315,6 @@ Tips:
 - Reference tools by name (run_command, edit_file, search_content, ...)
 - Add \`runAs: subagent\` to frontmatter to spawn an isolated subagent loop
 - Add \`allowed-tools: read_file, search_content\` to scope a subagent's tools
-- Add \`max-iters: N\` to change the subagent's pause cadence (default 16). This isn't a budget — the parent resumes on pause, so N is how often the parent gets a checkpoint, not how much total work the subagent gets.
 `;
 }
 

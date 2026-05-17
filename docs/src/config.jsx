@@ -35,7 +35,8 @@ const CONFIG_TABS = [
     },
     "postgres": {
       "transport": "sse",
-      "url": "https://mcp.internal/pg/sse"
+      "url": "https://mcp.internal/pg/sse",
+      "headers": { "Authorization": "Bearer ***" }
     }
   }
 }`,

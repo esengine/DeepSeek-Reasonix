@@ -1,3 +1,6 @@
+import { closeSync, mkdirSync, openSync, writeSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { render } from "ink";
 import React, { useState } from "react";
 import {
@@ -16,6 +19,7 @@ import {
   renameSession,
   resolveSession,
 } from "../../memory/session.js";
+import { QQChannel } from "../../qq/channel.js";
 import { ToolRegistry } from "../../tools.js";
 import { registerChoiceTool } from "../../tools/choice.js";
 import { registerMemoryTools } from "../../tools/memory.js";
@@ -26,7 +30,15 @@ import { App } from "../ui/App.js";
 import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
-import { KeystrokeProvider } from "../ui/keystroke-context.js";
+import { KeystrokeProvider, type KeystrokeReader } from "../ui/keystroke-context.js";
+import {
+  type RustKeystrokeReader,
+  createRustKeystrokeReader,
+  nullKeystrokeReader,
+} from "../ui/scene/input-adapter.js";
+import { makeNullStdin } from "../ui/scene/null-stdin.js";
+import { makeNullStdout } from "../ui/scene/null-stdout.js";
+import { isIntegratedRendererRequested, setIntegratedEventHandler } from "../ui/scene/trace.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
   type McpLifecycleNotice,
@@ -37,6 +49,45 @@ import {
 } from "./mcp-runtime.js";
 
 export type { McpLifecycleNotice, McpLifecycleSink, McpRuntime, ProgressInfo };
+
+function parseInputCmd(raw: string | undefined): readonly string[] | undefined {
+  if (!raw || raw.length === 0) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((p) => typeof p === "string")) return parsed;
+  } catch {
+    // fall through
+  }
+  return undefined;
+}
+
+// Under REASONIX_RENDERER=rust the alt-screen is owned by the Rust child. Any
+// stderr write from the Node parent overwrites whatever ratatui just drew at
+// the same cells, and stays visible until the next frame redraws — so Node's
+// own warnings (MaxListeners etc.) and any stray library logs all corrupt the
+// view. Redirect stderr to a log file for the duration of the session.
+function redirectStderrToLogFile(): () => void {
+  const dir = join(homedir(), ".reasonix");
+  mkdirSync(dir, { recursive: true });
+  const logPath = join(dir, "rust-render-stderr.log");
+  const fd = openSync(logPath, "a");
+  const origWrite = process.stderr.write.bind(process.stderr);
+  (process.stderr.write as unknown as (chunk: string | Uint8Array) => boolean) = (
+    chunk: string | Uint8Array,
+  ): boolean => {
+    const buf = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : Buffer.from(chunk);
+    writeSync(fd, buf);
+    return true;
+  };
+  return () => {
+    process.stderr.write = origWrite;
+    try {
+      closeSync(fd);
+    } catch {
+      // already closed — ignore
+    }
+  };
+}
 
 export interface ChatOptions {
   model: string;
@@ -128,6 +179,26 @@ interface RootProps extends ChatOptions {
   mcpRuntime: McpRuntime;
   /** One-time startup info rows shown after App mounts. */
   startupInfoHints: string[];
+  /** Pre-created QQ channel (started before TUI mounts). */
+  qqChannel?: QQChannel;
+  /** App fills this ref on mount so QQ messages flow into the TUI input queue. */
+  qqSubmitRef: { current: ((text: string) => void) | null };
+  /** Set by App on mount so Rust approval-response events route to the right handler ref. */
+  approvalDispatchRef?: { current: ((kind: string, choice: unknown) => void) | null };
+  /** Set by App on mount; chat.tsx calls it with the Rust child's composer text so Ink pickers (@ / slash) recompute. */
+  rustComposerRef?: { current: ((text: string) => void) | null };
+  /** Apply edit-mode value when Rust emits mode-set (Shift+Tab cycle or picker selection). */
+  modeSetRef?: {
+    current: ((value: "review" | "auto" | "yolo") => void) | null;
+  };
+  /** Apply preset value when Rust emits preset-set (picker selection). */
+  presetSetRef?: {
+    current: ((value: "auto" | "flash" | "pro") => void) | null;
+  };
+  /** App fills this ref on mount so QQ errors appear in the TUI log. */
+  qqErrorRef: { current: ((msg: string) => void) | null };
+  /** Custom keystroke source — populated when REASONIX_RENDERER=rust so keys flow from the spawned input child (or a no-op reader in integrated mode) instead of process.stdin. */
+  keystrokeReader?: KeystrokeReader;
 }
 
 function Root({
@@ -139,6 +210,7 @@ function Root({
   showPicker,
   mcpRuntime,
   startupInfoHints,
+  keystrokeReader,
   ...appProps
 }: RootProps) {
   const [key, setKey] = useState<string | undefined>(initialKey);
@@ -149,19 +221,21 @@ function Root({
 
   if (!key) {
     return (
-      <Setup
-        onReady={(k) => {
-          process.env.DEEPSEEK_API_KEY = k;
-          setKey(k);
-        }}
-      />
+      <KeystrokeProvider reader={keystrokeReader}>
+        <Setup
+          onReady={(k) => {
+            process.env.DEEPSEEK_API_KEY = k;
+            setKey(k);
+          }}
+        />
+      </KeystrokeProvider>
     );
   }
   process.env.DEEPSEEK_API_KEY = key;
 
   if (pickerOpen) {
     return (
-      <KeystrokeProvider>
+      <KeystrokeProvider reader={keystrokeReader}>
         <SessionPicker
           sessions={sessions}
           workspace={workspaceRoot}
@@ -199,7 +273,7 @@ function Root({
   }
 
   return (
-    <KeystrokeProvider>
+    <KeystrokeProvider reader={keystrokeReader}>
       <App
         // key forces a full remount (and fresh transcript / scrollback / cards) on switch.
         key={activeSession ?? "__new__"}
@@ -221,6 +295,13 @@ function Root({
         openDashboard={appProps.openDashboard}
         dashboardPort={appProps.dashboardPort}
         mouse={appProps.mouse}
+        qqChannel={appProps.qqChannel}
+        qqSubmitRef={appProps.qqSubmitRef}
+        qqErrorRef={appProps.qqErrorRef}
+        approvalDispatchRef={appProps.approvalDispatchRef}
+        rustComposerRef={appProps.rustComposerRef}
+        modeSetRef={appProps.modeSetRef}
+        presetSetRef={appProps.presetSetRef}
         onSwitchSession={setActiveSession}
       />
     </KeystrokeProvider>
@@ -303,6 +384,87 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     !opts.session && !opts.forceResume && listSessionsForWorkspace(launchWorkspace).length > 0;
 
   markPhase("ink_render_call");
+
+  // Create QQ channel before the TUI mounts so connection setup stays
+  // outside React lifecycle timing and the WebSocket handshake remains
+  // deterministic.
+  const qqSubmitRef: { current: ((text: string) => void) | null } = { current: null };
+  const qqErrorRef: { current: ((msg: string) => void) | null } = { current: null };
+  const approvalDispatchRef: {
+    current: ((kind: string, choice: unknown) => void) | null;
+  } = { current: null };
+  const rustComposerRef: { current: ((text: string) => void) | null } = { current: null };
+  const modeSetRef: {
+    current: ((value: "review" | "auto" | "yolo") => void) | null;
+  } = { current: null };
+  const presetSetRef: {
+    current: ((value: "auto" | "flash" | "pro") => void) | null;
+  } = { current: null };
+  const qqRequested = cfg.qq?.enabled === true;
+  let qqChannel: QQChannel | undefined;
+  if (qqRequested) {
+    const channel = new QQChannel({
+      onSubmitMessage: (text) => qqSubmitRef.current?.(text),
+      onError: (msg) => qqErrorRef.current?.(msg),
+    });
+    process.stderr.write("Connecting QQ bot...\n");
+    try {
+      await channel.start();
+      qqChannel = channel;
+      process.stderr.write("QQ bot connected\n");
+    } catch (err) {
+      process.stderr.write(`QQ bot failed: ${(err as Error).message}\n`);
+    }
+  }
+
+  const rustRendererRequested = process.env.REASONIX_RENDERER === "rust";
+  // If REASONIX_RENDERER=rust is set but no API key is saved, the first screen
+  // is Setup — which renders to Ink's stdout and reads stdin directly. Under
+  // the Rust path both would be the null streams, leaving the user typing their
+  // key blind. Fall back to the Ink renderer for this launch; the next launch
+  // (with the key saved) gets the Rust path.
+  const rustRendererActive = rustRendererRequested && initialKey !== undefined;
+  if (rustRendererRequested && !rustRendererActive) {
+    process.stderr.write(
+      "REASONIX_RENDERER=rust ignored for this launch: no saved API key. " +
+        "Complete Setup once, then re-launch with the flag.\n",
+    );
+  }
+  const rustIntegrated = rustRendererActive && isIntegratedRendererRequested();
+  const inkStdout = rustRendererActive ? makeNullStdout() : undefined;
+  const inkStdin = rustRendererActive ? makeNullStdin() : undefined;
+  const inputCmdOverride = parseInputCmd(process.env.REASONIX_INPUT_CMD);
+  const rustInputChild: RustKeystrokeReader | undefined =
+    rustRendererActive && !rustIntegrated
+      ? createRustKeystrokeReader(inputCmdOverride ? { command: inputCmdOverride } : {})
+      : undefined;
+  const keystrokeReader: KeystrokeReader | undefined = rustIntegrated
+    ? nullKeystrokeReader
+    : rustInputChild;
+  const stderrRestore = rustRendererActive ? redirectStderrToLogFile() : undefined;
+
+  if (rustIntegrated) {
+    setIntegratedEventHandler((event) => {
+      if (event.event === "submit") {
+        qqSubmitRef.current?.(event.text);
+      } else if (event.event === "exit") {
+        void (async () => {
+          await stopAndSaveCpuProfile();
+          process.exit(0);
+        })();
+      } else if (event.event === "approval-response") {
+        approvalDispatchRef.current?.(event.kind, event.choice);
+      } else if (event.event === "composer") {
+        rustComposerRef.current?.(event.text);
+      } else if (event.event === "mode-set") {
+        modeSetRef.current?.(event.value);
+      } else if (event.event === "preset-set") {
+        presetSetRef.current?.(event.value);
+      }
+      // interrupt: no-op for now; terminal SIGINT already reaches Node.
+    });
+  }
+
   const { waitUntilExit } = render(
     <Root
       initialKey={initialKey}
@@ -313,10 +475,19 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       progressSink={progressSink}
       startupInfoHints={startupInfoHints}
       showPicker={showPicker}
+      keystrokeReader={keystrokeReader}
       {...opts}
       session={resolvedSession}
+      qqChannel={qqChannel}
+      qqSubmitRef={qqSubmitRef}
+      approvalDispatchRef={approvalDispatchRef}
+      rustComposerRef={rustComposerRef}
+      modeSetRef={modeSetRef}
+      presetSetRef={presetSetRef}
+      qqErrorRef={qqErrorRef}
     />,
     {
+      ...(rustRendererActive ? { stdout: inkStdout, stdin: inkStdin } : {}),
       exitOnCtrlC: true,
       // patchConsole:false — winpty/MINTTY redraw-glitch source.
       patchConsole: false,
@@ -329,13 +500,17 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       // Default true — alt-screen is the only mode without scrollback-
       // reflow ghosting. `--no-alt-screen` opts back into scrollback mode
       // for users who need chat output preserved in shell history on exit.
-      alternateScreen: opts.altScreen !== false,
+      // Off when the Rust child owns the terminal — it runs its own alt-screen.
+      alternateScreen: !rustRendererActive && opts.altScreen !== false,
     },
   );
   try {
     await waitUntilExit();
   } finally {
     await runtime.closeAll();
+    qqChannel?.stop();
+    if (rustInputChild) await rustInputChild.close();
+    if (stderrRestore) stderrRestore();
     // Eat any pending terminal-feature-detection responses (#365) so the
     // parent shell doesn't print them as junk after exit.
     await drainTtyResponses();

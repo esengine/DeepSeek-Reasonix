@@ -89,6 +89,8 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
 
     case "turn.end": {
       const sessionCost = state.status.sessionCost + event.usage.cost;
+      const sessionInputTokens = state.status.sessionInputTokens + event.usage.prompt;
+      const sessionOutputTokens = state.status.sessionOutputTokens + event.usage.output;
       return {
         ...state,
         turnInProgress: false,
@@ -99,6 +101,9 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
           cacheHit: event.usage.cacheHit,
           promptTokens: event.usage.prompt,
           promptCap: event.promptCap ?? state.status.promptCap,
+          sessionInputTokens,
+          sessionOutputTokens,
+          lastTurnMs: event.elapsedMs ?? state.status.lastTurnMs,
         },
       };
     }
@@ -206,7 +211,20 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       });
 
     case "session.reset":
-      return { ...state, cards: [], focusedCardId: null, toasts: [] };
+      return {
+        ...state,
+        cards: [],
+        focusedCardId: null,
+        toasts: [],
+        status: {
+          ...state.status,
+          cost: 0,
+          sessionCost: 0,
+          cacheHit: 0,
+          promptTokens: undefined,
+          promptCap: undefined,
+        },
+      };
 
     case "session.workspace.change":
       return state.session.id === event.id && state.session.workspace === event.workspace

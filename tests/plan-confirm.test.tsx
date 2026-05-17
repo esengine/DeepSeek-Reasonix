@@ -9,7 +9,7 @@ import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 function bytesFor(plan: string, steps?: { id: string; title: string }[]): string {
   const { lastFrame, unmount } = render(
-    <PlanConfirm plan={plan} steps={steps as never} onChoose={() => {}} />,
+    React.createElement(PlanConfirm, { plan, steps: steps as never, onChoose: () => {} }),
   );
   const out = lastFrame() ?? "";
   unmount();

@@ -98,9 +98,22 @@ export type { TodoItem, TodoStatus, TodoToolOptions } from "./tools/todo.js";
 export { forkRegistryExcluding, registerSubagentTool } from "./tools/subagent.js";
 export type {
   SubagentEvent,
+  SubagentResult,
   SubagentSink,
   SubagentToolOptions,
 } from "./tools/subagent.js";
+export {
+  DEFAULT_SPAWN_STORM_THRESHOLD,
+  SubagentTelemetry,
+  computeSpawnDistillation,
+  countSpawnStorms,
+  summarizeSubagentSession,
+} from "./telemetry/subagent-distillation.js";
+export type {
+  SpawnDistillation,
+  SubagentResultLike,
+  SubagentSessionSummary,
+} from "./telemetry/subagent-distillation.js";
 export {
   NeedsConfirmationError,
   detectShellOperator,

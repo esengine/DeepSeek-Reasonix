@@ -538,7 +538,7 @@ describe("handleSlash", () => {
     // Case-insensitive.
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
     // Empty prefix returns the full non-advanced release list, including code commands.
-    expect(suggestSlashCommands("", true)).toHaveLength(40);
+    expect(suggestSlashCommands("", true)).toHaveLength(41);
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("logs");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("language");
     expect(suggestSlashCommands("lan").map((s) => s.cmd)).toContain("language");
@@ -1074,28 +1074,41 @@ describe("handleSlash", () => {
 
   describe("/memory", () => {
     let root: string;
-    let home: string;
     const originalEnv = process.env.REASONIX_MEMORY;
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
 
     beforeEach(() => {
       root = mkdtempSync(join(tmpdir(), "reasonix-mem-slash-"));
-      home = mkdtempSync(join(tmpdir(), "reasonix-mem-slash-home-"));
+      process.env.HOME = root;
+      process.env.USERPROFILE = root;
       // biome-ignore lint/performance/noDelete: avoid "undefined" in env
       delete process.env.REASONIX_MEMORY;
     });
     afterEach(() => {
       rmSync(root, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
       if (originalEnv === undefined) {
         // biome-ignore lint/performance/noDelete: same reason
         delete process.env.REASONIX_MEMORY;
       } else {
         process.env.REASONIX_MEMORY = originalEnv;
       }
+      if (originalHome === undefined) {
+        // biome-ignore lint/performance/noDelete: env restoration needs absence, not "undefined"
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        // biome-ignore lint/performance/noDelete: env restoration needs absence, not "undefined"
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
     });
 
     it("prints a how-to when no memory (REASONIX.md or ~/.reasonix/memory) exists", () => {
-      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root, homeDir: home });
+      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root });
       expect(r.info).toMatch(/no memory pinned/);
       expect(r.info).toMatch(/REASONIX\.md/);
     });
@@ -1106,7 +1119,7 @@ describe("handleSlash", () => {
         "# House rules\nSnake case only in this repo.\n",
         "utf8",
       );
-      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root, homeDir: home });
+      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root });
       expect(r.info).toMatch(/▸ REASONIX\.md:/);
       expect(r.info).toContain("Snake case only");
       expect(r.info).toMatch(/chars/);
@@ -1115,7 +1128,7 @@ describe("handleSlash", () => {
     it("says memory is disabled when REASONIX_MEMORY=off, even with a file present", () => {
       writeFileSync(join(root, "REASONIX.md"), "content", "utf8");
       process.env.REASONIX_MEMORY = "off";
-      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root, homeDir: home });
+      const r = handleSlash("memory", [], makeLoop(), { memoryRoot: root });
       expect(r.info).toMatch(/memory is disabled/);
     });
 

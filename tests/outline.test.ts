@@ -177,10 +177,66 @@ describe("extractOutline", () => {
     });
   });
 
+  describe("Protobuf", () => {
+    it("captures top-level message / service / enum + nested rpc", () => {
+      const src = lines(
+        [
+          'syntax = "proto3";',
+          "package demo;",
+          "",
+          "message User {",
+          "  string id = 1;",
+          "}",
+          "",
+          "enum Status { OK = 0; }",
+          "",
+          "service Accounts {",
+          "  rpc Get(GetReq) returns (User);",
+          "  rpc List(ListReq) returns (ListResp);",
+          "}",
+        ].join("\n"),
+      );
+      const out = extractOutline("demo.proto", src);
+      expect(out.map((e) => e.text)).toEqual([
+        "message User",
+        "enum Status",
+        "service Accounts",
+        "rpc Get",
+        "rpc List",
+      ]);
+    });
+  });
+
+  describe("Plain text — novel / document chapter markers", () => {
+    it("captures Chinese chapter, volume, prologue markers", () => {
+      const src = lines(
+        ["楔子", "今天天气不错。", "第一章 启程", "故事开始。", "卷二 江湖", "另一段。"].join("\n"),
+      );
+      const out = extractOutline("novel.txt", src);
+      expect(out.map((e) => e.text)).toEqual(["楔子", "第一章 启程", "卷二 江湖"]);
+    });
+
+    it("captures English Chapter / Part markers", () => {
+      const src = lines(
+        ["Some intro.", "Chapter 1 The Beginning", "body.", "Part II Aftermath", "more body."].join(
+          "\n",
+        ),
+      );
+      const out = extractOutline("story.txt", src);
+      expect(out.map((e) => e.text)).toEqual(["Chapter 1 The Beginning", "Part II Aftermath"]);
+    });
+
+    it("ignores prose lines that don't match a chapter pattern", () => {
+      const src = lines(
+        ["just some regular text", "another paragraph", "no chapters here"].join("\n"),
+      );
+      expect(extractOutline("plain.txt", src)).toEqual([]);
+    });
+  });
+
   describe("unknown extensions", () => {
     it("returns empty outline for unsupported file types", () => {
       const src = lines("function not_recognized() {}");
-      expect(extractOutline("a.txt", src)).toEqual([]);
       expect(extractOutline("a.yml", src)).toEqual([]);
       expect(extractOutline("Makefile", src)).toEqual([]);
     });

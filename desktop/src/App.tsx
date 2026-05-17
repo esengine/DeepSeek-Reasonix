@@ -25,6 +25,7 @@ import type {
   ChoiceVerdict,
   ConfirmationChoice,
   IncomingEvent,
+  JobInfo,
   McpSpecInfo,
   MemoryEntryInfo,
   OutgoingCommand,
@@ -35,6 +36,7 @@ import type {
 } from "./protocol";
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
+import { JobsPop } from "./ui/jobs-pop";
 import { useElapsed } from "./ui/live";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Sidebar } from "./ui/sidebar";
@@ -54,6 +56,7 @@ import {
   UserMsg,
 } from "./ui/thread";
 import { WorkdirPop } from "./ui/workdir-pop";
+import { useAutoScroll } from "./ui/useAutoScroll";
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -219,6 +222,7 @@ type State = {
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
+  jobs: JobInfo[];
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
   /** Messages typed while busy=true — auto-sent FIFO once the current turn completes. Cleared on `clear`, `rpc_exit`, `session_loaded`. */
@@ -619,6 +623,8 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
       return { ...state, usage: { ...state.usage, reservedTokens: ev.reservedTokens } };
     case "$memory":
       return { ...state, memory: ev.entries };
+    case "$jobs":
+      return { ...state, jobs: ev.items };
     case "$balance":
       return {
         ...state,
@@ -938,6 +944,7 @@ function TabRuntime({
     skills: [],
     sessionFiles: [],
     memory: [],
+    jobs: [],
     activeSkill: null,
     queuedSends: [],
   });
@@ -951,8 +958,10 @@ function TabRuntime({
   >(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const threadInnerRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
+  const [jobsOpen, setJobsOpen] = useState(false);
   const openSettingsAt = useCallback((page: SettingsPageId = "general") => {
     setSettingsPage(page);
     setSettingsOpen(true);
@@ -1160,10 +1169,25 @@ function TabRuntime({
     [sendRpc],
   );
 
+  const { showJumpButton, scrollToBottom } = useAutoScroll(
+    threadRef,
+    threadInnerRef,
+    state.busy,
+  );
+
   useEffect(() => {
-    if (!threadRef.current) return;
-    threadRef.current.scrollTo({ top: threadRef.current.scrollHeight, behavior: "smooth" });
-  }, [state.messages.length]);
+    if (!active) return;
+    if (!jobsOpen) return;
+    sendRpc({ cmd: "jobs_list" });
+    const id = window.setInterval(() => sendRpc({ cmd: "jobs_list" }), 1500);
+    return () => window.clearInterval(id);
+  }, [active, jobsOpen, sendRpc]);
+
+  useEffect(() => {
+    if (!active) return;
+    if (state.busy) return;
+    sendRpc({ cmd: "jobs_list" });
+  }, [active, state.busy, sendRpc]);
 
   useEffect(() => {
     // Every TabRuntime stays mounted (display:none on inactive), so each registers its own keydown — without this gate Cmd+N would fire newChat() in every tab and wipe the inactive ones' sessions.
@@ -1184,6 +1208,9 @@ function TabRuntime({
         e.preventDefault();
         if (settingsOpen) setSettingsOpen(false);
         else openSettingsAt("general");
+      } else if (mod && (e.key === "j" || e.key === "J")) {
+        e.preventDefault();
+        setJobsOpen((v) => !v);
       } else if (e.key === "Escape" && state.busy) {
         const target = e.target as HTMLElement | null;
         if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
@@ -1470,7 +1497,7 @@ function TabRuntime({
               ) : null}
 
               <div className="thread" ref={threadRef}>
-                <div className="thread-inner">
+                <div className="thread-inner" ref={threadInnerRef}>
                   {pendingUpdate ? (
                     <UpdateBanner
                       version={pendingUpdate.version}
@@ -1618,6 +1645,16 @@ function TabRuntime({
                     </div>
                   ) : null}
                 </div>
+                {showJumpButton ? (
+                  <button
+                    className="thread-jump-bottom"
+                    onClick={() => scrollToBottom(true)}
+                    title={t("app.jumpToBottom") ?? "Jump to bottom"}
+                    aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
+                  >
+                    <I.chev size={16} />
+                  </button>
+                ) : null}
               </div>
 
               <Composer
@@ -1681,6 +1718,9 @@ function TabRuntime({
           ready={state.ready}
           currency={currency}
           theme={theme}
+          jobs={state.jobs}
+          jobsOpen={jobsOpen}
+          onToggleJobs={() => setJobsOpen((v) => !v)}
           onToggleTheme={onToggleTheme}
           onToggleCurrency={onToggleCurrency}
           onOpenSettings={() => openSettingsAt("general")}
@@ -1730,6 +1770,14 @@ function TabRuntime({
             onRemoveMcpSpec={removeMcpSpec}
           />
         ) : null}
+
+        <JobsPop
+          open={jobsOpen}
+          onClose={() => setJobsOpen(false)}
+          jobs={state.jobs}
+          onStop={(jobId) => sendRpc({ cmd: "jobs_stop", jobId })}
+          onStopAll={() => sendRpc({ cmd: "jobs_stop_all" })}
+        />
 
         <Toast message={toast} />
 
@@ -2406,6 +2454,13 @@ export function App() {
               setTabs((prev) =>
                 prev.map((t) => (t.id === tabId ? { ...t, workspaceDir: ev.workspaceDir } : t)),
               );
+            }
+
+            if (ev.type === "$jobs") {
+              for (const id of dispatchersRef.current.keys()) {
+                deliverToTab(id, { t: "incoming", event: ev });
+              }
+              return;
             }
 
             const target = tabId;

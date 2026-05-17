@@ -18,6 +18,8 @@ export interface ReconnectArgs {
   accept?: ReadonlyArray<"identity" | "append">;
   /** Stdio env overlay — same lookup that produced the live client's env. */
   env?: Record<string, string>;
+  /** SSE / Streamable-HTTP headers overlay. */
+  headers?: Record<string, string>;
 }
 
 export type ReconnectResult =
@@ -56,7 +58,10 @@ export async function reconnectMcpServer(args: ReconnectArgs): Promise<Reconnect
       ms: Date.now() - t0,
     };
   }
-  const transport = buildTransportFromSpec(parsed, { env: args.env });
+  const transport = buildTransportFromSpec(parsed, {
+    env: args.env,
+    headers: args.headers,
+  });
   const next = new McpClient({ transport });
   try {
     await next.initialize();

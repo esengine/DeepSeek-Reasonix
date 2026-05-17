@@ -3,6 +3,7 @@ import {
   loadBaseUrl,
   loadEditMode,
   loadProjectShellAllowed,
+  loadResolvedSkillPaths,
   readConfig,
   searchEnabled,
   webSearchEndpoint,
@@ -26,6 +27,8 @@ export interface CodeToolsetOpts {
   rootDir: string;
   /** Fired after `install_skill` writes a new skill — desktop wires this to push a fresh `$skills` event so the sidebar updates without a tab reload. */
   onSkillInstalled?: SkillInstalledHook;
+  /** Fired after `run_background` / `stop_job` mutate the JobRegistry — desktop pushes a fresh `$jobs` event so the popover updates without waiting for poll. */
+  onJobsChanged?: () => void;
 }
 
 export interface CodeToolset {
@@ -48,6 +51,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
       extraAllowed: () => loadProjectShellAllowed(root),
       allowAll: () => loadEditMode() === "yolo",
       jobs,
+      onJobsChanged: opts.onJobsChanged,
       sensitivePaths: cfg.sensitivePaths,
     });
     registerMemoryTools(tools, { projectRoot: root });
@@ -77,6 +81,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   let subagentClient: DeepSeekClient | null = null;
   registerSkillTools(tools, {
     projectRoot: opts.rootDir,
+    customSkillPaths: loadResolvedSkillPaths(opts.rootDir),
     onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal) => {
       if (!subagentClient) subagentClient = new DeepSeekClient({ baseUrl: loadBaseUrl() });
@@ -88,7 +93,6 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         task,
         model: skill.model,
         allowedTools: skill.allowedTools,
-        maxToolIters: skill.maxToolIters,
         skillName: skill.name,
       });
       return formatSubagentResult(result);

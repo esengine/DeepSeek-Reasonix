@@ -128,7 +128,7 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 |---|---|
 | `/pro [off]` | Arm v4-pro for the NEXT turn only |
 | `/budget [usd\|off]` | Session USD cap |
-| `/search-engine <mojeek\|searxng>` (`/se`) | Switch web search backend |
+| `/search-engine <mojeek\|searxng\|metaso>` (`/se`) | Switch web search backend |
 | `/hooks [reload]` | List / reload hooks |
 | `/permissions [list\|add\|remove\|clear]` | Edit shell allowlist |
 | `/dashboard [stop]` | Launch / stop the embedded web dashboard |

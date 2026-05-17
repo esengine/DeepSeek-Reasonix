@@ -19,20 +19,20 @@ export interface FilesystemToolsOptions {
   rootDir: string;
   /** false → register only read-side tools. Default true. */
   allowWriting?: boolean;
-  /** Per-read byte cap; floor against OOM on a multi-GB blob. */
-  maxReadBytes?: number;
+  /** Files at or under this size get full content; larger go to outline mode. Default 512 KiB. */
+  outlineThresholdBytes?: number;
   /** Cap on total bytes from listing/grep tools — bounds tree-as-one-string accidents. */
   maxListBytes?: number;
 }
 
-const DEFAULT_MAX_READ_BYTES = 2 * 1024 * 1024;
+const DEFAULT_OUTLINE_THRESHOLD_BYTES = 512 * 1024;
 const DEFAULT_MAX_LIST_BYTES = 256 * 1024;
 
-/** Auto-preview threshold — files above this force the model to scope (range/head/tail). */
-const DEFAULT_AUTO_PREVIEW_LINES = 200;
-const AUTO_PREVIEW_HEAD_LINES = 80;
-const AUTO_PREVIEW_TAIL_LINES = 40;
-const OUTLINE_MAX_ENTRIES = 30;
+/** Refuse load above this; outline-mode would have to slurp the whole file to scan it. */
+const HARD_MAX_FILE_BYTES = 32 * 1024 * 1024;
+
+/** Lines shown for orientation when a file is too big for full content. */
+const OUTLINE_HEAD_LINES = 80;
 
 /** Skipped unless `include_deps:true` — shared with the semantic indexer via DEFAULT_INDEX_EXCLUDES. */
 const SKIP_DIR_NAMES: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.dirs);
@@ -66,13 +66,29 @@ function isLikelyBinaryByName(name: string): boolean {
   return BINARY_EXTENSIONS.has(name.slice(dot).toLowerCase());
 }
 
+/** Sniff first 8 KiB for a NUL byte — catches binary files whose extension lied. UTF-16 (rare in source) is an accepted false positive. */
+function looksBinary(buf: Buffer): boolean {
+  const end = Math.min(buf.length, 8192);
+  for (let i = 0; i < end; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+}
+
 export function registerFilesystemTools(
   registry: ToolRegistry,
   opts: FilesystemToolsOptions,
 ): ToolRegistry {
   const rootDir = pathMod.resolve(opts.rootDir);
   const allowWriting = opts.allowWriting !== false;
-  const maxReadBytes = opts.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
+  const outlineThresholdBytes = opts.outlineThresholdBytes ?? DEFAULT_OUTLINE_THRESHOLD_BYTES;
   const maxListBytes = opts.maxListBytes ?? DEFAULT_MAX_LIST_BYTES;
 
   const normRoot = pathMod.resolve(rootDir);
@@ -175,11 +191,11 @@ export function registerFilesystemTools(
   registry.register({
     name: "read_file",
     parallelSafe: true,
-    description: `Read a file under the sandbox root. To save context, PREFER to scope the read instead of pulling the whole file:
-  - head: N  → first N lines (imports, public API, small configs)
-  - tail: N  → last N lines (recently-added code, log tails)
-  - range: "A-B"  → inclusive line range A..B, 1-indexed (e.g. "120-180" around an edit site)
-When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_LINES} lines, the tool auto-returns a head+tail preview with an "N lines omitted" marker, plus a top-level symbol outline (TS/JS exports, Python def/class, Go func/type, Rust fn/struct/impl/trait, Markdown headings, with line numbers, capped at ${OUTLINE_MAX_ENTRIES}) so you can pick a smart range without a follow-up grep. If you need the middle, re-call with a range. Prefer search_content to locate a symbol first only when the outline doesn't have what you want — one scoped read beats three full-file reads.`,
+    description: `Read a file under the sandbox root. Default behaviour returns FULL CONTENT for files at or under ${Math.round(DEFAULT_OUTLINE_THRESHOLD_BYTES / 1024)} KiB — trust the prompt cache, don't pre-truncate. Optional scoping:
+  - head: N  → first N lines (cheap probe of imports / config head)
+  - tail: N  → last N lines (recent-tail of a log)
+  - range: "A-B"  → inclusive 1-indexed range (e.g. "120-180" around an edit site)
+Files OVER the threshold auto-switch to outline mode: file metadata + first ${OUTLINE_HEAD_LINES} lines + a top-level symbol outline (TS/JS exports, Python def/class, Go func/type, Rust fn/struct/impl/trait, Markdown headings, Protobuf message/service/rpc, plain-text chapter markers) + concrete next-step commands. No middle bytes — drill in with range / search_content. Files over ${Math.round(HARD_MAX_FILE_BYTES / (1024 * 1024))} MiB are refused entirely (use grep / range). Binary files are refused — use get_file_info if you only need stat.`,
     readOnly: true,
     stormExempt: true,
     parameters: {
@@ -201,23 +217,36 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
       ctx?: ToolCallContext,
     ) => {
       const abs = await safePath(args.path, "read_file", ctx);
+      const rel = displayRel(rootDir, abs);
       // Open once and reuse the fd so the directory check and the read
       // bind to the same inode — closes the stat→read TOCTOU race.
       const fh = await fs.open(abs, "r");
       let raw: Buffer;
+      let sizeBytes: number;
       try {
         const stat = await fh.stat();
         if (stat.isDirectory()) {
           throw new Error(`not a file: ${args.path} (it's a directory)`);
         }
+        sizeBytes = stat.size;
+        if (sizeBytes > HARD_MAX_FILE_BYTES) {
+          return [
+            `[refused: ${rel} is ${formatBytes(sizeBytes)} (> ${formatBytes(HARD_MAX_FILE_BYTES)} hard ceiling) — too large to load]`,
+            "Use one of:",
+            `  - search_content path:"${rel}" pattern:"<your regex>"  — grep within the file`,
+            `  - read_file path:"${rel}" range:"A-B"                   — read a specific 1-indexed line range`,
+            `  - read_file path:"${rel}" head:N  /  tail:N             — read N lines at the start or end`,
+          ].join("\n");
+        }
         raw = await fh.readFile();
       } finally {
         await fh.close();
       }
-      if (raw.length > maxReadBytes) {
-        const headBytes = raw.slice(0, maxReadBytes).toString("utf8");
-        return `${headBytes}\n\n[…truncated ${raw.length - maxReadBytes} bytes — file is ${raw.length} B, cap ${maxReadBytes} B. Retry with head/tail/range for targeted view.]`;
+
+      if (looksBinary(raw)) {
+        return `[refused: ${rel} appears to be binary (${formatBytes(sizeBytes)}) — read_file returns text only. Use get_file_info for stat.]`;
       }
+
       const text = raw.toString("utf8");
       let lines = text.split(/\r?\n/);
       // Most files end with '\n' which splits into an empty trailing
@@ -228,7 +257,7 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
 
       // range wins over head/tail when set — the most precise ask
       // should dominate. Parse "A-B" strictly; bad formats fall through
-      // to head/tail / auto-preview instead of erroring.
+      // to head/tail / outline-mode instead of erroring.
       if (typeof args.range === "string" && /^\d+\s*-\s*\d+$/.test(args.range)) {
         const [rawStart, rawEnd] = args.range.split("-").map((s) => Number.parseInt(s, 10));
         const start = Math.max(1, rawStart ?? 1);
@@ -256,26 +285,30 @@ When none of these is given AND the file is longer than ${DEFAULT_AUTO_PREVIEW_L
         return marker + slice.join("\n");
       }
 
-      // No explicit scope + file is small → full content.
-      if (totalLines <= DEFAULT_AUTO_PREVIEW_LINES) return lines.join("\n");
+      // No explicit scope + file fits the threshold → full content.
+      // Trust the prompt cache: a 100K-token file read once amortizes
+      // across every turn of the same conversation.
+      if (sizeBytes <= outlineThresholdBytes) return lines.join("\n");
 
-      // No explicit scope + file is large → head + tail preview plus
-      // a marker telling the model how much it missed and how to get
-      // it. This is the single biggest lever on read_file token cost —
-      // historically a 500-line file dumped ~4K tokens into the turn
-      // even when the model only needed 20 of them.
-      const head = lines.slice(0, AUTO_PREVIEW_HEAD_LINES).join("\n");
-      const tail = lines.slice(totalLines - AUTO_PREVIEW_TAIL_LINES).join("\n");
-      const omitted = totalLines - AUTO_PREVIEW_HEAD_LINES - AUTO_PREVIEW_TAIL_LINES;
+      // No explicit scope + file is over the threshold → outline mode.
+      // Return enough for the model to orient (head + symbol map) plus
+      // concrete next-step commands. Avoids dumping a 5 MB proto into
+      // every cached prefix while still surfacing what's inside.
+      const head = lines.slice(0, Math.min(OUTLINE_HEAD_LINES, totalLines)).join("\n");
       const outline = formatOutline(extractOutline(abs, lines));
       const parts: string[] = [
-        `[auto-preview: head ${AUTO_PREVIEW_HEAD_LINES} + tail ${AUTO_PREVIEW_TAIL_LINES} of ${totalLines} lines]`,
+        `[large file: ${formatBytes(sizeBytes)}, ${totalLines} lines — outline mode (threshold ${formatBytes(outlineThresholdBytes)})]`,
+        "",
+        `[head ${Math.min(OUTLINE_HEAD_LINES, totalLines)} lines for orientation]`,
         head,
       ];
       if (outline) parts.push("", outline);
       parts.push(
-        `\n[… ${omitted} lines omitted — call read_file again with range:"A-B" (1-indexed) or head / tail to get the middle]\n`,
-        tail,
+        "",
+        "[to read more, call one of:",
+        `  - read_file path:"${rel}" range:"A-B"          — 1-indexed line range`,
+        `  - read_file path:"${rel}" head:N  /  tail:N    — first/last N lines`,
+        `  - search_content path:"${rel}" pattern:"..."   — grep within this file]`,
       );
       return parts.join("\n");
     },

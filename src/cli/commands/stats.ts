@@ -1,6 +1,7 @@
 /** `reasonix stats [path]` — path arg switches to per-transcript mode; default is the cross-session dashboard. */
 
 import { existsSync, readFileSync } from "node:fs";
+import { t } from "../../i18n/index.js";
 import {
   type UsageAggregate,
   type UsageBucket,
@@ -62,8 +63,8 @@ function dashboard(opts: StatsOptions): void {
     console.log("");
     console.log(`  ${path}`);
     console.log("");
-    console.log("run `reasonix chat`, `reasonix code`, or `reasonix run <task>` — every turn");
-    console.log("appends one line to the log and `reasonix stats` will roll it up.");
+    console.log(t("stats.usageHint"));
+    console.log(t("stats.usageDetail"));
     return;
   }
 

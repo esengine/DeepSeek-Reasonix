@@ -6,7 +6,6 @@ export type SubagentTypeName = "explore" | "verify";
 
 export interface SubagentTypeSpec {
   system: string;
-  maxToolIters: number;
 }
 
 const EXPLORE_SYSTEM = `You are an exploration subagent. Wide-net read-only investigation; return one distilled answer.
@@ -31,7 +30,7 @@ const VERIFY_SYSTEM = `You are a verify subagent. Narrow check — return YES / 
 How to operate:
 - Read only what's needed to verify the specific claim. No exploration past the claim.
 - Use search_content / read_file to confirm the exact behavior, type, or call site in question.
-- Cap at 6-8 tool calls. If you can't verify in that, return INCONCLUSIVE plus what's missing.
+- If a focused round of reads can't verify it, return INCONCLUSIVE plus what's missing — don't keep digging.
 
 Final answer:
 - Lead with VERIFIED / NOT VERIFIED / INCONCLUSIVE.
@@ -43,8 +42,8 @@ ${NEGATIVE_CLAIM_RULE}
 ${TUI_FORMATTING_RULES}`;
 
 const TYPES: Record<SubagentTypeName, SubagentTypeSpec> = {
-  explore: { system: EXPLORE_SYSTEM, maxToolIters: 20 },
-  verify: { system: VERIFY_SYSTEM, maxToolIters: 8 },
+  explore: { system: EXPLORE_SYSTEM },
+  verify: { system: VERIFY_SYSTEM },
 };
 
 export const SUBAGENT_TYPE_NAMES: readonly SubagentTypeName[] = Object.freeze(

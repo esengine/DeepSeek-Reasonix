@@ -181,6 +181,24 @@ export type MemoryEvent = {
   entries: MemoryEntryInfo[];
 };
 
+export type JobInfo = {
+  id: number;
+  tabId: string;
+  sessionLabel: string;
+  command: string;
+  pid: number | null;
+  running: boolean;
+  exitCode: number | null;
+  startedAt: number;
+  outputTail: string;
+  spawnError?: string;
+};
+
+export type JobsEvent = {
+  type: "$jobs";
+  items: JobInfo[];
+};
+
 export type LoadedSegment =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
@@ -371,6 +389,7 @@ export type IncomingEvent = { tabId?: string } & (
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent
+  | JobsEvent
   | UserMessageEvent
   | ModelTurnStartedEvent
   | ModelDeltaEvent
@@ -407,4 +426,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_remove"; spec: string }
   | { cmd: "skills_get" }
   | { cmd: "skill_run"; name: string; args?: string }
+  | { cmd: "jobs_list" }
+  | { cmd: "jobs_stop"; jobId: number }
+  | { cmd: "jobs_stop_all" }
 );

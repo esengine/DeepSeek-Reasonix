@@ -1,7 +1,7 @@
 /** CacheFirstLoop integration — fake-fetch DeepSeekClient, non-streaming path. */
 
 import { describe, expect, it, vi } from "vitest";
-import { DeepSeekClient } from "../src/client.js";
+import { DeepSeekClient, Usage } from "../src/client.js";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
@@ -227,42 +227,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(msgs2.length).toBeGreaterThan(msgs1.length);
   });
 
-  it("yields a warning event once when tool-call count crosses 70% of budget", async () => {
-    const reg = new ToolRegistry();
-    reg.register({
-      name: "probe",
-      description: "no-op",
-      parameters: { type: "object", properties: {} },
-      fn: async () => "ok",
-    });
-    const callAgain = {
-      content: "",
-      tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
-    };
-    const summary = { content: "all done" };
-    const responses: FakeResponseShape[] = [callAgain, callAgain, callAgain, callAgain, summary];
-    const client = makeClient(responses);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
-      tools: reg,
-      stream: false,
-      maxToolIters: 4, // 70% → warn starting at iter >= 2
-    });
-
-    const warnings: string[] = [];
-    for await (const ev of loop.step("go")) {
-      if (ev.role === "warning") warnings.push(ev.content);
-    }
-    // Identical fixture calls also trip the storm breaker in 0.4.19+,
-    // which emits its own warning. Filter for the iter-budget warning
-    // specifically — that's what this test guards (once-per-turn flag).
-    const iterBudgetWarnings = warnings.filter((w) => /tool calls used/.test(w));
-    expect(iterBudgetWarnings).toHaveLength(1);
-    expect(iterBudgetWarnings[0]).toMatch(/\d+\/4 tool calls used/);
-    expect(iterBudgetWarnings[0]).toMatch(/Esc/);
-  });
-
   it("abort() mid-step stops immediately without a follow-up API call", async () => {
     const reg = new ToolRegistry();
     reg.register({
@@ -378,59 +342,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(
       turn2Events.some((e) => e.role === "warning" && /aborted at iter/.test(e.content ?? "")),
     ).toBe(false);
-  });
-
-  it("forces a summary when maxToolIters is exhausted, instead of stopping silently", async () => {
-    // Give a registered tool so the repair layer doesn't strip the fake
-    // tool_calls for referring to an unknown name.
-    const reg = new ToolRegistry();
-    reg.register({
-      name: "probe",
-      description: "no-op",
-      parameters: { type: "object", properties: {} },
-      fn: async () => "ok",
-    });
-    // Every tool-iter response says "call probe again" — infinite loop
-    // absent the iter cap. The (N+1)th response is the forced-summary
-    // call (no tools, returns text).
-    const chainingToolCall = {
-      content: "",
-      tool_calls: [
-        {
-          id: "call_1",
-          type: "function",
-          function: { name: "probe", arguments: "{}" },
-        },
-      ],
-    };
-    const responses: FakeResponseShape[] = [
-      chainingToolCall,
-      chainingToolCall,
-      { content: "done — here's what I found." }, // summary call
-    ];
-    const client = makeClient(responses);
-    const loop = new CacheFirstLoop({
-      client,
-      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
-      tools: reg,
-      stream: false,
-      maxToolIters: 2, // deliberately tight so we hit the cap fast
-    });
-
-    const events: { role: string; content?: string }[] = [];
-    for await (const ev of loop.step("go")) {
-      events.push({ role: ev.role, content: ev.content });
-    }
-
-    // Multiple assistant_final events are yielded (one per iter) — the
-    // summary is the LAST one, carrying the "tool-call budget" prefix.
-    const finals = events.filter((e) => e.role === "assistant_final");
-    const summary = finals[finals.length - 1];
-    expect(summary).toBeDefined();
-    expect(summary!.content).toMatch(/tool-call budget/);
-    expect(summary!.content).toContain("done — here's what I found.");
-    // Last event is still `done`, preserving the contract used by run().
-    expect(events[events.length - 1]!.role).toBe("done");
   });
 
   it("first all-suppressed storm self-corrects in-turn instead of stopping", async () => {
@@ -1393,12 +1304,17 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     expect(loop.log.length).toBeGreaterThan(0);
     loop.scratch.notes = ["stale note"];
     loop.scratch.reasoning = "stale reasoning";
+    loop.stats.record(1, "deepseek-chat", new Usage(1000, 100, 1100, 800, 200));
+    expect(loop.stats.summary().totalCostUsd).toBeGreaterThan(0);
 
     const { dropped } = loop.clearLog();
     expect(dropped).toBe(2);
     expect(loop.log.length).toBe(0);
     expect(loop.scratch.notes).toEqual([]);
     expect(loop.scratch.reasoning).toBeNull();
+    expect(loop.stats.summary().totalCostUsd).toBe(0);
+    expect(loop.stats.summary().turns).toBe(0);
+    expect(loop.currentTurn).toBe(0);
   });
 
   it("clearLog returns 0 dropped when already empty", () => {
@@ -2424,5 +2340,228 @@ describe("CacheFirstLoop (streaming) — tool_call_delta emission", () => {
         } else process.env.REASONIX_PARALLEL_MAX = prev;
       }
     });
+  });
+});
+
+describe("CacheFirstLoop — mid-turn steer injection", () => {
+  it("steer() stores text and steerConsumed returns false before consumption", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+    });
+    expect(loop.steerConsumed).toBe(false);
+    loop.steer("mid-turn msg");
+    expect(loop.steerConsumed).toBe(false); // not consumed until step()
+  });
+
+  it("steer(null) clears a pending steer", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+    });
+    loop.steer("mid-turn msg");
+    loop.steer(null);
+    // steer(null) should clear — step() won't see it
+    expect(loop.steerConsumed).toBe(false);
+  });
+
+  it("consumes a mid-turn steer between iterations and yields a steer event", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "add", arguments: '{"a":2,"b":3}' },
+          },
+        ],
+      },
+      { content: "The answer is 5." },
+    ]);
+
+    const tools = new ToolRegistry();
+    tools.register<{ a: number; b: number }, number>({
+      name: "add",
+      parameters: {
+        type: "object",
+        properties: { a: { type: "integer" }, b: { type: "integer" } },
+        required: ["a", "b"],
+      },
+      fn: ({ a, b }) => a + b,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({
+        system: "use add tool",
+        toolSpecs: tools.specs(),
+      }),
+      tools,
+      stream: false,
+    });
+
+    // Start step() — manually iterate to inject steer mid-turn.
+    const gen = loop.step("2 + 3 = ?");
+
+    // Drain events until the tool result is yielded ("tool" role).
+    let sawTool = false;
+    let result = await gen.next();
+    while (!result.done) {
+      if (result.value.role === "tool") {
+        sawTool = true;
+        break;
+      }
+      result = await gen.next();
+    }
+    expect(sawTool).toBe(true);
+
+    // Inject steer BEFORE the next iteration starts.
+    loop.steer("mid-turn steer message");
+
+    // Continue — the next iteration should consume the steer.
+    let sawSteer = false;
+    result = await gen.next();
+    while (!result.done) {
+      if (result.value.role === "steer") {
+        sawSteer = true;
+        expect(result.value.content).toBe("mid-turn steer message");
+        break;
+      }
+      result = await gen.next();
+    }
+    expect(sawSteer).toBe(true);
+
+    // Drain remaining events to completion.
+    while (!result.done) {
+      result = await gen.next();
+    }
+
+    // steerConsumed should be true after consumption.
+    expect(loop.steerConsumed).toBe(true);
+
+    // The steer should appear as a user message in the log.
+    const userMessages = loop.log.entries.filter((m) => m.role === "user");
+    expect(userMessages.some((m) => m.content === "mid-turn steer message")).toBe(true);
+  });
+
+  it("steerConsumed resets to false at the start of each new step()", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "add", arguments: '{"a":1,"b":1}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+    const tools = new ToolRegistry();
+    tools.register<{ a: number; b: number }, number>({
+      name: "add",
+      parameters: {
+        type: "object",
+        properties: { a: { type: "integer" }, b: { type: "integer" } },
+        required: ["a", "b"],
+      },
+      fn: ({ a, b }) => a + b,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "use add", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    // First turn: inject steer.
+    const gen1 = loop.step("turn 1");
+    // Drain to tool event.
+    let r = await gen1.next();
+    while (!r.done && r.value.role !== "tool") r = await gen1.next();
+    loop.steer("steer in turn 1");
+    // Drain rest.
+    while (!r.done) r = await gen1.next();
+    expect(loop.steerConsumed).toBe(true);
+
+    // Second turn: steerConsumed should be false again.
+    // But the fake client was exhausted. Use a fresh loop instead.
+    const client2 = makeClient([{ content: "turn 2 answer" }]);
+    const loop2 = new CacheFirstLoop({
+      client: client2,
+      prefix: new ImmutablePrefix({ system: "be brief" }),
+      stream: false,
+    });
+    expect(loop2.steerConsumed).toBe(false);
+    loop2.steer("steer in turn 2");
+    const gen2 = loop2.step("turn 2 input");
+    let sawSteer2 = false;
+    r = await gen2.next();
+    while (!r.done) {
+      if (r.value.role === "steer") {
+        sawSteer2 = true;
+        break;
+      }
+      r = await gen2.next();
+    }
+    expect(sawSteer2).toBe(true);
+    expect(loop2.steerConsumed).toBe(true);
+  });
+
+  it("steer() resets steerConsumed when new text is set after a previous steer was consumed", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_reset",
+            type: "function",
+            function: { name: "add", arguments: '{"a":1,"b":1}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+
+    const tools = new ToolRegistry();
+    tools.register<{ a: number; b: number }, number>({
+      name: "add",
+      parameters: {
+        type: "object",
+        properties: { a: { type: "integer" }, b: { type: "integer" } },
+        required: ["a", "b"],
+      },
+      fn: ({ a, b }) => a + b,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "use add", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    // First turn: inject steer, consume it via step(), verify steerConsumed is true.
+    const gen = loop.step("turn 1");
+    // Drain to tool event.
+    let r = await gen.next();
+    while (!r.done && r.value.role !== "tool") r = await gen.next();
+    loop.steer("first steer");
+    // Drain past steer consumption.
+    r = await gen.next();
+    while (!r.done && r.value.role !== "steer") r = await gen.next();
+    // Finish the turn.
+    while (!r.done) r = await gen.next();
+    expect(loop.steerConsumed).toBe(true);
+
+    // Second steer should reset steerConsumed to false.
+    loop.steer("second steer");
+    expect(loop.steerConsumed).toBe(false);
   });
 });

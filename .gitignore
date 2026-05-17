@@ -45,6 +45,9 @@ desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/src-tauri/binaries/
 
+# Cargo build artifacts for the workspace at the repo root.
+/target/
+
 # Design mock-up reference (local, not part of repo)
 .design-ref/
 *.cpuprofile

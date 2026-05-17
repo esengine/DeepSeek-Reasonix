@@ -428,6 +428,10 @@ async function runPipeGroup(
         cwd: opts.cwd,
         shell: false,
         windowsHide: true,
+        // POSIX: detach so the child becomes its own process-group leader,
+        // allowing killProcessTree's neg-pid kill to terminate the whole
+        // pipe chain subtree instead of just the direct child.
+        detached: process.platform !== "win32",
         env,
         stdio: [stdinSpec, stdoutSpec, stderrSpec],
         ...spawnOverrides,

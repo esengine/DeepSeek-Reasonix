@@ -2,7 +2,7 @@
 
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { type ThemeName, isThemeName, resolveThemeName } from "./cli/ui/theme/tokens.js";
 import type { LanguageCode } from "./i18n/types.js";
 import {
@@ -10,6 +10,7 @@ import {
   type ResolvedIndexConfig,
   resolveIndexConfig,
 } from "./index/config.js";
+import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 
 /** Legacy `fast|smart|max` kept for back-compat with existing config.json files. */
 export type PresetName = "auto" | "flash" | "pro" | "fast" | "smart" | "max";
@@ -74,6 +75,23 @@ export interface SemanticEmbeddingConfigView {
   };
 }
 
+export interface McpServerConfig {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  transport?: "stdio" | "sse" | "streamable-http";
+  url?: string;
+  headers?: Record<string, string>;
+  disabled?: boolean;
+}
+
+export interface QQBotConfig {
+  appId?: string;
+  appSecret?: string;
+  sandbox?: boolean;
+  enabled?: boolean;
+}
+
 export interface ReasonixConfig {
   apiKey?: string;
   baseUrl?: string;
@@ -82,6 +100,8 @@ export interface ReasonixConfig {
   editMode?: EditMode;
   editModeHintShown?: boolean;
   mouseClipboardHintShown?: boolean;
+  /** When false, skip the boot splash animation and show the main UI immediately. Default true. */
+  banner?: boolean;
   reasoningEffort?: ReasoningEffort;
   /** Default workspace root for the desktop client. CLI uses cwd. */
   workspaceDir?: string;
@@ -96,6 +116,8 @@ export interface ReasonixConfig {
   mcpDisabled?: string[];
   /** Env overlay per MCP server name (matches the `name=` prefix of the spec). Stdio transports merge this over process.env; SSE/HTTP ignore it. */
   mcpEnv?: Record<string, Record<string, string>>;
+  /** Canonical MCP server configuration — merges with and overrides legacy `mcp`/`mcpEnv`/`mcpDisabled`. */
+  mcpServers?: Record<string, McpServerConfig>;
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
@@ -140,10 +162,15 @@ export interface ReasonixConfig {
   };
   index?: IndexUserConfig;
   semantic?: SemanticEmbeddingUserConfig;
+  skills?: {
+    paths?: string[];
+  };
   /** User-declared extensions to the built-in memory types (#709). Unknown types round-trip even without a declaration; declaring one lets you attach a default priority + lifecycle. */
   memory?: {
     customTypes?: CustomMemoryTypeConfig[];
   };
+  /** QQ Bot configuration */
+  qq?: QQBotConfig;
 }
 
 export interface CustomMemoryTypeConfig {
@@ -264,6 +291,113 @@ export function mcpEnvFor(
   return Object.keys(filtered).length > 0 ? filtered : undefined;
 }
 
+function inferMcpTransport(cfg: McpServerConfig): "stdio" | "sse" | "streamable-http" {
+  if (cfg.transport) return cfg.transport;
+  const url = cfg.url?.trim() ?? "";
+  if (/^streamable\+https?:\/\//i.test(url)) return "streamable-http";
+  if (/^https?:\/\//i.test(url)) return "sse";
+  return "stdio";
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof v === "string" && v.length > 0) out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]): McpServerSpec[] {
+  const result: McpServerSpec[] = [];
+  const seen = new Set<string>();
+
+  // 1. Legacy specs first.
+  const disabledFromLegacy = new Set(cfg.mcpDisabled ?? []);
+  const legacySpecs = extraLegacy && extraLegacy.length > 0 ? extraLegacy : (cfg.mcp ?? []);
+  for (const raw of legacySpecs) {
+    if (typeof raw !== "string") continue;
+    try {
+      const spec = parseMcpSpec(raw);
+      const env = spec.name ? normalizeStringRecord(cfg.mcpEnv?.[spec.name]) : undefined;
+      const disabled = spec.name ? disabledFromLegacy.has(spec.name) : false;
+      if (spec.transport === "stdio") {
+        result.push({ ...spec, env, disabled });
+      } else if (spec.transport === "sse") {
+        result.push({ ...spec, disabled });
+      } else {
+        result.push({ ...spec, disabled });
+      }
+      if (spec.name) seen.add(spec.name);
+    } catch {
+      /* skip invalid legacy specs */
+    }
+  }
+
+  // 2. mcpServers objects override on name conflict.
+  for (const [name, serverCfg] of Object.entries(cfg.mcpServers ?? {})) {
+    if (!serverCfg || typeof serverCfg !== "object") continue;
+    const transport = inferMcpTransport(serverCfg as McpServerConfig);
+    const disabled = (serverCfg as McpServerConfig).disabled === true;
+    if (transport === "stdio") {
+      const env = normalizeStringRecord((serverCfg as McpServerConfig).env);
+      const spec: McpServerSpec = {
+        transport: "stdio",
+        name,
+        command: (serverCfg as McpServerConfig).command ?? "",
+        args: (serverCfg as McpServerConfig).args ?? [],
+        env,
+        disabled,
+      };
+      if (seen.has(name)) {
+        const idx = result.findIndex((s) => s.name === name);
+        if (idx >= 0) result[idx] = spec;
+      } else {
+        seen.add(name);
+        result.push(spec);
+      }
+    } else {
+      let url = (serverCfg as McpServerConfig).url ?? "";
+      const streamMatch = /^streamable\+(https?:\/\/.+)$/i.exec(url);
+      if (streamMatch) url = streamMatch[1]!;
+      const headers = normalizeStringRecord((serverCfg as McpServerConfig).headers);
+      if (transport === "sse") {
+        const spec: McpServerSpec = {
+          transport: "sse",
+          name,
+          url,
+          headers,
+          disabled,
+        };
+        if (seen.has(name)) {
+          const idx = result.findIndex((s) => s.name === name);
+          if (idx >= 0) result[idx] = spec;
+        } else {
+          seen.add(name);
+          result.push(spec);
+        }
+      } else {
+        const spec: McpServerSpec = {
+          transport: "streamable-http",
+          name,
+          url,
+          headers,
+          disabled,
+        };
+        if (seen.has(name)) {
+          const idx = result.findIndex((s) => s.name === name);
+          if (idx >= 0) result[idx] = spec;
+        } else {
+          seen.add(name);
+          result.push(spec);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 /** Persist the language so it survives a relaunch. */
 export function saveLanguage(lang: LanguageCode, path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
@@ -292,6 +426,132 @@ export function saveBaseUrl(url: string, path: string = defaultConfigPath()): vo
     cfg.baseUrl = undefined;
   }
   writeConfig(cfg, path);
+}
+
+export interface SkillPathEntry {
+  raw: string;
+  resolved: string;
+}
+
+export function resolveSkillPath(raw: string, baseDir: string): string {
+  const homeExpanded = expandCurrentUserHome(raw.trim());
+  return resolve(isAbsolute(homeExpanded) ? homeExpanded : join(baseDir, homeExpanded));
+}
+
+export function normalizeSkillPathEntries(
+  paths: readonly unknown[],
+  baseDir: string,
+): SkillPathEntry[] {
+  const out: SkillPathEntry[] = [];
+  const seen = new Set<string>();
+  for (const value of paths) {
+    if (typeof value !== "string") continue;
+    const raw = value.trim();
+    if (!raw) continue;
+    const resolved = resolveSkillPath(raw, baseDir);
+    const key = skillPathKey(resolved);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ raw, resolved });
+  }
+  return out;
+}
+
+export function normalizeSkillPaths(paths: readonly unknown[], baseDir: string): string[] {
+  return normalizeSkillPathEntries(paths, baseDir).map((entry) => entry.raw);
+}
+
+export function resolveSkillPaths(paths: readonly unknown[], baseDir: string): string[] {
+  return normalizeSkillPathEntries(paths, baseDir).map((entry) => entry.resolved);
+}
+
+function skillPathKey(path: string): string {
+  return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+function expandCurrentUserHome(path: string): string {
+  if (path === "~") return homedir();
+  if (path.startsWith("~/") || path.startsWith("~\\")) return join(homedir(), path.slice(2));
+  return path;
+}
+
+export function loadSkillPaths(
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): string[] {
+  const raw = readConfig(path).skills?.paths;
+  return Array.isArray(raw) ? normalizeSkillPaths(raw, baseDir) : [];
+}
+
+export function loadResolvedSkillPaths(
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): string[] {
+  const raw = readConfig(path).skills?.paths;
+  return Array.isArray(raw) ? resolveSkillPaths(raw, baseDir) : [];
+}
+
+export function saveSkillPaths(
+  paths: readonly unknown[],
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): string[] {
+  const cfg = readConfig(path);
+  const normalized = normalizeSkillPaths(paths, baseDir);
+  cfg.skills = { ...(cfg.skills ?? {}), paths: normalized };
+  writeConfig(cfg, path);
+  return normalized;
+}
+
+export function addSkillPath(
+  skillPath: string,
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): { added: boolean; path: string; resolved: string; paths: string[] } | { error: string } {
+  const entry = normalizeSkillPathEntries([skillPath], baseDir)[0];
+  if (!entry) return { error: "skill path is empty" };
+  const existing = loadSkillPaths(baseDir, path);
+  const seen = new Set(resolveSkillPaths(existing, baseDir).map(skillPathKey));
+  const key = skillPathKey(entry.resolved);
+  if (seen.has(key))
+    return { added: false, path: entry.raw, resolved: entry.resolved, paths: existing };
+  const paths = saveSkillPaths([...existing, entry.raw], baseDir, path);
+  return { added: true, path: entry.raw, resolved: entry.resolved, paths };
+}
+
+export function removeSkillPath(
+  target: string,
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): { removed: boolean; path?: string; resolved?: string; paths: string[] } {
+  const existing = loadSkillPaths(baseDir, path);
+  const trimmed = target.trim();
+  if (!trimmed) return { removed: false, paths: existing };
+  const existingEntries = normalizeSkillPathEntries(existing, baseDir);
+  const idx = /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) - 1 : -1;
+  let removeAt = idx >= 0 && idx < existing.length ? idx : -1;
+  if (removeAt < 0) {
+    const targetEntry = normalizeSkillPathEntries([trimmed], baseDir)[0];
+    const targetKey = targetEntry ? skillPathKey(targetEntry.resolved) : undefined;
+    removeAt = existingEntries.findIndex(
+      (entry) =>
+        entry.raw === trimmed ||
+        (targetKey !== undefined && skillPathKey(entry.resolved) === targetKey),
+    );
+  }
+  if (removeAt < 0) return { removed: false, paths: existing };
+  const removed = existingEntries[removeAt];
+  const paths = saveSkillPaths(
+    existing.filter((_, i) => i !== removeAt),
+    baseDir,
+    path,
+  );
+  return {
+    removed: true,
+    path: removed?.raw ?? existing[removeAt],
+    resolved: removed?.resolved,
+    paths,
+  };
 }
 
 export function searchEnabled(path: string = defaultConfigPath()): boolean {
@@ -730,4 +990,38 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
+}
+
+export interface LoadedQQConfig {
+  appId?: string;
+  appSecret?: string;
+  sandbox?: boolean;
+  enabled?: boolean;
+}
+
+export function loadQQConfig(path: string = defaultConfigPath()): LoadedQQConfig {
+  const envSandbox = process.env.QQ_SANDBOX;
+  const fromEnv = {
+    appId: process.env.QQ_APPID,
+    appSecret: process.env.QQ_SECRET,
+    sandbox: envSandbox === "1" ? true : envSandbox === "0" ? false : undefined,
+  };
+  const fromCfg = readConfig(path).qq ?? {};
+  return {
+    appId: fromEnv.appId ?? fromCfg.appId,
+    appSecret: fromEnv.appSecret ?? fromCfg.appSecret,
+    sandbox: fromEnv.sandbox ?? fromCfg.sandbox ?? false,
+    enabled: fromCfg.enabled === true,
+  };
+}
+
+export function saveQQConfig(cfg: LoadedQQConfig, path: string = defaultConfigPath()): void {
+  const rootCfg = readConfig(path);
+  rootCfg.qq = {
+    appId: cfg.appId,
+    appSecret: cfg.appSecret,
+    sandbox: cfg.sandbox,
+    enabled: cfg.enabled,
+  };
+  writeConfig(rootCfg, path);
 }

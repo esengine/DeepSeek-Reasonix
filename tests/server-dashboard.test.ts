@@ -355,6 +355,35 @@ describe("dashboard server: endpoints", () => {
     }
   });
 
+  it("GET /api/skills returns custom skills and path status", async () => {
+    const proj = mkdtempSync(join(tmpdir(), "reasonix-dash-skills-custom-proj-"));
+    const custom = mkdtempSync(join(tmpdir(), "reasonix-dash-skills-custom-"));
+    try {
+      await writeFile(
+        cfgPath,
+        JSON.stringify({ skills: { paths: [custom, join(proj, "missing")] } }),
+        "utf8",
+      );
+      await mkdir(join(custom, "custom-skill"), { recursive: true });
+      await writeFile(
+        join(custom, "custom-skill", "SKILL.md"),
+        "---\ndescription: Custom skill\n---\ncustom body\n",
+        "utf8",
+      );
+      const base = await boot({ getCurrentCwd: () => proj });
+      const list = await call(`${base}api/skills`, { token: TOKEN });
+      expect(list.status).toBe(200);
+      expect(list.body.custom.map((s: { name: string }) => s.name)).toEqual(["custom-skill"]);
+      expect(list.body.paths.custom.map((p: { status: string }) => p.status)).toEqual([
+        "ok",
+        "missing",
+      ]);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+      rmSync(custom, { recursive: true, force: true });
+    }
+  });
+
   it("POST /api/skills rejects content missing a description frontmatter line (#583)", async () => {
     const proj = mkdtempSync(join(tmpdir(), "reasonix-dash-skills-desc-"));
     try {
@@ -1207,11 +1236,21 @@ describe("dashboard server: checkpoint API", () => {
     await mkdir(cwd, { recursive: true });
     await writeFile(join(cwd, "hello.txt"), "hello world\n");
     const { execSync } = await import("node:child_process");
-    execSync("git init", { cwd });
-    execSync("git config user.email test@test.com", { cwd });
-    execSync("git config user.name test", { cwd });
-    execSync("git add -A", { cwd });
-    execSync("git commit -m init", { cwd });
+    // Strip GIT_* env vars so execSync doesn't inherit them from a calling
+    // git operation (e.g. when this suite runs under a pre-push hook).
+    // Without this, `git commit` would resolve GIT_DIR from the env and
+    // operate on the parent repo, not the temp dir — and `git config
+    // user.email test@test.com` would silently rewrite the parent's
+    // committer identity.
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const k of Object.keys(env)) {
+      if (k.startsWith("GIT_")) delete env[k];
+    }
+    execSync("git init", { cwd, env });
+    execSync("git config user.email test@test.com", { cwd, env });
+    execSync("git config user.name test", { cwd, env });
+    execSync("git add -A", { cwd, env });
+    execSync("git commit -m init", { cwd, env });
   });
 
   afterEach(async () => {

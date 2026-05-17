@@ -62,24 +62,16 @@ function formatDeepSeek5xx(status: string, probe?: DeepSeekProbeResult): string 
   return `${head}${probeNote}${action}`;
 }
 
-export function reasonPrefixFor(
-  reason: "budget" | "aborted" | "context-guard" | "stuck",
-  iterCap: number,
-): string {
+export function reasonPrefixFor(reason: "aborted" | "context-guard" | "stuck"): string {
   if (reason === "aborted") return t("errors.reasonAborted");
   if (reason === "context-guard") return t("errors.reasonContextGuard");
-  if (reason === "stuck") return t("errors.reasonStuck");
-  return t("errors.reasonBudget", { iterCap });
+  return t("errors.reasonStuck");
 }
 
-export function errorLabelFor(
-  reason: "budget" | "aborted" | "context-guard" | "stuck",
-  iterCap: number,
-): string {
+export function errorLabelFor(reason: "aborted" | "context-guard" | "stuck"): string {
   if (reason === "aborted") return t("errors.labelAborted");
   if (reason === "context-guard") return t("errors.labelContextGuard");
-  if (reason === "stuck") return t("errors.labelStuck");
-  return t("errors.labelBudget", { iterCap });
+  return t("errors.labelStuck");
 }
 
 function extractDeepSeekErrorMessage(body: string): string {

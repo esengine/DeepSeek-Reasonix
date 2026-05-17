@@ -224,10 +224,9 @@ function resolveSensitivePath(token: string, projectRoot: string): string | null
   return pathMod.resolve(projectRoot, expanded);
 }
 
-/** Convert a tilde-relative prefix to an absolute path for comparison. */
 function expandPrefix(prefix: string): string {
   if (prefix.startsWith("~")) return pathMod.join(homedir(), prefix.slice(1));
-  return prefix;
+  return pathMod.resolve(prefix);
 }
 
 /** Ensure prefix matches only at directory boundaries (not mid-segment). */

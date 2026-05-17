@@ -1,6 +1,6 @@
 /** Shared async-fire-and-forget reconnect trigger — called by both `/mcp reconnect` and the McpBrowser `r` keybind. */
 
-import { mcpEnvFor, readConfig } from "../../config.js";
+import { normalizeMcpConfig, readConfig } from "../../config.js";
 import { reconnectMcpServer } from "../../mcp/reconnect.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
 import type { McpTool } from "../../mcp/types.js";
@@ -25,19 +25,22 @@ export function kickOffMcpReconnect(
   let liveTarget = target;
   void (async () => {
     try {
-      const env = (() => {
-        try {
-          return mcpEnvFor(parseMcpSpec(liveTarget.spec).name, readConfig());
-        } catch {
-          return undefined;
-        }
-      })();
+      const parsed = parseMcpSpec(liveTarget.spec);
+      const cfg = readConfig();
+      const normalized = normalizeMcpConfig(cfg);
+      const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
+      const env = matched && matched.transport === "stdio" ? matched.env : undefined;
+      const headers =
+        matched && (matched.transport === "sse" || matched.transport === "streamable-http")
+          ? matched.headers
+          : undefined;
       const result = await reconnectMcpServer({
         host: liveTarget.host,
         spec: liveTarget.spec,
         beforeTools,
         accept,
         env,
+        headers,
       });
       if (result.ok) {
         if (result.kind === "append" && applyAppend) {

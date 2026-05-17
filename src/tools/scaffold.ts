@@ -1,6 +1,6 @@
 /** Agent-facing tools for scaffolding skills + MCP servers from chat. Persists via the same paths the wizard / `/skill new` use. */
 
-import { defaultConfigPath, readConfig, writeConfig } from "../config.js";
+import { defaultConfigPath, loadResolvedSkillPaths, readConfig, writeConfig } from "../config.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import { preflightStdioSpec } from "../mcp/preflight.js";
 import { type McpSpec, parseMcpSpec } from "../mcp/spec.js";
@@ -123,6 +123,9 @@ export function registerScaffoldTools(
       const store = new SkillStore({
         homeDir: opts.homeDir,
         projectRoot: opts.projectRoot,
+        customSkillPaths: opts.projectRoot
+          ? loadResolvedSkillPaths(opts.projectRoot, configPath)
+          : [],
       });
       const result = store.createWithContent(name, scope, content);
       if ("error" in result) {

@@ -34,6 +34,19 @@ export const zhCN: TranslationSchema = {
     update: "检查较新版本的 Reasonix 并安装。",
     index: "构建（或增量刷新）本地语义搜索索引。",
   },
+  stats: {
+    usageHint: "运行 `reasonix chat`、`reasonix code` 或 `reasonix run <task>` — 每次对话都会记录",
+    usageDetail: "每次对话在日志中追加一行，`reasonix stats` 会将其汇总统计。",
+  },
+  run: {
+    missingApiKey:
+      "未设置 DEEPSEEK_API_KEY 且标准输入不是 TTY（无法交互式输入）。\n" +
+      "请设置环境变量，或先运行 `reasonix chat` 交互一次以保存密钥。\n",
+  },
+  sessions: {
+    emptyHint:
+      "暂无已保存的会话 — 运行 `reasonix chat`（会话会自动保存，除非使用了 --no-session）。",
+  },
   ui: {
     welcome: "随时运行 `reasonix` 开始聊天 — 您的设置将被记住。",
     taglineChat: "DeepSeek 原生智能体",
@@ -271,8 +284,8 @@ export const zhCN: TranslationSchema = {
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
     },
     skill: {
-      description: "列出 / 运行用户技能（<project>/.reasonix/skills + ~/.reasonix/skills）",
-      argsHint: "[list|show <name>|<name> [args]]",
+      description: "列出 / 运行用户技能（项目 + 自定义 + 全局 + 内置）",
+      argsHint: "[list|paths|show <name>|<name> [args]]",
     },
     hooks: {
       description: "列出活跃的 hooks（.reasonix/ 下的 settings.json）· reload 从磁盘重新读取",
@@ -317,6 +330,10 @@ export const zhCN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "列出已保存的会话（当前标记为 ▸）" },
+    qq: {
+      description: "连接、查看或断开当前会话的 QQ 通道",
+      argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
+    },
     setup: { description: "提醒您退出并运行 `reasonix setup`" },
     semantic: {
       description: "显示 semantic_search 状态 — 已构建？Ollama 已安装？如何启用",
@@ -589,10 +606,8 @@ export const zhCN: TranslationSchema = {
       "会话预算已用完 — 已花费 ${spent} ≥ 上限 ${cap}。用 /budget <usd> 提高上限，/budget off 清除上限，或结束会话。",
     budget80Pct: "▲ 预算已用 80% — ${spent} / ${cap}。下一两轮可能就触顶。",
     proArmed: "⇧ /pro 已装备 — 本轮使用 deepseek-v4-pro（一次性 · 本轮后自动解除）",
-    abortedAtIter:
-      "在第 {iter}/{cap} 次工具调用处中断 — 未生成总结即停止（按 ↑ + Enter 或 /retry 恢复）",
+    abortedAtIter: "在第 {iter} 次工具调用处中断 — 未生成总结即停止（按 ↑ + Enter 或 /retry 恢复）",
     toolUploadStatus: "工具结果已上传 · 模型在生成下一条响应前思考中…",
-    toolBudgetWarning: "已用 {iter}/{cap} 次工具调用 — 接近上限。按 Esc 立即强制总结。",
     preflightFoldStatus: "预检：上下文接近上限，尝试折叠…",
     preflightFolded:
       "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）— 已折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。发送中。",
@@ -639,11 +654,9 @@ export const zhCN: TranslationSchema = {
     reasonAborted: "[用户已中断（Esc） — 正在总结到目前为止的发现]",
     reasonContextGuard: "[上下文额度即将耗尽 — 在下一次调用溢出之前先总结]",
     reasonStuck: "[卡在重复的工具调用上 — 说明已尝试的方法以及阻塞点]",
-    reasonBudget: "[工具调用配额（{iterCap}）已用尽 — 基于已发现的内容强制总结]",
     labelAborted: "用户中断",
     labelContextGuard: "触发上下文保护（prompt > 80% 窗口）",
     labelStuck: "卡死（重复工具调用被反风暴机制抑制）",
-    labelBudget: "工具调用配额（{iterCap}）已用尽",
   },
   handlers: {
     basic: {
@@ -1005,13 +1018,13 @@ export const zhCN: TranslationSchema = {
       usageSearxng: "  /search-engine searxng            使用 SearXNG 默认端点",
       usageSearxngUrl: "  /search-engine searxng <url>      使用 SearXNG 自定义端点",
       usageMetaso:
-        "  /search-engine metaso              使用 Metaso API（每天 100 次免费，设置 METASO_API_KEY 提高额度）",
+        "  /search-engine metaso              使用 Metaso API（每天 100 次免费，配置你自己的 API 密钥可提升限额）",
       alias: "别名：/se",
       searxngInfo: "SearXNG 是一个自托管的元搜索引擎（https://github.com/searxng/searxng）。",
       searxngInstall: "安装命令：  docker run -d -p 8080:8080 searxng/searxng",
       switched: '已切换网页搜索引擎为 "{engine}"。{note}',
       switchedSearxngNote: " 请确保 SearXNG 在 {endpoint} 运行。",
-      switchedMetasoNote: " 每日限额 100 次（设置 METASO_API_KEY 可提升限额）。",
+      switchedMetasoNote: " 每日限额 100 次（配置你自己的 API 密钥可提升限额）。",
       confirmed: '✓ 网页搜索引擎已设为 "{engine}"{detail}。下一轮模型调用将生效。',
       confirmedDetail: "（{endpoint}）",
     },
@@ -1034,6 +1047,18 @@ export const zhCN: TranslationSchema = {
       newUsage: "用法：/skill new <name> [--global]",
       newCreated: "▸ 已创建技能：{name}\n  {path}\n  编辑后用 `/skill {name}` 调用",
       newError: "▲ /skill new 失败：{reason}",
+      pathsHeader: "技能路径（按优先级）：",
+      pathsPriority:
+        "优先级：项目 > 配置顺序中的自定义路径 > 全局 > 内置。更改会在下次 /new 或新会话刷新系统提示词时生效。",
+      pathsUsage:
+        "用法：/skill paths [list]\n       /skill paths add <path>\n       /skill paths remove <path|N>",
+      pathsAddUsage: "用法：/skill paths add <path>",
+      pathsRemoveUsage: "用法：/skill paths remove <path|N>",
+      pathsAdded: "▸ 已添加自定义技能路径：{path}",
+      pathsAlready: "▸ 自定义技能路径已存在：{path}",
+      pathsRemoved: "▸ 已移除自定义技能路径：{path}",
+      pathsRemoveNotFound: "▸ 没有匹配的自定义技能路径：{target}",
+      pathsRestartHint: "当前会话的系统提示词不会热更新；运行 /new 或启动新会话以刷新技能索引。",
     },
   },
   statusBar: {
@@ -1082,6 +1107,7 @@ export const zhCN: TranslationSchema = {
     editorMissing:
       "未设置 $EDITOR / $VISUAL / $GIT_EDITOR — 请导出环境变量（例如 `export EDITOR=nano`）后重试",
     editorExited: "编辑器异常退出，返回码 {code}",
+    typeaheadStaged: "\u25b8 {count} 行已暂存 \u00b7 esc 召回",
   },
   pathConfirm: {
     title: "沙箱外路径",

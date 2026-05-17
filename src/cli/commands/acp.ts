@@ -28,7 +28,7 @@ import {
   loadBaseUrl,
   loadPreset,
   loadReasoningEffort,
-  mcpEnvFor,
+  normalizeMcpConfig,
   readConfig,
 } from "../../config.js";
 import { loadEditMode } from "../../config.js";
@@ -41,7 +41,6 @@ import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js"
 import { McpClient } from "../../mcp/client.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { bridgeMcpTools } from "../../mcp/registry.js";
-import { parseMcpSpec } from "../../mcp/spec.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import { timestampSuffix } from "../../memory/session.js";
 import { openTranscriptFile, recordFromLoopEvent, writeRecord } from "../../transcript/log.js";
@@ -93,22 +92,21 @@ export async function loadMcpServers(
   const clients: McpClient[] = [];
   if (specs.length === 0) return clients;
   const cfg = readConfig();
-  const disabledNames = new Set(cfg.mcpDisabled ?? []);
-  for (const raw of specs) {
+  const normalizedSpecs = normalizeMcpConfig(cfg, specs);
+  for (const spec of normalizedSpecs) {
     let label = "anon";
     let mcp: McpClient | undefined;
     try {
-      const spec = parseMcpSpec(raw);
       label = spec.name ?? "anon";
-      if (spec.name && disabledNames.has(spec.name)) {
+      if (spec.disabled) {
         process.stderr.write(`${formatMcpLifecycleEvent({ state: "disabled", name: label })}\n`);
         continue;
       }
       process.stderr.write(`${formatMcpLifecycleEvent({ state: "handshake", name: label })}\n`);
       const t0 = Date.now();
-      const prefix = resolveMcpPrefix(spec.name, specs.length, globalPrefix);
+      const prefix = resolveMcpPrefix(spec.name, normalizedSpecs.length, globalPrefix);
       if (spec.transport === "stdio") preflightStdioSpec(spec);
-      const transport = buildTransportFromSpec(spec, { env: mcpEnvFor(spec.name, cfg) });
+      const transport = buildTransportFromSpec(spec);
       mcp = new McpClient({ transport });
       await mcp.initialize();
       const bridge = await bridgeMcpTools(mcp, {

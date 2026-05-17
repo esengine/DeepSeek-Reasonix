@@ -2,13 +2,13 @@
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SkillStore, applySkillsIndex, validateSkillFrontmatter } from "../src/skills.js";
 
 const BASE = "You are a test assistant.";
 
-type SkillRoot = "project" | "global";
+type SkillRoot = "project" | "global" | "custom";
 
 function writeSkillDir(
   root: string,
@@ -21,7 +21,9 @@ function writeSkillDir(
   const parent =
     which === "global"
       ? join(homeOrProject, ".reasonix", "skills")
-      : join(root, ".reasonix", "skills");
+      : which === "project"
+        ? join(root, ".reasonix", "skills")
+        : homeOrProject;
   const dir = join(parent, name);
   mkdirSync(dir, { recursive: true });
   const fmLines = ["---"];
@@ -112,6 +114,25 @@ describe("SkillStore", () => {
     expect(list[0]?.path).toContain(projectRoot);
   });
 
+  it("discovers .agents/skills as a default root (#870) — both project and global", () => {
+    const projParent = join(projectRoot, ".agents", "skills");
+    mkdirSync(projParent, { recursive: true });
+    const projPath = join(projParent, "deploy", "SKILL.md");
+    mkdirSync(join(projParent, "deploy"));
+    writeFileSync(projPath, "---\ndescription: from .agents\n---\nbody\n", "utf8");
+
+    const globParent = join(home, ".agents", "skills");
+    mkdirSync(globParent, { recursive: true });
+    const globPath = join(globParent, "review", "SKILL.md");
+    mkdirSync(join(globParent, "review"));
+    writeFileSync(globPath, "---\ndescription: glob agents\n---\nbody\n", "utf8");
+
+    const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+    const names = store.list().map((s) => s.name);
+    expect(names).toContain("deploy");
+    expect(names).toContain("review");
+  });
+
   it("project scope wins on a name collision with global", () => {
     writeSkillDir(projectRoot, "global", "review", { description: "global one" }, "G", home);
     writeSkillDir(projectRoot, "project", "review", { description: "project one" }, "P", home);
@@ -146,6 +167,103 @@ describe("SkillStore", () => {
     writeFileSync(join(dotDir, ".hidden.md"), "---\ndescription: x\n---\nbody\n", "utf8");
     const list = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true }).list();
     expect(list.map((s) => s.name)).toEqual(["ok"]);
+  });
+
+  it("reads custom flat and dir-layout skills directly from configured roots", () => {
+    const custom = mkdtempSync(join(tmpdir(), "reasonix-skills-custom-"));
+    try {
+      writeSkillDir(
+        projectRoot,
+        "custom",
+        "custom-dir",
+        { description: "custom dir" },
+        "D",
+        custom,
+      );
+      const flatPath = join(custom, "custom-flat.md");
+      writeFileSync(flatPath, "---\ndescription: custom flat\n---\nF\n", "utf8");
+      const list = new SkillStore({
+        homeDir: home,
+        projectRoot,
+        customSkillPaths: [custom],
+        disableBuiltins: true,
+      }).list();
+      expect(list.map((s) => `${s.scope}:${s.name}`)).toEqual([
+        "custom:custom-dir",
+        "custom:custom-flat",
+      ]);
+      expect(list.find((s) => s.name === "custom-flat")?.path).toBe(flatPath);
+    } finally {
+      rmSync(custom, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates custom roots and preserves first priority", () => {
+    const custom = mkdtempSync(join(tmpdir(), "reasonix-skills-custom-"));
+    try {
+      const roots = new SkillStore({
+        homeDir: home,
+        projectRoot,
+        customSkillPaths: [custom, custom],
+        disableBuiltins: true,
+      }).customRoots();
+      expect(roots.map((r) => r.dir)).toEqual([custom]);
+    } finally {
+      rmSync(custom, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves relative custom roots against projectRoot for discovery", () => {
+    const relativeRoot = "skills-local";
+    const custom = join(projectRoot, relativeRoot);
+    writeSkillDir(projectRoot, "custom", "local-skill", { description: "local" }, "L", custom);
+    const store = new SkillStore({
+      homeDir: home,
+      projectRoot,
+      customSkillPaths: [relativeRoot, custom],
+      disableBuiltins: true,
+    });
+    expect(store.customRoots().map((r) => r.dir)).toEqual([resolve(projectRoot, relativeRoot)]);
+    expect(store.list().map((s) => s.name)).toEqual(["local-skill"]);
+  });
+
+  it("keeps priority project > custom > global on same-name collisions", () => {
+    const custom = mkdtempSync(join(tmpdir(), "reasonix-skills-custom-"));
+    try {
+      writeSkillDir(projectRoot, "global", "same", { description: "global" }, "G", home);
+      writeSkillDir(projectRoot, "custom", "same", { description: "custom" }, "C", custom);
+      const customWinner = new SkillStore({
+        homeDir: home,
+        projectRoot,
+        customSkillPaths: [custom],
+        disableBuiltins: true,
+      }).read("same");
+      expect(customWinner?.scope).toBe("custom");
+      writeSkillDir(projectRoot, "project", "same", { description: "project" }, "P", home);
+      const projectWinner = new SkillStore({
+        homeDir: home,
+        projectRoot,
+        customSkillPaths: [custom],
+        disableBuiltins: true,
+      }).read("same");
+      expect(projectWinner?.scope).toBe("project");
+    } finally {
+      rmSync(custom, { recursive: true, force: true });
+    }
+  });
+
+  it("reports invalid custom root status without throwing", () => {
+    const missing = join(projectRoot, "missing-skills");
+    const notDir = join(projectRoot, "file.txt");
+    writeFileSync(notDir, "x", "utf8");
+    const store = new SkillStore({
+      homeDir: home,
+      projectRoot,
+      customSkillPaths: [missing, notDir],
+      disableBuiltins: true,
+    });
+    expect(store.list()).toEqual([]);
+    expect(store.customRoots().map((r) => r.status)).toEqual(["missing", "not-directory"]);
   });
 
   describe("create() — /skill new scaffold (#366)", () => {
@@ -396,58 +514,6 @@ describe("Skill frontmatter — runAs", () => {
     );
     const store = new SkillStore({ homeDir: home, disableBuiltins: true });
     expect(store.read("empty")?.allowedTools).toBeUndefined();
-  });
-
-  it("parses max-iters and passes it through as maxToolIters", () => {
-    writeSkillDir(
-      home,
-      "global",
-      "big",
-      { description: "...", runAs: "subagent", "max-iters": "32" },
-      "body",
-      home,
-    );
-    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("big")?.maxToolIters).toBe(32);
-  });
-
-  it("passes large max-iters values through unchanged (no upper clamp)", () => {
-    writeSkillDir(
-      home,
-      "global",
-      "bigger",
-      { description: "...", runAs: "subagent", "max-iters": "9999" },
-      "body",
-      home,
-    );
-    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("bigger")?.maxToolIters).toBe(9999);
-  });
-
-  it("ignores max-iters below 1 (falls back to subagent default)", () => {
-    writeSkillDir(
-      home,
-      "global",
-      "toosmall",
-      { description: "...", runAs: "subagent", "max-iters": "0" },
-      "body",
-      home,
-    );
-    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("toosmall")?.maxToolIters).toBeUndefined();
-  });
-
-  it("ignores max-iters that isn't a number", () => {
-    writeSkillDir(
-      home,
-      "global",
-      "junk",
-      { description: "...", runAs: "subagent", "max-iters": "many" },
-      "body",
-      home,
-    );
-    const store = new SkillStore({ homeDir: home, disableBuiltins: true });
-    expect(store.read("junk")?.maxToolIters).toBeUndefined();
   });
 });
 

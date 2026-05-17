@@ -89,9 +89,22 @@ export class ToolCallRepair {
       const args = call.function?.arguments ?? "";
       const r = repairTruncatedJson(args);
       if (r.changed) {
-        call.function.arguments = r.repaired;
-        report.truncationsFixed++;
-        report.notes.push(...r.notes.map((n) => `[${call.function.name}] ${n}`));
+        if (r.fallback) {
+          // Hard fallback — all repair attempts failed. Leave the
+          // original truncated args untouched so tools.ts dispatch
+          // rejects them with "invalid JSON" rather than silently
+          // running with {} (which would miss required params or
+          // succeed with nonsense args). The JSON parse error is more
+          // informative to the model than "missing required parameter".
+          report.truncationsFixed++;
+          report.notes.push(
+            ...r.notes.map((n) => `[${call.function?.name}] ⚠️ TRUNCATION UNRECOVERABLE: ${n}`),
+          );
+        } else {
+          call.function.arguments = r.repaired;
+          report.truncationsFixed++;
+          report.notes.push(...r.notes.map((n) => `[${call.function.name}] ${n}`));
+        }
       }
     }
 

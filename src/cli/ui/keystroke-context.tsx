@@ -32,16 +32,25 @@ interface KeystrokeBus {
 
 export type KeystrokeHandler = (ev: KeyEvent) => void;
 
+/** Minimum surface KeystrokeProvider needs from a key source. StdinReader implements this; the Rust input adapter does too. */
+export interface KeystrokeReader {
+  start(): void;
+  subscribe(handler: KeystrokeHandler): () => void;
+}
+
 const KeystrokeContext = createContext<KeystrokeBus | null>(null);
 
 export interface KeystrokeProviderProps {
   children: React.ReactNode;
   /**
    * Optional reader override. Tests inject a synthetic reader so
-   * they can `feed()` chunks instead of touching real stdin. Production
-   * callers leave this unset and get the singleton.
+   * they can `feed()` chunks instead of touching real stdin; the
+   * Rust input adapter (when `REASONIX_RENDERER=rust`) injects one
+   * that receives events from a spawned `reasonix-render --emit-input`
+   * child. Production stdin callers leave this unset and get the
+   * singleton.
    */
-  reader?: StdinReader;
+  reader?: KeystrokeReader;
 }
 
 export function KeystrokeProvider({

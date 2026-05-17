@@ -79,6 +79,7 @@
     "react": "^19.2.6",
     "string-width": "^7.2.0",
     "undici": "^8.2.0",
+    "ws": "^8.20.1",
     "zod": "^4.4.1"
   },
   "devDependencies": {
@@ -88,6 +89,7 @@
     "@types/node": "^22.9.0",
     "@types/picomatch": "^4.0.3",
     "@types/react": "^19.2.14",
+    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^2.1.5",
     "esbuild": "^0.21.5",
     "highlight.js": "^11.10.0",

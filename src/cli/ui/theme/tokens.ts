@@ -57,7 +57,7 @@ type ThemeBase = Omit<ThemeTokens, "card">;
 
 function card(fg: ThemeTokens["fg"], tone: ThemeTokens["tone"]): ThemeTokens["card"] {
   return {
-    user: { color: fg.meta, glyph: "◇" },
+    user: { color: tone.brand, glyph: "◇" },
     reasoning: { color: tone.accent, glyph: "◆" },
     streaming: { color: tone.brand, glyph: "◈" },
     task: { color: tone.warn, glyph: "▶" },

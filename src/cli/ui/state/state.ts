@@ -34,6 +34,12 @@ export interface StatusBar {
   promptTokens?: number;
   /** Model context-window cap (denominator for the usage pill). */
   promptCap?: number;
+  /** Cumulative prompt tokens billed across the session — drives the dock "tok ↑" segment. */
+  sessionInputTokens: number;
+  /** Cumulative completion tokens billed across the session — drives the dock "tok ↓" segment. */
+  sessionOutputTokens: number;
+  /** Wall-clock ms for the most recent completed turn. */
+  lastTurnMs: number;
   countdownSeconds?: number;
   recording?: { sizeBytes: number; events: number; path: string };
   /** null → user is on a custom model that doesn't match any preset; pill falls back to the model id. */
@@ -80,6 +86,9 @@ export function initialState(session: SessionInfo, cards: ReadonlyArray<Card> = 
       cost: 0,
       sessionCost: 0,
       cacheHit: 0,
+      sessionInputTokens: 0,
+      sessionOutputTokens: 0,
+      lastTurnMs: 0,
     },
     focusedCardId: null,
     toasts: [],

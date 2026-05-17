@@ -4,17 +4,24 @@ export interface TruncationRepairResult {
   repaired: string;
   changed: boolean;
   notes: string[];
+  /** True when all repair attempts failed and the result falls back to "{}" — the original args are unrecoverable. */
+  fallback: boolean;
 }
 
 export function repairTruncatedJson(input: string): TruncationRepairResult {
   const notes: string[] = [];
   if (!input || !input.trim()) {
-    return { repaired: "{}", changed: input !== "{}", notes: ["empty input → {}"] };
+    return {
+      repaired: "{}",
+      changed: input !== "{}",
+      notes: ["empty input → {}"],
+      fallback: false,
+    };
   }
   // Fast path: already parseable.
   try {
     JSON.parse(input);
-    return { repaired: input, changed: false, notes: [] };
+    return { repaired: input, changed: false, notes: [], fallback: false };
   } catch {
     /* fall through */
   }
@@ -82,9 +89,12 @@ export function repairTruncatedJson(input: string): TruncationRepairResult {
 
   try {
     JSON.parse(s);
-    return { repaired: s, changed: true, notes };
+    return { repaired: s, changed: s !== input, notes, fallback: false };
   } catch (err) {
+    const preview =
+      input.length <= 500 ? input : `${input.slice(0, 500)} …[+${input.length - 500} chars]`;
     notes.push(`fallback to {}: ${(err as Error).message}`);
-    return { repaired: "{}", changed: true, notes };
+    notes.push(`unrecoverable truncation — original args preview: ${preview}`);
+    return { repaired: "{}", changed: true, notes, fallback: true };
   }
 }

@@ -173,9 +173,17 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "skill",
     group: "extend",
-    argsHint: "[list|show <name>|new <name>|<name> [args]]",
-    summary: "list / run / scaffold user skills (<project>/.reasonix/skills + ~/.reasonix/skills)",
+    argsHint:
+      "[list|paths|paths add <path>|paths remove <path|N>|show <name>|new <name>|<name> [args]]",
+    summary: "list / run / scaffold skills (project + custom + global + builtin)",
     argCompleter: "skills",
+  },
+  {
+    cmd: "qq",
+    group: "extend",
+    argsHint: "<connect|status|disconnect>",
+    summary: "connect, inspect, or disconnect the QQ channel",
+    argCompleter: ["connect", "status", "disconnect"],
   },
 
   {
@@ -276,6 +284,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
       "switch the workspace root mid-session — re-points fs / shell / memory tools, reloads project hooks, refreshes the at-mention walker",
     contextual: "code",
     aliases: ["sandbox"],
+    argCompleter: "path",
   },
 
   {

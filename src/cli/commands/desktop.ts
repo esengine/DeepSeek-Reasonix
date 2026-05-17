@@ -24,6 +24,7 @@ import {
   loadPreset,
   loadReasoningEffort,
   loadRecentWorkspaces,
+  loadResolvedSkillPaths,
   loadWorkspaceDir,
   pushRecentWorkspace,
   readConfig,
@@ -60,7 +61,7 @@ import {
 } from "../../memory/session.js";
 import { MemoryStore } from "../../memory/user.js";
 import { SkillStore } from "../../skills.js";
-import { countTokens } from "../../tokenizer.js";
+import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
 import { VERSION } from "../../version.js";
@@ -108,6 +109,9 @@ type InMessage = { tabId?: string } & (
   | { cmd: "mcp_specs_remove"; spec: string }
   | { cmd: "skills_get" }
   | { cmd: "skill_run"; name: string; args?: string }
+  | { cmd: "jobs_list" }
+  | { cmd: "jobs_stop"; jobId: number }
+  | { cmd: "jobs_stop_all" }
 );
 
 interface NeedsSetupEvent {
@@ -307,7 +311,7 @@ interface MemoryEvent {
 interface SkillInfo {
   name: string;
   description: string;
-  scope: "project" | "global" | "builtin";
+  scope: "project" | "custom" | "global" | "builtin";
   path: string;
   runAs: "inline" | "subagent";
   model?: string;
@@ -316,6 +320,24 @@ interface SkillInfo {
 interface SkillsEvent {
   type: "$skills";
   items: SkillInfo[];
+}
+
+interface JobInfoPayload {
+  id: number;
+  tabId: string;
+  sessionLabel: string;
+  command: string;
+  pid: number | null;
+  running: boolean;
+  exitCode: number | null;
+  startedAt: number;
+  outputTail: string;
+  spawnError?: string;
+}
+
+interface JobsEvent {
+  type: "$jobs";
+  items: JobInfoPayload[];
 }
 
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
@@ -346,11 +368,18 @@ type EmittableEvent =
   | McpSpecsEvent
   | SkillsEvent
   | CtxBreakdownEvent
-  | MemoryEvent;
+  | MemoryEvent
+  | JobsEvent;
 
 function emit(ev: EmittableEvent, tabId?: string): void {
   const payload = tabId ? { ...ev, tabId } : ev;
   writeSync(1, Buffer.from(`${JSON.stringify(payload)}\n`, "utf8"));
+}
+
+function tailLines(s: string, n: number): string {
+  if (!s) return "";
+  const lines = s.split(/\r?\n/);
+  return lines.slice(-n).join("\n");
 }
 
 function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
@@ -519,8 +548,8 @@ function emitMemory(tab: Tab): void {
 function emitCtxBreakdown(tab: Tab): void {
   if (!tab.runtime) return;
   try {
-    const sys = countTokens(tab.runtime.loop.prefix.system);
-    const tools = countTokens(JSON.stringify(tab.runtime.loop.prefix.toolSpecs));
+    const sys = countTokensBounded(tab.runtime.loop.prefix.system);
+    const tools = countTokensBounded(JSON.stringify(tab.runtime.loop.prefix.toolSpecs));
     emit({ type: "$ctx_breakdown", reservedTokens: sys + tools }, tab.id);
   } catch {
     // tokenizer warmup can throw on first call before the data file loads
@@ -529,7 +558,10 @@ function emitCtxBreakdown(tab: Tab): void {
 
 function emitSkills(tab: Tab): void {
   try {
-    const store = new SkillStore({ projectRoot: tab.rootDir });
+    const store = new SkillStore({
+      projectRoot: tab.rootDir,
+      customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+    });
     const items = store.list().map((s) => ({
       name: s.name,
       description: s.description,
@@ -757,6 +789,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const toolset = await buildCodeToolset({
       rootDir: tab.rootDir,
       onSkillInstalled: () => emitSkills(tab),
+      onJobsChanged: () => emitJobs(),
     });
     tab.toolset = toolset;
     tab.system = codeSystemPrompt(tab.rootDir, {
@@ -824,7 +857,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   async function closeTab(tab: Tab): Promise<void> {
-    tab.aborter?.abort();
+    abortTurn(tab);
     try {
       await tab.toolset?.jobs.shutdown();
     } catch {
@@ -897,7 +930,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitSettings(tab);
       return;
     }
-    tab.aborter?.abort();
+    abortTurn(tab);
     try {
       await tab.toolset?.jobs.shutdown();
     } catch {
@@ -916,6 +949,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.toolset = await buildCodeToolset({
       rootDir: target,
       onSkillInstalled: () => emitSkills(tab),
+      onJobsChanged: () => emitJobs(),
     });
     tab.system = codeSystemPrompt(target, {
       hasSemanticSearch: tab.toolset.semantic.enabled,
@@ -934,6 +968,75 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     return undefined;
   }
 
+  function abortTurn(tab: Tab): void {
+    tab.aborter?.abort();
+    tab.runtime?.loop.abort();
+  }
+
+  function tabSessionLabel(tab: Tab): string {
+    if (tab.currentSession) {
+      try {
+        const summary = loadSessionMeta(tab.currentSession).summary?.trim();
+        if (summary) return summary;
+      } catch {
+        // session file unreadable — fall through to workspace basename
+      }
+    }
+    return tab.rootDir.split(/[\\/]/).filter(Boolean).pop() ?? tab.rootDir;
+  }
+
+  function emitJobs(): void {
+    const items: JobInfoPayload[] = [];
+    for (const t of tabs.values()) {
+      const reg = t.toolset?.jobs;
+      if (!reg) continue;
+      const label = tabSessionLabel(t);
+      for (const j of reg.list()) {
+        items.push({
+          id: j.id,
+          tabId: t.id,
+          sessionLabel: label,
+          command: j.command,
+          pid: j.pid,
+          running: j.running,
+          exitCode: j.exitCode,
+          startedAt: j.startedAt,
+          outputTail: tailLines(j.output, 8),
+          spawnError: j.spawnError,
+        });
+      }
+    }
+    items.sort((a, b) => {
+      if (a.running !== b.running) return a.running ? -1 : 1;
+      return b.startedAt - a.startedAt;
+    });
+    emit({ type: "$jobs", items });
+  }
+
+  async function stopJob(jobId: number): Promise<boolean> {
+    for (const t of tabs.values()) {
+      const reg = t.toolset?.jobs;
+      if (!reg) continue;
+      const hit = reg.list().find((j) => j.id === jobId);
+      if (!hit) continue;
+      await reg.stop(jobId);
+      return true;
+    }
+    return false;
+  }
+
+  async function stopAllJobs(): Promise<void> {
+    const ops: Promise<unknown>[] = [];
+    for (const t of tabs.values()) {
+      const reg = t.toolset?.jobs;
+      if (!reg) continue;
+      for (const j of reg.list()) {
+        if (j.running) ops.push(reg.stop(j.id));
+      }
+    }
+    await Promise.allSettled(ops);
+  }
+
   function cancelPendingGates(tab: Tab): void {
     const hadActivePlan = tab.planTotalSteps > 0 || tab.completedStepIds.size > 0;
     const ids = [...tab.pendingGateIds];
@@ -947,8 +1050,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   const first = createTabSkeleton();
-  process.once("exit", () => {
-    for (const t of tabs.values()) void t.toolset?.jobs.shutdown();
+
+  let shuttingDown = false;
+  async function gracefulShutdown(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await Promise.allSettled(
+      [...tabs.values()].map((t) => t.toolset?.jobs.shutdown(1500) ?? Promise.resolve()),
+    );
+    process.exit(0);
+  }
+  process.on("SIGTERM", () => {
+    void gracefulShutdown();
+  });
+  process.on("SIGINT", () => {
+    void gracefulShutdown();
   });
 
   pauseGate.on((req) => {
@@ -1239,6 +1355,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
 
+    if (msg.cmd === "jobs_list") {
+      emitJobs();
+      return;
+    }
+    if (msg.cmd === "jobs_stop") {
+      void stopJob(msg.jobId).finally(() => emitJobs());
+      return;
+    }
+    if (msg.cmd === "jobs_stop_all") {
+      void stopAllJobs().finally(() => emitJobs());
+      return;
+    }
+
     const tab = msg.tabId ? tabs.get(msg.tabId) : first;
     if (!tab) {
       emit({ type: "$error", message: `unknown tab: ${msg.tabId}` });
@@ -1246,7 +1375,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
 
     if (msg.cmd === "abort") {
-      tab.aborter?.abort();
+      abortTurn(tab);
       cancelPendingGates(tab);
       return;
     }
@@ -1313,7 +1442,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         return;
       }
       try {
-        const store = new SkillStore({ projectRoot: tab.rootDir });
+        const store = new SkillStore({
+          projectRoot: tab.rootDir,
+          customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+        });
         const found = store.read(msg.name);
         if (!found) {
           emit({ type: "$error", message: `skill not found: ${msg.name}` }, tab.id);
@@ -1342,7 +1474,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         const records = loadSessionMessages(msg.name);
         const meta = loadSessionMeta(msg.name);
-        tab.aborter?.abort();
+        abortTurn(tab);
         cancelPendingGates(tab);
         tab.currentSession = msg.name;
         if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
@@ -1365,7 +1497,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
-      tab.aborter?.abort();
+      abortTurn(tab);
       cancelPendingGates(tab);
       tab.currentSession = mintSessionFor(tab.rootDir);
       if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
@@ -1508,5 +1640,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
   });
 
-  await new Promise<void>((resolve) => rl.on("close", resolve));
+  await new Promise<void>((resolve) => {
+    rl.on("close", () => {
+      void gracefulShutdown();
+      resolve();
+    });
+  });
 }
