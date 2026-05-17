@@ -3,6 +3,77 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] — 2026-05-17
+
+**Headline:** The Rust TUI is now the default TUI. `npx reasonix@latest`
+on any supported platform (win32-x64, linux-x64, linux-arm64, darwin-x64,
+darwin-arm64) pulls a pre-built ratatui binary as an `optionalDependencies`
+sub-package and renders the full agent loop natively — no cargo, no
+toolchain setup, no opt-in flag. The Ink/Node TUI is still shipped and
+reachable via `--node` for users who hit a regression or run on an
+unsupported platform; the renderer-resolver auto-falls-back to Ink with
+a one-line stderr hint when no rust binary is locatable. Inside the rust
+TUI, **integrated mode** is the default too (rust owns keyboard + mouse +
+composer directly), which fixes the multi-press Ctrl+D + dropped preset
+clicks + Ctrl+C terminal-state leak that the split keystroke-bus path had.
+Bare `reasonix` (no subcommand) routes to `code` in the cwd instead of
+chat — explicit `reasonix chat` still works.
+
+**Note:** Existing users with `REASONIX_RENDERER=rust` or
+`REASONIX_RENDERER_INTEGRATED=1` set in their shell rc will see no
+behavior change (both are now no-ops with the value `=node` / `=0`
+opting back to the old behaviors).
+
+**Features:**
+
+- feat(rust): rust TUI is the default. `--node` flag (or
+  `REASONIX_RENDERER=node`) opts back to the Ink/Node renderer. Auto-
+  fallback to Ink with a stderr hint when no rust binary is found
+  (#1081)
+- feat(rust): integrated mode is the default once the rust renderer
+  is active. `REASONIX_RENDERER_INTEGRATED=0` opts back to the
+  --emit-input split keystroke bus (debug only) (#1081)
+- feat(cli): bare `reasonix` (no subcommand) now launches `code` in
+  the cwd. Drops the project-marker heuristic that used to route to
+  `chat` outside of project dirs; `reasonix chat` stays explicit (#1081)
+- feat(scene): renderer-resolver picks the binary by priority chain —
+  `REASONIX_RENDER_CMD` / `REASONIX_INPUT_CMD` env (full-command
+  override) > `REASONIX_RENDER_BIN` env (single binary path) >
+  `@reasonix/render-{platform}-{arch}` optional dependency > source-
+  tree `target/release/reasonix-render(.exe)` > `target/debug/...` >
+  `cargo run --bin reasonix-render` (source tree + cargo on PATH) >
+  missing → Ink fallback (#1081)
+- feat(scene): Setup wizard works end-to-end under the rust renderer.
+  First-launch with no saved API key shows the masked input prompt in
+  rust and accepts keystrokes via the input child / integrated event
+  path (#1081)
+- feat(scene): dashboard URL with a long token wraps inside the boot
+  panel instead of bleeding into the sidebar. `paint_link_wrapped`
+  emits each wrapped chunk as its own OSC 8 hyperlink so click-to-open
+  still hits the full URL (#1081)
+- feat(release): per-platform `@reasonix/render-*` subpackages
+  published as `optionalDependencies` of the main package. CI workflow
+  cross-compiles the rust renderer for 5 targets on tag push, uploads
+  one binary per subpackage, and `npm publish`es the 5 subpackages +
+  the main package together. `scripts/sync-render-versions.mjs` keeps
+  every subpackage version + the main `optionalDependencies` pins
+  lockstep, guarded by a `verify` + `prepublishOnly` `--check` (#1084)
+- feat(dev): `npm run dev` auto-runs `cargo build --release` ahead of
+  tsx so contributors never spawn a stale rust binary after editing
+  rust source. Silent no-op when cargo is missing (TS-only devs).
+  Added `npm run rust:build` for explicit rebuilds (#1081)
+- feat(ui): Ctrl+D wired to quit in the Ink TUI as well — the boot
+  banner already advertised it but the binding was never connected.
+  Integrated rust mode already handled it directly (#1081)
+
+**Fixes (inherited from #1070, included for 0.44.0 baseline):**
+
+- fix(rust): zero-width character handling + tab expansion in the
+  paint engine — control chars no longer overwrite adjacent cells,
+  combining marks / ZWJ / variation selectors are skipped, `\t`
+  expands to 2 spaces. Resolves the `tau-benc / tatus]` style card-
+  body fragmentation seen in 0.43.0 (#1070)
+
 ## [0.43.0] — 2026-05-14
 
 **Headline:** Desktop client graduates — `v0.42.0-*` prereleases hardened
