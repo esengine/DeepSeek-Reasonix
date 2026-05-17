@@ -1293,6 +1293,14 @@ function TabRuntime({
   });
 
   const slashCommands: SlashCmd[] = [
+    {
+      cmd: "/help",
+      desc: t("app.cmd.help"),
+      run: () => {
+        setDraft("/");
+        composerRef.current?.focus();
+      },
+    },
     { cmd: "/new", desc: t("app.cmd.newSession"), run: () => newChat(), kb: "⌘N" },
     { cmd: "/clear", desc: t("app.cmd.clearChat"), run: () => dispatch({ t: "clear" }) },
     { cmd: "/abort", desc: t("app.cmd.abort"), run: () => abort(), kb: "esc" },
@@ -1529,7 +1537,18 @@ function TabRuntime({
 
                   {state.messages.length === 0 ? (
                     <EmptyState
-                      onPick={(t) => send(t)}
+                      onPick={(text) => {
+                        const trimmed = text.trim();
+                        if (trimmed.startsWith("/")) {
+                          const cmd = trimmed.split(/\s+/)[0] ?? "";
+                          const match = slashCommands.find((s) => s.cmd === cmd);
+                          if (match) {
+                            match.run();
+                            return;
+                          }
+                        }
+                        send(text);
+                      }}
                       workspaceDir={state.settings?.workspaceDir}
                     />
                   ) : null}

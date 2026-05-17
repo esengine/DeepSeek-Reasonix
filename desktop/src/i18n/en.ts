@@ -268,6 +268,7 @@ export const en = {
       toggleCurrency: "Toggle currency (CNY / USD)",
       toggleLang: "Toggle language (CN / EN)",
       exportMd: "Copy session as Markdown",
+      help: "Show all commands",
     },
     yolo: {
       banner1: "All tool calls, shell commands, and file edits will be ",

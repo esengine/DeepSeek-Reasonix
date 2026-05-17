@@ -163,6 +163,16 @@ export function Composer({
   const nonceRef = useRef(0);
   const modelWrapRef = useRef<HTMLDivElement>(null);
 
+  // Programmatic draft transitions to "/" (e.g. /help suggestion in EmptyState, #929) must open the slash popup, since handleChange only fires on actual user input.
+  const prevDraftRef = useRef(draft);
+  useEffect(() => {
+    const prev = prevDraftRef.current;
+    prevDraftRef.current = draft;
+    if (draft === "/" && prev !== "/") {
+      setPopup({ kind: "slash", query: "" });
+    }
+  }, [draft]);
+
   useEffect(() => {
     if (!modelMenuOpen) return;
     const onDown = (e: MouseEvent) => {
