@@ -1305,7 +1305,10 @@ fn zero_width_chars_are_skipped_not_overwritten() {
     let rows = draw(&state, 80, 20);
     let all = joined(&rows);
     // ZWJ is zero-width and should be skipped. Result: "ab".
-    assert!(all.contains("ab"), "ZWJ should be skipped, rendering 'ab' as neighbors");
+    assert!(
+        all.contains("ab"),
+        "ZWJ should be skipped, rendering 'ab' as neighbors"
+    );
 }
 
 #[test]
@@ -1323,8 +1326,10 @@ fn combining_marks_are_skipped() {
     let rows = draw(&state, 80, 20);
     let all = joined(&rows);
     // Combining mark skipped: 'e' and 'x' should appear as neighbors.
-    assert!(all.contains("ex") || all.contains("e x"),
-        "combining mark should not corrupt adjacent chars; got: {all}");
+    assert!(
+        all.contains("ex") || all.contains("e x"),
+        "combining mark should not corrupt adjacent chars; got: {all}"
+    );
 }
 
 #[test]
@@ -1340,7 +1345,10 @@ fn tab_char_expands_to_spaces() {
     let rows = draw(&state, 80, 20);
     let all = joined(&rows);
     // Tab → 2 spaces: "a  b"
-    assert!(all.contains("a  b"), "tab should expand to 2 spaces; got: {all}");
+    assert!(
+        all.contains("a  b"),
+        "tab should expand to 2 spaces; got: {all}"
+    );
 }
 
 #[test]
@@ -1358,7 +1366,10 @@ fn control_characters_are_filtered() {
     let rows = draw(&state, 80, 20);
     let all = joined(&rows);
     // Control chars skipped: "abc".
-    assert!(all.contains("abc"), "control chars should be filtered; got: {all}");
+    assert!(
+        all.contains("abc"),
+        "control chars should be filtered; got: {all}"
+    );
 }
 
 #[test]
