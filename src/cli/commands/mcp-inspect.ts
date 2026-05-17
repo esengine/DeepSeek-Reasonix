@@ -18,14 +18,27 @@ export async function mcpInspectCommand(opts: McpInspectOptions): Promise<void> 
   const cfg = readConfig();
   const normalized = normalizeMcpConfig(cfg);
   const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
-  const spec = (matched
-    ? {
-        ...parsed,
-        disabled: matched.disabled,
-        env: getMcpServerEnv(matched),
-        headers: getMcpServerHeaders(matched),
-      }
-    : { ...parsed }) as unknown as import("../../mcp/spec.js").McpServerSpec;
+  const spec: import("../../mcp/spec.js").McpServerSpec = matched
+    ? (() => {
+        switch (parsed.transport) {
+          case "stdio":
+            return { ...parsed, disabled: matched.disabled, env: getMcpServerEnv(matched) };
+          case "sse":
+            return { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) };
+          case "streamable-http":
+            return { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) };
+        }
+      })()
+    : (() => {
+        switch (parsed.transport) {
+          case "stdio":
+            return { ...parsed };
+          case "sse":
+            return { ...parsed };
+          case "streamable-http":
+            return { ...parsed };
+        }
+      })();
   if (spec.transport === "stdio") preflightStdioSpec(spec);
   const transport = buildTransportFromSpec(spec);
   const client = new McpClient({ transport });

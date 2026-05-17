@@ -141,14 +141,35 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       // env/headers/disabled from the normalized config. Transport stays
       // what the raw string parsed to so the runtime key (raw) remains stable.
       const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
-      const spec = (matched
-        ? {
-            ...parsed,
-            disabled: matched.disabled,
-            env: getMcpServerEnv(matched),
-            headers: getMcpServerHeaders(matched),
-          }
-        : { ...parsed }) as unknown as import("../../mcp/spec.js").McpServerSpec;
+      const spec: import("../../mcp/spec.js").McpServerSpec = matched
+        ? (() => {
+            switch (parsed.transport) {
+              case "stdio":
+                return { ...parsed, disabled: matched.disabled, env: getMcpServerEnv(matched) };
+              case "sse":
+                return {
+                  ...parsed,
+                  disabled: matched.disabled,
+                  headers: getMcpServerHeaders(matched),
+                };
+              case "streamable-http":
+                return {
+                  ...parsed,
+                  disabled: matched.disabled,
+                  headers: getMcpServerHeaders(matched),
+                };
+            }
+          })()
+        : (() => {
+            switch (parsed.transport) {
+              case "stdio":
+                return { ...parsed };
+              case "sse":
+                return { ...parsed };
+              case "streamable-http":
+                return { ...parsed };
+            }
+          })();
       if (spec.disabled) {
         sink({ kind: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));
