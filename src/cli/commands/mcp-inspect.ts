@@ -3,7 +3,7 @@ import { McpClient } from "../../mcp/client.js";
 import { inspectMcpServer } from "../../mcp/inspect.js";
 import type { InspectionReport } from "../../mcp/inspect.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
-import { getMcpServerEnv, getMcpServerHeaders, parseMcpSpec } from "../../mcp/spec.js";
+import { overlayMatchedSpec, parseMcpSpec } from "../../mcp/spec.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 
 export interface McpInspectOptions {
@@ -18,27 +18,7 @@ export async function mcpInspectCommand(opts: McpInspectOptions): Promise<void> 
   const cfg = readConfig();
   const normalized = normalizeMcpConfig(cfg);
   const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
-  const spec: import("../../mcp/spec.js").McpServerSpec = matched
-    ? (() => {
-        switch (parsed.transport) {
-          case "stdio":
-            return { ...parsed, disabled: matched.disabled, env: getMcpServerEnv(matched) };
-          case "sse":
-            return { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) };
-          case "streamable-http":
-            return { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) };
-        }
-      })()
-    : (() => {
-        switch (parsed.transport) {
-          case "stdio":
-            return { ...parsed };
-          case "sse":
-            return { ...parsed };
-          case "streamable-http":
-            return { ...parsed };
-        }
-      })();
+  const spec = overlayMatchedSpec(parsed, matched);
   if (spec.transport === "stdio") preflightStdioSpec(spec);
   const transport = buildTransportFromSpec(spec);
   const client = new McpClient({ transport });

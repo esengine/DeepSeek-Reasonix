@@ -41,6 +41,26 @@ export function getMcpServerHeaders(spec: McpServerSpec): Record<string, string>
   return spec.transport !== "stdio" ? spec.headers : undefined;
 }
 
+export function overlayMatchedSpec(
+  parsed: McpSpec,
+  matched: McpServerSpec | undefined,
+): McpServerSpec {
+  switch (parsed.transport) {
+    case "stdio":
+      return matched
+        ? { ...parsed, disabled: matched.disabled, env: getMcpServerEnv(matched) }
+        : { ...parsed };
+    case "sse":
+      return matched
+        ? { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) }
+        : { ...parsed };
+    case "streamable-http":
+      return matched
+        ? { ...parsed, disabled: matched.disabled, headers: getMcpServerHeaders(matched) }
+        : { ...parsed };
+  }
+}
+
 /** Serialize a normalized spec back to the `--mcp` string format. Round-trips through `parseMcpSpec`. */
 export function specToRaw(spec: McpServerSpec): string {
   if (spec.transport === "stdio") {

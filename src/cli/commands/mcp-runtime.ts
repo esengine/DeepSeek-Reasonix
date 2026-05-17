@@ -5,7 +5,7 @@ import { McpClient } from "../../mcp/client.js";
 import { type InspectionReport, inspectMcpServer } from "../../mcp/inspect.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { type McpClientHost, bridgeMcpTools } from "../../mcp/registry.js";
-import { getMcpServerEnv, getMcpServerHeaders, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
+import { overlayMatchedSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import { buildMcpServerSummary } from "../../mcp/summary.js";
 import { buildTransportFromSpec } from "../../mcp/transport-from-spec.js";
 import type { ToolRegistry } from "../../tools.js";
@@ -137,39 +137,8 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     try {
       const parsed = parseMcpSpec(raw);
       label = parsed.name ?? "anon";
-      // If a mcpServers entry exists with the same name, it wins — overlay
-      // env/headers/disabled from the normalized config. Transport stays
-      // what the raw string parsed to so the runtime key (raw) remains stable.
       const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
-      const spec: import("../../mcp/spec.js").McpServerSpec = matched
-        ? (() => {
-            switch (parsed.transport) {
-              case "stdio":
-                return { ...parsed, disabled: matched.disabled, env: getMcpServerEnv(matched) };
-              case "sse":
-                return {
-                  ...parsed,
-                  disabled: matched.disabled,
-                  headers: getMcpServerHeaders(matched),
-                };
-              case "streamable-http":
-                return {
-                  ...parsed,
-                  disabled: matched.disabled,
-                  headers: getMcpServerHeaders(matched),
-                };
-            }
-          })()
-        : (() => {
-            switch (parsed.transport) {
-              case "stdio":
-                return { ...parsed };
-              case "sse":
-                return { ...parsed };
-              case "streamable-http":
-                return { ...parsed };
-            }
-          })();
+      const spec = overlayMatchedSpec(parsed, matched);
       if (spec.disabled) {
         sink({ kind: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));

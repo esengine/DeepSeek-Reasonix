@@ -58,22 +58,10 @@ export async function reconnectMcpServer(args: ReconnectArgs): Promise<Reconnect
       ms: Date.now() - t0,
     };
   }
-  const transport = buildTransportFromSpec(
-    (() => {
-      switch (parsed.transport) {
-        case "stdio":
-          return { ...parsed };
-        case "sse":
-          return { ...parsed };
-        case "streamable-http":
-          return { ...parsed };
-      }
-    })(),
-    {
-      env: args.env,
-      headers: args.headers,
-    },
-  );
+  const transport = buildTransportFromSpec(parsed, {
+    env: args.env,
+    headers: args.headers,
+  });
   const next = new McpClient({ transport });
   try {
     await next.initialize();
