@@ -27,6 +27,16 @@ Do NOT emit any other content in the same response when you request escalation. 
 /** Backward-compat — pre-#582 callers (and the `CODE_SYSTEM_PROMPT` public-API const) keep the historical flash phrasing. */
 export const ESCALATION_CONTRACT = escalationContract("deepseek-v4-flash");
 
+// Parallel-orchestration heuristic. False-positive costs ~1.1×; false-negative costs 3-5×. Err toward parallelism.
+export const ORCHESTRATION_RULE = `Parallel orchestration rule:
+When a user request has ≥2 clearly-independent subtasks (no shared state, no ordering dependency), and each subtask would need ≥3 tool calls on its own, use \`orchestrate\` to run them in parallel subagents.
+Benefits:
+- Parallel subagents share a prefix-cache — the second onward are ~90% cheaper, so 3 parallel tasks cost ~1.1× instead of 3×.
+- When in doubt, orchestrate. The cost of over-delegation is near zero; the cost of serialising independent work is 3-5×.
+Counter-indications (do NOT orchestrate):
+- One simple task (use direct tools or spawn_subagent).
+- Tasks with ordering dependencies (A must finish before B).`;
+
 export const NEGATIVE_CLAIM_RULE = `Negative claims ("X is missing", "Y isn't implemented", "there's no Z") are the #1 hallucination shape. They feel safe to write because no citation seems possible — but that's exactly why you must NOT write them on instinct.
 
 If you have a search tool (\`search_content\`, \`grep\`, web search), call it FIRST before asserting absence:

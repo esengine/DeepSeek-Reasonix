@@ -7,6 +7,7 @@ import { ImmutablePrefix } from "../memory/runtime.js";
 import { timestampSuffix } from "../memory/session.js";
 import {
   NEGATIVE_CLAIM_RULE,
+  ORCHESTRATION_RULE,
   TUI_FORMATTING_RULES,
   escalationContract,
 } from "../prompt-fragments.js";
@@ -100,6 +101,9 @@ Rules:
 - Use tools as needed. You share the parent's sandbox + safety rules.
 - When you're done, your final assistant message is the only thing the parent will see — make it complete and self-contained. No follow-up offers, no questions, no "let me know if you need more."
 - Prefer one clear, distilled answer over a long log of what you tried.
+- If your assigned task itself contains multiple independent sub-parts, consider using \`orchestrate\` to fan them out to parallel sub-subagents before writing your final answer. The same cache-sharing advantage applies — parallel is cheaper than serial.
+
+${ORCHESTRATION_RULE}
 
 ${NEGATIVE_CLAIM_RULE}
 
