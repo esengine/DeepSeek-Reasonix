@@ -11,6 +11,7 @@ import {
   isPlausibleKey,
   loadApiKey,
   loadBaseUrl,
+  loadDesktopOpenTabs,
   loadEditMode,
   loadIndexConfig,
   loadIndexUserConfig,
@@ -29,6 +30,7 @@ import {
   resolveThemePreference,
   saveApiKey,
   saveBaseUrl,
+  saveDesktopOpenTabs,
   saveEditMode,
   saveIndexConfig,
   saveReasoningEffort,
@@ -517,5 +519,33 @@ describe("config", () => {
         path,
       ),
     ).toThrow(/JSON object/);
+  });
+
+  describe("desktopOpenTabs — issue #933", () => {
+    it("returns [] when unset", () => {
+      expect(loadDesktopOpenTabs(path)).toEqual([]);
+    });
+
+    it("round-trips an ordered list", () => {
+      saveDesktopOpenTabs(["/a", "/b", "/c"], path);
+      expect(loadDesktopOpenTabs(path)).toEqual(["/a", "/b", "/c"]);
+    });
+
+    it("filters out empty / non-string entries on read", () => {
+      writeConfig({ desktopOpenTabs: ["/a", "", null as unknown as string, "/b"] }, path);
+      expect(loadDesktopOpenTabs(path)).toEqual(["/a", "/b"]);
+    });
+
+    it("clears the key when saving an empty list", () => {
+      saveDesktopOpenTabs(["/a"], path);
+      saveDesktopOpenTabs([], path);
+      expect(readConfig(path).desktopOpenTabs).toBeUndefined();
+    });
+
+    it("preserves order across multiple saves (tab reordering)", () => {
+      saveDesktopOpenTabs(["/a", "/b", "/c"], path);
+      saveDesktopOpenTabs(["/c", "/a", "/b"], path);
+      expect(loadDesktopOpenTabs(path)).toEqual(["/c", "/a", "/b"]);
+    });
   });
 });

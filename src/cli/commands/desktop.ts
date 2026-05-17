@@ -19,6 +19,7 @@ import {
   isPlausibleKey,
   loadApiKey,
   loadBaseUrl,
+  loadDesktopOpenTabs,
   loadEditMode,
   loadEditor,
   loadPreset,
@@ -30,6 +31,7 @@ import {
   readConfig,
   saveApiKey,
   saveBaseUrl,
+  saveDesktopOpenTabs,
   saveEditMode,
   saveEditor,
   savePreset,
@@ -856,6 +858,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       });
   }
 
+  /** Snapshot of every open tab's workspace dir, in tab order. Persisted after open/close so a restart restores the full tab set (issue #933). */
+  function persistOpenTabs(): void {
+    try {
+      saveDesktopOpenTabs(Array.from(tabs.values()).map((t) => t.rootDir));
+    } catch {
+      // best-effort — disk / perms shouldn't break tab management
+    }
+  }
+
   async function closeTab(tab: Tab): Promise<void> {
     abortTurn(tab);
     try {
@@ -871,6 +882,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
     }
     tabs.delete(tab.id);
+    if (first && first.id === tab.id) {
+      const next = tabs.values().next().value;
+      if (next) first = next;
+    }
+    persistOpenTabs();
     emit({ type: "$tab_closed" }, tab.id);
   }
 
@@ -1049,7 +1065,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
   }
 
-  const first = createTabSkeleton();
+  // `first` is the fallback tab for legacy tabId-less RPC messages. We
+  // assign it lazily below so saved-tabs restore (issue #933) can choose
+  // the boot dir before construction, and rotate `first` to the next
+  // surviving tab when its source closes.
+  let first: Tab;
 
   let shuttingDown = false;
   async function gracefulShutdown(): Promise<void> {
@@ -1235,22 +1255,46 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // `$ready` when it completes — until then `state.ready` keeps the
   // composer disabled, so users can't send a message before the runtime
   // exists. emitBalance was already fire-and-forget.
-  emit({ type: "$tab_opened", workspaceDir: first.rootDir }, first.id);
-  emitSessions(first);
-  emitSettings(first);
-  emitMcpSpecs(first);
-  emitSkills(first);
-  emitMemory(first);
-  if (!loadApiKey()) emit({ type: "$needs_setup", reason: "no_api_key" }, first.id);
-  void emitBalance(first);
-  void initTabToolset(first)
-    .then(() => {
-      if (loadApiKey()) emit({ type: "$ready" }, first.id);
-      emitCtxBreakdown(first);
-    })
-    .catch((err) => {
-      emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, first.id);
-    });
+  function bootstrapTab(initialDir?: string): Tab {
+    const tab = createTabSkeleton(initialDir);
+    emit({ type: "$tab_opened", workspaceDir: tab.rootDir }, tab.id);
+    emitSessions(tab);
+    emitSettings(tab);
+    emitMcpSpecs(tab);
+    emitSkills(tab);
+    emitMemory(tab);
+    if (!loadApiKey()) emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
+    void emitBalance(tab);
+    void initTabToolset(tab)
+      .then(() => {
+        if (loadApiKey()) emit({ type: "$ready" }, tab.id);
+        emitCtxBreakdown(tab);
+      })
+      .catch((err) => {
+        emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
+      });
+    return tab;
+  }
+
+  // Restore the full tab set from the previous session (issue #933).
+  // `--dir` overrides saved tabs so a CLI-supplied workspace stays
+  // authoritative. Missing dirs are silently skipped — a deleted
+  // workspace shouldn't block boot.
+  const savedTabDirs = opts.dir
+    ? []
+    : loadDesktopOpenTabs().filter((d) => {
+        try {
+          return existsSync(d) && statSync(d).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+  first = bootstrapTab(savedTabDirs[0]);
+  for (const d of savedTabDirs.slice(1)) {
+    if (resolve(d) === first.rootDir) continue;
+    bootstrapTab(d);
+  }
+  persistOpenTabs();
 
   const rl = createInterface({ input: stdin });
   rl.on("line", (line) => {
@@ -1266,23 +1310,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     if (msg.cmd === "tab_open") {
       try {
-        const tab = createTabSkeleton(msg.workspaceDir);
-        emit({ type: "$tab_opened", workspaceDir: tab.rootDir }, tab.id);
-        emitSessions(tab);
-        emitSettings(tab);
-        emitMcpSpecs(tab);
-        emitSkills(tab);
-        emitMemory(tab);
-        if (!loadApiKey()) emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
-        void emitBalance(tab);
-        void initTabToolset(tab)
-          .then(() => {
-            if (loadApiKey()) emit({ type: "$ready" }, tab.id);
-            emitCtxBreakdown(tab);
-          })
-          .catch((err) => {
-            emit({ type: "$error", message: `init failed: ${(err as Error).message}` }, tab.id);
-          });
+        bootstrapTab(msg.workspaceDir);
+        persistOpenTabs();
       } catch (err) {
         emit({ type: "$error", message: `tab_open failed: ${(err as Error).message}` });
       }

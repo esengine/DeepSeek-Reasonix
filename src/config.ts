@@ -107,6 +107,8 @@ export interface ReasonixConfig {
   workspaceDir?: string;
   /** Last N workspace paths the desktop client has opened, most recent first. */
   recentWorkspaces?: string[];
+  /** Desktop only — workspace dir per open tab in tab order, persisted so restart restores every tab (issue #933). Empty/absent → boot with a single default tab. */
+  desktopOpenTabs?: string[];
   /** Desktop only — `openWith` value for clicking file links. Empty/undefined = OS default app. Examples: "code", "cursor", "C:\\path\\to\\editor.exe". */
   editor?: string;
   theme?: ThemeName | "auto";
@@ -823,6 +825,24 @@ export function pushRecentWorkspace(dir: string, path: string = defaultConfigPat
   const list = (cfg.recentWorkspaces ?? []).filter((s) => s !== trimmed);
   list.unshift(trimmed);
   cfg.recentWorkspaces = list.slice(0, MAX_RECENT_WORKSPACES);
+  writeConfig(cfg, path);
+}
+
+export function loadDesktopOpenTabs(path: string = defaultConfigPath()): string[] {
+  const v = readConfig(path).desktopOpenTabs;
+  return Array.isArray(v)
+    ? v.filter((s): s is string => typeof s === "string" && s.length > 0)
+    : [];
+}
+
+export function saveDesktopOpenTabs(dirs: string[], path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  const cleaned = dirs.filter((s): s is string => typeof s === "string" && s.length > 0);
+  if (cleaned.length === 0) {
+    cfg.desktopOpenTabs = undefined;
+  } else {
+    cfg.desktopOpenTabs = cleaned;
+  }
   writeConfig(cfg, path);
 }
 
