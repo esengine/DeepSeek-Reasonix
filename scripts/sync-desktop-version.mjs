@@ -22,8 +22,19 @@ const tauriConfPath = join(repoRoot, "desktop/src-tauri/tauri.conf.json");
 const cargoTomlPath = join(repoRoot, "desktop/src-tauri/Cargo.toml");
 const desktopPkgPath = join(repoRoot, "desktop/package.json");
 
+// MSI bundler rejects pre-release identifiers — Windows installer versions
+// must be numeric MAJOR.MINOR.BUILD.REVISION ≤ 65535. Encode a SemVer
+// pre-release's numeric tail (rc.5, beta.2, alpha.1) as the 4th segment so
+// rc/beta tags still produce bundles. Stable versions pass through as-is.
+function tauriBundleVersion(semver) {
+  const m = /^(\d+\.\d+\.\d+)(?:-[A-Za-z-]+(?:\.(\d+))?)?$/.exec(semver);
+  if (!m) return semver;
+  return m[2] !== undefined ? `${m[1]}.${m[2]}` : m[1];
+}
+const tauriVersion = tauriBundleVersion(version);
+
 const tauriConf = JSON.parse(readFileSync(tauriConfPath, "utf8"));
-tauriConf.version = version;
+tauriConf.version = tauriVersion;
 writeFileSync(tauriConfPath, `${JSON.stringify(tauriConf, null, 2)}\n`);
 
 const cargoToml = readFileSync(cargoTomlPath, "utf8");
