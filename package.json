@@ -62,12 +62,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/esengine/reasonix.git"
+    "url": "git+https://github.com/esengine/DeepSeek-Reasonix.git"
   },
   "bugs": {
-    "url": "https://github.com/esengine/reasonix/issues"
+    "url": "https://github.com/esengine/DeepSeek-Reasonix/issues"
   },
-  "homepage": "https://github.com/esengine/reasonix#readme",
+  "homepage": "https://github.com/esengine/DeepSeek-Reasonix#readme",
   "engines": {
     "node": ">=22"
   },

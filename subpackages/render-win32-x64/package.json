@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/esengine/reasonix.git",
+    "url": "git+https://github.com/esengine/DeepSeek-Reasonix.git",
     "directory": "subpackages/render-win32-x64"
   },
   "os": [
