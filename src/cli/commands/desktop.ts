@@ -740,8 +740,22 @@ function pushMentionRecent(tab: Tab, path: string): void {
   if (tab.recentMentions.length > MAX) tab.recentMentions.length = MAX;
 }
 
+/** The desktop sidecar is a long-running daemon — Tauri spawns this Node process once per app launch and pipes JSON over stdin/stdout. Without these handlers, any orphaned promise rejection (e.g. from an aborted turn whose cleanup races a session-switch — #1074) crashes the process with exit code 1, which the Tauri host surfaces as "reasonix exited (code 1)" and a full reconnect cycle. Log loudly so we can find the underlying bug, but don't take the daemon down. */
+export function installDesktopCrashGuards(
+  stderr: { write: (s: string) => unknown } = process.stderr,
+): void {
+  process.on("unhandledRejection", (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    stderr.write(`[desktop] unhandledRejection: ${err.stack ?? err.message}\n`);
+  });
+  process.on("uncaughtException", (err) => {
+    stderr.write(`[desktop] uncaughtException: ${err.stack ?? err.message}\n`);
+  });
+}
+
 export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   loadDotenv();
+  installDesktopCrashGuards();
 
   const tabs = new Map<string, Tab>();
   const tabContext = new AsyncLocalStorage<string>();
