@@ -1,15 +1,14 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
-use unicode_width::UnicodeWidthStr;
 
 use crate::state::SceneCard;
 
-use super::super::md_render::{count_visual_rows, render_markdown};
+use super::super::md_render::render_markdown;
 use super::super::paint::{format_ts, paint};
 use super::super::theme::{BG, DS_BRIGHT, DS_PURPLE, FG, FG1, FG3};
 use super::{
-    body_indent_col, body_width_for, paint_blank_after, paint_body_line, paint_rail,
+    body_indent_col, body_width_for, paint_blank_after, paint_body_line,
     render_card_header, wrap_visual,
 };
 
@@ -121,7 +120,7 @@ pub(super) fn render_assistant_card(
         };
         let prev_row = row;
         row = render_markdown(buf, area, row, bottom, DS_BRIGHT, FG, &revealed);
-        if streaming && (tick / 6) % 2 == 0 {
+        if streaming && (tick / 6).is_multiple_of(2) {
             let caret_row = if row > prev_row { row - 1 } else { prev_row };
             if caret_row < bottom {
                 let col = body_indent_col(area) + 4;

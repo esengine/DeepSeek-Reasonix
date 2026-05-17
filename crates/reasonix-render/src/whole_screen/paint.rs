@@ -37,6 +37,7 @@ pub fn paint_str(
     paint_str_to(buf, x, y, s, buf.area.right(), fg, bg, modifier)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn paint_str_to(
     buf: &mut Buffer,
     x: u16,

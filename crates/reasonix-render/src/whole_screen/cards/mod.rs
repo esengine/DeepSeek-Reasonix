@@ -264,6 +264,7 @@ pub(super) fn paint_rail(buf: &mut Buffer, area: Rect, row: u16, color: Color) {
     paint(buf, area.x, row, '▎', color, BG, Modifier::empty());
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_card_header(
     buf: &mut Buffer,
     area: Rect,

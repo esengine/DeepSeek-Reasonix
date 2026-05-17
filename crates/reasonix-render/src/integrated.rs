@@ -710,9 +710,7 @@ fn cycle_or_pick(
     values: &[&'static str],
 ) -> Option<&'static str> {
     let n = values.len();
-    let Some(idx) = slot.as_mut() else {
-        return None;
-    };
+    let idx = slot.as_mut()?;
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             *idx = if *idx == 0 { n - 1 } else { *idx - 1 };

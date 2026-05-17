@@ -620,9 +620,11 @@ fn composer_scrolls_to_keep_cursor_visible() {
 
 #[test]
 fn composer_box_grows_for_multi_line_text() {
-    let mut state = SceneState::default();
-    state.composer_text = Some("line one\nline two\nline three".to_string());
-    state.composer_cursor = Some(0);
+    let state = SceneState {
+        composer_text: Some("line one\nline two\nline three".to_string()),
+        composer_cursor: Some(0),
+        ..Default::default()
+    };
     let backend = TestBackend::new(120, 40);
     let mut term = Terminal::new(backend).unwrap();
     term.draw(|f| f.render_widget(WholeScreen::new(&state).with_tick(0), f.area()))
@@ -674,8 +676,10 @@ fn shell_prefix_does_not_break_overlay_or_composer() {
 
 #[test]
 fn empty_cards_state_shows_idle_banner() {
-    let mut state = SceneState::default();
-    state.model = Some("deepseek-v3.2-coder".to_string());
+    let state = SceneState {
+        model: Some("deepseek-v3.2-coder".to_string()),
+        ..Default::default()
+    };
     let rows = draw(&state, 120, 30);
     let all = joined(&rows);
     assert!(all.contains("● idle"), "idle glyph + label missing");
@@ -688,9 +692,11 @@ fn empty_cards_state_shows_idle_banner() {
 
 #[test]
 fn composer_caret_renders_at_cursor_index() {
-    let mut state = SceneState::default();
-    state.composer_text = Some("hello world".to_string());
-    state.composer_cursor = Some(5);
+    let state = SceneState {
+        composer_text: Some("hello world".to_string()),
+        composer_cursor: Some(5),
+        ..Default::default()
+    };
     let backend = TestBackend::new(120, 30);
     let mut term = Terminal::new(backend).unwrap();
     term.draw(|f| f.render_widget(WholeScreen::new(&state).with_tick(0), f.area()))
@@ -972,10 +978,10 @@ fn main_panel_content_does_not_leak_into_sidebar_columns() {
     let main_w = 120 - 34;
     for (i, line) in rows.iter().enumerate() {
         let cells: Vec<&str> = line.split_terminator("").skip(1).collect();
-        for j in main_w..cells.len().min((main_w + 2) as usize) {
+        for j in main_w..cells.len().min(main_w + 2) {
             let cell = cells.get(j).copied().unwrap_or("");
             assert!(
-                cell == "│" || cell == " " || cell == "",
+                cell == "│" || cell == " " || cell.is_empty(),
                 "row {i} col {j}: main-panel content leaked into sidebar: {cell:?} (line: {line:?})"
             );
         }

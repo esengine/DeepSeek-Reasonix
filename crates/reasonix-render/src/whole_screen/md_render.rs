@@ -40,6 +40,7 @@ pub fn render_markdown(
     row
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_block(
     buf: &mut Buffer,
     area: Rect,
@@ -173,6 +174,7 @@ fn render_block(
     row
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_table(
     buf: &mut Buffer,
     area: Rect,
@@ -275,12 +277,12 @@ fn render_table(
         paint_rail(buf, area, row, rail_color);
         let mut c = base;
         c = paint_str(buf, c, row, "│", FG3, BG, Modifier::empty());
-        for i in 0..n_cols {
+        for (i, &col_w) in col_widths.iter().enumerate().take(n_cols) {
             c = paint_str(buf, c, row, " ", default_fg, BG, Modifier::empty());
             let empty: Vec<InlineSpan> = Vec::new();
             let cell = r.get(i).unwrap_or(&empty);
             let align = aligns.get(i).copied().unwrap_or(CellAlign::Left);
-            c = paint_cell(buf, c, row, cell, col_widths[i], align, default_fg, false);
+            c = paint_cell(buf, c, row, cell, col_w, align, default_fg, false);
             c = paint_str(buf, c, row, " │", FG3, BG, Modifier::empty());
         }
         let _ = c;
@@ -301,6 +303,7 @@ fn span_text_width(spans: &[InlineSpan]) -> usize {
         .sum()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_cell(
     buf: &mut Buffer,
     x: u16,
@@ -362,9 +365,8 @@ fn clip_spans(spans: &[InlineSpan], width: usize) -> Vec<InlineSpan> {
         for ch in span.text.chars() {
             let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
             if used + cw > width {
-                if width > 0 && used + 1 <= width {
+                if width > 0 && used < width {
                     buf.push('…');
-                    used += 1;
                 }
                 if !buf.is_empty() {
                     out.push(InlineSpan {

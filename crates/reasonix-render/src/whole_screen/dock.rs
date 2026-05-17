@@ -66,7 +66,7 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
         _ => DS_BRIGHT,
     };
     let text = state.composer_text.as_deref().unwrap_or("");
-    let show_caret = (tick / 6) % 2 == 0;
+    let show_caret = (tick / 6).is_multiple_of(2);
     let total_chars = text.chars().count();
     let cursor = state
         .composer_cursor
@@ -84,11 +84,7 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
         build_composer_visual_lines(text, cursor, inner_w);
 
     let visual_count = visual_lines.len();
-    let scroll_off = if cursor_visual_row + 1 > content_rows as usize {
-        cursor_visual_row + 1 - content_rows as usize
-    } else {
-        0
-    };
+    let scroll_off = (cursor_visual_row + 1).saturating_sub(content_rows as usize);
     let has_more_above = scroll_off > 0;
     let has_more_below = scroll_off + (content_rows as usize) < visual_count;
 

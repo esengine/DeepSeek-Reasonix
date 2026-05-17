@@ -24,7 +24,7 @@ fn at_token(buffer: &str) -> Option<(usize, &str)> {
     Some((at_pos, suffix))
 }
 
-fn entries_for<'a>(state: &'a SceneState) -> Option<&'a [AtPickerEntry]> {
+fn entries_for(state: &SceneState) -> Option<&[AtPickerEntry]> {
     match state.at_state.as_ref()? {
         AtState::Browse { entries, .. } | AtState::Search { entries, .. } => {
             Some(entries.as_slice())
@@ -73,7 +73,7 @@ pub fn render_at_overlay(
 
     let total = entries.len();
     let available_rows = (dock_area.y as usize).saturating_sub(3);
-    let cap = available_rows.min(ABS_MAX_ROWS).max(1);
+    let cap = available_rows.clamp(1, ABS_MAX_ROWS);
     let popup_w = dock_area.width.saturating_sub(4).min(120);
     if popup_w < 30 {
         return;
@@ -242,6 +242,7 @@ fn draw_rows(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_entry(
     buf: &mut Buffer,
     x: u16,

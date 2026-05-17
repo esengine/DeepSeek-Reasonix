@@ -30,6 +30,7 @@ pub enum MdBlock {
         spans: Vec<InlineSpan>,
     },
     Code {
+        #[allow(dead_code)]
         lang: String,
         text: String,
     },

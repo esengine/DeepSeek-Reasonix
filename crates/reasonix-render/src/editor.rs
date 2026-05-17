@@ -46,8 +46,7 @@ pub fn next_word_boundary(buffer: &str, from: usize) -> usize {
 pub fn locate_cursor_in(buffer: &str, cursor: usize) -> (usize, usize) {
     let mut line = 0usize;
     let mut col = 0usize;
-    let mut idx = 0usize;
-    for ch in buffer.chars() {
+    for (idx, ch) in buffer.chars().enumerate() {
         if idx == cursor {
             return (line, col);
         }
@@ -57,7 +56,6 @@ pub fn locate_cursor_in(buffer: &str, cursor: usize) -> (usize, usize) {
         } else {
             col += 1;
         }
-        idx += 1;
     }
     (line, col)
 }

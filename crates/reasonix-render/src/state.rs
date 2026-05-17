@@ -240,11 +240,13 @@ pub struct SetupState {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
     Trace(SceneState),
     Setup(SetupState),
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum Payload {
     Trace(SceneState),
     Setup(SetupState),

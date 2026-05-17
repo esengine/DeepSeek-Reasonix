@@ -9,12 +9,11 @@ use crate::theme::{palette, Color, NamedColor};
 pub fn render_setup(state: &SetupState, frame: &mut Frame<'_>) {
     let area = frame.area();
     frame.render_widget(canvas_block(), area);
-    let mut lines: Vec<Line<'_>> = Vec::new();
-    lines.push(Line::from(vec![
+    let mut lines: Vec<Line<'_>> = vec![Line::from(vec![
         styled(" ● ", palette::ds(), Modifier::BOLD),
         styled("REASONIX", palette::ds_bright(), Modifier::BOLD),
         styled("  welcome", palette::fg2(), Modifier::empty()),
-    ]));
+    ])];
     lines.push(Line::raw(""));
     lines.push(Line::from(styled(
         " Enter your DeepSeek API key:",

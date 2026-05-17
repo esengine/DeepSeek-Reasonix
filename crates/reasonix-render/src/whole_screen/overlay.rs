@@ -87,7 +87,7 @@ pub fn render_slash_overlay(
         .map(|(i, r)| row_visual_height(r, &layout, i == selected))
         .collect();
     let available_rows = (dock_area.y as usize).saturating_sub(3);
-    let max_visual_rows = available_rows.min(ABS_MAX_ROWS).max(1);
+    let max_visual_rows = available_rows.clamp(1, ABS_MAX_ROWS);
 
     let mut window_start = selected;
     let mut window_end = selected + 1;
