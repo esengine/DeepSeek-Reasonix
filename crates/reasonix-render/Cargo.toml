@@ -10,6 +10,7 @@ anyhow = "1"
 arboard = { version = "3", default-features = false }
 chrono = { version = "0.4", features = ["clock"] }
 crossterm = "0.29"
+ctrlc = { version = "3", features = ["termination"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }

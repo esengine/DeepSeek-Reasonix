@@ -63,10 +63,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if args.iter().any(|a| a == "--emit-input") {
+        install_signal_cleanup();
         return run_emit_input();
     }
 
     install_panic_hook();
+    install_signal_cleanup();
     let mut terminal = init_terminal().context("init terminal")?;
     terminal.hide_cursor().ok();
     terminal.clear().ok();
@@ -108,6 +110,25 @@ fn restore_terminal(terminal: &mut RenderTerminal) {
     )
     .ok();
     disable_raw_mode().ok();
+}
+
+/// Best-effort terminal restore on SIGTERM / SIGHUP / Windows console-close.
+/// In raw mode ctrl+c is delivered as the byte 0x03 to crossterm and never
+/// fires SIGINT, so the existing `is_quit` event-loop branch handles
+/// interactive ctrl+c with a clean restore_terminal. This guard covers the
+/// other paths — `taskkill`, parent process death, terminal disconnect — that
+/// would otherwise leave the alt-screen + raw mode dirty and corrupt the
+/// next launch's rendering.
+fn install_signal_cleanup() {
+    let _ = ctrlc::set_handler(|| {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(
+            io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show,
+        );
+        std::process::exit(130);
+    });
 }
 
 fn install_panic_hook() {
