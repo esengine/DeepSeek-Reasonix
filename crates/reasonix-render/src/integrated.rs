@@ -104,6 +104,18 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
     let mut should_exit = false;
     let mut pending_term: Option<Event> = None;
     let mut prev_emitted_buffer: String = String::new();
+    // Rust-owned buffer for the Ink Setup screen. In integrated mode Node's
+    // Setup gets a null keystroke reader (rust owns the terminal), so the
+    // dots / submission have to live here and Node only learns the final
+    // text via the `setup-submit` event below.
+    let mut setup_buffer: String = String::new();
+    // Timestamp of the previous key event — used to detect paste-as-
+    // keystrokes when the terminal doesn't speak bracketed paste (Apple
+    // Terminal, cmd.exe pre-ConPTY, some tmux configs). Pasted chars
+    // arrive at <2ms intervals; humans top out around 80ms, and even
+    // key-repeat is usually ≥30ms. A <15ms gap on Enter is treated as
+    // "newline inside a paste", not "submit".
+    let mut last_key_at: Option<Instant> = None;
 
     let result: Result<()> = (|| loop {
         while let Ok(evt) = rx.try_recv() {
@@ -125,6 +137,15 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                                 );
                             }
                             Payload::Setup(s) => {
+                                // Fresh setup screen — start with an empty
+                                // buffer. Re-renders (e.g. error after a
+                                // rejected key) come back as Setup payloads
+                                // too, but by then we've already cleared the
+                                // buffer on submit, so the no-reset branch
+                                // is a no-op anyway.
+                                if setup_pending.is_none() {
+                                    setup_buffer.clear();
+                                }
                                 setup_pending = Some(s);
                             }
                         }
@@ -227,8 +248,14 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                 crossterm::terminal::BeginSynchronizedUpdate
             );
             if let Some(setup) = setup_pending.as_ref() {
+                // Render the local buffer length, not the value Node sent —
+                // Node's Setup buffer always stays empty in integrated mode
+                // because its keystroke reader is null. Without this
+                // override the user types but sees no dots.
+                let mut display = setup.clone();
+                display.buffer_length = setup_buffer.chars().count();
                 terminal
-                    .draw(|f| render_setup(setup, f))
+                    .draw(|f| render_setup(&display, f))
                     .context("terminal draw")?;
             } else {
                 let mut display = scene.clone();
@@ -289,6 +316,9 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                                     );
                                 }
                                 Payload::Setup(s) => {
+                                    if setup_pending.is_none() {
+                                        setup_buffer.clear();
+                                    }
                                     setup_pending = Some(s);
                                 }
                             }
@@ -307,6 +337,55 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
             }
         };
         if setup_pending.is_some() {
+            // Setup screen — Node's MaskedInput can't read keys (integrated
+            // mode hands stdin to rust), so handle them here and forward the
+            // final string back as `setup-submit` for Setup.handleSubmit.
+            match &evt {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if is_quit(key) {
+                        emit_event(serde_json::json!({"event": "exit"}));
+                        return Ok(());
+                    }
+                    if key.code == KeyCode::Char('d')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        emit_event(serde_json::json!({"event": "exit"}));
+                        return Ok(());
+                    }
+                    match key.code {
+                        KeyCode::Enter => {
+                            let text = std::mem::take(&mut setup_buffer);
+                            emit_event(serde_json::json!({
+                                "event": "setup-submit",
+                                "text": text,
+                            }));
+                        }
+                        KeyCode::Backspace => {
+                            // pop one char by char-boundary, not byte.
+                            if let Some((idx, _)) = setup_buffer.char_indices().next_back() {
+                                setup_buffer.truncate(idx);
+                            }
+                        }
+                        KeyCode::Char(c)
+                            if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            setup_buffer.push(c);
+                        }
+                        _ => {}
+                    }
+                }
+                Event::Paste(text) => {
+                    // API keys often come with a trailing newline from copy —
+                    // strip all control chars so the key validates cleanly.
+                    for ch in text.chars() {
+                        if !ch.is_control() {
+                            setup_buffer.push(ch);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            dirty = true;
             continue;
         }
         dirty = true;
@@ -344,6 +423,12 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                     sidebar_visible = !sidebar_visible;
                     continue;
                 }
+                let now = Instant::now();
+                let since_last_key = last_key_at.map(|t| now.duration_since(t));
+                last_key_at = Some(now);
+                let paste_burst = since_last_key
+                    .map(|d| d < Duration::from_millis(15))
+                    .unwrap_or(false);
                 if mode_picker.is_some() || preset_picker.is_some() {
                     handle_mode_picker_key(&key, &mut mode_picker, &mut preset_picker);
                     continue;
@@ -353,6 +438,16 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                     continue;
                 }
                 if let Some(prompt) = scene.prompt_input.as_ref() {
+                    // Paste-as-keystrokes safeguard: a mid-burst Enter is
+                    // part of the pasted content, not the user submitting.
+                    // prompt_input is single-line so we can't insert '\n';
+                    // dropping the Enter lets the rest of the paste finish.
+                    if paste_burst
+                        && key.code == KeyCode::Enter
+                        && !key.modifiers.contains(KeyModifiers::SHIFT)
+                    {
+                        continue;
+                    }
                     handle_prompt_input_key(&key, prompt, &mut buffer, &mut cursor);
                     continue;
                 }
@@ -371,6 +466,40 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                 let at_active = !slash_active && !slash_arg_active && at_count > 0;
                 let slash_complete_only = slash_active && !slash_is_exact(&buffer, &scene);
                 match key.code {
+                    // Paste-as-keystrokes fallback: when bracketed paste is
+                    // off, an Enter in the middle of a burst is part of the
+                    // pasted content, not a submit. Wins over the picker
+                    // Enter arms because guard arms match top-down.
+                    KeyCode::Enter
+                        if paste_burst && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+                    {
+                        selection = None;
+                        insert_char_at(&mut buffer, cursor, '\n');
+                        cursor += 1;
+                        slash_idx = 0;
+                        at_idx = 0;
+                        scroll_offset = 0;
+                    }
+                    KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        // Explicit clipboard paste — the only path that works
+                        // on terminals without bracketed paste (Apple Terminal
+                        // default). Bypasses the burst heuristic above.
+                        if let Ok(mut cb) = arboard::Clipboard::new() {
+                            if let Ok(text) = cb.get_text() {
+                                selection = None;
+                                for ch in text.chars() {
+                                    if ch == '\r' {
+                                        continue;
+                                    }
+                                    insert_char_at(&mut buffer, cursor, ch);
+                                    cursor += 1;
+                                }
+                                slash_idx = 0;
+                                at_idx = 0;
+                                scroll_offset = 0;
+                            }
+                        }
+                    }
                     KeyCode::Up if slash_active => {
                         slash_idx = slash_idx.saturating_sub(1);
                     }
@@ -888,6 +1017,28 @@ fn handle_prompt_input_key(
         }
         KeyCode::Home => *cursor = 0,
         KeyCode::End => *cursor = buffer.chars().count(),
+        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            // Explicit clipboard paste — same shape as the Event::Paste
+            // path: secrets strip every control char (API keys often have a
+            // trailing newline), non-secrets keep the first line only since
+            // prompt_input is single-line by design.
+            if let Ok(mut cb) = arboard::Clipboard::new() {
+                if let Ok(text) = cb.get_text() {
+                    if prompt.secret {
+                        for ch in text.chars().filter(|c| !c.is_control()) {
+                            insert_char_at(buffer, *cursor, ch);
+                            *cursor += 1;
+                        }
+                    } else {
+                        let first = text.lines().next().unwrap_or("").trim();
+                        for ch in first.chars() {
+                            insert_char_at(buffer, *cursor, ch);
+                            *cursor += 1;
+                        }
+                    }
+                }
+            }
+        }
         KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             insert_char_at(buffer, *cursor, c);
             *cursor += 1;
