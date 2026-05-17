@@ -30,6 +30,32 @@ export const handlers: Record<string, SlashHandler> = {
       return { info: ctx.qq.status() };
     }
 
-    return { info: "Usage: /qq connect [appId appSecret [sandbox]] | /qq status | /qq disconnect" };
+    if (subcommand === "owner") {
+      void ctx.qq.owner(rest).then(
+        (message) => ctx.postInfo?.(message),
+        (err) => ctx.postInfo?.(`QQ owner failed: ${(err as Error).message}`),
+      );
+      return {};
+    }
+
+    if (subcommand === "allow") {
+      void ctx.qq.allow(rest).then(
+        (message) => ctx.postInfo?.(message),
+        (err) => ctx.postInfo?.(`QQ allow failed: ${(err as Error).message}`),
+      );
+      return {};
+    }
+
+    if (subcommand === "unallow") {
+      void ctx.qq.unallow(rest).then(
+        (message) => ctx.postInfo?.(message),
+        (err) => ctx.postInfo?.(`QQ unallow failed: ${(err as Error).message}`),
+      );
+      return {};
+    }
+
+    return {
+      info: "Usage: /qq connect [appId appSecret [sandbox]] | /qq status | /qq disconnect | /qq owner [openid|clear] | /qq allow [openid] | /qq unallow <openid>",
+    };
   },
 };

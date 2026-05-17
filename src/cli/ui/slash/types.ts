@@ -153,6 +153,9 @@ export interface SlashContext {
     connect: (args: readonly string[]) => Promise<string>;
     disconnect: () => Promise<string>;
     status: () => string;
+    owner: (args: readonly string[]) => Promise<string>;
+    allow: (args: readonly string[]) => Promise<string>;
+    unallow: (args: readonly string[]) => Promise<string>;
   };
   /** Current session id — included in `/feedback`'s diagnostic block when present. */
   sessionId?: string;

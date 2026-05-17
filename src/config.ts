@@ -11,6 +11,7 @@ import {
   resolveIndexConfig,
 } from "./index/config.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
+import { normalizeQQAllowlist, normalizeQQOpenId } from "./qq/access.js";
 
 /** Legacy `fast|smart|max` kept for back-compat with existing config.json files. */
 export type PresetName = "auto" | "flash" | "pro" | "fast" | "smart" | "max";
@@ -90,6 +91,8 @@ export interface QQBotConfig {
   appSecret?: string;
   sandbox?: boolean;
   enabled?: boolean;
+  ownerOpenId?: string;
+  allowlist?: string[];
 }
 
 export interface PricingOverride {
@@ -1061,31 +1064,46 @@ export interface LoadedQQConfig {
   appSecret?: string;
   sandbox?: boolean;
   enabled?: boolean;
+  ownerOpenId?: string;
+  allowlist?: string[];
 }
 
 export function loadQQConfig(path: string = defaultConfigPath()): LoadedQQConfig {
   const envSandbox = process.env.QQ_SANDBOX;
+  const envAllowlist = normalizeQQAllowlist(process.env.QQ_ALLOWLIST);
   const fromEnv = {
     appId: process.env.QQ_APPID,
     appSecret: process.env.QQ_SECRET,
     sandbox: envSandbox === "1" ? true : envSandbox === "0" ? false : undefined,
+    ownerOpenId: normalizeQQOpenId(process.env.QQ_OWNER_OPENID),
+    allowlist: envAllowlist,
   };
   const fromCfg = readConfig(path).qq ?? {};
+  const ownerOpenId = fromEnv.ownerOpenId ?? normalizeQQOpenId(fromCfg.ownerOpenId);
+  const allowlist = normalizeQQAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
+    (openid) => openid !== ownerOpenId,
+  );
   return {
     appId: fromEnv.appId ?? fromCfg.appId,
     appSecret: fromEnv.appSecret ?? fromCfg.appSecret,
     sandbox: fromEnv.sandbox ?? fromCfg.sandbox ?? false,
     enabled: fromCfg.enabled === true,
+    ownerOpenId,
+    allowlist,
   };
 }
 
 export function saveQQConfig(cfg: LoadedQQConfig, path: string = defaultConfigPath()): void {
   const rootCfg = readConfig(path);
+  const ownerOpenId = normalizeQQOpenId(cfg.ownerOpenId);
+  const allowlist = normalizeQQAllowlist(cfg.allowlist)?.filter((openid) => openid !== ownerOpenId);
   rootCfg.qq = {
     appId: cfg.appId,
     appSecret: cfg.appSecret,
     sandbox: cfg.sandbox,
     enabled: cfg.enabled,
+    ownerOpenId,
+    allowlist,
   };
   writeConfig(rootCfg, path);
 }

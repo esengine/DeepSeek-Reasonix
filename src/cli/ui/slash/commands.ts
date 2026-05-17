@@ -187,9 +187,9 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "qq",
     group: "extend",
-    argsHint: "<connect|status|disconnect>",
-    summary: "connect, inspect, or disconnect the QQ channel",
-    argCompleter: ["connect", "status", "disconnect"],
+    argsHint: "<connect|status|disconnect|owner|allow|unallow>",
+    summary: "connect, inspect, or manage QQ channel access control",
+    argCompleter: ["connect", "status", "disconnect", "owner", "allow", "unallow"],
   },
 
   {

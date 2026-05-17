@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadQQConfig } from "../config.js";
 import { loadDotenv } from "../env.js";
+import { decideQQAccess, describeQQAccess, redactQQOpenId } from "./access.js";
 import { type C2CMessage, QQBot } from "./bot.js";
 
 const QQ_LOCK_FILE = join(homedir(), ".reasonix", "qq-channel.pid");
@@ -25,6 +26,9 @@ export class QQChannel {
   private bot: QQBot | null = null;
   private qqUserId: string | null = null;
   private qqMessageId: string | null = null;
+  private ownerOpenId: string | undefined;
+  private allowlist: string[] | undefined;
+  private runtimeBoundOpenId: string | null = null;
   private processedMsgIds = new Set<string>();
   private processedMsgIdQueue: string[] = [];
   private lockAcquired = false;
@@ -80,6 +84,58 @@ export class QQChannel {
     this.lockAcquired = false;
   }
 
+  private applyAccessConfig(config: ReturnType<typeof loadQQConfig>): void {
+    this.ownerOpenId = config.ownerOpenId;
+    this.allowlist = config.allowlist;
+    if (this.ownerOpenId || (this.allowlist?.length ?? 0) > 0) {
+      this.runtimeBoundOpenId = null;
+    }
+  }
+
+  private handlePrivateMessage(msg: C2CMessage): void {
+    const text = msg.content?.trim();
+    if (!text) return;
+    if (!this.rememberMessage(msg.id)) return;
+
+    const openid = msg.author.user_openid;
+    const verdict = decideQQAccess(
+      {
+        ownerOpenId: this.ownerOpenId,
+        allowlist: this.allowlist,
+        runtimeBoundOpenId: this.runtimeBoundOpenId,
+      },
+      openid,
+    );
+    if (!verdict.accept) {
+      this.callbacks.onError?.(
+        `QQ ignored message from unauthorized openid ${redactQQOpenId(openid)}. Current access: ${this.describeAccess()}.`,
+      );
+      return;
+    }
+    if (verdict.bindRuntime) {
+      this.runtimeBoundOpenId = openid;
+      this.callbacks.onError?.(
+        `QQ temporarily bound this run to first sender ${redactQQOpenId(openid)}. Set \`/qq owner ${openid}\` to persist access.`,
+      );
+    }
+
+    this.qqUserId = openid;
+    this.qqMessageId = msg.id;
+    this.callbacks.onSubmitMessage(`[QQ] ${text}`);
+  }
+
+  refreshAccessConfig(): void {
+    this.applyAccessConfig(loadQQConfig());
+  }
+
+  describeAccess(): string {
+    return describeQQAccess({
+      ownerOpenId: this.ownerOpenId,
+      allowlist: this.allowlist,
+      runtimeBoundOpenId: this.runtimeBoundOpenId,
+    });
+  }
+
   async start(): Promise<void> {
     loadDotenv();
     this.acquireLock();
@@ -93,6 +149,7 @@ export class QQChannel {
       this.releaseLock();
       throw new Error("QQ App Secret is required. Run `/qq connect` to configure.");
     }
+    this.applyAccessConfig(config);
 
     const bot = new QQBot({
       appid: config.appId,
@@ -109,12 +166,7 @@ export class QQChannel {
     });
 
     bot.on("message.private", (msg: C2CMessage) => {
-      const text = msg.content?.trim();
-      if (!text) return;
-      if (!this.rememberMessage(msg.id)) return;
-      this.qqUserId = msg.author.user_openid;
-      this.qqMessageId = msg.id;
-      this.callbacks.onSubmitMessage(`[QQ] ${text}`);
+      this.handlePrivateMessage(msg);
     });
 
     this.bot = bot;
