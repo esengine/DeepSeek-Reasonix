@@ -129,7 +129,7 @@ export function registerOrchestrateTool(
     name: "orchestrate",
     parallelSafe: true,
     description:
-      "Split a complex task into independent subtasks and run them in parallel using isolated subagents. Each subtask gets its own tool loop and runs to completion. Results are merged into a single summary. Use this when the task naturally decomposes (e.g. 'fix X, test Y, document Z') and subtasks don't depend on each other. Each spawn pays a prefix-cache miss on the first subagent; subsequent subagents benefit from DeepSeek's prefix-cache (~90% cost reduction).",
+      "Split a complex task into independent subtasks and run them in parallel using isolated subagents. Each subtask gets its own tool loop and runs to completion. Results are merged into a single summary table.\n\n**When to use (all three must be true):**\n  1. The task naturally decomposes into ≥2 independent subtasks (no shared state, no ordering dependency).\n  2. Each subtask would need ≥3 file reads/edits on its own — simple single-file or single-grep tasks are cheaper to do directly.\n  3. The subtasks can run in parallel without coordination mid-flight.\n\n**Counter-examples — do NOT use orchestrate for:**\n  - One simple task (use spawn_subagent or direct tools)\n  - Tasks with dependencies (A must finish before B starts)\n  - Single-file fixes, one-shot greps, trivial questions\n\n**Cost: first subagent pays cache-miss (~flash price); subsequent subagents hit DeepSeek's prefix-cache (~90% cheaper). 3 parallel subagents cost ~1.1\\u00d7 flash, not 3\\u00d7.**",
     parameters: {
       type: "object",
       properties: {
