@@ -1,10 +1,10 @@
 import { release } from "node:os";
-import { loadTheme, resolveThemePreference } from "@/config.js";
+import { loadRateLimit, loadTheme, resolveThemePreference } from "@/config.js";
 import { getLanguage, t } from "@/i18n/index.js";
 import {
   DEEPSEEK_CONTEXT_TOKENS,
-  DEEPSEEK_PRICING,
   DEFAULT_CONTEXT_TOKENS,
+  pricingFor,
 } from "@/telemetry/stats.js";
 import { countTokensBounded } from "@/tokenizer.js";
 import { VERSION } from "@/version.js";
@@ -86,6 +86,7 @@ const status: SlashHandler = (_args, loop, ctx) => {
         resumed: loop.resumedMessageCount,
       })
     : t("handlers.observability.statusSessionEphemeral");
+  const rpm = loadRateLimit()?.rpm;
   const mcpCount = ctx.mcpSpecs?.length ?? 0;
   const toolCount = loop.prefix.toolSpecs.length;
   const mcpLine = t("handlers.observability.statusMcp", { servers: mcpCount, tools: toolCount });
@@ -113,6 +114,7 @@ const status: SlashHandler = (_args, loop, ctx) => {
     }),
     cacheLine,
     ctxLine,
+    `rate limit: ${rpm ? `${rpm} rpm` : "off"}`,
     mcpLine,
     sessionLine,
   ];
@@ -181,7 +183,7 @@ const cost: SlashHandler = (args, loop, ctx) => {
 };
 
 function estimateCost(userText: string, loop: import("@/loop.js").CacheFirstLoop) {
-  const pricing = DEEPSEEK_PRICING[loop.model];
+  const pricing = pricingFor(loop.model);
   if (!pricing) {
     return { info: t("handlers.observability.costNoPricing", { model: loop.model }) };
   }

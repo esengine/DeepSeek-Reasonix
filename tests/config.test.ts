@@ -12,6 +12,8 @@ import {
   loadApiKey,
   loadBaseUrl,
   loadDesktopOpenTabs,
+  loadPricingOverride,
+  loadRateLimit,
   loadEditMode,
   loadIndexConfig,
   loadIndexUserConfig,
@@ -151,6 +153,30 @@ describe("config", () => {
     saveBaseUrl("https://self-hosted.example.com", path);
     saveBaseUrl("", path);
     expect(loadBaseUrl(path)).toBeUndefined();
+  });
+
+  it("loads pricingOverride with valid non-negative fields", () => {
+    writeConfig(
+      {
+        pricingOverride: {
+          "third-party-model": { inputCacheHit: 0, inputCacheMiss: 1.5, output: 3 },
+          invalid: { inputCacheHit: -1, inputCacheMiss: "bad" as unknown as number },
+        },
+      },
+      path,
+    );
+    expect(loadPricingOverride(path)).toEqual({
+      "third-party-model": { inputCacheHit: 0, inputCacheMiss: 1.5, output: 3 },
+    });
+  });
+
+  it("loads positive integer rateLimit rpm only", () => {
+    writeConfig({ rateLimit: { rpm: 30 } }, path);
+    expect(loadRateLimit(path)).toEqual({ rpm: 30 });
+    writeConfig({ rateLimit: { rpm: 0 } }, path);
+    expect(loadRateLimit(path)).toBeUndefined();
+    writeConfig({ rateLimit: { rpm: 1.5 } }, path);
+    expect(loadRateLimit(path)).toBeUndefined();
   });
 
   it("redactKey hides the middle", () => {
