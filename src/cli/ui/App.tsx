@@ -152,6 +152,7 @@ import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useWorkspaceRoot } from "./hooks/useWorkspaceRoot.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
+import { InputAreaWithHistoryHint } from "./layout/InputAreaWithHistoryHint.js";
 import { LiveExpandContext } from "./layout/LiveExpandContext.js";
 import {
   ModeStatusBar,
@@ -330,27 +331,6 @@ const FLUSH_INTERVAL_MS = (() => {
 })();
 
 /**
- * Renders either the input area (pinned) or the "reading history" hint
- * (scrolled up). Reads `pinned` from the chat-scroll store directly so
- * AppInner doesn't subscribe 闂?toggling pinned only re-renders this leaf.
- */
-function InputAreaWithHistoryHint({
-  inputArea,
-}: { inputArea: React.ReactNode }): React.ReactElement {
-  const pinned = useChatScrollState((s) => s.pinned);
-  if (!pinned) {
-    return (
-      <Text color={FG.faint}>
-        {
-          " 濠电姷鏁告慨鐑藉极閸涘﹥鍙忛柣鎴ｆ閺嬩線鏌涘☉姗堟敾闁告瑥绻橀弻锝夊箣濠垫劖缍楅梺閫炲苯澧柛濠傛健楠炴劖绻濋崘顏嗗骄闂佸啿鎼鍥╃矓椤旈敮鍋撶憴鍕８闁告梹鍨甸锝夊醇閺囩偟顓洪梺缁樼懃閹虫劙鐛姀銈嗏拻闁稿本鐟︾粊鐗堛亜椤愩埄妲搁柣锝呭槻铻ｉ悶娑掑墲閻忓啫鈹戦悙鏉戠仸缁炬澘绉归、鏇熺鐎ｎ偆鍘梺鍓插亝缁诲啴宕戦鍡樺枑闁绘鐗嗙粭姘舵煕鐎ｎ偄濮夐柍褜鍓涢幊鎾寸珶婵犲洤绐楅柡宥庡幖缁€鍫澝归悡搴ｆ憼闁抽攱鍨堕幈銊╂偡閻楀牊鎮欓梺閫炲苯鍘甸柛濠冪箓閻ｇ兘寮剁拠鐐瀹曘劑顢橀崶椋庣暤闁哄本鐩鎾Ω閵壯傚摋闂備礁鎲￠崝蹇涘磻閹剧繝绻嗛柣鎰典簻閳ь剚鐗犲畷婵嬫晝閳ь剟鈥﹂崸妤€鐒垫い鎺戝€荤壕鍏笺亜閺冨倸甯舵い锝呯－缁?reading history 闂?End / PgDn to return 闂?闂?to advance one line"
-        }
-      </Text>
-    );
-  }
-  return <>{inputArea}</>;
-}
-
-/**
  * Captures printable keys / backspace / Enter while history is unpinned so the
  * user can type blind and see the buffer when they scroll back. Lives in its
  * own leaf so AppInner doesn't subscribe to `pinned` 闂?same trick as
@@ -402,7 +382,7 @@ function LoopStatusRow({
   const nextFireMs = Math.max(0, loop.nextFireAt - Date.now());
   return (
     <Box>
-      <Text color="cyan">{`闂?${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} 闂?/loop stop or type to cancel`}</Text>
+      <Text color="cyan">{`> ${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} - /loop stop or type to cancel`}</Text>
     </Box>
   );
 }
@@ -1136,8 +1116,8 @@ function AppInner({
         bumpReady();
       } else if (notice.kind === "failed") {
         log.pushWarning(
-          `MCP 闂?${notice.name} failed`,
-          `${notice.reason}\n闂?run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).`,
+          `MCP ${notice.name} failed`,
+          `${notice.reason}\nrun \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).`,
         );
         bumpReady();
       } else if (notice.kind === "tools-ready") {
@@ -1706,7 +1686,7 @@ function AppInner({
         planSummaryRef.current = restoredPlan.summary ?? null;
         const when = relativeTime(restoredPlan.updatedAt);
         const done = new Set(restoredPlan.completedStepIds);
-        const summary = restoredPlan.summary ? ` 闂?${restoredPlan.summary}` : "";
+        const summary = restoredPlan.summary ? ` - ${restoredPlan.summary}` : "";
         log.showPlan({
           title: t("ui.resumedPlan", { when, summary }),
           steps: restoredPlan.steps.map((s) => ({
@@ -2132,7 +2112,7 @@ function AppInner({
       if (choice === "reject") {
         const context = denyContext ? ` because: ${denyContext}` : "";
         log.pushInfo(t("app.rejectedEdit", { path: block.path, context }));
-        return `User rejected this edit to ${block.path}${context}. Don't retry the same SEARCH/REPLACE 闂?either try a different approach or ask the user what they want instead.`;
+        return `User rejected this edit to ${block.path}${context}. Don't retry the same SEARCH/REPLACE; either try a different approach or ask the user what they want instead.`;
       }
       if (choice === "apply-rest-of-turn") {
         turnEditPolicyRef.current = "apply-all";
@@ -2200,10 +2180,10 @@ function AppInner({
       return "/walk is only available inside `reasonix code`.";
     }
     if (pendingEdits.current.length === 0) {
-      return "nothing pending 闂?nothing to walk through.";
+      return "nothing pending - nothing to walk through.";
     }
     setWalkthroughActive(true);
-    return `闂?walking ${pendingEdits.current.length} edit block(s) 闂?y apply 闂?n reject 闂?a apply rest 闂?A flip to AUTO 闂?Esc cancels (keeps remaining queued).`;
+    return `walking ${pendingEdits.current.length} edit block(s) - y apply - n reject - a apply rest - A flip to AUTO - Esc cancels (keeps remaining queued).`;
   }, [codeMode, pendingEdits]);
 
   // Embedded dashboard server lifecycle. Boot is async (server has to
@@ -3266,18 +3246,18 @@ function AppInner({
                     (r) => {
                       log.pushInfo(
                         r.enabled
-                          ? `闂?semantic_search re-pointed at ${resolved}`
-                          : `闂?semantic_search disabled (no compatible index in ${resolved})`,
+                          ? `semantic_search re-pointed at ${resolved}`
+                          : `semantic_search disabled (no compatible index in ${resolved})`,
                       );
                     },
                     (err) => {
                       log.pushInfo(
-                        `闂?semantic_search re-bootstrap failed: ${(err as Error).message}`,
+                        `semantic_search re-bootstrap failed: ${(err as Error).message}`,
                       );
                     },
                   );
                 }
-                return { ok: true, info: `闂?workspace switched to ${resolved}` };
+                return { ok: true, info: `workspace switched to ${resolved}` };
               }
             : undefined,
           reloadMcp: mcpRuntime
@@ -3352,11 +3332,11 @@ function AppInner({
         }
         if (result.replayPlan) {
           const rp = result.replayPlan;
-          const titleSuffix = rp.summary ? ` 闂?${rp.summary}` : "";
+          const titleSuffix = rp.summary ? ` - ${rp.summary}` : "";
           const done = new Set(rp.completedStepIds);
           setPendingReplayViewer({
             viewerKind: "replay-plan",
-            title: `Replay #${rp.index}/${rp.total} 闂?${rp.relativeTime}${titleSuffix}`,
+            title: `Replay #${rp.index}/${rp.total} - ${rp.relativeTime}${titleSuffix}`,
             body: rp.body,
             steps: rp.steps.map((s) => ({
               id: s.id,
@@ -3521,8 +3501,8 @@ function AppInner({
               .filter((ex) => ex.ok)
               .map((ex) => {
                 const tag = ex.title ? `${ex.title} (${ex.url})` : ex.url;
-                const trunc = ex.truncated ? " 闂?truncated" : "";
-                return `${tag} 闂?${(ex.chars ?? 0).toLocaleString()} chars${trunc}`;
+                const trunc = ex.truncated ? " - truncated" : "";
+                return `${tag} - ${(ex.chars ?? 0).toLocaleString()} chars${trunc}`;
               });
             const skipped = urlExpanded.expansions
               .filter((ex) => !ex.ok)
@@ -4598,7 +4578,7 @@ function AppInner({
                         if (!target) return;
                         const result = restoreCheckpoint(currentRootDir, target.id);
                         const lines = [
-                          `闂?restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
+                          `restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
                         ];
                         if (result.restored.length > 0) {
                           lines.push(
@@ -4640,7 +4620,7 @@ function AppInner({
                           onSwitchSession(outcome.name);
                         } else {
                           log.pushInfo(
-                            `闂?to switch to "${outcome.name}", quit and run: reasonix chat --session ${outcome.name}`,
+                            `to switch to "${outcome.name}", quit and run: reasonix chat --session ${outcome.name}`,
                           );
                         }
                         return;
@@ -4651,7 +4631,7 @@ function AppInner({
                           onSwitchSession(freshSessionName(session));
                         } else {
                           log.pushInfo(
-                            "闂?to start a fresh session, quit and run: reasonix chat (no --session flag)",
+                            "to start a fresh session, quit and run: reasonix chat (no --session flag)",
                           );
                         }
                         return;
@@ -4684,7 +4664,7 @@ function AppInner({
                         process.env.REASONIX_THEME,
                       );
                       setThemeName(active);
-                      log.pushInfo(`闂?theme saved: ${outcome.value}\n  active now: ${active}`);
+                      log.pushInfo(`theme saved: ${outcome.value}\n  active now: ${active}`);
                     }}
                   />
                 ) : pendingCopyMode ? (
@@ -4736,7 +4716,7 @@ function AppInner({
                             /* disk full / perms 闂?runtime change still took effect */
                           }
                         }
-                        log.pushInfo(`闂?model: ${outcome.id}`);
+                        log.pushInfo(`model: ${outcome.id}`);
                         return;
                       }
                       if (outcome.kind === "preset") {
@@ -4757,7 +4737,7 @@ function AppInner({
                         } catch {
                           /* disk full / perms 闂?runtime change still took effect */
                         }
-                        log.pushInfo(`闂?preset: ${outcome.name} 闂?${p.model}`);
+                        log.pushInfo(`preset: ${outcome.name} - ${p.model}`);
                       }
                     }}
                   />

@@ -200,6 +200,7 @@ export interface TranslationSchema {
     continuingAfter: string;
     planStoppedAt: string;
     revisingAfter: string;
+    historyScrollHint: string;
   };
   hooks: {
     head: string;
