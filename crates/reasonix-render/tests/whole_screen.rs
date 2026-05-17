@@ -43,7 +43,7 @@ fn homepage_renders_logo_meta_dock_and_sidebar() {
     assert!(all.contains("██████╗"), "logo missing");
     assert!(all.contains("deepseek-v3.2-coder"), "model missing");
     assert!(all.contains("~/work/reasonix-core"), "workdir missing");
-    assert!(all.contains("read · write · edit"), "tools missing");
+    assert!(all.contains("128k"), "context cap missing");
     assert!(all.contains("type to chat"), "hint missing");
     assert!(all.contains("MISSION CONTROL"), "sidebar header missing");
     assert!(all.contains("PLAN"), "sidebar PLAN missing");
@@ -71,10 +71,10 @@ fn homepage_status_bar_has_segments_and_ctx_meter() {
     assert!(last.contains("●"), "brand dot missing");
     assert!(last.contains("ctx"));
     assert!(last.contains("19.2k/128k"));
-    assert!(last.contains("tok"));
+    assert!(last.contains("cache"));
+    assert!(last.contains("87%"));
     assert!(last.contains("cost"));
     assert!(last.contains("$0.043"));
-    assert!(last.contains("git"));
     assert!(last.contains("▰") && last.contains("▱"), "ctx bar segments");
 }
 
@@ -253,35 +253,56 @@ fn extract_text_returns_selected_card_symbols() {
     use ratatui::layout::Rect;
     let state = demo_state();
     let term = Rect::new(0, 0, 140, 80);
-    let layout = cards_layout(term, &state, 0);
+    let layout = cards_layout(term, &state, 0, true);
     assert!(layout.total > 0, "demo state has cards");
     let mut sel = Selection::new(layout.screen_rect.x + 2, layout.view_top);
     sel.extend(
         layout.screen_rect.right().saturating_sub(2),
         layout.view_top + layout.view_h.saturating_sub(1),
     );
-    let text = extract_text(&state, 0, term, sel);
+    let text = extract_text(&state, 0, term, sel, true);
     assert!(!text.is_empty(), "extracted text empty");
     assert!(!text.contains("MISSION CONTROL"), "sidebar leaked: {text:?}");
     assert!(!text.contains("19.2k/128k"), "dock leaked: {text:?}");
 }
 
+fn catalog_state() -> reasonix_render::state::SceneState {
+    use reasonix_render::state::{SceneState, SlashMatch};
+    let entries = ["clear", "compact", "commit", "undo", "diff", "help"];
+    SceneState {
+        slash_catalog: Some(
+            entries
+                .iter()
+                .map(|cmd| SlashMatch {
+                    cmd: (*cmd).to_string(),
+                    summary: String::new(),
+                    args_hint: None,
+                    aliases: Vec::new(),
+                })
+                .collect(),
+        ),
+        ..Default::default()
+    }
+}
+
 #[test]
 fn slash_match_count_filters_by_prefix() {
-    assert_eq!(slash_match_count("/c"), 3);
-    assert_eq!(slash_match_count("/u"), 1);
-    assert_eq!(slash_match_count("/"), 6);
-    assert_eq!(slash_match_count(""), 0);
-    assert_eq!(slash_match_count("/zzz"), 0);
+    let state = catalog_state();
+    assert_eq!(slash_match_count("/c", &state), 3);
+    assert_eq!(slash_match_count("/u", &state), 1);
+    assert_eq!(slash_match_count("/", &state), 6);
+    assert_eq!(slash_match_count("", &state), 0);
+    assert_eq!(slash_match_count("/zzz", &state), 0);
 }
 
 #[test]
 fn slash_completion_appends_trailing_space() {
-    assert_eq!(slash_completion("/c", 0).as_deref(), Some("/clear "));
-    assert_eq!(slash_completion("/c", 1).as_deref(), Some("/compact "));
-    assert_eq!(slash_completion("/c", 2).as_deref(), Some("/commit "));
-    assert_eq!(slash_completion("/c", 3), None);
-    assert_eq!(slash_completion("abc", 0), None);
+    let state = catalog_state();
+    assert_eq!(slash_completion("/c", 0, &state).as_deref(), Some("/clear "));
+    assert_eq!(slash_completion("/c", 1, &state).as_deref(), Some("/compact "));
+    assert_eq!(slash_completion("/c", 2, &state).as_deref(), Some("/commit "));
+    assert_eq!(slash_completion("/c", 3, &state), None);
+    assert_eq!(slash_completion("abc", 0, &state), None);
 }
 
 #[test]
@@ -324,31 +345,59 @@ fn slash_overlay_highlights_selected_index() {
     assert!(!clear_after.contains("▸"), "/clear should not be marked when idx=2");
 }
 
+fn at_state_state() -> reasonix_render::state::SceneState {
+    use reasonix_render::state::{AtPickerEntry, AtState, SceneState};
+    SceneState {
+        at_state: Some(AtState::Browse {
+            base_dir: String::new(),
+            entries: vec![
+                AtPickerEntry {
+                    label: "src/parser.ts".to_string(),
+                    insert_path: "src/parser.ts".to_string(),
+                    dir_suffix: String::new(),
+                    is_dir: false,
+                },
+                AtPickerEntry {
+                    label: "tests/parser.test.ts".to_string(),
+                    insert_path: "tests/parser.test.ts".to_string(),
+                    dir_suffix: String::new(),
+                    is_dir: false,
+                },
+            ],
+            loading: false,
+        }),
+        ..Default::default()
+    }
+}
+
 #[test]
 fn at_match_count_requires_at_at_end() {
-    assert_eq!(at_match_count("@"), 10);
-    assert_eq!(at_match_count("@par"), 2);
-    assert_eq!(at_match_count("check @par"), 2);
-    assert_eq!(at_match_count("@par this"), 0);
-    assert_eq!(at_match_count("nopath"), 0);
-    assert_eq!(at_match_count("foo@bar"), 0);
+    let state = at_state_state();
+    assert_eq!(at_match_count("@", &state), 2);
+    assert_eq!(at_match_count("@par", &state), 2);
+    assert_eq!(at_match_count("check @par", &state), 2);
+    assert_eq!(at_match_count("@par this", &state), 0);
+    assert_eq!(at_match_count("nopath", &state), 0);
+    assert_eq!(at_match_count("foo@bar", &state), 0);
 }
 
 #[test]
 fn at_completion_replaces_only_the_at_token() {
-    assert_eq!(at_completion("@par", 0).as_deref(), Some("@src/parser.ts "));
+    let state = at_state_state();
+    assert_eq!(at_completion("@par", 0, &state).as_deref(), Some("@src/parser.ts "));
     assert_eq!(
-        at_completion("check @par", 0).as_deref(),
+        at_completion("check @par", 0, &state).as_deref(),
         Some("check @src/parser.ts ")
     );
-    assert_eq!(at_completion("@zzz", 0), None);
-    assert_eq!(at_completion("no at", 0), None);
+    assert_eq!(at_completion("no at", 0, &state), None);
 }
 
 #[test]
 fn at_overlay_renders_when_composer_has_at_token() {
     let mut state = demo_state();
     state.composer_text = Some("check @par".to_string());
+    let at = at_state_state();
+    state.at_state = at.at_state;
     let backend = TestBackend::new(140, 50);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
@@ -366,7 +415,6 @@ fn at_overlay_renders_when_composer_has_at_token() {
         }
         all.push('\n');
     }
-    assert!(all.contains("@ ATTACH FILE"), "at-overlay header missing");
     assert!(all.contains("src/parser.ts"), "parser.ts match missing");
 }
 
@@ -758,8 +806,8 @@ fn selection_follows_scroll() {
     use ratatui::layout::Rect;
     let state = demo_state();
     let term = Rect::new(0, 0, 140, 30);
-    let layout_a = cards_layout(term, &state, 0);
-    let layout_b = cards_layout(term, &state, 5);
+    let layout_a = cards_layout(term, &state, 0, true);
+    let layout_b = cards_layout(term, &state, 5, true);
     assert!(
         layout_b.view_top < layout_a.view_top || layout_a.view_top == layout_b.view_top,
         "scrolling up moves view_top earlier"
@@ -769,7 +817,86 @@ fn selection_follows_scroll() {
         layout_a.screen_rect.x + 30,
         layout_a.view_top + 1,
     );
-    let a = extract_text(&state, 0, term, sel);
-    let b = extract_text(&state, 5, term, sel);
+    let a = extract_text(&state, 0, term, sel, true);
+    let b = extract_text(&state, 5, term, sel, true);
     assert_eq!(a, b, "selection text invariant under scroll");
+}
+
+#[test]
+fn sidebar_hidden_when_toggled_off() {
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            f.render_widget(
+                WholeScreen::new(&demo_state()).with_sidebar_visible(false),
+                area,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer().clone();
+    let mut all = String::new();
+    for y in 0..buf.area.height {
+        for x in 0..buf.area.width {
+            all.push_str(buf[(x, y)].symbol());
+        }
+        all.push('\n');
+    }
+    assert!(!all.contains("MISSION CONTROL"), "sidebar must be hidden when toggled off");
+    assert!(!all.contains("JOBS"), "sidebar JOBS section must be hidden");
+}
+
+#[test]
+fn sidebar_long_label_wraps_within_sidebar() {
+    let state = SceneState {
+        model: Some("ds".to_string()),
+        cards: vec![
+            SceneCard {
+                kind: "todo".to_string(),
+                body: Some("[~] 这是一个非常非常非常非常非常非常非常长的中文计划描述用来测试换行".to_string()),
+                ..Default::default()
+            },
+            SceneCard {
+                kind: "tool".to_string(),
+                summary: "Grep".to_string(),
+                args: Some("\"a_pattern_that_is_long_enough_to_need_wrapping_in_the_sidebar\"".to_string()),
+                status: Some(reasonix_render::state::ToolStatus::Ok),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    let rows = draw(&state, 120, 30);
+    let all = joined(&rows);
+    assert!(all.contains("中文计划描述"), "long plan label continuation segment missing");
+    assert!(all.contains("enough_to_need_wrapping"), "long job label continuation segment missing");
+}
+
+#[test]
+fn main_panel_content_does_not_leak_into_sidebar_columns() {
+    let state = SceneState {
+        model: Some("ds".to_string()),
+        cwd: Some("F:/some/very/deeply/nested/working/directory/that/keeps/going/and/going".to_string()),
+        cards: vec![SceneCard {
+            kind: "tool".to_string(),
+            summary: "Grep".to_string(),
+            args: Some("short".to_string()),
+            status: Some(reasonix_render::state::ToolStatus::Ok),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let rows = draw(&state, 120, 30);
+    let main_w = 120 - 34;
+    for (i, line) in rows.iter().enumerate() {
+        let cells: Vec<&str> = line.split_terminator("").skip(1).collect();
+        for j in main_w..cells.len().min((main_w + 2) as usize) {
+            let cell = cells.get(j).copied().unwrap_or("");
+            assert!(
+                cell == "│" || cell == " " || cell == "",
+                "row {i} col {j}: main-panel content leaked into sidebar: {cell:?} (line: {line:?})"
+            );
+        }
+    }
 }

@@ -5,8 +5,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::state::{SceneCard, SceneState, ToolStatus};
 
-use super::cards::{parse_todo_items, TodoState};
-use super::paint::{paint, paint_str, truncate};
+use super::cards::{parse_todo_items, wrap_visual, TodoState};
+use super::paint::{paint, paint_str};
 use super::theme::{BG, DS_BRIGHT, DS_PURPLE, ERR, FG, FG1, FG2, FG3, OK, WARN};
 
 pub fn render_sidebar(buf: &mut Buffer, area: Rect, state: &SceneState) {
@@ -21,7 +21,7 @@ pub fn render_sidebar(buf: &mut Buffer, area: Rect, state: &SceneState) {
     if row < bottom {
         paint_str(buf, inner_x, row, "⚙ ", FG, BG, Modifier::empty());
         paint_str(buf, inner_x + 2, row, "MISSION CONTROL", DS_BRIGHT, BG, Modifier::BOLD);
-        let toggle = "⌘. toggle";
+        let toggle = "^B hide";
         let toggle_col = area.x + area.width.saturating_sub(toggle.width() as u16 + 1);
         paint_str(buf, toggle_col, row, toggle, FG3, BG, Modifier::empty());
         row += 1;
@@ -60,12 +60,80 @@ pub fn render_sidebar(buf: &mut Buffer, area: Rect, state: &SceneState) {
         paint_str(buf, inner_x, row, "▥ ", OK, BG, Modifier::BOLD);
         paint_str(buf, inner_x + 2, row, "SESSION", OK, BG, Modifier::BOLD);
         row += 1;
-        row = sidebar_kv(buf, area, row, "model", "v3.2-coder", DS_BRIGHT);
-        row = sidebar_kv(buf, area, row, "context", "19.2k / 128k", FG);
-        row = sidebar_kv(buf, area, row, "↑ input", "12,408", FG);
-        row = sidebar_kv(buf, area, row, "↓ output", "3,194", FG);
-        row = sidebar_kv(buf, area, row, "cost", "$0.043", FG);
-        let _ = sidebar_kv(buf, area, row, "last turn", "—", FG);
+        let model_label = state.model.as_deref().unwrap_or("—");
+        row = sidebar_kv(buf, area, row, "model", model_label, DS_BRIGHT);
+        row = sidebar_kv(buf, area, row, "context", &format_ctx(state), FG);
+        if let Some(n) = state.session_input_tokens {
+            row = sidebar_kv(buf, area, row, "↑ input", &short_num(n), FG);
+        }
+        if let Some(n) = state.session_output_tokens {
+            row = sidebar_kv(buf, area, row, "↓ output", &short_num(n), FG);
+        }
+        row = sidebar_kv(buf, area, row, "cache", &format_cache(state), FG);
+        let currency = state.wallet_currency.as_deref();
+        row = sidebar_kv(buf, area, row, "cost", &format_session_cost(state, currency), FG);
+        if let (Some(balance), Some(cur)) = (state.wallet_balance, currency) {
+            row = sidebar_kv(buf, area, row, "balance", &format!("{:.2} {}", balance, cur), FG);
+        }
+        let _ = sidebar_kv(buf, area, row, "last turn", &format_last_turn(state, currency), FG);
+    }
+}
+
+fn format_ctx(state: &SceneState) -> String {
+    match (state.ctx_tokens, state.ctx_cap) {
+        (Some(t), Some(c)) if c > 0 => format!("{} / {}", short_num(t), short_num(c)),
+        _ => "—".to_string(),
+    }
+}
+
+fn format_cache(state: &SceneState) -> String {
+    state
+        .cache_hit_ratio
+        .map(|r| format!("{}%", (r * 100.0).round() as i32))
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn format_session_cost(state: &SceneState, currency: Option<&str>) -> String {
+    let Some(v) = state.session_cost_usd else {
+        return "—".to_string();
+    };
+    match currency {
+        Some("CNY") | Some("RMB") => format!("¥{:.3}", v * 7.2),
+        _ => format!("${v:.3}"),
+    }
+}
+
+fn format_last_turn(state: &SceneState, currency: Option<&str>) -> String {
+    let elapsed = state.last_turn_ms.map(|ms| {
+        if ms >= 60_000 {
+            format!("{:.1}m", ms as f64 / 60_000.0)
+        } else if ms >= 1000 {
+            format!("{:.1}s", ms as f64 / 1000.0)
+        } else {
+            format!("{ms}ms")
+        }
+    });
+    let cost = state.last_turn_cost_usd.map(|v| match currency {
+        Some("CNY") | Some("RMB") => format!("¥{:.3}", v * 7.2),
+        _ => format!("${v:.3}"),
+    });
+    match (elapsed, cost) {
+        (Some(t), Some(c)) => format!("{t} · {c}"),
+        (Some(t), None) => t,
+        (None, Some(c)) => c,
+        (None, None) => "—".to_string(),
+    }
+}
+
+fn short_num(n: u32) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", f64::from(n) / 1_000_000.0)
+    } else if n >= 100_000 {
+        format!("{}k", n / 1000)
+    } else if n >= 1_000 {
+        format!("{:.1}k", f64::from(n) / 1000.0)
+    } else {
+        format!("{n}")
     }
 }
 
@@ -108,7 +176,7 @@ fn sidebar_plan(buf: &mut Buffer, area: Rect, start_row: u16, items: &[(TodoStat
     let ccol = area.x + area.width.saturating_sub(count.width() as u16 + 1);
     paint_str(buf, ccol, row, &count, FG3, BG, Modifier::empty());
     row += 1;
-    let inner_w = area.width.saturating_sub(3);
+    let inner_w = area.width.saturating_sub(5);
     for (state, label) in items {
         if row >= bottom {
             return row;
@@ -119,8 +187,16 @@ fn sidebar_plan(buf: &mut Buffer, area: Rect, start_row: u16, items: &[(TodoStat
             TodoState::Pending => ("○", FG3, FG1, Modifier::empty()),
         };
         paint_str(buf, inner_x, row, marker, marker_fg, BG, Modifier::BOLD);
-        paint_str(buf, inner_x + 2, row, &truncate(label, inner_w as usize), label_fg, BG, label_mod);
-        row += 1;
+        for (i, seg) in wrap_visual(label, inner_w).iter().enumerate() {
+            if row >= bottom {
+                return row;
+            }
+            if i > 0 {
+                paint(buf, area.x, row, '│', FG3, BG, Modifier::empty());
+            }
+            paint_str(buf, inner_x + 2, row, seg, label_fg, BG, label_mod);
+            row += 1;
+        }
     }
     row + 1
 }
@@ -138,7 +214,7 @@ fn sidebar_jobs(buf: &mut Buffer, area: Rect, start_row: u16, tools: &[&SceneCar
     let ccol = area.x + area.width.saturating_sub(count.width() as u16 + 1);
     paint_str(buf, ccol, row, &count, FG3, BG, Modifier::empty());
     row += 1;
-    let inner_w = area.width.saturating_sub(3);
+    let inner_w = area.width.saturating_sub(5);
     for tool in tools {
         if row >= bottom {
             return row;
@@ -155,8 +231,16 @@ fn sidebar_jobs(buf: &mut Buffer, area: Rect, start_row: u16, tools: &[&SceneCar
             label.push(' ');
             label.push_str(args);
         }
-        paint_str(buf, inner_x + 2, row, &truncate(&label, inner_w as usize), FG, BG, Modifier::empty());
-        row += 1;
+        for (i, seg) in wrap_visual(&label, inner_w).iter().enumerate() {
+            if row >= bottom {
+                return row;
+            }
+            if i > 0 {
+                paint(buf, area.x, row, '│', FG3, BG, Modifier::empty());
+            }
+            paint_str(buf, inner_x + 2, row, seg, FG, BG, Modifier::empty());
+            row += 1;
+        }
     }
     row + 1
 }

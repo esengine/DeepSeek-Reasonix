@@ -5,7 +5,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::state::SceneState;
 
-use super::cards::{render_card_to, total_cards_height};
+use super::cards::{body_width_for, render_card_to, total_cards_height};
 use super::dock_height_for;
 use super::theme::SIDEBAR_WIDTH;
 
@@ -68,6 +68,16 @@ pub struct CardsLayout {
     pub total: u16,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ScrollbarGeom {
+    pub track_x: u16,
+    pub track_top: u16,
+    pub track_space: u16,
+    pub thumb_top: u16,
+    pub thumb_size: u16,
+    pub max_offset: u16,
+}
+
 impl CardsLayout {
     pub fn contains_screen(&self, x: u16, y: u16) -> bool {
         x >= self.screen_rect.x
@@ -94,10 +104,65 @@ impl CardsLayout {
         let virt_y = self.view_top.saturating_add(row - min_y);
         (col, virt_y)
     }
+
+    pub fn scrollbar(&self, scroll_offset: u16) -> Option<ScrollbarGeom> {
+        if self.screen_rect.width == 0 || self.view_h == 0 || self.total <= self.view_h {
+            return None;
+        }
+        let track_x = self.screen_rect.right().saturating_sub(1);
+        let track_top = self.screen_rect.bottom().saturating_sub(self.view_h);
+        let max_offset = self.total - self.view_h;
+        let thumb_size_raw =
+            ((f32::from(self.view_h) / f32::from(self.total)) * f32::from(self.view_h)).round();
+        let thumb_size = (thumb_size_raw as u16).clamp(1, self.view_h);
+        let track_space = self.view_h - thumb_size;
+        let offset = scroll_offset.min(max_offset);
+        let thumb_top_rel = if max_offset == 0 {
+            track_space
+        } else {
+            let ratio = 1.0 - (f32::from(offset) / f32::from(max_offset));
+            (ratio * f32::from(track_space)).round() as u16
+        };
+        let thumb_top = track_top + thumb_top_rel.min(track_space);
+        Some(ScrollbarGeom {
+            track_x,
+            track_top,
+            track_space,
+            thumb_top,
+            thumb_size,
+            max_offset,
+        })
+    }
 }
 
-pub fn cards_layout(terminal: Rect, state: &SceneState, scroll_offset: u16) -> CardsLayout {
-    let main_w = if terminal.width > SIDEBAR_WIDTH + 30 {
+impl ScrollbarGeom {
+    pub fn contains(&self, x: u16, y: u16) -> bool {
+        x == self.track_x
+            && y >= self.track_top
+            && y < self.track_top + (self.track_space + self.thumb_size)
+    }
+
+    pub fn thumb_contains(&self, y: u16) -> bool {
+        y >= self.thumb_top && y < self.thumb_top + self.thumb_size
+    }
+
+    pub fn offset_for_thumb_top_rel(&self, thumb_top_rel: u16) -> u16 {
+        if self.track_space == 0 {
+            return self.max_offset;
+        }
+        let clamped = thumb_top_rel.min(self.track_space);
+        let ratio = 1.0 - (f32::from(clamped) / f32::from(self.track_space));
+        (ratio * f32::from(self.max_offset)).round() as u16
+    }
+}
+
+pub fn cards_layout(
+    terminal: Rect,
+    state: &SceneState,
+    scroll_offset: u16,
+    sidebar_visible: bool,
+) -> CardsLayout {
+    let main_w = if sidebar_visible && terminal.width > SIDEBAR_WIDTH + 30 {
         terminal.width - SIDEBAR_WIDTH
     } else {
         terminal.width
@@ -109,7 +174,8 @@ pub fn cards_layout(terminal: Rect, state: &SceneState, scroll_offset: u16) -> C
     let cards_h = scroll_h.saturating_sub(boot);
     let screen_rect = Rect::new(terminal.x, cards_y, main_w, cards_h);
 
-    let total = total_cards_height(state);
+    let body_w = body_width_for(Rect::new(0, 0, main_w.saturating_sub(1), 1));
+    let total = total_cards_height(state, body_w);
     let avail = cards_h;
     let max_offset = total.saturating_sub(avail);
     let offset = scroll_offset.min(max_offset);
@@ -148,11 +214,12 @@ pub fn extract_text(
     scroll_offset: u16,
     terminal: Rect,
     sel: Selection,
+    sidebar_visible: bool,
 ) -> String {
     if sel.is_empty() {
         return String::new();
     }
-    let layout = cards_layout(terminal, state, scroll_offset);
+    let layout = cards_layout(terminal, state, scroll_offset, sidebar_visible);
     if layout.total == 0 {
         return String::new();
     }

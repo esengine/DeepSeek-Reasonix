@@ -100,3 +100,13 @@ pub fn move_cursor_line(buffer: &str, cursor: usize, delta: isize) -> usize {
     }
     line_col_to_cursor(buffer, new_line, col)
 }
+
+pub fn cursor_on_first_line(buffer: &str, cursor: usize) -> bool {
+    locate_cursor_in(buffer, cursor).0 == 0
+}
+
+pub fn cursor_on_last_line(buffer: &str, cursor: usize) -> bool {
+    let (line, _) = locate_cursor_in(buffer, cursor);
+    let last_line = buffer.chars().filter(|c| *c == '\n').count();
+    line >= last_line
+}

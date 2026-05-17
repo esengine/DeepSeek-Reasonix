@@ -5,7 +5,7 @@ use ratatui::style::Modifier;
 use crate::state::SceneState;
 
 use super::cards::render_cards;
-use super::paint::paint_str;
+use super::paint::paint_str_to;
 use super::theme::{DS, FG, FG2, FG3, LOGO};
 
 pub fn render_scroll(
@@ -30,12 +30,13 @@ pub fn render_scroll(
 
 fn render_logo(buf: &mut Buffer, area: Rect, start_row: u16) -> u16 {
     use super::theme::BG;
+    let end_x = area.x.saturating_add(area.width);
     let mut row = start_row;
     for line in LOGO {
         if row >= area.y + area.height {
             break;
         }
-        paint_str(buf, area.x + 2, row, line, DS, BG, Modifier::BOLD);
+        paint_str_to(buf, area.x + 2, row, line, end_x, DS, BG, Modifier::BOLD);
         row += 1;
     }
     row
@@ -44,55 +45,50 @@ fn render_logo(buf: &mut Buffer, area: Rect, start_row: u16) -> u16 {
 fn render_boot_meta(buf: &mut Buffer, area: Rect, start_row: u16, state: &SceneState) -> u16 {
     use super::theme::{BG, DS_BRIGHT};
     let bottom = area.y + area.height;
+    let end_x = area.x.saturating_add(area.width);
     let key_col = area.x + 2;
     let val_col = area.x + 14;
     let mut row = start_row;
 
-    let model = state.model.as_deref().unwrap_or("deepseek-v3.2-coder");
     if row < bottom {
-        paint_str(buf, key_col, row, "model", FG2, BG, Modifier::empty());
-        let after = paint_str(buf, val_col, row, model, DS_BRIGHT, BG, Modifier::empty());
-        let ctx_col = after.saturating_add(4);
-        paint_str(buf, ctx_col, row, "context", FG2, BG, Modifier::empty());
-        paint_str(
-            buf,
-            ctx_col.saturating_add(10),
-            row,
-            "128k · 12% used",
-            FG,
-            BG,
-            Modifier::empty(),
-        );
-        row += 1;
+        if let Some(model) = state.model.as_deref() {
+            paint_str_to(buf, key_col, row, "model", end_x, FG2, BG, Modifier::empty());
+            let after = paint_str_to(buf, val_col, row, model, end_x, DS_BRIGHT, BG, Modifier::empty());
+            if let Some(cap) = state.ctx_cap {
+                let ctx_col = after.saturating_add(4);
+                paint_str_to(buf, ctx_col, row, "context", end_x, FG2, BG, Modifier::empty());
+                let ctx_text = match (state.ctx_tokens, cap) {
+                    (Some(used), cap) if cap > 0 => {
+                        let pct = (f64::from(used) / f64::from(cap) * 100.0) as i32;
+                        format!("{} · {pct}% used", short_tokens(cap))
+                    }
+                    _ => short_tokens(cap),
+                };
+                paint_str_to(buf, ctx_col.saturating_add(10), row, &ctx_text, end_x, FG, BG, Modifier::empty());
+            }
+            row += 1;
+        }
     }
 
     if row < bottom {
-        paint_str(buf, key_col, row, "workdir", FG2, BG, Modifier::empty());
-        let cwd = state.cwd.as_deref().unwrap_or("~/work/reasonix-core");
-        paint_str(buf, val_col, row, cwd, FG, BG, Modifier::empty());
-        row += 1;
+        if let Some(cwd) = state.cwd.as_deref() {
+            paint_str_to(buf, key_col, row, "workdir", end_x, FG2, BG, Modifier::empty());
+            paint_str_to(buf, val_col, row, cwd, end_x, FG, BG, Modifier::empty());
+            row += 1;
+        }
     }
 
-    if row < bottom {
-        paint_str(buf, key_col, row, "git", FG2, BG, Modifier::empty());
-        paint_str(buf, val_col, row, "main · 3 modified · ↑2", FG, BG, Modifier::empty());
-        row += 1;
-    }
-
-    if row < bottom {
-        paint_str(buf, key_col, row, "tools", FG2, BG, Modifier::empty());
-        paint_str(
-            buf,
-            val_col,
-            row,
-            "read · write · edit · bash · grep · fetch · todo",
-            FG,
-            BG,
-            Modifier::empty(),
-        );
-        row += 1;
-    }
     row
+}
+
+fn short_tokens(n: u32) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", f64::from(n) / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{}k", n / 1000)
+    } else {
+        format!("{n}")
+    }
 }
 
 fn render_hint_line(buf: &mut Buffer, area: Rect, row: u16) -> u16 {
@@ -100,6 +96,7 @@ fn render_hint_line(buf: &mut Buffer, area: Rect, row: u16) -> u16 {
     if row >= area.y + area.height {
         return row;
     }
+    let end_x = area.x.saturating_add(area.width);
     let mut col = area.x + 2;
     let pairs: [(&str, &str); 6] = [
         ("type to chat", ""),
@@ -110,15 +107,18 @@ fn render_hint_line(buf: &mut Buffer, area: Rect, row: u16) -> u16 {
         ("Ctrl+D", "exit"),
     ];
     for (i, (key, label)) in pairs.iter().enumerate() {
+        if col >= end_x {
+            break;
+        }
         if i > 0 {
-            col = paint_str(buf, col, row, "  ·  ", FG3, BG, Modifier::empty());
+            col = paint_str_to(buf, col, row, "  ·  ", end_x, FG3, BG, Modifier::empty());
         }
         if label.is_empty() {
-            col = paint_str(buf, col, row, key, FG2, BG, Modifier::empty());
+            col = paint_str_to(buf, col, row, key, end_x, FG2, BG, Modifier::empty());
         } else {
-            col = paint_str(buf, col, row, key, DS, BG, Modifier::BOLD);
-            col = paint_str(buf, col, row, " ", FG2, BG, Modifier::empty());
-            col = paint_str(buf, col, row, label, FG2, BG, Modifier::empty());
+            col = paint_str_to(buf, col, row, key, end_x, DS, BG, Modifier::BOLD);
+            col = paint_str_to(buf, col, row, " ", end_x, FG2, BG, Modifier::empty());
+            col = paint_str_to(buf, col, row, label, end_x, FG2, BG, Modifier::empty());
         }
     }
     row + 1

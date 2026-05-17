@@ -45,13 +45,28 @@ pub fn paint_str(
     bg: Color,
     modifier: Modifier,
 ) -> u16 {
+    paint_str_to(buf, x, y, s, buf.area.right(), fg, bg, modifier)
+}
+
+pub fn paint_str_to(
+    buf: &mut Buffer,
+    x: u16,
+    y: u16,
+    s: &str,
+    end_x: u16,
+    fg: Color,
+    bg: Color,
+    modifier: Modifier,
+) -> u16 {
+    let limit = end_x.min(buf.area.right());
     let mut col = x;
     for ch in s.chars() {
-        if col >= buf.area.right() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(1) as u16;
+        if col.saturating_add(w) > limit {
             break;
         }
         paint(buf, col, y, ch, fg, bg, modifier);
-        col = col.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(1) as u16);
+        col = col.saturating_add(w);
     }
     col
 }
@@ -63,20 +78,6 @@ pub fn fill_bg(buf: &mut Buffer, area: Rect, bg: Color) {
             buf[(x, y)].set_style(style);
         }
     }
-}
-
-pub fn truncate(s: &str, max_cols: usize) -> String {
-    let mut out = String::new();
-    let mut w = 0usize;
-    for ch in s.chars() {
-        let cw = UnicodeWidthChar::width(ch).unwrap_or(1);
-        if w + cw > max_cols {
-            break;
-        }
-        w += cw;
-        out.push(ch);
-    }
-    out
 }
 
 pub fn format_ts(ts: i64) -> String {

@@ -38,7 +38,95 @@ pub struct SceneState {
     #[serde(default)]
     pub edit_mode: Option<EditMode>,
     #[serde(default)]
+    pub preset: Option<String>,
+    #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub ctx_tokens: Option<u32>,
+    #[serde(default)]
+    pub ctx_cap: Option<u32>,
+    #[serde(default)]
+    pub session_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub last_turn_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub cache_hit_ratio: Option<f64>,
+    #[serde(default)]
+    pub last_turn_ms: Option<u64>,
+    #[serde(default)]
+    pub session_input_tokens: Option<u32>,
+    #[serde(default)]
+    pub session_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub slash_catalog: Option<Vec<SlashMatch>>,
+    #[serde(default)]
+    pub prompt_history: Option<Vec<String>>,
+    #[serde(default)]
+    pub approval: Option<Approval>,
+    #[serde(default)]
+    pub at_state: Option<AtState>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Approval {
+    Plan {
+        #[serde(default)]
+        body: String,
+        #[serde(default)]
+        steps: Vec<PlanStepItem>,
+    },
+    Shell {
+        command: String,
+        #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default, rename = "timeoutSec")]
+        timeout_sec: Option<u32>,
+    },
+    Path {
+        path: String,
+        #[serde(default)]
+        intent: String,
+        #[serde(default, rename = "toolName")]
+        tool_name: String,
+    },
+    Edit {
+        path: String,
+        #[serde(default)]
+        search: String,
+        #[serde(default)]
+        replace: String,
+    },
+    Choice {
+        question: String,
+        #[serde(default)]
+        options: Vec<ApprovalChoiceOption>,
+        #[serde(default, rename = "allowCustom")]
+        allow_custom: bool,
+    },
+    Checkpoint {
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        completed: u32,
+        #[serde(default)]
+        total: u32,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApprovalChoiceOption {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlanStepItem {
+    pub title: String,
+    #[serde(default)]
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -96,6 +184,42 @@ pub struct SlashMatch {
     pub summary: String,
     #[serde(default, rename = "argsHint")]
     pub args_hint: Option<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtPickerEntry {
+    pub label: String,
+    pub insert_path: String,
+    #[serde(default)]
+    pub dir_suffix: String,
+    #[serde(default)]
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum AtState {
+    Browse {
+        #[serde(default, rename = "baseDir")]
+        base_dir: String,
+        #[serde(default)]
+        entries: Vec<AtPickerEntry>,
+        #[serde(default)]
+        loading: bool,
+    },
+    Search {
+        #[serde(default)]
+        filter: String,
+        #[serde(default)]
+        entries: Vec<AtPickerEntry>,
+        #[serde(default)]
+        scanned: u32,
+        #[serde(default)]
+        searching: bool,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]

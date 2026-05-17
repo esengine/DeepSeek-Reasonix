@@ -100,6 +100,23 @@ fn restore_terminal(terminal: &mut RenderTerminal) {
 fn install_panic_hook() {
     let original = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+        if !home.is_empty() {
+            let path = format!("{home}/.reasonix/rust-panic.log");
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(mut f) =
+                std::fs::OpenOptions::new().create(true).append(true).open(&path)
+            {
+                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(f, "[{now}] {info}");
+                let bt = std::backtrace::Backtrace::force_capture();
+                let _ = writeln!(f, "{bt}\n");
+            }
+        }
         let _ = disable_raw_mode();
         let _ = crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
         original(info);
@@ -124,6 +141,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
     let mut dragging = false;
     let mut slash_idx: usize = 0;
     let mut at_idx: usize = 0;
+    let mut sidebar_visible = true;
     let mut tick: u32 = 0;
     let tick_period = std::time::Duration::from_millis(80);
     let scroll_step: u16 = 3;
@@ -137,7 +155,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
         state.composer_text = Some(buffer.clone());
         state.composer_cursor = Some(cursor);
 
-        let slash_count = slash_match_count(&buffer);
+        let slash_count = slash_match_count(&buffer, &state);
         if slash_count == 0 {
             slash_idx = 0;
         } else if slash_idx >= slash_count {
@@ -146,7 +164,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
         let at_count = if slash_count > 0 {
             0
         } else {
-            at_match_count(&buffer)
+            at_match_count(&buffer, &state)
         };
         if at_count == 0 {
             at_idx = 0;
@@ -167,6 +185,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                         .with_selection(selection)
                         .with_slash_index(slash_idx)
                         .with_at_index(at_idx)
+                        .with_sidebar_visible(sidebar_visible)
                         .with_tick(tick),
                     area,
                 );
@@ -189,7 +208,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     if let Some(sel) = selection {
                         if let Ok(size) = terminal.size() {
                             let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                            let text = extract_text(&state, scroll_offset, rect, sel);
+                            let text = extract_text(&state, scroll_offset, rect, sel, sidebar_visible);
                             if !text.is_empty() {
                                 if let Ok(mut cb) = arboard::Clipboard::new() {
                                     let _ = cb.set_text(text);
@@ -205,6 +224,12 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     && key.modifiers.contains(KeyModifiers::CONTROL)
                 {
                     return Ok(());
+                }
+                if key.code == KeyCode::Char('b')
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    sidebar_visible = !sidebar_visible;
+                    continue;
                 }
                 let slash_active = slash_count > 0;
                 let at_active = !slash_active && at_count > 0;
@@ -230,7 +255,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                         };
                     }
                     KeyCode::Enter if slash_active => {
-                        if let Some(completion) = slash_completion(&buffer, slash_idx) {
+                        if let Some(completion) = slash_completion(&buffer, slash_idx, &state) {
                             cursor = completion.chars().count();
                             buffer = completion;
                         }
@@ -256,7 +281,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                         };
                     }
                     KeyCode::Enter if at_active => {
-                        if let Some(completion) = at_completion(&buffer, at_idx) {
+                        if let Some(completion) = at_completion(&buffer, at_idx, &state) {
                             cursor = completion.chars().count();
                             buffer = completion;
                         }
@@ -370,7 +395,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         if let Some(rect) = term_rect {
-                            let layout = cards_layout(rect, &state, scroll_offset);
+                            let layout = cards_layout(rect, &state, scroll_offset, sidebar_visible);
                             if layout.contains_screen(m.column, m.row) {
                                 let (col, virt_y) = layout.project_clamped(m.column, m.row);
                                 selection = Some(Selection::new(col, virt_y));
@@ -383,7 +408,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     }
                     MouseEventKind::Drag(MouseButton::Left) if dragging => {
                         if let Some(rect) = term_rect {
-                            let layout = cards_layout(rect, &state, scroll_offset);
+                            let layout = cards_layout(rect, &state, scroll_offset, sidebar_visible);
                             let (col, virt_y) = layout.project_clamped(m.column, m.row);
                             if let Some(s) = selection.as_mut() {
                                 s.extend(col, virt_y);
@@ -408,7 +433,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                                         size.width,
                                         size.height,
                                     );
-                                    let text = extract_text(&state, scroll_offset, rect, sel);
+                                    let text = extract_text(&state, scroll_offset, rect, sel, sidebar_visible);
                                     if !text.is_empty() {
                                         if let Ok(mut cb) = arboard::Clipboard::new() {
                                             let _ = cb.set_text(text);
@@ -525,7 +550,7 @@ fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
                 if let Some(Payload::Trace(state)) = current_state.as_ref() {
                     if let Ok(size) = terminal.size() {
                         let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        let layout = cards_layout(rect, state, scroll_offset);
+                        let layout = cards_layout(rect, state, scroll_offset, true);
                         match m.kind {
                             MouseEventKind::Down(MouseButton::Left) => {
                                 if layout.contains_screen(m.column, m.row) {
@@ -556,7 +581,7 @@ fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
                                 dragging = false;
                                 if let Some(sel) = selection {
                                     if !sel.is_empty() {
-                                        let text = extract_text(state, scroll_offset, rect, sel);
+                                        let text = extract_text(state, scroll_offset, rect, sel, true);
                                         if !text.is_empty() {
                                             if let Ok(mut cb) = arboard::Clipboard::new() {
                                                 let _ = cb.set_text(text);

@@ -1,6 +1,6 @@
 use chrono::Local;
 
-use crate::state::{SceneCard, SceneState, ToolStatus};
+use crate::state::{SceneCard, SceneState, SlashMatch, ToolStatus};
 
 pub fn demo_state() -> SceneState {
     let ts = Local::now().timestamp();
@@ -12,6 +12,34 @@ pub fn demo_state() -> SceneState {
         composer_cursor: Some(0),
         busy: true,
         activity: Some("streaming".to_string()),
+        ctx_tokens: Some(19_200),
+        ctx_cap: Some(128_000),
+        session_cost_usd: Some(0.043),
+        last_turn_cost_usd: Some(0.012),
+        cache_hit_ratio: Some(0.87),
+        last_turn_ms: Some(2_100),
+        session_input_tokens: Some(12_408),
+        session_output_tokens: Some(3_194),
+        edit_mode: Some(crate::state::EditMode::Auto),
+        preset: Some("pro".to_string()),
+        slash_catalog: Some(
+            [
+                ("clear", "reset conversation context"),
+                ("compact", "summarize history to free up tokens"),
+                ("commit", "create a git commit from current changes"),
+                ("diff", "show pending edits as a diff"),
+                ("undo", "revert the last file edit"),
+                ("help", "show help"),
+            ]
+            .iter()
+            .map(|(cmd, summary)| SlashMatch {
+                cmd: (*cmd).to_string(),
+                summary: (*summary).to_string(),
+                args_hint: None,
+                aliases: Vec::new(),
+            })
+            .collect(),
+        ),
         cards: vec![
             SceneCard {
                 kind: "user".to_string(),
