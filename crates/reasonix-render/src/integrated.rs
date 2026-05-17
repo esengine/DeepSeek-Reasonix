@@ -330,11 +330,10 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                         slash_idx = (slash_idx + 1).min(slash_count - 1);
                     }
                     KeyCode::Tab if slash_active => {
-                        slash_idx = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            slash_idx.saturating_sub(1)
-                        } else {
-                            (slash_idx + 1) % slash_count
-                        };
+                        if let Some(completion) = slash_completion(&buffer, slash_idx, &scene) {
+                            buffer = completion.trim_end().to_string();
+                            cursor = buffer.chars().count();
+                        }
                     }
                     KeyCode::BackTab if slash_active => {
                         slash_idx = if slash_idx == 0 {
@@ -356,11 +355,10 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                         at_idx = (at_idx + 1).min(at_count - 1);
                     }
                     KeyCode::Tab if at_active => {
-                        at_idx = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            at_idx.saturating_sub(1)
-                        } else {
-                            (at_idx + 1) % at_count
-                        };
+                        if let Some(completion) = at_completion(&buffer, at_idx, &scene) {
+                            cursor = completion.chars().count();
+                            buffer = completion;
+                        }
                     }
                     KeyCode::BackTab if at_active => {
                         at_idx = if at_idx == 0 {
