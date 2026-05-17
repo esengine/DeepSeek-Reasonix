@@ -42,6 +42,8 @@ export type SceneTraceInput = {
   editMode?: "review" | "auto" | "yolo";
   preset?: "auto" | "flash" | "pro";
   cwd?: string;
+  /** Local URL of the running dashboard server — surfaced in the rust boot block so users can discover the web UI. Null when --no-dashboard or while the server is still starting. */
+  dashboardUrl?: string;
   ctxTokens?: number;
   ctxCap?: number;
   sessionCostUsd?: number;
@@ -298,6 +300,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     editMode,
     preset,
     cwd,
+    dashboardUrl,
     ctxTokens,
     ctxCap,
     sessionCostUsd,
@@ -336,6 +339,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
       editMode,
       preset,
       cwd,
+      dashboardUrl,
       ctxTokens,
       ctxCap,
       sessionCostUsd,
@@ -375,6 +379,7 @@ export function useSceneTrace(input: SceneTraceInput): void {
     editMode,
     preset,
     cwd,
+    dashboardUrl,
     ctxTokens,
     ctxCap,
     sessionCostUsd,

@@ -41,6 +41,8 @@ pub struct SceneState {
     pub preset: Option<String>,
     #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default, rename = "dashboardUrl")]
+    pub dashboard_url: Option<String>,
     #[serde(default)]
     pub ctx_tokens: Option<u32>,
     #[serde(default)]

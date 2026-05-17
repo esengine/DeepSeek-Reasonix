@@ -1527,6 +1527,11 @@ function AppInner({
     return undefined;
   }, [pendingPlan, pendingShell, pendingPath, pendingEditReview, pendingChoice, pendingCheckpoint]);
 
+  // Hoisted above useSceneTrace so the dashboard URL can ride the
+  // scene frame to the rust renderer. Definition (incl. setter) lives
+  // here; the auto-start effect that populates it follows further down.
+  const [dashboardUrl, setDashboardUrlState] = useState<string | null>(null);
+
   useSceneTrace({
     cardCount,
     busy,
@@ -1549,6 +1554,7 @@ function AppInner({
     editMode,
     preset: presetForDisplay,
     cwd: currentRootDir,
+    dashboardUrl: dashboardUrl ?? undefined,
     ctxTokens,
     ctxCap,
     sessionCostUsd,
@@ -2460,11 +2466,12 @@ function AppInner({
     return dashboardRef.current?.url ?? null;
   }, []);
 
-  // Mirror of the dashboard URL into React state so the StatsPanel
-  // header can render a clickable pill the moment the server is up.
-  // Updated by both the auto-start effect below and the explicit
-  // /dashboard slash path (via startDashboard).
-  const [dashboardUrl, setDashboardUrlState] = useState<string | null>(null);
+  // dashboardUrl state lives near the top of this component so it can
+  // ride the scene frame (see useSceneTrace input above). Mirror of
+  // the dashboard URL so the StatsPanel header can render a clickable
+  // pill the moment the server is up. Updated by both the auto-start
+  // effect below and the explicit /dashboard slash path (via
+  // startDashboard).
 
   // Auto-start the dashboard once the TUI is mounted unless the user
   // opted out with --no-dashboard. The whole point is discoverability:

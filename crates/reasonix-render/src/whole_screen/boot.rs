@@ -123,6 +123,37 @@ fn render_boot_meta(buf: &mut Buffer, area: Rect, start_row: u16, state: &SceneS
         }
     }
 
+    if row < bottom {
+        if let Some(url) = state.dashboard_url.as_deref() {
+            paint_str_to(
+                buf,
+                key_col,
+                row,
+                "dashboard",
+                end_x,
+                FG2,
+                BG,
+                Modifier::empty(),
+            );
+            // Most modern terminals (Windows Terminal, iTerm2, WezTerm,
+            // gnome-terminal ≥3.26) auto-detect URLs and make them
+            // Ctrl+click-able without needing OSC 8. Render as plain
+            // text in the accent color so it's obvious where the web UI
+            // lives — and selectable with the mouse for copy/paste.
+            paint_str_to(
+                buf,
+                val_col,
+                row,
+                url,
+                end_x,
+                DS_BRIGHT,
+                BG,
+                Modifier::UNDERLINED,
+            );
+            row += 1;
+        }
+    }
+
     row
 }
 

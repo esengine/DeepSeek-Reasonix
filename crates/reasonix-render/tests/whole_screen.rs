@@ -308,6 +308,34 @@ fn catalog_state() -> reasonix_render::state::SceneState {
 }
 
 #[test]
+fn dashboard_url_renders_in_boot_block() {
+    let state = SceneState {
+        model: Some("deepseek-v3.2-coder".to_string()),
+        cwd: Some("~/work/reasonix-core".to_string()),
+        dashboard_url: Some("http://localhost:7777".to_string()),
+        ..Default::default()
+    };
+    let rows = draw(&state, 120, 36);
+    let all = joined(&rows);
+    assert!(all.contains("dashboard"), "dashboard label missing");
+    assert!(
+        all.contains("http://localhost:7777"),
+        "dashboard URL missing"
+    );
+}
+
+#[test]
+fn dashboard_line_hidden_when_url_absent() {
+    let state = SceneState {
+        model: Some("deepseek-v3.2-coder".to_string()),
+        ..Default::default()
+    };
+    let rows = draw(&state, 120, 30);
+    let all = joined(&rows);
+    assert!(!all.contains("dashboard"), "no dashboard line without URL");
+}
+
+#[test]
 fn double_slash_does_not_match_anything() {
     let state = catalog_state();
     // Bare "/" is browse mode — every catalog entry surfaces.
