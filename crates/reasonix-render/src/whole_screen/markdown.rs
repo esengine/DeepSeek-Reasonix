@@ -248,13 +248,11 @@ pub fn parse(text: &str) -> Vec<MdBlock> {
                     });
                 }
             }
-            Event::SoftBreak | Event::HardBreak => {
-                if !in_code {
-                    current_spans.push(InlineSpan {
-                        text: " ".to_string(),
-                        style: style.clone(),
-                    });
-                }
+            Event::SoftBreak | Event::HardBreak if !in_code => {
+                current_spans.push(InlineSpan {
+                    text: " ".to_string(),
+                    style: style.clone(),
+                });
             }
             _ => {}
         }
