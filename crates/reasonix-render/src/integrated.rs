@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
@@ -36,6 +36,7 @@ enum Evt {
 pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
     let mut stdout = io::stdout();
     let mouse_enabled = crossterm::execute!(stdout, EnableMouseCapture).is_ok();
+    let paste_enabled = crossterm::execute!(stdout, EnableBracketedPaste).is_ok();
 
     let (tx, rx) = mpsc::channel::<Evt>();
     let tx_stdin = tx.clone();
@@ -646,6 +647,41 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                     }
                 }
             }
+            Event::Paste(text) => {
+                if let Some(prompt) = scene.prompt_input.as_ref() {
+                    if prompt.secret {
+                        // Don't accept multi-line / control chars into a
+                        // secret prompt — pasted secrets in a non-line
+                        // editor are messy. Strip newlines and append.
+                        let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+                        for ch in clean.chars() {
+                            insert_char_at(&mut buffer, cursor, ch);
+                            cursor += 1;
+                        }
+                    } else {
+                        // Strip leading/trailing whitespace + collapse
+                        // newlines to a single line — same shape an
+                        // interactive setup prompt would expect.
+                        let line = text.lines().next().unwrap_or("").trim();
+                        for ch in line.chars() {
+                            insert_char_at(&mut buffer, cursor, ch);
+                            cursor += 1;
+                        }
+                    }
+                } else {
+                    selection = None;
+                    for ch in text.chars() {
+                        if ch == '\r' {
+                            continue;
+                        }
+                        insert_char_at(&mut buffer, cursor, ch);
+                        cursor += 1;
+                    }
+                    slash_idx = 0;
+                    at_idx = 0;
+                    scroll_offset = 0;
+                }
+            }
             Event::Resize(_, _) => {}
             _ => {}
         }
@@ -653,6 +689,9 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
 
     if mouse_enabled {
         let _ = crossterm::execute!(io::stdout(), DisableMouseCapture);
+    }
+    if paste_enabled {
+        let _ = crossterm::execute!(io::stdout(), DisableBracketedPaste);
     }
     result
 }

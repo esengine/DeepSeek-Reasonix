@@ -308,6 +308,44 @@ fn catalog_state() -> reasonix_render::state::SceneState {
 }
 
 #[test]
+fn renders_doctor_memory_ctx_plan_card_task_kinds() {
+    let cards = [
+        ("doctor", "/doctor", "✓ git\n✕ docker"),
+        (
+            "memory",
+            "memory · 2",
+            "· [user] ds engineer\n· [project] rust port",
+        ),
+        (
+            "ctx",
+            "context breakdown",
+            "8.0k / 128k used (6%)\nsystem 1.2k",
+        ),
+        ("plan-card", "rewrite renderer", "○ scaffold\n◆ port cards"),
+        ("task", "build · 1/3", "✓ install\n◆ compile"),
+    ];
+    for (kind, summary, body) in cards {
+        let state = SceneState {
+            cards: vec![SceneCard {
+                kind: kind.to_string(),
+                summary: summary.to_string(),
+                body: Some(body.to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let rows = draw(&state, 140, 30);
+        let all = joined(&rows);
+        assert!(all.contains(summary), "{kind} summary missing: {summary}");
+        let first_body_line = body.lines().next().unwrap();
+        assert!(
+            all.contains(first_body_line),
+            "{kind} body missing: {first_body_line}"
+        );
+    }
+}
+
+#[test]
 fn dashboard_url_renders_in_boot_block() {
     let state = SceneState {
         model: Some("deepseek-v3.2-coder".to_string()),

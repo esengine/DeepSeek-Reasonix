@@ -218,7 +218,8 @@ fn card_height(card: &SceneCard, body_width: u16) -> u16 {
     match card.kind.as_str() {
         "user" | "reasoning" | "think" | "thinking" | "assistant" | "streaming" | "diff"
         | "cmd" | "fileview" | "search" | "subagent" | "confirm" | "await" | "await_input"
-        | "error" | "info" | "warn" | "usage" => 1 + body_lines + 1,
+        | "error" | "info" | "warn" | "usage" | "doctor" | "memory" | "ctx" | "plan-card"
+        | "task" => 1 + body_lines + 1,
         "todo" | "plan" => {
             let items = card
                 .body
@@ -259,6 +260,11 @@ fn render_card(
         "info" => notify::render_info_card(buf, area, row, card, super::theme::INFO, "ⓘ"),
         "warn" => notify::render_info_card(buf, area, row, card, super::theme::WARN, "▲"),
         "usage" => notify::render_info_card(buf, area, row, card, super::theme::DS_BRIGHT, "$"),
+        "doctor" => notify::render_info_card(buf, area, row, card, super::theme::OK, "✚"),
+        "memory" => notify::render_info_card(buf, area, row, card, super::theme::DS_PURPLE, "◈"),
+        "ctx" => notify::render_info_card(buf, area, row, card, super::theme::INFO, "▦"),
+        "plan-card" => notify::render_info_card(buf, area, row, card, super::theme::DS_PURPLE, "◆"),
+        "task" => notify::render_info_card(buf, area, row, card, super::theme::DS_BRIGHT, "▸"),
         _ => row,
     }
 }

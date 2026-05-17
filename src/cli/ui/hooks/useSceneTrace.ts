@@ -144,9 +144,123 @@ export function toSceneCard(card: Card): SceneCard {
       };
     case "tip":
       return { kind: "info", summary, body: formatTipBody(card), ts: card.ts };
+    case "doctor":
+      return {
+        kind: "doctor",
+        summary: "/doctor",
+        body: formatDoctorBody(card),
+        ts: card.ts,
+      };
+    case "memory":
+      return {
+        kind: "memory",
+        summary: `memory · ${card.entries.length} entr${card.entries.length === 1 ? "y" : "ies"}`,
+        body: formatMemoryBody(card),
+        ts: card.ts,
+        meta: `${formatTokens(card.tokens)} tok`,
+      };
+    case "ctx":
+      return {
+        kind: "ctx",
+        summary: card.text,
+        body: formatCtxBody(card),
+        ts: card.ts,
+      };
+    case "plan":
+      return {
+        kind: "plan-card",
+        summary: card.title,
+        body: formatPlanBody(card),
+        ts: card.ts,
+        meta: card.variant,
+      };
+    case "task":
+      return {
+        kind: "task",
+        summary: `${card.title} · ${card.index + 1}/${card.total}`,
+        body: formatTaskBody(card),
+        ts: card.ts,
+        meta: card.status,
+      };
     default:
       return { kind: card.kind, summary };
   }
+}
+
+function formatDoctorBody(card: Extract<Card, { kind: "doctor" }>): string {
+  return card.checks
+    .map((c) => {
+      const glyph = c.level === "ok" ? "✓" : c.level === "warn" ? "▲" : "✕";
+      return `${glyph} ${c.label}  —  ${c.detail}`;
+    })
+    .join("\n");
+}
+
+function formatMemoryBody(card: Extract<Card, { kind: "memory" }>): string {
+  if (card.entries.length === 0) return "(no memories)";
+  return card.entries.map((e) => `· [${e.category}] ${e.summary}`).join("\n");
+}
+
+function formatCtxBody(card: Extract<Card, { kind: "ctx" }>): string {
+  const used = card.systemTokens + card.toolsTokens + card.logTokens + card.inputTokens;
+  const pct = card.ctxMax > 0 ? Math.round((used / card.ctxMax) * 100) : 0;
+  const lines = [
+    `${formatTokens(used)} / ${formatTokens(card.ctxMax)} used (${pct}%)`,
+    `system ${formatTokens(card.systemTokens)}    tools ${formatTokens(card.toolsTokens)} (${card.toolsCount})    log ${formatTokens(card.logTokens)} (${card.logMessages} msgs)    input ${formatTokens(card.inputTokens)}`,
+  ];
+  if (card.topTools.length > 0) {
+    lines.push("top tools:");
+    for (const t of card.topTools.slice(0, 5)) {
+      lines.push(`  · ${t.name}  ${formatTokens(t.tokens)} (turn ${t.turn})`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatPlanBody(card: Extract<Card, { kind: "plan" }>): string {
+  return card.steps
+    .map((s) => {
+      const glyph = (() => {
+        switch (s.status) {
+          case "done":
+            return "✓";
+          case "running":
+            return "◆";
+          case "failed":
+            return "✕";
+          case "blocked":
+            return "⊘";
+          case "skipped":
+            return "·";
+          default:
+            return "○";
+        }
+      })();
+      return `${glyph} ${s.title}`;
+    })
+    .join("\n");
+}
+
+function formatTaskBody(card: Extract<Card, { kind: "task" }>): string {
+  if (card.steps.length === 0) return "(no steps)";
+  return card.steps
+    .map((s) => {
+      const glyph = (() => {
+        switch (s.status) {
+          case "done":
+            return "✓";
+          case "running":
+            return "◆";
+          case "failed":
+            return "✕";
+          default:
+            return "○";
+        }
+      })();
+      const detail = s.detail ? `  — ${s.detail}` : "";
+      return `${glyph} ${s.title}${detail}`;
+    })
+    .join("\n");
 }
 
 function formatUsageBody(card: Extract<Card, { kind: "usage" }>): string {
