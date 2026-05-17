@@ -67,7 +67,11 @@ fn homepage_input_box_drawn_with_corners() {
 #[test]
 fn homepage_status_bar_has_segments_and_ctx_meter() {
     let rows = draw(&demo_state(), 120, 36);
-    let last = rows.iter().rev().find(|r| r.contains("reasonix")).expect("status row");
+    let last = rows
+        .iter()
+        .rev()
+        .find(|r| r.contains("reasonix"))
+        .expect("status row");
     assert!(last.contains("●"), "brand dot missing");
     assert!(last.contains("ctx"));
     assert!(last.contains("19.2k/128k"));
@@ -84,7 +88,10 @@ fn narrow_terminal_hides_sidebar_but_keeps_main_column() {
     let all = joined(&rows);
     assert!(all.contains("██████╗"), "logo still drawn");
     assert!(all.contains("❯ "), "composer still drawn");
-    assert!(!all.contains("MISSION CONTROL"), "sidebar must collapse on narrow term");
+    assert!(
+        !all.contains("MISSION CONTROL"),
+        "sidebar must collapse on narrow term"
+    );
 }
 
 #[test]
@@ -156,7 +163,10 @@ fn sidebar_jobs_populates_from_tool_history() {
     let rows = draw(&demo_state(), 140, 50);
     let all = joined(&rows);
     assert!(all.contains("recent"), "jobs count missing");
-    let jobs_row = rows.iter().find(|r| r.contains("Grep")).expect("grep job row");
+    let jobs_row = rows
+        .iter()
+        .find(|r| r.contains("Grep"))
+        .expect("grep job row");
     assert!(jobs_row.contains("✓"), "job glyph missing");
 }
 
@@ -178,7 +188,10 @@ fn slash_overlay_hidden_when_no_slash() {
     let state = demo_state();
     let rows = draw(&state, 140, 50);
     let all = joined(&rows);
-    assert!(!all.contains("SLASH COMMANDS"), "popup should not show without slash");
+    assert!(
+        !all.contains("SLASH COMMANDS"),
+        "popup should not show without slash"
+    );
 }
 
 fn draw_with_scroll(state: &SceneState, cols: u16, rows: u16, scroll: u16) -> Vec<String> {
@@ -226,7 +239,10 @@ fn scrolling_up_reveals_older_cards() {
 fn scrollbar_thumb_appears_when_content_overflows() {
     let rows = draw_with_scroll(&demo_state(), 140, 18, 0);
     let all = joined(&rows);
-    assert!(all.contains('█') || all.contains('▊'), "thumb glyph missing");
+    assert!(
+        all.contains('█') || all.contains('▊'),
+        "thumb glyph missing"
+    );
 }
 
 #[test]
@@ -262,7 +278,10 @@ fn extract_text_returns_selected_card_symbols() {
     );
     let text = extract_text(&state, 0, term, sel, true);
     assert!(!text.is_empty(), "extracted text empty");
-    assert!(!text.contains("MISSION CONTROL"), "sidebar leaked: {text:?}");
+    assert!(
+        !text.contains("MISSION CONTROL"),
+        "sidebar leaked: {text:?}"
+    );
     assert!(!text.contains("19.2k/128k"), "dock leaked: {text:?}");
 }
 
@@ -298,9 +317,18 @@ fn slash_match_count_filters_by_prefix() {
 #[test]
 fn slash_completion_appends_trailing_space() {
     let state = catalog_state();
-    assert_eq!(slash_completion("/c", 0, &state).as_deref(), Some("/clear "));
-    assert_eq!(slash_completion("/c", 1, &state).as_deref(), Some("/compact "));
-    assert_eq!(slash_completion("/c", 2, &state).as_deref(), Some("/commit "));
+    assert_eq!(
+        slash_completion("/c", 0, &state).as_deref(),
+        Some("/clear ")
+    );
+    assert_eq!(
+        slash_completion("/c", 1, &state).as_deref(),
+        Some("/compact ")
+    );
+    assert_eq!(
+        slash_completion("/c", 2, &state).as_deref(),
+        Some("/commit ")
+    );
     assert_eq!(slash_completion("/c", 3, &state), None);
     assert_eq!(slash_completion("abc", 0, &state), None);
 }
@@ -335,14 +363,32 @@ fn slash_overlay_highlights_selected_index() {
     }
 
     let rows_zero = draw_at_idx(0);
-    let clear_row = rows_zero.iter().find(|r| r.contains("/clear")).expect("/clear row");
-    assert!(clear_row.contains("▸"), "first row should be marked: {clear_row:?}");
+    let clear_row = rows_zero
+        .iter()
+        .find(|r| r.contains("/clear"))
+        .expect("/clear row");
+    assert!(
+        clear_row.contains("▸"),
+        "first row should be marked: {clear_row:?}"
+    );
 
     let rows_two = draw_at_idx(2);
-    let commit_row = rows_two.iter().find(|r| r.contains("/commit")).expect("/commit row");
-    assert!(commit_row.contains("▸"), "third row should be marked: {commit_row:?}");
-    let clear_after = rows_two.iter().find(|r| r.contains("/clear")).expect("/clear row");
-    assert!(!clear_after.contains("▸"), "/clear should not be marked when idx=2");
+    let commit_row = rows_two
+        .iter()
+        .find(|r| r.contains("/commit"))
+        .expect("/commit row");
+    assert!(
+        commit_row.contains("▸"),
+        "third row should be marked: {commit_row:?}"
+    );
+    let clear_after = rows_two
+        .iter()
+        .find(|r| r.contains("/clear"))
+        .expect("/clear row");
+    assert!(
+        !clear_after.contains("▸"),
+        "/clear should not be marked when idx=2"
+    );
 }
 
 fn at_state_state() -> reasonix_render::state::SceneState {
@@ -384,7 +430,10 @@ fn at_match_count_requires_at_at_end() {
 #[test]
 fn at_completion_replaces_only_the_at_token() {
     let state = at_state_state();
-    assert_eq!(at_completion("@par", 0, &state).as_deref(), Some("@src/parser.ts "));
+    assert_eq!(
+        at_completion("@par", 0, &state).as_deref(),
+        Some("@src/parser.ts ")
+    );
     assert_eq!(
         at_completion("check @par", 0, &state).as_deref(),
         Some("check @src/parser.ts ")
@@ -520,9 +569,15 @@ fn streaming_card_body_reveals_progressively() {
     let early = buffer_string(term_early.backend().buffer());
     let mid = buffer_string(term_mid.backend().buffer());
     let late = buffer_string(term_late.backend().buffer());
-    assert!(!early.contains("streaming reveal"), "tick=2 should not have full body");
+    assert!(
+        !early.contains("streaming reveal"),
+        "tick=2 should not have full body"
+    );
     assert!(mid.contains("hello"), "tick=20 should have some chars");
-    assert!(late.contains("streaming reveal"), "tick=200 should have full body");
+    assert!(
+        late.contains("streaming reveal"),
+        "tick=200 should have full body"
+    );
 }
 
 #[test]
@@ -551,9 +606,15 @@ fn composer_scrolls_to_keep_cursor_visible() {
         }
         all.push('\n');
     }
-    assert!(all.contains("line 8"), "last line (cursor row) must be visible");
+    assert!(
+        all.contains("line 8"),
+        "last line (cursor row) must be visible"
+    );
     assert!(all.contains("line 4"), "line 4 should still fit (cap 5)");
-    assert!(!all.contains("line 1"), "earliest line should be scrolled out");
+    assert!(
+        !all.contains("line 1"),
+        "earliest line should be scrolled out"
+    );
     assert!(all.contains('↑'), "scroll indicator up missing");
 }
 
@@ -587,8 +648,10 @@ fn composer_box_grows_for_multi_line_text() {
             lines_found[2] = true;
         }
     }
-    assert!(lines_found[0] && lines_found[1] && lines_found[2],
-        "all 3 composer lines should render: {lines_found:?}");
+    assert!(
+        lines_found[0] && lines_found[1] && lines_found[2],
+        "all 3 composer lines should render: {lines_found:?}"
+    );
 }
 
 #[test]
@@ -599,8 +662,14 @@ fn shell_prefix_does_not_break_overlay_or_composer() {
     let all = joined(&rows);
     assert!(all.contains("❯"), "prompt missing");
     assert!(all.contains("!ls -la"), "shell text missing");
-    assert!(!all.contains("SLASH COMMANDS"), "slash overlay should not show for !");
-    assert!(!all.contains("@ ATTACH FILE"), "at overlay should not show for !");
+    assert!(
+        !all.contains("SLASH COMMANDS"),
+        "slash overlay should not show for !"
+    );
+    assert!(
+        !all.contains("@ ATTACH FILE"),
+        "at overlay should not show for !"
+    );
 }
 
 #[test]
@@ -666,7 +735,10 @@ fn composer_caret_blinks_with_tick() {
     let off = buffer_string(term_off.backend().buffer());
     let on_count = on.matches('▮').count();
     let off_count = off.matches('▮').count();
-    assert!(on_count > off_count, "caret should be visible at tick 0 (on={on_count}, off={off_count})");
+    assert!(
+        on_count > off_count,
+        "caret should be visible at tick 0 (on={on_count}, off={off_count})"
+    );
 }
 
 fn buffer_string(buf: &ratatui::buffer::Buffer) -> String {
@@ -691,9 +763,7 @@ fn subagent_card_renders_task_and_steps() {
             kind: "subagent".to_string(),
             summary: "subagent: reviewer".to_string(),
             meta: Some("3 steps · 1.4s".to_string()),
-            body: Some(
-                "review parser.ts\nscanned call sites\nall callers compatible".to_string(),
-            ),
+            body: Some("review parser.ts\nscanned call sites\nall callers compatible".to_string()),
             ..Default::default()
         }],
         ..Default::default()
@@ -785,9 +855,7 @@ fn search_card_renders_file_line_and_match() {
             kind: "search".to_string(),
             summary: "grep \"foo\" in src/".to_string(),
             meta: Some("2 matches".to_string()),
-            body: Some(
-                "src/a.ts:42:foo(bar)\nsrc/b.ts:88:return foo;".to_string(),
-            ),
+            body: Some("src/a.ts:42:foo(bar)\nsrc/b.ts:88:return foo;".to_string()),
             ..Default::default()
         }],
         ..Default::default()
@@ -813,10 +881,7 @@ fn selection_follows_scroll() {
         "scrolling up moves view_top earlier"
     );
     let mut sel = Selection::new(layout_a.screen_rect.x + 4, layout_a.view_top + 1);
-    sel.extend(
-        layout_a.screen_rect.x + 30,
-        layout_a.view_top + 1,
-    );
+    sel.extend(layout_a.screen_rect.x + 30, layout_a.view_top + 1);
     let a = extract_text(&state, 0, term, sel, true);
     let b = extract_text(&state, 5, term, sel, true);
     assert_eq!(a, b, "selection text invariant under scroll");
@@ -843,7 +908,10 @@ fn sidebar_hidden_when_toggled_off() {
         }
         all.push('\n');
     }
-    assert!(!all.contains("MISSION CONTROL"), "sidebar must be hidden when toggled off");
+    assert!(
+        !all.contains("MISSION CONTROL"),
+        "sidebar must be hidden when toggled off"
+    );
     assert!(!all.contains("JOBS"), "sidebar JOBS section must be hidden");
 }
 
@@ -854,13 +922,18 @@ fn sidebar_long_label_wraps_within_sidebar() {
         cards: vec![
             SceneCard {
                 kind: "todo".to_string(),
-                body: Some("[~] 这是一个非常非常非常非常非常非常非常长的中文计划描述用来测试换行".to_string()),
+                body: Some(
+                    "[~] 这是一个非常非常非常非常非常非常非常长的中文计划描述用来测试换行"
+                        .to_string(),
+                ),
                 ..Default::default()
             },
             SceneCard {
                 kind: "tool".to_string(),
                 summary: "Grep".to_string(),
-                args: Some("\"a_pattern_that_is_long_enough_to_need_wrapping_in_the_sidebar\"".to_string()),
+                args: Some(
+                    "\"a_pattern_that_is_long_enough_to_need_wrapping_in_the_sidebar\"".to_string(),
+                ),
                 status: Some(reasonix_render::state::ToolStatus::Ok),
                 ..Default::default()
             },
@@ -869,15 +942,23 @@ fn sidebar_long_label_wraps_within_sidebar() {
     };
     let rows = draw(&state, 120, 30);
     let all = joined(&rows);
-    assert!(all.contains("中文计划描述"), "long plan label continuation segment missing");
-    assert!(all.contains("enough_to_need_wrapping"), "long job label continuation segment missing");
+    assert!(
+        all.contains("中文计划描述"),
+        "long plan label continuation segment missing"
+    );
+    assert!(
+        all.contains("enough_to_need_wrapping"),
+        "long job label continuation segment missing"
+    );
 }
 
 #[test]
 fn main_panel_content_does_not_leak_into_sidebar_columns() {
     let state = SceneState {
         model: Some("ds".to_string()),
-        cwd: Some("F:/some/very/deeply/nested/working/directory/that/keeps/going/and/going".to_string()),
+        cwd: Some(
+            "F:/some/very/deeply/nested/working/directory/that/keeps/going/and/going".to_string(),
+        ),
         cards: vec![SceneCard {
             kind: "tool".to_string(),
             summary: "Grep".to_string(),

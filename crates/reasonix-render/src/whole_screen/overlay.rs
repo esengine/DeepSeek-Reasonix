@@ -27,7 +27,9 @@ pub fn slash_completion(query: &str, idx: usize, state: &SceneState) -> Option<S
     if !query.starts_with('/') {
         return None;
     }
-    match_iter(query, state).nth(idx).map(|name| format!("/{name} "))
+    match_iter(query, state)
+        .nth(idx)
+        .map(|name| format!("/{name} "))
 }
 
 fn match_iter<'a>(query: &'a str, state: &'a SceneState) -> Box<dyn Iterator<Item = &'a str> + 'a> {
@@ -91,13 +93,23 @@ pub fn render_slash_overlay(
     let mut window_end = selected + 1;
     let mut used = heights[selected];
     while used < max_visual_rows {
-        let grew = grow_window(&heights, &mut window_start, &mut window_end, &mut used, max_visual_rows, total);
+        let grew = grow_window(
+            &heights,
+            &mut window_start,
+            &mut window_end,
+            &mut used,
+            max_visual_rows,
+            total,
+        );
         if !grew {
             break;
         }
     }
 
-    let visible_rows: u16 = heights[window_start..window_end].iter().sum::<usize>().min(max_visual_rows) as u16;
+    let visible_rows: u16 = heights[window_start..window_end]
+        .iter()
+        .sum::<usize>()
+        .min(max_visual_rows) as u16;
     let popup_h = 3 + visible_rows;
     if popup_h > dock_area.y {
         return;
@@ -126,8 +138,16 @@ fn grow_window(
     cap: usize,
     total: usize,
 ) -> bool {
-    let next_below = if *end < total { Some(heights[*end]) } else { None };
-    let next_above = if *start > 0 { Some(heights[*start - 1]) } else { None };
+    let next_below = if *end < total {
+        Some(heights[*end])
+    } else {
+        None
+    };
+    let next_above = if *start > 0 {
+        Some(heights[*start - 1])
+    } else {
+        None
+    };
     if let Some(h) = next_below {
         if *used + h <= cap {
             *used += h;
@@ -156,7 +176,8 @@ struct ColumnLayout {
 fn compute_columns(rows: &[SlashRow], popup_w: u16) -> ColumnLayout {
     const MAX_ARGS_HINT_W: u16 = 28;
     const MAX_NAME_W: u16 = 22;
-    let raw_name_w = (rows.iter().map(|r| r.name.width()).max().unwrap_or(8) as u16).min(MAX_NAME_W);
+    let raw_name_w =
+        (rows.iter().map(|r| r.name.width()).max().unwrap_or(8) as u16).min(MAX_NAME_W);
     let raw_args_w = (rows
         .iter()
         .map(|r| r.args_hint.as_deref().map(|s| s.width()).unwrap_or(0))
@@ -197,9 +218,18 @@ fn compute_columns(rows: &[SlashRow], popup_w: u16) -> ColumnLayout {
     };
     let max_args_w = cols_budget.saturating_sub(max_name_w);
     let args_col_off = name_col_off + max_name_w + gap_after_name;
-    let desc_col_off = if max_args_w > 0 { args_col_off + max_args_w + gap_after_args } else { args_col_off };
+    let desc_col_off = if max_args_w > 0 {
+        args_col_off + max_args_w + gap_after_args
+    } else {
+        args_col_off
+    };
     let desc_w = right_edge_off.saturating_sub(desc_col_off).max(10);
-    ColumnLayout { name_col_off, args_col_off, desc_col_off, desc_w }
+    ColumnLayout {
+        name_col_off,
+        args_col_off,
+        desc_col_off,
+        desc_w,
+    }
 }
 
 fn description_with_aliases(row: &SlashRow) -> String {
@@ -209,7 +239,11 @@ fn description_with_aliases(row: &SlashRow) -> String {
         format!(
             "{}  · {}",
             row.desc,
-            row.aliases.iter().map(|a| format!("/{a}")).collect::<Vec<_>>().join(" ")
+            row.aliases
+                .iter()
+                .map(|a| format!("/{a}"))
+                .collect::<Vec<_>>()
+                .join(" ")
         )
     }
 }
@@ -262,7 +296,6 @@ fn wrap_desc(text: &str, width: usize) -> Vec<String> {
     }
     out
 }
-
 
 #[derive(Clone)]
 struct SlashRow {
@@ -330,7 +363,15 @@ fn draw_box(buf: &mut Buffer, area: Rect) {
 
 fn draw_header(buf: &mut Buffer, area: Rect, total: usize, window_start: usize, visible: usize) {
     let row = area.y + 1;
-    let mut col = paint_str(buf, area.x + 2, row, "/ SLASH COMMANDS", DS_BRIGHT, BG, Modifier::BOLD);
+    let mut col = paint_str(
+        buf,
+        area.x + 2,
+        row,
+        "/ SLASH COMMANDS",
+        DS_BRIGHT,
+        BG,
+        Modifier::BOLD,
+    );
     let position = if total <= visible {
         format!("  {total} commands")
     } else {
@@ -372,13 +413,29 @@ fn draw_rows_wrapped(
             paint_str(buf, area.x + 2, row, "▸", DS_BRIGHT, BG, Modifier::BOLD);
             paint_str(buf, name_col, row, &name_clipped, FG, BG, Modifier::BOLD);
         } else {
-            paint_str(buf, name_col, row, &name_clipped, DS_BRIGHT, BG, Modifier::BOLD);
+            paint_str(
+                buf,
+                name_col,
+                row,
+                &name_clipped,
+                DS_BRIGHT,
+                BG,
+                Modifier::BOLD,
+            );
         }
 
         if name_clipped.starts_with(query) && !name_clipped.ends_with('…') {
             let typed_w = query.width() as u16;
             let suffix: String = name_clipped.chars().skip(query.chars().count()).collect();
-            paint_str(buf, name_col + typed_w, row, &suffix, FG2, BG, Modifier::empty());
+            paint_str(
+                buf,
+                name_col + typed_w,
+                row,
+                &suffix,
+                FG2,
+                BG,
+                Modifier::empty(),
+            );
         }
 
         if let Some(hint) = row_data.args_hint.as_deref() {

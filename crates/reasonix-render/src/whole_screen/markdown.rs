@@ -25,12 +25,27 @@ pub enum CellAlign {
 #[derive(Clone, Debug)]
 pub enum MdBlock {
     Paragraph(Vec<InlineSpan>),
-    Heading { level: u8, spans: Vec<InlineSpan> },
-    Code { lang: String, text: String },
-    ListItem { ordered: bool, index: u32, depth: u8, spans: Vec<InlineSpan> },
+    Heading {
+        level: u8,
+        spans: Vec<InlineSpan>,
+    },
+    Code {
+        lang: String,
+        text: String,
+    },
+    ListItem {
+        ordered: bool,
+        index: u32,
+        depth: u8,
+        spans: Vec<InlineSpan>,
+    },
     BlockQuote(Vec<InlineSpan>),
     Hr,
-    Table { aligns: Vec<CellAlign>, head: Vec<Vec<InlineSpan>>, rows: Vec<Vec<Vec<InlineSpan>>> },
+    Table {
+        aligns: Vec<CellAlign>,
+        head: Vec<Vec<InlineSpan>>,
+        rows: Vec<Vec<Vec<InlineSpan>>>,
+    },
 }
 
 pub fn parse(text: &str) -> Vec<MdBlock> {
@@ -56,10 +71,20 @@ pub fn parse(text: &str) -> Vec<MdBlock> {
     for ev in parser {
         match ev {
             Event::Start(Tag::Paragraph) => {
-                start_block(&mut out, &mut current_spans, &mut current_kind, TagKind::Paragraph);
+                start_block(
+                    &mut out,
+                    &mut current_spans,
+                    &mut current_kind,
+                    TagKind::Paragraph,
+                );
             }
             Event::End(TagEnd::Paragraph) => {
-                end_block(&mut out, &mut current_spans, &mut current_kind, list_stack.last());
+                end_block(
+                    &mut out,
+                    &mut current_spans,
+                    &mut current_kind,
+                    list_stack.last(),
+                );
             }
             Event::Start(Tag::Heading { level, .. }) => {
                 start_block(
@@ -70,27 +95,47 @@ pub fn parse(text: &str) -> Vec<MdBlock> {
                 );
             }
             Event::End(TagEnd::Heading(_)) => {
-                end_block(&mut out, &mut current_spans, &mut current_kind, list_stack.last());
+                end_block(
+                    &mut out,
+                    &mut current_spans,
+                    &mut current_kind,
+                    list_stack.last(),
+                );
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 in_code = true;
                 code_lang = match kind {
-                    CodeBlockKind::Fenced(s) => s.split_whitespace().next().unwrap_or("").to_string(),
+                    CodeBlockKind::Fenced(s) => {
+                        s.split_whitespace().next().unwrap_or("").to_string()
+                    }
                     CodeBlockKind::Indented => String::new(),
                 };
                 code_buf.clear();
             }
             Event::End(TagEnd::CodeBlock) => {
                 let text = code_buf.trim_end_matches('\n').to_string();
-                out.push(MdBlock::Code { lang: std::mem::take(&mut code_lang), text });
+                out.push(MdBlock::Code {
+                    lang: std::mem::take(&mut code_lang),
+                    text,
+                });
                 in_code = false;
                 code_buf.clear();
             }
             Event::Start(Tag::BlockQuote(_)) => {
-                start_block(&mut out, &mut current_spans, &mut current_kind, TagKind::BlockQuote);
+                start_block(
+                    &mut out,
+                    &mut current_spans,
+                    &mut current_kind,
+                    TagKind::BlockQuote,
+                );
             }
             Event::End(TagEnd::BlockQuote(_)) => {
-                end_block(&mut out, &mut current_spans, &mut current_kind, list_stack.last());
+                end_block(
+                    &mut out,
+                    &mut current_spans,
+                    &mut current_kind,
+                    list_stack.last(),
+                );
             }
             Event::Start(Tag::List(start)) => {
                 list_stack.push(ListFrame {
@@ -115,7 +160,12 @@ pub fn parse(text: &str) -> Vec<MdBlock> {
                 }
             }
             Event::End(TagEnd::Item) => {
-                end_block(&mut out, &mut current_spans, &mut current_kind, list_stack.last());
+                end_block(
+                    &mut out,
+                    &mut current_spans,
+                    &mut current_kind,
+                    list_stack.last(),
+                );
                 if let Some(frame) = list_stack.last_mut() {
                     if frame.ordered {
                         frame.next_index += 1;
@@ -182,13 +232,19 @@ pub fn parse(text: &str) -> Vec<MdBlock> {
             Event::Code(s) => {
                 let mut code_style = style.clone();
                 code_style.code = true;
-                current_spans.push(InlineSpan { text: s.into_string(), style: code_style });
+                current_spans.push(InlineSpan {
+                    text: s.into_string(),
+                    style: code_style,
+                });
             }
             Event::Text(s) => {
                 if in_code {
                     code_buf.push_str(&s);
                 } else {
-                    current_spans.push(InlineSpan { text: s.into_string(), style: style.clone() });
+                    current_spans.push(InlineSpan {
+                        text: s.into_string(),
+                        style: style.clone(),
+                    });
                 }
             }
             Event::SoftBreak | Event::HardBreak => {
@@ -202,7 +258,12 @@ pub fn parse(text: &str) -> Vec<MdBlock> {
             _ => {}
         }
     }
-    end_block(&mut out, &mut current_spans, &mut current_kind, list_stack.last());
+    end_block(
+        &mut out,
+        &mut current_spans,
+        &mut current_kind,
+        list_stack.last(),
+    );
     out
 }
 

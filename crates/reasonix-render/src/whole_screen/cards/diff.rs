@@ -28,7 +28,15 @@ fn render_diff_header(buf: &mut Buffer, area: Rect, row: u16, card: &SceneCard) 
     let mut col = area.x;
     col = paint_str(buf, col, row, "▎ ", DS_BRIGHT, BG, Modifier::empty());
     col = paint_str(buf, col, row, "± ", DS_BRIGHT, BG, Modifier::BOLD);
-    col = paint_str(buf, col, row, &card.summary, DS_BRIGHT, BG, Modifier::empty());
+    col = paint_str(
+        buf,
+        col,
+        row,
+        &card.summary,
+        DS_BRIGHT,
+        BG,
+        Modifier::empty(),
+    );
     if let Some(meta) = card.meta.as_deref() {
         col = col.saturating_add(2);
         paint_meta(buf, col, row, meta);
@@ -113,9 +121,25 @@ fn render_diff_line(
         DiffKind::Del => (Some(*old_ln), None, '-', ERR, ERR),
     };
 
-    col = paint_str(buf, col, row, &fmt_lineno(ol_show), FG3, BG, Modifier::empty());
+    col = paint_str(
+        buf,
+        col,
+        row,
+        &fmt_lineno(ol_show),
+        FG3,
+        BG,
+        Modifier::empty(),
+    );
     col = col.saturating_add(1);
-    col = paint_str(buf, col, row, &fmt_lineno(nl_show), FG3, BG, Modifier::empty());
+    col = paint_str(
+        buf,
+        col,
+        row,
+        &fmt_lineno(nl_show),
+        FG3,
+        BG,
+        Modifier::empty(),
+    );
     col = col.saturating_add(1);
     paint(buf, col, row, sign_ch, sign_fg, BG, Modifier::empty());
     col = col.saturating_add(2);
@@ -148,6 +172,9 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
         .find(|c: char| !c.is_ascii_digit() && c != ',')
         .unwrap_or(new_part.len());
     let new_section = &new_part[..new_end];
-    let new_start = new_section.split_once(',').map(|(a, _)| a).unwrap_or(new_section);
+    let new_start = new_section
+        .split_once(',')
+        .map(|(a, _)| a)
+        .unwrap_or(new_section);
     Some((old_start.parse().ok()?, new_start.parse().ok()?))
 }

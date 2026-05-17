@@ -160,7 +160,8 @@ pub fn demo_state() -> SceneState {
             SceneCard {
                 kind: "streaming".to_string(),
                 body: Some(
-                    "已经把 parseStream 改成 async *parse() 异步生成器，并把 7 处调用迁移完成。".to_string(),
+                    "已经把 parseStream 改成 async *parse() 异步生成器，并把 7 处调用迁移完成。"
+                        .to_string(),
                 ),
                 ..Default::default()
             },

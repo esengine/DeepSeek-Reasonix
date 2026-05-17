@@ -4,25 +4,14 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use unicode_width::UnicodeWidthChar;
 
-pub fn paint(
-    buf: &mut Buffer,
-    x: u16,
-    y: u16,
-    ch: char,
-    fg: Color,
-    bg: Color,
-    modifier: Modifier,
-) {
+pub fn paint(buf: &mut Buffer, x: u16, y: u16, ch: char, fg: Color, bg: Color, modifier: Modifier) {
     if x >= buf.area.right() || y >= buf.area.bottom() {
         return;
     }
     let mut tmp = [0u8; 4];
     let s = ch.encode_utf8(&mut tmp);
     let style = Style::default().fg(fg).bg(bg).add_modifier(modifier);
-    buf[(x, y)]
-        .set_symbol(s)
-        .set_style(style)
-        .set_skip(false);
+    buf[(x, y)].set_symbol(s).set_style(style).set_skip(false);
     let w = UnicodeWidthChar::width(ch).unwrap_or(1) as u16;
     for off in 1..w {
         let cx = x + off;

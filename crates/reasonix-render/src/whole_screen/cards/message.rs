@@ -5,10 +5,13 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::state::SceneCard;
 
+use super::super::md_render::{count_visual_rows, render_markdown};
 use super::super::paint::{format_ts, paint};
 use super::super::theme::{BG, DS_BRIGHT, DS_PURPLE, FG, FG1, FG3};
-use super::{body_indent_col, body_width_for, paint_blank_after, paint_body_line, paint_rail, render_card_header, wrap_visual};
-use super::super::md_render::{count_visual_rows, render_markdown};
+use super::{
+    body_indent_col, body_width_for, paint_blank_after, paint_body_line, paint_rail,
+    render_card_header, wrap_visual,
+};
 
 pub(super) fn render_user_card(
     buf: &mut Buffer,
@@ -131,4 +134,3 @@ pub(super) fn render_assistant_card(
     }
     paint_blank_after(buf, area, row, DS_BRIGHT)
 }
-

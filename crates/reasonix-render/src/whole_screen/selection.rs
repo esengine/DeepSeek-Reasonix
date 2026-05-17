@@ -88,17 +88,9 @@ impl CardsLayout {
 
     pub fn project_clamped(&self, x: u16, y: u16) -> (u16, u16) {
         let min_x = self.screen_rect.x;
-        let max_x = self
-            .screen_rect
-            .right()
-            .saturating_sub(2)
-            .max(min_x);
+        let max_x = self.screen_rect.right().saturating_sub(2).max(min_x);
         let min_y = self.screen_rect.y;
-        let max_y = self
-            .screen_rect
-            .bottom()
-            .saturating_sub(1)
-            .max(min_y);
+        let max_y = self.screen_rect.bottom().saturating_sub(1).max(min_y);
         let col = x.clamp(min_x, max_x);
         let row = y.clamp(min_y, max_y);
         let virt_y = self.view_top.saturating_add(row - min_y);

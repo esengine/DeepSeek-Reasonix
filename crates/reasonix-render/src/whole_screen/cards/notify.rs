@@ -12,7 +12,12 @@ use super::{
     render_card_header, wrap_visual,
 };
 
-pub(super) fn render_subagent_card(buf: &mut Buffer, area: Rect, start_row: u16, card: &SceneCard) -> u16 {
+pub(super) fn render_subagent_card(
+    buf: &mut Buffer,
+    area: Rect,
+    start_row: u16,
+    card: &SceneCard,
+) -> u16 {
     let bottom = area.y + area.height;
     let mut row = start_row;
     render_card_header(
@@ -30,7 +35,11 @@ pub(super) fn render_subagent_card(buf: &mut Buffer, area: Rect, start_row: u16,
     let width = body_width_for(area);
     if let Some(body) = card.body.as_deref() {
         for (i, raw) in body.split('\n').enumerate() {
-            let wrap_w = if i == 0 { width } else { width.saturating_sub(2) };
+            let wrap_w = if i == 0 {
+                width
+            } else {
+                width.saturating_sub(2)
+            };
             for (wi, line) in wrap_visual(raw, wrap_w).iter().enumerate() {
                 if row >= bottom {
                     return row;
@@ -50,21 +59,16 @@ pub(super) fn render_subagent_card(buf: &mut Buffer, area: Rect, start_row: u16,
     paint_blank_after(buf, area, row, INFO)
 }
 
-pub(super) fn render_confirm_card(buf: &mut Buffer, area: Rect, start_row: u16, card: &SceneCard) -> u16 {
+pub(super) fn render_confirm_card(
+    buf: &mut Buffer,
+    area: Rect,
+    start_row: u16,
+    card: &SceneCard,
+) -> u16 {
     let bottom = area.y + area.height;
     let mut row = start_row;
     let title = format!("permission required · {}", card.summary);
-    render_card_header(
-        buf,
-        area,
-        row,
-        WARN,
-        "⚠",
-        WARN,
-        &title,
-        WARN,
-        None,
-    );
+    render_card_header(buf, area, row, WARN, "⚠", WARN, &title, WARN, None);
     row += 1;
     if let Some(body) = card.body.as_deref() {
         let mut lines = body.split('\n');
@@ -115,7 +119,12 @@ fn paint_option_token(buf: &mut Buffer, x: u16, row: u16, tok: &str) -> u16 {
     paint_str(buf, col, row, label, FG1, BG, Modifier::empty())
 }
 
-pub(super) fn render_await_card(buf: &mut Buffer, area: Rect, start_row: u16, card: &SceneCard) -> u16 {
+pub(super) fn render_await_card(
+    buf: &mut Buffer,
+    area: Rect,
+    start_row: u16,
+    card: &SceneCard,
+) -> u16 {
     let bottom = area.y + area.height;
     let mut row = start_row;
     render_card_header(
@@ -168,25 +177,24 @@ fn paint_await_option(buf: &mut Buffer, x: u16, row: u16, line: &str) {
     }
 }
 
-pub(super) fn render_error_card(buf: &mut Buffer, area: Rect, start_row: u16, card: &SceneCard) -> u16 {
+pub(super) fn render_error_card(
+    buf: &mut Buffer,
+    area: Rect,
+    start_row: u16,
+    card: &SceneCard,
+) -> u16 {
     let bottom = area.y + area.height;
     let mut row = start_row;
-    render_card_header(
-        buf,
-        area,
-        row,
-        ERR,
-        "✕",
-        ERR,
-        &card.summary,
-        ERR,
-        None,
-    );
+    render_card_header(buf, area, row, ERR, "✕", ERR, &card.summary, ERR, None);
     row += 1;
     if let Some(body) = card.body.as_deref() {
         let width = body_width_for(area);
         for raw in body.split('\n') {
-            let fg = if raw.trim_start().starts_with("at ") { FG2 } else { FG };
+            let fg = if raw.trim_start().starts_with("at ") {
+                FG2
+            } else {
+                FG
+            };
             for line in wrap_visual(raw, width) {
                 if row >= bottom {
                     return row;

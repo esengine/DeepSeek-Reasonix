@@ -31,11 +31,11 @@ use dock::render_dock;
 use mode_picker::{mode_picker_options, preset_picker_options, render_picker};
 use overlay::render_slash_overlay;
 use overlay_at::render_at_overlay;
-use theme::{DS_BRIGHT, DS_PURPLE};
 use paint::fill_bg;
 use selection::apply_highlight;
 use sidebar::render_sidebar;
 use theme::{BG, DOCK_HEIGHT, MAX_COMPOSER_ROWS, SIDEBAR_WIDTH};
+use theme::{DS_BRIGHT, DS_PURPLE};
 
 pub struct WholeScreen<'a> {
     state: &'a SceneState,
@@ -167,13 +167,7 @@ fn split_main_sidebar(area: Rect, sidebar_visible: bool) -> (Rect, Rect) {
     (main, side)
 }
 
-fn render_main(
-    buf: &mut Buffer,
-    area: Rect,
-    state: &SceneState,
-    scroll_offset: u16,
-    tick: u32,
-) {
+fn render_main(buf: &mut Buffer, area: Rect, state: &SceneState, scroll_offset: u16, tick: u32) {
     let dock_h = dock_height_for(state).min(area.height);
     let scroll_h = area.height.saturating_sub(dock_h);
     let scroll = Rect::new(area.x, area.y, area.width, scroll_h);
@@ -187,7 +181,9 @@ pub(super) fn dock_height_for(state: &SceneState) -> u16 {
     let lines = if text.is_empty() {
         1u16
     } else {
-        text.split('\n').count().clamp(1, MAX_COMPOSER_ROWS as usize) as u16
+        text.split('\n')
+            .count()
+            .clamp(1, MAX_COMPOSER_ROWS as usize) as u16
     };
     DOCK_HEIGHT + lines.saturating_sub(1)
 }

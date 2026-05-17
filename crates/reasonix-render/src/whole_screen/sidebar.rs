@@ -20,7 +20,15 @@ pub fn render_sidebar(buf: &mut Buffer, area: Rect, state: &SceneState) {
 
     if row < bottom {
         paint_str(buf, inner_x, row, "⚙ ", FG, BG, Modifier::empty());
-        paint_str(buf, inner_x + 2, row, "MISSION CONTROL", DS_BRIGHT, BG, Modifier::BOLD);
+        paint_str(
+            buf,
+            inner_x + 2,
+            row,
+            "MISSION CONTROL",
+            DS_BRIGHT,
+            BG,
+            Modifier::BOLD,
+        );
         let toggle = "^B hide";
         let toggle_col = area.x + area.width.saturating_sub(toggle.width() as u16 + 1);
         paint_str(buf, toggle_col, row, toggle, FG3, BG, Modifier::empty());
@@ -37,7 +45,15 @@ pub fn render_sidebar(buf: &mut Buffer, area: Rect, state: &SceneState) {
         .unwrap_or("");
     let plan_items = parse_todo_items(plan_body);
     if plan_items.is_empty() {
-        row = sidebar_section(buf, area, row, "◇", "PLAN", DS_PURPLE, "waiting for a task — type below");
+        row = sidebar_section(
+            buf,
+            area,
+            row,
+            "◇",
+            "PLAN",
+            DS_PURPLE,
+            "waiting for a task — type below",
+        );
     } else {
         row = sidebar_plan(buf, area, row, &plan_items);
     }
@@ -71,11 +87,32 @@ pub fn render_sidebar(buf: &mut Buffer, area: Rect, state: &SceneState) {
         }
         row = sidebar_kv(buf, area, row, "cache", &format_cache(state), FG);
         let currency = state.wallet_currency.as_deref();
-        row = sidebar_kv(buf, area, row, "cost", &format_session_cost(state, currency), FG);
+        row = sidebar_kv(
+            buf,
+            area,
+            row,
+            "cost",
+            &format_session_cost(state, currency),
+            FG,
+        );
         if let (Some(balance), Some(cur)) = (state.wallet_balance, currency) {
-            row = sidebar_kv(buf, area, row, "balance", &format!("{:.2} {}", balance, cur), FG);
+            row = sidebar_kv(
+                buf,
+                area,
+                row,
+                "balance",
+                &format!("{:.2} {}", balance, cur),
+                FG,
+            );
         }
-        let _ = sidebar_kv(buf, area, row, "last turn", &format_last_turn(state, currency), FG);
+        let _ = sidebar_kv(
+            buf,
+            area,
+            row,
+            "last turn",
+            &format_last_turn(state, currency),
+            FG,
+        );
     }
 }
 
@@ -169,7 +206,10 @@ fn sidebar_plan(buf: &mut Buffer, area: Rect, start_row: u16, items: &[(TodoStat
     if row >= bottom {
         return row;
     }
-    let done = items.iter().filter(|(s, _)| matches!(s, TodoState::Done)).count();
+    let done = items
+        .iter()
+        .filter(|(s, _)| matches!(s, TodoState::Done))
+        .count();
     paint_str(buf, inner_x, row, "◇", DS_PURPLE, BG, Modifier::BOLD);
     paint_str(buf, inner_x + 2, row, "PLAN", DS_PURPLE, BG, Modifier::BOLD);
     let count = format!("{}/{}", done, items.len());

@@ -7,7 +7,9 @@ use crate::state::SceneCard;
 
 use super::super::paint::paint_str;
 use super::super::theme::{BG, DS_BRIGHT, ERR, FG, FG1, FG2, FG3, INFO, OK};
-use super::{body_width_for, paint_blank_after, paint_body_line, paint_rail, render_card_header, wrap_visual};
+use super::{
+    body_width_for, paint_blank_after, paint_body_line, paint_rail, render_card_header, wrap_visual,
+};
 
 pub(super) fn render_cmd_card(
     buf: &mut Buffer,
@@ -90,7 +92,15 @@ pub(super) fn render_fileview_card(
             paint_rail(buf, area, row, DS_BRIGHT);
             let (ln, code) = split_first_colon(line);
             let mut col = area.x + 2;
-            col = paint_str(buf, col, row, &format!("{ln:>4}"), FG3, BG, Modifier::empty());
+            col = paint_str(
+                buf,
+                col,
+                row,
+                &format!("{ln:>4}"),
+                FG3,
+                BG,
+                Modifier::empty(),
+            );
             col = col.saturating_add(2);
             paint_str(buf, col, row, code, FG1, BG, Modifier::empty());
             row += 1;

@@ -9,8 +9,8 @@ pub fn run_decode_only<R: BufRead, W: Write>(input: R, mut output: W) -> Result<
         if line.trim().is_empty() {
             continue;
         }
-        let _value: serde_json::Value = serde_json::from_str(&line)
-            .with_context(|| format!("decode line {}", lineno + 1))?;
+        let _value: serde_json::Value =
+            serde_json::from_str(&line).with_context(|| format!("decode line {}", lineno + 1))?;
         count += 1;
         writeln!(output, "frame {count}").ok();
     }

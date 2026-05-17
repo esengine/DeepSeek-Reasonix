@@ -117,7 +117,15 @@ fn render_idle_banner(buf: &mut Buffer, area: Rect, start_row: u16) {
     col = paint_str(buf, col, start_row, "idle", OK, BG, Modifier::BOLD);
     let meta = "ready for next task";
     let mcol = area.x + area.width.saturating_sub(meta.len() as u16 + 1);
-    paint_str(buf, mcol.max(col + 2), start_row, meta, FG3, BG, Modifier::empty());
+    paint_str(
+        buf,
+        mcol.max(col + 2),
+        start_row,
+        meta,
+        FG3,
+        BG,
+        Modifier::empty(),
+    );
 
     let row = start_row + 1;
     if row >= bottom {
@@ -126,11 +134,7 @@ fn render_idle_banner(buf: &mut Buffer, area: Rect, start_row: u16) {
     paint_rail(buf, area, row, OK);
     let mut tcol = area.x + 4;
     tcol = paint_str(buf, tcol, row, "type below", FG1, BG, Modifier::empty());
-    let pairs: [(&str, &str); 3] = [
-        ("/", "commands"),
-        ("@", "file refs"),
-        ("!", "shell"),
-    ];
+    let pairs: [(&str, &str); 3] = [("/", "commands"), ("@", "file refs"), ("!", "shell")];
     for (key, label) in pairs {
         tcol = paint_str(buf, tcol, row, "  ·  ", FG3, BG, Modifier::empty());
         tcol = paint_str(buf, tcol, row, key, DS, BG, Modifier::BOLD);
@@ -205,28 +209,15 @@ fn card_height(card: &SceneCard, body_width: u16) -> u16 {
         .as_deref()
         .map(|b| {
             if is_md {
-                super::md_render::count_visual_rows(b, body_width)
-                    .min(u16::MAX as usize) as u16
+                super::md_render::count_visual_rows(b, body_width).min(u16::MAX as usize) as u16
             } else {
                 body_lines_height(b, body_width)
             }
         })
         .unwrap_or(0);
     match card.kind.as_str() {
-        "user"
-        | "reasoning"
-        | "think"
-        | "thinking"
-        | "assistant"
-        | "streaming"
-        | "diff"
-        | "cmd"
-        | "fileview"
-        | "search"
-        | "subagent"
-        | "confirm"
-        | "await"
-        | "await_input"
+        "user" | "reasoning" | "think" | "thinking" | "assistant" | "streaming" | "diff"
+        | "cmd" | "fileview" | "search" | "subagent" | "confirm" | "await" | "await_input"
         | "error" => 1 + body_lines + 1,
         "todo" | "plan" => {
             let items = card
@@ -313,12 +304,7 @@ pub(super) fn paint_body_line(
     paint_str(buf, body_indent_col(area), row, line, fg, BG, modifier);
 }
 
-pub(super) fn paint_blank_after(
-    buf: &mut Buffer,
-    area: Rect,
-    row: u16,
-    rail_color: Color,
-) -> u16 {
+pub(super) fn paint_blank_after(buf: &mut Buffer, area: Rect, row: u16, rail_color: Color) -> u16 {
     if row >= area.y + area.height {
         return row;
     }

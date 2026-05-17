@@ -33,8 +33,9 @@ fn debug_log(msg: &str) {
         return;
     }
     let path = std::env::var("REASONIX_RENDER_DEBUG_LOG").unwrap_or_else(|_| {
-        let home =
-            std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
         if home.is_empty() {
             "reasonix-render-debug.log".to_string()
         } else {
@@ -44,7 +45,11 @@ fn debug_log(msg: &str) {
     if let Some(parent) = std::path::Path::new(&path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = writeln!(f, "[reasonix-render] {msg}");
     }
 }
@@ -67,7 +72,10 @@ fn main() -> Result<()> {
     terminal.clear().ok();
 
     if let Ok(size) = terminal.size() {
-        debug_log(&format!("startup terminal.size = {}x{}", size.width, size.height));
+        debug_log(&format!(
+            "startup terminal.size = {}x{}",
+            size.width, size.height
+        ));
     }
 
     let result = if args.iter().any(|a| a == "--demo") {
@@ -94,7 +102,11 @@ fn init_terminal() -> Result<RenderTerminal> {
 
 fn restore_terminal(terminal: &mut RenderTerminal) {
     terminal.show_cursor().ok();
-    crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen).ok();
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::LeaveAlternateScreen
+    )
+    .ok();
     disable_raw_mode().ok();
 }
 
@@ -109,8 +121,10 @@ fn install_panic_hook() {
             if let Some(parent) = std::path::Path::new(&path).parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if let Ok(mut f) =
-                std::fs::OpenOptions::new().create(true).append(true).open(&path)
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
             {
                 let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
                 let _ = writeln!(f, "[{now}] {info}");
@@ -126,8 +140,8 @@ fn install_panic_hook() {
 
 fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
     use crossterm::event::{
-        DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind, KeyModifiers,
-        MouseButton, MouseEventKind,
+        DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind, KeyModifiers, MouseButton,
+        MouseEventKind,
     };
     use reasonix_render::state::SceneCard;
 
@@ -209,7 +223,8 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     if let Some(sel) = selection {
                         if let Ok(size) = terminal.size() {
                             let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                            let text = extract_text(&state, scroll_offset, rect, sel, sidebar_visible);
+                            let text =
+                                extract_text(&state, scroll_offset, rect, sel, sidebar_visible);
                             if !text.is_empty() {
                                 if let Ok(mut cb) = arboard::Clipboard::new() {
                                     let _ = cb.set_text(text);
@@ -221,14 +236,10 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                     }
                     return Ok(());
                 }
-                if key.code == KeyCode::Char('d')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(());
                 }
-                if key.code == KeyCode::Char('b')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('b') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     sidebar_visible = !sidebar_visible;
                     continue;
                 }
@@ -390,9 +401,8 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
             }
             Event::Mouse(m) => {
                 let term_size = terminal.size().ok();
-                let term_rect = term_size.map(|s| {
-                    ratatui::layout::Rect::new(0, 0, s.width, s.height)
-                });
+                let term_rect =
+                    term_size.map(|s| ratatui::layout::Rect::new(0, 0, s.width, s.height));
                 match m.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
                         if let Some(rect) = term_rect {
@@ -428,13 +438,15 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
                         if let Some(sel) = selection {
                             if !sel.is_empty() {
                                 if let Ok(size) = terminal.size() {
-                                    let rect = ratatui::layout::Rect::new(
-                                        0,
-                                        0,
-                                        size.width,
-                                        size.height,
+                                    let rect =
+                                        ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                                    let text = extract_text(
+                                        &state,
+                                        scroll_offset,
+                                        rect,
+                                        sel,
+                                        sidebar_visible,
                                     );
-                                    let text = extract_text(&state, scroll_offset, rect, sel, sidebar_visible);
                                     if !text.is_empty() {
                                         if let Ok(mut cb) = arboard::Clipboard::new() {
                                             let _ = cb.set_text(text);
@@ -466,9 +478,7 @@ fn run_demo_loop(terminal: &mut RenderTerminal) -> Result<()> {
 }
 
 fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
-    use crossterm::event::{
-        DisableMouseCapture, EnableMouseCapture, MouseButton, MouseEventKind,
-    };
+    use crossterm::event::{DisableMouseCapture, EnableMouseCapture, MouseButton, MouseEventKind};
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
@@ -586,7 +596,8 @@ fn run_stream_loop(terminal: &mut RenderTerminal) -> Result<()> {
                                 dragging = false;
                                 if let Some(sel) = selection {
                                     if !sel.is_empty() {
-                                        let text = extract_text(state, scroll_offset, rect, sel, true);
+                                        let text =
+                                            extract_text(state, scroll_offset, rect, sel, true);
                                         if !text.is_empty() {
                                             if let Ok(mut cb) = arboard::Clipboard::new() {
                                                 let _ = cb.set_text(text);
@@ -675,8 +686,10 @@ fn draw_atomic_with_ui(
             }
         })
         .err();
-    let _ =
-        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::EndSynchronizedUpdate);
+    let _ = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::EndSynchronizedUpdate
+    );
     if let Some(e) = draw_err {
         return Err(e).context("terminal draw");
     }

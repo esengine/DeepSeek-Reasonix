@@ -19,8 +19,8 @@ use crate::input::is_quit;
 use crate::state::{decode_message, Payload, SceneState};
 use crate::view::render_setup;
 use crate::whole_screen::{
-    at_completion, at_match_count, cards_layout, extract_text, slash_completion,
-    slash_match_count, Selection, WholeScreen,
+    at_completion, at_match_count, cards_layout, extract_text, slash_completion, slash_match_count,
+    Selection, WholeScreen,
 };
 
 type Terminal = ratatui::Terminal<CrosstermBackend<BufWriter<io::Stdout>>>;
@@ -279,7 +279,8 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                     if let Some(sel) = selection {
                         if let Ok(size) = terminal.size() {
                             let rect = Rect::new(0, 0, size.width, size.height);
-                            let text = extract_text(&scene, scroll_offset, rect, sel, sidebar_visible);
+                            let text =
+                                extract_text(&scene, scroll_offset, rect, sel, sidebar_visible);
                             if !text.is_empty() {
                                 if let Ok(mut cb) = arboard::Clipboard::new() {
                                     let _ = cb.set_text(text);
@@ -296,24 +297,16 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                     emit_event(serde_json::json!({"event": "exit"}));
                     return Ok(());
                 }
-                if key.code == KeyCode::Char('d')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     emit_event(serde_json::json!({"event": "exit"}));
                     return Ok(());
                 }
-                if key.code == KeyCode::Char('b')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('b') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     sidebar_visible = !sidebar_visible;
                     continue;
                 }
                 if mode_picker.is_some() || preset_picker.is_some() {
-                    handle_mode_picker_key(
-                        &key,
-                        &mut mode_picker,
-                        &mut preset_picker,
-                    );
+                    handle_mode_picker_key(&key, &mut mode_picker, &mut preset_picker);
                     continue;
                 }
                 if let Some(approval) = scene.approval.as_ref() {
@@ -381,9 +374,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                             Some(crate::state::EditMode::Auto) => "yolo",
                             Some(crate::state::EditMode::Yolo) | None => "review",
                         };
-                        emit_event(
-                            serde_json::json!({"event": "mode-set", "value": next}),
-                        );
+                        emit_event(serde_json::json!({"event": "mode-set", "value": next}));
                     }
                     KeyCode::Enter if at_active => {
                         if let Some(completion) = at_completion(&buffer, at_idx, &scene) {
@@ -540,8 +531,7 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                                     let new_top_rel = (mouse_rel - anchor)
                                         .clamp(0, i32::from(sb.track_space))
                                         as u16;
-                                    scroll_offset =
-                                        sb.offset_for_thumb_top_rel(new_top_rel);
+                                    scroll_offset = sb.offset_for_thumb_top_rel(new_top_rel);
                                     continue;
                                 }
                             }
@@ -558,9 +548,8 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                             let anchor = scrollbar_drag.unwrap_or(0);
                             if let Some(sb) = scrollbar {
                                 let mouse_rel = i32::from(m.row) - i32::from(sb.track_top);
-                                let new_top_rel = (mouse_rel - anchor)
-                                    .clamp(0, i32::from(sb.track_space))
-                                    as u16;
+                                let new_top_rel =
+                                    (mouse_rel - anchor).clamp(0, i32::from(sb.track_space)) as u16;
                                 scroll_offset = sb.offset_for_thumb_top_rel(new_top_rel);
                             }
                         }
@@ -582,7 +571,13 @@ pub fn run_integrated_loop(terminal: &mut Terminal) -> Result<()> {
                             scrollbar_drag = None;
                             if let Some(sel) = selection {
                                 if !sel.is_empty() {
-                                    let text = extract_text(&scene, scroll_offset, rect, sel, sidebar_visible);
+                                    let text = extract_text(
+                                        &scene,
+                                        scroll_offset,
+                                        rect,
+                                        sel,
+                                        sidebar_visible,
+                                    );
                                     if !text.is_empty() {
                                         if let Ok(mut cb) = arboard::Clipboard::new() {
                                             let _ = cb.set_text(text);
@@ -659,7 +654,11 @@ fn approval_log(msg: &str) {
     if let Some(parent) = std::path::Path::new(&path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let now = chrono::Local::now().format("%H:%M:%S%.3f");
         let _ = writeln!(f, "[{now}] {msg}");
     }
@@ -692,9 +691,7 @@ fn handle_mode_picker_key(
     preset_picker: &mut Option<usize>,
 ) {
     if mode_picker.is_some() {
-        if let Some(value) =
-            cycle_or_pick(key, mode_picker, &MODE_VALUES)
-        {
+        if let Some(value) = cycle_or_pick(key, mode_picker, &MODE_VALUES) {
             emit_event(serde_json::json!({"event": "mode-set", "value": value}));
         }
         return;
@@ -806,15 +803,17 @@ fn approval_signature(scene: &SceneState) -> Option<String> {
         Approval::Plan { body, steps } => Some(format!("plan:{}:{}", body.len(), steps.len())),
         Approval::Shell { command, .. } => Some(format!("shell:{command}")),
         Approval::Path { path, intent, .. } => Some(format!("path:{intent}:{path}")),
-        Approval::Edit { path, search, replace } => {
-            Some(format!("edit:{path}:{}:{}", search.len(), replace.len()))
-        }
-        Approval::Choice { question, options, .. } => {
-            Some(format!("choice:{}:{}", question.len(), options.len()))
-        }
-        Approval::Checkpoint { completed, total, .. } => {
-            Some(format!("checkpoint:{completed}/{total}"))
-        }
+        Approval::Edit {
+            path,
+            search,
+            replace,
+        } => Some(format!("edit:{path}:{}:{}", search.len(), replace.len())),
+        Approval::Choice {
+            question, options, ..
+        } => Some(format!("choice:{}:{}", question.len(), options.len())),
+        Approval::Checkpoint {
+            completed, total, ..
+        } => Some(format!("checkpoint:{completed}/{total}")),
     }
 }
 
@@ -882,7 +881,11 @@ fn handle_approval_key(
             }
             _ => None,
         },
-        Approval::Choice { options, allow_custom, .. } => {
+        Approval::Choice {
+            options,
+            allow_custom,
+            ..
+        } => {
             let n = options.len();
             if *choice_idx >= n && n > 0 {
                 *choice_idx = n - 1;
@@ -890,16 +893,20 @@ fn handle_approval_key(
             match key.code {
                 KeyCode::Esc => Some(serde_json::json!({"kind": "cancel"})),
                 KeyCode::Up | KeyCode::Char('k') if n > 0 => {
-                    *choice_idx = if *choice_idx == 0 { n - 1 } else { *choice_idx - 1 };
+                    *choice_idx = if *choice_idx == 0 {
+                        n - 1
+                    } else {
+                        *choice_idx - 1
+                    };
                     None
                 }
                 KeyCode::Down | KeyCode::Char('j') if n > 0 => {
                     *choice_idx = (*choice_idx + 1) % n;
                     None
                 }
-                KeyCode::Enter if n > 0 => Some(
-                    serde_json::json!({"kind": "pick", "optionId": options[*choice_idx].id}),
-                ),
+                KeyCode::Enter if n > 0 => {
+                    Some(serde_json::json!({"kind": "pick", "optionId": options[*choice_idx].id}))
+                }
                 KeyCode::Char('c') | KeyCode::Char('C') if *allow_custom => {
                     Some(serde_json::json!({"kind": "custom"}))
                 }

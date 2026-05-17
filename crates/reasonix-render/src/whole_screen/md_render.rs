@@ -34,14 +34,7 @@ pub fn render_markdown(
             return row;
         }
         row = render_block(
-            buf,
-            area,
-            row,
-            bottom,
-            rail_color,
-            default_fg,
-            &block,
-            width,
+            buf, area, row, bottom, rail_color, default_fg, &block, width,
         );
     }
     row
@@ -86,7 +79,10 @@ fn render_block(
                 .map(|s| {
                     let mut style = s.style.clone();
                     style.bold = true;
-                    InlineSpan { text: s.text.clone(), style }
+                    InlineSpan {
+                        text: s.text.clone(),
+                        style,
+                    }
                 })
                 .collect();
             paint_styled(buf, col, row, &bold_spans, DS_BRIGHT);
@@ -104,7 +100,12 @@ fn render_block(
                 row += 1;
             }
         }
-        MdBlock::ListItem { ordered, index, depth, spans } => {
+        MdBlock::ListItem {
+            ordered,
+            index,
+            depth,
+            spans,
+        } => {
             let indent = " ".repeat(*depth as usize * 2);
             let marker = if *ordered {
                 format!("{indent}{index}. ")
@@ -126,7 +127,15 @@ fn render_block(
                 if i == 0 {
                     col = paint_str(buf, col, row, &marker, FG2, BG, Modifier::BOLD);
                 } else {
-                    col = paint_str(buf, col, row, &" ".repeat(marker_w as usize), default_fg, BG, Modifier::empty());
+                    col = paint_str(
+                        buf,
+                        col,
+                        row,
+                        &" ".repeat(marker_w as usize),
+                        default_fg,
+                        BG,
+                        Modifier::empty(),
+                    );
                 }
                 paint_styled(buf, col, row, line, default_fg);
                 row += 1;
@@ -358,7 +367,10 @@ fn clip_spans(spans: &[InlineSpan], width: usize) -> Vec<InlineSpan> {
                     used += 1;
                 }
                 if !buf.is_empty() {
-                    out.push(InlineSpan { text: buf, style: span.style.clone() });
+                    out.push(InlineSpan {
+                        text: buf,
+                        style: span.style.clone(),
+                    });
                 }
                 return out;
             }
@@ -366,7 +378,10 @@ fn clip_spans(spans: &[InlineSpan], width: usize) -> Vec<InlineSpan> {
             used += cw;
         }
         if !buf.is_empty() {
-            out.push(InlineSpan { text: buf, style: span.style.clone() });
+            out.push(InlineSpan {
+                text: buf,
+                style: span.style.clone(),
+            });
         }
     }
     out
@@ -378,7 +393,12 @@ fn block_rows(block: &MdBlock, width: u16) -> usize {
         MdBlock::Paragraph(spans) => wrap_spans(spans, body_w).len().max(1),
         MdBlock::Heading { .. } => 1,
         MdBlock::Code { text, .. } => text.lines().count().max(1),
-        MdBlock::ListItem { ordered, index, depth, spans } => {
+        MdBlock::ListItem {
+            ordered,
+            index,
+            depth,
+            spans,
+        } => {
             let indent = (*depth as usize * 2) as u16;
             let marker_w = indent
                 + if *ordered {
@@ -387,7 +407,9 @@ fn block_rows(block: &MdBlock, width: u16) -> usize {
                 } else {
                     2
                 };
-            wrap_spans(spans, body_w.saturating_sub(marker_w)).len().max(1)
+            wrap_spans(spans, body_w.saturating_sub(marker_w))
+                .len()
+                .max(1)
         }
         MdBlock::BlockQuote(spans) => wrap_spans(spans, body_w.saturating_sub(2)).len().max(1),
         MdBlock::Hr => 1,

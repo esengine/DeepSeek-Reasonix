@@ -52,11 +52,38 @@ fn render_boot_meta(buf: &mut Buffer, area: Rect, start_row: u16, state: &SceneS
 
     if row < bottom {
         if let Some(model) = state.model.as_deref() {
-            paint_str_to(buf, key_col, row, "model", end_x, FG2, BG, Modifier::empty());
-            let after = paint_str_to(buf, val_col, row, model, end_x, DS_BRIGHT, BG, Modifier::empty());
+            paint_str_to(
+                buf,
+                key_col,
+                row,
+                "model",
+                end_x,
+                FG2,
+                BG,
+                Modifier::empty(),
+            );
+            let after = paint_str_to(
+                buf,
+                val_col,
+                row,
+                model,
+                end_x,
+                DS_BRIGHT,
+                BG,
+                Modifier::empty(),
+            );
             if let Some(cap) = state.ctx_cap {
                 let ctx_col = after.saturating_add(4);
-                paint_str_to(buf, ctx_col, row, "context", end_x, FG2, BG, Modifier::empty());
+                paint_str_to(
+                    buf,
+                    ctx_col,
+                    row,
+                    "context",
+                    end_x,
+                    FG2,
+                    BG,
+                    Modifier::empty(),
+                );
                 let ctx_text = match (state.ctx_tokens, cap) {
                     (Some(used), cap) if cap > 0 => {
                         let pct = (f64::from(used) / f64::from(cap) * 100.0) as i32;
@@ -64,7 +91,16 @@ fn render_boot_meta(buf: &mut Buffer, area: Rect, start_row: u16, state: &SceneS
                     }
                     _ => short_tokens(cap),
                 };
-                paint_str_to(buf, ctx_col.saturating_add(10), row, &ctx_text, end_x, FG, BG, Modifier::empty());
+                paint_str_to(
+                    buf,
+                    ctx_col.saturating_add(10),
+                    row,
+                    &ctx_text,
+                    end_x,
+                    FG,
+                    BG,
+                    Modifier::empty(),
+                );
             }
             row += 1;
         }
@@ -72,7 +108,16 @@ fn render_boot_meta(buf: &mut Buffer, area: Rect, start_row: u16, state: &SceneS
 
     if row < bottom {
         if let Some(cwd) = state.cwd.as_deref() {
-            paint_str_to(buf, key_col, row, "workdir", end_x, FG2, BG, Modifier::empty());
+            paint_str_to(
+                buf,
+                key_col,
+                row,
+                "workdir",
+                end_x,
+                FG2,
+                BG,
+                Modifier::empty(),
+            );
             paint_str_to(buf, val_col, row, cwd, end_x, FG, BG, Modifier::empty());
             row += 1;
         }

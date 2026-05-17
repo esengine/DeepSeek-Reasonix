@@ -55,7 +55,11 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
     paint(buf, right, bot, '╯', FG3, BG, Modifier::empty());
 
     let content_rows = rows.saturating_sub(2);
-    let prompt_color = match state.composer_text.as_deref().and_then(|s| s.chars().next()) {
+    let prompt_color = match state
+        .composer_text
+        .as_deref()
+        .and_then(|s| s.chars().next())
+    {
         Some('!') => OK,
         Some('/') => DS_BRIGHT,
         Some('@') => DS_PURPLE,
@@ -64,7 +68,10 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
     let text = state.composer_text.as_deref().unwrap_or("");
     let show_caret = (tick / 6) % 2 == 0;
     let total_chars = text.chars().count();
-    let cursor = state.composer_cursor.unwrap_or(total_chars).min(total_chars);
+    let cursor = state
+        .composer_cursor
+        .unwrap_or(total_chars)
+        .min(total_chars);
     let col_start = area.x + 2;
     let text_start = col_start + 2;
     let inner_w = if right > text_start + 1 {
@@ -92,7 +99,15 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
         }
         let vidx = scroll_off + i as usize;
         if text.is_empty() && i == 0 {
-            paint_str(buf, text_start, y, COMPOSER_PLACEHOLDER, FG3, BG, Modifier::empty());
+            paint_str(
+                buf,
+                text_start,
+                y,
+                COMPOSER_PLACEHOLDER,
+                FG3,
+                BG,
+                Modifier::empty(),
+            );
             if show_caret {
                 paint(buf, text_start, y, '▮', DS_BRIGHT, BG, Modifier::empty());
             }
@@ -117,10 +132,26 @@ fn render_input_box(buf: &mut Buffer, area: Rect, rows: u16, state: &SceneState,
     }
 
     if has_more_above && rows >= 3 {
-        paint(buf, right.saturating_sub(1), top + 1, '↑', FG3, BG, Modifier::empty());
+        paint(
+            buf,
+            right.saturating_sub(1),
+            top + 1,
+            '↑',
+            FG3,
+            BG,
+            Modifier::empty(),
+        );
     }
     if has_more_below && rows >= 3 {
-        paint(buf, right.saturating_sub(1), bot.saturating_sub(1), '↓', FG3, BG, Modifier::empty());
+        paint(
+            buf,
+            right.saturating_sub(1),
+            bot.saturating_sub(1),
+            '↓',
+            FG3,
+            BG,
+            Modifier::empty(),
+        );
     }
 }
 
@@ -278,9 +309,15 @@ fn render_status_bar(buf: &mut Buffer, area: Rect, row: u16, w: u16, state: &Sce
 
     if state.session_input_tokens.is_some() || state.session_output_tokens.is_some() {
         col = paint_str(buf, col, row, "tok ", FG2, BG, Modifier::empty());
-        let up = format!("↑{} ", format_tokens(state.session_input_tokens.unwrap_or(0)));
+        let up = format!(
+            "↑{} ",
+            format_tokens(state.session_input_tokens.unwrap_or(0))
+        );
         col = paint_str(buf, col, row, &up, OK, BG, Modifier::empty());
-        let dn = format!("↓{}", format_tokens(state.session_output_tokens.unwrap_or(0)));
+        let dn = format!(
+            "↓{}",
+            format_tokens(state.session_output_tokens.unwrap_or(0))
+        );
         col = paint_str(buf, col, row, &dn, FG1, BG, Modifier::empty());
         col = paint_sep(buf, col, row);
     }

@@ -14,8 +14,7 @@ fn at_token(buffer: &str) -> Option<(usize, &str)> {
     let at_pos = buffer.rfind('@')?;
     let prefix = &buffer[..at_pos];
     let suffix = &buffer[at_pos + 1..];
-    let valid_prefix = prefix.is_empty()
-        || prefix.chars().last().is_some_and(char::is_whitespace);
+    let valid_prefix = prefix.is_empty() || prefix.chars().last().is_some_and(char::is_whitespace);
     if !valid_prefix {
         return None;
     }
@@ -92,10 +91,20 @@ pub fn render_at_overlay(
         let label = match at_state {
             AtState::Browse { loading: true, .. } => "loading…",
             AtState::Browse { .. } => "(empty directory)",
-            AtState::Search { searching: true, .. } => "scanning…",
+            AtState::Search {
+                searching: true, ..
+            } => "scanning…",
             AtState::Search { .. } => "(no matches)",
         };
-        paint_str(buf, popup.x + 4, popup.y + 2, label, FG3, BG, Modifier::ITALIC);
+        paint_str(
+            buf,
+            popup.x + 4,
+            popup.y + 2,
+            label,
+            FG3,
+            BG,
+            Modifier::ITALIC,
+        );
         return;
     }
     let selected = selected_idx.min(total - 1);
@@ -161,7 +170,11 @@ fn draw_header(
     col = paint_str(buf, col, row, "@ ", DS_PURPLE, BG, Modifier::BOLD);
     let lead = match at_state {
         AtState::Browse { base_dir, .. } => {
-            if base_dir.is_empty() { "/".to_string() } else { format!("{base_dir}/") }
+            if base_dir.is_empty() {
+                "/".to_string()
+            } else {
+                format!("{base_dir}/")
+            }
         }
         AtState::Search { filter, .. } => format!("search: {filter}"),
     };
@@ -175,7 +188,9 @@ fn draw_header(
     col = paint_str(buf, col, row, &position, FG2, BG, Modifier::empty());
     let status = match at_state {
         AtState::Browse { loading: true, .. } => " · loading…",
-        AtState::Search { searching: true, .. } => " · scanning…",
+        AtState::Search {
+            searching: true, ..
+        } => " · scanning…",
         _ => "",
     };
     if !status.is_empty() {
@@ -213,7 +228,17 @@ fn draw_rows(
             entry.label.clone()
         };
         let suffix_label = entry.dir_suffix.as_str();
-        paint_entry(buf, name_col, row, &label, suffix_label, filter, max_w, selected, entry.is_dir);
+        paint_entry(
+            buf,
+            name_col,
+            row,
+            &label,
+            suffix_label,
+            filter,
+            max_w,
+            selected,
+            entry.is_dir,
+        );
     }
 }
 
@@ -229,7 +254,11 @@ fn paint_entry(
     is_dir: bool,
 ) {
     let base_fg = if selected { FG } else { FG2 };
-    let base_mod = if selected || is_dir { Modifier::BOLD } else { Modifier::empty() };
+    let base_mod = if selected || is_dir {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    };
     let mut budget = max_w;
     let mut col = x;
     if let Some((before, mid, after)) = case_insensitive_split(label, filter) {
@@ -272,7 +301,11 @@ fn case_insensitive_split<'a>(label: &'a str, filter: &str) -> Option<(&'a str, 
         }
         let start_byte = chars[start].0;
         let end_byte = if i >= n { label.len() } else { chars[i].0 };
-        return Some((&label[..start_byte], &label[start_byte..end_byte], &label[end_byte..]));
+        return Some((
+            &label[..start_byte],
+            &label[start_byte..end_byte],
+            &label[end_byte..],
+        ));
     }
     None
 }

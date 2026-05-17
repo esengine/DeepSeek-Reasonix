@@ -94,12 +94,32 @@ pub fn render_picker(
         let row = body_top + (i as u16) * row_h;
         let selected = i == selected_idx;
         let title_color = if selected { opt.marker_color } else { FG };
-        let title_mod = if selected { Modifier::BOLD } else { Modifier::empty() };
+        let title_mod = if selected {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
 
         if selected {
-            paint_str(buf, popup.x + 2, row, "▸", opt.marker_color, BG, Modifier::BOLD);
+            paint_str(
+                buf,
+                popup.x + 2,
+                row,
+                "▸",
+                opt.marker_color,
+                BG,
+                Modifier::BOLD,
+            );
         }
-        paint_str(buf, popup.x + 4, row, opt.marker, opt.marker_color, BG, Modifier::BOLD);
+        paint_str(
+            buf,
+            popup.x + 4,
+            row,
+            opt.marker,
+            opt.marker_color,
+            BG,
+            Modifier::BOLD,
+        );
         let mut col = popup.x + 6;
         col = paint_str(buf, col, row, opt.title, title_color, BG, title_mod);
         let _ = col;
@@ -110,7 +130,15 @@ pub fn render_picker(
         paint_str(buf, hot_col, row, hot_label, FG3, BG, Modifier::empty());
 
         if row + 1 < popup.y + popup.height - 1 {
-            paint_str(buf, popup.x + 6, row + 1, opt.summary, FG2, BG, Modifier::empty());
+            paint_str(
+                buf,
+                popup.x + 6,
+                row + 1,
+                opt.summary,
+                FG2,
+                BG,
+                Modifier::empty(),
+            );
         }
     }
     let _ = (FG1, WARN);

@@ -23,7 +23,12 @@ pub fn render_approval(
     }
     let popup_x = screen.x + 2;
     let accent = accent_for(approval);
-    let body = body_lines(approval, popup_w.saturating_sub(6) as usize, choice_idx, accent);
+    let body = body_lines(
+        approval,
+        popup_w.saturating_sub(6) as usize,
+        choice_idx,
+        accent,
+    );
     let actions = action_cells(approval);
     let body_h = body.len().min(MAX_BODY_ROWS as usize) as u16;
     let popup_h = 2 + body_h + 3;
@@ -41,7 +46,15 @@ pub fn render_approval(
     draw_title(buf, popup, approval, accent);
     let body_top = popup.y + 1;
     for (i, line) in body.iter().take(MAX_BODY_ROWS as usize).enumerate() {
-        paint_str(buf, popup.x + 2, body_top + 1 + i as u16, line, FG, BG, Modifier::empty());
+        paint_str(
+            buf,
+            popup.x + 2,
+            body_top + 1 + i as u16,
+            line,
+            FG,
+            BG,
+            Modifier::empty(),
+        );
     }
     let footer_y = popup.y + popup.height - 2;
     draw_actions(buf, popup, footer_y, &actions);
@@ -80,25 +93,41 @@ fn title_parts(approval: &Approval) -> (&'static str, &'static str, String, &'st
             } else {
                 steps.len()
             };
-            ("◇", "REVIEW PLAN", format!("{n} step{}", if n == 1 { "" } else { "s" }), "skip")
+            (
+                "◇",
+                "REVIEW PLAN",
+                format!("{n} step{}", if n == 1 { "" } else { "s" }),
+                "skip",
+            )
         }
         Approval::Shell { command, .. } => {
             let head = first_chunk(command, 40);
             ("⚡", "SHELL EXEC", head, "dismiss")
         }
-        Approval::Path { path, intent, .. } => {
-            ("▸", "PATH ACCESS", format!("{intent} {}", first_chunk(path, 50)), "deny")
-        }
-        Approval::Edit { path, .. } => {
-            ("▣", "EDIT PREVIEW", first_chunk(path, 50), "dismiss")
-        }
+        Approval::Path { path, intent, .. } => (
+            "▸",
+            "PATH ACCESS",
+            format!("{intent} {}", first_chunk(path, 50)),
+            "deny",
+        ),
+        Approval::Edit { path, .. } => ("▣", "EDIT PREVIEW", first_chunk(path, 50), "dismiss"),
         Approval::Choice { options, .. } => {
             let n = options.len();
-            ("◆", "CHOOSE", format!("{n} option{}", if n == 1 { "" } else { "s" }), "skip")
+            (
+                "◆",
+                "CHOOSE",
+                format!("{n} option{}", if n == 1 { "" } else { "s" }),
+                "skip",
+            )
         }
-        Approval::Checkpoint { completed, total, .. } => {
-            ("◉", "STEP CHECKPOINT", format!("{completed}/{total}"), "stop")
-        }
+        Approval::Checkpoint {
+            completed, total, ..
+        } => (
+            "◉",
+            "STEP CHECKPOINT",
+            format!("{completed}/{total}"),
+            "stop",
+        ),
     }
 }
 
@@ -176,9 +205,16 @@ fn body_lines(approval: &Approval, max_w: usize, choice_idx: usize, accent: Colo
             }
             out
         }
-        Approval::Shell { command, cwd, timeout_sec } => {
+        Approval::Shell {
+            command,
+            cwd,
+            timeout_sec,
+        } => {
             let mut out = Vec::new();
-            out.push(format!("$ {}", first_chunk(command, max_w.saturating_sub(2))));
+            out.push(format!(
+                "$ {}",
+                first_chunk(command, max_w.saturating_sub(2))
+            ));
             let mut meta = Vec::new();
             if let Some(dir) = cwd.as_deref() {
                 meta.push(format!("cwd {dir}"));
@@ -192,14 +228,25 @@ fn body_lines(approval: &Approval, max_w: usize, choice_idx: usize, accent: Colo
             }
             out
         }
-        Approval::Path { path, intent, tool_name } => {
+        Approval::Path {
+            path,
+            intent,
+            tool_name,
+        } => {
             let mut out = Vec::new();
             out.push(format!("intent  {intent}"));
             out.push(format!("tool    {tool_name}"));
-            out.push(format!("path    {}", first_chunk(path, max_w.saturating_sub(8))));
+            out.push(format!(
+                "path    {}",
+                first_chunk(path, max_w.saturating_sub(8))
+            ));
             out
         }
-        Approval::Edit { path, search, replace } => {
+        Approval::Edit {
+            path,
+            search,
+            replace,
+        } => {
             let mut out = Vec::new();
             let s_lines = search.lines().count();
             let r_lines = replace.lines().count();
@@ -213,10 +260,17 @@ fn body_lines(approval: &Approval, max_w: usize, choice_idx: usize, accent: Colo
             }
             out
         }
-        Approval::Checkpoint { title, completed, total } => {
+        Approval::Checkpoint {
+            title,
+            completed,
+            total,
+        } => {
             let mut out = Vec::new();
             if let Some(t) = title.as_deref() {
-                out.push(format!("just finished: {}", first_chunk(t, max_w.saturating_sub(15))));
+                out.push(format!(
+                    "just finished: {}",
+                    first_chunk(t, max_w.saturating_sub(15))
+                ));
             }
             out.push(String::new());
             out.push(format!("progress: {completed} of {total} step(s) done"));
@@ -224,7 +278,9 @@ fn body_lines(approval: &Approval, max_w: usize, choice_idx: usize, accent: Colo
             out.push("continue executing, type a refinement, or stop here?".to_string());
             out
         }
-        Approval::Choice { question, options, .. } => {
+        Approval::Choice {
+            question, options, ..
+        } => {
             let mut out = Vec::new();
             out.push(first_chunk(question, max_w));
             out.push(String::new());
@@ -238,7 +294,10 @@ fn body_lines(approval: &Approval, max_w: usize, choice_idx: usize, accent: Colo
                 ));
                 if let Some(summary) = opt.summary.as_deref() {
                     if !summary.is_empty() {
-                        out.push(format!("        {}", first_chunk(summary, max_w.saturating_sub(8))));
+                        out.push(format!(
+                            "        {}",
+                            first_chunk(summary, max_w.saturating_sub(8))
+                        ));
                     }
                 }
             }
@@ -260,22 +319,14 @@ fn action_cells(approval: &Approval) -> Vec<(&'static str, &'static str)> {
             ("a", "always allow this command"),
             ("n", "cancel"),
         ],
-        Approval::Path { .. } => vec![
-            ("↵", "allow once"),
-            ("a", "always allow"),
-            ("n", "deny"),
-        ],
+        Approval::Path { .. } => vec![("↵", "allow once"), ("a", "always allow"), ("n", "deny")],
         Approval::Edit { .. } => vec![
             ("↵", "apply"),
             ("r", "reject"),
             ("t", "rest of turn"),
             ("y", "flip to auto"),
         ],
-        Approval::Checkpoint { .. } => vec![
-            ("↵", "continue"),
-            ("r", "revise"),
-            ("s", "stop"),
-        ],
+        Approval::Checkpoint { .. } => vec![("↵", "continue"), ("r", "revise"), ("s", "stop")],
         Approval::Choice { allow_custom, .. } => {
             let mut v = vec![("↑↓", "move"), ("↵", "pick"), ("1-9", "jump")];
             if *allow_custom {
