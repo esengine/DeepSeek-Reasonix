@@ -12,7 +12,8 @@ export type RustEvent =
   | { event: "mode-set"; value: "review" | "auto" | "yolo" }
   | { event: "preset-set"; value: "auto" | "flash" | "pro" }
   | { event: "prompt-response"; id: string; text?: string; cancelled?: boolean }
-  | { event: "list-picker-response"; id: string; key?: string; cancelled?: boolean };
+  | { event: "list-picker-response"; id: string; key?: string; cancelled?: boolean }
+  | { event: "setup-submit"; text: string };
 
 export type Renderer = {
   emit(message: unknown): void;

@@ -194,6 +194,8 @@ interface RootProps extends ChatOptions {
   qqErrorRef: { current: ((msg: string) => void) | null };
   /** Custom keystroke source — populated when the Rust renderer is active so keys flow from the spawned input child (or a no-op reader in integrated mode) instead of process.stdin. */
   keystrokeReader?: KeystrokeReader;
+  /** Integrated rust child accumulates the api-key locally (Node's stdin is null) and posts the final text via setup-submit; the integrated handler calls into this ref so Setup.handleSubmit runs unchanged. */
+  setupSubmitRef?: { current: ((text: string) => void) | null };
 }
 
 function Root({
@@ -206,6 +208,7 @@ function Root({
   mcpRuntime,
   startupInfoHints,
   keystrokeReader,
+  setupSubmitRef,
   ...appProps
 }: RootProps) {
   const [key, setKey] = useState<string | undefined>(initialKey);
@@ -222,6 +225,7 @@ function Root({
             process.env.DEEPSEEK_API_KEY = k;
             setKey(k);
           }}
+          submitRef={setupSubmitRef}
         />
       </KeystrokeProvider>
     );
@@ -397,6 +401,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const presetSetRef: {
     current: ((value: "auto" | "flash" | "pro") => void) | null;
   } = { current: null };
+  const setupSubmitRef: { current: ((text: string) => void) | null } = { current: null };
   const qqRequested = cfg.qq?.enabled === true;
   let qqChannel: QQChannel | undefined;
   if (qqRequested) {
@@ -452,6 +457,8 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
         resolvePromptInput(event.id, event.cancelled ? null : (event.text ?? ""));
       } else if (event.event === "list-picker-response") {
         resolveListPicker(event.id, event.cancelled ? null : (event.key ?? null));
+      } else if (event.event === "setup-submit") {
+        setupSubmitRef.current?.(event.text);
       }
       // interrupt: no-op for now; terminal SIGINT already reaches Node.
     });
@@ -481,6 +488,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       modeSetRef={modeSetRef}
       presetSetRef={presetSetRef}
       qqErrorRef={qqErrorRef}
+      setupSubmitRef={setupSubmitRef}
     />,
     {
       ...(rustRendererActive ? { stdout: inkStdout, stdin: inkStdin } : {}),

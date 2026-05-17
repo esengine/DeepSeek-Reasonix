@@ -1,5 +1,5 @@
 import { Box, Text, useApp } from "ink";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { defaultConfigPath, isPlausibleKey, redactKey, saveApiKey } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { MaskedInput } from "./MaskedInput.js";
@@ -8,9 +8,11 @@ import { COLOR, GLYPH, GRADIENT } from "./theme.js";
 
 export interface SetupProps {
   onReady: (apiKey: string) => void;
+  /** Integrated rust renderer routes its setup-submit event here — Node's MaskedInput can't read keys when rust owns stdin, so the rust child accumulates the text and Node calls handleSubmit via this ref instead. */
+  submitRef?: { current: ((text: string) => void) | null };
 }
 
-export function Setup({ onReady }: SetupProps) {
+export function Setup({ onReady, submitRef }: SetupProps) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const { exit } = useApp();
@@ -36,6 +38,18 @@ export function Setup({ onReady }: SetupProps) {
     }
     onReady(trimmed);
   };
+
+  // Re-bind on every render so handleSubmit's captured `onReady` stays fresh.
+  // Cleanup is split into a mount-only effect so the ref never goes null between renders.
+  useEffect(() => {
+    if (submitRef) submitRef.current = handleSubmit;
+  });
+  useEffect(() => {
+    if (!submitRef) return undefined;
+    return () => {
+      submitRef.current = null;
+    };
+  }, [submitRef]);
 
   return (
     <Box flexDirection="column" paddingX={1} marginY={1}>
