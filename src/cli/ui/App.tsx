@@ -192,6 +192,10 @@ import { useSubagent } from "./useSubagent.js";
 
 export interface AppProps {
   model: string;
+  /** Preset resolved at launch; keeps flash distinct from auto when both use deepseek-v4-flash. */
+  preset?: "auto" | "flash" | "pro";
+  /** Whether flash may auto-upgrade hard turns to pro. */
+  autoEscalate?: boolean;
   system: string;
   /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Must produce the same shape as `system` was built from. */
   rebuildSystem?: () => string;
@@ -427,6 +431,8 @@ type AppInnerProps = AppProps & {
 
 function AppInner({
   model,
+  preset: initialPreset,
+  autoEscalate,
   system,
   rebuildSystem,
   transcript,
@@ -569,8 +575,10 @@ function AppInner({
     editModeRef,
     modeFlash,
   } = useEditGate(!!codeMode);
-  const { preset, setPreset, proArmed, setProArmed, turnOnPro, setTurnOnPro } =
-    usePresetMode(model);
+  const { preset, setPreset, proArmed, setProArmed, turnOnPro, setTurnOnPro } = usePresetMode(
+    model,
+    initialPreset,
+  );
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -962,6 +970,7 @@ function AppInner({
       // `/effort high` silently reverted to `max` on relaunch —the
       // loop's constructor default wins over persisted state.
       reasoningEffort: loadReasoningEffort(),
+      autoEscalate,
       rebuildSystem,
     });
     loopRef.current = l;
@@ -1112,13 +1121,14 @@ function AppInner({
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
   useEffect(() => {
     const canonical: "auto" | "flash" | "pro" | null =
-      loop.model === "deepseek-v4-pro"
+      initialPreset ??
+      (loop.model === "deepseek-v4-pro"
         ? "pro"
         : loop.model === "deepseek-v4-flash"
           ? loop.autoEscalate
             ? "auto"
             : "flash"
-          : null;
+          : null);
     agentStore.dispatch({ type: "session.preset.change", preset: canonical });
   }, []);
 

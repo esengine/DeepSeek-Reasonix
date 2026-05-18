@@ -12,9 +12,9 @@ export interface PresetMode {
   setTurnOnPro: Dispatch<SetStateAction<boolean>>;
 }
 
-export function usePresetMode(model: string): PresetMode {
-  const [preset, setPreset] = useState<"auto" | "flash" | "pro">(() =>
-    model === "deepseek-v4-pro" ? "pro" : "auto",
+export function usePresetMode(model: string, initialPreset?: "auto" | "flash" | "pro"): PresetMode {
+  const [preset, setPreset] = useState<"auto" | "flash" | "pro">(
+    () => initialPreset ?? (model === "deepseek-v4-pro" ? "pro" : "auto"),
   );
   const [proArmed, setProArmed] = useState(false);
   const [turnOnPro, setTurnOnPro] = useState(false);

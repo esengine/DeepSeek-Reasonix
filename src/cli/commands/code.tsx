@@ -27,7 +27,7 @@ import { t } from "../../i18n/index.js";
 import { detectForeignAgentPlatform } from "../../memory/project.js";
 import { sanitizeName } from "../../memory/session.js";
 import { markPhase } from "../startup-profile.js";
-import { resolvePreset } from "../ui/presets.js";
+import { presetNameForSettings, resolvePreset } from "../ui/presets.js";
 import { chatCommand } from "./chat.js";
 
 export interface CodeOptions {
@@ -67,7 +67,9 @@ export interface CodeOptions {
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   markPhase("code_command_enter");
-  const resolvedModel = opts.model ?? resolvePreset(loadPreset()).model;
+  const loadedPreset = loadPreset();
+  const presetSettings = resolvePreset(loadedPreset);
+  const resolvedModel = opts.model ?? presetSettings.model;
   // Bridge .env + ~/.reasonix/config.json into process.env so buildCodeToolset's
   // eager DeepSeekClient constructions (subagent client; semantic embedder) can
   // pick up a key the user already configured via `reasonix setup`. chatCommand
@@ -150,6 +152,8 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     });
   await chatCommand({
     model: resolvedModel,
+    preset: opts.model ? undefined : presetNameForSettings(presetSettings),
+    autoEscalate: opts.model ? false : presetSettings.autoEscalate,
     budgetUsd: opts.budgetUsd,
     system: codeRebuildSystem(),
     rebuildSystem: codeRebuildSystem,

@@ -41,6 +41,10 @@ export type { McpLifecycleNotice, McpLifecycleSink, McpRuntime, ProgressInfo };
 
 export interface ChatOptions {
   model: string;
+  /** Preset resolved at launch; keeps flash distinct from auto when both use the same model. */
+  preset?: "auto" | "flash" | "pro";
+  /** Whether flash may auto-upgrade hard turns to pro. */
+  autoEscalate?: boolean;
   system: string;
   /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Should produce the same string `system` was built from. */
   rebuildSystem?: () => string;
@@ -214,6 +218,8 @@ function Root({
       <App
         key={activeSession ?? "__new__"}
         model={appProps.model}
+        preset={appProps.preset}
+        autoEscalate={appProps.autoEscalate}
         system={appProps.system}
         rebuildSystem={appProps.rebuildSystem}
         transcript={appProps.transcript}

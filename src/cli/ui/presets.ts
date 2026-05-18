@@ -57,3 +57,8 @@ export function canonicalPresetName(name: PresetName | undefined): "auto" | "fla
   if (name === "auto" || name === "flash" || name === "pro") return name;
   return "auto";
 }
+
+export function presetNameForSettings(settings: PresetSettings): "auto" | "flash" | "pro" {
+  if (settings.model === "deepseek-v4-pro") return "pro";
+  return settings.autoEscalate ? "auto" : "flash";
+}

@@ -2,10 +2,12 @@
 
 import { type PresetName, type ReasonixConfig, normalizeMcpConfig, readConfig } from "../config.js";
 import { specToRaw } from "../mcp/spec.js";
-import { resolvePreset } from "./ui/presets.js";
+import { presetNameForSettings, resolvePreset } from "./ui/presets.js";
 
 export interface ResolvedDefaults {
   model: string;
+  preset?: "auto" | "flash" | "pro";
+  autoEscalate: boolean;
   reasoningEffort: "high" | "max";
   mcp: string[];
   session: string | undefined;
@@ -28,6 +30,8 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
   const presetSettings = resolvePreset(preset);
 
   const model = flags.model ?? presetSettings.model;
+  const presetName = flags.model ? undefined : presetNameForSettings(presetSettings);
+  const autoEscalate = flags.model ? false : presetSettings.autoEscalate;
   const reasoningEffort = presetSettings.reasoningEffort;
 
   // `--mcp` accumulator is [] when absent. Treat empty from flags as
@@ -41,7 +45,7 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
 
   const session = resolveSession(flags.session, cfg.session);
 
-  return { model, reasoningEffort, mcp, session };
+  return { model, preset: presetName, autoEscalate, reasoningEffort, mcp, session };
 }
 
 function pickPreset(

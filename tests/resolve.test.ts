@@ -45,10 +45,20 @@ describe("resolveDefaults", () => {
     expect(r.session).toBe("default");
   });
 
+  it("config.preset 'flash' preserves no-auto-escalate semantics", () => {
+    writeConfig({ preset: "flash" }, join(home, ".reasonix", "config.json"));
+    const r = resolveDefaults({});
+    expect(r.model).toBe("deepseek-v4-flash");
+    expect(r.preset).toBe("flash");
+    expect(r.autoEscalate).toBe(false);
+  });
+
   it("config.preset 'fast' drops effort to high (still flash)", () => {
     writeConfig({ preset: "fast" }, join(home, ".reasonix", "config.json"));
     const r = resolveDefaults({});
     expect(r.model).toBe("deepseek-v4-flash");
+    expect(r.preset).toBe("flash");
+    expect(r.autoEscalate).toBe(false);
     expect(r.reasoningEffort).toBe("high");
   });
 
@@ -62,7 +72,16 @@ describe("resolveDefaults", () => {
   it("--model wins even when --preset is set", () => {
     const r = resolveDefaults({ preset: "max", model: "deepseek-v4-flash" });
     expect(r.model).toBe("deepseek-v4-flash");
+    expect(r.preset).toBeUndefined();
+    expect(r.autoEscalate).toBe(false);
     expect(r.reasoningEffort).toBe("max");
+  });
+
+  it("--model with a custom id does not infer a preset", () => {
+    const r = resolveDefaults({ preset: "max", model: "custom-model" });
+    expect(r.model).toBe("custom-model");
+    expect(r.preset).toBeUndefined();
+    expect(r.autoEscalate).toBe(false);
   });
 
   it("--mcp overrides config.mcp wholesale (no merging)", () => {
