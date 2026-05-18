@@ -1,6 +1,7 @@
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL = "nomic-embed-text";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_BATCH_SIZE = 10;
 
 export type EmbedOptions =
   | {
@@ -17,6 +18,7 @@ export type EmbedOptions =
       model: string;
       extraBody?: Record<string, unknown>;
       timeoutMs?: number;
+      batchSize?: number;
       signal?: AbortSignal;
     };
 
@@ -151,19 +153,34 @@ async function embedAllOpenAICompat(
 ): Promise<Array<Float32Array | null>> {
   if (texts.length === 0) return [];
   if (opts.signal?.aborted) throw new EmbeddingError("embedding aborted");
-  const vectors = await requestOpenAICompatEmbeddings([...texts], opts);
-  for (let i = 0; i < vectors.length; i++) {
-    if (vectors[i] === null) {
-      opts.onError?.(
-        i,
-        new EmbeddingError(
-          `provider dropped input ${i} from the batch (model ${opts.model} returned no embedding for it)`,
-        ),
-      );
+
+  const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
+  const result: Array<Float32Array | null> = [];
+  let done = 0;
+
+  for (let i = 0; i < texts.length; i += batchSize) {
+    if (opts.signal?.aborted) throw new EmbeddingError("embedding aborted");
+    const batch = texts.slice(i, i + batchSize);
+    const vectors = await requestOpenAICompatEmbeddings([...batch], opts);
+
+    for (let j = 0; j < vectors.length; j++) {
+      const idx = i + j;
+      if (vectors[j] === null) {
+        opts.onError?.(
+          idx,
+          new EmbeddingError(
+            `provider dropped input ${idx} from batch ${Math.floor(i / batchSize) + 1} (model ${opts.model} returned no embedding for it)`,
+          ),
+        );
+      }
     }
+
+    result.push(...vectors);
+    done += vectors.length;
+    opts.onProgress?.(done, texts.length);
   }
-  opts.onProgress?.(texts.length, texts.length);
-  return vectors;
+
+  return result;
 }
 
 async function requestOpenAICompatEmbeddings(
