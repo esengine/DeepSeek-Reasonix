@@ -334,6 +334,10 @@ export const zhCN: typeof en = {
       toggleLang: "切换界面语言 (中 / 英)",
       exportMd: "复制本会话为 Markdown",
       help: "查看所有命令",
+      feedback: "在 GitHub 提交反馈（打开浏览器）",
+      compact: "折叠旧轮次为摘要（节省上下文）",
+      retry: "截断并重发你的最后一条消息",
+      btw: "旁路提问（不写入会话上下文）",
     },
     skill: {
       generic: "{scope}技能 · {runAs}",

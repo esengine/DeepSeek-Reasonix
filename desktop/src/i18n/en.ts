@@ -317,6 +317,10 @@ export const en = {
       toggleLang: "Toggle language (CN / EN)",
       exportMd: "Copy session as Markdown",
       help: "Show all commands",
+      feedback: "Submit feedback on GitHub (opens browser)",
+      compact: "Fold older turns into a summary (save context)",
+      retry: "Truncate and resend your last message",
+      btw: "Ask a side question (never added to context)",
     },
     skill: {
       generic: "{scope} skill · {runAs}",

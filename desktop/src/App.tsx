@@ -62,6 +62,7 @@ import { WorkdirPop } from "./ui/workdir-pop";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { useWindowBounds } from "./ui/useWindowBounds";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -232,6 +233,9 @@ type State = {
   activeSkill: SkillOrigin | null;
   /** Messages typed while busy=true — auto-sent FIFO once the current turn completes. Cleared on `clear`, `rpc_exit`, `session_loaded`. */
   queuedSends: string[];
+  /** Populated by $retry_result — component useEffect reads and sets composer draft. */
+  retryText?: string;
+  retryNonce: number;
 };
 
 export type SessionFile = {
@@ -377,6 +381,7 @@ function reduce(state: State, action: Action): State {
         sessionFiles: [],
         activeSkill: null,
         queuedSends: [],
+        retryNonce: 0,
       };
     case "resolve_confirm":
       return {
@@ -673,6 +678,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         activePlan: wsChanged ? null : state.activePlan,
         usage: wsChanged ? zeroUsage() : state.usage,
         sessionFiles: wsChanged ? [] : state.sessionFiles,
+        retryNonce: wsChanged ? 0 : state.retryNonce,
         settings: {
           reasoningEffort: ev.reasoningEffort,
           editMode: ev.editMode,
@@ -743,6 +749,7 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         sessionFiles,
         activeSkill: null,
         queuedSends: [],
+        retryNonce: 0,
       };
     }
     case "$session_empty": {
@@ -896,6 +903,16 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           return mutated ? { ...m, segments: segs } : m;
         }),
       };
+    case "$retry_result":
+      return { ...state, retryText: ev.text, retryNonce: state.retryNonce + 1 };
+    case "$btw_result":
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          { kind: "status", text: `≫ btw\n${ev.answer}` },
+        ],
+      };
     case "status":
       return state;
     default:
@@ -989,6 +1006,7 @@ function TabRuntime({
     jobs: [],
     activeSkill: null,
     queuedSends: [],
+    retryNonce: 0,
   });
   useLang();
   useDisableTextAssist();
@@ -1152,6 +1170,17 @@ function TabRuntime({
     (override?: string) => {
       const text = (override ?? draft).trim();
       if (!text || !state.ready || state.busy) return;
+
+      // /btw <question> — route to side-question RPC instead of user_input
+      const btwMatch = /^\/btw(?:\s+([\s\S]+))?$/.exec(text);
+      if (btwMatch) {
+        const question = btwMatch[1]?.trim() ?? "";
+        if (!question) return;
+        sendRpc({ cmd: "btw", text: question });
+        if (!override) setDraft("");
+        return;
+      }
+
       const clientId = `c-${Date.now()}`;
       dispatch({ t: "send_user", text, clientId });
       sendRpc({ cmd: "user_input", text });
@@ -1161,6 +1190,16 @@ function TabRuntime({
   );
 
   const abort = useCallback(() => sendRpc({ cmd: "abort" }), [sendRpc]);
+
+  // When /retry returns the last user text, set it as the composer draft
+  useEffect(() => {
+    if (state.retryNonce > 0 && state.retryText) {
+      setDraft(state.retryText);
+      composerRef.current?.focus();
+    }
+    // Only fire when retryNonce changes — retryText alone would re-fire on re-renders
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.retryNonce]);
 
   useEffect(() => {
     if (state.busy || !state.ready || state.queuedSends.length === 0) return;
@@ -1389,6 +1428,35 @@ function TabRuntime({
       cmd: "/export",
       desc: t("app.cmd.exportMd"),
       run: () => exportConversation(),
+    },
+    {
+      cmd: "/feedback",
+      desc: t("app.cmd.feedback"),
+      run: () => {
+        void openUrl("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose").catch(
+          () => undefined,
+        );
+      },
+    },
+    {
+      cmd: "/compact",
+      desc: t("app.cmd.compact"),
+      run: () => sendRpc({ cmd: "compact_history" }),
+    },
+    {
+      cmd: "/retry",
+      desc: t("app.cmd.retry"),
+      run: () => sendRpc({ cmd: "retry" }),
+    },
+    {
+      cmd: "/btw",
+      desc: t("app.cmd.btw"),
+      run: () => {
+        // Sets the draft to /btw so the user can type their question.
+        // The send() handler detects the /btw prefix and routes to the btw RPC.
+        setDraft("/btw ");
+        composerRef.current?.focus();
+      },
     },
     ...state.skills.map((s) => ({
       cmd: `/${s.name}`,

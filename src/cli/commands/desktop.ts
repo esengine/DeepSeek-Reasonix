@@ -115,6 +115,9 @@ type InMessage = { tabId?: string } & (
   | { cmd: "jobs_list" }
   | { cmd: "jobs_stop"; jobId: number }
   | { cmd: "jobs_stop_all" }
+  | { cmd: "compact_history" }
+  | { cmd: "retry" }
+  | { cmd: "btw"; text: string }
 );
 
 interface NeedsSetupEvent {
@@ -349,6 +352,17 @@ interface JobsEvent {
   items: JobInfoPayload[];
 }
 
+interface RetryResultEvent {
+  type: "$retry_result";
+  text: string;
+}
+
+interface BtwResultEvent {
+  type: "$btw_result";
+  question: string;
+  answer: string;
+}
+
 /** Direct fd write — bypasses Node's stream layer (and its piped-output
  *  block buffering) so every JSON line reaches Rust the moment it's
  *  produced, not whenever the next 8 KB flushes. */
@@ -373,6 +387,8 @@ type EmittableEvent =
   | BalanceEvent
   | MentionResultsEvent
   | MentionPreviewEvent
+  | RetryResultEvent
+  | BtwResultEvent
   | TabOpenedEvent
   | TabClosedEvent
   | McpSpecsEvent
@@ -1701,6 +1717,42 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         .catch(() => {
           emit({ type: "$mention_preview", nonce, path: rel, head: "", totalLines: 0 }, tab.id);
         });
+      return;
+    }
+    if (msg.cmd === "compact_history") {
+      if (!tab.runtime) return;
+      void tab.runtime.loop.compactHistory().catch((err: Error) => {
+        emit({ type: "$error", message: `/compact failed: ${err.message}` }, tab.id);
+      });
+      return;
+    }
+    if (msg.cmd === "retry") {
+      if (!tab.runtime) return;
+      const prev = tab.runtime.loop.retryLastUser();
+      if (prev) {
+        emit({ type: "$retry_result", text: prev }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "btw") {
+      if (!tab.runtime) return;
+      const question = msg.text.trim();
+      if (!question) return;
+      void (async () => {
+        try {
+          const reply = await tab.runtime!.loop.client.chat({
+            messages: [
+              { role: "system", content: tab.system },
+              { role: "user", content: question },
+            ],
+          });
+          const answer =
+            (typeof reply.content === "string" ? reply.content.trim() : "") || "(no answer)";
+          emit({ type: "$btw_result", question, answer }, tab.id);
+        } catch (err) {
+          emit({ type: "$error", message: `/btw failed: ${(err as Error).message}` }, tab.id);
+        }
+      })();
       return;
     }
     if (msg.cmd === "user_input") {

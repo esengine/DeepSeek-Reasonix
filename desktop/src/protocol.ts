@@ -181,6 +181,10 @@ export type MemoryEvent = {
   entries: MemoryEntryInfo[];
 };
 
+export type RetryResultEvent = { type: "$retry_result"; text: string };
+
+export type BtwResultEvent = { type: "$btw_result"; question: string; answer: string };
+
 export type JobInfo = {
   id: number;
   tabId: string;
@@ -406,6 +410,8 @@ export type IncomingEvent = { tabId?: string } & (
   | ToolResultEvent
   | StatusEvent
   | KernelErrorEvent
+  | RetryResultEvent
+  | BtwResultEvent
 );
 
 export type OutgoingCommand = { tabId?: string } & (
@@ -436,4 +442,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "jobs_list" }
   | { cmd: "jobs_stop"; jobId: number }
   | { cmd: "jobs_stop_all" }
+  | { cmd: "compact_history" }
+  | { cmd: "retry" }
+  | { cmd: "btw"; text: string }
 );
