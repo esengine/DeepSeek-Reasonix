@@ -93,7 +93,10 @@ export async function handleMcp(
   // bridged set (a recent edit hasn't been reloaded yet).
   if (method === "GET" && rest[0] === "specs") {
     const cfg = readConfig(ctx.configPath);
-    return { status: 200, body: { specs: cfg.mcp ?? [] } };
+    return {
+      status: 200,
+      body: { specs: cfg.mcp ?? [], failures: ctx.getMcpFailures?.() ?? [] },
+    };
   }
 
   if (method === "POST" && rest[0] === "specs") {

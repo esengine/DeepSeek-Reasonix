@@ -100,10 +100,19 @@ export const stderrLifecycleSink: McpLifecycleSink = (n) => {
   );
 };
 
+export interface McpFailure {
+  spec: string;
+  name: string;
+  reason: string;
+  at: number;
+}
+
 export interface McpRuntime {
   size(): number;
   specs(): string[];
   summaries(): McpServerSummary[];
+  /** Last bridge failure per spec — drives the "未桥接" reason shown in the dashboard. */
+  failures(): McpFailure[];
   addSpec(
     raw: string,
     loop?: CacheFirstLoop,
@@ -123,6 +132,7 @@ export interface McpRuntime {
 export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
   const records = new Map<string, SpecRecord>();
   const insertionOrder: string[] = [];
+  const failureMap = new Map<string, McpFailure>();
   let sink: McpLifecycleSink = stderrLifecycleSink;
 
   async function addSpec(
@@ -132,6 +142,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     if (records.has(raw)) {
       return { ok: true, summary: records.get(raw)!.summary };
     }
+    failureMap.delete(raw);
     const tools = ctx.getTools();
     if (!tools) return { ok: false, reason: "no tool registry available" };
     const cfg = readConfig();
@@ -159,6 +170,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       if (spec.disabled) {
         sink({ kind: "disabled", name: label });
         rejectReady(new Error(`MCP server "${label}" is disabled`));
+        failureMap.set(raw, { spec: raw, name: label, reason: "disabled by user", at: Date.now() });
         return { ok: false, reason: "disabled by user" };
       }
       sink({ kind: "handshake", name: label });
@@ -291,6 +303,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         await mcp?.close().catch(() => undefined);
         rejectReady(new Error(`MCP server "${label}" failed to start: ${reason}`));
         sink({ kind: "failed", name: label, reason });
+        failureMap.set(raw, { spec: raw, name: label, reason, at: Date.now() });
         return { ok: false, reason };
       }
       sink({ kind: "warn", name: label, reason });
@@ -299,6 +312,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
   }
 
   async function removeSpec(raw: string, loop?: CacheFirstLoop): Promise<boolean> {
+    failureMap.delete(raw);
     const record = records.get(raw);
     if (!record) return false;
     await record.client.close().catch(() => undefined);
@@ -354,6 +368,10 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     for (const r of records.values()) await r.client.close().catch(() => undefined);
     records.clear();
     insertionOrder.length = 0;
+    failureMap.clear();
+  }
+  function failures(): McpFailure[] {
+    return [...failureMap.values()];
   }
   function setLifecycleSink(s: McpLifecycleSink): void {
     sink = s;
@@ -362,6 +380,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
     size: () => records.size,
     specs,
     summaries,
+    failures,
     addSpec,
     removeSpec,
     reloadFromConfig,

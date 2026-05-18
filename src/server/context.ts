@@ -17,6 +17,8 @@ export interface DashboardContext {
   loop?: CacheFirstLoop;
   tools?: ToolRegistry;
   getMcpServers?: () => McpServerSummary[];
+  /** Per-spec bridge failures — drives the "未桥接" reason shown in the dashboard. */
+  getMcpFailures?: () => Array<{ spec: string; name: string; reason: string; at: number }>;
   jobs?: JobRegistry;
 
   /** Current code-mode root, if any. Drives the project-scoped allowlist. */

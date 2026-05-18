@@ -85,10 +85,18 @@ interface RegistryListResponse {
 
 type McpFilter = "all" | "live" | "unbridged" | "marketplace";
 
+interface McpFailure {
+  spec: string;
+  name: string;
+  reason: string;
+  at: number;
+}
+
 export function McpPanel() {
   useLang();
   const [data, setData] = useState<McpData | null>(null);
   const [specs, setSpecs] = useState<string[] | null>(null);
+  const [failures, setFailures] = useState<McpFailure[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [newSpec, setNewSpec] = useState("");
@@ -171,11 +179,27 @@ export function McpPanel() {
           spec: normalizeMcpSpec(server.spec) ?? "",
         })),
       });
-      const specResponse = await api<{ specs?: unknown[] }>("/mcp/specs");
+      const specResponse = await api<{ specs?: unknown[]; failures?: unknown[] }>("/mcp/specs");
       const normalized = (Array.isArray(specResponse.specs) ? specResponse.specs : [])
         .map(normalizeMcpSpec)
         .filter((spec): spec is string => spec !== null && spec.length > 0);
       setSpecs(normalized);
+      const rawFailures = Array.isArray(specResponse.failures) ? specResponse.failures : [];
+      const validFailures: McpFailure[] = [];
+      for (const f of rawFailures) {
+        if (typeof f !== "object" || f === null) continue;
+        const o = f as Record<string, unknown>;
+        const rawSpec = typeof o.spec === "string" ? o.spec : "";
+        const norm = normalizeMcpSpec(rawSpec);
+        if (!norm) continue;
+        validFailures.push({
+          spec: norm,
+          name: typeof o.name === "string" ? o.name : "",
+          reason: typeof o.reason === "string" ? o.reason : "",
+          at: typeof o.at === "number" ? o.at : 0,
+        });
+      }
+      setFailures(validFailures);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -341,8 +365,9 @@ export function McpPanel() {
           }
           ${
             showUnbridged
-              ? unbridgedSpecs.map(
-                  (spec) => html`
+              ? unbridgedSpecs.map((spec) => {
+                  const failure = failures.find((f) => f.spec === spec);
+                  return html`
                   <div
                     class=${`ssl-row ${openUnbridged === spec ? "sel" : ""}`}
                     onClick=${() => {
@@ -350,12 +375,12 @@ export function McpPanel() {
                       setOpen(null);
                     }}
                   >
-                    <span class="name">${specLabel(spec)} <span class="pill">${t("mcp.unbridged")}</span></span>
+                    <span class="name">${specLabel(spec)} <span class=${`pill ${failure ? "err" : ""}`}>${failure ? t("mcp.bridgeFailed") : t("mcp.unbridged")}</span></span>
                     <span class="preview">${specCommand(spec)}</span>
-                    <span class="meta"><span class="dim">${t("mcp.inConfig")}</span></span>
+                    <span class="meta"><span class=${failure ? "" : "dim"} style=${failure ? "color:var(--c-err)" : ""}>${failure ? failure.reason : t("mcp.inConfig")}</span></span>
                   </div>
-                `,
-                )
+                `;
+                })
               : null
           }
         </div>
@@ -376,10 +401,12 @@ export function McpPanel() {
                 onClose: () => setOpenRegistry(null),
               })
             : openUnbridged != null
-              ? html`
+              ? (() => {
+                  const failure = failures.find((f) => f.spec === openUnbridged);
+                  return html`
               <div class="sessions-detail-h">
                 <span class="name">${specLabel(openUnbridged)}</span>
-                <span class="ws"><span class="pill">${t("mcp.unbridgedTitle")}</span></span>
+                <span class="ws"><span class="pill">${failure ? t("mcp.bridgeFailedTitle") : t("mcp.unbridgedTitle")}</span></span>
                 <span class="actions">
                   <button class="btn" disabled=${busy} onClick=${() => removeSpec(openUnbridged)}
                     style="border-color:var(--c-err);color:var(--c-err)">${t("mcp.removeBtn")}</button>
@@ -390,16 +417,29 @@ export function McpPanel() {
                 <div class="card-h"><span class="title">${t("mcp.spec")}</span></div>
                 <code class="mono" style="font-size:11.5px;color:var(--fg-2);word-break:break-all">${openUnbridged}</code>
               </div>
-              <div class="card accent-warn">
-                <div class="card-h"><span class="title" style="color:var(--c-warn)">${t("mcp.whyUnbridged")}</span></div>
-                <div class="card-b" style="font-size:13px;line-height:1.6">
-                  ${t("mcp.whyUnbridgedDesc")}
-                  <div style="margin-top:10px;color:var(--fg-3);font-size:12px">
-                    ${t("mcp.whyUnbridgedHint")}
-                  </div>
-                </div>
-              </div>
-            `
+              ${
+                failure
+                  ? html`<div class="card accent-err">
+                      <div class="card-h"><span class="title" style="color:var(--c-err)">${t("mcp.bridgeFailed")}</span></div>
+                      <div class="card-b" style="font-size:13px;line-height:1.6">
+                        <code class="mono" style="font-size:12px;color:var(--fg-1);word-break:break-word;white-space:pre-wrap">${failure.reason}</code>
+                        <div style="margin-top:10px;color:var(--fg-3);font-size:12px">
+                          ${t("mcp.bridgeFailedHint")}
+                        </div>
+                      </div>
+                    </div>`
+                  : html`<div class="card accent-warn">
+                      <div class="card-h"><span class="title" style="color:var(--c-warn)">${t("mcp.whyUnbridged")}</span></div>
+                      <div class="card-b" style="font-size:13px;line-height:1.6">
+                        ${t("mcp.whyUnbridgedDesc")}
+                        <div style="margin-top:10px;color:var(--fg-3);font-size:12px">
+                          ${t("mcp.whyUnbridgedHint")}
+                        </div>
+                      </div>
+                    </div>`
+              }
+            `;
+                })()
               : open == null
                 ? html`<div style="color:var(--fg-3);font-size:13px;text-align:center;padding:60px 20px">
                 ${showMarketplace ? t("mcp.marketplacePickHint") : t("mcp.pickHint")}

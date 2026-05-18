@@ -2042,6 +2042,7 @@ function AppInner({
           loop,
           tools,
           getMcpServers: () => liveMcpServersRef.current,
+          getMcpFailures: () => mcpRuntime?.failures() ?? [],
           getCurrentCwd: () => (codeMode ? currentRootDirRef.current : undefined),
           getEditMode: () => (codeMode ? editModeRef.current : undefined),
           getPlanMode: () => planModeRef.current,

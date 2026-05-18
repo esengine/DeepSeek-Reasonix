@@ -431,6 +431,10 @@ export const en = {
     whyUnbridgedDesc:
       "This spec lives in your config.json but isn't bridged into the live session. MCP servers attach when reasonix code starts; the dashboard alone can't spawn the child process.",
     whyUnbridgedHint: "To activate: restart reasonix code, then refresh this dashboard.",
+    bridgeFailed: "Bridge failed",
+    bridgeFailedTitle: "bridge failed · in config",
+    bridgeFailedHint:
+      "Reasonix tried to bridge this server and the attempt errored. Common causes: wrong URL, missing auth header, upstream 404/5xx, missing local command. Fix and restart reasonix code to retry.",
     pickHint: "Pick an MCP server on the left to inspect tools / resources / prompts.",
     toolsTitle: "Tools · {count}",
     resourcesTitle: "Resources · {count}",

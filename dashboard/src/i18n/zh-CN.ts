@@ -407,6 +407,10 @@ export const zhCN = {
     whyUnbridgedDesc:
       "此规格存在于您的 config.json 中，但未桥接到实时会话。MCP 服务器在 reasonix code 启动时连接；仪表盘本身无法生成子进程。",
     whyUnbridgedHint: "激活方法：重启 reasonix code，然后刷新此仪表盘。",
+    bridgeFailed: "桥接失败",
+    bridgeFailedTitle: "桥接失败 · 在配置中",
+    bridgeFailedHint:
+      "已尝试桥接但失败。常见原因：URL 错误、需要鉴权、上游 404 / 5xx、本地命令缺失。修复后重启 reasonix code 重试。",
     pickHint: "选择左侧的 MCP 服务器以检查工具 / 资源 / 提示。",
     toolsTitle: "工具 · {count}",
     resourcesTitle: "资源 · {count}",
