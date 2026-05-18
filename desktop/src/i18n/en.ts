@@ -317,6 +317,7 @@ export const en = {
       toggleLang: "Toggle language (CN / EN)",
       exportMd: "Copy session as Markdown",
       help: "Show all commands",
+      feedback: "Submit feedback on GitHub (opens browser)",
     },
     yolo: {
       banner1: "All tool calls, shell commands, and file edits will be ",

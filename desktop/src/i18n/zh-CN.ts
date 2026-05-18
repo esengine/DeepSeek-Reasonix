@@ -334,6 +334,7 @@ export const zhCN: typeof en = {
       toggleLang: "切换界面语言 (中 / 英)",
       exportMd: "复制本会话为 Markdown",
       help: "查看所有命令",
+      feedback: "在 GitHub 提交反馈（打开浏览器）",
     },
     yolo: {
       banner1: "所有工具调用、shell 命令、文件编辑都会",

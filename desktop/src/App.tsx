@@ -61,6 +61,7 @@ import {
 import { WorkdirPop } from "./ui/workdir-pop";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -1374,6 +1375,15 @@ function TabRuntime({
       cmd: "/export",
       desc: t("app.cmd.exportMd"),
       run: () => exportConversation(),
+    },
+    {
+      cmd: "/feedback",
+      desc: t("app.cmd.feedback"),
+      run: () => {
+        void openUrl("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose").catch(
+          () => undefined,
+        );
+      },
     },
     ...state.skills.map((s) => ({
       cmd: `/${s.name}`,
