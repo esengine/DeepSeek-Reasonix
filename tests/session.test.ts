@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -162,6 +170,30 @@ describe("session persistence", () => {
     patchSessionMeta("a", { workspace: "/proj/a/" });
     const names = listSessionsForWorkspace("/proj/a").map((s) => s.name);
     expect(names).toEqual(["a"]);
+  });
+
+  it("listSessionsForWorkspace preserves messageCount + size for matched sessions (issue #1179)", () => {
+    // Workspace pre-filter must not strip the metadata downstream consumers rely on.
+    appendSessionMessage("here", { role: "user", content: "hello" });
+    appendSessionMessage("here", { role: "assistant", content: "world" });
+    appendSessionMessage("elsewhere", { role: "user", content: "skip" });
+    patchSessionMeta("here", { workspace: "/proj/a" });
+    patchSessionMeta("elsewhere", { workspace: "/proj/b" });
+    const matched = listSessionsForWorkspace("/proj/a");
+    expect(matched.map((s) => s.name)).toEqual(["here"]);
+    expect(matched[0]!.messageCount).toBe(2);
+    expect(matched[0]!.size).toBeGreaterThan(0);
+    expect(matched[0]!.meta.workspace).toBe("/proj/a");
+  });
+
+  it("listSessions messageCount counts a final line without trailing newline", () => {
+    appendSessionMessage("tail", { role: "user", content: "a" });
+    // Simulate a hand-edited / corrupted save: append a line WITHOUT the
+    // trailing \n that appendSessionMessage normally writes.
+    const p = sessionPath("tail");
+    appendFileSync(p, JSON.stringify({ role: "user", content: "b" }), "utf8");
+    const item = listSessions().find((s) => s.name === "tail")!;
+    expect(item.messageCount).toBe(2);
   });
 
   it("renameSession also moves the .events.jsonl sidecar", () => {
