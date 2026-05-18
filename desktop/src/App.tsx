@@ -1250,7 +1250,7 @@ function TabRuntime({
     },
     focusComposer: () => composerRef.current?.focus(),
     openSettings: () => openSettingsAt("general"),
-    about: () => flashToast(`Reasonix · ${state.settings?.version ?? "dev"}`),
+    about: () => setAboutOpen(true),
     abort,
     copyLast: () => {
       const last = [...state.messages].reverse().find((m) => m.kind === "assistant");
