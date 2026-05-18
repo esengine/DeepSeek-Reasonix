@@ -1,4 +1,3 @@
-import { createInterface } from "node:readline";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { PlanConfirmChoice } from "../cli/ui/PlanConfirm.js";
 import type { ReviseChoice } from "../cli/ui/PlanReviseConfirm.js";
@@ -7,11 +6,19 @@ import type { SlashResult } from "../cli/ui/slash/types.js";
 import { listThemeNames } from "../cli/ui/theme/tokens.js";
 import { type CheckpointMeta, fmtAgo, restoreCheckpoint } from "../code/checkpoints.js";
 import { loadQQConfig, resolveThemePreference, saveQQConfig } from "../config.js";
+import { t } from "../i18n/index.js";
 import { type SessionInfo, freshSessionName } from "../memory/session.js";
 import type { ChoiceOption } from "../tools/choice.js";
 import type { PlanStep } from "../tools/plan.js";
-import { describeQQAccess } from "./access.js";
+import type { QQAccessConfig } from "./access.js";
 import { QQChannel } from "./channel.js";
+import {
+  type QQSetupStep,
+  formatQQAccessSummary,
+  formatQQModeLabel,
+  formatQQSetupPrompt,
+  formatQQSetupWaiting,
+} from "./strings.js";
 
 type QQInteractionKind =
   | "run_command"
@@ -38,6 +45,18 @@ interface QQSlashInteractionState {
   payload: unknown;
 }
 
+interface PendingQQConnectSetup {
+  step: QQSetupStep;
+  appId?: string;
+  appSecret?: string;
+  sandbox: boolean;
+  ownerOpenId?: string;
+  allowlist?: readonly string[];
+  resolve: (message: string) => void;
+  reject: (error: Error) => void;
+  promise: Promise<string>;
+}
+
 interface QQLogger {
   pushInfo: (text: string) => void;
   pushWarning: (title: string, detail: string) => void;
@@ -47,8 +66,6 @@ interface UseQQChannelArgs {
   codeMode: boolean;
   initialChannel?: QQChannel;
   log: QQLogger;
-  isRawModeSupported: boolean;
-  setRawMode: (enabled: boolean) => void;
   setQueuedSubmit: (text: string) => void;
   qqSubmitRef?: { current: ((text: string) => void) | null };
   qqErrorRef?: { current: ((msg: string) => void) | null };
@@ -160,8 +177,6 @@ export function useQQChannel({
   codeMode,
   initialChannel,
   log,
-  isRawModeSupported,
-  setRawMode,
   setQueuedSubmit,
   qqSubmitRef,
   qqErrorRef,
@@ -187,23 +202,7 @@ export function useQQChannel({
   const interactionRef = useRef<QQInteractionState>({ kind: null, payload: null });
   const slashInteractionRef = useRef<QQSlashInteractionState>({ kind: null, payload: null });
   const replyThisTurnRef = useRef(false);
-
-  const promptLine = useCallback(
-    async (prompt: string, fallback?: string): Promise<string> => {
-      if (isRawModeSupported) setRawMode(false);
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      try {
-        const answer = await new Promise<string>((resolve) => {
-          rl.question(prompt, resolve);
-        });
-        return answer.trim() || fallback || "";
-      } finally {
-        rl.close();
-        if (isRawModeSupported) setRawMode(true);
-      }
-    },
-    [isRawModeSupported, setRawMode],
-  );
+  const pendingConnectSetupRef = useRef<PendingQQConnectSetup | null>(null);
 
   const sendText = useCallback(
     (message: string) => {
@@ -223,17 +222,138 @@ export function useQQChannel({
     [log, sendText],
   );
 
+  const persistQQConfig = useCallback(
+    (config: {
+      appId: string;
+      appSecret: string;
+      sandbox: boolean;
+      enabled: boolean;
+      ownerOpenId?: string;
+      allowlist?: readonly string[];
+    }) => {
+      saveQQConfig({
+        appId: config.appId,
+        appSecret: config.appSecret,
+        sandbox: config.sandbox,
+        enabled: config.enabled,
+        ownerOpenId: config.ownerOpenId,
+        allowlist: config.allowlist ? [...config.allowlist] : undefined,
+      });
+    },
+    [],
+  );
+
+  const completeConnect = useCallback(
+    async ({
+      appId,
+      appSecret,
+      sandbox,
+      ownerOpenId,
+      allowlist,
+    }: {
+      appId: string;
+      appSecret: string;
+      sandbox: boolean;
+      ownerOpenId?: string;
+      allowlist?: readonly string[];
+    }) => {
+      if (!appId || !appSecret) {
+        throw new Error(t("handlers.qq.credentialsRequired"));
+      }
+
+      persistQQConfig({
+        appId,
+        appSecret,
+        sandbox,
+        enabled: false,
+        ownerOpenId,
+        allowlist,
+      });
+      if (channelRef.current) {
+        persistQQConfig({
+          appId,
+          appSecret,
+          sandbox,
+          enabled: true,
+          ownerOpenId,
+          allowlist,
+        });
+        channelRef.current.refreshAccessConfig();
+        return t("handlers.qq.alreadyConnected", {
+          mode: formatQQModeLabel(codeMode),
+        });
+      }
+
+      const channel = new QQChannel({
+        onSubmitMessage: (message) => setQueuedSubmit(message),
+        onError: (message) => log.pushWarning("QQ", message),
+      });
+      await channel.start();
+      channelRef.current = channel;
+      persistQQConfig({
+        appId,
+        appSecret,
+        sandbox,
+        enabled: true,
+        ownerOpenId,
+        allowlist,
+      });
+      return t("handlers.qq.connected", {
+        mode: formatQQModeLabel(codeMode),
+      });
+    },
+    [codeMode, log, persistQQConfig, setQueuedSubmit],
+  );
+
+  const beginConnectSetup = useCallback(
+    ({
+      appId,
+      appSecret,
+      sandbox,
+      ownerOpenId,
+      allowlist,
+    }: {
+      appId?: string;
+      appSecret?: string;
+      sandbox: boolean;
+      ownerOpenId?: string;
+      allowlist?: readonly string[];
+    }): Promise<string> => {
+      const current = pendingConnectSetupRef.current;
+      if (current) {
+        log.pushInfo(formatQQSetupWaiting(current.step));
+        return current.promise;
+      }
+
+      let resolveSetup: ((message: string) => void) | null = null;
+      let rejectSetup: ((error: Error) => void) | null = null;
+      const promise = new Promise<string>((resolve, reject) => {
+        resolveSetup = resolve;
+        rejectSetup = reject;
+      });
+      const step: QQSetupStep = appId ? "appSecret" : "appId";
+      pendingConnectSetupRef.current = {
+        step,
+        appId,
+        appSecret,
+        sandbox,
+        ownerOpenId,
+        allowlist,
+        resolve: (message) => resolveSetup?.(message),
+        reject: (error) => rejectSetup?.(error),
+        promise,
+      };
+      log.pushInfo(formatQQSetupPrompt(step));
+      return promise;
+    },
+    [log],
+  );
+
   const connect = useCallback(
     async (args: readonly string[]): Promise<string> => {
       const existing = loadQQConfig();
-      const appId =
-        args[0]?.trim() ||
-        existing.appId ||
-        (await promptLine("QQ Open Platform App ID: ", existing.appId));
-      const appSecret =
-        args[1]?.trim() ||
-        existing.appSecret ||
-        (await promptLine("QQ Open Platform App Secret: ", existing.appSecret));
+      const appId = args[0]?.trim() || existing.appId || "";
+      const appSecret = args[1]?.trim() || existing.appSecret || "";
       const sandboxArg = args[2]?.trim().toLowerCase();
       const sandbox =
         sandboxArg === "sandbox" ||
@@ -249,72 +369,74 @@ export function useQQChannel({
             : (existing.sandbox ?? false);
 
       if (!appId || !appSecret) {
-        throw new Error("QQ App ID and App Secret are required.");
-      }
-
-      saveQQConfig({
-        appId,
-        appSecret,
-        sandbox,
-        enabled: false,
-        ownerOpenId: existing.ownerOpenId,
-        allowlist: existing.allowlist,
-      });
-      if (channelRef.current) {
-        saveQQConfig({
-          appId,
-          appSecret,
+        return beginConnectSetup({
+          appId: appId || undefined,
+          appSecret: appSecret || undefined,
           sandbox,
-          enabled: true,
           ownerOpenId: existing.ownerOpenId,
           allowlist: existing.allowlist,
         });
-        channelRef.current.refreshAccessConfig();
-        return `QQ is already connected (${codeMode ? "code" : "chat"} mode). Auto-start is enabled.`;
       }
 
-      const channel = new QQChannel({
-        onSubmitMessage: (message) => setQueuedSubmit(message),
-        onError: (message) => log.pushWarning("QQ", message),
-      });
-      await channel.start();
-      channelRef.current = channel;
-      saveQQConfig({
+      return completeConnect({
         appId,
         appSecret,
         sandbox,
-        enabled: true,
         ownerOpenId: existing.ownerOpenId,
         allowlist: existing.allowlist,
       });
-      return `QQ connected in ${codeMode ? "code" : "chat"} mode. It will auto-start on future launches.`;
     },
-    [codeMode, log, promptLine, setQueuedSubmit],
+    [beginConnectSetup, completeConnect],
   );
 
   const disconnect = useCallback(async (): Promise<string> => {
+    const pendingSetup = pendingConnectSetupRef.current;
+    if (pendingSetup) {
+      pendingConnectSetupRef.current = null;
+      pendingSetup.reject(new Error(t("handlers.qq.setupCancelled")));
+    }
     const existing = loadQQConfig();
     const current = channelRef.current;
     channelRef.current = null;
     if (current) await current.stop();
     saveQQConfig({ ...existing, enabled: false });
-    return "QQ disconnected. Auto-start is disabled.";
+    return t("handlers.qq.disconnected");
   }, []);
 
   const status = useCallback((): string => {
     const config = loadQQConfig();
-    const configured = config.appId && config.appSecret ? "configured" : "not configured";
-    const connected = channelRef.current ? "connected" : "disconnected";
-    const enabled = config.enabled ? "enabled" : "disabled";
-    const appId = config.appId ? `${config.appId.slice(0, 6)}...` : "none";
-    const sandbox = config.sandbox ? "sandbox" : "production";
-    const access =
-      channelRef.current?.describeAccess() ??
-      describeQQAccess({
-        ownerOpenId: config.ownerOpenId,
-        allowlist: config.allowlist,
+    const configured = config.appId && config.appSecret;
+    const connected = !!channelRef.current;
+    const enabled = !!config.enabled;
+    const appId = config.appId ? `${config.appId.slice(0, 6)}...` : t("handlers.qq.none");
+    const sandbox = config.sandbox ? t("handlers.qq.sandbox") : t("handlers.qq.production");
+    const access = channelRef.current
+      ? formatQQAccessSummary({
+          ownerOpenId: config.ownerOpenId,
+          allowlist: config.allowlist,
+          runtimeBoundOpenId: channelRef.current.getRuntimeBoundOpenId(),
+        } satisfies QQAccessConfig)
+      : formatQQAccessSummary({
+          ownerOpenId: config.ownerOpenId,
+          allowlist: config.allowlist,
+        });
+    const pendingSetup = pendingConnectSetupRef.current;
+    if (pendingSetup) {
+      return t("handlers.qq.statusSetup", {
+        step: formatQQSetupWaiting(pendingSetup.step),
       });
-    return `QQ: ${connected}, auto-start ${enabled}, credentials ${configured}, appId ${appId}, ${sandbox}, access ${access}, current mode ${codeMode ? "code" : "chat"}.`;
+    }
+    return t("handlers.qq.status", {
+      connected: connected ? t("handlers.qq.stateConnected") : t("handlers.qq.stateDisconnected"),
+      enabled: enabled ? t("handlers.qq.stateEnabled") : t("handlers.qq.stateDisabled"),
+      configured: configured
+        ? t("handlers.qq.stateConfigured")
+        : t("handlers.qq.stateNotConfigured"),
+      appId,
+      sandbox,
+      access,
+      mode: formatQQModeLabel(codeMode),
+    });
   }, [codeMode]);
 
   const resetInteractions = useCallback(() => {
@@ -675,6 +797,34 @@ export function useQQChannel({
       if (!text) return null;
 
       const fromQQ = text.startsWith("[QQ] ");
+      if (!fromQQ && pendingConnectSetupRef.current) {
+        const lower = text.toLowerCase();
+        const pending = pendingConnectSetupRef.current;
+        if (lower === "/cancel" || lower === "cancel") {
+          pendingConnectSetupRef.current = null;
+          pending.reject(new Error(t("handlers.qq.setupCancelled")));
+          log.pushInfo(t("handlers.qq.setupCancelled"));
+          return { handled: true, fromQQ, text };
+        }
+
+        if (pending.step === "appId") {
+          pending.appId = text;
+          pending.step = "appSecret";
+          log.pushInfo(formatQQSetupPrompt("appSecret"));
+          return { handled: true, fromQQ, text };
+        }
+
+        pending.appSecret = text;
+        pendingConnectSetupRef.current = null;
+        void completeConnect({
+          appId: pending.appId ?? "",
+          appSecret: pending.appSecret ?? "",
+          sandbox: pending.sandbox,
+          ownerOpenId: pending.ownerOpenId,
+          allowlist: pending.allowlist,
+        }).then(pending.resolve, (err) => pending.reject(err as Error));
+        return { handled: true, fromQQ, text };
+      }
       if (fromQQ) {
         text = text.slice(5).trimStart() || text;
         if (consumeSlashReply(text) || consumePauseReply(text)) {
@@ -684,7 +834,7 @@ export function useQQChannel({
 
       return { handled: false, fromQQ, text };
     },
-    [consumePauseReply, consumeSlashReply],
+    [completeConnect, consumePauseReply, consumeSlashReply, log],
   );
 
   const handleRemoteSlashResult = useCallback(

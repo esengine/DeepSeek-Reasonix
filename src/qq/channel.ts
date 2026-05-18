@@ -3,8 +3,10 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadQQConfig } from "../config.js";
 import { loadDotenv } from "../env.js";
+import { t } from "../i18n/index.js";
 import { decideQQAccess, describeQQAccess, redactQQOpenId } from "./access.js";
 import { type C2CMessage, QQBot } from "./bot.js";
+import { formatQQAccessSummary } from "./strings.js";
 
 const QQ_LOCK_FILE = join(homedir(), ".reasonix", "qq-channel.pid");
 const QQ_MAX_CHUNK_BYTES = 1500;
@@ -85,9 +87,7 @@ export class QQChannel {
       if (Number.isInteger(existing) && existing > 0 && existing !== process.pid) {
         try {
           process.kill(existing, 0);
-          throw new Error(
-            `QQ channel is already running in process ${existing}. Stop that process before starting another QQ channel.`,
-          );
+          throw new Error(t("handlers.qq.lockAlreadyRunning", { pid: existing }));
         } catch (err) {
           const e = err as NodeJS.ErrnoException;
           if (e.code !== "ESRCH") throw err;
@@ -136,14 +136,23 @@ export class QQChannel {
     );
     if (!verdict.accept) {
       this.callbacks.onError?.(
-        `QQ ignored message from unauthorized openid ${redactQQOpenId(openid)}. Current access: ${this.describeAccess()}.`,
+        t("handlers.qq.unauthorizedMessage", {
+          openid: redactQQOpenId(openid),
+          access: formatQQAccessSummary({
+            ownerOpenId: this.ownerOpenId,
+            allowlist: this.allowlist,
+            runtimeBoundOpenId: this.runtimeBoundOpenId,
+          }),
+        }),
       );
       return;
     }
     if (verdict.bindRuntime) {
       this.runtimeBoundOpenId = openid;
       this.callbacks.onError?.(
-        `QQ temporarily bound this run to first sender ${redactQQOpenId(openid)}. Set \`qq.ownerOpenId\` in config to persist access.`,
+        t("handlers.qq.runtimeBound", {
+          openid: redactQQOpenId(openid),
+        }),
       );
     }
 
@@ -164,6 +173,10 @@ export class QQChannel {
     });
   }
 
+  getRuntimeBoundOpenId(): string | null {
+    return this.runtimeBoundOpenId;
+  }
+
   async start(): Promise<void> {
     loadDotenv();
     this.acquireLock();
@@ -171,11 +184,11 @@ export class QQChannel {
     const config = loadQQConfig();
     if (!config.appId) {
       this.releaseLock();
-      throw new Error("QQ App ID is required. Run `/qq connect` to configure.");
+      throw new Error(t("handlers.qq.missingAppId"));
     }
     if (!config.appSecret) {
       this.releaseLock();
-      throw new Error("QQ App Secret is required. Run `/qq connect` to configure.");
+      throw new Error(t("handlers.qq.missingAppSecret"));
     }
     this.applyAccessConfig(config);
 
@@ -209,10 +222,10 @@ export class QQChannel {
       ]);
 
       if (readyOrError === "error") {
-        throw new Error("QQ bot authentication failed - check your appId and appSecret");
+        throw new Error(t("handlers.qq.authFailed"));
       }
       if (readyOrError === "timeout") {
-        throw new Error("QQ bot did not receive READY within 15s - check your appId and appSecret");
+        throw new Error(t("handlers.qq.readyTimeout"));
       }
     } catch (err) {
       this.releaseLock();

@@ -2529,8 +2529,6 @@ function AppInner({
     codeMode: !!codeMode,
     initialChannel: qqChannel,
     log,
-    isRawModeSupported,
-    setRawMode,
     setQueuedSubmit,
     qqSubmitRef,
     qqErrorRef,
