@@ -71,7 +71,7 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
       <Box flexDirection="row" gap={1}>
         <Text color={FG.faint}>{t("cardLabels.session")}</Text>
         <Text bold color={FG.body}>
-          {`⛁ ${formatCost(card.sessionCost, card.balanceCurrency, 3)}`}
+          {`● ${formatCost(card.sessionCost, card.balanceCurrency, 3)}`}
         </Text>
         {card.balance !== undefined ? (
           <>

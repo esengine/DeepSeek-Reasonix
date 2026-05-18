@@ -20,7 +20,7 @@ export function SearchCard({ card }: { card: SearchCardData }): React.ReactEleme
   return (
     <Card tone={TONE.info}>
       <CardHeader
-        glyph="⊙"
+        glyph="●"
         tone={TONE.info}
         title={t("cardTitles.search")}
         subtitle={`"${card.query}"`}

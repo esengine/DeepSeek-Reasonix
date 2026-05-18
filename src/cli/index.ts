@@ -158,20 +158,17 @@ program
 // `reasonix` with no subcommand → setup wizard on first run, otherwise `code`
 // in the current directory. Filesystem-less chat stays reachable via
 // `reasonix chat`.
-program
-  .option("--node", "use the legacy Node/Ink TUI (default is the Rust renderer)")
-  .action(async (opts: { continue?: boolean; node?: boolean }) => {
-    if (opts.node) process.env.REASONIX_RENDERER = "node";
-    const cfg = readConfig();
-    const mode = resolveBareCommandMode(cfg);
-    if (mode === "setup") {
-      const { setupCommand } = await import("./commands/setup.js");
-      await setupCommand({ forceKeyStep: true });
-      return;
-    }
-    const { codeCommand } = await import("./commands/code.js");
-    await codeCommand({ dir: process.cwd(), forceResume: !!opts.continue });
-  });
+program.action(async (opts: { continue?: boolean }) => {
+  const cfg = readConfig();
+  const mode = resolveBareCommandMode(cfg);
+  if (mode === "setup") {
+    const { setupCommand } = await import("./commands/setup.js");
+    await setupCommand({ forceKeyStep: true });
+    return;
+  }
+  const { codeCommand } = await import("./commands/code.js");
+  await codeCommand({ dir: process.cwd(), forceResume: !!opts.continue });
+});
 
 program
   .command("setup")
@@ -202,17 +199,13 @@ program
     "--dashboard-host <host>",
     "bind address for the dashboard (default 127.0.0.1; use 0.0.0.0 for LAN access — the URL token is then the only auth)",
   )
-  .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
-  .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
   .option("--system-append <prompt>", t("ui.systemAppendHint"))
   .option("--system-append-file <path>", t("ui.systemAppendFileHint"))
   .option(
     "--profile [path]",
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
-  .option("--node", "use the legacy Node/Ink TUI (default is the Rust renderer)")
   .action(async (dir: string | undefined, opts) => {
-    if (opts.node) process.env.REASONIX_RENDERER = "node";
     const profiling = await maybeStartCpuProfile(opts.profile);
     try {
       const { codeCommand } = await import("./commands/code.js");
@@ -235,8 +228,6 @@ program
         dashboardToken: resolveDashboardToken(false),
         systemAppend: opts.systemAppend,
         systemAppendFile: opts.systemAppendFile,
-        altScreen: opts.altScreen !== false,
-        mouse: opts.mouse !== false,
       });
     } finally {
       if (profiling) await stopAndSaveCpuProfile();
@@ -276,15 +267,11 @@ program
     "--dashboard-host <host>",
     "bind address for the dashboard (default 127.0.0.1; use 0.0.0.0 for LAN access — the URL token is then the only auth)",
   )
-  .option("--no-alt-screen", "keep chat output in shell scrollback (legacy mode, ghost-prone)")
-  .option("--no-mouse", "disable SGR mouse tracking (keeps drag-select 100% native)")
   .option(
     "--profile [path]",
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
-  .option("--node", "use the legacy Node/Ink TUI (default is the Rust renderer)")
   .action(async (opts) => {
-    if (opts.node) process.env.REASONIX_RENDERER = "node";
     const profiling = await maybeStartCpuProfile(opts.profile);
     try {
       const defaults = resolveDefaults({
@@ -333,8 +320,6 @@ program
         ),
         dashboardHost: resolveDashboardHost(opts.dashboardHost, opts.config === false),
         dashboardToken: resolveDashboardToken(opts.config === false),
-        altScreen: opts.altScreen !== false,
-        mouse: opts.mouse !== false,
       });
     } finally {
       if (profiling) await stopAndSaveCpuProfile();

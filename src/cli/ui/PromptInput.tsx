@@ -16,7 +16,6 @@ import {
 } from "./paste-sentinels.js";
 import { type Segment, buildViewport, stringCells } from "./prompt-viewport.js";
 import { FG, SURFACE, TONE } from "./theme/tokens.js";
-import { useCursorBlink } from "./ticker.js";
 
 /** Raw-stdin keystroke bus → multiline reducer; one logical line per Box row, viewport-clipped. */
 
@@ -171,14 +170,14 @@ export function PromptInput({
 
   const lines = value.length > 0 ? value.split("\n") : [""];
   const accentColor = disabled ? FG.faint : TONE.brand;
-  const cursorVisible = useCursorBlink();
+  const cursorVisible = true;
   const { line: cursorLine, col: cursorCol } = lineAndColumn(value, cursor);
 
   const renderItems = collapseLinesForDisplay(lines, cursorLine);
   const showHugeBufferHints = lines.length > 20;
 
   return (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={accentColor} paddingX={1}>
       {(() => {
         const rows: React.ReactNode[] = [];
         let firstRowEmitted = false;

@@ -1,14 +1,7 @@
 import { type WriteStream, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { Box, Text, useStdin, useStdout } from "ink";
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type JsonlEventSink,
   eventLogPath,
@@ -152,9 +145,7 @@ import { useLanguageReload } from "./hooks/useLanguageReload.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
 import { usePresetMode } from "./hooks/usePresetMode.js";
 import { useQuit } from "./hooks/useQuit.js";
-import { toSceneCard, useSceneTrace } from "./hooks/useSceneTrace.js";
 import { useScrollback } from "./hooks/useScrollback.js";
-import { useTerminalSetup } from "./hooks/useTerminalSetup.js";
 import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useWorkspaceRoot } from "./hooks/useWorkspaceRoot.js";
@@ -176,10 +167,6 @@ import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
-import { requestListPicker } from "./scene/list-picker-store.js";
-import { getActiveListPicker, subscribeListPicker } from "./scene/list-picker-store.js";
-import { getActivePromptInput, subscribePromptInput } from "./scene/prompt-input-store.js";
-import { isIntegratedRendererRequested } from "./scene/trace.js";
 import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
@@ -284,16 +271,8 @@ export interface AppProps {
   dashboardHost?: string;
   /** Stable dashboard URL token (#968). `undefined` mints a fresh per-boot token. */
   dashboardToken?: string;
-  /** Mid-chat session swap 闂?Root remounts App with the new session via key. */
+  /** Mid-chat session swap — Root remounts App with the new session via key. */
   onSwitchSession?: (name: string | undefined) => void;
-  /**
-   * Enable DECSET 1007 (alternate-scroll) so the wheel scrolls chat
-   * on web/cloud/SSH terminals 闂?terminal translates wheel events to
-   * 闂?闂?key sequences in alt-screen, no full mouse tracking, native
-   * drag-select + right-click unaffected. Default true. Pass false
-   * (CLI: `--no-mouse`) to suppress entirely.
-   */
-  mouse?: boolean;
   /** One-time startup info rows injected by chatCommand. */
   startupInfoHints?: string[];
   /** Pre-created QQ channel (started before TUI mounts). */
@@ -302,18 +281,6 @@ export interface AppProps {
   qqSubmitRef?: { current: ((text: string) => void) | null };
   /** Ref filled by App on mount so QQ errors appear in the TUI log. */
   qqErrorRef?: { current: ((msg: string) => void) | null };
-  /** Ref filled by App on mount so Rust approval-response events route to the right handler. */
-  approvalDispatchRef?: { current: ((kind: string, choice: unknown) => void) | null };
-  /** Ref filled by App on mount so Rust composer-text events update Ink's `input` (so @/slash pickers fire). */
-  rustComposerRef?: { current: ((text: string) => void) | null };
-  /** Apply edit-mode value from Rust (Shift+Tab cycle resolved in Rust, or picker selection). */
-  modeSetRef?: {
-    current: ((value: "review" | "auto" | "yolo") => void) | null;
-  };
-  /** Apply preset value from Rust (picker selection). */
-  presetSetRef?: {
-    current: ((value: "auto" | "flash" | "pro") => void) | null;
-  };
 }
 
 /**
@@ -475,15 +442,10 @@ function AppInner({
   dashboardHost,
   dashboardToken,
   onSwitchSession,
-  mouse = true,
   startupInfoHints,
   qqChannel,
   qqSubmitRef,
   qqErrorRef,
-  approvalDispatchRef,
-  rustComposerRef,
-  modeSetRef,
-  presetSetRef,
   themeName,
   setThemeName,
   statusBar,
@@ -496,7 +458,6 @@ function AppInner({
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const cardCount = useAgentState((s) => s.cards.length);
-  const recentCardsJson = useAgentState((s) => JSON.stringify(s.cards.slice(-24).map(toSceneCard)));
   const sessionModel = useAgentState((s) => s.session.model);
   const ctxTokens = useAgentState((s) => s.status.promptTokens);
   const ctxCap = useAgentState(
@@ -515,13 +476,6 @@ function AppInner({
   const activityLabel = useActivityLabel();
   const chatScroll = useChatScrollActions();
   const [input, setInput] = useState("");
-  useEffect(() => {
-    if (!rustComposerRef) return;
-    rustComposerRef.current = (text: string) => setInput(text);
-    return () => {
-      if (rustComposerRef) rustComposerRef.current = null;
-    };
-  }, [rustComposerRef]);
   const [composerCursor, setComposerCursor] = useState(0);
   const [busy, setBusy] = useState(false);
   const [slashUsage, setSlashUsage] = useState<Readonly<Record<string, number>>>(() =>
@@ -572,8 +526,6 @@ function AppInner({
     clear: clearToolProgressDisplay,
   } = useToolProgressDisplay(progressSink);
   const { stdout } = useStdout();
-  useTerminalSetup(mouse);
-
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
   // subagentRunner closure can read the ref. The wallet-currency thunk
@@ -617,25 +569,6 @@ function AppInner({
   } = useEditGate(!!codeMode);
   const { preset, setPreset, proArmed, setProArmed, turnOnPro, setTurnOnPro } =
     usePresetMode(model);
-  useEffect(() => {
-    if (!modeSetRef) return;
-    modeSetRef.current = (value) => {
-      setEditMode(value);
-    };
-    return () => {
-      if (modeSetRef) modeSetRef.current = null;
-    };
-  }, [modeSetRef, setEditMode]);
-  useEffect(() => {
-    if (!presetSetRef) return;
-    presetSetRef.current = (value) => {
-      setPreset(value);
-      agentStore.dispatch({ type: "session.preset.change", preset: value });
-    };
-    return () => {
-      if (presetSetRef) presetSetRef.current = null;
-    };
-  }, [presetSetRef, setPreset, agentStore]);
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -1439,212 +1372,11 @@ function AppInner({
     slashUsage,
   });
 
-  const slashMatchesJson = useMemo(() => {
-    if (!slashMatches || slashMatches.length === 0) return undefined;
-    return JSON.stringify(
-      slashMatches.map((m) => ({
-        cmd: m.cmd,
-        summary: m.summary,
-        ...(m.argsHint !== undefined ? { argsHint: m.argsHint } : {}),
-      })),
-    );
-  }, [slashMatches]);
-
-  const slashCatalogJson = useMemo(() => {
-    const all = suggestSlashCommands("", !!codeMode);
-    return JSON.stringify(
-      all.map((m) => {
-        const i18nKey = `slash.${m.cmd}.description`;
-        const translated = t(i18nKey);
-        const summary = translated === i18nKey ? m.summary : translated;
-        const argCompleter = Array.isArray(m.argCompleter) ? [...m.argCompleter] : undefined;
-        return {
-          cmd: m.cmd,
-          summary,
-          group: m.group,
-          ...(m.argsHint !== undefined ? { argsHint: m.argsHint } : {}),
-          ...(m.aliases && m.aliases.length > 0 ? { aliases: [...m.aliases] } : {}),
-          ...(argCompleter ? { argCompleter } : {}),
-        };
-      }),
-    );
-  }, [codeMode]);
-
-  const atStateJson = useMemo(() => {
-    if (!atState) return undefined;
-    return JSON.stringify(atState);
-  }, [atState]);
-
-  const slashArgStateJson = useMemo(() => {
-    if (!slashArgContext || slashArgContext.kind !== "picker") return undefined;
-    if (!slashArgMatches || slashArgMatches.length === 0) return undefined;
-    return JSON.stringify({
-      cmd: slashArgContext.spec.cmd,
-      partial: slashArgContext.partial,
-      matches: [...slashArgMatches],
-    });
-  }, [slashArgContext, slashArgMatches]);
-
-  const promptHistoryJson = useMemo(
-    () => (promptHistory.length === 0 ? undefined : JSON.stringify(promptHistory)),
-    [promptHistory],
-  );
-
-  const activePromptInput = useSyncExternalStore(
-    subscribePromptInput,
-    getActivePromptInput,
-    getActivePromptInput,
-  );
-  const promptInputJson = useMemo(
-    () => (activePromptInput ? JSON.stringify(activePromptInput) : undefined),
-    [activePromptInput],
-  );
-
-  const activeListPicker = useSyncExternalStore(
-    subscribeListPicker,
-    getActiveListPicker,
-    getActiveListPicker,
-  );
-  const listPickerJson = useMemo(
-    () => (activeListPicker ? JSON.stringify(activeListPicker) : undefined),
-    [activeListPicker],
-  );
-
   useEffect(() => {
     setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
   }, [currentRootDir]);
 
-  const sessionsJson = useMemo(() => {
-    if (!pendingSessionsPicker || sessionsPickerList.length === 0) return undefined;
-    return JSON.stringify(
-      sessionsPickerList.map((s) => {
-        const branch = s.meta.branch ?? "main";
-        const turns = s.meta.turnCount ?? Math.ceil(s.messageCount / 2);
-        return { title: s.name, meta: `${branch} · ${turns} turns` };
-      }),
-    );
-  }, [pendingSessionsPicker, sessionsPickerList]);
-
-  const sidebarSessionsJson = useMemo(() => {
-    if (sessionsPickerList.length === 0) return undefined;
-    return JSON.stringify(
-      sessionsPickerList.map((s) => ({
-        title: s.name,
-        meta: s.meta.branch ?? "main",
-      })),
-    );
-  }, [sessionsPickerList]);
-
-  const sceneApproval = useMemo(() => {
-    if (pendingShell) return { kind: "shell", prompt: pendingShell.command };
-    if (pendingPath) return { kind: "path", prompt: `${pendingPath.intent} ${pendingPath.path}` };
-    if (pendingEditReview) return { kind: "edit", prompt: `review ${pendingEditReview.path}` };
-    if (pendingChoice) return { kind: "choice", prompt: pendingChoice.question };
-    if (pendingPlan) return { kind: "plan", prompt: "approve plan" };
-    if (pendingCheckpoint)
-      return {
-        kind: "checkpoint",
-        prompt: `step ${pendingCheckpoint.completed}/${pendingCheckpoint.total}`,
-      };
-    return null;
-  }, [pendingShell, pendingPath, pendingEditReview, pendingChoice, pendingPlan, pendingCheckpoint]);
-
-  const approvalJson = useMemo(() => {
-    if (pendingPlan) {
-      const steps = planStepsRef.current;
-      return JSON.stringify({
-        kind: "plan",
-        body: pendingPlan,
-        steps: steps?.map((s) => ({ title: s.title })),
-      });
-    }
-    if (pendingShell) {
-      return JSON.stringify({
-        kind: "shell",
-        command: pendingShell.command,
-        cwd: pendingShell.cwd,
-        timeoutSec: pendingShell.timeoutSec,
-      });
-    }
-    if (pendingPath) {
-      return JSON.stringify({
-        kind: "path",
-        path: pendingPath.path,
-        intent: pendingPath.intent,
-        toolName: pendingPath.toolName,
-      });
-    }
-    if (pendingEditReview) {
-      return JSON.stringify({
-        kind: "edit",
-        path: pendingEditReview.path,
-        search: pendingEditReview.search,
-        replace: pendingEditReview.replace,
-      });
-    }
-    if (pendingChoice) {
-      return JSON.stringify({
-        kind: "choice",
-        question: pendingChoice.question,
-        options: pendingChoice.options,
-        allowCustom: pendingChoice.allowCustom,
-      });
-    }
-    if (pendingCheckpoint) {
-      return JSON.stringify({
-        kind: "checkpoint",
-        title: pendingCheckpoint.title,
-        completed: pendingCheckpoint.completed,
-        total: pendingCheckpoint.total,
-      });
-    }
-    return undefined;
-  }, [pendingPlan, pendingShell, pendingPath, pendingEditReview, pendingChoice, pendingCheckpoint]);
-
-  // Hoisted above useSceneTrace so the dashboard URL can ride the
-  // scene frame to the rust renderer. Definition (incl. setter) lives
-  // here; the auto-start effect that populates it follows further down.
   const [dashboardUrl, setDashboardUrlState] = useState<string | null>(null);
-
-  useSceneTrace({
-    cardCount,
-    busy,
-    activity: activityLabel,
-    model: sessionModel,
-    recentCardsJson,
-    composerText: input,
-    composerCursor,
-    slashMatchesJson,
-    slashSelectedIndex: slashMatchesJson ? slashSelected : undefined,
-    approvalKind: sceneApproval?.kind,
-    approvalPrompt: sceneApproval?.prompt,
-    sessionsJson,
-    sessionsFocusedIndex: sessionsJson ? sessionsPickerFocus : undefined,
-    walletBalance: balance?.total,
-    walletCurrency: balance?.currency,
-    sidebarSessionsJson,
-    sidebarActiveSession: session ?? undefined,
-    mcpServerCount: liveMcpServers.length,
-    editMode,
-    preset: presetForDisplay,
-    cwd: currentRootDir,
-    dashboardUrl: dashboardUrl ?? undefined,
-    ctxTokens,
-    ctxCap,
-    sessionCostUsd,
-    lastTurnCostUsd,
-    cacheHitRatio,
-    sessionInputTokens,
-    sessionOutputTokens,
-    lastTurnMs: lastTurnMs > 0 ? lastTurnMs : undefined,
-    slashCatalogJson,
-    slashArgStateJson,
-    promptHistoryJson,
-    approvalJson,
-    atStateJson,
-    promptInputJson,
-    listPickerJson,
-  });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix
   // picker is open (slash / @ / slash-arg), the keys navigate that picker
@@ -2559,189 +2291,6 @@ function AppInner({
     return dashboardRef.current?.url ?? null;
   }, []);
 
-  // dashboardUrl state lives near the top of this component so it can
-  // ride the scene frame (see useSceneTrace input above). Mirror of
-  // the dashboard URL so the StatsPanel header can render a clickable
-  // pill the moment the server is up. Updated by both the auto-start
-  // effect below and the explicit /dashboard slash path (via
-  // startDashboard).
-
-  // Integrated-mode picker bridge: under REASONIX_RENDERER_INTEGRATED=1
-  // the rust child owns the alt-screen, so React modals (SessionPicker,
-  // ThemePicker) aren't visible. Intercept the pendingXPicker state
-  // changes and route through scene-driven requestListPicker, dispatch
-  // the choice to the same handlers the modal would call.
-  useEffect(() => {
-    if (!pendingSessionsPicker) return;
-    if (!isIntegratedRendererRequested()) return;
-    if (sessionsPickerList.length === 0) return;
-    let cancelled = false;
-    requestListPicker({
-      title: "switch session",
-      hint: "↑↓ move  ↵ open  esc cancel",
-      options: sessionsPickerList.map((s) => ({
-        key: s.name,
-        label: s.name,
-        sublabel: s.meta.branch ? `branch ${s.meta.branch}` : undefined,
-        meta: fmtAgo(s.mtime.getTime()),
-      })),
-    })
-      .then((picked) => {
-        if (cancelled) return;
-        setPendingSessionsPicker(false);
-        if (picked && onSwitchSession) onSwitchSession(picked);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingSessionsPicker, sessionsPickerList, onSwitchSession]);
-
-  useEffect(() => {
-    if (!pendingThemePicker) return;
-    if (!isIntegratedRendererRequested()) return;
-    let cancelled = false;
-    const active = themeName;
-    const preference = loadTheme() ?? "auto";
-    const all = ["auto", ...listThemeNames()];
-    requestListPicker({
-      title: "pick theme",
-      hint: "↑↓ move  ↵ select  esc cancel",
-      options: all.map((name) => ({
-        key: name,
-        label: name,
-        sublabel:
-          name === preference
-            ? `saved · active: ${active}`
-            : name === active
-              ? "active"
-              : undefined,
-      })),
-    })
-      .then((picked) => {
-        if (cancelled) return;
-        setPendingThemePicker(false);
-        if (!picked) return;
-        const choice = picked as ThemeChoice;
-        saveTheme(choice);
-        const resolved = resolveThemePreference(choice, process.env.REASONIX_THEME);
-        setThemeName(resolved);
-        log.pushInfo(`theme: ${choice} (active: ${resolved})`);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingThemePicker, themeName, setThemeName, log]);
-
-  useEffect(() => {
-    if (!pendingCheckpointPicker) return;
-    if (!isIntegratedRendererRequested()) return;
-    if (checkpointPickerList.length === 0) return;
-    let cancelled = false;
-    requestListPicker({
-      title: "restore checkpoint",
-      hint: "↑↓ move  ↵ restore  esc cancel",
-      options: checkpointPickerList.map((c) => ({
-        key: c.id,
-        label: c.name,
-        sublabel: c.id.slice(0, 7),
-        meta: fmtAgo(c.createdAt),
-      })),
-    })
-      .then((picked) => {
-        if (cancelled) return;
-        setPendingCheckpointPicker(false);
-        if (!picked) return;
-        const target = checkpointPickerList.find((c) => c.id === picked);
-        if (!target) return;
-        const result = restoreCheckpoint(currentRootDir, target.id);
-        const lines = [
-          `restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
-        ];
-        if (result.restored.length > 0) {
-          lines.push(`  wrote ${result.restored.length} file(s)`);
-        }
-        if (result.removed.length > 0) {
-          lines.push(`  removed ${result.removed.length} file(s)`);
-        }
-        if (result.skipped.length > 0) {
-          lines.push(`  skipped ${result.skipped.length} file(s)`);
-        }
-        log.pushInfo(lines.join("\n"));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingCheckpointPicker, checkpointPickerList, currentRootDir, log]);
-
-  useEffect(() => {
-    if (!pendingModelPicker) return;
-    if (!isIntegratedRendererRequested()) return;
-    const modelList = models ?? [];
-    if (modelList.length === 0) return;
-    let cancelled = false;
-    requestListPicker({
-      title: "pick model",
-      hint: "↑↓ move  ↵ select  esc cancel",
-      options: modelList.map((m) => ({
-        key: m,
-        label: m,
-        sublabel: m === loop.model ? "current" : undefined,
-      })),
-    })
-      .then((picked) => {
-        if (cancelled) return;
-        setPendingModelPicker(false);
-        if (!picked) return;
-        loop.configure({ model: picked, autoEscalate: false });
-        agentStore.dispatch({ type: "session.model.change", model: picked });
-        const inferred =
-          picked === "deepseek-v4-pro" ? "pro" : picked === "deepseek-v4-flash" ? "flash" : null;
-        setPreset(inferred ?? "flash");
-        agentStore.dispatch({ type: "session.preset.change", preset: inferred });
-        if (inferred) {
-          try {
-            savePreset(inferred);
-          } catch {}
-        }
-        log.pushInfo(`model: ${picked}`);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingModelPicker, models, loop, agentStore, setPreset, log]);
-
-  // MCP hub: the full Live/Marketplace tabbed modal is heavy and
-  // interactive (install / configure flows). Under integrated mode
-  // dump a read-only inventory of currently-connected servers so the
-  // user at least sees what's wired up; full hub still works in non-
-  // integrated mode for now.
-  useEffect(() => {
-    if (!pendingMcpHub) return;
-    if (!isIntegratedRendererRequested()) return;
-    const lines: string[] = [];
-    if (liveMcpServers.length === 0) {
-      lines.push("(no MCP servers connected)");
-    } else {
-      for (const s of liveMcpServers) {
-        const tools = s.report.tools.supported ? s.report.tools.items.length : 0;
-        const res = s.report.resources.supported ? s.report.resources.items.length : 0;
-        const prompts = s.report.prompts.supported ? s.report.prompts.items.length : 0;
-        lines.push(
-          `· ${s.label}  —  ${tools} tool${tools === 1 ? "" : "s"}, ${res} resource${res === 1 ? "" : "s"}, ${prompts} prompt${prompts === 1 ? "" : "s"}`,
-        );
-        lines.push(`    ${s.spec}`);
-      }
-    }
-    lines.push("");
-    lines.push("Install / configure flows are only available in non-integrated mode.");
-    log.pushInfo(`MCP hub (live)\n${lines.join("\n")}`);
-    setPendingMcpHub(null);
-  }, [pendingMcpHub, liveMcpServers, log]);
-
   // Auto-start the dashboard once the TUI is mounted unless the user
   // opted out with --no-dashboard. The whole point is discoverability:
   // most users had no idea /dashboard existed, so the URL needs to be
@@ -2752,14 +2301,11 @@ function AppInner({
     if (dashboardRef.current) return;
     startDashboard()
       .then((url) => {
-        if (url && openDashboard) openUrl(url);
+        if (!url) return;
+        log.pushInfo(`/dashboard  →  ${url}`);
+        if (openDashboard) openUrl(url);
       })
       .catch((err) => {
-        // Auto-start failure surfaces as a visible warn row. The URL
-        // itself is shown on the welcome card (when the server is up),
-        // so silence here would leave the user with no way to know the
-        // web UI is unreachable 闂?port already in use, permission
-        // denied, etc. Don't block the TUI; everything else keeps working.
         const reason = err instanceof Error ? err.message : String(err);
         log.pushInfo(t("ui.dashboardAutoStartFailed", { reason }));
       });
@@ -2847,85 +2393,6 @@ function AppInner({
         | { type: "cancel" },
     ) => void
   >(() => undefined);
-
-  useEffect(() => {
-    if (!approvalDispatchRef) return;
-    approvalDispatchRef.current = (kind: string, choice: unknown) => {
-      switch (kind) {
-        case "plan": {
-          if (typeof choice === "string") {
-            const mode: "approve" | "refine" | "reject" | null =
-              choice === "approve"
-                ? "approve"
-                : choice === "refine"
-                  ? "refine"
-                  : choice === "cancel"
-                    ? "reject"
-                    : null;
-            if (mode) {
-              handleStagedInputSubmitRef.current("", {
-                plan: pendingPlanRef.current ?? "",
-                mode,
-              });
-              return;
-            }
-            handlePlanConfirmRef.current?.(choice as PlanConfirmChoice).catch(() => undefined);
-          }
-          return;
-        }
-        case "shell": {
-          if (typeof choice === "string") {
-            handleShellConfirmRef.current?.(choice as "run_once" | "always_allow" | "deny");
-          }
-          return;
-        }
-        case "path": {
-          if (typeof choice === "string") {
-            handlePathConfirmRef.current?.(choice as "run_once" | "always_allow" | "deny");
-          }
-          return;
-        }
-        case "edit": {
-          if (typeof choice === "string") {
-            const resolve = editReviewResolveRef.current;
-            if (resolve) {
-              editReviewResolveRef.current = null;
-              resolve({ choice: choice as EditReviewChoice });
-            }
-          }
-          return;
-        }
-        case "choice": {
-          const c = choice as { kind?: string; optionId?: string };
-          if (c?.kind === "pick" && typeof c.optionId === "string") {
-            handleChoiceResolveRef.current?.({ type: "pick", optionId: c.optionId });
-          } else if (c?.kind === "cancel") {
-            handleChoiceResolveRef.current?.({ type: "cancel" });
-          }
-          return;
-        }
-        case "checkpoint": {
-          if (typeof choice === "string") {
-            if (choice === "revise") {
-              const snap = pendingCheckpointRef.current;
-              if (snap) {
-                handleCheckpointReviseSubmitRef.current("", {
-                  stepId: snap.stepId,
-                  title: snap.title,
-                });
-              }
-            } else if (choice === "continue" || choice === "stop") {
-              handleCheckpointConfirmRef.current?.(choice);
-            }
-          }
-          return;
-        }
-      }
-    };
-    return () => {
-      if (approvalDispatchRef) approvalDispatchRef.current = null;
-    };
-  }, [approvalDispatchRef]);
 
   const handleQQModelPick = useCallback(
     (target: string): string => {

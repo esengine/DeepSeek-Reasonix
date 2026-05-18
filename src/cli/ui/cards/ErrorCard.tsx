@@ -24,7 +24,7 @@ export function ErrorCard({ card }: { card: ErrorCardData }): React.ReactElement
   return (
     <Card tone={TONE.err}>
       <CardHeader
-        glyph="✖"
+        glyph="✗"
         tone={TONE.err}
         title={card.title || t("cardTitles.error")}
         meta={retryNote ? [retryNote] : undefined}

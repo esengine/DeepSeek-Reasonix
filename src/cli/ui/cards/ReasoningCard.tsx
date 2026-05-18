@@ -65,7 +65,7 @@ function ReasoningHeader({
       : isEmpty
         ? FG.faint
         : TONE.accent;
-  const glyph = streamingActive ? "◇" : "◆";
+  const glyph = streamingActive ? "○" : "●";
   const title = streamingActive
     ? t("cardTitles.reasoningEllipsis")
     : card.aborted
@@ -83,8 +83,6 @@ function ReasoningHeader({
       glyph={glyph}
       tone={headColor}
       title={title}
-      titleColor={pill.fg}
-      titleBg={pill.bg}
       meta={meta.length > 0 ? meta : undefined}
       right={
         <>

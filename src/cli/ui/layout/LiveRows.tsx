@@ -176,11 +176,9 @@ export function SubagentRow({ activity }: { activity: SubagentActivity }) {
   return (
     <Card tone={CARD.subagent.color}>
       <CardHeader
-        glyph="⌬"
+        glyph="●"
         tone={CARD.subagent.color}
         title="subagent"
-        titleColor={PILL_SECTION.plan.fg}
-        titleBg={PILL_SECTION.plan.bg}
         subtitle={subtitle}
         meta={[`iter ${activity.iter}`, `${seconds}s`]}
         right={
@@ -235,11 +233,9 @@ export function SubagentLiveStack({
   return (
     <Card tone={CARD.subagent.color}>
       <CardHeader
-        glyph="⌬"
+        glyph="●"
         tone={CARD.subagent.color}
         title="subagents"
-        titleColor={PILL_SECTION.plan.fg}
-        titleBg={PILL_SECTION.plan.bg}
         subtitle={metaParts.join(" · ")}
         right={<Spinner kind="braille" color={CARD.subagent.color} />}
       />
