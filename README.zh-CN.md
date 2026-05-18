@@ -254,6 +254,19 @@ npx reasonix code --dir /path/to/project
 
 <br/>
 
+## 支持本项目
+
+如果 Reasonix 帮你省了时间或 token，欢迎请杯咖啡。捐助不会换来 feature 优先级，也不会影响 issue 的处理顺序——就是「谢谢」。
+
+- **国内** — 微信支付（扫下方二维码）
+- **海外** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
+
+<p align="center">
+  <img src=".github/sponsor/wechat-pay.jpg" alt="微信支付收款码" width="240"/>
+</p>
+
+<br/>
+
 ## 致谢
 
 下面这些朋友的工作塑造了 Reasonix 今天的样子 —— 综合 commit 数和代码量两个维度。
