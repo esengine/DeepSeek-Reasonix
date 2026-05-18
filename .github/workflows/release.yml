@@ -1,12 +1,16 @@
-name: Release
+name: Release desktop
 
+# Tag namespace: `desktop-v<semver>` triggers desktop Tauri bundles.
+# Plain `v<semver>` tags are reserved for the npm CLI release (see
+# publish-npm.yml) — they intentionally do NOT trigger this workflow.
+# Bump the desktop with: `git tag desktop-vX.Y.Z && git push origin desktop-vX.Y.Z`.
 on:
   push:
-    tags: ["v*"]
+    tags: ["desktop-v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish (e.g. v0.40.0). Required when running manually."
+        description: "Tag to publish (e.g. desktop-v0.47.0). Required when running manually."
         required: true
         type: string
 
