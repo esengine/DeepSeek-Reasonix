@@ -146,15 +146,6 @@ export function Sidebar({
                 className="session-item"
                 data-active={active}
                 onClick={() => onLoadSession(s.name)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setPendingDelete({
-                    name: s.name,
-                    pretty: prettyName(s),
-                    x: e.clientX,
-                    y: e.clientY,
-                  });
-                }}
                 role="button"
                 tabIndex={0}
                 title={s.name}
@@ -174,6 +165,27 @@ export function Sidebar({
                     <span>{updated}</span>
                   </span>
                 </div>
+                <button
+                  type="button"
+                  className="delete-btn"
+                  title="删除会话"
+                  aria-label="删除会话"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setPendingDelete({
+                      name: s.name,
+                      pretty: prettyName(s),
+                      x: rect.right,
+                      y: rect.bottom,
+                    });
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+                  }}
+                >
+                  <I.x size={12} />
+                </button>
               </div>
             );
           })}

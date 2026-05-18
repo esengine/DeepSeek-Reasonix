@@ -1061,6 +1061,34 @@ html[data-platform="macos"] .titlebar .tb-left {
 .session-item .body .meta .sep {
   color: var(--border-strong);
 }
+.session-item .delete-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
+.session-item:hover .delete-btn,
+.session-item:focus-within .delete-btn,
+.session-item .delete-btn:focus-visible {
+  opacity: 1;
+}
+.session-item .delete-btn:hover {
+  background: var(--panel-2, rgba(255, 80, 80, 0.12));
+  color: var(--danger, #e25555);
+}
+.session-item .delete-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
 
 /* ---- right-click session menu ---- */
 .session-menu {
