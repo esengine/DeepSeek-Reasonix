@@ -3,6 +3,42 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.0] — 2026-05-17
+
+**Breaking — Rust renderer removed.** Reasonix is back to a pure Ink/Node
+TUI. The `reasonix-render` ratatui crate, the five
+`@reasonix/render-{platform}-{arch}` optional sub-packages, the NAPI
+loader (`src/cli/ui/scene/`), and the `--node` opt-out flag are all
+gone. Cross-terminal compat issues (Termux #1149 / #1026, mac eager-spawn
+chain, Windows alt-screen handoff, integrated-mode keyboard collisions)
+disappear with them — at the cost of the streaming/animation perf the
+rust renderer was supposed to buy us.
+
+Notes for users:
+- `REASONIX_RENDERER`, `REASONIX_RENDER_BIN`, `REASONIX_RENDER_CMD`,
+  `REASONIX_INPUT_CMD`, `REASONIX_RENDERER_INTEGRATED` env vars are no-ops
+  — drop them from your shell config.
+- `--node` flag is no-op (and unrecognized; will error). Just drop it.
+- `--no-alt-screen` / `--no-mouse` flags also gone — Ink defaults take
+  over end-to-end.
+- `npm install reasonix@0.46.0` no longer pulls a per-platform binary —
+  one dep tree on every OS, no optional resolution step.
+
+**TUI overhaul** — same pass that removed the rust path also cleared
+the Ink-side workarounds we'd accumulated on top of it:
+- Card primitive drops the left `▎` stripe; cards are plain column
+  boxes with a top margin
+- CardHeader drops the colored pill background behind titles
+- Single consistent glyph vocabulary: `●` running, `✓` done, `✗`
+  failed, `⊘` aborted, `○` queued, `⚠` warn, `⎿` child row, `█`/`░`
+  bars, braille spinner
+- Composer wrapped in a rounded border box; status row moved to the
+  bottom; on narrow terminals status pills wrap to a new line instead
+  of being truncated away (#1149)
+- `/dashboard` URL surfaces as a startup info row (was easy to miss)
+- `/copy` permanently in the startup hint list — vim-style copy mode
+  was undiscoverable before
+
 ## [0.44.2-rc.2] — 2026-05-17
 
 **Fix:** macOS hang on `npx reasonix@next code` — keep-alive interval
