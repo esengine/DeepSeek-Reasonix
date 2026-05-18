@@ -190,6 +190,8 @@ interface RootProps extends ChatOptions {
   presetSetRef?: {
     current: ((value: "auto" | "flash" | "pro") => void) | null;
   };
+  /** App fills this ref on mount so Rust interrupt events abort the active turn. */
+  interruptRef?: { current: (() => void) | null };
   /** App fills this ref on mount so QQ errors appear in the TUI log. */
   qqErrorRef: { current: ((msg: string) => void) | null };
   /** Custom keystroke source — populated when the Rust renderer is active so keys flow from the spawned input child (or a no-op reader in integrated mode) instead of process.stdin. */
@@ -303,6 +305,7 @@ function Root({
         rustComposerRef={appProps.rustComposerRef}
         modeSetRef={appProps.modeSetRef}
         presetSetRef={appProps.presetSetRef}
+        interruptRef={appProps.interruptRef}
         onSwitchSession={setActiveSession}
       />
     </KeystrokeProvider>
@@ -402,6 +405,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     current: ((value: "auto" | "flash" | "pro") => void) | null;
   } = { current: null };
   const setupSubmitRef: { current: ((text: string) => void) | null } = { current: null };
+  const interruptRef: { current: (() => void) | null } = { current: null };
   const qqRequested = cfg.qq?.enabled === true;
   let qqChannel: QQChannel | undefined;
   if (qqRequested) {
@@ -459,8 +463,9 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
         resolveListPicker(event.id, event.cancelled ? null : (event.key ?? null));
       } else if (event.event === "setup-submit") {
         setupSubmitRef.current?.(event.text);
+      } else if (event.event === "interrupt") {
+        interruptRef.current?.();
       }
-      // interrupt: no-op for now; terminal SIGINT already reaches Node.
     });
     // Synchronous create_renderer install — registers the ThreadsafeFunction
     // before render() returns, so libuv has a ref'd handle and the event
@@ -488,6 +493,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       modeSetRef={modeSetRef}
       presetSetRef={presetSetRef}
       qqErrorRef={qqErrorRef}
+      interruptRef={interruptRef}
       setupSubmitRef={setupSubmitRef}
     />,
     {

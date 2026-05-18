@@ -614,6 +614,8 @@ pub fn run_integrated_loop(
                     KeyCode::Esc => {
                         if selection.is_some() {
                             selection = None;
+                        } else if scene.busy {
+                            emit_event(serde_json::json!({"event": "interrupt"}));
                         } else {
                             buffer.clear();
                             cursor = 0;
