@@ -315,6 +315,18 @@ export const zhCN: typeof en = {
       exportMd: "复制本会话为 Markdown",
       help: "查看所有命令",
     },
+    skill: {
+      generic: "{scope}技能 · {runAs}",
+      scope: {
+        builtin: "内置",
+        global: "全局",
+        project: "项目",
+      },
+      runAs: {
+        inline: "内联",
+        subagent: "子代理",
+      },
+    },
     yolo: {
       banner1: "所有工具调用、shell 命令、文件编辑都会",
       bannerBold: "自动批准",

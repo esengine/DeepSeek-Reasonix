@@ -2863,8 +2863,12 @@ html[data-platform="macos"] .titlebar .tb-left {
   margin-right: 6px;
 }
 .popup-item .desc {
+  display: block;
   font-size: 14px;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .popup-item .kb {
   font-family: inherit;

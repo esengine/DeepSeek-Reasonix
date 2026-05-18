@@ -21,8 +21,8 @@ type ModeEntry = { k: EditMode; label: string; icon: React.ReactNode; hint: TKey
 
 const PRESET_INFO: Record<PresetName, PresetEntry> = {
   auto: { label: "auto", badge: "AUTO", desc: "preset.autoDesc" },
-  flash: { label: "deepseek-v4-flash", badge: "FLASH", desc: "preset.flashDesc" },
-  pro: { label: "deepseek-v4-pro", badge: "PRO", desc: "preset.proDesc" },
+  flash: { label: "v4-flash", badge: "FLASH", desc: "preset.flashDesc" },
+  pro: { label: "v4-pro", badge: "PRO", desc: "preset.proDesc" },
 };
 
 const MODE_INFO: ModeEntry[] = [

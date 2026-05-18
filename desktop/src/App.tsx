@@ -264,6 +264,20 @@ type Action =
   | { t: "dequeue_send"; index: number }
   | { t: "shift_queued_send" };
 
+function fallbackSkillDesc(skill: SkillInfo): string {
+  const scope =
+    skill.scope === "builtin"
+      ? t("app.skill.scope.builtin")
+      : skill.scope === "global"
+        ? t("app.skill.scope.global")
+        : t("app.skill.scope.project");
+  const runAs =
+    skill.runAs === "subagent"
+      ? t("app.skill.runAs.subagent")
+      : t("app.skill.runAs.inline");
+  return t("app.skill.generic", { scope, runAs });
+}
+
 function reduce(state: State, action: Action): State {
   switch (action.t) {
     case "send_user": {
@@ -1353,7 +1367,7 @@ function TabRuntime({
     },
     ...state.skills.map((s) => ({
       cmd: `/${s.name}`,
-      desc: s.description || `skill · ${s.scope}`,
+      desc: s.description?.trim() || fallbackSkillDesc(s),
       run: () => {
         dispatch({
           t: "start_skill",

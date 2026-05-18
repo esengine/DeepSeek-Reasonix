@@ -308,6 +308,18 @@ export const en = {
       exportMd: "Copy session as Markdown",
       help: "Show all commands",
     },
+    skill: {
+      generic: "{scope} skill · {runAs}",
+      scope: {
+        builtin: "Builtin",
+        global: "Global",
+        project: "Project",
+      },
+      runAs: {
+        inline: "inline",
+        subagent: "subagent",
+      },
+    },
     yolo: {
       banner1: "All tool calls, shell commands, and file edits will be ",
       bannerBold: "auto-approved",
