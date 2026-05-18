@@ -196,15 +196,15 @@ export interface AppProps {
   /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Must produce the same shape as `system` was built from. */
   rebuildSystem?: () => string;
   transcript?: string;
-  /** Soft USD spend cap; undefined 闂?no cap. See CacheFirstLoopOptions.budgetUsd. */
+  /** Soft USD spend cap; undefined —no cap. See CacheFirstLoopOptions.budgetUsd. */
   budgetUsd?: number;
-  /** Per-turn repair-signal count required to escalate flash闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鏁愭径濠勵吅闂佹寧绻傞幉娑㈠箻缂佹鍘辨繝鐢靛Т閸婂綊宕戦妷鈺傜厸閻忕偠顕ф慨鍌溾偓娈垮枟閹告娊骞冨▎寰濆湱鈧綆浜欐竟鏇㈡⒑閸涘﹦缂氶柛搴㈠▕閹矂宕卞☉娆戝幈濡炪倖鍔戦崐鏇㈠几閹达附鐓曟繛鍡楃箳缁犳彃菐閸パ嶈含妞ゃ垺绋戦埥澶婎潨閸℃鐤傜紓鍌欒兌閾忓酣宕㈤崗鍏兼珷濞寸姴顑嗛崕澶嬨亜韫囨挾澧曠紒鐘虫皑閹茬顭ㄩ崼鐔蜂簵婵犻潧鍊搁幉锟犳偂濞戙垺鍊堕柣鎰絻閳锋棃鏌嶉挊澶樻█闁哄苯绉归幐濠冨緞濡儵鏋呴柣搴ゎ潐濞测晝鎹㈠┑瀣畺婵炲棙鍨熼崑鎾绘偨閸涘﹥鐝抽梺瑙勭叀缁犳牕顫忔繝姘＜婵炲棙鍩堝Σ顕€姊虹涵鍜佸殝缂佺粯绻堥獮鍐倻閽樺）銊ф喐鎼达紕鏆﹂柛娆忣槹閸欏繑淇婇悙棰濆殭濞存粓绠栭幃妤€鈻撻崹顔界亪濡炪値鍘鹃崗妯侯嚕椤愶箑绠涢柡澶嬪閵囨繃绻涙潏鍓у埌闁圭⒈鍋勯锝夊箮閼恒儮鎷绘繛杈剧到閹诧繝宕悙鐢电＜妞ゆ棁鍋愭晶锕傛煙椤旀儳浠遍柡浣稿暣瀹曟帒顫濇鏍ㄐ? Undefined 闂?loop default (3). */
+  /** Per-turn repair-signal count required to escalate flash→pro. Undefined → loop default (3). */
   failureThreshold?: number;
   session?: string;
   /**
    * Pre-populated tool registry (e.g. from bridgeMcpTools()). When present,
    * its specs are folded into the ImmutablePrefix so the model sees them,
-   * and its dispatch is used for tool calls 闂?MCP tools become first-class.
+   * and its dispatch is used for tool calls —MCP tools become first-class.
    */
   tools?: ToolRegistry;
   /** Raw `--mcp` / config-derived spec strings, for `/mcp` slash display. */
@@ -225,7 +225,7 @@ export interface AppProps {
    * Shared ref the MCP bridge's onProgress callback writes through.
    * We attach our updater to `progressSink.current` on mount so any
    * `notifications/progress` frame from any bridged tool flows into
-   * the UI. `null` allowed 闂?chat mode without MCP leaves it unset.
+   * the UI. `null` allowed —chat mode without MCP leaves it unset.
    */
   progressSink?: {
     current:
@@ -242,14 +242,14 @@ export interface AppProps {
     rootDir: string;
     jobs?: import("../../tools/jobs.js").JobRegistry;
     /**
-     * `/cwd <path>` callback 闂?re-registers every rootDir-dependent
+     * `/cwd <path>` callback —re-registers every rootDir-dependent
      * native tool against the new path. Optional: when omitted the
      * slash command degrades to updating hook cwd / memory root only,
      * with file/shell tools still pointing at the original root.
      */
     reregisterTools?: (rootDir: string) => void;
     /**
-     * Async tail of the `/cwd` swap 闂?re-probes the new directory for a
+     * Async tail of the `/cwd` swap —re-probes the new directory for a
      * compatible semantic index, registers `semantic_search` against it
      * if found, unregisters the stale binding otherwise. Kept separate
      * from `reregisterTools` so the sync FS/shell/memory re-registration
@@ -263,7 +263,7 @@ export interface AppProps {
    * When `true`, suppress the auto-launch of the embedded web dashboard
    * server on TUI mount. Default behavior is to boot the dashboard so
    * the URL shows in the status bar (clickable in OSC-8-aware
-   * terminals) 闂?most users had no idea `/dashboard` even existed.
+   * terminals) —most users had no idea `/dashboard` even existed.
    * `--no-dashboard` is the CLI flag that flips this on for CI / users
    * who don't want a localhost listener.
    */
@@ -289,7 +289,7 @@ export interface AppProps {
 }
 
 /**
- * Throttle interval in ms. 50ms 闂?20Hz 闂?slow enough that cursor-up
+ * Throttle interval in ms. 50ms —20Hz —slow enough that cursor-up
  * repaints on winpty/MINTTY/ConEmu/tmux don't leave half-drawn frames,
  * fast enough that streaming text still reads as continuous. Override
  * via `REASONIX_FLUSH_MS` if you want 60Hz on a terminal you trust.
@@ -305,7 +305,7 @@ const FLUSH_INTERVAL_MS = (() => {
 /**
  * Captures printable keys / backspace / Enter while history is unpinned so the
  * user can type blind and see the buffer when they scroll back. Lives in its
- * own leaf so AppInner doesn't subscribe to `pinned` 闂?same trick as
+ * own leaf so AppInner doesn't subscribe to `pinned` —same trick as
  * `InputAreaWithHistoryHint` above.
  */
 function HistoryTypingCapture({
@@ -548,7 +548,7 @@ function AppInner({
   const { hookList, reloadHooks } = useHookList(codeMode?.rootDir);
   // Session-scoped edit history + undo banner + /undo, /history, /show
   // handlers. Kept in a custom hook so App.tsx only sees the small API
-  // it needs 闂?append an edit, arm the banner, answer the slash
+  // it needs —append an edit, arm the banner, answer the slash
   // callbacks, seal the turn entry, check whether anything's undoable.
   const {
     undoBanner,
@@ -581,12 +581,12 @@ function AppInner({
   const planModeRef = useRef<boolean>(false);
   const latestVersionRef = useRef<string | null>(null);
   // Current per-edit confirmation prompt (review mode, tool-call path).
-  // Non-null 闂?EditConfirm modal renders, interceptor is suspended on
+  // Non-null —EditConfirm modal renders, interceptor is suspended on
   // `editReviewResolveRef.current`, other live rows hide. User picks a
-  // choice 闂?handleEditReviewChoose resolves the promise, interceptor
+  // choice —handleEditReviewChoose resolves the promise, interceptor
   // resumes and returns the tool result the model will see.
   const [pendingEditReview, setPendingEditReview] = useState<EditBlock | null>(null);
-  // /walk active flag 闂?when true the App walks pendingEdits one block
+  // /walk active flag —when true the App walks pendingEdits one block
   // at a time through EditConfirm. Distinct from `pendingEditReview`,
   // which is the AUTO-mode tool-call interceptor. Walkthrough is
   // user-initiated against the QUEUED pending list, not mid-stream.
@@ -645,7 +645,7 @@ function AppInner({
   /** True while the CheckpointPicker is open mid-chat (triggered by bare `/restore`). */
   const [pendingCheckpointPicker, setPendingCheckpointPicker] = useState(false);
   const [checkpointPickerList, setCheckpointPickerList] = useState<CheckpointMeta[]>([]);
-  /** Opens the unified McpHub modal 闂?null when closed. `tab` selects the initial tab. */
+  /** Opens the unified McpHub modal —null when closed. `tab` selects the initial tab. */
   const [pendingMcpHub, setPendingMcpHub] = useState<{ tab: "live" | "marketplace" } | null>(null);
   /** True while the ModelPicker is open mid-chat (triggered by bare `/model`). */
   const [pendingModelPicker, setPendingModelPicker] = useState(false);
@@ -655,7 +655,7 @@ function AppInner({
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
   // returns "refine" or "approve", we defer the loop-resume and show
-  // PlanRefineInput. User types + Enter 闂?we ship it; Esc 闂?restore
+  // PlanRefineInput. User types + Enter —we ship it; Esc —restore
   // pendingPlan and re-show the picker. Letting Approve also take
   // input closes the "model left open questions, user had no place
   // to answer them" hole.
@@ -665,7 +665,7 @@ function AppInner({
     /** Open-questions / risks block extracted from the plan; surfaced in PlanRefineInput on refine. */
     questions?: string;
   } | null>(null);
-  // Mid-execution pause from mark_step_complete 闂?model finished a step
+  // Mid-execution pause from mark_step_complete —model finished a step
   // and the loop waits for user to pick Continue / Revise / Stop.
   const [pendingCheckpoint, setPendingCheckpoint] = useState<{
     stepId: string;
@@ -693,7 +693,7 @@ function AppInner({
   // user picks an option (synthetic "user picked <id>"), types a
   // custom answer (synthetic "user answered: <text>"), or cancels.
   // Kept separate from pendingPlan because a branch question is
-  // orthogonal to plan state 闂?it can fire in chat mode or mid-plan
+  // orthogonal to plan state —it can fire in chat mode or mid-plan
   // when the model genuinely needs a decision.
   const [pendingChoice, setPendingChoice] = useState<{
     question: string;
@@ -701,7 +701,7 @@ function AppInner({
     allowCustom: boolean;
   } | null>(null);
   // Staged entry for the "Let me type my own answer" path. Same
-  // two-step pattern as stagedInput for plan approvals 闂?user picks
+  // two-step pattern as stagedInput for plan approvals —user picks
   // "custom", we stash the question context, show a free-form input,
   // and Esc restores the picker.
   const [stagedChoiceCustom, setStagedChoiceCustom] = useState<{
@@ -709,7 +709,7 @@ function AppInner({
     options: ChoiceOption[];
     allowCustom: boolean;
   } | null>(null);
-  // Truthy when any pending modal owns the screen 闂?gates global
+  // Truthy when any pending modal owns the screen —gates global
   // hotkeys (chat-scroll, etc.) so they don't fire behind a picker.
   const modalOpen =
     !!pendingShell ||
@@ -746,9 +746,9 @@ function AppInner({
     !pendingMcpHub &&
     !stagedInput &&
     !pendingEditReview;
-  // Plan-mode indicator 闂?displayed in the StatsPanel, mirrored onto
+  // Plan-mode indicator —displayed in the StatsPanel, mirrored onto
   // the ToolRegistry so dispatch enforces read-only. Toggled via the
-  // `/plan` slash and PlanConfirm picker. Ephemeral 闂?not persisted
+  // `/plan` slash and PlanConfirm picker. Ephemeral —not persisted
   // across launches (you explicitly opt in per session).
   const [planMode, setPlanMode] = useState<boolean>(false);
   // Text waiting to be submitted AFTER the current turn finishes.
@@ -759,7 +759,7 @@ function AppInner({
   // submit once busy clears.
   const [queuedSubmit, setQueuedSubmit] = useState<string | null>(null);
   // Ctrl+P/Ctrl+N recall over a turn-local prompt history. We don't
-  // persist to disk 闂?the session log already keeps the messages, and
+  // persist to disk —the session log already keeps the messages, and
   // cross-session bash-style recall would need per-project scoping.
   const {
     recallPrev,
@@ -769,7 +769,7 @@ function AppInner({
     history: promptHistory,
   } = useInputRecall(setInput);
   const { setRawMode, isRawModeSupported } = useStdin();
-  // Ctrl+X 闂?hand the composer buffer to $EDITOR. Raw-mode flip lets the
+  // Ctrl+X —hand the composer buffer to $EDITOR. Raw-mode flip lets the
   // editor own line-buffered input; result replaces the composer value.
   const handleOpenExternalEditor = useCallback(async () => {
     if (!isRawModeSupported) {
@@ -788,7 +788,7 @@ function AppInner({
   // Disambiguates <Static> keys when a single turn yields multiple assistant_final events.
   const assistantIterCounter = useRef<number>(0);
   // Per-session @url fetch cache. Keyed by stripped URL; same URL
-  // referenced twice in one session fetches once. Not persisted 闂?  // we deliberately re-fetch on session resume since the page may
+  // referenced twice in one session fetches once. Not persisted —  // we deliberately re-fetch on session resume since the page may
   // have changed. Shape mirrors AtUrlExpansion + an optional `body`
   // so the trailing block can be reconstructed from cache alone.
   const atUrlCache = useRef<Map<string, AtUrlExpansion & { body?: string }>>(new Map());
@@ -808,7 +808,7 @@ function AppInner({
   // the auto-start useEffect re-fires (because `startDashboard`'s
   // useCallback deps change mid-mount) the early `if (dashboardRef.current)
   // return` check sees null because the first call hasn't returned from
-  // its `await startDashboardServer()` yet 闂?so we'd start two listeners
+  // its `await startDashboardServer()` yet —so we'd start two listeners
   // on two ports, leak the first handle, and make the chrome pill flicker
   // between two URLs. Hold the in-flight Promise here and reuse it.
   const dashboardStartingRef = useRef<Promise<string> | null>(null);
@@ -828,7 +828,7 @@ function AppInner({
   // Populated only when the model supplied `steps`; used by the
   // `mark_step_complete` handler to look up the step title and compute
   // the `N/M` counter. Reset on every new plan submission so a
-  // revised plan starts fresh 闂?old completions don't spill over.
+  // revised plan starts fresh —old completions don't spill over.
   const planStepsRef = useRef<PlanStep[] | null>(null);
   const completedStepIdsRef = useRef<Set<string>>(new Set());
   // Markdown body + human-friendly summary captured from submit_plan.
@@ -840,7 +840,7 @@ function AppInner({
   const planSummaryRef = useRef<string | null>(null);
   // Wall-clock when the latest tool_start fired. Cleared when the
   // matching `tool` event arrives (or at turn end). Tools are
-  // dispatched serially in the loop, so a single ref is enough 闂?no
+  // dispatched serially in the loop, so a single ref is enough —no
   // need for a per-toolName map.
   const toolStartedAtRef = useRef<number | null>(null);
   // Persist the active plan state (steps + completedStepIds) to disk
@@ -882,11 +882,11 @@ function AppInner({
       startedAt: new Date().toISOString(),
     });
   }
-  // Kernel event log sidecar 闂?opens iff the session has a name (skip
+  // Kernel event log sidecar —opens iff the session has a name (skip
   // ephemeral sessions). Sink + Eventizer share lifetime with App; the
   // for-await consumer below pipes every LoopEvent through them so a
   // typed Event log accumulates at `~/.reasonix/sessions/<name>.events.jsonl`.
-  // Old transcript path is unchanged 闂?this is a parallel artifact, not
+  // Old transcript path is unchanged —this is a parallel artifact, not
   // a replacement. Future replay / projection consumers read from here.
   const eventSinkRef = useRef<JsonlEventSink | null>(null);
   const eventizerRef = useRef<Eventizer | null>(null);
@@ -903,14 +903,14 @@ function AppInner({
   }, []);
 
   const loopRef = useRef<CacheFirstLoop | null>(null);
-  // hookList + currentRootDir intentionally NOT in deps 闂?they seed
+  // hookList + currentRootDir intentionally NOT in deps —they seed
   // the loop on first construction (loopRef guards a single
   // instantiation), and later edits flow in through the mutable
   // `loop.hooks = hookList` / `loop.hookCwd = currentRootDir` effects
   // below. Putting them in deps would tear down the loop on every
   // reload, wiping the append-only log mid-session.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: hookList 闂?see comment above
-  // biome-ignore lint/correctness/useExhaustiveDependencies: currentRootDir 闂?see comment above
+  // biome-ignore lint/correctness/useExhaustiveDependencies: hookList —see comment above
+  // biome-ignore lint/correctness/useExhaustiveDependencies: currentRootDir —see comment above
   const loop = useMemo(() => {
     if (loopRef.current) return loopRef.current;
     const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
@@ -920,7 +920,7 @@ function AppInner({
     // path covers both code mode and chat mode.
     //
     // The closure captures `tools` (parent registry), `client`, and
-    // the subagent sink ref by lexical scope 闂?`spawnSubagent` reads
+    // the subagent sink ref by lexical scope —`spawnSubagent` reads
     // them per invocation, so a sink handler attached after this
     // registration still receives events.
     if (tools && !tools.has("run_skill")) {
@@ -963,7 +963,7 @@ function AppInner({
       hooks: hookList,
       hookCwd: currentRootDir,
       // Restore the user's last-chosen effort cap. Without this a
-      // `/effort high` silently reverted to `max` on relaunch 闂?the
+      // `/effort high` silently reverted to `max` on relaunch —the
       // loop's constructor default wins over persisted state.
       reasoningEffort: loadReasoningEffort(),
       rebuildSystem,
@@ -1104,13 +1104,13 @@ function AppInner({
   }, [loop, session, tools]);
 
   // Keep the loop's hook list in sync after a `/hooks reload`. The
-  // loop's field is intentionally mutable for exactly this case 闂?  // construction happens once, hook edits are picked up live.
+  // loop's field is intentionally mutable for exactly this case —  // construction happens once, hook edits are picked up live.
   useEffect(() => {
     loop.hooks = hookList;
   }, [loop, hookList]);
 
   // Seed status.preset from initial loop state so the StatusRow preset pill
-  // renders correctly on first paint 闂?usePresetMode's React-state mirror
+  // renders correctly on first paint —usePresetMode's React-state mirror
   // doesn't propagate to the agent store, so without this dispatch the pill
   // would show the bare model id instead of the resolved preset.
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
@@ -1126,7 +1126,7 @@ function AppInner({
     agentStore.dispatch({ type: "session.preset.change", preset: canonical });
   }, []);
 
-  // Deferred MCP bridge 闂?fire addSpec for each requested server in the
+  // Deferred MCP bridge —fire addSpec for each requested server in the
   // background instead of blocking startup, route lifecycle events to
   // the in-app log so they don't corrupt alt-screen via stderr.
   const mcpBridgeStartedRef = useRef(false);
@@ -1202,7 +1202,7 @@ function AppInner({
   }, [mcpRuntime, mcpSpecs, loop, log, agentStore]);
 
   // Ambient session info (balance, model catalog, latest published
-  // version) 闂?three independent mount-time fetches behind one hook
+  // version) —three independent mount-time fetches behind one hook
   // so the refresh callbacks can be wired into handleSubmit's finally
   // (balance) and the slash context (/models, /update).
   const { balance, models, latestVersion, refreshBalance, refreshModels, refreshLatestVersion } =
@@ -1288,11 +1288,11 @@ function AppInner({
   // Each pending* state is the source of truth on the TUI side. These
   // effects fan it out to web subscribers as `modal-up` events; the
   // useEffect cleanup fires `modal-down` when the modal closes (the
-  // user picked from EITHER surface 闂?once a pending state goes null
+  // user picked from EITHER surface —once a pending state goes null
   // the cleanup runs and both clients see it disappear).
   //
-  // The shell + choice + plan paths are straightforward state闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鏁愭径濠勵吅闂佹寧绻傞幉娑㈠箻缂佹鍘辨繝鐢靛Т閸婂綊宕戦妷鈺傜厸閻忕偠顕ф慨鍌溾偓娈垮枟閹告娊骞冨▎寰濆湱鈧綆浜欐竟鏇㈡⒑閸涘﹦缂氶柛搴㈠▕閹矂宕卞☉娆戝幈濡炪倖鍔戦崐鏇㈠几閹达附鐓曟繛鍡楃箳缁犳彃菐閸パ嶈含妞ゃ垺绋戦埥澶婎潨閸℃鐤傜紓鍌欒兌閾忓酣宕㈤崗鍏兼珷濞寸姴顑嗛崕澶嬨亜韫囨挾澧曠紒鐘虫皑閹茬顭ㄩ崼鐔蜂簵婵犻潧鍊搁幉锟犳偂濞戙垺鍊堕柣鎰絻閳锋棃鏌嶉挊澶樻█闁哄苯绉归幐濠冨緞濡儵鏋呴柣搴ゎ潐濞测晝鎹㈠┑瀣畺婵炲棙鍨熼崑鎾绘偨閸涘﹥鐝抽梺瑙勭叀缁犳牕顫忔繝姘＜婵炲棙鍩堝Σ顕€姊虹涵鍜佸殝缂佺粯绻堥獮鍐倻閽樺）銊ф喐鎼达紕鏆﹂柛娆忣槹閸欏繑淇婇悙棰濆殭濞存粓绠栭幃妤€鈻撻崹顔界仌濡炪倖娉﹂崶鑸垫櫍婵犻潧鍊婚…鍫ユ煁閸ャ劊浜滈柟鎷屾硾瀵攱銇勯幒鎴濐仾闁抽攱甯掗湁闁挎繂娲ら崝瀣煕閵堝倸浜鹃梺璇插椤旀牠宕伴弽顓熷亯濠靛倻顭堢粻姘扁偓鍏夊亾闁告洦鍓欐禍顖涚節?
-  // edit-review is different 闂?its source of truth is `editReviewResolveRef`
+  // The shell + choice + plan paths are straightforward state.
+  // edit-review is different —its source of truth is `editReviewResolveRef`
   // (a promise the dispatch interceptor is awaiting), wired via a
   // separate `pendingEditReview` state that we already broadcast here.
 
@@ -1337,7 +1337,7 @@ function AppInner({
 
   useEffect(() => {
     if (!pendingEditReview) return;
-    // Trim the preview 闂?older clients only render this string; newer
+    // Trim the preview —older clients only render this string; newer
     // clients use `search`/`replace` directly to render a side-by-side
     // diff with syntax highlighting (full content, no line cap).
     const previewLines = (pendingEditReview.search || pendingEditReview.replace || "")
@@ -1400,7 +1400,7 @@ function AppInner({
   }, [pendingCheckpoint, broadcastDashboardEvent]);
 
   // Three mutually-exclusive input-prefix pickers (slash name, @ file
-  // mention, slash argument) 闂?state + memos + commit callbacks live
+  // mention, slash argument) —state + memos + commit callbacks live
   // in a dedicated hook so App.tsx only sees the small surface it
   // actually consumes in useInput / handleSubmit / render. Declared
   // after useSessionInfo because the slash-arg picker reads the model
@@ -1440,7 +1440,7 @@ function AppInner({
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix
   // picker is open (slash / @ / slash-arg), the keys navigate that picker
-  // 闂?consistent with 闂?闂? Otherwise they walk prompt history (issue #647).
+  // — consistent with ↑/↓. Otherwise they walk prompt history (issue #647).
   const handleHistoryPrev = useCallback(() => {
     if (atState && atState.entries.length > 0) {
       setAtSelected((i) => Math.max(0, i - 1));
@@ -1521,7 +1521,7 @@ function AppInner({
     // structured state to pick back up.
     // Guard: skip restoration when the session has zero prior messages
     // (truly fresh). A stale plan file from a prior wipe that wasn't
-    // cleaned up is not a real plan to resume 闂?it's a sidecar orphan.
+    // cleaned up is not a real plan to resume —it's a sidecar orphan.
     if (session && loop.resumedMessageCount > 0) {
       const restoredPlan = loadPlanState(session);
       if (restoredPlan && restoredPlan.steps.length > 0) {
@@ -1547,7 +1547,7 @@ function AppInner({
     // wouldn't otherwise discover Shift+Tab (it's in /keys and the
     // bottom status bar, but both require looking). Shown exactly once
     // per install; the config flag suppresses re-display on every
-    // relaunch. Skips chat mode 闂?those shortcuts don't apply there.
+    // relaunch. Skips chat mode —those shortcuts don't apply there.
     if (codeMode && !editModeHintShown()) {
       const tip = tObj<{
         topic: string;
@@ -1577,9 +1577,9 @@ function AppInner({
     if (ev.ctrl && ev.input === "d") quitProcess();
   });
 
-  // 闂?闂?PgUp/PgDn always scroll chat; wheel arrives as 闂?闂?via
+  // ↑/↓ / PgUp/PgDn always scroll chat; wheel arrives as ↑/↓ via
   // DECSET 1007 alternate-scroll so it joins the same path. Pickers
-  // (slash / @-mention / slash-arg / shell-confirm) own 闂?闂?闂?when
+  // (slash / @-mention / slash-arg / shell-confirm) own ↑/↓ — when
   // any of them is open we skip the arrow path so chat doesn't scroll
   // alongside picker navigation; PgUp/PgDn/End still scroll. Prompt
   // history + multi-line cursor moves live on Ctrl+P / Ctrl+N.
@@ -1603,7 +1603,7 @@ function AppInner({
   // controller.
   //
   // Prompt history (Ctrl+P/Ctrl+N) is handed off from PromptInput via
-  // recallPrev/recallNext below 闂?parent-level useInput is simpler
+  // recallPrev/recallNext below —parent-level useInput is simpler
   // than ink-text-input's (absent) history support and lets us own
   // the cursor semantics.
   useKeystroke((ev) => {
@@ -1645,13 +1645,13 @@ function AppInner({
     }
     // Esc dismisses any composer-level picker (slash / @ / slash-arg)
     // by clearing the prefix that triggered it. Picker footers advertise
-    // "esc cancel" 闂?this binds it.
+    // "esc cancel" —this binds it.
     if (key.escape && !busy && (slashMatches || atState || slashArgContext)) {
       setInput("");
       return;
     }
     // Esc inside a /walk session exits the walk WITHOUT applying or
-    // discarding the current block 闂?remaining edits stay queued so
+    // discarding the current block —remaining edits stay queued so
     // the user can resume via /walk or commit via /apply later.
     if (key.escape && walkthroughActive) {
       setWalkthroughActive(false);
@@ -1663,8 +1663,8 @@ function AppInner({
       );
       return;
     }
-    // Edit-mode cycle: Shift+Tab flips review 闂?auto. Available any
-    // time a modal isn't up 闂?including mid-turn 闂?so the user can
+    // Edit-mode cycle: Shift+Tab flips review —auto. Available any
+    // time a modal isn't up —including mid-turn —so the user can
     // switch gears without abandoning the in-flight request. Prefer
     // this to typing `/mode <x>`; one keystroke, no command parsing.
     if (
@@ -1685,7 +1685,7 @@ function AppInner({
       !stagedChoiceCustom &&
       !pendingRevision
     ) {
-      // Three-stop cycle: review 闂?auto 闂?yolo 闂?review. yolo also
+      // Three-stop cycle: review —auto —yolo —review. yolo also
       // disables shell confirmations so true zero-prompt iteration takes two Shift+Tabs from default.
       const cur = editModeRef.current;
       const next: EditMode = cur === "review" ? "auto" : cur === "auto" ? "yolo" : "review";
@@ -1721,7 +1721,7 @@ function AppInner({
       !stagedChoiceCustom &&
       !pendingRevision &&
       // Fire when EITHER the banner is up OR there's any non-undone
-      // history entry 闂?the keybind is useful long after the 5-second
+      // history entry —the keybind is useful long after the 5-second
       // banner expires, which users rightly want.
       (undoBanner || hasUndoable())
     ) {
@@ -1779,12 +1779,12 @@ function AppInner({
     }
     if (busy) return;
     // ShellConfirm owns the full keyboard while it's showing. If we
-    // kept handling 闂?闂?/ Tab here they'd race with its SingleSelect
-    // 闂?the picker would move AND history recall would fire into the
+    // kept handling ↑/↓ / Tab here they'd race with its SingleSelect
+    // — the picker would move AND history recall would fire into the
     // (hidden) prompt buffer. Bail early.
     if (pendingShell || pendingPath) return;
 
-    // @-mention picker takes the same priority tier as slash. 闂?闂?walk
+    // @-mention picker takes the same priority tier as slash. ↑/↓ walk
     // the list; Tab on a folder drills into it, Tab on a file commits.
     // Enter is caught in handleSubmit. Right arrow stays cursor-move
     // (would otherwise fight PromptInput's multiline cursor). Must come
@@ -1806,7 +1806,7 @@ function AppInner({
       }
     }
 
-    // Slash-argument picker. Fires inside `/<cmd> <partial>` 闂?either
+    // Slash-argument picker. Fires inside `/<cmd> <partial>` —either
     // a file picker (for /edit), enum picker (for /preset, /model,
     // /plan, /branch, /harvest), or hint-only row. Navigation + Tab
     // substitute the highlighted value at the arg's offset.
@@ -1827,8 +1827,8 @@ function AppInner({
     }
 
     // Slash-suggestion mode takes priority over history recall.
-    // When the user is typing a `/闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鏁愭径濠勵吅闂佹寧绻傞幉娑㈠箻缂佹鍘遍梺闈涚墕閹冲酣顢旈銏＄厸閻忕偛澧藉ú瀛樸亜閵忊剝绀嬮柡浣瑰姍瀹曞崬鈻庡Ο鎭嶆氨绱撻崒娆掑厡闁稿鎹囧畷鏇㈠箮鐟欙絺鍋撻敃鍌涘€婚柦妯侯槼閹芥洟姊洪崫鍕窛闁哥姵鎸剧划缁樸偅閸愨晝鍘介梺閫涘嵆濞佳勬櫠椤栫偞鐓熸繝闈涙处閳锋帞绱掓潏銊ユ诞闁诡喗鐟╅、妤呭焵椤掑嫬绀夐柕鍫濇缁犲墽鐥銏╂缂佲檧鍋撻柣搴㈩問閸犳盯顢氳閸┿儲寰勬繛銏㈠枛閺屻劎鈧綆鍋呭鎴︽⒒閸屾瑨鍏岀痪顓炵埣瀹曟粌鈹戠€ｃ劉鍋撻崘顓犵杸闁哄啫鍋嗗ù鍕⒒娓氬洤澧紒澶屾暬閸?prefix and there are matches,
-    // 闂?闂?walk the suggestion list and Tab snaps the input to the
+    // When the user is typing a `/` prefix and there are matches,
+    // ↑/↓ walk the suggestion list and Tab snaps the input to the
     // highlighted command. Enter is handled in `handleSubmit` so
     // TextInput's onSubmit still fires cleanly.
     if (slashMatches && slashMatches.length > 0) {
@@ -1847,9 +1847,9 @@ function AppInner({
       }
     }
 
-    // Prompt history is now Ctrl+P / Ctrl+N (PromptInput 闂?multiline
-    // keys 闂?historyHandoff 闂?recallPrev / recallNext below). 闂?闂?are
-    // reserved for chat scroll 闂?without that move, native drag-select
+    // Prompt history is now Ctrl+P / Ctrl+N (PromptInput → multiline
+    // keys → historyHandoff → recallPrev / recallNext below). ↑/↓ are
+    // reserved for chat scroll — without that move, native drag-select
     // and right-click paste don't work on most terminals because we'd
     // have to keep xterm mouse tracking on to grab the wheel.
   });
@@ -1858,14 +1858,14 @@ function AppInner({
   // calls through the review queue (in `review` mode) or the auto-apply
   // snapshot/banner path (in `auto` mode) so the model's tool usage
   // respects the same gate as its text-form SEARCH/REPLACE output.
-  // Without this, edit_file bypasses `/apply` entirely 闂?which was the
+  // Without this, edit_file bypasses `/apply` entirely —which was the
   // bug that made the preview flow feel absent pre-0.5.24.
   //
   // `editModeRef` is read inside the closure so mode cycles don't need
   // to reinstall the hook. Cleanup clears the slot on unmount so a
   // follow-up App instance (tests, HMR) starts with a fresh registry.
   //
-  // biome-ignore lint/correctness/useExhaustiveDependencies: session / setEditMode / syncPendingCount are intentional closure captures 闂?their updaters are stable and we don't want to tear down and rebuild the interceptor on unrelated state churn
+  // biome-ignore lint/correctness/useExhaustiveDependencies: session / setEditMode / syncPendingCount are intentional closure captures —their updaters are stable and we don't want to tear down and rebuild the interceptor on unrelated state churn
   useEffect(() => {
     if (!tools || !codeMode) return;
     tools.setToolInterceptor(async (name, args) => {
@@ -1905,7 +1905,7 @@ function AppInner({
       } else {
         // write_file: capture the current content (if any) as SEARCH so
         // the queued block is a literal whole-file overwrite. For new
-        // files SEARCH stays empty 闂?applyEditBlock's create-new sentinel.
+        // files SEARCH stays empty —applyEditBlock's create-new sentinel.
         const content = typeof args.content === "string" ? args.content : "";
         block = toWholeFileEditBlock(relPath, content, rootForEdit);
       }
@@ -1917,7 +1917,7 @@ function AppInner({
       //
       // Does NOT push an info row to scrollback: the returned string
       // becomes the tool result AND the loop yields a `tool` event right
-      // after 闂?ToolCard renders that with the same text. Pushing here
+      // after —ToolCard renders that with the same text. Pushing here
       // would produce "result shown twice".
       const applyNow = (): string => {
         const snaps = snapshotBeforeEdits([block], rootForEdit);
@@ -1930,7 +1930,7 @@ function AppInner({
         return formatEditResults(results);
       };
 
-      // yolo behaves like auto for edit application 闂?the only extra
+      // yolo behaves like auto for edit application —the only extra
       // power yolo adds is bypassing shell confirmations (handled in
       // shell.ts via the allowAll getter).
       if (editModeRef.current === "auto" || editModeRef.current === "yolo") return applyNow();
@@ -1938,7 +1938,7 @@ function AppInner({
       // review mode, tool-call path: suspend the interceptor on the
       // per-edit modal unless the user has already hit "apply-rest-of-
       // turn" earlier in the same turn. Text-form SEARCH/REPLACE blocks
-      // in assistant_final still queue for end-of-turn preview 闂?they
+      // in assistant_final still queue for end-of-turn preview —they
       // land all at once with no mid-stream opportunity to prompt.
       if (turnEditPolicyRef.current === "apply-all") return applyNow();
 
@@ -2031,7 +2031,7 @@ function AppInner({
   // Embedded dashboard server lifecycle. Boot is async (server has to
   // bind a port + read static assets); the slash handler kicks this
   // off and reads the URL out of `dashboardRef` once the promise
-  // resolves. Tear-down is also async but cheap 闂?close drains
+  // resolves. Tear-down is also async but cheap —close drains
   // in-flight requests within a 1s grace window.
   const startDashboard = useCallback(async (): Promise<string> => {
     if (dashboardRef.current) return dashboardRef.current.url;
@@ -2080,7 +2080,7 @@ function AppInner({
             try {
               savePreset(canonical);
             } catch {
-              /* disk full / perms 闂?runtime change still took effect */
+              /* disk full / perms —runtime change still took effect */
             }
           },
           applyEffortLive: (effort) => {
@@ -2116,7 +2116,7 @@ function AppInner({
             }
             const fn = handleSubmitRef.current;
             if (!fn) return { accepted: false, reason: "TUI not ready" };
-            // Fire-and-forget 闂?handleSubmit drives the loop event stream
+            // Fire-and-forget —handleSubmit drives the loop event stream
             // which the web sees via SSE. We don't await it here because
             // a turn can take minutes; the HTTP request would time out.
             fn(text).catch(() => undefined);
@@ -2157,7 +2157,7 @@ function AppInner({
           },
           // ---------- Modal mirroring ----------
           getActiveModal: (): ActiveModal | null => {
-            // Probe the live state via refs in priority order 闂?only one
+            // Probe the live state via refs in priority order —only one
             // modal can be up at a time per App invariant.
             const ps = pendingShell;
             if (ps) {
@@ -2238,7 +2238,7 @@ function AppInner({
               return;
             }
             const plan = pendingPlanRef.current ?? "";
-            // Bypass the picker 闂?input two-step on web. The override
+            // Bypass the picker —input two-step on web. The override
             // form of handleStagedInputSubmit takes the plan + mode
             // directly; behaviour matches the TUI's "user typed feedback +
             // pressed Enter" path.
@@ -2339,7 +2339,7 @@ function AppInner({
     try {
       await h.close();
     } catch {
-      /* swallow 闂?server going down is best-effort */
+      /* swallow —server going down is best-effort */
     }
     log.pushInfo(t("app.dashboardStopped"));
   }, [log]);
@@ -2352,7 +2352,7 @@ function AppInner({
   // opted out with --no-dashboard. The whole point is discoverability:
   // most users had no idea /dashboard existed, so the URL needs to be
   // visible from the first render. startDashboard updates the React
-  // state itself, so we just fire-and-forget. Failures stay silent 闂?  // a missing dashboard never blocks the TUI.
+  // state itself, so we just fire-and-forget. Failures stay silent —  // a missing dashboard never blocks the TUI.
   useEffect(() => {
     if (noDashboard) return;
     if (dashboardRef.current) return;
@@ -2383,7 +2383,7 @@ function AppInner({
   /**
    * onChoose for the walkthrough EditConfirm. Each pick mutates
    * pendingEdits via the existing codeApply/codeDiscard helpers, which
-   * also bump pendingTick 闂?the modal re-renders with the next block.
+   * also bump pendingTick —the modal re-renders with the next block.
    * When no blocks remain, the modal unmounts.
    */
   const handleWalkChoice = useCallback(
@@ -2401,7 +2401,7 @@ function AppInner({
         return;
       } else if (choice === "flip-to-auto") {
         // Flip the gate first, then apply the current block, then exit
-        // the walk. Remaining blocks stay pending 闂?the user can keep
+        // the walk. Remaining blocks stay pending —the user can keep
         // walking via /walk again or commit them with /apply.
         setEditMode("auto");
         saveEditMode("auto");
@@ -2542,7 +2542,7 @@ function AppInner({
       }
       clearFiringFlag();
       // @-mention picker intercept. Enter on either a file or a folder
-      // commits the path INTO the buffer (with trailing space) 闂?the
+      // commits the path INTO the buffer (with trailing space) —the
       // user almost always types more after a mention. The trailing
       // space dismisses the picker, so the next Enter submits normally.
       // Folders inline as a directory listing at submit time.
@@ -2554,10 +2554,10 @@ function AppInner({
         }
       }
 
-      // Slash-argument picker intercept 闂?same shape as @-picker. For
+      // Slash-argument picker intercept —same shape as @-picker. For
       // file pickers (/edit) we splice + trailing space so the user
       // keeps typing the instruction. For enum pickers (/preset,
-      // /model, /plan, 闂? we splice without trailing space; those
+      // /model, /plan, — we splice without trailing space; those
       // commands take no further args, so the user presses Enter a
       // second time to run.
       if (slashArgMatches && slashArgMatches.length > 0 && slashArgContext) {
@@ -2570,7 +2570,7 @@ function AppInner({
 
       // Slash auto-complete on Enter. When the user typed a prefix
       // (e.g. "/he") and the suggestion list is visible, substitute
-      // the highlighted match so Enter runs it 闂?same effect as Tab
+      // the highlighted match so Enter runs it —same effect as Tab
       // + Enter, one keystroke less. Skip substitution if the user
       // already typed a full, exact command name (respect verbatim
       // input when they know what they want).
@@ -2588,7 +2588,7 @@ function AppInner({
       resetCursor();
 
       // Y/N fast-path when edits are pending. One keystroke is all it
-      // takes to commit or drop 闂?matches the muscle memory of `git
+      // takes to commit or drop —matches the muscle memory of `git
       // add -p` / most prompts. Deliberately scoped: only when there
       // ARE pending edits, so "y" as a normal message still works
       // when nothing's waiting.
@@ -2598,7 +2598,7 @@ function AppInner({
         return;
       }
 
-      // Hash mode 闂?`#note` (project) and `#g note` (global) append to
+      // Hash mode —`#note` (project) and `#g note` (global) append to
       // a REASONIX.md so future sessions pin the note in the immutable
       // prefix. No model round-trip. `\#literal` escape falls through to
       // normal submission with the backslash stripped so the model sees
@@ -2622,12 +2622,12 @@ function AppInner({
       }
       if (hashParse?.kind === "escape") {
         // Replace the working buffer with the de-escaped form. We don't
-        // recurse into handleSubmit to avoid the "still busy" race 闂?        // just rewrite `text` and let the rest of the pipeline (bang /
+        // recurse into handleSubmit to avoid the "still busy" race —        // just rewrite `text` and let the rest of the pipeline (bang /
         // slash / model) see the literal prompt.
         text = hashParse.text;
       }
 
-      // Bash mode 闂?`!cmd` runs a shell command in the sandbox root
+      // Bash mode —`!cmd` runs a shell command in the sandbox root
       // immediately (no allowlist gate: user-typed = explicit consent),
       // surfaces the formatted output in the Historical log, and
       // persists a user-role message so the next model turn sees what
@@ -2658,7 +2658,7 @@ function AppInner({
         return;
       }
 
-      // `/btw <question>` 闂?one-shot side question. Same async-not-fit-
+      // `/btw <question>` —one-shot side question. Same async-not-fit-
       // handleSlash shape as MCP browse: intercept here, call the client
       // directly with a fresh message list, never append to `loop.messages`
       // so the side exchange leaves the conversation context untouched.
@@ -2694,7 +2694,7 @@ function AppInner({
         return;
       }
 
-      // MCP resource / prompt browsers 闂?async calls that don't fit the
+      // MCP resource / prompt browsers —async calls that don't fit the
       // synchronous handleSlash shape, so we intercept the exact command
       // forms here. The slash-command registry still lists them (for
       // /help + argument-level picker completion), but this branch is
@@ -2976,7 +2976,7 @@ function AppInner({
       qq.noteTurnFromQQ(fromQQ);
       abortedThisTurn.current = false;
       // Seal the in-progress history entry so this turn's edits open
-      // a new one 闂?prior turns are preserved intact for /history and
+      // a new one —prior turns are preserved intact for /history and
       // `/undo` to walk back through independently.
       if (codeMode) sealCurrentEntry();
       // Reset per-turn edit policy so "apply-rest-of-turn" from the
@@ -2984,7 +2984,7 @@ function AppInner({
       // new prompt to start with the normal review gate re-armed.
       turnEditPolicyRef.current = "ask";
       // Pro badge state: if /pro was armed, this turn consumes it; the
-      // loop emits a "闂?/pro armed" warning we'll catch below. Clear
+      // loop emits a "—/pro armed" warning we'll catch below. Clear
       // the armed mirror so the badge flips to "escalated" (via the
       // warning handler) rather than staying at "armed" during the
       // actual run.
@@ -3038,7 +3038,7 @@ function AppInner({
       }
       // Expand `@http(s)://...` URL mentions. Available in any mode (chat
       // OR code) since fetching a URL doesn't need a sandbox root. Awaits
-      // the network sequentially across URLs 闂?for a typical 1-2 URLs in
+      // the network sequentially across URLs —for a typical 1-2 URLs in
       // a prompt this is fine; if a user pastes 10 URLs the latency adds
       // up but their prompt is also already huge.
       if (/(?:^|\s)@https?:\/\//.test(text)) {
@@ -3075,7 +3075,7 @@ function AppInner({
         let lastAssistantText = "";
         for await (const ev of loop.step(modelInput)) {
           writeTranscript(ev);
-          // Mirror to the kernel event log sidecar. Pure passthrough 闂?          // Eventizer holds the small state (turn boundary detection +
+          // Mirror to the kernel event log sidecar. Pure passthrough —          // Eventizer holds the small state (turn boundary detection +
           // tool callId correlation) needed to translate LoopEvent
           // shape into typed Event variants. Sink + eventizer share the
           // App's lifetime; nothing reads the artifact yet (future
@@ -3096,7 +3096,7 @@ function AppInner({
             const dashMsg = loopEventToDashboard(ev, { assistantId });
             if (dashMsg) broadcastDashboardEvent(dashMsg);
           }
-          // Status lines are transient 闂?any primary event (streaming
+          // Status lines are transient —any primary event (streaming
           // starts, a tool fires, etc.) means whatever we were waiting
           // FOR has now arrived, so drop the hint. We do this uniformly
           // at the top of the loop body for every role except "status"
@@ -3221,7 +3221,7 @@ function AppInner({
           );
         }
 
-        // Stop hooks 闂?turn has ended (or aborted). Block decisions are
+        // Stop hooks —turn has ended (or aborted). Block decisions are
         // meaningless past this point so we treat every non-pass as a
         // warning. Natural place for "after every turn, run the
         // formatter / lint / tests" automation.
@@ -3243,7 +3243,7 @@ function AppInner({
         qq.maybeSendFinalReply(lastAssistantText);
       } finally {
         clearInterval(timer);
-        // Esc aborted the turn 闂?close any in-flight cards (streaming /
+        // Esc aborted the turn —close any in-flight cards (streaming /
         // reasoning / tool / branch) so they leave the live region. Without
         // this, stranded done=false cards stick in CardStream's live tail.
         if (abortedThisTurn.current) {
@@ -3258,7 +3258,7 @@ function AppInner({
         // Clear pro-on-turn badge; armed-for-next-turn already cleared
         // at turn start when it was consumed.
         setTurnOnPro(false);
-        // Refresh balance lazily 闂?don't block the return.
+        // Refresh balance lazily —don't block the return.
         refreshBalance();
       }
     },
@@ -3339,7 +3339,7 @@ function AppInner({
   );
 
   // Mirror the latest handleSubmit so the /loop timer (set up below)
-  // calls the freshest closure on each firing 闂?config changes during
+  // calls the freshest closure on each firing —config changes during
   // the loop (model, mode, etc.) take effect immediately.
   useEffect(() => {
     handleSubmitRef.current = handleSubmit;
@@ -3348,7 +3348,7 @@ function AppInner({
   /**
    * ShellConfirm callback. Resolves the PauseGate so the
    * blocked tool function can proceed. The tool handles running the
-   * command (or throwing on deny) 闂?no synthetic user message needed.
+   * command (or throwing on deny) —no synthetic user message needed.
    */
   const handleShellConfirm = useCallback(
     (choice: ShellConfirmChoice, denyContext?: string) => {
@@ -3377,7 +3377,7 @@ function AppInner({
     [pendingShell, codeMode, currentRootDir, log],
   );
 
-  /** PathConfirm callback 闂?mirrors handleShellConfirm. Resolves the gate, no synthetic user message. */
+  /** PathConfirm callback —mirrors handleShellConfirm. Resolves the gate, no synthetic user message. */
   const handlePathConfirm = useCallback(
     (choice: "run_once" | "always_allow" | "deny", denyContext?: string) => {
       const pending = pendingPath;
@@ -3396,7 +3396,7 @@ function AppInner({
   );
 
   /** Bail out of every pending modal + the awaiting tool fn behind it.
-   *  Called by Esc-during-busy and by /new 闂?without this, a tool stuck
+   *  Called by Esc-during-busy and by /new —without this, a tool stuck
    *  on `pauseGate.ask` ignores the AbortSignal and the turn never ends. */
   const resetPendingModals = useCallback(() => {
     const editResolve = editReviewResolveRef.current;
@@ -3436,10 +3436,10 @@ function AppInner({
   /**
    * PlanConfirm callback. Three outcomes, all ending with a synthetic
    * user message so the model sees the verdict on its next turn:
-   *   - approve 闂?exit plan mode, tell the model to implement now.
-   *   - refine  闂?stay in plan mode, tell the model to revise.
-   *   - cancel  闂?exit plan mode, tell the model to drop the plan.
-   * Mirrors handleShellConfirm's busy-queue dance 闂?if the turn is
+   *   - approve —exit plan mode, tell the model to implement now.
+   *   - refine  —stay in plan mode, tell the model to revise.
+   *   - cancel  —exit plan mode, tell the model to drop the plan.
+   * Mirrors handleShellConfirm's busy-queue dance —if the turn is
    * still streaming "plan submitted, waiting" chatter when the user
    * picks, we abort it and queue the synthetic for the effect above.
    *
@@ -3477,7 +3477,7 @@ function AppInner({
       }
 
       // Cancel ("reject"). Open the same staged input as approve/refine so
-      // the user can tell the model *why* 闂?symmetric with the deny-tool
+      // the user can tell the model *why* —symmetric with the deny-tool
       // "press Tab to add reason" pattern. Empty Enter still cancels cleanly.
       if (pendingPlan) {
         const questions = extractOpenQuestionsSection(pendingPlan) ?? undefined;
@@ -3490,7 +3490,7 @@ function AppInner({
 
   // Ref-wrapped stable alias. `handlePlanConfirm` has deps that churn
   // every turn (busy toggles while the model is still streaming its
-  // wrap-up) 闂?passing it directly to `React.memo(PlanConfirm)` breaks
+  // wrap-up) —passing it directly to `React.memo(PlanConfirm)` breaks
   // the memo's shallow prop compare, so even without the ticker the
   // picker re-rendered on every parent state change. The ref keeps the
   // identity stable across the whole picker lifetime; the callback
@@ -3524,7 +3524,7 @@ function AppInner({
       // dispatch path without first having to setStagedInput() (which
       // is async and would race the read below). When the override is
       // present we also clear pendingPlan ourselves since web flow
-      // doesn't go through the picker 闂?input two-step.
+      // doesn't go through the picker —input two-step.
       const staged = override ?? stagedInput;
       if (override) {
         setPendingPlan(null);
@@ -3539,7 +3539,7 @@ function AppInner({
       if (staged.mode === "approve") {
         togglePlanMode(false);
         // Materialize the approved plan as an "active" card so PlanLiveRow
-        // can dock it at the bottom 闂?without this dispatch, no card with
+        // can dock it at the bottom —without this dispatch, no card with
         // variant: "active" exists and the live strip stays empty.
         const approvedSteps = planStepsRef.current;
         if (approvedSteps && approvedSteps.length > 0) {
@@ -3559,7 +3559,7 @@ function AppInner({
           ? `plan approved + instructions - ${tail}`
           : "plan approved - implementing";
       } else if (staged.mode === "reject") {
-        // Drop the structured plan state 闂?the user said this path is wrong,
+        // Drop the structured plan state —the user said this path is wrong,
         // no point keeping it around for resume.
         planStepsRef.current = null;
         completedStepIdsRef.current = new Set();
@@ -3576,7 +3576,7 @@ function AppInner({
 
       // Resolve the PauseGate so the blocked submit_plan tool function
       // returns. The user's typed feedback rides on the verdict so the
-      // model sees it as the tool result 闂?without this, refine looked
+      // model sees it as the tool result —without this, refine looked
       // identical to "user requested refinement" with no payload (#533).
       const gateId = pendingGateIdRef.current;
       if (gateId !== null) {
@@ -3593,7 +3593,7 @@ function AppInner({
     [stagedInput, togglePlanMode, persistPlanState, agentStore, log],
   );
   // Ref-mirror so startDashboard's resolvePlanConfirm closure can call
-  // the latest function 闂?handleStagedInputSubmit's deps churn on every
+  // the latest function —handleStagedInputSubmit's deps churn on every
   // stagedInput change, which would freeze a captured reference.
   const handleStagedInputSubmitRef = useRef(handleStagedInputSubmit);
   useEffect(() => {
@@ -3604,7 +3604,7 @@ function AppInner({
       handleStagedInputSubmitRef.current(feedback, override);
   }, []);
 
-  /** Esc on the inline input 闂?restore the picker without resuming. */
+  /** Esc on the inline input —restore the picker without resuming. */
   const handleStagedInputCancel = useCallback(() => {
     if (stagedInput?.plan) setPendingPlan(stagedInput.plan);
     setStagedInput(null);
@@ -3639,7 +3639,7 @@ function AppInner({
 
   // Ref-wrap to keep ChoiceConfirm's React.memo from re-rendering on
   // every parent tick (same pattern as PlanConfirm / CheckpointConfirm).
-  // Stable refs over the modal handlers 闂?used by the web chat-bridge
+  // Stable refs over the modal handlers —used by the web chat-bridge
   // to drive the same code path as a TUI button click without
   // dragging the handlers (and their ever-shifting deps) into
   // startDashboard's useCallback closure.
@@ -3720,7 +3720,7 @@ function AppInner({
             result: string;
             notes?: string;
           };
-          // completed/total come from planStepsRef 闂?don't have them via gate
+          // completed/total come from planStepsRef —don't have them via gate
           const completed = completedStepIdsRef.current.size;
           const total = planStepsRef.current?.length ?? 0;
           // Shared policy (src/core/pause-policy.ts) decides whether to
@@ -3799,7 +3799,7 @@ function AppInner({
       setPendingCheckpoint(null);
       const gid = pendingGateIdRef.current;
       if (choice === "revise") {
-        // Don't resolve the gate yet 闂?wait for the staged feedback input
+        // Don't resolve the gate yet —wait for the staged feedback input
         // and let handleCheckpointReviseSubmit resolve with the feedback text.
         setStagedCheckpointRevise(snap);
         return;
@@ -3882,7 +3882,7 @@ function AppInner({
     [],
   );
 
-  /** Revise feedback submitted 闂?resolves the gate with feedback. */
+  /** Revise feedback submitted —resolves the gate with feedback. */
   const handleCheckpointReviseSubmit = useCallback(
     (feedback: string, snapOverride?: { stepId: string; title?: string }) => {
       const snap = snapOverride;
@@ -3920,7 +3920,7 @@ function AppInner({
     handleCheckpointReviseSubmitRef.current = handleCheckpointReviseSubmit;
   }, [handleCheckpointReviseSubmit]);
 
-  /** Custom free-form answer submitted 闂?resolves the PauseGate with the typed text. */
+  /** Custom free-form answer submitted —resolves the PauseGate with the typed text. */
   const handleChoiceCustomSubmit = useCallback((answer: string) => {
     setStagedChoiceCustom(null);
     const trimmed = answer.trim();
@@ -3930,7 +3930,7 @@ function AppInner({
     }
   }, []);
 
-  /** Esc on the custom input 闂?restore the choice picker. */
+  /** Esc on the custom input —restore the choice picker. */
   const handleChoiceCustomCancel = useCallback(() => {
     const snap = stagedChoiceCustom;
     setStagedChoiceCustom(null);
@@ -3968,18 +3968,18 @@ function AppInner({
       }
       // Accept: keep the done-step prefix from the existing plan, replace
       // the rest with the proposed remainingSteps. completedStepIds
-      // stays intact 闂?done work isn't undone.
+      // stays intact —done work isn't undone.
       const completed = completedStepIdsRef.current;
       const oldSteps = planStepsRef.current ?? [];
       const donePrefix = oldSteps.filter((s) => completed.has(s.id));
       const merged: PlanStep[] = [...donePrefix];
       for (const s of snap.remainingSteps) {
-        if (completed.has(s.id)) continue; // already done 闂?don't re-queue
+        if (completed.has(s.id)) continue; // already done —don't re-queue
         merged.push(s);
       }
       planStepsRef.current = merged;
       persistPlanState();
-      // Replace the live active card so PlanLiveRow shows the new tail 闂?      // existing card's stale ids would fail subsequent step completes.
+      // Replace the live active card so PlanLiveRow shows the new tail —      // existing card's stale ids would fail subsequent step completes.
       agentStore.dispatch({ type: "plan.drop" });
       log.showPlan({
         title: planSummaryRef.current ?? "plan",
@@ -4289,7 +4289,7 @@ function AppInner({
                           try {
                             savePreset(inferred);
                           } catch {
-                            /* disk full / perms 闂?runtime change still took effect */
+                            /* disk full / perms —runtime change still took effect */
                           }
                         }
                         log.pushInfo(`model: ${outcome.id}`);
@@ -4311,7 +4311,7 @@ function AppInner({
                         try {
                           savePreset(outcome.name);
                         } catch {
-                          /* disk full / perms 闂?runtime change still took effect */
+                          /* disk full / perms —runtime change still took effect */
                         }
                         log.pushInfo(`preset: ${outcome.name} - ${p.model}`);
                       }
