@@ -39,6 +39,7 @@ import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
 import { useElapsed } from "./ui/live";
+import { AboutModal } from "./ui/about";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Sidebar } from "./ui/sidebar";
 import { Splash, shouldShowSplash } from "./ui/splash";
@@ -965,6 +966,7 @@ function TabRuntime({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
   const [jobsOpen, setJobsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const openSettingsAt = useCallback((page: SettingsPageId = "general") => {
     setSettingsPage(page);
     setSettingsOpen(true);
@@ -1473,6 +1475,7 @@ function TabRuntime({
           onOpenSettings={() => openSettingsAt("general")}
           onOpenRules={() => openSettingsAt("rules")}
           onOpenCommands={() => palette.setOpen(true)}
+          onOpenAbout={() => setAboutOpen(true)}
         />
 
         <main className="main" style={{ position: "relative" }}>
@@ -1762,6 +1765,8 @@ function TabRuntime({
           onPick={(path) => saveSettings({ workspaceDir: path })}
           onBrowse={pickWorkspace}
         />
+
+        {aboutOpen ? <AboutModal onClose={() => setAboutOpen(false)} /> : null}
 
         {settingsOpen && state.settings ? (
           <SettingsModal

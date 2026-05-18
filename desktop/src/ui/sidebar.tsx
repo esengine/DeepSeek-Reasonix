@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { I } from "../icons";
 import type { SessionInfo } from "../App";
+import { t } from "../i18n";
+import { I } from "../icons";
 
 type PendingDelete = {
   name: string;
@@ -39,6 +40,7 @@ export function Sidebar({
   onOpenSettings,
   onOpenRules,
   onOpenCommands,
+  onOpenAbout,
 }: {
   sessions: SessionInfo[];
   activeName?: string;
@@ -48,6 +50,7 @@ export function Sidebar({
   onOpenSettings: () => void;
   onOpenRules: () => void;
   onOpenCommands: () => void;
+  onOpenAbout: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
@@ -186,6 +189,12 @@ export function Sidebar({
             <I.shield size={13} />
           </span>
           <span>审批规则</span>
+        </div>
+        <div className="row" onClick={onOpenAbout}>
+          <span className="ico">
+            <I.help size={13} />
+          </span>
+          <span>{t("about.sidebarLabel")}</span>
         </div>
         <div className="row" onClick={onOpenSettings}>
           <span className="ico">
