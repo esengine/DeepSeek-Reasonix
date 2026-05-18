@@ -54,18 +54,20 @@ export class StdioTransport implements McpTransport {
       this.child = spawn(line, [], {
         env,
         cwd: opts.cwd,
-        stdio: ["pipe", "pipe", "inherit"],
+        stdio: ["pipe", "pipe", "pipe"],
         shell: true,
       });
     } else {
       this.child = spawn(opts.command, opts.args ?? [], {
         env,
         cwd: opts.cwd,
-        stdio: ["pipe", "pipe", "inherit"],
+        stdio: ["pipe", "pipe", "pipe"],
       });
     }
     this.child.stdout!.setEncoding("utf8");
     this.child.stdout!.on("data", (chunk: string) => this.onStdout(chunk));
+    this.child.stderr!.setEncoding("utf8");
+    this.child.stderr!.on("data", (chunk: string) => this.onStderr(chunk));
     this.child.on("close", () => this.onClose());
     this.child.on("error", (err) => {
       // Surface spawn errors as a synthetic JsonRpcError so callers don't
@@ -138,13 +140,21 @@ export class StdioTransport implements McpTransport {
         const msg = JSON.parse(line) as JsonRpcMessage;
         this.push(msg);
       } catch {
-        // Malformed lines are dropped — some servers emit startup banners
-        // before the JSON-RPC loop begins. We surface the noise to stderr
-        // via the inherited stderr stream, not our event queue.
+        // Malformed stdout lines are dropped — some servers emit startup
+        // banners before the JSON-RPC loop begins. Surface only under
+        // REASONIX_DEBUG_MCP=1; otherwise the noise corrupts the TUI render.
         if (process.env.REASONIX_DEBUG_MCP === "1") {
           process.stderr.write(`[mcp-stdio] dropped malformed line: ${line}\n`);
         }
       }
+    }
+  }
+
+  // Python MCP SDK writes info logs (`server.py:534 ListPromptsRequest`)
+  // to stderr — letting those through would corrupt the TUI render.
+  private onStderr(chunk: string): void {
+    if (process.env.REASONIX_DEBUG_MCP === "1") {
+      process.stderr.write(chunk);
     }
   }
 
