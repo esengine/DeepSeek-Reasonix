@@ -24,7 +24,6 @@ type BuildOptions = {
   model?: string;
   extraBody?: Record<string, unknown>;
   timeoutMs?: number;
-  batchSize?: number;
   signal?: AbortSignal;
   windowLines?: number;
   overlap?: number;
@@ -215,7 +214,6 @@ type QueryOptions = {
   model?: string;
   extraBody?: Record<string, unknown>;
   timeoutMs?: number;
-  batchSize?: number;
   signal?: AbortSignal;
   topK?: number;
   minScore?: number;
@@ -272,7 +270,6 @@ function resolveBuildEmbeddingConfig(opts: BuildOptions): ResolvedEmbeddingConfi
       model: opts.model,
       extraBody: opts.extraBody ?? {},
       timeoutMs: opts.timeoutMs ?? 30_000,
-      batchSize: opts.batchSize ?? 10,
     };
   }
   if (opts.baseUrl || opts.model) {

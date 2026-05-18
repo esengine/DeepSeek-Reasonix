@@ -33,7 +33,6 @@ export interface OpenAICompatEmbeddingUserConfig {
   apiKey?: string;
   model?: string;
   extraBody?: Record<string, unknown>;
-  batchSize?: number;
 }
 
 export interface SemanticEmbeddingUserConfig {
@@ -56,7 +55,6 @@ export interface ResolvedOpenAICompatEmbeddingConfig {
   model: string;
   extraBody: Record<string, unknown>;
   timeoutMs: number;
-  batchSize: number;
 }
 
 export type ResolvedEmbeddingConfig =
@@ -75,7 +73,6 @@ export interface SemanticEmbeddingConfigView {
     apiKeySet: boolean;
     model: string;
     extraBody: Record<string, unknown>;
-    batchSize: number;
   };
 }
 
@@ -265,7 +262,6 @@ export function loadMetasoApiKey(path: string = defaultConfigPath()): string {
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL = "nomic-embed-text";
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_BATCH_SIZE = 10;
 
 export function defaultConfigPath(): string {
   return join(homedir(), ".reasonix", "config.json");
@@ -850,6 +846,38 @@ export function loadSemanticEmbeddingUserConfig(
   return normalizeSemanticEmbeddingUserConfig(readConfig(path).semantic);
 }
 
+export function normalizeSemanticEmbeddingUserConfig(
+  raw: SemanticEmbeddingUserConfig | undefined | null,
+): SemanticEmbeddingUserConfig {
+  if (!raw || typeof raw !== "object") return {};
+  const out: SemanticEmbeddingUserConfig = {};
+  if (raw.provider === "openai-compat" || raw.provider === "ollama") {
+    out.provider = raw.provider;
+  }
+  if (raw.ollama && typeof raw.ollama === "object") {
+    out.ollama = {
+      baseUrl:
+        typeof raw.ollama.baseUrl === "string" ? raw.ollama.baseUrl.trim() : undefined,
+      model: typeof raw.ollama.model === "string" ? raw.ollama.model.trim() : undefined,
+    };
+  }
+  if (raw.openaiCompat && typeof raw.openaiCompat === "object") {
+    const c = raw.openaiCompat;
+    out.openaiCompat = {
+      baseUrl: typeof c.baseUrl === "string" ? c.baseUrl.trim() : undefined,
+      apiKey: typeof c.apiKey === "string" ? c.apiKey.trim() : undefined,
+      model: typeof c.model === "string" ? c.model.trim() : undefined,
+      extraBody:
+        c.extraBody &&
+        typeof c.extraBody === "object" &&
+        !Array.isArray(c.extraBody)
+          ? { ...c.extraBody }
+          : undefined,
+    };
+  }
+  return out;
+}
+
 export function resolveSemanticEmbeddingConfig(
   path: string = defaultConfigPath(),
 ): ResolvedEmbeddingConfig {
@@ -868,7 +896,6 @@ export function resolveSemanticEmbeddingConfig(
       model: c.model,
       extraBody: c.extraBody ?? {},
       timeoutMs: 30_000,
-      batchSize: c.batchSize ?? DEFAULT_BATCH_SIZE,
     };
   }
   const baseUrl = user.ollama?.baseUrl || process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL;
@@ -879,33 +906,6 @@ export function resolveSemanticEmbeddingConfig(
     model,
     timeoutMs: 30_000,
   };
-}
-
-export function normalizeSemanticEmbeddingUserConfig(
-  raw: SemanticEmbeddingUserConfig | undefined | null,
-): SemanticEmbeddingUserConfig {
-  if (!raw || typeof raw !== "object") return {};
-  const out: SemanticEmbeddingUserConfig = {};
-  if (raw.provider === "openai-compat" || raw.provider === "ollama") {
-    out.provider = raw.provider;
-  }
-  if (raw.ollama && typeof raw.ollama === "object") {
-    out.ollama = {
-      baseUrl: typeof raw.ollama.baseUrl === "string" ? raw.ollama.baseUrl.trim() : undefined,
-      model: typeof raw.ollama.model === "string" ? raw.ollama.model.trim() : undefined,
-    };
-  }
-  if (raw.openaiCompat && typeof raw.openaiCompat === "object") {
-    const c = raw.openaiCompat;
-    out.openaiCompat = {
-      baseUrl: typeof c.baseUrl === "string" ? c.baseUrl.trim() : undefined,
-      apiKey: typeof c.apiKey === "string" ? c.apiKey.trim() : undefined,
-      model: typeof c.model === "string" ? c.model.trim() : undefined,
-      extraBody: c.extraBody && typeof c.extraBody === "object" && !Array.isArray(c.extraBody) ? { ...c.extraBody } : undefined,
-      batchSize: typeof c.batchSize === "number" && Number.isInteger(c.batchSize) && c.batchSize > 0 ? c.batchSize : undefined,
-    };
-  }
-  return out;
 }
 
 export function loadSemanticEmbeddingConfigView(
@@ -932,7 +932,6 @@ export function loadSemanticEmbeddingConfigView(
       apiKeySet,
       model: user.openaiCompat?.model ?? "",
       extraBody: user.openaiCompat?.extraBody ?? {},
-      batchSize: user.openaiCompat?.batchSize ?? DEFAULT_BATCH_SIZE,
     },
   };
 }
