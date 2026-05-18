@@ -616,6 +616,15 @@ function Popup({
   onClose: () => void;
   onHover: (i: number, item: SlashCmd | MentionItem) => void;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      const el = listRef.current?.querySelector<HTMLElement>(`[data-active="true"]`);
+      el?.scrollIntoView({ block: "nearest" });
+    });
+  }, [activeIdx]);
+
   return (
     <div className="popup" onMouseDown={(e) => e.preventDefault()}>
       <div className="ph">
@@ -630,7 +639,7 @@ function Popup({
           <I.x size={11} />
         </span>
       </div>
-      <div className="popup-list">
+      <div className="popup-list" ref={listRef}>
         {items.length === 0 ? (
           <div
             style={{
