@@ -84,9 +84,10 @@ export function useAutoScroll(
     };
   }, [containerRef, isAtBottom, refreshJumpButton]);
 
-  // When busy→idle (turn completes), re-pin and scroll to final answer.
+  // Both busy edges re-pin: turn start = user just sent and expects to
+  // see the reply; turn end = settle on the final answer (issue #1182).
   useEffect(() => {
-    if (wasBusyRef.current && !busy) {
+    if (wasBusyRef.current !== busy) {
       scrollToBottom(true);
     }
     wasBusyRef.current = busy;
