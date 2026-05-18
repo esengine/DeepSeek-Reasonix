@@ -1,6 +1,6 @@
 // Lang context + t() helper. `t({zh, en})` returns the active-lang string.
 
-window.REASONIX_VERSION = "0.43.0";
+window.REASONIX_VERSION = "0.45.1";
 
 const LangCtx = React.createContext({ lang: "zh", setLang: () => {} });
 

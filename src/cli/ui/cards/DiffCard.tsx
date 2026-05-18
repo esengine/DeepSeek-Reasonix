@@ -29,7 +29,6 @@ export function DiffCard({ card }: { card: DiffCardData }): React.ReactElement {
         glyph="±"
         tone={TONE.ok}
         title={card.file}
-        titleColor={FG.body}
         meta={[
           { text: `+${card.stats.add}`, color: TONE.ok },
           { text: `-${card.stats.del}`, color: TONE.err },

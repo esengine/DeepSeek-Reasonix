@@ -4,27 +4,21 @@ import React from "react";
 import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
-import { PILL_PATH, PILL_SECTION, Pill } from "../primitives/Pill.js";
+import { PILL_PATH, Pill } from "../primitives/Pill.js";
 import type { TaskCard as TaskCardData, TaskStep } from "../state/cards.js";
 import { useThemeTokens } from "../theme/context.js";
 
 const STEP_GLYPH: Record<TaskStep["status"], string> = {
   queued: "○",
-  running: "▶",
+  running: "●",
   done: "✓",
   failed: "✗",
 };
 
 const TASK_GLYPH: Record<TaskCardData["status"], string> = {
-  running: "▶",
+  running: "●",
   done: "✓",
   failed: "✗",
-};
-
-const TASK_PILL: Record<TaskCardData["status"], { bg: string; fg: string }> = {
-  running: PILL_SECTION.task,
-  done: PILL_SECTION.taskDone,
-  failed: PILL_SECTION.taskFailed,
 };
 
 export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
@@ -40,7 +34,6 @@ export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
     done: tone.ok,
     failed: tone.err,
   };
-  const pill = TASK_PILL[card.status];
   const elapsed = `${(card.elapsedMs / 1000).toFixed(1)}s`;
   return (
     <Card tone={taskColor[card.status]}>
@@ -48,8 +41,6 @@ export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
         glyph={TASK_GLYPH[card.status]}
         tone={taskColor[card.status]}
         title={t("cardTitles.task")}
-        titleColor={pill.fg}
-        titleBg={pill.bg}
         subtitle={`${card.index} / ${card.total}  ${card.title}`}
         meta={[elapsed, card.status]}
       />

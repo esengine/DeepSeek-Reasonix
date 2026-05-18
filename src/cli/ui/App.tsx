@@ -1,14 +1,7 @@
 import { type WriteStream, statSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { Box, Text, useStdin, useStdout } from "ink";
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type JsonlEventSink,
   eventLogPath,
@@ -109,7 +102,9 @@ import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { BootSplash } from "./BootSplash.js";
 import { CheckpointPicker } from "./CheckpointPicker.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
+import { ComposerArea } from "./ComposerArea.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
+import { LiveActivityArea } from "./LiveActivityArea.js";
 import { McpHub } from "./McpHub.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { PathConfirm } from "./PathConfirm.js";
@@ -150,26 +145,17 @@ import { useLanguageReload } from "./hooks/useLanguageReload.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
 import { usePresetMode } from "./hooks/usePresetMode.js";
 import { useQuit } from "./hooks/useQuit.js";
-import { toSceneCard, useSceneTrace } from "./hooks/useSceneTrace.js";
 import { useScrollback } from "./hooks/useScrollback.js";
-import { useTerminalSetup } from "./hooks/useTerminalSetup.js";
 import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useWorkspaceRoot } from "./hooks/useWorkspaceRoot.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { CardStream } from "./layout/CardStream.js";
+import { InputAreaWithHistoryHint } from "./layout/InputAreaWithHistoryHint.js";
 import { LiveExpandContext } from "./layout/LiveExpandContext.js";
-import {
-  ModeStatusBar,
-  OngoingToolRow,
-  SubagentLiveStack,
-  ThinkingRow,
-  UndoBanner,
-} from "./layout/LiveRows.js";
+import { ModeStatusBar } from "./layout/LiveRows.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import type { StatusBarConfig } from "./layout/StatusRow.js";
-import { ToastRail } from "./layout/ToastRail.js";
-import { PlanLiveRow } from "./layout/plan-live-row.js";
 import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
@@ -181,10 +167,6 @@ import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
-import { requestListPicker } from "./scene/list-picker-store.js";
-import { getActiveListPicker, subscribeListPicker } from "./scene/list-picker-store.js";
-import { getActivePromptInput, subscribePromptInput } from "./scene/prompt-input-store.js";
-import { isIntegratedRendererRequested } from "./scene/trace.js";
 import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
@@ -289,16 +271,8 @@ export interface AppProps {
   dashboardHost?: string;
   /** Stable dashboard URL token (#968). `undefined` mints a fresh per-boot token. */
   dashboardToken?: string;
-  /** Mid-chat session swap 闂?Root remounts App with the new session via key. */
+  /** Mid-chat session swap — Root remounts App with the new session via key. */
   onSwitchSession?: (name: string | undefined) => void;
-  /**
-   * Enable DECSET 1007 (alternate-scroll) so the wheel scrolls chat
-   * on web/cloud/SSH terminals 闂?terminal translates wheel events to
-   * 闂?闂?key sequences in alt-screen, no full mouse tracking, native
-   * drag-select + right-click unaffected. Default true. Pass false
-   * (CLI: `--no-mouse`) to suppress entirely.
-   */
-  mouse?: boolean;
   /** One-time startup info rows injected by chatCommand. */
   startupInfoHints?: string[];
   /** Pre-created QQ channel (started before TUI mounts). */
@@ -307,18 +281,6 @@ export interface AppProps {
   qqSubmitRef?: { current: ((text: string) => void) | null };
   /** Ref filled by App on mount so QQ errors appear in the TUI log. */
   qqErrorRef?: { current: ((msg: string) => void) | null };
-  /** Ref filled by App on mount so Rust approval-response events route to the right handler. */
-  approvalDispatchRef?: { current: ((kind: string, choice: unknown) => void) | null };
-  /** Ref filled by App on mount so Rust composer-text events update Ink's `input` (so @/slash pickers fire). */
-  rustComposerRef?: { current: ((text: string) => void) | null };
-  /** Apply edit-mode value from Rust (Shift+Tab cycle resolved in Rust, or picker selection). */
-  modeSetRef?: {
-    current: ((value: "review" | "auto" | "yolo") => void) | null;
-  };
-  /** Apply preset value from Rust (picker selection). */
-  presetSetRef?: {
-    current: ((value: "auto" | "flash" | "pro") => void) | null;
-  };
 }
 
 /**
@@ -334,27 +296,6 @@ const FLUSH_INTERVAL_MS = (() => {
   if (!Number.isFinite(parsed) || parsed < 16 || parsed > 1000) return 50;
   return Math.round(parsed);
 })();
-
-/**
- * Renders either the input area (pinned) or the "reading history" hint
- * (scrolled up). Reads `pinned` from the chat-scroll store directly so
- * AppInner doesn't subscribe 闂?toggling pinned only re-renders this leaf.
- */
-function InputAreaWithHistoryHint({
-  inputArea,
-}: { inputArea: React.ReactNode }): React.ReactElement {
-  const pinned = useChatScrollState((s) => s.pinned);
-  if (!pinned) {
-    return (
-      <Text color={FG.faint}>
-        {
-          " 濠电姷鏁告慨鐑藉极閸涘﹥鍙忛柣鎴ｆ閺嬩線鏌涘☉姗堟敾闁告瑥绻橀弻锝夊箣濠垫劖缍楅梺閫炲苯澧柛濠傛健楠炴劖绻濋崘顏嗗骄闂佸啿鎼鍥╃矓椤旈敮鍋撶憴鍕８闁告梹鍨甸锝夊醇閺囩偟顓洪梺缁樼懃閹虫劙鐛姀銈嗏拻闁稿本鐟︾粊鐗堛亜椤愩埄妲搁柣锝呭槻铻ｉ悶娑掑墲閻忓啫鈹戦悙鏉戠仸缁炬澘绉归、鏇熺鐎ｎ偆鍘梺鍓插亝缁诲啴宕戦鍡樺枑闁绘鐗嗙粭姘舵煕鐎ｎ偄濮夐柍褜鍓涢幊鎾寸珶婵犲洤绐楅柡宥庡幖缁€鍫澝归悡搴ｆ憼闁抽攱鍨堕幈銊╂偡閻楀牊鎮欓梺閫炲苯鍘甸柛濠冪箓閻ｇ兘寮剁拠鐐瀹曘劑顢橀崶椋庣暤闁哄本鐩鎾Ω閵壯傚摋闂備礁鎲￠崝蹇涘磻閹剧繝绻嗛柣鎰典簻閳ь剚鐗犲畷婵嬫晝閳ь剟鈥﹂崸妤€鐒垫い鎺戝€荤壕鍏笺亜閺冨倸甯舵い锝呯－缁?reading history 闂?End / PgDn to return 闂?闂?to advance one line"
-        }
-      </Text>
-    );
-  }
-  return <>{inputArea}</>;
-}
 
 /**
  * Captures printable keys / backspace / Enter while history is unpinned so the
@@ -408,7 +349,7 @@ function LoopStatusRow({
   const nextFireMs = Math.max(0, loop.nextFireAt - Date.now());
   return (
     <Box>
-      <Text color="cyan">{`闂?${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} 闂?/loop stop or type to cancel`}</Text>
+      <Text color="cyan">{`> ${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} - /loop stop or type to cancel`}</Text>
     </Box>
   );
 }
@@ -501,15 +442,10 @@ function AppInner({
   dashboardHost,
   dashboardToken,
   onSwitchSession,
-  mouse = true,
   startupInfoHints,
   qqChannel,
   qqSubmitRef,
   qqErrorRef,
-  approvalDispatchRef,
-  rustComposerRef,
-  modeSetRef,
-  presetSetRef,
   themeName,
   setThemeName,
   statusBar,
@@ -522,7 +458,6 @@ function AppInner({
   );
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const cardCount = useAgentState((s) => s.cards.length);
-  const recentCardsJson = useAgentState((s) => JSON.stringify(s.cards.slice(-24).map(toSceneCard)));
   const sessionModel = useAgentState((s) => s.session.model);
   const ctxTokens = useAgentState((s) => s.status.promptTokens);
   const ctxCap = useAgentState(
@@ -541,13 +476,6 @@ function AppInner({
   const activityLabel = useActivityLabel();
   const chatScroll = useChatScrollActions();
   const [input, setInput] = useState("");
-  useEffect(() => {
-    if (!rustComposerRef) return;
-    rustComposerRef.current = (text: string) => setInput(text);
-    return () => {
-      if (rustComposerRef) rustComposerRef.current = null;
-    };
-  }, [rustComposerRef]);
   const [composerCursor, setComposerCursor] = useState(0);
   const [busy, setBusy] = useState(false);
   const [slashUsage, setSlashUsage] = useState<Readonly<Record<string, number>>>(() =>
@@ -598,8 +526,6 @@ function AppInner({
     clear: clearToolProgressDisplay,
   } = useToolProgressDisplay(progressSink);
   const { stdout } = useStdout();
-  useTerminalSetup(mouse);
-
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
   // subagentRunner closure can read the ref. The wallet-currency thunk
@@ -643,25 +569,6 @@ function AppInner({
   } = useEditGate(!!codeMode);
   const { preset, setPreset, proArmed, setProArmed, turnOnPro, setTurnOnPro } =
     usePresetMode(model);
-  useEffect(() => {
-    if (!modeSetRef) return;
-    modeSetRef.current = (value) => {
-      setEditMode(value);
-    };
-    return () => {
-      if (modeSetRef) modeSetRef.current = null;
-    };
-  }, [modeSetRef, setEditMode]);
-  useEffect(() => {
-    if (!presetSetRef) return;
-    presetSetRef.current = (value) => {
-      setPreset(value);
-      agentStore.dispatch({ type: "session.preset.change", preset: value });
-    };
-    return () => {
-      if (presetSetRef) presetSetRef.current = null;
-    };
-  }, [presetSetRef, setPreset, agentStore]);
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -1195,8 +1102,8 @@ function AppInner({
         bumpReady();
       } else if (notice.kind === "failed") {
         log.pushWarning(
-          `MCP 闂?${notice.name} failed`,
-          `${notice.reason}\n闂?run \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).`,
+          `MCP ${notice.name} failed`,
+          `${notice.reason}\nrun \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).`,
         );
         bumpReady();
       } else if (notice.kind === "tools-ready") {
@@ -1465,212 +1372,11 @@ function AppInner({
     slashUsage,
   });
 
-  const slashMatchesJson = useMemo(() => {
-    if (!slashMatches || slashMatches.length === 0) return undefined;
-    return JSON.stringify(
-      slashMatches.map((m) => ({
-        cmd: m.cmd,
-        summary: m.summary,
-        ...(m.argsHint !== undefined ? { argsHint: m.argsHint } : {}),
-      })),
-    );
-  }, [slashMatches]);
-
-  const slashCatalogJson = useMemo(() => {
-    const all = suggestSlashCommands("", !!codeMode);
-    return JSON.stringify(
-      all.map((m) => {
-        const i18nKey = `slash.${m.cmd}.description`;
-        const translated = t(i18nKey);
-        const summary = translated === i18nKey ? m.summary : translated;
-        const argCompleter = Array.isArray(m.argCompleter) ? [...m.argCompleter] : undefined;
-        return {
-          cmd: m.cmd,
-          summary,
-          group: m.group,
-          ...(m.argsHint !== undefined ? { argsHint: m.argsHint } : {}),
-          ...(m.aliases && m.aliases.length > 0 ? { aliases: [...m.aliases] } : {}),
-          ...(argCompleter ? { argCompleter } : {}),
-        };
-      }),
-    );
-  }, [codeMode]);
-
-  const atStateJson = useMemo(() => {
-    if (!atState) return undefined;
-    return JSON.stringify(atState);
-  }, [atState]);
-
-  const slashArgStateJson = useMemo(() => {
-    if (!slashArgContext || slashArgContext.kind !== "picker") return undefined;
-    if (!slashArgMatches || slashArgMatches.length === 0) return undefined;
-    return JSON.stringify({
-      cmd: slashArgContext.spec.cmd,
-      partial: slashArgContext.partial,
-      matches: [...slashArgMatches],
-    });
-  }, [slashArgContext, slashArgMatches]);
-
-  const promptHistoryJson = useMemo(
-    () => (promptHistory.length === 0 ? undefined : JSON.stringify(promptHistory)),
-    [promptHistory],
-  );
-
-  const activePromptInput = useSyncExternalStore(
-    subscribePromptInput,
-    getActivePromptInput,
-    getActivePromptInput,
-  );
-  const promptInputJson = useMemo(
-    () => (activePromptInput ? JSON.stringify(activePromptInput) : undefined),
-    [activePromptInput],
-  );
-
-  const activeListPicker = useSyncExternalStore(
-    subscribeListPicker,
-    getActiveListPicker,
-    getActiveListPicker,
-  );
-  const listPickerJson = useMemo(
-    () => (activeListPicker ? JSON.stringify(activeListPicker) : undefined),
-    [activeListPicker],
-  );
-
   useEffect(() => {
     setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
   }, [currentRootDir]);
 
-  const sessionsJson = useMemo(() => {
-    if (!pendingSessionsPicker || sessionsPickerList.length === 0) return undefined;
-    return JSON.stringify(
-      sessionsPickerList.map((s) => {
-        const branch = s.meta.branch ?? "main";
-        const turns = s.meta.turnCount ?? Math.ceil(s.messageCount / 2);
-        return { title: s.name, meta: `${branch} · ${turns} turns` };
-      }),
-    );
-  }, [pendingSessionsPicker, sessionsPickerList]);
-
-  const sidebarSessionsJson = useMemo(() => {
-    if (sessionsPickerList.length === 0) return undefined;
-    return JSON.stringify(
-      sessionsPickerList.map((s) => ({
-        title: s.name,
-        meta: s.meta.branch ?? "main",
-      })),
-    );
-  }, [sessionsPickerList]);
-
-  const sceneApproval = useMemo(() => {
-    if (pendingShell) return { kind: "shell", prompt: pendingShell.command };
-    if (pendingPath) return { kind: "path", prompt: `${pendingPath.intent} ${pendingPath.path}` };
-    if (pendingEditReview) return { kind: "edit", prompt: `review ${pendingEditReview.path}` };
-    if (pendingChoice) return { kind: "choice", prompt: pendingChoice.question };
-    if (pendingPlan) return { kind: "plan", prompt: "approve plan" };
-    if (pendingCheckpoint)
-      return {
-        kind: "checkpoint",
-        prompt: `step ${pendingCheckpoint.completed}/${pendingCheckpoint.total}`,
-      };
-    return null;
-  }, [pendingShell, pendingPath, pendingEditReview, pendingChoice, pendingPlan, pendingCheckpoint]);
-
-  const approvalJson = useMemo(() => {
-    if (pendingPlan) {
-      const steps = planStepsRef.current;
-      return JSON.stringify({
-        kind: "plan",
-        body: pendingPlan,
-        steps: steps?.map((s) => ({ title: s.title })),
-      });
-    }
-    if (pendingShell) {
-      return JSON.stringify({
-        kind: "shell",
-        command: pendingShell.command,
-        cwd: pendingShell.cwd,
-        timeoutSec: pendingShell.timeoutSec,
-      });
-    }
-    if (pendingPath) {
-      return JSON.stringify({
-        kind: "path",
-        path: pendingPath.path,
-        intent: pendingPath.intent,
-        toolName: pendingPath.toolName,
-      });
-    }
-    if (pendingEditReview) {
-      return JSON.stringify({
-        kind: "edit",
-        path: pendingEditReview.path,
-        search: pendingEditReview.search,
-        replace: pendingEditReview.replace,
-      });
-    }
-    if (pendingChoice) {
-      return JSON.stringify({
-        kind: "choice",
-        question: pendingChoice.question,
-        options: pendingChoice.options,
-        allowCustom: pendingChoice.allowCustom,
-      });
-    }
-    if (pendingCheckpoint) {
-      return JSON.stringify({
-        kind: "checkpoint",
-        title: pendingCheckpoint.title,
-        completed: pendingCheckpoint.completed,
-        total: pendingCheckpoint.total,
-      });
-    }
-    return undefined;
-  }, [pendingPlan, pendingShell, pendingPath, pendingEditReview, pendingChoice, pendingCheckpoint]);
-
-  // Hoisted above useSceneTrace so the dashboard URL can ride the
-  // scene frame to the rust renderer. Definition (incl. setter) lives
-  // here; the auto-start effect that populates it follows further down.
   const [dashboardUrl, setDashboardUrlState] = useState<string | null>(null);
-
-  useSceneTrace({
-    cardCount,
-    busy,
-    activity: activityLabel,
-    model: sessionModel,
-    recentCardsJson,
-    composerText: input,
-    composerCursor,
-    slashMatchesJson,
-    slashSelectedIndex: slashMatchesJson ? slashSelected : undefined,
-    approvalKind: sceneApproval?.kind,
-    approvalPrompt: sceneApproval?.prompt,
-    sessionsJson,
-    sessionsFocusedIndex: sessionsJson ? sessionsPickerFocus : undefined,
-    walletBalance: balance?.total,
-    walletCurrency: balance?.currency,
-    sidebarSessionsJson,
-    sidebarActiveSession: session ?? undefined,
-    mcpServerCount: liveMcpServers.length,
-    editMode,
-    preset: presetForDisplay,
-    cwd: currentRootDir,
-    dashboardUrl: dashboardUrl ?? undefined,
-    ctxTokens,
-    ctxCap,
-    sessionCostUsd,
-    lastTurnCostUsd,
-    cacheHitRatio,
-    sessionInputTokens,
-    sessionOutputTokens,
-    lastTurnMs: lastTurnMs > 0 ? lastTurnMs : undefined,
-    slashCatalogJson,
-    slashArgStateJson,
-    promptHistoryJson,
-    approvalJson,
-    atStateJson,
-    promptInputJson,
-    listPickerJson,
-  });
 
   // Ctrl+P / Ctrl+N from PromptInput route here. When any input-prefix
   // picker is open (slash / @ / slash-arg), the keys navigate that picker
@@ -1765,7 +1471,7 @@ function AppInner({
         planSummaryRef.current = restoredPlan.summary ?? null;
         const when = relativeTime(restoredPlan.updatedAt);
         const done = new Set(restoredPlan.completedStepIds);
-        const summary = restoredPlan.summary ? ` 闂?${restoredPlan.summary}` : "";
+        const summary = restoredPlan.summary ? ` - ${restoredPlan.summary}` : "";
         log.showPlan({
           title: t("ui.resumedPlan", { when, summary }),
           steps: restoredPlan.steps.map((s) => ({
@@ -2191,7 +1897,7 @@ function AppInner({
       if (choice === "reject") {
         const context = denyContext ? ` because: ${denyContext}` : "";
         log.pushInfo(t("app.rejectedEdit", { path: block.path, context }));
-        return `User rejected this edit to ${block.path}${context}. Don't retry the same SEARCH/REPLACE 闂?either try a different approach or ask the user what they want instead.`;
+        return `User rejected this edit to ${block.path}${context}. Don't retry the same SEARCH/REPLACE; either try a different approach or ask the user what they want instead.`;
       }
       if (choice === "apply-rest-of-turn") {
         turnEditPolicyRef.current = "apply-all";
@@ -2259,10 +1965,10 @@ function AppInner({
       return "/walk is only available inside `reasonix code`.";
     }
     if (pendingEdits.current.length === 0) {
-      return "nothing pending 闂?nothing to walk through.";
+      return "nothing pending - nothing to walk through.";
     }
     setWalkthroughActive(true);
-    return `闂?walking ${pendingEdits.current.length} edit block(s) 闂?y apply 闂?n reject 闂?a apply rest 闂?A flip to AUTO 闂?Esc cancels (keeps remaining queued).`;
+    return `walking ${pendingEdits.current.length} edit block(s) - y apply - n reject - a apply rest - A flip to AUTO - Esc cancels (keeps remaining queued).`;
   }, [codeMode, pendingEdits]);
 
   // Embedded dashboard server lifecycle. Boot is async (server has to
@@ -2585,189 +2291,6 @@ function AppInner({
     return dashboardRef.current?.url ?? null;
   }, []);
 
-  // dashboardUrl state lives near the top of this component so it can
-  // ride the scene frame (see useSceneTrace input above). Mirror of
-  // the dashboard URL so the StatsPanel header can render a clickable
-  // pill the moment the server is up. Updated by both the auto-start
-  // effect below and the explicit /dashboard slash path (via
-  // startDashboard).
-
-  // Integrated-mode picker bridge: under REASONIX_RENDERER_INTEGRATED=1
-  // the rust child owns the alt-screen, so React modals (SessionPicker,
-  // ThemePicker) aren't visible. Intercept the pendingXPicker state
-  // changes and route through scene-driven requestListPicker, dispatch
-  // the choice to the same handlers the modal would call.
-  useEffect(() => {
-    if (!pendingSessionsPicker) return;
-    if (!isIntegratedRendererRequested()) return;
-    if (sessionsPickerList.length === 0) return;
-    let cancelled = false;
-    requestListPicker({
-      title: "switch session",
-      hint: "↑↓ move  ↵ open  esc cancel",
-      options: sessionsPickerList.map((s) => ({
-        key: s.name,
-        label: s.name,
-        sublabel: s.meta.branch ? `branch ${s.meta.branch}` : undefined,
-        meta: fmtAgo(s.mtime.getTime()),
-      })),
-    })
-      .then((picked) => {
-        if (cancelled) return;
-        setPendingSessionsPicker(false);
-        if (picked && onSwitchSession) onSwitchSession(picked);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingSessionsPicker, sessionsPickerList, onSwitchSession]);
-
-  useEffect(() => {
-    if (!pendingThemePicker) return;
-    if (!isIntegratedRendererRequested()) return;
-    let cancelled = false;
-    const active = themeName;
-    const preference = loadTheme() ?? "auto";
-    const all = ["auto", ...listThemeNames()];
-    requestListPicker({
-      title: "pick theme",
-      hint: "↑↓ move  ↵ select  esc cancel",
-      options: all.map((name) => ({
-        key: name,
-        label: name,
-        sublabel:
-          name === preference
-            ? `saved · active: ${active}`
-            : name === active
-              ? "active"
-              : undefined,
-      })),
-    })
-      .then((picked) => {
-        if (cancelled) return;
-        setPendingThemePicker(false);
-        if (!picked) return;
-        const choice = picked as ThemeChoice;
-        saveTheme(choice);
-        const resolved = resolveThemePreference(choice, process.env.REASONIX_THEME);
-        setThemeName(resolved);
-        log.pushInfo(`theme: ${choice} (active: ${resolved})`);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingThemePicker, themeName, setThemeName, log]);
-
-  useEffect(() => {
-    if (!pendingCheckpointPicker) return;
-    if (!isIntegratedRendererRequested()) return;
-    if (checkpointPickerList.length === 0) return;
-    let cancelled = false;
-    requestListPicker({
-      title: "restore checkpoint",
-      hint: "↑↓ move  ↵ restore  esc cancel",
-      options: checkpointPickerList.map((c) => ({
-        key: c.id,
-        label: c.name,
-        sublabel: c.id.slice(0, 7),
-        meta: fmtAgo(c.createdAt),
-      })),
-    })
-      .then((picked) => {
-        if (cancelled) return;
-        setPendingCheckpointPicker(false);
-        if (!picked) return;
-        const target = checkpointPickerList.find((c) => c.id === picked);
-        if (!target) return;
-        const result = restoreCheckpoint(currentRootDir, target.id);
-        const lines = [
-          `restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
-        ];
-        if (result.restored.length > 0) {
-          lines.push(`  wrote ${result.restored.length} file(s)`);
-        }
-        if (result.removed.length > 0) {
-          lines.push(`  removed ${result.removed.length} file(s)`);
-        }
-        if (result.skipped.length > 0) {
-          lines.push(`  skipped ${result.skipped.length} file(s)`);
-        }
-        log.pushInfo(lines.join("\n"));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingCheckpointPicker, checkpointPickerList, currentRootDir, log]);
-
-  useEffect(() => {
-    if (!pendingModelPicker) return;
-    if (!isIntegratedRendererRequested()) return;
-    const modelList = models ?? [];
-    if (modelList.length === 0) return;
-    let cancelled = false;
-    requestListPicker({
-      title: "pick model",
-      hint: "↑↓ move  ↵ select  esc cancel",
-      options: modelList.map((m) => ({
-        key: m,
-        label: m,
-        sublabel: m === loop.model ? "current" : undefined,
-      })),
-    })
-      .then((picked) => {
-        if (cancelled) return;
-        setPendingModelPicker(false);
-        if (!picked) return;
-        loop.configure({ model: picked, autoEscalate: false });
-        agentStore.dispatch({ type: "session.model.change", model: picked });
-        const inferred =
-          picked === "deepseek-v4-pro" ? "pro" : picked === "deepseek-v4-flash" ? "flash" : null;
-        setPreset(inferred ?? "flash");
-        agentStore.dispatch({ type: "session.preset.change", preset: inferred });
-        if (inferred) {
-          try {
-            savePreset(inferred);
-          } catch {}
-        }
-        log.pushInfo(`model: ${picked}`);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingModelPicker, models, loop, agentStore, setPreset, log]);
-
-  // MCP hub: the full Live/Marketplace tabbed modal is heavy and
-  // interactive (install / configure flows). Under integrated mode
-  // dump a read-only inventory of currently-connected servers so the
-  // user at least sees what's wired up; full hub still works in non-
-  // integrated mode for now.
-  useEffect(() => {
-    if (!pendingMcpHub) return;
-    if (!isIntegratedRendererRequested()) return;
-    const lines: string[] = [];
-    if (liveMcpServers.length === 0) {
-      lines.push("(no MCP servers connected)");
-    } else {
-      for (const s of liveMcpServers) {
-        const tools = s.report.tools.supported ? s.report.tools.items.length : 0;
-        const res = s.report.resources.supported ? s.report.resources.items.length : 0;
-        const prompts = s.report.prompts.supported ? s.report.prompts.items.length : 0;
-        lines.push(
-          `· ${s.label}  —  ${tools} tool${tools === 1 ? "" : "s"}, ${res} resource${res === 1 ? "" : "s"}, ${prompts} prompt${prompts === 1 ? "" : "s"}`,
-        );
-        lines.push(`    ${s.spec}`);
-      }
-    }
-    lines.push("");
-    lines.push("Install / configure flows are only available in non-integrated mode.");
-    log.pushInfo(`MCP hub (live)\n${lines.join("\n")}`);
-    setPendingMcpHub(null);
-  }, [pendingMcpHub, liveMcpServers, log]);
-
   // Auto-start the dashboard once the TUI is mounted unless the user
   // opted out with --no-dashboard. The whole point is discoverability:
   // most users had no idea /dashboard existed, so the URL needs to be
@@ -2778,14 +2301,11 @@ function AppInner({
     if (dashboardRef.current) return;
     startDashboard()
       .then((url) => {
-        if (url && openDashboard) openUrl(url);
+        if (!url) return;
+        log.pushInfo(`/dashboard  →  ${url}`);
+        if (openDashboard) openUrl(url);
       })
       .catch((err) => {
-        // Auto-start failure surfaces as a visible warn row. The URL
-        // itself is shown on the welcome card (when the server is up),
-        // so silence here would leave the user with no way to know the
-        // web UI is unreachable 闂?port already in use, permission
-        // denied, etc. Don't block the TUI; everything else keeps working.
         const reason = err instanceof Error ? err.message : String(err);
         log.pushInfo(t("ui.dashboardAutoStartFailed", { reason }));
       });
@@ -2873,85 +2393,6 @@ function AppInner({
         | { type: "cancel" },
     ) => void
   >(() => undefined);
-
-  useEffect(() => {
-    if (!approvalDispatchRef) return;
-    approvalDispatchRef.current = (kind: string, choice: unknown) => {
-      switch (kind) {
-        case "plan": {
-          if (typeof choice === "string") {
-            const mode: "approve" | "refine" | "reject" | null =
-              choice === "approve"
-                ? "approve"
-                : choice === "refine"
-                  ? "refine"
-                  : choice === "cancel"
-                    ? "reject"
-                    : null;
-            if (mode) {
-              handleStagedInputSubmitRef.current("", {
-                plan: pendingPlanRef.current ?? "",
-                mode,
-              });
-              return;
-            }
-            handlePlanConfirmRef.current?.(choice as PlanConfirmChoice).catch(() => undefined);
-          }
-          return;
-        }
-        case "shell": {
-          if (typeof choice === "string") {
-            handleShellConfirmRef.current?.(choice as "run_once" | "always_allow" | "deny");
-          }
-          return;
-        }
-        case "path": {
-          if (typeof choice === "string") {
-            handlePathConfirmRef.current?.(choice as "run_once" | "always_allow" | "deny");
-          }
-          return;
-        }
-        case "edit": {
-          if (typeof choice === "string") {
-            const resolve = editReviewResolveRef.current;
-            if (resolve) {
-              editReviewResolveRef.current = null;
-              resolve({ choice: choice as EditReviewChoice });
-            }
-          }
-          return;
-        }
-        case "choice": {
-          const c = choice as { kind?: string; optionId?: string };
-          if (c?.kind === "pick" && typeof c.optionId === "string") {
-            handleChoiceResolveRef.current?.({ type: "pick", optionId: c.optionId });
-          } else if (c?.kind === "cancel") {
-            handleChoiceResolveRef.current?.({ type: "cancel" });
-          }
-          return;
-        }
-        case "checkpoint": {
-          if (typeof choice === "string") {
-            if (choice === "revise") {
-              const snap = pendingCheckpointRef.current;
-              if (snap) {
-                handleCheckpointReviseSubmitRef.current("", {
-                  stepId: snap.stepId,
-                  title: snap.title,
-                });
-              }
-            } else if (choice === "continue" || choice === "stop") {
-              handleCheckpointConfirmRef.current?.(choice);
-            }
-          }
-          return;
-        }
-      }
-    };
-    return () => {
-      if (approvalDispatchRef) approvalDispatchRef.current = null;
-    };
-  }, [approvalDispatchRef]);
 
   const handleQQModelPick = useCallback(
     (target: string): string => {
@@ -3325,18 +2766,18 @@ function AppInner({
                     (r) => {
                       log.pushInfo(
                         r.enabled
-                          ? `闂?semantic_search re-pointed at ${resolved}`
-                          : `闂?semantic_search disabled (no compatible index in ${resolved})`,
+                          ? `semantic_search re-pointed at ${resolved}`
+                          : `semantic_search disabled (no compatible index in ${resolved})`,
                       );
                     },
                     (err) => {
                       log.pushInfo(
-                        `闂?semantic_search re-bootstrap failed: ${(err as Error).message}`,
+                        `semantic_search re-bootstrap failed: ${(err as Error).message}`,
                       );
                     },
                   );
                 }
-                return { ok: true, info: `闂?workspace switched to ${resolved}` };
+                return { ok: true, info: `workspace switched to ${resolved}` };
               }
             : undefined,
           reloadMcp: mcpRuntime
@@ -3412,11 +2853,11 @@ function AppInner({
         }
         if (result.replayPlan) {
           const rp = result.replayPlan;
-          const titleSuffix = rp.summary ? ` 闂?${rp.summary}` : "";
+          const titleSuffix = rp.summary ? ` - ${rp.summary}` : "";
           const done = new Set(rp.completedStepIds);
           setPendingReplayViewer({
             viewerKind: "replay-plan",
-            title: `Replay #${rp.index}/${rp.total} 闂?${rp.relativeTime}${titleSuffix}`,
+            title: `Replay #${rp.index}/${rp.total} - ${rp.relativeTime}${titleSuffix}`,
             body: rp.body,
             steps: rp.steps.map((s) => ({
               id: s.id,
@@ -3582,8 +3023,8 @@ function AppInner({
               .filter((ex) => ex.ok)
               .map((ex) => {
                 const tag = ex.title ? `${ex.title} (${ex.url})` : ex.url;
-                const trunc = ex.truncated ? " 闂?truncated" : "";
-                return `${tag} 闂?${(ex.chars ?? 0).toLocaleString()} chars${trunc}`;
+                const trunc = ex.truncated ? " - truncated" : "";
+                return `${tag} - ${(ex.chars ?? 0).toLocaleString()} chars${trunc}`;
               });
             const skipped = urlExpanded.expansions
               .filter((ex) => !ex.ok)
@@ -4577,44 +4018,34 @@ function AppInner({
                       languageVersion={languageVersion}
                     />
                   ) : null}
-                  {/*
-          Live rows are hidden while the ShellConfirm modal is up 闂?the
-          model's concurrent "please confirm" stream is noise the user
-          doesn't need, and the picker shouldn't fight it for visual
-          attention. They come back naturally once the user chooses and
-          the next turn begins.
-        */}
-                  {noTakeoverOverlay && ongoingTool ? (
-                    <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
-                  ) : null}
-                  {noTakeoverOverlay && subagentActivities.length > 0 ? (
-                    <SubagentLiveStack activities={subagentActivities} max={3} />
-                  ) : null}
-                  {noTakeoverOverlay && !ongoingTool && statusLine ? (
-                    <ThinkingRow text={statusLine} />
-                  ) : null}
-                  {undoBanner &&
-                  !pendingShell &&
-                  !pendingPlan &&
-                  !pendingReviseEditor &&
-                  !pendingSessionsPicker &&
-                  !pendingCheckpointPicker &&
-                  !pendingMcpHub &&
-                  !stagedInput &&
-                  !pendingEditReview &&
-                  !pendingChoice &&
-                  !stagedChoiceCustom &&
-                  !pendingRevision &&
-                  !stagedCheckpointRevise &&
-                  !pendingCheckpoint ? (
-                    <UndoBanner banner={undoBanner} />
-                  ) : null}
-                  {/* Activity row when no targeted indicator is visible 闂?phase label from useActivityLabel. */}
-                  {noTakeoverOverlay && busy && !isStreaming && !ongoingTool && !statusLine ? (
-                    <ThinkingRow text={activityLabel} />
-                  ) : null}
-                  {noTakeoverOverlay ? <PlanLiveRow /> : null}
-                  <ToastRail />
+                  <LiveActivityArea
+                    noTakeoverOverlay={noTakeoverOverlay}
+                    ongoingTool={ongoingTool}
+                    toolProgress={toolProgress}
+                    subagentActivities={subagentActivities}
+                    statusLine={statusLine}
+                    busy={busy}
+                    isStreaming={isStreaming}
+                    activityLabel={activityLabel}
+                    undoBanner={undoBanner}
+                    hideUndo={
+                      !!(
+                        pendingShell ||
+                        pendingPlan ||
+                        pendingReviseEditor ||
+                        pendingSessionsPicker ||
+                        pendingCheckpointPicker ||
+                        pendingMcpHub ||
+                        stagedInput ||
+                        pendingEditReview ||
+                        pendingChoice ||
+                        stagedChoiceCustom ||
+                        pendingRevision ||
+                        stagedCheckpointRevise ||
+                        pendingCheckpoint
+                      )
+                    }
+                  />
                 </Box>
                 {stagedInput ? (
                   <PlanRefineInput
@@ -4678,7 +4109,7 @@ function AppInner({
                         if (!target) return;
                         const result = restoreCheckpoint(currentRootDir, target.id);
                         const lines = [
-                          `闂?restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
+                          `restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
                         ];
                         if (result.restored.length > 0) {
                           lines.push(
@@ -4720,7 +4151,7 @@ function AppInner({
                           onSwitchSession(outcome.name);
                         } else {
                           log.pushInfo(
-                            `闂?to switch to "${outcome.name}", quit and run: reasonix chat --session ${outcome.name}`,
+                            `to switch to "${outcome.name}", quit and run: reasonix chat --session ${outcome.name}`,
                           );
                         }
                         return;
@@ -4731,7 +4162,7 @@ function AppInner({
                           onSwitchSession(freshSessionName(session));
                         } else {
                           log.pushInfo(
-                            "闂?to start a fresh session, quit and run: reasonix chat (no --session flag)",
+                            "to start a fresh session, quit and run: reasonix chat (no --session flag)",
                           );
                         }
                         return;
@@ -4764,7 +4195,7 @@ function AppInner({
                         process.env.REASONIX_THEME,
                       );
                       setThemeName(active);
-                      log.pushInfo(`闂?theme saved: ${outcome.value}\n  active now: ${active}`);
+                      log.pushInfo(`theme saved: ${outcome.value}\n  active now: ${active}`);
                     }}
                   />
                 ) : pendingCopyMode ? (
@@ -4816,7 +4247,7 @@ function AppInner({
                             /* disk full / perms 闂?runtime change still took effect */
                           }
                         }
-                        log.pushInfo(`闂?model: ${outcome.id}`);
+                        log.pushInfo(`model: ${outcome.id}`);
                         return;
                       }
                       if (outcome.kind === "preset") {
@@ -4837,7 +4268,7 @@ function AppInner({
                         } catch {
                           /* disk full / perms 闂?runtime change still took effect */
                         }
-                        log.pushInfo(`闂?preset: ${outcome.name} 闂?${p.model}`);
+                        log.pushInfo(`preset: ${outcome.name} - ${p.model}`);
                       }
                     }}
                   />
@@ -4931,58 +4362,32 @@ function AppInner({
                     onChoose={handleWalkChoice}
                   />
                 ) : (
-                  <InputAreaWithHistoryHint
-                    inputArea={
-                      <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                        <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                          {codeMode ? (
-                            <ModeStatusBar
-                              editMode={editMode}
-                              pendingCount={pendingCount}
-                              flash={modeFlash}
-                              planMode={planMode}
-                              undoArmed={!!undoBanner || hasUndoable()}
-                              jobs={codeMode.jobs}
-                            />
-                          ) : null}
-                          {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
-                          <StatusRow statusBar={statusBar} />
-                          <PromptInput
-                            value={input}
-                            onChange={setInput}
-                            onSubmit={handleSubmit}
-                            disabled={busy}
-                            onHistoryPrev={handleHistoryPrev}
-                            onHistoryNext={handleHistoryNext}
-                            onOpenExternalEditor={handleOpenExternalEditor}
-                            onCursorChange={setComposerCursor}
-                          />
-                        </Box>
-                        <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-                          {slashMatches !== null ? (
-                            <SlashSuggestions
-                              key={`slash-suggestions:${slashGroupMode ? "group" : "search"}`}
-                              matches={slashMatches}
-                              selectedIndex={slashSelected}
-                              groupMode={slashGroupMode}
-                              advancedHidden={slashAdvancedHidden}
-                            />
-                          ) : null}
-                          {atState !== null ? (
-                            <AtMentionSuggestions state={atState} selectedIndex={atSelected} />
-                          ) : null}
-                        </Box>
-                        {slashArgContext ? (
-                          <SlashArgPicker
-                            matches={slashArgMatches}
-                            selectedIndex={slashArgSelected}
-                            spec={slashArgContext.spec}
-                            kind={slashArgContext.kind}
-                            partial={slashArgContext.partial}
-                          />
-                        ) : null}
-                      </Box>
-                    }
+                  <ComposerArea
+                    editMode={editMode}
+                    pendingCount={pendingCount}
+                    modeFlash={modeFlash}
+                    planMode={planMode}
+                    undoArmed={!!undoBanner || hasUndoable()}
+                    jobs={codeMode ? codeMode.jobs : undefined}
+                    activeLoop={activeLoop}
+                    statusBar={statusBar}
+                    input={input}
+                    setInput={setInput}
+                    busy={busy}
+                    onSubmit={handleSubmit}
+                    onHistoryPrev={handleHistoryPrev}
+                    onHistoryNext={handleHistoryNext}
+                    onOpenExternalEditor={handleOpenExternalEditor}
+                    onCursorChange={setComposerCursor}
+                    slashMatches={slashMatches}
+                    slashSelected={slashSelected}
+                    slashGroupMode={slashGroupMode}
+                    slashAdvancedHidden={slashAdvancedHidden}
+                    atState={atState}
+                    atSelected={atSelected}
+                    slashArgContext={slashArgContext}
+                    slashArgMatches={slashArgMatches}
+                    slashArgSelected={slashArgSelected}
                   />
                 )}
               </Box>

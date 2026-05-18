@@ -21,10 +21,10 @@ const VARIANT_GLYPH = {
   ctxPressure: "⚠",
   aborted: "—",
   retry: "↻",
-  checkpoint: "⛁",
+  checkpoint: "●",
   stepProgress: "✓",
-  mcpEvent: "⌘",
-  sessionOp: "◍",
+  mcpEvent: "●",
+  sessionOp: "○",
 } as const;
 
 export function LiveCard({ card }: { card: LiveCardData }): React.ReactElement {

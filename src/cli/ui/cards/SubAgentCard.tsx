@@ -32,7 +32,6 @@ export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactE
         glyph={headGlyph}
         tone={headColor}
         title={t("cardTitles.subagent")}
-        titleColor={tone.violet}
         subtitle={card.task}
         meta={headerMeta}
       />
@@ -42,7 +41,7 @@ export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactE
       )}
       {card.children.map((child) => (
         <Box key={child.id} flexDirection="row" gap={1}>
-          {inLive ? null : <Text color={tone.violet}>▎</Text>}
+          {inLive ? null : <Text color={tone.violet}>⎿</Text>}
           <ChildRow card={child} />
         </Box>
       ))}
@@ -93,7 +92,7 @@ function doneGlyph(color: string): React.ReactElement {
 }
 
 function failedGlyph(color: string): React.ReactElement {
-  return <Text color={color}>✖</Text>;
+  return <Text color={color}>✗</Text>;
 }
 
 function childVisual(
@@ -107,7 +106,7 @@ function childVisual(
       const done = !card.streaming;
       return {
         statusGlyph: done ? doneGlyph(doneColor) : runningGlyph(CARD.reasoning.color),
-        kindGlyph: "◆",
+        kindGlyph: "●",
         kindColor: CARD.reasoning.color,
         text: t("cardLabels.reasoningLabel", { count: card.paragraphs }),
       };
@@ -116,7 +115,7 @@ function childVisual(
       const elapsed = card.elapsedMs > 0 ? ` · ${(card.elapsedMs / 1000).toFixed(2)}s` : "";
       return {
         statusGlyph: card.done ? doneGlyph(doneColor) : runningGlyph(CARD.tool.color),
-        kindGlyph: "▣",
+        kindGlyph: "●",
         kindColor: CARD.tool.color,
         text: `${card.name}${elapsed}`,
       };
@@ -124,7 +123,7 @@ function childVisual(
     case "streaming":
       return {
         statusGlyph: card.done ? doneGlyph(doneColor) : runningGlyph(CARD.streaming.color),
-        kindGlyph: "◈",
+        kindGlyph: "●",
         kindColor: CARD.streaming.color,
         text: card.done ? t("cardLabels.response") : t("cardLabels.writing"),
       };
@@ -138,7 +137,7 @@ function childVisual(
     case "error":
       return {
         statusGlyph: failedGlyph(failedColor),
-        kindGlyph: "✖",
+        kindGlyph: "✗",
         kindColor: CARD.error.color,
         text: card.title,
       };

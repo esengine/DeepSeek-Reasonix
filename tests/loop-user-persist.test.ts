@@ -6,6 +6,7 @@ import { DeepSeekClient } from "../src/client.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { loadSessionMessages } from "../src/memory/session.js";
+import type { ChatMessage } from "../src/types.js";
 
 describe("loop persists user message at step entry (issue #943)", () => {
   let tmp: string;
@@ -109,5 +110,57 @@ describe("loop persists user message at step entry (issue #943)", () => {
     // No duplicate user copies.
     const userMsgs = persisted.filter((m) => m.role === "user");
     expect(userMsgs).toHaveLength(1);
+  });
+
+  it("persists send-time healing of dangling tool_calls so the session does not stay poisoned", async () => {
+    const requestMessages: ChatMessage[][] = [];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async (_url: unknown, init: { body?: string } | undefined) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        requestMessages.push(body.messages as ChatMessage[]);
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: "recovered" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as unknown as typeof fetch,
+    });
+
+    const sessionName = "issue1079-dangling-tool-heal";
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      session: sessionName,
+    });
+    loop.appendAndPersist({ role: "user", content: "before sleep" });
+    loop.appendAndPersist({
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "lost", type: "function", function: { name: "read", arguments: "{}" } }],
+    });
+
+    await loop.run("continue after wake");
+
+    expect(
+      requestMessages[0]!.some((m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) > 0),
+    ).toBe(false);
+    expect(
+      loop.log.entries.some((m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) > 0),
+    ).toBe(false);
+    expect(
+      loadSessionMessages(sessionName).some(
+        (m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) > 0,
+      ),
+    ).toBe(false);
   });
 });

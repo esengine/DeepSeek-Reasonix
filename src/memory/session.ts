@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -16,6 +17,14 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
 import type { ChatMessage } from "../types.js";
+
+const SESSION_SIDECAR_EXTS = [
+  ".events.jsonl",
+  ".meta.json",
+  ".pending.json",
+  ".plan.json",
+  ".jsonl.bak",
+] as const;
 
 /** Best-effort git branch sniff; returns undefined if not a git repo or git missing. */
 export function detectGitBranch(cwd: string): string | undefined {
@@ -141,23 +150,34 @@ export function resolveSession(
 export function loadSessionMessages(name: string): ChatMessage[] {
   const path = sessionPath(name);
   if (!existsSync(path)) return [];
+  const live = readSessionMessages(path);
+  if (live && (live.messages.length > 0 || !live.hadContent)) return live.messages;
+
+  const backup = readSessionMessages(sessionBackupPath(path));
+  return backup?.messages ?? live?.messages ?? [];
+}
+
+function readSessionMessages(
+  path: string,
+): { messages: ChatMessage[]; hadContent: boolean } | null {
+  let raw: string;
   try {
-    const raw = readFileSync(path, "utf8");
-    const out: ChatMessage[] = [];
-    for (const line of raw.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const msg = JSON.parse(trimmed) as ChatMessage;
-        if (msg && typeof msg === "object" && "role" in msg) out.push(msg);
-      } catch {
-        /* skip malformed line */
-      }
-    }
-    return out;
+    raw = readFileSync(path, "utf8");
   } catch {
-    return [];
+    return null;
   }
+  const out: ChatMessage[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const msg = JSON.parse(trimmed) as ChatMessage;
+      if (msg && typeof msg === "object" && "role" in msg) out.push(msg);
+    } catch {
+      /* skip malformed line */
+    }
+  }
+  return { messages: out, hadContent: raw.trim().length > 0 };
 }
 
 export function appendSessionMessage(name: string, message: ChatMessage): void {
@@ -261,7 +281,7 @@ export function renameSession(oldName: string, newName: string): boolean {
   const newJsonl = sessionPath(newName);
   if (!existsSync(oldJsonl) || existsSync(newJsonl)) return false;
   renameSync(oldJsonl, newJsonl);
-  for (const ext of [".events.jsonl", ".meta.json", ".pending.json", ".plan.json"]) {
+  for (const ext of SESSION_SIDECAR_EXTS) {
     const oldP = oldJsonl.replace(/\.jsonl$/, ext);
     const newP = newJsonl.replace(/\.jsonl$/, ext);
     if (existsSync(oldP)) {
@@ -291,7 +311,7 @@ export function deleteSession(name: string): boolean {
   const path = sessionPath(name);
   try {
     unlinkSync(path);
-    for (const ext of [".events.jsonl", ".pending.json", ".meta.json", ".plan.json"]) {
+    for (const ext of SESSION_SIDECAR_EXTS) {
       const sidecar = path.replace(/\.jsonl$/, ext);
       try {
         unlinkSync(sidecar);
@@ -305,16 +325,29 @@ export function deleteSession(name: string): boolean {
   }
 }
 
-/** Non-atomic truncate+write window is acceptable — a concurrent crash leaves the session file empty, same end state as the user deleting it. */
+/** Crash-safe rewrite: snapshot the previous live log, write a sibling tmp file, then atomically swap it in. */
 export function rewriteSession(name: string, messages: ChatMessage[]): void {
   const path = sessionPath(name);
   mkdirSync(dirname(path), { recursive: true });
   const body = messages.map((m) => JSON.stringify(m)).join("\n");
-  writeFileSync(path, body ? `${body}\n` : "", "utf8");
+  const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
   try {
-    chmodSync(path, 0o600);
-  } catch {
-    /* chmod not supported */
+    writeFileSync(tmp, body ? `${body}\n` : "", "utf8");
+    chmodPrivate(tmp);
+    if (existsSync(path) && statSync(path).size > 0) {
+      const backup = sessionBackupPath(path);
+      copyFileSync(path, backup);
+      chmodPrivate(backup);
+    }
+    renameSync(tmp, path);
+    chmodPrivate(path);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* tmp may not exist */
+    }
+    throw err;
   }
 }
 
@@ -340,5 +373,17 @@ function countLines(path: string): number {
     return raw.split(/\r?\n/).filter((l) => l.trim()).length;
   } catch {
     return 0;
+  }
+}
+
+function sessionBackupPath(path: string): string {
+  return `${path}.bak`;
+}
+
+function chmodPrivate(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* chmod not supported */
   }
 }

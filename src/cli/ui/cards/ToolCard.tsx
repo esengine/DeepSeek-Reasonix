@@ -127,13 +127,13 @@ function toolStatus(card: ToolCardData, isInflight: boolean): ToolStatus {
 function statusGlyph(s: ToolStatus): string {
   switch (s) {
     case "running":
-      return "▢";
+      return "●";
     case "ok":
       return "✓";
     case "rejected":
       return "✗";
     case "error":
-      return "✖";
+      return "✗";
     case "aborted":
       return "⊘";
   }

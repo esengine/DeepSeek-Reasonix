@@ -607,6 +607,7 @@ export const EN: TranslationSchema = {
     continuingAfter: "▸ continuing after {label}{counter}",
     planStoppedAt: "▸ plan stopped at {label}{counter}",
     revisingAfter: "▸ revising after {label} — {feedback}",
+    historyScrollHint: " ↑ reading history · End / PgDn returns to bottom · ↓ advances one line",
   },
   hooks: {
     head: "hook {tag} `{cmd}` {decision}{truncTag}",

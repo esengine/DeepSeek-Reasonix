@@ -1,6 +1,6 @@
 /** Bare `reasonix` routing — defaults to code mode in the current directory; explicit `chat` stays chat. */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +31,11 @@ describe("bare CLI routing", () => {
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "reasonix-cli-home-"));
-    cwd = mkdtempSync(join(tmpdir(), "reasonix-cli-cwd-"));
+    // macOS's tmpdir is /var/folders/... but realpath is /private/var/folders/...;
+    // process.chdir followed by process.cwd() returns the resolved form, so
+    // normalise here too or the toHaveBeenCalledWith({ dir: cwd, ... }) assertions
+    // compare mismatched paths.
+    cwd = realpathSync(mkdtempSync(join(tmpdir(), "reasonix-cli-cwd-")));
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     process.chdir(cwd);

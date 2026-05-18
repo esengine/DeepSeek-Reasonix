@@ -9,10 +9,6 @@ export interface CardHeaderProps {
   glyph: string;
   tone: string;
   title: string;
-  /** Override the default tone-colored bold title (e.g. demoted cards use FG.sub). */
-  titleColor?: string;
-  /** When set, render the title as a backgrounded pill (e.g. `▎ ◆  reasoning  ` with a tinted block). */
-  titleBg?: string;
   /** Body-tone text after the title, separated by a space (no `·`). */
   subtitle?: string;
   /** Faint trailing fields, prefixed with ` · ` and joined by ` · `. */
@@ -25,27 +21,18 @@ export function CardHeader({
   glyph,
   tone,
   title,
-  titleColor,
-  titleBg,
   subtitle,
   meta,
   right,
 }: CardHeaderProps): React.ReactElement {
   const active = useContext(ActiveCardContext);
-  // Settled scrollback drops faint string meta + spinners; colored badges (rejected, retry) stay.
   const visibleMeta = active ? meta : meta?.filter((item) => typeof item !== "string");
   return (
     <Box flexDirection="row" gap={1}>
       <Text color={tone}>{glyph}</Text>
-      {titleBg ? (
-        <Text backgroundColor={titleBg} color={titleColor ?? tone} bold>
-          {` ${title} `}
-        </Text>
-      ) : (
-        <Text bold color={titleColor ?? tone}>
-          {title}
-        </Text>
-      )}
+      <Text bold color={tone}>
+        {title}
+      </Text>
       {subtitle ? <Text color={FG.body}>{subtitle}</Text> : null}
       {visibleMeta?.map((item, i) => {
         const isStr = typeof item === "string";

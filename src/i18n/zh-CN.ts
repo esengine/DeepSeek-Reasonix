@@ -592,6 +592,7 @@ export const zhCN: TranslationSchema = {
     continuingAfter: "▸ 在 {label}{counter} 之后继续",
     planStoppedAt: "▸ 计划在 {label}{counter} 处停止",
     revisingAfter: "▸ 在 {label} 之后修订 — {feedback}",
+    historyScrollHint: " ↑ 正在查看历史 · End / PgDn 返回底部 · ↓ 向下滚动一行",
   },
   hooks: {
     head: "钩子 {tag} `{cmd}` {decision}{truncTag}",
