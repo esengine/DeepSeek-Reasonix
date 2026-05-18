@@ -8,6 +8,7 @@ import { type ConfirmationChoice, pauseGate as defaultPauseGate } from "../core/
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
 import { memoryEnabled } from "../memory/project.js";
 import {
+  findDirMemory,
   findSubdirMemoryAncestors,
   formatSubdirMemorySection,
   readSubdirMemoryContent,
@@ -118,11 +119,16 @@ export function registerFilesystemTools(
 
   /** Prepend any not-yet-shown ancestor REASONIX.md (between absPath's dir and rootDir) to a read_file body. Outer dirs first so broad rules read before specific overrides. */
   function withSubdirMemory(absPath: string, body: string): string {
-    if (!memoryEnabled()) return body;
-    const ancestors = findSubdirMemoryAncestors(absPath, rootDir);
-    if (ancestors.length === 0) return body;
+    return prependMemorySections(findSubdirMemoryAncestors(absPath, rootDir), body);
+  }
+  /** Same idea as withSubdirMemory but for list_directory — includes the listed dir's own REASONIX.md, not just ancestors. */
+  function withDirMemory(absDir: string, body: string): string {
+    return prependMemorySections(findDirMemory(absDir, rootDir), body);
+  }
+  function prependMemorySections(memPaths: string[], body: string): string {
+    if (!memoryEnabled() || memPaths.length === 0) return body;
     const sections: string[] = [];
-    for (const memPath of [...ancestors].reverse()) {
+    for (const memPath of [...memPaths].reverse()) {
       if (shownSubdirMemory.has(memPath)) continue;
       const content = readSubdirMemoryContent(memPath);
       if (!content) continue;
@@ -359,7 +365,7 @@ Files OVER the threshold auto-switch to outline mode: file metadata + first ${OU
       for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
         lines.push(e.isDirectory() ? `${e.name}/` : e.name);
       }
-      return lines.join("\n") || "(empty directory)";
+      return withDirMemory(abs, lines.join("\n") || "(empty directory)");
     },
   });
 

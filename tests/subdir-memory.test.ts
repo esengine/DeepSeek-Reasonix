@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  findDirMemory,
   findSubdirMemoryAncestors,
   formatSubdirMemorySection,
   readSubdirMemoryContent,
@@ -190,5 +191,86 @@ describe("read_file injects subdir memory on first read per session", () => {
         process.env.REASONIX_MEMORY = prev;
       }
     }
+  });
+});
+
+describe("findDirMemory — for list_directory's listed dir", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "reasonix-dir-mem-"));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("includes the listed dir's own AGENTS.md", () => {
+    mkdirSync(join(root, "pkg"), { recursive: true });
+    writeFileSync(join(root, "pkg", "AGENTS.md"), "pkg rules");
+    expect(findDirMemory(join(root, "pkg"), root)).toEqual([join(root, "pkg", "AGENTS.md")]);
+  });
+
+  it("walks ancestors innermost-first when nested dirs each have memory", () => {
+    mkdirSync(join(root, "pkg", "module"), { recursive: true });
+    writeFileSync(join(root, "pkg", "REASONIX.md"), "pkg rules");
+    writeFileSync(join(root, "pkg", "module", "REASONIX.md"), "module rules");
+    expect(findDirMemory(join(root, "pkg", "module"), root)).toEqual([
+      join(root, "pkg", "module", "REASONIX.md"),
+      join(root, "pkg", "REASONIX.md"),
+    ]);
+  });
+
+  it("returns [] when the listed dir IS the root (root memory lives in system prompt)", () => {
+    writeFileSync(join(root, "REASONIX.md"), "root rules");
+    expect(findDirMemory(root, root)).toEqual([]);
+  });
+
+  it("returns [] for a dir outside rootDir", () => {
+    const outside = mkdtempSync(join(tmpdir(), "reasonix-dir-out-"));
+    try {
+      mkdirSync(join(outside, "sub"), { recursive: true });
+      expect(findDirMemory(join(outside, "sub"), root)).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("list_directory injects subdir memory (issue #1160)", () => {
+  let root: string;
+  let tools: ToolRegistry;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "reasonix-ls-mem-"));
+    mkdirSync(join(root, "pkg", "module"), { recursive: true });
+    writeFileSync(join(root, "pkg", "AGENTS.md"), "package rules");
+    writeFileSync(join(root, "pkg", "module", "AGENTS.md"), "module rules");
+    writeFileSync(join(root, "pkg", "module", "code.ts"), "//");
+    tools = new ToolRegistry();
+    registerFilesystemTools(tools, { rootDir: root });
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("prepends [module memory:…] when listing a subdir that has its own AGENTS.md", async () => {
+    const out = await tools.dispatch("list_directory", JSON.stringify({ path: "pkg/module" }));
+    expect(out).toContain("[module memory: pkg/module/AGENTS.md]");
+    expect(out).toContain("module rules");
+    expect(out).toContain("[module memory: pkg/AGENTS.md]");
+    expect(out).toContain("package rules");
+    expect(out).toContain("code.ts");
+  });
+
+  it("does not repeat memory on a follow-up read_file in the same dir", async () => {
+    await tools.dispatch("list_directory", JSON.stringify({ path: "pkg/module" }));
+    const out = await tools.dispatch("read_file", JSON.stringify({ path: "pkg/module/code.ts" }));
+    expect(out).not.toContain("[module memory:");
+  });
+
+  it("does not inject memory when listing the project root", async () => {
+    writeFileSync(join(root, "REASONIX.md"), "root rules");
+    const out = await tools.dispatch("list_directory", JSON.stringify({ path: "." }));
+    expect(out).not.toContain("[module memory:");
   });
 });
