@@ -61,6 +61,7 @@ import {
 import { WorkdirPop } from "./ui/workdir-pop";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
+import { useWindowBounds } from "./ui/useWindowBounds";
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -2482,6 +2483,8 @@ export function App() {
     window.addEventListener("reasonix:currency", onCur);
     return () => window.removeEventListener("reasonix:currency", onCur);
   }, []);
+
+  useWindowBounds();
 
   const deliverToTab = useCallback((tabId: string, action: TabAction) => {
     const dispatch = dispatchersRef.current.get(tabId);
