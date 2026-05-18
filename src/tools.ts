@@ -226,6 +226,17 @@ export class ToolRegistry {
       }
     }
 
+    // Pre-dispatch abort gate: if ESC fired while this tool was queued,
+    // refuse to start it. Tools that already check `ctx.signal` mid-run
+    // still own their own interrupt path; this just stops a queue of
+    // pending calls from running to completion after the user gave up.
+    if (opts.signal?.aborted) {
+      return JSON.stringify({
+        error: `${name}: aborted before dispatch (user interrupt)`,
+        rejectedReason: "aborted",
+      });
+    }
+
     let finalResult: string;
     try {
       try {

@@ -524,6 +524,33 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).not.toMatch(/src[\\]cli/);
     });
 
+    it("does not hang on a file with a very long line (issue #1236)", async () => {
+      // A minified-JS one-liner can be MBs on a single line. Before the
+      // LINE_MATCH_BUDGET truncation, `line.toLowerCase()` (and any plain
+      // substring scan) had to chew through the whole thing on every iteration
+      // and `re.test` ran unbounded; we want this to return in well under a
+      // second on modern hardware regardless of file size.
+      const longLine = "a".repeat(1_500_000);
+      await fs.writeFile(join(root, "huge.txt"), `${longLine}\n`);
+      const start = Date.now();
+      const out = await tools.dispatch(
+        "search_content",
+        JSON.stringify({ pattern: "definitely_not_in_aaaa" }),
+      );
+      expect(Date.now() - start).toBeLessThan(2000);
+      expect(out).toMatch(/no matches/);
+    });
+
+    it("returns an aborted error when the signal fires before dispatch (issue #1236)", async () => {
+      const ctrl = new AbortController();
+      ctrl.abort();
+      const out = await tools.dispatch("search_content", JSON.stringify({ pattern: "anything" }), {
+        signal: ctrl.signal,
+      });
+      expect(out).toMatch(/aborted before dispatch/);
+      expect(JSON.parse(out)).toMatchObject({ rejectedReason: "aborted" });
+    });
+
     it("honors AbortSignal during recursive content search", async () => {
       await fs.mkdir(join(root, "src", "nested"), { recursive: true });
       await fs.writeFile(join(root, "src", "nested", "deep.ts"), "export const z = 3;\n");

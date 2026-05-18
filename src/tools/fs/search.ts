@@ -71,6 +71,15 @@ export async function searchFiles(
 const MAX_HITS_PER_FILE = 30;
 /** Once printed bytes pass this fraction of the byte budget, remaining files switch to histogram. */
 const SUMMARY_MODE_TRIGGER_RATIO = 0.8;
+// Cap the substring matchers feed-in. A minified-JS one-liner can be MBs of
+// text on a single line; a backtracking user pattern (`(a+)+!`) on that line
+// hangs uninterruptibly inside V8's regex engine — `throwIfAborted` only
+// fires between lines, not inside re.test. Truncating to 8 KiB removes the
+// pathological input without changing real-world matches: any sane code line
+// is well under this and the displayed slice is already capped at 200 chars.
+const LINE_MATCH_BUDGET = 8 * 1024;
+/** Soft deadline for a single searchContent invocation — a stuck walk fails loudly instead of hanging the turn. */
+const WALK_DEADLINE_MS = 15_000;
 
 export async function searchContent(
   ctx: SearchContext,
@@ -104,6 +113,14 @@ export async function searchContent(
   let summaryMode = summaryOnly;
   let summaryNoticeEmitted = false;
   const fileHitCounts = new Map<string, number>();
+  const t0 = Date.now();
+  const throwIfTimedOut = (): void => {
+    if (Date.now() - t0 > WALK_DEADLINE_MS) {
+      throw new Error(
+        `search_content exceeded ${WALK_DEADLINE_MS}ms — narrow the scope (path/glob) or simplify the pattern`,
+      );
+    }
+  };
 
   const pushLine = (out: string): boolean => {
     if (totalBytes + out.length + 1 > ctx.maxListBytes) {
@@ -141,6 +158,7 @@ export async function searchContent(
     for (const e of entries) {
       if (truncated) return;
       throwIfAborted(args.signal);
+      throwIfTimedOut();
       if (e.isDirectory()) {
         if (!includeDeps && ctx.skipDirNames.has(e.name)) continue;
         await walk(pathMod.join(dir, e.name));
@@ -180,8 +198,9 @@ export async function searchContent(
       for (let li = 0; li < lines.length; li++) {
         throwIfAborted(args.signal);
         const line = lines[li]!;
-        const lineForCheck = caseSensitive ? line : line.toLowerCase();
-        const hit = re ? re.test(line) : lineForCheck.includes(needle);
+        const sample = line.length > LINE_MATCH_BUDGET ? line.slice(0, LINE_MATCH_BUDGET) : line;
+        const sampleForCheck = caseSensitive ? sample : sample.toLowerCase();
+        const hit = re ? re.test(sample) : sampleForCheck.includes(needle);
         if (hit) hits.push(li);
       }
       scanned++;

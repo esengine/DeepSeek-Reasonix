@@ -394,7 +394,10 @@ describe("registerSubagentTool", () => {
       signal: ctrl.signal,
     });
     const parsed = JSON.parse(out);
-    expect(parsed.success).toBe(false);
+    // Central dispatch now refuses an already-aborted call before the tool
+    // runs (issue #1236); the subagent's own iter-0 bail is the fallback
+    // for late aborts. Either shape proves no API call was made.
+    expect(parsed.rejectedReason === "aborted" || parsed.success === false).toBe(true);
     expect(fetchCalls).toBe(0);
   });
 
