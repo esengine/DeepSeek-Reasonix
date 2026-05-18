@@ -342,6 +342,11 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     }
   }
 
+  // One stdout `resize` listener per card (Ink's useBoxMetrics); long
+  // chats legitimately hold dozens, so Node's default cap of 10 fires
+  // a spurious MaxListenersExceededWarning. Raise the ceiling.
+  process.stdout.setMaxListeners(200);
+
   const { waitUntilExit } = render(
     <Root
       initialKey={initialKey}
