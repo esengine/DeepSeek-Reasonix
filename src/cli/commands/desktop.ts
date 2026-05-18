@@ -1741,6 +1741,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       void (async () => {
         try {
           const reply = await tab.runtime!.loop.client.chat({
+            model: tab.currentModel,
             messages: [
               { role: "system", content: tab.system },
               { role: "user", content: question },
