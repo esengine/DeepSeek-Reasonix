@@ -58,6 +58,7 @@ import {
 } from "./ui/thread";
 import { WorkdirPop } from "./ui/workdir-pop";
 import { useAutoScroll } from "./ui/useAutoScroll";
+import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 
 export type AssistantSegment =
   | { kind: "text"; text: string }
@@ -950,6 +951,7 @@ function TabRuntime({
     queuedSends: [],
   });
   useLang();
+  useDisableTextAssist();
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<{ msg: string; yolo?: boolean } | null>(null);
   const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());

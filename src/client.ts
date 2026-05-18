@@ -1,4 +1,5 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
+import { loadRateLimit } from "./config.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
 
@@ -87,6 +88,7 @@ export interface DeepSeekClientOptions {
   baseUrl?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
+  rateLimit?: { rpm?: number };
   /** Retry configuration. Pass `{ maxAttempts: 1 }` to disable retries. */
   retry?: RetryOptions;
 }
@@ -97,6 +99,8 @@ export class DeepSeekClient {
   readonly timeoutMs: number;
   readonly retry: RetryOptions;
   private readonly _fetch: typeof fetch;
+  private readonly minChatIntervalMs: number;
+  private nextChatRequestAt = 0;
 
   constructor(opts: DeepSeekClientOptions = {}) {
     const apiKey = opts.apiKey ?? process.env.DEEPSEEK_API_KEY;
@@ -123,6 +127,27 @@ export class DeepSeekClient {
     this.timeoutMs = opts.timeoutMs ?? 660_000;
     this._fetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
     this.retry = opts.retry ?? {};
+    const rpm = opts.rateLimit?.rpm ?? loadRateLimit()?.rpm;
+    this.minChatIntervalMs = rpm ? Math.ceil(60_000 / rpm) : 0;
+  }
+
+  private async waitForChatRateLimit(signal?: AbortSignal): Promise<void> {
+    if (this.minChatIntervalMs <= 0) return;
+    const now = Date.now();
+    const waitMs = Math.max(0, this.nextChatRequestAt - now);
+    this.nextChatRequestAt = Math.max(now, this.nextChatRequestAt) + this.minChatIntervalMs;
+    if (waitMs <= 0) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, waitMs);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+        },
+        { once: true },
+      );
+    });
   }
 
   private buildPayload(opts: ChatRequestOptions, stream: boolean) {
@@ -190,6 +215,7 @@ export class DeepSeekClient {
     const signal = opts.signal ?? ctrl.signal;
 
     try {
+      await this.waitForChatRateLimit(signal);
       const resp = await fetchWithRetry(
         this._fetch,
         `${this.baseUrl}/chat/completions`,
@@ -228,6 +254,7 @@ export class DeepSeekClient {
 
     let resp: Response;
     try {
+      await this.waitForChatRateLimit(signal);
       // Only the initial fetch is retried. Once the server has started sending
       // the stream body we do NOT retry — a mid-stream retry would re-bill and
       // desync the session context.

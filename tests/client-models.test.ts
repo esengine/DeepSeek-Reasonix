@@ -73,3 +73,34 @@ describe("DeepSeekClient.listModels", () => {
     expect(headers.Authorization).toBe("Bearer sk-xyz");
   });
 });
+
+describe("DeepSeekClient rateLimit", () => {
+  it("waits between chat requests when rpm is configured", async () => {
+    vi.useFakeTimers();
+    const spy = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: spy as unknown as typeof fetch,
+      rateLimit: { rpm: 30 },
+    });
+    try {
+      await client.chat({ model: "deepseek-chat", messages: [] });
+      const second = client.chat({ model: "deepseek-chat", messages: [] });
+      await Promise.resolve();
+      expect(spy).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(spy).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await second;
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
