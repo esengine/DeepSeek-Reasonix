@@ -85,6 +85,8 @@ export interface DashboardContext {
 
   reloadHooks?: () => number;
   reloadMcp?: () => Promise<number>;
+  /** Live session swap — pass a name to switch into an existing session, or `undefined` to mint a fresh one. Available only in attached mode (an active CLI session to swap inside of). */
+  switchSession?: (name: string | undefined) => { ok: true } | { ok: false; reason: string };
   invokeMcpTool?: (
     serverLabel: string,
     toolName: string,

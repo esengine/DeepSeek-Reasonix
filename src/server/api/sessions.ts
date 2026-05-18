@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { listSessions, sessionPath } from "../../memory/session.js";
+import { deleteSession, listSessions, sessionPath } from "../../memory/session.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
 
@@ -45,15 +45,12 @@ export async function handleSessions(
   method: string,
   rest: string[],
   _body: string,
-  _ctx: DashboardContext,
+  ctx: DashboardContext,
 ): Promise<ApiResult> {
-  if (method !== "GET") {
-    return { status: 405, body: { error: "GET only" } };
-  }
-
   // Listing.
-  if (rest.length === 0) {
+  if (method === "GET" && rest.length === 0) {
     const sessions = listSessions();
+    const currentName = ctx.getSessionName?.() ?? null;
     return {
       status: 200,
       body: {
@@ -64,25 +61,80 @@ export async function handleSessions(
           messageCount: s.messageCount,
           mtime: s.mtime.getTime(),
         })),
+        currentSession: currentName,
+        canSwitch: Boolean(ctx.switchSession),
       },
     };
   }
 
-  // Single-session detail. URL-decode in case the name had spaces / CJK
-  // (sanitizeName allows them).
+  // New session — mints a fresh session by calling switchSession(undefined),
+  // which routes through the same path the SessionPicker "new" branch takes.
+  if (method === "POST" && rest.length === 1 && rest[0] === "new") {
+    if (!ctx.switchSession) {
+      return {
+        status: 503,
+        body: { error: "live session swap requires an attached CLI session." },
+      };
+    }
+    const result = ctx.switchSession(undefined);
+    if (!result.ok) return { status: 500, body: { error: result.reason } };
+    return { status: 200, body: { ok: true } };
+  }
+
+  if (rest.length === 0) {
+    return { status: 405, body: { error: `method ${method} not supported on /sessions` } };
+  }
+
+  // Single-session detail / switch / delete. URL-decode in case the name
+  // had spaces / CJK (sanitizeName allows them).
   const name = decodeURIComponent(rest[0]!);
   const path = sessionPath(name);
-  if (!existsSync(path)) {
-    return { status: 404, body: { error: `no such session: ${name}` } };
+  const currentName = ctx.getSessionName?.() ?? null;
+
+  if (method === "POST" && rest[1] === "switch") {
+    if (!ctx.switchSession) {
+      return {
+        status: 503,
+        body: { error: "live session swap requires an attached CLI session." },
+      };
+    }
+    if (!existsSync(path)) return { status: 404, body: { error: `no such session: ${name}` } };
+    const result = ctx.switchSession(name);
+    if (!result.ok) return { status: 500, body: { error: result.reason } };
+    return { status: 200, body: { ok: true } };
   }
-  const messages = parseTranscript(path);
-  return {
-    status: 200,
-    body: {
-      name,
-      path,
-      messages,
-      messageCount: messages.length,
-    },
-  };
+
+  if (method === "DELETE") {
+    if (rest.length !== 1) {
+      return { status: 405, body: { error: `method ${method} not supported on this path` } };
+    }
+    // Refuse to delete the currently-attached session — the live process
+    // still has the file open for append, and deleting it would resurrect
+    // an empty file on the next message.
+    if (currentName && name === currentName) {
+      return {
+        status: 409,
+        body: { error: "cannot delete the currently-active session — switch away first." },
+      };
+    }
+    if (!existsSync(path)) return { status: 404, body: { error: `no such session: ${name}` } };
+    const removed = deleteSession(name);
+    if (!removed) return { status: 500, body: { error: `failed to delete ${name}` } };
+    ctx.audit?.({ ts: Date.now(), action: "delete-session", payload: { name } });
+    return { status: 200, body: { ok: true, deleted: name } };
+  }
+
+  if (method === "GET") {
+    if (rest.length !== 1) {
+      return { status: 405, body: { error: `method ${method} not supported on this path` } };
+    }
+    if (!existsSync(path)) return { status: 404, body: { error: `no such session: ${name}` } };
+    const messages = parseTranscript(path);
+    return {
+      status: 200,
+      body: { name, path, messages, messageCount: messages.length },
+    };
+  }
+
+  return { status: 405, body: { error: `method ${method} not supported on this path` } };
 }

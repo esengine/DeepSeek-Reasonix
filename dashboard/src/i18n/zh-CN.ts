@@ -300,6 +300,16 @@ export const zhCN = {
     loadingTranscript: "加载转录稿…",
     emptyTranscript: "空的转录稿。",
     messages: "{count} 条消息",
+    newBtn: "新建会话",
+    newHint: "归档当前会话并开启新会话",
+    switchBtn: "切换到此会话",
+    deleteBtn: "删除",
+    deleteConfirm: "确定删除会话「{name}」？转录文件将被移除，无法撤销。",
+    cantDeleteActive: "请先切换到其他会话，再删除当前会话。",
+    attachRequired:
+      "实时会话操作需要已连接的 CLI 会话。请通过 reasonix chat 启动，或在 TUI 会话中打开仪表盘。",
+    activeChip: "当前",
+    activePill: "当前",
   },
   tools: {
     loading: "加载工具…",

@@ -801,6 +801,33 @@ describe("dashboard server: v0.13 panels", () => {
     expect(r.status).toBe(404);
   });
 
+  it("GET /api/sessions returns canSwitch=false when no switchSession callback is wired", async () => {
+    const base = handle!.url.split("?")[0]!;
+    const r = await call(`${base}api/sessions`, { token: TOKEN });
+    expect(r.status).toBe(200);
+    expect(r.body.canSwitch).toBe(false);
+  });
+
+  it("POST /api/sessions/new returns 503 without an attached switchSession callback", async () => {
+    const base = handle!.url.split("?")[0]!;
+    const r = await call(`${base}api/sessions/new`, {
+      token: TOKEN,
+      tokenInHeader: true,
+      method: "POST",
+    });
+    expect(r.status).toBe(503);
+  });
+
+  it("DELETE /api/sessions/<missing> returns 404", async () => {
+    const base = handle!.url.split("?")[0]!;
+    const r = await call(`${base}api/sessions/never-existed`, {
+      token: TOKEN,
+      tokenInHeader: true,
+      method: "DELETE",
+    });
+    expect(r.status).toBe(404);
+  });
+
   it("GET /api/plans returns empty array when no archives exist", async () => {
     const base = handle!.url.split("?")[0]!;
     const r = await call(`${base}api/plans`, { token: TOKEN });

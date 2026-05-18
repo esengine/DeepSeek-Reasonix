@@ -2288,6 +2288,12 @@ function AppInner({
                 return r.summaries.length;
               }
             : undefined,
+          switchSession: onSwitchSession
+            ? (name) => {
+                onSwitchSession(name);
+                return { ok: true as const };
+              }
+            : undefined,
         },
         { port: dashboardPort, host: dashboardHost, token: dashboardToken },
       );
@@ -2323,6 +2329,7 @@ function AppInner({
     currentRootDirRef,
     reloadHooks,
     setPreset,
+    onSwitchSession,
     dashboardPort,
     dashboardHost,
     dashboardToken,
