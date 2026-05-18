@@ -88,6 +88,23 @@ describe("Wizard API-key validation", () => {
 
     await expect(
       validateDeepSeekApiKey("sk-valid1234567890", { fetch: fetcher as typeof fetch }),
-    ).resolves.toMatchObject({ ok: false, reason: "failed", message: "DeepSeek 503" });
+    ).resolves.toMatchObject({ ok: false, reason: "failed", message: "HTTP 503" });
+  });
+
+  it("hits /models, not /user/balance — third-party endpoints (DashScope etc.) accept it", async () => {
+    const calls: string[] = [];
+    const fetcher = async (url: string) => {
+      calls.push(url);
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    };
+
+    await expect(
+      validateDeepSeekApiKey("sk-valid1234567890", {
+        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        fetch: fetcher as typeof fetch,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(calls).toEqual(["https://dashscope.aliyuncs.com/compatible-mode/v1/models"]);
   });
 });
