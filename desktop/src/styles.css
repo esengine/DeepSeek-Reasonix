@@ -4005,6 +4005,64 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   font-family: inherit;
 }
 
+.qq-setting-row {
+  align-items: flex-start;
+}
+
+.qq-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.qq-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.qq-status-badge.on {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--border));
+}
+
+.qq-status-badge.off {
+  color: var(--tone-err);
+  background: color-mix(in srgb, var(--tone-err) 10%, transparent);
+  border-color: color-mix(in srgb, var(--tone-err) 30%, var(--border));
+}
+
+.qq-config-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 12px 14px;
+}
+
+.qq-config-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.qq-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+}
+
 /* card list (mcp, skills) */
 .scard {
   border: 1px solid var(--border);

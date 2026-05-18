@@ -23,6 +23,7 @@ import {
   loadEditMode,
   loadEditor,
   loadPreset,
+  loadQQConfig,
   loadReasoningEffort,
   loadRecentWorkspaces,
   loadResolvedSkillPaths,
@@ -50,6 +51,11 @@ import {
   pauseGate,
 } from "../../core/pause-gate.js";
 import { autoResolveVerdict } from "../../core/pause-policy.js";
+import {
+  loadDesktopQQState,
+  saveDesktopQQSettings,
+  setDesktopQQEnabled,
+} from "../../desktop/qq-settings.js";
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
@@ -102,6 +108,15 @@ type InMessage = { tabId?: string } & (
       preset?: "auto" | "flash" | "pro";
       editor?: string;
     }
+  | { cmd: "qq_status_get" }
+  | { cmd: "qq_connect" }
+  | { cmd: "qq_disconnect" }
+  | {
+      cmd: "qq_config_save";
+      appId?: string;
+      appSecret?: string;
+      sandbox: boolean;
+    }
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }
@@ -138,6 +153,18 @@ interface SettingsEvent {
   preset: "auto" | "flash" | "pro";
   editor?: string;
   version: string;
+}
+
+interface QQSettingsEvent {
+  type: "$qq_settings";
+  appId?: string;
+  appSecret?: string;
+  sandbox: boolean;
+  enabled: boolean;
+  configured: boolean;
+  connected: boolean;
+  appIdPreview?: string;
+  access: string;
 }
 
 interface BalanceEvent {
@@ -384,6 +411,7 @@ type EmittableEvent =
   | SessionEmptyEvent
   | NeedsSetupEvent
   | SettingsEvent
+  | QQSettingsEvent
   | BalanceEvent
   | MentionResultsEvent
   | MentionPreviewEvent
@@ -476,6 +504,10 @@ function emitSettings(tab: Tab): void {
     },
     tab.id,
   );
+}
+
+function emitQQSettings(tab: Tab): void {
+  emit({ type: "$qq_settings", ...loadDesktopQQState() }, tab.id);
 }
 
 async function emitBalance(tab: Tab): Promise<void> {
@@ -1301,6 +1333,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emitMcpSpecs(tab);
     emitSkills(tab);
     emitMemory(tab);
+    emitQQSettings(tab);
     if (!loadApiKey()) emit({ type: "$needs_setup", reason: "no_api_key" }, tab.id);
     void emitBalance(tab);
     void initTabToolset(tab)
@@ -1599,6 +1632,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       emitSettings(tab);
       return;
     }
+    if (msg.cmd === "qq_status_get") {
+      emitQQSettings(tab);
+      return;
+    }
     if (msg.cmd === "settings_save") {
       try {
         if (msg.reasoningEffort !== undefined) {
@@ -1635,6 +1672,68 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       } catch (err) {
         emit(
           { type: "$error", message: `settings_save failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "qq_config_save") {
+      try {
+        saveDesktopQQSettings(
+          {
+            appId: msg.appId,
+            appSecret: msg.appSecret,
+            sandbox: msg.sandbox,
+          },
+          undefined,
+        );
+        emitQQSettings(tab);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `qq_config_save failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "qq_connect") {
+      try {
+        const current = loadQQConfig();
+        setDesktopQQEnabled(true);
+        emit(
+          {
+            type: "status",
+            id: Date.now(),
+            ts: new Date().toISOString(),
+            turn: 0,
+            text: `QQ enabled (${current.sandbox ? "sandbox" : "production"})`,
+          },
+          tab.id,
+        );
+        emitQQSettings(tab);
+      } catch (err) {
+        emit({ type: "$error", message: `qq_connect failed: ${(err as Error).message}` }, tab.id);
+        emitQQSettings(tab);
+      }
+      return;
+    }
+    if (msg.cmd === "qq_disconnect") {
+      try {
+        setDesktopQQEnabled(false);
+        emit(
+          {
+            type: "status",
+            id: Date.now(),
+            ts: new Date().toISOString(),
+            turn: 0,
+            text: "QQ disabled",
+          },
+          tab.id,
+        );
+        emitQQSettings(tab);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `qq_disconnect failed: ${(err as Error).message}` },
           tab.id,
         );
       }
