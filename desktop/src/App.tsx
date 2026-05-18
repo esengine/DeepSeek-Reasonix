@@ -619,7 +619,11 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$sessions":
       return { ...state, sessions: ev.items };
     case "$mcp_specs":
-      return { ...state, mcpSpecs: ev.specs, mcpBridged: ev.bridged };
+      return {
+        ...state,
+        mcpSpecs: Array.isArray(ev.specs) ? ev.specs : [],
+        mcpBridged: Boolean(ev.bridged),
+      };
     case "$skills":
       return { ...state, skills: ev.items };
     case "$ctx_breakdown":

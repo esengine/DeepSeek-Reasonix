@@ -595,4 +595,7 @@ export const en = {
     secondsAgo: "{seconds}s ago",
     deliveredWaiting: "Delivered · waiting for agent",
   },
+  panel: {
+    renderError: "{panel} panel render error",
+  },
 };

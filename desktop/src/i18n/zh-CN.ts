@@ -582,4 +582,7 @@ export const zhCN: typeof en = {
     secondsAgo: "{seconds}s 前",
     deliveredWaiting: "已送达 · 等待 agent 响应",
   },
+  panel: {
+    renderError: "{panel} 面板渲染错误",
+  },
 };

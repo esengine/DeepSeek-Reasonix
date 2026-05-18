@@ -3,6 +3,7 @@ import type { SessionFile, Settings, UsageStats } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryEntryInfo } from "../protocol";
+import { PanelErrorBoundary } from "./error-boundary";
 
 type Tab = "files" | "tools" | "memory" | "rules";
 
@@ -85,10 +86,12 @@ export function ContextPanel({
           </div>
         </div>
 
-        {tab === "files" && <CtxFiles files={sessionFiles} />}
-        {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
-        {tab === "memory" && <CtxMemory entries={memory} />}
-        {tab === "rules" && <CtxRules settings={settings} />}
+        <PanelErrorBoundary key={tab} label={tab}>
+          {tab === "files" && <CtxFiles files={sessionFiles} />}
+          {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
+          {tab === "memory" && <CtxMemory entries={memory} />}
+          {tab === "rules" && <CtxRules settings={settings} />}
+        </PanelErrorBoundary>
       </div>
     </aside>
   );
