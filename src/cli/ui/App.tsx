@@ -146,7 +146,6 @@ import { useLoopMode } from "./hooks/useLoopMode.js";
 import { usePresetMode } from "./hooks/usePresetMode.js";
 import { useQuit } from "./hooks/useQuit.js";
 import { useScrollback } from "./hooks/useScrollback.js";
-import { useTerminalSetup } from "./hooks/useTerminalSetup.js";
 import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useWorkspaceRoot } from "./hooks/useWorkspaceRoot.js";
@@ -272,16 +271,8 @@ export interface AppProps {
   dashboardHost?: string;
   /** Stable dashboard URL token (#968). `undefined` mints a fresh per-boot token. */
   dashboardToken?: string;
-  /** Mid-chat session swap 闂?Root remounts App with the new session via key. */
+  /** Mid-chat session swap — Root remounts App with the new session via key. */
   onSwitchSession?: (name: string | undefined) => void;
-  /**
-   * Enable DECSET 1007 (alternate-scroll) so the wheel scrolls chat
-   * on web/cloud/SSH terminals 闂?terminal translates wheel events to
-   * 闂?闂?key sequences in alt-screen, no full mouse tracking, native
-   * drag-select + right-click unaffected. Default true. Pass false
-   * (CLI: `--no-mouse`) to suppress entirely.
-   */
-  mouse?: boolean;
   /** One-time startup info rows injected by chatCommand. */
   startupInfoHints?: string[];
   /** Pre-created QQ channel (started before TUI mounts). */
@@ -451,7 +442,6 @@ function AppInner({
   dashboardHost,
   dashboardToken,
   onSwitchSession,
-  mouse = true,
   startupInfoHints,
   qqChannel,
   qqSubmitRef,
@@ -536,8 +526,6 @@ function AppInner({
     clear: clearToolProgressDisplay,
   } = useToolProgressDisplay(progressSink);
   const { stdout } = useStdout();
-  useTerminalSetup(mouse);
-
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
   // subagentRunner closure can read the ref. The wallet-currency thunk
@@ -2313,14 +2301,11 @@ function AppInner({
     if (dashboardRef.current) return;
     startDashboard()
       .then((url) => {
-        if (url && openDashboard) openUrl(url);
+        if (!url) return;
+        log.pushInfo(`/dashboard  →  ${url}`);
+        if (openDashboard) openUrl(url);
       })
       .catch((err) => {
-        // Auto-start failure surfaces as a visible warn row. The URL
-        // itself is shown on the welcome card (when the server is up),
-        // so silence here would leave the user with no way to know the
-        // web UI is unreachable 闂?port already in use, permission
-        // denied, etc. Don't block the TUI; everything else keeps working.
         const reason = err instanceof Error ? err.message : String(err);
         log.pushInfo(t("ui.dashboardAutoStartFailed", { reason }));
       });

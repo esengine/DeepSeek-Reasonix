@@ -118,17 +118,17 @@ export const GRADIENT = proxyThemeValue(() => gradientFromTheme(currentTheme()))
 export const COLOR = proxyThemeValue(() => colorFromTheme(currentTheme()));
 
 export const GLYPH = {
-  brand: "◈",
-  user: "◇",
-  assistant: "◆",
-  toolOk: "▣",
-  toolErr: "▥",
-  warn: "▲",
-  err: "✦",
-  arrow: "›",
+  brand: "●",
+  user: "●",
+  assistant: "●",
+  toolOk: "✓",
+  toolErr: "✗",
+  warn: "⚠",
+  err: "✗",
+  arrow: "▸",
   bullet: "·",
-  bar: "▎",
-  thinBar: "▏",
+  bar: "│",
+  thinBar: "│",
   block: "█",
   shade1: "░",
   shade2: "▒",
@@ -140,12 +140,12 @@ export const GLYPH = {
   fail: "✗",
   running: "●",
 
-  branch: "┣",
-  branchEnd: "┗",
-  branchStub: "┃",
+  branch: "├",
+  branchEnd: "└",
+  branchStub: "│",
   rule: "─",
 
-  spinFrames: ["◐", "◓", "◑", "◒"] as readonly string[],
+  spinFrames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"] as readonly string[],
 } as const;
 
 export const SURFACE = proxyThemeValue(() => surfaceFromTheme(currentTheme()));

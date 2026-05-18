@@ -103,21 +103,6 @@ export interface ChatOptions {
   dashboardHost?: string;
   /** Stable dashboard URL token (#968). `undefined` mints a fresh per-boot token. */
   dashboardToken?: string;
-  /**
-   * Render into the terminal's alternate screen buffer. Default true —
-   * alt-screen avoids the scrollback-mode resize/wrap ghost class. Pass
-   * false (CLI: `--no-alt-screen`) when the chat output needs to remain
-   * in shell scrollback after exit.
-   */
-  altScreen?: boolean;
-  /**
-   * Enable DECSET 1007 (alternate-scroll) so the wheel scrolls chat on
-   * web/cloud/SSH terminals — terminal translates wheel events to ↑/↓
-   * key sequences in alt-screen, no full mouse tracking, native
-   * drag-select + right-click unaffected. Default true. Pass false
-   * (CLI: `--no-mouse`) to suppress entirely.
-   */
-  mouse?: boolean;
 }
 
 interface RootProps extends ChatOptions {
@@ -234,7 +219,6 @@ function Root({
         dashboardPort={appProps.dashboardPort}
         dashboardHost={appProps.dashboardHost}
         dashboardToken={appProps.dashboardToken}
-        mouse={appProps.mouse}
         qqChannel={appProps.qqChannel}
         qqSubmitRef={appProps.qqSubmitRef}
         qqErrorRef={appProps.qqErrorRef}
@@ -279,6 +263,9 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   if (cfg.setupCompleted === true && (cfg.mcp?.length ?? 0) === 0 && mcpSpecs.length === 0) {
     startupInfoHints.push(t("mcpHealth.emptyHint"));
   }
+  startupInfoHints.push(
+    "/copy  →  vim-style copy mode (j/k navigate, v select, y yank to clipboard)",
+  );
 
   // Register web search/fetch tools unless explicitly disabled. DDG
   // backs them with no key required; the model invokes them whenever
@@ -359,12 +346,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       qqSubmitRef={qqSubmitRef}
       qqErrorRef={qqErrorRef}
     />,
-    {
-      exitOnCtrlC: true,
-      patchConsole: false,
-      incrementalRendering: false,
-      alternateScreen: opts.altScreen !== false,
-    },
+    { exitOnCtrlC: true },
   );
   try {
     await waitUntilExit();

@@ -32,7 +32,7 @@ export function CtxCard({ card }: { card: CtxCardData }): React.ReactElement {
   return (
     <Card tone={TONE.brand}>
       <CardHeader
-        glyph="⌘"
+        glyph="●"
         tone={TONE.brand}
         title={t("cardTitles.context")}
         meta={[`${used.toLocaleString()} / ${cap.toLocaleString()} (${usedPct.toFixed(1)}%)`]}

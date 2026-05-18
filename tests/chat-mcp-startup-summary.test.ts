@@ -213,19 +213,12 @@ async function captureStartupState(opts?: {
 // isolation. 15s leaves headroom for cold module-cache + slow CI hosts
 // without making the suite noticeably slower in the happy path.
 describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
-  let savedRenderer: string | undefined;
   beforeEach(() => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    savedRenderer = process.env.REASONIX_RENDERER;
-    // Renderer takes over the TTY + holds a singleton; tests probe chat
-    // startup state only, no real renderer needed.
-    process.env.REASONIX_RENDERER = "node";
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    if (savedRenderer === undefined) process.env.REASONIX_RENDERER = undefined;
-    else process.env.REASONIX_RENDERER = savedRenderer;
   });
 
   it("passes mcpSpecs through with empty initial mcpServers — bridging is deferred to App mount", async () => {
@@ -256,6 +249,8 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
     expect(mocks.initializeMock).not.toHaveBeenCalled();
   });
 
+  const COPY_HINT = "/copy  →  vim-style copy mode (j/k navigate, v select, y yank to clipboard)";
+
   it("adds empty-MCP hint exactly when setup is completed and configured MCP list is empty", async () => {
     const props = await captureStartupState({
       readConfig: { setupCompleted: true, mcp: [] },
@@ -264,6 +259,7 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
 
     expect(props.startupInfoHints).toEqual([
       "\u2139 no MCP servers configured \u2014 try: `reasonix setup` to re-pick, or `reasonix mcp install filesystem`",
+      COPY_HINT,
     ]);
   });
 
@@ -273,7 +269,7 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
       mcp: ["fs=npx -y @scope/fs /tmp"],
     });
 
-    expect(props.startupInfoHints).toEqual([]);
+    expect(props.startupInfoHints).toEqual([COPY_HINT]);
   });
 
   it("renders empty-MCP hint in zh-CN locale", async () => {
@@ -284,6 +280,7 @@ describe("chatCommand MCP startup summary states", { timeout: 15_000 }, () => {
     });
     expect(props.startupInfoHints).toEqual([
       "\u2139 未配置 MCP 服务器 —— 可尝试：`reasonix setup` 重新选择，或 `reasonix mcp install filesystem`",
+      COPY_HINT,
     ]);
   });
 });
