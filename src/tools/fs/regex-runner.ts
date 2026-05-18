@@ -25,7 +25,11 @@ parentPort.on("message", (msg) => {
 });
 `;
 
-const DEFAULT_TIMEOUT_MS = 5_000;
+// 60s gives slow machines (WSL, low-end laptops) generous headroom for any
+// non-catastrophic regex on the 2 MiB per-file cap — V8 finishes those in
+// seconds at most. ESC still tears the worker down immediately; this is the
+// automatic backstop for an unattended terminal.
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 type Pending = {
   resolve: (hits: number[]) => void;

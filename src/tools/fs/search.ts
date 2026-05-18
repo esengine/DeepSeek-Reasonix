@@ -72,8 +72,11 @@ export async function searchFiles(
 const MAX_HITS_PER_FILE = 30;
 /** Once printed bytes pass this fraction of the byte budget, remaining files switch to histogram. */
 const SUMMARY_MODE_TRIGGER_RATIO = 0.8;
-/** Soft deadline for a single searchContent invocation — a stuck walk fails loudly instead of hanging the turn. */
-const WALK_DEADLINE_MS = 15_000;
+// Walk-level deadline must be larger than the per-file regex timeout
+// (DEFAULT_TIMEOUT_MS in regex-runner = 60 s) so one timed-out file doesn't
+// immediately trip this guard; 120 s leaves room for a second slow file
+// plus the rest of the walk before declaring the search a lost cause.
+const WALK_DEADLINE_MS = 120_000;
 
 export async function searchContent(
   ctx: SearchContext,
