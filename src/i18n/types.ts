@@ -799,6 +799,7 @@ export interface TranslationSchema {
     disabledDetail: string;
     failedSetupHint: string;
     failedSetupConfigHint: string;
+    abortedHint: string;
   };
   checkpointPicker: {
     title: string;

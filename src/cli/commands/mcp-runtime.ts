@@ -116,6 +116,7 @@ export interface McpRuntime {
   addSpec(
     raw: string,
     loop?: CacheFirstLoop,
+    signal?: AbortSignal,
   ): Promise<{ ok: true; summary: McpServerSummary } | { ok: false; reason: string }>;
   removeSpec(raw: string, loop?: CacheFirstLoop): Promise<boolean>;
   reloadFromConfig(loop?: CacheFirstLoop): Promise<{
@@ -138,6 +139,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
   async function addSpec(
     raw: string,
     loop?: CacheFirstLoop,
+    signal?: AbortSignal,
   ): Promise<{ ok: true; summary: McpServerSummary } | { ok: false; reason: string }> {
     if (records.has(raw)) {
       return { ok: true, summary: records.get(raw)!.summary };
@@ -183,7 +185,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       if (spec.transport === "stdio") preflightStdioSpec(spec);
       const transport = buildTransportFromSpec(spec);
       mcp = new McpClient({ transport });
-      await mcp.initialize();
+      await mcp.initialize({ signal });
       const host: McpClientHost = { client: mcp };
       const bridge = await bridgeMcpTools(mcp, {
         registry: tools,

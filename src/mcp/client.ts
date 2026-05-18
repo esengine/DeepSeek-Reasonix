@@ -85,19 +85,23 @@ export class McpClient {
   }
 
   /** Compliant servers reject other methods until this completes. */
-  async initialize(): Promise<InitializeResult> {
+  async initialize(opts: { signal?: AbortSignal } = {}): Promise<InitializeResult> {
     if (this.initialized) throw new Error("MCP client already initialized");
     this.startReaderIfNeeded();
-    const result = await this.request<InitializeResult>("initialize", {
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      // Advertise every method the client can consume so servers know
-      // they can send listChanged notifications etc. Sub-feature flags
-      // (e.g. `resources.subscribe`) are omitted — we don't implement
-      // those yet and the empty object means "method-level support, no
-      // sub-features."
-      capabilities: { tools: {}, resources: {}, prompts: {} },
-      clientInfo: this.clientInfo,
-    } satisfies InitializeParams);
+    const result = await this.request<InitializeResult>(
+      "initialize",
+      {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        // Advertise every method the client can consume so servers know
+        // they can send listChanged notifications etc. Sub-feature flags
+        // (e.g. `resources.subscribe`) are omitted — we don't implement
+        // those yet and the empty object means "method-level support, no
+        // sub-features."
+        capabilities: { tools: {}, resources: {}, prompts: {} },
+        clientInfo: this.clientInfo,
+      } satisfies InitializeParams,
+      opts.signal,
+    );
     this._serverCapabilities = result.capabilities ?? {};
     this._serverInfo = result.serverInfo ?? { name: "", version: "" };
     this._protocolVersion = result.protocolVersion ?? "";

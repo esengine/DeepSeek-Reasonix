@@ -1126,6 +1126,7 @@ function AppInner({
   // background instead of blocking startup, route lifecycle events to
   // the in-app log so they don't corrupt alt-screen via stderr.
   const mcpBridgeStartedRef = useRef(false);
+  const pendingMcpAbortersRef = useRef<Set<AbortController>>(new Set());
   useEffect(() => {
     if (mcpBridgeStartedRef.current) return;
     if (!mcpRuntime || !mcpSpecs || mcpSpecs.length === 0) return;
@@ -1191,7 +1192,10 @@ function AppInner({
       }
     });
     for (const spec of mcpSpecs) {
-      void mcpRuntime.addSpec(spec, loop).then(() => {
+      const ac = new AbortController();
+      pendingMcpAbortersRef.current.add(ac);
+      void mcpRuntime.addSpec(spec, loop, ac.signal).then(() => {
+        pendingMcpAbortersRef.current.delete(ac);
         setLiveMcpServers(mcpRuntime.summaries());
       });
     }
@@ -1625,6 +1629,18 @@ function AppInner({
         loop,
         quitProcess,
       });
+      return;
+    }
+    if (
+      key.escape &&
+      !submittingRef.current &&
+      !isLoopActive() &&
+      pendingMcpAbortersRef.current.size > 0
+    ) {
+      const count = pendingMcpAbortersRef.current.size;
+      for (const ac of pendingMcpAbortersRef.current) ac.abort();
+      pendingMcpAbortersRef.current.clear();
+      log.pushInfo(t("mcpLifecycle.abortedHint", { count }));
       return;
     }
     if (key.escape && (submittingRef.current || isLoopActive())) {

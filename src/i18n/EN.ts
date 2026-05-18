@@ -1594,6 +1594,8 @@ export const EN: TranslationSchema = {
       "→ run `reasonix setup` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).",
     failedSetupConfigHint:
       "→ run `reasonix setup` to remove broken entries from your saved config.",
+    abortedHint:
+      "MCP startup aborted — {count} server(s) skipped. Run /mcp to retry once you've fixed the underlying issue.",
   },
   checkpointPicker: {
     title: "restore a checkpoint \u2014 {workspace}",
