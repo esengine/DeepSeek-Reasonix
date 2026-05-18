@@ -1710,6 +1710,12 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   background: var(--card-hover);
 }
 
+.msg-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
 .markdown pre {
   margin: 14px 0;
   padding: 14px 16px;

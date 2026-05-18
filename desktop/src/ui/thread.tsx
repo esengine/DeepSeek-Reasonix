@@ -1,4 +1,5 @@
-import { memo, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
+import { Copy } from "lucide-react";
 import { I } from "../icons";
 import { t, useLang } from "../i18n";
 import type { AssistantSegment, ActivePlan, PendingPlan, PendingCheckpoint, PendingRevision, PendingConfirm, PendingChoice, SkillOrigin } from "../App";
@@ -24,6 +25,16 @@ export const UserMsg = memo(function UserMsg({
   skill?: SkillOrigin;
 }) {
   useLang();
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* ignore */
+    }
+  };
   return (
     <div className="msg user">
       <div className="avatar">YOU</div>
@@ -39,6 +50,17 @@ export const UserMsg = memo(function UserMsg({
           {time ? <span className="time">{time}</span> : null}
         </div>
         <div className="msg-text">{text}</div>
+        <div className="msg-actions">
+          <button
+            type="button"
+            className={`copy-btn ${copied ? "done" : ""}`}
+            onClick={onCopy}
+            title="Copy this message"
+          >
+            <Copy size={11} />
+            {copied ? t("markdown.copied") : null}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -63,6 +85,20 @@ export const AssistantMsg = memo(function AssistantMsg({
   onAlwaysAllowConfirm: (id: number, prefix: string) => void;
   pendingConfirms: PendingConfirm[];
 }) {
+  const [copied, setCopied] = useState(false);
+  const content = segments
+    .filter((s): s is AssistantSegment & { kind: "text" } => s.kind === "text")
+    .map((s) => s.text)
+    .join("\n\n");
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* ignore */
+    }
+  };
   return (
     <div className="msg assistant">
       <div className="avatar">DS</div>
@@ -132,6 +168,19 @@ export const AssistantMsg = memo(function AssistantMsg({
             />
           );
         })}
+        {content ? (
+          <div className="msg-actions">
+            <button
+              type="button"
+              className={`copy-btn ${copied ? "done" : ""}`}
+              onClick={onCopy}
+              title="Copy this response"
+            >
+              <Copy size={11} />
+              {copied ? t("markdown.copied") : null}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
