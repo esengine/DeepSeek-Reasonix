@@ -239,7 +239,6 @@ export interface TranslationSchema {
     preflightNoFold: string;
     flashEscalation: string;
     harvestStatus: string;
-    autoEscalation: string;
     repeatToolCallWarning: string;
     stormStuck: string;
     stormSuppressed: string;

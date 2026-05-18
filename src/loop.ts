@@ -39,7 +39,6 @@ import {
   stripHallucinatedToolMarkup,
   thinkingModeForModel,
 } from "./loop/thinking.js";
-import { FAILURE_ESCALATION_THRESHOLD, TurnFailureTracker } from "./loop/turn-failure-tracker.js";
 import type { LoopEvent } from "./loop/types.js";
 import { AppendOnlyLog, type ImmutablePrefix, VolatileScratch } from "./memory/runtime.js";
 import {
@@ -82,8 +81,6 @@ export interface CacheFirstLoopOptions {
   autoEscalate?: boolean;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
-  /** Per-turn repair/error signal count required to escalate flash→pro. Defaults to FAILURE_ESCALATION_THRESHOLD. Out-of-range values warn + fall back. */
-  failureThreshold?: number;
   session?: string;
   /** PreToolUse + PostToolUse only — UserPromptSubmit / Stop live at the App boundary. */
   hooks?: ResolvedHook[];
@@ -100,7 +97,7 @@ export interface ReconfigurableOptions {
   stream?: boolean;
   /** V4 thinking mode only; deepseek-chat ignores. */
   reasoningEffort?: "high" | "max";
-  /** `false` pins to `model` — kills both NEEDS_PRO marker scavenge and failure-count threshold. */
+  /** `false` pins to `model` — disables the model-marker scavenge that flips flash→pro. */
   autoEscalate?: boolean;
 }
 
@@ -162,7 +159,6 @@ export class CacheFirstLoop {
 
   private _proArmedForNextTurn = false;
   private _escalateThisTurn = false;
-  private readonly _turnFailures: TurnFailureTracker;
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
   private context!: ContextManager;
@@ -185,9 +181,6 @@ export class CacheFirstLoop {
     if (opts.autoEscalate !== undefined) this.autoEscalate = opts.autoEscalate;
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
-    this._turnFailures = new TurnFailureTracker(
-      resolveFailureThreshold(opts.failureThreshold, FAILURE_ESCALATION_THRESHOLD),
-    );
 
     this.hooks = opts.hooks ?? [];
     this.hookCwd = opts.hookCwd ?? process.cwd();
@@ -318,7 +311,6 @@ export class CacheFirstLoop {
     this._inflight.clear();
     this.stats.reset();
     this._turn = 0;
-    this._turnFailures.reset();
     this._budgetWarned = false;
     let systemRebuilt = false;
     if (this._rebuildSystem) {
@@ -397,14 +389,6 @@ export class CacheFirstLoop {
 
   private modelForCurrentCall(): string {
     return this._escalateThisTurn ? ESCALATION_MODEL : this.model;
-  }
-
-  /** Returns true ONLY on the tipping call — caller surfaces a one-shot warning. */
-  private noteToolFailureSignal(resultJson: string, repair?: RepairReport): boolean {
-    if (!this._turnFailures.noteAndCrossedThreshold(resultJson, repair)) return false;
-    if (this._escalateThisTurn || !this.autoEscalate) return false;
-    this._escalateThisTurn = true;
-    return true;
   }
 
   /** A call counts as mutating when its definition reports `readOnly !== true` and any dynamic `readOnlyCheck` doesn't override that for these args. */
@@ -593,11 +577,9 @@ export class CacheFirstLoop {
     // calls that are now legitimately on-task. The window repopulates
     // naturally as this turn's tool calls flow through.
     this.repair.resetStorm();
-    // Per-turn escalation state: reset both flags at turn start, then
-    // consume the /pro armed flag into `_escalateThisTurn` (so the
-    // armed intent is one-shot — next turn starts fresh on flash
-    // unless the user re-arms or mid-turn escalation triggers).
-    this._turnFailures.reset();
+    // Per-turn escalation state: reset at turn start, then consume the
+    // /pro armed flag into `_escalateThisTurn` (one-shot — next turn
+    // starts fresh on flash unless re-armed or the model self-escalates).
     this._turnSelfCorrected = false;
     this._escalateThisTurn = false;
     this._foldedThisTurn = false;
@@ -1023,22 +1005,6 @@ export class CacheFirstLoop {
         repair: report,
       };
 
-      // Cost-aware escalation: repair fires (scavenge / truncation /
-      // storm) are visible "model struggled" signals. Feed them into
-      // the turn failure counter — if we hit the threshold, the
-      // remainder of this turn's model calls use pro.
-      if (this.noteToolFailureSignal("", report)) {
-        yield {
-          turn: this._turn,
-          role: "warning",
-          content: t("loop.autoEscalation", {
-            model: ESCALATION_MODEL,
-            breakdown: this._turnFailures.formatBreakdown(),
-            fallback: this.model,
-          }),
-        };
-      }
-
       const allSuppressed =
         report.stormsBroken > 0 && repairedCalls.length === 0 && toolCalls.length > 0;
 
@@ -1220,17 +1186,6 @@ export class CacheFirstLoop {
             content: result,
           });
 
-          if (this.noteToolFailureSignal(result)) {
-            yield {
-              turn: this._turn,
-              role: "warning",
-              content: t("loop.autoEscalation", {
-                model: ESCALATION_MODEL,
-                breakdown: this._turnFailures.formatBreakdown(),
-                fallback: this.model,
-              }),
-            };
-          }
           yield {
             turn: this._turn,
             role: "tool",
@@ -1274,19 +1229,4 @@ function parsePositiveIntEnv(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
-}
-
-/** Sane-range bounds for the flash→pro escalation threshold. */
-const FAILURE_THRESHOLD_MIN = 1;
-const FAILURE_THRESHOLD_MAX = 20;
-
-function resolveFailureThreshold(raw: number | undefined, fallback: number): number {
-  if (raw === undefined) return fallback;
-  if (!Number.isInteger(raw) || raw < FAILURE_THRESHOLD_MIN || raw > FAILURE_THRESHOLD_MAX) {
-    process.stderr.write(
-      `▲ ignoring escalation failureThreshold=${raw} (must be an integer in [${FAILURE_THRESHOLD_MIN},${FAILURE_THRESHOLD_MAX}]) — using default ${fallback}\n`,
-    );
-    return fallback;
-  }
-  return raw;
 }

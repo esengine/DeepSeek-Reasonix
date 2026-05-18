@@ -28,8 +28,6 @@ export interface RunOptions {
   model: string;
   system: string;
   budgetUsd?: number;
-  /** Per-turn repair-signal count required to escalate flash→pro. Undefined → loop default (3). */
-  failureThreshold?: number;
   /** JSONL transcript path — lets `reasonix replay` / `diff` audit this run. */
   transcript?: string;
   /** Zero or more MCP server specs. Each: `"name=cmd args..."` or `"cmd args..."`. */
@@ -149,7 +147,6 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     tools,
     model: opts.model,
     budgetUsd: opts.budgetUsd,
-    failureThreshold: opts.failureThreshold,
   });
   const prefixHash = prefix.fingerprint;
 

@@ -52,8 +52,6 @@ export interface ChatOptions {
    * mid-session.
    */
   budgetUsd?: number;
-  /** Per-turn repair-signal count required to escalate flash→pro. Undefined → loop default (3). */
-  failureThreshold?: number;
   session?: string;
   /** Zero or more MCP server specs. Each: `"name=cmd args..."` or `"cmd args..."`. */
   mcp?: string[];
@@ -220,7 +218,6 @@ function Root({
         rebuildSystem={appProps.rebuildSystem}
         transcript={appProps.transcript}
         budgetUsd={appProps.budgetUsd}
-        failureThreshold={appProps.failureThreshold}
         session={activeSession}
         tools={tools}
         mcpSpecs={mcpSpecs}

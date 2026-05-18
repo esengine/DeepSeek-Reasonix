@@ -49,8 +49,6 @@ export interface CodeOptions {
    * via `/budget <usd>` slash command.
    */
   budgetUsd?: number;
-  /** Per-turn repair-signal count required to escalate flash→pro. Undefined → loop default (3). */
-  failureThreshold?: number;
   /** Suppress the auto-launched embedded web dashboard. */
   noDashboard?: boolean;
   /** When true and the dashboard is enabled, open its URL in the system default browser as soon as the server is ready. */
@@ -153,7 +151,6 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   await chatCommand({
     model: resolvedModel,
     budgetUsd: opts.budgetUsd,
-    failureThreshold: opts.failureThreshold,
     system: codeRebuildSystem(),
     rebuildSystem: codeRebuildSystem,
     transcript: opts.transcript,

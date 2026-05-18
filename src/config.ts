@@ -147,10 +147,6 @@ export interface ReasonixConfig {
     /** Stable URL token (#968). If unset, a fresh token is minted each boot. Min 16 chars enforced at load time. */
     token?: string;
   };
-  escalation?: {
-    /** Per-turn repair/error signal count required to escalate flash→pro. Defaults to 3. Out-of-range → default. */
-    failureThreshold?: number;
-  };
   /** Per-field visibility toggles for the bottom status row. All default to true (visible). */
   statusBar?: {
     showBalance?: boolean;
