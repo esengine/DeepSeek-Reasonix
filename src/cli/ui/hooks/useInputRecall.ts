@@ -6,7 +6,7 @@ export interface UseInputRecallResult {
   pushHistory: (text: string) => void;
   /** Reset cursor to the "fresh input" position — call after a successful submit. */
   resetCursor: () => void;
-  /** Newest-last snapshot — published so the Rust renderer can cycle it locally. */
+  /** Newest-last snapshot. */
   history: readonly string[];
 }
 

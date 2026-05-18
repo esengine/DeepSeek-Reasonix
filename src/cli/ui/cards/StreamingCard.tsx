@@ -145,7 +145,7 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   const droppedAbove = Math.max(0, visualLines.length - visible.length);
   const aborted = !!card.aborted;
   const headColor = aborted ? TONE.err : TONE_ACTIVE.brand;
-  const glyph = aborted ? "‹" : "◈";
+  const glyph = aborted ? "⊘" : "●";
   const headLabel = aborted ? t("cardLabels.aborted") : t("cardLabels.writing");
 
   const liveRatePill =

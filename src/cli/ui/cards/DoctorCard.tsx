@@ -11,7 +11,7 @@ import { CARD } from "../theme/tokens.js";
 const LEVEL_GLYPH: Record<DoctorCheckEntry["level"], string> = {
   ok: "✓",
   warn: "⚠",
-  fail: "✖",
+  fail: "✗",
 };
 
 function levelTag(level: DoctorCheckEntry["level"]): string {
@@ -41,7 +41,7 @@ export function DoctorCard({ card }: { card: DoctorCardData }): React.ReactEleme
   return (
     <Card tone={CARD.tool.color}>
       <CardHeader
-        glyph="⚕"
+        glyph="●"
         tone={CARD.tool.color}
         title={t("cardTitles.doctor")}
         meta={[summary]}

@@ -21,8 +21,6 @@ export interface StatusBarConfig {
   showFeedbackHint: boolean;
 }
 
-const RULE_PAD = 4;
-const RULE_MIN = 20;
 const WALLET_MIN_COLS = 90;
 const VERSION_MIN_COLS = 70;
 const FEEDBACK_HINT_MIN_COLS = 100;
@@ -48,7 +46,6 @@ export function StatusRow({
   const session = useAgentState((s) => s.session);
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
-  const ruleWidth = Math.max(RULE_MIN, cols - RULE_PAD);
   const hasTurn = status.cost > 0;
   const hasSession = status.sessionCost > 0;
   const hasBalance = typeof status.balance === "number";
@@ -57,15 +54,9 @@ export function StatusRow({
     ((hasSession && statusBar.showSessionCost) || (hasBalance && statusBar.showBalance));
 
   return (
-    <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-      <Box height={1} flexWrap="nowrap">
+    <Box flexDirection="column" flexShrink={0}>
+      <Box flexDirection="row" flexWrap="wrap" flexShrink={0}>
         <Text>{"  "}</Text>
-        <Text color={FG.faint} wrap="truncate">
-          {"─".repeat(ruleWidth)}
-        </Text>
-      </Box>
-      <Box flexDirection="row" height={1} minHeight={1} flexWrap="nowrap" flexShrink={0}>
-        <Text wrap="truncate">{"  "}</Text>
         {status.recording ? (
           <RecordingPill rec={status.recording} />
         ) : status.countdownSeconds !== undefined ? (
@@ -77,14 +68,14 @@ export function StatusRow({
           <PresetPill preset={status.preset} model={session.model} />
         )}
         <Sep />
-        <Text color={FG.sub} wrap="truncate">{`${session.id} · ${session.branch}`}</Text>
+        <Text color={FG.sub}>{`${session.id} · ${session.branch}`}</Text>
         {hasTurn && statusBar.showTurnCost && (
           <>
             <Sep />
-            <Text bold color={TONE.brand} wrap="truncate">
+            <Text bold color={TONE.brand}>
               {"▸ "}
             </Text>
-            <Text bold color={FG.body} wrap="truncate">
+            <Text bold color={FG.body}>
               {`${formatCost(status.cost, status.balanceCurrency)} ${t("statusBar.turn")}`}
             </Text>
           </>
@@ -94,7 +85,6 @@ export function StatusRow({
             <Sep />
             <Text
               color={TONE.accent}
-              wrap="truncate"
             >{`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}</Text>
           </>
         )}
@@ -122,18 +112,14 @@ export function StatusRow({
         {statusBar.showVersion && cols >= VERSION_MIN_COLS && (
           <>
             <Sep />
-            <Text color={FG.faint} wrap="truncate">{`v${VERSION}`}</Text>
+            <Text color={FG.faint}>{`v${VERSION}`}</Text>
           </>
         )}
         {statusBar.showFeedbackHint && cols >= FEEDBACK_HINT_MIN_COLS && (
           <>
             <Sep />
-            <Text color={FG.meta} wrap="truncate">
-              {"⚑ "}
-            </Text>
-            <Text color={FG.sub} wrap="truncate">
-              {"/feedback"}
-            </Text>
+            <Text color={FG.meta}>{"⚑ "}</Text>
+            <Text color={FG.sub}>{"/feedback"}</Text>
           </>
         )}
       </Box>
@@ -201,10 +187,7 @@ function CtxUsagePill({
       )}
       <Text color={color} wrap="truncate">{`${pct}%`}</Text>
       {showTokens && (
-        <Text
-          color={FG.faint}
-          wrap="truncate"
-        >{` · ${formatTokens(tokens)}/${formatTokens(cap)}`}</Text>
+        <Text color={FG.faint}>{` · ${formatTokens(tokens)}/${formatTokens(cap)}`}</Text>
       )}
     </>
   );
@@ -223,10 +206,7 @@ function McpLoadingPill({
       <Text color={TONE.brand} wrap="truncate">
         {"⌁ "}
       </Text>
-      <Text
-        color={FG.body}
-        wrap="truncate"
-      >{`${t("statusBar.mcpLoading")} ${ready}/${total}`}</Text>
+      <Text color={FG.body}>{`${t("statusBar.mcpLoading")} ${ready}/${total}`}</Text>
     </>
   );
 }
@@ -255,7 +235,6 @@ function WalletPill({
       {showSpent && (
         <Text
           color={FG.body}
-          wrap="truncate"
         >{`${formatCost(sessionCostUsd, currency, 2)} ${t("statusBar.spent")}`}</Text>
       )}
       {showSpent && showBalanceLine && (
@@ -306,10 +285,7 @@ function ModePill({
         <Text color={dot.color} wrap="truncate">
           {dot.glyph}
         </Text>
-        <Text
-          color={dot.color}
-          wrap="truncate"
-        >{` ${modeLabel} · ${t("statusBar.slow")}${tail}`}</Text>
+        <Text color={dot.color}>{` ${modeLabel} · ${t("statusBar.slow")}${tail}`}</Text>
       </Box>
     );
   }
@@ -373,7 +349,6 @@ function RecordingPill({ rec }: { rec: NonNullable<StatusBar["recording"]> }): R
       </Text>
       <Text
         color={TONE.err}
-        wrap="truncate"
       >{` ${sizeMb}${t("statusBar.mb")} · ${rec.events}${t("statusBar.evt")}`}</Text>
     </Box>
   );
