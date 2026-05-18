@@ -364,6 +364,80 @@ describe("flattenMcpResult", () => {
   });
 });
 
+describe("flattenMcpResult: schema validation", () => {
+  it("rejects a non-object result", () => {
+    expect(() => flattenMcpResult(null as unknown as CallToolResult)).toThrow("non-object");
+    expect(() => flattenMcpResult("str" as unknown as CallToolResult)).toThrow("non-object");
+    expect(() => flattenMcpResult(42 as unknown as CallToolResult)).toThrow("non-object");
+  });
+
+  it("rejects a result missing content", () => {
+    expect(() => flattenMcpResult({} as unknown as CallToolResult)).toThrow("non-array content");
+  });
+
+  it("rejects non-array content", () => {
+    expect(() => flattenMcpResult({ content: "nope" } as unknown as CallToolResult)).toThrow(
+      "non-array content",
+    );
+    expect(() => flattenMcpResult({ content: null } as unknown as CallToolResult)).toThrow(
+      "non-array content",
+    );
+  });
+
+  it("rejects a content block that isn't an object", () => {
+    expect(() => flattenMcpResult({ content: ["string"] } as unknown as CallToolResult)).toThrow(
+      "is not an object",
+    );
+    expect(() => flattenMcpResult({ content: [null] } as unknown as CallToolResult)).toThrow(
+      "is not an object",
+    );
+  });
+
+  it("rejects an unknown content block type", () => {
+    expect(() =>
+      flattenMcpResult({
+        content: [{ type: "resource", uri: "file:///etc/passwd" }],
+      } as unknown as CallToolResult),
+    ).toThrow("unknown type");
+  });
+
+  it("rejects a text block with non-string text", () => {
+    expect(() =>
+      flattenMcpResult({
+        content: [{ type: "text", text: 42 }],
+      } as unknown as CallToolResult),
+    ).toThrow("non-string text");
+  });
+
+  it("rejects an image block with non-string data", () => {
+    expect(() =>
+      flattenMcpResult({
+        content: [{ type: "image", data: null, mimeType: "image/png" }],
+      } as unknown as CallToolResult),
+    ).toThrow("non-string data");
+  });
+
+  it("rejects an image block with non-string mimeType", () => {
+    expect(() =>
+      flattenMcpResult({
+        content: [{ type: "image", data: "abc", mimeType: 7 }],
+      } as unknown as CallToolResult),
+    ).toThrow("non-string mimeType");
+  });
+
+  it("passes a valid result through unchanged", () => {
+    const out = flattenMcpResult({
+      content: [
+        { type: "text", text: "hello" },
+        { type: "image", data: "abc", mimeType: "image/png" },
+      ],
+      isError: false,
+    });
+    expect(out).toContain("hello");
+    expect(out).toContain("[image image/png");
+  });
+});
+
 describe("bridgeMcpTools: result-size cap", () => {
   it("caps a giant MCP tool result before handing it to the registry", async () => {
     // Minimal local fake — just enough to exercise the dispatch path.

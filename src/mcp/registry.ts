@@ -211,10 +211,43 @@ export interface FlattenOptions {
 }
 
 export function flattenMcpResult(result: CallToolResult, opts: FlattenOptions = {}): string {
+  validateResultShape(result);
   const parts = result.content.map(blockToString);
   const joined = parts.join("\n").trim();
   const prefixed = result.isError ? `ERROR: ${joined || "(no error message from server)"}` : joined;
   return opts.maxChars ? truncateForModel(prefixed, opts.maxChars) : prefixed;
+}
+
+/** Runtime schema check — MCP server responses cross a network boundary and the TypeScript types are compile-time only. */
+function validateResultShape(result: CallToolResult): void {
+  if (typeof result !== "object" || !result)
+    throw new Error(`MCP server returned non-object result: ${typeof result}`);
+  const { content, isError: _isError } = result as { content: unknown; isError?: unknown };
+  if (!Array.isArray(content))
+    throw new Error(`MCP server returned result with non-array content: ${typeof content}`);
+  for (let i = 0; i < content.length; i++) {
+    const block = content[i] as Record<string, unknown> | null | undefined;
+    if (typeof block !== "object" || !block)
+      throw new Error(`MCP server returned result.content[${i}] is not an object`);
+    if (block.type !== "text" && block.type !== "image")
+      throw new Error(
+        `MCP server returned result.content[${i}] with unknown type ${JSON.stringify(block.type)}`,
+      );
+    if (block.type === "text" && typeof block.text !== "string")
+      throw new Error(
+        `MCP server returned result.content[${i}] with non-string text (${typeof block.text})`,
+      );
+    if (block.type === "image") {
+      if (typeof block.data !== "string")
+        throw new Error(
+          `MCP server returned result.content[${i}] with non-string data (${typeof block.data})`,
+        );
+      if (typeof block.mimeType !== "string")
+        throw new Error(
+          `MCP server returned result.content[${i}] with non-string mimeType (${typeof block.mimeType})`,
+        );
+    }
+  }
 }
 
 /** Head + 1KB tail so error messages at end of stack traces aren't lost. */
