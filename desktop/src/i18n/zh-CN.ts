@@ -586,6 +586,8 @@ export const zhCN: typeof en = {
     userChoiceKind: "用户选择",
     optionCount: "{count} 个选项",
     subagent: "subagent",
+    copyMessage: "复制这条消息",
+    copyResponse: "复制这条回复",
   },
   live: {
     reasoning: "live · reasoning",

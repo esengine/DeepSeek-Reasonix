@@ -55,7 +55,7 @@ export const UserMsg = memo(function UserMsg({
             type="button"
             className={`copy-btn ${copied ? "done" : ""}`}
             onClick={onCopy}
-            title="Copy this message"
+            title={t("thread.copyMessage")}
           >
             <Copy size={11} />
             {copied ? t("markdown.copied") : null}
@@ -174,7 +174,7 @@ export const AssistantMsg = memo(function AssistantMsg({
               type="button"
               className={`copy-btn ${copied ? "done" : ""}`}
               onClick={onCopy}
-              title="Copy this response"
+              title={t("thread.copyResponse")}
             >
               <Copy size={11} />
               {copied ? t("markdown.copied") : null}

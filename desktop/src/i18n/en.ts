@@ -599,6 +599,8 @@ export const en = {
     userChoiceKind: "user choice",
     optionCount: "{count} options",
     subagent: "subagent",
+    copyMessage: "Copy this message",
+    copyResponse: "Copy this response",
   },
   live: {
     reasoning: "live · reasoning",
