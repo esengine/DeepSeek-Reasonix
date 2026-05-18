@@ -231,6 +231,12 @@ export type SessionLoadedEvent = {
   };
 };
 
+export type SessionEmptyEvent = {
+  type: "$session_empty";
+  name: string;
+  sizeBytes: number;
+};
+
 export type NeedsSetupEvent = {
   type: "$needs_setup";
   reason: "no_api_key";
@@ -374,6 +380,7 @@ export type IncomingEvent = { tabId?: string } & (
   | PlanRequiredEvent
   | SessionsEvent
   | SessionLoadedEvent
+  | SessionEmptyEvent
   | NeedsSetupEvent
   | SettingsEvent
   | BalanceEvent

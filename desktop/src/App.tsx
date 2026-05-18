@@ -730,6 +730,25 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
         queuedSends: [],
       };
     }
+    case "$session_empty": {
+      // The sidecar successfully ran loadSessionMessages but the jsonl is
+      // empty / all-malformed. Without this, the click looks like a no-op
+      // because the chat just re-renders empty. Issue #1179.
+      const sizeNote = ev.sizeBytes === 0 ? "0 bytes" : `${ev.sizeBytes} bytes, no valid entries`;
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "error",
+            message:
+              `Session "${ev.name}" loaded with no messages (${sizeNote}). ` +
+              `The file ~/.reasonix/sessions/${ev.name}.jsonl exists but couldn't be parsed — ` +
+              `start a new chat or restore from .jsonl.bak if you have one.`,
+          },
+        ],
+      };
+    }
     case "$error":
     case "error":
       return {

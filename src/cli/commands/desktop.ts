@@ -59,6 +59,7 @@ import {
   loadSessionMessages,
   loadSessionMeta,
   patchSessionMeta,
+  sessionPath,
   timestampSuffix,
 } from "../../memory/session.js";
 import { MemoryStore } from "../../memory/user.js";
@@ -212,6 +213,12 @@ interface SessionLoadedEvent {
   };
 }
 
+interface SessionEmptyEvent {
+  type: "$session_empty";
+  name: string;
+  sizeBytes: number;
+}
+
 interface ConfirmRequiredEvent {
   type: "$confirm_required";
   id: number;
@@ -360,6 +367,7 @@ type EmittableEvent =
   | PlanClearedEvent
   | SessionsEvent
   | SessionLoadedEvent
+  | SessionEmptyEvent
   | NeedsSetupEvent
   | SettingsEvent
   | BalanceEvent
@@ -1413,7 +1421,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
 
     const tab = msg.tabId ? tabs.get(msg.tabId) : first;
     if (!tab) {
-      emit({ type: "$error", message: `unknown tab: ${msg.tabId}` });
+      // No tabId on the emit ⇒ the renderer's per-tab router drops it
+      // silently. Surface to stderr instead so it's at least visible
+      // when the desktop is launched from a terminal.
+      process.stderr.write(
+        `rpc dispatch: unknown tabId=${msg.tabId} for cmd=${msg.cmd} — dropping\n`,
+      );
       return;
     }
 
@@ -1521,11 +1534,29 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         cancelPendingGates(tab);
         tab.currentSession = msg.name;
         if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+        const loadedMessages = buildLoadedMessages(records);
+        // Empty load is a known silent-failure path (file 0 bytes, all
+        // lines malformed, etc.). Log to stderr so a terminal-launched
+        // desktop reports something diagnostic, and emit a $session_empty
+        // event so the UI can surface "loaded but empty" instead of
+        // looking like the click did nothing. Issue #1179.
+        if (loadedMessages.length === 0) {
+          let sizeBytes = 0;
+          try {
+            sizeBytes = statSync(sessionPath(msg.name)).size;
+          } catch {
+            /* file may not exist */
+          }
+          process.stderr.write(
+            `session_load: "${msg.name}" returned 0 messages (file size=${sizeBytes}B) — empty or unreadable jsonl\n`,
+          );
+          emit({ type: "$session_empty", name: msg.name, sizeBytes }, tab.id);
+        }
         emit(
           {
             type: "$session_loaded",
             name: msg.name,
-            messages: buildLoadedMessages(records),
+            messages: loadedMessages,
             carryover: {
               totalCostUsd: meta.totalCostUsd ?? 0,
               cacheHitTokens: meta.cacheHitTokens ?? 0,
@@ -1535,6 +1566,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           tab.id,
         );
       } catch (err) {
+        process.stderr.write(`session_load: "${msg.name}" threw — ${(err as Error).message}\n`);
         emit({ type: "$error", message: `session_load failed: ${(err as Error).message}` }, tab.id);
       }
       return;
