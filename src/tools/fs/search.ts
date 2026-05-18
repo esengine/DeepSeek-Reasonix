@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import { getRegexRunner } from "./regex-runner.js";
 
 export interface SearchContext {
   rootDir: string;
@@ -92,11 +93,16 @@ export async function searchContent(
   const includeDeps = args.include_deps === true;
   const ctxLines = Math.max(0, Math.min(20, Math.floor(args.context ?? 0)));
   const summaryOnly = args.summary_only === true;
-  let re: RegExp | null = null;
+  const reFlags = caseSensitive ? "" : "i";
+  // We track the regex by source + flags rather than holding an instance — the
+  // actual re.test runs inside a worker so catastrophic backtracking can be
+  // killed via worker.terminate().
+  let reSource: string | null = null;
   try {
-    re = new RegExp(args.pattern, caseSensitive ? "" : "i");
+    new RegExp(args.pattern, reFlags);
+    reSource = args.pattern;
   } catch {
-    re = null;
+    reSource = null;
   }
   const needle = caseSensitive ? args.pattern : args.pattern.toLowerCase();
   const matches: string[] = [];
@@ -106,6 +112,7 @@ export async function searchContent(
   let summaryMode = summaryOnly;
   let summaryNoticeEmitted = false;
   const fileHitCounts = new Map<string, number>();
+  const regexSkippedFiles: Array<{ rel: string; reason: string }> = [];
   const t0 = Date.now();
   const throwIfTimedOut = (): void => {
     if (Date.now() - t0 > WALK_DEADLINE_MS) {
@@ -187,13 +194,27 @@ export async function searchContent(
       const text = raw.toString("utf8");
       const rel = displayRel(ctx.rootDir, full);
       const lines = text.split(/\r?\n/);
-      const hits: number[] = [];
-      for (let li = 0; li < lines.length; li++) {
-        throwIfAborted(args.signal);
-        const line = lines[li]!;
-        const lineForCheck = caseSensitive ? line : line.toLowerCase();
-        const hit = re ? re.test(line) : lineForCheck.includes(needle);
-        if (hit) hits.push(li);
+      let hits: number[];
+      if (reSource !== null) {
+        try {
+          hits = await getRegexRunner().testLines(text, reSource, reFlags, {
+            signal: args.signal,
+          });
+        } catch (err) {
+          const reason = (err as Error).message;
+          // Genuine abort bubbles up; regex-timeout means this single file's
+          // pattern is pathological — skip it and keep walking.
+          if (reason.includes("aborted")) throw err;
+          regexSkippedFiles.push({ rel, reason });
+          continue;
+        }
+      } else {
+        hits = [];
+        for (let li = 0; li < lines.length; li++) {
+          throwIfAborted(args.signal);
+          const lineForCheck = caseSensitive ? lines[li]! : lines[li]!.toLowerCase();
+          if (lineForCheck.includes(needle)) hits.push(li);
+        }
       }
       scanned++;
       if (hits.length === 0) continue;
@@ -249,6 +270,11 @@ export async function searchContent(
     }
   };
   await walk(startAbs);
+  if (regexSkippedFiles.length > 0) {
+    pushLine(
+      `[regex timed out on ${regexSkippedFiles.length} file${regexSkippedFiles.length === 1 ? "" : "s"} — pattern may have catastrophic backtracking; first: ${regexSkippedFiles[0]!.rel}]`,
+    );
+  }
   if (matches.length === 0) {
     return scanned === 0
       ? "(no files scanned — path empty or all files filtered out)"

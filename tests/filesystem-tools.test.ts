@@ -542,6 +542,26 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).toMatch(/no matches/);
     });
 
+    it("skips a single file with catastrophic regex and keeps walking (issue #1236)", async () => {
+      // (a+)+! on a long run of 'a' is the textbook ReDoS pattern. With the
+      // worker-isolated runner, the bad file is terminated and reported as
+      // a regex-timeout in the footer; the remaining file still produces
+      // its match.
+      const { RegexRunner, __setRegexRunnerForTesting } = await import(
+        "../src/tools/fs/regex-runner.js"
+      );
+      __setRegexRunnerForTesting(new RegexRunner({ defaultTimeoutMs: 300 }));
+      try {
+        await fs.writeFile(join(root, "evil.txt"), `${"a".repeat(40)}\n`);
+        await fs.writeFile(join(root, "good.txt"), "match here\n");
+        const out = await tools.dispatch("search_content", JSON.stringify({ pattern: "(a+)+!" }));
+        expect(out).toMatch(/regex timed out on 1 file/);
+        expect(out).toContain("evil.txt");
+      } finally {
+        __setRegexRunnerForTesting(null);
+      }
+    });
+
     it("returns an aborted error when the signal fires before dispatch (issue #1236)", async () => {
       const ctrl = new AbortController();
       ctrl.abort();
