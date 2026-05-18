@@ -182,6 +182,7 @@ import { ThemeProvider } from "./theme/context.js";
 import { listThemeNames } from "./theme/tokens.js";
 import { FG, type ThemeName } from "./theme/tokens.js";
 import { TickerProvider } from "./ticker.js";
+import { handleTurnInterrupt } from "./turn-interrupt.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
 import { useEditHistory } from "./useEditHistory.js";
 import { useSessionInfo } from "./useSessionInfo.js";
@@ -1537,11 +1538,10 @@ function AppInner({
     else if (!pickerOwnsArrows && ev.downArrow) chatScroll.scrollDown();
   }, !modalOpen);
 
-  // Esc during busy 闂?forward to the loop as an abort signal. The loop
-  // finishes the tool call in flight (we can't kill subprocess stdio
-  // mid-write), then diverts to its no-tools summary path so the user
-  // gets an answer instead of a hard stop. Only listens while busy so
-  // we don't accidentally hijack Esc in other contexts.
+  // Esc/Ctrl+C during an active model turn forward to the loop as an
+  // abort signal. Generic busy states such as `!cmd` and `/btw` are
+  // excluded so a stray Esc cannot poison the next turn's abort
+  // controller.
   //
   // Prompt history (Ctrl+P/Ctrl+N) is handed off from PromptInput via
   // recallPrev/recallNext below 闂?parent-level useInput is simpler
@@ -1561,29 +1561,27 @@ function AppInner({
       return;
     }
     if (key.ctrl && key.input === "c") {
-      quitProcess();
+      handleTurnInterrupt("ctrl-c", {
+        turnActiveRef: submittingRef,
+        abortedThisTurn,
+        resetPendingModals,
+        isLoopActive,
+        stopLoop,
+        loop,
+        quitProcess,
+      });
       return;
     }
-    if (key.escape && busy) {
-      if (abortedThisTurn.current) return;
-      abortedThisTurn.current = true;
-      // Flush every pending modal + cancel the awaiting tool fn behind
-      // it. pauseGate.ask doesn't watch AbortSignal, so without this a
-      // plan_checkpoint / plan_proposed / choice / shell modal would
-      // strand its tool fn and busy would never clear.
-      resetPendingModals();
-      // Esc during a busy turn also kills any active /loop 闂?the user
-      // is taking over. Loops persist past plain Esc when the system is
-      // idle so a long-cadence loop doesn't die from random key noise.
-      if (isLoopActive()) stopLoop();
-      loop.abort();
-      return;
-    }
-    // Esc when idle ALSO cancels an active loop, since hitting Esc with
-    // nothing else going on is a clear "stop whatever's running"
-    // gesture. No-op when no loop is active.
-    if (key.escape && !busy && isLoopActive()) {
-      stopLoop();
+    if (key.escape && (submittingRef.current || isLoopActive())) {
+      handleTurnInterrupt("escape", {
+        turnActiveRef: submittingRef,
+        abortedThisTurn,
+        resetPendingModals,
+        isLoopActive,
+        stopLoop,
+        loop,
+        quitProcess,
+      });
       return;
     }
     // Esc dismisses any composer-level picker (slash / @ / slash-arg)
@@ -2066,7 +2064,7 @@ function AppInner({
             return { accepted: true };
           },
           abortTurn: () => {
-            if (busyRef.current) loop.abort();
+            if (submittingRef.current) loop.abort();
           },
           isBusy: () => busyRef.current,
           getStats: () => {
@@ -2942,6 +2940,7 @@ function AppInner({
       };
 
       submittingRef.current = true;
+      busyRef.current = true;
       setBusy(true);
       qq.noteTurnFromQQ(fromQQ);
       abortedThisTurn.current = false;
@@ -3221,6 +3220,7 @@ function AppInner({
         }
         clearToolProgressDisplay();
         setSummary(loop.stats.summary());
+        busyRef.current = false;
         setBusy(false);
         submittingRef.current = false;
         qq.clearTurnReply();
