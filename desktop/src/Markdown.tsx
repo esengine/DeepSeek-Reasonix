@@ -44,8 +44,12 @@ function resolveAgainstWorkspace(rel: string, ws: string | undefined): string {
 
 const KNOWN_EXTS =
   "ts|tsx|mts|cts|js|jsx|mjs|cjs|py|pyi|rs|go|json|jsonc|md|mdx|css|scss|less|html|htm|xml|svg|yaml|yml|toml|sh|bash|zsh|fish|sql|rb|java|kt|swift|c|cpp|cc|cxx|h|hpp|hxx|cs|php|lua|dart|ex|exs|erl|hs|clj|cljs|zig|vue|svelte|graphql|gql|proto";
+// No lookbehind here — Tauri's WKWebView on macOS Monterey (Safari < 16.4)
+// can't parse `(?<=...)` and the whole bundle fails to load with an
+// "invalid group specifier name" error. Capture the leading char as
+// group 1 instead and let splitFilePaths skip past it. Issue #1209.
 const FILE_PATH_RE = new RegExp(
-  `(?:^|(?<=[\\s\`'"(\\[]))((?:[\\w.-]+\\/)+[\\w.-]+\\.(?:${KNOWN_EXTS}))(?::(\\d+(?:-\\d+)?))?(?=[\\s.,;!?\\]\\)'"\`]|$)`,
+  `(^|[\\s\`'"(\\[])((?:[\\w.-]+\\/)+[\\w.-]+\\.(?:${KNOWN_EXTS}))(?::(\\d+(?:-\\d+)?))?(?=[\\s.,;!?\\]\\)'"\`]|$)`,
   "g",
 );
 
@@ -113,9 +117,13 @@ function splitFilePaths(text: string): ReactNode[] | string {
   let last = 0;
   let m: RegExpExecArray | null = FILE_PATH_RE.exec(text);
   while (m !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    out.push(<FilePill key={`fp-${m.index}`} path={m[1]!} line={m[2]} />);
-    last = m.index + m[0].length;
+    const prefix = m[1] ?? "";
+    const path = m[2]!;
+    const line = m[3];
+    const pillStart = m.index + prefix.length;
+    if (pillStart > last) out.push(text.slice(last, pillStart));
+    out.push(<FilePill key={`fp-${pillStart}`} path={path} line={line} />);
+    last = pillStart + path.length + (line ? line.length + 1 : 0);
     m = FILE_PATH_RE.exec(text);
   }
   if (out.length === 0) return text;
