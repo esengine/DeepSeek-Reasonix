@@ -13,8 +13,10 @@ import {
   useState,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { CodeView } from "./CodeView";
 import { t, useLang } from "./i18n";
 
@@ -150,7 +152,8 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
   return (
     <div className="markdown">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false }]]}
         components={{
           pre: ({ children }) => {
             const codeEl = Children.toArray(children).find(
