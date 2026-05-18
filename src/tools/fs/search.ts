@@ -71,13 +71,6 @@ export async function searchFiles(
 const MAX_HITS_PER_FILE = 30;
 /** Once printed bytes pass this fraction of the byte budget, remaining files switch to histogram. */
 const SUMMARY_MODE_TRIGGER_RATIO = 0.8;
-// Cap the substring matchers feed-in. A minified-JS one-liner can be MBs of
-// text on a single line; a backtracking user pattern (`(a+)+!`) on that line
-// hangs uninterruptibly inside V8's regex engine — `throwIfAborted` only
-// fires between lines, not inside re.test. Truncating to 8 KiB removes the
-// pathological input without changing real-world matches: any sane code line
-// is well under this and the displayed slice is already capped at 200 chars.
-const LINE_MATCH_BUDGET = 8 * 1024;
 /** Soft deadline for a single searchContent invocation — a stuck walk fails loudly instead of hanging the turn. */
 const WALK_DEADLINE_MS = 15_000;
 
@@ -198,9 +191,8 @@ export async function searchContent(
       for (let li = 0; li < lines.length; li++) {
         throwIfAborted(args.signal);
         const line = lines[li]!;
-        const sample = line.length > LINE_MATCH_BUDGET ? line.slice(0, LINE_MATCH_BUDGET) : line;
-        const sampleForCheck = caseSensitive ? sample : sample.toLowerCase();
-        const hit = re ? re.test(sample) : sampleForCheck.includes(needle);
+        const lineForCheck = caseSensitive ? line : line.toLowerCase();
+        const hit = re ? re.test(line) : lineForCheck.includes(needle);
         if (hit) hits.push(li);
       }
       scanned++;

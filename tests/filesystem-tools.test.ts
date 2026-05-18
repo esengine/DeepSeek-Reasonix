@@ -524,12 +524,13 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
       expect(out).not.toMatch(/src[\\]cli/);
     });
 
-    it("does not hang on a file with a very long line (issue #1236)", async () => {
-      // A minified-JS one-liner can be MBs on a single line. Before the
-      // LINE_MATCH_BUDGET truncation, `line.toLowerCase()` (and any plain
-      // substring scan) had to chew through the whole thing on every iteration
-      // and `re.test` ran unbounded; we want this to return in well under a
-      // second on modern hardware regardless of file size.
+    it("scans a 1.5 MiB single-line file fully without hanging (issue #1236)", async () => {
+      // Minified-bundle shape — long single line. We want the search to
+      // (a) cover the whole line, and (b) complete in reasonable time
+      // against a literal pattern. The pattern below is literal so V8's
+      // fast regex path handles 1.5 MiB in tens of ms. The walk-level
+      // deadline (WALK_DEADLINE_MS) is the backstop if a future change
+      // regresses to quadratic behaviour.
       const longLine = "a".repeat(1_500_000);
       await fs.writeFile(join(root, "huge.txt"), `${longLine}\n`);
       const start = Date.now();
