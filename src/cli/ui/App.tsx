@@ -961,6 +961,13 @@ function AppInner({
     return l;
   }, [model, system, rebuildSystem, budgetUsd, failureThreshold, session, tools, codeMode]);
 
+  // Loop is rebuilt on session switch with seeded carryover totals from
+  // the resumed session's meta; mirror them into summary state so the
+  // StatusRow doesn't keep showing the prior session's cost until the next turn.
+  useEffect(() => {
+    setSummary(loop.stats.summary());
+  }, [loop]);
+
   const generateCurrentSessionTitle = useCallback(
     async (seed?: { userText?: string; assistantText?: string; auto?: boolean }) => {
       if (!session || !onSwitchSession) return t("app.sessionTitleNoSession");
