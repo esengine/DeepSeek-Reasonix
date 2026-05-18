@@ -1492,6 +1492,8 @@ function ChatPane(props: ChatPaneProps) {
   const [popoverKind, setPopoverKind] = useState<PopoverKind>(null);
   const [popoverItems, setPopoverItems] = useState<PopoverItem[]>([]);
   const [popoverSel, setPopoverSel] = useState(0);
+  /** Suppress popover work and Enter-submission while an IME is mid-composition. */
+  const composing = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1747,6 +1749,7 @@ function ChatPane(props: ChatPaneProps) {
     (e: Event) => {
       const v = (e.target as HTMLTextAreaElement).value;
       setInput(v);
+      if (composing.current) return;
       updatePopover(v);
     },
     [updatePopover],
@@ -1835,8 +1838,20 @@ function ChatPane(props: ChatPaneProps) {
     }
   }, []);
 
+  const onCompositionStart = useCallback(() => {
+    composing.current = true;
+  }, []);
+  const onCompositionEnd = useCallback(
+    (e: CompositionEvent) => {
+      composing.current = false;
+      void updatePopover((e.target as HTMLTextAreaElement).value);
+    },
+    [updatePopover],
+  );
+
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if (composing.current) return;
       if (popoverKind && popoverItems.length > 0) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -1962,6 +1977,8 @@ function ChatPane(props: ChatPaneProps) {
               value=${input}
               onInput=${onInput}
               onKeyDown=${onKeyDown}
+              onCompositionStart=${onCompositionStart}
+              onCompositionEnd=${onCompositionEnd}
               onBlur=${() => setTimeout(() => setPopoverKind(null), 150)}
               disabled=${busy}
               rows="2"

@@ -1,0 +1,66 @@
+name: Publish npm
+
+# Tag namespace: plain `v<semver>` triggers npm publish for the
+# reasonix CLI package. Desktop Tauri releases use `desktop-v*`
+# (see release.yml) — pushing one of those never reaches this
+# workflow, so the two release tracks are fully decoupled.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.47.0). Required when running manually."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  # `id-token: write` is the npm provenance handshake — harmless if we
+  # don't enable provenance, required if we ever do.
+  id-token: write
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_dispatch lets a maintainer publish an older tag
+          # without re-pushing it; tag pushes already point HEAD at the
+          # right ref so the fallback is a no-op.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: https://registry.npmjs.org/
+
+      # Fail-fast if someone tags without bumping package.json. npm itself
+      # would reject the duplicate publish, but the error there is
+      # opaque ("403 You cannot publish over the previously published
+      # versions") and CI is the place to catch it cleanly.
+      - name: Verify tag matches package.json version
+        shell: bash
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          tag_version="${tag#v}"
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag $tag (version $tag_version) does not match package.json version $pkg_version"
+            exit 1
+          fi
+          echo "tag $tag matches package.json $pkg_version"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm publish` runs the prepublishOnly hook (lint + typecheck +
+      # test + build) automatically, so no separate verify step here.
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

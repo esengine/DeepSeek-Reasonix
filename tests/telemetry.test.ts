@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Usage } from "../src/client.js";
+import { writeConfig } from "../src/config.js";
 import {
   DEEPSEEK_PRICING,
   SessionStats,
@@ -61,6 +65,48 @@ describe("costUsd", () => {
 
   it("returns 0 for unknown model", () => {
     expect(costUsd("unknown-model", new Usage(1000, 100))).toBe(0);
+  });
+
+  it("uses pricingOverride for renamed third-party models", () => {
+    const dir = mkdtempSync(join(tmpdir(), "reasonix-telemetry-"));
+    const path = join(dir, "config.json");
+    try {
+      writeConfig(
+        { pricingOverride: { "openrouter/deepseek": { inputCacheHit: 0.5, inputCacheMiss: 2, output: 4 } } },
+        path,
+      );
+      expect(costUsd("openrouter/deepseek", new Usage(1000, 100, 0, 800, 200), path)).toBeCloseTo(
+        (800 * 0.5 + 200 * 2 + 100 * 4) / 1_000_000,
+        10,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 0 for incomplete unknown-model pricingOverride", () => {
+    const dir = mkdtempSync(join(tmpdir(), "reasonix-telemetry-"));
+    const path = join(dir, "config.json");
+    try {
+      writeConfig({ pricingOverride: { partial: { output: 4 } } }, path);
+      expect(costUsd("partial", new Usage(1000, 100, 0, 800, 200), path)).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lets pricingOverride partially override known model pricing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "reasonix-telemetry-"));
+    const path = join(dir, "config.json");
+    try {
+      writeConfig({ pricingOverride: { "deepseek-chat": { output: 9 } } }, path);
+      expect(costUsd("deepseek-chat", new Usage(1000, 100, 0, 800, 200), path)).toBeCloseTo(
+        (800 * CHAT.inputCacheHit + 200 * CHAT.inputCacheMiss + 100 * 9) / 1_000_000,
+        10,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -3,8 +3,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const PIN_THRESHOLD = 80; // px from bottom to consider "pinned"
 
 /**
- * Auto-scroll to bottom when content grows, as long as the user is pinned to the bottom.
- * When the user scrolls up, auto-scroll pauses. A "jump to bottom" button appears.
+ * Auto-scroll to bottom while content grows; un-pin only on real user input.
+ *
+ * The "user scrolled up" signal comes from wheel / touchmove / keydown,
+ * NOT from scroll events. Scroll events fire for both user gestures and
+ * our own scrollTo, and a smooth scrollTo can keep dispatching scroll
+ * events for 200-500 ms — long enough to misread "smooth scroll
+ * mid-flight" as "user scrolled up" and freeze the view (issue #1103).
  */
 export function useAutoScroll(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -16,43 +21,70 @@ export function useAutoScroll(
   const wasBusyRef = useRef(busy);
   const rafIdRef = useRef<number>(0);
 
-  const updateJumpButton = useCallback(() => {
+  const isAtBottom = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return true;
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - PIN_THRESHOLD;
+  }, [containerRef]);
+
+  const refreshJumpButton = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    const elScrollHeight = el.scrollHeight;
-    const elClientHeight = el.clientHeight;
-    const isPinned =
-      el.scrollTop + elClientHeight >= elScrollHeight - PIN_THRESHOLD;
-    isPinnedRef.current = isPinned;
     setShowJumpButton(
-      !isPinned && elScrollHeight > elClientHeight + PIN_THRESHOLD,
+      !isPinnedRef.current && el.scrollHeight > el.clientHeight + PIN_THRESHOLD,
     );
   }, [containerRef]);
 
-  // Scroll to bottom
   const scrollToBottom = useCallback(
     (smooth = true) => {
       const el = containerRef.current;
       if (!el) return;
+      isPinnedRef.current = true;
+      setShowJumpButton(false);
       el.scrollTo({
         top: el.scrollHeight,
         behavior: smooth ? "smooth" : "instant",
       });
-      isPinnedRef.current = true;
-      setShowJumpButton(false);
     },
     [containerRef],
   );
 
-  // Listen for scroll events on the container
+  // User-intent detection: only these gestures un-pin. Scroll events are
+  // intentionally NOT listened to — they can't tell user gestures from our
+  // own scrollTo.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    el.addEventListener("scroll", updateJumpButton, { passive: true });
-    return () => el.removeEventListener("scroll", updateJumpButton);
-  }, [containerRef, updateJumpButton]);
 
-  // When busy→idle (turn completes), always scroll to final answer
+    // rAF lets the gesture's scroll delta land before we measure.
+    let pendingFrame = 0;
+    const onUserGesture = () => {
+      if (pendingFrame) cancelAnimationFrame(pendingFrame);
+      pendingFrame = requestAnimationFrame(() => {
+        pendingFrame = 0;
+        isPinnedRef.current = isAtBottom();
+        refreshJumpButton();
+      });
+    };
+
+    el.addEventListener("wheel", onUserGesture, { passive: true });
+    el.addEventListener("touchmove", onUserGesture, { passive: true });
+    el.addEventListener("keydown", onUserGesture);
+    // pointerdown on the scrollbar gutter starts a drag-scroll. The
+    // drag itself fires no wheel/touch, but pointerdown's followup
+    // scroll arrives within a frame; one rAF measure catches it.
+    el.addEventListener("pointerdown", onUserGesture);
+
+    return () => {
+      if (pendingFrame) cancelAnimationFrame(pendingFrame);
+      el.removeEventListener("wheel", onUserGesture);
+      el.removeEventListener("touchmove", onUserGesture);
+      el.removeEventListener("keydown", onUserGesture);
+      el.removeEventListener("pointerdown", onUserGesture);
+    };
+  }, [containerRef, isAtBottom, refreshJumpButton]);
+
+  // When busy→idle (turn completes), re-pin and scroll to final answer.
   useEffect(() => {
     if (wasBusyRef.current && !busy) {
       scrollToBottom(true);
@@ -60,39 +92,22 @@ export function useAutoScroll(
     wasBusyRef.current = busy;
   }, [busy, scrollToBottom]);
 
-  // Watch content size changes (streaming text, tool results, new messages)
-  // and auto-scroll if user is pinned to bottom.
-  // Uses requestAnimationFrame to batch rapid resize events during streaming.
+  // Watch content size changes (streaming text, tool results, new
+  // messages) and follow the bottom while pinned.
   useEffect(() => {
     const content = contentRef.current;
     if (!content) return;
 
     const ro = new ResizeObserver(() => {
-      // Cancel any pending rAF to batch rapid resize events
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
-      }
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = requestAnimationFrame(() => {
         rafIdRef.current = 0;
         const el = containerRef.current;
         if (!el) return;
-
         if (isPinnedRef.current) {
           el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
-          // After scrolling, re-check if we're still at bottom
-          const stillPinned =
-            el.scrollTop + el.clientHeight >=
-            el.scrollHeight - PIN_THRESHOLD;
-          if (!stillPinned) {
-            isPinnedRef.current = false;
-            setShowJumpButton(
-              el.scrollHeight > el.clientHeight + PIN_THRESHOLD,
-            );
-          }
         } else {
-          setShowJumpButton(
-            el.scrollHeight > el.clientHeight + PIN_THRESHOLD,
-          );
+          refreshJumpButton();
         }
       });
     });
@@ -105,16 +120,16 @@ export function useAutoScroll(
         rafIdRef.current = 0;
       }
     };
-  }, [containerRef, contentRef]);
+  }, [containerRef, contentRef, refreshJumpButton]);
 
-  // Initial scroll to bottom when hook mounts (e.g., session loaded)
+  // Initial scroll to bottom when hook mounts (e.g., session loaded).
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const id = setTimeout(() => {
-      el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
       isPinnedRef.current = true;
       setShowJumpButton(false);
+      el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
     }, 50);
     return () => clearTimeout(id);
   }, [containerRef]);

@@ -92,6 +92,16 @@ export interface QQBotConfig {
   enabled?: boolean;
 }
 
+export interface PricingOverride {
+  inputCacheHit?: number;
+  inputCacheMiss?: number;
+  output?: number;
+}
+
+export interface RateLimitConfig {
+  rpm?: number;
+}
+
 export interface ReasonixConfig {
   apiKey?: string;
   baseUrl?: string;
@@ -175,6 +185,8 @@ export interface ReasonixConfig {
   memory?: {
     customTypes?: CustomMemoryTypeConfig[];
   };
+  pricingOverride?: Record<string, PricingOverride>;
+  rateLimit?: RateLimitConfig;
   /** QQ Bot configuration */
   qq?: QQBotConfig;
 }
@@ -421,6 +433,34 @@ export function loadApiKey(path: string = defaultConfigPath()): string | undefin
 export function loadBaseUrl(path: string = defaultConfigPath()): string | undefined {
   if (process.env.DEEPSEEK_BASE_URL) return process.env.DEEPSEEK_BASE_URL;
   return readConfig(path).baseUrl;
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+export function loadPricingOverride(
+  path: string = defaultConfigPath(),
+): Record<string, PricingOverride> {
+  const raw = readConfig(path).pricingOverride;
+  if (!isPlainObject(raw)) return {};
+
+  const result: Record<string, PricingOverride> = {};
+  for (const [model, value] of Object.entries(raw)) {
+    if (!isPlainObject(value)) continue;
+    const pricing: PricingOverride = {};
+    if (isNonNegativeNumber(value.inputCacheHit)) pricing.inputCacheHit = value.inputCacheHit;
+    if (isNonNegativeNumber(value.inputCacheMiss)) pricing.inputCacheMiss = value.inputCacheMiss;
+    if (isNonNegativeNumber(value.output)) pricing.output = value.output;
+    if (Object.keys(pricing).length > 0) result[model] = pricing;
+  }
+  return result;
+}
+
+export function loadRateLimit(path: string = defaultConfigPath()): RateLimitConfig | undefined {
+  const rpm = readConfig(path).rateLimit?.rpm;
+  if (typeof rpm !== "number" || !Number.isInteger(rpm) || rpm <= 0) return undefined;
+  return { rpm };
 }
 
 export function saveBaseUrl(url: string, path: string = defaultConfigPath()): void {

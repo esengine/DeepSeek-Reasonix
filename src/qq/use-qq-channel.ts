@@ -3,8 +3,6 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { PlanConfirmChoice } from "../cli/ui/PlanConfirm.js";
 import type { ReviseChoice } from "../cli/ui/PlanReviseConfirm.js";
 import type { ThemeChoice } from "../cli/ui/ThemePicker.js";
-import { requestPromptInput } from "../cli/ui/scene/prompt-input-store.js";
-import { isIntegratedRendererRequested } from "../cli/ui/scene/trace.js";
 import type { SlashResult } from "../cli/ui/slash/types.js";
 import { listThemeNames } from "../cli/ui/theme/tokens.js";
 import { type CheckpointMeta, fmtAgo, restoreCheckpoint } from "../code/checkpoints.js";
@@ -190,21 +188,7 @@ export function useQQChannel({
   const replyThisTurnRef = useRef(false);
 
   const promptLine = useCallback(
-    async (prompt: string, fallback?: string, opts?: { secret?: boolean }): Promise<string> => {
-      // Under REASONIX_RENDERER_INTEGRATED=1 the rust child owns the
-      // alt-screen and the keyboard reader on the same fd. readline
-      // would collide with it; route through the scene-driven prompt
-      // overlay instead — rust composer intercepts Enter and posts the
-      // answer back via `prompt-response`.
-      if (isIntegratedRendererRequested()) {
-        const answer = await requestPromptInput({
-          label: prompt.replace(/[:：]\s*$/u, "").trim(),
-          defaultValue: fallback,
-          secret: opts?.secret,
-        });
-        if (answer === null) throw new Error("input cancelled");
-        return answer.trim() || fallback || "";
-      }
+    async (prompt: string, fallback?: string): Promise<string> => {
       if (isRawModeSupported) setRawMode(false);
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {
@@ -248,9 +232,7 @@ export function useQQChannel({
       const appSecret =
         args[1]?.trim() ||
         existing.appSecret ||
-        (await promptLine("QQ Open Platform App Secret: ", existing.appSecret, {
-          secret: true,
-        }));
+        (await promptLine("QQ Open Platform App Secret: ", existing.appSecret));
       const sandboxArg = args[2]?.trim().toLowerCase();
       const sandbox =
         sandboxArg === "sandbox" ||

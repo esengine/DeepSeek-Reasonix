@@ -12,7 +12,7 @@ if (!tag) {
   process.exit(1);
 }
 
-const version = tag.replace(/^v/, "");
+const version = tag.replace(/^(?:desktop-)?v/, "");
 if (!/^\d+\.\d+\.\d+(-[\w.-]+)?(\+[\w.-]+)?$/.test(version)) {
   console.error(`refusing to write non-SemVer version: ${version}`);
   process.exit(1);

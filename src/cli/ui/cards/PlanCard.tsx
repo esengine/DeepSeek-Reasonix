@@ -9,11 +9,11 @@ import { useThemeTokens } from "../theme/context.js";
 
 const STATUS_GLYPH: Record<PlanStep["status"], string> = {
   queued: "○",
-  running: "▶",
+  running: "●",
   done: "✓",
   failed: "✗",
-  blocked: "!",
-  skipped: "s",
+  blocked: "⚠",
+  skipped: "·",
 };
 
 const VISIBLE_WINDOW = 5;
@@ -43,7 +43,7 @@ export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
 
   return (
     <Card tone={cardTone}>
-      <CardHeader glyph="⊞" tone={cardTone} title={card.title} meta={[progress]} />
+      <CardHeader glyph="●" tone={cardTone} title={card.title} meta={[progress]} />
       {window.hiddenBefore > 0 ? (
         <Box flexDirection="row" gap={1}>
           <Text color={tone.ok}>✓</Text>

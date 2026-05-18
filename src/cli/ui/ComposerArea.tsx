@@ -112,30 +112,6 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     const inputArea = (
       <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
         <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
-          {jobs ? (
-            <ModeStatusBar
-              editMode={editMode}
-              pendingCount={pendingCount}
-              flash={modeFlash}
-              planMode={planMode}
-              undoArmed={undoArmed}
-              jobs={jobs}
-            />
-          ) : null}
-          {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
-          <StatusRow statusBar={statusBar} />
-          <PromptInput
-            value={input}
-            onChange={setInput}
-            onSubmit={onSubmit}
-            disabled={busy}
-            onHistoryPrev={onHistoryPrev}
-            onHistoryNext={onHistoryNext}
-            onOpenExternalEditor={onOpenExternalEditor}
-            onCursorChange={onCursorChange}
-          />
-        </Box>
-        <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
           {slashMatches !== null ? (
             <SlashSuggestions
               key={`slash-suggestions:${slashGroupMode ? "group" : "search"}`}
@@ -148,16 +124,38 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
           {atState !== null ? (
             <AtMentionSuggestions state={atState} selectedIndex={atSelected} />
           ) : null}
+          {slashArgContext ? (
+            <SlashArgPicker
+              matches={slashArgMatches}
+              selectedIndex={slashArgSelected}
+              spec={slashArgContext.spec}
+              kind={slashArgContext.kind}
+              partial={slashArgContext.partial}
+            />
+          ) : null}
         </Box>
-        {slashArgContext ? (
-          <SlashArgPicker
-            matches={slashArgMatches}
-            selectedIndex={slashArgSelected}
-            spec={slashArgContext.spec}
-            kind={slashArgContext.kind}
-            partial={slashArgContext.partial}
+        <PromptInput
+          value={input}
+          onChange={setInput}
+          onSubmit={onSubmit}
+          disabled={busy}
+          onHistoryPrev={onHistoryPrev}
+          onHistoryNext={onHistoryNext}
+          onOpenExternalEditor={onOpenExternalEditor}
+          onCursorChange={onCursorChange}
+        />
+        {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
+        {jobs ? (
+          <ModeStatusBar
+            editMode={editMode}
+            pendingCount={pendingCount}
+            flash={modeFlash}
+            planMode={planMode}
+            undoArmed={undoArmed}
+            jobs={jobs}
           />
         ) : null}
+        <StatusRow statusBar={statusBar} />
       </Box>
     );
 

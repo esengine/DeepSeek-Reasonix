@@ -23,15 +23,15 @@ export interface ApprovalCardProps {
 }
 
 const TONE_PALETTE = {
-  warn: { color: CARD.warn.color, glyph: "?" },
+  warn: { color: CARD.warn.color, glyph: "⚠" },
   error: { color: CARD.error.color, glyph: "✗" },
-  approval: { color: CARD.approval.color, glyph: "?" },
+  approval: { color: CARD.approval.color, glyph: "●" },
   diff: { color: CARD.diff.color, glyph: "±" },
-  memory: { color: CARD.memory.color, glyph: "⌑" },
-  user: { color: CARD.user.color, glyph: "◇" },
+  memory: { color: CARD.memory.color, glyph: "●" },
+  user: { color: CARD.user.color, glyph: "●" },
   ok: { color: CARD.diff.color, glyph: "✓" },
-  accent: { color: CARD.plan.color, glyph: "⊞" },
-  info: { color: CARD.tool.color, glyph: "?" },
+  accent: { color: CARD.plan.color, glyph: "●" },
+  info: { color: CARD.tool.color, glyph: "●" },
 } as const;
 
 export function ApprovalCard({
@@ -52,21 +52,14 @@ export function ApprovalCard({
 
   return (
     <Box flexDirection="column" marginY={1} flexShrink={0}>
-      <Box flexDirection="row">
-        <Text color={palette.color} backgroundColor={SURFACE.bgElev}>
-          {" ▎ "}
+      <Box flexDirection="row" gap={1}>
+        <Text bold color={palette.color}>
+          {headerGlyph}
         </Text>
-        <Text bold color={palette.color} backgroundColor={SURFACE.bgElev}>
-          {`${headerGlyph}  `}
+        <Text bold color={FG.strong}>
+          {title}
         </Text>
-        <Text bold color={FG.strong} backgroundColor={SURFACE.bgElev}>
-          {` ${title} `}
-        </Text>
-        {metaRight !== undefined && (
-          <Text color={metaRightColor ?? FG.faint} backgroundColor={SURFACE.bgElev}>
-            {`  ${metaRight} `}
-          </Text>
-        )}
+        {metaRight !== undefined && <Text color={metaRightColor ?? FG.faint}>{metaRight}</Text>}
       </Box>
       <Box flexDirection="column" paddingX={2} marginTop={1} flexShrink={0}>
         {children}

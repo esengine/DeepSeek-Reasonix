@@ -1,4 +1,5 @@
 import type { Usage } from "../client.js";
+import { loadPricingOverride } from "../config.js";
 
 /** USD per 1M tokens; display currency conversion happens at the UI boundary. */
 export const DEEPSEEK_PRICING: Record<
@@ -11,6 +12,23 @@ export const DEEPSEEK_PRICING: Record<
   "deepseek-chat": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
   "deepseek-reasoner": { inputCacheHit: 0.0028, inputCacheMiss: 0.14, output: 0.28 },
 };
+
+export type ModelPricing = (typeof DEEPSEEK_PRICING)[string];
+
+export function pricingFor(model: string, path?: string): ModelPricing | undefined {
+  const defaults = DEEPSEEK_PRICING[model];
+  const override = loadPricingOverride(path)[model];
+  if (!override) return defaults;
+  const pricing = { ...defaults, ...override };
+  if (
+    pricing.inputCacheHit === undefined ||
+    pricing.inputCacheMiss === undefined ||
+    pricing.output === undefined
+  ) {
+    return undefined;
+  }
+  return pricing as ModelPricing;
+}
 
 /** Reference Claude Sonnet 4.6 pricing (USD per 1M tokens). */
 export const CLAUDE_SONNET_PRICING = { input: 3.0, output: 15.0 };
@@ -26,8 +44,8 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */
 export const DEFAULT_CONTEXT_TOKENS = 131_072;
 
-export function costUsd(model: string, usage: Usage): number {
-  const p = DEEPSEEK_PRICING[model];
+export function costUsd(model: string, usage: Usage, path?: string): number {
+  const p = pricingFor(model, path);
   if (!p) return 0;
   return (
     (usage.promptCacheHitTokens * p.inputCacheHit +
@@ -38,8 +56,8 @@ export function costUsd(model: string, usage: Usage): number {
 }
 
 /** Input-side cost only (prompt, cache hit + miss). Used for the panel breakdown. */
-export function inputCostUsd(model: string, usage: Usage): number {
-  const p = DEEPSEEK_PRICING[model];
+export function inputCostUsd(model: string, usage: Usage, path?: string): number {
+  const p = pricingFor(model, path);
   if (!p) return 0;
   return (
     (usage.promptCacheHitTokens * p.inputCacheHit +
@@ -49,15 +67,15 @@ export function inputCostUsd(model: string, usage: Usage): number {
 }
 
 /** Output-side cost only (completion tokens). Used for the panel breakdown. */
-export function outputCostUsd(model: string, usage: Usage): number {
-  const p = DEEPSEEK_PRICING[model];
+export function outputCostUsd(model: string, usage: Usage, path?: string): number {
+  const p = pricingFor(model, path);
   if (!p) return 0;
   return (usage.completionTokens * p.output) / 1_000_000;
 }
 
-export function cacheSavingsUsd(model: string, hitTokens: number): number {
+export function cacheSavingsUsd(model: string, hitTokens: number, path?: string): number {
   if (hitTokens <= 0) return 0;
-  const p = DEEPSEEK_PRICING[model];
+  const p = pricingFor(model, path);
   if (!p) return 0;
   return (hitTokens * (p.inputCacheMiss - p.inputCacheHit)) / 1_000_000;
 }

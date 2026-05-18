@@ -42,14 +42,7 @@ const KeystrokeContext = createContext<KeystrokeBus | null>(null);
 
 export interface KeystrokeProviderProps {
   children: React.ReactNode;
-  /**
-   * Optional reader override. Tests inject a synthetic reader so
-   * they can `feed()` chunks instead of touching real stdin; the
-   * Rust input adapter (active by default; off under `--node` /
-   * `REASONIX_RENDERER=node`) injects one that receives events from
-   * a spawned `reasonix-render --emit-input` child. Production stdin
-   * callers leave this unset and get the singleton.
-   */
+  /** Optional reader override. Tests inject a synthetic reader so they can `feed()` chunks instead of touching real stdin. Production callers leave this unset and get the singleton. */
   reader?: KeystrokeReader;
 }
 
