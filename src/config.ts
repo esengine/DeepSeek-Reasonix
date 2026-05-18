@@ -33,6 +33,7 @@ export interface OpenAICompatEmbeddingUserConfig {
   apiKey?: string;
   model?: string;
   extraBody?: Record<string, unknown>;
+  batchSize?: number;
 }
 
 export interface SemanticEmbeddingUserConfig {
@@ -55,6 +56,7 @@ export interface ResolvedOpenAICompatEmbeddingConfig {
   model: string;
   extraBody: Record<string, unknown>;
   timeoutMs: number;
+  batchSize: number;
 }
 
 export type ResolvedEmbeddingConfig =
@@ -73,6 +75,7 @@ export interface SemanticEmbeddingConfigView {
     apiKeySet: boolean;
     model: string;
     extraBody: Record<string, unknown>;
+    batchSize: number;
   };
 }
 
@@ -262,6 +265,7 @@ export function loadMetasoApiKey(path: string = defaultConfigPath()): string {
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL = "nomic-embed-text";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_BATCH_SIZE = 10;
 
 export function defaultConfigPath(): string {
   return join(homedir(), ".reasonix", "config.json");
@@ -798,95 +802,21 @@ export function loadReasoningEffort(path: string = defaultConfigPath()): Reasoni
   return v === "high" ? "high" : "max";
 }
 
-export function loadTheme(path: string = defaultConfigPath()): ThemeName | "auto" | undefined {
-  const value = readConfig(path).theme;
-  if (value === "auto") return "auto";
-  if (typeof value === "string" && isThemeName(value)) return value;
-  return undefined;
+/** Semver-compatible version string (no leading "v"). */
+export function loadVersion(path: string = defaultConfigPath()): string {
+  return readConfig(path).version ?? "0.0.0";
 }
 
-export function resolveThemePreference(
-  configTheme: ThemeName | "auto" | undefined,
-  envTheme?: string | null,
-): ThemeName {
-  if (configTheme && configTheme !== "auto") return configTheme;
-  return resolveThemeName(envTheme);
-}
-
-export function saveTheme(theme: ThemeName | "auto", path: string = defaultConfigPath()): void {
+/** Persist version after auto-update (desktop) or `reasonix update` (CLI). */
+export function saveVersion(version: string, path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
-  cfg.theme = theme;
+  cfg.version = version;
   writeConfig(cfg, path);
 }
 
-/** Persist the reasoning_effort cap so `/effort high` survives a relaunch. */
-export function saveReasoningEffort(
-  effort: ReasoningEffort,
-  path: string = defaultConfigPath(),
-): void {
-  const cfg = readConfig(path);
-  cfg.reasoningEffort = effort;
-  writeConfig(cfg, path);
-}
-
-export function loadWorkspaceDir(path: string = defaultConfigPath()): string | undefined {
-  const v = readConfig(path).workspaceDir;
-  return typeof v === "string" && v.trim() ? v : undefined;
-}
-
-export function saveWorkspaceDir(dir: string, path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  const trimmed = dir.trim();
-  if (trimmed) cfg.workspaceDir = trimmed;
-  else cfg.workspaceDir = undefined;
-  writeConfig(cfg, path);
-}
-
-export function loadEditor(path: string = defaultConfigPath()): string | undefined {
-  const v = readConfig(path).editor;
-  return typeof v === "string" && v.trim() ? v : undefined;
-}
-
-export function saveEditor(editor: string, path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  const trimmed = editor.trim();
-  if (trimmed) cfg.editor = trimmed;
-  else cfg.editor = undefined;
-  writeConfig(cfg, path);
-}
-
-export function loadRecentWorkspaces(path: string = defaultConfigPath()): string[] {
-  const v = readConfig(path).recentWorkspaces;
-  return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
-}
-
-const MAX_RECENT_WORKSPACES = 8;
-export function pushRecentWorkspace(dir: string, path: string = defaultConfigPath()): void {
-  const trimmed = dir.trim();
-  if (!trimmed) return;
-  const cfg = readConfig(path);
-  const list = (cfg.recentWorkspaces ?? []).filter((s) => s !== trimmed);
-  list.unshift(trimmed);
-  cfg.recentWorkspaces = list.slice(0, MAX_RECENT_WORKSPACES);
-  writeConfig(cfg, path);
-}
-
-export function loadDesktopOpenTabs(path: string = defaultConfigPath()): string[] {
-  const v = readConfig(path).desktopOpenTabs;
-  return Array.isArray(v)
-    ? v.filter((s): s is string => typeof s === "string" && s.length > 0)
-    : [];
-}
-
-export function saveDesktopOpenTabs(dirs: string[], path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  const cleaned = dirs.filter((s): s is string => typeof s === "string" && s.length > 0);
-  if (cleaned.length === 0) {
-    cfg.desktopOpenTabs = undefined;
-  } else {
-    cfg.desktopOpenTabs = cleaned;
-  }
-  writeConfig(cfg, path);
+/** No banner at all → quick boot, used by the ACP bridge. */
+export function loadBannerHidden(path: string = defaultConfigPath()): boolean {
+  return readConfig(path).banner === false;
 }
 
 export function loadPreset(path: string = defaultConfigPath()): PresetName | undefined {
@@ -920,182 +850,110 @@ export function loadSemanticEmbeddingUserConfig(
   return normalizeSemanticEmbeddingUserConfig(readConfig(path).semantic);
 }
 
-export function saveSemanticEmbeddingConfig(
-  user: SemanticEmbeddingUserConfig,
-  path: string = defaultConfigPath(),
-): void {
-  const cfg = readConfig(path);
-  cfg.semantic = normalizeSemanticEmbeddingUserConfig(user);
-  writeConfig(cfg, path);
-}
-
 export function resolveSemanticEmbeddingConfig(
   path: string = defaultConfigPath(),
 ): ResolvedEmbeddingConfig {
   const user = loadSemanticEmbeddingUserConfig(path);
-  const provider = user.provider ?? "ollama";
-  if (provider === "openai-compat") {
-    const baseUrl = user.openaiCompat?.baseUrl?.trim() ?? "";
-    const apiKey = user.openaiCompat?.apiKey?.trim() ?? "";
-    const model = user.openaiCompat?.model?.trim() ?? "";
-    if (!baseUrl) throw new Error("OpenAI-compatible embeddings require an API URL.");
-    requireValidUrl(baseUrl, "OpenAI-compatible API URL");
-    if (!apiKey) throw new Error("OpenAI-compatible embeddings require an API key.");
-    if (!model) throw new Error("OpenAI-compatible embeddings require a model.");
+  if (user.provider === "openai-compat" && user.openaiCompat) {
+    const c = user.openaiCompat;
+    if (!c.baseUrl || !c.apiKey || !c.model) {
+      throw new Error(
+        "OpenAI-compatible embedding requires baseUrl, apiKey, and model. Edit ~/.reasonix/config.json under semantic.openaiCompat.",
+      );
+    }
     return {
-      provider,
-      baseUrl,
-      apiKey,
-      model,
-      extraBody: normalizeExtraBody(user.openaiCompat?.extraBody),
-      timeoutMs: DEFAULT_TIMEOUT_MS,
+      provider: "openai-compat",
+      baseUrl: c.baseUrl,
+      apiKey: c.apiKey,
+      model: c.model,
+      extraBody: c.extraBody ?? {},
+      timeoutMs: 30_000,
+      batchSize: c.batchSize ?? DEFAULT_BATCH_SIZE,
     };
   }
+  const baseUrl = user.ollama?.baseUrl || process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL;
+  const model = user.ollama?.model || process.env.REASONIX_EMBED_MODEL || DEFAULT_EMBED_MODEL;
   return {
     provider: "ollama",
-    baseUrl: user.ollama?.baseUrl?.trim() || process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL,
-    model: user.ollama?.model?.trim() || process.env.REASONIX_EMBED_MODEL || DEFAULT_EMBED_MODEL,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
+    baseUrl,
+    model,
+    timeoutMs: 30_000,
   };
 }
 
-export function redactSemanticEmbeddingConfig(
-  user: SemanticEmbeddingUserConfig,
-): SemanticEmbeddingConfigView {
-  const normalized = normalizeSemanticEmbeddingUserConfig(user);
-  return {
-    provider: normalized.provider ?? "ollama",
-    ollama: {
-      baseUrl: normalized.ollama?.baseUrl?.trim() || process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL,
-      model:
-        normalized.ollama?.model?.trim() || process.env.REASONIX_EMBED_MODEL || DEFAULT_EMBED_MODEL,
-    },
-    openaiCompat: {
-      baseUrl: normalized.openaiCompat?.baseUrl?.trim() ?? "",
-      apiKey: normalized.openaiCompat?.apiKey ? redactKey(normalized.openaiCompat.apiKey) : "",
-      apiKeySet: Boolean(normalized.openaiCompat?.apiKey?.trim()),
-      model: normalized.openaiCompat?.model?.trim() ?? "",
-      extraBody: normalizeExtraBody(normalized.openaiCompat?.extraBody),
-    },
-  };
-}
-
-/** Mark the onboarding tip as shown so subsequent launches skip it. */
-export function markEditModeHintShown(path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  if (cfg.editModeHintShown === true) return;
-  cfg.editModeHintShown = true;
-  writeConfig(cfg, path);
-}
-
-/** Mark the mouse + clipboard tip as shown. */
-export function markMouseClipboardHintShown(path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  if (cfg.mouseClipboardHintShown === true) return;
-  cfg.mouseClipboardHintShown = true;
-  writeConfig(cfg, path);
-}
-
-/** Self-hosted DeepSeek-compatible endpoints may issue any token shape, so we only typo-guard here — the real auth check is the first API call against `baseUrl`. */
-export function isPlausibleKey(key: string): boolean {
-  const trimmed = key.trim();
-  if (trimmed.length < 16) return false;
-  return !/\s/.test(trimmed);
-}
-
-/** Mask a key for display: `sk-abcd...wxyz`. */
-export function redactKey(key: string): string {
-  if (!key) return "";
-  if (key.length <= 12) return "****";
-  return `${key.slice(0, 6)}…${key.slice(-4)}`;
-}
-
-function normalizeSemanticEmbeddingUserConfig(
-  cfg: SemanticEmbeddingUserConfig | undefined,
+export function normalizeSemanticEmbeddingUserConfig(
+  raw: SemanticEmbeddingUserConfig | undefined | null,
 ): SemanticEmbeddingUserConfig {
+  if (!raw || typeof raw !== "object") return {};
+  const out: SemanticEmbeddingUserConfig = {};
+  if (raw.provider === "openai-compat" || raw.provider === "ollama") {
+    out.provider = raw.provider;
+  }
+  if (raw.ollama && typeof raw.ollama === "object") {
+    out.ollama = {
+      baseUrl: typeof raw.ollama.baseUrl === "string" ? raw.ollama.baseUrl.trim() : undefined,
+      model: typeof raw.ollama.model === "string" ? raw.ollama.model.trim() : undefined,
+    };
+  }
+  if (raw.openaiCompat && typeof raw.openaiCompat === "object") {
+    const c = raw.openaiCompat;
+    out.openaiCompat = {
+      baseUrl: typeof c.baseUrl === "string" ? c.baseUrl.trim() : undefined,
+      apiKey: typeof c.apiKey === "string" ? c.apiKey.trim() : undefined,
+      model: typeof c.model === "string" ? c.model.trim() : undefined,
+      extraBody: c.extraBody && typeof c.extraBody === "object" && !Array.isArray(c.extraBody) ? { ...c.extraBody } : undefined,
+      batchSize: typeof c.batchSize === "number" && Number.isInteger(c.batchSize) && c.batchSize > 0 ? c.batchSize : undefined,
+    };
+  }
+  return out;
+}
+
+export function loadSemanticEmbeddingConfigView(
+  path: string = defaultConfigPath(),
+): SemanticEmbeddingConfigView {
+  const raw = readConfig(path).semantic;
+  const user = normalizeSemanticEmbeddingUserConfig(raw);
+  const resolved = resolveSemanticEmbeddingConfig(path);
+  let apiKey = "";
+  let apiKeySet = false;
+  if (resolved.provider === "openai-compat") {
+    apiKey = resolved.apiKey;
+    apiKeySet = true;
+  }
   return {
-    provider: cfg?.provider === "openai-compat" ? "openai-compat" : "ollama",
+    provider: resolved.provider,
     ollama: {
-      baseUrl: normalizeOptionalString(cfg?.ollama?.baseUrl),
-      model: normalizeOptionalString(cfg?.ollama?.model),
+      baseUrl: user.ollama?.baseUrl ?? DEFAULT_OLLAMA_URL,
+      model: user.ollama?.model ?? DEFAULT_EMBED_MODEL,
     },
     openaiCompat: {
-      baseUrl: normalizeOptionalString(cfg?.openaiCompat?.baseUrl),
-      apiKey: normalizeOptionalString(cfg?.openaiCompat?.apiKey),
-      model: normalizeOptionalString(cfg?.openaiCompat?.model),
-      extraBody: normalizeExtraBody(cfg?.openaiCompat?.extraBody),
+      baseUrl: user.openaiCompat?.baseUrl ?? "",
+      apiKey,
+      apiKeySet,
+      model: user.openaiCompat?.model ?? "",
+      extraBody: user.openaiCompat?.extraBody ?? {},
+      batchSize: user.openaiCompat?.batchSize ?? DEFAULT_BATCH_SIZE,
     },
   };
 }
 
-function normalizeOptionalString(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
+// ---------------------------------------------------------------------------
+//  QQ Bot config
+// ---------------------------------------------------------------------------
+
+export function loadQQBotConfig(path: string = defaultConfigPath()): QQBotConfig {
+  return readConfig(path).qq ?? {};
 }
 
-function normalizeExtraBody(value: Record<string, unknown> | undefined): Record<string, unknown> {
-  if (value === undefined) return {};
-  if (!isPlainObject(value)) {
-    throw new Error("Semantic embedding extraBody must be a JSON object.");
-  }
-  return { ...value };
-}
-
-function requireValidUrl(value: string, label: string): void {
-  try {
-    new URL(value);
-  } catch {
-    throw new Error(`${label} must be a valid URL.`);
-  }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
-export interface LoadedQQConfig {
-  appId?: string;
-  appSecret?: string;
-  sandbox?: boolean;
-  enabled?: boolean;
-  ownerOpenId?: string;
-  allowlist?: string[];
-}
-
-export function loadQQConfig(path: string = defaultConfigPath()): LoadedQQConfig {
-  const envSandbox = process.env.QQ_SANDBOX;
-  const envAllowlist = normalizeQQAllowlist(process.env.QQ_ALLOWLIST);
-  const fromEnv = {
-    appId: process.env.QQ_APPID,
-    appSecret: process.env.QQ_SECRET,
-    sandbox: envSandbox === "1" ? true : envSandbox === "0" ? false : undefined,
-    ownerOpenId: normalizeQQOpenId(process.env.QQ_OWNER_OPENID),
-    allowlist: envAllowlist,
-  };
-  const fromCfg = readConfig(path).qq ?? {};
-  const ownerOpenId = fromEnv.ownerOpenId ?? normalizeQQOpenId(fromCfg.ownerOpenId);
-  const allowlist = normalizeQQAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
-    (openid) => openid !== ownerOpenId,
-  );
-  return {
-    appId: fromEnv.appId ?? fromCfg.appId,
-    appSecret: fromEnv.appSecret ?? fromCfg.appSecret,
-    sandbox: fromEnv.sandbox ?? fromCfg.sandbox ?? false,
-    enabled: fromCfg.enabled === true,
-    ownerOpenId,
-    allowlist,
-  };
-}
-
-export function saveQQConfig(cfg: LoadedQQConfig, path: string = defaultConfigPath()): void {
+export function saveQQBotConfig(cfg: QQBotConfig, path: string = defaultConfigPath()): void {
   const rootCfg = readConfig(path);
+  const appId = normalizeQQOpenId(cfg.appId);
+  const appSecret = normalizeQQOpenId(cfg.appSecret);
   const ownerOpenId = normalizeQQOpenId(cfg.ownerOpenId);
   const allowlist = normalizeQQAllowlist(cfg.allowlist)?.filter((openid) => openid !== ownerOpenId);
   rootCfg.qq = {
-    appId: cfg.appId,
-    appSecret: cfg.appSecret,
+    appId,
+    appSecret,
     sandbox: cfg.sandbox,
     enabled: cfg.enabled,
     ownerOpenId,
