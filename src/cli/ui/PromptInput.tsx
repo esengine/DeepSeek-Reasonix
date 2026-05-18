@@ -26,6 +26,46 @@ export function shouldInlinePaste(content: string): boolean {
   return !content.includes("\n") && content.length <= INLINE_PASTE_THRESHOLD;
 }
 
+// ── QueueIndicator ────────────────────────────────────────────────────
+
+export interface QueueIndicatorProps {
+  /** Either plain strings (for simple count+preview) or objects with timestamps (for timer). */
+  messages: string[] | ReadonlyArray<{ text: string; enqueuedAt: number }>;
+  /** Remaining ms before auto-dismiss; 0 or undefined means no timer shown. */
+  remainingMs?: number;
+}
+
+/** Compact row shown above the prompt input when the user has queued steering messages
+ *  while the model is busy. Shows count + last message preview + optional Esc hint. */
+export function QueueIndicator({
+  messages,
+  remainingMs,
+}: QueueIndicatorProps): React.ReactElement | null {
+  if (messages.length === 0) return null;
+
+  const count = messages.length;
+  const lastRaw = messages[messages.length - 1]!;
+  const lastText = typeof lastRaw === "string" ? lastRaw : lastRaw.text;
+  const preview = lastText.length > 60 ? `${lastText.slice(0, 57)}…` : lastText;
+  const timer =
+    typeof remainingMs === "number" && remainingMs > 0
+      ? ` · ${Math.ceil(remainingMs / 1000)}s`
+      : "";
+  const hint = " · esc to remove";
+
+  return (
+    <Box>
+      <Text color={FG.faint}>
+        ⏳ QUEUE ({count}) — {preview}
+        {timer}
+        {hint}
+      </Text>
+    </Box>
+  );
+}
+
+// ── PromptInputProps ─────────────────────────────────────────────────
+
 export interface PromptInputProps {
   value: string;
   onChange: (v: string) => void;

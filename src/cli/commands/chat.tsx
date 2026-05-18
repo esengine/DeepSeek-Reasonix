@@ -217,10 +217,8 @@ function Root({
         key={activeSession ?? "__new__"}
         model={appProps.model}
         system={appProps.system}
-        rebuildSystem={appProps.rebuildSystem}
         transcript={appProps.transcript}
         budgetUsd={appProps.budgetUsd}
-        failureThreshold={appProps.failureThreshold}
         session={activeSession}
         tools={tools}
         mcpSpecs={mcpSpecs}
@@ -228,7 +226,7 @@ function Root({
         mcpRuntime={mcpRuntime}
         progressSink={progressSink}
         startupInfoHints={startupInfoHints}
-        codeMode={codeMode}
+        codeMode={appProps.codeMode}
         noDashboard={appProps.noDashboard}
         openDashboard={appProps.openDashboard}
         dashboardPort={appProps.dashboardPort}

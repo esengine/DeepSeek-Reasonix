@@ -88,6 +88,9 @@ export class Eventizer {
       case "status":
         out.push(this.statusEvent(ev.turn, ev.content));
         break;
+      case "user.queued":
+        out.push(this.emitUserMessage(ev.turn, ev.content));
+        break;
       // `done` / `branch_*` intentionally drop — no kernel-level event.
       default:
         break;

@@ -249,6 +249,8 @@ export type DashboardEvent =
 export interface SubmitResult {
   accepted: boolean;
   reason?: string;
+  /** True when the prompt was queued (loop busy) rather than submitted immediately. */
+  queued?: boolean;
 }
 
 /** Append-only — same rules as `usage.jsonl`, never rewritten. */

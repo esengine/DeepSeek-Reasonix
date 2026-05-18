@@ -652,19 +652,25 @@ describe("dashboard server: chat bridge", () => {
     expect(submitted).toEqual(["build me a thing"]);
   });
 
-  it("POST /api/submit returns 409 when the loop is busy", async () => {
+  it("POST /api/submit accepts and queues when the loop is busy", async () => {
+    const queued: string[] = [];
     const base = await boot({
-      submitPrompt: () => ({ accepted: false, reason: "loop is busy" }),
+      isBusy: () => true,
+      submitPrompt: (text) => {
+        queued.push(text);
+        return { accepted: true, queued: true };
+      },
     });
     const r = await call(`${base}api/submit`, {
       method: "POST",
       token: TOKEN,
       tokenInHeader: true,
-      body: { prompt: "x" },
+      body: { prompt: "steer: look at src/" },
     });
-    expect(r.status).toBe(409);
-    expect(r.body.accepted).toBe(false);
-    expect(r.body.reason).toMatch(/busy/i);
+    expect(r.status).toBe(202);
+    expect(r.body.accepted).toBe(true);
+    expect(r.body.queued).toBe(true);
+    expect(queued).toEqual(["steer: look at src/"]);
   });
 
   it("POST /api/submit rejects empty prompts (400)", async () => {

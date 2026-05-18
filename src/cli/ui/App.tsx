@@ -114,7 +114,7 @@ import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
 import { PlanReviseConfirm, type ReviseChoice } from "./PlanReviseConfirm.js";
 import { PlanReviseEditor } from "./PlanReviseEditor.js";
-import { PromptInput } from "./PromptInput.js";
+import { PromptInput, QueueIndicator } from "./PromptInput.js";
 import { SessionPicker } from "./SessionPicker.js";
 import { ShellConfirm, type ShellConfirmChoice, derivePrefix } from "./ShellConfirm.js";
 import { SlashArgPicker } from "./SlashArgPicker.js";
@@ -145,6 +145,7 @@ import { useHookList } from "./hooks/useHookList.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLanguageReload } from "./hooks/useLanguageReload.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
+import { useMessageQueue } from "./hooks/useMessageQueue.js";
 import { usePresetMode } from "./hooks/usePresetMode.js";
 import { useQuit } from "./hooks/useQuit.js";
 import { useScrollback } from "./hooks/useScrollback.js";
@@ -574,6 +575,8 @@ function AppInner({
   } = useEditGate(!!codeMode);
   const { preset, setPreset, proArmed, setProArmed, turnOnPro, setTurnOnPro } =
     usePresetMode(model);
+  // User steering queue: messages typed while the model is busy.
+  const messageQueue = useMessageQueue();
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -2525,6 +2528,9 @@ function AppInner({
         return;
       }
       if (busy || submittingRef.current) {
+        loop.queueMessage(text);
+        messageQueue.enqueue(text);
+        setInput("");
         return;
       }
       // Cancel-on-user-input: any user-typed submit cancels an active
@@ -3099,6 +3105,8 @@ function AppInner({
           }
           if (ev.role === "status") {
             setStatusLine(ev.content);
+          } else if (ev.role === "user.queued") {
+            log.pushUser(ev.content);
           } else if (ev.role === "assistant_delta") {
             if (ev.content) contentBuf.current += ev.content;
             if (ev.reasoningDelta) reasoningBuf.current += ev.reasoningDelta;
@@ -3325,6 +3333,7 @@ function AppInner({
       mcpRuntime,
       pushHistory,
       resetCursor,
+      messageQueue.enqueue,
       liveMcpServers,
       generateCurrentSessionTitle,
       switchWorkspaceRoot,
@@ -4412,6 +4421,7 @@ function AppInner({
                     input={input}
                     setInput={setInput}
                     busy={busy}
+                    queueMessages={messageQueue.queue}
                     onSubmit={handleSubmit}
                     onHistoryPrev={handleHistoryPrev}
                     onHistoryNext={handleHistoryNext}

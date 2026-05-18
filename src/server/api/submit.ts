@@ -49,5 +49,8 @@ export async function handleSubmit(
     action: "submit-prompt",
     payload: { length: prompt.length },
   });
-  return { status: 202, body: { accepted: true } };
+  return {
+    status: 202,
+    body: { accepted: true, ...(result.queued ? { queued: true } : {}) },
+  };
 }

@@ -637,6 +637,8 @@ export const EN: TranslationSchema = {
     abortedAtIter:
       "aborted at iter {iter} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
+    queuedSteerPending:
+      "steering message queued — skipping remaining tool calls to apply your input…",
     preflightTruncateStatus: "preflight: context near full, truncating oldest history…",
     preflightTruncated:
       "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) — truncated {beforeMessages} messages → {afterMessages}. Sending.",

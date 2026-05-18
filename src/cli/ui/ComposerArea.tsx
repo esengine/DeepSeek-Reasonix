@@ -10,7 +10,7 @@ import type { EditMode } from "../../config.js";
 import type { JobRegistry } from "../../tools/jobs.js";
 
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
-import { PromptInput } from "./PromptInput.js";
+import { PromptInput, QueueIndicator } from "./PromptInput.js";
 import type { SlashArgPickerProps } from "./SlashArgPicker.js";
 import { SlashArgPicker } from "./SlashArgPicker.js";
 import type { SlashSuggestionsProps } from "./SlashSuggestions.js";
@@ -40,6 +40,7 @@ export interface ComposerAreaProps {
   input: string;
   setInput: (next: string) => void;
   busy: boolean;
+  queueMessages: { text: string; enqueuedAt: number }[];
   onSubmit: (raw: string) => Promise<void>;
   onHistoryPrev: () => void;
   onHistoryNext: () => void;
@@ -94,6 +95,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     input,
     setInput,
     busy,
+    queueMessages,
     onSubmit,
     onHistoryPrev,
     onHistoryNext,
@@ -134,6 +136,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
             />
           ) : null}
         </Box>
+        <QueueIndicator messages={queueMessages} />
         <PromptInput
           value={input}
           onChange={setInput}

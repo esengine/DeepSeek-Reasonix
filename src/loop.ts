@@ -165,6 +165,11 @@ export class CacheFirstLoop {
   private readonly _turnFailures: TurnFailureTracker;
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
+  private _toolDispatchesThisStep = 0;
+  /** User messages queued mid-turn via queueMessage(); drained into context at the top of each iter. */
+  private _messageQueue: string[] = [];
+  /** Drained messages that arrived while pendingUser was still set — committed alongside it. */
+  private _drainedBuffer: string[] = [];
   private context!: ContextManager;
 
   /** Subscribe API so UI hooks can derive `running` from finally-guaranteed insertions. */
@@ -523,6 +528,14 @@ export class CacheFirstLoop {
     return healed.messages;
   }
 
+  /** Push a user message onto the in-turn queue. The loop drains this queue at the top of each
+   *  iter (before the next model call), injecting each message into the conversation log. */
+  queueMessage(text: string): void {
+    // Empty/whitespace gating is at the input level (addMessage in useMessageQueue).
+    // The loop trusts the caller.
+    this._messageQueue.push(text);
+  }
+
   abort(): void {
     this._turnAbort.abort();
   }
@@ -726,6 +739,25 @@ export class CacheFirstLoop {
           role: "steer",
           content: steer,
         };
+      }
+      // Drain the in-turn message queue (user steering) before every model call.
+      // We drain AFTER buildMessages so queued messages appear after the initial
+      // user input in the model's message array.  If pendingUser is still set
+      // (first iter) the drained messages are buffered and committed to the log
+      // when pendingUser is committed later; otherwise they're committed now.
+      const drained: string[] = this._messageQueue.length > 0 ? this._messageQueue.splice(0) : [];
+
+      if (drained.length > 0) {
+        for (const msg of drained) {
+          if (pendingUser === null) {
+            this.appendAndPersist({ role: "user", content: msg });
+          } else {
+            // Buffer — committed alongside pendingUser after the model response.
+            this._drainedBuffer.push(msg);
+          }
+          messages.push({ role: "user", content: msg });
+          yield { turn: this._turn, role: "user.queued", content: msg };
+        }
       }
 
       // Preflight context check. Local estimate of the outgoing payload
@@ -998,6 +1030,17 @@ export class CacheFirstLoop {
         usage ?? new Usage(),
       );
 
+      // Commit the user turn to the log only on success of the first round-trip.
+      if (pendingUser !== null) {
+        this.appendAndPersist({ role: "user", content: pendingUser });
+        // Commit any queued steering messages that arrived while pendingUser was set.
+        // They were buffered so they'd appear after the initial user in the log.
+        for (const msg of this._drainedBuffer) {
+          this.appendAndPersist({ role: "user", content: msg });
+        }
+        this._drainedBuffer = [];
+        pendingUser = null;
+      }
       this.scratch.reasoning = reasoningContent || null;
 
       const { calls: repairedCalls, report } = this.repair.process(
@@ -1152,6 +1195,23 @@ export class CacheFirstLoop {
 
       let callIdx = 0;
       while (callIdx < repairedCalls.length) {
+        // If user queued a steering message mid-turn, skip the remaining
+        // tool calls so the model sees the steering before committing.
+        // The queued messages will be drained at the top of the next
+        // iteration and the model can change course without the user
+        // seeing stale tool prompts.
+        if (this._messageQueue.length > 0) {
+          // Strip the assistant's unfired tool calls so the history
+          // stays valid (tool_calls without tool results is a 400).
+          this.context.trimTrailingToolCalls();
+          yield {
+            turn: this._turn,
+            role: "status",
+            content: t("loop.queuedSteerPending"),
+          };
+          break;
+        }
+
         // Group consecutive parallel-safe calls; an unsafe call breaks
         // the chunk and runs alone (serial barrier).
         const chunk: ToolCall[] = [];

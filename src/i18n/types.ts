@@ -233,6 +233,7 @@ export interface TranslationSchema {
     proArmed: string;
     abortedAtIter: string;
     toolUploadStatus: string;
+    queuedSteerPending: string;
     preflightTruncateStatus: string;
     preflightTruncated: string;
     preflightTruncatedStillFull: string;
