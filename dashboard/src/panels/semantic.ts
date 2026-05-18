@@ -16,6 +16,7 @@ interface SemanticConfigView {
     apiKeySet: boolean;
     model: string;
     extraBody: Record<string, unknown>;
+    batchSize: number;
   };
 }
 
@@ -44,6 +45,7 @@ interface SemanticData {
         apiKeySet: boolean;
         model: string;
         extraBodyKeys: string[];
+        batchSize: number;
       };
   index?: IndexInfo;
   job?: SemanticJob | null;
@@ -106,6 +108,7 @@ interface SemanticConfigDraft {
     apiKey: string;
     model: string;
     extraBodyText: string;
+    batchSize: number;
     apiKeySet: boolean;
   };
 }
@@ -243,6 +246,7 @@ export function SemanticPanel() {
             apiKey: draft.openaiCompat.apiKey,
             model: draft.openaiCompat.model,
             extraBody,
+            batchSize: draft.openaiCompat.batchSize,
           },
         },
       });
@@ -409,6 +413,27 @@ export function SemanticPanel() {
                         openaiCompat: {
                           ...draft.openaiCompat,
                           model: (e.target as HTMLInputElement).value,
+                        },
+                      });
+                    }}
+                  />
+                </div>
+                <div class="form-row">
+                  <span class="lbl">${t("semantic.batchSize")}</span>
+                  <input
+                    class="input mono"
+                    type="number"
+                    min="1"
+                    value=${draft.openaiCompat.batchSize}
+                    onInput=${(e: Event) => {
+                      const v = Number.parseInt((e.target as HTMLInputElement).value, 10);
+                      draftDirtyRef.current = true;
+                      setDraftDirty(true);
+                      setDraft({
+                        ...draft,
+                        openaiCompat: {
+                          ...draft.openaiCompat,
+                          batchSize: Number.isInteger(v) && v > 0 ? v : 10,
                         },
                       });
                     }}
@@ -600,6 +625,7 @@ export function SemanticPanel() {
                 <div class="rail-kv"><span class="k">${t("semantic.apiKey")}</span><span class="v">${remote?.apiKeySet ? html`<span class="pill ok">${t("semantic.found")}</span>` : html`<span class="pill warn">${t("semantic.missing")}</span>`}</span></div>
                 <div class="rail-kv"><span class="k">${t("semantic.model")}</span><span class="v" style="font-size:11px">${remote?.model ?? draft.openaiCompat.model}</span></div>
                 <div class="rail-kv"><span class="k">${t("semantic.extraBody")}</span><span class="v">${fmtNum(remote?.extraBodyKeys.length ?? 0)}</span></div>
+                <div class="rail-kv"><span class="k">${t("semantic.batchSize")}</span><span class="v">${remote?.batchSize ?? 10}</span></div>
               `
           }
         </div>
@@ -622,6 +648,7 @@ function toConfigDraft(config: SemanticConfigView): SemanticConfigDraft {
       apiKey: "",
       model: config.openaiCompat.model,
       extraBodyText: JSON.stringify(config.openaiCompat.extraBody ?? {}, null, 2),
+      batchSize: config.openaiCompat.batchSize,
       apiKeySet: config.openaiCompat.apiKeySet,
     },
   };

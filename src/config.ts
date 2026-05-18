@@ -33,6 +33,7 @@ export interface OpenAICompatEmbeddingUserConfig {
   apiKey?: string;
   model?: string;
   extraBody?: Record<string, unknown>;
+  batchSize?: number;
 }
 
 export interface SemanticEmbeddingUserConfig {
@@ -55,6 +56,7 @@ export interface ResolvedOpenAICompatEmbeddingConfig {
   model: string;
   extraBody: Record<string, unknown>;
   timeoutMs: number;
+  batchSize: number;
 }
 
 export type ResolvedEmbeddingConfig =
@@ -73,6 +75,7 @@ export interface SemanticEmbeddingConfigView {
     apiKeySet: boolean;
     model: string;
     extraBody: Record<string, unknown>;
+    batchSize: number;
   };
 }
 
@@ -262,6 +265,7 @@ export function loadMetasoApiKey(path: string = defaultConfigPath()): string {
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_EMBED_MODEL = "nomic-embed-text";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_BATCH_SIZE = 10;
 
 export function defaultConfigPath(): string {
   return join(homedir(), ".reasonix", "config.json");
@@ -949,6 +953,7 @@ export function resolveSemanticEmbeddingConfig(
       model,
       extraBody: normalizeExtraBody(user.openaiCompat?.extraBody),
       timeoutMs: DEFAULT_TIMEOUT_MS,
+      batchSize: user.openaiCompat?.batchSize ?? DEFAULT_BATCH_SIZE,
     };
   }
   return {
@@ -976,6 +981,7 @@ export function redactSemanticEmbeddingConfig(
       apiKeySet: Boolean(normalized.openaiCompat?.apiKey?.trim()),
       model: normalized.openaiCompat?.model?.trim() ?? "",
       extraBody: normalizeExtraBody(normalized.openaiCompat?.extraBody),
+      batchSize: normalized.openaiCompat?.batchSize ?? DEFAULT_BATCH_SIZE,
     },
   };
 }
@@ -1024,6 +1030,7 @@ function normalizeSemanticEmbeddingUserConfig(
       apiKey: normalizeOptionalString(cfg?.openaiCompat?.apiKey),
       model: normalizeOptionalString(cfg?.openaiCompat?.model),
       extraBody: normalizeExtraBody(cfg?.openaiCompat?.extraBody),
+      batchSize: normalizePositiveInt(cfg?.openaiCompat?.batchSize),
     },
   };
 }
@@ -1031,6 +1038,10 @@ function normalizeSemanticEmbeddingUserConfig(
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizePositiveInt(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function normalizeExtraBody(value: Record<string, unknown> | undefined): Record<string, unknown> {

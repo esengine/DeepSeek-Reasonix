@@ -587,6 +587,7 @@ export const zhCN = {
     customRequestBodyMustBeObject: "自定义请求体必须是 JSON 对象。",
     saveBeforeIndex: "请先保存语义设置，再启动索引。",
     extraBody: "扩展请求体",
+    batchSize: "批次大小",
     keepExistingKey: "留空则保留现有 Key",
     remoteProvider: "远程向量服务",
     remoteProviderDesc:

@@ -485,6 +485,7 @@ function saveSemanticConfigApi(rawBody: string, ctx: DashboardContext): ApiResul
       apiKey?: unknown;
       model?: unknown;
       extraBody?: unknown;
+      batchSize?: unknown;
     };
   };
   try {
@@ -520,6 +521,13 @@ function saveSemanticConfigApi(rawBody: string, ctx: DashboardContext): ApiResul
         parsed.openaiCompat?.extraBody === undefined
           ? existing.openaiCompat?.extraBody
           : (parsed.openaiCompat.extraBody as Record<string, unknown>),
+      batchSize:
+        parsed.openaiCompat?.batchSize === undefined
+          ? existing.openaiCompat?.batchSize
+          : Number.isInteger(parsed.openaiCompat.batchSize) &&
+              (parsed.openaiCompat.batchSize as number) > 0
+            ? (parsed.openaiCompat.batchSize as number)
+            : undefined,
     },
   };
   try {
@@ -572,6 +580,7 @@ async function getProviderStatusFromConfig(
       apiKeySet: boolean;
       model: string;
       extraBodyKeys: string[];
+      batchSize: number;
     }
 > {
   if (config.provider === "openai-compat") {
@@ -584,6 +593,7 @@ async function getProviderStatusFromConfig(
       apiKeySet: config.openaiCompat.apiKeySet,
       model: config.openaiCompat.model,
       extraBodyKeys: Object.keys(config.openaiCompat.extraBody),
+      batchSize: config.openaiCompat.batchSize,
     };
   }
   const ollama = await checkOllamaStatus(config.ollama.model, config.ollama.baseUrl).catch(
@@ -625,6 +635,7 @@ async function getProviderStatus(
       apiKeySet: boolean;
       model: string;
       extraBodyKeys: string[];
+      batchSize: number;
     }
 > {
   if (resolved.provider === "openai-compat") {
@@ -635,6 +646,7 @@ async function getProviderStatus(
       apiKeySet: Boolean(resolved.apiKey),
       model: resolved.model,
       extraBodyKeys: Object.keys(resolved.extraBody),
+      batchSize: resolved.batchSize,
     };
   }
   const ollama = await checkOllamaStatus(resolved.model, resolved.baseUrl).catch((err) => ({

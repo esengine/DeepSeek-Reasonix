@@ -614,6 +614,7 @@ export const en = {
     customRequestBodyMustBeObject: "Custom request body must be a JSON object.",
     saveBeforeIndex: "Save semantic settings before starting an index.",
     extraBody: "extra body",
+    batchSize: "batch size",
     keepExistingKey: "leave blank to keep existing key",
     remoteProvider: "Remote embedding provider",
     remoteProviderDesc:
