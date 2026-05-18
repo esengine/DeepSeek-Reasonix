@@ -64,6 +64,7 @@ export type SlashCmd = {
   desc: string;
   run: () => void;
   kb?: string;
+  insertOnly?: boolean;
 };
 export type MentionItem = {
   name: string;
@@ -292,10 +293,17 @@ export function Composer({
     if (!it || !popup) return;
     if (popup.kind === "slash") {
       const cmd = (it as SlashCmd).cmd;
-      const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
-      setDraft(next);
-      setChips((c) => [...c, { kind: "slash", label: cmd.replace(/^\//, "") }]);
-      (it as SlashCmd).run();
+      const insertOnly = (it as SlashCmd).insertOnly === true;
+      if (insertOnly) {
+        const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
+        setDraft(next ? `${next} ${cmd} ` : `${cmd} `);
+        setChips((c) => [...c, { kind: "slash", label: cmd.replace(/^\//, "") }]);
+      } else {
+        const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
+        setDraft(next);
+        setChips((c) => [...c, { kind: "slash", label: cmd.replace(/^\//, "") }]);
+        (it as SlashCmd).run();
+      }
     } else {
       const mention = it as MentionItem;
       if (mention.name === "..") {

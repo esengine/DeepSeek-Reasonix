@@ -1218,12 +1218,25 @@ function TabRuntime({
         return;
       }
 
+      const skillMatch = text.match(/^\/([a-zA-Z0-9_-]+)(\s+.*)?$/);
+      if (skillMatch) {
+        const [, name, args] = skillMatch;
+        const skill = state.skills.find((s) => s.name === name);
+        if (skill) {
+          const clientId = `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const trimmedArgs = args?.trim() ?? "";
+          dispatch({ t: "start_skill", skill: { name: skill.name, runAs: skill.runAs }, args: trimmedArgs, clientId });
+          sendRpc({ cmd: "skill_run", name: skill.name, args: trimmedArgs || undefined });
+          if (!override) setDraft("");
+          return;
+        }
+      }
       const clientId = `c-${Date.now()}`;
       dispatch({ t: "send_user", text, clientId });
       sendRpc({ cmd: "user_input", text });
       if (!override) setDraft("");
     },
-    [draft, state.ready, state.busy, sendRpc],
+    [draft, state.ready, state.busy, state.skills, sendRpc],
   );
 
   const abort = useCallback(() => sendRpc({ cmd: "abort" }), [sendRpc]);
@@ -1477,6 +1490,7 @@ function TabRuntime({
     ...state.skills.map((s) => ({
       cmd: `/${s.name}`,
       desc: s.description?.trim() || fallbackSkillDesc(s),
+      insertOnly: true,
       run: () => {
         dispatch({
           t: "start_skill",
