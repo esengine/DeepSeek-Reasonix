@@ -1,11 +1,7 @@
 import { release } from "node:os";
 import { loadRateLimit, loadTheme, resolveThemePreference } from "@/config.js";
 import { getLanguage, t } from "@/i18n/index.js";
-import {
-  DEEPSEEK_CONTEXT_TOKENS,
-  DEFAULT_CONTEXT_TOKENS,
-  pricingFor,
-} from "@/telemetry/stats.js";
+import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS, pricingFor } from "@/telemetry/stats.js";
 import { countTokensBounded } from "@/tokenizer.js";
 import { VERSION } from "@/version.js";
 import { writeClipboard } from "../../clipboard.js";

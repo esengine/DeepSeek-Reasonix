@@ -72,7 +72,11 @@ describe("costUsd", () => {
     const path = join(dir, "config.json");
     try {
       writeConfig(
-        { pricingOverride: { "openrouter/deepseek": { inputCacheHit: 0.5, inputCacheMiss: 2, output: 4 } } },
+        {
+          pricingOverride: {
+            "openrouter/deepseek": { inputCacheHit: 0.5, inputCacheMiss: 2, output: 4 },
+          },
+        },
         path,
       );
       expect(costUsd("openrouter/deepseek", new Usage(1000, 100, 0, 800, 200), path)).toBeCloseTo(
