@@ -673,7 +673,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "multi_edit",
     description:
-      "Apply N SEARCH/REPLACE edits across ONE OR MORE files in a single atomic call. Edits run sequentially in array order; for edits that touch the same file, a later edit can match text inserted by an earlier one. If ANY edit fails (search not found, ambiguous match, empty search, file unreadable), NO files are written — atomic at the validation layer. Same per-edit rules as edit_file: `search` is exact text (whitespace sensitive, no regex) and must be unique in its target file at the moment that edit applies. Use this for renames spanning multiple files, cross-file refactors, or any batch where you'd otherwise loop edit_file.",
+      "Apply N SEARCH/REPLACE edits across ONE OR MORE files in one call. Edits validate across the full batch before writing. Validation failures leave all files untouched; disk write failures trigger best-effort rollback of files that may have been modified. Per-file edits run in array order, so a later edit can match text inserted by an earlier one. Same per-edit rules as edit_file: `search` is exact text (whitespace sensitive, no regex) and must be unique in its target file at the moment that edit applies. Use this for renames spanning multiple files, cross-file refactors, or any batch where you'd otherwise loop edit_file.",
     parameters: {
       type: "object",
       properties: {

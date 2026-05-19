@@ -80,7 +80,7 @@ Rules:
     >>>>>>> REPLACE
 - Don't use write_file to change existing files — the user reviews edits as SEARCH/REPLACE. write_file is for wholesale overwrites only.
 - Paths are relative to the working directory.
-- For multi-site changes use \`multi_edit\` — all edits validate before any file is written; any failure → all files untouched.
+- For multi-site changes use \`multi_edit\` — validation runs before any write; validation failures leave all files untouched. Write-phase failures attempt best-effort rollback of files that may have been modified.
 
 # Trust what you already know
 
