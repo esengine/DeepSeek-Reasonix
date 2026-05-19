@@ -21,7 +21,7 @@
 import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { buildCodeToolset } from "../../code/setup.js";
-import { loadApiKey, loadPreset, readConfig } from "../../config.js";
+import { loadApiKey, loadEngineeringLifecycleMode, loadPreset, readConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { t } from "../../i18n/index.js";
 import { detectForeignAgentPlatform } from "../../memory/project.js";
@@ -149,6 +149,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
       systemAppend: opts.systemAppend,
       systemAppendFile: systemAppendFileContents,
       modelId: resolvedModel,
+      engineeringLifecycleMode: loadEngineeringLifecycleMode(),
     });
   await chatCommand({
     model: resolvedModel,

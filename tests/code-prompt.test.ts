@@ -155,6 +155,16 @@ describe("codeSystemPrompt", () => {
   });
 
   describe("system append", () => {
+    it("omits lifecycle contract by default and includes it only for strict mode", () => {
+      expect(codeSystemPrompt(root)).not.toMatch(/# Engineering lifecycle contract/);
+      expect(codeSystemPrompt(root, { engineeringLifecycleMode: "off" })).not.toMatch(
+        /# Engineering lifecycle contract/,
+      );
+      expect(codeSystemPrompt(root, { engineeringLifecycleMode: "strict" })).toMatch(
+        /# Engineering lifecycle contract/,
+      );
+    });
+
     it("does not add a User System Append section when neither option is provided", () => {
       const out = codeSystemPrompt(root);
       expect(out).not.toMatch(/# User System Append/);

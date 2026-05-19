@@ -21,6 +21,8 @@ export type EditMode = "review" | "auto" | "yolo";
 
 export type ReasoningEffort = "high" | "max";
 
+export type EngineeringLifecycleMode = "off" | "strict";
+
 export type EmbeddingProvider = "ollama" | "openai-compat";
 
 export interface OllamaEmbeddingUserConfig {
@@ -195,6 +197,10 @@ export interface ReasonixConfig {
   };
   pricingOverride?: Record<string, PricingOverride>;
   rateLimit?: RateLimitConfig;
+  /** Host-enforced engineering lifecycle. Defaults to off so opt-outs pay zero prefix cost. */
+  engineeringLifecycle?: {
+    mode?: EngineeringLifecycleMode;
+  };
   /** QQ Bot configuration */
   qq?: QQBotConfig;
 }
@@ -801,6 +807,15 @@ export function saveEditMode(mode: EditMode, path: string = defaultConfigPath())
   const cfg = readConfig(path);
   cfg.editMode = mode;
   writeConfig(cfg, path);
+}
+
+/** Unknown values fall back to "off" so bad config keeps the zero-cost default. */
+export function loadEngineeringLifecycleMode(
+  path: string = defaultConfigPath(),
+): EngineeringLifecycleMode {
+  const v = readConfig(path).engineeringLifecycle?.mode;
+  if (v === "off" || v === "strict") return v;
+  return "off";
 }
 
 /** True when the onboarding tip for the review/AUTO gate has been shown. */

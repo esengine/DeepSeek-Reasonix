@@ -64,6 +64,8 @@ export class ToolRegistry {
   private _resultAugmenter: ToolResultAugmenter | null = null;
   /** Per-tool fingerprint of the last call that failed schema validation. Cleared by any successful validation for that tool. */
   private readonly _lastMalformed = new Map<string, string>();
+  /** Per-tool fingerprint of the last host-side interceptor rejection. */
+  private readonly _lastInterceptorRejection = new Map<string, string>();
 
   constructor(opts: ToolRegistryOptions = {}) {
     this._autoFlatten = opts.autoFlatten !== false;
@@ -235,13 +237,17 @@ export class ToolRegistry {
     for (const interceptor of chain) {
       try {
         const short = await interceptor(name, args);
-        if (typeof short === "string") return this._augmentResult(name, args, short);
+        if (typeof short === "string") {
+          const guarded = this._noteInterceptorRejection(name, fingerprint, short);
+          return this._augmentResult(name, args, guarded);
+        }
       } catch (err) {
         return JSON.stringify({
           error: `${name}: interceptor failed — ${(err as Error).message}`,
         });
       }
     }
+    this._lastInterceptorRejection.delete(name);
 
     // Pre-dispatch abort gate: if ESC fired while this tool was queued,
     // refuse to start it. Tools that already check `ctx.signal` mid-run
@@ -326,6 +332,36 @@ export class ToolRegistry {
       });
     }
     return JSON.stringify({ error: `${name}: ${detail}` });
+  }
+
+  private _noteInterceptorRejection(name: string, fingerprint: string, result: string): string {
+    const reason = rejectedReason(result);
+    if (!reason) {
+      this._lastInterceptorRejection.delete(name);
+      return result;
+    }
+    const key = `${reason}:${fingerprint}`;
+    const prev = this._lastInterceptorRejection.get(name);
+    this._lastInterceptorRejection.set(name, key);
+    if (prev === key) {
+      return JSON.stringify({
+        error: `${name}: same call was just rejected by ${reason} — do not retry identical args. Switch to read-only exploration, submit or revise the plan, or choose a different tool call.`,
+        rejectedReason: reason,
+        consecutiveInterceptorRejection: true,
+      });
+    }
+    return result;
+  }
+}
+
+function rejectedReason(result: string): string | null {
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const reason = (parsed as { rejectedReason?: unknown }).rejectedReason;
+    return typeof reason === "string" && reason ? reason : null;
+  } catch {
+    return null;
   }
 }
 

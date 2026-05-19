@@ -14,6 +14,7 @@ import {
   loadBaseUrl,
   loadDesktopOpenTabs,
   loadEditMode,
+  loadEngineeringLifecycleMode,
   loadIndexConfig,
   loadIndexUserConfig,
   loadPricingOverride,
@@ -370,6 +371,22 @@ describe("config", () => {
   it("loadEditMode coerces unknown values back to 'review'", () => {
     writeConfig({ editMode: "garbage" as any }, path);
     expect(loadEditMode(path)).toBe("review");
+  });
+
+  it("loadEngineeringLifecycleMode defaults to 'off' when unset", () => {
+    expect(loadEngineeringLifecycleMode(path)).toBe("off");
+  });
+
+  it("loadEngineeringLifecycleMode accepts off and strict", () => {
+    writeConfig({ engineeringLifecycle: { mode: "off" } }, path);
+    expect(loadEngineeringLifecycleMode(path)).toBe("off");
+    writeConfig({ engineeringLifecycle: { mode: "strict" } }, path);
+    expect(loadEngineeringLifecycleMode(path)).toBe("strict");
+  });
+
+  it("loadEngineeringLifecycleMode coerces unknown values back to 'off'", () => {
+    writeConfig({ engineeringLifecycle: { mode: "garbage" as any } }, path);
+    expect(loadEngineeringLifecycleMode(path)).toBe("off");
   });
 
   it("loadReasoningEffort defaults to 'max' when unset", () => {

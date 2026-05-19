@@ -331,6 +331,24 @@ describe("ToolRegistry", () => {
       expect(out).toBe("ok");
     });
 
+    it("sharpens repeated identical interceptor rejections", async () => {
+      const reg = new ToolRegistry();
+      reg.register({ name: "multi_edit", fn: () => "ok" });
+      reg.addToolInterceptor("lifecycle", () =>
+        JSON.stringify({
+          error: "multi_edit blocked",
+          rejectedReason: "engineering-lifecycle",
+        }),
+      );
+
+      const first = JSON.parse(await reg.dispatch("multi_edit", '{"edits":[]}'));
+      const second = JSON.parse(await reg.dispatch("multi_edit", '{"edits":[]}'));
+
+      expect(first.consecutiveInterceptorRejection).toBeUndefined();
+      expect(second.consecutiveInterceptorRejection).toBe(true);
+      expect(second.error).toMatch(/do not retry identical args/);
+    });
+
     it("surfaces interceptor throws as structured errors", async () => {
       const reg = new ToolRegistry();
       reg.register({ name: "edit_file", fn: () => "ok" });

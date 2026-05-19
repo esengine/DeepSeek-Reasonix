@@ -22,6 +22,7 @@ import {
   snapshotBeforeEdits,
   toWholeFileEditBlock,
 } from "../../code/edit-blocks.js";
+import { EngineeringLifecycleRuntime } from "../../code/lifecycle.js";
 import { clearPendingEdits, loadPendingEdits } from "../../code/pending-edits.js";
 import {
   clearPlanState,
@@ -31,10 +32,12 @@ import {
 } from "../../code/plan-store.js";
 import {
   type EditMode,
+  type EngineeringLifecycleMode,
   type PresetName,
   defaultConfigPath,
   editModeHintShown,
   loadBaseUrl,
+  loadEngineeringLifecycleMode,
   loadReasoningEffort,
   loadTheme,
   markEditModeHintShown,
@@ -594,6 +597,15 @@ function AppInner({
     model,
     initialPreset,
   );
+  const engineeringLifecycleBaseModeRef = useRef<EngineeringLifecycleMode>(
+    loadEngineeringLifecycleMode(),
+  );
+  const engineeringLifecycleRef = useRef<EngineeringLifecycleRuntime | null>(null);
+  if (engineeringLifecycleRef.current === null) {
+    engineeringLifecycleRef.current = new EngineeringLifecycleRuntime({
+      mode: engineeringLifecycleBaseModeRef.current,
+    });
+  }
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -1567,6 +1579,10 @@ function AppInner({
         stepCompletionsRef.current = new Map(Object.entries(restoredPlan.stepCompletions ?? {}));
         planBodyRef.current = restoredPlan.body ?? null;
         planSummaryRef.current = restoredPlan.summary ?? null;
+        engineeringLifecycleRef.current?.recordPlanApproved(restoredPlan.steps);
+        for (const stepId of restoredPlan.completedStepIds) {
+          engineeringLifecycleRef.current?.recordStepCompleted(stepId);
+        }
         const when = relativeTime(restoredPlan.updatedAt);
         const done = new Set(restoredPlan.completedStepIds);
         const summary = restoredPlan.summary ? ` - ${restoredPlan.summary}` : "";
@@ -1894,6 +1910,22 @@ function AppInner({
     }
   });
 
+  useEffect(() => {
+    if (!tools || !codeMode) return;
+    return tools.addToolInterceptor("engineering-lifecycle", (name, args) => {
+      return engineeringLifecycleRef.current?.guardToolCall(name, args) ?? null;
+    });
+  }, [tools, codeMode]);
+
+  useEffect(() => {
+    if (!tools || !codeMode) return;
+    tools.setResultAugmenter((name, args, result) => {
+      engineeringLifecycleRef.current?.recordToolResult(name, args, result);
+      return result;
+    });
+    return () => tools.setResultAugmenter(null);
+  }, [tools, codeMode]);
+
   // Edit-gate interceptor. Reroutes `edit_file` / `write_file` tool
   // calls through the review queue (in `review` mode) or the auto-apply
   // snapshot/banner path (in `auto` mode) so the model's tool usage
@@ -2037,6 +2069,19 @@ function AppInner({
     (on: boolean) => {
       setPlanMode(on);
       tools?.setPlanMode(on);
+      if (on) {
+        engineeringLifecycleRef.current?.setMode("strict");
+      } else {
+        const state = engineeringLifecycleRef.current?.snapshot().state;
+        if (
+          state === undefined ||
+          state === "idle" ||
+          state === "complete" ||
+          state === "cancelled"
+        ) {
+          engineeringLifecycleRef.current?.setMode(engineeringLifecycleBaseModeRef.current);
+        }
+      }
     },
     [tools],
   );
@@ -2832,6 +2877,7 @@ function AppInner({
             completedStepIdsRef.current.add(stepId);
             persistPlanState();
             log.completePlanStep(stepId);
+            engineeringLifecycleRef.current?.recordStepCompleted(stepId);
             return "ok";
           },
           markAllPlanStepsDone: () => {
@@ -2842,6 +2888,7 @@ function AppInner({
               if (completedStepIdsRef.current.has(s.id)) continue;
               completedStepIdsRef.current.add(s.id);
               log.completePlanStep(s.id);
+              engineeringLifecycleRef.current?.recordStepCompleted(s.id);
               added++;
             }
             if (added > 0) persistPlanState();
@@ -2980,6 +3027,17 @@ function AppInner({
           log.pushWarning(t("app.hookUserPromptSubmit"), formatHookOutcomeMessage(o));
         }
         if (promptReport.blocked) return;
+      }
+
+      if (codeMode) {
+        const before = engineeringLifecycleRef.current?.snapshot().state;
+        engineeringLifecycleRef.current?.observeUserPrompt(text);
+        const after = engineeringLifecycleRef.current?.snapshot().state;
+        if (before === "idle" && after === "armed") {
+          log.pushInfo(
+            "Engineering lifecycle armed: high-risk mutations now require an approved structured plan.",
+          );
+        }
       }
 
       // Large pastes (stack traces, log dumps, file contents) get a
@@ -3232,6 +3290,8 @@ function AppInner({
               planBodyRef,
               planSummaryRef,
               persistPlanState,
+              onPlanStepCompleted: (stepId) =>
+                engineeringLifecycleRef.current?.recordStepCompleted(stepId),
               log,
               session: session ?? null,
               codeModeOn: !!codeMode,
@@ -3589,6 +3649,7 @@ function AppInner({
         // can dock it at the bottom —without this dispatch, no card with
         // variant: "active" exists and the live strip stays empty.
         const approvedSteps = planStepsRef.current;
+        engineeringLifecycleRef.current?.recordPlanApproved(approvedSteps ?? []);
         if (approvedSteps && approvedSteps.length > 0) {
           completedStepIdsRef.current = new Set();
           stepCompletionsRef.current = new Map();
@@ -3615,6 +3676,7 @@ function AppInner({
         planBodyRef.current = null;
         planSummaryRef.current = null;
         persistPlanState();
+        engineeringLifecycleRef.current?.cancel();
         togglePlanMode(false);
         agentStore.dispatch({ type: "plan.drop" });
         marker = trimmed ? `plan rejected - ${tail}` : "plan cancelled";
@@ -3761,6 +3823,7 @@ function AppInner({
           planSummaryRef.current = p.summary ?? null;
           planBodyRef.current = p.plan;
           stepCompletionsRef.current = new Map();
+          engineeringLifecycleRef.current?.recordPlanProposed(p.steps);
           break;
         }
         case "plan_checkpoint": {
@@ -4032,6 +4095,10 @@ function AppInner({
         merged.push(s);
       }
       planStepsRef.current = merged;
+      engineeringLifecycleRef.current?.recordPlanApproved(merged);
+      for (const s of merged) {
+        if (completed.has(s.id)) engineeringLifecycleRef.current?.recordStepCompleted(s.id);
+      }
       persistPlanState();
       // Replace the live active card so PlanLiveRow shows the new tail —      // existing card's stale ids would fail subsequent step completes.
       agentStore.dispatch({ type: "plan.drop" });

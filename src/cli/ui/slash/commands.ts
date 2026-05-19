@@ -261,10 +261,10 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "plan",
     group: "code",
-    argsHint: "[on|off]",
-    summary: "toggle read-only plan mode (writes bounced until submit_plan + approval)",
+    argsHint: "[on|off|strict]",
+    summary: "toggle read-only plan mode / strict lifecycle rails",
     contextual: "code",
-    argCompleter: ["on", "off"],
+    argCompleter: ["on", "off", "strict"],
   },
   {
     cmd: "checkpoint",

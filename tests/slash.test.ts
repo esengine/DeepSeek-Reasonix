@@ -417,7 +417,7 @@ describe("handleSlash", () => {
       const ctx = detectSlashArgContext("/plan o", true);
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
-      expect(ctx!.spec.argCompleter).toEqual(["on", "off"]);
+      expect(ctx!.spec.argCompleter).toEqual(["on", "off", "strict"]);
     });
 
     it("hides /plan outside code mode (command is contextual)", () => {
@@ -1192,7 +1192,7 @@ describe("handleSlash", () => {
       expect(r2.info).toMatch(/plan mode OFF/);
     });
 
-    it("/plan on / off / true / false / 0 / 1 parse correctly", () => {
+    it("/plan on / off / true / false / 0 / 1 / strict parse correctly", () => {
       const check = (arg: string, expected: boolean) => {
         const calls: boolean[] = [];
         handleSlash("plan", [arg], makeLoop(), {
@@ -1207,6 +1207,16 @@ describe("handleSlash", () => {
       check("off", false);
       check("false", false);
       check("0", false);
+      check("strict", true);
+    });
+
+    it("/plan strict is explicit, not a toggle", () => {
+      const calls: boolean[] = [];
+      handleSlash("plan", ["strict"], makeLoop(), {
+        planMode: true,
+        setPlanMode: (on) => calls.push(on),
+      });
+      expect(calls).toEqual([true]);
     });
 
     it("/plan explains the stronger-constraint relationship with autonomous submit_plan", () => {
