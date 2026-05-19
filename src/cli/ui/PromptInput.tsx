@@ -50,6 +50,8 @@ export interface PromptInputProps {
   /** Ctrl+X — parent spawns $EDITOR with the current buffer and re-injects on exit. */
   onOpenExternalEditor?: () => void;
   onCursorChange?: (cursor: number) => void;
+  /** Rows the parent renders below this box — drives IME cursor sync so fcitx5/ibus/Win-IME candidate popups land next to the visual ▌. */
+  rowsAfter?: number;
 }
 
 export function PromptInput({
@@ -62,6 +64,7 @@ export function PromptInput({
   onHistoryNext,
   onOpenExternalEditor,
   onCursorChange,
+  rowsAfter = 0,
 }: PromptInputProps) {
   // Cap at 24 — collapseLinesForDisplay hides content past ~20 logical lines.
   // Quantize spec.max to 4-row buckets so per-keystroke line-count changes
@@ -200,6 +203,36 @@ export function PromptInput({
 
   const renderItems = collapseLinesForDisplay(lines, cursorLine);
   const showHugeBufferHints = lines.length > 20;
+
+  // IME cursor sync. Ink writes a full ANSI frame each render; the
+  // terminal cursor ends up at the bottom of that frame and IMEs
+  // (fcitx5 / ibus on Linux, Microsoft Pinyin on Windows) query it for
+  // candidate-window placement. Without this, popups land at screen
+  // bottom instead of next to the visual ▌. Issue #1261.
+  const cursorLineText = lines[cursorLine] ?? "";
+  const cursorCellsInLine = stringCells(cursorLineText.slice(0, cursorCol), pastesRef.current);
+  useEffect(() => {
+    if (!stdout || disabled) return;
+    const totalRows = stdout.rows;
+    if (!totalRows || totalRows < 4) return;
+    const linesBelow = Math.max(0, lines.length - 1 - cursorLine);
+    const largeHint = showHugeBufferHints ? 1 : 0;
+    // Inside our bordered Box, below the visual cursor: remaining input
+    // lines, optional huge-hint, blank marginTop, HintRow, bottom border.
+    const rowsBelow = linesBelow + largeHint + 3 + rowsAfter;
+    const targetRow = Math.max(1, totalRows - rowsBelow);
+    // Column 1-indexed. No left border, paddingX=1, prompt prefix "› " = 2 cells.
+    const targetCol = 1 + 1 + 2 + cursorCellsInLine;
+    stdout.write(`\x1b[${targetRow};${targetCol}H`);
+  }, [
+    stdout,
+    disabled,
+    cursorLine,
+    cursorCellsInLine,
+    lines.length,
+    showHugeBufferHints,
+    rowsAfter,
+  ]);
 
   return (
     <Box
