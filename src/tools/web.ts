@@ -401,10 +401,14 @@ async function searchPerplexity(
     const c = citations[i];
     if (typeof c === "string") {
       results.push({ title: `Source ${i + 1}`, url: c, snippet: "" });
-    } else if (c && typeof c === "object" && typeof (c as Record<string, unknown>).url === "string") {
+    } else if (
+      c &&
+      typeof c === "object" &&
+      typeof (c as Record<string, unknown>).url === "string"
+    ) {
       const item = c as Record<string, unknown>;
       results.push({
-        title: (typeof item.title === "string" ? item.title : `Source ${i + 1}`),
+        title: typeof item.title === "string" ? item.title : `Source ${i + 1}`,
         url: item.url as string,
         snippet: "",
       });
@@ -428,10 +432,7 @@ interface ExaAnswerResponse {
   citations?: ExaCitation[];
 }
 
-async function searchExa(
-  query: string,
-  opts: WebSearchOptions = {},
-): Promise<SearchResult[]> {
+async function searchExa(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
   const apiKey = loadExaApiKey();
   if (!apiKey) throw new Error(t("webErrors.exaMissingKey"));

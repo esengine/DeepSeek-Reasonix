@@ -65,7 +65,9 @@ export const handlers: Record<string, SlashHandler> = {
         cfg.webSearchEngine = engine;
         (cfg as Record<string, unknown>)[`${engine}ApiKey`] = args[1];
         writeConfig(cfg);
-        return { info: t("handlers.webSearchEngine.confirmed", { engine, detail: "" }) + " " + t("handlers.webSearchEngine.keySaved") };
+        return {
+          info: `${t("handlers.webSearchEngine.confirmed", { engine, detail: "" })} ${t("handlers.webSearchEngine.keySaved")}`,
+        };
       }
 
       const existingKey = loadKey();

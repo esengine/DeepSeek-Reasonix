@@ -1114,9 +1114,8 @@ export const zhCN: TranslationSchema = {
       switchedExaNote:
         " 请设置环境变量 EXA_API_KEY 或 config 中的 `exaApiKey`；注册 https://exa.ai。",
       keyNeeded:
-        "未配置 \"{engine}\" 的 API 密钥。\n\n  1. 设置环境变量 {envVar}\n  2. 或内联提供：/search-engine {engine} <your-key>\n  3. 或在 ~/.reasonix/config.json 中添加 \"{engine}ApiKey\"\n\n完成后重新执行 /search-engine {engine}。",
-      keySaved:
-        " API 密钥已保存到配置。",
+        '未配置 "{engine}" 的 API 密钥。\n\n  1. 设置环境变量 {envVar}\n  2. 或内联提供：/search-engine {engine} <your-key>\n  3. 或在 ~/.reasonix/config.json 中添加 "{engine}ApiKey"\n\n完成后重新执行 /search-engine {engine}。',
+      keySaved: " API 密钥已保存到配置。",
       confirmed: '网页搜索引擎已设为 "{engine}"{detail}。下一轮模型调用将生效。',
       confirmedDetail: "（{endpoint}）",
     },
@@ -1430,8 +1429,7 @@ export const zhCN: TranslationSchema = {
       "web_search: Perplexity 请求频率限制 — 等待后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     perplexityServerError:
       "web_search: Perplexity 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
-    perplexityParseError:
-      "web_search: Perplexity 返回无法解析的响应（HTTP {status}）— 稍后重试",
+    perplexityParseError: "web_search: Perplexity 返回无法解析的响应（HTTP {status}）— 稍后重试",
     exaMissingKey:
       "web_search: Exa 后端需要 API 密钥 — 设置 EXA_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `exaApiKey`；https://exa.ai 每月 1000 次免费",
     exaUnauthorized:
@@ -1440,8 +1438,7 @@ export const zhCN: TranslationSchema = {
       "web_search: Exa 请求频率限制或月度配额用尽 — 等待升级，或在 https://exa.ai/pricing 查看计划",
     exaServerError:
       "web_search: Exa 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
-    exaParseError:
-      "web_search: Exa 返回无法解析的响应（HTTP {status}）— 稍后重试",
+    exaParseError: "web_search: Exa 返回无法解析的响应（HTTP {status}）— 稍后重试",
     fetchStatus:
       "web_fetch {status} for {url} — try: 在浏览器中确认该 URL 能否访问；该状态码表明目标主机返回了错误页面",
     fetchRateLimit429:

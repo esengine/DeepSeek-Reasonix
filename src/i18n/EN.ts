@@ -1176,12 +1176,10 @@ export const EN: TranslationSchema = {
         " Set TAVILY_API_KEY or `tavilyApiKey` in config; free 1000/mo at https://tavily.com.",
       switchedPerplexityNote:
         " Set PERPLEXITY_API_KEY or `perplexityApiKey` in config; get one at https://perplexity.ai/settings/api.",
-      switchedExaNote:
-        " Set EXA_API_KEY or `exaApiKey` in config; sign up at https://exa.ai.",
+      switchedExaNote: " Set EXA_API_KEY or `exaApiKey` in config; sign up at https://exa.ai.",
       keyNeeded:
-        "No API key configured for \"{engine}\".\n\n  1. Set the {envVar} environment variable\n  2. Or provide one inline:  /search-engine {engine} <your-key>\n  3. Or add \"{engine}ApiKey\" to ~/.reasonix/config.json\n\nThen retry /search-engine {engine}.",
-      keySaved:
-        " API key saved to config.",
+        'No API key configured for "{engine}".\n\n  1. Set the {envVar} environment variable\n  2. Or provide one inline:  /search-engine {engine} <your-key>\n  3. Or add "{engine}ApiKey" to ~/.reasonix/config.json\n\nThen retry /search-engine {engine}.',
+      keySaved: " API key saved to config.",
       confirmed:
         'Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
       confirmedDetail: " ({endpoint})",
