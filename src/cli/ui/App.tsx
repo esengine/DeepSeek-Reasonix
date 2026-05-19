@@ -1767,10 +1767,10 @@ function AppInner({
       log.pushInfo(message);
       return;
     }
-    // Undo banner keybind: `u` rolls back the last auto-apply. Gated
-    // on an empty prompt buffer so typing "user" into the input doesn't
-    // steal from the first keystroke. 5-second window; after that the
-    // banner self-dismisses and /undo remains the only path.
+    // Undo banner keybind: `u` rolls back the last auto-apply, only
+    // while the 5-second banner is visible. Older batches go through
+    // /undo so a stray `u` long after the fact can't quietly revert
+    // unrelated work (issue #1249).
     if (
       codeMode &&
       input.length === 0 &&
@@ -1788,10 +1788,7 @@ function AppInner({
       !pendingChoice &&
       !stagedChoiceCustom &&
       !pendingRevision &&
-      // Fire when EITHER the banner is up OR there's any non-undone
-      // history entry —the keybind is useful long after the 5-second
-      // banner expires, which users rightly want.
-      (undoBanner || hasUndoable())
+      undoBanner
     ) {
       const out = codeUndo([]);
       log.pushInfo(out);
