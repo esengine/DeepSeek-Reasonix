@@ -1,30 +1,41 @@
 # QQ 连接指南
 
-Reasonix 可以把 QQ 挂到现有的 `chat` 和 `code` 会话上，作为远程通信通道使用。QQ 不是一个独立的新运行模式。
+Reasonix 可以把 QQ 挂到现有的 `chat` 或 `code` 会话上，作为远程通道使用。QQ 不是第三种运行模式。
 
-连接成功后，QQ 消息可以进入当前会话；需要继续确认、选择或补充输入时，也可以直接在 QQ 里完成，不需要回到终端。
+连接成功后，QQ 可以：
 
-## 支持什么
+- 把普通消息送进当前会话
+- 接收后续助手回复
+- 继续确认、选择、checkpoint、plan 这类二次交互
 
-QQ 通道可以用于：
+## 开始前先准备
 
-- 把普通用户消息发送到当前会话
-- 在 QQ 中接收后续助手回复
-- 从 QQ 触发斜杠命令
-- 远程处理确认和暂停类交互
-- 继续处理 plan、checkpoint、choice 这类二次交互
+请先确认：
 
-换句话说，QQ 是同一个 `chat` 或 `code` 会话的远程交互面。
+- 使用的是已经包含 QQ 支持的较新 Reasonix 版本
+- QQ 账号已经完成实名认证
+- 已经从 QQ 开放平台拿到机器人 `App ID` 和 `App Secret`
 
-## 命令
+QQ 开放平台入口：
 
-在 Reasonix 会话内可用的 QQ 命令：
+- [QQ 开放平台](https://q.qq.com/qqbot/openclaw/login.html)
 
-- `/qq connect`
-- `/qq status`
-- `/qq disconnect`
+注意：
 
-## 快速开始
+- `App Secret` 显示时就要保存好
+- 你的机器人环境可能需要选择 `sandbox` 或 `prod`
+
+## 获取 QQ 机器人凭据
+
+QQ 开放平台界面可能会变化，但通常流程是：
+
+1. 打开 [QQ 开放平台](https://q.qq.com/qqbot/openclaw/login.html) 并登录。
+2. 创建 QQ 机器人。
+3. 打开机器人的开发设置。
+4. 复制 `App ID`。
+5. 查看并保存 `App Secret`。
+
+## 在 CLI 里连接
 
 先启动一个会话：
 
@@ -34,102 +45,83 @@ reasonix code
 reasonix chat
 ~~~
 
-然后在会话里连接 QQ：
+然后运行：
 
 ~~~text
 /qq connect
 ~~~
 
-如果本地已经保存了凭据，Reasonix 会直接复用；如果没有，则会提示输入 QQ 开放平台的 `App ID` 和 `App Secret`。
+首次连接时会这样引导：
 
-也可以直接内联传入：
+1. 先在当前 TUI 里提示你输入 `App ID`
+2. 再提示你输入 `App Secret`
+3. 任一步输入 `/cancel` 都可以取消
+
+这些提示和 `/qq` 结果会跟随当前 CLI 语言切换。
+
+如果本地已经保存过凭据，`/qq connect` 会直接复用，不会重复询问。
+
+也可以直接一次性传参：
 
 ~~~text
 /qq connect <appId> <appSecret> [sandbox|prod]
 ~~~
 
-连接成功后，只要 QQ 保持启用，后续的 `chat` 和 `code` 会话都会自动启动 QQ 通道。
+其他相关命令：
 
-## 它和运行模式的关系
+- `/qq status`
+- `/qq disconnect`
 
-QQ 只是挂接到现有会话上的通道：
+第一次连接成功后，只要 QQ 保持启用，后续 `chat` 和 `code` 会话都会自动启动 QQ 通道。
 
-- `reasonix code` 仍然负责文件、Shell 和编辑流程
-- `reasonix chat` 仍然保持纯聊天
-- QQ 只是在其上增加一个远程通信入口
+## 在桌面端连接
 
-这样可以保持现有交互模型的一致性，而不是引入第三种模式。
+如果你使用桌面客户端：
 
-## QQ 开放平台准备
+1. 打开 `Settings`
+2. 进入 `General`
+3. 在底部找到 `QQ Channel`
+4. 点击 `Configure...`
+5. 填入 `App ID`、`App Secret`，再选择 `Sandbox` / `Production`
+6. 点击 `Save and connect`
 
-要使用 QQ 通道，需要先在 QQ 开放平台创建一个机器人应用。
-
-一般流程是：
-
-1. 登录 QQ 开放平台。
-2. 创建机器人应用。
-3. 打开该机器人的开发设置。
-4. 复制 `App ID` 和 `App Secret`。
-5. 在 Reasonix 里用 `/qq connect` 录入这些凭据。
-
-根据机器人当前环境，你可能还需要选择 `sandbox` 或 `prod`。
-
-官方入口：[QQ 开放平台](https://q.qq.com/)
-
-## 如何申请 QQ 机器人
-
-QQ 开放平台界面可能会调整，但通常流程是：
-
-1. 打开 QQ 开放平台开发者控制台。
-2. 创建一个新的机器人应用。
-3. 按要求填写注册信息。
-4. 为该应用启用机器人能力。
-5. 在开发设置里复制 `App ID` 和 `App Secret`。
-6. 回到 Reasonix 完成连接。
-
-例如：
-
-~~~text
-/qq connect 1234567890 your_app_secret_here sandbox
-~~~
-
-或者直接运行 `/qq connect`，按提示交互式输入。
+桌面端和 CLI 复用同一份 QQ 配置。
 
 ## 典型使用方式
 
-1. 启动 `reasonix code`
-2. 运行 `/qq connect`
-3. 从 QQ 发起一个任务
-4. 让会话在终端继续执行
-5. 在 QQ 中接收确认提示或后续回复
-6. 当需要确认或选择时，直接在 QQ 中回复
+1. 启动 `reasonix code` 或 `reasonix chat`
+2. 先完成一次 QQ 连接
+3. 从 QQ 发一条消息
+4. 本地 Reasonix 会话继续运行
+5. 需要时直接在 QQ 里继续回复、确认或选择
 
-## 说明
+QQ 只是扩展当前会话，不替代 `chat` 或 `code`。
 
-- QQ 不替代 `chat` 或 `code`，只是扩展它们
-- 只有 `code` 模式具备文件系统和 Shell 能力
-- 只有在 QQ 成功连接并启用之后，后续会话才会自动启动 QQ 通道
-- 如果 QQ 断开，终端会话本身仍然可以继续运行
+## 排障
 
-## 排查
+### 首次 `/qq connect` 失败
 
-### `/qq connect` 没有连接成功
-
-请检查：
+优先检查：
 
 - `App ID` 是否正确
 - `App Secret` 是否正确
-- QQ 开放平台上的机器人应用是否已启用
-- 当前选择的环境是否正确（`sandbox` 或 `prod`）
+- QQ 开放平台里的机器人是否已启用
+- 当前环境是否选对了：`sandbox` 或 `prod`
+
+必要时可以直接显式传参重连：
+
+~~~text
+/qq connect <appId> <appSecret> [sandbox|prod]
+~~~
 
 ### QQ 能收到消息，但没有后续回复
 
-先确认当前会话还在运行，并且 QQ 通道仍然在线：
+先确认本地 Reasonix 会话还在运行，而且 QQ 通道仍然在线：
 
 ~~~text
 /qq status
 ~~~
 
-### npm 发布版里看不到 QQ 命令
+### 已安装的 npm 版本里没有 `/qq` 命令
 
-QQ 支持只会出现在合并该功能之后发布的 npm 版本里。如果当前 npm 发布版早于该次合并，请先使用仓库的最新 `main` 分支，等后续 npm 版本发布。
+说明本地包版本太旧。请升级到已经包含 QQ 支持的发行版，或者直接使用仓库最新 `main` 分支。

@@ -96,6 +96,8 @@ reasonix chat
 /qq connect
 ~~~
 
+第一次使用时，Reasonix 会直接在当前 TUI 里引导输入 QQ 的 `App ID` 和 `App Secret`；之后再次执行 `/qq connect` 会直接复用已保存凭据。
+
 可用命令：
 
 - `/qq connect`
@@ -104,7 +106,10 @@ reasonix chat
 
 启用后，后续的 `chat` / `code` 会话会自动启动 QQ 通道。斜杠命令、确认提示，以及后续助手回复都可以通过 QQ 继续完成，不需要回到终端交互。
 
+桌面端也可以在 `Settings -> General -> QQ Channel` 里配置同一条通道。
+
 详细说明见 [QQ 连接指南](./docs/qq-connect.zh-CN.md)。
+
 <details>
 <summary><strong>切换工作区 · chat vs. code · 写第一个 Skill</strong></summary>
 
@@ -197,7 +202,7 @@ npx reasonix code --dir /path/to/project
 
 - [**架构**](./docs/ARCHITECTURE.md) —— 四大支柱、缓存优先循环、思维提取、脚手架
 - [**CLI 参考**](./docs/CLI-REFERENCE.md) —— 每个 shell 子命令、每个 slash 命令、每个快捷键
-- [**QQ 连接指南**](./docs/qq-connect.zh-CN.md) —— 通道定位、命令、配置流程和 QQ 开放平台凭据
+- [**QQ 连接指南**](./docs/qq-connect.zh-CN.md) —— CLI 首次连接流程、桌面端入口和 QQ 开放平台凭据
 - [**基准测试**](./benchmarks/) —— τ-bench-lite harness、transcript、成本方法论
 - [**官方网站**](https://esengine.github.io/DeepSeek-Reasonix/) —— 入门、Dashboard 设计稿、TUI 设计稿
 - [**贡献指南**](./CONTRIBUTING.md) —— 注释规则、错误处理、用现成库不手写

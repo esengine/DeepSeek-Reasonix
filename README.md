@@ -112,6 +112,8 @@ Then connect QQ from inside the session:
 /qq connect
 ~~~
 
+On first use, Reasonix asks for the QQ `App ID` and `App Secret` inside the current TUI. Later `/qq connect` calls reuse the saved credentials directly.
+
 Available commands:
 
 - `/qq connect`
@@ -120,7 +122,10 @@ Available commands:
 
 Once enabled, later `chat` / `code` sessions auto-start the QQ channel. Slash commands, confirmation prompts, and follow-up assistant replies can continue through QQ without terminal-side input.
 
-See [QQ channel setup](./docs/qq-connect.md) for setup details and QQ Open Platform bot registration.
+Desktop users can configure the same channel from `Settings -> General -> QQ Channel`.
+
+See [QQ channel setup](./docs/qq-connect.md) for the CLI flow, desktop entry, and QQ Open Platform setup.
+
 ### Desktop client (prerelease)
 
 A native Tauri client for users who want a GUI over the same loop. Multi-tab, the right-panel shows files the agent has read or edited this session, the same cost / cache / token meters live at the bottom. Same DeepSeek API key, same `~/.reasonix` config — the desktop bundles its own Node runtime, no separate `npm install` step.
@@ -234,7 +239,7 @@ For live cache-hit rates, costs, and methodology, see [`benchmarks/`](./benchmar
 
 - [**Architecture**](./docs/ARCHITECTURE.md) — three pillars: cache-first loop, tool-call repair, cost control
 - [**CLI Reference**](./docs/CLI-REFERENCE.md) — every shell subcommand, every slash command, every keybinding
-- [**QQ channel setup**](./docs/qq-connect.md) — what it is, commands, setup flow, and QQ Open Platform credentials
+- [**QQ channel setup**](./docs/qq-connect.md) — CLI first-connect flow, desktop entry, and QQ Open Platform credentials
 - [**Benchmarks**](./benchmarks/) — τ-bench-lite harness, transcripts, cost methodology
 - [**Website**](https://esengine.github.io/DeepSeek-Reasonix/) — getting started, dashboard mockup, TUI mockup
 - [**Contributing**](./CONTRIBUTING.md) — comment policy, error-handling rules, library-over-hand-rolled

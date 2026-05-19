@@ -1,30 +1,41 @@
 # QQ channel setup
 
-Reasonix can attach QQ as a remote communication channel for existing `chat` and `code` sessions. QQ is not a separate runtime mode.
+Reasonix can attach QQ to an existing `chat` or `code` session as a remote channel. QQ is not a third runtime mode.
 
-Once connected, QQ messages can be routed into the active session, and interactive prompts can continue remotely without terminal-side input.
+Once connected, QQ can:
 
-## What it supports
+- send normal user messages into the active session
+- receive follow-up assistant replies
+- continue confirmation, choice, checkpoint, and plan-style follow-up interactions
 
-The QQ channel can be used for:
+## Before you start
 
-- sending normal user messages into the active session
-- receiving follow-up assistant replies in QQ
-- handling slash commands from QQ
-- handling confirmation and pause flows remotely
-- continuing plan, checkpoint, and choice-style follow-up interactions through QQ
+Prepare these first:
 
-QQ acts as a remote surface for the same running `chat` or `code` session.
+- a recent Reasonix release that already includes QQ support
+- a QQ account that has completed real-name verification
+- a QQ bot `App ID` and `App Secret` from QQ Open Platform
 
-## Commands
+QQ Open Platform entry:
 
-Available commands inside a Reasonix session:
+- [QQ Open Platform](https://q.qq.com/qqbot/openclaw/login.html)
 
-- `/qq connect`
-- `/qq status`
-- `/qq disconnect`
+Important:
 
-## Quick start
+- save the `App Secret` when it is shown
+- depending on your bot, you may need `sandbox` or `prod`
+
+## Get your QQ bot credentials
+
+The exact QQ Open Platform UI may change, but the flow is usually:
+
+1. Open [QQ Open Platform](https://q.qq.com/qqbot/openclaw/login.html) and sign in.
+2. Create a QQ bot.
+3. Open the bot's developer settings.
+4. Copy the `App ID`.
+5. Reveal and save the `App Secret`.
+
+## Connect from the CLI
 
 Start a session first:
 
@@ -34,102 +45,82 @@ reasonix code
 reasonix chat
 ~~~
 
-Then connect QQ from inside the session:
+Then run:
 
 ~~~text
 /qq connect
 ~~~
 
-If credentials are already configured, Reasonix reuses them directly. If not, it prompts for the QQ Open Platform `App ID` and `App Secret`.
+First-time behavior:
 
-You can also provide credentials inline:
+1. Reasonix asks for the QQ `App ID` in the current TUI.
+2. Then it asks for the `App Secret`.
+3. Enter `/cancel` at either step to abort.
+
+The prompts and `/qq` status messages follow the current CLI language.
+
+If credentials are already saved, `/qq connect` reuses them directly.
+
+You can also pass credentials inline:
 
 ~~~text
 /qq connect <appId> <appSecret> [sandbox|prod]
 ~~~
 
-After a successful connection, later `chat` and `code` sessions auto-start the QQ channel when it is enabled.
+Other QQ commands:
 
-## Runtime model
+- `/qq status`
+- `/qq disconnect`
 
-QQ is attached to the existing session runtime:
+After the first successful connection, later `chat` and `code` sessions auto-start the QQ channel while it stays enabled.
 
-- `reasonix code` keeps filesystem, shell, and edit workflows
-- `reasonix chat` stays chat-only
-- QQ only adds a remote communication channel on top
+## Connect from the desktop app
 
-This keeps the interaction model aligned with the rest of Reasonix instead of introducing a third mode.
+If you use the desktop client:
 
-## QQ Open Platform setup
+1. Open `Settings`.
+2. Go to `General`.
+3. Find `QQ Channel` near the bottom.
+4. Click `Configure...` to enter `App ID`, `App Secret`, and `Sandbox` / `Production`.
+5. Click `Save and connect`.
 
-To use the QQ channel, you need a bot application from QQ Open Platform.
+The desktop app uses the same underlying QQ config as the CLI.
 
-The general setup flow is:
+## Typical usage
 
-1. Sign in to QQ Open Platform.
-2. Create a bot application.
-3. Open the bot's developer settings.
-4. Copy the `App ID` and `App Secret`.
-5. Use those credentials with `/qq connect`.
+1. Start `reasonix code` or `reasonix chat`.
+2. Connect QQ once.
+3. Send a message from QQ.
+4. Let the local Reasonix session keep running.
+5. Continue replies, approvals, and follow-up interactions from QQ when needed.
 
-Depending on your bot's environment, you may also need to choose `sandbox` or `prod`.
-
-Official entry point: [QQ Open Platform](https://q.qq.com/)
-
-## Registering a QQ bot
-
-The QQ Open Platform UI may change over time, but the usual process is:
-
-1. Open the QQ Open Platform developer console.
-2. Create a new bot application.
-3. Complete the required registration fields.
-4. Enable the bot capability for the application.
-5. Copy the generated `App ID` and `App Secret`.
-6. Use those credentials in Reasonix.
-
-Example:
-
-~~~text
-/qq connect 1234567890 your_app_secret_here sandbox
-~~~
-
-Or run `/qq connect` and enter the values interactively when prompted.
-
-## Typical workflow
-
-1. Start `reasonix code`.
-2. Run `/qq connect`.
-3. Send a task from QQ.
-4. Let the session continue in the terminal.
-5. Receive confirmations or follow-up replies back in QQ.
-6. Reply from QQ when approval or selection is required.
-
-## Notes
-
-- QQ does not replace `chat` or `code`; it extends them.
-- `code` mode remains the only mode with filesystem and shell access.
-- Auto-start only happens after QQ has been connected successfully and enabled.
-- If QQ is disconnected, the terminal session continues normally.
+QQ extends the current session. It does not replace `chat` or `code`.
 
 ## Troubleshooting
 
-### `/qq connect` does not connect
+### `/qq connect` fails on first setup
 
-Check that:
+Check these first:
 
-- your `App ID` is correct
-- your `App Secret` is correct
-- the bot application is enabled in QQ Open Platform
-- you selected the correct environment (`sandbox` or `prod`)
+- `App ID` is correct
+- `App Secret` is correct
+- the QQ bot is enabled in QQ Open Platform
+- you selected the right environment: `sandbox` or `prod`
 
-### QQ messages arrive, but no reply is returned
+If needed, reconnect with explicit arguments:
 
-Check that the active session is still running and that the QQ channel is still connected:
+~~~text
+/qq connect <appId> <appSecret> [sandbox|prod]
+~~~
+
+### QQ receives the message, but no reply comes back
+
+Check that the local Reasonix session is still running and the channel is still connected:
 
 ~~~text
 /qq status
 ~~~
 
-### The npm package does not show QQ commands
+### `/qq` commands do not exist in your installed package
 
-QQ support is only available in versions published after the QQ channel merge landed. If the published package is older than that merge, use the current repository `main` branch until a newer npm release is published.
+Your installed npm version is too old. Upgrade to a release that already includes QQ support, or use the current repository `main` branch.
