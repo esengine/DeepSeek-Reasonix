@@ -1414,6 +1414,11 @@ function TabRuntime({
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === "a" || e.key === "A")) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag !== "INPUT" && tag !== "TEXTAREA") e.preventDefault();
+        return;
+      }
       if (mod && (e.key === "l" || e.key === "L")) {
         e.preventDefault();
         composerRef.current?.focus();
