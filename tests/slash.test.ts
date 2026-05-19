@@ -266,6 +266,14 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/\/mcp/);
   });
 
+  it("/help explains the per-call shell-exec approval flow (issue #866)", () => {
+    const r = handleSlash("help", [], makeLoop());
+    expect(r.info).toMatch(/per-call approval/i);
+    expect(r.info).toMatch(/allow once/i);
+    expect(r.info).toMatch(/allow always/i);
+    expect(r.info).toMatch(/deny/i);
+  });
+
   it("/undo outside code mode says it's not available", () => {
     const r = handleSlash("undo", [], makeLoop());
     expect(r.info).toMatch(/only available inside .reasonix code/);

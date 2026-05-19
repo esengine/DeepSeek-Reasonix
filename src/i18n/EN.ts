@@ -473,6 +473,8 @@ export const EN: TranslationSchema = {
     reviewSaveError: "Could not save config: {message}",
     reviewFooter: "[Enter] save · [Esc] cancel",
     savedTitle: "▸ Saved.",
+    savedShellHint:
+      "Shell commands the model wants to run ask each time — pick `allow always` on the prompt to whitelist that exact command for this project. No global allow-all flag by design.",
     savedFooter: "[Enter] to exit",
     selectFooter: "[↑↓] navigate · [Enter] confirm · [Esc] cancel",
     stepCounter: "Step {step}/{total} · ",
@@ -708,6 +710,13 @@ export const EN: TranslationSchema = {
       helpShellConsent:
         "                             No allowlist gate — user-typed = explicit consent.",
       helpShellExample: "                             Example: !git status   !ls src/   !npm test",
+      helpShellGateTitle: "Model-invoked shell commands (per-call approval):",
+      helpShellGate:
+        "  ↑↓ + ⏎                   each call shows a prompt with `allow once` / `allow always`",
+      helpShellGateDetail:
+        "                             / `deny`. Pick `allow always` to whitelist that exact",
+      helpShellGatePolicy:
+        "                             command prefix for this project. No global allow-all flag.",
       helpMemoryTitle: "Quick memory:",
       helpMemoryPin:
         "  #<note>                  append <note> to <project>/REASONIX.md (committable).",
@@ -1102,7 +1111,7 @@ export const EN: TranslationSchema = {
     },
     mcp: {
       noServers:
-        'no MCP servers attached. Run `reasonix setup` to pick some, or launch with --mcp "<spec>". `reasonix mcp list` shows the catalog.',
+        'no MCP servers attached. Run `reasonix setup` to pick some, or launch with --mcp "<spec>". `reasonix mcp list` shows the catalog. Note: model-invoked shell commands are gated per-call (allow once / allow always / deny) — no global allow-all flag.',
       toolsLabel: "  tools     {count}",
       resourcesHint: "`/resource` to browse+read",
       promptsHint: "`/prompt` to browse+fetch",
@@ -1585,7 +1594,7 @@ export const EN: TranslationSchema = {
     verySlow: "very slow \u00b7 {ms}ms",
     slowToast: "\u26a0 MCP `{name}` slow \u00b7 {seconds}s p95 over the last {sampleSize} calls",
     emptyHint:
-      "\u2139 no MCP servers configured \u2014 try: `reasonix setup` to re-pick, or `reasonix mcp install filesystem`",
+      "\u2139 no MCP servers configured \u2014 try: `reasonix setup` to re-pick, or `reasonix mcp install filesystem` \u00b7 shell commands gate per-call (allow once / allow always / deny), no global allow-all",
   },
   denyContextInput: {
     description:

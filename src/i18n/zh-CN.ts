@@ -458,6 +458,8 @@ export const zhCN: TranslationSchema = {
     reviewSaveError: "保存配置失败：{message}",
     reviewFooter: "[Enter] 保存 · [Esc] 取消",
     savedTitle: "▸ 已保存。",
+    savedShellHint:
+      "模型发起的 shell 命令每次都会弹出确认 —— 在提示框里选 `allow always` 可将该命令前缀加入本项目白名单。设计上没有「全局放行」开关。",
     savedFooter: "[Enter] 退出",
     selectFooter: "[↑↓] 移动 · [Enter] 确认 · [Esc] 取消",
     stepCounter: "步骤 {step}/{total} · ",
@@ -684,6 +686,13 @@ export const zhCN: TranslationSchema = {
       helpShellDetail: "                             以便模型在下一轮看到。无允许列表限制。",
       helpShellConsent: "                             用户输入 = 明确同意。",
       helpShellExample: "                             示例：!git status   !ls src/   !npm test",
+      helpShellGateTitle: "模型发起的 shell 命令（按次审批）：",
+      helpShellGate:
+        "  ↑↓ + ⏎                   每次都会弹出 `allow once` / `allow always` /",
+      helpShellGateDetail:
+        "                             `deny` 三选一。选 `allow always` 可将该命令前缀",
+      helpShellGatePolicy:
+        "                             加入本项目白名单。设计上没有「全局放行」开关。",
       helpMemoryTitle: "快速记忆：",
       helpMemoryPin:
         "  #<note>                  将 <note> 追加到 <project>/REASONIX.md（可提交）。",
@@ -1045,7 +1054,7 @@ export const zhCN: TranslationSchema = {
     },
     mcp: {
       noServers:
-        '未附加 MCP 服务器。运行 `reasonix setup` 选择一些，或使用 --mcp "<spec>" 启动。`reasonix mcp list` 显示目录。',
+        '未附加 MCP 服务器。运行 `reasonix setup` 选择一些，或使用 --mcp "<spec>" 启动。`reasonix mcp list` 显示目录。注：模型发起的 shell 命令按次审批（allow once / allow always / deny），设计上没有「全局放行」开关。',
       toolsLabel: "  工具     {count}",
       resourcesHint: "`/resource` 浏览+读取",
       promptsHint: "`/prompt` 浏览+获取",
@@ -1508,7 +1517,7 @@ export const zhCN: TranslationSchema = {
     verySlow: "非常慢 \u00b7 {ms}ms",
     slowToast: "\u26a0 MCP `{name}` 响应缓慢 \u00b7 P95 {seconds}s \u00b7 最近 {sampleSize} 次调用",
     emptyHint:
-      "\u2139 未配置 MCP 服务器 —— 可尝试：`reasonix setup` 重新选择，或 `reasonix mcp install filesystem`",
+      "\u2139 未配置 MCP 服务器 —— 可尝试：`reasonix setup` 重新选择，或 `reasonix mcp install filesystem` · shell 命令按次审批（allow once / allow always / deny），无全局放行",
   },
   denyContextInput: {
     description: "告诉模型你为什么拒绝了。模型下次会看到你的理由作为额外的上下文。",

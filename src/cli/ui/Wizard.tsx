@@ -292,6 +292,9 @@ export function Wizard({
           <Text>{t("ui.welcome")}</Text>
         </Box>
         <Box marginTop={1}>
+          <Text dimColor>{t("wizard.savedShellHint")}</Text>
+        </Box>
+        <Box marginTop={1}>
           <Text dimColor>{t("wizard.savedFooter")}</Text>
         </Box>
         <ExitOnEnter onExit={exit} />

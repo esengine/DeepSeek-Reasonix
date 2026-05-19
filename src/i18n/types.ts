@@ -314,6 +314,7 @@ export interface TranslationSchema {
     reviewSaveError: string;
     reviewFooter: string;
     savedTitle: string;
+    savedShellHint: string;
     savedFooter: string;
     selectFooter: string;
     stepCounter: string;

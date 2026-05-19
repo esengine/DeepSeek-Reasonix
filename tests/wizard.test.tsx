@@ -4,7 +4,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Wizard, buildSpec, validateDeepSeekApiKey } from "../src/cli/ui/Wizard.js";
-import { setLanguageRuntime } from "../src/i18n/index.js";
+import { setLanguageRuntime, t } from "../src/i18n/index.js";
 import { parseMcpSpec } from "../src/mcp/spec.js";
 
 describe("Wizard.buildSpec → parseMcpSpec round-trip", () => {
@@ -38,6 +38,26 @@ describe("Wizard.buildSpec → parseMcpSpec round-trip", () => {
     // sees an unfamiliar name on re-run, we degrade gracefully rather
     // than throwing.
     expect(buildSpec("not-in-catalog", {})).toBe("not-in-catalog");
+  });
+});
+
+describe("Wizard — shell-exec discoverability (issue #866)", () => {
+  afterEach(() => {
+    setLanguageRuntime("EN");
+  });
+
+  it("EN saved-step hint surfaces the per-call shell-exec gate", () => {
+    setLanguageRuntime("EN");
+    const hint = t("wizard.savedShellHint");
+    expect(hint).toMatch(/shell/i);
+    expect(hint.toLowerCase()).toContain("allow always");
+  });
+
+  it("zh-CN saved-step hint surfaces the per-call shell-exec gate", () => {
+    setLanguageRuntime("zh-CN");
+    const hint = t("wizard.savedShellHint");
+    expect(hint).toContain("shell");
+    expect(hint).toContain("allow always");
   });
 });
 
