@@ -10,6 +10,12 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn(), Update: class {} }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+vi.mock("../desktop/src/CommandPalette", () => ({
+  CommandPalette: () => null,
+  Toast: () => null,
+  buildCommands: vi.fn(() => []),
+  useCommandPalette: vi.fn(() => ({ open: false, setOpen: vi.fn() })),
+}));
 
 type ChatMessage = Awaited<typeof import("../desktop/src/App")>["ChatMessage"];
 type AppState = Parameters<Awaited<typeof import("../desktop/src/App")>["applyIncoming"]>[0];
