@@ -19,6 +19,19 @@ vi.mock("../desktop/src/CommandPalette", () => ({
 vi.mock("../desktop/src/Markdown", () => ({
   WorkspaceProvider: ({ children }: { children?: unknown }) => children ?? null,
 }));
+vi.mock("../desktop/src/ui/thread", () => ({
+  ActivePlanTaskCard: () => null,
+  AssistantMsg: () => null,
+  CheckpointApprovalCard: () => null,
+  ChoiceApprovalCard: () => null,
+  ConfirmApprovalCard: () => null,
+  PathAccessApprovalCard: () => null,
+  PlanApprovalCard: () => null,
+  PlanBanner: () => null,
+  RevisionApprovalCard: () => null,
+  TurnDivider: () => null,
+  UserMsg: () => null,
+}));
 
 type ChatMessage = Awaited<typeof import("../desktop/src/App")>["ChatMessage"];
 type AppState = Parameters<Awaited<typeof import("../desktop/src/App")>["applyIncoming"]>[0];
