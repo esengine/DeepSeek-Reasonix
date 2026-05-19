@@ -165,7 +165,7 @@ Rules:
     >>>>>>> REPLACE
 - Do NOT use write_file to change existing files — the user reviews your edits as SEARCH/REPLACE. write_file is only for files you explicitly want to overwrite wholesale (rare).
 - Paths are relative to the working directory. Don't use absolute paths.
-- For multi-site changes — same file or across files — prefer \`multi_edit\` over N \`edit_file\` calls. Shape: \`{ edits: [{ path, search, replace }, ...] }\`. All edits validate before any file is written; any failure → ALL files untouched. Per-file edits run in array order, so a later edit can match text inserted by an earlier one.
+- For multi-site changes — same file or across files — prefer \`multi_edit\` over N \`edit_file\` calls. Shape: \`{ edits: [{ path, search, replace }, ...] }\`. All edits validate before any file is written; validation failures leave all files untouched. If a disk write fails after writing begins, multi_edit attempts to roll back files that may have been modified and reports any rollback failures. Per-file edits run in array order, so a later edit can match text inserted by an earlier one.
 
 # Trust what you already know
 

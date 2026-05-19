@@ -51,6 +51,7 @@ export async function applyMultiEdit(
     throw new Error("multi_edit: edits must contain at least one entry");
   }
   type FileState = {
+    before: string;
     buf: string;
     le: string;
     hunks: string[];
@@ -89,7 +90,7 @@ export async function applyMultiEdit(
         );
       }
       const le = before.includes("\r\n") ? "\r\n" : "\n";
-      state = { buf: before, le, hunks: [], deltaChars: 0, touched: 0 };
+      state = { before, buf: before, le, hunks: [], deltaChars: 0, touched: 0 };
       filesByPath.set(e.abs, state);
     }
     const adaptedSearch = e.search.replace(/\r?\n/g, state.le);
@@ -97,7 +98,7 @@ export async function applyMultiEdit(
     const firstIdx = state.buf.indexOf(adaptedSearch);
     if (firstIdx < 0) {
       throw new Error(
-        `multi_edit: edit #${i + 1} search text not found in ${rel} — no edits applied (multi_edit is atomic)`,
+        `multi_edit: edit #${i + 1} search text not found in ${rel} — no edits applied`,
       );
     }
     const nextIdx = state.buf.indexOf(adaptedSearch, firstIdx + 1);
@@ -116,8 +117,31 @@ export async function applyMultiEdit(
     state.touched++;
   }
 
-  for (const [abs, state] of filesByPath) {
-    await fs.writeFile(abs, state.buf, "utf8");
+  // Push to `attempted` BEFORE writeFile so a write that truncates or
+  // partially-writes before failing is also rolled back.
+  const attempted: Array<{ abs: string; before: string }> = [];
+  try {
+    for (const [abs, state] of filesByPath) {
+      attempted.push({ abs, before: state.before });
+      await fs.writeFile(abs, state.buf, "utf8");
+    }
+  } catch (writeErr) {
+    const rollbackFailures: string[] = [];
+    for (const item of [...attempted].reverse()) {
+      try {
+        await fs.writeFile(item.abs, item.before, "utf8");
+      } catch (restoreErr) {
+        rollbackFailures.push(`${displayRel(rootDir, item.abs)}: ${(restoreErr as Error).message}`);
+      }
+    }
+    if (rollbackFailures.length > 0) {
+      throw new Error(
+        `multi_edit: write failed after partial application: ${(writeErr as Error).message}; rollback failed for ${rollbackFailures.join("; ")}`,
+      );
+    }
+    throw new Error(
+      `multi_edit: write failed: ${(writeErr as Error).message}; rolled back all files that may have been modified`,
+    );
   }
 
   const fileCount = filesByPath.size;
