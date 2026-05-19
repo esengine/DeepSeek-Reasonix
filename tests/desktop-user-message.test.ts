@@ -1,8 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { type ChatMessage, applyIncoming } from "../desktop/src/App";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { IncomingEvent } from "../desktop/src/protocol";
 
-function makeState(messages: ChatMessage[] = []): Parameters<typeof applyIncoming>[0] {
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: vi.fn(() => ({ onCloseRequested: vi.fn() })),
+}));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn(), Update: class {} }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+
+type ChatMessage = Awaited<typeof import("../desktop/src/App")>["ChatMessage"];
+type AppState = Parameters<Awaited<typeof import("../desktop/src/App")>["applyIncoming"]>[0];
+type ApplyIncoming = Awaited<typeof import("../desktop/src/App")>["applyIncoming"];
+
+let applyIncoming: ApplyIncoming;
+
+beforeAll(async () => {
+  ({ applyIncoming } = await import("../desktop/src/App"));
+});
+
+function makeState(messages: ChatMessage[] = []): AppState {
   return {
     ready: true,
     needsSetup: false,
