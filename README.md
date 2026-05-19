@@ -162,6 +162,13 @@ npx reasonix code --dir /path/to/project
 /skill new my-skill --global     # ~/.reasonix/skills for cross-project use
 ~~~
 
+**Claude-format skills also load.** `<project>/.claude/skills/<name>/SKILL.md` and `~/.claude/skills/` are read alongside Reasonix's native paths, so tooling that emits Claude-format skills works out of the box. Example — drop OpenSpec workflows in without an upstream adapter:
+
+~~~bash
+npx openspec init --tools claude    # writes .claude/skills/openspec-*/SKILL.md
+/skill openspec-propose <task>      # then invoke from Reasonix
+~~~
+
 </details>
 
 <br/>
