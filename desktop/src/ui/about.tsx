@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { check } from "@tauri-apps/plugin-updater";
+import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { useCallback, useState } from "react";
 import { t } from "../i18n";
 import { I } from "../icons";
@@ -27,7 +27,7 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
   const checkForUpdates = useCallback(async () => {
     setCheck({ kind: "checking" });
     try {
-      const update = await check();
+      const update = await checkUpdate();
       if (!update) {
         setCheck({ kind: "up-to-date", latest: __APP_VERSION__ });
       } else {
