@@ -141,12 +141,14 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), or "metaso" (Metaso API). */
-  webSearchEngine?: "mojeek" | "searxng" | "metaso";
+  /** Web search engine backend: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), or "tavily" (LLM-friendly API, free tier). */
+  webSearchEngine?: "mojeek" | "searxng" | "metaso" | "tavily";
   /** Base URL for SearXNG instance (default http://localhost:8080). */
   webSearchEndpoint?: string;
   /** Metaso API key. Falls back to METASO_API_KEY env var, then a built-in default. */
   metasoApiKey?: string;
+  /** Tavily API key. Falls back to TAVILY_API_KEY env var. No baked-in default — free tier is 1000/mo per account, sharing would burn out. */
+  tavilyApiKey?: string;
   dashboard?: {
     /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
     port?: number;
@@ -262,6 +264,14 @@ export function loadMetasoApiKey(path: string = defaultConfigPath()): string {
   const cfg = readConfig(path).metasoApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
   return DEFAULT_METASO_API_KEY;
+}
+
+/** Tavily API key — env > config > undefined. Returning undefined means the caller must error out with a clear "go get one at tavily.com" message; we deliberately ship no default because the free 1000/mo quota wouldn't survive being shared. */
+export function loadTavilyApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.TAVILY_API_KEY) return process.env.TAVILY_API_KEY.trim();
+  const cfg = readConfig(path).tavilyApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
 }
 
 const DEFAULT_OLLAMA_URL = "http://localhost:11434";

@@ -1140,6 +1140,8 @@ export const EN: TranslationSchema = {
       usageSearxngUrl: "  /search-engine searxng <url>      use SearXNG at custom endpoint",
       usageMetaso:
         "  /search-engine metaso              use Metaso API (100/d free, configure your own API key for more)",
+      usageTavily:
+        "  /search-engine tavily              use Tavily API (LLM-friendly, free 1000/mo — set TAVILY_API_KEY or tavilyApiKey in config; get one at https://tavily.com)",
       alias: "Alias: /se",
       searxngInfo:
         "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
@@ -1148,6 +1150,8 @@ export const EN: TranslationSchema = {
       switchedSearxngNote: " Make sure SearXNG is running at {endpoint}.",
       switchedMetasoNote:
         " There is a daily quota of 100 (configure your own API key for higher limits).",
+      switchedTavilyNote:
+        " Set TAVILY_API_KEY or `tavilyApiKey` in config; free 1000/mo at https://tavily.com.",
       confirmed:
         '✓ Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
       confirmedDetail: " ({endpoint})",
@@ -1451,6 +1455,16 @@ export const EN: TranslationSchema = {
     metasoParseError:
       "web_search: Metaso returned unparseable response (HTTP {status}) \u2014 try again later",
     metasoApiError: "web_search: Metaso API error (code {code}: {message}) \u2014 try again later",
+    tavilyMissingKey:
+      "web_search: Tavily backend requires an API key \u2014 set TAVILY_API_KEY env var or `tavilyApiKey` in ~/.reasonix/config.json; free 1000/mo signup at https://tavily.com",
+    tavilyUnauthorized:
+      "web_search: Tavily API key rejected \u2014 check TAVILY_API_KEY or get one at https://tavily.com",
+    tavilyRateLimit:
+      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine mojeek, or upgrade your Tavily plan",
+    tavilyServerError:
+      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek",
+    tavilyParseError:
+      "web_search: Tavily returned unparseable response (HTTP {status}) \u2014 try again later",
     fetchStatus:
       "web_fetch {status} for {url} \u2014 try: confirm the URL resolves in a browser; status suggests the host returned an error page",
     fetchRateLimit429:

@@ -622,6 +622,11 @@ export interface TranslationSchema {
     metasoServerError: string;
     metasoParseError: string;
     metasoApiError: string;
+    tavilyMissingKey: string;
+    tavilyUnauthorized: string;
+    tavilyRateLimit: string;
+    tavilyServerError: string;
+    tavilyParseError: string;
     fetchStatus: string;
     fetchRateLimit429: string;
     fetchForbidden403: string;

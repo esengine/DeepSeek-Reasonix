@@ -3,6 +3,7 @@
 import { parse as parseHtml } from "node-html-parser";
 import {
   loadMetasoApiKey,
+  loadTavilyApiKey,
   webSearchEndpoint as loadWebSearchEndpoint,
   webSearchEngine as loadWebSearchEngine,
 } from "../config.js";
@@ -34,8 +35,8 @@ export interface WebFetchOptions {
 export interface WebSearchOptions {
   topK?: number;
   signal?: AbortSignal;
-  /** Backend engine: "mojeek" (scrapes Mojeek HTML), "searxng" (self-hosted SearXNG JSON API), or "metaso" (Metaso API). */
-  engine?: "mojeek" | "searxng" | "metaso";
+  /** Backend engine: "mojeek" (scrapes Mojeek HTML), "searxng" (self-hosted SearXNG JSON API), "metaso" (Metaso API), or "tavily" (LLM-friendly JSON API). */
+  engine?: "mojeek" | "searxng" | "metaso" | "tavily";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -51,6 +52,7 @@ const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const MOJEEK_ENDPOINT = "https://www.mojeek.com/search";
 const METASO_ENDPOINT = "https://metaso.cn/api/v1";
+const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 
 /** Pick a status-specific webErrors key so the model gets an actionable hint, not a bare status. */
 function searchStatusError(status: number): string {
@@ -77,6 +79,9 @@ export async function webSearch(
   }
   if (opts.engine === "searxng") {
     return searchSearxng(query, opts);
+  }
+  if (opts.engine === "tavily") {
+    return searchTavily(query, opts);
   }
   return searchMojeek(query, opts);
 }
@@ -241,6 +246,73 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
     title: wp.title,
     url: wp.link,
     snippet: wp.snippet ?? wp.summary ?? "",
+  }));
+}
+
+interface TavilyResultItem {
+  title: string;
+  url: string;
+  content?: string;
+  score?: number;
+}
+
+interface TavilySearchResponse {
+  results?: TavilyResultItem[];
+  // Tavily error responses use { detail: { error: "..." } } shape.
+  detail?: { error?: string } | string;
+}
+
+async function searchTavily(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadTavilyApiKey();
+  if (!apiKey) throw new Error(t("webErrors.tavilyMissingKey"));
+
+  let resp: Response;
+  try {
+    resp = await fetch(TAVILY_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        search_depth: "basic",
+        max_results: topK,
+        include_answer: false,
+        include_raw_content: false,
+        include_images: false,
+      }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: TAVILY_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.tavilyUnauthorized"));
+    }
+    if (resp.status === 429) throw new Error(t("webErrors.tavilyRateLimit"));
+    throw new Error(t("webErrors.tavilyServerError", { status: resp.status }));
+  }
+
+  let data: TavilySearchResponse;
+  try {
+    data = (await resp.json()) as TavilySearchResponse;
+  } catch {
+    throw new Error(t("webErrors.tavilyParseError", { status: resp.status }));
+  }
+
+  const results = data.results ?? [];
+  return results.slice(0, topK).map((r) => ({
+    title: r.title,
+    url: r.url,
+    snippet: r.content ?? "",
   }));
 }
 
@@ -509,8 +581,8 @@ export interface WebToolsOptions {
   defaultTopK?: number;
   /** Byte cap for `web_fetch` extracted text. */
   maxFetchChars?: number;
-  /** Backend engine: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), or "metaso" (Metaso API). */
-  webSearchEngine?: "mojeek" | "searxng" | "metaso";
+  /** Backend engine: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), or "tavily" (LLM-friendly API). */
+  webSearchEngine?: "mojeek" | "searxng" | "metaso" | "tavily";
   /** Base URL for SearXNG (default http://localhost:8080). */
   webSearchEndpoint?: string;
 }
@@ -523,7 +595,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
     name: "web_search",
     description:
       "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this." +
-      " To change the backend, use /search-engine mojeek|searxng|metaso.",
+      " To change the backend, use /search-engine mojeek|searxng|metaso|tavily.",
     readOnly: true,
     parallelSafe: true,
     parameters: {

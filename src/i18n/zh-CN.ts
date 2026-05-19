@@ -1081,12 +1081,16 @@ export const zhCN: TranslationSchema = {
       usageSearxngUrl: "  /search-engine searxng <url>      使用 SearXNG 自定义端点",
       usageMetaso:
         "  /search-engine metaso              使用 Metaso API（每天 100 次免费，配置你自己的 API 密钥可提升限额）",
+      usageTavily:
+        "  /search-engine tavily              使用 Tavily API（LLM 友好，每月 1000 次免费 — 设置 TAVILY_API_KEY 或 config 的 tavilyApiKey；注册 https://tavily.com）",
       alias: "别名：/se",
       searxngInfo: "SearXNG 是一个自托管的元搜索引擎（https://github.com/searxng/searxng）。",
       searxngInstall: "安装命令：  docker run -d -p 8080:8080 searxng/searxng",
       switched: '已切换网页搜索引擎为 "{engine}"。{note}',
       switchedSearxngNote: " 请确保 SearXNG 在 {endpoint} 运行。",
       switchedMetasoNote: " 每日限额 100 次（配置你自己的 API 密钥可提升限额）。",
+      switchedTavilyNote:
+        " 请设置环境变量 TAVILY_API_KEY 或 config 中的 `tavilyApiKey`；https://tavily.com 每月 1000 次免费。",
       confirmed: '✓ 网页搜索引擎已设为 "{engine}"{detail}。下一轮模型调用将生效。',
       confirmedDetail: "（{endpoint}）",
     },
@@ -1376,6 +1380,15 @@ export const zhCN: TranslationSchema = {
       "web_search: Metaso 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek 切换引擎",
     metasoParseError: "web_search: Metaso 返回无法解析的响应（HTTP {status}）— 稍后重试",
     metasoApiError: "web_search: Metaso API 错误（code {code}: {message}）— 稍后重试",
+    tavilyMissingKey:
+      "web_search: Tavily 后端需要 API 密钥 — 设置 TAVILY_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `tavilyApiKey`；https://tavily.com 每月 1000 次免费",
+    tavilyUnauthorized:
+      "web_search: Tavily API 密钥被拒绝 — 检查 TAVILY_API_KEY，或在 https://tavily.com 获取密钥",
+    tavilyRateLimit:
+      "web_search: Tavily 请求频率限制或月度配额用尽 — 等待、用 /search-engine mojeek 切换引擎，或升级 Tavily 计划",
+    tavilyServerError:
+      "web_search: Tavily 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek 切换引擎",
+    tavilyParseError: "web_search: Tavily 返回无法解析的响应（HTTP {status}）— 稍后重试",
     fetchStatus:
       "web_fetch {status} for {url} — try: 在浏览器中确认该 URL 能否访问；该状态码表明目标主机返回了错误页面",
     fetchRateLimit429:

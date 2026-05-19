@@ -450,6 +450,147 @@ describe("searchMetaso", () => {
   });
 });
 
+describe("searchTavily", () => {
+  const sampleResponse = {
+    query: "test query",
+    results: [
+      {
+        title: "First Hit",
+        url: "https://example.com/1",
+        content: "First snippet.",
+        score: 0.93,
+      },
+      {
+        title: "Second Hit",
+        url: "https://example.com/2",
+        content: "Second snippet.",
+        score: 0.81,
+      },
+    ],
+    response_time: 0.42,
+  };
+
+  it("requires an API key — throws a setup-pointing error when none is set", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.TAVILY_API_KEY;
+    try {
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/Tavily.*API key/i);
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/tavily\.com/);
+    } finally {
+      if (origKey !== undefined) process.env.TAVILY_API_KEY = origKey;
+    }
+  });
+
+  it("POSTs to Tavily with the api_key in the body", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-test-key";
+    const captured: { url: string; method: string; body: string } = {
+      url: "",
+      method: "",
+      body: "",
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.body = String(init?.body ?? "");
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "tavily", topK: 5 });
+      expect(captured.url).toBe("https://api.tavily.com/search");
+      expect(captured.method).toBe("POST");
+      const body = JSON.parse(captured.body);
+      expect(body.api_key).toBe("tvly-test-key");
+      expect(body.query).toBe("test query");
+      expect(body.max_results).toBe(5);
+      expect(out).toHaveLength(2);
+      expect(out[0]).toEqual({
+        title: "First Hit",
+        url: "https://example.com/1",
+        snippet: "First snippet.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason — must drop, not set to "undefined"
+        delete process.env.TAVILY_API_KEY;
+      } else {
+        process.env.TAVILY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 401/403 to a key-rejected error", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-bad";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/Tavily.*rejected/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.TAVILY_API_KEY;
+      } else {
+        process.env.TAVILY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 429 to a quota/rate-limit error", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("too many", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/quota|rate-limit/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.TAVILY_API_KEY;
+      } else {
+        process.env.TAVILY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("returns empty array when results is empty", async () => {
+    const origKey = process.env.TAVILY_API_KEY;
+    process.env.TAVILY_API_KEY = "tvly-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ query: "x", results: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("x", { engine: "tavily" });
+      expect(out).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.TAVILY_API_KEY;
+      } else {
+        process.env.TAVILY_API_KEY = origKey;
+      }
+    }
+  });
+});
+
 describe("formatSearchResults", () => {
   it("renders a query header + numbered list", () => {
     const out = formatSearchResults("hello", [

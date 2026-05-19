@@ -5,7 +5,10 @@ import type { SlashHandler } from "../dispatch.js";
 export const handlers: Record<string, SlashHandler> = {
   "search-engine": (args, _loop, ctx) => {
     const engine = args[0];
-    if (!engine || (engine !== "mojeek" && engine !== "searxng" && engine !== "metaso")) {
+    if (
+      !engine ||
+      (engine !== "mojeek" && engine !== "searxng" && engine !== "metaso" && engine !== "tavily")
+    ) {
       return {
         info: [
           t("handlers.webSearchEngine.currentEngine", { engine: webSearchEngine() }),
@@ -16,6 +19,7 @@ export const handlers: Record<string, SlashHandler> = {
           t("handlers.webSearchEngine.usageSearxng"),
           t("handlers.webSearchEngine.usageSearxngUrl"),
           t("handlers.webSearchEngine.usageMetaso"),
+          t("handlers.webSearchEngine.usageTavily"),
           "",
           t("handlers.webSearchEngine.alias"),
           "",
@@ -38,7 +42,9 @@ export const handlers: Record<string, SlashHandler> = {
         ? t("handlers.webSearchEngine.switchedSearxngNote", { endpoint: webSearchEndpoint() })
         : engine === "metaso"
           ? t("handlers.webSearchEngine.switchedMetasoNote")
-          : "";
+          : engine === "tavily"
+            ? t("handlers.webSearchEngine.switchedTavilyNote")
+            : "";
     ctx.postInfo?.(t("handlers.webSearchEngine.switched", { engine, note }));
 
     const detail =
