@@ -139,6 +139,10 @@ export const EN: TranslationSchema = {
             { key: "Ctrl+C", text: "abort the running model turn (NOT copy — see clipboard)" },
             { key: "PgUp / PgDn", text: "scroll chat history a page at a time" },
             { key: "End", text: "jump chat to the most recent line" },
+            {
+              key: "Ctrl+R",
+              text: "toggle verbose mode — full reasoning + tool output, no head/tail elision",
+            },
           ],
         },
         {
@@ -583,6 +587,8 @@ export const EN: TranslationSchema = {
     notedVerbCreated: "created",
     notedVerbAppended: "appended to",
     memoryWriteFailed: "# memory write failed",
+    verboseOn: "▸ verbose mode on — full reasoning + tool output",
+    verboseOff: "▸ verbose mode off — head/tail elision restored",
     commandFailed: "! command failed",
     btwUsage: "▸ /btw <question> — ask a side question without polluting the conversation context.",
     btwHeader: "≫ btw",
@@ -1302,6 +1308,13 @@ export const EN: TranslationSchema = {
     linesAbovePlural: "  \u2191 {count} lines above  (\u2191/k or PgUp)",
     linesBelow: "  \u2193 {count} line below  (\u2193/j or Space/PgDn)",
     linesBelowPlural: "  \u2193 {count} lines below  (\u2193/j or Space/PgDn)",
+  },
+  editPicker: {
+    title: "edit a previous message",
+    hint: "↑↓ pick · Enter to load into composer · Esc to cancel",
+    empty: "no user turns yet — nothing to edit",
+    dismiss: "Esc to dismiss",
+    forked: "▸ forked at turn #{turn} — buffer holds the original text",
   },
   sessionPicker: {
     header: " \u25c8 REASONIX \u00b7 pick a session ",

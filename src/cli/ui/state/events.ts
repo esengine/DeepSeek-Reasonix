@@ -198,6 +198,12 @@ const sessionReset = z.object({
   type: z.literal("session.reset"),
 });
 
+const sessionFork = z.object({
+  type: z.literal("session.fork"),
+  /** Drop this card and everything after it. */
+  cardId: cardId,
+});
+
 const sessionWorkspaceChange = z.object({
   type: z.literal("session.workspace.change"),
   id: z.string().min(1),
@@ -353,6 +359,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   liveShow,
   tipShow,
   sessionReset,
+  sessionFork,
   sessionWorkspaceChange,
   planShow,
   planStepComplete,

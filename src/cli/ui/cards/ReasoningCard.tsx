@@ -1,5 +1,4 @@
 import { Box, Text, useStdout } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
@@ -9,6 +8,7 @@ import { CursorBlock } from "../primitives/CursorBlock.js";
 import { PILL_MODEL, PILL_SECTION, Pill, modelBadgeFor } from "../primitives/Pill.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { ReasoningCard as ReasoningCardData } from "../state/cards.js";
+import { VerboseContext } from "../state/verbose-context.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 import { useIncrementalWrap } from "./useIncrementalWrap.js";
 
@@ -28,6 +28,7 @@ export function ReasoningCard({
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const lineCells = Math.max(20, cols - 4);
+  const verbose = React.useContext(VerboseContext);
 
   const wrapped = useIncrementalWrap(card.text, lineCells);
   const visualLines = card.text.length === 0 ? [] : wrapped;
@@ -43,6 +44,8 @@ export function ReasoningCard({
           <EmptyHint />
         ) : card.streaming ? (
           <StreamingPreview card={card} visualLines={visualLines} lineCells={lineCells} />
+        ) : verbose ? (
+          <BodyLines card={card} lines={visualLines} lineCells={lineCells} anchor />
         ) : (
           <SettledPreview card={card} visualLines={visualLines} lineCells={lineCells} />
         ))}

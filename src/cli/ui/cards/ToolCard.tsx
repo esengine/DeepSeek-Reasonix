@@ -8,6 +8,7 @@ import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { ToolCard as ToolCardData } from "../state/cards.js";
 import { useIsInflight } from "../state/inflight-context.js";
+import { VerboseContext } from "../state/verbose-context.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 
 const READ_TAIL = 2;
@@ -33,9 +34,10 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
     [card.name, card.output],
   );
 
+  const verbose = React.useContext(VerboseContext);
   const allLines = card.output.length > 0 ? card.output.split("\n") : [];
   const tail = tailLinesFor(card.name);
-  const truncated = allLines.length > tail;
+  const truncated = !verbose && allLines.length > tail;
   const visible = truncated ? allLines.slice(-tail) : allLines;
   const hidden = truncated ? allLines.length - visible.length : 0;
   const isInflight = useIsInflight(card.id);

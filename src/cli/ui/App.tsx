@@ -105,6 +105,7 @@ import { CheckpointPicker } from "./CheckpointPicker.js";
 import { ChoiceConfirm, type ChoiceConfirmChoice } from "./ChoiceConfirm.js";
 import { ComposerArea } from "./ComposerArea.js";
 import { EditConfirm, type EditReviewChoice } from "./EditConfirm.js";
+import { EditPicker, type UserTurnEntry } from "./EditPicker.js";
 import { LiveActivityArea } from "./LiveActivityArea.js";
 import { McpHub } from "./McpHub.js";
 import { ModelPicker } from "./ModelPicker.js";
@@ -180,6 +181,7 @@ import {
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
+import { VerboseContext } from "./state/verbose-context.js";
 import { ThemeProvider } from "./theme/context.js";
 import { listThemeNames } from "./theme/tokens.js";
 import { FG, type ThemeName } from "./theme/tokens.js";
@@ -496,6 +498,9 @@ function AppInner({
   useEffect(() => {
     if (!isStreaming && liveExpand) setLiveExpand(false);
   }, [isStreaming, liveExpand]);
+  // ctrl-r toggles verbose mode — ReasoningCard / ToolCard skip elision while on.
+  // Survives turn boundaries; resets on session restart.
+  const [verboseMode, setVerboseMode] = useState(false);
   const languageVersion = useLanguageReload();
   // Boot splash: skip when config has banner:false, otherwise show
   // one full whale-spout cycle (~1.4s) so the brand mark lands clean.
@@ -639,6 +644,10 @@ function AppInner({
   const [pendingReviseEditor, setPendingReviseEditor] = useState<string | null>(null);
   /** True while the SessionPicker is open mid-chat (triggered by `/sessions`). */
   const [pendingSessionsPicker, setPendingSessionsPicker] = useState(false);
+  /** Open by double-Esc — lists user turns; picking forks the session at that turn. */
+  const [pendingEditPicker, setPendingEditPicker] = useState<ReadonlyArray<UserTurnEntry> | null>(
+    null,
+  );
   const [sessionsPickerList, setSessionsPickerList] = useState<ReturnType<typeof listSessions>>(
     () => listSessionsForWorkspace(currentRootDir),
   );
@@ -722,6 +731,7 @@ function AppInner({
     !!pendingPlan ||
     !!pendingReviseEditor ||
     !!pendingSessionsPicker ||
+    !!pendingEditPicker ||
     !!pendingWorkspacePicker ||
     !!pendingCheckpointPicker ||
     !!pendingMcpHub ||
@@ -747,6 +757,7 @@ function AppInner({
     !pendingPlan &&
     !pendingReviseEditor &&
     !pendingSessionsPicker &&
+    !pendingEditPicker &&
     !pendingWorkspacePicker &&
     !pendingCheckpointPicker &&
     !pendingMcpHub &&
@@ -1588,6 +1599,16 @@ function AppInner({
     if (ev.ctrl && ev.input === "d") quitProcess();
   });
 
+  // Ctrl+R = verbose toggle. ReasoningCard / ToolCard skip elision while on.
+  useKeystroke((ev) => {
+    if (!(ev.ctrl && ev.input === "r")) return;
+    setVerboseMode((v) => {
+      const next = !v;
+      log.pushInfo(next ? t("app.verboseOn") : t("app.verboseOff"));
+      return next;
+    });
+  });
+
   // Chat scroll keys. Mouse wheel + PgUp/PgDn always scroll; End jumps
   // to bottom. ↑/↓ belong to the composer (prompt history / per-line
   // cursor) whenever the composer is visible — so we only consume
@@ -1599,6 +1620,37 @@ function AppInner({
     else if (ev.end) chatScroll.jumpToBottom();
     else if (!composerPinned && ev.upArrow) chatScroll.scrollUp();
     else if (!composerPinned && ev.downArrow) chatScroll.scrollDown();
+  }, !modalOpen);
+
+  // Double-Esc — opens the rewind/edit picker when idle with an empty
+  // composer. Tracks the prior Esc timestamp; a second Esc inside 500 ms
+  // collects user turns and dispatches the picker. First Esc just records.
+  const lastEscAtRef = useRef(0);
+  useKeystroke((ev) => {
+    if (!ev.escape) return;
+    if (busy || submittingRef.current || isLoopActive()) return;
+    if (input.length > 0) return;
+    const now = Date.now();
+    const prev = lastEscAtRef.current;
+    lastEscAtRef.current = now;
+    if (prev === 0 || now - prev > 500) return;
+    const turns: UserTurnEntry[] = [];
+    const cards = agentStore.getState().cards;
+    let userTurnIndex = 0;
+    for (const c of cards) {
+      if (c.kind === "user") {
+        turns.push({
+          cardId: c.id,
+          userTurnIndex,
+          text: c.text,
+          ts: c.ts,
+        });
+        userTurnIndex++;
+      }
+    }
+    if (turns.length === 0) return;
+    setPendingEditPicker(turns);
+    lastEscAtRef.current = 0;
   }, !modalOpen);
 
   // Esc/Ctrl+C during an active model turn forward to the loop as an
@@ -4014,7 +4066,9 @@ function AppInner({
               <Box flexDirection="column" flexGrow={1}>
                 <Box flexDirection="column" flexGrow={1}>
                   <LiveExpandContext.Provider value={liveExpand}>
-                    <CardStream suppressLive={modalOpen} />
+                    <VerboseContext.Provider value={verboseMode}>
+                      <CardStream suppressLive={modalOpen} />
+                    </VerboseContext.Provider>
                   </LiveExpandContext.Provider>
                   {/*
           Welcome card on the empty state. Visible only when nothing
@@ -4224,6 +4278,27 @@ function AppInner({
                       );
                       setThemeName(active);
                       log.pushInfo(`theme saved: ${outcome.value}\n  active now: ${active}`);
+                    }}
+                  />
+                ) : pendingEditPicker ? (
+                  <EditPicker
+                    entries={pendingEditPicker}
+                    onChoose={(outcome) => {
+                      setPendingEditPicker(null);
+                      if (outcome.kind === "cancel") return;
+                      const userText = loop.rewindToUserTurn(outcome.entry.userTurnIndex);
+                      if (userText === null) {
+                        log.pushInfo(t("editPicker.empty"));
+                        return;
+                      }
+                      agentStore.dispatch({
+                        type: "session.fork",
+                        cardId: outcome.entry.cardId,
+                      });
+                      setInput(outcome.entry.text);
+                      log.pushInfo(
+                        t("editPicker.forked", { turn: outcome.entry.userTurnIndex + 1 }),
+                      );
                     }}
                   />
                 ) : pendingCopyMode ? (

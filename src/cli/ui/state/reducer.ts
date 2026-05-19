@@ -226,6 +226,12 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         },
       };
 
+    case "session.fork": {
+      const idx = state.cards.findIndex((c) => c.id === event.cardId);
+      if (idx < 0) return state;
+      return { ...state, cards: state.cards.slice(0, idx), focusedCardId: null };
+    }
+
     case "session.workspace.change":
       return state.session.id === event.id && state.session.workspace === event.workspace
         ? state

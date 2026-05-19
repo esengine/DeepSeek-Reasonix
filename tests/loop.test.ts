@@ -1102,6 +1102,58 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser / proArm", () =>
     expect(loop.log.entries[1]!.content).toBe("an answer");
   });
 
+  it("rewindToUserTurn(0) drops everything from the first user turn", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.log.append({ role: "user", content: "turn one" });
+    loop.log.append({ role: "assistant", content: "reply one" });
+    loop.log.append({ role: "user", content: "turn two" });
+    loop.log.append({ role: "assistant", content: "reply two" });
+
+    const result = loop.rewindToUserTurn(0);
+    expect(result).toBe("turn one");
+    expect(loop.log.length).toBe(0);
+  });
+
+  it("rewindToUserTurn(1) keeps turn 0 and drops turn 1+ onwards", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.log.append({ role: "user", content: "turn one" });
+    loop.log.append({ role: "assistant", content: "reply one" });
+    loop.log.append({ role: "user", content: "turn two" });
+    loop.log.append({ role: "assistant", content: "reply two" });
+    loop.log.append({ role: "user", content: "turn three" });
+    loop.log.append({ role: "assistant", content: "reply three" });
+
+    const result = loop.rewindToUserTurn(1);
+    expect(result).toBe("turn two");
+    expect(loop.log.length).toBe(2);
+    expect(loop.log.entries[0]!.content).toBe("turn one");
+    expect(loop.log.entries[1]!.content).toBe("reply one");
+  });
+
+  it("rewindToUserTurn(N) returns null when N exceeds available user turns", () => {
+    const client = makeClient([{ content: "ok" }]);
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.log.append({ role: "user", content: "only one" });
+    loop.log.append({ role: "assistant", content: "reply" });
+
+    expect(loop.rewindToUserTurn(5)).toBeNull();
+    expect(loop.log.length).toBe(2);
+  });
+
   it("armProForNextTurn sets proArmed and step consumes it producing warning", async () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({

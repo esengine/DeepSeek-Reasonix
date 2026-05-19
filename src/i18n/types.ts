@@ -182,6 +182,8 @@ export interface TranslationSchema {
     notedVerbCreated: string;
     notedVerbAppended: string;
     memoryWriteFailed: string;
+    verboseOn: string;
+    verboseOff: string;
     commandFailed: string;
     btwUsage: string;
     btwHeader: string;
@@ -488,6 +490,13 @@ export interface TranslationSchema {
     linesAbovePlural: string;
     linesBelow: string;
     linesBelowPlural: string;
+  };
+  editPicker: {
+    title: string;
+    hint: string;
+    empty: string;
+    dismiss: string;
+    forked: string;
   };
   sessionPicker: {
     header: string;

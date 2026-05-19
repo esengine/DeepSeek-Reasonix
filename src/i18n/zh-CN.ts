@@ -135,6 +135,7 @@ export const zhCN: TranslationSchema = {
             { key: "Ctrl+C", text: "中止当前模型回合（不是复制 — 见剪贴板段）" },
             { key: "PgUp / PgDn", text: "整页滚动聊天记录" },
             { key: "End", text: "跳到聊天的最新一行" },
+            { key: "Ctrl+R", text: "切换详细模式 — 显示完整推理 + 工具输出，不省略" },
           ],
         },
         {
@@ -568,6 +569,8 @@ export const zhCN: TranslationSchema = {
     notedVerbCreated: "创建",
     notedVerbAppended: "追加到",
     memoryWriteFailed: "# 记忆写入失败",
+    verboseOn: "▸ 详细模式已开 — 显示完整推理 + 工具输出",
+    verboseOff: "▸ 详细模式已关 — 恢复头尾省略",
     commandFailed: "! 命令失败",
     btwUsage: "▸ /btw <问题> — 顺便问个题外话，不会写入当前会话上下文。",
     btwHeader: "≫ btw",
@@ -1232,6 +1235,13 @@ export const zhCN: TranslationSchema = {
     linesAbovePlural: "  ↑ 上方 {count} 行（↑/k 或 PgUp）",
     linesBelow: "  ↓ 下方 {count} 行（↓/j 或 Space/PgDn）",
     linesBelowPlural: "  ↓ 下方 {count} 行（↓/j 或 Space/PgDn）",
+  },
+  editPicker: {
+    title: "编辑之前的消息",
+    hint: "↑↓ 选择 · Enter 加载到输入框 · Esc 取消",
+    empty: "还没有用户发言 — 没什么可以编辑的",
+    dismiss: "Esc 关闭",
+    forked: "▸ 从第 #{turn} 轮分叉 — 原文已填回输入框",
   },
   sessionPicker: {
     header: " ◈ REASONIX · 选择会话 ",

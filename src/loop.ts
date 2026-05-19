@@ -536,6 +536,34 @@ export class CacheFirstLoop {
     return userText;
   }
 
+  /** Rewind to the N-th user turn (0-indexed). Drops that turn + everything after. */
+  rewindToUserTurn(userTurnIndex: number): string | null {
+    const entries = this.log.entries;
+    let count = 0;
+    let targetIdx = -1;
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i]!.role !== "user") continue;
+      if (count === userTurnIndex) {
+        targetIdx = i;
+        break;
+      }
+      count++;
+    }
+    if (targetIdx < 0) return null;
+    const raw = entries[targetIdx]!.content;
+    const userText = typeof raw === "string" ? raw : "";
+    const preserved = entries.slice(0, targetIdx).map((m) => ({ ...m }));
+    this.log.compactInPlace(preserved);
+    if (this.sessionName) {
+      try {
+        rewriteSession(this.sessionName, preserved);
+      } catch {
+        /* disk-full / perms — in-memory compaction still applies */
+      }
+    }
+    return userText;
+  }
+
   async *step(userInput: string): AsyncGenerator<LoopEvent> {
     // Reset per-turn flags.
     this._steerConsumed = false;
