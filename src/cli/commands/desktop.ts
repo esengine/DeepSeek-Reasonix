@@ -1765,7 +1765,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             id: Date.now(),
             ts: new Date().toISOString(),
             turn: 0,
-            text: `QQ enabled (${current.sandbox ? "sandbox" : "production"})`,
+            text: `QQ enabled for CLI (${current.sandbox ? "sandbox" : "production"}) — start the bot by running \`reasonix\` in a terminal`,
           },
           tab.id,
         );
@@ -1785,7 +1785,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             id: Date.now(),
             ts: new Date().toISOString(),
             turn: 0,
-            text: "QQ disabled",
+            text: "QQ disabled for CLI (next `reasonix` terminal session won't auto-start the bot)",
           },
           tab.id,
         );

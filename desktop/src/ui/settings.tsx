@@ -253,6 +253,7 @@ export function QQChannelSection({
   return (
     <section className="section">
       <div className="stitle">{t("settings.qqSection")}</div>
+      <div className="qq-runtime-note">{t("settings.qqRuntimeNote")}</div>
       {!configureOpen ? (
         <div className="setting-row qq-setting-row">
           <div className="l">
@@ -260,7 +261,7 @@ export function QQChannelSection({
             <div className="h">{describeQQRowSummary(current)}</div>
           </div>
           <div className="qq-row-actions">
-            <span className={`qq-status-badge ${current.connected ? "on" : "off"}`}>
+            <span className={`qq-status-badge ${current.enabledForCli ? "on" : "off"}`}>
               {getQQStatusLabel(current)}
             </span>
             <button
@@ -282,7 +283,7 @@ export function QQChannelSection({
             <button
               type="button"
               className="btn"
-              disabled={!current.connected}
+              disabled={!current.enabledForCli}
               onClick={onDisconnect}
             >
               {t("settings.qqDisconnect")}

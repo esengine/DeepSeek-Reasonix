@@ -1,11 +1,15 @@
 import { type LoadedQQConfig, type QQBotConfig, loadQQConfig, saveQQConfig } from "../config.js";
 import { describeQQAccess } from "../qq/access.js";
 
+/** The desktop process is a config editor, not a runtime — only the CLI (`reasonix`) starts an actual QQChannel. `enabledForCli` says the config flag is on; the bot only comes up on the next terminal session. */
 export interface DesktopQQSettingsState extends Omit<LoadedQQConfig, "sandbox" | "enabled"> {
   sandbox: boolean;
   enabled: boolean;
   configured: boolean;
+  /** Always false: the desktop never holds a live QQ Bot connection (#1317). Kept for protocol back-compat — UIs should read `enabledForCli` instead. */
   connected: boolean;
+  /** True iff credentials are saved AND the user has enabled the bot — the next `reasonix` CLI session will auto-start the channel. */
+  enabledForCli: boolean;
   appIdPreview?: string;
   access: string;
 }
@@ -36,12 +40,15 @@ function toAccess(config: QQBotConfig | LoadedQQConfig): string {
 export function loadDesktopQQState(path?: string): DesktopQQSettingsState {
   const config = loadQQConfig(path);
   const configured = Boolean(config.appId && config.appSecret);
+  const enabled = config.enabled === true;
   return {
     ...config,
     sandbox: config.sandbox ?? false,
-    enabled: config.enabled === true,
+    enabled,
     configured,
-    connected: configured && config.enabled === true,
+    // Never true — the desktop process doesn't host a QQChannel (#1317).
+    connected: false,
+    enabledForCli: configured && enabled,
     appIdPreview: toPreview(config.appId),
     access: toAccess(config),
   };

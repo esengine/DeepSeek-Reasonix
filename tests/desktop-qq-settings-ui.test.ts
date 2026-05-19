@@ -41,8 +41,36 @@ describe("desktop QQ settings view model", () => {
     ).toBe("App ID 123456... · Sandbox · Owner abcd...mnop");
   });
 
-  it("localizes the disconnected label in zh-CN", () => {
+  it("localizes the 'not configured' label in zh-CN (was 'disconnected' pre-#1317)", () => {
     setLang("zh-CN");
-    expect(getQQStatusLabel(DISCONNECTED)).toBe("已断开");
+    expect(getQQStatusLabel(DISCONNECTED)).toBe("未配置");
+  });
+
+  it("uses the 'enabled (CLI)' label when credentials saved and toggle on (#1317)", () => {
+    setLang("en");
+    expect(
+      getQQStatusLabel({
+        ...DISCONNECTED,
+        appId: "x",
+        appSecret: "y",
+        configured: true,
+        enabled: true,
+        enabledForCli: true,
+      }),
+    ).toBe("Enabled (CLI)");
+  });
+
+  it("uses the 'configured · disabled' label when credentials saved but toggle off (#1317)", () => {
+    setLang("en");
+    expect(
+      getQQStatusLabel({
+        ...DISCONNECTED,
+        appId: "x",
+        appSecret: "y",
+        configured: true,
+        enabled: false,
+        enabledForCli: false,
+      }),
+    ).toBe("Configured · disabled");
   });
 });
