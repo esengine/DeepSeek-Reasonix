@@ -59,6 +59,7 @@ export class ToolRegistry {
   private readonly _autoFlatten: boolean;
   private _planMode = false;
   private _interceptor: ToolInterceptor | null = null;
+  private readonly _interceptors: Array<{ id: string; fn: ToolInterceptor }> = [];
   private _auditListener: ToolCallAuditListener | null = null;
   private _resultAugmenter: ToolResultAugmenter | null = null;
   /** Per-tool fingerprint of the last call that failed schema validation. Cleared by any successful validation for that tool. */
@@ -81,6 +82,19 @@ export class ToolRegistry {
   /** At most one interceptor active; calling twice replaces. */
   setToolInterceptor(fn: ToolInterceptor | null): void {
     this._interceptor = fn;
+  }
+
+  /** Ordered host-side interceptors. They run before the legacy single interceptor. */
+  addToolInterceptor(id: string, fn: ToolInterceptor): () => void {
+    const normalized = id.trim();
+    if (!normalized) throw new Error("tool interceptor requires a non-empty id");
+    const existing = this._interceptors.findIndex((entry) => entry.id === normalized);
+    if (existing >= 0) this._interceptors.splice(existing, 1);
+    this._interceptors.push({ id: normalized, fn });
+    return () => {
+      const idx = this._interceptors.findIndex((entry) => entry.id === normalized);
+      if (idx >= 0) this._interceptors.splice(idx, 1);
+    };
   }
 
   setAuditListener(fn: ToolCallAuditListener | null): void {
@@ -210,15 +224,18 @@ export class ToolRegistry {
       });
     }
 
-    // Interceptor runs after plan-mode (so a plan-mode refusal still
+    // Interceptors run after plan-mode (so a plan-mode refusal still
     // wins) but before the real tool fn. A string return is treated as
     // the full tool result; null / undefined means "not my concern,
-    // fall through." Uncaught throws from the interceptor are surfaced
-    // through the same error path as a failed tool fn below.
-    if (this._interceptor) {
+    // fall through." Uncaught throws are surfaced through the same
+    // structured error path as the legacy single interceptor.
+    const chain = this._interceptor
+      ? [...this._interceptors.map((entry) => entry.fn), this._interceptor]
+      : this._interceptors.map((entry) => entry.fn);
+    for (const interceptor of chain) {
       try {
-        const short = await this._interceptor(name, args);
-        if (typeof short === "string") return short;
+        const short = await interceptor(name, args);
+        if (typeof short === "string") return this._augmentResult(name, args, short);
       } catch (err) {
         return JSON.stringify({
           error: `${name}: interceptor failed — ${(err as Error).message}`,
@@ -284,14 +301,18 @@ export class ToolRegistry {
       }
     }
 
+    return this._augmentResult(name, args, finalResult);
+  }
+
+  private _augmentResult(name: string, args: Record<string, unknown>, result: string): string {
     if (this._resultAugmenter) {
       try {
-        return this._resultAugmenter(name, args, finalResult);
+        return this._resultAugmenter(name, args, result);
       } catch {
         /* augmenter must never break the tool result */
       }
     }
-    return finalResult;
+    return result;
   }
 
   /** Records the failed call's fingerprint; on the 2nd consecutive identical malformed call to the same tool, returns a sharper error that tells the model to stop retrying. */
