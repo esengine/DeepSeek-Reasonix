@@ -52,6 +52,7 @@ import {
   pauseGate,
 } from "../../core/pause-gate.js";
 import { autoResolveVerdict } from "../../core/pause-policy.js";
+import { augmentProcessPath } from "../../desktop/login-shell-path.js";
 import {
   loadDesktopQQState,
   saveDesktopQQSettings,
@@ -815,6 +816,16 @@ export function installDesktopCrashGuards(
 
 export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   loadDotenv();
+  // Tauri spawns the bundled Node from the GUI process, which never runs the
+  // user's shell init (`.bashrc` / `.zshrc` / profile). Probe the login shell
+  // once so nvm / asdf / fnm / volta / mise PATH entries reach `run_command`
+  // children too (#1252). No-op on Windows — system PATH already covers GUI apps.
+  const augmented = augmentProcessPath();
+  if (augmented.added.length > 0) {
+    process.stderr.write(
+      `[desktop] augmented PATH with ${augmented.added.length} login-shell entries\n`,
+    );
+  }
   installDesktopCrashGuards();
 
   const tabs = new Map<string, Tab>();
