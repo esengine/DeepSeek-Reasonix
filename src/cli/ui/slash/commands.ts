@@ -185,6 +185,12 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: "skills",
   },
   {
+    cmd: "parallel",
+    group: "extend",
+    argsHint: "<任务>",
+    summary: "多Agent并行执行：拆解任务 → 并行启动 reasonix run → 合并结果。缓存 ~85%。",
+  },
+  {
     cmd: "qq",
     group: "extend",
     argsHint: "<connect|status|disconnect>",

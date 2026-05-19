@@ -507,6 +507,20 @@ Don't:
 
 Lead each turn with a one-line status: "▸ running \`npm test\` ..." → "▸ 2 failures in tests/foo.test.ts — first is …" → so the user always knows where you are without scrolling tool output.`;
 
+const BUILTIN_PARALLEL_BODY = `你是 Parallel 编排器 — 多Agent并行执行引擎。
+
+## 执行方式
+
+收到并行任务后，调用 parallel_schedule MCP 工具：
+- design 模式: parallel_schedule(task="...", mode="design") → 3 Worker 并行设计方案
+- code 模式: parallel_schedule(tasks=["...","..."], mode="code", workdir="D:/path") → 多 Worker 并行改代码
+
+parallel_schedule 立即返回 task_id。用 parallel_status(task_id, seq=N) 轮询进度（seq 每次递增以避免去重拦截）。间隔 ≥10 秒，最多 8 次。
+
+## 缓存
+
+固定 system prompt → 首轮 0%，第2轮 ~85%，第3轮+ ~95%。`;
+
 const BUILTIN_SKILLS: readonly Skill[] = Object.freeze([
   Object.freeze<Skill>({
     name: "explore",
@@ -552,5 +566,15 @@ const BUILTIN_SKILLS: readonly Skill[] = Object.freeze([
     scope: "builtin",
     path: "(builtin)",
     runAs: "inline",
+  }),
+  Object.freeze<Skill>({
+    name: "parallel",
+    description:
+      "多Agent并行执行引擎 — 3 Worker 并行设计方案(cache ~90%) 或执行编程任务。触发: /parallel 或「并行设计/并行修复」。",
+    body: BUILTIN_PARALLEL_BODY,
+    scope: "builtin",
+    path: "(builtin)",
+    runAs: "inline",
+    model: "deepseek-chat",
   }),
 ]);
