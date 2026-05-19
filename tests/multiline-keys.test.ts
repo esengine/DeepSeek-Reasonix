@@ -148,20 +148,21 @@ describe("processMultilineKey — cursor motion", () => {
     expect(processMultilineKey("abc", 3, key({ rightArrow: true })).cursor).toBe(3);
   });
 
-  it("↑/↓ are NOOP — reserved for chat scroll at the App level", () => {
-    expect(processMultilineKey("hello", 3, key({ upArrow: true }))).toEqual({
-      next: null,
-      cursor: null,
-      submit: false,
-    });
-    expect(processMultilineKey("hello", 3, key({ downArrow: true }))).toEqual({
-      next: null,
-      cursor: null,
-      submit: false,
-    });
-    expect(processMultilineKey("", 0, key({ upArrow: true })).historyHandoff).toBeUndefined();
-    expect(processMultilineKey("", 0, key({ downArrow: true })).historyHandoff).toBeUndefined();
-    expect(processMultilineKey("hello\nworld", 9, key({ upArrow: true })).cursor).toBeNull();
+  it("↑/↓ on single-line buffer hand off to prompt history", () => {
+    expect(processMultilineKey("hello", 3, key({ upArrow: true })).historyHandoff).toBe("prev");
+    expect(processMultilineKey("hello", 3, key({ downArrow: true })).historyHandoff).toBe("next");
+    expect(processMultilineKey("", 0, key({ upArrow: true })).historyHandoff).toBe("prev");
+    expect(processMultilineKey("", 0, key({ downArrow: true })).historyHandoff).toBe("next");
+  });
+
+  it("↑/↓ in multi-line buffer move the cursor between lines", () => {
+    const v = "hello\nworld";
+    const up = processMultilineKey(v, 9, key({ upArrow: true }));
+    expect(up.cursor).toBe(3);
+    expect(up.historyHandoff).toBeUndefined();
+    const down = processMultilineKey(v, 2, key({ downArrow: true }));
+    expect(down.cursor).toBe(8);
+    expect(down.historyHandoff).toBeUndefined();
   });
 
   it("Ctrl+P / Ctrl+N on single-line / empty buffer hand off to history recall", () => {
@@ -227,17 +228,9 @@ describe("processMultilineKey — cursor motion", () => {
     expect(down.cursor).toBeNull();
   });
 
-  it("raw `\\x1b[A` / `\\x1b[B` escape sequences are NOOP (chat-scroll handled at App level)", () => {
-    expect(processMultilineKey("", 0, { input: "\x1b[A" })).toEqual({
-      next: null,
-      cursor: null,
-      submit: false,
-    });
-    expect(processMultilineKey("", 0, { input: "\x1b[B" })).toEqual({
-      next: null,
-      cursor: null,
-      submit: false,
-    });
+  it("raw `\\x1b[A` / `\\x1b[B` escape sequences fire history handoff (same as ↑/↓)", () => {
+    expect(processMultilineKey("", 0, { input: "\x1b[A" }).historyHandoff).toBe("prev");
+    expect(processMultilineKey("", 0, { input: "\x1b[B" }).historyHandoff).toBe("next");
   });
 
   it("raw `\\x1b[C` rightArrow / `\\x1b[D` leftArrow still move the cursor", () => {

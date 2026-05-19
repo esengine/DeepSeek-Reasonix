@@ -5,7 +5,7 @@ import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { UserCard as UserCardData } from "../state/cards.js";
-import { CARD, FG } from "../theme/tokens.js";
+import { CARD, FG, SURFACE } from "../theme/tokens.js";
 import { formatRelativeTime } from "./time.js";
 
 export function UserCard({ card }: { card: UserCardData }): React.ReactElement {
@@ -19,7 +19,7 @@ export function UserCard({ card }: { card: UserCardData }): React.ReactElement {
       />
       <Box flexDirection="row" gap={1}>
         <Text color={FG.sub}>↳</Text>
-        <Text>{card.text}</Text>
+        <Text backgroundColor={SURFACE.bgElev}>{` ${card.text} `}</Text>
       </Box>
     </Card>
   );

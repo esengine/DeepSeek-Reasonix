@@ -9,13 +9,18 @@ export interface CountdownProps {
   endsAt: number;
   /** Override digit color — default brand sky. */
   color?: string;
+  backgroundColor?: string;
 }
 
-export function Countdown({ endsAt, color = TONE.brand }: CountdownProps): React.ReactElement {
+export function Countdown({
+  endsAt,
+  color = TONE.brand,
+  backgroundColor,
+}: CountdownProps): React.ReactElement {
   useSlowTick();
   const remainingSec = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
   return (
-    <Text bold color={color}>
+    <Text bold color={color} backgroundColor={backgroundColor}>
       {String(remainingSec)}
     </Text>
   );

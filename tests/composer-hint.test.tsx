@@ -48,11 +48,10 @@ describe("composer hint bar — issue #564", () => {
       const { lastFrame, unmount } = render(<HintRow />);
       const out = lastFrame() ?? "";
       unmount();
-      // ⏎ send · ⇧⏎ newline · ^U clear · ^P/^N history · esc abort · ^C quit
       expect(out).toContain("send");
       expect(out).toContain("newline");
       expect(out).toContain("clear");
-      expect(out).toContain("^P/^N");
+      expect(out).toContain("\u2191\u2193");
       expect(out).toContain("history");
       expect(out).toContain("esc");
       expect(out).toContain("abort");

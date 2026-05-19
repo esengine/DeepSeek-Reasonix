@@ -9,7 +9,7 @@ import { Countdown } from "../primitives/Countdown.js";
 import { useAgentState } from "../state/provider.js";
 import type { Mode, NetworkState, StatusBar } from "../state/state.js";
 import { GLYPH } from "../theme.js";
-import { FG, TONE, balanceColor, formatBalance, formatCost } from "../theme/tokens.js";
+import { FG, SURFACE, TONE, balanceColor, formatBalance, formatCost } from "../theme/tokens.js";
 
 export interface StatusBarConfig {
   showBalance: boolean;
@@ -39,6 +39,22 @@ const DEFAULT_STATUS_BAR_CONFIG: StatusBarConfig = {
   showFeedbackHint: true,
 };
 
+const BG = SURFACE.bgElev;
+
+function Pill({ children }: { children: React.ReactNode }): React.ReactElement {
+  return (
+    <Box flexDirection="row" flexShrink={0}>
+      <Text backgroundColor={BG}> </Text>
+      {children}
+      <Text backgroundColor={BG}> </Text>
+    </Box>
+  );
+}
+
+function Gap(): React.ReactElement {
+  return <Text> </Text>;
+}
+
 export function StatusRow({
   statusBar = DEFAULT_STATUS_BAR_CONFIG,
 }: { statusBar?: StatusBarConfig }): React.ReactElement {
@@ -56,70 +72,112 @@ export function StatusRow({
   return (
     <Box flexDirection="column" flexShrink={0}>
       <Box flexDirection="row" flexWrap="wrap" flexShrink={0}>
-        <Text>{"  "}</Text>
+        <Text> </Text>
         {status.recording ? (
-          <RecordingPill rec={status.recording} />
+          <Pill>
+            <RecordingPill rec={status.recording} />
+          </Pill>
         ) : status.countdownSeconds !== undefined ? (
-          <CountdownRow mode={status.mode} secondsLeft={status.countdownSeconds} />
+          <Pill>
+            <CountdownRow mode={status.mode} secondsLeft={status.countdownSeconds} />
+          </Pill>
         ) : (
-          <ModePill mode={status.mode} network={status.network} detail={status.networkDetail} />
+          <Pill>
+            <ModePill mode={status.mode} network={status.network} detail={status.networkDetail} />
+          </Pill>
         )}
         {cols >= PRESET_MIN_COLS && status.preset !== undefined && (
-          <PresetPill preset={status.preset} model={session.model} />
+          <>
+            <Gap />
+            <Pill>
+              <PresetPill preset={status.preset} model={session.model} />
+            </Pill>
+          </>
         )}
-        <Sep />
-        <Text color={FG.sub}>{`${session.id} · ${session.branch}`}</Text>
+        <Gap />
+        <Pill>
+          <Text color={FG.sub} backgroundColor={BG}>{`${session.id} · ${session.branch}`}</Text>
+        </Pill>
         {hasTurn && statusBar.showTurnCost && (
           <>
-            <Sep />
-            <Text bold color={TONE.brand}>
-              {"▸ "}
-            </Text>
-            <Text bold color={FG.body}>
-              {`${formatCost(status.cost, status.balanceCurrency)} ${t("statusBar.turn")}`}
-            </Text>
+            <Gap />
+            <Pill>
+              <Text bold color={TONE.brand} backgroundColor={BG}>
+                {"▸ "}
+              </Text>
+              <Text bold color={FG.body} backgroundColor={BG}>
+                {`${formatCost(status.cost, status.balanceCurrency)} ${t("statusBar.turn")}`}
+              </Text>
+            </Pill>
           </>
         )}
         {statusBar.showCacheHit && (
           <>
-            <Sep />
-            <Text
-              color={TONE.accent}
-            >{`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}</Text>
+            <Gap />
+            <Pill>
+              <Text color={TONE.accent} backgroundColor={BG}>
+                {`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}
+              </Text>
+            </Pill>
           </>
         )}
         {statusBar.showCtxUsage && status.promptTokens !== undefined && status.promptTokens > 0 && (
-          <CtxUsagePill
-            tokens={status.promptTokens}
-            cap={
-              status.promptCap ?? DEEPSEEK_CONTEXT_TOKENS[session.model] ?? DEFAULT_CONTEXT_TOKENS
-            }
-            cols={cols}
-          />
+          <>
+            <Gap />
+            <Pill>
+              <CtxUsagePill
+                tokens={status.promptTokens}
+                cap={
+                  status.promptCap ??
+                  DEEPSEEK_CONTEXT_TOKENS[session.model] ??
+                  DEFAULT_CONTEXT_TOKENS
+                }
+                cols={cols}
+              />
+            </Pill>
+          </>
         )}
         {status.mcpLoading && status.mcpLoading.ready < status.mcpLoading.total && (
-          <McpLoadingPill ready={status.mcpLoading.ready} total={status.mcpLoading.total} />
+          <>
+            <Gap />
+            <Pill>
+              <McpLoadingPill ready={status.mcpLoading.ready} total={status.mcpLoading.total} />
+            </Pill>
+          </>
         )}
         {showWallet && (
-          <WalletPill
-            sessionCostUsd={status.sessionCost}
-            balance={status.balance}
-            currency={status.balanceCurrency}
-            showSessionCost={statusBar.showSessionCost}
-            showBalance={statusBar.showBalance}
-          />
+          <>
+            <Gap />
+            <Pill>
+              <WalletPill
+                sessionCostUsd={status.sessionCost}
+                balance={status.balance}
+                currency={status.balanceCurrency}
+                showSessionCost={statusBar.showSessionCost}
+                showBalance={statusBar.showBalance}
+              />
+            </Pill>
+          </>
         )}
         {statusBar.showVersion && cols >= VERSION_MIN_COLS && (
           <>
-            <Sep />
-            <Text color={FG.faint}>{`v${VERSION}`}</Text>
+            <Gap />
+            <Pill>
+              <Text color={FG.faint} backgroundColor={BG}>{`v${VERSION}`}</Text>
+            </Pill>
           </>
         )}
         {statusBar.showFeedbackHint && cols >= FEEDBACK_HINT_MIN_COLS && (
           <>
-            <Sep />
-            <Text color={FG.meta}>{"⚑ "}</Text>
-            <Text color={FG.sub}>{"/feedback"}</Text>
+            <Gap />
+            <Pill>
+              <Text color={FG.meta} backgroundColor={BG}>
+                {"⚑ "}
+              </Text>
+              <Text color={FG.sub} backgroundColor={BG}>
+                {"/feedback"}
+              </Text>
+            </Pill>
           </>
         )}
       </Box>
@@ -138,11 +196,10 @@ function PresetPill({
   const color = preset === "pro" ? TONE.accent : preset === "flash" ? TONE.brand : FG.sub;
   return (
     <>
-      <Sep />
-      <Text color={FG.meta} wrap="truncate">
+      <Text color={FG.meta} backgroundColor={BG} wrap="truncate">
         {"▴ "}
       </Text>
-      <Text color={color} wrap="truncate">
+      <Text color={color} backgroundColor={BG} wrap="truncate">
         {label}
       </Text>
     </>
@@ -172,22 +229,25 @@ function CtxUsagePill({
   const filled = Math.round(CTX_BAR_CELLS * ratio);
   return (
     <>
-      <Sep />
-      <Text color={FG.meta} wrap="truncate">{`${t("statusBar.ctx")} `}</Text>
+      <Text color={FG.meta} backgroundColor={BG} wrap="truncate">{`${t("statusBar.ctx")} `}</Text>
       {showBar && (
         <>
-          <Text color={color} wrap="truncate">
+          <Text color={color} backgroundColor={BG} wrap="truncate">
             {GLYPH.block.repeat(filled)}
           </Text>
-          <Text color={FG.faint} wrap="truncate">
+          <Text color={FG.faint} backgroundColor={BG} wrap="truncate">
             {GLYPH.shade1.repeat(CTX_BAR_CELLS - filled)}
           </Text>
-          <Text wrap="truncate"> </Text>
+          <Text backgroundColor={BG} wrap="truncate">
+            {" "}
+          </Text>
         </>
       )}
-      <Text color={color} wrap="truncate">{`${pct}%`}</Text>
+      <Text color={color} backgroundColor={BG} wrap="truncate">{`${pct}%`}</Text>
       {showTokens && (
-        <Text color={FG.faint}>{` · ${formatTokens(tokens)}/${formatTokens(cap)}`}</Text>
+        <Text color={FG.faint} backgroundColor={BG}>
+          {` · ${formatTokens(tokens)}/${formatTokens(cap)}`}
+        </Text>
       )}
     </>
   );
@@ -202,11 +262,13 @@ function McpLoadingPill({
 }): React.ReactElement {
   return (
     <>
-      <Sep />
-      <Text color={TONE.brand} wrap="truncate">
+      <Text color={TONE.brand} backgroundColor={BG} wrap="truncate">
         {"⌁ "}
       </Text>
-      <Text color={FG.body}>{`${t("statusBar.mcpLoading")} ${ready}/${total}`}</Text>
+      <Text
+        color={FG.body}
+        backgroundColor={BG}
+      >{`${t("statusBar.mcpLoading")} ${ready}/${total}`}</Text>
     </>
   );
 }
@@ -228,27 +290,26 @@ function WalletPill({
   const showBalanceLine = showBalanceCfg && typeof balance === "number";
   return (
     <>
-      <Sep />
-      <Text color={FG.meta} wrap="truncate">
+      <Text color={FG.meta} backgroundColor={BG} wrap="truncate">
         {"⛁ "}
       </Text>
       {showSpent && (
-        <Text
-          color={FG.body}
-        >{`${formatCost(sessionCostUsd, currency, 2)} ${t("statusBar.spent")}`}</Text>
+        <Text color={FG.body} backgroundColor={BG}>
+          {`${formatCost(sessionCostUsd, currency, 2)} ${t("statusBar.spent")}`}
+        </Text>
       )}
       {showSpent && showBalanceLine && (
-        <Text color={FG.meta} wrap="truncate">
+        <Text color={FG.meta} backgroundColor={BG} wrap="truncate">
           {"  /  "}
         </Text>
       )}
       {showBalanceLine && (
-        <Text bold color={balanceColor(balance, currency)} wrap="truncate">
+        <Text bold color={balanceColor(balance, currency)} backgroundColor={BG} wrap="truncate">
           {formatBalance(balance, currency, { fractionDigits: 2 })}
         </Text>
       )}
       {showBalanceLine && (
-        <Text color={FG.faint} wrap="truncate">
+        <Text color={FG.faint} backgroundColor={BG} wrap="truncate">
           {t("statusBar.left")}
         </Text>
       )}
@@ -269,46 +330,50 @@ function ModePill({
   if (network === "online") {
     const pill = modeGlyph(mode);
     return (
-      <Box flexDirection="row" height={1} flexWrap="nowrap">
-        <Text color={pill.color} wrap="truncate">
+      <>
+        <Text color={pill.color} backgroundColor={BG} wrap="truncate">
           {pill.glyph}
         </Text>
-        <Text color={FG.sub} wrap="truncate">{` ${modeLabel}`}</Text>
-      </Box>
+        <Text color={FG.sub} backgroundColor={BG} wrap="truncate">{` ${modeLabel}`}</Text>
+      </>
     );
   }
   const dot = networkDot(network);
   if (network === "slow") {
     const tail = detail ? ` · ${detail}` : "";
     return (
-      <Box flexDirection="row" height={1} flexWrap="nowrap">
-        <Text color={dot.color} wrap="truncate">
+      <>
+        <Text color={dot.color} backgroundColor={BG} wrap="truncate">
           {dot.glyph}
         </Text>
-        <Text color={dot.color}>{` ${modeLabel} · ${t("statusBar.slow")}${tail}`}</Text>
-      </Box>
+        <Text color={dot.color} backgroundColor={BG}>
+          {` ${modeLabel} · ${t("statusBar.slow")}${tail}`}
+        </Text>
+      </>
     );
   }
   if (network === "disconnected") {
     const tail = detail ? ` · ${detail}` : "";
     return (
-      <Box flexDirection="row" height={1} flexWrap="nowrap">
-        <Text color={dot.color} wrap="truncate">
+      <>
+        <Text color={dot.color} backgroundColor={BG} wrap="truncate">
           {dot.glyph}
         </Text>
-        <Text color={dot.color} wrap="truncate">{` ${t("statusBar.disconnect")}${tail}`}</Text>
-      </Box>
+        <Text color={dot.color} backgroundColor={BG} wrap="truncate">
+          {` ${t("statusBar.disconnect")}${tail}`}
+        </Text>
+      </>
     );
   }
   return (
-    <Box flexDirection="row" height={1} flexWrap="nowrap">
-      <Text color={dot.color} wrap="truncate">
+    <>
+      <Text color={dot.color} backgroundColor={BG} wrap="truncate">
         {dot.glyph}
       </Text>
-      <Text color={dot.color} wrap="truncate">
+      <Text color={dot.color} backgroundColor={BG} wrap="truncate">
         {` ${t("statusBar.reconnecting")}`}
       </Text>
-    </Box>
+    </>
   );
 }
 
@@ -322,43 +387,35 @@ function CountdownRow({
   const pill = modeGlyph(mode);
   const endsAt = Date.now() + secondsLeft * 1000;
   return (
-    <Box flexDirection="row" height={1} flexWrap="nowrap">
-      <Text color={pill.color} wrap="truncate">
+    <>
+      <Text color={pill.color} backgroundColor={BG} wrap="truncate">
         {pill.glyph}
       </Text>
-      <Text color={FG.sub} wrap="truncate">
-        {` ${t("statusBar.editsLabel")}${mode}   ·   `}
+      <Text color={FG.sub} backgroundColor={BG} wrap="truncate">
+        {` ${t("statusBar.editsLabel")}${mode} · `}
       </Text>
-      <Text color={TONE.warn} wrap="truncate">
+      <Text color={TONE.warn} backgroundColor={BG} wrap="truncate">
         {t("statusBar.approvingIn")}
       </Text>
-      <Countdown endsAt={endsAt} />
-      <Text color={TONE.warn} wrap="truncate">
+      <Countdown endsAt={endsAt} backgroundColor={BG} />
+      <Text color={TONE.warn} backgroundColor={BG} wrap="truncate">
         {t("statusBar.escToInterrupt")}
       </Text>
-    </Box>
+    </>
   );
 }
 
 function RecordingPill({ rec }: { rec: NonNullable<StatusBar["recording"]> }): React.ReactElement {
   const sizeMb = (rec.sizeBytes / (1024 * 1024)).toFixed(1);
   return (
-    <Box flexDirection="row" height={1} flexWrap="nowrap">
-      <Text bold color={TONE.err} wrap="truncate">
+    <>
+      <Text bold color={TONE.err} backgroundColor={BG} wrap="truncate">
         {t("statusBar.recordingGlyph")}
       </Text>
-      <Text
-        color={TONE.err}
-      >{` ${sizeMb}${t("statusBar.mb")} · ${rec.events}${t("statusBar.evt")}`}</Text>
-    </Box>
-  );
-}
-
-function Sep(): React.ReactElement {
-  return (
-    <Text color={FG.meta} wrap="truncate">
-      {"   ·   "}
-    </Text>
+      <Text color={TONE.err} backgroundColor={BG}>
+        {` ${sizeMb}${t("statusBar.mb")} · ${rec.events}${t("statusBar.evt")}`}
+      </Text>
+    </>
   );
 }
 

@@ -483,6 +483,7 @@ function AppInner({
   const lastTurnMs = useAgentState((s) => s.status.lastTurnMs);
   const activityLabel = useActivityLabel();
   const chatScroll = useChatScrollActions();
+  const composerPinned = useChatScrollState((s) => s.pinned);
   const [input, setInput] = useState("");
   const [composerCursor, setComposerCursor] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -1587,24 +1588,17 @@ function AppInner({
     if (ev.ctrl && ev.input === "d") quitProcess();
   });
 
-  // ↑/↓ / PgUp/PgDn always scroll chat; wheel arrives as ↑/↓ via
-  // DECSET 1007 alternate-scroll so it joins the same path. Pickers
-  // (slash / @-mention / slash-arg / shell-confirm) own ↑/↓ — when
-  // any of them is open we skip the arrow path so chat doesn't scroll
-  // alongside picker navigation; PgUp/PgDn/End still scroll. Prompt
-  // history + multi-line cursor moves live on Ctrl+P / Ctrl+N.
+  // Chat scroll keys. Mouse wheel + PgUp/PgDn always scroll; End jumps
+  // to bottom. ↑/↓ belong to the composer (prompt history / per-line
+  // cursor) whenever the composer is visible — so we only consume
+  // arrows here when the composer is hidden (chat is scrolled up and
+  // InputAreaWithHistoryHint has replaced it).
   useKeystroke((ev) => {
-    const pickerOwnsArrows =
-      (atState?.entries.length ?? 0) > 0 ||
-      (slashMatches?.length ?? 0) > 0 ||
-      (slashArgMatches?.length ?? 0) > 0 ||
-      pendingShell != null ||
-      pendingPath != null;
     if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollPageUp();
     else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollPageDown();
     else if (ev.end) chatScroll.jumpToBottom();
-    else if (!pickerOwnsArrows && ev.upArrow) chatScroll.scrollUp();
-    else if (!pickerOwnsArrows && ev.downArrow) chatScroll.scrollDown();
+    else if (!composerPinned && ev.upArrow) chatScroll.scrollUp();
+    else if (!composerPinned && ev.downArrow) chatScroll.scrollDown();
   }, !modalOpen);
 
   // Esc/Ctrl+C during an active model turn forward to the loop as an
@@ -1806,41 +1800,19 @@ function AppInner({
     // (hidden) prompt buffer. Bail early.
     if (pendingShell || pendingPath) return;
 
-    // @-mention picker takes the same priority tier as slash. ↑/↓ walk
-    // the list; Tab on a folder drills into it, Tab on a file commits.
-    // Enter is caught in handleSubmit. Right arrow stays cursor-move
-    // (would otherwise fight PromptInput's multiline cursor). Must come
-    // BEFORE slash so the two pickers don't share arrow keys.
+    // Picker arrow nav lives on the PromptInput → historyHandoff →
+    // handleHistoryPrev/Next path (which checks pickers before recall).
+    // Tab stays here — multiline-keys treats Tab as parent-owned.
     if (atState && atState.entries.length > 0) {
-      const entries = atState.entries;
-      if (key.upArrow) {
-        setAtSelected((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setAtSelected((i) => Math.min(entries.length - 1, i + 1));
-        return;
-      }
       if (key.tab) {
+        const entries = atState.entries;
         const sel = entries[atSelected] ?? entries[0];
         if (sel) pickAtMention(sel, sel.isDir ? "drill" : "commit");
         return;
       }
     }
 
-    // Slash-argument picker. Fires inside `/<cmd> <partial>` —either
-    // a file picker (for /edit), enum picker (for /preset, /model,
-    // /plan, /branch, /harvest), or hint-only row. Navigation + Tab
-    // substitute the highlighted value at the arg's offset.
     if (slashArgMatches && slashArgMatches.length > 0) {
-      if (key.upArrow) {
-        setSlashArgSelected((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setSlashArgSelected((i) => Math.min(slashArgMatches.length - 1, i + 1));
-        return;
-      }
       if (key.tab) {
         const sel = slashArgMatches[slashArgSelected] ?? slashArgMatches[0];
         if (sel) pickSlashArg(sel);
@@ -1848,32 +1820,13 @@ function AppInner({
       }
     }
 
-    // Slash-suggestion mode takes priority over history recall.
-    // When the user is typing a `/` prefix and there are matches,
-    // ↑/↓ walk the suggestion list and Tab snaps the input to the
-    // highlighted command. Enter is handled in `handleSubmit` so
-    // TextInput's onSubmit still fires cleanly.
     if (slashMatches && slashMatches.length > 0) {
-      if (key.upArrow) {
-        setSlashSelected((i) => Math.max(0, i - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setSlashSelected((i) => Math.min(slashMatches.length - 1, i + 1));
-        return;
-      }
       if (key.tab) {
         const sel = slashMatches[slashSelected] ?? slashMatches[0];
         if (sel) setInput(`/${sel.cmd}`);
         return;
       }
     }
-
-    // Prompt history is now Ctrl+P / Ctrl+N (PromptInput → multiline
-    // keys → historyHandoff → recallPrev / recallNext below). ↑/↓ are
-    // reserved for chat scroll — without that move, native drag-select
-    // and right-click paste don't work on most terminals because we'd
-    // have to keep xterm mouse tracking on to grab the wheel.
   });
 
   // Edit-gate interceptor. Reroutes `edit_file` / `write_file` tool

@@ -194,6 +194,7 @@ export function PromptInput({
 
   const lines = value.length > 0 ? value.split("\n") : [""];
   const accentColor = disabled ? FG.faint : TONE.brand;
+  const borderColor = disabled ? FG.faint : FG.meta;
   const cursorVisible = true;
   const { line: cursorLine, col: cursorCol } = lineAndColumn(value, cursor);
 
@@ -201,7 +202,16 @@ export function PromptInput({
   const showHugeBufferHints = lines.length > 20;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={accentColor} paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderTop
+      borderBottom
+      borderLeft={false}
+      borderRight={false}
+      borderColor={borderColor}
+      paddingX={1}
+    >
       {(() => {
         const rows: React.ReactNode[] = [];
         let firstRowEmitted = false;
@@ -338,7 +348,7 @@ export function HintRow(): React.ReactElement {
     { key: "\u23ce", tKey: "composer.hintSend" },
     { key: "\u21e7\u23ce", tKey: "composer.hintNewline" },
     { key: "^U", tKey: "composer.hintClear" },
-    { key: "^P/^N", tKey: "composer.hintHistory" },
+    { key: "\u2191\u2193", tKey: "composer.hintHistory" },
     { key: "esc", tKey: "composer.hintAbort" },
     { key: "^C", tKey: "composer.hintQuit" },
   ];

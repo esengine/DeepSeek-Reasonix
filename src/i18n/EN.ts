@@ -109,8 +109,9 @@ export const EN: TranslationSchema = {
             { key: "wheel", text: "scrolls chat history (works on web/cloud/SSH terminals too)" },
             {
               key: "↑ / ↓",
-              text: "scroll chat · use Ctrl+P / Ctrl+N for prompt history + multi-line cursor",
+              text: "prompt history (or per-line cursor in a multi-line draft) — Ctrl+P / Ctrl+N alias",
             },
+            { key: "PgUp / PgDn", text: "scroll chat history (mouse wheel routes here too)" },
           ],
         },
       ],
@@ -124,11 +125,11 @@ export const EN: TranslationSchema = {
           rows: [
             { key: "Enter", text: "submit the prompt" },
             { key: "Shift+Enter", text: "insert a newline in the prompt" },
-            { key: "↑ / ↓", text: "scroll chat history (mouse wheel routes here too)" },
             {
-              key: "Ctrl+P / Ctrl+N",
+              key: "↑ / ↓",
               text: "previous / next prompt history · cursor up / down in a multi-line draft",
             },
+            { key: "Ctrl+P / Ctrl+N", text: "readline alias for ↑ / ↓" },
             { key: "Ctrl+A / Ctrl+E", text: "jump to start / end of the current line" },
             { key: "Ctrl+W", text: "delete the word before the cursor" },
             { key: "Ctrl+U", text: "clear the entire prompt buffer" },
@@ -177,7 +178,7 @@ export const EN: TranslationSchema = {
         },
       ],
       footer:
-        "Wheel→↑/↓ via DECSET 1007 (alternate-scroll) — wheel scrolls chat on most terminals (web/cloud/SSH included) without disturbing native selection. Drag to select stays modifier-free. Pass --no-mouse to opt out.",
+        "Wheel scrolls chat on most terminals (web/cloud/SSH included) — SGR mouse tracking is on by default and stays out of the way of native drag-select and right-click. Pass --no-mouse to opt out.",
     },
     tipShownOnce: "shown once",
     modelOverride: "override the default model",
@@ -1594,8 +1595,8 @@ export const EN: TranslationSchema = {
     scrollAbove: " \u2191 {scroll} / {max} row above",
     scrollAbovePlural: " \u2191 {scroll} / {max} rows above",
     scrollMore: " \u2014 {remaining} more",
-    scrollPgUp: " \u00b7 PgUp / wheel / \u2191",
-    scrollCopy: " \u00b7 /copy to select",
+    scrollPgUp: " \u00b7 PgUp / wheel",
+    scrollCopy: " \u00b7 /copy enters copy mode",
   },
   slashArgPicker: {
     noMatch: 'no match for "{partial}"',

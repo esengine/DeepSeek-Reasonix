@@ -105,8 +105,9 @@ export const zhCN: TranslationSchema = {
             { key: "滚轮", text: "滚动聊天记录（Web / 云端 / SSH 终端也能用）" },
             {
               key: "↑ / ↓",
-              text: "滚动聊天 · 输入框历史 + 多行光标用 Ctrl+P / Ctrl+N",
+              text: "输入历史（多行草稿时按行移动光标）— Ctrl+P / Ctrl+N 同义",
             },
+            { key: "PgUp / PgDn", text: "滚动聊天记录（鼠标滚轮也走这条路径）" },
           ],
         },
       ],
@@ -120,11 +121,11 @@ export const zhCN: TranslationSchema = {
           rows: [
             { key: "Enter", text: "提交输入" },
             { key: "Shift+Enter", text: "在输入框中插入换行" },
-            { key: "↑ / ↓", text: "滚动聊天记录（鼠标滚轮也走这条路径）" },
             {
-              key: "Ctrl+P / Ctrl+N",
+              key: "↑ / ↓",
               text: "上一条 / 下一条输入历史 · 多行草稿中按行移动光标",
             },
+            { key: "Ctrl+P / Ctrl+N", text: "↑ / ↓ 的 readline 同义键" },
             { key: "Ctrl+A / Ctrl+E", text: "跳到当前行的开头 / 结尾" },
             { key: "Ctrl+W", text: "删除光标前的一个词" },
             { key: "Ctrl+U", text: "清空整个输入缓冲区" },
@@ -173,7 +174,7 @@ export const zhCN: TranslationSchema = {
         },
       ],
       footer:
-        "通过 DECSET 1007（alternate-scroll），终端把滚轮翻译成 ↑/↓ 发给应用 — 大多数终端（含 Web / 云端 / SSH）都能滚，且不影响终端原生选区。直接拖动选中文本无需 Shift。传入 --no-mouse 可关闭。",
+        "滚轮在大多数终端（含 Web / 云端 / SSH）都能滚聊天 — 默认开启 SGR 鼠标跟踪，但不会影响终端原生拖选和右键菜单。直接拖动选中文本无需 Shift。传入 --no-mouse 可关闭。",
     },
     tipShownOnce: "仅显示一次",
     modelOverride: "覆盖默认模型",
@@ -1516,8 +1517,8 @@ export const zhCN: TranslationSchema = {
     scrollAbove: " \u2191 {scroll}/{max} 行",
     scrollAbovePlural: " \u2191 {scroll}/{max} 行",
     scrollMore: " \u2014 还有 {remaining} 行",
-    scrollPgUp: " \u00b7 PgUp/\u6eda\u8f6e/\u2191",
-    scrollCopy: " \u00b7 /copy \u590d\u5236",
+    scrollPgUp: " \u00b7 PgUp/\u6eda\u8f6e",
+    scrollCopy: " \u00b7 /copy \u8fdb\u5165\u590d\u5236\u6a21\u5f0f",
   },
   slashArgPicker: {
     noMatch: '\u6ca1\u6709\u5339\u914d "{partial}"',
