@@ -16,6 +16,9 @@ vi.mock("../desktop/src/CommandPalette", () => ({
   buildCommands: vi.fn(() => []),
   useCommandPalette: vi.fn(() => ({ open: false, setOpen: vi.fn() })),
 }));
+vi.mock("../desktop/src/Markdown", () => ({
+  WorkspaceProvider: ({ children }: { children?: unknown }) => children ?? null,
+}));
 
 type ChatMessage = Awaited<typeof import("../desktop/src/App")>["ChatMessage"];
 type AppState = Parameters<Awaited<typeof import("../desktop/src/App")>["applyIncoming"]>[0];
