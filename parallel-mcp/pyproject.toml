@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parallel-mcp"
+version = "1.0.0"
+description = "Parallel MCP Server — 多Agent并行执行引擎。3个独立Worker并行设计方案或执行编程任务。"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.0.0"]
+
+[project.scripts]
+parallel-mcp = "parallel_server:main"
