@@ -445,6 +445,8 @@ export const zhCN: typeof en = {
     update: {
       available: "新版本可用 · {current} → {latest}",
       installing: "正在安装…",
+      downloading: "下载中 · {downloaded} / {total}（{pct}%）",
+      downloadingUnknown: "下载中 · {downloaded}",
       failed: "安装失败",
       clickToInstall: "点击安装并重启",
       install: "安装",

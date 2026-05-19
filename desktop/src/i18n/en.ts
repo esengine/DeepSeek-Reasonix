@@ -429,6 +429,8 @@ export const en = {
     update: {
       available: "New version available · {current} → {latest}",
       installing: "Installing…",
+      downloading: "Downloading · {downloaded} / {total} ({pct}%)",
+      downloadingUnknown: "Downloading · {downloaded}",
       failed: "Installation failed",
       clickToInstall: "Click to install & restart",
       install: "Install",

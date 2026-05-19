@@ -981,6 +981,7 @@ interface TabRuntimeProps {
   currency: "CNY" | "USD";
   pendingUpdate: Update | null;
   updateStatus: "idle" | "installing" | "error";
+  updateProgress: { downloaded: number; total: number | null } | null;
   installUpdate: () => void;
   dismissUpdate: () => void;
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
@@ -1010,6 +1011,7 @@ function TabRuntime({
   currency,
   pendingUpdate,
   updateStatus,
+  updateProgress,
   installUpdate,
   dismissUpdate,
   registerDispatch,
@@ -1710,6 +1712,7 @@ function TabRuntime({
                       version={pendingUpdate.version}
                       currentVersion={pendingUpdate.currentVersion}
                       status={updateStatus}
+                      progress={updateProgress}
                       onInstall={installUpdate}
                       onDismiss={dismissUpdate}
                     />
@@ -2573,21 +2576,37 @@ function UpdateBanner({
   version,
   currentVersion,
   status,
+  progress,
   onInstall,
   onDismiss,
 }: {
   version: string;
   currentVersion: string;
   status: "idle" | "installing" | "error";
+  progress: { downloaded: number; total: number | null } | null;
   onInstall: () => void;
   onDismiss: () => void;
 }) {
   useLang();
+  const ratio =
+    progress && progress.total && progress.total > 0
+      ? Math.min(1, progress.downloaded / progress.total)
+      : null;
   const statusText =
-    status === "installing"
-      ? t("app.update.installing")
-      : status === "error"
-        ? t("app.update.failed")
+    status === "error"
+      ? t("app.update.failed")
+      : status === "installing"
+        ? progress
+          ? ratio !== null
+            ? t("app.update.downloading", {
+                downloaded: formatBytes(progress.downloaded),
+                total: formatBytes(progress.total ?? 0),
+                pct: Math.round(ratio * 100),
+              })
+            : t("app.update.downloadingUnknown", {
+                downloaded: formatBytes(progress.downloaded),
+              })
+          : t("app.update.installing")
         : t("app.update.clickToInstall");
   return (
     <div
@@ -2602,17 +2621,29 @@ function UpdateBanner({
           {t("app.update.available", { current: currentVersion, latest: version })}
         </div>
         <div className="s">{statusText}</div>
+        {status === "installing" && ratio !== null ? (
+          <div className="meter-mini" aria-label="download progress">
+            <span style={{ width: `${Math.round(ratio * 100)}%` }} />
+          </div>
+        ) : null}
       </div>
       <div className="prog">
         <button type="button" onClick={onInstall} disabled={status === "installing"}>
           {t("app.update.install")}
         </button>
-        <button type="button" onClick={onDismiss}>
+        <button type="button" onClick={onDismiss} disabled={status === "installing"}>
           {t("app.update.later")}
         </button>
       </div>
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 type TabMeta = { id: string; workspaceDir?: string; busy?: boolean };
@@ -2631,6 +2662,10 @@ export function App() {
 
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState<"idle" | "installing" | "error">("idle");
+  const [updateProgress, setUpdateProgress] = useState<{
+    downloaded: number;
+    total: number | null;
+  } | null>(null);
   const [currency, setCurrency] = useState<"CNY" | "USD">(() => {
     const v = localStorage.getItem("reasonix.currency");
     return v === "USD" ? "USD" : "CNY";
@@ -2730,8 +2765,19 @@ export function App() {
   const installUpdate = useCallback(async () => {
     if (!pendingUpdate) return;
     setUpdateStatus("installing");
+    setUpdateProgress(null);
     try {
-      await pendingUpdate.downloadAndInstall();
+      await pendingUpdate.downloadAndInstall((evt) => {
+        if (evt.event === "Started") {
+          setUpdateProgress({ downloaded: 0, total: evt.data.contentLength ?? null });
+        } else if (evt.event === "Progress") {
+          setUpdateProgress((p) =>
+            p ? { ...p, downloaded: p.downloaded + evt.data.chunkLength } : p,
+          );
+        } else if (evt.event === "Finished") {
+          setUpdateProgress((p) => (p ? { ...p, downloaded: p.total ?? p.downloaded } : p));
+        }
+      });
       await relaunch();
     } catch (err) {
       console.error("update failed", err);
@@ -2954,6 +3000,7 @@ export function App() {
           currency={currency}
           pendingUpdate={pendingUpdate}
           updateStatus={updateStatus}
+          updateProgress={updateProgress}
           installUpdate={installUpdate}
           dismissUpdate={() => setPendingUpdate(null)}
           registerDispatch={registerDispatch}
