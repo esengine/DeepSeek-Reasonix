@@ -1,6 +1,6 @@
 // Dedicated /download page — hero + smart mirror grid + platform notes
 
-const PLATFORM_NOTES = {
+function buildPlatformNotes(version) { return {
   mac: {
     title: 'macOS · Gatekeeper',
     en_label: 'first-launch unquarantine',
@@ -33,15 +33,18 @@ const PLATFORM_NOTES = {
       en: 'AppImages need an executable bit; some distros also need libfuse2:',
     },
     steps: [
-      { cmd: `chmod +x Reasonix_${window.REASONIX_VERSION}_amd64.AppImage`, note: { zh: '赋予可执行权限', en: 'Mark it executable' } },
+      { cmd: `chmod +x Reasonix_${version}_amd64.AppImage`, note: { zh: '赋予可执行权限', en: 'Mark it executable' } },
       { cmd: 'sudo apt install libfuse2 # debian/ubuntu', note: { zh: 'AppImage 运行时依赖', en: 'AppImage runtime dependency' } },
     ],
   },
-};
+}; }
 
 function PlatformNotes({ os }) {
   const { lang } = useLang();
-  const n = PLATFORM_NOTES[os] || PLATFORM_NOTES.mac;
+  const { version: rxVersion, status: rxStatus } = useVersion();
+  const versionLabel = rxStatus === "ok" && rxVersion ? rxVersion : "<version>";
+  const notes = React.useMemo(() => buildPlatformNotes(versionLabel), [versionLabel]);
+  const n = notes[os] || notes.mac;
   return (
     <div className="platform-note">
       <div className="platform-note-head">
@@ -65,12 +68,17 @@ function PlatformNotes({ os }) {
 
 function DownloadHero() {
   const { lang } = useLang();
+  const { version: rxVersion, status: rxStatus } = useVersion();
+  const heroBadge =
+    rxStatus === "ok" && rxVersion
+      ? `Reasonix Desktop · ${rxVersion}`
+      : t({ zh: "Reasonix Desktop · 正在获取版本…", en: "Reasonix Desktop · fetching version…" }, lang);
   return (
     <section className="dl-hero">
       <div className="hero-head">
         <span>§00 · Download</span>
         <span className="rule"></span>
-        <span className="v">Reasonix Desktop · {window.REASONIX_VERSION}</span>
+        <span className="v">{heroBadge}</span>
       </div>
       <div className="dl-hero-grid">
         <div>

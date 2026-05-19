@@ -1,52 +1,55 @@
 // Smart mirror grid — probes R2 / GitHub Releases for fastest TTFB and offers
 // a per-platform installer link from whichever wins.
 
-const VERSION = window.REASONIX_VERSION;
 const GH_REPO = "esengine/DeepSeek-Reasonix";
 const R2_BASE = "https://pub-147fb53b9c1e4bbf891a257968619ea7.r2.dev";
 
-const MIRRORS = [
-  {
-    id: "r2",
-    name: "Cloudflare R2",
-    region: "GLOBAL · CF Edge",
-    icon: "Cloud",
-    base: `${R2_BASE}/v${VERSION}`,
-    probe: `${R2_BASE}/latest/latest.json`,
-  },
-  {
-    id: "github",
-    name: "GitHub Releases",
-    region: "GLOBAL · US",
-    icon: "Github",
-    base: `https://github.com/${GH_REPO}/releases/download/v${VERSION}`,
-    probe: `https://github.com/${GH_REPO}/releases/download/v${VERSION}/latest.json`,
-  },
-];
+function buildMirrors(version) {
+  return [
+    {
+      id: "r2",
+      name: "Cloudflare R2",
+      region: "GLOBAL · CF Edge",
+      icon: "Cloud",
+      base: `${R2_BASE}/v${version}`,
+      probe: `${R2_BASE}/latest/latest.json`,
+    },
+    {
+      id: "github",
+      name: "GitHub Releases",
+      region: "GLOBAL · US",
+      icon: "Github",
+      base: `https://github.com/${GH_REPO}/releases/download/v${version}`,
+      probe: `https://github.com/${GH_REPO}/releases/download/v${version}/latest.json`,
+    },
+  ];
+}
 
-const OS_OPTIONS = [
-  {
-    id: "mac",
-    label: "macOS",
-    file: `Reasonix_${VERSION}_universal.dmg`,
-    size: "52 MB",
-    note: "Universal — Apple Silicon + Intel",
-  },
-  {
-    id: "win",
-    label: "Windows",
-    file: `Reasonix_${VERSION}_x64-setup.exe`,
-    size: "30 MB",
-    note: "NSIS installer · x64",
-  },
-  {
-    id: "linux",
-    label: "Linux",
-    file: `Reasonix_${VERSION}_amd64.AppImage`,
-    size: "128 MB",
-    note: "AppImage · x86_64",
-  },
-];
+function buildOsOptions(version) {
+  return [
+    {
+      id: "mac",
+      label: "macOS",
+      file: `Reasonix_${version}_universal.dmg`,
+      size: "52 MB",
+      note: "Universal — Apple Silicon + Intel",
+    },
+    {
+      id: "win",
+      label: "Windows",
+      file: `Reasonix_${version}_x64-setup.exe`,
+      size: "30 MB",
+      note: "NSIS installer · x64",
+    },
+    {
+      id: "linux",
+      label: "Linux",
+      file: `Reasonix_${version}_amd64.AppImage`,
+      size: "128 MB",
+      note: "AppImage · x86_64",
+    },
+  ];
+}
 
 function MirrorIcon({ name }) {
   const Icon = Ic[name];
@@ -80,12 +83,22 @@ async function probeMirror(url) {
 
 function MirrorGrid({ os, setOs }) {
   const { lang } = useLang();
-  const [testing, setTesting] = React.useState(true);
-  const [results, setResults] = React.useState(() =>
-    MIRRORS.map(m => ({ id: m.id, lat: null, done: false, ok: false }))
+  const { version: rxVersion, status: rxStatus } = useVersion();
+  const versionReady = rxStatus === "ok" && !!rxVersion;
+  const MIRRORS = React.useMemo(
+    () => (versionReady ? buildMirrors(rxVersion) : []),
+    [versionReady, rxVersion],
+  );
+  const OS_OPTIONS = React.useMemo(
+    () => (versionReady ? buildOsOptions(rxVersion) : []),
+    [versionReady, rxVersion],
   );
 
+  const [testing, setTesting] = React.useState(true);
+  const [results, setResults] = React.useState([]);
+
   const runTest = React.useCallback(() => {
+    if (MIRRORS.length === 0) return;
     setTesting(true);
     setResults(MIRRORS.map(m => ({ id: m.id, lat: null, done: false, ok: false })));
     let remaining = MIRRORS.length;
@@ -98,18 +111,31 @@ function MirrorGrid({ os, setOs }) {
         if (remaining === 0) setTesting(false);
       });
     });
-  }, []);
+  }, [MIRRORS]);
 
   React.useEffect(() => {
+    if (!versionReady) return undefined;
     const t = setTimeout(runTest, 200);
     return () => clearTimeout(t);
-  }, [runTest]);
+  }, [runTest, versionReady]);
 
   const fastest = React.useMemo(() => {
     const done = results.filter(r => r.done && r.ok && r.lat != null);
     if (done.length === 0) return null;
     return done.reduce((a, b) => (a.lat <= b.lat ? a : b)).id;
   }, [results]);
+
+  if (!versionReady) {
+    const msg =
+      rxStatus === "failed"
+        ? t({ zh: "版本信息获取失败 · 请刷新重试", en: "Could not fetch the version · refresh to retry" }, lang)
+        : t({ zh: "正在获取最新版本…", en: "Fetching latest version…" }, lang);
+    return (
+      <div className="dl-loading" style={{ padding: 32, textAlign: "center", color: "var(--cream-mute)" }}>
+        {msg}
+      </div>
+    );
+  }
 
   const currentOs = OS_OPTIONS.find(o => o.id === os) || OS_OPTIONS[0];
   const fastestMirror = MIRRORS.find(m => m.id === fastest);
