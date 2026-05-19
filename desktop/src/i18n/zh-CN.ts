@@ -46,7 +46,6 @@ export const zhCN: typeof en = {
     updateAvailable: "新版本可用：{version}",
     openReleases: "查看发布页",
     checkFailed: "检查失败：{message}",
-    checkNoRelease: "尚无发布",
     close: "关闭",
   },
   workdir: {

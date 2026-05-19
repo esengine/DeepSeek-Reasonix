@@ -44,7 +44,6 @@ export const en = {
     updateAvailable: "Update available: {version}",
     openReleases: "View releases",
     checkFailed: "Check failed: {message}",
-    checkNoRelease: "No releases yet",
     close: "Close",
   },
   workdir: {
