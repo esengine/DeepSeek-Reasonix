@@ -1517,6 +1517,7 @@ export const zhCN: TranslationSchema = {
     scrollAbovePlural: " \u2191 {scroll}/{max} 行",
     scrollMore: " \u2014 还有 {remaining} 行",
     scrollPgUp: " \u00b7 PgUp/\u6eda\u8f6e/\u2191",
+    scrollCopy: " \u00b7 /copy \u590d\u5236",
   },
   slashArgPicker: {
     noMatch: '\u6ca1\u6709\u5339\u914d "{partial}"',

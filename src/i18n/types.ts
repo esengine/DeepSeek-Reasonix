@@ -746,6 +746,7 @@ export interface TranslationSchema {
     scrollAbovePlural: string;
     scrollMore: string;
     scrollPgUp: string;
+    scrollCopy: string;
   };
   slashArgPicker: {
     noMatch: string;

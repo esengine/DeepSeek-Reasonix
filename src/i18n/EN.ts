@@ -1595,6 +1595,7 @@ export const EN: TranslationSchema = {
     scrollAbovePlural: " \u2191 {scroll} / {max} rows above",
     scrollMore: " \u2014 {remaining} more",
     scrollPgUp: " \u00b7 PgUp / wheel / \u2191",
+    scrollCopy: " \u00b7 /copy to select",
   },
   slashArgPicker: {
     noMatch: 'no match for "{partial}"',

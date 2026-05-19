@@ -3,8 +3,9 @@
  * Extracted from App.tsx per #565 Phase 2.
  */
 
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import React from "react";
+import stringWidth from "string-width";
 
 import type { EditMode } from "../../config.js";
 import type { JobRegistry } from "../../tools/jobs.js";
@@ -19,7 +20,7 @@ import { ModeStatusBar } from "./layout/LiveRows.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import { formatLoopStatus } from "./loop.js";
 import { useChatScrollState } from "./state/chat-scroll-provider.js";
-import { FG } from "./theme/tokens.js";
+import { FG, SURFACE } from "./theme/tokens.js";
 
 import type { StatusBarConfig } from "./layout/StatusRow.js";
 
@@ -68,10 +69,14 @@ export interface ComposerAreaProps {
 
 const HistoryHint: React.FC<{ children: React.ReactNode }> = React.memo(({ children }) => {
   const pinned = useChatScrollState((s: { pinned: boolean }) => s.pinned);
+  const { stdout } = useStdout();
   if (!pinned) {
+    const text = "scrolled up — reading history — End / PgDn to return — ↓ to advance one line";
+    const cols = stdout?.columns ?? 80;
+    const pad = Math.max(0, cols - stringWidth(text));
     return (
-      <Text color={FG.faint}>
-        scrolled up — reading history — End / PgDn to return — ↓ to advance one line
+      <Text color={FG.faint} backgroundColor={SURFACE.bgElev}>
+        {text + " ".repeat(pad)}
       </Text>
     );
   }

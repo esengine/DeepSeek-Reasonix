@@ -1,11 +1,12 @@
-import { Box, type DOMElement, Text, useBoxMetrics } from "ink";
+import { Box, type DOMElement, Text, useBoxMetrics, useStdout } from "ink";
 import React, { useEffect, useMemo, useRef } from "react";
+import stringWidth from "string-width";
 import { t } from "../../../i18n/index.js";
 import { CardRenderer } from "../cards/CardRenderer.js";
 import type { Card } from "../state/cards.js";
 import { useChatScrollActions, useChatScrollState } from "../state/chat-scroll-provider.js";
 import { useAgentState } from "../state/provider.js";
-import { FG, TONE } from "../theme/tokens.js";
+import { FG, SURFACE, TONE } from "../theme/tokens.js";
 
 /** Buffer of rows kept rendered on each side of the viewport so a single scroll
  * step doesn't reveal an unmeasured card. Larger = smoother but renders more. */
@@ -182,8 +183,18 @@ function ScrollIndicator({
       ? t("cardStream.scrollAbove", { scroll: scrollRows, max: maxScroll })
       : t("cardStream.scrollAbovePlural", { scroll: scrollRows, max: maxScroll });
   const more = remaining > 0 ? t("cardStream.scrollMore", { remaining }) : "";
-  const text = `${above}${more}${t("cardStream.scrollPgUp")}`;
-  return <Text color={hot ? TONE.accent : FG.faint}>{text}</Text>;
+  // `/copy` lives next to the scroll keys so users see the existing copy-mode
+  // entry without having to dig through /help. Padded to full terminal width
+  // so the background covers the whole row, not just up to the last char.
+  const text = `${above}${more}${t("cardStream.scrollPgUp")}${t("cardStream.scrollCopy")}`;
+  const { stdout } = useStdout();
+  const cols = stdout?.columns ?? 80;
+  const pad = Math.max(0, cols - stringWidth(text));
+  return (
+    <Text color={hot ? TONE.accent : FG.faint} backgroundColor={SURFACE.bgElev}>
+      {text + " ".repeat(pad)}
+    </Text>
+  );
 }
 
 function isFullySettled(card: Card): boolean {
