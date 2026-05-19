@@ -290,27 +290,27 @@ function fallbackSkillDesc(skill: SkillInfo): string {
   return t("app.skill.generic", { scope, runAs });
 }
 
+function nextMessageTurn(messages: ChatMessage[]): number {
+  const lastTurn = messages.reduce((max, m) => {
+    if (m.kind === "user" || m.kind === "assistant") return Math.max(max, m.turn);
+    return max;
+  }, 0);
+  return lastTurn + 1;
+}
+
 function reduce(state: State, action: Action): State {
   switch (action.t) {
     case "send_user": {
-      const lastTurn = state.messages.reduce((max, m) => {
-        if (m.kind === "user" || m.kind === "assistant") return Math.max(max, m.turn);
-        return max;
-      }, 0);
       return {
         ...state,
         busy: true,
         messages: [
           ...state.messages,
-          { kind: "user", text: action.text, clientId: action.clientId, turn: lastTurn + 1 },
+          { kind: "user", text: action.text, clientId: action.clientId, turn: nextMessageTurn(state.messages) },
         ],
       };
     }
     case "start_skill": {
-      const lastTurn = state.messages.reduce((max, m) => {
-        if (m.kind === "user" || m.kind === "assistant") return Math.max(max, m.turn);
-        return max;
-      }, 0);
       const argsLine = action.args ? ` ${action.args}` : "";
       return {
         ...state,
@@ -322,7 +322,7 @@ function reduce(state: State, action: Action): State {
             kind: "user",
             text: `/${action.skill.name}${argsLine}`,
             clientId: action.clientId,
-            turn: lastTurn + 1,
+            turn: nextMessageTurn(state.messages),
             skill: action.skill,
           },
         ],
@@ -540,8 +540,23 @@ function appendTextSegment(
   return [...segments, { kind, text }];
 }
 
-function applyIncoming(state: State, ev: IncomingEvent): State {
+export function applyIncoming(state: State, ev: IncomingEvent): State {
   switch (ev.type) {
+    case "user.message": {
+      return {
+        ...state,
+        busy: true,
+        messages: [
+          ...state.messages,
+          {
+            kind: "user",
+            text: ev.text,
+            clientId: `remote-${ev.id}`,
+            turn: ev.turn > 0 ? ev.turn : nextMessageTurn(state.messages),
+          },
+        ],
+      };
+    }
     case "$ready":
       return { ...state, ready: true, needsSetup: false };
     case "$needs_setup":
@@ -677,7 +692,8 @@ function applyIncoming(state: State, ev: IncomingEvent): State {
           sandbox: ev.sandbox,
           enabled: ev.enabled,
           configured: ev.configured,
-          connected: ev.connected,
+          runtimeState: ev.runtimeState,
+          lastError: ev.lastError,
           appIdPreview: ev.appIdPreview,
           access: ev.access,
         },

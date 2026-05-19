@@ -40,26 +40,10 @@ describe("desktop QQ settings helpers", () => {
       sandbox: true,
       enabled: true,
       configured: true,
-      // The desktop never holds a live channel — only the CLI does (#1317).
-      connected: false,
-      enabledForCli: true,
+      runtimeState: "disconnected",
       appIdPreview: "123456...",
       access: "owner abcdef...mnop",
     });
-  });
-
-  it("never reports `connected: true` even when credentials are saved and enabled (#1317)", () => {
-    saveQQConfig({ appId: "app", appSecret: "secret", sandbox: false, enabled: true }, path);
-    const state = loadDesktopQQState(path);
-    expect(state.connected).toBe(false);
-    expect(state.enabledForCli).toBe(true);
-  });
-
-  it("reports `enabledForCli: false` when credentials are missing OR the toggle is off", () => {
-    saveQQConfig({ enabled: true } as Parameters<typeof saveQQConfig>[0], path);
-    expect(loadDesktopQQState(path).enabledForCli).toBe(false);
-    saveQQConfig({ appId: "app", appSecret: "secret", enabled: false }, path);
-    expect(loadDesktopQQState(path).enabledForCli).toBe(false);
   });
 
   it("saves desktop QQ settings while preserving existing access controls", () => {

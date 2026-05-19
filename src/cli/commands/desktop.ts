@@ -52,7 +52,6 @@ import {
   pauseGate,
 } from "../../core/pause-gate.js";
 import { autoResolveVerdict } from "../../core/pause-policy.js";
-import { augmentProcessPath } from "../../desktop/login-shell-path.js";
 import {
   loadDesktopQQState,
   saveDesktopQQSettings,
@@ -71,6 +70,7 @@ import {
   timestampSuffix,
 } from "../../memory/session.js";
 import { MemoryStore } from "../../memory/user.js";
+import { QQChannel } from "../../qq/channel.js";
 import { SkillStore } from "../../skills.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
@@ -165,7 +165,8 @@ interface QQSettingsEvent {
   sandbox: boolean;
   enabled: boolean;
   configured: boolean;
-  connected: boolean;
+  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
+  lastError?: string;
   appIdPreview?: string;
   access: string;
 }
@@ -384,6 +385,13 @@ interface JobsEvent {
   items: JobInfoPayload[];
 }
 
+const desktopQqRuntimeSnapshot: {
+  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
+  lastError?: string;
+} = {
+  runtimeState: "disconnected",
+};
+
 interface RetryResultEvent {
   type: "$retry_result";
   text: string;
@@ -512,7 +520,16 @@ function emitSettings(tab: Tab): void {
 }
 
 function emitQQSettings(tab: Tab): void {
-  emit({ type: "$qq_settings", ...loadDesktopQQState() }, tab.id);
+  const base = loadDesktopQQState();
+  emit(
+    {
+      type: "$qq_settings",
+      ...base,
+      runtimeState: desktopQqRuntimeSnapshot.runtimeState,
+      lastError: desktopQqRuntimeSnapshot.lastError,
+    },
+    tab.id,
+  );
 }
 
 async function emitBalance(tab: Tab): Promise<void> {
@@ -816,16 +833,6 @@ export function installDesktopCrashGuards(
 
 export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   loadDotenv();
-  // Tauri spawns the bundled Node from the GUI process, which never runs the
-  // user's shell init (`.bashrc` / `.zshrc` / profile). Probe the login shell
-  // once so nvm / asdf / fnm / volta / mise PATH entries reach `run_command`
-  // children too (#1252). No-op on Windows — system PATH already covers GUI apps.
-  const augmented = augmentProcessPath();
-  if (augmented.added.length > 0) {
-    process.stderr.write(
-      `[desktop] augmented PATH with ${augmented.added.length} login-shell entries\n`,
-    );
-  }
   installDesktopCrashGuards();
 
   const tabs = new Map<string, Tab>();
@@ -836,6 +843,306 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   function activeRunningTab(): Tab | undefined {
     const id = tabContext.getStore();
     return id ? tabs.get(id) : undefined;
+  }
+
+  let first: Tab;
+
+  const qqRuntime = {
+    channel: null as QQChannel | null,
+    runtimeState: "disconnected" as "disconnected" | "connecting" | "connected" | "failed",
+    lastError: undefined as string | undefined,
+    pendingGateId: null as number | null,
+    interaction: { kind: null as string | null, payload: null as unknown },
+    replyThisTurn: false,
+  };
+
+  function currentQqSettings(): QQSettingsEvent {
+    const base = loadDesktopQQState();
+    return {
+      type: "$qq_settings",
+      ...base,
+      runtimeState: qqRuntime.runtimeState,
+      lastError: qqRuntime.lastError,
+    };
+  }
+
+  function activeDesktopTab(): Tab | undefined {
+    return (lastActiveTabId ? tabs.get(lastActiveTabId) : undefined) ?? first;
+  }
+
+  function broadcastQQSettings(): void {
+    for (const tab of tabs.values()) emit(currentQqSettings(), tab.id);
+  }
+
+  function setQQRuntimeState(
+    runtimeState: "disconnected" | "connecting" | "connected" | "failed",
+    lastError?: string,
+  ): void {
+    qqRuntime.runtimeState = runtimeState;
+    qqRuntime.lastError = lastError;
+    desktopQqRuntimeSnapshot.runtimeState = runtimeState;
+    desktopQqRuntimeSnapshot.lastError = lastError;
+    broadcastQQSettings();
+  }
+
+  function sendQQInfo(message: string): void {
+    const tab = activeDesktopTab();
+    if (tab) {
+      emit(
+        {
+          type: "status",
+          id: Date.now(),
+          ts: new Date().toISOString(),
+          turn: 0,
+          text: message,
+        },
+        tab.id,
+      );
+    }
+    void qqRuntime.channel?.sendResponse(message).catch((err) => {
+      const active = activeDesktopTab();
+      if (active) {
+        emit({ type: "$error", message: `qq send failed: ${(err as Error).message}` }, active.id);
+      }
+    });
+  }
+
+  function parseIndexedChoice(text: string): number {
+    const rawIndex = text.match(/^(\d+)/)?.[1];
+    return rawIndex ? Number.parseInt(rawIndex, 10) - 1 : -1;
+  }
+
+  function parseRunPermissionChoice(text: string): "run_once" | "always_allow" | "deny" {
+    const lower = text.toLowerCase();
+    if (lower.includes("1") || lower.includes("run")) return "run_once";
+    if (lower.includes("2") || lower.includes("always")) return "always_allow";
+    return "deny";
+  }
+
+  function parsePlanChoice(text: string): "approve" | "refine" | "cancel" {
+    const lower = text.toLowerCase();
+    if (lower.includes("1") || lower.includes("approve")) return "approve";
+    if (lower.includes("2") || lower.includes("refine")) return "refine";
+    return "cancel";
+  }
+
+  function parseCheckpointChoice(text: string): "continue" | "revise" | "stop" {
+    const lower = text.toLowerCase();
+    if (lower.includes("1") || lower.includes("continue")) return "continue";
+    if (lower.includes("2") || lower.includes("revise")) return "revise";
+    return "stop";
+  }
+
+  function parseRevisionChoice(text: string): "accept" | "reject" | "cancel" {
+    const lower = text.toLowerCase();
+    if (lower.includes("1") || lower.includes("accept")) return "accept";
+    if (lower.includes("2") || lower.includes("reject")) return "reject";
+    return "cancel";
+  }
+
+  function stripFollowupPrefix(text: string): string {
+    return text
+      .replace(
+        /^(?:\d+\s*|approve\s*|refine\s*|cancel\s*|continue\s*|revise\s*|stop\s*|accept\s*|reject\s*|run\s*|always\s*|deny\s*)/iu,
+        "",
+      )
+      .trim();
+  }
+
+  function handleQQPauseReply(text: string): boolean {
+    if (qqRuntime.interaction.kind === null || qqRuntime.pendingGateId === null) return false;
+    qqRuntime.replyThisTurn = true;
+    const followup = stripFollowupPrefix(text);
+    const interaction = qqRuntime.interaction;
+    qqRuntime.interaction = { kind: null, payload: null };
+    const gateId = qqRuntime.pendingGateId;
+    qqRuntime.pendingGateId = null;
+
+    switch (interaction.kind) {
+      case "run_command":
+      case "run_background":
+      case "path_access":
+        pauseGate.resolve(gateId, parseRunPermissionChoice(text));
+        return true;
+      case "plan_proposed": {
+        const payload = (interaction.payload as { plan?: string }) ?? {};
+        const choice = parsePlanChoice(text);
+        if (choice === "cancel") {
+          pauseGate.cancel(gateId);
+        } else {
+          pauseGate.resolve(gateId, {
+            type: choice === "approve" ? "approve" : "refine",
+            feedback: followup,
+            override: {
+              plan: payload.plan ?? "",
+              mode: choice === "approve" ? "approve" : "refine",
+            },
+          });
+        }
+        return true;
+      }
+      case "plan_checkpoint": {
+        const payload = (interaction.payload as { stepId?: string; title?: string }) ?? {};
+        const choice = parseCheckpointChoice(text);
+        if (choice === "revise") {
+          pauseGate.resolve(gateId, {
+            type: "revise",
+            feedback: followup,
+            checkpoint: { stepId: payload.stepId ?? "", title: payload.title },
+          });
+        } else {
+          pauseGate.resolve(gateId, { type: choice });
+        }
+        return true;
+      }
+      case "plan_revision":
+        pauseGate.resolve(gateId, parseRevisionChoice(text));
+        return true;
+      case "choice": {
+        const payload =
+          (interaction.payload as { options?: ChoiceOption[]; allowCustom?: boolean }) ?? {};
+        const options = payload.options ?? [];
+        const pickedIndex = parseIndexedChoice(text);
+        if (pickedIndex >= 0 && pickedIndex < options.length) {
+          const selected = options[pickedIndex];
+          if (selected) pauseGate.resolve(gateId, { type: "pick", optionId: selected.id });
+          return true;
+        }
+        for (const option of options) {
+          if (text.toLowerCase().includes(option.title.toLowerCase())) {
+            pauseGate.resolve(gateId, { type: "pick", optionId: option.id });
+            return true;
+          }
+        }
+        pauseGate.resolve(
+          gateId,
+          payload.allowCustom ? { type: "text", text } : { type: "cancel" },
+        );
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  function handleQQPauseRequest(tab: Tab, kind: string, payload: Record<string, unknown>): void {
+    if (!qqRuntime.channel) return;
+    qqRuntime.interaction = { kind, payload };
+    let qqMessage = "";
+    switch (kind) {
+      case "run_command":
+      case "run_background": {
+        const p = payload as { command: string };
+        qqMessage = `Need confirmation\n\nCommand: \`${p.command}\`\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
+        break;
+      }
+      case "path_access": {
+        const p = payload as { path: string; intent: "read" | "write"; toolName: string };
+        const intentText = p.intent === "read" ? "Read" : "Write";
+        qqMessage = `Need file access confirmation\n\nAction: ${intentText}\nPath: ${p.path}\nTool: ${p.toolName}\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
+        break;
+      }
+      case "plan_proposed": {
+        const p = payload as { plan: string };
+        qqMessage = `Plan confirmation\n\n${p.plan}\n\nReply with:\n1. Approve\n2. Refine\n3. Cancel`;
+        break;
+      }
+      case "plan_checkpoint": {
+        const p = payload as { title?: string; result: string };
+        qqMessage = `Step complete (${tab.completedStepIds.size}/${tab.planTotalSteps})\n\n${
+          p.title ? `Step: ${p.title}\n` : ""
+        }Result: ${p.result}\n\nReply with:\n1. Continue\n2. Revise\n3. Stop`;
+        break;
+      }
+      case "plan_revision": {
+        const p = payload as { reason: string };
+        qqMessage = `Plan revision proposed\n\n${p.reason}\n\nReply with:\n1. Accept\n2. Reject\n3. Cancel`;
+        break;
+      }
+      case "choice": {
+        const p = payload as { question: string; options: ChoiceOption[]; allowCustom: boolean };
+        const optionsList = p.options.map((opt, idx) => `${idx + 1}. ${opt.title}`).join("\n");
+        qqMessage = `Please choose\n\n${p.question}\n\nOptions:\n${optionsList}${
+          p.allowCustom ? "\n\n(You can also reply with custom text.)" : ""
+        }`;
+        break;
+      }
+    }
+    if (qqMessage) {
+      void qqRuntime.channel.sendResponse(qqMessage).catch((err) => {
+        emit({ type: "$error", message: `qq send failed: ${(err as Error).message}` }, tab.id);
+      });
+    }
+  }
+
+  async function startDesktopQQ(shouldPersistEnabled = true): Promise<void> {
+    const current = loadQQConfig();
+    if (!(current.appId && current.appSecret)) {
+      throw new Error("QQ App ID and App Secret are required.");
+    }
+    if (qqRuntime.channel) {
+      qqRuntime.channel.refreshAccessConfig();
+      setQQRuntimeState("connected");
+      return;
+    }
+    setQQRuntimeState("connecting");
+    const channel = new QQChannel({
+      onSubmitMessage: (text) => {
+        const tab = activeDesktopTab();
+        if (!tab) return;
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        emit(
+          {
+            type: "user.message",
+            id: Date.now(),
+            ts: new Date().toISOString(),
+            turn: 0,
+            text: trimmed,
+          },
+          tab.id,
+        );
+        if (handleQQPauseReply(trimmed)) return;
+        if (tab.aborter) {
+          void channel
+            .sendResponse(
+              "Session is busy. Wait for the current turn or reply to the pending prompt.",
+            )
+            .catch(() => undefined);
+          return;
+        }
+        qqRuntime.replyThisTurn = true;
+        void runTurn(tab, trimmed, true);
+      },
+      onError: (message) => {
+        const tab = activeDesktopTab();
+        setQQRuntimeState("failed", message);
+        if (tab) emit({ type: "$error", message: `QQ: ${message}` }, tab.id);
+      },
+    });
+    try {
+      await channel.start();
+      qqRuntime.channel = channel;
+      if (shouldPersistEnabled) setDesktopQQEnabled(true);
+      setQQRuntimeState("connected");
+    } catch (err) {
+      await channel.stop().catch(() => undefined);
+      qqRuntime.channel = null;
+      if (shouldPersistEnabled) setDesktopQQEnabled(false);
+      setQQRuntimeState("failed", (err as Error).message);
+      throw err;
+    }
+  }
+
+  async function stopDesktopQQ(shouldDisable = true): Promise<void> {
+    const channel = qqRuntime.channel;
+    qqRuntime.channel = null;
+    qqRuntime.interaction = { kind: null, payload: null };
+    qqRuntime.pendingGateId = null;
+    qqRuntime.replyThisTurn = false;
+    if (channel) await channel.stop();
+    if (shouldDisable) setDesktopQQEnabled(false);
+    setQQRuntimeState("disconnected");
   }
 
   /** Synchronous tab construction — no I/O. All cheap, disk-only events (`$settings`, `$sessions`, `$memory`, `$skills`, `$mcp_specs`) can fire against this immediately. The heavy bits (`buildCodeToolset`, MCP probes, runtime construction) happen in `initTabToolset` so the UI shell paints without waiting for them. */
@@ -983,10 +1290,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     emit({ type: "$tab_closed" }, tab.id);
   }
 
-  async function runTurn(tab: Tab, text: string): Promise<void> {
+  async function runTurn(tab: Tab, text: string, fromQQ = false): Promise<void> {
     if (!tab.runtime) return;
     const rt = tab.runtime;
     tab.aborter = new AbortController();
+    qqRuntime.replyThisTurn = fromQQ;
+    let lastAssistantText = "";
     if (tab.currentSession) {
       const existing = loadSessionMeta(tab.currentSession).summary;
       if (!existing || !existing.trim()) {
@@ -1003,6 +1312,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     await tabContext.run(tab.id, async () => {
       try {
         for await (const ev of rt.loop.step(text)) {
+          if (ev.role === "assistant_final" && ev.content) {
+            lastAssistantText = ev.content;
+          }
           for (const kev of rt.eventizer.consume(ev, rt.ctx)) emit(kev, tab.id);
           // Memory tools mutate disk state behind the loop's back — the UI
           // panel won't know until we re-emit. Without this the right-hand
@@ -1016,6 +1328,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emit({ type: "$error", message: (err as Error).message }, tab.id);
       } finally {
         tab.aborter = null;
+        if (fromQQ && lastAssistantText && qqRuntime.channel && qqRuntime.replyThisTurn) {
+          await qqRuntime.channel.sendResponse(lastAssistantText).catch((err) => {
+            emit({ type: "$error", message: `qq send failed: ${(err as Error).message}` }, tab.id);
+          });
+        }
+        qqRuntime.replyThisTurn = false;
         emit({ type: "$turn_complete" }, tab.id);
         if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
           tab.completedStepIds.clear();
@@ -1163,12 +1481,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   // assign it lazily below so saved-tabs restore (issue #933) can choose
   // the boot dir before construction, and rotate `first` to the next
   // surviving tab when its source closes.
-  let first: Tab;
-
   let shuttingDown = false;
   async function gracefulShutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
+    await stopDesktopQQ(false).catch(() => undefined);
     await Promise.allSettled(
       [...tabs.values()].map((t) => t.toolset?.jobs.shutdown(1500) ?? Promise.resolve()),
     );
@@ -1185,6 +1502,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const tab = activeRunningTab();
     const tabId = tab?.id;
     if (tab) tab.pendingGateIds.add(req.id);
+    qqRuntime.pendingGateId = req.id;
     // Shared auto-resolve policy (e.g. plan_checkpoint in auto/yolo) — must
     // still run BEFORE we emit any UI event, otherwise the surface flickers
     // a card that we'd immediately tear down.
@@ -1221,6 +1539,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         { type: "$confirm_required", id: req.id, kind: req.kind, command: payload.command ?? "" },
         tabId,
       );
+      if (tab) handleQQPauseRequest(tab, req.kind, payload as Record<string, unknown>);
       return;
     }
     if (req.kind === "path_access") {
@@ -1243,6 +1562,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         },
         tabId,
       );
+      if (tab) handleQQPauseRequest(tab, req.kind, payload as Record<string, unknown>);
       return;
     }
     if (req.kind === "choice") {
@@ -1261,6 +1581,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         },
         tabId,
       );
+      if (tab) handleQQPauseRequest(tab, req.kind, payload as Record<string, unknown>);
       return;
     }
     if (req.kind === "plan_proposed") {
@@ -1279,6 +1600,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         },
         tabId,
       );
+      if (tab) handleQQPauseRequest(tab, req.kind, payload as Record<string, unknown>);
       return;
     }
     if (req.kind === "plan_checkpoint") {
@@ -1312,6 +1634,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         },
         tabId,
       );
+      if (tab) handleQQPauseRequest(tab, req.kind, payload as Record<string, unknown>);
       return;
     }
     if (req.kind === "plan_revision") {
@@ -1330,6 +1653,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         },
         tabId,
       );
+      if (tab) handleQQPauseRequest(tab, req.kind, payload as Record<string, unknown>);
       return;
     }
     // Unknown PauseKind — `never` makes a new kind without a handler a compile
@@ -1425,6 +1749,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   const activeIdx = savedTabs.findIndex((t) => t.active);
   lastActiveTabId = ((activeIdx >= 0 ? restored[activeIdx] : first) ?? first).id;
   persistOpenTabs();
+  const qqConfig = loadQQConfig();
+  if (qqConfig.enabled && qqConfig.appId && qqConfig.appSecret) {
+    void startDesktopQQ(false).catch(() => undefined);
+  } else {
+    broadcastQQSettings();
+  }
 
   const rl = createInterface({ input: stdin });
   rl.on("line", (line) => {
@@ -1769,18 +2099,38 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "qq_connect") {
       try {
         const current = loadQQConfig();
-        setDesktopQQEnabled(true);
         emit(
           {
             type: "status",
             id: Date.now(),
             ts: new Date().toISOString(),
             turn: 0,
-            text: `QQ enabled for CLI (${current.sandbox ? "sandbox" : "production"}) — start the bot by running \`reasonix\` in a terminal`,
+            text: `QQ connecting (${current.sandbox ? "sandbox" : "production"})`,
           },
           tab.id,
         );
-        emitQQSettings(tab);
+        void startDesktopQQ(true).then(
+          () => {
+            emit(
+              {
+                type: "status",
+                id: Date.now(),
+                ts: new Date().toISOString(),
+                turn: 0,
+                text: `QQ connected (${current.sandbox ? "sandbox" : "production"})`,
+              },
+              tab.id,
+            );
+            emitQQSettings(tab);
+          },
+          (err) => {
+            emit(
+              { type: "$error", message: `qq_connect failed: ${(err as Error).message}` },
+              tab.id,
+            );
+            emitQQSettings(tab);
+          },
+        );
       } catch (err) {
         emit({ type: "$error", message: `qq_connect failed: ${(err as Error).message}` }, tab.id);
         emitQQSettings(tab);
@@ -1789,18 +2139,27 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "qq_disconnect") {
       try {
-        setDesktopQQEnabled(false);
-        emit(
-          {
-            type: "status",
-            id: Date.now(),
-            ts: new Date().toISOString(),
-            turn: 0,
-            text: "QQ disabled for CLI (next `reasonix` terminal session won't auto-start the bot)",
+        void stopDesktopQQ(true).then(
+          () => {
+            emit(
+              {
+                type: "status",
+                id: Date.now(),
+                ts: new Date().toISOString(),
+                turn: 0,
+                text: "QQ disabled",
+              },
+              tab.id,
+            );
+            emitQQSettings(tab);
           },
-          tab.id,
+          (err) => {
+            emit(
+              { type: "$error", message: `qq_disconnect failed: ${(err as Error).message}` },
+              tab.id,
+            );
+          },
         );
-        emitQQSettings(tab);
       } catch (err) {
         emit(
           { type: "$error", message: `qq_disconnect failed: ${(err as Error).message}` },

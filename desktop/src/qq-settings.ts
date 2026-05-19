@@ -6,10 +6,8 @@ export interface QQDesktopSettingsState {
   sandbox: boolean;
   enabled: boolean;
   configured: boolean;
-  /** Always false — desktop is a config editor; the channel runs in `reasonix` CLI (#1317). */
-  connected: boolean;
-  /** Credentials saved + enabled — next `reasonix` terminal session starts the bot. */
-  enabledForCli?: boolean;
+  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
+  lastError?: string;
   appIdPreview?: string;
   access: string;
 }
@@ -24,9 +22,16 @@ export function getQQConnectIntent(qq: QQDesktopSettingsState): "configure" | "c
 }
 
 export function getQQStatusLabel(qq: QQDesktopSettingsState): string {
-  if (qq.enabledForCli) return t("settings.qqEnabledForCli");
-  if (qq.configured) return t("settings.qqConfiguredDisabled");
-  return t("settings.qqNotConfigured");
+  switch (qq.runtimeState) {
+    case "connected":
+      return t("settings.qqConnected");
+    case "connecting":
+      return t("settings.qqConnecting");
+    case "failed":
+      return t("settings.qqFailed");
+    default:
+      return t("settings.qqDisconnected");
+  }
 }
 
 export function describeQQAccessLabel(access: string): string {

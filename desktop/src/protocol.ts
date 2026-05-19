@@ -271,10 +271,8 @@ export type QQSettingsEvent = {
   sandbox: boolean;
   enabled: boolean;
   configured: boolean;
-  /** Always false — desktop never holds a live QQ connection (#1317). Read enabledForCli instead. */
-  connected: boolean;
-  /** Credentials saved + enable toggle on. The next `reasonix` CLI run will start the channel. */
-  enabledForCli?: boolean;
+  runtimeState: "disconnected" | "connecting" | "connected" | "failed";
+  lastError?: string;
   appIdPreview?: string;
   access: string;
 };

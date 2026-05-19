@@ -4305,38 +4305,47 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   gap: 8px;
 }
 
-.qq-runtime-note {
-  font-size: 12px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin-bottom: 10px;
-  line-height: 1.5;
-}
-
-.qq-status-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 13px;
+.qq-status-btn {
+  min-width: 88px;
+  justify-content: center;
   font-weight: 600;
 }
 
-.qq-status-badge.on {
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-  border-color: color-mix(in srgb, var(--ok) 35%, var(--border));
+.qq-status-btn.qq-status-on {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
 }
 
-.qq-status-badge.off {
-  color: var(--tone-err);
-  background: color-mix(in srgb, var(--tone-err) 10%, transparent);
-  border-color: color-mix(in srgb, var(--tone-err) 30%, var(--border));
+.qq-status-btn.qq-status-on:hover {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.qq-status-btn.qq-status-off {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+}
+
+.qq-status-btn.qq-status-off:hover {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.qq-status-btn.qq-status-connecting {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+
+.qq-status-btn.qq-status-failed {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+}
+
+.qq-config-card .h {
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .qq-config-card {
