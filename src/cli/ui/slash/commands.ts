@@ -332,10 +332,10 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "search-engine",
     group: "advanced",
-    argsHint: "<mojeek|searxng|metaso> [<endpoint>]",
+    argsHint: "<mojeek|searxng|metaso|tavily|perplexity|exa> [<key>]",
     summary:
-      "switch web search backend — mojeek (default, no deps), searxng (self-hosted), or metaso (free quota 100/d)",
-    argCompleter: ["mojeek", "searxng", "metaso"],
+      "switch web search backend — mojeek (default, no deps), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), or exa (AI-native). Provider with no key prompts inline config.",
+    argCompleter: ["mojeek", "searxng", "metaso", "tavily", "perplexity", "exa"],
     aliases: ["se"],
   },
   {

@@ -143,14 +143,19 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), or "tavily" (LLM-friendly API, free tier). */
-  webSearchEngine?: "mojeek" | "searxng" | "metaso" | "tavily";
+  /** Web search engine backend: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), or "exa" (Exa API). */
+  webSearchEngine?: "mojeek" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   /** Base URL for SearXNG instance (default http://localhost:8080). */
   webSearchEndpoint?: string;
   /** Metaso API key. Falls back to METASO_API_KEY env var, then a built-in default. */
   metasoApiKey?: string;
   /** Tavily API key. Falls back to TAVILY_API_KEY env var. No baked-in default — free tier is 1000/mo per account, sharing would burn out. */
   tavilyApiKey?: string;
+  /** Perplexity API key. Falls back to PERPLEXITY_API_KEY env var. Get one at https://perplexity.ai/settings/api */
+  perplexityApiKey?: string;
+  /** Exa API key. Falls back to EXA_API_KEY env var. Free 1000/mo signup at https://exa.ai */
+  exaApiKey?: string;
+
   /** TUI mouse-wheel scrolling via SGR mouse tracking. Default true. Set false to fall back to native terminal drag-select for copy (then wheel is terminal-dependent — most terminals translate wheel→arrow in alt-screen, some don't). */
   mouseTracking?: boolean;
   dashboard?: {
@@ -282,6 +287,22 @@ export function loadMetasoApiKey(path: string = defaultConfigPath()): string {
 export function loadTavilyApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.TAVILY_API_KEY) return process.env.TAVILY_API_KEY.trim();
   const cfg = readConfig(path).tavilyApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
+/** Perplexity API key — env > config > undefined. Get one at https://perplexity.ai/settings/api */
+export function loadPerplexityApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.PERPLEXITY_API_KEY) return process.env.PERPLEXITY_API_KEY.trim();
+  const cfg = readConfig(path).perplexityApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
+/** Exa API key — env > config > undefined. Free 1000/mo signup at https://exa.ai */
+export function loadExaApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.EXA_API_KEY) return process.env.EXA_API_KEY.trim();
+  const cfg = readConfig(path).exaApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
   return undefined;
 }
@@ -640,11 +661,13 @@ export function searchEnabled(path: string = defaultConfigPath()): boolean {
 
 export function webSearchEngine(
   path: string = defaultConfigPath(),
-): "mojeek" | "searxng" | "metaso" | "tavily" {
+): "mojeek" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" {
   const cfg = readConfig(path).webSearchEngine;
   if (cfg === "searxng") return "searxng";
   if (cfg === "metaso") return "metaso";
   if (cfg === "tavily") return "tavily";
+  if (cfg === "perplexity") return "perplexity";
+  if (cfg === "exa") return "exa";
   return "mojeek";
 }
 

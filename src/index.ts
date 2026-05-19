@@ -294,6 +294,8 @@ export {
   loadApiKey,
   loadBaseUrl,
   loadMetasoApiKey,
+  loadPerplexityApiKey,
+  loadExaApiKey,
   readConfig,
   redactKey,
   saveApiKey,

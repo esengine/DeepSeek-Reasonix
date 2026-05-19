@@ -421,8 +421,8 @@ export const EN: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "switch web search backend — mojeek (default, no deps), searxng (self-hosted), or metaso (free quota 100/d)",
-      argsHint: "<mojeek|searxng|metaso> [<endpoint>]",
+        "switch web search backend — mojeek (default, no deps), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), or exa (AI-native)",
+      argsHint: "<mojeek|searxng|metaso|tavily|perplexity|exa> [<key>]",
     },
   },
   wizard: {
@@ -1160,6 +1160,10 @@ export const EN: TranslationSchema = {
         "  /search-engine metaso              use Metaso API (100/d free, configure your own API key for more)",
       usageTavily:
         "  /search-engine tavily              use Tavily API (LLM-friendly, free 1000/mo — set TAVILY_API_KEY or tavilyApiKey in config; get one at https://tavily.com)",
+      usagePerplexity:
+        "  /search-engine perplexity          use Perplexity AI (AI-native answer + citations — set PERPLEXITY_API_KEY or perplexityApiKey in config; get one at https://perplexity.ai/settings/api)",
+      usageExa:
+        "  /search-engine exa                 use Exa API (AI-native answer + citations, free 1000/mo — set EXA_API_KEY or exaApiKey in config; sign up at https://exa.ai)",
       alias: "Alias: /se",
       searxngInfo:
         "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
@@ -1170,8 +1174,16 @@ export const EN: TranslationSchema = {
         " There is a daily quota of 100 (configure your own API key for higher limits).",
       switchedTavilyNote:
         " Set TAVILY_API_KEY or `tavilyApiKey` in config; free 1000/mo at https://tavily.com.",
+      switchedPerplexityNote:
+        " Set PERPLEXITY_API_KEY or `perplexityApiKey` in config; get one at https://perplexity.ai/settings/api.",
+      switchedExaNote:
+        " Set EXA_API_KEY or `exaApiKey` in config; sign up at https://exa.ai.",
+      keyNeeded:
+        "No API key configured for \"{engine}\".\n\n  1. Set the {envVar} environment variable\n  2. Or provide one inline:  /search-engine {engine} <your-key>\n  3. Or add \"{engine}ApiKey\" to ~/.reasonix/config.json\n\nThen retry /search-engine {engine}.",
+      keySaved:
+        " API key saved to config.",
       confirmed:
-        '✓ Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
+        'Web search engine set to "{engine}"{detail}. Next assistant turn will pick up the change.',
       confirmedDetail: " ({endpoint})",
     },
     skill: {
@@ -1450,25 +1462,25 @@ export const EN: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine mojeek|searxng",
+      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
     rateLimit429:
       "web_search 429 \u2014 try: wait 10s before retrying, or rephrase the query; the search backend is rate-limiting this client",
     forbidden403:
-      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine mojeek|searxng, or wait and retry later",
+      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa, or wait and retry later",
     serverError5xx:
       "web_search {status} \u2014 try: open the search URL in a browser; if it loads this is transient and a retry in 30s may help",
     mojeekBlocked:
-      "web_search: Mojeek anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine searxng",
+      "web_search: Mojeek anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
     mojeekNoResults:
-      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine searxng",
+      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
     invalidEndpoint:
       'web_search: invalid SearXNG endpoint "{endpoint}" \u2014 try: set a valid URL with /search-endpoint http://host:port',
     endpointMustBeHttp:
       "web_search: SearXNG endpoint must be http(s), got {protocol} \u2014 try: set a valid URL with /search-endpoint http://host:port",
     cannotReach:
-      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to the default engine with /search-engine mojeek",
+      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to another engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
     searxngNoResults:
-      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine mojeek",
+      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
     metasoDailyLimit:
       "web_search: daily search limit reached for the default API key \u2014 set your own METASO_API_KEY env var or get one at https://metaso.cn/search-api/playground",
     metasoUnauthorized:
@@ -1476,7 +1488,7 @@ export const EN: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metaso rate-limited \u2014 wait and retry, or get your own API key at https://metaso.cn/search-api/playground",
     metasoServerError:
-      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek",
+      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
     metasoParseError:
       "web_search: Metaso returned unparseable response (HTTP {status}) \u2014 try again later",
     metasoApiError: "web_search: Metaso API error (code {code}: {message}) \u2014 try again later",
@@ -1485,11 +1497,31 @@ export const EN: TranslationSchema = {
     tavilyUnauthorized:
       "web_search: Tavily API key rejected \u2014 check TAVILY_API_KEY or get one at https://tavily.com",
     tavilyRateLimit:
-      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine mojeek, or upgrade your Tavily plan",
+      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa, or upgrade your Tavily plan",
     tavilyServerError:
-      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek",
+      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
     tavilyParseError:
       "web_search: Tavily returned unparseable response (HTTP {status}) \u2014 try again later",
+    perplexityMissingKey:
+      "web_search: Perplexity backend requires an API key \u2014 set PERPLEXITY_API_KEY env var or `perplexityApiKey` in ~/.reasonix/config.json; get one at https://perplexity.ai/settings/api",
+    perplexityUnauthorized:
+      "web_search: Perplexity API key rejected \u2014 check PERPLEXITY_API_KEY or get one at https://perplexity.ai/settings/api",
+    perplexityRateLimit:
+      "web_search: Perplexity rate-limited \u2014 wait and retry, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+    perplexityServerError:
+      "web_search: Perplexity server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+    perplexityParseError:
+      "web_search: Perplexity returned unparseable response (HTTP {status}) \u2014 try again later",
+    exaMissingKey:
+      "web_search: Exa backend requires an API key \u2014 set EXA_API_KEY env var or `exaApiKey` in ~/.reasonix/config.json; free 1000/mo signup at https://exa.ai",
+    exaUnauthorized:
+      "web_search: Exa API key rejected \u2014 check EXA_API_KEY or get one at https://exa.ai",
+    exaRateLimit:
+      "web_search: Exa API rate-limited or monthly quota exceeded \u2014 wait or upgrade at https://exa.ai/pricing",
+    exaServerError:
+      "web_search: Exa server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+    exaParseError:
+      "web_search: Exa returned unparseable response (HTTP {status}) \u2014 try again later",
     fetchStatus:
       "web_fetch {status} for {url} \u2014 try: confirm the URL resolves in a browser; status suggests the host returned an error page",
     fetchRateLimit429:

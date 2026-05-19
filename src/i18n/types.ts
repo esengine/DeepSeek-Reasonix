@@ -639,6 +639,16 @@ export interface TranslationSchema {
     tavilyRateLimit: string;
     tavilyServerError: string;
     tavilyParseError: string;
+    perplexityMissingKey: string;
+    perplexityUnauthorized: string;
+    perplexityRateLimit: string;
+    perplexityServerError: string;
+    perplexityParseError: string;
+    exaMissingKey: string;
+    exaUnauthorized: string;
+    exaRateLimit: string;
+    exaServerError: string;
+    exaParseError: string;
     fetchStatus: string;
     fetchRateLimit429: string;
     fetchForbidden403: string;

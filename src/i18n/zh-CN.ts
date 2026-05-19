@@ -406,8 +406,8 @@ export const zhCN: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "切换网络搜索后端 — mojeek（默认，无依赖）、searxng（自托管）或 metaso（每日 100 次免费额度）",
-      argsHint: "<mojeek|searxng|metaso> [<endpoint>]",
+        "切换网络搜索后端 — mojeek（默认，无依赖）、searxng（自托管）、metaso（每日 100 次）、tavily（每月 1000 次免费）、perplexity（AI 直接回答）或 exa（AI 直接回答）",
+      argsHint: "<mojeek|searxng|metaso|tavily|perplexity|exa> [<key>]",
     },
   },
   wizard: {
@@ -1097,6 +1097,10 @@ export const zhCN: TranslationSchema = {
         "  /search-engine metaso              使用 Metaso API（每天 100 次免费，配置你自己的 API 密钥可提升限额）",
       usageTavily:
         "  /search-engine tavily              使用 Tavily API（LLM 友好，每月 1000 次免费 — 设置 TAVILY_API_KEY 或 config 的 tavilyApiKey；注册 https://tavily.com）",
+      usagePerplexity:
+        "  /search-engine perplexity          使用 Perplexity AI（AI 直接回答 + 引用 — 设置 PERPLEXITY_API_KEY 或 config 的 perplexityApiKey；在 https://perplexity.ai/settings/api 获取密钥）",
+      usageExa:
+        "  /search-engine exa                 使用 Exa API（AI 直接回答 + 引用，每月 1000 次免费 — 设置 EXA_API_KEY 或 config 的 exaApiKey；注册 https://exa.ai）",
       alias: "别名：/se",
       searxngInfo: "SearXNG 是一个自托管的元搜索引擎（https://github.com/searxng/searxng）。",
       searxngInstall: "安装命令：  docker run -d -p 8080:8080 searxng/searxng",
@@ -1105,7 +1109,15 @@ export const zhCN: TranslationSchema = {
       switchedMetasoNote: " 每日限额 100 次（配置你自己的 API 密钥可提升限额）。",
       switchedTavilyNote:
         " 请设置环境变量 TAVILY_API_KEY 或 config 中的 `tavilyApiKey`；https://tavily.com 每月 1000 次免费。",
-      confirmed: '✓ 网页搜索引擎已设为 "{engine}"{detail}。下一轮模型调用将生效。',
+      switchedPerplexityNote:
+        " 请设置环境变量 PERPLEXITY_API_KEY 或 config 中的 `perplexityApiKey`；在 https://perplexity.ai/settings/api 获取密钥。",
+      switchedExaNote:
+        " 请设置环境变量 EXA_API_KEY 或 config 中的 `exaApiKey`；注册 https://exa.ai。",
+      keyNeeded:
+        "未配置 \"{engine}\" 的 API 密钥。\n\n  1. 设置环境变量 {envVar}\n  2. 或内联提供：/search-engine {engine} <your-key>\n  3. 或在 ~/.reasonix/config.json 中添加 \"{engine}ApiKey\"\n\n完成后重新执行 /search-engine {engine}。",
+      keySaved:
+        " API 密钥已保存到配置。",
+      confirmed: '网页搜索引擎已设为 "{engine}"{detail}。下一轮模型调用将生效。',
       confirmedDetail: "（{endpoint}）",
     },
     skill: {
@@ -1372,25 +1384,25 @@ export const zhCN: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} — try: 搜索后端返回错误；请改写查询，或使用 /search-engine mojeek|searxng 切换引擎",
+      "web_search {status} — try: 搜索后端返回错误；请改写查询，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     rateLimit429:
       "web_search 429 — try: 等待 10 秒后重试，或改写查询；搜索后端正在对该客户端进行限流",
     forbidden403:
-      "web_search 403 — try: 搜索后端拒绝该客户端访问；使用 /search-engine mojeek|searxng 切换引擎，或稍后重试",
+      "web_search 403 — try: 搜索后端拒绝该客户端访问；使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎，或稍后重试",
     serverError5xx:
       "web_search {status} — try: 在浏览器中打开搜索 URL；若能加载则属临时故障，等 30 秒重试即可",
     mojeekBlocked:
-      "web_search: Mojeek 反爬页面 — 频率限制或被屏蔽 — try: 等待 30 秒后重试，或使用 /search-engine searxng 切换引擎",
+      "web_search: Mojeek 反爬页面 — 频率限制或被屏蔽 — try: 等待 30 秒后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     mojeekNoResults:
-      "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）— try: 使用更简单的关键词改写查询，或使用 /search-engine searxng 切换引擎",
+      "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）— try: 使用更简单的关键词改写查询，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     invalidEndpoint:
       'web_search: 无效的 SearXNG 端点 "{endpoint}" — try: 使用 /search-endpoint http://host:port 设置有效的 URL',
     endpointMustBeHttp:
       "web_search: SearXNG 端点必须是 http(s) 协议，当前为 {protocol} — try: 使用 /search-endpoint http://host:port 设置有效的 URL",
     cannotReach:
-      "web_search: 无法访问 SearXNG 服务器 {endpoint} — try: 安装并启动 SearXNG（https://github.com/searxng/searxng，例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine mojeek 切换到默认引擎",
+      "web_search: 无法访问 SearXNG 服务器 {endpoint} — try: 安装并启动 SearXNG（https://github.com/searxng/searxng，例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     searxngNoResults:
-      "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）— try: 使用更简单的关键词改写查询，或使用 /search-engine mojeek 切换引擎",
+      "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）— try: 使用更简单的关键词改写查询，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     metasoDailyLimit:
       "web_search: 默认 API 密钥的每日搜索次数已达上限 — 设置 METASO_API_KEY 环境变量，或在 https://metaso.cn/search-api/playground 获取自己的密钥",
     metasoUnauthorized:
@@ -1398,7 +1410,7 @@ export const zhCN: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metaso 请求频率限制 — 等待后重试，或在 https://metaso.cn/search-api/playground 获取自己的密钥",
     metasoServerError:
-      "web_search: Metaso 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek 切换引擎",
+      "web_search: Metaso 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     metasoParseError: "web_search: Metaso 返回无法解析的响应（HTTP {status}）— 稍后重试",
     metasoApiError: "web_search: Metaso API 错误（code {code}: {message}）— 稍后重试",
     tavilyMissingKey:
@@ -1406,10 +1418,30 @@ export const zhCN: TranslationSchema = {
     tavilyUnauthorized:
       "web_search: Tavily API 密钥被拒绝 — 检查 TAVILY_API_KEY，或在 https://tavily.com 获取密钥",
     tavilyRateLimit:
-      "web_search: Tavily 请求频率限制或月度配额用尽 — 等待、用 /search-engine mojeek 切换引擎，或升级 Tavily 计划",
+      "web_search: Tavily 请求频率限制或月度配额用尽 — 等待、用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎，或升级 Tavily 计划",
     tavilyServerError:
-      "web_search: Tavily 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek 切换引擎",
+      "web_search: Tavily 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     tavilyParseError: "web_search: Tavily 返回无法解析的响应（HTTP {status}）— 稍后重试",
+    perplexityMissingKey:
+      "web_search: Perplexity 后端需要 API 密钥 — 设置 PERPLEXITY_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `perplexityApiKey`；在 https://perplexity.ai/settings/api 获取密钥",
+    perplexityUnauthorized:
+      "web_search: Perplexity API 密钥被拒绝 — 检查 PERPLEXITY_API_KEY，或在 https://perplexity.ai/settings/api 获取密钥",
+    perplexityRateLimit:
+      "web_search: Perplexity 请求频率限制 — 等待后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
+    perplexityServerError:
+      "web_search: Perplexity 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
+    perplexityParseError:
+      "web_search: Perplexity 返回无法解析的响应（HTTP {status}）— 稍后重试",
+    exaMissingKey:
+      "web_search: Exa 后端需要 API 密钥 — 设置 EXA_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `exaApiKey`；https://exa.ai 每月 1000 次免费",
+    exaUnauthorized:
+      "web_search: Exa API 密钥被拒绝 — 检查 EXA_API_KEY，或在 https://exa.ai 获取密钥",
+    exaRateLimit:
+      "web_search: Exa 请求频率限制或月度配额用尽 — 等待升级，或在 https://exa.ai/pricing 查看计划",
+    exaServerError:
+      "web_search: Exa 服务器错误（{status}）— 稍后重试，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
+    exaParseError:
+      "web_search: Exa 返回无法解析的响应（HTTP {status}）— 稍后重试",
     fetchStatus:
       "web_fetch {status} for {url} — try: 在浏览器中确认该 URL 能否访问；该状态码表明目标主机返回了错误页面",
     fetchRateLimit429:

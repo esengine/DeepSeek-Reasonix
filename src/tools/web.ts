@@ -2,7 +2,9 @@
 
 import { parse as parseHtml } from "node-html-parser";
 import {
+  loadExaApiKey,
   loadMetasoApiKey,
+  loadPerplexityApiKey,
   loadTavilyApiKey,
   webSearchEndpoint as loadWebSearchEndpoint,
   webSearchEngine as loadWebSearchEngine,
@@ -14,6 +16,8 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  /** AI-generated answer text — set by AI-native engines (Perplexity, Exa); undefined for traditional engines. */
+  answer?: string;
 }
 
 export interface PageContent {
@@ -35,8 +39,8 @@ export interface WebFetchOptions {
 export interface WebSearchOptions {
   topK?: number;
   signal?: AbortSignal;
-  /** Backend engine: "mojeek" (scrapes Mojeek HTML), "searxng" (self-hosted SearXNG JSON API), "metaso" (Metaso API), or "tavily" (LLM-friendly JSON API). */
-  engine?: "mojeek" | "searxng" | "metaso" | "tavily";
+  /** Backend engine: "mojeek" (scrapes Mojeek HTML), "searxng" (self-hosted SearXNG JSON API), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), or "exa" (Exa API). */
+  engine?: "mojeek" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -53,6 +57,8 @@ const USER_AGENT =
 const MOJEEK_ENDPOINT = "https://www.mojeek.com/search";
 const METASO_ENDPOINT = "https://metaso.cn/api/v1";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
+const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
+const EXA_ENDPOINT = "https://api.exa.ai/answer";
 
 /** Pick a status-specific webErrors key so the model gets an actionable hint, not a bare status. */
 function searchStatusError(status: number): string {
@@ -82,6 +88,12 @@ export async function webSearch(
   }
   if (opts.engine === "tavily") {
     return searchTavily(query, opts);
+  }
+  if (opts.engine === "perplexity") {
+    return searchPerplexity(query, opts);
+  }
+  if (opts.engine === "exa") {
+    return searchExa(query, opts);
   }
   return searchMojeek(query, opts);
 }
@@ -314,6 +326,172 @@ async function searchTavily(query: string, opts: WebSearchOptions = {}): Promise
     url: r.url,
     snippet: r.content ?? "",
   }));
+}
+
+// ── Perplexity ───────────────────────────────────────────────────────────────
+
+interface PerplexityChoice {
+  message?: { content?: string };
+}
+
+interface PerplexityResponse {
+  choices?: PerplexityChoice[];
+  citations?: unknown[];
+}
+
+async function searchPerplexity(
+  query: string,
+  opts: WebSearchOptions = {},
+): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadPerplexityApiKey();
+  if (!apiKey) throw new Error(t("webErrors.perplexityMissingKey"));
+
+  let resp: Response;
+  try {
+    resp = await fetch(PERPLEXITY_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [{ role: "user", content: query }],
+        max_tokens: 1024,
+        return_related_questions: false,
+      }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: PERPLEXITY_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.perplexityUnauthorized"));
+    }
+    if (resp.status === 429) throw new Error(t("webErrors.perplexityRateLimit"));
+    throw new Error(t("webErrors.perplexityServerError", { status: resp.status }));
+  }
+
+  const raw = await resp.text();
+  let data: PerplexityResponse;
+  try {
+    data = JSON.parse(raw) as PerplexityResponse;
+  } catch {
+    throw new Error(t("webErrors.perplexityParseError", { status: resp.status }));
+  }
+
+  const answer = data.choices?.[0]?.message?.content ?? "";
+  const citations = Array.isArray(data.citations) ? data.citations : [];
+
+  const results: SearchResult[] = [];
+
+  // First entry carries the AI answer
+  if (answer) {
+    results.push({ title: answer, url: "", snippet: "", answer });
+  }
+
+  const count = Math.min(citations.length, topK);
+  for (let i = 0; i < count; i++) {
+    const c = citations[i];
+    if (typeof c === "string") {
+      results.push({ title: `Source ${i + 1}`, url: c, snippet: "" });
+    } else if (c && typeof c === "object" && typeof (c as Record<string, unknown>).url === "string") {
+      const item = c as Record<string, unknown>;
+      results.push({
+        title: (typeof item.title === "string" ? item.title : `Source ${i + 1}`),
+        url: item.url as string,
+        snippet: "",
+      });
+    }
+  }
+
+  return results;
+}
+
+// ── Exa ─────────────────────────────────────────────────────────────────────
+
+interface ExaCitation {
+  url?: string;
+  title?: string;
+  text?: string;
+  publishedDate?: string;
+}
+
+interface ExaAnswerResponse {
+  answer?: string;
+  citations?: ExaCitation[];
+}
+
+async function searchExa(
+  query: string,
+  opts: WebSearchOptions = {},
+): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadExaApiKey();
+  if (!apiKey) throw new Error(t("webErrors.exaMissingKey"));
+
+  let resp: Response;
+  try {
+    resp = await fetch(EXA_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, text: true }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: EXA_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.exaUnauthorized"));
+    }
+    if (resp.status === 429) throw new Error(t("webErrors.exaRateLimit"));
+    throw new Error(t("webErrors.exaServerError", { status: resp.status }));
+  }
+
+  const raw = await resp.text();
+  let data: ExaAnswerResponse;
+  try {
+    data = JSON.parse(raw) as ExaAnswerResponse;
+  } catch {
+    throw new Error(t("webErrors.exaParseError", { status: resp.status }));
+  }
+
+  const answer = data.answer ?? "";
+  const citations = data.citations ?? [];
+
+  const results: SearchResult[] = [];
+
+  // First entry carries the AI answer
+  if (answer) {
+    results.push({ title: answer, url: "", snippet: "", answer });
+  }
+
+  const count = Math.min(citations.length, topK);
+  for (let i = 0; i < count; i++) {
+    const c = citations[i]!;
+    if (!c.url) continue;
+    results.push({
+      title: c.title || `Source ${i + 1}`,
+      url: c.url,
+      snippet: c.text ?? "",
+    });
+  }
+
+  return results;
 }
 
 /** Parse SearXNG HTML search results using node-html-parser. */
@@ -590,8 +768,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
   registry.register({
     name: "web_search",
     description:
-      "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this." +
-      " To change the backend, use /search-engine mojeek|searxng|metaso|tavily.",
+      "Search the public web. Returns ranked results with title, url, and snippet. Call this when the answer's correctness depends on current state — anything that changes over time (events, prices, releases, status of a thing in the real world). Composing such answers from training memory invents stale numbers; search first, then ground the answer in the results. For evergreen / definitional questions you don't need this.",
     readOnly: true,
     parallelSafe: true,
     parameters: {
@@ -600,7 +777,7 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
         query: { type: "string", description: "Natural-language search query." },
         topK: {
           type: "integer",
-          description: `Number of results to return (1..10). Default ${defaultTopK}.`,
+          description: `Number of results to return. Default ${defaultTopK}.`,
         },
       },
       required: ["query"],
@@ -646,11 +823,29 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
 }
 
 export function formatSearchResults(query: string, results: SearchResult[]): string {
-  const lines: string[] = [`query: ${query}`, `\nresults (${results.length}):`];
-  results.forEach((r, i) => {
-    lines.push(`\n${i + 1}. ${r.title}`);
-    lines.push(`   ${r.url}`);
-    if (r.snippet) lines.push(`   ${r.snippet}`);
-  });
+  const lines: string[] = [`query: ${query}`];
+
+  // Check if the first result carries an AI answer (Perplexity/Exa)
+  const hasAnswer = results.length > 0 && results[0]?.url === "" && results[0]?.answer;
+
+  if (hasAnswer) {
+    lines.push("\nanswer:");
+    lines.push(`  ${results[0]!.answer}`);
+    const sources = results.slice(1);
+    lines.push(`\nsources (${sources.length}):`);
+    sources.forEach((r, i) => {
+      lines.push(`\n${i + 1}. ${r.title}`);
+      lines.push(`   ${r.url}`);
+      if (r.snippet) lines.push(`   ${r.snippet}`);
+    });
+  } else {
+    lines.push(`\nresults (${results.length}):`);
+    results.forEach((r, i) => {
+      lines.push(`\n${i + 1}. ${r.title}`);
+      lines.push(`   ${r.url}`);
+      if (r.snippet) lines.push(`   ${r.snippet}`);
+    });
+  }
+
   return lines.join("\n");
 }
