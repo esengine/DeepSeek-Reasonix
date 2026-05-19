@@ -4039,12 +4039,14 @@ function AppInner({
           surviving past the first turn.
         */}
                   {!hasConversation && !busy && !isStreaming && slashMatches === null ? (
-                    <WelcomeBanner
-                      inCodeMode={!!codeMode}
-                      workspaceRoot={codeMode ? currentRootDir : undefined}
-                      dashboardUrl={dashboardUrl}
-                      languageVersion={languageVersion}
-                    />
+                    <Box flexGrow={1} justifyContent="center">
+                      <WelcomeBanner
+                        inCodeMode={!!codeMode}
+                        workspaceRoot={codeMode ? currentRootDir : undefined}
+                        dashboardUrl={dashboardUrl}
+                        languageVersion={languageVersion}
+                      />
+                    </Box>
                   ) : null}
                   <LiveActivityArea
                     noTakeoverOverlay={noTakeoverOverlay}
