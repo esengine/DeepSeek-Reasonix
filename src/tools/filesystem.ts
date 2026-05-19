@@ -26,13 +26,14 @@ export interface FilesystemToolsOptions {
   rootDir: string;
   /** false → register only read-side tools. Default true. */
   allowWriting?: boolean;
-  /** Files at or under this size get full content; larger go to outline mode. Default 512 KiB. */
+  /** Files at or under this size get full content; larger go to outline mode. Default 64 KiB. */
   outlineThresholdBytes?: number;
   /** Cap on total bytes from listing/grep tools — bounds tree-as-one-string accidents. */
   maxListBytes?: number;
 }
 
-const DEFAULT_OUTLINE_THRESHOLD_BYTES = 512 * 1024;
+/** 64 KiB covers ~99% of source files; larger ones (generated bundles, lockfiles, novels) outline-mode by default to keep the cache prefix slim. */
+const DEFAULT_OUTLINE_THRESHOLD_BYTES = 64 * 1024;
 const DEFAULT_MAX_LIST_BYTES = 256 * 1024;
 
 /** Refuse load above this; outline-mode would have to slurp the whole file to scan it. */

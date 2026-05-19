@@ -15,6 +15,7 @@ import {
   loadDesktopOpenTabs,
   loadEditMode,
   loadEngineeringLifecycleMode,
+  loadFilesystemOutlineThresholdBytes,
   loadIndexConfig,
   loadIndexUserConfig,
   loadPricingOverride,
@@ -388,6 +389,24 @@ describe("config", () => {
   it("loadEngineeringLifecycleMode coerces unknown values back to 'off'", () => {
     writeConfig({ engineeringLifecycle: { mode: "garbage" as any } }, path);
     expect(loadEngineeringLifecycleMode(path)).toBe("off");
+  });
+
+  it("loadFilesystemOutlineThresholdBytes returns undefined when unset (caller applies default)", () => {
+    expect(loadFilesystemOutlineThresholdBytes(path)).toBeUndefined();
+  });
+
+  it("loadFilesystemOutlineThresholdBytes accepts a positive integer", () => {
+    writeConfig({ filesystem: { outlineThresholdBytes: 524288 } }, path);
+    expect(loadFilesystemOutlineThresholdBytes(path)).toBe(524288);
+  });
+
+  it("loadFilesystemOutlineThresholdBytes ignores non-positive / non-numeric values", () => {
+    writeConfig({ filesystem: { outlineThresholdBytes: 0 } }, path);
+    expect(loadFilesystemOutlineThresholdBytes(path)).toBeUndefined();
+    writeConfig({ filesystem: { outlineThresholdBytes: -1 } }, path);
+    expect(loadFilesystemOutlineThresholdBytes(path)).toBeUndefined();
+    writeConfig({ filesystem: { outlineThresholdBytes: "big" as any } }, path);
+    expect(loadFilesystemOutlineThresholdBytes(path)).toBeUndefined();
   });
 
   it("loadReasoningEffort defaults to 'max' when unset", () => {

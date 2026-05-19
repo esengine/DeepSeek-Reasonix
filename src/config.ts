@@ -201,6 +201,10 @@ export interface ReasonixConfig {
   engineeringLifecycle?: {
     mode?: EngineeringLifecycleMode;
   };
+  filesystem?: {
+    /** read_file flips to outline mode for files above this. Default 64 KiB — keeps the cache prefix slim while covering ~99% of source files. Raise to 524288 (512 KiB) for the pre-0.46.0 "trust the cache" behavior. */
+    outlineThresholdBytes?: number;
+  };
   /** QQ Bot configuration */
   qq?: QQBotConfig;
 }
@@ -817,6 +821,15 @@ export function loadEngineeringLifecycleMode(
   const v = readConfig(path).engineeringLifecycle?.mode;
   if (v === "off" || v === "strict") return v;
   return "off";
+}
+
+/** Bytes above which `read_file` flips to outline mode. Returns `undefined` so callers can apply the registered default; non-positive / non-numeric config values fall through to the default too. */
+export function loadFilesystemOutlineThresholdBytes(
+  path: string = defaultConfigPath(),
+): number | undefined {
+  const v = readConfig(path).filesystem?.outlineThresholdBytes;
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return undefined;
+  return Math.floor(v);
 }
 
 /** True when the onboarding tip for the review/AUTO gate has been shown. */
