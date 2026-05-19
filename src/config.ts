@@ -149,6 +149,8 @@ export interface ReasonixConfig {
   metasoApiKey?: string;
   /** Tavily API key. Falls back to TAVILY_API_KEY env var. No baked-in default — free tier is 1000/mo per account, sharing would burn out. */
   tavilyApiKey?: string;
+  /** TUI mouse-wheel scrolling via SGR mouse tracking. Default true. Set false to fall back to native terminal drag-select for copy (then wheel is terminal-dependent — most terminals translate wheel→arrow in alt-screen, some don't). */
+  mouseTracking?: boolean;
   dashboard?: {
     /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
     port?: number;

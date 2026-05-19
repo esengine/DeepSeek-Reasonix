@@ -28,6 +28,7 @@ import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
 import { KeystrokeProvider } from "../ui/keystroke-context.js";
+import { disableMouseMode, enableMouseMode } from "../ui/mouse-mode.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
   type McpLifecycleNotice,
@@ -353,6 +354,23 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // a spurious MaxListenersExceededWarning. Raise the ceiling.
   process.stdout.setMaxListeners(200);
 
+  // Wheel scrolling. Opt-out via `mouseTracking: false` for users who
+  // prefer native drag-select copy (Shift+drag still selects with mouse
+  // mode on in most terminals). exit hooks cover hard kills so the
+  // sequence doesn't leak into the parent shell.
+  if (cfg.mouseTracking !== false) {
+    enableMouseMode();
+    process.once("exit", disableMouseMode);
+    process.once("SIGINT", () => {
+      disableMouseMode();
+      process.exit(130);
+    });
+    process.once("SIGTERM", () => {
+      disableMouseMode();
+      process.exit(143);
+    });
+  }
+
   const { waitUntilExit } = render(
     <Root
       initialKey={initialKey}
@@ -374,6 +392,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   try {
     await waitUntilExit();
   } finally {
+    disableMouseMode();
     await runtime.closeAll();
     qqChannel?.stop();
     await drainTtyResponses();
