@@ -432,3 +432,40 @@ describe("normalizeMcpConfig: extraLegacy parameter", () => {
     expect(result[0]!.name).toBe("fs");
   });
 });
+
+describe("normalizeMcpConfig: Claude .mcp.json compatibility", () => {
+  it("accepts `type` as alias for `transport`", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        local: { type: "stdio", command: "node", args: ["server.js"] },
+        events: { type: "sse", url: "https://example.com/sse" },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const local = findByName(result, "local")!;
+    expect(local.transport).toBe("stdio");
+    const events = findByName(result, "events")!;
+    expect(events.transport).toBe("sse");
+  });
+
+  it('treats `type: "http"` as `streamable-http`', () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        gh: { type: "http", url: "https://api.githubcopilot.com/mcp/" },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const gh = findByName(result, "gh")!;
+    expect(gh.transport).toBe("streamable-http");
+  });
+
+  it("`transport` still wins when both transport and type are set", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        odd: { transport: "stdio", type: "http", command: "node" },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    expect(result[0]!.transport).toBe("stdio");
+  });
+});

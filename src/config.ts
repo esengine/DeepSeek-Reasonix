@@ -84,6 +84,8 @@ export interface McpServerConfig {
   args?: string[];
   env?: Record<string, string>;
   transport?: "stdio" | "sse" | "streamable-http";
+  /** Claude `.mcp.json` alias for `transport`; `"http"` is treated as `"streamable-http"`. */
+  type?: "stdio" | "sse" | "streamable-http" | "http";
   url?: string;
   headers?: Record<string, string>;
   disabled?: boolean;
@@ -313,7 +315,10 @@ export function mcpEnvFor(
 }
 
 function inferMcpTransport(cfg: McpServerConfig): "stdio" | "sse" | "streamable-http" {
-  if (cfg.transport) return cfg.transport;
+  // Claude's `.mcp.json` uses `type` and shortens `streamable-http` to `http`.
+  const declared = cfg.transport ?? cfg.type;
+  if (declared === "http") return "streamable-http";
+  if (declared) return declared;
   const url = cfg.url?.trim() ?? "";
   if (/^streamable\+https?:\/\//i.test(url)) return "streamable-http";
   if (/^https?:\/\//i.test(url)) return "sse";

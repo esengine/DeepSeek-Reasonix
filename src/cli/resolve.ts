@@ -1,6 +1,7 @@
 /** Precedence: per-setting flag > --preset > config.preset > "auto" defaults. */
 
 import { type PresetName, type ReasonixConfig, normalizeMcpConfig, readConfig } from "../config.js";
+import { loadDotMcpJson } from "../mcp/dot-mcp-json.js";
 import { specToRaw } from "../mcp/spec.js";
 import { presetNameForSettings, resolvePreset } from "./ui/presets.js";
 
@@ -34,11 +35,16 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
   const autoEscalate = flags.model ? false : presetSettings.autoEscalate;
   const reasoningEffort = presetSettings.reasoningEffort;
 
+  // Project-level `.mcp.json` merges in before normalization. Project entries
+  // override user `mcpServers` on name collision — same precedence Claude uses
+  // for shared, git-committed configs. Skipped under `--no-config`.
+  const merged = flags.noConfig ? cfg : mergeDotMcpJson(cfg, process.cwd());
+
   // `--mcp` accumulator is [] when absent. Treat empty from flags as
   // "user didn't pass" → fall through to config. Users who explicitly
   // want zero MCP servers can pass `--no-config` or edit the file.
   const normalizedMcp = normalizeMcpConfig(
-    cfg,
+    merged,
     flags.mcp && flags.mcp.length > 0 ? flags.mcp : undefined,
   );
   const mcp = normalizedMcp.map(specToRaw);
@@ -46,6 +52,12 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
   const session = resolveSession(flags.session, cfg.session);
 
   return { model, preset: presetName, autoEscalate, reasoningEffort, mcp, session };
+}
+
+function mergeDotMcpJson(cfg: ReasonixConfig, projectRoot: string): ReasonixConfig {
+  const project = loadDotMcpJson(projectRoot);
+  if (!project) return cfg;
+  return { ...cfg, mcpServers: { ...(cfg.mcpServers ?? {}), ...project } };
 }
 
 function pickPreset(

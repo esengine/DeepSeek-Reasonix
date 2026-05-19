@@ -1,6 +1,6 @@
 /** resolveDefaults — flags vs config precedence; silent failures here are user-visible "config does nothing" bugs. */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -121,6 +121,65 @@ describe("resolveDefaults", () => {
     writeConfig({ session: null }, join(home, ".reasonix", "config.json"));
     const r = resolveDefaults({});
     expect(r.session).toBeUndefined();
+  });
+
+  describe("Claude .mcp.json compatibility", () => {
+    let cwd: string;
+    const origCwd = process.cwd();
+
+    beforeEach(() => {
+      cwd = mkdtempSync(join(tmpdir(), "reasonix-cwd-"));
+      process.chdir(cwd);
+    });
+
+    afterEach(() => {
+      process.chdir(origCwd);
+      rmSync(cwd, { recursive: true, force: true });
+    });
+
+    it("merges project-level .mcp.json into resolved mcp specs", () => {
+      writeFileSync(
+        join(cwd, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            gh: { type: "http", url: "https://api.githubcopilot.com/mcp/" },
+          },
+        }),
+        "utf8",
+      );
+      const r = resolveDefaults({});
+      expect(r.mcp.some((s) => s.includes("gh="))).toBe(true);
+    });
+
+    it("project .mcp.json overrides user mcpServers on name collision", () => {
+      writeConfig(
+        {
+          mcpServers: { gh: { command: "user-level-cmd" } },
+        },
+        join(home, ".reasonix", "config.json"),
+      );
+      writeFileSync(
+        join(cwd, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: { gh: { type: "stdio", command: "project-level-cmd" } },
+        }),
+        "utf8",
+      );
+      const r = resolveDefaults({});
+      const ghEntry = r.mcp.find((s) => s.startsWith("gh="))!;
+      expect(ghEntry).toContain("project-level-cmd");
+      expect(ghEntry).not.toContain("user-level-cmd");
+    });
+
+    it("--no-config skips .mcp.json entirely", () => {
+      writeFileSync(
+        join(cwd, ".mcp.json"),
+        JSON.stringify({ mcpServers: { gh: { type: "stdio", command: "node" } } }),
+        "utf8",
+      );
+      const r = resolveDefaults({ noConfig: true });
+      expect(r.mcp).toEqual([]);
+    });
   });
 });
 

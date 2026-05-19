@@ -125,10 +125,16 @@ export class SkillStore {
         dir: join(this.projectRoot, ".agents", SKILLS_DIRNAME),
         scope: "project",
       });
+      // Claude Code compatibility — a user's `.claude/skills/` folder works as-is.
+      out.push({
+        dir: join(this.projectRoot, ".claude", SKILLS_DIRNAME),
+        scope: "project",
+      });
     }
     for (const dir of this.customSkillPaths) out.push({ dir, scope: "custom" });
     out.push({ dir: join(this.homeDir, ".reasonix", SKILLS_DIRNAME), scope: "global" });
     out.push({ dir: join(this.homeDir, ".agents", SKILLS_DIRNAME), scope: "global" });
+    out.push({ dir: join(this.homeDir, ".claude", SKILLS_DIRNAME), scope: "global" });
     return out.map((root, priority) => ({ ...root, priority, status: skillPathStatus(root.dir) }));
   }
 
@@ -246,14 +252,22 @@ export class SkillStore {
     }
     const { data, body } = parseFrontmatter(raw);
     const name = data.name && isValidSkillName(data.name) ? data.name : stem;
+    const description = (data.description ?? "").trim();
+    // Surface the silent-pin failure mode at parse time. Builtins always have
+    // a description so user-authored files are the only ones that hit this.
+    if (!description) {
+      console.warn(
+        `[skills] "${name}" at ${path} has no description: — it will be loaded but won't appear in the skills index.`,
+      );
+    }
     return {
       name,
-      description: (data.description ?? "").trim(),
+      description,
       body: body.trim(),
       scope,
       path,
       allowedTools: parseAllowedTools(data["allowed-tools"]),
-      runAs: parseRunAs(data.runAs),
+      runAs: parseRunAs(data.runAs, data.context, data.agent),
       model: data.model?.startsWith("deepseek-") ? data.model : undefined,
     };
   }
@@ -295,9 +309,17 @@ export function skillPathStatus(dir: string): SkillPathStatus {
   }
 }
 
-/** Unknown values default to the safe (non-spawning) `inline` mode. */
-function parseRunAs(raw: string | undefined): SkillRunAs {
-  return raw?.trim() === "subagent" ? "subagent" : "inline";
+/** Unknown values default to the safe (non-spawning) `inline` mode. Claude SKILL.md
+ *  uses `context: fork` or a non-empty `agent:` field for the same intent. */
+function parseRunAs(
+  raw: string | undefined,
+  context: string | undefined,
+  agent: string | undefined,
+): SkillRunAs {
+  if (raw?.trim() === "subagent") return "subagent";
+  if (context?.trim().toLowerCase() === "fork") return "subagent";
+  if (agent?.trim()) return "subagent";
+  return "inline";
 }
 
 /** Stub markdown for `/skill new` — minimal frontmatter + scaffolding the user fills in. */

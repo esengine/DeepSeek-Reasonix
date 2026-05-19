@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillStore, applySkillsIndex, validateSkillFrontmatter } from "../src/skills.js";
 
 const BASE = "You are a test assistant.";
@@ -514,6 +514,88 @@ describe("Skill frontmatter — runAs", () => {
     );
     const store = new SkillStore({ homeDir: home, disableBuiltins: true });
     expect(store.read("empty")?.allowedTools).toBeUndefined();
+  });
+
+  describe("Claude SKILL.md aliases", () => {
+    function writeClaudeSkill(
+      base: string,
+      where: "global" | "project",
+      name: string,
+      frontmatter: Record<string, string>,
+      body: string,
+    ): void {
+      const parent =
+        where === "global" ? join(base, ".claude", "skills") : join(base, ".claude", "skills");
+      const dir = join(parent, name);
+      mkdirSync(dir, { recursive: true });
+      const fmLines = ["---"];
+      for (const [k, v] of Object.entries(frontmatter)) fmLines.push(`${k}: ${v}`);
+      fmLines.push("---", "");
+      writeFileSync(join(dir, "SKILL.md"), `${fmLines.join("\n")}${body}\n`, "utf8");
+    }
+
+    it("reads skills from ~/.claude/skills/", () => {
+      writeClaudeSkill(home, "global", "from-claude", { description: "lifted from Claude" }, "go");
+      const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+      const skill = store.read("from-claude");
+      expect(skill?.description).toBe("lifted from Claude");
+      expect(skill?.scope).toBe("global");
+    });
+
+    it("reads skills from <project>/.claude/skills/", () => {
+      const project = mkdtempSync(join(tmpdir(), "reasonix-skills-proj-"));
+      try {
+        writeClaudeSkill(project, "project", "proj-skill", { description: "from project" }, "go");
+        const store = new SkillStore({
+          homeDir: home,
+          projectRoot: project,
+          disableBuiltins: true,
+        });
+        const skill = store.read("proj-skill");
+        expect(skill?.description).toBe("from project");
+        expect(skill?.scope).toBe("project");
+      } finally {
+        rmSync(project, { recursive: true, force: true });
+      }
+    });
+
+    it("treats `context: fork` as runAs: subagent", () => {
+      writeSkillDir(
+        home,
+        "global",
+        "forked",
+        { description: "...", context: "fork" },
+        "body",
+        home,
+      );
+      const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+      expect(store.read("forked")?.runAs).toBe("subagent");
+    });
+
+    it("treats non-empty `agent:` as runAs: subagent", () => {
+      writeSkillDir(
+        home,
+        "global",
+        "agented",
+        { description: "...", agent: "Explore" },
+        "body",
+        home,
+      );
+      const store = new SkillStore({ homeDir: home, disableBuiltins: true });
+      expect(store.read("agented")?.runAs).toBe("subagent");
+    });
+
+    it("warns to console when description is missing", () => {
+      writeSkillDir(home, "global", "no-desc", { name: "no-desc" }, "body", home);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        new SkillStore({ homeDir: home, disableBuiltins: true }).read("no-desc");
+        expect(warn).toHaveBeenCalledOnce();
+        expect(warn.mock.calls[0]![0]).toMatch(/no description/);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });
 
