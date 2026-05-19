@@ -187,6 +187,7 @@ export const EN: TranslationSchema = {
     tipShownOnce: "shown once",
     modelOverride: "override the default model",
     noSession: "disable session persistence for this run",
+    noMouseHint: "disable SGR mouse tracking; restores native drag-select and right-click",
     resumeHint: "force-resume the named session (even if idle)",
     newHint: "force a fresh session (ignore --session / --continue)",
     transcriptHint: "path to write the JSONL transcript",

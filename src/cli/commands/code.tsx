@@ -63,6 +63,8 @@ export interface CodeOptions {
   systemAppend?: string;
   /** Path to a UTF-8 text file whose contents are appended to the code system prompt. */
   systemAppendFile?: string;
+  /** Disable SGR mouse tracking so the terminal keeps native selection and right-click behavior. */
+  noMouse?: boolean;
 }
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
@@ -182,5 +184,6 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     dashboardPort: opts.dashboardPort,
     dashboardHost: opts.dashboardHost,
     dashboardToken: opts.dashboardToken,
+    noMouse: opts.noMouse,
   });
 }

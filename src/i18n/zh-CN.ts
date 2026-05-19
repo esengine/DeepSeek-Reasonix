@@ -180,6 +180,7 @@ export const zhCN: TranslationSchema = {
     tipShownOnce: "仅显示一次",
     modelOverride: "覆盖默认模型",
     noSession: "禁用本次运行的会话持久化",
+    noMouseHint: "关闭 SGR 鼠标跟踪；恢复终端原生拖选和右键行为",
     resumeHint: "强制恢复指定会话（即使空闲）",
     newHint: "强制创建新会话（忽略 --session / --continue）",
     transcriptHint: "JSONL 转录稿的写入路径",

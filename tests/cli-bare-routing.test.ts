@@ -72,7 +72,7 @@ describe("bare CLI routing", () => {
     await importCli([]);
 
     await vi.waitFor(() =>
-      expect(codeCommand).toHaveBeenCalledWith({ dir: cwd, forceResume: false }),
+      expect(codeCommand).toHaveBeenCalledWith({ dir: cwd, forceResume: false, noMouse: false }),
     );
     expect(chatCommand).not.toHaveBeenCalled();
   });
@@ -83,7 +83,7 @@ describe("bare CLI routing", () => {
     await importCli([]);
 
     await vi.waitFor(() =>
-      expect(codeCommand).toHaveBeenCalledWith({ dir: cwd, forceResume: false }),
+      expect(codeCommand).toHaveBeenCalledWith({ dir: cwd, forceResume: false, noMouse: false }),
     );
     expect(chatCommand).not.toHaveBeenCalled();
     expect(stderr.mock.calls.map((call) => String(call[0])).join("")).not.toContain(
@@ -97,7 +97,17 @@ describe("bare CLI routing", () => {
     await importCli(["-c"]);
 
     await vi.waitFor(() =>
-      expect(codeCommand).toHaveBeenCalledWith({ dir: cwd, forceResume: true }),
+      expect(codeCommand).toHaveBeenCalledWith({ dir: cwd, forceResume: true, noMouse: false }),
+    );
+  });
+
+  it("forwards bare --no-mouse to code mode", async () => {
+    writeConfig({ setupCompleted: true }, join(home, ".reasonix", "config.json"));
+
+    await importCli(["--no-mouse"]);
+
+    await vi.waitFor(() =>
+      expect(codeCommand).toHaveBeenCalledWith({ dir: cwd, forceResume: false, noMouse: true }),
     );
   });
 

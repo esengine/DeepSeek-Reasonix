@@ -100,6 +100,8 @@ export interface ChatOptions {
   dashboardHost?: string;
   /** Stable dashboard URL token (#968). `undefined` mints a fresh per-boot token. */
   dashboardToken?: string;
+  /** Disable SGR mouse tracking so the terminal keeps native selection and right-click behavior. */
+  noMouse?: boolean;
 }
 
 interface RootProps extends ChatOptions {
@@ -349,7 +351,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // prefer native drag-select copy (Shift+drag still selects with mouse
   // mode on in most terminals). exit hooks cover hard kills so the
   // sequence doesn't leak into the parent shell.
-  if (cfg.mouseTracking !== false) {
+  if (!opts.noMouse && cfg.mouseTracking !== false) {
     enableMouseMode();
     process.once("exit", disableMouseMode);
     process.once("SIGINT", () => {

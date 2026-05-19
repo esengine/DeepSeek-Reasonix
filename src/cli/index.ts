@@ -124,12 +124,13 @@ program
   .name("reasonix")
   .description(t("cli.description"))
   .version(VERSION)
-  .option("-c, --continue", t("cli.continue"));
+  .option("-c, --continue", t("cli.continue"))
+  .option("--no-mouse", t("ui.noMouseHint"));
 
 // `reasonix` with no subcommand → setup wizard on first run, otherwise `code`
 // in the current directory. Filesystem-less chat stays reachable via
 // `reasonix chat`.
-program.action(async (opts: { continue?: boolean }) => {
+program.action(async (opts: { continue?: boolean; mouse?: boolean }) => {
   const cfg = readConfig();
   const mode = resolveBareCommandMode(cfg);
   if (mode === "setup") {
@@ -138,7 +139,11 @@ program.action(async (opts: { continue?: boolean }) => {
     return;
   }
   const { codeCommand } = await import("./commands/code.js");
-  await codeCommand({ dir: process.cwd(), forceResume: !!opts.continue });
+  await codeCommand({
+    dir: process.cwd(),
+    forceResume: !!opts.continue,
+    noMouse: opts.mouse === false,
+  });
 });
 
 program
@@ -154,6 +159,7 @@ program
   .description(t("cli.code"))
   .option("-m, --model <id>", t("ui.modelOverride"))
   .option("--no-session", t("ui.noSession"))
+  .option("--no-mouse", t("ui.noMouseHint"))
   .option("-r, --resume", t("ui.resumeHint"))
   .option("-n, --new", t("ui.newHint"))
   .option("--transcript <path>", t("ui.transcriptHint"))
@@ -188,6 +194,7 @@ program
         dashboardPort: resolveDashboardPort(parseDashboardPortFlag(opts.dashboardPort), false),
         dashboardHost: resolveDashboardHost(opts.dashboardHost, false),
         dashboardToken: resolveDashboardToken(false),
+        noMouse: opts.mouse === false,
         systemAppend: opts.systemAppend,
         systemAppendFile: opts.systemAppendFile,
       });
@@ -206,6 +213,7 @@ program
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
   .option("--session <name>", t("ui.sessionNameHint"))
   .option("--no-session", t("ui.ephemeralHint"))
+  .option("--no-mouse", t("ui.noMouseHint"))
   .option("-r, --resume", t("ui.resumeHint"))
   .option("-c, --continue", t("cli.continue"))
   .option("-n, --new", t("ui.newHint"))
@@ -275,6 +283,7 @@ program
         ),
         dashboardHost: resolveDashboardHost(opts.dashboardHost, opts.config === false),
         dashboardToken: resolveDashboardToken(opts.config === false),
+        noMouse: opts.mouse === false,
       });
     } finally {
       if (profiling) await stopAndSaveCpuProfile();

@@ -96,6 +96,7 @@ export interface TranslationSchema {
     tipShownOnce: string;
     modelOverride: string;
     noSession: string;
+    noMouseHint: string;
     resumeHint: string;
     newHint: string;
     transcriptHint: string;
