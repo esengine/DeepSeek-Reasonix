@@ -16,6 +16,8 @@ export interface SlashSuggestionsProps {
   groupMode?: boolean;
   /** Count of hidden `advanced` commands; rendered as a footer hint when groupMode is true. */
   advancedHidden?: number;
+  /** User-favorited command names — shown with a ★ marker. */
+  favorites?: readonly string[];
 }
 
 function groupLabel(group: SlashGroup): string {
@@ -28,6 +30,7 @@ export function SlashSuggestions({
   selectedIndex,
   groupMode,
   advancedHidden,
+  favorites,
 }: SlashSuggestionsProps): React.ReactElement | null {
   const color = useColor();
   const { stdout } = useStdout();
@@ -65,6 +68,7 @@ export function SlashSuggestions({
     );
   }
   const total = matches.length;
+  const favSet = favorites && favorites.length > 0 ? new Set(favorites) : null;
   const items = buildVisibleItems(matches, windowStart, maxRows, groupMode);
   const shownCommands = items.filter((item) => item.kind === "command");
   const hiddenAbove = windowStart;
@@ -95,6 +99,7 @@ export function SlashSuggestions({
             spec={item.spec}
             isSelected={item.index === selectedIndex}
             columns={cols}
+            isFavorite={favSet?.has(item.spec.cmd) ?? false}
           />
         );
       })}
@@ -176,10 +181,12 @@ function SuggestionRow({
   spec,
   isSelected,
   columns,
+  isFavorite,
 }: {
   spec: SlashCommandSpec;
   isSelected: boolean;
   columns: number;
+  isFavorite: boolean;
 }) {
   const color = useColor();
   const name = `/${spec.cmd}`;
@@ -206,6 +213,7 @@ function SuggestionRow({
       <Text color={isSelected ? color.user : color.info} dimColor={!isSelected} wrap="truncate">
         {summaryText}
       </Text>
+      {isFavorite ? <Text color={color.accent}> ★</Text> : null}
     </Box>
   );
 }

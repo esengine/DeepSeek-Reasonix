@@ -388,8 +388,10 @@ export function suggestSlashCommands(
   prefix: string,
   codeMode = false,
   counts?: Readonly<Record<string, number>>,
+  favorites?: readonly string[],
 ): SlashCommandSpec[] {
   const p = prefix.toLowerCase();
+  const favSet = favorites && favorites.length > 0 ? new Set(favorites) : null;
   const matches = SLASH_COMMANDS.filter((c) => {
     // Empty prefix = browsing the menu — show the full release command surface except
     // advanced rows, which remain collapsed behind the footer hint.
@@ -398,14 +400,30 @@ export function suggestSlashCommands(
     if (c.cmd.startsWith(p)) return true;
     return c.aliases?.some((a) => a.startsWith(p)) ?? false;
   });
-  if (p === "") return orderSlashCommandsByGroup(matches);
-  if (!counts) return matches;
+  if (p === "") {
+    const grouped = orderSlashCommandsByGroup(matches);
+    if (!favSet) return grouped;
+    // Favorites first, then non-favorites — both preserve group order within.
+    const favs = grouped.filter((c) => favSet.has(c.cmd));
+    const rest = grouped.filter((c) => !favSet.has(c.cmd));
+    return [...favs, ...rest];
+  }
+  if (!counts) {
+    if (!favSet) return matches;
+    const favs = matches.filter((c) => favSet.has(c.cmd));
+    const rest = matches.filter((c) => !favSet.has(c.cmd));
+    return [...favs, ...rest];
+  }
   const indexOf = new Map(matches.map((s, i) => [s.cmd, i]));
-  return [...matches].sort((a, b) => {
+  const sorted = [...matches].sort((a, b) => {
     const diff = (counts[b.cmd] ?? 0) - (counts[a.cmd] ?? 0);
     if (diff !== 0) return diff;
     return (indexOf.get(a.cmd) ?? 0) - (indexOf.get(b.cmd) ?? 0);
   });
+  if (!favSet) return sorted;
+  const favs = sorted.filter((c) => favSet.has(c.cmd));
+  const rest = sorted.filter((c) => !favSet.has(c.cmd));
+  return [...favs, ...rest];
 }
 
 export function countAdvancedCommands(codeMode: boolean): number {

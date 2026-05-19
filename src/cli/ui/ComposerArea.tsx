@@ -52,6 +52,7 @@ export interface ComposerAreaProps {
   slashSelected: SlashSuggestionsProps["selectedIndex"];
   slashGroupMode: SlashSuggestionsProps["groupMode"];
   slashAdvancedHidden: SlashSuggestionsProps["advancedHidden"];
+  slashFavorites: SlashSuggestionsProps["favorites"];
 
   atState: React.ComponentProps<typeof AtMentionSuggestions>["state"] | null;
   atSelected: React.ComponentProps<typeof AtMentionSuggestions>["selectedIndex"];
@@ -108,6 +109,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     slashSelected,
     slashGroupMode,
     slashAdvancedHidden,
+    slashFavorites,
     atState,
     atSelected,
     slashArgContext,
@@ -124,6 +126,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
               selectedIndex={slashSelected}
               groupMode={slashGroupMode}
               advancedHidden={slashAdvancedHidden}
+              favorites={slashFavorites}
             />
           ) : null}
           {atState !== null ? (

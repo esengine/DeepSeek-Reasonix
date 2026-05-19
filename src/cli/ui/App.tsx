@@ -1,5 +1,8 @@
 import { type WriteStream, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { relative, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { Box, Text, useStdin, useStdout } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -400,6 +403,37 @@ interface StreamingState {
   toolCallBuild?: { name: string; chars: number };
 }
 
+// ── favorites persistence ─────────────────────────────────────────
+
+function favoritesPath(): string {
+  return join(homedir(), ".reasonix", "favorites.json");
+}
+
+function loadFavorites(): readonly string[] {
+  const path = favoritesPath();
+  if (!existsSync(path)) return [];
+  try {
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((v) => typeof v === "string")) return parsed;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFavorites(favs: readonly string[]): void {
+  const path = favoritesPath();
+  const tmp = `${path}.tmp`;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(tmp, JSON.stringify(favs), "utf8");
+    renameSync(tmp, path);
+  } catch {
+    /* disk full / perms — non-fatal */
+  }
+}
+
 export function App(props: AppProps): React.ReactElement {
   markPhase("app_render_start");
   const session = useAgentSession({
@@ -509,6 +543,7 @@ function AppInner({
   const [slashUsage, setSlashUsage] = useState<Readonly<Record<string, number>>>(() =>
     loadSlashUsage(),
   );
+  const [favorites, setFavorites] = useState<readonly string[]>(() => loadFavorites());
   // ctrl-o toggles full-tail view on the live streaming card.
   // Auto-resets at the end of every turn so the next reply starts collapsed.
   const [liveExpand, setLiveExpand] = useState(false);
@@ -1483,6 +1518,7 @@ function AppInner({
     models,
     mcpServers: liveMcpServers,
     slashUsage,
+    favorites,
   });
 
   useEffect(() => {
@@ -1634,6 +1670,21 @@ function AppInner({
   // — no modal / picker should swallow it.
   useKeystroke((ev) => {
     if (ev.ctrl && ev.input === "d") quitProcess();
+  });
+
+  // Ctrl+S in slash menu = toggle favorite on the highlighted command.
+  useKeystroke((ev) => {
+    if (!(ev.ctrl && (ev.input === "s" || ev.input === "S"))) return;
+    if (slashMatches === null || slashMatches.length === 0) return;
+    const target = slashMatches[slashSelected];
+    if (!target) return;
+    setFavorites((prev) => {
+      const next = prev.includes(target.cmd)
+        ? prev.filter((c) => c !== target.cmd)
+        : [...prev, target.cmd];
+      saveFavorites(next);
+      return next;
+    });
   });
 
   // Ctrl+R = verbose toggle. ReasoningCard / ToolCard skip elision while on.
@@ -2672,7 +2723,7 @@ function AppInner({
       // input when they know what they want).
       if (text.startsWith("/") && !text.includes(" ")) {
         const typed = text.slice(1).toLowerCase();
-        const matches = suggestSlashCommands(typed, !!codeMode, slashUsage);
+        const matches = suggestSlashCommands(typed, !!codeMode, slashUsage, favorites);
         const exact = matches.find((m) => m.cmd === typed);
         if (!exact && matches.length > 0) {
           const chosen = matches[slashSelected] ?? matches[0];
@@ -3447,6 +3498,7 @@ function AppInner({
       liveMcpServers,
       generateCurrentSessionTitle,
       switchWorkspaceRoot,
+      favorites,
     ],
   );
 
@@ -4579,6 +4631,7 @@ function AppInner({
                     slashSelected={slashSelected}
                     slashGroupMode={slashGroupMode}
                     slashAdvancedHidden={slashAdvancedHidden}
+                    slashFavorites={favorites}
                     atState={atState}
                     atSelected={atSelected}
                     slashArgContext={slashArgContext}

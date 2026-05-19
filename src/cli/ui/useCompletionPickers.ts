@@ -31,6 +31,8 @@ export interface UseCompletionPickersParams {
   mcpServers: McpServerSummary[] | undefined;
   /** Cross-session slash invocation counts — used to sort suggestions by frequency. */
   slashUsage?: Readonly<Record<string, number>>;
+  /** User-favorited command names — pinned to top of slash suggestions. */
+  favorites?: readonly string[];
 }
 
 export interface AtPickerEntry {
@@ -97,13 +99,14 @@ export function useCompletionPickers({
   models,
   mcpServers,
   slashUsage,
+  favorites,
 }: UseCompletionPickersParams): UseCompletionPickersResult {
   // ── slash-name picker ──
   const [slashSelected, setSlashSelected] = useState(0);
   const slashMatches = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ")) return null;
-    return suggestSlashCommands(input.slice(1), !!codeMode, slashUsage);
-  }, [input, codeMode, slashUsage]);
+    return suggestSlashCommands(input.slice(1), !!codeMode, slashUsage, favorites);
+  }, [input, codeMode, slashUsage, favorites]);
   const slashGroupMode = input === "/";
   const slashAdvancedHidden = useMemo(
     () => (slashGroupMode ? countAdvancedCommands(!!codeMode) : 0),
