@@ -3,47 +3,40 @@ import type { ToolRegistry } from "../tools.js";
 import { PlanProposedError, PlanRevisionProposedError } from "./plan-errors.js";
 import type { PlanStep, PlanStepRisk, StepCompletion, StepEvidence } from "./plan-types.js";
 
-// Tool descriptions (teaching prompts for the model). Edit here, not inline.
-
 const SUBMIT_PLAN_DESCRIPTION =
-  "Submit ONE concrete plan you've already decided on. Use this for tasks that warrant a review gate — multi-file refactors, architecture changes, anything that would be expensive or confusing to undo. Skip it for small fixes (one-line typo, obvious bug with a clear fix) — just make the change. The user will either approve (you then implement it), ask for refinement, or cancel. If the user has already enabled /plan mode, writes are blocked at dispatch and you MUST use this. CRITICAL: do NOT use submit_plan to present alternative routes (A/B/C, option 1/2/3) for the user to pick from — the picker only exposes approve/refine/cancel, so a menu plan strands the user with no way to choose. For branching decisions, call `ask_choice` instead; only call submit_plan once the user has picked a direction and you have a single actionable plan. Write the plan as markdown with a one-line summary, a bulleted list of files to touch and what will change, and any risks or open questions. STRONGLY PREFERRED: pass `steps` — an array of {id, title, action, risk?, targets?, acceptance?, verification?} — so the UI renders a structured step list above the approval picker and tracks per-step progress. Use risk='high' for steps that touch prod data / break public APIs / are hard to undo; 'med' for non-trivial but reversible (multi-file edits, schema tweaks); 'low' for safe local work. After each step, call `mark_step_complete` so the user sees progress ticks.";
+  "Submit ONE concrete plan for review. The user approves / refines / cancels — write a markdown plan body and (strongly preferred) a structured `steps` array. Use for multi-file refactors, architecture changes, anything expensive to undo. Skip for small fixes. Do NOT use for A/B/C menus — the picker has no branch selector, so a menu plan strands the user; call `ask_choice` for branching decisions. See the system prompt for fuller guidance.";
 
 const MARK_STEP_COMPLETE_DESCRIPTION =
-  "Mark one step of the approved plan as done. MANDATORY: call this exactly once after finishing each step, before starting the next one — skipping it leaves the user staring at `0/N done` on the resume banner even when the work is finished, and they have no way to know which steps actually ran. The TUI updates the plan card's progress in place; the count is persisted to disk so it survives session resume. After the FINAL step, write a brief reply summarizing what was done and end the turn. Pass the `stepId` from the plan's steps array, a short `result` (what you did), optional `notes` for anything surprising, and `evidence` when the step had medium/high risk, verification criteria, or code mutations. This tool doesn't change any files. Don't call it if the plan didn't include structured steps, and don't invent ids that weren't in the original plan. If you only realized at the end that you skipped marking steps, mark them then — late is still better than never.";
+  "Mark one approved-plan step as done. Call exactly once after finishing each step, before starting the next. After the FINAL step, write a brief reply summarizing what was done and end the turn. Skip if the plan didn't include structured steps.";
 
 const REVISE_PLAN_DESCRIPTION =
-  "Surgically replace the REMAINING steps of an in-flight plan. Call this when the user has given feedback at a checkpoint that warrants a structured plan change — skip a step, swap two steps, add a new step, change risk, etc. Pass: `reason` (one sentence why), `remainingSteps` (the new tail of the plan, replacing whatever steps haven't been done yet), and optional `summary` (updated one-line plan summary). Done steps are NEVER touched — keep them out of `remainingSteps`. The TUI shows a diff (removed in red, kept in gray, added in green) and the user accepts or rejects. Don't call this for trivial mid-step adjustments — just keep executing. Don't call submit_plan for revisions either — that resets the whole plan including completed steps. Use submit_plan only when the entire approach has changed; use revise_plan when the tail needs editing.";
+  "Replace the REMAINING steps of an in-flight plan when checkpoint feedback warrants a structural change. Pass `reason`, the new `remainingSteps` tail (done steps are untouched — keep them out), and optional updated `summary`. Don't call submit_plan for revisions — it resets the whole plan.";
 
-// Reused by both submit_plan and revise_plan — the step list shape is
-// identical, only the outer wrapper differs. Deliberately NOT `as const`:
-// ToolRegistry's JSONSchema type expects mutable arrays.
+// Shared between submit_plan + revise_plan; not `as const` because JSONSchema expects mutable arrays.
 const STEP_ITEM_SCHEMA = {
   type: "object",
   properties: {
     id: { type: "string", description: "Stable id, e.g. step-1." },
     title: { type: "string", description: "Short imperative title." },
-    action: { type: "string", description: "One-sentence description of the concrete action." },
+    action: { type: "string", description: "One-sentence concrete action." },
     risk: {
       type: "string",
       enum: ["low", "med", "high"],
       description:
-        "Self-assessed risk. 'high' = hard-to-undo / touches prod / breaks API; 'med' = non-trivial but reversible; 'low' = safe local work. The UI shows a colored dot per step so the user knows where to focus review. Omit if you're unsure.",
+        "high = hard-to-undo / prod / API break; med = reversible multi-file; low = safe local. Omit if unsure.",
     },
     targets: {
       type: "array",
-      description:
-        "Optional. Files, directories, or modules this step expects to touch. Used by the host lifecycle guard for risk/evidence tracking.",
+      description: "Optional. Files/dirs/modules this step touches.",
       items: { type: "string" },
     },
     acceptance: {
       type: "string",
-      description:
-        "Optional. One-sentence acceptance criterion for this step; what must be true before it is marked complete.",
+      description: "Optional. One-sentence completion criterion.",
     },
     verification: {
       type: "array",
-      description:
-        "Optional. Verification commands or checks expected before this step is marked complete.",
+      description: "Optional. Verification commands/checks for this step.",
       items: { type: "string" },
     },
   },
@@ -133,18 +126,17 @@ function registerSubmitPlan(registry: ToolRegistry, opts: PlanToolOptions): void
         plan: {
           type: "string",
           description:
-            "Markdown-formatted plan. Lead with a one-sentence summary. Then a file-by-file breakdown of what you'll change and why. Flag any risks or open questions at the end so the user can weigh in before you start.",
+            "Markdown plan: one-line summary, file-by-file breakdown, risks/open questions.",
         },
         steps: {
           type: "array",
           description:
-            "Structured step list (strongly recommended). When provided, the UI renders a compact step list above the approval picker AND tracks per-step progress via `mark_step_complete`. Use stable ids (step-1, step-2, ...). Skip only for tiny one-step plans where the markdown body is enough.",
+            "Structured step list — strongly recommended for >1 step. Stable ids (step-1, step-2, ...).",
           items: STEP_ITEM_SCHEMA,
         },
         summary: {
           type: "string",
-          description:
-            "Optional. One-sentence human-friendly title for the plan, ~80 chars max. Surfaces in the PlanConfirm picker header and in /plans listings ('▸ refactor auth into signed tokens · 2/5 done'). Skip for trivial plans where the first line of the markdown body is already short and clear.",
+          description: "Optional ~80-char plan title for the picker header and /plans listings.",
         },
       },
       required: ["plan"],
@@ -185,27 +177,23 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
       properties: {
         stepId: {
           type: "string",
-          description:
-            "The id of the step being marked complete. Must match one from submit_plan's steps array.",
+          description: "Step id from submit_plan's steps array.",
         },
         title: {
           type: "string",
-          description:
-            "Optional. The step's title, echoed back for the UI. If omitted, the UI falls back to the id.",
+          description: "Optional. Echoed for the UI; falls back to id.",
         },
         result: {
           type: "string",
-          description: "One-sentence summary of what was done for this step.",
+          description: "One-sentence summary of what was done.",
         },
         notes: {
           type: "string",
-          description:
-            "Optional. Anything surprising — blockers hit, assumptions revised, follow-ups for later steps.",
+          description: "Optional. Surprises — blockers, revised assumptions, follow-ups.",
         },
         evidence: {
           type: "array",
-          description:
-            "Optional. Evidence that this step is complete: verification command output summary, diff/checkpoint reference, or a manual note when no command applies.",
+          description: "Optional. Verification summary / diff / checkpoint ref / manual note.",
           items: {
             type: "object",
             properties: {
@@ -277,19 +265,16 @@ function registerRevisePlan(registry: ToolRegistry, opts: PlanToolOptions): void
       properties: {
         reason: {
           type: "string",
-          description:
-            "One sentence explaining why you're revising — what the user asked for, what changed your assessment.",
+          description: "One sentence — why you're revising / what the user asked for.",
         },
         remainingSteps: {
           type: "array",
-          description:
-            "The new tail of the plan — what should run from here on. Each entry: {id, title, action, risk?}. Use stable ids; reuse old ids when a step is just being adjusted, generate new ones for genuinely new steps.",
+          description: "New tail of the plan. Reuse old ids when adjusting; new ids for new steps.",
           items: STEP_ITEM_SCHEMA,
         },
         summary: {
           type: "string",
-          description:
-            "Optional. Updated one-line plan summary if the overall framing has shifted.",
+          description: "Optional. Updated one-line summary when framing has shifted.",
         },
       },
       required: ["reason", "remainingSteps"],

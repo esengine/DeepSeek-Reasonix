@@ -27,48 +27,46 @@ export function registerScaffoldTools(
   registry.register({
     name: "create_skill",
     description:
-      'Scaffold a new skill (`SKILL.md` in `.reasonix/skills/<name>.md`) the user can invoke later via `/skill <name>`. Use this when the user asks the agent to add a playbook, automate a recurring workflow, or capture a multi-step recipe as a named skill. The frontmatter is filled from the structured args here (description / allowed_tools / run_as / model) so the model never has to write raw YAML. Use `run_as: "subagent"` for read-and-synthesize playbooks where only the final answer should come back; default `"inline"` appends the body to the parent log so the user sees the steps. Refuses to overwrite an existing skill — pick a different name or ask the user to delete the old one.',
+      'Scaffold a SKILL.md the user can later invoke via `/skill <name>`. Frontmatter (description / allowed_tools / run_as / model) is filled from structured args here. Use `run_as: "subagent"` for read-and-synthesize playbooks; default inline appends body to parent log. Refuses to overwrite existing skills.',
     parameters: {
       type: "object",
       properties: {
         name: {
           type: "string",
           description:
-            "Skill identifier — letters/digits/`_`/`-`/`.`, 1–64 chars. Becomes the `name` frontmatter and the `<name>.md` filename.",
+            "Identifier — letters/digits/`_`/`-`/`.`, 1–64 chars. Becomes filename + frontmatter `name`.",
         },
         description: {
           type: "string",
-          description:
-            'One-line summary shown in the pinned skills index. Lead with the verb ("Run X and …") so the parent agent can scan it.',
+          description: 'One-liner for the skills index. Lead with the verb ("Run X and …").',
         },
         body: {
           type: "string",
-          description:
-            "Markdown body of the skill — the playbook the model follows when invoked. Plain prose + bullets; reference tools by name.",
+          description: "Markdown playbook. Reference tools by name.",
         },
         scope: {
           type: "string",
           enum: ["project", "global"],
           description:
-            "`project` = `.reasonix/skills/` under the workspace (default, requires `reasonix code`); `global` = `~/.reasonix/skills/` shared across all repos.",
+            "`project` (default) = workspace .reasonix/skills/; `global` = ~/.reasonix/skills/.",
         },
         allowed_tools: {
           type: "array",
           items: { type: "string" },
           description:
-            "Optional whitelist of tool names the subagent registry is scoped to (only meaningful for `run_as: subagent`). Common values: `read_file`, `search_content`, `directory_tree`, `run_command`. Omit to give the subagent the full inherited toolset.",
+            "Optional tool allowlist for `run_as: subagent`. Omit for full inherited toolset.",
         },
         run_as: {
           type: "string",
           enum: ["inline", "subagent"],
           description:
-            "`inline` (default) appends the body to the parent log as a tool result. `subagent` spawns an isolated child loop and only the final answer comes back — use for read-and-synthesize playbooks (explore, research, review).",
+            "inline (default) appends body to parent log. subagent spawns isolated child; only final answer returns.",
         },
         model: {
           type: "string",
           enum: ["deepseek-v4-flash", "deepseek-v4-pro"],
           description:
-            "Subagent model override (only meaningful for `run_as: subagent`). Default is the same as `spawn_subagent` — `deepseek-v4-flash`. Set to `deepseek-v4-pro` only when the playbook empirically needs the stronger model.",
+            "Subagent model override. Default flash; use pro only when the playbook needs it.",
         },
       },
       required: ["name", "description", "body"],
@@ -144,41 +142,39 @@ export function registerScaffoldTools(
   registry.register({
     name: "add_mcp_server",
     description:
-      'Register a new MCP server in the user\'s Reasonix config (`mcp` array). Takes effect on the next session — does NOT spawn the server now. Use stdio for local commands (npx packages, local binaries), `sse` or `streamable-http` for remote endpoints. Pass `from_catalog: "<name>"` (e.g. `"filesystem"`, `"memory"`, `"github"`) to auto-fill `command` + `args` from the bundled catalog — the user still has to supply user-args (filesystem: a sandbox dir; github: GITHUB_PERSONAL_ACCESS_TOKEN in env). Refuses to add a server whose name collides with an existing entry.',
+      'Register a new MCP server in the user\'s config (`mcp` array). Takes effect next session. Use stdio for local commands, sse/streamable-http for remote. Pass `from_catalog` (e.g. "filesystem", "github") to auto-fill command+args from the bundled catalog. Refuses name collisions.',
     parameters: {
       type: "object",
       properties: {
         name: {
           type: "string",
           description:
-            "Server name — used as the namespace prefix on every tool the server exposes. Letters/digits/`_`/`-`, must start with a letter or `_`.",
+            "Namespace prefix on every tool. Letters/digits/`_`/`-`, must start with letter or `_`.",
         },
         transport: {
           type: "string",
           enum: ["stdio", "sse", "streamable-http"],
           description:
-            "`stdio` = spawn a local command and pipe MCP over stdin/stdout. `sse` = HTTP+SSE remote. `streamable-http` = Streamable HTTP remote. Required unless `from_catalog` is set.",
+            "stdio = local command via stdin/stdout; sse / streamable-http = remote. Required unless `from_catalog` is set.",
         },
         command: {
           type: "string",
-          description:
-            'Argv[0] for stdio servers — typically `npx` or a binary path. Required when `transport: "stdio"` (and no `from_catalog`).',
+          description: "Argv[0] for stdio — typically `npx` or a binary path.",
         },
         args: {
           type: "array",
           items: { type: "string" },
           description:
-            'Remaining argv for stdio servers — e.g. `["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]`. The dir at the tail is enforced to exist by the preflight check.',
+            'Remaining argv for stdio — e.g. `["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]`.',
         },
         url: {
           type: "string",
-          description:
-            "Endpoint URL for `sse` / `streamable-http` transports. Must be `http://` or `https://`.",
+          description: "Endpoint URL for sse / streamable-http — must be http(s)://.",
         },
         from_catalog: {
           type: "string",
           description:
-            "Optional shortcut — name out of the bundled catalog (`filesystem`, `memory`, `github`, `puppeteer`, `everything`). When set, fills `command` + `args` from the catalog entry; you still supply `name` (defaults to the catalog name) and any user-args via `args`.",
+            "Bundled catalog shortcut: filesystem / memory / github / puppeteer / everything. Fills command+args; user supplies user-args via `args`.",
         },
       },
       required: ["name"],

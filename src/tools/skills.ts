@@ -133,24 +133,24 @@ export function registerSkillTools(
   registry.register({
     name: "install_skill",
     description:
-      "Author and save a new skill — a reusable playbook future turns can invoke via `run_skill`. Use when the same multi-step instruction would benefit from being callable by name instead of re-pasted. The skill is written to disk and runnable immediately (call `run_skill` with the same name in this very turn); it appears in the pinned Skills index only on the next `/new` or launch. WARNING: skill bodies become prompts for future agent turns — treat what you write as instructions you are giving your future self.",
+      "Author and save a new skill — a reusable playbook future turns invoke via `run_skill`. Runnable immediately (same turn); appears in the pinned Skills index on next `/new` or launch. Skill bodies become prompts for future turns, so write what you'd want your future self to follow.",
     parameters: {
       type: "object",
       properties: {
         name: {
           type: "string",
           description:
-            "Skill identifier — letters/digits/_/-/., 1-64 chars, starts alnum. Becomes the filename and what callers pass to `run_skill`.",
+            "Identifier — letters/digits/_/-/., 1-64 chars, starts alnum. Becomes the filename.",
         },
         description: {
           type: "string",
           description:
-            "One-line summary shown in the pinned Skills index. Keep under ~120 chars; this is what future agents read to decide whether to invoke the skill.",
+            "≤120 char one-liner shown in the pinned Skills index — future agents read this to decide whether to invoke.",
         },
         body: {
           type: "string",
           description:
-            "Full skill playbook in markdown — the instructions a future turn (or subagent) follows when this skill runs. For inline skills, write 'how to do X'. For subagent skills, write the subagent's persona + operating rules; remember the subagent has NO other context besides the `arguments` passed at runtime.",
+            "Markdown playbook. For subagent skills, write the subagent's persona/rules — it gets no context besides `arguments` at runtime.",
         },
         scope: {
           type: "string",
@@ -161,18 +161,18 @@ export function registerSkillTools(
           type: "string",
           enum: ["inline", "subagent"],
           description:
-            "'inline' (default) — body becomes a tool-result the parent agent reads and acts on (cheap, shares parent context). 'subagent' — spawns an isolated child loop; only the final answer returns to the parent (use when the work would flood context, e.g. exploration / research).",
+            "inline (default) appends body to parent log. subagent spawns isolated child loop; only final answer returns (use for context-heavy work).",
         },
         model: {
           type: "string",
           description:
-            "Optional model override for subagent skills (e.g. 'deepseek-chat'). Ignored for runAs=inline. Only `deepseek-*` ids are honored.",
+            "Optional `deepseek-*` model override for runAs=subagent. Ignored otherwise.",
         },
         allowedTools: {
           type: "array",
           items: { type: "string" },
           description:
-            "Optional tool-name allowlist for subagent skills (e.g. ['read_file','search_content']). When set, the spawned subagent's registry is scoped to these literal names. Ignored for runAs=inline.",
+            "Optional tool allowlist for runAs=subagent (e.g. ['read_file','search_content']).",
         },
       },
       required: ["name", "description", "body"],

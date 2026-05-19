@@ -222,11 +222,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "read_file",
     parallelSafe: true,
-    description: `Read a file under the sandbox root. Default behaviour returns FULL CONTENT for files at or under ${Math.round(DEFAULT_OUTLINE_THRESHOLD_BYTES / 1024)} KiB — trust the prompt cache, don't pre-truncate. Optional scoping:
-  - head: N  → first N lines (cheap probe of imports / config head)
-  - tail: N  → last N lines (recent-tail of a log)
-  - range: "A-B"  → inclusive 1-indexed range (e.g. "120-180" around an edit site)
-Files OVER the threshold auto-switch to outline mode: file metadata + first ${OUTLINE_HEAD_LINES} lines + a top-level symbol outline (TS/JS exports, Python def/class, Go func/type, Rust fn/struct/impl/trait, Markdown headings, Protobuf message/service/rpc, plain-text chapter markers) + concrete next-step commands. No middle bytes — drill in with range / search_content. Files over ${Math.round(HARD_MAX_FILE_BYTES / (1024 * 1024))} MiB are refused entirely (use grep / range). Binary files are refused — use get_file_info if you only need stat.`,
+    description: `Read a file under the sandbox root. Default returns FULL CONTENT for files ≤ ${Math.round(DEFAULT_OUTLINE_THRESHOLD_BYTES / 1024)} KiB. Optional scoping: head/tail (N lines), range "A-B" (1-indexed inclusive). Larger files auto-switch to outline mode (metadata + head + symbol outline for TS/JS/Python/Go/Rust/Markdown/Protobuf/text) — drill in with range or search_content. Files over ${Math.round(HARD_MAX_FILE_BYTES / (1024 * 1024))} MiB and binaries are refused — use get_file_info for stat.`,
     readOnly: true,
     stormExempt: true,
     parameters: {
@@ -372,11 +368,7 @@ Files OVER the threshold auto-switch to outline mode: file metadata + first ${OU
   registry.register({
     name: "directory_tree",
     parallelSafe: true,
-    description: `Recursively list entries in a directory. Shows indented tree structure with directories marked '/'. Budget-aware by default:
-  - maxDepth defaults to 2 (root + one level). A depth-4 tree on a real repo blew ~5K tokens in one call. If you truly need deeper, pass maxDepth:N explicitly.
-  - Skips ${[...SKIP_DIR_NAMES].sort().join(", ")} unless include_deps:true. Traversing into node_modules / .git / dist is almost always token-waste.
-  - Large subtrees (>50 children) auto-collapse to "[N files, M dirs hidden — list_directory <path> to inspect]" so one huge folder can't dominate the output.
-Prefer \`list_directory\` for a single-level view, \`search_files\` to find specific paths, and \`search_content\` to find code.`,
+    description: `Recursively list entries with indented tree structure (dirs marked '/'). Budget-aware: maxDepth defaults to 2, large subtrees (>50 children) auto-collapse to "[N hidden — list_directory to inspect]", and ${[...SKIP_DIR_NAMES].sort().join(" / ")} are skipped unless include_deps:true. For single-level use list_directory; for path lookups use search_files; for code lookups use search_content.`,
     readOnly: true,
     parameters: {
       type: "object",
@@ -496,42 +488,41 @@ Prefer \`list_directory\` for a single-level view, \`search_files\` to find spec
     name: "search_content",
     parallelSafe: true,
     description:
-      "Recursively grep file CONTENTS for a substring or regex. This is the right tool for 'find all places that call X', 'where is Y referenced', 'what files contain Z'. Different from search_files (which matches FILE NAMES). Returns one match per line in 'path:line: text' format. Per-file hits are capped at 30 (a footer reports any extras); when the byte budget is mostly spent the remaining files switch to a 'rel: N matches' histogram so distribution stays visible instead of one popular file drowning the rest. Pass `summary_only:true` to skip line content entirely and get just the histogram. Skips dependency / VCS / build directories (node_modules, .git, dist, build, .next, target, .venv) and binary files by default.",
+      "Recursively grep file CONTENTS for a substring or regex — 'where is X called', 'what files contain Y'. Returns one match per line as `path:line: text`. Per-file hit cap 30; when the byte budget is mostly spent, remaining files switch to a `rel: N matches` histogram. Pass `summary_only:true` for just the histogram. Skips dependency / VCS / build dirs and binary files. For file NAMES use search_files.",
     readOnly: true,
     parameters: {
       type: "object",
       properties: {
         pattern: {
           type: "string",
-          description: "Substring (or regex) to search file contents for.",
+          description: "Substring or regex.",
         },
         path: {
           type: "string",
-          description: "Directory to start the search at (default: sandbox root).",
+          description: "Search root (default: sandbox root).",
         },
         glob: {
           type: "string",
           description:
-            "Optional filename filter. Real glob when the value contains `*`, `?`, `{`, or `[` — e.g. '*.ts', '**/*.tsx', 'src/**/*.{ts,tsx}'. Plain substring otherwise — e.g. '.ts' (suffix), 'test' (anywhere in the name). Patterns containing `/` match against the path relative to the search root; otherwise just the basename.",
+            "Filename filter. Glob when it contains `*`/`?`/`{`/`[`; otherwise substring. Patterns with `/` match the path relative to the search root.",
         },
         case_sensitive: {
           type: "boolean",
-          description: "When true, match case exactly. Default false (case-insensitive).",
+          description: "Default false.",
         },
         include_deps: {
           type: "boolean",
-          description:
-            "When true, also search inside node_modules / .git / dist / build / etc. Off by default — most exploration questions are about the user's own code.",
+          description: "Also search node_modules / .git / dist / build / etc. Default off.",
         },
         context: {
           type: "integer",
           description:
-            "Lines of context to show around each match (both before and after). Default 0 (just the matching line). Capped at 20. Output uses ripgrep style: `:` after the line number on the matching line, `-` on context lines, `--` separating non-adjacent windows.",
+            "Lines of context around each match (both sides). Default 0, capped 20. Ripgrep-style output.",
         },
         summary_only: {
           type: "boolean",
           description:
-            "When true, skip line content and return one 'rel: N matches' line per matching file. Use for 'where does this exist at all' questions before drilling in with a targeted read_file.",
+            "Skip line content, return `rel: N matches` per file. Use for 'where does this exist at all' before drilling in.",
         },
       },
       required: ["pattern"],

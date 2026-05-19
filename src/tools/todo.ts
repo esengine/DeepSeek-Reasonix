@@ -13,7 +13,7 @@ export interface TodoToolOptions {
 }
 
 const DESCRIPTION =
-  'In-session task tracker for multi-step work. NOT a plan — no approval gate, no checkpoint pauses, doesn\'t touch any files. The tool replaces the entire todo list every call (set semantics, NOT append). Pass the FULL list every time.\n\nWhen to use:\n• The task has 3+ distinct steps and you want to keep them straight as you work.\n• The user gave you a multi-part request ("do A, then B, then C").\n• You\'re partway through a long task and want to record where you are so a future you doesn\'t lose the thread.\n\nWhen NOT to use:\n• One-shot edits, single-question answers, single-tool tasks.\n• User-facing approval gates → that\'s `submit_plan`.\n• Branching choices → that\'s `ask_choice`.\n\nRules:\n• Exactly ONE todo may have status:"in_progress" at a time (or zero — between steps).\n• Mark a todo "completed" the moment it\'s actually done — don\'t batch.\n• Each todo: `content` (imperative, e.g. "Add tests"), `activeForm` (gerund shown while running, e.g. "Adding tests"), `status`.\n• Empty `todos:[]` is allowed — it clears the list when work is fully done.';
+  "In-session task tracker for 3+ step work. NOT a plan — no approval gate, no checkpoint, no files touched. Each call REPLACES the entire list (set semantics) — pass the FULL list. Exactly one item may be in_progress at a time; flip to completed the moment that step's done. Pass `[]` to clear. For approval gates use submit_plan; for branching choices use ask_choice.";
 
 function validateTodos(raw: unknown): TodoItem[] {
   if (!Array.isArray(raw)) {
