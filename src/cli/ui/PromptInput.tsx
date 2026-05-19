@@ -244,6 +244,7 @@ export function PromptInput({
       borderRight={false}
       borderColor={borderColor}
       paddingX={1}
+      backgroundColor={SURFACE.bgInput}
     >
       {(() => {
         const rows: React.ReactNode[] = [];
