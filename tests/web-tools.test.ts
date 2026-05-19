@@ -476,7 +476,9 @@ describe("searchTavily", () => {
     delete process.env.TAVILY_API_KEY;
     try {
       await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/Tavily.*API key/i);
-      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow(/tavily\.com/);
+      // Plain-string match — checking the error message includes the signup URL,
+      // not testing URL safety; using a regex here trips CodeQL's missing-anchor rule.
+      await expect(webSearch("q", { engine: "tavily" })).rejects.toThrow("tavily.com");
     } finally {
       if (origKey !== undefined) process.env.TAVILY_API_KEY = origKey;
     }
