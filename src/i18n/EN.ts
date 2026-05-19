@@ -545,6 +545,8 @@ export const EN: TranslationSchema = {
       title: "Checkpoint — step done",
       continue: "Continue — run the next step",
       continueHint: "Model resumes with the next step.",
+      finish: "Finish — summarize and close",
+      finishHint: "Model records the final step and summarizes the completed plan.",
       revise: "Revise — give feedback before the next step",
       reviseHint: "Stay paused, type guidance; model adjusts the remaining plan.",
       stop: "Stop — end the plan here",

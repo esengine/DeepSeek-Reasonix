@@ -5,6 +5,18 @@ export interface PlanStep {
   title: string;
   action: string;
   risk?: PlanStepRisk;
+  targets?: string[];
+  acceptance?: string;
+  verification?: string[];
+}
+
+export type StepEvidenceKind = "verification" | "diff" | "checkpoint" | "manual";
+
+export interface StepEvidence {
+  kind: StepEvidenceKind;
+  summary: string;
+  command?: string;
+  paths?: string[];
 }
 
 export interface StepCompletion {
@@ -13,4 +25,5 @@ export interface StepCompletion {
   title?: string;
   result: string;
   notes?: string;
+  evidence?: StepEvidence[];
 }

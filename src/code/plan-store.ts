@@ -12,13 +12,14 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { sanitizeName, sessionsDir } from "../memory/session.js";
-import type { PlanStep } from "../tools/plan.js";
+import type { PlanStep, StepCompletion, StepEvidence } from "../tools/plan.js";
 
 export interface PlanStateOnDisk {
   /** File format version — bump when shape changes. */
-  version: 1;
+  version: 1 | 2;
   steps: PlanStep[];
   completedStepIds: string[];
+  stepCompletions?: Record<string, StepCompletion>;
   /** ISO8601 timestamp of the last write. */
   updatedAt: string;
   body?: string;
@@ -36,7 +37,7 @@ export function loadPlanState(sessionName: string): PlanStateOnDisk | null {
     const raw = readFileSync(path, "utf8");
     const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
     if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.version !== 1) return null;
+    if (parsed.version !== 1 && parsed.version !== 2) return null;
     if (!Array.isArray(parsed.steps)) return null;
     if (!Array.isArray(parsed.completedStepIds)) return null;
     if (typeof parsed.updatedAt !== "string") return null;
@@ -51,18 +52,27 @@ export function loadPlanState(sessionName: string): PlanStateOnDisk | null {
       if (typeof e.action !== "string" || !e.action) continue;
       const step: PlanStep = { id: e.id, title: e.title, action: e.action };
       if (e.risk === "low" || e.risk === "med" || e.risk === "high") step.risk = e.risk;
+      const targets = stringList(e.targets);
+      if (targets) step.targets = targets;
+      if (typeof e.acceptance === "string" && e.acceptance.trim()) {
+        step.acceptance = e.acceptance.trim();
+      }
+      const verification = stringList(e.verification);
+      if (verification) step.verification = verification;
       steps.push(step);
     }
     if (steps.length === 0) return null;
     const completedStepIds = parsed.completedStepIds.filter(
       (id): id is string => typeof id === "string" && id.length > 0,
     );
+    const stepCompletions = sanitizeStepCompletions(parsed.stepCompletions);
     const out: PlanStateOnDisk = {
-      version: 1,
+      version: parsed.version,
       steps,
       completedStepIds,
       updatedAt: parsed.updatedAt,
     };
+    if (stepCompletions) out.stepCompletions = stepCompletions;
     if (typeof parsed.body === "string" && parsed.body) out.body = parsed.body;
     if (typeof parsed.summary === "string" && parsed.summary) out.summary = parsed.summary;
     return out;
@@ -76,17 +86,23 @@ export function savePlanState(
   sessionName: string,
   steps: PlanStep[],
   completedStepIds: Iterable<string>,
-  extras?: { body?: string; summary?: string },
+  extras?: {
+    body?: string;
+    summary?: string;
+    stepCompletions?: ReadonlyMap<string, StepCompletion> | Record<string, StepCompletion>;
+  },
 ): void {
   const path = planStatePath(sessionName);
   try {
     mkdirSync(dirname(path), { recursive: true });
     const state: PlanStateOnDisk = {
-      version: 1,
+      version: 2,
       steps,
       completedStepIds: [...completedStepIds],
       updatedAt: new Date().toISOString(),
     };
+    const stepCompletions = normalizeStepCompletionsForWrite(extras?.stepCompletions);
+    if (stepCompletions) state.stepCompletions = stepCompletions;
     if (extras?.body) state.body = extras.body;
     if (extras?.summary) state.summary = extras.summary;
     writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, "utf8");
@@ -133,6 +149,7 @@ export interface PlanArchiveSummary {
   completedAt: string;
   steps: PlanStep[];
   completedStepIds: string[];
+  stepCompletions?: Record<string, StepCompletion>;
   /** Markdown body, when the archive carried it. */
   body?: string;
   /** One-line human-friendly title, when supplied. */
@@ -157,7 +174,7 @@ export function listPlanArchives(sessionName: string): PlanArchiveSummary[] {
     try {
       const raw = readFileSync(full, "utf8");
       const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
-      if (parsed.version !== 1) continue;
+      if (parsed.version !== 1 && parsed.version !== 2) continue;
       if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) continue;
       const steps = parsed.steps.filter(
         (s): s is PlanStep =>
@@ -182,6 +199,8 @@ export function listPlanArchives(sessionName: string): PlanArchiveSummary[] {
         }
       }
       const entry: PlanArchiveSummary = { path: full, completedAt, steps, completedStepIds };
+      const stepCompletions = sanitizeStepCompletions(parsed.stepCompletions);
+      if (stepCompletions) entry.stepCompletions = stepCompletions;
       if (typeof parsed.body === "string" && parsed.body) entry.body = parsed.body;
       if (typeof parsed.summary === "string" && parsed.summary) entry.summary = parsed.summary;
       summaries.push(entry);
@@ -220,7 +239,7 @@ export function listAllPlanArchives(): PlanArchiveWithSession[] {
     try {
       const raw = readFileSync(full, "utf8");
       const parsed = JSON.parse(raw) as Partial<PlanStateOnDisk>;
-      if (parsed.version !== 1) continue;
+      if (parsed.version !== 1 && parsed.version !== 2) continue;
       if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) continue;
       const steps = parsed.steps.filter(
         (s): s is PlanStep =>
@@ -249,6 +268,8 @@ export function listAllPlanArchives(): PlanArchiveWithSession[] {
         steps,
         completedStepIds,
       };
+      const stepCompletions = sanitizeStepCompletions(parsed.stepCompletions);
+      if (stepCompletions) entry.stepCompletions = stepCompletions;
       if (typeof parsed.body === "string" && parsed.body) entry.body = parsed.body;
       if (typeof parsed.summary === "string" && parsed.summary) entry.summary = parsed.summary;
       out.push(entry);
@@ -258,6 +279,80 @@ export function listAllPlanArchives(): PlanArchiveWithSession[] {
   }
   out.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
   return out;
+}
+
+function stringList(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+  return out.length > 0 ? out : undefined;
+}
+
+function normalizeStepCompletionsForWrite(
+  raw: ReadonlyMap<string, StepCompletion> | Record<string, StepCompletion> | undefined,
+): Record<string, StepCompletion> | undefined {
+  if (!raw) return undefined;
+  const entries =
+    raw instanceof Map
+      ? [...raw.entries()]
+      : (Object.entries(raw) as Array<[string, StepCompletion]>);
+  const out: Record<string, StepCompletion> = {};
+  for (const [key, value] of entries) {
+    const completion = sanitizeStepCompletion(value, key);
+    if (completion) out[completion.stepId] = completion;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeStepCompletions(raw: unknown): Record<string, StepCompletion> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, StepCompletion> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const completion = sanitizeStepCompletion(value, key);
+    if (completion) out[completion.stepId] = completion;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeStepCompletion(raw: unknown, fallbackStepId?: string): StepCompletion | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const entry = raw as Record<string, unknown>;
+  const stepId =
+    typeof entry.stepId === "string" && entry.stepId.trim()
+      ? entry.stepId.trim()
+      : fallbackStepId?.trim();
+  const result = typeof entry.result === "string" ? entry.result.trim() : "";
+  if (!stepId || !result) return undefined;
+  const completion: StepCompletion = { kind: "step_completed", stepId, result };
+  if (typeof entry.title === "string" && entry.title.trim()) completion.title = entry.title.trim();
+  if (typeof entry.notes === "string" && entry.notes.trim()) completion.notes = entry.notes.trim();
+  const evidence = sanitizeEvidenceList(entry.evidence);
+  if (evidence) completion.evidence = evidence;
+  return completion;
+}
+
+function sanitizeEvidenceList(raw: unknown): StepEvidence[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: StepEvidence[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const entry = item as Record<string, unknown>;
+    const kind = entry.kind;
+    if (kind !== "verification" && kind !== "diff" && kind !== "checkpoint" && kind !== "manual") {
+      continue;
+    }
+    const summary = typeof entry.summary === "string" ? entry.summary.trim() : "";
+    if (!summary) continue;
+    const evidence: StepEvidence = { kind, summary };
+    if (typeof entry.command === "string" && entry.command.trim()) {
+      evidence.command = entry.command.trim();
+    }
+    const paths = stringList(entry.paths);
+    if (paths) evidence.paths = paths;
+    out.push(evidence);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /** Falls back to raw ISO string past a week — "47 days ago" misleads more than it helps. */

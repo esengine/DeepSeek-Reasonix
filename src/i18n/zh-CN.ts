@@ -526,6 +526,8 @@ export const zhCN: TranslationSchema = {
       title: "检查点 —— 当前步骤已完成",
       continue: "继续 —— 执行下一步",
       continueHint: "模型从下一步继续。",
+      finish: "完成 —— 总结并收尾",
+      finishHint: "模型记录最后一步，然后总结已完成的计划。",
       revise: "调整 —— 在下一步前给反馈",
       reviseHint: "先暂停，输入指引；模型会调整剩余计划。",
       stop: "停止 —— 在此结束计划",

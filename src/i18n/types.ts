@@ -367,6 +367,8 @@ export interface TranslationSchema {
       title: string;
       continue: string;
       continueHint: string;
+      finish: string;
+      finishHint: string;
       revise: string;
       reviseHint: string;
       stop: string;

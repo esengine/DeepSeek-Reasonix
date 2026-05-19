@@ -90,7 +90,7 @@ import { defaultUsageLogPath } from "../../telemetry/usage.js";
 import type { ToolRegistry } from "../../tools.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import { looksLikeAbsoluteSystemPath, pathIsUnder } from "../../tools/filesystem.js";
-import type { PlanStep } from "../../tools/plan.js";
+import type { PlanStep, StepCompletion } from "../../tools/plan.js";
 import { formatCommandResult, runCommand } from "../../tools/shell.js";
 import { registerSkillTools } from "../../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
@@ -361,6 +361,15 @@ function LoopStatusRow({
       <Text color="cyan">{`> ${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} - /loop stop or type to cancel`}</Text>
     </Box>
   );
+}
+
+function completedCountIncludingStep(
+  completedStepIds: Set<string>,
+  stepId: string,
+  total: number,
+): number {
+  const completed = completedStepIds.size + (completedStepIds.has(stepId) ? 0 : 1);
+  return total > 0 ? Math.min(completed, total) : completed;
 }
 
 function lastMessageContent(
@@ -848,6 +857,7 @@ function AppInner({
   // revised plan starts fresh —old completions don't spill over.
   const planStepsRef = useRef<PlanStep[] | null>(null);
   const completedStepIdsRef = useRef<Set<string>>(new Set());
+  const stepCompletionsRef = useRef<Map<string, StepCompletion>>(new Map());
   // Markdown body + human-friendly summary captured from submit_plan.
   // Persisted alongside the structured state so a future Time-Travel
   // replay can show the model's full original proposal without re-
@@ -873,9 +883,14 @@ function AppInner({
       clearPlanState(session);
       return;
     }
-    const extras: { body?: string; summary?: string } = {};
+    const extras: {
+      body?: string;
+      summary?: string;
+      stepCompletions?: Map<string, StepCompletion>;
+    } = {};
     if (planBodyRef.current) extras.body = planBodyRef.current;
     if (planSummaryRef.current) extras.summary = planSummaryRef.current;
+    if (stepCompletionsRef.current.size > 0) extras.stepCompletions = stepCompletionsRef.current;
     savePlanState(session, steps, completedStepIdsRef.current, extras);
   }, [session]);
   const [summary, setSummary] = useState<SessionSummary>({
@@ -1549,6 +1564,7 @@ function AppInner({
       if (restoredPlan && restoredPlan.steps.length > 0) {
         planStepsRef.current = restoredPlan.steps;
         completedStepIdsRef.current = new Set(restoredPlan.completedStepIds);
+        stepCompletionsRef.current = new Map(Object.entries(restoredPlan.stepCompletions ?? {}));
         planBodyRef.current = restoredPlan.body ?? null;
         planSummaryRef.current = restoredPlan.summary ?? null;
         const when = relativeTime(restoredPlan.updatedAt);
@@ -3212,6 +3228,7 @@ function AppInner({
               setPendingChoice,
               planStepsRef,
               completedStepIdsRef,
+              stepCompletionsRef,
               planBodyRef,
               planSummaryRef,
               persistPlanState,
@@ -3574,6 +3591,7 @@ function AppInner({
         const approvedSteps = planStepsRef.current;
         if (approvedSteps && approvedSteps.length > 0) {
           completedStepIdsRef.current = new Set();
+          stepCompletionsRef.current = new Map();
           log.showPlan({
             title: planSummaryRef.current ?? "plan",
             steps: approvedSteps.map((s) => ({
@@ -3593,6 +3611,7 @@ function AppInner({
         // no point keeping it around for resume.
         planStepsRef.current = null;
         completedStepIdsRef.current = new Set();
+        stepCompletionsRef.current = new Map();
         planBodyRef.current = null;
         planSummaryRef.current = null;
         persistPlanState();
@@ -3741,6 +3760,7 @@ function AppInner({
           planStepsRef.current = p.steps ?? null;
           planSummaryRef.current = p.summary ?? null;
           planBodyRef.current = p.plan;
+          stepCompletionsRef.current = new Map();
           break;
         }
         case "plan_checkpoint": {
@@ -3750,9 +3770,13 @@ function AppInner({
             result: string;
             notes?: string;
           };
-          // completed/total come from planStepsRef —don't have them via gate
-          const completed = completedStepIdsRef.current.size;
+          // completed/total come from planStepsRef — don't have them via gate.
           const total = planStepsRef.current?.length ?? 0;
+          const completed = completedCountIncludingStep(
+            completedStepIdsRef.current,
+            p.stepId,
+            total,
+          );
           // Shared policy (src/core/pause-policy.ts) decides whether to
           // auto-resolve. Per-step rollback snapshot still runs so /restore
           // granularity is preserved.
@@ -3895,8 +3919,8 @@ function AppInner({
           }
         }
       }
-      const completed = completedStepIdsRef.current.size;
       const total = planStepsRef.current?.length ?? 0;
+      const completed = completedCountIncludingStep(completedStepIdsRef.current, stepId, total);
       const label = title ? `${stepId} - ${title}` : stepId;
       const counter = total > 0 ? ` (${completed}/${total})` : "";
       log.pushInfo(t("app.continuingAfter", { label, counter }));
