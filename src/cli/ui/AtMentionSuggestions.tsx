@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import { GLYPH, useColor } from "./theme.js";
+import { SURFACE } from "./theme/tokens.js";
 import type { AtPickerEntry, AtPickerState } from "./useCompletionPickers.js";
 
 export interface AtMentionSuggestionsProps {
@@ -123,7 +124,7 @@ function EntryRow({ entry, isSelected }: { entry: AtPickerEntry; isSelected: boo
   const labelColor = entry.isDir ? color.accent : color.primary;
   const labelText = entry.isDir ? `${entry.label}/` : entry.label;
   return (
-    <Box>
+    <Box backgroundColor={isSelected ? SURFACE.bgElev : undefined}>
       <Text color={isSelected ? color.primary : color.info} bold={isSelected}>
         {cursor}
       </Text>

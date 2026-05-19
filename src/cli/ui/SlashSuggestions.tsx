@@ -3,6 +3,7 @@ import React from "react";
 import { t } from "../../i18n/index.js";
 import type { SlashCommandSpec, SlashGroup } from "./slash.js";
 import { GLYPH, useColor } from "./theme.js";
+import { SURFACE } from "./theme/tokens.js";
 
 const GROUP_MODE_MAX_ROWS = 24;
 const SEARCH_MODE_MAX_ROWS = 8;
@@ -192,7 +193,14 @@ function SuggestionRow({
   const summaryBudget = Math.max(8, columns - reservedCells);
   const summaryText = truncateCells(`${summary}${aliasHint}`, summaryBudget);
   return (
-    <Box flexDirection="row" flexWrap="nowrap" flexShrink={0} height={1} minHeight={1}>
+    <Box
+      flexDirection="row"
+      flexWrap="nowrap"
+      flexShrink={0}
+      height={1}
+      minHeight={1}
+      backgroundColor={isSelected ? SURFACE.bgElev : undefined}
+    >
       <Text color={isSelected ? color.primary : color.info} bold={isSelected} wrap="truncate">
         {isSelected ? `${GLYPH.cur} ` : "  "}
       </Text>
