@@ -57,7 +57,7 @@ describe("plan-store roundtrip", () => {
     expect(loaded).not.toBeNull();
     expect(loaded?.steps).toEqual(steps);
     expect(loaded?.completedStepIds).toEqual(["step-1"]);
-    expect(loaded?.version).toBe(1);
+    expect(loaded?.version).toBe(2);
     expect(typeof loaded?.updatedAt).toBe("string");
   });
 
@@ -162,6 +162,26 @@ describe("plan-store roundtrip", () => {
     expect(loaded?.steps[1]?.risk).toBe("low");
   });
 
+  it("loads v2 lifecycle metadata fields and persists them on save", () => {
+    const steps = [
+      {
+        id: "step-1",
+        title: "refactor",
+        action: "change gates",
+        risk: "med" as const,
+        targets: ["src/tools.ts"],
+        acceptance: "high-risk mutations are gated",
+        verification: ["npm test tests/lifecycle.test.ts"],
+      },
+    ];
+    savePlanState("v2-fields", steps, []);
+
+    const loaded = loadPlanState("v2-fields");
+
+    expect(loaded?.version).toBe(2);
+    expect(loaded?.steps).toEqual(steps);
+  });
+
   it("filters out non-string entries from completedStepIds", () => {
     writeFixture(
       planStatePath("badcompleted"),
@@ -211,7 +231,40 @@ describe("archivePlanState", () => {
     const parsed = JSON.parse(raw);
     expect(parsed.steps).toEqual(steps);
     expect(parsed.completedStepIds).toEqual(["step-1"]);
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
+  });
+
+  it("persists step completion evidence in active and archived plan state", () => {
+    const steps = [
+      {
+        id: "step-1",
+        title: "verify",
+        action: "run tests",
+        verification: ["npm test"],
+      },
+    ];
+    const completion = {
+      kind: "step_completed" as const,
+      stepId: "step-1",
+      result: "npm test passed",
+      evidence: [
+        {
+          kind: "verification" as const,
+          summary: "npm test exited 0",
+          command: "npm test",
+        },
+      ],
+    };
+
+    savePlanState("evidence-test", steps, ["step-1"], {
+      stepCompletions: new Map([["step-1", completion]]),
+    });
+
+    expect(loadPlanState("evidence-test")?.stepCompletions?.["step-1"]).toEqual(completion);
+    const archive = archivePlanState("evidence-test");
+    expect(archive).not.toBeNull();
+    const archived = listPlanArchives("evidence-test")[0];
+    expect(archived?.stepCompletions?.["step-1"]).toEqual(completion);
   });
 
   it("two archives within the same millisecond don't collide", () => {

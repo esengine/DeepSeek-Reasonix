@@ -311,6 +311,41 @@ describe("registerPlanTool + submit_plan", () => {
     ]);
   });
 
+  it("accepts optional lifecycle metadata on steps", async () => {
+    const reg = new ToolRegistry();
+    const submitted: Array<{ steps?: unknown }> = [];
+    registerPlanTool(reg, { onPlanSubmitted: (_p, steps) => submitted.push({ steps }) });
+    reg.setPlanMode(true);
+    const gate = new AutoGate({ type: "approve" });
+    await reg.dispatch(
+      "submit_plan",
+      JSON.stringify({
+        plan: "# Plan",
+        steps: [
+          {
+            id: "step-1",
+            title: "refactor",
+            action: "change tool gates",
+            targets: ["src/tools.ts", "src/cli/ui/App.tsx"],
+            acceptance: "high-risk mutations require an approved plan",
+            verification: ["npm test tests/lifecycle.test.ts"],
+          },
+        ],
+      }),
+      { confirmationGate: gate },
+    );
+    expect(submitted[0]?.steps).toEqual([
+      {
+        id: "step-1",
+        title: "refactor",
+        action: "change tool gates",
+        targets: ["src/tools.ts", "src/cli/ui/App.tsx"],
+        acceptance: "high-risk mutations require an approved plan",
+        verification: ["npm test tests/lifecycle.test.ts"],
+      },
+    ]);
+  });
+
   it("drops malformed risk values rather than letting them through", async () => {
     const reg = new ToolRegistry();
     const submitted: Array<{ steps?: unknown }> = [];
@@ -455,6 +490,52 @@ describe("registerPlanTool + mark_step_complete", () => {
     expect(parsed.notes).toBeUndefined();
     expect(parsed.result).toBe("done");
     expect(parsed.error).toBeUndefined();
+  });
+
+  it("preserves structured evidence when supplied", async () => {
+    const reg = new ToolRegistry();
+    const seen: StepCompletion[] = [];
+    registerPlanTool(reg, { onStepCompleted: (u) => seen.push(u) });
+    const gate = new AutoGate({ type: "continue" });
+    await reg.dispatch(
+      "mark_step_complete",
+      JSON.stringify({
+        stepId: "step-1",
+        result: "updated lifecycle guard",
+        evidence: [
+          {
+            kind: "verification",
+            summary: "targeted tests passed",
+            command: "npm test tests/lifecycle.test.ts",
+            paths: ["tests/lifecycle.test.ts"],
+          },
+        ],
+      }),
+      { confirmationGate: gate },
+    );
+
+    expect(seen[0]?.evidence).toEqual([
+      {
+        kind: "verification",
+        summary: "targeted tests passed",
+        command: "npm test tests/lifecycle.test.ts",
+        paths: ["tests/lifecycle.test.ts"],
+      },
+    ]);
+  });
+
+  it("rejects completion without evidence when the host requires it", async () => {
+    const reg = new ToolRegistry();
+    registerPlanTool(reg, {
+      requireStepEvidence: () => "step touched high-risk code",
+    });
+    const out = await reg.dispatch(
+      "mark_step_complete",
+      JSON.stringify({ stepId: "step-1", result: "updated lifecycle guard" }),
+    );
+
+    expect(JSON.parse(out).error).toMatch(/evidence required/);
+    expect(JSON.parse(out).error).toMatch(/high-risk code/);
   });
 
   it("rejects an empty stepId", async () => {

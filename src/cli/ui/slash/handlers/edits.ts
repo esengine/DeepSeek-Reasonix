@@ -69,8 +69,8 @@ const plan: SlashHandler = (args, _loop, ctx) => {
   const currentOn = Boolean(ctx.planMode);
   const raw = (args[0] ?? "").toLowerCase();
   let target: boolean;
-  if (raw === "on" || raw === "true" || raw === "1") target = true;
-  else if (raw === "off" || raw === "false" || raw === "0") target = false;
+  if (raw === "on" || raw === "true" || raw === "1" || raw === "strict") target = true;
+  else if (raw === "off" || raw === "false" || raw === "0" || raw === "auto") target = false;
   else target = !currentOn;
   ctx.setPlanMode(target);
   if (target) {

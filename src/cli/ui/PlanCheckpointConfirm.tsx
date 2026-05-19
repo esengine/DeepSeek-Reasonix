@@ -48,12 +48,12 @@ function PlanCheckpointConfirmInner({
         </Box>
       ) : null}
       <SingleSelect
-        initialValue={isLast ? "stop" : "continue"}
+        initialValue="continue"
         items={[
           {
             value: "continue",
-            label: t("planFlow.checkpoint.continue"),
-            hint: t("planFlow.checkpoint.continueHint"),
+            label: t(isLast ? "planFlow.checkpoint.finish" : "planFlow.checkpoint.continue"),
+            hint: t(isLast ? "planFlow.checkpoint.finishHint" : "planFlow.checkpoint.continueHint"),
           },
           {
             value: "revise",

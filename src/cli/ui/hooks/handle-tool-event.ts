@@ -27,9 +27,11 @@ export interface ToolEventContext {
   >;
   planStepsRef: MutableRefObject<PlanStep[] | null>;
   completedStepIdsRef: MutableRefObject<Set<string>>;
+  stepCompletionsRef?: MutableRefObject<Map<string, StepCompletion>>;
   planBodyRef: MutableRefObject<string | null>;
   planSummaryRef: MutableRefObject<string | null>;
   persistPlanState: () => void;
+  onPlanStepCompleted?: (stepId: string) => void;
   log: Scrollback;
   session: string | null;
   codeModeOn: boolean;
@@ -49,8 +51,10 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
       const stepId = parsed.stepId;
       if (parsed.kind === "step_completed" && typeof stepId === "string") {
         ctx.completedStepIdsRef.current.add(stepId);
+        ctx.stepCompletionsRef?.current.set(stepId, parsed as StepCompletion);
         ctx.persistPlanState();
         ctx.log.completePlanStep(stepId);
+        ctx.onPlanStepCompleted?.(stepId);
         const total = ctx.planStepsRef.current?.length ?? 0;
         const completed = ctx.completedStepIdsRef.current.size;
         const stepFromPlan = ctx.planStepsRef.current?.find((s) => s.id === stepId);

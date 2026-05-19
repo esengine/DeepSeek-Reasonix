@@ -22,6 +22,7 @@ import {
   snapshotBeforeEdits,
   toWholeFileEditBlock,
 } from "../../code/edit-blocks.js";
+import { EngineeringLifecycleRuntime } from "../../code/lifecycle.js";
 import { clearPendingEdits, loadPendingEdits } from "../../code/pending-edits.js";
 import {
   clearPlanState,
@@ -31,10 +32,12 @@ import {
 } from "../../code/plan-store.js";
 import {
   type EditMode,
+  type EngineeringLifecycleMode,
   type PresetName,
   defaultConfigPath,
   editModeHintShown,
   loadBaseUrl,
+  loadEngineeringLifecycleMode,
   loadReasoningEffort,
   loadTheme,
   markEditModeHintShown,
@@ -90,7 +93,7 @@ import { defaultUsageLogPath } from "../../telemetry/usage.js";
 import type { ToolRegistry } from "../../tools.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import { looksLikeAbsoluteSystemPath, pathIsUnder } from "../../tools/filesystem.js";
-import type { PlanStep } from "../../tools/plan.js";
+import type { PlanStep, StepCompletion } from "../../tools/plan.js";
 import { formatCommandResult, runCommand } from "../../tools/shell.js";
 import { registerSkillTools } from "../../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
@@ -363,6 +366,15 @@ function LoopStatusRow({
   );
 }
 
+function completedCountIncludingStep(
+  completedStepIds: Set<string>,
+  stepId: string,
+  total: number,
+): number {
+  const completed = completedStepIds.size + (completedStepIds.has(stepId) ? 0 : 1);
+  return total > 0 ? Math.min(completed, total) : completed;
+}
+
 function lastMessageContent(
   entries: ReadonlyArray<{ role: string; content?: string | null }>,
   role: "user" | "assistant",
@@ -585,6 +597,15 @@ function AppInner({
     model,
     initialPreset,
   );
+  const engineeringLifecycleBaseModeRef = useRef<EngineeringLifecycleMode>(
+    loadEngineeringLifecycleMode(),
+  );
+  const engineeringLifecycleRef = useRef<EngineeringLifecycleRuntime | null>(null);
+  if (engineeringLifecycleRef.current === null) {
+    engineeringLifecycleRef.current = new EngineeringLifecycleRuntime({
+      mode: engineeringLifecycleBaseModeRef.current,
+    });
+  }
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -848,6 +869,7 @@ function AppInner({
   // revised plan starts fresh —old completions don't spill over.
   const planStepsRef = useRef<PlanStep[] | null>(null);
   const completedStepIdsRef = useRef<Set<string>>(new Set());
+  const stepCompletionsRef = useRef<Map<string, StepCompletion>>(new Map());
   // Markdown body + human-friendly summary captured from submit_plan.
   // Persisted alongside the structured state so a future Time-Travel
   // replay can show the model's full original proposal without re-
@@ -873,9 +895,14 @@ function AppInner({
       clearPlanState(session);
       return;
     }
-    const extras: { body?: string; summary?: string } = {};
+    const extras: {
+      body?: string;
+      summary?: string;
+      stepCompletions?: Map<string, StepCompletion>;
+    } = {};
     if (planBodyRef.current) extras.body = planBodyRef.current;
     if (planSummaryRef.current) extras.summary = planSummaryRef.current;
+    if (stepCompletionsRef.current.size > 0) extras.stepCompletions = stepCompletionsRef.current;
     savePlanState(session, steps, completedStepIdsRef.current, extras);
   }, [session]);
   const [summary, setSummary] = useState<SessionSummary>({
@@ -1549,8 +1576,13 @@ function AppInner({
       if (restoredPlan && restoredPlan.steps.length > 0) {
         planStepsRef.current = restoredPlan.steps;
         completedStepIdsRef.current = new Set(restoredPlan.completedStepIds);
+        stepCompletionsRef.current = new Map(Object.entries(restoredPlan.stepCompletions ?? {}));
         planBodyRef.current = restoredPlan.body ?? null;
         planSummaryRef.current = restoredPlan.summary ?? null;
+        engineeringLifecycleRef.current?.recordPlanApproved(restoredPlan.steps);
+        for (const stepId of restoredPlan.completedStepIds) {
+          engineeringLifecycleRef.current?.recordStepCompleted(stepId);
+        }
         const when = relativeTime(restoredPlan.updatedAt);
         const done = new Set(restoredPlan.completedStepIds);
         const summary = restoredPlan.summary ? ` - ${restoredPlan.summary}` : "";
@@ -1878,6 +1910,22 @@ function AppInner({
     }
   });
 
+  useEffect(() => {
+    if (!tools || !codeMode) return;
+    return tools.addToolInterceptor("engineering-lifecycle", (name, args) => {
+      return engineeringLifecycleRef.current?.guardToolCall(name, args) ?? null;
+    });
+  }, [tools, codeMode]);
+
+  useEffect(() => {
+    if (!tools || !codeMode) return;
+    tools.setResultAugmenter((name, args, result) => {
+      engineeringLifecycleRef.current?.recordToolResult(name, args, result);
+      return result;
+    });
+    return () => tools.setResultAugmenter(null);
+  }, [tools, codeMode]);
+
   // Edit-gate interceptor. Reroutes `edit_file` / `write_file` tool
   // calls through the review queue (in `review` mode) or the auto-apply
   // snapshot/banner path (in `auto` mode) so the model's tool usage
@@ -2021,6 +2069,9 @@ function AppInner({
     (on: boolean) => {
       setPlanMode(on);
       tools?.setPlanMode(on);
+      engineeringLifecycleRef.current?.setMode(
+        on ? "strict" : engineeringLifecycleBaseModeRef.current,
+      );
     },
     [tools],
   );
@@ -2816,6 +2867,7 @@ function AppInner({
             completedStepIdsRef.current.add(stepId);
             persistPlanState();
             log.completePlanStep(stepId);
+            engineeringLifecycleRef.current?.recordStepCompleted(stepId);
             return "ok";
           },
           markAllPlanStepsDone: () => {
@@ -2826,6 +2878,7 @@ function AppInner({
               if (completedStepIdsRef.current.has(s.id)) continue;
               completedStepIdsRef.current.add(s.id);
               log.completePlanStep(s.id);
+              engineeringLifecycleRef.current?.recordStepCompleted(s.id);
               added++;
             }
             if (added > 0) persistPlanState();
@@ -2964,6 +3017,17 @@ function AppInner({
           log.pushWarning(t("app.hookUserPromptSubmit"), formatHookOutcomeMessage(o));
         }
         if (promptReport.blocked) return;
+      }
+
+      if (codeMode) {
+        const before = engineeringLifecycleRef.current?.snapshot().state;
+        engineeringLifecycleRef.current?.observeUserPrompt(text);
+        const after = engineeringLifecycleRef.current?.snapshot().state;
+        if (before === "idle" && after === "armed") {
+          log.pushInfo(
+            "Engineering lifecycle armed: high-risk mutations now require an approved structured plan.",
+          );
+        }
       }
 
       // Large pastes (stack traces, log dumps, file contents) get a
@@ -3212,9 +3276,12 @@ function AppInner({
               setPendingChoice,
               planStepsRef,
               completedStepIdsRef,
+              stepCompletionsRef,
               planBodyRef,
               planSummaryRef,
               persistPlanState,
+              onPlanStepCompleted: (stepId) =>
+                engineeringLifecycleRef.current?.recordStepCompleted(stepId),
               log,
               session: session ?? null,
               codeModeOn: !!codeMode,
@@ -3572,8 +3639,10 @@ function AppInner({
         // can dock it at the bottom —without this dispatch, no card with
         // variant: "active" exists and the live strip stays empty.
         const approvedSteps = planStepsRef.current;
+        engineeringLifecycleRef.current?.recordPlanApproved(approvedSteps ?? []);
         if (approvedSteps && approvedSteps.length > 0) {
           completedStepIdsRef.current = new Set();
+          stepCompletionsRef.current = new Map();
           log.showPlan({
             title: planSummaryRef.current ?? "plan",
             steps: approvedSteps.map((s) => ({
@@ -3593,10 +3662,12 @@ function AppInner({
         // no point keeping it around for resume.
         planStepsRef.current = null;
         completedStepIdsRef.current = new Set();
+        stepCompletionsRef.current = new Map();
         planBodyRef.current = null;
         planSummaryRef.current = null;
         persistPlanState();
         togglePlanMode(false);
+        engineeringLifecycleRef.current?.cancel();
         agentStore.dispatch({ type: "plan.drop" });
         marker = trimmed ? `plan rejected - ${tail}` : "plan cancelled";
       } else {
@@ -3741,6 +3812,8 @@ function AppInner({
           planStepsRef.current = p.steps ?? null;
           planSummaryRef.current = p.summary ?? null;
           planBodyRef.current = p.plan;
+          stepCompletionsRef.current = new Map();
+          engineeringLifecycleRef.current?.recordPlanProposed(p.steps);
           break;
         }
         case "plan_checkpoint": {
@@ -3750,9 +3823,13 @@ function AppInner({
             result: string;
             notes?: string;
           };
-          // completed/total come from planStepsRef —don't have them via gate
-          const completed = completedStepIdsRef.current.size;
+          // completed/total come from planStepsRef — don't have them via gate.
           const total = planStepsRef.current?.length ?? 0;
+          const completed = completedCountIncludingStep(
+            completedStepIdsRef.current,
+            p.stepId,
+            total,
+          );
           // Shared policy (src/core/pause-policy.ts) decides whether to
           // auto-resolve. Per-step rollback snapshot still runs so /restore
           // granularity is preserved.
@@ -3895,8 +3972,8 @@ function AppInner({
           }
         }
       }
-      const completed = completedStepIdsRef.current.size;
       const total = planStepsRef.current?.length ?? 0;
+      const completed = completedCountIncludingStep(completedStepIdsRef.current, stepId, total);
       const label = title ? `${stepId} - ${title}` : stepId;
       const counter = total > 0 ? ` (${completed}/${total})` : "";
       log.pushInfo(t("app.continuingAfter", { label, counter }));
@@ -4008,6 +4085,10 @@ function AppInner({
         merged.push(s);
       }
       planStepsRef.current = merged;
+      engineeringLifecycleRef.current?.recordPlanApproved(merged);
+      for (const s of merged) {
+        if (completed.has(s.id)) engineeringLifecycleRef.current?.recordStepCompleted(s.id);
+      }
       persistPlanState();
       // Replace the live active card so PlanLiveRow shows the new tail —      // existing card's stale ids would fail subsequent step completes.
       agentStore.dispatch({ type: "plan.drop" });

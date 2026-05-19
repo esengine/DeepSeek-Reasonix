@@ -409,7 +409,7 @@ describe("handleSlash", () => {
       const ctx = detectSlashArgContext("/plan o", true);
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
-      expect(ctx!.spec.argCompleter).toEqual(["on", "off"]);
+      expect(ctx!.spec.argCompleter).toEqual(["on", "off", "strict", "auto"]);
     });
 
     it("hides /plan outside code mode (command is contextual)", () => {
@@ -1184,7 +1184,7 @@ describe("handleSlash", () => {
       expect(r2.info).toMatch(/plan mode OFF/);
     });
 
-    it("/plan on / off / true / false / 0 / 1 parse correctly", () => {
+    it("/plan on / off / true / false / 0 / 1 / strict / auto parse correctly", () => {
       const check = (arg: string, expected: boolean) => {
         const calls: boolean[] = [];
         handleSlash("plan", [arg], makeLoop(), {
@@ -1199,6 +1199,24 @@ describe("handleSlash", () => {
       check("off", false);
       check("false", false);
       check("0", false);
+      check("strict", true);
+      check("auto", false);
+    });
+
+    it("/plan strict and auto are explicit lifecycle modes, not toggles", () => {
+      const strictCalls: boolean[] = [];
+      handleSlash("plan", ["strict"], makeLoop(), {
+        planMode: true,
+        setPlanMode: (on) => strictCalls.push(on),
+      });
+      expect(strictCalls).toEqual([true]);
+
+      const autoCalls: boolean[] = [];
+      handleSlash("plan", ["auto"], makeLoop(), {
+        planMode: false,
+        setPlanMode: (on) => autoCalls.push(on),
+      });
+      expect(autoCalls).toEqual([false]);
     });
 
     it("/plan explains the stronger-constraint relationship with autonomous submit_plan", () => {

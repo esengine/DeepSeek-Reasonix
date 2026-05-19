@@ -1,15 +1,15 @@
 import { pauseGate } from "../core/pause-gate.js";
 import type { ToolRegistry } from "../tools.js";
 import { PlanProposedError, PlanRevisionProposedError } from "./plan-errors.js";
-import type { PlanStep, PlanStepRisk, StepCompletion } from "./plan-types.js";
+import type { PlanStep, PlanStepRisk, StepCompletion, StepEvidence } from "./plan-types.js";
 
 // Tool descriptions (teaching prompts for the model). Edit here, not inline.
 
 const SUBMIT_PLAN_DESCRIPTION =
-  "Submit ONE concrete plan you've already decided on. Use this for tasks that warrant a review gate — multi-file refactors, architecture changes, anything that would be expensive or confusing to undo. Skip it for small fixes (one-line typo, obvious bug with a clear fix) — just make the change. The user will either approve (you then implement it), ask for refinement, or cancel. If the user has already enabled /plan mode, writes are blocked at dispatch and you MUST use this. CRITICAL: do NOT use submit_plan to present alternative routes (A/B/C, option 1/2/3) for the user to pick from — the picker only exposes approve/refine/cancel, so a menu plan strands the user with no way to choose. For branching decisions, call `ask_choice` instead; only call submit_plan once the user has picked a direction and you have a single actionable plan. Write the plan as markdown with a one-line summary, a bulleted list of files to touch and what will change, and any risks or open questions. STRONGLY PREFERRED: pass `steps` — an array of {id, title, action, risk?} — so the UI renders a structured step list above the approval picker and tracks per-step progress. Use risk='high' for steps that touch prod data / break public APIs / are hard to undo; 'med' for non-trivial but reversible (multi-file edits, schema tweaks); 'low' for safe local work. After each step, call `mark_step_complete` so the user sees progress ticks.";
+  "Submit ONE concrete plan you've already decided on. Use this for tasks that warrant a review gate — multi-file refactors, architecture changes, anything that would be expensive or confusing to undo. Skip it for small fixes (one-line typo, obvious bug with a clear fix) — just make the change. The user will either approve (you then implement it), ask for refinement, or cancel. If the user has already enabled /plan mode, writes are blocked at dispatch and you MUST use this. CRITICAL: do NOT use submit_plan to present alternative routes (A/B/C, option 1/2/3) for the user to pick from — the picker only exposes approve/refine/cancel, so a menu plan strands the user with no way to choose. For branching decisions, call `ask_choice` instead; only call submit_plan once the user has picked a direction and you have a single actionable plan. Write the plan as markdown with a one-line summary, a bulleted list of files to touch and what will change, and any risks or open questions. STRONGLY PREFERRED: pass `steps` — an array of {id, title, action, risk?, targets?, acceptance?, verification?} — so the UI renders a structured step list above the approval picker and tracks per-step progress. Use risk='high' for steps that touch prod data / break public APIs / are hard to undo; 'med' for non-trivial but reversible (multi-file edits, schema tweaks); 'low' for safe local work. After each step, call `mark_step_complete` so the user sees progress ticks.";
 
 const MARK_STEP_COMPLETE_DESCRIPTION =
-  "Mark one step of the approved plan as done. MANDATORY: call this exactly once after finishing each step, before starting the next one — skipping it leaves the user staring at `0/N done` on the resume banner even when the work is finished, and they have no way to know which steps actually ran. The TUI updates the plan card's progress in place; the count is persisted to disk so it survives session resume. After the FINAL step, write a brief reply summarizing what was done and end the turn. Pass the `stepId` from the plan's steps array, a short `result` (what you did), and optional `notes` for anything surprising (errors, scope changes, follow-ups). This tool doesn't change any files. Don't call it if the plan didn't include structured steps, and don't invent ids that weren't in the original plan. If you only realized at the end that you skipped marking steps, mark them then — late is still better than never.";
+  "Mark one step of the approved plan as done. MANDATORY: call this exactly once after finishing each step, before starting the next one — skipping it leaves the user staring at `0/N done` on the resume banner even when the work is finished, and they have no way to know which steps actually ran. The TUI updates the plan card's progress in place; the count is persisted to disk so it survives session resume. After the FINAL step, write a brief reply summarizing what was done and end the turn. Pass the `stepId` from the plan's steps array, a short `result` (what you did), optional `notes` for anything surprising, and `evidence` when the step had medium/high risk, verification criteria, or code mutations. This tool doesn't change any files. Don't call it if the plan didn't include structured steps, and don't invent ids that weren't in the original plan. If you only realized at the end that you skipped marking steps, mark them then — late is still better than never.";
 
 const REVISE_PLAN_DESCRIPTION =
   "Surgically replace the REMAINING steps of an in-flight plan. Call this when the user has given feedback at a checkpoint that warrants a structured plan change — skip a step, swap two steps, add a new step, change risk, etc. Pass: `reason` (one sentence why), `remainingSteps` (the new tail of the plan, replacing whatever steps haven't been done yet), and optional `summary` (updated one-line plan summary). Done steps are NEVER touched — keep them out of `remainingSteps`. The TUI shows a diff (removed in red, kept in gray, added in green) and the user accepts or rejects. Don't call this for trivial mid-step adjustments — just keep executing. Don't call submit_plan for revisions either — that resets the whole plan including completed steps. Use submit_plan only when the entire approach has changed; use revise_plan when the tail needs editing.";
@@ -29,6 +29,23 @@ const STEP_ITEM_SCHEMA = {
       description:
         "Self-assessed risk. 'high' = hard-to-undo / touches prod / breaks API; 'med' = non-trivial but reversible; 'low' = safe local work. The UI shows a colored dot per step so the user knows where to focus review. Omit if you're unsure.",
     },
+    targets: {
+      type: "array",
+      description:
+        "Optional. Files, directories, or modules this step expects to touch. Used by the host lifecycle guard for risk/evidence tracking.",
+      items: { type: "string" },
+    },
+    acceptance: {
+      type: "string",
+      description:
+        "Optional. One-sentence acceptance criterion for this step; what must be true before it is marked complete.",
+    },
+    verification: {
+      type: "array",
+      description:
+        "Optional. Verification commands or checks expected before this step is marked complete.",
+      items: { type: "string" },
+    },
   },
   required: ["id", "title", "action"],
 };
@@ -39,6 +56,7 @@ export interface PlanToolOptions {
   onPlanSubmitted?: (plan: string, steps?: PlanStep[]) => void;
   onStepCompleted?: (update: StepCompletion) => void;
   onPlanRevisionProposed?: (reason: string, remainingSteps: PlanStep[], summary?: string) => void;
+  requireStepEvidence?: (args: { stepId: string; title?: string }) => string | null | undefined;
 }
 
 // Arg sanitizers — defensive cleanup shared between submit_plan and revise_plan
@@ -61,9 +79,45 @@ function sanitizeSteps(raw: unknown): PlanStep[] | undefined {
     const step: PlanStep = { id, title, action };
     const risk = sanitizeRisk(e.risk);
     if (risk) step.risk = risk;
+    const targets = sanitizeStringList(e.targets);
+    if (targets) step.targets = targets;
+    const acceptance = typeof e.acceptance === "string" ? e.acceptance.trim() : "";
+    if (acceptance) step.acceptance = acceptance;
+    const verification = sanitizeStringList(e.verification);
+    if (verification) step.verification = verification;
     steps.push(step);
   }
   return steps.length > 0 ? steps : undefined;
+}
+
+function sanitizeStringList(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+  return out.length > 0 ? out : undefined;
+}
+
+function sanitizeEvidence(raw: unknown): StepEvidence[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: StepEvidence[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const e = item as Record<string, unknown>;
+    const kind = e.kind;
+    if (kind !== "verification" && kind !== "diff" && kind !== "checkpoint" && kind !== "manual") {
+      continue;
+    }
+    const summary = typeof e.summary === "string" ? e.summary.trim() : "";
+    if (!summary) continue;
+    const evidence: StepEvidence = { kind, summary };
+    const command = typeof e.command === "string" ? e.command.trim() : "";
+    if (command) evidence.command = command;
+    const paths = sanitizeStringList(e.paths);
+    if (paths) evidence.paths = paths;
+    out.push(evidence);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 // Individual tool registrations — one per screen
@@ -148,10 +202,34 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
           description:
             "Optional. Anything surprising — blockers hit, assumptions revised, follow-ups for later steps.",
         },
+        evidence: {
+          type: "array",
+          description:
+            "Optional. Evidence that this step is complete: verification command output summary, diff/checkpoint reference, or a manual note when no command applies.",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string", enum: ["verification", "diff", "checkpoint", "manual"] },
+              summary: { type: "string" },
+              command: { type: "string" },
+              paths: { type: "array", items: { type: "string" } },
+            },
+            required: ["kind", "summary"],
+          },
+        },
       },
       required: ["stepId", "result"],
     },
-    fn: async (args: { stepId: string; title?: string; result: string; notes?: string }, ctx) => {
+    fn: async (
+      args: {
+        stepId: string;
+        title?: string;
+        result: string;
+        notes?: string;
+        evidence?: unknown;
+      },
+      ctx,
+    ) => {
       const stepId = (args?.stepId ?? "").trim();
       const result = (args?.result ?? "").trim();
       if (!stepId) {
@@ -164,9 +242,15 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
       }
       const title = typeof args?.title === "string" ? args.title.trim() || undefined : undefined;
       const notes = typeof args?.notes === "string" ? args.notes.trim() || undefined : undefined;
+      const evidence = sanitizeEvidence(args?.evidence);
+      const evidenceReason = opts.requireStepEvidence?.({ stepId, title });
+      if (evidenceReason && (!evidence || evidence.length === 0)) {
+        throw new Error(`mark_step_complete: evidence required — ${evidenceReason}`);
+      }
       const update: StepCompletion = { kind: "step_completed", stepId, result };
       if (title) update.title = title;
       if (notes) update.notes = notes;
+      if (evidence) update.evidence = evidence;
       opts.onStepCompleted?.(update);
       // Block until the user continues, revises, or stops
       const verdict = await (ctx?.confirmationGate ?? pauseGate).ask({

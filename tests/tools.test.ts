@@ -230,6 +230,22 @@ describe("ToolRegistry", () => {
       expect(fnCalled).toBe(false);
     });
 
+    it("passes intercepted tool results through the result augmenter", async () => {
+      const reg = new ToolRegistry();
+      const seen: Array<{ name: string; result: string }> = [];
+      reg.register({ name: "edit_file", fn: () => "should not run" });
+      reg.addToolInterceptor("review-gate", () => "▸ edit blocks: 1/1 applied");
+      reg.setResultAugmenter((name, _args, result) => {
+        seen.push({ name, result });
+        return `${result}\naugmented`;
+      });
+
+      const out = await reg.dispatch("edit_file", '{"path":"src/app.ts"}');
+
+      expect(out).toBe("▸ edit blocks: 1/1 applied\naugmented");
+      expect(seen).toEqual([{ name: "edit_file", result: "▸ edit blocks: 1/1 applied" }]);
+    });
+
     it("falls through to tool.fn when interceptor returns null", async () => {
       const reg = new ToolRegistry();
       reg.register({ name: "read_file", fn: () => "content" });
@@ -279,6 +295,40 @@ describe("ToolRegistry", () => {
       expect(await reg.dispatch("edit_file", "{}")).toBe("queued");
       reg.setToolInterceptor(null);
       expect(await reg.dispatch("edit_file", "{}")).toBe("fn-output");
+    });
+
+    it("runs ordered interceptors before the legacy interceptor", async () => {
+      const reg = new ToolRegistry();
+      const seen: string[] = [];
+      reg.register({ name: "edit_file", fn: () => "ok" });
+      reg.addToolInterceptor("first", () => {
+        seen.push("first");
+        return null;
+      });
+      reg.addToolInterceptor("second", () => {
+        seen.push("second");
+        return "blocked";
+      });
+      reg.setToolInterceptor(() => {
+        seen.push("legacy");
+        return null;
+      });
+
+      const out = await reg.dispatch("edit_file", "{}");
+
+      expect(out).toBe("blocked");
+      expect(seen).toEqual(["first", "second"]);
+    });
+
+    it("can remove an ordered interceptor by id", async () => {
+      const reg = new ToolRegistry();
+      reg.register({ name: "edit_file", fn: () => "ok" });
+      const remove = reg.addToolInterceptor("blocker", () => "blocked");
+      remove();
+
+      const out = await reg.dispatch("edit_file", "{}");
+
+      expect(out).toBe("ok");
     });
 
     it("surfaces interceptor throws as structured errors", async () => {
