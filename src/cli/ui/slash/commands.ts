@@ -453,6 +453,8 @@ export function detectSlashArgContext(input: string, codeMode = false): SlashArg
 
 export function parseSlash(text: string): { cmd: string; args: string[] } | null {
   if (!text.startsWith("/")) return null;
+  // "//" is a line comment, not a slash command
+  if (text.startsWith("//")) return null;
   const parts = text.slice(1).trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase() ?? "";
   if (!cmd) return null;

@@ -39,6 +39,12 @@ describe("parseSlash", () => {
     expect(parseSlash("")).toBeNull();
     expect(parseSlash("/")).toBeNull();
   });
+  it("returns null on comment-like input starting with //", () => {
+    expect(parseSlash("// some comment")).toBeNull();
+    expect(parseSlash("//")).toBeNull();
+    expect(parseSlash("//help")).toBeNull();
+    expect(parseSlash("// /still/a/comment")).toBeNull();
+  });
   it("lowercases the command and splits args", () => {
     expect(parseSlash("/Harvest on")).toEqual({ cmd: "harvest", args: ["on"] });
     expect(parseSlash("/branch 3")).toEqual({ cmd: "branch", args: ["3"] });
