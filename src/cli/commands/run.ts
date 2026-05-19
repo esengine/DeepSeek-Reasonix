@@ -6,6 +6,7 @@ import {
   isPlausibleKey,
   loadApiKey,
   loadBaseUrl,
+  loadToolRateLimit,
   normalizeMcpConfig,
   readConfig,
   saveApiKey,
@@ -82,7 +83,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   let tools: ToolRegistry | undefined;
   let successCount = 0;
   if (normalizedSpecs.length > 0) {
-    tools = new ToolRegistry();
+    tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
     for (const spec of normalizedSpecs) {
       let label = "anon";
       let mcp: McpClient | undefined;

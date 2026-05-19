@@ -6,6 +6,7 @@ import {
   loadJavaSourceEnabled,
   loadProjectShellAllowed,
   loadResolvedSkillPaths,
+  loadToolRateLimit,
   readConfig,
   searchEnabled,
 } from "../config.js";
@@ -49,7 +50,7 @@ export interface CodeToolset {
 }
 
 export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeToolset> {
-  const tools = new ToolRegistry();
+  const tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
   const jobs = new JobRegistry();
 
   const outlineThresholdBytes = loadFilesystemOutlineThresholdBytes();

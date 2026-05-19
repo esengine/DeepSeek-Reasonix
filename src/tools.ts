@@ -1,6 +1,11 @@
 import type { PauseGate } from "./core/pause-gate.js";
 import { truncateForModel, truncateForModelByTokens } from "./mcp/registry.js";
 import { analyzeSchema, flattenSchema, nestArguments } from "./repair/flatten.js";
+import {
+  type NormalizedToolRateLimitConfig,
+  type ToolRateLimitOption,
+  ToolRateLimiter,
+} from "./tools/rate-limit.js";
 import type { JSONSchema, ToolSpec } from "./types.js";
 
 export interface ToolCallContext {
@@ -32,6 +37,7 @@ interface InternalTool extends ToolDefinition {
 export interface ToolRegistryOptions {
   /** Auto-flatten + re-nest at dispatch; default true. */
   autoFlatten?: boolean;
+  rateLimit?: ToolRateLimitOption;
 }
 
 export type ToolCallAuditEvent = {
@@ -62,6 +68,7 @@ export class ToolRegistry {
   private readonly _interceptors: Array<{ id: string; fn: ToolInterceptor }> = [];
   private _auditListener: ToolCallAuditListener | null = null;
   private _resultAugmenter: ToolResultAugmenter | null = null;
+  private readonly _rateLimiter: ToolRateLimiter;
   /** Per-tool fingerprint of the last call that failed schema validation. Cleared by any successful validation for that tool. */
   private readonly _lastMalformed = new Map<string, string>();
   /** Per-tool fingerprint of the last host-side gate rejection. */
@@ -69,6 +76,7 @@ export class ToolRegistry {
 
   constructor(opts: ToolRegistryOptions = {}) {
     this._autoFlatten = opts.autoFlatten !== false;
+    this._rateLimiter = new ToolRateLimiter(opts.rateLimit);
   }
 
   /** Enable / disable plan-mode enforcement at dispatch. */
@@ -111,6 +119,10 @@ export class ToolRegistry {
   /** True when an augmenter is already wired — lets late-installing callers skip clobbering an earlier one. */
   get hasResultAugmenter(): boolean {
     return this._resultAugmenter !== null;
+  }
+
+  get rateLimitPolicy(): false | NormalizedToolRateLimitConfig {
+    return this._rateLimiter.policy;
   }
 
   register<A, R>(def: ToolDefinition<A, R>): this {
@@ -258,6 +270,12 @@ export class ToolRegistry {
         error: `${name}: aborted before dispatch (user interrupt)`,
         rejectedReason: "aborted",
       });
+    }
+
+    // Only real dispatch attempts consume quota; earlier refusals are guidance, not work.
+    const rateLimit = this._rateLimiter.consume(name);
+    if (!rateLimit.allowed) {
+      return JSON.stringify(rateLimit.result);
     }
 
     let finalResult: string;

@@ -51,6 +51,7 @@ import {
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { ToolRegistry } from "./tools.js";
+import { parseRateLimitedToolResult } from "./tools/rate-limit.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
 const ESCALATION_MODEL = "deepseek-v4-pro";
@@ -655,6 +656,7 @@ export class CacheFirstLoop {
     this.appendAndPersist({ role: "user", content: userInput });
     let pendingUser: string | null = null;
     const toolSpecs = this.prefix.tools();
+    let rateLimitWarningShown = false;
 
     for (let iter = 0; ; iter++) {
       if (signal.aborted) {
@@ -1193,6 +1195,17 @@ export class CacheFirstLoop {
 
           for (const w of preWarnings) yield w;
           for (const w of postWarnings) yield w;
+
+          // Keep the structured result in history; the warning is only host-side visibility.
+          const rateLimited = parseRateLimitedToolResult(result);
+          if (rateLimited && !rateLimitWarningShown) {
+            rateLimitWarningShown = true;
+            yield {
+              turn: this._turn,
+              role: "warning",
+              content: rateLimited.message,
+            };
+          }
 
           this.appendAndPersist({
             role: "tool",

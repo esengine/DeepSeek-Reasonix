@@ -196,6 +196,67 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(roleOrder[1]).toEqual({ role: "tool", toolName: "add" });
   });
 
+  it("surfaces a warning when a tool call is rate-limited", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "echo", arguments: '{"msg":"one"}' },
+          },
+          {
+            id: "call_2",
+            type: "function",
+            function: { name: "echo", arguments: '{"msg":"two"}' },
+          },
+          {
+            id: "call_3",
+            type: "function",
+            function: { name: "echo", arguments: '{"msg":"three"}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+    const tools = new ToolRegistry({
+      rateLimit: { aggregate: { maxCalls: 2, windowSeconds: 60 }, tools: {} },
+    });
+    const seen: string[] = [];
+    tools.register<{ msg: string }, string>({
+      name: "echo",
+      parallelSafe: true,
+      parameters: {
+        type: "object",
+        properties: { msg: { type: "string" } },
+        required: ["msg"],
+      },
+      fn: ({ msg }) => {
+        seen.push(msg);
+        return msg;
+      },
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const warnings: string[] = [];
+    const toolResults: string[] = [];
+    for await (const ev of loop.step("go")) {
+      if (ev.role === "warning") warnings.push(ev.content);
+      if (ev.role === "tool") toolResults.push(ev.content);
+    }
+
+    expect(seen).toEqual(["one", "two"]);
+    expect(toolResults).toHaveLength(3);
+    expect(JSON.parse(toolResults[2]!).error).toBe("rate_limited");
+    expect(warnings.filter((content) => content.includes("rate-limited"))).toHaveLength(1);
+  });
+
   it("immutable prefix is preserved across turns (cache-stability invariant)", async () => {
     const sharedFetch = fakeFetch([{ content: "a" }, { content: "b" }]);
     const client = new DeepSeekClient({ apiKey: "sk-test", fetch: sharedFetch });

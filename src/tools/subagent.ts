@@ -576,11 +576,12 @@ export function registerSubagentTool(
 }
 
 /** Plan-mode state propagates — a subagent spawned under `/plan` MUST NOT escape it. */
+// Registry forks inherit the policy but start with fresh counters, preserving session-local limits.
 export function forkRegistryExcluding(
   parent: ToolRegistry,
   exclude: ReadonlySet<string>,
 ): ToolRegistry {
-  const child = new ToolRegistry();
+  const child = new ToolRegistry({ rateLimit: parent.rateLimitPolicy });
   for (const spec of parent.specs()) {
     const name = spec.function.name;
     if (exclude.has(name)) continue;
@@ -601,7 +602,7 @@ export function forkRegistryWithAllowList(
   allow: ReadonlySet<string>,
   alsoExclude: ReadonlySet<string>,
 ): ToolRegistry {
-  const child = new ToolRegistry();
+  const child = new ToolRegistry({ rateLimit: parent.rateLimitPolicy });
   for (const spec of parent.specs()) {
     const name = spec.function.name;
     if (!allow.has(name)) continue;

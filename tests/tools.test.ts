@@ -436,6 +436,117 @@ describe("ToolRegistry", () => {
     });
   });
 
+  describe("rate limit", () => {
+    it("does not consume quota for unknown tools", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      reg.register({ name: "ok", fn: () => String(++calls) });
+
+      await reg.dispatch("missing", "{}");
+      expect(await reg.dispatch("ok", "{}")).toBe("1");
+      expect(JSON.parse(await reg.dispatch("ok", "{}")).error).toBe("rate_limited");
+      expect(calls).toBe(1);
+    });
+
+    it("does not consume quota for malformed or missing required args", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      reg.register({
+        name: "read_file",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        },
+        fn: () => String(++calls),
+      });
+
+      await reg.dispatch("read_file", "{bad json");
+      await reg.dispatch("read_file", "{}");
+      expect(await reg.dispatch("read_file", '{"path":"a"}')).toBe("1");
+      expect(JSON.parse(await reg.dispatch("read_file", '{"path":"b"}')).error).toBe(
+        "rate_limited",
+      );
+      expect(calls).toBe(1);
+    });
+
+    it("does not consume quota for plan-mode refusals", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      reg.register({ name: "edit_file", fn: () => String(++calls) });
+
+      reg.setPlanMode(true);
+      await reg.dispatch("edit_file", "{}");
+      reg.setPlanMode(false);
+
+      expect(await reg.dispatch("edit_file", "{}")).toBe("1");
+      expect(JSON.parse(await reg.dispatch("edit_file", "{}")).error).toBe("rate_limited");
+      expect(calls).toBe(1);
+    });
+
+    it("does not consume quota for interceptor short-circuits", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      reg.register({ name: "edit_file", fn: () => String(++calls) });
+      reg.setToolInterceptor(() => "queued");
+
+      expect(await reg.dispatch("edit_file", "{}")).toBe("queued");
+      reg.setToolInterceptor(null);
+      expect(await reg.dispatch("edit_file", "{}")).toBe("1");
+      expect(JSON.parse(await reg.dispatch("edit_file", "{}")).error).toBe("rate_limited");
+      expect(calls).toBe(1);
+    });
+
+    it("consumes quota before the tool fn awaits", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      reg.register({
+        name: "slow",
+        fn: async () => {
+          await gate;
+          return "done";
+        },
+      });
+
+      const first = reg.dispatch("slow", "{}");
+      const second = reg.dispatch("slow", "{}");
+      release();
+
+      expect(JSON.parse(await second).error).toBe("rate_limited");
+      expect(await first).toBe("done");
+    });
+
+    it("does not call fn or audit when rate-limited", async () => {
+      const reg = new ToolRegistry({
+        rateLimit: { aggregate: { maxCalls: 1, windowSeconds: 60 }, tools: {} },
+      });
+      let calls = 0;
+      const audit: string[] = [];
+      reg.register({ name: "echo", fn: () => String(++calls) });
+      reg.setAuditListener((event) => audit.push(event.name));
+
+      expect(await reg.dispatch("echo", "{}")).toBe("1");
+      const blocked = JSON.parse(await reg.dispatch("echo", "{}"));
+
+      expect(blocked).toMatchObject({ error: "rate_limited", tool: "echo" });
+      expect(calls).toBe(1);
+      expect(audit).toEqual(["echo"]);
+    });
+  });
+
   describe("isParallelSafe", () => {
     it("returns true when the tool opts in", () => {
       const reg = new ToolRegistry();

@@ -26,6 +26,7 @@ import {
   loadReasoningEffort,
   loadSemanticEmbeddingUserConfig,
   loadTheme,
+  loadToolRateLimit,
   markEditModeHintShown,
   readConfig,
   redactKey,
@@ -201,6 +202,36 @@ describe("config", () => {
 
     writeConfig({}, path);
     expect(loadProxyConfig(path)).toEqual({});
+  });
+
+  it("loads toolRateLimit with defaults and opt-out", () => {
+    writeConfig(
+      {
+        toolRateLimit: {
+          aggregate: { maxCalls: 5, windowSeconds: 10 },
+          tools: {
+            run_command: { maxCalls: 2, windowSeconds: 3 },
+            run_background: false,
+          },
+        },
+      },
+      path,
+    );
+    expect(loadToolRateLimit(path)).toMatchObject({
+      aggregate: { maxCalls: 5, windowSeconds: 10 },
+      tools: {
+        run_command: { maxCalls: 2, windowSeconds: 3 },
+        run_background: false,
+      },
+    });
+
+    writeConfig({ toolRateLimit: { enabled: false } }, path);
+    expect(loadToolRateLimit(path)).toBe(false);
+
+    writeConfig({ toolRateLimit: { aggregate: { maxCalls: 0, windowSeconds: 1.5 } } }, path);
+    expect(loadToolRateLimit(path)).toMatchObject({
+      aggregate: { maxCalls: 200, windowSeconds: 60 },
+    });
   });
 
   it("redactKey hides the middle", () => {

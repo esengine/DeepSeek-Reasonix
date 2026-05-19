@@ -13,6 +13,11 @@ import {
 } from "./index/config.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 import { normalizeQQAllowlist, normalizeQQOpenId } from "./qq/access.js";
+import {
+  type NormalizedToolRateLimitConfig,
+  type ToolRateLimitConfig,
+  normalizeToolRateLimitConfig,
+} from "./tools/rate-limit.js";
 
 /** Legacy `fast|smart|max` kept for back-compat with existing config.json files. */
 export type PresetName = "auto" | "flash" | "pro" | "fast" | "smart" | "max";
@@ -214,6 +219,7 @@ export interface ReasonixConfig {
   /** Per-app proxy override. Layered on top of HTTPS_PROXY / NO_PROXY env vars + the default DeepSeek-bypass whitelist. */
   proxy?: ProxyConfig;
   rateLimit?: RateLimitConfig;
+  toolRateLimit?: ToolRateLimitConfig;
   /** Host-enforced engineering lifecycle. Defaults to off so opt-outs pay zero prefix cost. */
   engineeringLifecycle?: {
     mode?: EngineeringLifecycleMode;
@@ -590,6 +596,12 @@ export function loadRateLimit(path: string = defaultConfigPath()): RateLimitConf
   const rpm = readConfig(path).rateLimit?.rpm;
   if (typeof rpm !== "number" || !Number.isInteger(rpm) || rpm <= 0) return undefined;
   return { rpm };
+}
+
+export function loadToolRateLimit(
+  path: string = defaultConfigPath(),
+): false | NormalizedToolRateLimitConfig {
+  return normalizeToolRateLimitConfig(readConfig(path).toolRateLimit);
 }
 
 export function saveBaseUrl(url: string, path: string = defaultConfigPath()): void {
