@@ -141,7 +141,10 @@ fn find_real_node() -> Result<PathBuf> {
 pub fn rpc_spawn(app: AppHandle, state: State<'_, RpcState>) -> Result<(), String> {
     let mut guard = state.inner.lock();
     if guard.is_some() {
-        return Err("rpc already spawned".into());
+        // Idempotent — a second call (effect re-run, WebView reload) keeps the
+        // existing Node child. The frontend follows up with `desktop_resync`
+        // so a reloaded React app catches up on bootstrap events it missed.
+        return Ok(());
     }
 
     let (program, args) = resolve_cli(&app).map_err(|e| e.to_string())?;

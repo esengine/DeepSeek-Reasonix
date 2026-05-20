@@ -137,6 +137,7 @@ type InMessage = { tabId?: string } & (
   | { cmd: "compact_history" }
   | { cmd: "retry" }
   | { cmd: "btw"; text: string }
+  | { cmd: "desktop_resync" }
 );
 
 interface NeedsSetupEvent {
@@ -1899,6 +1900,28 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
 
+    if (msg.cmd === "desktop_resync") {
+      // WebView reloads (DevTools F5, host-side respawn) leave the Node child
+      // alive but the React app starts blank. Re-fire the bootstrap events
+      // so it can rehydrate without restarting the agent.
+      const hasKey = !!loadApiKey();
+      for (const t of tabs.values()) {
+        emit(
+          { type: "$tab_opened", workspaceDir: t.rootDir, active: t.id === lastActiveTabId },
+          t.id,
+        );
+        emitSessions(t);
+        emitSettings(t);
+        emitMcpSpecs(t);
+        emitSkills(t);
+        emitMemory(t);
+        emitQQSettings(t);
+        if (!hasKey) emit({ type: "$needs_setup", reason: "no_api_key" }, t.id);
+        else if (t.toolset) emit({ type: "$ready" }, t.id);
+        void emitBalance(t);
+      }
+      return;
+    }
     if (msg.cmd === "jobs_list") {
       emitJobs();
       return;

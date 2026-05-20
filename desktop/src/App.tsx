@@ -2985,6 +2985,14 @@ export function App() {
       cleanups.push(...subs);
       try {
         await invoke("rpc_spawn");
+        // WebView reload (DevTools F5, host respawn) keeps the Node child
+        // alive but loses every $tab_opened / $settings / $needs_setup that
+        // already fired. Ask the desktop server to re-emit them.
+        if (!cancelled) {
+          await invoke("rpc_send", {
+            line: JSON.stringify({ cmd: "desktop_resync" }),
+          });
+        }
       } catch (err) {
         if (!cancelled) console.error("rpc_spawn failed", err);
       }
