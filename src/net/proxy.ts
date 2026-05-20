@@ -1,6 +1,9 @@
-/** Node's built-in fetch ignores HTTPS_PROXY env vars — undici's ProxyAgent has to be wired in explicitly. */
+// Node's built-in fetch ignores HTTPS_PROXY env vars — undici's ProxyAgent has to
+// be wired in explicitly. A custom dispatcher routes around the proxy for hosts
+// matched by NO_PROXY (curl-style) so DeepSeek API stays direct while user-set
+// HTTPS_PROXY still routes everything else through the user's proxy.
 
-import { ProxyAgent, setGlobalDispatcher } from "undici";
+import { Agent, type Dispatcher, ProxyAgent, setGlobalDispatcher } from "undici";
 
 /** Env-var precedence matches curl: HTTPS_PROXY → HTTP_PROXY → ALL_PROXY, upper-case first then lower. */
 const PROXY_ENV_KEYS = [
@@ -12,8 +15,32 @@ const PROXY_ENV_KEYS = [
   "all_proxy",
 ] as const;
 
+const NO_PROXY_ENV_KEYS = ["NO_PROXY", "no_proxy"] as const;
+
+// DeepSeek's API origin is in CN; routing it through a user's clash/v2ray
+// (typically a US-exit pool) lands on shared abuse IPs that DeepSeek 403s.
+// Localhost entries protect the dashboard, MCP stdio sidecars' HTTP probes,
+// and the `reasonix doctor` reachability checks.
+export const DEFAULT_NO_PROXY = [
+  "api.deepseek.com",
+  "*.deepseek.com",
+  "localhost",
+  "127.0.0.1",
+  "::1",
+] as const;
+
 export function detectProxyUrl(env: NodeJS.ProcessEnv = process.env): string | null {
   for (const key of PROXY_ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
+export function detectNoProxyRaw(env: NodeJS.ProcessEnv = process.env): string | null {
+  for (const key of NO_PROXY_ENV_KEYS) {
     const raw = env[key];
     if (typeof raw !== "string") continue;
     const trimmed = raw.trim();
@@ -34,12 +61,116 @@ export function normalizeProxyUrl(raw: string): string | null {
   }
 }
 
+export interface NoProxyPattern {
+  /** Raw pattern text, kept for /doctor display. */
+  raw: string;
+  matches: (host: string) => boolean;
+}
+
+/** Curl-style NO_PROXY parsing: comma-separated, supports `*` (all), bare host (exact OR `.host` suffix), `.suffix`, `*.suffix`, IP literals. Strips optional `:port` since we only match by host. */
+export function parseNoProxy(raw: string | null | undefined): NoProxyPattern[] {
+  if (!raw) return [];
+  const out: NoProxyPattern[] = [];
+  for (const segment of raw.split(",")) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+    out.push(buildPattern(trimmed));
+  }
+  return out;
+}
+
+function buildPattern(raw: string): NoProxyPattern {
+  // Strip optional :port — we route by host only.
+  const colon = raw.lastIndexOf(":");
+  const hostPart = colon !== -1 && /^\d+$/.test(raw.slice(colon + 1)) ? raw.slice(0, colon) : raw;
+  const normalized = hostPart.toLowerCase();
+  if (normalized === "*") {
+    return { raw, matches: () => true };
+  }
+  if (normalized.startsWith("*.")) {
+    const suffix = normalized.slice(1); // ".foo.com"
+    const bare = normalized.slice(2); // "foo.com"
+    return {
+      raw,
+      matches: (host) => {
+        const h = host.toLowerCase();
+        return h === bare || h.endsWith(suffix);
+      },
+    };
+  }
+  if (normalized.startsWith(".")) {
+    return {
+      raw,
+      matches: (host) => host.toLowerCase().endsWith(normalized),
+    };
+  }
+  return {
+    raw,
+    matches: (host) => {
+      const h = host.toLowerCase();
+      return h === normalized || h.endsWith(`.${normalized}`);
+    },
+  };
+}
+
+export function matchesNoProxy(host: string, patterns: readonly NoProxyPattern[]): boolean {
+  for (const p of patterns) {
+    if (p.matches(host)) return true;
+  }
+  return false;
+}
+
+class SelectiveProxyDispatcher {
+  private readonly direct: Agent;
+  private readonly proxied: ProxyAgent;
+  private readonly patterns: readonly NoProxyPattern[];
+
+  constructor(proxyUrl: string, patterns: readonly NoProxyPattern[]) {
+    this.direct = new Agent();
+    this.proxied = new ProxyAgent(proxyUrl);
+    this.patterns = patterns;
+  }
+
+  dispatch(
+    opts: Dispatcher.DispatchOptions,
+    handler: Dispatcher.DispatchHandler,
+  ): ReturnType<Dispatcher["dispatch"]> {
+    const origin = opts.origin;
+    let host = "";
+    try {
+      if (typeof origin === "string") {
+        host = new URL(origin).hostname;
+      } else if (origin instanceof URL) {
+        host = origin.hostname;
+      }
+    } catch {
+      // Fall through with empty host — won't match patterns, will route via proxy.
+    }
+    const target = host && matchesNoProxy(host, this.patterns) ? this.direct : this.proxied;
+    return (target as unknown as Dispatcher).dispatch(opts, handler);
+  }
+
+  async close(): Promise<void> {
+    await Promise.allSettled([this.direct.close(), this.proxied.close()]);
+  }
+
+  async destroy(): Promise<void> {
+    await Promise.allSettled([this.direct.destroy(), this.proxied.destroy()]);
+  }
+}
+
 let installed = false;
 
-/** Sets the undici global dispatcher to a ProxyAgent. Returns the proxy URL or null if no env var is set, the value is unparseable, or the ProxyAgent ctor throws. Idempotent. */
+export interface ProxyInstallResult {
+  url: string;
+  reinstalled: boolean;
+  noProxy: readonly NoProxyPattern[];
+}
+
+/** Sets the undici global dispatcher to a SelectiveProxyDispatcher (proxy for non-NO_PROXY hosts, direct for matches). Returns the proxy URL + parsed NO_PROXY patterns, or null when no env var is set, the value is unparseable, or the ProxyAgent ctor throws. Idempotent. */
 export function installProxyIfConfigured(
   env: NodeJS.ProcessEnv = process.env,
-): { url: string; reinstalled: boolean } | null {
+): ProxyInstallResult | null {
   const raw = detectProxyUrl(env);
   if (!raw) return null;
   const url = normalizeProxyUrl(raw);
@@ -49,11 +180,19 @@ export function installProxyIfConfigured(
     );
     return null;
   }
+
+  // Default whitelist always applies; user's NO_PROXY entries are additive.
+  const userNoProxy = parseNoProxy(detectNoProxyRaw(env));
+  const defaultNoProxy = parseNoProxy(DEFAULT_NO_PROXY.join(","));
+  const patterns = [...defaultNoProxy, ...userNoProxy];
+
   try {
     const reinstalled = installed;
-    setGlobalDispatcher(new ProxyAgent(url));
+    setGlobalDispatcher(new SelectiveProxyDispatcher(url, patterns) as unknown as Dispatcher);
     installed = true;
-    return { url, reinstalled };
+    const bypassList = patterns.map((p) => p.raw).join(",");
+    process.stderr.write(`[proxy] using ${url} (NO_PROXY: ${bypassList})\n`);
+    return { url, reinstalled, noProxy: patterns };
   } catch (err) {
     process.stderr.write(
       `▲ proxy install failed (${(err as Error).message}); continuing without proxy.\n`,

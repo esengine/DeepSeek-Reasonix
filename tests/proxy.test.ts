@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_NO_PROXY,
   _resetForTests,
+  detectNoProxyRaw,
   detectProxyUrl,
   installProxyIfConfigured,
+  matchesNoProxy,
   normalizeProxyUrl,
+  parseNoProxy,
 } from "../src/net/proxy.js";
 
 describe("detectProxyUrl (issue #646)", () => {
@@ -56,11 +60,97 @@ describe("detectProxyUrl (issue #646)", () => {
   });
 });
 
+describe("detectNoProxyRaw", () => {
+  it("returns null when neither NO_PROXY nor no_proxy is set", () => {
+    expect(detectNoProxyRaw({})).toBeNull();
+  });
+
+  it("uppercase NO_PROXY wins over lowercase", () => {
+    expect(detectNoProxyRaw({ NO_PROXY: "a.com", no_proxy: "b.com" })).toBe("a.com");
+  });
+
+  it("falls back to lowercase no_proxy", () => {
+    expect(detectNoProxyRaw({ no_proxy: "b.com" })).toBe("b.com");
+  });
+});
+
+describe("parseNoProxy + matchesNoProxy", () => {
+  it("returns [] for empty / null input", () => {
+    expect(parseNoProxy(null)).toEqual([]);
+    expect(parseNoProxy("")).toEqual([]);
+    expect(parseNoProxy("   ")).toEqual([]);
+  });
+
+  it("`*` matches every host", () => {
+    const p = parseNoProxy("*");
+    expect(matchesNoProxy("api.deepseek.com", p)).toBe(true);
+    expect(matchesNoProxy("anything.example", p)).toBe(true);
+  });
+
+  it("bare hostname matches exact + dot-prefixed subdomain (curl compat)", () => {
+    const p = parseNoProxy("deepseek.com");
+    expect(matchesNoProxy("deepseek.com", p)).toBe(true);
+    expect(matchesNoProxy("api.deepseek.com", p)).toBe(true);
+    expect(matchesNoProxy("notdeepseek.com", p)).toBe(false);
+  });
+
+  it("`.suffix` matches subdomains only, NOT the bare apex", () => {
+    const p = parseNoProxy(".deepseek.com");
+    expect(matchesNoProxy("api.deepseek.com", p)).toBe(true);
+    expect(matchesNoProxy("deepseek.com", p)).toBe(false);
+  });
+
+  it("`*.suffix` matches subdomains AND apex", () => {
+    const p = parseNoProxy("*.deepseek.com");
+    expect(matchesNoProxy("api.deepseek.com", p)).toBe(true);
+    expect(matchesNoProxy("deepseek.com", p)).toBe(true);
+    expect(matchesNoProxy("nondeepseek.com", p)).toBe(false);
+  });
+
+  it("case-insensitive matching", () => {
+    const p = parseNoProxy("DEEPSEEK.COM");
+    expect(matchesNoProxy("api.DeepSeek.com", p)).toBe(true);
+  });
+
+  it("strips `:port` suffix when present", () => {
+    const p = parseNoProxy("api.deepseek.com:443");
+    expect(matchesNoProxy("api.deepseek.com", p)).toBe(true);
+  });
+
+  it("comma-separated entries are merged", () => {
+    const p = parseNoProxy("a.com, .b.com, *.c.com, 127.0.0.1");
+    expect(matchesNoProxy("a.com", p)).toBe(true);
+    expect(matchesNoProxy("foo.a.com", p)).toBe(true);
+    expect(matchesNoProxy("foo.b.com", p)).toBe(true);
+    expect(matchesNoProxy("b.com", p)).toBe(false);
+    expect(matchesNoProxy("c.com", p)).toBe(true);
+    expect(matchesNoProxy("127.0.0.1", p)).toBe(true);
+    expect(matchesNoProxy("128.0.0.1", p)).toBe(false);
+  });
+
+  it("ignores blank entries between commas", () => {
+    const p = parseNoProxy(",, foo.com , ,");
+    expect(p).toHaveLength(1);
+    expect(matchesNoProxy("foo.com", p)).toBe(true);
+  });
+});
+
 describe("installProxyIfConfigured", () => {
+  let writes: string[];
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     _resetForTests();
+    writes = [];
+    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ): boolean => {
+      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+      return true;
+    }) as typeof process.stderr.write);
   });
   afterEach(() => {
+    stderrSpy.mockRestore();
     _resetForTests();
   });
 
@@ -68,12 +158,34 @@ describe("installProxyIfConfigured", () => {
     expect(installProxyIfConfigured({})).toBeNull();
   });
 
-  it("returns the detected url + reinstalled=false on the first install", () => {
+  it("returns url + reinstalled=false + default NO_PROXY patterns on first install", () => {
     const result = installProxyIfConfigured({ HTTPS_PROXY: "http://example:8080" });
-    expect(result).toEqual({ url: "http://example:8080/", reinstalled: false });
+    expect(result?.url).toBe("http://example:8080/");
+    expect(result?.reinstalled).toBe(false);
+    const raws = result?.noProxy.map((p) => p.raw) ?? [];
+    for (const expected of DEFAULT_NO_PROXY) {
+      expect(raws).toContain(expected);
+    }
   });
 
-  it("returns reinstalled=true on subsequent installs (idempotent at the env-detect level)", () => {
+  it("merges user NO_PROXY entries onto the default whitelist", () => {
+    const result = installProxyIfConfigured({
+      HTTPS_PROXY: "http://example:8080",
+      NO_PROXY: "internal.corp.example, .private.lan",
+    });
+    const raws = result?.noProxy.map((p) => p.raw) ?? [];
+    expect(raws).toContain("api.deepseek.com");
+    expect(raws).toContain("internal.corp.example");
+    expect(raws).toContain(".private.lan");
+  });
+
+  it("logs the proxy decision to stderr at startup", () => {
+    installProxyIfConfigured({ HTTPS_PROXY: "http://example:8080" });
+    expect(writes.join("")).toMatch(/\[proxy\] using http:\/\/example:8080\//);
+    expect(writes.join("")).toMatch(/NO_PROXY: .*api\.deepseek\.com/);
+  });
+
+  it("returns reinstalled=true on subsequent installs", () => {
     installProxyIfConfigured({ HTTPS_PROXY: "http://first:8080" });
     const second = installProxyIfConfigured({ HTTPS_PROXY: "http://second:8080" });
     expect(second?.reinstalled).toBe(true);
@@ -86,21 +198,8 @@ describe("installProxyIfConfigured", () => {
   });
 
   it("does not throw on a malformed env value — warns to stderr and returns null", () => {
-    const writes: string[] = [];
-    const orig = process.stderr.write.bind(process.stderr);
-    const spy = vi.spyOn(process.stderr, "write").mockImplementation(((
-      chunk: string | Uint8Array,
-    ): boolean => {
-      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-      return true;
-    }) as typeof process.stderr.write);
-    try {
-      expect(installProxyIfConfigured({ HTTPS_PROXY: "http://[invalid:::" })).toBeNull();
-      expect(writes.join("")).toMatch(/ignoring proxy env value/);
-    } finally {
-      spy.mockRestore();
-      process.stderr.write = orig;
-    }
+    expect(installProxyIfConfigured({ HTTPS_PROXY: "http://[invalid:::" })).toBeNull();
+    expect(writes.join("")).toMatch(/ignoring proxy env value/);
   });
 });
 
