@@ -4,7 +4,8 @@
   "description": "DeepSeek-native coding agent: cache-first loop, flash-first cost control, tool-call repair.",
   "type": "module",
   "bin": {
-    "reasonix": "dist/cli/index.js"
+    "reasonix": "dist/cli/index.js",
+    "dsnix": "dist/cli/index.js"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
