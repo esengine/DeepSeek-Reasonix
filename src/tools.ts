@@ -64,8 +64,8 @@ export class ToolRegistry {
   private _resultAugmenter: ToolResultAugmenter | null = null;
   /** Per-tool fingerprint of the last call that failed schema validation. Cleared by any successful validation for that tool. */
   private readonly _lastMalformed = new Map<string, string>();
-  /** Per-tool fingerprint of the last host-side interceptor rejection. */
-  private readonly _lastInterceptorRejection = new Map<string, string>();
+  /** Per-tool fingerprint of the last host-side gate rejection. */
+  private readonly _lastGateRejection = new Map<string, string>();
 
   constructor(opts: ToolRegistryOptions = {}) {
     this._autoFlatten = opts.autoFlatten !== false;
@@ -239,7 +239,7 @@ export class ToolRegistry {
       try {
         const short = await interceptor(name, args);
         if (typeof short === "string") {
-          const guarded = this._noteInterceptorRejection(name, fingerprint, short);
+          const guarded = this._noteGateRejection(name, fingerprint, short);
           return this._augmentResult(name, args, guarded);
         }
       } catch (err) {
@@ -248,7 +248,6 @@ export class ToolRegistry {
         });
       }
     }
-    this._lastInterceptorRejection.delete(name);
 
     // Pre-dispatch abort gate: if ESC fired while this tool was queued,
     // refuse to start it. Tools that already check `ctx.signal` mid-run
@@ -308,6 +307,7 @@ export class ToolRegistry {
       }
     }
 
+    finalResult = this._noteGateRejection(name, fingerprint, finalResult);
     return this._augmentResult(name, args, finalResult);
   }
 
@@ -335,18 +335,18 @@ export class ToolRegistry {
     return JSON.stringify({ error: `${name}: ${detail}` });
   }
 
-  private _noteInterceptorRejection(name: string, fingerprint: string, result: string): string {
-    const reason = rejectedReason(result);
+  private _noteGateRejection(name: string, fingerprint: string, result: string): string {
+    const reason = rejectedReason(name, result);
     if (!reason) {
-      this._lastInterceptorRejection.delete(name);
+      this._lastGateRejection.delete(name);
       return result;
     }
     const key = `${reason}:${fingerprint}`;
-    const prev = this._lastInterceptorRejection.get(name);
-    this._lastInterceptorRejection.set(name, key);
+    const prev = this._lastGateRejection.get(name);
+    this._lastGateRejection.set(name, key);
     if (prev === key) {
       return JSON.stringify({
-        error: `${name}: same call was just rejected by ${reason} — do not retry identical args. Switch to read-only exploration, submit or revise the plan, or choose a different tool call.`,
+        error: `${name}: same call was just rejected by ${reason} — do not retry identical args. ${rejectionRecoveryHint(reason)}`,
         rejectedReason: reason,
         consecutiveInterceptorRejection: true,
       });
@@ -355,14 +355,44 @@ export class ToolRegistry {
   }
 }
 
-function rejectedReason(result: string): string | null {
+function rejectedReason(name: string, result: string): string | null {
+  const textReason = plainTextRejectedReason(name, result);
+  if (textReason) return textReason;
   try {
     const parsed = JSON.parse(result) as unknown;
     if (!parsed || typeof parsed !== "object") return null;
     const reason = (parsed as { rejectedReason?: unknown }).rejectedReason;
-    return typeof reason === "string" && reason ? reason : null;
+    if (typeof reason === "string" && reason) return reason;
+    const error = (parsed as { error?: unknown }).error;
+    if (typeof error === "string") return plainTextRejectedReason(name, error);
+    return null;
   } catch {
     return null;
+  }
+}
+
+function plainTextRejectedReason(name: string, result: string): string | null {
+  if ((name === "edit_file" || name === "write_file") && /rejected this edit/i.test(result)) {
+    return "edit-gate";
+  }
+  if ((name === "run_command" || name === "run_background") && /\buser denied:/i.test(result)) {
+    return "shell-gate";
+  }
+  return null;
+}
+
+function rejectionRecoveryHint(reason: string): string {
+  switch (reason) {
+    case "edit-gate":
+      return "Do not re-emit the same edit. Try a genuinely different edit or ask the user how to proceed.";
+    case "shell-gate":
+      return "Do not retry the same command. Use an allowlisted/read-only command, wait for approval, or ask the user how to proceed.";
+    case "engineering-lifecycle":
+      return "Switch to read-only exploration, submit or revise the plan, or choose a different tool call.";
+    case "engineering-lifecycle-evidence":
+      return "Submit completion evidence or revise/checkpoint the plan before marking the step complete.";
+    default:
+      return "Choose a different tool call or ask the user how to proceed.";
   }
 }
 

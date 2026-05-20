@@ -526,6 +526,33 @@ describe("registerShellTools — dispatch integration", () => {
     expect(out).not.toMatch(/user denied/);
   });
 
+  it("sharpens repeated shell gate denials for the high-risk call corpus", async () => {
+    const cases: Array<{ name: "run_command" | "run_background"; args: Record<string, unknown> }> =
+      [
+        { name: "run_command", args: { command: "npm install left-pad" } },
+        { name: "run_background", args: { command: "npm run dev", waitSec: 1 } },
+      ];
+
+    for (const item of cases) {
+      const registry = new ToolRegistry();
+      registerShellTools(registry, { rootDir: tmp });
+      const gate = new AutoGate({ type: "deny", denyContext: "too risky" });
+      const rawArgs = JSON.stringify(item.args);
+
+      const first = await registry.dispatch(item.name, rawArgs, { confirmationGate: gate });
+      const second = JSON.parse(
+        await registry.dispatch(item.name, rawArgs, { confirmationGate: gate }),
+      );
+
+      expect(first).toMatch(new RegExp(`user denied: ${String(item.args.command)}`));
+      expect(first).toMatch(/too risky/);
+      expect(second.rejectedReason).toBe("shell-gate");
+      expect(second.consecutiveInterceptorRejection).toBe(true);
+      expect(second.error).toMatch(/do not retry identical args/);
+      expect(second.error).toMatch(/allowlisted/);
+    }
+  });
+
   it("passes the correct kind to the gate — regression check for argument swap", async () => {
     const registry = new ToolRegistry();
     registerShellTools(registry, { rootDir: tmp });

@@ -402,6 +402,29 @@ describe("ToolRegistry", () => {
       }
     });
 
+    it("sharpens repeated edit gate rejections from review-mode text", async () => {
+      const reg = new ToolRegistry();
+      reg.register({ name: "edit_file", fn: () => "should not run" });
+      reg.setToolInterceptor((name, args) => {
+        if (name !== "edit_file") return null;
+        return `User rejected this edit to ${String(args.path)}. Don't retry the same SEARCH/REPLACE; either try a different approach or ask the user what they want instead.`;
+      });
+
+      const rawArgs = JSON.stringify({
+        path: "src/app.ts",
+        search: "oldValue",
+        replace: "newValue",
+      });
+      const first = await reg.dispatch("edit_file", rawArgs);
+      const second = JSON.parse(await reg.dispatch("edit_file", rawArgs));
+
+      expect(first).toMatch(/User rejected this edit to src\/app\.ts/);
+      expect(second.rejectedReason).toBe("edit-gate");
+      expect(second.consecutiveInterceptorRejection).toBe(true);
+      expect(second.error).toMatch(/do not retry identical args/);
+      expect(second.error).toMatch(/different edit/);
+    });
+
     it("surfaces interceptor throws as structured errors", async () => {
       const reg = new ToolRegistry();
       reg.register({ name: "edit_file", fn: () => "ok" });
