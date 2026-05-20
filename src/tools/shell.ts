@@ -104,7 +104,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         command: {
           type: "string",
           description:
-            'Full command line. POSIX-ish quoting. Chain operators `|`, `||`, `&&`, `;` and file redirects `>` / `>>` / `<` / `2>` / `2>>` / `2>&1` / `&>` work natively (no shell). Background `&`, heredoc `<<`, env-var expansion `$VAR`, and command substitution `$(…)` are rejected (or passed through as literal in the case of `$VAR`). To pass an operator character as a literal argument (e.g. a regex), wrap it in quotes: `grep "a|b" file.txt`.',
+            "Full command line. Quoting + chain/redirect rules per the top-level description.",
         },
         timeoutSec: {
           type: "integer",
