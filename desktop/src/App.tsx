@@ -274,7 +274,8 @@ type Action =
   | { t: "mention_preview"; preview: MentionPreviewState }
   | { t: "enqueue_send"; text: string }
   | { t: "dequeue_send"; index: number }
-  | { t: "shift_queued_send" };
+  | { t: "shift_queued_send" }
+  | { t: "push_status"; text: string };
 
 function fallbackSkillDesc(skill: SkillInfo): string {
   const scope =
@@ -298,7 +299,7 @@ function nextMessageTurn(messages: ChatMessage[]): number {
   return lastTurn + 1;
 }
 
-function reduce(state: State, action: Action): State {
+export function reduce(state: State, action: Action): State {
   switch (action.t) {
     case "send_user": {
       return {
@@ -460,6 +461,8 @@ function reduce(state: State, action: Action): State {
       };
     case "shift_queued_send":
       return { ...state, queuedSends: state.queuedSends.slice(1) };
+    case "push_status":
+      return { ...state, messages: [...state.messages, { kind: "status", text: action.text }] };
   }
 }
 
@@ -1263,11 +1266,17 @@ function TabRuntime({
       const text = (override ?? draft).trim();
       if (!text || !state.ready || state.busy) return;
 
-      // /btw <question> — route to side-question RPC instead of user_input
+      // /btw <question> — route to side-question RPC instead of user_input.
+      // Empty payload used to silently swallow the keystroke (#1370); surface
+      // the usage hint as a status message so the user knows what's expected.
       const btwMatch = /^\/btw(?:\s+([\s\S]+))?$/.exec(text);
       if (btwMatch) {
         const question = btwMatch[1]?.trim() ?? "";
-        if (!question) return;
+        if (!question) {
+          dispatch({ t: "push_status", text: t("app.btwUsage") });
+          if (!override) setDraft("/btw ");
+          return;
+        }
         sendRpc({ cmd: "btw", text: question });
         if (!override) setDraft("");
         return;

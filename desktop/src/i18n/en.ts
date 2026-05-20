@@ -391,6 +391,7 @@ export const en = {
       switchBack: "Switch to Review",
       toast: "All operations will be auto-approved without asking",
     },
+    btwUsage: "▸ /btw <question> — ask a side question without polluting the conversation context.",
     errorLabel: "Error",
     jumpToBottom: "Jump to bottom",
     splashSubtitle: "DeepSeek Agents",
