@@ -593,6 +593,281 @@ describe("searchTavily", () => {
   });
 });
 
+describe("searchPerplexity", () => {
+  const sampleResponse = {
+    choices: [{ message: { content: "Synthesized answer about the query." } }],
+    citations: [
+      { url: "https://source.example.com/a", title: "Source A" },
+      "https://source.example.com/b",
+    ],
+  };
+
+  it("requires an API key — throws a setup-pointing error when none is set", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.PERPLEXITY_API_KEY;
+    try {
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow(
+        /Perplexity.*API key/i,
+      );
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow("perplexity.ai");
+    } finally {
+      if (origKey !== undefined) process.env.PERPLEXITY_API_KEY = origKey;
+    }
+  });
+
+  it("POSTs to Perplexity with bearer auth and sonar model", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "pplx-test-key";
+    const captured: { url: string; method: string; auth: string; body: string } = {
+      url: "",
+      method: "",
+      auth: "",
+      body: "",
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.auth = String((init?.headers as Record<string, string>)?.Authorization ?? "");
+      captured.body = String(init?.body ?? "");
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "perplexity", topK: 5 });
+      expect(captured.url).toBe("https://api.perplexity.ai/chat/completions");
+      expect(captured.method).toBe("POST");
+      expect(captured.auth).toBe("Bearer pplx-test-key");
+      const body = JSON.parse(captured.body);
+      expect(body.model).toBe("sonar");
+      expect(body.messages[0].content).toBe("test query");
+      // First result is the AI answer (url:"" sentinel + answer field)
+      expect(out[0]).toEqual({
+        title: "Synthesized answer about the query.",
+        url: "",
+        snippet: "",
+        answer: "Synthesized answer about the query.",
+      });
+      // Citations follow — both object and string forms
+      expect(out[1]?.url).toBe("https://source.example.com/a");
+      expect(out[1]?.title).toBe("Source A");
+      expect(out[2]?.url).toBe("https://source.example.com/b");
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.PERPLEXITY_API_KEY;
+      } else {
+        process.env.PERPLEXITY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 401/403 to a key-rejected error", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "pplx-bad";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow(
+        /Perplexity.*rejected/i,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.PERPLEXITY_API_KEY;
+      } else {
+        process.env.PERPLEXITY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 429 to a rate-limit error", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "pplx-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("too many", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow(/rate-limit/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.PERPLEXITY_API_KEY;
+      } else {
+        process.env.PERPLEXITY_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps unparseable JSON to a parse error", async () => {
+    const origKey = process.env.PERPLEXITY_API_KEY;
+    process.env.PERPLEXITY_API_KEY = "pplx-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("<html>not json</html>", { status: 200 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "perplexity" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.PERPLEXITY_API_KEY;
+      } else {
+        process.env.PERPLEXITY_API_KEY = origKey;
+      }
+    }
+  });
+});
+
+describe("searchExa", () => {
+  const sampleResponse = {
+    answer: "Exa synthesized answer.",
+    citations: [
+      {
+        title: "Citation A",
+        url: "https://exa.example.com/a",
+        text: "Snippet A.",
+      },
+      {
+        title: "Citation B",
+        url: "https://exa.example.com/b",
+        text: "Snippet B.",
+      },
+    ],
+  };
+
+  it("requires an API key — throws a setup-pointing error when none is set", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.EXA_API_KEY;
+    try {
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow(/Exa.*API key/i);
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow("exa.ai");
+    } finally {
+      if (origKey !== undefined) process.env.EXA_API_KEY = origKey;
+    }
+  });
+
+  it("POSTs to Exa /answer with x-api-key header", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    process.env.EXA_API_KEY = "exa-test-key";
+    const captured: { url: string; method: string; auth: string; body: string } = {
+      url: "",
+      method: "",
+      auth: "",
+      body: "",
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.auth = String((init?.headers as Record<string, string>)?.["x-api-key"] ?? "");
+      captured.body = String(init?.body ?? "");
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "exa", topK: 5 });
+      expect(captured.url).toBe("https://api.exa.ai/answer");
+      expect(captured.method).toBe("POST");
+      expect(captured.auth).toBe("exa-test-key");
+      const body = JSON.parse(captured.body);
+      expect(body.query).toBe("test query");
+      expect(out[0]).toEqual({
+        title: "Exa synthesized answer.",
+        url: "",
+        snippet: "",
+        answer: "Exa synthesized answer.",
+      });
+      expect(out[1]).toEqual({
+        title: "Citation A",
+        url: "https://exa.example.com/a",
+        snippet: "Snippet A.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.EXA_API_KEY;
+      } else {
+        process.env.EXA_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 401/403 to a key-rejected error", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    process.env.EXA_API_KEY = "exa-bad";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow(/Exa.*rejected/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.EXA_API_KEY;
+      } else {
+        process.env.EXA_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 429 to a rate-limit/quota error", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    process.env.EXA_API_KEY = "exa-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("too many", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow(/rate-limit|quota/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.EXA_API_KEY;
+      } else {
+        process.env.EXA_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps unparseable JSON to a parse error", async () => {
+    const origKey = process.env.EXA_API_KEY;
+    process.env.EXA_API_KEY = "exa-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("<html>not json</html>", { status: 200 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "exa" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.EXA_API_KEY;
+      } else {
+        process.env.EXA_API_KEY = origKey;
+      }
+    }
+  });
+});
+
 describe("formatSearchResults", () => {
   it("renders a query header + numbered list", () => {
     const out = formatSearchResults("hello", [
@@ -603,6 +878,19 @@ describe("formatSearchResults", () => {
     expect(out).toMatch(/results \(2\)/);
     expect(out).toMatch(/1\. One\n\s+https:\/\/one\n\s+first/);
     expect(out).toMatch(/2\. Two/);
+  });
+
+  it("renders answer + sources dual-section when an AI answer is present", () => {
+    const out = formatSearchResults("hello", [
+      { title: "An AI answer.", url: "", snippet: "", answer: "An AI answer." },
+      { title: "Citation A", url: "https://a", snippet: "snippet a" },
+      { title: "Citation B", url: "https://b", snippet: "" },
+    ]);
+    expect(out).toMatch(/answer:\n\s+An AI answer\./);
+    expect(out).toMatch(/sources \(2\)/);
+    expect(out).toMatch(/1\. Citation A\n\s+https:\/\/a\n\s+snippet a/);
+    expect(out).toMatch(/2\. Citation B/);
+    expect(out).not.toMatch(/^results \(/m);
   });
 });
 

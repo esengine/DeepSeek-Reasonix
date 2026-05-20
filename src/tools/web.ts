@@ -328,8 +328,6 @@ async function searchTavily(query: string, opts: WebSearchOptions = {}): Promise
   }));
 }
 
-// ── Perplexity ───────────────────────────────────────────────────────────────
-
 interface PerplexityChoice {
   message?: { content?: string };
 }
@@ -417,8 +415,6 @@ async function searchPerplexity(
 
   return results;
 }
-
-// ── Exa ─────────────────────────────────────────────────────────────────────
 
 interface ExaCitation {
   url?: string;

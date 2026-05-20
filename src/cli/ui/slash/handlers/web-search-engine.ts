@@ -47,10 +47,8 @@ export const handlers: Record<string, SlashHandler> = {
 
     const cfg = readConfig();
 
-    // ── API-key engines ──
     const apiKeyEngines = new Set(["tavily", "perplexity", "exa", "metaso"]);
     if (apiKeyEngines.has(engine)) {
-      // Resolve the loader for the current engine
       const loadKey =
         engine === "tavily"
           ? loadTavilyApiKey
@@ -61,7 +59,6 @@ export const handlers: Record<string, SlashHandler> = {
               : loadMetasoApiKey;
 
       if (args[1]) {
-        // User provided key inline → save to config + switch
         cfg.webSearchEngine = engine;
         (cfg as Record<string, unknown>)[`${engine}ApiKey`] = args[1];
         writeConfig(cfg);
@@ -72,18 +69,15 @@ export const handlers: Record<string, SlashHandler> = {
 
       const existingKey = loadKey();
       if (existingKey) {
-        // Key already configured → switch normally, no config hint needed
         cfg.webSearchEngine = engine;
         writeConfig(cfg);
         return { info: t("handlers.webSearchEngine.confirmed", { engine, detail: "" }) };
       }
 
-      // No key configured → don't switch, show guidance with env var name
       const envVar = `${engine.toUpperCase()}_API_KEY`;
       return { info: t("handlers.webSearchEngine.keyNeeded", { engine, envVar }) };
     }
 
-    // ── Engines without API keys (mojeek, searxng) ──
     cfg.webSearchEngine = engine;
     if (engine === "searxng" && args[1]) {
       const raw = args[1];
