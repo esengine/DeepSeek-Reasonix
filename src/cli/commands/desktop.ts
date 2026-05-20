@@ -445,6 +445,7 @@ const STDOUT_BACKPRESSURE_WAIT = new Int32Array(new SharedArrayBuffer(4));
 
 type SyncWriter = (fd: number, buffer: Buffer, offset: number, length: number) => number;
 
+/** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
 export function writeAllSync(
   fd: number,
   buffer: Buffer,
@@ -461,7 +462,7 @@ export function writeAllSync(
     try {
       written = write(fd, buffer, offset, buffer.length - offset);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException)?.code === "EAGAIN") {
+      if ((err as NodeJS.ErrnoException).code === "EAGAIN") {
         wait();
         continue;
       }
