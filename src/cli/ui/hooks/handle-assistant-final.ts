@@ -53,12 +53,25 @@ export function handleAssistantFinal(ev: LoopEvent, ctx: AssistantFinalContext):
   ctx.flush();
   ctx.translator.reasoningDone(ctx.streamRef.reasoning);
   ctx.translator.streamingDone();
-  ctx.broadcastDashboardEvent({
+  // 广播 assistant_final 事件，包含 usage 信息
+  const finalEvent: import("../../../server/context.js").DashboardEvent = {
     kind: "assistant_final",
     id: ctx.assistantId,
     text: ev.content || ctx.streamRef.text,
     reasoning: ctx.streamRef.reasoning || undefined,
-  });
+  };
+  // 如果有 usage 信息，添加到事件中
+  if (ev.stats?.usage) {
+    finalEvent.usage = {
+      prompt_tokens: ev.stats.usage.promptTokens,
+      completion_tokens: ev.stats.usage.completionTokens,
+      total_tokens: ev.stats.usage.totalTokens,
+      prompt_cache_hit_tokens: ev.stats.usage.promptCacheHitTokens,
+      prompt_cache_miss_tokens: ev.stats.usage.promptCacheMissTokens,
+    };
+    finalEvent.costUsd = ev.stats.cost;
+  }
+  ctx.broadcastDashboardEvent(finalEvent);
   // Keep the live stats panel current with per-iter usage. Without this,
   // cost/ctx/cache/hit stay at the prior turn's numbers until the whole
   // step resolves — confusing in multi-iter tool-call chains.

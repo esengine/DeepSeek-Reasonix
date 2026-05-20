@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { addProjectShellAllowed, loadProjectShellAllowed } from "../src/config.js";
+import { addProjectShellAllowed, loadProjectShellAllowed, readConfig } from "../src/config.js";
 import type { DashboardContext } from "../src/server/context.js";
 import {
   type DashboardServerHandle,
@@ -1121,6 +1121,39 @@ describe("dashboard server: D-1 settings + auto-loop surface", () => {
     expect(calls.proNext).toEqual([true]);
     expect(calls.budgetUsd).toEqual([2.5]);
     expect(calls.model).toEqual(["deepseek-v4-pro"]);
+  });
+
+  it("POST /api/settings persists and applies editMode", async () => {
+    const editModeCalls: unknown[] = [];
+    const base = await boot({
+      getEditMode: () => "review",
+      setEditMode: (mode) => {
+        editModeCalls.push(mode);
+        return mode;
+      },
+    });
+    const r = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { editMode: "auto" },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.changed).toContain("editMode");
+    expect(readConfig(cfgPath).editMode).toBe("auto");
+    expect(editModeCalls).toEqual(["auto"]);
+  });
+
+  it("POST /api/settings rejects invalid editMode", async () => {
+    const base = await boot();
+    const r = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { editMode: "danger" },
+    });
+    expect(r.status).toBe(400);
+    expect(readConfig(cfgPath).editMode).toBeUndefined();
   });
 
   it("POST /api/settings rejects non-positive budgetUsd", async () => {
