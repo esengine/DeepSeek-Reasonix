@@ -23,6 +23,7 @@ import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
 import { KeystrokeProvider } from "../ui/keystroke-context.js";
 import { disableMouseMode, enableMouseMode } from "../ui/mouse-mode.js";
+import { installResizeBroadcaster } from "../ui/resize-broadcaster.js";
 import type { McpServerSummary } from "../ui/slash.js";
 import {
   type McpLifecycleNotice,
@@ -342,10 +343,9 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     }
   }
 
-  // One stdout `resize` listener per card (Ink's useBoxMetrics); long
-  // chats legitimately hold dozens, so Node's default cap of 10 fires
-  // a spurious MaxListenersExceededWarning. Raise the ceiling.
-  process.stdout.setMaxListeners(200);
+  // Before render() — shims Ink's per-card useBoxMetrics resize subscribe
+  // path so N cards don't accumulate N native stdout listeners.
+  installResizeBroadcaster();
 
   // Wheel scrolling. Opt-out via `mouseTracking: false` for users who
   // prefer native drag-select copy (Shift+drag still selects with mouse
