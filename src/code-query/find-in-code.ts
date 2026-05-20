@@ -20,6 +20,8 @@ const IDENTIFIER_TYPES = new Set([
   "type_identifier",
   "shorthand_property_identifier",
   "shorthand_property_identifier_pattern",
+  "field_identifier",
+  "package_identifier",
 ]);
 
 const DECLARATION_NAME_PARENTS = new Set([
@@ -37,7 +39,38 @@ const DECLARATION_NAME_PARENTS = new Set([
   "property_signature",
   "internal_module",
   "variable_declarator",
+  "function_definition",
+  "class_definition",
+  "method_declaration",
+  "type_spec",
+  "function_item",
+  "struct_item",
+  "enum_item",
+  "trait_item",
+  "type_item",
+  "mod_item",
+  "const_item",
+  "static_item",
+  "constructor_declaration",
 ]);
+
+const CALL_PARENT_TYPES = new Set([
+  "call_expression",
+  "new_expression",
+  "call",
+  "method_invocation",
+  "object_creation_expression",
+]);
+
+const MEMBER_PARENT_TYPES = new Set([
+  "member_expression",
+  "attribute",
+  "selector_expression",
+  "field_expression",
+]);
+
+const CALLEE_FIELDS = ["function", "constructor", "name"] as const;
+const MEMBER_NAME_FIELDS = ["property", "field", "attribute", "name"] as const;
 
 export async function findInCode(
   filePath: string,
@@ -86,28 +119,28 @@ function classify(node: Node): CodeMatchKind {
     const nameField = parent.childForFieldName("name");
     if (nameField && nameField.id === node.id) return "definition";
   }
-  if (parent.type === "call_expression" || parent.type === "new_expression") {
-    const constructorField = parent.childForFieldName(
-      parent.type === "new_expression" ? "constructor" : "function",
-    );
-    if (constructorField && constructorField.id === node.id) return "call";
+  if (CALL_PARENT_TYPES.has(parent.type) && fieldMatches(parent, node, CALLEE_FIELDS)) {
+    return "call";
   }
-  if (parent.type === "member_expression") {
-    const propField = parent.childForFieldName("property");
-    if (propField && propField.id === node.id) {
-      const grandparent = parent.parent;
-      if (
-        grandparent &&
-        (grandparent.type === "call_expression" || grandparent.type === "new_expression")
-      ) {
-        const callee = grandparent.childForFieldName(
-          grandparent.type === "new_expression" ? "constructor" : "function",
-        );
-        if (callee && callee.id === parent.id) return "call";
-      }
+  if (MEMBER_PARENT_TYPES.has(parent.type) && fieldMatches(parent, node, MEMBER_NAME_FIELDS)) {
+    const grandparent = parent.parent;
+    if (
+      grandparent &&
+      CALL_PARENT_TYPES.has(grandparent.type) &&
+      fieldMatches(grandparent, parent, CALLEE_FIELDS)
+    ) {
+      return "call";
     }
   }
   return "reference";
+}
+
+function fieldMatches(parent: Node, child: Node, fields: readonly string[]): boolean {
+  for (const field of fields) {
+    const f = parent.childForFieldName(field);
+    if (f && f.id === child.id) return true;
+  }
+  return false;
 }
 
 function walk(root: Node, visit: (node: Node) => void): void {

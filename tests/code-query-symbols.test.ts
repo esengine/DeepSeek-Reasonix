@@ -90,7 +90,80 @@ const g = () => 1;
   });
 
   it("returns empty for unsupported language", async () => {
-    expect(await extractSymbols("file.py", "def foo(): pass")).toEqual([]);
+    expect(await extractSymbols("file.cpp", "int main(){}")).toEqual([]);
+  });
+
+  it("extracts Python functions and classes; nested functions become methods", async () => {
+    const source = `
+def hello():
+    return 1
+
+class Greeter:
+    def greet(self):
+        return "hi"
+
+    def __init__(self):
+        self.n = 0
+`;
+    const symbols = await extractSymbols("a.py", source);
+    const named = symbols.map((s) => `${s.kind}:${s.name}${s.parent ? `@${s.parent}` : ""}`);
+    expect(named).toContain("function:hello");
+    expect(named).toContain("class:Greeter");
+    expect(named).toContain("method:greet@Greeter");
+    expect(named).toContain("method:__init__@Greeter");
+  });
+
+  it("extracts Go funcs, methods, structs, and interfaces", async () => {
+    const source = `package main
+
+type User struct {
+  Name string
+}
+
+type Greeter interface {
+  Greet() string
+}
+
+func Hello() string { return "hi" }
+func (u *User) Greet() string { return "hi " + u.Name }
+`;
+    const symbols = await extractSymbols("a.go", source);
+    const named = symbols.map((s) => `${s.kind}:${s.name}`);
+    expect(named).toContain("class:User");
+    expect(named).toContain("interface:Greeter");
+    expect(named).toContain("function:Hello");
+    expect(named).toContain("method:Greet");
+  });
+
+  it("extracts Rust functions, structs, traits, and impl methods", async () => {
+    const source = `pub struct User { pub name: String }
+pub trait Greet { fn greet(&self) -> String; }
+pub fn hello() -> i32 { 1 }
+impl User {
+  pub fn name_len(&self) -> usize { self.name.len() }
+}
+`;
+    const symbols = await extractSymbols("a.rs", source);
+    const named = symbols.map((s) => `${s.kind}:${s.name}${s.parent ? `@${s.parent}` : ""}`);
+    expect(named).toContain("class:User");
+    expect(named).toContain("interface:Greet");
+    expect(named).toContain("function:hello");
+    expect(named).toContain("method:name_len@User");
+  });
+
+  it("extracts Java classes, methods, and fields", async () => {
+    const source = `public class Calc {
+  int total = 0;
+  public int add(int n) { return total + n; }
+  public Calc() {}
+}
+`;
+    const symbols = await extractSymbols("Calc.java", source);
+    const named = symbols.map((s) => `${s.kind}:${s.name}${s.parent ? `@${s.parent}` : ""}`);
+    expect(named).toContain("class:Calc");
+    expect(named).toContain("method:add@Calc");
+    expect(named).toContain("method:Calc@Calc");
+    expect(named).toContain("property:total@Calc");
   });
 
   it("returns empty for empty source", async () => {

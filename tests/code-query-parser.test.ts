@@ -14,9 +14,16 @@ describe("code-query parser", () => {
       expect(grammarForPath("a.jsx")).toBe("javascript");
     });
 
+    it("maps Python/Go/Rust/Java extensions to the right grammar", () => {
+      expect(grammarForPath("a.py")).toBe("python");
+      expect(grammarForPath("a.pyi")).toBe("python");
+      expect(grammarForPath("a.go")).toBe("go");
+      expect(grammarForPath("a.rs")).toBe("rust");
+      expect(grammarForPath("A.java")).toBe("java");
+    });
+
     it("returns null for unsupported extensions", () => {
-      expect(grammarForPath("a.py")).toBeNull();
-      expect(grammarForPath("a.rs")).toBeNull();
+      expect(grammarForPath("a.cpp")).toBeNull();
       expect(grammarForPath("README.md")).toBeNull();
       expect(grammarForPath("no-extension")).toBeNull();
     });
@@ -53,8 +60,36 @@ describe("code-query parser", () => {
     });
 
     it("returns null for unsupported file extensions", async () => {
-      expect(await parseSource("x.py", "print('hi')")).toBeNull();
-      expect(await parseSource("x.rs", "fn main() {}")).toBeNull();
+      expect(await parseSource("x.cpp", "int main(){}")).toBeNull();
+      expect(await parseSource("x.swift", "func main() {}")).toBeNull();
+    });
+
+    it("parses Python", async () => {
+      const result = await parseSource("a.py", "def hello():\n    return 1\n");
+      expect(result!.grammar).toBe("python");
+      expect(result!.tree.rootNode.hasError).toBe(false);
+      result!.tree.delete();
+    });
+
+    it("parses Go", async () => {
+      const result = await parseSource("a.go", "package main\nfunc Hello() int { return 1 }\n");
+      expect(result!.grammar).toBe("go");
+      expect(result!.tree.rootNode.hasError).toBe(false);
+      result!.tree.delete();
+    });
+
+    it("parses Rust", async () => {
+      const result = await parseSource("a.rs", "fn hello() -> i32 { 1 }\n");
+      expect(result!.grammar).toBe("rust");
+      expect(result!.tree.rootNode.hasError).toBe(false);
+      result!.tree.delete();
+    });
+
+    it("parses Java", async () => {
+      const result = await parseSource("A.java", "class A { int hello() { return 1; } }\n");
+      expect(result!.grammar).toBe("java");
+      expect(result!.tree.rootNode.hasError).toBe(false);
+      result!.tree.delete();
     });
 
     it("distinguishes valid syntax from broken syntax", async () => {

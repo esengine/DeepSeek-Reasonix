@@ -14,7 +14,7 @@ export interface CodeQueryToolOpts {
 }
 
 const UNSUPPORTED =
-  "language not supported (only .ts/.tsx/.js/.jsx/.mjs/.cjs/.mts/.cts); use search_content for grep-style matching";
+  "language not supported (TS/TSX/JS/JSX/Python/Go/Rust/Java); use search_content for grep-style matching";
 
 export function registerCodeQueryTools(registry: ToolRegistry, opts: CodeQueryToolOpts): void {
   const { rootDir } = opts;
@@ -22,7 +22,7 @@ export function registerCodeQueryTools(registry: ToolRegistry, opts: CodeQueryTo
   registry.register({
     name: "get_symbols",
     description:
-      "Outline a single TS/TSX/JS/JSX file via tree-sitter — returns its top-level + nested symbols (functions, classes, methods, interfaces, types, enums, namespaces) with 1-based line/column. Grammar-aware, ignores names inside comments/strings. Use for 'what's in this file' / 'where is X defined here'; for cross-file scans use search_content. Result: {path, symbols:[{name, kind, line, column, endLine, endColumn, parent?}]} or {path, error}.",
+      "Outline a single TS/TSX/JS/JSX/Python/Go/Rust/Java file via tree-sitter — returns its top-level + nested symbols (functions, classes, methods, interfaces, types, enums, namespaces) with 1-based line/column. Grammar-aware, ignores names inside comments/strings. Use for 'what's in this file' / 'where is X defined here'; for cross-file scans use search_content. Result: {path, symbols:[{name, kind, line, column, endLine, endColumn, parent?}]} or {path, error}.",
     readOnly: true,
     parallelSafe: true,
     stormExempt: true,
@@ -50,7 +50,7 @@ export function registerCodeQueryTools(registry: ToolRegistry, opts: CodeQueryTo
   registry.register({
     name: "find_in_code",
     description:
-      "Find an identifier `name` in a single TS/TSX/JS/JSX file, AST-filtered — skips matches inside comments and strings. Optional `kind` narrows by syntactic role: 'call' (function call site), 'definition' (declaration name), 'reference' (other uses), 'any' (default). Within-file only — does NOT resolve cross-file references; use search_content + reading for that. Result: {path, matches:[{line, column, kind, snippet}]} or {path, error}.",
+      "Find an identifier `name` in a single TS/TSX/JS/JSX/Python/Go/Rust/Java file, AST-filtered — skips matches inside comments and strings. Optional `kind` narrows by syntactic role: 'call' (function call site), 'definition' (declaration name), 'reference' (other uses), 'any' (default). Within-file only — does NOT resolve cross-file references; use search_content + reading for that. Result: {path, matches:[{line, column, kind, snippet}]} or {path, error}.",
     readOnly: true,
     parallelSafe: true,
     stormExempt: true,

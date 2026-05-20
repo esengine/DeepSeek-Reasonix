@@ -8,7 +8,7 @@ import { Language, Parser, type Tree } from "web-tree-sitter";
 
 const localRequire = createRequire(import.meta.url);
 
-export type GrammarName = "typescript" | "tsx" | "javascript";
+export type GrammarName = "typescript" | "tsx" | "javascript" | "python" | "go" | "rust" | "java";
 
 const EXT_TO_GRAMMAR: Record<string, GrammarName> = {
   ".ts": "typescript",
@@ -19,6 +19,11 @@ const EXT_TO_GRAMMAR: Record<string, GrammarName> = {
   ".mjs": "javascript",
   ".cjs": "javascript",
   ".jsx": "javascript",
+  ".py": "python",
+  ".pyi": "python",
+  ".go": "go",
+  ".rs": "rust",
+  ".java": "java",
 };
 
 export interface ParserOptions {
@@ -106,4 +111,8 @@ const DEV_PACKAGE_FOR_GRAMMAR: Record<GrammarName, string[]> = {
   typescript: ["tree-sitter-typescript"],
   tsx: ["tree-sitter-typescript"],
   javascript: ["tree-sitter-javascript"],
+  python: ["tree-sitter-python"],
+  go: ["tree-sitter-go"],
+  rust: ["tree-sitter-rust"],
+  java: ["tree-sitter-java"],
 };

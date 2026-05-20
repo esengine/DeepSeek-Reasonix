@@ -34,11 +34,18 @@ describe("code-query tools", () => {
       expect(parsed.symbols.map((s) => `${s.kind}:${s.name}`)).toEqual(["function:add", "class:C"]);
     });
 
-    it("reports unsupported language for non-JS/TS files", async () => {
-      writeFileSync(join(tmp, "a.py"), "def hello(): pass\n");
-      const raw = await registry.dispatch("get_symbols", JSON.stringify({ path: "a.py" }));
+    it("reports unsupported language for non-JS/TS/Python/Go/Rust/Java files", async () => {
+      writeFileSync(join(tmp, "a.cpp"), "int main(){}\n");
+      const raw = await registry.dispatch("get_symbols", JSON.stringify({ path: "a.cpp" }));
       const parsed = JSON.parse(raw) as { error?: string };
       expect(parsed.error).toMatch(/language not supported/);
+    });
+
+    it("extracts symbols for Python files", async () => {
+      writeFileSync(join(tmp, "a.py"), "def hello():\n    pass\n");
+      const raw = await registry.dispatch("get_symbols", JSON.stringify({ path: "a.py" }));
+      const parsed = JSON.parse(raw) as { symbols: Array<{ name: string; kind: string }> };
+      expect(parsed.symbols.map((s) => `${s.kind}:${s.name}`)).toEqual(["function:hello"]);
     });
 
     it("treats leading slash as project-root-relative", async () => {
@@ -78,13 +85,23 @@ describe("code-query tools", () => {
     });
 
     it("reports unsupported language", async () => {
-      writeFileSync(join(tmp, "a.rs"), "fn main(){}\n");
+      writeFileSync(join(tmp, "a.cpp"), "int main(){}\n");
       const raw = await registry.dispatch(
         "find_in_code",
-        JSON.stringify({ path: "a.rs", name: "main" }),
+        JSON.stringify({ path: "a.cpp", name: "main" }),
       );
       const parsed = JSON.parse(raw) as { error?: string };
       expect(parsed.error).toMatch(/language not supported/);
+    });
+
+    it("finds call sites in Rust", async () => {
+      writeFileSync(join(tmp, "a.rs"), "fn helper(){}\nfn main(){ helper(); helper(); }\n");
+      const raw = await registry.dispatch(
+        "find_in_code",
+        JSON.stringify({ path: "a.rs", name: "helper", kind: "call" }),
+      );
+      const parsed = JSON.parse(raw) as { matches: Array<{ kind: string }> };
+      expect(parsed.matches.length).toBe(2);
     });
   });
 

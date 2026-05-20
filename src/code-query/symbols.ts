@@ -41,10 +41,47 @@ const JS_QUERY = `
 (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)]) @function
 `;
 
+const PYTHON_QUERY = `
+(function_definition name: (identifier) @name) @function
+(class_definition name: (identifier) @name) @class
+`;
+
+const GO_QUERY = `
+(function_declaration name: (identifier) @name) @function
+(method_declaration name: (field_identifier) @name) @method
+(type_spec name: (type_identifier) @name type: (struct_type)) @class
+(type_spec name: (type_identifier) @name type: (interface_type)) @interface
+(type_spec name: (type_identifier) @name) @type
+`;
+
+const RUST_QUERY = `
+(function_item name: (identifier) @name) @function
+(struct_item name: (type_identifier) @name) @class
+(enum_item name: (type_identifier) @name) @enum
+(trait_item name: (type_identifier) @name) @interface
+(type_item name: (type_identifier) @name) @type
+(mod_item name: (identifier) @name) @namespace
+(const_item name: (identifier) @name) @property
+(static_item name: (identifier) @name) @property
+`;
+
+const JAVA_QUERY = `
+(class_declaration name: (identifier) @name) @class
+(interface_declaration name: (identifier) @name) @interface
+(enum_declaration name: (identifier) @name) @enum
+(method_declaration name: (identifier) @name) @method
+(constructor_declaration name: (identifier) @name) @method
+(field_declaration declarator: (variable_declarator name: (identifier) @name)) @property
+`;
+
 const QUERIES: Record<GrammarName, string> = {
   typescript: TS_QUERY,
   tsx: TS_QUERY,
   javascript: JS_QUERY,
+  python: PYTHON_QUERY,
+  go: GO_QUERY,
+  rust: RUST_QUERY,
+  java: JAVA_QUERY,
 };
 
 const KIND_CAPTURE_NAMES = new Set<SymbolKind>([
@@ -62,6 +99,18 @@ const PARENT_CONTAINER_TYPES = new Set([
   "class_declaration",
   "interface_declaration",
   "internal_module",
+  "class_definition",
+  "impl_item",
+  "trait_item",
+  "mod_item",
+]);
+
+const METHOD_PROMOTING_CONTAINER_TYPES = new Set([
+  "class_declaration",
+  "class_definition",
+  "interface_declaration",
+  "impl_item",
+  "trait_item",
 ]);
 
 export async function extractSymbols(filePath: string, source: string): Promise<CodeSymbol[]> {
@@ -103,6 +152,10 @@ function matchesToSymbols(
       }
     }
     if (!nameNode || !containerNode || !kind) continue;
+    const enclosing = findEnclosingContainer(containerNode);
+    if (kind === "function" && enclosing && METHOD_PROMOTING_CONTAINER_TYPES.has(enclosing.type)) {
+      kind = "method";
+    }
     out.push({
       name: nameNode.text,
       kind,
@@ -110,21 +163,27 @@ function matchesToSymbols(
       column: containerNode.startPosition.column + 1,
       endLine: containerNode.endPosition.row + 1,
       endColumn: containerNode.endPosition.column + 1,
-      parent: findEnclosingDefinitionName(containerNode),
+      parent: enclosing ? containerNameOf(enclosing) : undefined,
     });
   }
   out.sort((a, b) => a.line - b.line || a.column - b.column);
   return out;
 }
 
-function findEnclosingDefinitionName(node: Node): string | undefined {
+function findEnclosingContainer(node: Node): Node | null {
   let current = node.parent;
   while (current) {
-    if (PARENT_CONTAINER_TYPES.has(current.type)) {
-      const nameNode = current.childForFieldName("name");
-      if (nameNode) return nameNode.text;
-    }
+    if (PARENT_CONTAINER_TYPES.has(current.type)) return current;
     current = current.parent;
   }
-  return undefined;
+  return null;
+}
+
+function containerNameOf(container: Node): string | undefined {
+  if (container.type === "impl_item") {
+    const typeField = container.childForFieldName("type");
+    if (typeField) return typeField.text;
+  }
+  const nameField = container.childForFieldName("name");
+  return nameField?.text;
 }

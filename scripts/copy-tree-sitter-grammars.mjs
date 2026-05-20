@@ -11,6 +11,10 @@ const SOURCES = [
     "node_modules/tree-sitter-javascript/tree-sitter-javascript.wasm",
     "tree-sitter-javascript.wasm",
   ],
+  ["node_modules/tree-sitter-python/tree-sitter-python.wasm", "tree-sitter-python.wasm"],
+  ["node_modules/tree-sitter-go/tree-sitter-go.wasm", "tree-sitter-go.wasm"],
+  ["node_modules/tree-sitter-rust/tree-sitter-rust.wasm", "tree-sitter-rust.wasm"],
+  ["node_modules/tree-sitter-java/tree-sitter-java.wasm", "tree-sitter-java.wasm"],
   ["node_modules/web-tree-sitter/web-tree-sitter.wasm", "web-tree-sitter.wasm"],
 ];
 

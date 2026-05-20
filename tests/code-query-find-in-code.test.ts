@@ -64,7 +64,46 @@ const User = 1;
   });
 
   it("returns empty for unsupported language", async () => {
-    expect(await findInCode("a.py", "x = 1\n", "x")).toEqual([]);
+    expect(await findInCode("a.cpp", "int x = 1;\n", "x")).toEqual([]);
+  });
+
+  it("classifies Python calls (foo() and obj.foo())", async () => {
+    const source = "def foo():\n    pass\nfoo()\nobj.foo()\n";
+    const matches = await findInCode("a.py", source, "foo");
+    const kinds = matches.map((m) => m.kind).sort();
+    expect(kinds).toEqual(["call", "call", "definition"]);
+  });
+
+  it("classifies Go calls and method invocations", async () => {
+    const source = `package main
+func hello() {}
+func main() {
+  hello()
+  m.hello()
+}
+`;
+    const calls = await findInCode("a.go", source, "hello", { kind: "call" });
+    expect(calls.length).toBe(2);
+  });
+
+  it("classifies Rust function calls and method calls", async () => {
+    const source = `fn helper() {}
+fn main() {
+  helper();
+  obj.helper();
+}
+`;
+    const calls = await findInCode("a.rs", source, "helper", { kind: "call" });
+    expect(calls.length).toBe(2);
+  });
+
+  it("classifies Java method invocations", async () => {
+    const source = `class C {
+  void run() { obj.run(); other.run(); }
+}
+`;
+    const calls = await findInCode("C.java", source, "run", { kind: "call" });
+    expect(calls.length).toBe(2);
   });
 
   it("returns empty when name is empty", async () => {
