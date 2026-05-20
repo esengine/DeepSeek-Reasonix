@@ -971,6 +971,12 @@ export const zhCN: TranslationSchema = {
       statusMcp: "  MCP     {servers} 个服务器，注册表中 {tools} 个工具",
       statusEdits: "  编辑    {count} 个待处理（/apply 提交，/discard 丢弃）",
       statusPlan: "  计划    开启 — 写入受限（submit_plan + 审批）",
+      statusLifecycle: "  生命周期 {mode}/{state} · {progress}{evidence}",
+      lifecycleNoPlan: "暂无计划",
+      lifecycleEvidencePending: "等待 evidence",
+      lifecycleRejected: "lifecycle：{tool} 在 {state} 状态被拦截 — 下一步：{next}",
+      lifecycleEvidenceRejected: "lifecycle：步骤 {stepId} 需要 evidence — 下一步：{next}",
+      lifecycleRepeatedRejected: "lifecycle：{tool} 被重复拦截 — 不要用相同参数反复重试",
       statusModeYolo:
         "  模式    YOLO — 编辑 + shell 自动运行，无提示（/undo 仍可回滚 · Shift+Tab 切换）",
       statusModeAuto: "  模式    AUTO — 编辑立即应用（5 秒内按 u 撤消 · Shift+Tab 切换）",

@@ -4,6 +4,7 @@ import { t } from "../../../i18n/index.js";
 import type { LoopEvent } from "../../../loop.js";
 import type { ChoiceOption } from "../../../tools/choice.js";
 import type { PlanStep, StepCompletion, StepEvidence } from "../../../tools/plan.js";
+import { formatLifecycleRejection } from "../lifecycle-observability.js";
 import type { TurnTranslator } from "../state/TurnTranslator.js";
 import type { Scrollback } from "./useScrollback.js";
 
@@ -45,6 +46,9 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
   ctx.translator.toolEnd(ev.content);
 
   ctx.toolStartedAtRef.current = null;
+
+  const lifecycleHint = formatLifecycleRejection(ev.toolName, ev.content);
+  if (lifecycleHint) ctx.log.pushInfo(lifecycleHint, "warn");
 
   if (ev.toolName === "mark_step_complete") {
     try {

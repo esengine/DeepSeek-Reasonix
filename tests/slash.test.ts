@@ -1249,6 +1249,54 @@ describe("handleSlash", () => {
       const r = handleSlash("status", [], makeLoop(), { planMode: false });
       expect(r.info).not.toMatch(/plan\s+ON/);
     });
+
+    it("/status surfaces strict lifecycle state when enabled", () => {
+      const r = handleSlash("status", [], makeLoop(), {
+        getEngineeringLifecycleSnapshot: () => ({
+          mode: "strict",
+          state: "armed",
+          planSteps: [],
+          completedStepIds: [],
+          mutatedSinceLastStep: false,
+        }),
+      });
+
+      expect(r.info).toMatch(/lifecycle\s+strict\/armed/);
+    });
+
+    it("/status surfaces lifecycle progress and evidence pending", () => {
+      const r = handleSlash("status", [], makeLoop(), {
+        getEngineeringLifecycleSnapshot: () => ({
+          mode: "strict",
+          state: "executing",
+          planSteps: [
+            { id: "step-1", title: "Refactor", action: "Move code." },
+            { id: "step-2", title: "Verify", action: "Run tests." },
+            { id: "step-3", title: "Document", action: "Write notes." },
+          ],
+          completedStepIds: ["step-1"],
+          mutatedSinceLastStep: true,
+        }),
+      });
+
+      expect(r.info).toMatch(/lifecycle\s+strict\/executing/);
+      expect(r.info).toMatch(/1\/3/);
+      expect(r.info).toMatch(/evidence pending/);
+    });
+
+    it("/status hides lifecycle when it is off", () => {
+      const r = handleSlash("status", [], makeLoop(), {
+        getEngineeringLifecycleSnapshot: () => ({
+          mode: "off",
+          state: "idle",
+          planSteps: [],
+          completedStepIds: [],
+          mutatedSinceLastStep: false,
+        }),
+      });
+
+      expect(r.info).not.toMatch(/lifecycle/);
+    });
   });
 
   describe("/theme", () => {

@@ -1,3 +1,4 @@
+import type { EngineeringLifecycleSnapshot } from "../../../code/lifecycle.js";
 import type { EditMode } from "../../../config.js";
 import type { McpServerSummary } from "../../../mcp/summary.js";
 import type { JobRegistry } from "../../../tools/jobs.js";
@@ -70,6 +71,7 @@ export interface SlashContext {
   codeHistory?: () => string;
   codeShowEdit?: (args: readonly string[]) => string;
   codeRoot?: string;
+  getEngineeringLifecycleSnapshot?: () => EngineeringLifecycleSnapshot | null;
   pendingEditCount?: number;
   mcpServers?: McpServerSummary[];
   /** Absent → tests context; `/memory` MUST reply "root unknown" rather than silently reading wrong dir. */

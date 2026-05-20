@@ -2874,6 +2874,9 @@ function AppInner({
             status: qq.status,
           },
           sessionId: session,
+          getEngineeringLifecycleSnapshot: codeMode
+            ? () => engineeringLifecycleRef.current?.snapshot() ?? null
+            : undefined,
           jobs: codeMode?.jobs,
           postInfo: fromQQ ? qq.sendInfo : log.pushInfo,
           postDoctor: (checks) => log.showDoctor(checks),
