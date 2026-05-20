@@ -37,6 +37,20 @@ const platform = /Mac|macOS/i.test(navigator.userAgent)
 document.documentElement.dataset.platform = platform;
 document.body.dataset.platform = platform;
 
+// Packaged builds: block F5 / Ctrl+R — webview reload drops React state
+// and flashes white. Dev keeps the shortcuts for HMR fallback.
+if (!import.meta.env.DEV) {
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"))) {
+        e.preventDefault();
+      }
+    },
+    { capture: true },
+  );
+}
+
 const host = document.getElementById("root");
 if (!host) throw new Error("#root missing");
 
