@@ -2795,8 +2795,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   padding: 12px 14px 6px;
   font-size: 14px;
   line-height: 1.55;
-  min-height: 24px;
-  max-height: 220px;
+  min-height: calc(5 * 1.55em + 18px);
+  overflow-y: hidden;
   font-family: inherit;
 }
 .composer textarea::placeholder {

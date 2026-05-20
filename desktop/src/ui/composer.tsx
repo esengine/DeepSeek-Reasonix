@@ -3,6 +3,7 @@ import {
   type KeyboardEvent,
   type RefObject,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,6 +12,10 @@ import type React from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { t, type TKey } from "../i18n";
 import { I } from "../icons";
+import {
+  DEFAULT_COMPOSER_ROWS,
+  applyComposerTextareaAutosize,
+} from "./composer-sizing";
 import { fmtElapsed } from "./live";
 import { Shortcut } from "./shortcut";
 
@@ -174,6 +179,12 @@ export function Composer({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const nonceRef = useRef(0);
   const modelWrapRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    applyComposerTextareaAutosize(textarea);
+  });
 
   // Programmatic draft transitions to "/" (e.g. /help suggestion in EmptyState, #929) must open the slash popup, since handleChange only fires on actual user input.
   const prevDraftRef = useRef(draft);
@@ -479,7 +490,7 @@ export function Composer({
             placeholder={t("composer.placeholder")}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            rows={2}
+            rows={DEFAULT_COMPOSER_ROWS}
             disabled={disabled}
           />
 
