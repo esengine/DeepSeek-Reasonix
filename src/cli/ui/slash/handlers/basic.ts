@@ -1,9 +1,14 @@
 import { wrapToCells } from "@/frame/width.js";
 import { t, tObj } from "@/i18n/index.js";
+import { VERSION } from "@/version.js";
 import { formatDuration, formatLoopStatus, parseLoopCommand } from "../../loop.js";
 import { SLASH_COMMANDS, SLASH_GROUP_ORDER, orderSlashCommandsByGroup } from "../commands.js";
 import type { SlashHandler } from "../dispatch.js";
 import type { SlashCommandSpec, SlashGroup } from "../types.js";
+
+const ABOUT_WEBSITE = "https://esengine.github.io/DeepSeek-Reasonix/";
+const ABOUT_REPO = "https://github.com/esengine/DeepSeek-Reasonix";
+const ABOUT_LICENSE = "MIT";
 
 const exit: SlashHandler = () => ({ exit: true });
 
@@ -153,6 +158,17 @@ const keys: SlashHandler = (_args, _loop, ctx) => {
 
 const copy: SlashHandler = () => ({ openCopyMode: true });
 
+const about: SlashHandler = () => {
+  const lines = [
+    t("handlers.basic.aboutHeader", { version: VERSION }),
+    "",
+    `  ${t("handlers.basic.aboutWebsiteLabel")}  ${ABOUT_WEBSITE}`,
+    `  ${t("handlers.basic.aboutRepoLabel")}   ${ABOUT_REPO}`,
+    `  ${t("handlers.basic.aboutLicenseLabel")}   ${ABOUT_LICENSE}`,
+  ];
+  return { info: lines.join("\n") };
+};
+
 export const handlers: Record<string, SlashHandler> = {
   exit,
   new: resetLog,
@@ -161,4 +177,5 @@ export const handlers: Record<string, SlashHandler> = {
   loop,
   keys,
   copy,
+  about,
 };

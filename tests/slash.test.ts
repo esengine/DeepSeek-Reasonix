@@ -123,6 +123,15 @@ describe("handleSlash", () => {
     expect(info.indexOf("  SETUP")).toBeLessThan(info.indexOf("  CHAT"));
   });
 
+  it("/about prints version, website, repo, and MIT license", () => {
+    const r = handleSlash("about", [], makeLoop());
+    expect(r.info).toContain(VERSION);
+    expect(r.info).toContain("https://esengine.github.io/DeepSeek-Reasonix/");
+    expect(r.info).toContain("https://github.com/esengine/DeepSeek-Reasonix");
+    expect(r.info).toContain("MIT");
+    expect(SLASH_COMMANDS.find((s) => s.cmd === "about")?.group).toBe("info");
+  });
+
   it("/title starts AI session title regeneration", async () => {
     let called = 0;
     let posted = "";
@@ -569,7 +578,7 @@ describe("handleSlash", () => {
     // Case-insensitive.
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
     // Empty prefix returns the full non-advanced release list, including code commands.
-    expect(suggestSlashCommands("", true)).toHaveLength(42);
+    expect(suggestSlashCommands("", true)).toHaveLength(43);
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("logs");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("language");
     expect(suggestSlashCommands("lan").map((s) => s.cmd)).toContain("language");
