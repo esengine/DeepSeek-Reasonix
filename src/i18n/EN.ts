@@ -626,6 +626,24 @@ export const EN: TranslationSchema = {
     planStoppedAt: "▸ plan stopped at {label}{counter}",
     revisingAfter: "▸ revising after {label} — {feedback}",
     historyScrollHint: " ↑ reading history · End / PgDn returns to bottom · ↓ advances one line",
+    editHistoryTitle: "Edit history (oldest first):",
+    editHistoryNoCodeMode: "not in code mode",
+    editHistoryNoEdits: "no edits recorded this session yet",
+    editHistoryNoShowId:
+      "usage: /show [id] [path]   (omit id for newest; path from the per-file summary)",
+    editHistoryIdNotFound: "no edit #{id} — run /history to see valid ids",
+    editHistoryLookupFailed: "unexpected: history lookup failed",
+    editHistoryBatchNoFile: 'batch #{id} doesn\'t include "{path}" — files in this batch: {files}',
+    editHistoryNoEdits2: "no edits recorded this session — /history is empty",
+    editHistoryStatusApplied: "applied",
+    editHistoryStatusPartial: "PARTIAL",
+    editHistoryStatusUndone: "UNDONE",
+    editHistoryHelpShow:
+      "/show <id>            \u2192 per-file summary    \u00b7    /show <id> <path>  \u2192 full diff of one file",
+    editHistoryHelpUndo:
+      "/undo                 \u2192 newest non-undone   \u00b7    /undo <id> [path]  \u2192 target a specific batch or file",
+    editHistoryAlreadyReverted: "(already reverted \u2014 /history shows the batch-level status)",
+    editHistoryRevertFile: "/undo {id} {path}  \u2192 revert just this file",
   },
   hooks: {
     head: "hook {tag} `{cmd}` {decision}{truncTag}",
@@ -1701,6 +1719,15 @@ export const EN: TranslationSchema = {
     empty: "No MCP servers attached. Run `reasonix setup` to pick some, or launch with --mcp.",
     serverCount: "{count} server{s}",
     footer: "\u2191\u2193 pick \u00b7 [r] reconnect \u00b7 [d] disable \u00b7 esc quit",
+  },
+  mcpBrowse: {
+    noResources:
+      "No resources on any connected MCP server (or no servers connected). `/mcp` shows the current set.",
+    readOne: "Read one: `/resource <uri>` \u2014 or use Tab in the picker.",
+    noPrompts:
+      "No prompts on any connected MCP server (or no servers connected). `/mcp` shows the current set.",
+    fetchOne:
+      "Fetch one: `/prompt <name>` \u2014 args are not supported yet; prompts with required args will surface an error from the server.",
   },
   mcpLifecycle: {
     handshake: "handshake\u2026",

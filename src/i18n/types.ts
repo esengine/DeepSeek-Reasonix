@@ -216,6 +216,27 @@ export interface TranslationSchema {
     planStoppedAt: string;
     revisingAfter: string;
     historyScrollHint: string;
+    editHistoryTitle: string;
+    editHistoryNoCodeMode: string;
+    editHistoryNoEdits: string;
+    editHistoryNoShowId: string;
+    editHistoryIdNotFound: string;
+    editHistoryLookupFailed: string;
+    editHistoryBatchNoFile: string;
+    editHistoryNoEdits2: string;
+    editHistoryStatusApplied: string;
+    editHistoryStatusPartial: string;
+    editHistoryStatusUndone: string;
+    editHistoryHelpShow: string;
+    editHistoryHelpUndo: string;
+    editHistoryAlreadyReverted: string;
+    editHistoryRevertFile: string;
+  };
+  mcpBrowse: {
+    noResources: string;
+    readOne: string;
+    noPrompts: string;
+    fetchOne: string;
   };
   hooks: {
     head: string;

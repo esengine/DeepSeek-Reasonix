@@ -1,5 +1,6 @@
 /** `/resource` + `/prompt` handlers — async (round-trip to MCP server), so App.tsx calls directly instead of `handleSlash`. */
 
+import { t } from "../../i18n/index.js";
 import type {
   GetPromptResult,
   McpPromptMessage,
@@ -27,9 +28,9 @@ export function formatResourceList(servers: readonly McpServerSummary[]): string
     lines.push("");
   }
   if (total === 0) {
-    return "No resources on any connected MCP server (or no servers connected). `/mcp` shows the current set.";
+    return t("mcpBrowse.noResources");
   }
-  lines.push("Read one: `/resource <uri>` — or use Tab in the picker.");
+  lines.push(t("mcpBrowse.readOne"));
   return lines.join("\n");
 }
 
@@ -54,11 +55,9 @@ export function formatPromptList(servers: readonly McpServerSummary[]): string {
     lines.push("");
   }
   if (total === 0) {
-    return "No prompts on any connected MCP server (or no servers connected). `/mcp` shows the current set.";
+    return t("mcpBrowse.noPrompts");
   }
-  lines.push(
-    "Fetch one: `/prompt <name>` — args are not supported yet; prompts with required args will surface an error from the server.",
-  );
+  lines.push(t("mcpBrowse.fetchOne"));
   return lines.join("\n");
 }
 
