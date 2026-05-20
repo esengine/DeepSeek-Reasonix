@@ -1,17 +1,10 @@
-// java_source tool — find and decompile Java source by fully-qualified class name.
-// Modes: (1) project .java walk, (2) Maven/Gradle jar cache scan, (3) direct jarPath.
-// Default-off: enabled via config.json `"javaSource": true` or env `REASONIX_JAVA_SOURCE=1`.
-
 import { ClassSourceFinder } from "../java/class-source-finder.js";
 import type { ToolRegistry } from "../tools.js";
 
 export interface JavaSourceToolOptions {
-  // Root directory for .java file search. Falls back to process.cwd().
   projectRoot?: string;
 }
 
-// Register the java_source tool on registry.
-// Parameters: className (required), projectRoot, jarPath, jarKeyword.
 export function registerJavaSourceTool(
   registry: ToolRegistry,
   opts: JavaSourceToolOptions = {},
@@ -68,7 +61,6 @@ export function registerJavaSourceTool(
         throw new Error("java_source: `className` is required");
       }
 
-      // Validate that the class name looks like a valid Java identifier chain.
       if (!/^[a-zA-Z_$][\w$]*(\.[a-zA-Z_$][\w$]*)*$/.test(className)) {
         throw new Error(
           `java_source: "${className}" is not a valid fully qualified Java class name. Expected format: \`com.example.MyClass\``,
@@ -82,7 +74,6 @@ export function registerJavaSourceTool(
       const jarKeyword = args?.jarKeyword?.trim();
 
       if (jarPath) {
-        // Mode: direct jar path — skip project + repo scan
         const result = await finder.findSourceInJar(className, jarPath);
         if (!result.found) {
           return JSON.stringify({
@@ -100,7 +91,6 @@ export function registerJavaSourceTool(
         });
       }
 
-      // Default: project search → jar cache scan (optionally filtered by jarKeyword)
       const result = await finder.findSource(className, {
         ...(jarKeyword ? { jarKeyword } : {}),
       });
