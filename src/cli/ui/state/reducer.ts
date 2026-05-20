@@ -325,37 +325,70 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
   }
 }
 
-/** Tool outputs older than this many cards get stubbed so a 7-hour session doesn't drag GBs of one-off file reads / search results / screenshots through the heap (issue #1031). */
+/** Heavy card fields older than this many cards get stubbed so a 7-hour session doesn't drag GBs of one-off file reads / reasoning streams / diff hunks through the heap (issue #1031). */
 const RECENT_CARDS_WINDOW = 200;
-/** Don't bother eliding tiny outputs — the stub is itself ~150 chars and the savings aren't worth the lost context. */
+/** Don't bother eliding tiny payloads — the stub is itself ~150 chars and the savings aren't worth the lost context. */
 const MIN_ELIDE_OUTPUT_LENGTH = 4096;
-/** Marker for already-elided outputs so we don't re-stub on every subsequent append. */
+/** Marker for already-elided fields so we don't re-stub on every subsequent append. */
 const ELIDED_TOOL_OUTPUT_PREFIX = "[elided — older than the last ";
 
-function elideOldToolOutputs(cards: ReadonlyArray<Card>): ReadonlyArray<Card> {
-  // Caller is about to append a new card. Anticipate that — so once
+function elidedStub(originalChars: number): string {
+  return `${ELIDED_TOOL_OUTPUT_PREFIX}${RECENT_CARDS_WINDOW} cards; ${originalChars.toLocaleString()} chars dropped to save memory. Full output is on disk in the session log.]`;
+}
+
+function stubHeavyContent(c: Card): Card {
+  switch (c.kind) {
+    case "tool": {
+      const out = (c as ToolCard).output;
+      if (typeof out !== "string") return c;
+      if (out.length <= MIN_ELIDE_OUTPUT_LENGTH) return c;
+      if (out.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) return c;
+      return { ...(c as ToolCard), output: elidedStub(out.length) };
+    }
+    case "reasoning": {
+      const r = c as ReasoningCard;
+      if (r.streaming) return c;
+      if (r.text.length <= MIN_ELIDE_OUTPUT_LENGTH) return c;
+      if (r.text.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) return c;
+      return { ...r, text: elidedStub(r.text.length) };
+    }
+    case "streaming": {
+      const s = c as StreamingCard;
+      if (!s.done) return c;
+      if (s.text.length <= MIN_ELIDE_OUTPUT_LENGTH) return c;
+      if (s.text.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) return c;
+      return { ...s, text: elidedStub(s.text.length) };
+    }
+    case "diff": {
+      if (c.hunks.length === 0) return c;
+      let totalChars = 0;
+      for (const h of c.hunks) for (const l of h.lines) totalChars += l.text.length;
+      if (totalChars <= MIN_ELIDE_OUTPUT_LENGTH) return c;
+      return { ...c, hunks: [] };
+    }
+    default:
+      return c;
+  }
+}
+
+function elideOldCardContent(cards: ReadonlyArray<Card>): ReadonlyArray<Card> {
+  // Caller is about to append a new card. Anticipate that — once
   // cards.length hits the window, the very next append starts eliding.
   if (cards.length < RECENT_CARDS_WINDOW) return cards;
   const cutoff = cards.length + 1 - RECENT_CARDS_WINDOW;
   let next: Card[] | null = null;
   for (let i = 0; i < cutoff; i++) {
     const c = cards[i]!;
-    if (c.kind !== "tool") continue;
-    const out = (c as ToolCard).output;
-    if (typeof out !== "string") continue;
-    if (out.length <= MIN_ELIDE_OUTPUT_LENGTH) continue;
-    if (out.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) continue;
+    const stubbed = stubHeavyContent(c);
+    if (stubbed === c) continue;
     if (next === null) next = cards.slice();
-    next[i] = {
-      ...(c as ToolCard),
-      output: `${ELIDED_TOOL_OUTPUT_PREFIX}${RECENT_CARDS_WINDOW} cards; ${out.length.toLocaleString()} chars dropped to save memory. Full output is on disk in the session log.]`,
-    };
+    next[i] = stubbed;
   }
   return next ?? cards;
 }
 
 function appendCard(state: AgentState, card: Card): AgentState {
-  return { ...state, cards: [...elideOldToolOutputs(state.cards), card] };
+  return { ...state, cards: [...elideOldCardContent(state.cards), card] };
 }
 
 function mutateCard<K extends Card["kind"]>(
