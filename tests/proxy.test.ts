@@ -8,6 +8,7 @@ import {
   matchesNoProxy,
   normalizeProxyUrl,
   parseNoProxy,
+  resolveNoProxy,
 } from "../src/net/proxy.js";
 
 describe("detectProxyUrl (issue #646)", () => {
@@ -232,6 +233,39 @@ describe("installProxyIfConfigured", () => {
   it("does not throw on a malformed env value — warns to stderr and returns null", () => {
     expect(installProxyIfConfigured({ HTTPS_PROXY: "http://[invalid:::" })).toBeNull();
     expect(writes.join("")).toMatch(/ignoring proxy env value/);
+  });
+});
+
+describe("resolveNoProxy", () => {
+  it("returns just defaults when no env vars or extra patterns are set", () => {
+    const r = resolveNoProxy({});
+    expect(r.defaults).toHaveLength(DEFAULT_NO_PROXY.length);
+    expect(r.envSystem).toHaveLength(0);
+    expect(r.envReasonix).toHaveLength(0);
+    expect(r.extra).toHaveLength(0);
+    expect(r.all.length).toBe(DEFAULT_NO_PROXY.length);
+  });
+
+  it("partitions patterns by source (defaults / env / REASONIX / extra)", () => {
+    const r = resolveNoProxy(
+      { NO_PROXY: "system.example", REASONIX_NO_PROXY: "app.example" },
+      { extraNoProxy: ["config.example"] },
+    );
+    expect(r.defaults.map((p) => p.raw)).toContain("api.deepseek.com");
+    expect(r.envSystem.map((p) => p.raw)).toEqual(["system.example"]);
+    expect(r.envReasonix.map((p) => p.raw)).toEqual(["app.example"]);
+    expect(r.extra.map((p) => p.raw)).toEqual(["config.example"]);
+    expect(r.all.map((p) => p.raw)).toEqual([
+      ...r.defaults.map((p) => p.raw),
+      "system.example",
+      "app.example",
+      "config.example",
+    ]);
+  });
+
+  it("api.deepseek.com always matches the resolved list — DeepSeek bypass is non-optional", () => {
+    const r = resolveNoProxy({}, {});
+    expect(matchesNoProxy("api.deepseek.com", r.all)).toBe(true);
   });
 });
 

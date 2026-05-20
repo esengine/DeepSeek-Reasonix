@@ -174,6 +174,35 @@ export interface InstallProxyOptions {
   extraNoProxy?: readonly string[];
 }
 
+export interface ResolvedNoProxy {
+  defaults: NoProxyPattern[];
+  envSystem: NoProxyPattern[];
+  envReasonix: NoProxyPattern[];
+  extra: NoProxyPattern[];
+  /** Defaults + env + REASONIX + extra concatenated. The same list `installProxyIfConfigured` uses. */
+  all: NoProxyPattern[];
+}
+
+/** Merge default + env + REASONIX_NO_PROXY + opts.extraNoProxy into one resolved view. Same composition as installProxyIfConfigured so /doctor can show what's actually applied. */
+export function resolveNoProxy(
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { extraNoProxy?: readonly string[] } = {},
+): ResolvedNoProxy {
+  const defaults = parseNoProxy(DEFAULT_NO_PROXY.join(","));
+  const envSystem = parseNoProxy(detectNoProxyRaw(env));
+  const envReasonix = parseNoProxy(
+    typeof env.REASONIX_NO_PROXY === "string" ? env.REASONIX_NO_PROXY : null,
+  );
+  const extra = parseNoProxy((opts.extraNoProxy ?? []).join(","));
+  return {
+    defaults,
+    envSystem,
+    envReasonix,
+    extra,
+    all: [...defaults, ...envSystem, ...envReasonix, ...extra],
+  };
+}
+
 /** Sets the undici global dispatcher to a SelectiveProxyDispatcher (proxy for non-NO_PROXY hosts, direct for matches). Returns the proxy URL + parsed NO_PROXY patterns, or null when no env var is set, the value is unparseable, the ProxyAgent ctor throws, or opts.disabled is true. Idempotent. */
 export function installProxyIfConfigured(
   env: NodeJS.ProcessEnv = process.env,
@@ -191,14 +220,9 @@ export function installProxyIfConfigured(
   }
 
   // Default whitelist always applies; env NO_PROXY, REASONIX_NO_PROXY, and
-  // opts.extraNoProxy (config) all layer on top additively.
-  const defaultNoProxy = parseNoProxy(DEFAULT_NO_PROXY.join(","));
-  const envNoProxy = parseNoProxy(detectNoProxyRaw(env));
-  const reasonixNoProxy = parseNoProxy(
-    typeof env.REASONIX_NO_PROXY === "string" ? env.REASONIX_NO_PROXY : null,
-  );
-  const extraNoProxy = parseNoProxy((opts.extraNoProxy ?? []).join(","));
-  const patterns = [...defaultNoProxy, ...envNoProxy, ...reasonixNoProxy, ...extraNoProxy];
+  // opts.extraNoProxy (config) all layer on top additively. Composition lives
+  // in resolveNoProxy() so /doctor and install can't drift.
+  const { all: patterns } = resolveNoProxy(env, { extraNoProxy: opts.extraNoProxy });
 
   try {
     const reinstalled = installed;
