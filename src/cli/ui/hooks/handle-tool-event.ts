@@ -3,7 +3,7 @@ import { archivePlanState } from "../../../code/plan-store.js";
 import { t } from "../../../i18n/index.js";
 import type { LoopEvent } from "../../../loop.js";
 import type { ChoiceOption } from "../../../tools/choice.js";
-import type { PlanStep, StepCompletion } from "../../../tools/plan.js";
+import type { PlanStep, StepCompletion, StepEvidence } from "../../../tools/plan.js";
 import type { TurnTranslator } from "../state/TurnTranslator.js";
 import type { Scrollback } from "./useScrollback.js";
 
@@ -60,6 +60,8 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
         const stepFromPlan = ctx.planStepsRef.current?.find((s) => s.id === stepId);
         const title = parsed.title ?? stepFromPlan?.title;
         if (title) ctx.log.pushStepProgress(completed, total, title);
+        const evidenceSummary = formatStepEvidenceSummary(parsed.evidence);
+        if (evidenceSummary) ctx.log.pushInfo(evidenceSummary, "ghost");
         if (ctx.session && total > 0 && completed >= total) {
           const archive = archivePlanState(ctx.session);
           if (archive) {
@@ -71,4 +73,20 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
       /* malformed payload — skip the progress row */
     }
   }
+}
+
+function formatStepEvidenceSummary(evidence: StepCompletion["evidence"]): string | null {
+  if (!evidence || evidence.length === 0) return null;
+  const parts = evidence.map(formatStepEvidenceItem).filter((part) => part.length > 0);
+  if (parts.length === 0) return null;
+  return `evidence: ${parts.join("; ")}`;
+}
+
+function formatStepEvidenceItem(evidence: StepEvidence): string {
+  const extras: string[] = [];
+  if (evidence.command) extras.push(evidence.command);
+  if (evidence.paths && evidence.paths.length > 0)
+    extras.push(evidence.paths.slice(0, 3).join(", "));
+  const suffix = extras.length > 0 ? ` (${extras.join("; ")})` : "";
+  return `${evidence.kind} - ${evidence.summary}${suffix}`;
 }
