@@ -6,8 +6,11 @@ import type { JobInfo } from "../protocol";
 import { THEME, THEME_STYLES, type Theme, type ThemeStyle, themeForStyle } from "../theme";
 import { localizeShortcutText } from "./shortcut";
 
-function formatMoney(amount: number, currency: "CNY" | "USD"): string {
+const USD_TO_CNY = 7.2;
+
+function formatMoney(amountUsd: number, currency: "CNY" | "USD"): string {
   const symbol = currency === "CNY" ? "¥" : "$";
+  const amount = currency === "CNY" ? amountUsd * USD_TO_CNY : amountUsd;
   return `${symbol} ${amount.toFixed(4)}`;
 }
 

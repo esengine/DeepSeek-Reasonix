@@ -999,6 +999,7 @@ function PageBilling({
   currency: "CNY" | "USD";
 }) {
   const symbol = currency === "CNY" ? "¥" : "$";
+  const sessionCost = currency === "CNY" ? usage.totalCostUsd * 7.2 : usage.totalCostUsd;
   const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
   const hitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
   return (
@@ -1020,7 +1021,7 @@ function PageBilling({
         <div className="bill-card">
           <div className="l">{t("settings.sessionCost")}</div>
           <div className="v">
-            {symbol} {usage.totalCostUsd.toFixed(4)}
+            {symbol} {sessionCost.toFixed(4)}
           </div>
           <div className="sub">prompt {usage.totalPromptTokens.toLocaleString()} t</div>
         </div>
