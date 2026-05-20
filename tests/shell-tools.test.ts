@@ -616,6 +616,67 @@ describe("registerShellTools — dispatch integration", () => {
     expect(afterYolo).toMatch(/user denied/);
     expect(afterYolo).toMatch(/node -e/);
   });
+
+  it("run_background dispatch starts a job, list_jobs sees it, job_output reads it, stop_job ends it", async () => {
+    const registry = new ToolRegistry();
+    const jobs = new (await import("../src/tools/jobs.js")).JobRegistry();
+    registerShellTools(registry, { rootDir: tmp, jobs, extraAllowed: ["node"] });
+
+    try {
+      const startOut = await registry.dispatch(
+        "run_background",
+        JSON.stringify({
+          command: `node -e "setInterval(()=>console.log('tick'), 50)"`,
+          waitSec: 0.1,
+        }),
+      );
+      const jobIdMatch = startOut.match(/job (\d+) started/);
+      expect(jobIdMatch).not.toBeNull();
+      const jobId = Number(jobIdMatch![1]);
+
+      const listOut = await registry.dispatch("list_jobs", "{}");
+      expect(listOut).toMatch(new RegExp(`\\b${jobId}\\b`));
+      expect(listOut).toContain("node -e");
+
+      await registry.dispatch(
+        "wait_for_job",
+        JSON.stringify({ jobId, timeoutMs: 500, waitFor: "output-or-exit" }),
+      );
+      const outputOut = await registry.dispatch("job_output", JSON.stringify({ jobId }));
+      expect(outputOut).toContain("tick");
+
+      const stopOut = await registry.dispatch("stop_job", JSON.stringify({ jobId }));
+      expect(stopOut).toContain(`job ${jobId}`);
+    } finally {
+      await jobs.shutdown(2000);
+    }
+  });
+
+  it("job_output / stop_job report not-found for unknown jobId", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp });
+    const outNoRead = await registry.dispatch("job_output", JSON.stringify({ jobId: 9999 }));
+    expect(outNoRead).toMatch(/job 9999: not found/);
+    const outNoStop = await registry.dispatch("stop_job", JSON.stringify({ jobId: 9999 }));
+    expect(outNoStop).toMatch(/job 9999: not found/);
+  });
+
+  it("list_jobs reports an empty session when nothing has been started", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp });
+    const out = await registry.dispatch("list_jobs", "{}");
+    expect(out).toContain("no background jobs");
+  });
+
+  it("run_background dispatch rejects a cwd that escapes the workspace root", async () => {
+    const registry = new ToolRegistry();
+    registerShellTools(registry, { rootDir: tmp, extraAllowed: ["node"] });
+    const out = await registry.dispatch(
+      "run_background",
+      JSON.stringify({ command: "node --version", cwd: "../../etc" }),
+    );
+    expect(out).toMatch(/resolves outside the workspace root/);
+  });
 });
 
 describe("formatCommandResult", () => {

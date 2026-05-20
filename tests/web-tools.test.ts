@@ -907,6 +907,55 @@ describe("registerWebTools", () => {
     const out = await registry.dispatch("web_fetch", JSON.stringify({ url: "file:///etc/passwd" }));
     expect(out).toMatch(/must start with http/);
   });
+
+  it("web_search dispatch returns formatted results", async () => {
+    const html = `
+      <a class="title" href="https://example.com/a">A</a>
+      <p class="s">snippet A</p>
+      <a class="title" href="https://example.com/b">B</a>
+      <p class="s">snippet B</p>`;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response(html, { status: 200, headers: { "Content-Type": "text/html" } }),
+    ) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry);
+      const out = await registry.dispatch(
+        "web_search",
+        JSON.stringify({ query: "flutter 3.19", topK: 2 }),
+      );
+      expect(out).toContain("query: flutter 3.19");
+      expect(out).toContain("https://example.com/a");
+      expect(out).toContain("snippet A");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_fetch dispatch returns title + body text", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          "<html><head><title>Demo</title></head><body><p>Hello world.</p></body></html>",
+          { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } },
+        ),
+    ) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry);
+      const out = await registry.dispatch(
+        "web_fetch",
+        JSON.stringify({ url: "https://example.com/" }),
+      );
+      expect(out).toContain("Demo");
+      expect(out).toContain("https://example.com/");
+      expect(out).toContain("Hello world.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("webFetch", () => {
