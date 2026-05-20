@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { EngineeringLifecycleRuntime } from "../src/code/lifecycle.js";
 import { ToolRegistry } from "../src/tools.js";
 
 describe("ToolRegistry", () => {
@@ -347,6 +348,58 @@ describe("ToolRegistry", () => {
       expect(first.consecutiveInterceptorRejection).toBeUndefined();
       expect(second.consecutiveInterceptorRejection).toBe(true);
       expect(second.error).toMatch(/do not retry identical args/);
+    });
+
+    it("sharpens repeated lifecycle gate rejections when JSON key order changes", async () => {
+      const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
+      const reg = new ToolRegistry();
+      reg.register({ name: "run_command", fn: () => "should not run" });
+      reg.addToolInterceptor("engineering-lifecycle", lifecycle.guardToolCall);
+
+      const first = JSON.parse(
+        await reg.dispatch("run_command", '{"command":"rm -rf dist","cwd":"/repo"}'),
+      );
+      const second = JSON.parse(
+        await reg.dispatch("run_command", '{"cwd":"/repo","command":"rm -rf dist"}'),
+      );
+
+      expect(first.rejectedReason).toBe("engineering-lifecycle");
+      expect(first.consecutiveInterceptorRejection).toBeUndefined();
+      expect(second.rejectedReason).toBe("engineering-lifecycle");
+      expect(second.consecutiveInterceptorRejection).toBe(true);
+      expect(second.error).toMatch(/do not retry identical args/);
+    });
+
+    it("sharpens repeated lifecycle gate rejections for high-risk call corpus", async () => {
+      const cases: Array<{ name: string; args: Record<string, unknown> }> = [
+        {
+          name: "multi_edit",
+          args: {
+            edits: [
+              { path: "src/a.ts", search: "a", replace: "b" },
+              { path: "src/b.ts", search: "a", replace: "b" },
+            ],
+          },
+        },
+        { name: "delete_file", args: { path: "src/old.ts" } },
+        { name: "run_command", args: { command: "npm install left-pad", cwd: "/repo" } },
+      ];
+
+      for (const item of cases) {
+        const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
+        const reg = new ToolRegistry();
+        reg.register({ name: item.name, fn: () => "should not run" });
+        reg.addToolInterceptor("engineering-lifecycle", lifecycle.guardToolCall);
+
+        const rawArgs = JSON.stringify(item.args);
+        const first = JSON.parse(await reg.dispatch(item.name, rawArgs));
+        const second = JSON.parse(await reg.dispatch(item.name, rawArgs));
+
+        expect(first.rejectedReason).toBe("engineering-lifecycle");
+        expect(first.consecutiveInterceptorRejection).toBeUndefined();
+        expect(second.rejectedReason).toBe("engineering-lifecycle");
+        expect(second.consecutiveInterceptorRejection).toBe(true);
+      }
     });
 
     it("surfaces interceptor throws as structured errors", async () => {

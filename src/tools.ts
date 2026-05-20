@@ -179,7 +179,7 @@ export class ToolRegistry {
     if (!tool) {
       return JSON.stringify({ error: `unknown tool: ${name}` });
     }
-    const fingerprint = fingerprintArgs(argumentsRaw);
+    const rawFingerprint = rawFingerprintArgs(argumentsRaw);
     let args: Record<string, unknown>;
     try {
       args =
@@ -191,7 +191,7 @@ export class ToolRegistry {
     } catch (err) {
       return this._noteMalformed(
         name,
-        fingerprint,
+        rawFingerprint,
         `invalid tool arguments JSON: ${(err as Error).message}`,
       );
     }
@@ -204,6 +204,7 @@ export class ToolRegistry {
     if (tool.flatSchema && args && typeof args === "object" && hasDotKey(args)) {
       args = nestArguments(args);
     }
+    const fingerprint = fingerprintArgs(args);
 
     const missing = tool.parameters ? missingRequiredParam(tool.parameters, args) : null;
     if (missing) {
@@ -386,14 +387,30 @@ function hasDotKey(obj: Record<string, unknown>): boolean {
   return false;
 }
 
-/** Stable per-call key for the malformed-args storm guard. String args compare as-is; objects round-trip through JSON so key order is stable. */
-function fingerprintArgs(argumentsRaw: string | Record<string, unknown>): string {
+/** Raw key for invalid JSON, where there is no parsed argument object to normalize. */
+function rawFingerprintArgs(argumentsRaw: string | Record<string, unknown>): string {
   if (typeof argumentsRaw === "string") return argumentsRaw;
+  return fingerprintArgs(argumentsRaw);
+}
+
+/** Stable per-call key for parsed tool args; object key order should not affect repeat detection. */
+function fingerprintArgs(args: Record<string, unknown>): string {
   try {
-    return JSON.stringify(argumentsRaw);
+    return JSON.stringify(sortJson(args));
   } catch {
     return "";
   }
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!value || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    const item = (value as Record<string, unknown>)[key];
+    if (item !== undefined) out[key] = sortJson(item);
+  }
+  return out;
 }
 
 /** If the schema declares required params, return the first one that's missing. */
