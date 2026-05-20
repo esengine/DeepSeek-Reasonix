@@ -94,17 +94,17 @@ function PlanConfirmInner({ plan, steps, summary, onChoose }: PlanConfirmProps) 
       return;
     }
     if (!isDetailScrollKey(ev)) return;
-    if (ev.pageUp || ev.mouseScrollUp) {
+    if (ev.pageUp) {
       setDetailOffset((n) => Math.max(0, n - detailViewRows));
-    } else if (ev.pageDown || ev.mouseScrollDown) {
+    } else if (ev.pageDown) {
       setDetailOffset((n) => Math.min(maxDetailOffset, n + detailViewRows));
     } else if (ev.home) {
       setDetailOffset(0);
     } else if (ev.end) {
       setDetailOffset(maxDetailOffset);
-    } else if (ev.upArrow) {
+    } else if (ev.upArrow || ev.mouseScrollUp) {
       setDetailOffset((n) => Math.max(0, n - 1));
-    } else if (ev.downArrow) {
+    } else if (ev.downArrow || ev.mouseScrollDown) {
       setDetailOffset((n) => Math.min(maxDetailOffset, n + 1));
     }
   });

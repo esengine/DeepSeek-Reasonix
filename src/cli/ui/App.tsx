@@ -1660,8 +1660,10 @@ function AppInner({
   // arrows here when the composer is hidden (chat is scrolled up and
   // InputAreaWithHistoryHint has replaced it).
   useKeystroke((ev) => {
-    if (ev.pageUp || ev.mouseScrollUp) chatScroll.scrollPageUp();
-    else if (ev.pageDown || ev.mouseScrollDown) chatScroll.scrollPageDown();
+    if (ev.pageUp) chatScroll.scrollPageUp();
+    else if (ev.pageDown) chatScroll.scrollPageDown();
+    else if (ev.mouseScrollUp) chatScroll.scrollWheelUp();
+    else if (ev.mouseScrollDown) chatScroll.scrollWheelDown();
     else if (ev.end) chatScroll.jumpToBottom();
     else if (!composerPinned && ev.upArrow) chatScroll.scrollUp();
     else if (!composerPinned && ev.downArrow) chatScroll.scrollDown();

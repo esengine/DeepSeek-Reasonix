@@ -22,6 +22,8 @@ export interface ChatScrollStore {
   scrollDown(): void;
   scrollPageUp(): void;
   scrollPageDown(): void;
+  scrollWheelUp(): void;
+  scrollWheelDown(): void;
   jumpToBottom(): void;
   setMaxScroll(rows: number): void;
   /** Reports a card's measured height. No-op if value matches the cache. */
@@ -32,6 +34,9 @@ export interface ChatScrollStore {
 
 export const SCROLL_ARROW_ROWS = 3;
 export const SCROLL_PAGE_ROWS = 5;
+/** One wheel notch on most mice emits 2-5 SGR mouse reports back-to-back,
+ * so anything larger here multiplies into a 10-25 row jump per notch. */
+export const SCROLL_WHEEL_ROWS = 1;
 const COALESCE_MS = 16;
 
 const EMPTY_HEIGHTS: ReadonlyMap<string, number> = new Map();
@@ -127,6 +132,8 @@ export function createChatScrollStore(): ChatScrollStore {
     scrollDown: () => schedule(SCROLL_ARROW_ROWS),
     scrollPageUp: () => schedule(-SCROLL_PAGE_ROWS),
     scrollPageDown: () => schedule(SCROLL_PAGE_ROWS),
+    scrollWheelUp: () => schedule(-SCROLL_WHEEL_ROWS),
+    scrollWheelDown: () => schedule(SCROLL_WHEEL_ROWS),
     jumpToBottom() {
       pendingDelta = 0;
       if (flushTimer !== null) {

@@ -37,6 +37,8 @@ export function useChatScrollActions(): Pick<
   | "scrollDown"
   | "scrollPageUp"
   | "scrollPageDown"
+  | "scrollWheelUp"
+  | "scrollWheelDown"
   | "jumpToBottom"
   | "setMaxScroll"
   | "setCardHeight"
