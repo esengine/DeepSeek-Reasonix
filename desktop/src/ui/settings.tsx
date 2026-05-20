@@ -861,8 +861,8 @@ function PageMCP({
                   <I.wrench size={14} />
                 </span>
                 <div>
-                  <div className="nm">{typeof s.name === "string" ? s.name : "(anonymous)"}</div>
-                  <div className="sub">{typeof s.summary === "string" ? s.summary : "[invalid]"}</div>
+                  <div className="nm">{s.name ?? "(anonymous)"}</div>
+                  <div className="sub">{s.summary}</div>
                 </div>
                 <span className="grow" />
                 <button

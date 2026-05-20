@@ -222,7 +222,7 @@ function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }
                 <I.wrench size={12} />
               </span>
               <div className="body">
-                <div className="n">{s.name ?? (typeof s.summary === "string" ? s.summary : "[invalid]")}</div>
+                <div className="n">{s.name ?? s.summary}</div>
                 <div className="m">
                   {s.transport}
                   {suffix}

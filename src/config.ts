@@ -3,6 +3,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { z } from "zod";
 import { type ThemeName, isThemeName, resolveThemeName } from "./cli/ui/theme/tokens.js";
 import type { LanguageCode } from "./i18n/types.js";
 import {
@@ -327,11 +328,57 @@ export function defaultConfigPath(): string {
   return join(homedir(), ".reasonix", "config.json");
 }
 
+const STRING_ARRAY_FIELDS: Array<readonly string[]> = [
+  ["mcp"],
+  ["mcpDisabled"],
+  ["recentWorkspaces"],
+  ["skills", "paths"],
+];
+
+const stringArraySchema = z.array(z.string());
+
+function sanitizeStringArrayField(
+  cfg: Record<string, unknown>,
+  segments: readonly string[],
+  filePath: string,
+): void {
+  if (segments.length === 0) return;
+  let parent: Record<string, unknown> = cfg;
+  for (let i = 0; i < segments.length - 1; i++) {
+    const seg = segments[i] as string;
+    const next = parent[seg];
+    if (!next || typeof next !== "object" || Array.isArray(next)) return;
+    parent = next as Record<string, unknown>;
+  }
+  const leaf = segments[segments.length - 1] as string;
+  const value = parent[leaf];
+  if (value === undefined) return;
+  const fieldName = segments.join(".");
+  if (!Array.isArray(value)) {
+    console.warn(`reasonix: config "${filePath}" field "${fieldName}" is not an array — ignoring`);
+    delete parent[leaf];
+    return;
+  }
+  const parsed = stringArraySchema.safeParse(value);
+  if (parsed.success) return;
+  const filtered = value.filter((x): x is string => typeof x === "string");
+  console.warn(
+    `reasonix: config "${filePath}" field "${fieldName}" had ${value.length - filtered.length} non-string item(s) — dropped`,
+  );
+  parent[leaf] = filtered;
+}
+
 export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
   try {
     const raw = readFileSync(path, "utf8");
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") return parsed as ReasonixConfig;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const cfg = parsed as Record<string, unknown>;
+      for (const segments of STRING_ARRAY_FIELDS) {
+        sanitizeStringArrayField(cfg, segments, path);
+      }
+      return cfg as ReasonixConfig;
+    }
   } catch {
     /* missing or malformed → empty config */
   }
