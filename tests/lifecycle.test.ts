@@ -152,6 +152,62 @@ describe("EngineeringLifecycleRuntime", () => {
     ).toBeNull();
   });
 
+  it("keeps completed plan steps when accepting a revision", () => {
+    const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
+    lifecycle.observeUserPrompt("Refactor the command router");
+    lifecycle.recordPlanApproved([
+      { id: "step-1", title: "Extract router", action: "Move routing helpers.", risk: "low" },
+      { id: "step-2", title: "Migrate callers", action: "Update call sites.", risk: "med" },
+      { id: "step-3", title: "Update tests", action: "Refresh tests.", risk: "low" },
+    ]);
+    lifecycle.recordStepCompleted("step-1");
+
+    lifecycle.recordPlanRevised([
+      { id: "step-3", title: "Update tests", action: "Refresh tests first.", risk: "low" },
+      {
+        id: "step-4",
+        title: "Document fallout",
+        action: "Document skipped migration.",
+        risk: "low",
+      },
+    ]);
+
+    expect(lifecycle.snapshot()).toMatchObject({
+      state: "executing",
+      completedStepIds: ["step-1"],
+      planSteps: [
+        { id: "step-1", title: "Extract router" },
+        { id: "step-3", title: "Update tests" },
+        { id: "step-4", title: "Document fallout" },
+      ],
+    });
+  });
+
+  it("does not clear mutation evidence requirements when accepting a revision", () => {
+    const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
+    lifecycle.observeUserPrompt("Refactor formatting across modules");
+    lifecycle.recordPlanApproved([
+      { id: "step-1", title: "Attempt formatter", action: "Change formatter code.", risk: "low" },
+      { id: "step-2", title: "Repair tests", action: "Update focused tests.", risk: "low" },
+    ]);
+    lifecycle.recordToolResult(
+      "write_file",
+      { path: "src/format.ts" },
+      "▸ edit blocks: 1/1 applied\n  ✓ created     src/format.ts",
+    );
+
+    lifecycle.recordPlanRevised([
+      { id: "step-2", title: "Repair tests", action: "Update focused tests.", risk: "low" },
+    ]);
+
+    const rejected = lifecycle.guardToolCall("mark_step_complete", {
+      stepId: "step-2",
+      result: "Updated tests after revision.",
+    });
+    expect(rejected).not.toBeNull();
+    expect(JSON.parse(rejected!).rejectedReason).toBe("engineering-lifecycle-evidence");
+  });
+
   it("does not mutate the immutable prefix as lifecycle state changes", () => {
     const prefix = new ImmutablePrefix({ system: "s", toolSpecs: [] });
     const before = prefix.fingerprint;

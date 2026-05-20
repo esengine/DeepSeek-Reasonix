@@ -146,6 +146,24 @@ export class EngineeringLifecycleRuntime {
     this._mutatedSinceLastStep = false;
   }
 
+  recordPlanRevised(remainingSteps: readonly PlanStep[]): void {
+    if (this._mode === "off") return;
+
+    const donePrefix = this._planSteps.filter((step) => this._completedStepIds.has(step.id));
+    const merged: PlanStep[] = [...donePrefix];
+    for (const step of remainingSteps) {
+      if (this._completedStepIds.has(step.id)) continue;
+      merged.push(step);
+    }
+
+    this._planSteps = merged;
+    if (this._planSteps.length > 0 && this._completedStepIds.size >= this._planSteps.length) {
+      this._state = "complete";
+    } else {
+      this._state = "executing";
+    }
+  }
+
   recordStepCompleted(stepId: string): void {
     if (!stepId) return;
     this._completedStepIds.add(stepId);

@@ -4100,10 +4100,7 @@ function AppInner({
         merged.push(s);
       }
       planStepsRef.current = merged;
-      engineeringLifecycleRef.current?.recordPlanApproved(merged);
-      for (const s of merged) {
-        if (completed.has(s.id)) engineeringLifecycleRef.current?.recordStepCompleted(s.id);
-      }
+      engineeringLifecycleRef.current?.recordPlanRevised(snap.remainingSteps);
       persistPlanState();
       // Replace the live active card so PlanLiveRow shows the new tail —      // existing card's stale ids would fail subsequent step completes.
       agentStore.dispatch({ type: "plan.drop" });
