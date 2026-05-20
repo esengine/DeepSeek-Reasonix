@@ -220,6 +220,49 @@ describe("EngineeringLifecycleRuntime", () => {
     expect(JSON.parse(rejected!).rejectedReason).toBe("engineering-lifecycle-evidence");
   });
 
+  it("holds high-risk mutations while waiting at a checkpoint", () => {
+    const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
+    lifecycle.observeUserPrompt("Refactor formatting across modules");
+    lifecycle.recordPlanApproved([
+      { id: "step-1", title: "Extract formatter", action: "Move formatter code.", risk: "low" },
+      { id: "step-2", title: "Update tests", action: "Refresh focused tests.", risk: "low" },
+    ]);
+    lifecycle.recordToolResult(
+      "write_file",
+      { path: "src/format.ts" },
+      "▸ edit blocks: 1/1 applied\n  ✓ created     src/format.ts",
+    );
+
+    lifecycle.recordCheckpointReached();
+
+    expect(lifecycle.snapshot().state).toBe("checkpoint");
+    const rejected = lifecycle.guardToolCall("delete_file", { path: "src/old-format.ts" });
+    expect(rejected).not.toBeNull();
+    expect(JSON.parse(rejected!).state).toBe("checkpoint");
+
+    lifecycle.recordStepCompleted("step-1");
+    expect(lifecycle.snapshot().state).toBe("executing");
+  });
+
+  it("can cancel cleanly from a checkpoint", () => {
+    const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
+    lifecycle.observeUserPrompt("Refactor formatting across modules");
+    lifecycle.recordPlanApproved([
+      { id: "step-1", title: "Extract formatter", action: "Move formatter code.", risk: "low" },
+    ]);
+    lifecycle.recordCheckpointReached();
+
+    lifecycle.cancel();
+
+    expect(lifecycle.snapshot()).toMatchObject({
+      state: "cancelled",
+      planSteps: [],
+      completedStepIds: [],
+      mutatedSinceLastStep: false,
+    });
+    expect(lifecycle.guardToolCall("delete_file", { path: "src/old-format.ts" })).not.toBeNull();
+  });
+
   it("does not mutate the immutable prefix as lifecycle state changes", () => {
     const prefix = new ImmutablePrefix({ system: "s", toolSpecs: [] });
     const before = prefix.fingerprint;

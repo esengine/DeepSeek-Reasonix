@@ -164,6 +164,13 @@ export class EngineeringLifecycleRuntime {
     }
   }
 
+  recordCheckpointReached(): void {
+    if (this._mode === "off") return;
+    if (this._state === "approved" || this._state === "executing") {
+      this._state = "checkpoint";
+    }
+  }
+
   recordStepCompleted(stepId: string): void {
     if (!stepId) return;
     this._completedStepIds.add(stepId);

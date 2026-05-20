@@ -3853,6 +3853,7 @@ function AppInner({
             p.stepId,
             total,
           );
+          engineeringLifecycleRef.current?.recordCheckpointReached();
           // Shared policy (src/core/pause-policy.ts) decides whether to
           // auto-resolve. Per-step rollback snapshot still runs so /restore
           // granularity is preserved.
@@ -3933,6 +3934,9 @@ function AppInner({
         // and let handleCheckpointReviseSubmit resolve with the feedback text.
         setStagedCheckpointRevise(snap);
         return;
+      }
+      if (choice === "stop") {
+        engineeringLifecycleRef.current?.cancel();
       }
       // Auto file-snapshot per plan step
       if (codeMode && choice === "continue") {
