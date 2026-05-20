@@ -42,8 +42,13 @@ const HARD_MAX_FILE_BYTES = 32 * 1024 * 1024;
 /** Lines shown for orientation when a file is too big for full content. */
 const OUTLINE_HEAD_LINES = 80;
 
-/** Skipped unless `include_deps:true` — shared with the semantic indexer via DEFAULT_INDEX_EXCLUDES. */
-const SKIP_DIR_NAMES: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.dirs);
+// Skipped unless `include_deps:true`. Derived from the semantic indexer's exclude
+// list, minus `.reasonix` — the indexer shouldn't embed session logs / cache, but
+// user skills live at `<root>/.reasonix/skills/` (and `~/.reasonix/skills/`) and
+// must stay reachable to read_file / search_files / search_content (#1357).
+const SKIP_DIR_NAMES: ReadonlySet<string> = new Set(
+  DEFAULT_INDEX_EXCLUDES.dirs.filter((d) => d !== ".reasonix"),
+);
 
 /** First line of binary defense; NUL-byte sniff is the second (catches mislabeled `.txt`). */
 const BINARY_EXTENSIONS: ReadonlySet<string> = new Set(DEFAULT_INDEX_EXCLUDES.exts);
