@@ -51,7 +51,11 @@ export const LiveActivityArea: React.FC<LiveActivityAreaProps> = React.memo(
     return (
       <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
         {noTakeoverOverlay && ongoingTool ? (
-          <OngoingToolRow tool={ongoingTool} progress={toolProgress} />
+          <OngoingToolRow
+            tool={ongoingTool}
+            progress={toolProgress}
+            subagentActivities={subagentActivities}
+          />
         ) : null}
         {noTakeoverOverlay && subagentActivities.length > 0 ? (
           <SubagentLiveStack activities={subagentActivities} max={3} />

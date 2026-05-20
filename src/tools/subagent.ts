@@ -15,7 +15,7 @@ import { SUBAGENT_TYPE_NAMES, getSubagentType } from "./subagent-types.js";
 
 /** Side-channel — subagents run inside a tool-dispatch frame, can't go through parent's `LoopEvent` stream. */
 export interface SubagentEvent {
-  kind: "start" | "progress" | "end" | "inner" | "phase";
+  kind: "start" | "progress" | "end" | "inner" | "phase" | "stream-progress";
   /** Stable per-spawn id; lets the UI key parallel runs apart instead of overwriting one shared row. */
   runId: string;
   task: string;
@@ -32,6 +32,10 @@ export interface SubagentEvent {
   inner?: import("../loop.js").LoopEvent;
   /** When kind === "phase": coarse status verb for the activity row. */
   phase?: "exploring" | "summarising";
+  /** When kind === "stream-progress": monotonic char counters across the whole spawn, throttled. Lets the UI prove bytes are flowing during the long gaps between tool calls. `toolReadChars` is the sum of tool-result string lengths — the bytes pulled INTO the subagent from its reads/searches. */
+  outputChars?: number;
+  reasoningChars?: number;
+  toolReadChars?: number;
 }
 
 let runIdCounter = 0;
@@ -43,6 +47,9 @@ function nextRunId(): string {
 export interface SubagentSink {
   current: ((ev: SubagentEvent) => void) | null;
 }
+
+/** Process-wide late-bound channel. `buildCodeToolset` runs before the TUI mounts, so its `subagentRunner` closure can't capture a UI ref directly — it reads `.current` at dispatch time. The TUI's `useSubagent` writes `.current` on mount. Both sides reference the same singleton object so prop-drilling through `chatCommand` is unnecessary. Tests / library callers that want isolation pass their own `subagentSink` to `buildCodeToolset` (overrides the singleton for that toolset). */
+export const SHARED_SUBAGENT_SINK: SubagentSink = { current: null };
 
 export interface SpawnSubagentOptions {
   client: DeepSeekClient;
@@ -242,6 +249,40 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
   let toolIter = 0;
   let summarisingEmitted = false;
   let forcedSummaryFired = false;
+  let outputChars = 0;
+  let reasoningChars = 0;
+  let toolReadChars = 0;
+  let lastStreamEmitAt = 0;
+  let charsSinceLastEmit = 0;
+  // Throttle gates — 200ms or 400 chars between emits, whichever first.
+  // Cheap enough that React doesn't drown, often enough that the seconds
+  // counter has company.
+  const STREAM_EMIT_INTERVAL_MS = 200;
+  const STREAM_EMIT_CHARS = 400;
+  const maybeEmitStreamProgress = (now: number, force: boolean): void => {
+    if (!sink?.current) return;
+    if (
+      !force &&
+      now - lastStreamEmitAt < STREAM_EMIT_INTERVAL_MS &&
+      charsSinceLastEmit < STREAM_EMIT_CHARS
+    ) {
+      return;
+    }
+    lastStreamEmitAt = now;
+    charsSinceLastEmit = 0;
+    sink.current({
+      kind: "stream-progress",
+      runId,
+      task: taskPreview,
+      skillName,
+      model,
+      iter: toolIter,
+      elapsedMs: now - startedAt,
+      outputChars,
+      reasoningChars,
+      toolReadChars,
+    });
+  };
   try {
     for await (const ev of childLoop.step(opts.task)) {
       sink?.current?.({ kind: "inner", runId, task: taskPreview, skillName, model, inner: ev });
@@ -250,6 +291,7 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
         toolIter++;
         // New tool dispatched — the model went back to deciding, summarising flag resets so the next final-answer delta re-emits.
         summarisingEmitted = false;
+        toolReadChars += ev.content?.length ?? 0;
         sink?.current?.({
           kind: "progress",
           runId,
@@ -259,6 +301,20 @@ export async function spawnSubagent(opts: SpawnSubagentOptions): Promise<Subagen
           iter: toolIter,
           elapsedMs: Date.now() - startedAt,
         });
+        // Force-emit so the read counter ticks visibly even if the
+        // subsequent assistant_delta gap is short and the throttle gates
+        // would otherwise hold the next emit back.
+        maybeEmitStreamProgress(Date.now(), true);
+      }
+      if (ev.role === "assistant_delta") {
+        const dContent = ev.content?.length ?? 0;
+        const dReason = ev.reasoningDelta?.length ?? 0;
+        if (dContent > 0 || dReason > 0) {
+          outputChars += dContent;
+          reasoningChars += dReason;
+          charsSinceLastEmit += dContent + dReason;
+          maybeEmitStreamProgress(Date.now(), false);
+        }
       }
       // First content delta (no concurrent tool_call_delta role) = the
       // model is now writing its final answer, not deciding the next tool.

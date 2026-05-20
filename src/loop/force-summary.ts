@@ -4,7 +4,7 @@ import type { TurnStats } from "../telemetry/stats.js";
 import type { ChatMessage } from "../types.js";
 import { errorLabelFor, reasonPrefixFor } from "./errors.js";
 import { buildAssistantMessage } from "./messages.js";
-import { stripHallucinatedToolMarkup, thinkingModeForModel } from "./thinking.js";
+import { stripHallucinatedToolMarkup } from "./thinking.js";
 import type { LoopEvent } from "./types.js";
 
 export type ForceSummaryReason = "aborted" | "context-guard" | "stuck";
@@ -36,16 +36,16 @@ export async function* forceSummaryAfterIterLimit(
       content:
         "The turn is being force-summarized (context guard or stuck-state). Summarize in plain prose what you learned from the tool results above. Do NOT emit any tool calls, function-call markup, DSML invocations, or SEARCH/REPLACE edit blocks — they will be silently discarded. Just plain text.",
     });
-    // Pin to flash + effort=high regardless of the main turn's model —
-    // pro is 12× overkill for "paraphrase tool results into prose."
+    // Pin to flash + thinking disabled — the task is "paraphrase tool
+    // results into prose", which needs zero reasoning. Letting flash
+    // think here burns reasoning tokens on a job that's structurally
+    // bounded (no decisions, no tools). Pro is 12× overkill.
     const summaryModel = "deepseek-v4-flash";
-    const summaryEffort: "high" | "max" = "high";
     const resp = await ctx.client.chat({
       model: summaryModel,
       messages,
       signal: ctx.signal,
-      thinking: thinkingModeForModel(summaryModel),
-      reasoningEffort: summaryEffort,
+      thinking: "disabled",
     });
     const rawContent = resp.content?.trim() ?? "";
     const cleaned = stripHallucinatedToolMarkup(rawContent);

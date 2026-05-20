@@ -26,6 +26,65 @@ export interface SkillToolsOptions {
   onSkillInstalled?: SkillInstalledHook;
 }
 
+interface BuiltinSubagentToolSpec {
+  toolName: string;
+  skillName: string;
+  description: string;
+  taskDescription: string;
+}
+
+function registerBuiltinSubagentTool(
+  registry: ToolRegistry,
+  store: SkillStore,
+  subagentRunner: SubagentRunner | undefined,
+  spec: BuiltinSubagentToolSpec,
+): void {
+  // Eager presence check — keeps disableBuiltins test mode clean (no
+  // phantom tool spec when its skill body is absent).
+  if (!store.read(spec.skillName)) return;
+  registry.register({
+    name: spec.toolName,
+    description: spec.description,
+    readOnly: true,
+    parallelSafe: true,
+    parameters: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: spec.taskDescription },
+      },
+      required: ["task"],
+    },
+    fn: async (args: { task?: unknown }, ctx) => {
+      if (!subagentRunner) {
+        return JSON.stringify({
+          error: `${spec.toolName}: no subagent runner is configured for this session — run inside \`reasonix code\`, or pass \`subagentRunner\` to \`registerSkillTools\`.`,
+        });
+      }
+      const task = typeof args.task === "string" ? args.task.trim() : "";
+      if (!task) {
+        return JSON.stringify({
+          error: `${spec.toolName} requires a non-empty 'task' argument — describe the concrete question.`,
+        });
+      }
+      const skill = store.read(spec.skillName);
+      if (!skill) {
+        return JSON.stringify({
+          error: `${spec.toolName}: built-in skill ${JSON.stringify(spec.skillName)} is no longer registered`,
+        });
+      }
+      // A user-supplied skill with the same name but `runAs: inline`
+      // would silently lose isolation if we dispatched it here — bounce
+      // back to run_skill where inline is well-defined.
+      if (skill.runAs !== "subagent") {
+        return JSON.stringify({
+          error: `${spec.toolName}: skill ${JSON.stringify(spec.skillName)} is overridden as inline; invoke it via run_skill instead.`,
+        });
+      }
+      return subagentRunner(skill, task, ctx?.signal);
+    },
+  });
+}
+
 export function registerSkillTools(
   registry: ToolRegistry,
   opts: SkillToolsOptions = {},
@@ -43,7 +102,7 @@ export function registerSkillTools(
   registry.register({
     name: "run_skill",
     description:
-      "Invoke a playbook from the Skills index pinned in the system prompt. Each entry is a self-contained instruction block. Pass `name` as the BARE skill identifier (e.g. 'explore'), NOT the `[🧬 subagent]` tag that appears after it in the index. Entries tagged `[🧬 subagent]` spawn an isolated subagent — only the final distilled answer comes back, the model's tool calls + reasoning during the run never enter your context. Plain skills are inlined: the body becomes a tool result you read and follow. For subagent skills, supply 'arguments' describing the concrete task — they'll be the only context the subagent has.",
+      "Invoke a user-defined playbook from the Skills index pinned in the system prompt. **For the built-in subagent skills (explore / research / review / security_review), prefer the dedicated top-level tools by the same name — they're cheaper to pick and produce the same result.** Pass `name` as the BARE skill identifier (e.g. 'my-custom-skill'), NOT the `[🧬 subagent]` tag that appears after it in the index. Entries tagged `[🧬 subagent]` spawn an isolated subagent — only the final distilled answer comes back. Plain skills are inlined: the body becomes a tool result you read and follow. For subagent skills, supply 'arguments' describing the concrete task — they'll be the only context the subagent has.",
     readOnly: true,
     parallelSafe: true,
     parameters: {
@@ -124,6 +183,43 @@ export function registerSkillTools(
       // Sentinel-wrapped so ContextManager.fold preserves the body verbatim instead of paraphrasing it.
       return `<skill-pin name=${JSON.stringify(skill.name)}>\n${inner}\n</skill-pin>`;
     },
+  });
+
+  // Top-level wrappers for built-in subagent skills. Same underlying
+  // subagentRunner path as `run_skill(name="explore", ...)`, but the
+  // tool name matches the verb in the question — models pick it
+  // because affordance design > prompt rules.
+  registerBuiltinSubagentTool(registry, store, subagentRunner, {
+    toolName: "explore",
+    skillName: "explore",
+    description:
+      "Run a focused read-only codebase investigation in an isolated subagent. **Use for broad survey questions across multiple files** — 'find all places that X', 'how does Y work across the project', 'audit Z'. Returns one distilled answer with file:line citations. Chained `read_file` is the wrong tool for these — it bloats your context with raw file contents; `explore`'s reads + reasoning never enter your log.",
+    taskDescription:
+      "Concrete investigation question. The subagent has none of your context — write a self-contained prompt naming the symbol / pattern / behavior you want surveyed.",
+  });
+  registerBuiltinSubagentTool(registry, store, subagentRunner, {
+    toolName: "research",
+    skillName: "research",
+    description:
+      "Combine web search + code reading in an isolated subagent. **Use when the answer needs both external reference and local verification** — 'is X supported by lib Y in version Z', 'compare our impl against the spec', 'what's the canonical way to do Q'. Returns one synthesis citing code (file:line) and web (URL). Reads + searches stay in the subagent.",
+    taskDescription:
+      "Concrete research question. The subagent has none of your context — name the external thing to look up and the local code to compare against.",
+  });
+  registerBuiltinSubagentTool(registry, store, subagentRunner, {
+    toolName: "review",
+    skillName: "review",
+    description:
+      "Review the pending changes (current branch diff) in an isolated subagent — flags correctness / security / missing-tests / hidden behavior per file:line. Read-only; you decide what to act on. Use before suggesting a PR-shaped change, or when you've finished a multi-step edit and want a second pass.",
+    taskDescription:
+      "What to focus the review on (e.g. 'focus on the auth changes' or 'general'). The subagent reads the diff itself.",
+  });
+  registerBuiltinSubagentTool(registry, store, subagentRunner, {
+    toolName: "security_review",
+    skillName: "security-review",
+    description:
+      "Security-focused review of current branch diff in an isolated subagent — injection / authz / secrets / deserialization / path-traversal / crypto issues, severity-tagged. Use when shipping changes that touch auth, input parsing, file IO, or external requests. Read-only.",
+    taskDescription:
+      "Optional scope hint (e.g. 'focus on token handling in src/auth/') or 'full' for everything in the diff.",
   });
 
   const installScopeDesc = hasProjectScope

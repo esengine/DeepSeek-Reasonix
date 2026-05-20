@@ -173,6 +173,7 @@ export function SubagentRow({ activity }: { activity: SubagentActivity }) {
   const last = activity.lastInner;
   const subtitle = activity.skillName ?? truncate(activity.task, 48);
   const modelBadge = activity.model ? modelBadgeFor(activity.model) : null;
+  const streamLine = formatStreamLine(activity);
   return (
     <Card tone={CARD.subagent.color}>
       <CardHeader
@@ -206,12 +207,46 @@ export function SubagentRow({ activity }: { activity: SubagentActivity }) {
           <Text color={FG.faint}>{t("editMode.queuedDots")}</Text>
         )}
       </Text>
+      {streamLine ? (
+        <Text color={FG.faint}>
+          {"flow  "}
+          <Text color={FG.sub}>{streamLine}</Text>
+        </Text>
+      ) : null}
       <Text color={TONE.brand}>
         {"▶  "}
         {phase}
       </Text>
     </Card>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/** Same shape as formatStreamLine but designed for inline use inside OngoingToolRow — returns null when nothing has flowed yet. */
+function formatSubagentBytes(a: SubagentActivity): string | null {
+  if (a.outputChars + a.reasoningChars + a.toolReadChars === 0) return null;
+  const parts: string[] = [];
+  if (a.toolReadChars > 0) parts.push(`↓ ${formatBytes(a.toolReadChars)} read`);
+  if (a.outputChars > 0) parts.push(`↑ ${formatBytes(a.outputChars)} out`);
+  if (a.reasoningChars > 0) parts.push(`◆ ${formatBytes(a.reasoningChars)} think`);
+  return parts.join(" · ");
+}
+
+/** null → no flow yet (avoid printing a 0 B line that looks like noise). */
+function formatStreamLine(a: SubagentActivity): string | null {
+  if (a.outputChars + a.reasoningChars + a.toolReadChars === 0) return null;
+  const parts: string[] = [];
+  // Read first — that's usually the dominant traffic for explore/research
+  // and the most reassuring "files are being pulled in" signal.
+  if (a.toolReadChars > 0) parts.push(`↓ read ${formatBytes(a.toolReadChars)}`);
+  if (a.outputChars > 0) parts.push(`↑ out ${formatBytes(a.outputChars)}`);
+  if (a.reasoningChars > 0) parts.push(`◆ think ${formatBytes(a.reasoningChars)}`);
+  return parts.join(" · ");
 }
 
 /** 1 → rich; 2-max → compact rows; >max → compact + "+N more" fold. */
@@ -288,17 +323,36 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-/** Live spinner + arg summary while a tool call is in flight; absorbs MCP progress frames. */
+const SUBAGENT_WRAPPER_TOOLS = new Set<string>([
+  "explore",
+  "research",
+  "review",
+  "security_review",
+  "run_skill",
+]);
+
+/** Live spinner + arg summary while a tool call is in flight; absorbs MCP progress frames. Also surfaces subagent byte counters for subagent-shaped tools, so the row stays informative even if `SubagentLiveStack` is off-screen. */
 export function OngoingToolRow({
   tool,
   progress,
+  subagentActivities = [],
 }: {
   tool: { name: string; args?: string };
   progress: { progress: number; total?: number; message?: string } | null;
+  subagentActivities?: ReadonlyArray<SubagentActivity>;
 }) {
   const tick = useTick();
   const elapsed = useElapsedSeconds();
   const summary = summarizeToolArgs(tool.name, tool.args);
+  const argsBytes = tool.args ? tool.args.length : 0;
+  // For subagent-shaped wrappers, surface the live byte counters inline
+  // so the user sees data flowing even if the rich SubagentRow isn't
+  // visible (off-screen, race-condition, whatever). At most one subagent
+  // is in flight per ongoingTool today — pick the freshest.
+  const subagentBytes = SUBAGENT_WRAPPER_TOOLS.has(tool.name)
+    ? subagentActivities[subagentActivities.length - 1]
+    : undefined;
+  const subagentBytesLine = subagentBytes ? formatSubagentBytes(subagentBytes) : null;
   return (
     <Box marginY={1} flexDirection="column" paddingX={1}>
       <Box>
@@ -309,8 +363,16 @@ export function OngoingToolRow({
         <Text color={CARD.tool.color} bold>
           {`▣ ${tool.name}`}
         </Text>
-        <Text color={FG.faint}>{`  running · ${elapsed}s`}</Text>
+        <Text color={FG.faint}>
+          {`  running · ${elapsed}s`}
+          {argsBytes > 0 ? ` · args ${formatBytes(argsBytes)}` : ""}
+        </Text>
       </Box>
+      {subagentBytesLine ? (
+        <Box paddingLeft={3}>
+          <Text color={FG.faint}>{subagentBytesLine}</Text>
+        </Box>
+      ) : null}
       {progress ? (
         <Box paddingLeft={3}>
           <Text color={TONE.brand}>{renderProgressLine(progress)}</Text>

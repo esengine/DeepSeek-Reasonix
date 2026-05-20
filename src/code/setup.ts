@@ -21,7 +21,12 @@ import { registerPlanTool } from "../tools/plan.js";
 import { registerScaffoldTools } from "../tools/scaffold.js";
 import { registerShellTools } from "../tools/shell.js";
 import { type SkillInstalledHook, registerSkillTools } from "../tools/skills.js";
-import { formatSubagentResult, spawnSubagent } from "../tools/subagent.js";
+import {
+  SHARED_SUBAGENT_SINK,
+  type SubagentSink,
+  formatSubagentResult,
+  spawnSubagent,
+} from "../tools/subagent.js";
 import { registerTodoTool } from "../tools/todo.js";
 import { registerWebTools } from "../tools/web.js";
 
@@ -31,6 +36,8 @@ export interface CodeToolsetOpts {
   onSkillInstalled?: SkillInstalledHook;
   /** Fired after `run_background` / `stop_job` mutate the JobRegistry — desktop pushes a fresh `$jobs` event so the popover updates without waiting for poll. */
   onJobsChanged?: () => void;
+  /** Shared `{current: callback}` sink the TUI populates after mount. Setup forwards it into every `spawnSubagent` so live progress events reach the rich subagent row even though setup runs before the UI does. */
+  subagentSink?: SubagentSink;
 }
 
 export interface CodeToolset {
@@ -98,6 +105,11 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
         model: skill.model,
         allowedTools: skill.allowedTools,
         skillName: skill.name,
+        // Late-bound: the TUI's `useSubagent` writes the live callback into
+        // SHARED_SUBAGENT_SINK after mount. Until then `.current` is null
+        // and the events are silently dropped — that's fine for non-TUI
+        // callers (`reasonix chat --transcript`, library use).
+        sink: opts.subagentSink ?? SHARED_SUBAGENT_SINK,
       });
       return formatSubagentResult(result);
     },
