@@ -658,49 +658,30 @@ export class CacheFirstLoop {
 
     for (let iter = 0; ; iter++) {
       if (signal.aborted) {
-        // Esc means "stop now" — not "stop and force another 30-90s
-        // reasoner call to produce a summary I didn't ask for". The
-        // user's mental model of cancel is immediate. We emit a
-        // synthetic assistant_final (tagged forcedSummary so the
-        // code-mode applier ignores it) with a short stopped
-        // message, then done. The prior tool outputs are still in
-        // the log if the user wants to continue — asking again
-        // will hit a warm cache and be cheap.
-        //
-        // Context-guard still calls forceSummary because there the USER
-        // didn't choose to stop — we did — and leaving them staring at
-        // nothing is worse than one extra call.
-        yield {
-          turn: this._turn,
-          role: "warning",
-          content: t("loop.abortedAtIter", { iter }),
-        };
-        const stoppedMsg =
-          "[aborted by user (Esc) — no summary produced. Ask again or /retry when ready; prior tool output is still in the log.]";
-        // Synthetic assistant turn — no real model output exists. For
-        // reasoner sessions R1 still demands `reasoning_content` on
-        // every assistant message, so we attach an empty-string
-        // placeholder to satisfy the validator without inventing
-        // reasoning we don't have. V3 gets a plain message as before.
-        this.appendAndPersist(buildSyntheticAssistantMessage(stoppedMsg, this.model));
-        yield {
-          turn: this._turn,
-          role: "assistant_final",
-          content: stoppedMsg,
-          forcedSummary: true,
-        };
-        yield { turn: this._turn, role: "done", content: stoppedMsg };
-        // Reset to a fresh, non-aborted controller before returning.
-        // Without this the carry-abort logic above sees the still-
-        // aborted controller on the NEXT step() entry and immediately
-        // re-aborts at iter 0, locking the session: every subsequent
-        // user message produces "stopped without producing a summary"
-        // before any work happens. A user-initiated Esc is a discrete
-        // event tied to ONE turn; it must not bleed into the next.
-        // (The race scenario the carry-abort handles — abort fired in
-        // the async window before step() entry — still works: a fresh
-        // abort() between turns aborts the new controller below.)
-        this._turnAbort = new AbortController();
+        // Reset in finally — the consumer (desktop runTurn) breaks the
+        // for-await on its own aborter between our yields, which calls
+        // generator.return() and skips post-yield straight-line code.
+        // Without finally the reset is lost and carryAbort locks every
+        // future step() at iter 0.
+        try {
+          yield {
+            turn: this._turn,
+            role: "warning",
+            content: t("loop.abortedAtIter", { iter }),
+          };
+          const stoppedMsg =
+            "[aborted by user (Esc) — no summary produced. Ask again or /retry when ready; prior tool output is still in the log.]";
+          this.appendAndPersist(buildSyntheticAssistantMessage(stoppedMsg, this.model));
+          yield {
+            turn: this._turn,
+            role: "assistant_final",
+            content: stoppedMsg,
+            forcedSummary: true,
+          };
+          yield { turn: this._turn, role: "done", content: stoppedMsg };
+        } finally {
+          this._turnAbort = new AbortController();
+        }
         return;
       }
       // Bridge the silence between the PREVIOUS iter's tool result and
@@ -949,14 +930,15 @@ export class CacheFirstLoop {
         // synthetic OR user re-prompt) starts immediately and gets to
         // produce its own answer.
         if (signal.aborted) {
-          yield { turn: this._turn, role: "done", content: "" };
-          // Reset the controller so the carry-abort check at the top of
-          // the NEXT step() doesn't inherit this turn's aborted state.
-          // Without this, a queued-submit triggered by App.tsx (e.g.
-          // ShellConfirm "run once" → loop.abort() + setQueuedSubmit)
-          // produces a spurious "aborted at iter 0/64" the moment the
-          // synthetic message starts processing, locking the session.
-          this._turnAbort = new AbortController();
+          // Reset in finally — same rationale as the iter-start handler:
+          // if the consumer breaks the for-await before draining `done`,
+          // generator.return() would skip a bare post-yield reset and
+          // leave carryAbort locked on the next step().
+          try {
+            yield { turn: this._turn, role: "done", content: "" };
+          } finally {
+            this._turnAbort = new AbortController();
+          }
           return;
         }
         const probe = is5xxError(err) ? await probeDeepSeekReachable(this.client) : undefined;

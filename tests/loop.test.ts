@@ -343,6 +343,64 @@ describe("CacheFirstLoop (non-streaming)", () => {
     ).toBe(false);
   });
 
+  it("does not bleed when consumer breaks for-await mid-abort-yield", async () => {
+    // Desktop runTurn checks its own outer aborter after each yielded
+    // event and `break`s out. That calls generator.return() on step(),
+    // which throws into the suspended yield and skips any straight-line
+    // code after it. If `_turnAbort = new AbortController()` sits after
+    // a yield (rather than in finally), the reset is lost and every
+    // subsequent step() locks at iter 0 via carryAbort.
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const chainingToolCall = {
+      content: "",
+      tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
+    };
+    const finalAnswer = { content: "second turn ran cleanly", tool_calls: [] };
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: fakeFetch([chainingToolCall, finalAnswer]) as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 16,
+    });
+
+    let aborted = false;
+    for await (const ev of loop.step("first")) {
+      if (!aborted && ev.role === "tool") {
+        aborted = true;
+        loop.abort();
+        continue;
+      }
+      if (aborted && ev.role === "warning") {
+        // Mirror desktop runTurn: drop out of for-await right after the
+        // abort warning, before assistant_final / done are drained.
+        break;
+      }
+    }
+
+    const turn2Events: { role: string; content?: string }[] = [];
+    for await (const ev of loop.step("second")) {
+      turn2Events.push({ role: ev.role, content: ev.content });
+    }
+
+    const finals = turn2Events.filter((e) => e.role === "assistant_final");
+    expect(finals).toHaveLength(1);
+    expect(finals[0]!.content).toBe("second turn ran cleanly");
+    expect(
+      turn2Events.some((e) => e.role === "warning" && /aborted at iter/.test(e.content ?? "")),
+    ).toBe(false);
+  });
+
   it("first all-suppressed storm self-corrects in-turn instead of stopping", async () => {
     const reg = new ToolRegistry();
     reg.register({
