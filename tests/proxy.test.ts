@@ -179,6 +179,38 @@ describe("installProxyIfConfigured", () => {
     expect(raws).toContain(".private.lan");
   });
 
+  it("layers REASONIX_NO_PROXY on top of system NO_PROXY (app-specific override)", () => {
+    const result = installProxyIfConfigured({
+      HTTPS_PROXY: "http://example:8080",
+      NO_PROXY: "system.corp.example",
+      REASONIX_NO_PROXY: "app.specific.example, .reasonix.lan",
+    });
+    const raws = result?.noProxy.map((p) => p.raw) ?? [];
+    expect(raws).toContain("system.corp.example");
+    expect(raws).toContain("app.specific.example");
+    expect(raws).toContain(".reasonix.lan");
+  });
+
+  it("layers opts.extraNoProxy (config) on top of env-derived patterns", () => {
+    const result = installProxyIfConfigured(
+      { HTTPS_PROXY: "http://example:8080", NO_PROXY: "env.example" },
+      { extraNoProxy: ["config.example", ".workspace.lan"] },
+    );
+    const raws = result?.noProxy.map((p) => p.raw) ?? [];
+    expect(raws).toContain("env.example");
+    expect(raws).toContain("config.example");
+    expect(raws).toContain(".workspace.lan");
+  });
+
+  it("opts.disabled short-circuits — no install, no log", () => {
+    const result = installProxyIfConfigured(
+      { HTTPS_PROXY: "http://example:8080" },
+      { disabled: true },
+    );
+    expect(result).toBeNull();
+    expect(writes.join("")).not.toMatch(/\[proxy\]/);
+  });
+
   it("logs the proxy decision to stderr at startup", () => {
     installProxyIfConfigured({ HTTPS_PROXY: "http://example:8080" });
     expect(writes.join("")).toMatch(/\[proxy\] using http:\/\/example:8080\//);

@@ -21,6 +21,7 @@ import {
   loadPricingOverride,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
+  loadProxyConfig,
   loadRateLimit,
   loadReasoningEffort,
   loadSemanticEmbeddingUserConfig,
@@ -181,6 +182,25 @@ describe("config", () => {
     expect(loadRateLimit(path)).toBeUndefined();
     writeConfig({ rateLimit: { rpm: 1.5 } }, path);
     expect(loadRateLimit(path)).toBeUndefined();
+  });
+
+  it("loads proxy.disabled + proxy.noProxy[] when present, drops blank entries", () => {
+    writeConfig(
+      {
+        proxy: {
+          disabled: true,
+          noProxy: ["internal.corp.example", "", "  ", ".workspace.lan"],
+        },
+      },
+      path,
+    );
+    expect(loadProxyConfig(path)).toEqual({
+      disabled: true,
+      noProxy: ["internal.corp.example", ".workspace.lan"],
+    });
+
+    writeConfig({}, path);
+    expect(loadProxyConfig(path)).toEqual({});
   });
 
   it("redactKey hides the middle", () => {

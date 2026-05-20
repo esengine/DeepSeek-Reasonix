@@ -188,6 +188,7 @@ export const EN: TranslationSchema = {
     modelOverride: "override the default model",
     noSession: "disable session persistence for this run",
     noMouseHint: "disable SGR mouse tracking; restores native drag-select and right-click",
+    noProxyHint: "ignore HTTPS_PROXY / HTTP_PROXY for this run; go direct",
     resumeHint: "force-resume the named session (even if idle)",
     newHint: "force a fresh session (ignore --session / --continue)",
     transcriptHint: "path to write the JSONL transcript",

@@ -167,10 +167,19 @@ export interface ProxyInstallResult {
   noProxy: readonly NoProxyPattern[];
 }
 
-/** Sets the undici global dispatcher to a SelectiveProxyDispatcher (proxy for non-NO_PROXY hosts, direct for matches). Returns the proxy URL + parsed NO_PROXY patterns, or null when no env var is set, the value is unparseable, or the ProxyAgent ctor throws. Idempotent. */
+export interface InstallProxyOptions {
+  /** Skip proxy install entirely — for `--no-proxy` / `cfg.proxy.disabled` / env-driven kill-switch. */
+  disabled?: boolean;
+  /** Additional NO_PROXY patterns layered on top of defaults + env. Sourced from `cfg.proxy.noProxy` / `REASONIX_NO_PROXY`. */
+  extraNoProxy?: readonly string[];
+}
+
+/** Sets the undici global dispatcher to a SelectiveProxyDispatcher (proxy for non-NO_PROXY hosts, direct for matches). Returns the proxy URL + parsed NO_PROXY patterns, or null when no env var is set, the value is unparseable, the ProxyAgent ctor throws, or opts.disabled is true. Idempotent. */
 export function installProxyIfConfigured(
   env: NodeJS.ProcessEnv = process.env,
+  opts: InstallProxyOptions = {},
 ): ProxyInstallResult | null {
+  if (opts.disabled) return null;
   const raw = detectProxyUrl(env);
   if (!raw) return null;
   const url = normalizeProxyUrl(raw);
@@ -181,10 +190,15 @@ export function installProxyIfConfigured(
     return null;
   }
 
-  // Default whitelist always applies; user's NO_PROXY entries are additive.
-  const userNoProxy = parseNoProxy(detectNoProxyRaw(env));
+  // Default whitelist always applies; env NO_PROXY, REASONIX_NO_PROXY, and
+  // opts.extraNoProxy (config) all layer on top additively.
   const defaultNoProxy = parseNoProxy(DEFAULT_NO_PROXY.join(","));
-  const patterns = [...defaultNoProxy, ...userNoProxy];
+  const envNoProxy = parseNoProxy(detectNoProxyRaw(env));
+  const reasonixNoProxy = parseNoProxy(
+    typeof env.REASONIX_NO_PROXY === "string" ? env.REASONIX_NO_PROXY : null,
+  );
+  const extraNoProxy = parseNoProxy((opts.extraNoProxy ?? []).join(","));
+  const patterns = [...defaultNoProxy, ...envNoProxy, ...reasonixNoProxy, ...extraNoProxy];
 
   try {
     const reinstalled = installed;

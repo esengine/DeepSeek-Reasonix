@@ -4,7 +4,7 @@
 import "./heap-limit-launch.js";
 
 import { Command } from "commander";
-import { readConfig } from "../config.js";
+import { loadProxyConfig, readConfig } from "../config.js";
 import { t } from "../i18n/index.js";
 import { VERSION } from "../index.js";
 import { listSessions } from "../memory/session.js";
@@ -23,8 +23,15 @@ async function maybeStartCpuProfile(flag: unknown): Promise<boolean> {
 
 // HTTPS_PROXY / HTTP_PROXY only reach Node's fetch via undici's global
 // dispatcher; install before any client (DeepSeek, web tools, dashboard)
-// constructs a fetch closure. Issue #646.
-installProxyIfConfigured();
+// constructs a fetch closure (#646). Argv is peeked manually here — commander
+// hasn't run yet — so position of `--no-proxy` doesn't matter and we can
+// honor it before any fetch closure captures the dispatcher.
+const cliNoProxy = process.argv.includes("--no-proxy");
+const cfgProxy = loadProxyConfig();
+installProxyIfConfigured(process.env, {
+  disabled: cliNoProxy || cfgProxy.disabled === true,
+  extraNoProxy: cfgProxy.noProxy,
+});
 
 markPhase("cli_module_loaded");
 
@@ -125,7 +132,8 @@ program
   .description(t("cli.description"))
   .version(VERSION)
   .option("-c, --continue", t("cli.continue"))
-  .option("--no-mouse", t("ui.noMouseHint"));
+  .option("--no-mouse", t("ui.noMouseHint"))
+  .option("--no-proxy", t("ui.noProxyHint"));
 
 // `reasonix` with no subcommand → setup wizard on first run, otherwise `code`
 // in the current directory. Filesystem-less chat stays reachable via
@@ -160,6 +168,7 @@ program
   .option("-m, --model <id>", t("ui.modelOverride"))
   .option("--no-session", t("ui.noSession"))
   .option("--no-mouse", t("ui.noMouseHint"))
+  .option("--no-proxy", t("ui.noProxyHint"))
   .option("-r, --resume", t("ui.resumeHint"))
   .option("-n, --new", t("ui.newHint"))
   .option("--transcript <path>", t("ui.transcriptHint"))
@@ -214,6 +223,7 @@ program
   .option("--session <name>", t("ui.sessionNameHint"))
   .option("--no-session", t("ui.ephemeralHint"))
   .option("--no-mouse", t("ui.noMouseHint"))
+  .option("--no-proxy", t("ui.noProxyHint"))
   .option("-r, --resume", t("ui.resumeHint"))
   .option("-c, --continue", t("cli.continue"))
   .option("-n, --new", t("ui.newHint"))
@@ -306,6 +316,7 @@ program
   )
   .option("--mcp-prefix <str>", t("ui.mcpPrefixHintShort"))
   .option("--no-config", t("ui.noConfigHint"))
+  .option("--no-proxy", t("ui.noProxyHint"))
   .action(async (task: string, opts) => {
     const defaults = resolveDefaults({
       model: opts.model,

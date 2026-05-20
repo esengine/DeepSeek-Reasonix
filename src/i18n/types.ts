@@ -97,6 +97,7 @@ export interface TranslationSchema {
     modelOverride: string;
     noSession: string;
     noMouseHint: string;
+    noProxyHint: string;
     resumeHint: string;
     newHint: string;
     transcriptHint: string;

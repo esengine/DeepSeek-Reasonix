@@ -112,6 +112,13 @@ export interface RateLimitConfig {
   rpm?: number;
 }
 
+export interface ProxyConfig {
+  /** Skip proxy detection entirely — equivalent to launching with `--no-proxy`. */
+  disabled?: boolean;
+  /** Additional NO_PROXY patterns (curl syntax). Additive on top of env NO_PROXY and the default DeepSeek-bypass whitelist. */
+  noProxy?: string[];
+}
+
 export interface ReasonixConfig {
   apiKey?: string;
   baseUrl?: string;
@@ -203,6 +210,8 @@ export interface ReasonixConfig {
     customTypes?: CustomMemoryTypeConfig[];
   };
   pricingOverride?: Record<string, PricingOverride>;
+  /** Per-app proxy override. Layered on top of HTTPS_PROXY / NO_PROXY env vars + the default DeepSeek-bypass whitelist. */
+  proxy?: ProxyConfig;
   rateLimit?: RateLimitConfig;
   /** Host-enforced engineering lifecycle. Defaults to off so opt-outs pay zero prefix cost. */
   engineeringLifecycle?: {
@@ -508,6 +517,20 @@ export function loadPricingOverride(
     if (Object.keys(pricing).length > 0) result[model] = pricing;
   }
   return result;
+}
+
+export function loadProxyConfig(path: string = defaultConfigPath()): ProxyConfig {
+  const cfg = readConfig(path).proxy;
+  if (!cfg || typeof cfg !== "object") return {};
+  const out: ProxyConfig = {};
+  if (cfg.disabled === true) out.disabled = true;
+  if (Array.isArray(cfg.noProxy)) {
+    const entries = cfg.noProxy.filter(
+      (p): p is string => typeof p === "string" && p.trim() !== "",
+    );
+    if (entries.length > 0) out.noProxy = entries;
+  }
+  return out;
 }
 
 export function loadRateLimit(path: string = defaultConfigPath()): RateLimitConfig | undefined {
