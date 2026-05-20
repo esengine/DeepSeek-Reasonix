@@ -104,6 +104,16 @@ function registerMutationTools(registry: ToolRegistry): void {
     fn: (args: { path: string }) => `deleted ${args.path}`,
   });
   registry.register({
+    name: "move_file",
+    parameters: {
+      type: "object",
+      properties: { source: { type: "string" }, destination: { type: "string" } },
+      required: ["source", "destination"],
+    },
+    fn: (args: { source: string; destination: string }) =>
+      `moved ${args.source} → ${args.destination}`,
+  });
+  registry.register({
     name: "write_file",
     parameters: {
       type: "object",
@@ -111,5 +121,40 @@ function registerMutationTools(registry: ToolRegistry): void {
       required: ["path", "content"],
     },
     fn: (args: { path: string }) => `▸ edit blocks: 1/1 applied\n  ✓ wrote       ${args.path}`,
+  });
+  registry.register({
+    name: "multi_edit",
+    parameters: {
+      type: "object",
+      properties: {
+        edits: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              search: { type: "string" },
+              replace: { type: "string" },
+            },
+            required: ["path", "search", "replace"],
+          },
+        },
+      },
+      required: ["edits"],
+    },
+    fn: (args: { edits: Array<{ path: string; search: string; replace: string }> }) => {
+      const edits = args.edits ?? [];
+      const fileCount = new Set(edits.map((edit) => edit.path)).size;
+      return `multi_edit: applied ${edits.length} edits across ${fileCount} files`;
+    },
+  });
+  registry.register({
+    name: "run_command",
+    parameters: {
+      type: "object",
+      properties: { command: { type: "string" }, cwd: { type: "string" } },
+      required: ["command"],
+    },
+    fn: (args: { command: string }) => `exit 0\n${args.command}`,
   });
 }
