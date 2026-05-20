@@ -82,6 +82,15 @@ Grab a [DeepSeek API key →](https://platform.deepseek.com/api_keys) · `reason
 
 If you use Reasonix daily, global install is the simplest path. If you just want to try it, use `npx`.
 
+**Prefer fewer keystrokes?** The shorter `dsnix` alias resolves to the same CLI:
+
+~~~bash
+npm install -g dsnix       # exposes `dsnix` on PATH, depends on reasonix
+npx dsnix@latest code      # one-shot via the shorter command
+~~~
+
+A global `npm install -g reasonix` also drops a `dsnix` shim on PATH, so the two are interchangeable.
+
 Bare `reasonix` (no subcommand) launches `code` in the current directory — typing `reasonix` and `reasonix code` are equivalent.
 
 | Command | When |
