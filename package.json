@@ -24,9 +24,11 @@
     "README.md",
     "LICENSE"
   ],
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "tsup && node scripts/copy-dashboard-vendor-css.mjs",
+    "build": "tsup && node scripts/copy-dashboard-vendor-css.mjs && node scripts/copy-tree-sitter-grammars.mjs",
     "dev": "tsx src/cli/index.ts",
     "chat": "tsx src/cli/index.ts chat",
     "test": "vitest run",
@@ -80,6 +82,7 @@
     "react": "^19.2.6",
     "string-width": "^7.2.0",
     "undici": "^8.2.0",
+    "web-tree-sitter": "^0.26.9",
     "ws": "^8.20.1",
     "zod": "^4.4.1"
   },
@@ -101,6 +104,8 @@
     "preact": "^10.22.0",
     "simple-git-hooks": "^2.13.1",
     "strip-ansi": "^7.1.0",
+    "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-typescript": "^0.23.2",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
