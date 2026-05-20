@@ -1219,6 +1219,15 @@ describe("handleSlash", () => {
       expect(calls).toEqual([true]);
     });
 
+    it("/plan off marks the change as a user slash action", () => {
+      const calls: Array<{ on: boolean; source?: string }> = [];
+      handleSlash("plan", ["off"], makeLoop(), {
+        planMode: true,
+        setPlanMode: (on, source) => calls.push({ on, source }),
+      });
+      expect(calls).toEqual([{ on: false, source: "slash" }]);
+    });
+
     it("/plan explains the stronger-constraint relationship with autonomous submit_plan", () => {
       const r = handleSlash("plan", ["on"], makeLoop(), {
         setPlanMode: () => {},

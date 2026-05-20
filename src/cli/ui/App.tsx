@@ -174,7 +174,13 @@ import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
-import { type McpServerSummary, handleSlash, parseSlash, suggestSlashCommands } from "./slash.js";
+import {
+  type McpServerSummary,
+  type PlanModeToggleSource,
+  handleSlash,
+  parseSlash,
+  suggestSlashCommands,
+} from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
 import {
@@ -2071,11 +2077,13 @@ function AppInner({
    * by funneling every toggle through this setter.
    */
   const togglePlanMode = useCallback(
-    (on: boolean) => {
+    (on: boolean, source?: PlanModeToggleSource) => {
       setPlanMode(on);
       tools?.setPlanMode(on);
       if (on) {
         engineeringLifecycleRef.current?.setMode("strict");
+      } else if (source === "slash") {
+        engineeringLifecycleRef.current?.setMode("off");
       } else {
         const state = engineeringLifecycleRef.current?.snapshot().state;
         if (
@@ -2149,8 +2157,8 @@ function AppInner({
             saveEditMode(m);
             return m;
           },
-          setPlanMode: (on: boolean) => {
-            if (codeMode) togglePlanMode(on);
+          setPlanMode: (on: boolean, source?: PlanModeToggleSource) => {
+            if (codeMode) togglePlanMode(on, source);
           },
           applyPresetLive: (name: string) => {
             const settings = resolvePreset(name as PresetName);

@@ -59,6 +59,8 @@ export interface SlashResult {
   };
 }
 
+export type PlanModeToggleSource = "slash";
+
 export interface SlashContext {
   configPath?: string;
   mcpSpecs?: string[];
@@ -109,7 +111,7 @@ export interface SlashContext {
     footer?: string;
   }) => void;
   dispatch?: (event: import("../state/events.js").AgentEvent) => void;
-  setPlanMode?: (on: boolean) => void;
+  setPlanMode?: (on: boolean, source?: PlanModeToggleSource) => void;
   /** Manual escape valve when the model forgot to call `mark_step_complete` — used by `/plans done <id>`. */
   markPlanStepDone?: (stepId: string) => "ok" | "not-in-plan" | "already-done" | "no-plan";
   /** Mark every still-queued step done — used by `/plans done all`. Returns the count newly marked. */

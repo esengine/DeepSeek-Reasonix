@@ -72,7 +72,7 @@ const plan: SlashHandler = (args, _loop, ctx) => {
   if (raw === "on" || raw === "true" || raw === "1" || raw === "strict") target = true;
   else if (raw === "off" || raw === "false" || raw === "0") target = false;
   else target = !currentOn;
-  ctx.setPlanMode(target);
+  ctx.setPlanMode(target, "slash");
   if (target) {
     return { info: t("handlers.edits.planOn") };
   }
