@@ -6,6 +6,7 @@ import { ToolRegistry } from "../src/tools.js";
 import {
   PlanProposedError,
   PlanRevisionProposedError,
+  type StepCompletion,
   registerPlanTool,
 } from "../src/tools/plan.js";
 
@@ -449,9 +450,9 @@ describe("registerPlanTool + mark_step_complete", () => {
     expect(reg.get("mark_step_complete")?.readOnly).toBe(true);
   });
 
-  it("blocks on PauseGate on step complete and returns step_completed payload on continue", async () => {
+  it("blocks on PauseGate on step complete and returns compact payload on continue", async () => {
     const reg = new ToolRegistry();
-    const seen: unknown[] = [];
+    const seen: StepCompletion[] = [];
     registerPlanTool(reg, { onStepCompleted: (u) => seen.push(u) });
     const gate = new AutoGate({ type: "continue" });
     const out = await reg.dispatch(
@@ -467,13 +468,15 @@ describe("registerPlanTool + mark_step_complete", () => {
     const parsed = JSON.parse(out);
     expect(parsed.kind).toBe("step_completed");
     expect(parsed.stepId).toBe("step-1");
-    expect(parsed.title).toBe("Refactor auth");
     expect(parsed.result).toBe("Moved tokens into src/auth/tokens.ts.");
-    expect(parsed.notes).toBe("Had to rename one export.");
+    expect(parsed.title).toBeUndefined();
+    expect(parsed.notes).toBeUndefined();
     // No error wrapper — gate returns the structured payload directly
     expect(parsed.error).toBeUndefined();
     expect(seen).toHaveLength(1);
-    expect((seen[0] as { stepId: string }).stepId).toBe("step-1");
+    expect(seen[0]?.stepId).toBe("step-1");
+    expect(seen[0]?.title).toBe("Refactor auth");
+    expect(seen[0]?.notes).toBe("Had to rename one export.");
   });
 
   it("omits optional fields when empty", async () => {
@@ -492,12 +495,12 @@ describe("registerPlanTool + mark_step_complete", () => {
     expect(parsed.error).toBeUndefined();
   });
 
-  it("preserves structured evidence when supplied", async () => {
+  it("keeps full evidence host-side but returns a compact model payload", async () => {
     const reg = new ToolRegistry();
     const seen: StepCompletion[] = [];
     registerPlanTool(reg, { onStepCompleted: (u) => seen.push(u) });
     const gate = new AutoGate({ type: "continue" });
-    await reg.dispatch(
+    const out = await reg.dispatch(
       "mark_step_complete",
       JSON.stringify({
         stepId: "step-1",
@@ -513,6 +516,7 @@ describe("registerPlanTool + mark_step_complete", () => {
       }),
       { confirmationGate: gate },
     );
+    const parsed = JSON.parse(out);
 
     expect(seen[0]?.evidence).toEqual([
       {
@@ -522,6 +526,15 @@ describe("registerPlanTool + mark_step_complete", () => {
         paths: ["tests/lifecycle.test.ts"],
       },
     ]);
+    expect(parsed).toMatchObject({
+      kind: "step_completed",
+      stepId: "step-1",
+      result: "updated lifecycle guard",
+      evidenceSummary: "verification: targeted tests passed",
+    });
+    expect(parsed.evidence).toBeUndefined();
+    expect(out).not.toContain("npm test tests/lifecycle.test.ts");
+    expect(out).not.toContain("tests/lifecycle.test.ts");
   });
 
   it("rejects completion without evidence when the host requires it", async () => {

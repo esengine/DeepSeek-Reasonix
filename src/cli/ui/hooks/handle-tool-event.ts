@@ -28,6 +28,7 @@ export interface ToolEventContext {
   planStepsRef: MutableRefObject<PlanStep[] | null>;
   completedStepIdsRef: MutableRefObject<Set<string>>;
   stepCompletionsRef?: MutableRefObject<Map<string, StepCompletion>>;
+  pendingStepCompletionsRef?: MutableRefObject<Map<string, StepCompletion>>;
   planBodyRef: MutableRefObject<string | null>;
   planSummaryRef: MutableRefObject<string | null>;
   persistPlanState: () => void;
@@ -50,17 +51,25 @@ export function handleToolEvent(ev: LoopEvent, ctx: ToolEventContext): void {
       const parsed = JSON.parse(ev.content) as Partial<StepCompletion>;
       const stepId = parsed.stepId;
       if (parsed.kind === "step_completed" && typeof stepId === "string") {
+        const fullCompletion = ctx.pendingStepCompletionsRef?.current.get(stepId);
+        ctx.pendingStepCompletionsRef?.current.delete(stepId);
+        const completion = fullCompletion ?? (parsed as StepCompletion);
         ctx.completedStepIdsRef.current.add(stepId);
-        ctx.stepCompletionsRef?.current.set(stepId, parsed as StepCompletion);
+        ctx.stepCompletionsRef?.current.set(stepId, completion);
         ctx.persistPlanState();
         ctx.log.completePlanStep(stepId);
         ctx.onPlanStepCompleted?.(stepId);
         const total = ctx.planStepsRef.current?.length ?? 0;
         const completed = ctx.completedStepIdsRef.current.size;
         const stepFromPlan = ctx.planStepsRef.current?.find((s) => s.id === stepId);
-        const title = parsed.title ?? stepFromPlan?.title;
+        const title = completion.title ?? parsed.title ?? stepFromPlan?.title;
         if (title) ctx.log.pushStepProgress(completed, total, title);
-        const evidenceSummary = formatStepEvidenceSummary(parsed.evidence);
+        const compactEvidenceSummary =
+          typeof parsed.evidenceSummary === "string" && parsed.evidenceSummary.trim()
+            ? `evidence: ${parsed.evidenceSummary.trim()}`
+            : null;
+        const evidenceSummary =
+          formatStepEvidenceSummary(completion.evidence) ?? compactEvidenceSummary;
         if (evidenceSummary) ctx.log.pushInfo(evidenceSummary, "ghost");
         if (ctx.session && total > 0 && completed >= total) {
           const archive = archivePlanState(ctx.session);

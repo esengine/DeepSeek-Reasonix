@@ -206,9 +206,10 @@ export class EngineeringLifecycleRuntime {
 
     if (this._state !== "approved" && this._state !== "executing") {
       return JSON.stringify({
-        error: `${name}: blocked by Engineering Lifecycle — high-risk engineering work requires an approved structured plan first. Explore with read-only tools, call ask_choice for real forks, then call submit_plan with concrete steps.`,
+        error: `${name}: blocked by Engineering Lifecycle — submit an approved plan before high-risk mutation.`,
         rejectedReason: "engineering-lifecycle",
         state: this._state,
+        nextAction: "submit_plan",
       });
     }
 
@@ -238,9 +239,10 @@ export class EngineeringLifecycleRuntime {
     if (evidenceRequired && evidence.length === 0) {
       return JSON.stringify({
         error:
-          "mark_step_complete: evidence required by Engineering Lifecycle — include verification, diff, checkpoint, or manual evidence before completing this step.",
+          "mark_step_complete: evidence required — add verification, diff, checkpoint, or manual evidence.",
         rejectedReason: "engineering-lifecycle-evidence",
         stepId,
+        nextAction: "add_evidence",
       });
     }
     return null;

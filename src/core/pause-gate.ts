@@ -59,7 +59,13 @@ interface PausePayloadMap {
     allowPrefix: string;
   };
   plan_proposed: { plan: string; steps?: unknown[]; summary?: string };
-  plan_checkpoint: { stepId: string; title?: string; result: string; notes?: string };
+  plan_checkpoint: {
+    stepId: string;
+    title?: string;
+    result: string;
+    notes?: string;
+    completion?: unknown;
+  };
   plan_revision: { reason: string; remainingSteps: unknown[]; summary?: string };
   choice: { question: string; options: unknown[]; allowCustom: boolean };
 }

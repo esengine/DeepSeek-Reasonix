@@ -881,6 +881,7 @@ function AppInner({
   const planStepsRef = useRef<PlanStep[] | null>(null);
   const completedStepIdsRef = useRef<Set<string>>(new Set());
   const stepCompletionsRef = useRef<Map<string, StepCompletion>>(new Map());
+  const pendingStepCompletionsRef = useRef<Map<string, StepCompletion>>(new Map());
   // Markdown body + human-friendly summary captured from submit_plan.
   // Persisted alongside the structured state so a future Time-Travel
   // replay can show the model's full original proposal without re-
@@ -1588,6 +1589,7 @@ function AppInner({
         planStepsRef.current = restoredPlan.steps;
         completedStepIdsRef.current = new Set(restoredPlan.completedStepIds);
         stepCompletionsRef.current = new Map(Object.entries(restoredPlan.stepCompletions ?? {}));
+        pendingStepCompletionsRef.current = new Map();
         planBodyRef.current = restoredPlan.body ?? null;
         planSummaryRef.current = restoredPlan.summary ?? null;
         engineeringLifecycleRef.current?.recordPlanApproved(restoredPlan.steps);
@@ -3300,6 +3302,7 @@ function AppInner({
               planStepsRef,
               completedStepIdsRef,
               stepCompletionsRef,
+              pendingStepCompletionsRef,
               planBodyRef,
               planSummaryRef,
               persistPlanState,
@@ -3666,6 +3669,7 @@ function AppInner({
         if (approvedSteps && approvedSteps.length > 0) {
           completedStepIdsRef.current = new Set();
           stepCompletionsRef.current = new Map();
+          pendingStepCompletionsRef.current = new Map();
           log.showPlan({
             title: planSummaryRef.current ?? "plan",
             steps: approvedSteps.map((s) => ({
@@ -3686,6 +3690,7 @@ function AppInner({
         planStepsRef.current = null;
         completedStepIdsRef.current = new Set();
         stepCompletionsRef.current = new Map();
+        pendingStepCompletionsRef.current = new Map();
         planBodyRef.current = null;
         planSummaryRef.current = null;
         persistPlanState();
@@ -3836,6 +3841,7 @@ function AppInner({
           planSummaryRef.current = p.summary ?? null;
           planBodyRef.current = p.plan;
           stepCompletionsRef.current = new Map();
+          pendingStepCompletionsRef.current = new Map();
           engineeringLifecycleRef.current?.recordPlanProposed(p.steps);
           break;
         }
@@ -3845,7 +3851,11 @@ function AppInner({
             title?: string;
             result: string;
             notes?: string;
+            completion?: StepCompletion;
           };
+          if (p.completion?.kind === "step_completed") {
+            pendingStepCompletionsRef.current.set(p.stepId, p.completion);
+          }
           // completed/total come from planStepsRef — don't have them via gate.
           const total = planStepsRef.current?.length ?? 0;
           const completed = completedCountIncludingStep(

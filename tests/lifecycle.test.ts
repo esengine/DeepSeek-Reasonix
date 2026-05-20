@@ -58,7 +58,10 @@ describe("EngineeringLifecycleRuntime", () => {
     });
 
     expect(out).not.toBeNull();
-    expect(JSON.parse(out!).rejectedReason).toBe("engineering-lifecycle");
+    const parsed = JSON.parse(out!);
+    expect(parsed.rejectedReason).toBe("engineering-lifecycle");
+    expect(parsed.nextAction).toBe("submit_plan");
+    expect(parsed.error.length).toBeLessThan(180);
     expect(lifecycle.snapshot().state).toBe("armed");
   });
 
@@ -100,7 +103,10 @@ describe("EngineeringLifecycleRuntime", () => {
       result: "Refactored the gate path.",
     });
     expect(rejected).not.toBeNull();
-    expect(JSON.parse(rejected!).error).toMatch(/evidence/);
+    const parsed = JSON.parse(rejected!);
+    expect(parsed.error).toMatch(/evidence/);
+    expect(parsed.nextAction).toBe("add_evidence");
+    expect(parsed.error.length).toBeLessThan(180);
 
     expect(
       lifecycle.guardToolCall("mark_step_complete", {

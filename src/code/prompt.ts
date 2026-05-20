@@ -131,14 +131,6 @@ You have BOTH \`semantic_search\` (vector index) and \`search_content\` (literal
 
 If \`semantic_search\` returns nothing useful (low scores, off-topic), THEN fall back to \`search_content\`. Don't go the other way — grepping a paraphrased question wastes turns.`;
 
-const ENGINEERING_LIFECYCLE_CONTRACT = `
-
-# Engineering lifecycle contract
-
-Reasonix may enforce a prefix-stable Engineering Lifecycle for explicitly enabled high-risk engineering work. The runtime keeps lifecycle state outside the system prompt and tool list, so do not expect stage-specific prompt changes or new tools to appear. Treat any lifecycle block as a host constraint, not as a suggestion.
-
-When high-risk mutations are bounced with \`rejectedReason: "engineering-lifecycle"\`, switch to read-only exploration, then call \`submit_plan\` with concrete steps before trying the mutation again. Add optional per-step \`targets\`, \`acceptance\`, and \`verification\` fields when they clarify scope or success criteria. For medium/high-risk steps, steps with verification criteria, or steps that changed code, \`mark_step_complete\` requires \`evidence\` entries such as verification output, diff summary, checkpoint id, or manual rationale.`;
-
 export interface CodeSystemPromptOptions {
   /** True when semantic_search is registered for this run. Adds an
    *  explicit routing fragment so the model picks it for intent-style
@@ -152,15 +144,12 @@ export interface CodeSystemPromptOptions {
   systemAppendFile?: string;
   /** Model the loop will run on — interpolated into the escalation contract so the model can name itself correctly when asked (#582). */
   modelId?: string;
-  /** Include the lifecycle contract only for users who explicitly opt in. */
+  /** Back-compat no-op: lifecycle is runtime-only so strict/off do not change the cache prefix. */
   engineeringLifecycleMode?: "off" | "strict";
 }
 
 export function codeSystemPrompt(rootDir: string, opts: CodeSystemPromptOptions = {}): string {
-  let codeBase = codeSystemBase(opts.modelId ?? DEFAULT_CODE_MODEL);
-  if (opts.engineeringLifecycleMode === "strict") {
-    codeBase = `${codeBase}${ENGINEERING_LIFECYCLE_CONTRACT}`;
-  }
+  const codeBase = codeSystemBase(opts.modelId ?? DEFAULT_CODE_MODEL);
   const base = opts.hasSemanticSearch ? `${codeBase}${SEMANTIC_SEARCH_ROUTING}` : codeBase;
   const withMemory = applyMemoryStack(base, rootDir);
   const gitignorePath = join(rootDir, ".gitignore");

@@ -111,4 +111,68 @@ describe("handleToolEvent", () => {
       ],
     });
   });
+
+  it("stores full host-side evidence when the model payload is compact", () => {
+    const { log, calls } = makeLog();
+    const completions = new Map();
+    const pendingCompletions = new Map([
+      [
+        "step-1",
+        {
+          kind: "step_completed" as const,
+          stepId: "step-1",
+          result: "Updated lifecycle tests.",
+          evidence: [
+            {
+              kind: "verification" as const,
+              summary: "lifecycle tests passed",
+              command: "npm test -- tests/lifecycle.test.ts",
+            },
+          ],
+        },
+      ],
+    ]);
+
+    handleToolEvent(
+      makeEvent({
+        kind: "step_completed",
+        stepId: "step-1",
+        result: "Updated lifecycle tests.",
+        evidenceSummary: "verification: lifecycle tests passed",
+      }),
+      {
+        flush: () => undefined,
+        translator: { toolEnd: () => undefined } as unknown as TurnTranslator,
+        setOngoingTool: () => undefined,
+        setToolProgress: () => undefined,
+        toolStartedAtRef: { current: null },
+        setPendingShell: () => undefined,
+        setPendingPlan: () => undefined,
+        setPendingRevision: () => undefined,
+        setPendingChoice: () => undefined,
+        planStepsRef: { current: [{ id: "step-1", title: "Lifecycle", action: "Update tests" }] },
+        completedStepIdsRef: { current: new Set<string>() },
+        stepCompletionsRef: { current: completions },
+        pendingStepCompletionsRef: { current: pendingCompletions },
+        planBodyRef: { current: null },
+        planSummaryRef: { current: null },
+        persistPlanState: () => undefined,
+        log,
+        session: null,
+        codeModeOn: true,
+      },
+    );
+
+    expect(completions.get("step-1")?.evidence?.[0]).toMatchObject({
+      command: "npm test -- tests/lifecycle.test.ts",
+    });
+    expect(pendingCompletions.has("step-1")).toBe(false);
+    expect(calls).toContainEqual({
+      method: "pushInfo",
+      args: [
+        "evidence: verification - lifecycle tests passed (npm test -- tests/lifecycle.test.ts)",
+        "ghost",
+      ],
+    });
+  });
 });

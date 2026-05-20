@@ -25,5 +25,6 @@ export interface StepCompletion {
   title?: string;
   result: string;
   notes?: string;
+  evidenceSummary?: string;
   evidence?: StepEvidence[];
 }

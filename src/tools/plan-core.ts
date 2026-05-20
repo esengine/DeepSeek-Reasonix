@@ -113,6 +113,23 @@ function sanitizeEvidence(raw: unknown): StepEvidence[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+function summarizeEvidence(evidence: StepEvidence[] | undefined): string | undefined {
+  if (!evidence || evidence.length === 0) return undefined;
+  const parts = evidence.map((item) => `${item.kind}: ${item.summary}`);
+  return parts.join("; ");
+}
+
+function compactStepCompletion(update: StepCompletion): StepCompletion {
+  const compact: StepCompletion = {
+    kind: "step_completed",
+    stepId: update.stepId,
+    result: update.result,
+  };
+  const evidenceSummary = summarizeEvidence(update.evidence);
+  if (evidenceSummary) compact.evidenceSummary = evidenceSummary;
+  return compact;
+}
+
 // Individual tool registrations — one per screen
 
 function registerSubmitPlan(registry: ToolRegistry, opts: PlanToolOptions): void {
@@ -243,9 +260,9 @@ function registerMarkStepComplete(registry: ToolRegistry, opts: PlanToolOptions)
       // Block until the user continues, revises, or stops
       const verdict = await (ctx?.confirmationGate ?? pauseGate).ask({
         kind: "plan_checkpoint",
-        payload: { stepId, title, result, notes },
+        payload: { stepId, title, result, notes, completion: update },
       });
-      if (verdict.type === "continue") return JSON.stringify(update);
+      if (verdict.type === "continue") return JSON.stringify(compactStepCompletion(update));
       if (verdict.type === "revise") {
         if (verdict.feedback) return `revision requested: ${verdict.feedback}`;
         throw new Error("user requested revision at checkpoint");
