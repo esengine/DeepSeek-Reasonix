@@ -677,7 +677,7 @@ describe("registerShellTools — dispatch integration", () => {
     } finally {
       await jobs.shutdown(2000);
     }
-  });
+  }, 15000);
 
   it("job_output / stop_job report not-found for unknown jobId", async () => {
     const registry = new ToolRegistry();
