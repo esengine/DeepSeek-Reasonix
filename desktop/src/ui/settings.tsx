@@ -56,6 +56,8 @@ export function SettingsModal({
   onSetFontScale,
   fontFamily,
   onSetFontFamily,
+  customFontFamily,
+  onSetCustomFontFamily,
   initialPage,
   mcpSpecs,
   mcpBridged,
@@ -85,6 +87,8 @@ export function SettingsModal({
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
   onSetFontFamily: (family: FontFamily) => void;
+  customFontFamily: string;
+  onSetCustomFontFamily: (family: string) => void;
   initialPage?: PageId;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
@@ -153,6 +157,8 @@ export function SettingsModal({
                 onSetFontScale={onSetFontScale}
                 fontFamily={fontFamily}
                 onSetFontFamily={onSetFontFamily}
+                customFontFamily={customFontFamily}
+                onSetCustomFontFamily={onSetCustomFontFamily}
                 onSave={onSave}
                 onPickWorkspace={onPickWorkspace}
               />
@@ -382,6 +388,8 @@ function PageGeneral({
   onSetFontScale,
   fontFamily,
   onSetFontFamily,
+  customFontFamily,
+  onSetCustomFontFamily,
   onSave,
   onPickWorkspace,
 }: {
@@ -394,11 +402,22 @@ function PageGeneral({
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
   onSetFontFamily: (family: FontFamily) => void;
+  customFontFamily: string;
+  onSetCustomFontFamily: (family: string) => void;
   onSave: (patch: SettingsPatch) => void;
   onPickWorkspace: () => void;
 }) {
   const [editorDraft, setEditorDraft] = useState(settings.editor ?? "");
+  const [customFontDraft, setCustomFontDraft] = useState(customFontFamily);
   const lang = useLang();
+  useEffect(() => {
+    setCustomFontDraft(customFontFamily);
+  }, [customFontFamily]);
+  const commitCustomFont = (value: string) => {
+    const next = value.trim();
+    setCustomFontDraft(next);
+    onSetCustomFontFamily(next);
+  };
   return (
     <>
       <section className="section">
@@ -518,8 +537,38 @@ function PageGeneral({
             >
               {t("settings.fontFamilySerif")}
             </button>
+            <button
+              type="button"
+              data-on={fontFamily === FONT_FAMILY.CUSTOM}
+              onClick={() => onSetFontFamily(FONT_FAMILY.CUSTOM)}
+            >
+              {t("settings.fontFamilyCustom")}
+            </button>
           </div>
         </div>
+        {fontFamily === FONT_FAMILY.CUSTOM && (
+          <div className="setting-row">
+            <div className="l">
+              <div className="n">{t("settings.customFontFamily")}</div>
+              <div className="h">{t("settings.customFontFamilyHint")}</div>
+            </div>
+            <input
+              className="field font-family-field"
+              value={customFontDraft}
+              placeholder={`"Microsoft YaHei", "PingFang SC", sans-serif`}
+              onChange={(e) => {
+                setCustomFontDraft(e.target.value);
+                onSetCustomFontFamily(e.target.value);
+              }}
+              onBlur={(e) => commitCustomFont(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                }
+              }}
+            />
+          </div>
+        )}
         <div className="setting-row">
           <div className="l">
             <div className="n">{t("settings.language")}</div>

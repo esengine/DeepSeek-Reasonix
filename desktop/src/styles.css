@@ -1882,28 +1882,29 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  padding: 0 2px;
+  border-radius: 3px;
+  background: transparent;
+  border: 0;
   color: var(--accent);
   font-family: "Geist Mono", monospace;
-  font-size: 0.82em;
+  font-size: 0.86em;
+  line-height: 1.35;
   cursor: pointer;
   vertical-align: baseline;
   text-decoration: none;
-  transition: background 0.12s, border-color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
   white-space: nowrap;
 }
 .file-pill:hover {
   background: var(--accent-soft);
-  border-color: oklch(from var(--accent) l c h / 0.4);
   color: var(--accent-strong);
 }
 .file-pill.done {
   color: var(--success);
-  border-color: var(--success-soft);
-  background: var(--success-soft);
+  background: transparent;
 }
 .file-pill-icon {
   opacity: 0.6;
@@ -4291,6 +4292,9 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 }
 .field.mono {
   font-family: inherit;
+}
+.field.font-family-field {
+  width: min(360px, 100%);
 }
 
 .qq-setting-row {

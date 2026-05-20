@@ -76,16 +76,23 @@ export const FONT_FAMILY = {
   SANS: "sans",
   SYSTEM: "system",
   SERIF: "serif",
+  CUSTOM: "custom",
 } as const;
 
 export type FontFamily = (typeof FONT_FAMILY)[keyof typeof FONT_FAMILY];
 
 export function isFontFamily(value: unknown): value is FontFamily {
-  return value === FONT_FAMILY.SANS || value === FONT_FAMILY.SYSTEM || value === FONT_FAMILY.SERIF;
+  return (
+    value === FONT_FAMILY.SANS ||
+    value === FONT_FAMILY.SYSTEM ||
+    value === FONT_FAMILY.SERIF ||
+    value === FONT_FAMILY.CUSTOM
+  );
 }
 
 export const FONT_FAMILY_STACK: Record<FontFamily, string> = {
   sans: '"Geist", system-ui, sans-serif',
   system: '-apple-system, system-ui, "Segoe UI", Roboto, sans-serif',
   serif: 'Georgia, "Times New Roman", serif',
+  custom: '"Geist", system-ui, sans-serif',
 };

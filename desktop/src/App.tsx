@@ -1018,6 +1018,8 @@ interface TabRuntimeProps {
   onSetFontScale: (scale: FontScale) => void;
   fontFamily: FontFamily;
   onSetFontFamily: (family: FontFamily) => void;
+  customFontFamily: string;
+  onSetCustomFontFamily: (family: string) => void;
   sideCollapsed: boolean;
   ctxCollapsed: boolean;
   onToggleSide: () => void;
@@ -1050,6 +1052,8 @@ function TabRuntime({
   onSetFontScale,
   fontFamily,
   onSetFontFamily,
+  customFontFamily,
+  onSetCustomFontFamily,
   sideCollapsed,
   ctxCollapsed,
   onToggleSide,
@@ -2019,6 +2023,8 @@ function TabRuntime({
             onSetFontScale={onSetFontScale}
             fontFamily={fontFamily}
             onSetFontFamily={onSetFontFamily}
+            customFontFamily={customFontFamily}
+            onSetCustomFontFamily={onSetCustomFontFamily}
             initialPage={settingsPage}
             mcpSpecs={state.mcpSpecs}
             mcpBridged={state.mcpBridged}
@@ -2724,6 +2730,9 @@ export function App() {
     const v = localStorage.getItem("reasonix.fontFamily");
     return isFontFamily(v) ? v : FONT_FAMILY.SANS;
   });
+  const [customFontFamily, setCustomFontFamily] = useState<string>(() => {
+    return localStorage.getItem("reasonix.customFontFamily") ?? "";
+  });
   const [sideCollapsed, setSideCollapsed] = useState(
     () => localStorage.getItem("reasonix.sideCollapsed") === "1",
   );
@@ -2753,10 +2762,15 @@ export function App() {
   }, [fontScale]);
 
   useEffect(() => {
-    // CSS rules use var(--font-sans); changing it here re-styles every sans surface in one shot. Mono stays put because code/transcripts hardcode "Geist Mono".
-    document.documentElement.style.setProperty("--font-sans", FONT_FAMILY_STACK[fontFamily]);
+    const custom = customFontFamily.trim();
+    const stack =
+      fontFamily === FONT_FAMILY.CUSTOM && custom
+        ? custom
+        : FONT_FAMILY_STACK[fontFamily] ?? FONT_FAMILY_STACK.sans;
+    document.documentElement.style.setProperty("--font-sans", stack);
     localStorage.setItem("reasonix.fontFamily", fontFamily);
-  }, [fontFamily]);
+    localStorage.setItem("reasonix.customFontFamily", customFontFamily);
+  }, [fontFamily, customFontFamily]);
 
   useEffect(() => {
     const onCur = (e: Event) => {
@@ -3068,6 +3082,8 @@ export function App() {
           onSetFontScale={setFontScale}
           fontFamily={fontFamily}
           onSetFontFamily={setFontFamily}
+          customFontFamily={customFontFamily}
+          onSetCustomFontFamily={setCustomFontFamily}
           sideCollapsed={sideCollapsed}
           ctxCollapsed={ctxCollapsed}
           onToggleSide={() => setSideCollapsed((v) => !v)}
