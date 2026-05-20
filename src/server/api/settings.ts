@@ -1,6 +1,5 @@
 /** apiKey is write-only on the wire; GET always returns a redacted form so dashboard screenshots don't leak credentials. */
 
-import { appendFileSync } from "node:fs";
 import {
   isPlausibleKey,
   normalizeSkillPathEntries,
@@ -43,23 +42,6 @@ function parseBody(raw: string): SettingsBody {
 // read time. Web sends new names in 0.12.x onward.
 const VALID_PRESETS = new Set(["auto", "flash", "pro", "fast", "smart", "max"]);
 const VALID_EFFORTS = new Set(["high", "max"]);
-
-/** Twin of `config.savePreset`'s debug hook — the dashboard PATCH writes `cfg.preset` directly (no `savePreset()` round-trip), so we instrument the bypass path too. Same env gate, same file. */
-function debugLogPresetWriteFromDashboard(preset: string): void {
-  const debugPath = process.env.REASONIX_DEBUG_PRESET;
-  if (!debugPath) return;
-  try {
-    const stack = new Error("trace").stack ?? "";
-    const line = `${new Date().toISOString()} dashboard PATCH /api/settings { preset: ${JSON.stringify(preset)} }\n${stack
-      .split("\n")
-      .slice(1, 8)
-      .map((l) => `  ${l.trim()}`)
-      .join("\n")}\n\n`;
-    appendFileSync(debugPath, line);
-  } catch {
-    /* diagnostic only */
-  }
-}
 
 export async function handleSettings(
   method: string,
@@ -157,7 +139,6 @@ export async function handleSettings(
       if (typeof fields.preset !== "string" || !VALID_PRESETS.has(fields.preset)) {
         return { status: 400, body: { error: "preset must be auto | flash | pro" } };
       }
-      debugLogPresetWriteFromDashboard(fields.preset);
       cfg.preset = fields.preset as "auto" | "flash" | "pro" | "fast" | "smart" | "max";
       presetPendingLive = fields.preset;
       changed.push("preset");

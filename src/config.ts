@@ -1,6 +1,6 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
@@ -370,7 +370,13 @@ function sanitizeStringArrayField(
 
 export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
   try {
-    const raw = readFileSync(path, "utf8");
+    // Strip the UTF-8 BOM if a foreign writer left one in — Windows
+    // PowerShell 5's `Set-Content -Encoding UTF8` and several text
+    // editors emit `EF BB BF` at the head of the file. `JSON.parse`
+    // refuses BOM-prefixed input and throws, which used to fall
+    // through to `return {}` and silently nuke every saved field on
+    // the next read-modify-write.
+    const raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const cfg = parsed as Record<string, unknown>;
@@ -386,32 +392,12 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
 }
 
 export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPath()): void {
-  debugLogConfigWrite(cfg, path);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(cfg, null, 2), "utf8");
   try {
     chmodSync(path, 0o600);
   } catch {
     /* ignore on platforms without chmod */
-  }
-}
-
-/** Every writeConfig call → append timestamp + keys + preset (if set) + stack to REASONIX_DEBUG_PRESET. Catches the bypass paths that don't go through savePreset(). Zero cost when env var is unset. */
-function debugLogConfigWrite(cfg: ReasonixConfig, configPath: string): void {
-  const debugPath = process.env.REASONIX_DEBUG_PRESET;
-  if (!debugPath) return;
-  try {
-    const stack = new Error("trace").stack ?? "";
-    const keys = Object.keys(cfg).sort().join(",");
-    const presetField = cfg.preset === undefined ? "(absent)" : JSON.stringify(cfg.preset);
-    const line = `${new Date().toISOString()} writeConfig pid=${process.pid} → ${configPath}\n  keys=[${keys}]\n  preset=${presetField}\n${stack
-      .split("\n")
-      .slice(1, 10)
-      .map((l) => `  ${l.trim()}`)
-      .join("\n")}\n\n`;
-    appendFileSync(debugPath, line);
-  } catch {
-    /* diagnostic only */
   }
 }
 
@@ -1096,27 +1082,9 @@ export function loadPreset(path: string = defaultConfigPath()): PresetName | und
 
 /** Persist preset so `/preset pro` (or `/model deepseek-v4-pro`) sticks across relaunches. */
 export function savePreset(preset: PresetName, path: string = defaultConfigPath()): void {
-  debugLogPresetWrite(preset, path);
   const cfg = readConfig(path);
   cfg.preset = preset;
   writeConfig(cfg, path);
-}
-
-/** When REASONIX_DEBUG_PRESET is set, append timestamp + value + stack to that file so we can see who/when changed preset. Zero cost when env var is unset. */
-function debugLogPresetWrite(preset: PresetName, configPath: string): void {
-  const debugPath = process.env.REASONIX_DEBUG_PRESET;
-  if (!debugPath) return;
-  try {
-    const stack = new Error("trace").stack ?? "";
-    const line = `${new Date().toISOString()} savePreset(${JSON.stringify(preset)}) → ${configPath}\n${stack
-      .split("\n")
-      .slice(1, 8)
-      .map((l) => `  ${l.trim()}`)
-      .join("\n")}\n\n`;
-    appendFileSync(debugPath, line);
-  } catch {
-    /* diagnostic only */
-  }
 }
 
 export function loadIndexUserConfig(path: string = defaultConfigPath()): IndexUserConfig {
