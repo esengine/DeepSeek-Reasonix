@@ -127,10 +127,12 @@ export async function handleSettings(
       changed.push("apiKey");
     }
     if (fields.baseUrl !== undefined) {
-      if (typeof fields.baseUrl !== "string" || !fields.baseUrl.trim()) {
-        return { status: 400, body: { error: "baseUrl must be a non-empty string" } };
+      if (typeof fields.baseUrl !== "string") {
+        return { status: 400, body: { error: "baseUrl must be a string" } };
       }
-      cfg.baseUrl = fields.baseUrl.trim();
+      // Empty means clear — falls back to DEEPSEEK_BASE_URL / built-in default.
+      const trimmed = fields.baseUrl.trim();
+      cfg.baseUrl = trimmed.length > 0 ? trimmed : undefined;
       changed.push("baseUrl");
     }
     if (fields.preset !== undefined) {

@@ -80,6 +80,48 @@ describe("settings API — combined POST persistence (#274)", () => {
     expect(readFileSync(configPath, "utf8")).toBe(before);
   });
 
+  it("empty baseUrl clears the field on disk (issue #1409)", async () => {
+    const res = await handleSettings(
+      "POST",
+      [],
+      JSON.stringify({ baseUrl: "" }),
+      makeCtx(configPath),
+    );
+    expect(res.status).toBe(200);
+    const cfg = readCfg(configPath);
+    expect(cfg.baseUrl).toBeUndefined();
+    expect(Object.hasOwn(cfg, "baseUrl")).toBe(false);
+  });
+
+  it("whitespace-only baseUrl clears the field (issue #1409)", async () => {
+    const res = await handleSettings(
+      "POST",
+      [],
+      JSON.stringify({ baseUrl: "   " }),
+      makeCtx(configPath),
+    );
+    expect(res.status).toBe(200);
+    expect(readCfg(configPath).baseUrl).toBeUndefined();
+  });
+
+  it("GET surfaces null after baseUrl is cleared (issue #1409)", async () => {
+    await handleSettings("POST", [], JSON.stringify({ baseUrl: "" }), makeCtx(configPath));
+    const res = await handleSettings("GET", [], "", makeCtx(configPath));
+    expect(res.status).toBe(200);
+    expect((res.body as { baseUrl: string | null }).baseUrl).toBeNull();
+  });
+
+  it("rejects a non-string baseUrl (issue #1409)", async () => {
+    const res = await handleSettings(
+      "POST",
+      [],
+      JSON.stringify({ baseUrl: 42 }),
+      makeCtx(configPath),
+    );
+    expect(res.status).toBe(400);
+    expect(readCfg(configPath).baseUrl).toBe("https://orig");
+  });
+
   it("rejects an invalid lang without writing other fields", async () => {
     const res = await handleSettings(
       "POST",
