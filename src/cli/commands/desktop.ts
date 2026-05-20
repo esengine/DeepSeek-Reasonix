@@ -439,9 +439,40 @@ type EmittableEvent =
   | MemoryEvent
   | JobsEvent;
 
+const STDOUT_BACKPRESSURE_WAIT = new Int32Array(new SharedArrayBuffer(4));
+
+type SyncWriter = (fd: number, buffer: Buffer, offset: number, length: number) => number;
+
+export function writeAllSync(
+  fd: number,
+  buffer: Buffer,
+  opts: {
+    write?: SyncWriter;
+    wait?: () => void;
+  } = {},
+): void {
+  const write = opts.write ?? writeSync;
+  const wait = opts.wait ?? (() => Atomics.wait(STDOUT_BACKPRESSURE_WAIT, 0, 0, 5));
+  let offset = 0;
+  while (offset < buffer.length) {
+    let written: number;
+    try {
+      written = write(fd, buffer, offset, buffer.length - offset);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === "EAGAIN") {
+        wait();
+        continue;
+      }
+      throw err;
+    }
+    if (written <= 0) throw new Error("stdout write returned 0 bytes");
+    offset += written;
+  }
+}
+
 function emit(ev: EmittableEvent, tabId?: string): void {
   const payload = tabId ? { ...ev, tabId } : ev;
-  writeSync(1, Buffer.from(`${JSON.stringify(payload)}\n`, "utf8"));
+  writeAllSync(1, Buffer.from(`${JSON.stringify(payload)}\n`, "utf8"));
 }
 
 function tailLines(s: string, n: number): string {
