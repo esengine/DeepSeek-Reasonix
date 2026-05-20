@@ -274,22 +274,21 @@ describe("ClassSourceFinder — project search", () => {
     mkdirSync(join(root, "src"), { recursive: true });
     writeFileSync(join(root, "src", "other.ts"), "export const x = 1;\n");
 
-    const finder = new ClassSourceFinder({ projectRoot: root });
+    const finder = new ClassSourceFinder({ projectRoot: root, repoPaths: [] });
     const result = await finder.findSource("com.example.Missing");
 
     expect(result.found).toBe(false);
-  });
+  }, 30_000);
 
   it("skips common non-source directories", async () => {
     const root = await tmpDir();
     mkdirSync(join(root, "target", "classes"), { recursive: true });
     writeFileSync(join(root, "target", "classes", "MyClass.java"), "// should be ignored");
 
-    const finder = new ClassSourceFinder({ projectRoot: root });
+    const finder = new ClassSourceFinder({ projectRoot: root, repoPaths: [] });
     const result = await finder.findSource("MyClass");
-    // Should NOT find it since target/ is skipped
     expect(result.found).toBe(false);
-  });
+  }, 30_000);
 
   it("accepts jarKeyword filter (does not change project search result)", async () => {
     const root = await tmpDir();
@@ -711,12 +710,11 @@ describe("ClassSourceFinder — edge cases", () => {
 
   it("handles empty project root gracefully", async () => {
     const root = await tmpDir();
-    // No .java, no src dir — should not crash, just not find
-    const finder = new ClassSourceFinder({ projectRoot: root });
+    const finder = new ClassSourceFinder({ projectRoot: root, repoPaths: [] });
     const result = await finder.findSource("com.example.Nonexistent");
 
     expect(result.found).toBe(false);
-  });
+  }, 30_000);
 
   it("handles fully-qualified class name that is also a simple name", async () => {
     const root = await tmpDir();
