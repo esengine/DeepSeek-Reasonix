@@ -2,8 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { type Update, check } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
@@ -1004,11 +1002,6 @@ interface TabRuntimeProps {
   tabId: string;
   active: boolean;
   currency: "CNY" | "USD";
-  pendingUpdate: Update | null;
-  updateStatus: "idle" | "installing" | "error";
-  updateProgress: { downloaded: number; total: number | null } | null;
-  installUpdate: () => void;
-  dismissUpdate: () => void;
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
   onNewTab: () => void;
   onCloseTab: () => void;
@@ -1039,11 +1032,6 @@ function TabRuntime({
   tabId,
   active,
   currency,
-  pendingUpdate,
-  updateStatus,
-  updateProgress,
-  installUpdate,
-  dismissUpdate,
   registerDispatch,
   onNewTab,
   onCloseTab,
@@ -1761,17 +1749,6 @@ function TabRuntime({
               />
               <div className="thread" ref={threadRef}>
                 <div className="thread-inner" ref={threadInnerRef}>
-                  {pendingUpdate ? (
-                    <UpdateBanner
-                      version={pendingUpdate.version}
-                      currentVersion={pendingUpdate.currentVersion ?? pendingUpdate.version}
-                      status={updateStatus}
-                      progress={updateProgress}
-                      onInstall={installUpdate}
-                      onDismiss={dismissUpdate}
-                    />
-                  ) : null}
-
                   {state.activePlan ? (
                     <>
                       <PlanBanner
@@ -2647,73 +2624,6 @@ function NeedsSetupView({
   );
 }
 
-function UpdateBanner({
-  version,
-  currentVersion,
-  status,
-  progress,
-  onInstall,
-  onDismiss,
-}: {
-  version: string;
-  currentVersion: string;
-  status: "idle" | "installing" | "error";
-  progress: { downloaded: number; total: number | null } | null;
-  onInstall: () => void;
-  onDismiss: () => void;
-}) {
-  useLang();
-  const ratio =
-    progress && progress.total && progress.total > 0
-      ? Math.min(1, progress.downloaded / progress.total)
-      : null;
-  const statusText =
-    status === "error"
-      ? t("app.update.failed")
-      : status === "installing"
-        ? progress
-          ? ratio !== null
-            ? t("app.update.downloading", {
-                downloaded: formatBytes(progress.downloaded),
-                total: formatBytes(progress.total ?? 0),
-                pct: Math.round(ratio * 100),
-              })
-            : t("app.update.downloadingUnknown", {
-                downloaded: formatBytes(progress.downloaded),
-              })
-          : t("app.update.installing")
-        : t("app.update.clickToInstall");
-  return (
-    <div
-      className="plan-banner"
-      style={{ background: "var(--accent-soft)", borderColor: "var(--accent)" }}
-    >
-      <span className="ico">
-        <I.download size={14} />
-      </span>
-      <div className="body">
-        <div className="t">
-          {t("app.update.available", { current: currentVersion, latest: version })}
-        </div>
-        <div className="s">{statusText}</div>
-        {status === "installing" && ratio !== null ? (
-          <div className="meter-mini" aria-label="download progress">
-            <span style={{ width: `${Math.round(ratio * 100)}%` }} />
-          </div>
-        ) : null}
-      </div>
-      <div className="prog">
-        <button type="button" onClick={onInstall} disabled={status === "installing"}>
-          {t("app.update.install")}
-        </button>
-        <button type="button" onClick={onDismiss} disabled={status === "installing"}>
-          {t("app.update.later")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -2735,12 +2645,6 @@ export function App() {
     tabsRef.current = tabs;
   }, [tabs]);
 
-  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<"idle" | "installing" | "error">("idle");
-  const [updateProgress, setUpdateProgress] = useState<{
-    downloaded: number;
-    total: number | null;
-  } | null>(null);
   const [currency, setCurrency] = useState<"CNY" | "USD">(() => {
     const v = localStorage.getItem("reasonix.currency");
     return v === "USD" ? "USD" : "CNY";
@@ -2831,44 +2735,6 @@ export function App() {
       dispatchersRef.current.delete(tabId);
     }
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const update = await check();
-        if (!cancelled && update) setPendingUpdate(update);
-      } catch {
-        // updater not configured
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const installUpdate = useCallback(async () => {
-    if (!pendingUpdate) return;
-    setUpdateStatus("installing");
-    setUpdateProgress(null);
-    try {
-      await pendingUpdate.downloadAndInstall!((evt: any) => {
-        if (evt.event === "Started") {
-          setUpdateProgress({ downloaded: 0, total: evt.data.contentLength ?? null });
-        } else if (evt.event === "Progress") {
-          setUpdateProgress((p) =>
-            p ? { ...p, downloaded: p.downloaded + evt.data.chunkLength } : p,
-          );
-        } else if (evt.event === "Finished") {
-          setUpdateProgress((p) => (p ? { ...p, downloaded: p.total ?? p.downloaded } : p));
-        }
-      });
-      await relaunch();
-    } catch (err) {
-      console.error("update failed", err);
-      setUpdateStatus("error");
-    }
-  }, [pendingUpdate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3094,11 +2960,6 @@ export function App() {
           tabId={t.id}
           active={t.id === activeTabId}
           currency={currency}
-          pendingUpdate={pendingUpdate}
-          updateStatus={updateStatus}
-          updateProgress={updateProgress}
-          installUpdate={installUpdate}
-          dismissUpdate={() => setPendingUpdate(null)}
           registerDispatch={registerDispatch}
           onNewTab={openTab}
           onCloseTab={() => closeTab(t.id)}

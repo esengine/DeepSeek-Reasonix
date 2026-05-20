@@ -29,7 +29,6 @@ export default defineConfig({
       "@tauri-apps/plugin-dialog": resolve(__dirname, "src/lib/tauri-bridge.ts"),
       "@tauri-apps/plugin-opener": resolve(__dirname, "src/lib/tauri-bridge.ts"),
       "@tauri-apps/plugin-process": resolve(__dirname, "src/lib/tauri-bridge.ts"),
-      "@tauri-apps/plugin-updater": resolve(__dirname, "src/lib/tauri-bridge.ts"),
     },
   },
   build: {

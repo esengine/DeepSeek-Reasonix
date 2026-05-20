@@ -803,19 +803,6 @@ export async function relaunch(): Promise<void> {
   return Promise.resolve();
 }
 
-// 7. @tauri-apps/plugin-updater
-export type Update = {
-  version: string;
-  available: boolean;
-  currentVersion?: string;
-  downloadAndInstall?: (onEvent?: (evt: any) => void) => Promise<void>;
-};
-
-export async function check(): Promise<Update | null> {
-  // Web 版本：更新由 CLI (npm) 管理，不需要桌面 updater
-  return Promise.resolve(null);
-}
-
 // // ═══ Mock 数据（仅 Vite 开发模式使用）
 // 
 const mockSessions = [
