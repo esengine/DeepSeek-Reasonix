@@ -74,17 +74,24 @@ Other QQ commands:
 
 After the first successful connection, later `chat` and `code` sessions auto-start the QQ channel while it stays enabled.
 
-## Connect from the desktop app
+## Desktop quick start
 
 If you use the desktop client:
 
-1. Open `Settings`.
-2. Go to `General`.
-3. Find `QQ Channel` near the bottom.
-4. Click `Configure...` to enter `App ID`, `App Secret`, and `Sandbox` / `Production`.
-5. Click `Save and connect`.
+1. Open `Settings -> General -> QQ Channel`.
+2. Click `Configure`.
+3. Enter `App ID`, `App Secret`, and the correct QQ environment.
+4. Click `Save and connect`.
+5. Send a message from QQ and check that it appears in the current desktop transcript.
+6. Wait for the desktop reply to route back to QQ.
 
-The desktop app uses the same underlying QQ config as the CLI.
+The desktop app uses the same underlying QQ config as the CLI, but the runtime is attached to the current active desktop tab.
+
+That means:
+
+- QQ messages enter the current active tab
+- replies from that tab route back to QQ
+- if you switch tabs, later QQ messages follow the new active tab
 
 ## Typical usage
 
@@ -120,6 +127,16 @@ Check that the local Reasonix session is still running and the channel is still 
 ~~~text
 /qq status
 ~~~
+
+### Desktop shows QQ configured, but no message round-tripping happens
+
+First confirm you are using a desktop build that already includes desktop QQ runtime support.
+
+Then check:
+
+- the status in `Settings -> General -> QQ Channel`
+- that the current active desktop tab is the one you expect QQ to drive
+- that the local desktop session is still running
 
 ### `/qq` commands do not exist in your installed package
 

@@ -96,35 +96,14 @@ Other subcommands (`replay` · `diff` · `events` · `stats` · `index` · `mcp`
 
 ### QQ channel
 
-Reasonix can attach QQ as a remote communication channel for existing `chat` and `code` sessions. It is not a separate runtime mode.
+QQ can extend an existing `chat`, `code`, or desktop session as a remote channel. It is part of the current session flow, not a separate runtime mode.
 
-Start a session first:
+- CLI: start a session, then run `/qq connect`
+- Desktop: open `Settings -> General -> QQ Channel`
 
-~~~bash
-reasonix code
-# or
-reasonix chat
-~~~
+Once connected, QQ messages can enter the current session, assistant replies route back to QQ, and follow-up interactions can continue remotely.
 
-Then connect QQ from inside the session:
-
-~~~text
-/qq connect
-~~~
-
-On first use, Reasonix asks for the QQ `App ID` and `App Secret` inside the current TUI. Later `/qq connect` calls reuse the saved credentials directly.
-
-Available commands:
-
-- `/qq connect`
-- `/qq status`
-- `/qq disconnect`
-
-Once enabled, later `chat` / `code` sessions auto-start the QQ channel. Slash commands, confirmation prompts, and follow-up assistant replies can continue through QQ without terminal-side input.
-
-Desktop users can configure the same channel from `Settings -> General -> QQ Channel`.
-
-See [QQ channel setup](./docs/qq-connect.md) for the CLI flow, desktop entry, and QQ Open Platform setup.
+For full setup, desktop quick start, and troubleshooting, see [QQ channel setup](./docs/qq-connect.md).
 
 ### Desktop client (prerelease)
 
