@@ -13,6 +13,7 @@ import { accessSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
+import { t } from "./i18n/index.js";
 import { NEGATIVE_CLAIM_RULE, TUI_FORMATTING_RULES } from "./prompt-fragments.js";
 
 export const SKILLS_DIRNAME = "skills";
@@ -340,9 +341,15 @@ Tips:
 `;
 }
 
+function skillDescription(s: Pick<Skill, "name" | "description" | "scope">): string {
+  if (s.scope !== "builtin") return s.description;
+  const key = s.name === "security-review" ? "securityReview" : s.name;
+  return t(`builtinSkills.${key}`);
+}
+
 /** Subagent tag goes AFTER the name in brackets — leading-marker tags get copied into `name` arg verbatim. */
-function skillIndexLine(s: Pick<Skill, "name" | "description" | "runAs">): string {
-  const safeDesc = s.description.replace(/\n/g, " ").trim();
+function skillIndexLine(s: Pick<Skill, "name" | "description" | "runAs" | "scope">): string {
+  const safeDesc = skillDescription(s).replace(/\n/g, " ").trim();
   const tag = s.runAs === "subagent" ? " [🧬 subagent]" : "";
   const max = 130 - s.name.length - tag.length;
   const clipped = safeDesc.length > max ? `${safeDesc.slice(0, Math.max(1, max - 1))}…` : safeDesc;

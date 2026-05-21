@@ -1795,4 +1795,15 @@ export const EN: TranslationSchema = {
     untracked: "(untracked)",
     churned: "(churned \u00d7{count})",
   },
+  builtinSkills: {
+    explore:
+      "Explore the codebase in an isolated subagent \u2014 wide-net read-only investigation that returns one distilled answer. Best for: 'find all places that\u2026', 'how does X work across the project', 'survey the code for Y'.",
+    research:
+      "Research a question by combining web search + code reading in an isolated subagent. Best for: 'is X feature supported by lib Y', 'what\u2019s the canonical way to do Z', 'compare our impl against the spec'.",
+    review:
+      "Review the pending changes (current branch diff by default) in an isolated subagent \u2014 flags correctness, security, missing tests, hidden behavior changes; reports verdict + per-issue file:line. Read-only; the parent decides what to act on.",
+    securityReview:
+      "Security-focused review of the current branch diff in an isolated subagent \u2014 flags injection/authz/secrets/deserialization/path-traversal/crypto issues, severity-tagged. Read-only. Use when shipping changes that touch auth, input parsing, file IO, or external requests.",
+    test: "Run the project\u2019s test suite, diagnose failures, propose SEARCH/REPLACE fixes, re-run until green (or stop after 2 fix attempts on the same failure). Inlined \u2014 runs in the parent loop so you see the edit blocks and can /apply them. Detects npm/pnpm/yarn/pytest/go/cargo.",
+  },
 };

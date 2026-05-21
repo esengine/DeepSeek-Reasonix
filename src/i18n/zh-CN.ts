@@ -1703,4 +1703,11 @@ export const zhCN: TranslationSchema = {
     untracked: "（未追踪）",
     churned: "（已变更 ×{count}）",
   },
+  builtinSkills: {
+    explore: "在隔离子 agent 中探索代码库 — 只读宽网调查，返回一个精炼结论",
+    research: "结合代码阅读与网络搜索进行调研 — 在隔离子 agent 中综合信息并返回结论",
+    review: "审查当前分支变更 — 检查正确性、安全性、缺失测试、隐藏行为变更",
+    securityReview: "安全专项审查 — 标记注入/认证/密钥/反序列化/路径穿越/加密问题",
+    test: "运行测试套件并诊断失败 — 自动识别测试框架，修复后重跑直至通过",
+  },
 };
