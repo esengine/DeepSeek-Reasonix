@@ -1135,6 +1135,114 @@ describe("handleSlash", () => {
       expect(r.info).toMatch(/Refactor auth into signed tokens/);
       expect(r.info).toMatch(/1\/2/);
     });
+
+    it("/plans surfaces active step evidence and pending evidence state", () => {
+      const loop = loopWithSession("plans-active-evidence");
+      const fs = require("node:fs") as typeof import("node:fs");
+      const dir = join(tempHome, ".reasonix", "sessions");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        join(dir, "plans-active-evidence.plan.json"),
+        JSON.stringify({
+          version: 2,
+          steps: [
+            { id: "step-1", title: "Update router", action: "Update router references." },
+            { id: "step-2", title: "Run migration", action: "Run the migration." },
+          ],
+          completedStepIds: ["step-1"],
+          stepCompletions: {
+            "step-1": {
+              kind: "step_completed",
+              stepId: "step-1",
+              result: "Updated router references.",
+              evidence: [
+                {
+                  kind: "verification",
+                  summary: "focused router tests passed",
+                  command: "npm test -- tests/router.test.ts",
+                },
+                {
+                  kind: "diff",
+                  summary: "updated router imports",
+                  paths: ["src/router.ts", "src/routes.ts"],
+                },
+              ],
+            },
+          },
+          updatedAt: new Date().toISOString(),
+          summary: "Router migration",
+        }),
+      );
+
+      const r = handleSlash("plans", [], loop, {
+        getEngineeringLifecycleSnapshot: () => ({
+          mode: "strict",
+          state: "executing",
+          planSteps: [],
+          completedStepIds: ["step-1"],
+          mutatedSinceLastStep: true,
+        }),
+      });
+
+      expect(r.info).toContain("Router migration");
+      expect(r.info).toContain("evidence pending");
+      expect(r.info).toContain("step-1");
+      expect(r.info).toContain("verification - focused router tests passed");
+      expect(r.info).toContain("npm test -- tests/router.test.ts");
+      expect(r.info).toContain("diff - updated router imports");
+      expect(r.info).toContain("src/router.ts, src/routes.ts");
+    });
+
+    it("/plans surfaces archived plan evidence summaries", () => {
+      const loop = loopWithSession("plans-archived-evidence");
+      writeArchive("plans-archived-evidence", "2026-04-20-evidence", {
+        version: 2,
+        steps: [
+          { id: "step-1", title: "Migrate config", action: "Update dependency config." },
+          { id: "step-2", title: "Confirm rollout", action: "Confirm rollout notes." },
+        ],
+        completedStepIds: ["step-1", "step-2"],
+        stepCompletions: {
+          "step-1": {
+            kind: "step_completed",
+            stepId: "step-1",
+            result: "Updated dependency config.",
+            evidence: [
+              {
+                kind: "diff",
+                summary: "updated package and lockfile",
+                paths: ["package.json", "pnpm-lock.yaml"],
+              },
+              {
+                kind: "verification",
+                summary: "install completed",
+                command: "npm install",
+              },
+            ],
+          },
+          "step-2": {
+            kind: "step_completed",
+            stepId: "step-2",
+            result: "Confirmed rollout notes.",
+            evidence: [{ kind: "manual", summary: "owner approved rollout note" }],
+          },
+        },
+        updatedAt: "2026-04-20T00:00:00.000Z",
+        summary: "Config migration",
+      });
+
+      const r = handleSlash("plans", [], loop);
+
+      expect(r.info).toContain("Config migration");
+      expect(r.info).toContain("evidence:");
+      expect(r.info).toContain("step-1");
+      expect(r.info).toContain("diff - updated package and lockfile");
+      expect(r.info).toContain("package.json, pnpm-lock.yaml");
+      expect(r.info).toContain("verification - install completed");
+      expect(r.info).toContain("npm install");
+      expect(r.info).toContain("step-2");
+      expect(r.info).toContain("manual - owner approved rollout note");
+    });
   });
 
   describe("/memory", () => {

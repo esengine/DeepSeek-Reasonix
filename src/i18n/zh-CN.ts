@@ -1013,6 +1013,10 @@ export const zhCN: TranslationSchema = {
       activeNone: "▸ 活跃计划：（无）",
       noArchives: "此会话尚无归档计划 — 当每个步骤完成时自动归档",
       archivedHeader: "已归档（{count}）：",
+      evidencePending:
+        "  ! 等待 evidence — 当前步骤需要 verification/diff/checkpoint/manual evidence",
+      evidenceLine: "  evidence {stepId}: {summary}",
+      archivedEvidenceLine: "    evidence: {summary}",
       replayNoSession:
         "未附加会话 — `/replay` 是按会话的。在项目中运行 `reasonix code` 以获取会话。",
       replayNoArchives:

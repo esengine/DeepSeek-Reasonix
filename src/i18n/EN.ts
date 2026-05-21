@@ -1074,6 +1074,10 @@ export const EN: TranslationSchema = {
       noArchives:
         "no archived plans yet for this session — they auto-archive when every step is done",
       archivedHeader: "Archived ({count}):",
+      evidencePending:
+        "  ! evidence pending — current step needs verification/diff/checkpoint/manual evidence",
+      evidenceLine: "  evidence {stepId}: {summary}",
+      archivedEvidenceLine: "    evidence: {summary}",
       replayNoSession:
         "no session attached — `/replay` is per-session. Run `reasonix code` in a project to get a session.",
       replayNoArchives:
