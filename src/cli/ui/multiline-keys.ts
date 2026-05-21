@@ -28,7 +28,7 @@ export interface MultilineAction {
   /** When `true`, fire `onSubmit(submitValue ?? value)`. */
   submit: boolean;
   submitValue?: string;
-  /** Set on Ctrl+P / Ctrl+N when no in-buffer cursor move applies — parent recalls prompt history. */
+  /** Set on ↑/↓ / Ctrl+N when no in-buffer cursor move applies — parent recalls prompt history. */
   historyHandoff?: "prev" | "next";
   /** Reducer is pure — hands raw paste to PromptInput which allocates a sentinel and inserts that. */
   pasteRequest?: { content: string };
@@ -75,10 +75,10 @@ export function processMultilineKey(
     return cursor === value.length ? NOOP : { next: null, cursor: value.length, submit: false };
   }
 
-  // ↑/↓ (and Ctrl+P / Ctrl+N readline aliases):
+  // ↑/↓ (and Ctrl+N readline alias):
   //   • multi-line buffer → cursor up/down within the buffer
   //   • single-line / empty / already at top-or-bottom line → hand off to prompt history
-  if (key.upArrow || (key.ctrl && key.input === "p")) {
+  if (key.upArrow) {
     if (value.includes("\n")) {
       const moved = moveCursorUp(value, cursor);
       if (moved !== cursor) return { next: null, cursor: moved, submit: false };

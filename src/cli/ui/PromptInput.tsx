@@ -44,7 +44,7 @@ export interface PromptInputProps {
   onSubmit: (v: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  /** Ctrl+P / Ctrl+N hand off here when no in-buffer cursor move applies — parent walks history and swaps `value` via `onChange`. */
+  /** ↑/↓ / Ctrl+N hand off here when no in-buffer cursor move applies — parent walks history and swaps `value` via `onChange`. */
   onHistoryPrev?: () => void;
   onHistoryNext?: () => void;
   /** Ctrl+X — parent spawns $EDITOR with the current buffer and re-injects on exit. */
@@ -52,6 +52,10 @@ export interface PromptInputProps {
   onCursorChange?: (cursor: number) => void;
   /** Rows the parent renders below this box — drives IME cursor sync so fcitx5/ibus/Win-IME candidate popups land next to the visual ▌. */
   rowsAfter?: number;
+  /** Current mode for bottom status display. */
+  mode?: string;
+  /** Current model for bottom status display. */
+  model?: string;
 }
 
 export function PromptInput({
@@ -65,6 +69,8 @@ export function PromptInput({
   onOpenExternalEditor,
   onCursorChange,
   rowsAfter = 0,
+  mode,
+  model,
 }: PromptInputProps) {
   // Cap at 24 — collapseLinesForDisplay hides content past ~20 logical lines.
   // Quantize spec.max to 4-row buckets so per-keystroke line-count changes
@@ -197,7 +203,6 @@ export function PromptInput({
 
   const lines = value.length > 0 ? value.split("\n") : [""];
   const accentColor = disabled ? FG.faint : TONE.brand;
-  const borderColor = disabled ? FG.faint : FG.meta;
   const cursorVisible = true;
   const { line: cursorLine, col: cursorCol } = lineAndColumn(value, cursor);
 
@@ -235,144 +240,143 @@ export function PromptInput({
   ]);
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="single"
-      borderTop
-      borderBottom
-      borderLeft={false}
-      borderRight={false}
-      borderColor={borderColor}
-      paddingX={1}
-      backgroundColor={SURFACE.bgInput}
-    >
-      {(() => {
-        const rows: React.ReactNode[] = [];
-        let firstRowEmitted = false;
-        for (let renderIdx = 0; renderIdx < renderItems.length; renderIdx++) {
-          const item = renderItems[renderIdx]!;
-          if (item.kind === "skip") {
-            rows.push(
-              <Box key={`skip-${renderIdx}`}>
-                <Text color={FG.faint}>{continuationIndent}</Text>
-                <Text color={FG.faint}>
-                  {`[… ${item.linesHidden} line${item.linesHidden === 1 ? "" : "s"} hidden — full content kept, submitted on Enter …]`}
-                </Text>
-              </Box>,
-            );
-            continue;
-          }
-          const i = item.originalIndex;
-          const line = item.line;
-          const isCursorLine = i === cursorLine;
-          const showPlaceholder = i === 0 && value.length === 0;
-          if (showPlaceholder) {
-            rows.push(
-              <PromptLine
-                key={`ln-${i}-text-0`}
-                line=""
-                isFirst={true}
-                isCursorLine={isCursorLine && !disabled}
-                cursorCol={isCursorLine ? cursorCol : null}
-                cursorVisible={cursorVisible}
-                showPlaceholder
-                placeholderText={effectivePlaceholder}
-                promptPrefix={promptPrefix}
-                continuationIndent={continuationIndent}
-                visibleCells={visibleCells}
-                accentColor={accentColor}
-                pastes={pastesRef.current}
-                disabled={disabled === true}
-              />,
-            );
-            firstRowEmitted = true;
-            continue;
-          }
-          const segs = splitLineByPastes(line);
-          for (let segIdx = 0; segIdx < segs.length; segIdx++) {
-            const seg = segs[segIdx]!;
-            const isFirst = !firstRowEmitted;
-            firstRowEmitted = true;
-            if (seg.kind === "paste") {
-              const cursorOnIt =
-                isCursorLine && cursorCol >= seg.startOffset && cursorCol <= seg.startOffset + 1;
+    <Box flexDirection="row">
+      <Box width={1} backgroundColor="#0153e5" />
+      <Box flexDirection="column" flexGrow={1} paddingX={1} backgroundColor="#1e1e1e">
+        <Box height={1} />
+        {(() => {
+          const rows: React.ReactNode[] = [];
+          let firstRowEmitted = false;
+          for (let renderIdx = 0; renderIdx < renderItems.length; renderIdx++) {
+            const item = renderItems[renderIdx]!;
+            if (item.kind === "skip") {
               rows.push(
-                <PasteChipRow
-                  key={`ln-${i}-paste-${segIdx}`}
-                  entry={pastesRef.current.get(seg.id)}
-                  pasteId={seg.id}
-                  isFirst={isFirst}
-                  active={cursorOnIt && !disabled}
-                  visibleCells={visibleCells}
-                  accentColor={accentColor}
-                />,
+                <Box key={`skip-${renderIdx}`}>
+                  <Text color={FG.faint}>{continuationIndent}</Text>
+                  <Text color={FG.faint}>
+                    {`[… ${item.linesHidden} line${item.linesHidden === 1 ? "" : "s"} hidden — full content kept, submitted on Enter …]`}
+                  </Text>
+                </Box>,
               );
               continue;
             }
-            const segHasCursor =
-              isCursorLine &&
-              cursorCol >= seg.startOffset &&
-              cursorCol <= seg.startOffset + seg.text.length;
-            rows.push(
-              <PromptLine
-                key={`ln-${i}-text-${segIdx}`}
-                line={seg.text}
-                isFirst={isFirst}
-                isCursorLine={segHasCursor && !disabled}
-                cursorCol={segHasCursor ? cursorCol - seg.startOffset : null}
-                cursorVisible={cursorVisible}
-                showPlaceholder={false}
-                placeholderText=""
-                promptPrefix={promptPrefix}
-                continuationIndent={continuationIndent}
-                visibleCells={visibleCells}
-                accentColor={accentColor}
-                pastes={pastesRef.current}
-                disabled={disabled === true}
-              />,
-            );
+            const i = item.originalIndex;
+            const line = item.line;
+            const isCursorLine = i === cursorLine;
+            const showPlaceholder = i === 0 && value.length === 0;
+            if (showPlaceholder) {
+              rows.push(
+                <PromptLine
+                  key={`ln-${i}-text-0`}
+                  line=""
+                  isFirst={true}
+                  isCursorLine={isCursorLine && !disabled}
+                  cursorCol={isCursorLine ? cursorCol : null}
+                  cursorVisible={cursorVisible}
+                  showPlaceholder
+                  placeholderText={effectivePlaceholder}
+                  promptPrefix={promptPrefix}
+                  continuationIndent={continuationIndent}
+                  visibleCells={visibleCells}
+                  accentColor={accentColor}
+                  pastes={pastesRef.current}
+                  disabled={disabled === true}
+                />,
+              );
+              firstRowEmitted = true;
+              continue;
+            }
+            const segs = splitLineByPastes(line);
+            for (let segIdx = 0; segIdx < segs.length; segIdx++) {
+              const seg = segs[segIdx]!;
+              const isFirst = !firstRowEmitted;
+              firstRowEmitted = true;
+              if (seg.kind === "paste") {
+                const cursorOnIt =
+                  isCursorLine && cursorCol >= seg.startOffset && cursorCol <= seg.startOffset + 1;
+                rows.push(
+                  <PasteChipRow
+                    key={`ln-${i}-paste-${segIdx}`}
+                    entry={pastesRef.current.get(seg.id)}
+                    pasteId={seg.id}
+                    isFirst={isFirst}
+                    active={cursorOnIt && !disabled}
+                    visibleCells={visibleCells}
+                    accentColor={accentColor}
+                  />,
+                );
+                continue;
+              }
+              const segHasCursor =
+                isCursorLine &&
+                cursorCol >= seg.startOffset &&
+                cursorCol <= seg.startOffset + seg.text.length;
+              rows.push(
+                <PromptLine
+                  key={`ln-${i}-text-${segIdx}`}
+                  line={seg.text}
+                  isFirst={isFirst}
+                  isCursorLine={segHasCursor && !disabled}
+                  cursorCol={segHasCursor ? cursorCol - seg.startOffset : null}
+                  cursorVisible={cursorVisible}
+                  showPlaceholder={false}
+                  placeholderText=""
+                  promptPrefix={promptPrefix}
+                  continuationIndent={continuationIndent}
+                  visibleCells={visibleCells}
+                  accentColor={accentColor}
+                  pastes={pastesRef.current}
+                  disabled={disabled === true}
+                />,
+              );
+            }
+            if (segs.length === 0) {
+              const isFirst = !firstRowEmitted;
+              firstRowEmitted = true;
+              rows.push(
+                <PromptLine
+                  key={`ln-${i}-empty`}
+                  line=""
+                  isFirst={isFirst}
+                  isCursorLine={isCursorLine && !disabled}
+                  cursorCol={isCursorLine ? 0 : null}
+                  cursorVisible={cursorVisible}
+                  showPlaceholder={false}
+                  placeholderText=""
+                  promptPrefix={promptPrefix}
+                  continuationIndent={continuationIndent}
+                  visibleCells={visibleCells}
+                  accentColor={accentColor}
+                  pastes={pastesRef.current}
+                  disabled={disabled === true}
+                />,
+              );
+            }
           }
-          if (segs.length === 0) {
-            const isFirst = !firstRowEmitted;
-            firstRowEmitted = true;
-            rows.push(
-              <PromptLine
-                key={`ln-${i}-empty`}
-                line=""
-                isFirst={isFirst}
-                isCursorLine={isCursorLine && !disabled}
-                cursorCol={isCursorLine ? 0 : null}
-                cursorVisible={cursorVisible}
-                showPlaceholder={false}
-                placeholderText=""
-                promptPrefix={promptPrefix}
-                continuationIndent={continuationIndent}
-                visibleCells={visibleCells}
-                accentColor={accentColor}
-                pastes={pastesRef.current}
-                disabled={disabled === true}
-              />,
-            );
-          }
-        }
-        return rows;
-      })()}
-      {showHugeBufferHints && !disabled ? (
-        <Box>
-          <Text color={FG.faint}>
-            {`  [${lines.length} lines · PgUp/PgDn jump · Ctrl+U clear · Ctrl+W del word]`}
-          </Text>
-        </Box>
-      ) : null}
-      {!disabled ? (
-        <Box marginTop={1}>
-          <HintRow />
-        </Box>
-      ) : (
-        <Box marginTop={1}>
-          <Text color={FG.faint}>{"  esc to stop"}</Text>
-        </Box>
-      )}
+          return rows;
+        })()}
+        {showHugeBufferHints && !disabled ? (
+          <Box>
+            <Text color={FG.faint}>
+              {`  [${lines.length} lines · PgUp/PgDn jump · Ctrl+U clear · Ctrl+W del word]`}
+            </Text>
+          </Box>
+        ) : null}
+        <Box height={1} />
+        {mode || model ? (
+          <Box>
+            <Text color="#0153e5">{mode || ""}</Text>
+            {mode && model ? <Text color={FG.faint}>{" · "}</Text> : null}
+            {model ? <Text color={FG.faint}>{model}</Text> : null}
+          </Box>
+        ) : null}
+        <Box height={1} />
+        {disabled ? (
+          <Box marginTop={1}>
+            <Text color={FG.faint}>{"  esc to stop"}</Text>
+          </Box>
+        ) : null}
+      </Box>
     </Box>
   );
 }

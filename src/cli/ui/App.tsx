@@ -122,6 +122,7 @@ import { PlanReviseEditor } from "./PlanReviseEditor.js";
 import { PromptInput } from "./PromptInput.js";
 import { SessionPicker } from "./SessionPicker.js";
 import { ShellConfirm, type ShellConfirmChoice } from "./ShellConfirm.js";
+
 import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
 import { type ThemeChoice, ThemePicker } from "./ThemePicker.js";
@@ -492,6 +493,7 @@ function AppInner({
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const cardCount = useAgentState((s) => s.cards.length);
   const sessionModel = useAgentState((s) => s.session.model);
+  const sessionPreset = useAgentState((s) => s.status.preset);
   const ctxTokens = useAgentState((s) => s.status.promptTokens);
   const ctxCap = useAgentState(
     (s) => s.status.promptCap ?? DEEPSEEK_CONTEXT_TOKENS[s.session.model] ?? DEFAULT_CONTEXT_TOKENS,
@@ -538,6 +540,7 @@ function AppInner({
     markPhase("first_paint");
     dumpStartupProfile();
   }, []);
+
   // Live MCP server list: initialized from the boot-time prop, then
   // updated immutably when append-drift adds tools mid-session.
   const [liveMcpServers, setLiveMcpServers] = useState<McpServerSummary[]>(() => mcpServers ?? []);
@@ -699,6 +702,7 @@ function AppInner({
   /** True while the ThemePicker is open mid-chat (triggered by bare `/theme`). */
   const [pendingThemePicker, setPendingThemePicker] = useState(false);
   const [pendingCopyMode, setPendingCopyMode] = useState(false);
+  const [pendingShortcuts, setPendingShortcuts] = useState(false);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
   // returns "refine" or "approve", we defer the loop-resume and show
@@ -770,6 +774,7 @@ function AppInner({
     pendingModelPicker ||
     pendingThemePicker ||
     pendingCopyMode ||
+    pendingShortcuts ||
     !!stagedInput ||
     !!pendingEditReview ||
     walkthroughActive ||
@@ -1734,6 +1739,10 @@ function AppInner({
       });
       return;
     }
+    if (key.ctrl && key.input === "p" && !busy && (!modalOpen || pendingShortcuts)) {
+      setPendingShortcuts((prev) => !prev);
+      return;
+    }
     if (
       key.escape &&
       !submittingRef.current &&
@@ -1756,6 +1765,11 @@ function AppInner({
         loop,
         quitProcess,
       });
+      return;
+    }
+    // Esc dismisses the shortcuts help modal
+    if (key.escape && pendingShortcuts) {
+      setPendingShortcuts(false);
       return;
     }
     // Esc dismisses any composer-level picker (slash / @ / slash-arg)
@@ -4629,6 +4643,26 @@ function AppInner({
                     jobs={codeMode ? codeMode.jobs : undefined}
                     activeLoop={activeLoop}
                     statusBar={statusBar}
+                    showShortcuts={pendingShortcuts}
+                    mode={
+                      editMode === "yolo"
+                        ? t("statsPanel.modeYolo")
+                        : editMode === "auto"
+                          ? t("statsPanel.modeAuto")
+                          : editMode === "review"
+                            ? t("statsPanel.modeReview")
+                            : editMode
+                    }
+                    model={
+                      (sessionPreset
+                        ? `${sessionPreset.charAt(0).toUpperCase() + sessionPreset.slice(1)} \u00b7 `
+                        : "") +
+                      (sessionModel === "deepseek-v4-pro"
+                        ? "Deepseek v4 pro"
+                        : sessionModel === "deepseek-v4-flash"
+                          ? "Deepseek v4 flash"
+                          : sessionModel)
+                    }
                     input={input}
                     setInput={setInput}
                     busy={busy}

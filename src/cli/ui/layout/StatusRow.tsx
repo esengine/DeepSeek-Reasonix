@@ -24,7 +24,7 @@ export interface StatusBarConfig {
 const WALLET_MIN_COLS = 90;
 const VERSION_MIN_COLS = 70;
 const FEEDBACK_HINT_MIN_COLS = 100;
-const PRESET_MIN_COLS = 60;
+
 const CTX_TOKENS_MIN_COLS = 90;
 const CTX_BAR_MIN_COLS = 110;
 const CTX_BAR_CELLS = 8;
@@ -44,9 +44,7 @@ const BG = SURFACE.bgElev;
 function Pill({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
     <Box flexDirection="row" flexShrink={0}>
-      <Text backgroundColor={BG}> </Text>
       {children}
-      <Text backgroundColor={BG}> </Text>
     </Box>
   );
 }
@@ -70,8 +68,8 @@ export function StatusRow({
     ((hasSession && statusBar.showSessionCost) || (hasBalance && statusBar.showBalance));
 
   return (
-    <Box flexDirection="column" flexShrink={0}>
-      <Box flexDirection="row" flexWrap="wrap" flexShrink={0}>
+    <Box flexDirection="row" flexShrink={0} marginTop={1}>
+      <Box flexDirection="row" flexWrap="wrap" flexGrow={1}>
         <Text> </Text>
         {status.recording ? (
           <Pill>
@@ -86,26 +84,18 @@ export function StatusRow({
             <ModePill mode={status.mode} network={status.network} detail={status.networkDetail} />
           </Pill>
         )}
-        {cols >= PRESET_MIN_COLS && status.preset !== undefined && (
-          <>
-            <Gap />
-            <Pill>
-              <PresetPill preset={status.preset} model={session.model} />
-            </Pill>
-          </>
-        )}
         <Gap />
         <Pill>
-          <Text color={FG.sub} backgroundColor={BG}>{`${session.id} · ${session.branch}`}</Text>
+          <Text color={FG.sub}>{`${session.id} · ${session.branch}`}</Text>
         </Pill>
         {hasTurn && statusBar.showTurnCost && (
           <>
             <Gap />
             <Pill>
-              <Text bold color={TONE.brand} backgroundColor={BG}>
+              <Text bold color={TONE.brand}>
                 {"▸ "}
               </Text>
-              <Text bold color={FG.body} backgroundColor={BG}>
+              <Text bold color={FG.body}>
                 {`${formatCost(status.cost, status.balanceCurrency)} ${t("statusBar.turn")}`}
               </Text>
             </Pill>
@@ -115,7 +105,7 @@ export function StatusRow({
           <>
             <Gap />
             <Pill>
-              <Text color={TONE.accent} backgroundColor={BG}>
+              <Text color={TONE.accent}>
                 {`${t("statusBar.cache")} ${Math.round(status.cacheHit * 100)}%`}
               </Text>
             </Pill>
@@ -159,57 +149,25 @@ export function StatusRow({
             </Pill>
           </>
         )}
+      </Box>
+      <Box flexDirection="row" flexShrink={0}>
         {statusBar.showVersion && cols >= VERSION_MIN_COLS && (
-          <>
-            <Gap />
-            <Pill>
-              <Text color={FG.faint} backgroundColor={BG}>{`v${VERSION}`}</Text>
-            </Pill>
-          </>
+          <Pill>
+            <Text color={FG.faint}>{`v${VERSION}`}</Text>
+          </Pill>
         )}
         {statusBar.showFeedbackHint && cols >= FEEDBACK_HINT_MIN_COLS && (
           <>
             <Gap />
             <Pill>
-              <Text color={FG.meta} backgroundColor={BG}>
-                {"⚑ "}
-              </Text>
-              <Text color={FG.sub} backgroundColor={BG}>
-                {"/feedback"}
-              </Text>
+              <Text color={FG.meta}>{"⚑ "}</Text>
+              <Text color={FG.sub}>{t("statusBar.shortcutsHint")}</Text>
             </Pill>
           </>
         )}
       </Box>
     </Box>
   );
-}
-
-function PresetPill({
-  preset,
-  model,
-}: {
-  preset: "auto" | "flash" | "pro" | null;
-  model: string;
-}): React.ReactElement {
-  const label = preset ?? shortModelLabel(model);
-  const color = preset === "pro" ? TONE.accent : preset === "flash" ? TONE.brand : FG.sub;
-  return (
-    <>
-      <Text color={FG.meta} backgroundColor={BG} wrap="truncate">
-        {"▴ "}
-      </Text>
-      <Text color={color} backgroundColor={BG} wrap="truncate">
-        {label}
-      </Text>
-    </>
-  );
-}
-
-function shortModelLabel(model: string): string {
-  if (model === "deepseek-v4-flash") return "flash";
-  if (model === "deepseek-v4-pro") return "pro";
-  return model.replace(/^deepseek-/, "");
 }
 
 function CtxUsagePill({
@@ -229,25 +187,21 @@ function CtxUsagePill({
   const filled = Math.round(CTX_BAR_CELLS * ratio);
   return (
     <>
-      <Text color={FG.meta} backgroundColor={BG} wrap="truncate">{`${t("statusBar.ctx")} `}</Text>
+      <Text color={FG.meta} wrap="truncate">{`${t("statusBar.ctx")} `}</Text>
       {showBar && (
         <>
-          <Text color={color} backgroundColor={BG} wrap="truncate">
+          <Text color={color} wrap="truncate">
             {GLYPH.block.repeat(filled)}
           </Text>
-          <Text color={FG.faint} backgroundColor={BG} wrap="truncate">
+          <Text color={FG.faint} wrap="truncate">
             {GLYPH.shade1.repeat(CTX_BAR_CELLS - filled)}
           </Text>
-          <Text backgroundColor={BG} wrap="truncate">
-            {" "}
-          </Text>
+          <Text wrap="truncate"> </Text>
         </>
       )}
-      <Text color={color} backgroundColor={BG} wrap="truncate">{`${pct}%`}</Text>
+      <Text color={color} wrap="truncate">{`${pct}%`}</Text>
       {showTokens && (
-        <Text color={FG.faint} backgroundColor={BG}>
-          {` · ${formatTokens(tokens)}/${formatTokens(cap)}`}
-        </Text>
+        <Text color={FG.faint}>{` · ${formatTokens(tokens)}/${formatTokens(cap)}`}</Text>
       )}
     </>
   );
@@ -262,13 +216,10 @@ function McpLoadingPill({
 }): React.ReactElement {
   return (
     <>
-      <Text color={TONE.brand} backgroundColor={BG} wrap="truncate">
+      <Text color={TONE.brand} wrap="truncate">
         {"⌁ "}
       </Text>
-      <Text
-        color={FG.body}
-        backgroundColor={BG}
-      >{`${t("statusBar.mcpLoading")} ${ready}/${total}`}</Text>
+      <Text color={FG.body}>{`${t("statusBar.mcpLoading")} ${ready}/${total}`}</Text>
     </>
   );
 }
@@ -290,27 +241,27 @@ function WalletPill({
   const showBalanceLine = showBalanceCfg && typeof balance === "number";
   return (
     <>
-      <Text color={FG.meta} backgroundColor={BG} wrap="truncate">
+      <Text color={FG.meta} wrap="truncate">
         {"⛁ "}
       </Text>
       {showSpent && (
-        <Text color={FG.body} backgroundColor={BG}>
+        <Text color={FG.body}>
           {`${formatCost(sessionCostUsd, currency, 2)} ${t("statusBar.spent")}`}
         </Text>
       )}
       {showSpent && showBalanceLine && (
-        <Text color={FG.meta} backgroundColor={BG} wrap="truncate">
+        <Text color={FG.meta} wrap="truncate">
           {"  /  "}
         </Text>
       )}
       {showBalanceLine && (
-        <Text bold color={balanceColor(balance, currency)} backgroundColor={BG} wrap="truncate">
-          {formatBalance(balance, currency, { fractionDigits: 2 })}
+        <Text color={FG.faint} wrap="truncate">
+          {t("statusBar.left")}
         </Text>
       )}
       {showBalanceLine && (
-        <Text color={FG.faint} backgroundColor={BG} wrap="truncate">
-          {t("statusBar.left")}
+        <Text bold color={balanceColor(balance, currency)} wrap="truncate">
+          {formatBalance(balance, currency, { fractionDigits: 2 })}
         </Text>
       )}
     </>
@@ -331,10 +282,10 @@ function ModePill({
     const pill = modeGlyph(mode);
     return (
       <>
-        <Text color={pill.color} backgroundColor={BG} wrap="truncate">
+        <Text color={pill.color} wrap="truncate">
           {pill.glyph}
         </Text>
-        <Text color={FG.sub} backgroundColor={BG} wrap="truncate">{` ${modeLabel}`}</Text>
+        <Text color={FG.sub} wrap="truncate">{` ${modeLabel}`}</Text>
       </>
     );
   }
@@ -343,12 +294,10 @@ function ModePill({
     const tail = detail ? ` · ${detail}` : "";
     return (
       <>
-        <Text color={dot.color} backgroundColor={BG} wrap="truncate">
+        <Text color={dot.color} wrap="truncate">
           {dot.glyph}
         </Text>
-        <Text color={dot.color} backgroundColor={BG}>
-          {` ${modeLabel} · ${t("statusBar.slow")}${tail}`}
-        </Text>
+        <Text color={dot.color}>{` ${modeLabel} · ${t("statusBar.slow")}${tail}`}</Text>
       </>
     );
   }
@@ -356,10 +305,10 @@ function ModePill({
     const tail = detail ? ` · ${detail}` : "";
     return (
       <>
-        <Text color={dot.color} backgroundColor={BG} wrap="truncate">
+        <Text color={dot.color} wrap="truncate">
           {dot.glyph}
         </Text>
-        <Text color={dot.color} backgroundColor={BG} wrap="truncate">
+        <Text color={dot.color} wrap="truncate">
           {` ${t("statusBar.disconnect")}${tail}`}
         </Text>
       </>
@@ -367,10 +316,10 @@ function ModePill({
   }
   return (
     <>
-      <Text color={dot.color} backgroundColor={BG} wrap="truncate">
+      <Text color={dot.color} wrap="truncate">
         {dot.glyph}
       </Text>
-      <Text color={dot.color} backgroundColor={BG} wrap="truncate">
+      <Text color={dot.color} wrap="truncate">
         {` ${t("statusBar.reconnecting")}`}
       </Text>
     </>
@@ -388,17 +337,17 @@ function CountdownRow({
   const endsAt = Date.now() + secondsLeft * 1000;
   return (
     <>
-      <Text color={pill.color} backgroundColor={BG} wrap="truncate">
+      <Text color={pill.color} wrap="truncate">
         {pill.glyph}
       </Text>
-      <Text color={FG.sub} backgroundColor={BG} wrap="truncate">
+      <Text color={FG.sub} wrap="truncate">
         {` ${t("statusBar.editsLabel")}${mode} · `}
       </Text>
-      <Text color={TONE.warn} backgroundColor={BG} wrap="truncate">
+      <Text color={TONE.warn} wrap="truncate">
         {t("statusBar.approvingIn")}
       </Text>
-      <Countdown endsAt={endsAt} backgroundColor={BG} />
-      <Text color={TONE.warn} backgroundColor={BG} wrap="truncate">
+      <Countdown endsAt={endsAt} />
+      <Text color={TONE.warn} wrap="truncate">
         {t("statusBar.escToInterrupt")}
       </Text>
     </>
@@ -409,10 +358,10 @@ function RecordingPill({ rec }: { rec: NonNullable<StatusBar["recording"]> }): R
   const sizeMb = (rec.sizeBytes / (1024 * 1024)).toFixed(1);
   return (
     <>
-      <Text bold color={TONE.err} backgroundColor={BG} wrap="truncate">
+      <Text bold color={TONE.err} wrap="truncate">
         {t("statusBar.recordingGlyph")}
       </Text>
-      <Text color={TONE.err} backgroundColor={BG}>
+      <Text color={TONE.err}>
         {` ${sizeMb}${t("statusBar.mb")} · ${rec.events}${t("statusBar.evt")}`}
       </Text>
     </>

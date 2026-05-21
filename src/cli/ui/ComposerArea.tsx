@@ -12,11 +12,12 @@ import type { JobRegistry } from "../../tools/jobs.js";
 
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { PromptInput } from "./PromptInput.js";
+import { ShortcutsHelpModal } from "./ShortcutsHelpModal.js";
 import type { SlashArgPickerProps } from "./SlashArgPicker.js";
 import { SlashArgPicker } from "./SlashArgPicker.js";
 import type { SlashSuggestionsProps } from "./SlashSuggestions.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
-import { ModeStatusBar } from "./layout/LiveRows.js";
+
 import { StatusRow } from "./layout/StatusRow.js";
 import { formatLoopStatus } from "./loop.js";
 import { useChatScrollState } from "./state/chat-scroll-provider.js";
@@ -36,6 +37,12 @@ export interface ComposerAreaProps {
   jobs?: JobRegistry;
   activeLoop?: Parameters<typeof LoopStatusRow>[0]["loop"] | null;
   statusBar: StatusBarConfig;
+  /** Current mode for input box bottom display. */
+  mode?: string;
+  /** Current model for input box bottom display. */
+  model?: string;
+  /** Show the shortcuts help modal above the input box. */
+  showShortcuts?: boolean;
 
   // ── prompt ───────────────────────────────────────────────────────
   input: string;
@@ -96,6 +103,9 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     jobs,
     activeLoop,
     statusBar,
+    mode,
+    model,
+    showShortcuts,
     input,
     setInput,
     busy,
@@ -139,6 +149,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
             />
           ) : null}
         </Box>
+        {showShortcuts ? <ShortcutsHelpModal /> : null}
         <PromptInput
           value={input}
           onChange={setInput}
@@ -149,18 +160,10 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
           onOpenExternalEditor={onOpenExternalEditor}
           onCursorChange={onCursorChange}
           rowsAfter={1 + (activeLoop ? 1 : 0) + (jobs ? 1 : 0)}
+          mode={mode}
+          model={model}
         />
         {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
-        {jobs ? (
-          <ModeStatusBar
-            editMode={editMode}
-            pendingCount={pendingCount}
-            flash={modeFlash}
-            planMode={planMode}
-            undoArmed={undoArmed}
-            jobs={jobs}
-          />
-        ) : null}
         <StatusRow statusBar={statusBar} />
       </Box>
     );

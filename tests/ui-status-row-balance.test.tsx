@@ -271,8 +271,10 @@ describe("StatusRow + SlashSuggestions composition", () => {
     expect(statusLine).toBeDefined();
     expect(statusLine).toContain("auto");
     expect(statusLine).toContain("default · main");
-    expect(statusLine).toContain(`v${VERSION}`);
-    expect(statusLine).toContain("/feedback");
+    expect(lines.some((line) => line.includes(`v${VERSION}`))).toBe(true);
+    expect(
+      lines.some((line) => line.includes("Ctrl+P shortcuts") || line.includes("Ctrl+P 快捷键")),
+    ).toBe(true);
     expect(statusLine).not.toContain("SETUP");
     expect(statusLine).not.toContain("commands");
     expect(lines.some((line) => /^\s*SETUP\s*$/.test(line))).toBe(true);

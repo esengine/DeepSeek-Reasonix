@@ -437,6 +437,8 @@ export interface TranslationSchema {
     mcpLoading: string;
     /** Word used in the context-usage pill (rendered as `ctx 72% · 144K/200K`). */
     ctx: string;
+    /** Hint shown next to the ⚑ icon — triggers the shortcut help modal. */
+    shortcutsHint: string;
   };
   editMode: {
     plan: string;
@@ -913,5 +915,33 @@ export interface TranslationSchema {
     review: string;
     securityReview: string;
     test: string;
+  };
+  shortcutsHelp: {
+    title: string;
+    groupInput: string;
+    groupNavigation: string;
+    groupSession: string;
+    groupSystem: string;
+    descEnter: string;
+    descShiftEnter: string;
+    descCtrlU: string;
+    descCtrlW: string;
+    descCtrlP: string;
+    descCtrlX: string;
+    descArrows: string;
+    descPgUpDown: string;
+    descCtrlL: string;
+    descCtrlB: string;
+    descNewSession: string;
+    descListSessions: string;
+    descSwitchModel: string;
+    descSwitchPreset: string;
+    descSwitchTheme: string;
+    descCtrlC: string;
+    descEsc: string;
+    descCtrlR: string;
+    descCtrlO: string;
+    descHelp: string;
+    descShiftTab: string;
   };
 }
