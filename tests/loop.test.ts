@@ -2,6 +2,10 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, Usage } from "../src/client.js";
+import {
+  HISTORY_FOLD_AGGRESSIVE_THRESHOLD,
+  HISTORY_FOLD_THRESHOLD,
+} from "../src/context-manager.js";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
@@ -610,10 +614,15 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBe(4);
   });
 
-  it("auto-folds history when promptTokens crosses 50% of ctxMax", async () => {
+  it("auto-folds history when promptTokens crosses the normal fold threshold", async () => {
     // Shrink ctxMax so the seed log can trip the auto-fold threshold without
     // also exceeding the preflight byte ceiling (~700 KB by default).
     DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 100_000;
+    // Aim just past the normal threshold but below the aggressive band.
+    const tripPrompt = Math.ceil(
+      100_000 *
+        (HISTORY_FOLD_THRESHOLD + (HISTORY_FOLD_AGGRESSIVE_THRESHOLD - HISTORY_FOLD_THRESHOLD) / 2),
+    );
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -622,16 +631,15 @@ describe("CacheFirstLoop (non-streaming)", () => {
       fn: async () => "ok",
     });
     const responses: FakeResponseShape[] = [
-      // Iter 0: tool call with usage above 50% of the 100k test ctx.
       {
         content: "",
         tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
         usage: {
-          prompt_tokens: 60_000,
+          prompt_tokens: tripPrompt,
           completion_tokens: 10,
-          total_tokens: 60_010,
-          prompt_cache_hit_tokens: 50_000,
-          prompt_cache_miss_tokens: 10_000,
+          total_tokens: tripPrompt + 10,
+          prompt_cache_hit_tokens: Math.floor(tripPrompt * 0.8),
+          prompt_cache_miss_tokens: Math.ceil(tripPrompt * 0.2),
         },
       },
       // Summary call response (compactHistory).
@@ -677,8 +685,12 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBeLessThan(beforeMessages);
   }, 30_000);
 
-  it("uses the aggressive fold tier when promptTokens crosses 70% of ctxMax", async () => {
+  it("uses the aggressive fold tier when promptTokens crosses the aggressive threshold", async () => {
     DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 100_000;
+    // Halfway between the aggressive threshold and the force-summary line at 0.8.
+    const tripPrompt = Math.ceil(
+      100_000 * (HISTORY_FOLD_AGGRESSIVE_THRESHOLD + (0.8 - HISTORY_FOLD_AGGRESSIVE_THRESHOLD) / 2),
+    );
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -687,16 +699,15 @@ describe("CacheFirstLoop (non-streaming)", () => {
       fn: async () => "ok",
     });
     const responses: FakeResponseShape[] = [
-      // Iter 0: usage at 75% of the 100k test ctx — squarely in the aggressive band.
       {
         content: "",
         tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
         usage: {
-          prompt_tokens: 75_000,
+          prompt_tokens: tripPrompt,
           completion_tokens: 10,
-          total_tokens: 75_010,
-          prompt_cache_hit_tokens: 60_000,
-          prompt_cache_miss_tokens: 15_000,
+          total_tokens: tripPrompt + 10,
+          prompt_cache_hit_tokens: Math.floor(tripPrompt * 0.8),
+          prompt_cache_miss_tokens: Math.ceil(tripPrompt * 0.2),
         },
       },
       // Summary call (compactHistory).

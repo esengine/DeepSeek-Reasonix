@@ -19,31 +19,18 @@ import {
 } from "./tokenizer.js";
 import type { ChatMessage } from "./types.js";
 
-function envFraction(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 && n <= 1 ? n : fallback;
-}
-
 /** Auto-fold when a turn's response shows promptTokens above this fraction of ctxMax. */
-export const HISTORY_FOLD_THRESHOLD = envFraction("REASONIX_FOLD_THRESHOLD", 0.5);
+export const HISTORY_FOLD_THRESHOLD = 0.75;
 /** Tail budget after a normal fold, as a fraction of ctxMax. */
-export const HISTORY_FOLD_TAIL_FRACTION = envFraction("REASONIX_FOLD_TAIL_FRACTION", 0.2);
+export const HISTORY_FOLD_TAIL_FRACTION = 0.2;
 /** Above this fraction the normal fold's tail budget didn't buy enough headroom — fold harder. */
-export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = envFraction(
-  "REASONIX_FOLD_AGGRESSIVE_THRESHOLD",
-  0.7,
-);
+export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = 0.78;
 /** Tail budget after an aggressive fold — half the normal one, sacrifices recent context for headroom. */
-export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = envFraction(
-  "REASONIX_FOLD_AGGRESSIVE_TAIL_FRACTION",
-  0.1,
-);
+export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = 0.1;
 /** Skip the fold if the head wouldn't shrink the log by at least this fraction. */
 export const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
 /** Above this fraction we exit the turn with a summary instead of folding (defense in depth). */
-export const FORCE_SUMMARY_THRESHOLD = envFraction("REASONIX_FORCE_SUMMARY_THRESHOLD", 0.8);
+export const FORCE_SUMMARY_THRESHOLD = 0.8;
 /** Local preflight estimate above this fraction trips the emergency in-place compact path. */
 export const PREFLIGHT_EMERGENCY_THRESHOLD = 0.95;
 /** Emergency preflight target after local truncation, as a fraction of ctxMax. */
