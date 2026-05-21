@@ -3585,14 +3585,42 @@ function AppInner({
         return;
       }
 
-      if (choice === "refine" || choice === "approve") {
+      if (choice === "refine") {
         if (pendingPlan) {
           const questions = extractOpenQuestionsSection(pendingPlan) ?? undefined;
-          setStagedInput({ plan: pendingPlan, mode: choice, questions });
+          setStagedInput({ plan: pendingPlan, mode: "refine", questions });
           setPendingPlan(null);
-        } else if (choice === "approve") {
-          setStagedInput({ plan: "", mode: "approve" });
         }
+        return;
+      }
+
+      if (choice === "approve") {
+        if (pendingPlan) {
+          const questions = extractOpenQuestionsSection(pendingPlan) ?? undefined;
+          if (questions) {
+            // Plan flagged open questions — keep the staged input so the user
+            // can answer them before approve goes through.
+            setStagedInput({ plan: pendingPlan, mode: "approve", questions });
+            setPendingPlan(null);
+          } else {
+            // No open questions → Accept should execute the plan, not stop
+            // for an optional-guidance step. Resolve the gate directly via the
+            // same path handleStagedInputSubmit uses for explicit-feedback
+            // approvals so plan-card setup and lifecycle hooks stay in sync.
+            // #1475: the staged input was visually indistinguishable from the
+            // regular composer, trapping users after the picker reopened from
+            // a reject-flow Esc and breaking their "Accept = run it" mental
+            // model.
+            const plan = pendingPlan;
+            setPendingPlan(null);
+            await handlePlanFeedbackRef.current("", { plan, mode: "approve" });
+          }
+          return;
+        }
+        // `/apply-plan` slash fallback — model wrote a plan in assistant text
+        // instead of calling submit_plan, so there's no pending gate to resolve.
+        // Surface the staged input so we still capture the implement-now intent.
+        setStagedInput({ plan: "", mode: "approve" });
         return;
       }
 
