@@ -197,6 +197,8 @@ export interface TranslationSchema {
     verboseOn: string;
     verboseOff: string;
     commandFailed: string;
+    steerInjected: string;
+    steerCommandRejected: string;
     btwUsage: string;
     btwHeader: string;
     btwFailed: string;
@@ -483,6 +485,10 @@ export interface TranslationSchema {
     editorExited: string;
     /** Typeahead queue indicator, e.g. "▸ 3 lines staged · esc recall" */
     typeaheadStaged: string;
+    /** Placeholder shown when steerBusy is active. */
+    steerPlaceholder: string;
+    /** Status-line hint shown when steerBusy is active. */
+    steerHint: string;
   };
   pathConfirm: {
     title: string;

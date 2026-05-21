@@ -56,6 +56,13 @@ import type { ChatMessage, ToolCall } from "./types.js";
 
 const ESCALATION_MODEL = "deepseek-v4-pro";
 
+function formatSteerUserMessage(content: string): string {
+  return [
+    "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]",
+    content,
+  ].join("\n");
+}
+
 export {
   fixToolCallPairing,
   formatLoopError,
@@ -140,17 +147,21 @@ export class CacheFirstLoop {
   /** Authoritative running-id set — UI cards consult this instead of trusting end-event delivery. Insert at dispatch entry, delete in finally. */
   private readonly _inflight = new InflightSet();
 
-  /** Typeahead steer message set by the UI; step() consumes it at the next iter boundary. */
-  private _steer: string | null = null;
+  /** Typeahead steer messages set by the UI; step() consumes one at each iter boundary. */
+  private readonly _steerQueue: string[] = [];
 
   /** Set true when a steer was consumed this turn; cleared on next step() entry. */
   private _steerConsumed = false;
 
   /** UI calls this to inject a mid-turn steer message without aborting the current turn.
-   *  New text resets steerConsumed — a fresh steer hasn't been consumed yet. */
+   *  New text resets steerConsumed because a fresh steer is queued. */
   steer(text: string | null): void {
-    this._steer = text;
-    if (text !== null) this._steerConsumed = false;
+    if (text === null) {
+      this._steerQueue.length = 0;
+      return;
+    }
+    this._steerQueue.push(text);
+    this._steerConsumed = false;
   }
 
   /** True when a steer was consumed this turn (UI gate to avoid double-submit). */
@@ -590,6 +601,7 @@ export class CacheFirstLoop {
             cap: this.budgetUsd.toFixed(2),
           }),
         };
+        this._steerQueue.length = 0;
         return;
       }
       if (!this._budgetWarned && spent >= this.budgetUsd * 0.8) {
@@ -654,7 +666,7 @@ export class CacheFirstLoop {
     // first round-trip still leaves the message in the log; the user can
     // /retry without re-typing.
     this.appendAndPersist({ role: "user", content: userInput });
-    let pendingUser: string | null = null;
+    const pendingUser: string | null = null;
     const toolSpecs = this.prefix.tools();
     let rateLimitWarningShown = false;
 
@@ -684,6 +696,7 @@ export class CacheFirstLoop {
         } finally {
           this._turnAbort = new AbortController();
         }
+        this._steerQueue.length = 0;
         return;
       }
       // Bridge the silence between the PREVIOUS iter's tool result and
@@ -707,18 +720,17 @@ export class CacheFirstLoop {
       }
       let messages = this.buildMessages(pendingUser);
 
-      // Consume a typeahead steer if the UI wrote one between iters.
-      // Injecting as a user message via appendAndPersist means the
-      // next buildMessages() (or the fold rebuild below) will include it.
-      if (this._steer !== null) {
-        const steer = this._steer;
-        this._steer = null;
-        this._steerConsumed = true;
-        this.appendAndPersist({ role: "user", content: steer });
+      // Consume one queued steer between model calls. This never mutates
+      // the currently running request; the steer becomes visible only in
+      // the next request payload.
+      if (this._steerQueue.length > 0) {
+        const steer = this._steerQueue.shift()!;
+        this._steerConsumed = this._steerQueue.length === 0;
+        this.appendAndPersist({
+          role: "user",
+          content: formatSteerUserMessage(steer),
+        });
         messages = this.buildMessages(pendingUser);
-        // Treat the steer as a fresh user utterance — reset pendingUser
-        // since it's already in the log now.
-        pendingUser = null;
         yield {
           turn: this._turn,
           role: "steer",
@@ -943,6 +955,7 @@ export class CacheFirstLoop {
           } finally {
             this._turnAbort = new AbortController();
           }
+          this._steerQueue.length = 0;
           return;
         }
         const probe = is5xxError(err) ? await probeDeepSeekReachable(this.client) : undefined;
@@ -952,6 +965,7 @@ export class CacheFirstLoop {
           content: "",
           error: formatLoopError(err as Error, probe),
         };
+        this._steerQueue.length = 0;
         return;
       }
 
@@ -1071,11 +1085,16 @@ export class CacheFirstLoop {
       }
 
       if (repairedCalls.length === 0) {
+        if (this._steerQueue.length > 0) {
+          continue;
+        }
         if (allSuppressed) {
           yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
+          this._steerQueue.length = 0;
           return;
         }
         yield { turn: this._turn, role: "done", content: assistantContent };
+        this._steerQueue.length = 0;
         return;
       }
 
@@ -1124,6 +1143,7 @@ export class CacheFirstLoop {
         };
         this.context.trimTrailingToolCalls();
         yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "context-guard" });
+        this._steerQueue.length = 0;
         return;
       }
 

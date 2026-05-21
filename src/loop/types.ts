@@ -14,7 +14,7 @@ export type EventRole =
   | "warning"
   /** Transient indicator for silent phases; UI clears on next primary event. */
   | "status"
-  /** Mid-turn steer injected as a user utterance without aborting the current turn. */
+  /** Mid-turn steer injected as queued user guidance without aborting the current turn. */
   | "steer";
 
 export interface LoopEvent {

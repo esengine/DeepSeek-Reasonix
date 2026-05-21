@@ -43,6 +43,9 @@ export interface PromptInputProps {
   onSubmit: (v: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  /** When true, the input stays editable during a busy turn — Enter fires normal onSubmit,
+   *  but the parent should detect the busy state and call loop.steer() instead of step(). */
+  steerBusy?: boolean;
   /** ↑/↓ / Ctrl+N hand off here when no in-buffer cursor move applies — parent walks history and swaps `value` via `onChange`. */
   onHistoryPrev?: () => void;
   onHistoryNext?: () => void;
@@ -63,6 +66,7 @@ export function PromptInput({
   onSubmit,
   disabled,
   placeholder,
+  steerBusy,
   onHistoryPrev,
   onHistoryNext,
   onOpenExternalEditor,
@@ -105,11 +109,11 @@ export function PromptInput({
     const insertion = shouldInlinePaste(content)
       ? content
       : (() => {
-          const id = nextPasteIdRef.current % PASTE_SENTINEL_RANGE;
-          nextPasteIdRef.current = id + 1;
-          pastesRef.current.set(id, makePasteEntry(id, content));
-          return encodePasteSentinel(id);
-        })();
+        const id = nextPasteIdRef.current % PASTE_SENTINEL_RANGE;
+        nextPasteIdRef.current = id + 1;
+        pastesRef.current.set(id, makePasteEntry(id, content));
+        return encodePasteSentinel(id);
+      })();
     const next = v.slice(0, c) + insertion + v.slice(c);
     lastLocalValueRef.current = next;
     cursorRef.current = c + insertion.length;
@@ -117,8 +121,13 @@ export function PromptInput({
     setCursor(c + insertion.length);
   };
 
+  // Derived guard: input is only truly frozen when disabled AND no steer is pending.
+  // When steerBusy is active the user can still type; Enter routes via the steer path.
+  const inputFrozen = disabled && !steerBusy;
+  const inputActive = !disabled || !!steerBusy;
+
   useKeystroke((ev) => {
-    if (disabled) return;
+    if (inputFrozen) return;
     if (ev.paste) {
       // Bracketed-paste content delivered by the stdin reader.
       if (ev.input.length > 0) registerPaste(ev.input);
@@ -175,7 +184,7 @@ export function PromptInput({
     if (action.historyHandoff === "prev") onHistoryPrev?.();
     if (action.historyHandoff === "next") onHistoryNext?.();
     if (action.openExternalEditor) onOpenExternalEditor?.();
-  }, !disabled);
+  }, inputActive);
 
   // ── Render ──────────────────────────────────────────────────────
 
@@ -188,12 +197,14 @@ export function PromptInput({
 
   // Hint avoids literal `/` and `@` glyphs — they render in the same row as
   // a just-cleared buffer and read as residual typed input on dim-poor terminals.
-  const effectivePlaceholder = disabled
-    ? (placeholder ?? t("composer.waitingForResponse"))
-    : (placeholder ?? t("composer.placeholder"));
+  const effectivePlaceholder = steerBusy
+    ? t("composer.steerPlaceholder")
+    : disabled
+      ? (placeholder ?? t("composer.waitingForResponse"))
+      : (placeholder ?? t("composer.placeholder"));
 
   const lines = value.length > 0 ? value.split("\n") : [""];
-  const accentColor = disabled ? FG.faint : TONE.brand;
+  const accentColor = steerBusy ? TONE.brand : disabled ? FG.faint : TONE.brand;
   const cursorVisible = true;
   const { line: cursorLine, col: cursorCol } = lineAndColumn(value, cursor);
 
@@ -231,7 +242,7 @@ export function PromptInput({
                   key={`ln-${i}-text-0`}
                   line=""
                   isFirst={true}
-                  isCursorLine={isCursorLine && !disabled}
+                  isCursorLine={isCursorLine && inputActive}
                   cursorCol={isCursorLine ? cursorCol : null}
                   cursorVisible={cursorVisible}
                   showPlaceholder
@@ -242,6 +253,7 @@ export function PromptInput({
                   accentColor={accentColor}
                   pastes={pastesRef.current}
                   disabled={disabled === true}
+                  steerBusy={steerBusy}
                 />,
               );
               firstRowEmitted = true;
@@ -261,7 +273,7 @@ export function PromptInput({
                     entry={pastesRef.current.get(seg.id)}
                     pasteId={seg.id}
                     isFirst={isFirst}
-                    active={cursorOnIt && !disabled}
+                    active={cursorOnIt && inputActive}
                     visibleCells={visibleCells}
                     accentColor={accentColor}
                   />,
@@ -277,7 +289,7 @@ export function PromptInput({
                   key={`ln-${i}-text-${segIdx}`}
                   line={seg.text}
                   isFirst={isFirst}
-                  isCursorLine={segHasCursor && !disabled}
+                  isCursorLine={segHasCursor && inputActive}
                   cursorCol={segHasCursor ? cursorCol - seg.startOffset : null}
                   cursorVisible={cursorVisible}
                   showPlaceholder={false}
@@ -288,6 +300,7 @@ export function PromptInput({
                   accentColor={accentColor}
                   pastes={pastesRef.current}
                   disabled={disabled === true}
+                  steerBusy={steerBusy}
                 />,
               );
             }
@@ -299,7 +312,7 @@ export function PromptInput({
                   key={`ln-${i}-empty`}
                   line=""
                   isFirst={isFirst}
-                  isCursorLine={isCursorLine && !disabled}
+                  isCursorLine={isCursorLine && inputActive}
                   cursorCol={isCursorLine ? 0 : null}
                   cursorVisible={cursorVisible}
                   showPlaceholder={false}
@@ -310,13 +323,14 @@ export function PromptInput({
                   accentColor={accentColor}
                   pastes={pastesRef.current}
                   disabled={disabled === true}
+                  steerBusy={steerBusy}
                 />,
               );
             }
           }
           return rows;
         })()}
-        {showHugeBufferHints && !disabled ? (
+        {showHugeBufferHints && inputActive ? (
           <Box>
             <Text color={FG.faint}>
               {`  [${lines.length} lines · PgUp/PgDn jump · Ctrl+U clear · Ctrl+W del word]`}
@@ -332,9 +346,17 @@ export function PromptInput({
           </Box>
         ) : null}
         <Box height={1} />
-        {disabled ? (
+        {inputFrozen ? (
           <Box marginTop={1}>
             <Text color={FG.faint}>{"  esc to stop"}</Text>
+          </Box>
+        ) : null}
+        {steerBusy ? (
+          <Box marginTop={1} flexDirection="row">
+            <Text color={TONE.accent}>{"  \u23ce "}</Text>
+            <Text color={FG.faint}>{t("composer.steerHint")}</Text>
+            <Text color={FG.faint}>{"  ·  "}</Text>
+            <Text color={FG.faint}>{"esc to stop"}</Text>
           </Box>
         ) : null}
       </Box>
@@ -488,6 +510,7 @@ interface PromptLineProps {
   accentColor: string;
   pastes: ReadonlyMap<number, PasteEntry>;
   disabled: boolean;
+  steerBusy?: boolean;
 }
 
 function PromptLine({
@@ -504,14 +527,16 @@ function PromptLine({
   accentColor,
   pastes,
   disabled,
+  steerBusy,
 }: PromptLineProps) {
+  const promptActive = !disabled || !!steerBusy;
   if (showPlaceholder) {
     return (
       <Box>
         <Text bold color={accentColor}>
           {promptPrefix}
         </Text>
-        {!disabled ? <Text color={accentColor}>{cursorVisible ? "▌" : " "}</Text> : null}
+        {promptActive ? <Text color={accentColor}>{cursorVisible ? "▌" : " "}</Text> : null}
         <Text color={FG.faint}>{placeholderText}</Text>
       </Box>
     );

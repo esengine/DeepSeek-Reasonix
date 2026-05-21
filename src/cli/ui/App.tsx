@@ -196,6 +196,11 @@ import { useEditHistory } from "./useEditHistory.js";
 import { useSessionInfo } from "./useSessionInfo.js";
 import { useSubagent } from "./useSubagent.js";
 
+function isBusyPromptCommand(text: string): boolean {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith("/") || trimmed.startsWith("#") || detectBangCommand(trimmed) !== null;
+}
+
 export interface AppProps {
   model: string;
   /** Preset resolved at launch; keeps flash distinct from auto when both use deepseek-v4-flash. */
@@ -2181,7 +2186,15 @@ function AppInner({
           },
           submitPrompt: (text: string): SubmitResult => {
             if (busyRef.current) {
-              return { accepted: false, reason: "loop is busy with a turn" };
+              if (isBusyPromptCommand(text)) {
+                return {
+                  accepted: false,
+                  reason: "commands are disabled while steering a busy turn",
+                };
+              }
+              // Steer into current turn instead of rejecting
+              loop.steer(text);
+              return { accepted: true, reason: "steered" };
             }
             const fn = handleSubmitRef.current;
             if (!fn) return { accepted: false, reason: "TUI not ready" };
@@ -2622,6 +2635,25 @@ function AppInner({
         return;
       }
       if (busy || submittingRef.current) {
+        // Busy with an active turn: inject text as a mid-turn steer
+        // message instead of silently dropping it. The steer is
+        // consumed at the next iteration boundary inside step() and
+        // the model sees it as additional guidance in the same turn.
+        if (busy && text.trim()) {
+          if (isBusyPromptCommand(text)) {
+            log.pushInfo(t("app.steerCommandRejected"));
+            return;
+          }
+          setInput("");
+          resetCursor();
+          pushHistory(text);
+          loop.steer(text);
+          // Show header + pending text in ghost (light gray).
+          // When the loop consumes the steer, the steer event handler
+          // will promote it to a normal user message.
+          log.pushInfo(t("app.steerInjected"));
+          log.pushInfo(text, "ghost");
+        }
         return;
       }
       // Cancel-on-user-input: any user-typed submit cancels an active
@@ -3304,6 +3336,9 @@ function AppInner({
             });
           } else if (ev.role === "warning") {
             handleWarningEvent(ev, { log, setTurnOnPro });
+          } else if (ev.role === "steer") {
+            // The ghost preview from handleSubmit's steer branch already
+            // confirmed the message was queued; nothing more to show.
           }
         }
         flush();
@@ -4600,6 +4635,7 @@ function AppInner({
                   input={input}
                   setInput={setInput}
                   busy={busy}
+                  steerBusy={busy}
                   onSubmit={handleSubmit}
                   onHistoryPrev={handleHistoryPrev}
                   onHistoryNext={handleHistoryNext}

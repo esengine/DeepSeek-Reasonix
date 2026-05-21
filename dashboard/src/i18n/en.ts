@@ -164,6 +164,8 @@ export const en = {
     modeView: "session view",
     placeholder: "Type a prompt — Enter sends, Shift+Enter for a newline · / @ for pickers",
     placeholderBusy: "wait for the current turn to finish…",
+    placeholderSteerBusy: "type to steer — commands and pickers are disabled while busy",
+    steerHint: "message steers the current turn (added as instruction)",
     send: "Send",
     new: "New",
     clear: "Clear",

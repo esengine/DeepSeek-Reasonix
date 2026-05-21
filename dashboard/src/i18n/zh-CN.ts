@@ -164,6 +164,8 @@ export const zhCN = {
     modeView: "会话视图",
     placeholder: "输入提示词 — Enter 发送，Shift+Enter 换行 · / @ 打开选择器",
     placeholderBusy: "请等待当前轮次完成…",
+    placeholderSteerBusy: "输入消息以引导当前任务 — 忙碌时不支持命令和选择器",
+    steerHint: "消息将作为附加指示引导当前轮次",
     send: "发送",
     new: "新建",
     clear: "清除",

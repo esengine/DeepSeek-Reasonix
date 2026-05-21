@@ -600,6 +600,8 @@ export const EN: TranslationSchema = {
     verboseOn: "▸ verbose mode on — full reasoning + tool output",
     verboseOff: "▸ verbose mode off — head/tail elision restored",
     commandFailed: "! command failed",
+    steerInjected: "▸ steering queued — will be added after the current step",
+    steerCommandRejected: "▸ commands are disabled while steering a busy turn",
     btwUsage: "▸ /btw <question> — ask a side question without polluting the conversation context.",
     btwHeader: "≫ btw",
     btwFailed: "/btw failed",
@@ -1313,6 +1315,8 @@ export const EN: TranslationSchema = {
       "no $EDITOR / $VISUAL / $GIT_EDITOR set \u2014 export one (e.g. `export EDITOR=nano`) and retry",
     editorExited: "editor exited with code {code}",
     typeaheadStaged: "\u25b8 {count} line(s) staged \u00b7 esc recall",
+    steerPlaceholder: "type to steer the current task — commands are disabled while busy",
+    steerHint: "send — injected mid-turn",
   },
   pathConfirm: {
     title: "Outside-sandbox path",

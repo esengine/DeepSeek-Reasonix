@@ -582,6 +582,8 @@ export const zhCN: TranslationSchema = {
     verboseOn: "▸ 详细模式已开 — 显示完整推理 + 工具输出",
     verboseOff: "▸ 详细模式已关 — 恢复头尾省略",
     commandFailed: "! 命令失败",
+    steerInjected: "▸ 已加入引导队列 — 将在当前步骤后注入",
+    steerCommandRejected: "▸ 当前轮次忙碌时不能提交命令，只能输入普通引导消息",
     btwUsage: "▸ /btw <问题> — 顺便问个题外话，不会写入当前会话上下文。",
     btwHeader: "≫ btw",
     btwFailed: "/btw 调用失败",
@@ -1243,6 +1245,8 @@ export const zhCN: TranslationSchema = {
       "未设置 $EDITOR / $VISUAL / $GIT_EDITOR — 请导出环境变量（例如 `export EDITOR=nano`）后重试",
     editorExited: "编辑器异常退出，返回码 {code}",
     typeaheadStaged: "\u25b8 {count} 行已暂存 \u00b7 esc 召回",
+    steerPlaceholder: "输入消息以引导当前任务 — 忙碌时不支持命令",
+    steerHint: "发送 — 回合内注入",
   },
   pathConfirm: {
     title: "沙箱外路径",

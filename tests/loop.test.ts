@@ -2277,9 +2277,82 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     // steerConsumed should be true after consumption.
     expect(loop.steerConsumed).toBe(true);
 
-    // The steer should appear as a user message in the log.
+    // The steer should appear as a user message in the log, wrapped so it
+    // remains guidance for the current task rather than a new top-level task.
     const userMessages = loop.log.entries.filter((m) => m.role === "user");
-    expect(userMessages.some((m) => m.content === "mid-turn steer message")).toBe(true);
+    expect(
+      userMessages.some(
+        (m) =>
+          typeof m.content === "string" &&
+          m.content.includes("Mid-turn steer queued by the user") &&
+          m.content.includes("mid-turn steer message"),
+      ),
+    ).toBe(true);
+  });
+
+  it("queues multiple mid-turn steers and consumes one per iteration", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "add", arguments: '{"a":1,"b":1}' },
+          },
+        ],
+      },
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_2",
+            type: "function",
+            function: { name: "add", arguments: '{"a":2,"b":2}' },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+
+    const tools = new ToolRegistry();
+    tools.register<{ a: number; b: number }, number>({
+      name: "add",
+      parameters: {
+        type: "object",
+        properties: { a: { type: "integer" }, b: { type: "integer" } },
+        required: ["a", "b"],
+      },
+      fn: ({ a, b }) => a + b,
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "use add", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const gen = loop.step("turn");
+    let r = await gen.next();
+    while (!r.done && r.value.role !== "tool") r = await gen.next();
+
+    loop.steer("first steer");
+    loop.steer("second steer");
+
+    const seen: string[] = [];
+    while (!r.done) {
+      r = await gen.next();
+      if (!r.done && r.value.role === "steer") seen.push(r.value.content);
+    }
+
+    expect(seen).toEqual(["first steer", "second steer"]);
+    const persisted = loop.log.entries
+      .filter((m) => m.role === "user")
+      .map((m) => m.content)
+      .filter((c): c is string => typeof c === "string");
+    expect(persisted.some((c) => c.includes("first steer"))).toBe(true);
+    expect(persisted.some((c) => c.includes("second steer"))).toBe(true);
   });
 
   it("steerConsumed resets to false at the start of each new step()", async () => {
