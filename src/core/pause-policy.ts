@@ -19,5 +19,15 @@ export function autoResolveVerdict(req: PauseRequest, editMode: EditMode): unkno
   if (req.kind === "path_access" && editMode === "yolo") {
     return { type: "run_once" };
   }
+  // Shell commands in YOLO: shell.ts's `allowAll` callback should already have
+  // skipped gate.ask for these, but the closure reads on-disk config via
+  // `loadEditMode()` while ACP's `--yolo` flag and any future runtime-only
+  // YOLO source don't write to config. Without this second layer those paths
+  // surface a confirmation prompt even though the user is in YOLO (#1448).
+  // `run_once` matches shell.ts's behavior — don't pollute the persistent
+  // allowlist with every transient command.
+  if ((req.kind === "run_command" || req.kind === "run_background") && editMode === "yolo") {
+    return { type: "run_once" };
+  }
   return null;
 }
