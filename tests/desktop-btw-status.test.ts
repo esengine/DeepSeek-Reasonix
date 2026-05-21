@@ -117,3 +117,40 @@ describe("desktop $btw_result reducer (#1470)", () => {
     });
   });
 });
+
+describe("desktop $turn_complete reducer (#1456)", () => {
+  it("clears orphaned pause-gate modals so an aborted plan card stops haunting the transcript", () => {
+    // When the user aborts (e.g. presses the stop button mistaken for send)
+    // mid-plan-approval, the loop unwinds and emits $turn_complete. Without
+    // this clear, pendingPlans stays populated — the queued user message
+    // drains next and renders ABOVE the zombie plan card (#1456).
+    const state: AppState = {
+      ...makeState(),
+      busy: true,
+      pendingPlans: [{ id: 7, plan: "## Plan\nstep 1\nstep 2", summary: "do thing" }],
+      pendingConfirms: [{ id: 8, kind: "shell", command: "rm -rf /tmp/x", prompt: "?" }],
+      pendingPathAccess: [{ id: 9, path: "/secret" }],
+      pendingChoices: [{ id: 10, question: "?", options: [], allowCustom: false }],
+      pendingCheckpoints: [
+        {
+          id: 11,
+          stepId: "s1",
+          title: "step 1",
+          result: "ok",
+          notes: "",
+          completed: 1,
+          total: 2,
+        },
+      ],
+      pendingRevisions: [{ id: 12, reason: "blocked", remainingSteps: [] }],
+    };
+    const next = reduce(state, { t: "incoming", event: { type: "$turn_complete" } });
+    expect(next.busy).toBe(false);
+    expect(next.pendingPlans).toEqual([]);
+    expect(next.pendingConfirms).toEqual([]);
+    expect(next.pendingPathAccess).toEqual([]);
+    expect(next.pendingChoices).toEqual([]);
+    expect(next.pendingCheckpoints).toEqual([]);
+    expect(next.pendingRevisions).toEqual([]);
+  });
+});

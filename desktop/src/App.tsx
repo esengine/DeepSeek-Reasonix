@@ -567,7 +567,24 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$needs_setup":
       return { ...state, needsSetup: true, ready: false };
     case "$turn_complete":
-      return { ...state, busy: false, activeSkill: null };
+      // Clear pause-gate-tied modals too. By the time the loop emits
+      // $turn_complete, anything still in these arrays is orphaned — the
+      // tool call that opened it has either resolved (so it's gone already)
+      // or the turn was aborted (so the model isn't coming back for it).
+      // Without this, an Esc/abort during plan approval leaves the plan
+      // card rendered AFTER state.messages forever; the queued user input
+      // that drains next then appears above the zombie card (#1456).
+      return {
+        ...state,
+        busy: false,
+        activeSkill: null,
+        pendingConfirms: [],
+        pendingPathAccess: [],
+        pendingChoices: [],
+        pendingPlans: [],
+        pendingCheckpoints: [],
+        pendingRevisions: [],
+      };
     case "$confirm_required":
       return {
         ...state,
