@@ -731,7 +731,7 @@ export class CacheFirstLoop {
       {
         const decision = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
         if (decision.needsAction) {
-          const { estimateTokens: estimate, ctxMax } = decision;
+          const { estimateTokens: estimate, estimateBytes, ctxMax } = decision;
           yield {
             turn: this._turn,
             role: "status",
@@ -753,6 +753,7 @@ export class CacheFirstLoop {
                   estimate: after.estimateTokens.toLocaleString(),
                   ctxMax: after.ctxMax.toLocaleString(),
                   pct: Math.round((after.estimateTokens / after.ctxMax) * 100),
+                  bodyKB: Math.round(after.estimateBytes / 1024).toLocaleString(),
                   beforeMessages: result.beforeMessages,
                   afterMessages: result.afterMessages,
                 },
@@ -766,6 +767,7 @@ export class CacheFirstLoop {
                 estimate: estimate.toLocaleString(),
                 ctxMax: ctxMax.toLocaleString(),
                 pct: Math.round((estimate / ctxMax) * 100),
+                bodyKB: Math.round(estimateBytes / 1024).toLocaleString(),
               }),
             };
           }

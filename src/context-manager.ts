@@ -19,22 +19,41 @@ import {
 } from "./tokenizer.js";
 import type { ChatMessage } from "./types.js";
 
+function envFraction(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n <= 1 ? n : fallback;
+}
+
 /** Auto-fold when a turn's response shows promptTokens above this fraction of ctxMax. */
-export const HISTORY_FOLD_THRESHOLD = 0.5;
+export const HISTORY_FOLD_THRESHOLD = envFraction("REASONIX_FOLD_THRESHOLD", 0.5);
 /** Tail budget after a normal fold, as a fraction of ctxMax. */
-export const HISTORY_FOLD_TAIL_FRACTION = 0.2;
+export const HISTORY_FOLD_TAIL_FRACTION = envFraction("REASONIX_FOLD_TAIL_FRACTION", 0.2);
 /** Above this fraction the normal fold's tail budget didn't buy enough headroom — fold harder. */
-export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = 0.7;
+export const HISTORY_FOLD_AGGRESSIVE_THRESHOLD = envFraction(
+  "REASONIX_FOLD_AGGRESSIVE_THRESHOLD",
+  0.7,
+);
 /** Tail budget after an aggressive fold — half the normal one, sacrifices recent context for headroom. */
-export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = 0.1;
+export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = envFraction(
+  "REASONIX_FOLD_AGGRESSIVE_TAIL_FRACTION",
+  0.1,
+);
 /** Skip the fold if the head wouldn't shrink the log by at least this fraction. */
 export const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
 /** Above this fraction we exit the turn with a summary instead of folding (defense in depth). */
-export const FORCE_SUMMARY_THRESHOLD = 0.8;
+export const FORCE_SUMMARY_THRESHOLD = envFraction("REASONIX_FORCE_SUMMARY_THRESHOLD", 0.8);
 /** Local preflight estimate above this fraction trips the emergency in-place compact path. */
 export const PREFLIGHT_EMERGENCY_THRESHOLD = 0.95;
 /** Emergency preflight target after local truncation, as a fraction of ctxMax. */
 export const PREFLIGHT_MECHANICAL_TARGET_FRACTION = 0.7;
+/** Hard ceiling on JSON body bytes — DeepSeek's gateway 400s on bodies past ~880 KB with a cryptic
+ * `unexpected end of hex escape` truncation error. Token preflight alone misses this because the
+ * model's 1M-token context window is far wider than the gateway's body limit. */
+export const MAX_BODY_BYTES = 700_000;
+/** Target body size after mechanical truncate when bytes — not tokens — were the trigger. */
+export const MAX_BODY_BYTES_TARGET = 500_000;
 /** Hard deadline for semantic fold summaries so a hung request cannot stall the turn loop. */
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
 /** Prepended to fold summary content so the model knows it's a synthesized recap. */
@@ -70,7 +89,10 @@ export interface PostUsageDecision {
 export interface PreflightDecision {
   needsAction: boolean;
   estimateTokens: number;
+  estimateBytes: number;
   ctxMax: number;
+  /** Which signal tripped `needsAction`. `"none"` when below both thresholds. */
+  trigger: "none" | "tokens" | "bytes" | "both";
 }
 
 export interface FoldResult {
@@ -151,7 +173,9 @@ export class ContextManager {
     return { kind: "none", ...base };
   }
 
-  /** Local-side preflight before sending a request — catches oversized payloads early. */
+  /** Local-side preflight before sending a request — catches oversized payloads early.
+   * Two independent signals trip mechanical truncate: token estimate above the context-window
+   * fraction, OR JSON body bytes above the gateway limit (see `MAX_BODY_BYTES`). */
   decidePreflight(
     messages: ChatMessage[],
     toolSpecs: ReadonlyArray<unknown> | undefined | null,
@@ -159,10 +183,19 @@ export class ContextManager {
   ): PreflightDecision {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
     const estimate = estimateRequestTokens(messages, toolSpecs ?? null, true);
+    const estimateBytes = Buffer.byteLength(JSON.stringify(messages), "utf8");
+    const tokensOver = estimate / ctxMax > PREFLIGHT_EMERGENCY_THRESHOLD;
+    const bytesOver = estimateBytes > MAX_BODY_BYTES;
+    let trigger: PreflightDecision["trigger"] = "none";
+    if (tokensOver && bytesOver) trigger = "both";
+    else if (tokensOver) trigger = "tokens";
+    else if (bytesOver) trigger = "bytes";
     return {
-      needsAction: estimate / ctxMax > PREFLIGHT_EMERGENCY_THRESHOLD,
+      needsAction: tokensOver || bytesOver,
       estimateTokens: estimate,
+      estimateBytes,
       ctxMax,
+      trigger,
     };
   }
 
@@ -225,14 +258,17 @@ export class ContextManager {
     };
   }
 
-  /** Pure local emergency compaction for preflight: drop oldest log entries and keep a valid tail. */
+  /** Pure local emergency compaction for preflight: drop oldest log entries and keep a valid tail.
+   * Bounded by tokens AND bytes — bytes matter because DeepSeek's gateway 400s on bodies past
+   * `MAX_BODY_BYTES` even when the token budget is far from exhausted. */
   mechanicalTruncate(
     model: string,
-    opts?: { targetTokens?: number; allowEmpty?: boolean },
+    opts?: { targetTokens?: number; targetBytes?: number; allowEmpty?: boolean },
   ): FoldResult {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
     const targetTokens =
       opts?.targetTokens ?? Math.floor(ctxMax * PREFLIGHT_MECHANICAL_TARGET_FRACTION);
+    const targetBytes = opts?.targetBytes ?? MAX_BODY_BYTES_TARGET;
     const all = this.deps.log.toMessages();
     const noop: FoldResult = {
       folded: false,
@@ -243,6 +279,7 @@ export class ContextManager {
     if (all.length === 0) return noop;
 
     const tokenCounts = all.map((m) => estimateConversationTokens([m], true));
+    const byteCounts = all.map((m) => Buffer.byteLength(JSON.stringify(m), "utf8"));
     let latestUserBoundary = -1;
     for (let i = all.length - 1; i >= 0; i--) {
       if (all[i]!.role === "user") {
@@ -251,12 +288,15 @@ export class ContextManager {
       }
     }
     let cumTokens = 0;
+    let cumBytes = 0;
     let boundary = all.length;
     let foundSafeBoundary = false;
     for (let i = all.length - 1; i >= 0; i--) {
-      const next = cumTokens + tokenCounts[i]!;
-      if (next > targetTokens) break;
-      cumTokens = next;
+      const nextTokens = cumTokens + tokenCounts[i]!;
+      const nextBytes = cumBytes + byteCounts[i]!;
+      if (nextTokens > targetTokens || nextBytes > targetBytes) break;
+      cumTokens = nextTokens;
+      cumBytes = nextBytes;
       if (all[i]!.role === "user") {
         boundary = i;
         foundSafeBoundary = true;

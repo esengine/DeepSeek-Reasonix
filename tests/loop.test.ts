@@ -1,12 +1,15 @@
 /** CacheFirstLoop integration — fake-fetch DeepSeekClient, non-streaming path. */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, Usage } from "../src/client.js";
 import { type ConfirmationChoice, PauseGate } from "../src/core/pause-gate.js";
 import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
+import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
 import type { ChatMessage } from "../src/types.js";
+
+const FOLD_TEST_MODEL = "test-fold-ctx";
 
 interface FakeResponseShape {
   content?: string;
@@ -56,6 +59,10 @@ function makeClient(responses: FakeResponseShape[]) {
 }
 
 describe("CacheFirstLoop (non-streaming)", () => {
+  afterEach(() => {
+    delete DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL];
+  });
+
   it("completes a single-turn plain chat", async () => {
     const client = makeClient([{ content: "hi there" }]);
     const loop = new CacheFirstLoop({
@@ -604,6 +611,9 @@ describe("CacheFirstLoop (non-streaming)", () => {
   });
 
   it("auto-folds history when promptTokens crosses 50% of ctxMax", async () => {
+    // Shrink ctxMax so the seed log can trip the auto-fold threshold without
+    // also exceeding the preflight byte ceiling (~700 KB by default).
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 100_000;
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -612,16 +622,16 @@ describe("CacheFirstLoop (non-streaming)", () => {
       fn: async () => "ok",
     });
     const responses: FakeResponseShape[] = [
-      // Iter 0: tool call with usage above 50% of 1M ctx.
+      // Iter 0: tool call with usage above 50% of the 100k test ctx.
       {
         content: "",
         tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
         usage: {
-          prompt_tokens: 600_000,
+          prompt_tokens: 60_000,
           completion_tokens: 10,
-          total_tokens: 600_010,
-          prompt_cache_hit_tokens: 500_000,
-          prompt_cache_miss_tokens: 100_000,
+          total_tokens: 60_010,
+          prompt_cache_hit_tokens: 50_000,
+          prompt_cache_miss_tokens: 10_000,
         },
       },
       // Summary call response (compactHistory).
@@ -636,12 +646,12 @@ describe("CacheFirstLoop (non-streaming)", () => {
       tools: reg,
       stream: false,
       maxToolIters: 8,
+      model: FOLD_TEST_MODEL,
     });
-    // Seed 18 user/assistant turns sized so the LOG estimate stays
-    // below the 95% preflight threshold (otherwise preflight folds
-    // first and the auto-fold path never runs). The mocked usage of
-    // 600k below is what trips the auto-fold check, independent of the
-    // tokenizer's view of the seed.
+    // Seed 18 user/assistant turns sized so the LOG estimate stays below both
+    // preflight signals (95% of token ctx AND the byte ceiling) — otherwise
+    // preflight folds first and the auto-fold path never runs. The mocked usage
+    // of 600k below is what trips the auto-fold check.
     const fillLines = (label: string, n: number) =>
       Array.from(
         { length: n },
@@ -649,8 +659,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
           `${label} line ${i}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
       ).join("\n");
     for (let i = 0; i < 18; i++) {
-      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 400)}` });
-      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 400)}` });
+      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 100)}` });
+      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 100)}` });
     }
     const beforeMessages = loop.log.length;
 
@@ -668,6 +678,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
   }, 30_000);
 
   it("uses the aggressive fold tier when promptTokens crosses 70% of ctxMax", async () => {
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 100_000;
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -676,16 +687,16 @@ describe("CacheFirstLoop (non-streaming)", () => {
       fn: async () => "ok",
     });
     const responses: FakeResponseShape[] = [
-      // Iter 0: usage at 75% of 1M ctx — squarely in the aggressive band.
+      // Iter 0: usage at 75% of the 100k test ctx — squarely in the aggressive band.
       {
         content: "",
         tool_calls: [{ id: "c1", type: "function", function: { name: "probe", arguments: "{}" } }],
         usage: {
-          prompt_tokens: 750_000,
+          prompt_tokens: 75_000,
           completion_tokens: 10,
-          total_tokens: 750_010,
-          prompt_cache_hit_tokens: 600_000,
-          prompt_cache_miss_tokens: 150_000,
+          total_tokens: 75_010,
+          prompt_cache_hit_tokens: 60_000,
+          prompt_cache_miss_tokens: 15_000,
         },
       },
       // Summary call (compactHistory).
@@ -700,6 +711,7 @@ describe("CacheFirstLoop (non-streaming)", () => {
       tools: reg,
       stream: false,
       maxToolIters: 8,
+      model: FOLD_TEST_MODEL,
     });
     const fillLines = (label: string, n: number) =>
       Array.from(
@@ -708,8 +720,8 @@ describe("CacheFirstLoop (non-streaming)", () => {
           `${label} line ${i}: lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.`,
       ).join("\n");
     for (let i = 0; i < 18; i++) {
-      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 400)}` });
-      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 400)}` });
+      loop.log.append({ role: "user", content: `Q${i}\n${fillLines(`q${i}`, 100)}` });
+      loop.log.append({ role: "assistant", content: `A${i}\n${fillLines(`a${i}`, 100)}` });
     }
 
     const events: { role: string; content?: string }[] = [];

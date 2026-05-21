@@ -259,6 +259,71 @@ describe("preflight context-size check", () => {
     expect(anyPreflight).toBeUndefined();
   });
 
+  it("fires on body bytes alone when many under-cap tool results accumulate", async () => {
+    // Real-world failure: 156+ messages, each under the 32 KB per-tool cap, but the
+    // accumulated body exceeds DeepSeek's gateway limit (~880 KB). Token estimate
+    // stays well under 95%; only the byte signal trips.
+    DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL] = 5_000_000;
+
+    const fetchFn = fakeFetch([{ content: "ack" }]);
+    const loop = new CacheFirstLoop({
+      client: new DeepSeekClient({ apiKey: "sk-test", fetch: fetchFn }),
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: TEST_MODEL,
+    });
+
+    // 40 paired turns × ~25 KB tool result ≈ 1 MB body — past the 700 KB byte
+    // ceiling but only ~250 K tokens (5% of the 5 M budget).
+    const per = "ERROR: step failed with trailing detail x\n".repeat(630); // ~25 KB
+    for (let i = 0; i < 40; i++) {
+      loop.log.append({ role: "user", content: `q${i}` });
+      loop.log.append({
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: `c${i}`,
+            type: "function",
+            function: { name: "probe", arguments: "{}" },
+          },
+        ],
+      });
+      loop.log.append({ role: "tool", tool_call_id: `c${i}`, content: per });
+    }
+
+    const events: { role: string; content?: string }[] = [];
+    for await (const ev of loop.step("follow-up")) {
+      events.push({ role: ev.role, content: ev.content });
+    }
+
+    const warn = events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? ""));
+    expect(warn).toBeDefined();
+    expect(warn!.content).toMatch(/body \d/);
+    expect(warn!.content).toMatch(/truncated \d+ messages/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("decidePreflight reports bytes trigger when only bytes exceed the limit", () => {
+    DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL] = 5_000_000;
+    const loop = new CacheFirstLoop({
+      client: new DeepSeekClient({ apiKey: "sk-test", fetch: fakeFetch([]) }),
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: TEST_MODEL,
+    });
+
+    const big = "ERROR: step failed with trailing detail x\n".repeat(20_000);
+    const messages: ChatMessage[] = [
+      { role: "user", content: "u" },
+      { role: "assistant", content: big },
+    ];
+    const decision = loop.context.decidePreflight(messages, undefined, TEST_MODEL);
+    expect(decision.needsAction).toBe(true);
+    expect(decision.trigger).toBe("bytes");
+    expect(decision.estimateBytes).toBeGreaterThan(700_000);
+  });
+
   it("warns (but does not block) when over 95% with nothing to truncate", async () => {
     // Tiny budget AND a system prompt that alone overwhelms it. The log
     // is empty, so truncation has nothing to shrink — the preflight surfaces
