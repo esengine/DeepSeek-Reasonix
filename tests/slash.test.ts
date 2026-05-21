@@ -945,6 +945,31 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/no turn yet/);
   });
 
+  it("/cost posts the session-aggregate cacheHit so the card matches the status bar (#1479)", () => {
+    const loop = makeLoop();
+    // Two turns with very different per-turn cache hits — last turn is 10%
+    // but the session average is ~75% once both turns are summed. Without
+    // the fix the slash card would have shown 10% while the bottom status
+    // bar showed ~75%, which is exactly the bug.
+    loop.stats.record(1, loop.model, new Usage(10_000, 100, 10_100, 9_000, 1_000));
+    loop.stats.record(2, loop.model, new Usage(10_000, 100, 10_100, 1_000, 9_000));
+    const lastTurn = loop.stats.turns[loop.stats.turns.length - 1]!;
+    const summary = loop.stats.summary();
+    // Sanity: per-turn and session-aggregate must actually differ, otherwise
+    // the test passes for the wrong reason.
+    expect(lastTurn.cacheHitRatio).not.toBe(summary.cacheHitRatio);
+
+    let posted: { cacheHit: number; sessionCost: number } | null = null;
+    handleSlash("cost", [], loop, {
+      postUsage: (args) => {
+        posted = { cacheHit: args.cacheHit, sessionCost: args.sessionCost };
+      },
+    });
+    expect(posted).not.toBeNull();
+    expect(posted!.cacheHit).toBeCloseTo(summary.cacheHitRatio, 6);
+    expect(posted!.cacheHit).not.toBe(lastTurn.cacheHitRatio);
+  });
+
   it("/status with pendingEditCount=0 hides the edits line", () => {
     const r = handleSlash("status", [], makeLoop(), { pendingEditCount: 0 });
     expect(r.info).not.toMatch(/pending/);
