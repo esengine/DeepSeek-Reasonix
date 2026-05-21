@@ -36,25 +36,33 @@ describe("mouse-mode enable/disable", () => {
     }
   });
 
-  it("default mode writes the alternate-scroll escape (?1007h)", () => {
+  it("default picks the platform-appropriate protocol (SGR on Windows, alternate-scroll elsewhere)", () => {
     enableMouseMode();
-    expect(writes.join("")).toBe("\u001b[?1007h");
+    const expected = process.platform === "win32" ? "\u001b[?1000h\u001b[?1006h" : "\u001b[?1007h";
+    expect(writes.join("")).toBe(expected);
   });
 
-  it("default disable writes the matching off-escape (?1007l)", () => {
+  it("default disable matches the enable sequence on the current platform", () => {
     enableMouseMode();
     writes.length = 0;
     disableMouseMode();
-    expect(writes.join("")).toBe("\u001b[?1007l");
+    const expected = process.platform === "win32" ? "\u001b[?1006l\u001b[?1000l" : "\u001b[?1007l";
+    expect(writes.join("")).toBe(expected);
   });
 
-  it("REASONIX_MOUSE_MODE=sgr restores legacy ?1000h + ?1006h capture", () => {
+  it("REASONIX_MOUSE_MODE=sgr forces ?1000h + ?1006h capture even off Windows", () => {
     process.env.REASONIX_MOUSE_MODE = "sgr";
     enableMouseMode();
     expect(writes.join("")).toBe("\u001b[?1000h\u001b[?1006h");
     writes.length = 0;
     disableMouseMode();
     expect(writes.join("")).toBe("\u001b[?1006l\u001b[?1000l");
+  });
+
+  it("REASONIX_MOUSE_MODE=alternate-scroll forces ?1007h even on Windows", () => {
+    process.env.REASONIX_MOUSE_MODE = "alternate-scroll";
+    enableMouseMode();
+    expect(writes.join("")).toBe("\u001b[?1007h");
   });
 
   it("REASONIX_MOUSE_MODE=off skips writing any escape sequence", () => {
@@ -64,10 +72,11 @@ describe("mouse-mode enable/disable", () => {
     expect(writes).toEqual([]);
   });
 
-  it("unknown REASONIX_MOUSE_MODE falls back to alternate-scroll default", () => {
+  it("unknown REASONIX_MOUSE_MODE falls back to the platform default", () => {
     process.env.REASONIX_MOUSE_MODE = "garbage";
     enableMouseMode();
-    expect(writes.join("")).toBe("\u001b[?1007h");
+    const expected = process.platform === "win32" ? "\u001b[?1000h\u001b[?1006h" : "\u001b[?1007h";
+    expect(writes.join("")).toBe(expected);
   });
 
   it("enable is idempotent — second call is a no-op", () => {

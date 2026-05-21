@@ -1,30 +1,43 @@
-// Mouse-protocol selection for the TUI. Default: DECSET 1007 (alternate scroll
-// mode). We DON'T need full mouse capture — the TUI never reacts to clicks or
-// drags, only the wheel. `?1000h` was the old default and broke native text
-// selection + right-click context menu for every user (#1337, #677, #1419) just
-// to get the wheel working — net negative when the only thing reasonix uses
-// the mouse for is scrolling chat history.
+// Mouse-protocol selection for the TUI. Reasonix only reacts to the wheel —
+// clicks and drags are not handled — so the goal is "wheel works in-app,
+// native click/drag/right-click stays untouched".
 //
-// `?1007h` (alternate scroll): the terminal translates wheel events into
-// up/down (or PgUp/PgDn, depending on terminal) key sequences in the alt
-// screen. Mouse buttons stay native — copy/paste/right-click all behave the
-// way the terminal owner expects. Supported by Windows Terminal, iTerm2,
-// GNOME Terminal, kitty, Alacritty, recent xterm. Terminals without it
-// (macOS Terminal.app, very old emulators) fall back to the host terminal's
-// own scrollback for history — still functional, just not in-app wheel scroll.
+// `?1007h` (DECSET alternate scroll) does exactly that: the terminal
+// translates wheel events into up/down (or PgUp/PgDn) key sequences in the
+// alt screen, leaving mouse buttons native. Works on iTerm2, GNOME
+// Terminal, kitty, Alacritty, recent xterm.
 //
-// Escape hatch: `REASONIX_MOUSE_MODE=sgr` restores the old `?1000h+?1006h`
-// behavior for users on terminals where alternate scroll doesn't work and
-// they prefer in-app wheel over native selection. `off` disables mouse
-// reporting entirely (no in-app wheel, full native behavior).
+// Windows Terminal is the odd one out: it advertises `?1007h` but doesn't
+// reliably translate wheel events to keys, so reasonix never sees the
+// wheel. The old default `?1000h+?1006h` (full SGR mouse capture) DID work
+// for the wheel on WT, at the cost of breaking native text selection /
+// right-click — which is what got us into #1337 / #677 / #1419 in the
+// first place. On Windows the proven wheel-working mode is still SGR, so
+// platform-detect and pick the right one rather than ship a regression
+// either way (#1456-followup: WT users lost wheel scroll after the
+// alternate-scroll switch).
+//
+// Escape hatch: `REASONIX_MOUSE_MODE=sgr|alternate-scroll|off` overrides
+// the platform default for users on terminals where the auto-pick is
+// wrong.
 
 type Mode = "alternate-scroll" | "sgr" | "off";
+
+function platformDefault(): Mode {
+  // Windows Terminal / conhost / ConEmu / Cmder all honor SGR mouse capture
+  // but not alternate-scroll. The handful of Linux/macOS terminals that
+  // don't honor `?1007h` (notably macOS Terminal.app) fall back to native
+  // terminal scrollback, which is acceptable; broken in-app wheel for WT
+  // users is not.
+  return process.platform === "win32" ? "sgr" : "alternate-scroll";
+}
 
 function readMode(): Mode {
   const raw = (process.env.REASONIX_MOUSE_MODE ?? "").toLowerCase();
   if (raw === "sgr") return "sgr";
+  if (raw === "alternate-scroll") return "alternate-scroll";
   if (raw === "off") return "off";
-  return "alternate-scroll";
+  return platformDefault();
 }
 
 const SEQUENCES: Record<Mode, { enable: string; disable: string }> = {
