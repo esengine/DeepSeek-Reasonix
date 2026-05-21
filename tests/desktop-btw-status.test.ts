@@ -100,3 +100,20 @@ describe("desktop push_status action (#1370)", () => {
     expect(next.ready).toBe(state.ready);
   });
 });
+
+describe("desktop $btw_result reducer (#1470)", () => {
+  it("clears busy and appends the answer as a status message", () => {
+    // /btw flips busy=true on send (via send_user echo); the answer must
+    // flip it back off or the composer stays disabled (#1470).
+    const state: AppState = { ...makeState(), busy: true };
+    const next = reduce(state, {
+      t: "incoming",
+      event: { type: "$btw_result", question: "what year is it?", answer: "2026." },
+    });
+    expect(next.busy).toBe(false);
+    expect(next.messages.at(-1)).toEqual({
+      kind: "status",
+      text: "≫ btw\n2026.",
+    });
+  });
+});

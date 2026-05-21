@@ -2366,7 +2366,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           const reply = await tab.runtime!.loop.client.chat({
             model: tab.currentModel,
             messages: [
-              { role: "system", content: tab.system },
+              {
+                role: "system",
+                content:
+                  "You are answering a side question that is unrelated to the current coding conversation. Answer concisely (1-3 sentences) in plain prose. Do not call tools, do not ask clarifying questions, and do not reference any prior turns.",
+              },
               { role: "user", content: question },
             ],
           });

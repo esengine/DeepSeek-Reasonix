@@ -958,6 +958,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$btw_result":
       return {
         ...state,
+        busy: false,
         messages: [
           ...state.messages,
           { kind: "status", text: `≫ btw\n${ev.answer}` },
@@ -1280,6 +1281,9 @@ function TabRuntime({
       // /btw <question> — route to side-question RPC instead of user_input.
       // Empty payload used to silently swallow the keystroke (#1370); surface
       // the usage hint as a status message so the user knows what's expected.
+      // The full /btw line is echoed via send_user so the typed text appears
+      // immediately and busy=true gives a thinking indicator while the side
+      // call runs (#1470).
       const btwMatch = /^\/btw(?:\s+([\s\S]+))?$/.exec(text);
       if (btwMatch) {
         const question = btwMatch[1]?.trim() ?? "";
@@ -1288,6 +1292,8 @@ function TabRuntime({
           if (!override) setDraft("/btw ");
           return;
         }
+        const clientId = `btw-${Date.now()}`;
+        dispatch({ t: "send_user", text, clientId });
         sendRpc({ cmd: "btw", text: question });
         if (!override) setDraft("");
         return;
