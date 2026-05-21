@@ -393,6 +393,8 @@ export const en = {
     },
     btwUsage: "▸ /btw <question> — ask a side question without polluting the conversation context.",
     errorLabel: "Error",
+    warningLabel: "Warning",
+    dismissError: "Dismiss",
     jumpToBottom: "Jump to bottom",
     splashSubtitle: "DeepSeek Agents",
     connecting: "Connecting to reasonix core…",

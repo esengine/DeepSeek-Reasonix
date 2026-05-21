@@ -97,7 +97,7 @@ export type ChatMessage =
       pending: boolean;
     }
   | { kind: "status"; text: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; id: string; recoverable?: boolean };
 
 export type PendingConfirm = {
   id: number;
@@ -272,6 +272,7 @@ type Action =
   | { t: "resolve_checkpoint"; id: number; verdict: CheckpointVerdict }
   | { t: "resolve_revision"; id: number; verdict: RevisionVerdict }
   | { t: "dismiss_plan" }
+  | { t: "dismiss_error"; id: string }
   | { t: "mention_results"; results: MentionResults }
   | { t: "mention_preview"; preview: MentionPreviewState }
   | { t: "enqueue_send"; text: string }
@@ -299,6 +300,12 @@ function nextMessageTurn(messages: ChatMessage[]): number {
     return max;
   }, 0);
   return lastTurn + 1;
+}
+
+let _errSeq = 0;
+function nextErrorId(): string {
+  _errSeq += 1;
+  return `err-${Date.now().toString(36)}-${_errSeq}`;
 }
 
 export function reduce(state: State, action: Action): State {
@@ -340,7 +347,11 @@ export function reduce(state: State, action: Action): State {
         queuedSends: [],
         messages: [
           ...state.messages,
-          { kind: "error", message: `reasonix exited (code ${action.code ?? "?"})` },
+          {
+            kind: "error",
+            message: `reasonix exited (code ${action.code ?? "?"})`,
+            id: nextErrorId(),
+          },
         ],
       };
     case "incoming":
@@ -450,6 +461,13 @@ export function reduce(state: State, action: Action): State {
     }
     case "dismiss_plan":
       return { ...state, activePlan: null };
+    case "dismiss_error":
+      return {
+        ...state,
+        messages: state.messages.filter(
+          (m) => !(m.kind === "error" && m.id === action.id),
+        ),
+      };
     case "mention_results":
       return { ...state, mentionResults: action.results };
     case "mention_preview":
@@ -839,13 +857,24 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     }
     case "$error":
-    case "error":
+    case "error": {
+      // Kernel-level errors carry a `recoverable` flag — true for
+      // storm-repair / repeat-loop warnings the loop already worked
+      // around, false for hard failures. The desktop renders both as
+      // dismissable cards but uses softer tone for the recoverable
+      // ones so a session full of self-repaired loops doesn't look
+      // like everything's on fire (#1456-followup).
+      const recoverable = ev.type === "error" ? ev.recoverable : false;
       return {
         ...state,
         busy: false,
         activeSkill: null,
-        messages: [...state.messages, { kind: "error", message: ev.message }],
+        messages: [
+          ...state.messages,
+          { kind: "error", message: ev.message, id: nextErrorId(), recoverable },
+        ],
       };
+    }
     case "model.turn.started":
       if (state.messages.some((m) => m.kind === "assistant" && m.turn === ev.turn)) {
         return { ...state, model: ev.model };
@@ -1854,22 +1883,40 @@ function TabRuntime({
                       );
                     }
                     if (m.kind === "error") {
+                      const toneVar = m.recoverable ? "var(--tone-warn)" : "var(--tone-err)";
+                      const bgVar = m.recoverable
+                        ? "var(--warn-soft, var(--danger-soft))"
+                        : "var(--danger-soft)";
+                      const labelKey = m.recoverable ? "app.warningLabel" : "app.errorLabel";
                       return (
                         <div
-                          key={`e-${i}`}
+                          key={m.id}
                           className="warn-card"
-                          style={{
-                            borderColor: "var(--tone-err)",
-                            background: "var(--danger-soft)",
-                          }}
+                          style={{ borderColor: toneVar, background: bgVar, position: "relative" }}
                         >
-                          <span className="ico" style={{ color: "var(--tone-err)" }}>
+                          <span className="ico" style={{ color: toneVar }}>
                             <I.warning size={16} />
                           </span>
-                          <div>
-                            <div className="tt">{t("app.errorLabel")}</div>
+                          <div style={{ flex: 1 }}>
+                            <div className="tt">{t(labelKey)}</div>
                             <div className="ds">{m.message}</div>
                           </div>
+                          <button
+                            type="button"
+                            className="warn-card-dismiss"
+                            title={t("app.dismissError")}
+                            onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: toneVar,
+                              cursor: "pointer",
+                              padding: "4px",
+                              alignSelf: "flex-start",
+                            }}
+                          >
+                            <I.x size={14} />
+                          </button>
                         </div>
                       );
                     }

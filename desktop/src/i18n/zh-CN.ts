@@ -413,6 +413,8 @@ export const zhCN: typeof en = {
     },
     btwUsage: "▸ /btw <问题> — 顺便问个题外话，不会写入当前会话上下文。",
     errorLabel: "错误",
+    warningLabel: "提示",
+    dismissError: "关闭",
     jumpToBottom: "回到底部",
     splashSubtitle: "DeepSeek Agents",
     connecting: "正在连接 reasonix 内核…",

@@ -118,6 +118,71 @@ describe("desktop $btw_result reducer (#1470)", () => {
   });
 });
 
+describe("desktop dismiss_error reducer (recoverable / hard error parity)", () => {
+  it("removes the targeted error by id, leaves other messages untouched", () => {
+    const base = makeState();
+    const state: AppState = {
+      ...base,
+      messages: [
+        { kind: "status", text: "hello" },
+        { kind: "error", message: "first", id: "err-a", recoverable: true },
+        { kind: "error", message: "second", id: "err-b", recoverable: false },
+      ],
+    };
+    const next = reduce(state, { t: "dismiss_error", id: "err-a" });
+    expect(next.messages).toEqual([
+      { kind: "status", text: "hello" },
+      { kind: "error", message: "second", id: "err-b", recoverable: false },
+    ]);
+  });
+
+  it("is a no-op when the id doesn't match any error", () => {
+    const base = makeState();
+    const state: AppState = {
+      ...base,
+      messages: [{ kind: "error", message: "only one", id: "err-x" }],
+    };
+    const next = reduce(state, { t: "dismiss_error", id: "does-not-exist" });
+    expect(next.messages).toEqual(state.messages);
+  });
+});
+
+describe("desktop error events carry recoverable flag from kernel events (#1456-followup)", () => {
+  it("kernel error with recoverable=true produces a recoverable=true chat message", () => {
+    const state = makeState();
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "error",
+        id: 99,
+        ts: "2026-05-21T00:00:00Z",
+        turn: 1,
+        message: "repeat-loop guard tripped",
+        recoverable: true,
+      },
+    });
+    const last = next.messages.at(-1);
+    expect(last?.kind).toBe("error");
+    if (last?.kind === "error") {
+      expect(last.recoverable).toBe(true);
+      expect(typeof last.id).toBe("string");
+    }
+  });
+
+  it("$error protocol event treats hard errors as non-recoverable", () => {
+    const state = makeState();
+    const next = reduce(state, {
+      t: "incoming",
+      event: { type: "$error", message: "rpc died" },
+    });
+    const last = next.messages.at(-1);
+    expect(last?.kind).toBe("error");
+    if (last?.kind === "error") {
+      expect(last.recoverable).toBe(false);
+    }
+  });
+});
+
 describe("desktop $turn_complete reducer (#1456)", () => {
   it("clears orphaned pause-gate modals so an aborted plan card stops haunting the transcript", () => {
     // When the user aborts (e.g. presses the stop button mistaken for send)
