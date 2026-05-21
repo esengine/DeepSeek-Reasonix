@@ -369,6 +369,130 @@ describe("strict engineering lifecycle e2e harness", () => {
     });
   });
 
+  it("covers failed verification followed by an accepted revised repair plan", async () => {
+    const harness = createStrictLifecycleHarness({
+      commandResults: {
+        "npm test -- tests/router.test.ts":
+          "exit 1\nFAIL tests/router.test.ts\nExpected route handler to use the new router.",
+        "npm test -- tests/router-repair.test.ts":
+          "exit 0\nnpm test -- tests/router-repair.test.ts",
+      },
+    });
+    harness.queue({ type: "approve" });
+    await harness.dispatch("submit_plan", {
+      plan: "Extract command routing and migrate callers.",
+      steps: [
+        {
+          id: "step-1",
+          title: "Extract router",
+          action: "Move routing helpers into src/router.ts.",
+          risk: "low",
+          targets: ["src/router.ts"],
+          verification: ["npm test -- tests/router.test.ts"],
+        },
+        {
+          id: "step-2",
+          title: "Migrate callers",
+          action: "Update call sites to use the extracted router.",
+          risk: "med",
+          targets: ["src/app.ts", "src/cli.ts"],
+          verification: ["npm test -- tests/router.test.ts"],
+        },
+      ],
+    });
+
+    await harness.dispatch("write_file", { path: "src/router.ts", content: "export {};\n" });
+    harness.queue({ type: "continue" });
+    await harness.dispatch("mark_step_complete", {
+      stepId: "step-1",
+      result: "Extracted the router module.",
+      evidence: [{ kind: "diff", summary: "added router module", paths: ["src/router.ts"] }],
+    });
+
+    const failedVerification = await harness.dispatch("run_command", {
+      command: "npm test -- tests/router.test.ts",
+      cwd: "/repo",
+    });
+    expect(failedVerification).toContain("exit 1");
+    expect(failedVerification).toContain("Expected route handler to use the new router.");
+
+    harness.queue({ type: "accepted" });
+    const revision = await harness.dispatch("revise_plan", {
+      reason:
+        "Focused router tests failed; repair the route expectations before migrating callers.",
+      remainingSteps: [
+        {
+          id: "step-2",
+          title: "Repair router test expectations",
+          action: "Update the failing route test to match the extracted router.",
+          risk: "low",
+          targets: ["tests/router.test.ts"],
+          verification: ["npm test -- tests/router-repair.test.ts"],
+        },
+        {
+          id: "step-3",
+          title: "Migrate callers after repair",
+          action: "Update callers once the router contract is green.",
+          risk: "med",
+          targets: ["src/app.ts", "src/cli.ts"],
+          verification: ["npm test -- tests/router-repair.test.ts"],
+        },
+      ],
+    });
+
+    expect(revision).toBe("revision accepted");
+    expect(harness.lifecycle.snapshot()).toMatchObject({
+      state: "executing",
+      completedStepIds: ["step-1"],
+      mutatedSinceLastStep: false,
+      planSteps: [
+        { id: "step-1", title: "Extract router" },
+        { id: "step-2", title: "Repair router test expectations" },
+        { id: "step-3", title: "Migrate callers after repair" },
+      ],
+    });
+
+    await harness.dispatch("write_file", {
+      path: "tests/router.test.ts",
+      content: "expect(route.handler).toBe(router.handler);\n",
+    });
+    const missingEvidence = await harness.dispatch("mark_step_complete", {
+      stepId: "step-2",
+      result: "Updated router test expectations.",
+    });
+    expect(JSON.parse(missingEvidence)).toMatchObject({
+      rejectedReason: "engineering-lifecycle-evidence",
+      stepId: "step-2",
+      nextAction: "add_evidence",
+    });
+
+    const repairedVerification = await harness.dispatch("run_command", {
+      command: "npm test -- tests/router-repair.test.ts",
+      cwd: "/repo",
+    });
+    expect(repairedVerification).toBe("exit 0\nnpm test -- tests/router-repair.test.ts");
+
+    harness.queue({ type: "continue" });
+    await harness.dispatch("mark_step_complete", {
+      stepId: "step-2",
+      result: "Updated router test expectations.",
+      evidence: [
+        { kind: "diff", summary: "repaired router test", paths: ["tests/router.test.ts"] },
+        {
+          kind: "verification",
+          summary: "router repair tests passed",
+          command: "npm test -- tests/router-repair.test.ts",
+        },
+      ],
+    });
+
+    expect(harness.lifecycle.snapshot()).toMatchObject({
+      state: "executing",
+      completedStepIds: ["step-1", "step-2"],
+      mutatedSinceLastStep: false,
+    });
+  });
+
   it("cancels the runtime when the user stops at a checkpoint", async () => {
     const harness = createStrictLifecycleHarness();
     harness.queue({ type: "approve" });

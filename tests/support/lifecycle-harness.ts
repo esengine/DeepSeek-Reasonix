@@ -54,7 +54,13 @@ export interface StrictLifecycleHarness {
   queue(verdict: GateVerdict): void;
 }
 
-export function createStrictLifecycleHarness(): StrictLifecycleHarness {
+export interface StrictLifecycleHarnessOptions {
+  commandResults?: Record<string, string>;
+}
+
+export function createStrictLifecycleHarness(
+  opts: StrictLifecycleHarnessOptions = {},
+): StrictLifecycleHarness {
   const lifecycle = new EngineeringLifecycleRuntime({ mode: "strict" });
   const registry = new ToolRegistry();
   const gate = new QueueGate(lifecycle);
@@ -69,7 +75,7 @@ export function createStrictLifecycleHarness(): StrictLifecycleHarness {
     onPlanSubmitted: (_plan, steps) => lifecycle.recordPlanProposed(steps),
     onStepCompleted: (completion) => completions.push(completion),
   });
-  registerMutationTools(registry);
+  registerMutationTools(registry, opts);
 
   return {
     lifecycle,
@@ -93,7 +99,10 @@ export function createStrictLifecycleHarness(): StrictLifecycleHarness {
   };
 }
 
-function registerMutationTools(registry: ToolRegistry): void {
+function registerMutationTools(
+  registry: ToolRegistry,
+  opts: StrictLifecycleHarnessOptions = {},
+): void {
   registry.register({
     name: "delete_file",
     parameters: {
@@ -155,6 +164,7 @@ function registerMutationTools(registry: ToolRegistry): void {
       properties: { command: { type: "string" }, cwd: { type: "string" } },
       required: ["command"],
     },
-    fn: (args: { command: string }) => `exit 0\n${args.command}`,
+    fn: (args: { command: string }) =>
+      opts.commandResults?.[args.command] ?? `exit 0\n${args.command}`,
   });
 }
