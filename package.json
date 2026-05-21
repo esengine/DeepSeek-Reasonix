@@ -72,6 +72,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.60.0",
     "cli-highlight": "^2.1.11",
     "commander": "^12.1.0",
     "eventsource-parser": "^3.0.0",

@@ -53,6 +53,8 @@ import {
 import { Eventizer } from "../../core/eventize.js";
 import { pauseGate } from "../../core/pause-gate.js";
 import { autoResolveVerdict, shouldAutoResolveCheckpoint } from "../../core/pause-policy.js";
+import type { FeishuChannel } from "../../feishu/channel.js";
+import { useFeishuChannel } from "../../feishu/use-feishu-channel.js";
 import { formatHookOutcomeMessage, runHooks } from "../../hooks.js";
 import { t, tObj } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
@@ -175,6 +177,7 @@ import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import { PRESETS, resolvePreset } from "./presets.js";
+import { pickRemoteChannel, relayRemoteSlashInfo } from "./remote-channel.js";
 import {
   type McpServerSummary,
   type PlanModeToggleSource,
@@ -302,6 +305,8 @@ export interface AppProps {
   qqSubmitRef?: { current: ((text: string) => void) | null };
   /** Ref filled by App on mount so QQ errors appear in the TUI log. */
   qqErrorRef?: { current: ((msg: string) => void) | null };
+  /** Pre-created Feishu channel (started before TUI mounts). */
+  feishuChannel?: FeishuChannel;
 }
 
 /**
@@ -480,6 +485,7 @@ function AppInner({
   qqChannel,
   qqSubmitRef,
   qqErrorRef,
+  feishuChannel,
   themeName,
   setThemeName,
   statusBar,
@@ -2644,13 +2650,66 @@ function AppInner({
     onPlanRevisionRef: handleReviseConfirmRef,
     onChoiceResolveRef: handleChoiceResolveRef,
   });
+  const feishu = useFeishuChannel({
+    codeMode: !!codeMode,
+    initialChannel: feishuChannel,
+    log,
+    setQueuedSubmit,
+    currentRootDir,
+    pendingGateIdRef,
+    completedStepIdsRef,
+    planStepsRef,
+    onCreateSession: onSwitchSession ? (name) => onSwitchSession(name) : undefined,
+    onSelectSession: onSwitchSession ? (name) => onSwitchSession(name) : undefined,
+    onModelPick: handleQQModelPick,
+    onThemePick: handleQQThemePick,
+    onShellConfirmRef: handleShellConfirmRef,
+    onPathConfirmRef: handlePathConfirmRef,
+    onPlanCancelRef: handlePlanCancelRef,
+    onPlanFeedbackRef: handlePlanFeedbackRef,
+    onCheckpointConfirmRef: handleCheckpointConfirmRef,
+    onCheckpointReviseRef: handleCheckpointReviseSubmitRef,
+    onPlanRevisionRef: handleReviseConfirmRef,
+    onChoiceResolveRef: handleChoiceResolveRef,
+  });
+  const remoteTurnSourceRef = useRef<"qq" | "feishu" | null>(null);
 
   const handleSubmit = useCallback(
     async (raw: string) => {
-      const incoming = qq.parseSubmit(raw);
+      let remoteSource: "qq" | "feishu" | null = null;
+      let incoming: {
+        handled: boolean;
+        text: string;
+        fromQQ?: boolean;
+        fromFeishu?: boolean;
+        shouldClearInput?: boolean;
+      } | null = qq.parseSubmit(raw);
+      if (incoming?.fromQQ) {
+        remoteSource = "qq";
+      } else if (!incoming || !incoming.handled) {
+        const feishuIncoming = feishu.parseSubmit(raw);
+        if (feishuIncoming) {
+          incoming = feishuIncoming;
+          if (feishuIncoming.fromFeishu) remoteSource = "feishu";
+        }
+      }
       if (!incoming) return;
-      let { text, fromQQ } = incoming;
-      if (incoming.handled) {
+      const normalized = incoming as {
+        handled: boolean;
+        text: string;
+        fromQQ?: boolean;
+        fromFeishu?: boolean;
+        shouldClearInput?: boolean;
+      };
+      let { text } = normalized;
+      const fromQQ = !!normalized.fromQQ;
+      const fromFeishu = !!normalized.fromFeishu;
+      const remoteChannel = pickRemoteChannel(remoteSource, qq, feishu);
+      if (normalized.handled) {
+        if (normalized.shouldClearInput) {
+          setInput("");
+          resetCursor();
+        }
         return;
       }
       if (busy || submittingRef.current) {
@@ -2887,12 +2946,17 @@ function AppInner({
             disconnect: qq.disconnect,
             status: qq.status,
           },
+          feishu: {
+            connect: feishu.connect,
+            disconnect: feishu.disconnect,
+            status: feishu.status,
+          },
           sessionId: session,
           getEngineeringLifecycleSnapshot: codeMode
             ? () => engineeringLifecycleRef.current?.snapshot() ?? null
             : undefined,
           jobs: codeMode?.jobs,
-          postInfo: fromQQ ? qq.sendInfo : log.pushInfo,
+          postInfo: remoteChannel?.sendInfo ?? log.pushInfo,
           postDoctor: (checks) => log.showDoctor(checks),
           postUsage: (args) => log.showUsageVerbose(args),
           postKeys: (args) =>
@@ -2944,8 +3008,7 @@ function AppInner({
           generateSessionTitle: generateCurrentSessionTitle,
         });
         if (
-          fromQQ &&
-          qq.handleRemoteSlashResult({
+          remoteChannel?.handleRemoteSlashResult({
             result,
             codeMode: !!codeMode,
             sessions: listSessionsForWorkspace(currentRootDir),
@@ -3037,7 +3100,7 @@ function AppInner({
           resetPendingModals,
           text,
         });
-        if (fromQQ && result.info) qq.sendText(result.info);
+        relayRemoteSlashInfo(remoteChannel, result.info);
         if (outcome.kind === "resubmit") {
           text = outcome.text;
         } else {
@@ -3112,6 +3175,8 @@ function AppInner({
       busyRef.current = true;
       setBusy(true);
       qq.noteTurnFromQQ(fromQQ);
+      feishu.noteTurnFromFeishu(fromFeishu);
+      remoteTurnSourceRef.current = remoteSource;
       abortedThisTurn.current = false;
       // Seal the in-progress history entry so this turn's edits open
       // a new one —prior turns are preserved intact for /history and
@@ -3383,6 +3448,7 @@ function AppInner({
           }
         }
         qq.maybeSendFinalReply(lastAssistantText);
+        feishu.maybeSendFinalReply(lastAssistantText);
       } finally {
         clearInterval(timer);
         // Esc aborted the turn —close any in-flight cards (streaming /
@@ -3397,6 +3463,8 @@ function AppInner({
         setBusy(false);
         submittingRef.current = false;
         qq.clearTurnReply();
+        feishu.clearTurnReply();
+        remoteTurnSourceRef.current = null;
         // Clear pro-on-turn badge; armed-for-next-turn already cleared
         // at turn start when it was consumed.
         setTurnOnPro(false);
@@ -3458,6 +3526,7 @@ function AppInner({
       startLoop,
       getLoopStatus,
       qq,
+      feishu,
       isLoopActive,
       isLoopFiring,
       clearFiringFlag,
@@ -3837,7 +3906,11 @@ function AppInner({
       // scrolled up, the picker mounts off-screen and the user can't see it.
       chatScroll.jumpToBottom();
 
-      qq.handlePauseRequest(request.kind, payload);
+      if (remoteTurnSourceRef.current === "qq") {
+        qq.handlePauseRequest(request.kind, payload);
+      } else if (remoteTurnSourceRef.current === "feishu") {
+        feishu.handlePauseRequest(request.kind, payload);
+      }
 
       switch (request.kind) {
         case "run_command":

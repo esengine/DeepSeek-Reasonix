@@ -5,22 +5,22 @@ import type { ThemeChoice } from "../cli/ui/ThemePicker.js";
 import type { SlashResult } from "../cli/ui/slash/types.js";
 import { listThemeNames } from "../cli/ui/theme/tokens.js";
 import { type CheckpointMeta, fmtAgo, restoreCheckpoint } from "../code/checkpoints.js";
-import { loadQQConfig, resolveThemePreference, saveQQConfig } from "../config.js";
+import { loadFeishuConfig, saveFeishuConfig } from "../config.js";
 import { t } from "../i18n/index.js";
 import { type SessionInfo, freshSessionName } from "../memory/session.js";
 import type { ChoiceOption } from "../tools/choice.js";
 import type { PlanStep } from "../tools/plan.js";
-import type { QQAccessConfig } from "./access.js";
-import { QQChannel } from "./channel.js";
+import type { FeishuAccessConfig } from "./access.js";
+import { FeishuChannel } from "./channel.js";
 import {
-  type QQSetupStep,
-  formatQQAccessSummary,
-  formatQQModeLabel,
-  formatQQSetupPrompt,
-  formatQQSetupWaiting,
+  type FeishuSetupStep,
+  formatFeishuAccessSummary,
+  formatFeishuModeLabel,
+  formatFeishuSetupPrompt,
+  formatFeishuSetupWaiting,
 } from "./strings.js";
 
-type QQInteractionKind =
+type FeishuInteractionKind =
   | "run_command"
   | "run_background"
   | "path_access"
@@ -29,27 +29,26 @@ type QQInteractionKind =
   | "plan_revision"
   | "choice";
 
-type QQSlashInteractionKind =
+type FeishuSlashInteractionKind =
   | "sessions_picker"
   | "checkpoint_picker"
   | "model_picker"
   | "theme_picker";
 
-interface QQInteractionState {
-  kind: QQInteractionKind | null;
+interface FeishuInteractionState {
+  kind: FeishuInteractionKind | null;
   payload: unknown;
 }
 
-interface QQSlashInteractionState {
-  kind: QQSlashInteractionKind | null;
+interface FeishuSlashInteractionState {
+  kind: FeishuSlashInteractionKind | null;
   payload: unknown;
 }
 
-interface PendingQQConnectSetup {
-  step: QQSetupStep;
+interface PendingFeishuConnectSetup {
+  step: FeishuSetupStep;
   appId?: string;
   appSecret?: string;
-  sandbox: boolean;
   ownerOpenId?: string;
   allowlist?: readonly string[];
   resolve: (message: string) => void;
@@ -57,18 +56,16 @@ interface PendingQQConnectSetup {
   promise: Promise<string>;
 }
 
-interface QQLogger {
+interface FeishuLogger {
   pushInfo: (text: string) => void;
   pushWarning: (title: string, detail: string) => void;
 }
 
-interface UseQQChannelArgs {
+interface UseFeishuChannelArgs {
   codeMode: boolean;
-  initialChannel?: QQChannel;
-  log: QQLogger;
+  initialChannel?: FeishuChannel;
+  log: FeishuLogger;
   setQueuedSubmit: (text: string) => void;
-  qqSubmitRef?: { current: ((text: string) => void) | null };
-  qqErrorRef?: { current: ((msg: string) => void) | null };
   sessionName?: string | null;
   currentRootDir: string;
   pendingGateIdRef: { current: number | null };
@@ -173,13 +170,11 @@ function stripFollowupPrefix(text: string): string {
     .trim();
 }
 
-export function useQQChannel({
+export function useFeishuChannel({
   codeMode,
   initialChannel,
   log,
   setQueuedSubmit,
-  qqSubmitRef,
-  qqErrorRef,
   sessionName,
   currentRootDir,
   pendingGateIdRef,
@@ -197,18 +192,18 @@ export function useQQChannel({
   onCheckpointReviseRef,
   onPlanRevisionRef,
   onChoiceResolveRef,
-}: UseQQChannelArgs) {
-  const channelRef = useRef<QQChannel | null>(initialChannel ?? null);
-  const interactionRef = useRef<QQInteractionState>({ kind: null, payload: null });
-  const slashInteractionRef = useRef<QQSlashInteractionState>({ kind: null, payload: null });
+}: UseFeishuChannelArgs) {
+  const channelRef = useRef<FeishuChannel | null>(initialChannel ?? null);
+  const interactionRef = useRef<FeishuInteractionState>({ kind: null, payload: null });
+  const slashInteractionRef = useRef<FeishuSlashInteractionState>({ kind: null, payload: null });
   const replyThisTurnRef = useRef(false);
-  const pendingConnectSetupRef = useRef<PendingQQConnectSetup | null>(null);
+  const pendingConnectSetupRef = useRef<PendingFeishuConnectSetup | null>(null);
 
   const sendText = useCallback(
     (message: string) => {
       const send = channelRef.current?.sendResponse(message);
       send?.catch((err) => {
-        log.pushWarning("QQ", `sendResponse error: ${(err as Error).message}`);
+        log.pushWarning("Feishu", `sendResponse error: ${(err as Error).message}`);
       });
     },
     [log],
@@ -222,19 +217,17 @@ export function useQQChannel({
     [log, sendText],
   );
 
-  const persistQQConfig = useCallback(
+  const persistFeishuConfig = useCallback(
     (config: {
       appId: string;
       appSecret: string;
-      sandbox: boolean;
       enabled: boolean;
       ownerOpenId?: string;
       allowlist?: readonly string[];
     }) => {
-      saveQQConfig({
+      saveFeishuConfig({
         appId: config.appId,
         appSecret: config.appSecret,
-        sandbox: config.sandbox,
         enabled: config.enabled,
         ownerOpenId: config.ownerOpenId,
         allowlist: config.allowlist ? [...config.allowlist] : undefined,
@@ -247,81 +240,74 @@ export function useQQChannel({
     async ({
       appId,
       appSecret,
-      sandbox,
       ownerOpenId,
       allowlist,
     }: {
       appId: string;
       appSecret: string;
-      sandbox: boolean;
       ownerOpenId?: string;
       allowlist?: readonly string[];
     }) => {
       if (!appId || !appSecret) {
-        throw new Error(t("handlers.qq.credentialsRequired"));
+        throw new Error(t("handlers.feishu.credentialsRequired"));
       }
 
-      persistQQConfig({
+      persistFeishuConfig({
         appId,
         appSecret,
-        sandbox,
         enabled: false,
         ownerOpenId,
         allowlist,
       });
       if (channelRef.current) {
-        persistQQConfig({
+        persistFeishuConfig({
           appId,
           appSecret,
-          sandbox,
           enabled: true,
           ownerOpenId,
           allowlist,
         });
         channelRef.current.refreshAccessConfig();
-        return t("handlers.qq.alreadyConnected", {
-          mode: formatQQModeLabel(codeMode),
+        return t("handlers.feishu.alreadyConnected", {
+          mode: formatFeishuModeLabel(codeMode),
         });
       }
 
-      const channel = new QQChannel({
+      const channel = new FeishuChannel({
         onSubmitMessage: (message) => setQueuedSubmit(message),
-        onError: (message) => log.pushWarning("QQ", message),
+        onError: (message) => log.pushWarning("Feishu", message),
       });
       await channel.start();
       channelRef.current = channel;
-      persistQQConfig({
+      persistFeishuConfig({
         appId,
         appSecret,
-        sandbox,
         enabled: true,
         ownerOpenId,
         allowlist,
       });
-      return t("handlers.qq.connected", {
-        mode: formatQQModeLabel(codeMode),
+      return t("handlers.feishu.connected", {
+        mode: formatFeishuModeLabel(codeMode),
       });
     },
-    [codeMode, log, persistQQConfig, setQueuedSubmit],
+    [codeMode, log, persistFeishuConfig, setQueuedSubmit],
   );
 
   const beginConnectSetup = useCallback(
     ({
       appId,
       appSecret,
-      sandbox,
       ownerOpenId,
       allowlist,
     }: {
       appId?: string;
       appSecret?: string;
-      sandbox: boolean;
       ownerOpenId?: string;
       allowlist?: readonly string[];
     }): Promise<string> => {
       const current = pendingConnectSetupRef.current;
       if (current) {
-        log.pushInfo(formatQQSetupWaiting(current.step));
+        log.pushInfo(formatFeishuSetupWaiting(current.step));
         return current.promise;
       }
 
@@ -331,19 +317,18 @@ export function useQQChannel({
         resolveSetup = resolve;
         rejectSetup = reject;
       });
-      const step: QQSetupStep = appId ? "appSecret" : "appId";
+      const step: FeishuSetupStep = appId ? "appSecret" : "appId";
       pendingConnectSetupRef.current = {
         step,
         appId,
         appSecret,
-        sandbox,
         ownerOpenId,
         allowlist,
         resolve: (message) => resolveSetup?.(message),
         reject: (error) => rejectSetup?.(error),
         promise,
       };
-      log.pushInfo(formatQQSetupPrompt(step));
+      log.pushInfo(formatFeishuSetupPrompt(step));
       return promise;
     },
     [log],
@@ -351,28 +336,14 @@ export function useQQChannel({
 
   const connect = useCallback(
     async (args: readonly string[]): Promise<string> => {
-      const existing = loadQQConfig();
+      const existing = loadFeishuConfig();
       const appId = args[0]?.trim() || existing.appId || "";
       const appSecret = args[1]?.trim() || existing.appSecret || "";
-      const sandboxArg = args[2]?.trim().toLowerCase();
-      const sandbox =
-        sandboxArg === "sandbox" ||
-        sandboxArg === "true" ||
-        sandboxArg === "1" ||
-        sandboxArg === "yes"
-          ? true
-          : sandboxArg === "prod" ||
-              sandboxArg === "false" ||
-              sandboxArg === "0" ||
-              sandboxArg === "no"
-            ? false
-            : (existing.sandbox ?? false);
 
       if (!appId || !appSecret) {
         return beginConnectSetup({
           appId: appId || undefined,
           appSecret: appSecret || undefined,
-          sandbox,
           ownerOpenId: existing.ownerOpenId,
           allowlist: existing.allowlist,
         });
@@ -381,7 +352,6 @@ export function useQQChannel({
       return completeConnect({
         appId,
         appSecret,
-        sandbox,
         ownerOpenId: existing.ownerOpenId,
         allowlist: existing.allowlist,
       });
@@ -393,49 +363,49 @@ export function useQQChannel({
     const pendingSetup = pendingConnectSetupRef.current;
     if (pendingSetup) {
       pendingConnectSetupRef.current = null;
-      pendingSetup.reject(new Error(t("handlers.qq.setupCancelled")));
+      pendingSetup.reject(new Error(t("handlers.feishu.setupCancelled")));
     }
-    const existing = loadQQConfig();
+    const existing = loadFeishuConfig();
     const current = channelRef.current;
     channelRef.current = null;
     if (current) await current.stop();
-    saveQQConfig({ ...existing, enabled: false });
-    return t("handlers.qq.disconnected");
+    saveFeishuConfig({ ...existing, enabled: false });
+    return t("handlers.feishu.disconnected");
   }, []);
 
   const status = useCallback((): string => {
-    const config = loadQQConfig();
-    const configured = config.appId && config.appSecret;
+    const config = loadFeishuConfig();
+    const configured = Boolean(config.appId && config.appSecret);
     const connected = !!channelRef.current;
     const enabled = !!config.enabled;
-    const appId = config.appId ? `${config.appId.slice(0, 6)}...` : t("handlers.qq.none");
-    const sandbox = config.sandbox ? t("handlers.qq.sandbox") : t("handlers.qq.production");
+    const appId = config.appId ? `${config.appId.slice(0, 6)}...` : t("handlers.feishu.none");
     const access = channelRef.current
-      ? formatQQAccessSummary({
+      ? formatFeishuAccessSummary({
           ownerOpenId: config.ownerOpenId,
           allowlist: config.allowlist,
           runtimeBoundOpenId: channelRef.current.getRuntimeBoundOpenId(),
-        } satisfies QQAccessConfig)
-      : formatQQAccessSummary({
+        } satisfies FeishuAccessConfig)
+      : formatFeishuAccessSummary({
           ownerOpenId: config.ownerOpenId,
           allowlist: config.allowlist,
         });
     const pendingSetup = pendingConnectSetupRef.current;
     if (pendingSetup) {
-      return t("handlers.qq.statusSetup", {
-        step: formatQQSetupWaiting(pendingSetup.step),
+      return t("handlers.feishu.statusSetup", {
+        step: formatFeishuSetupWaiting(pendingSetup.step),
       });
     }
-    return t("handlers.qq.status", {
-      connected: connected ? t("handlers.qq.stateConnected") : t("handlers.qq.stateDisconnected"),
-      enabled: enabled ? t("handlers.qq.stateEnabled") : t("handlers.qq.stateDisabled"),
+    return t("handlers.feishu.status", {
+      connected: connected
+        ? t("handlers.feishu.stateConnected")
+        : t("handlers.feishu.stateDisconnected"),
+      enabled: enabled ? t("handlers.feishu.stateEnabled") : t("handlers.feishu.stateDisabled"),
       configured: configured
-        ? t("handlers.qq.stateConfigured")
-        : t("handlers.qq.stateNotConfigured"),
+        ? t("handlers.feishu.stateConfigured")
+        : t("handlers.feishu.stateNotConfigured"),
       appId,
-      sandbox,
       access,
-      mode: formatQQModeLabel(codeMode),
+      mode: formatFeishuModeLabel(codeMode),
     });
   }, [codeMode]);
 
@@ -451,23 +421,11 @@ export function useQQChannel({
 
   const canBypassBusy = useCallback(
     (queuedSubmit: string) =>
-      queuedSubmit.startsWith("[QQ] ") &&
+      queuedSubmit.startsWith("[Feishu] ") &&
       interactionRef.current.kind !== null &&
       pendingGateIdRef.current !== null,
     [pendingGateIdRef],
   );
-
-  const bindTransportRefs = useCallback(() => {
-    if (!qqSubmitRef || !qqErrorRef) return () => undefined;
-    qqSubmitRef.current = setQueuedSubmit;
-    qqErrorRef.current = (msg) => log.pushWarning("QQ", msg);
-    return () => {
-      qqSubmitRef.current = null;
-      qqErrorRef.current = null;
-    };
-  }, [log, qqErrorRef, qqSubmitRef, setQueuedSubmit]);
-
-  useEffect(() => bindTransportRefs(), [bindTransportRefs]);
 
   const beginSessionsPicker = useCallback(
     (sessions: SessionInfo[]) => {
@@ -516,15 +474,12 @@ export function useQQChannel({
 
   const consumeSlashReply = useCallback(
     (text: string): boolean => {
-      const lowerText = text.toLowerCase();
       const pickedIndex = parseIndexedChoice(text);
       switch (slashInteractionRef.current.kind) {
         case "sessions_picker": {
           const sessions = (slashInteractionRef.current.payload as SessionInfo[]) ?? [];
           slashInteractionRef.current = { kind: null, payload: null };
-          if (isCancelText(text)) {
-            return true;
-          }
+          if (isCancelText(text)) return true;
           if (isNewText(text)) {
             if (onCreateSession) {
               const nextSession = freshSessionName(sessionName ?? undefined);
@@ -539,12 +494,9 @@ export function useQQChannel({
           }
           if (pickedIndex >= 0 && pickedIndex < sessions.length) {
             const target = sessions[pickedIndex];
-            if (!target) return true;
-            if (onSelectSession) {
+            if (target && onSelectSession) {
               onSelectSession(target.name);
               sendText(`Switched to session: ${target.name}`);
-            } else {
-              sendText(`Switch to session in the terminal: ${target.name}`);
             }
           }
           return true;
@@ -552,9 +504,7 @@ export function useQQChannel({
         case "checkpoint_picker": {
           const checkpoints = (slashInteractionRef.current.payload as CheckpointMeta[]) ?? [];
           slashInteractionRef.current = { kind: null, payload: null };
-          if (isCancelText(text)) {
-            return true;
-          }
+          if (isCancelText(text)) return true;
           if (pickedIndex >= 0 && pickedIndex < checkpoints.length) {
             const target = checkpoints[pickedIndex];
             if (!target) return true;
@@ -574,30 +524,28 @@ export function useQQChannel({
         case "model_picker": {
           const choices = (slashInteractionRef.current.payload as string[]) ?? [];
           slashInteractionRef.current = { kind: null, payload: null };
-          if (isCancelText(text)) {
-            return true;
-          }
+          if (isCancelText(text)) return true;
           if (pickedIndex >= 0 && pickedIndex < choices.length) {
             const target = choices[pickedIndex];
-            if (!target) return true;
-            const message = onModelPick(target);
-            log.pushInfo(message);
-            sendText(message);
+            if (target) {
+              const message = onModelPick(target);
+              log.pushInfo(message);
+              sendText(message);
+            }
           }
           return true;
         }
         case "theme_picker": {
           const choices = (slashInteractionRef.current.payload as ThemeChoice[]) ?? [];
           slashInteractionRef.current = { kind: null, payload: null };
-          if (isCancelText(text)) {
-            return true;
-          }
+          if (isCancelText(text)) return true;
           if (pickedIndex >= 0 && pickedIndex < choices.length) {
             const target = choices[pickedIndex];
-            if (!target) return true;
-            const message = onThemePick(target);
-            log.pushInfo(message);
-            sendText(message);
+            if (target) {
+              const message = onThemePick(target);
+              log.pushInfo(message);
+              sendText(message);
+            }
           }
           return true;
         }
@@ -705,15 +653,15 @@ export function useQQChannel({
     ],
   );
 
-  const noteTurnFromQQ = useCallback((fromQQ: boolean) => {
-    replyThisTurnRef.current = fromQQ;
+  const noteTurnFromFeishu = useCallback((fromFeishu: boolean) => {
+    replyThisTurnRef.current = fromFeishu;
   }, []);
 
   const maybeSendFinalReply = useCallback(
     (lastAssistantText: string) => {
       if (channelRef.current && lastAssistantText && replyThisTurnRef.current) {
         channelRef.current.sendResponse(lastAssistantText).catch((err) => {
-          log.pushWarning("QQ", `sendResponse error: ${(err as Error).message}`);
+          log.pushWarning("Feishu", `sendResponse error: ${(err as Error).message}`);
         });
       }
     },
@@ -727,47 +675,47 @@ export function useQQChannel({
   const handlePauseRequest = useCallback(
     (kind: string, payload: Record<string, unknown>) => {
       if (!channelRef.current) return;
-      interactionRef.current = { kind: kind as QQInteractionKind, payload };
+      interactionRef.current = { kind: kind as FeishuInteractionKind, payload };
 
-      let qqMessage = "";
+      let feishuMessage = "";
       switch (kind) {
         case "run_command":
         case "run_background": {
           const p = payload as { command: string };
-          qqMessage = `Need confirmation\n\nCommand: \`${p.command}\`\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
+          feishuMessage = `Need confirmation\n\nCommand: \`${p.command}\`\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
           break;
         }
         case "path_access": {
           const p = payload as { path: string; intent: "read" | "write"; toolName: string };
           const intentText = p.intent === "read" ? "Read" : "Write";
-          qqMessage = `Need file access confirmation\n\nAction: ${intentText}\nPath: ${p.path}\nTool: ${p.toolName}\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
+          feishuMessage = `Need file access confirmation\n\nAction: ${intentText}\nPath: ${p.path}\nTool: ${p.toolName}\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
           break;
         }
         case "plan_proposed": {
           const p = payload as { plan: string };
-          qqMessage = `Plan confirmation\n\n${p.plan}\n\nReply with:\n1. Approve\n2. Refine\n3. Cancel`;
+          feishuMessage = `Plan confirmation\n\n${p.plan}\n\nReply with:\n1. Approve\n2. Refine\n3. Cancel`;
           break;
         }
         case "plan_checkpoint": {
           const p = payload as { title?: string; result: string };
           const completed = completedStepIdsRef.current.size;
           const total = planStepsRef.current?.length ?? 0;
-          qqMessage = `Step complete (${completed}/${total})\n\n${p.title ? `Step: ${p.title}\n` : ""}Result: ${p.result}\n\nReply with:\n1. Continue\n2. Revise\n3. Stop`;
+          feishuMessage = `Step complete (${completed}/${total})\n\n${p.title ? `Step: ${p.title}\n` : ""}Result: ${p.result}\n\nReply with:\n1. Continue\n2. Revise\n3. Stop`;
           break;
         }
         case "plan_revision": {
           const p = payload as { reason: string };
-          qqMessage = `Plan revision proposed\n\n${p.reason}\n\nReply with:\n1. Accept\n2. Reject\n3. Cancel`;
+          feishuMessage = `Plan revision proposed\n\n${p.reason}\n\nReply with:\n1. Accept\n2. Reject\n3. Cancel`;
           break;
         }
         case "choice": {
           const p = payload as { question: string; options: ChoiceOption[]; allowCustom: boolean };
           const optionsList = p.options.map((opt, idx) => `${idx + 1}. ${opt.title}`).join("\n");
-          qqMessage = `Please choose\n\n${p.question}\n\nOptions:\n${optionsList}${p.allowCustom ? "\n\n(You can also reply with custom text.)" : ""}`;
+          feishuMessage = `Please choose\n\n${p.question}\n\nOptions:\n${optionsList}${p.allowCustom ? "\n\n(You can also reply with custom text.)" : ""}`;
           break;
         }
       }
-      if (qqMessage) sendText(qqMessage);
+      if (feishuMessage) sendText(feishuMessage);
     },
     [completedStepIdsRef, planStepsRef, sendText],
   );
@@ -796,22 +744,22 @@ export function useQQChannel({
       let text = raw.trim();
       if (!text) return null;
 
-      const fromQQ = text.startsWith("[QQ] ");
-      if (!fromQQ && pendingConnectSetupRef.current) {
+      const fromFeishu = text.startsWith("[Feishu] ");
+      if (!fromFeishu && pendingConnectSetupRef.current) {
         const lower = text.toLowerCase();
         const pending = pendingConnectSetupRef.current;
         if (lower === "/cancel" || lower === "cancel") {
           pendingConnectSetupRef.current = null;
-          pending.reject(new Error(t("handlers.qq.setupCancelled")));
-          log.pushInfo(t("handlers.qq.setupCancelled"));
-          return { handled: true, fromQQ, text, shouldClearInput: true };
+          pending.reject(new Error(t("handlers.feishu.setupCancelled")));
+          log.pushInfo(t("handlers.feishu.setupCancelled"));
+          return { handled: true, fromFeishu, text, shouldClearInput: true };
         }
 
         if (pending.step === "appId") {
           pending.appId = text;
           pending.step = "appSecret";
-          log.pushInfo(formatQQSetupPrompt("appSecret"));
-          return { handled: true, fromQQ, text, shouldClearInput: true };
+          log.pushInfo(formatFeishuSetupPrompt("appSecret"));
+          return { handled: true, fromFeishu, text, shouldClearInput: true };
         }
 
         pending.appSecret = text;
@@ -819,20 +767,19 @@ export function useQQChannel({
         void completeConnect({
           appId: pending.appId ?? "",
           appSecret: pending.appSecret ?? "",
-          sandbox: pending.sandbox,
           ownerOpenId: pending.ownerOpenId,
           allowlist: pending.allowlist,
         }).then(pending.resolve, (err) => pending.reject(err as Error));
-        return { handled: true, fromQQ, text, shouldClearInput: true };
+        return { handled: true, fromFeishu, text, shouldClearInput: true };
       }
-      if (fromQQ) {
-        text = text.slice(5).trimStart() || text;
+      if (fromFeishu) {
+        text = text.slice(9).trimStart() || text;
         if (consumeSlashReply(text) || consumePauseReply(text)) {
-          return { handled: true, fromQQ, text };
+          return { handled: true, fromFeishu, text };
         }
       }
 
-      return { handled: false, fromQQ, text };
+      return { handled: false, fromFeishu, text };
     },
     [completeConnect, consumePauseReply, consumeSlashReply, log],
   );
@@ -894,6 +841,12 @@ export function useQQChannel({
     ],
   );
 
+  useEffect(() => {
+    return () => {
+      pendingConnectSetupRef.current = null;
+    };
+  }, []);
+
   return useMemo(
     () => ({
       channelRef,
@@ -912,7 +865,7 @@ export function useQQChannel({
       beginModelPicker,
       beginThemePicker,
       notifyTerminalOnly,
-      noteTurnFromQQ,
+      noteTurnFromFeishu,
       maybeSendFinalReply,
       clearTurnReply,
       handlePauseRequest,
@@ -938,7 +891,7 @@ export function useQQChannel({
       handlePauseRequest,
       handleRemoteSlashResult,
       maybeSendFinalReply,
-      noteTurnFromQQ,
+      noteTurnFromFeishu,
       notifyTerminalOnly,
       parseSubmit,
       resetInteractions,

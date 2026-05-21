@@ -103,6 +103,14 @@ export interface QQBotConfig {
   allowlist?: string[];
 }
 
+export interface FeishuBotConfig {
+  appId?: string;
+  appSecret?: string;
+  enabled?: boolean;
+  ownerOpenId?: string;
+  allowlist?: string[];
+}
+
 export interface PricingOverride {
   inputCacheHit?: number;
   inputCacheMiss?: number;
@@ -224,6 +232,8 @@ export interface ReasonixConfig {
   };
   /** QQ Bot configuration */
   qq?: QQBotConfig;
+  /** Feishu Bot configuration */
+  feishu?: FeishuBotConfig;
 }
 
 export interface CustomMemoryTypeConfig {
@@ -1258,6 +1268,14 @@ export interface LoadedQQConfig {
   allowlist?: string[];
 }
 
+export interface LoadedFeishuConfig {
+  appId?: string;
+  appSecret?: string;
+  enabled?: boolean;
+  ownerOpenId?: string;
+  allowlist?: string[];
+}
+
 export function loadQQConfig(path: string = defaultConfigPath()): LoadedQQConfig {
   const envSandbox = process.env.QQ_SANDBOX;
   const envAllowlist = normalizeQQAllowlist(process.env.QQ_ALLOWLIST);
@@ -1291,6 +1309,45 @@ export function saveQQConfig(cfg: LoadedQQConfig, path: string = defaultConfigPa
     appId: cfg.appId,
     appSecret: cfg.appSecret,
     sandbox: cfg.sandbox,
+    enabled: cfg.enabled,
+    ownerOpenId,
+    allowlist,
+  };
+  writeConfig(rootCfg, path);
+}
+
+export function loadFeishuConfig(path: string = defaultConfigPath()): LoadedFeishuConfig {
+  const envAllowlist = normalizeQQAllowlist(process.env.FEISHU_ALLOWLIST);
+  const fromEnv = {
+    appId: process.env.FEISHU_APP_ID,
+    appSecret: process.env.FEISHU_APP_SECRET,
+    ownerOpenId: normalizeQQOpenId(process.env.FEISHU_OWNER_OPENID),
+    allowlist: envAllowlist,
+  };
+  const fromCfg = readConfig(path).feishu ?? {};
+  const ownerOpenId = fromEnv.ownerOpenId ?? normalizeQQOpenId(fromCfg.ownerOpenId);
+  const allowlist = normalizeQQAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
+    (openid) => openid !== ownerOpenId,
+  );
+  return {
+    appId: fromEnv.appId ?? fromCfg.appId,
+    appSecret: fromEnv.appSecret ?? fromCfg.appSecret,
+    enabled: fromCfg.enabled === true,
+    ownerOpenId,
+    allowlist,
+  };
+}
+
+export function saveFeishuConfig(
+  cfg: LoadedFeishuConfig,
+  path: string = defaultConfigPath(),
+): void {
+  const rootCfg = readConfig(path);
+  const ownerOpenId = normalizeQQOpenId(cfg.ownerOpenId);
+  const allowlist = normalizeQQAllowlist(cfg.allowlist)?.filter((openid) => openid !== ownerOpenId);
+  rootCfg.feishu = {
+    appId: cfg.appId,
+    appSecret: cfg.appSecret,
     enabled: cfg.enabled,
     ownerOpenId,
     allowlist,

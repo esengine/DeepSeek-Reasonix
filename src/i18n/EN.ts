@@ -353,6 +353,11 @@ export const EN: TranslationSchema = {
         "connect, inspect, or disconnect the QQ channel for this session (first connect guides App ID / App Secret setup)",
       argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
     },
+    feishu: {
+      description:
+        "connect, inspect, or disconnect the Feishu channel for this session (first connect guides App ID / App Secret setup)",
+      argsHint: "[connect [appId appSecret]|status|disconnect]",
+    },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
       description: "show semantic_search status — built? Ollama installed? how to enable",
@@ -850,6 +855,50 @@ export const EN: TranslationSchema = {
       missingAppSecret: "QQ App Secret is required. Run `/qq connect` to configure.",
       authFailed: "QQ bot authentication failed — check your App ID and App Secret.",
       readyTimeout: "QQ bot did not receive READY within 15s — check your App ID and App Secret.",
+    },
+    feishu: {
+      unavailable: "/feishu is not available in this session.",
+      connecting: "Feishu: connecting…",
+      connectFailed: "Feishu connect failed: {reason}",
+      disconnecting: "Feishu: disconnecting…",
+      disconnectFailed: "Feishu disconnect failed: {reason}",
+      usage: "Usage: /feishu connect [appId appSecret] | /feishu status | /feishu disconnect",
+      promptAppId:
+        "Feishu setup: enter your Feishu Open Platform App ID, then press Enter. Type /cancel to abort.",
+      promptAppSecret:
+        "Feishu setup: enter your Feishu Open Platform App Secret, then press Enter. Type /cancel to abort.",
+      setupWaitingAppId: "waiting for App ID",
+      setupWaitingAppSecret: "waiting for App Secret",
+      setupCancelled: "Feishu setup cancelled.",
+      credentialsRequired: "Feishu App ID and App Secret are required.",
+      connected: "Feishu connected in {mode} mode. It will auto-start on future launches.",
+      alreadyConnected: "Feishu is already connected in {mode} mode. Auto-start is enabled.",
+      disconnected: "Feishu disconnected. Auto-start is disabled.",
+      status:
+        "Feishu: {connected}, auto-start {enabled}, credentials {configured}, appId {appId}, access {access}, current mode {mode}.",
+      statusSetup: "Feishu: setup in progress — {step}",
+      stateConnected: "connected",
+      stateDisconnected: "disconnected",
+      stateEnabled: "enabled",
+      stateDisabled: "disabled",
+      stateConfigured: "configured",
+      stateNotConfigured: "not configured",
+      none: "none",
+      modeChat: "chat",
+      modeCode: "code",
+      accessOwner: "owner {owner}",
+      accessOwnerWithAllowlist: "owner {owner}, allowlist {count}",
+      accessAllowlist: "allowlist {count}",
+      accessRuntime: "first-sender (runtime only, {owner})",
+      accessOpen: "open (unbound)",
+      lockAlreadyRunning:
+        "Feishu channel is already running in process {pid}. Stop that process before starting another Feishu channel.",
+      unauthorizedMessage:
+        "Feishu ignored message from unauthorized openid {openid}. Current access: {access}.",
+      runtimeBound:
+        "Feishu temporarily bound this run to first sender {openid}. Set `feishu.ownerOpenId` in config to persist access.",
+      missingAppId: "Feishu App ID is required. Run `/feishu connect` to configure.",
+      missingAppSecret: "Feishu App Secret is required. Run `/feishu connect` to configure.",
     },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",

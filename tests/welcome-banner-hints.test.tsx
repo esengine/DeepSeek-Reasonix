@@ -1,7 +1,6 @@
 /** #1213 — discoverability net: /skill must remain in the empty-session hint row. */
 
 import { render } from "ink-testing-library";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { WelcomeBanner } from "../src/cli/ui/WelcomeBanner.js";
