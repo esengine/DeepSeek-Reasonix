@@ -975,6 +975,7 @@ export const zhCN: TranslationSchema = {
       readyHint: "仅 127.0.0.1 · token 保护。输入 `/dashboard stop` 关闭。",
       failed: "▸ 仪表板启动失败：{reason}",
       starting: "▸ 正在启动仪表板服务器…",
+      copied: "▸ 仪表板 URL 已复制到剪贴板：{url}",
     },
     observability: {
       contextInfo: "上下文：~{total} / {max}（{pct}%）· 系统 {sys} · 工具 {tools} · 日志 {log}",

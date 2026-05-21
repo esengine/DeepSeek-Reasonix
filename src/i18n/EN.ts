@@ -1030,6 +1030,7 @@ export const EN: TranslationSchema = {
       readyHint: "127.0.0.1 only · token-gated. Type `/dashboard stop` to shut down.",
       failed: "▸ dashboard failed to start: {reason}",
       starting: "▸ starting dashboard server…",
+      copied: "▸ dashboard URL copied to clipboard: {url}",
     },
     observability: {
       contextInfo: "context: ~{total} of {max} ({pct}%) · system {sys} · tools {tools} · log {log}",

@@ -1,4 +1,5 @@
 import { t } from "@/i18n/index.js";
+import { writeClipboard } from "../../clipboard.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const dashboard: SlashHandler = (args, _loop, ctx) => {
@@ -16,6 +17,13 @@ const dashboard: SlashHandler = (args, _loop, ctx) => {
     if (!url) return { info: t("handlers.dashboard.notRunning") };
     ctx.stopDashboard();
     return { info: t("handlers.dashboard.stopping") };
+  }
+
+  if (sub === "copy") {
+    const url = ctx.getDashboardUrl();
+    if (!url) return { info: t("handlers.dashboard.notRunning") };
+    writeClipboard(url);
+    return { info: t("handlers.dashboard.copied", { url }) };
   }
 
   const existing = ctx.getDashboardUrl();
