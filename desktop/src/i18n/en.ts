@@ -596,6 +596,8 @@ export const en = {
     noMatches: "No matches",
     messageCount: "{count} messages",
     deleteSession: "Delete session",
+    renameSession: "Rename session",
+    renamePlaceholder: "Session title",
     approvalRules: "Approval rules",
     settings: "Settings",
     cancel: "Cancel",

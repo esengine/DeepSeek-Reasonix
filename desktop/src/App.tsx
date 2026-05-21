@@ -1633,14 +1633,16 @@ function TabRuntime({
     ? state.settings.workspaceDir.split(/[\\/]/).pop() || "workspace"
     : "Reasonix";
   const session = (() => {
+    if (state.currentSession) {
+      const s = state.sessions.find((x) => x.name === state.currentSession);
+      if (s?.summary?.trim()) return s.summary.trim();
+    }
     const firstUser = state.messages.find((m) => m.kind === "user");
     if (firstUser && firstUser.kind === "user") {
       const cleaned = firstUser.text.replace(/\s+/g, " ").trim();
       if (cleaned) return cleaned.length > 60 ? `${cleaned.slice(0, 60)}…` : cleaned;
     }
     if (state.currentSession) {
-      const s = state.sessions.find((x) => x.name === state.currentSession);
-      if (s?.summary?.trim()) return s.summary.trim();
       const m = state.currentSession.match(/^desktop-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
       if (m)
         return t("app.session.format", {
@@ -1736,6 +1738,7 @@ function TabRuntime({
           onNewChat={newChat}
           onLoadSession={(name) => sendRpc({ cmd: "session_load", name })}
           onDeleteSession={(name) => sendRpc({ cmd: "session_delete", name })}
+          onRenameSession={(name, title) => sendRpc({ cmd: "session_rename", name, title })}
           onOpenSettings={() => openSettingsAt("general")}
           onOpenRules={() => openSettingsAt("rules")}
           onOpenCommands={() => palette.setOpen(true)}

@@ -29,6 +29,7 @@ export const I = {
   chevR: (p: IconProps) => (<Ic {...p}><path d="m9 6 6 6-6 6" /></Ic>),
   check: (p: IconProps) => (<Ic {...p}><path d="m5 12 5 5L20 7" /></Ic>),
   x: (p: IconProps) => (<Ic {...p}><path d="M6 6l12 12M18 6 6 18" /></Ic>),
+  pencil: (p: IconProps) => (<Ic {...p}><path d="m4 20 4-1L20 7l-3-3L5 16l-1 4Z" /><path d="m14 6 4 4" /></Ic>),
   terminal: (p: IconProps) => (<Ic {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></Ic>),
   brain: (p: IconProps) => (
     <Ic {...p}>

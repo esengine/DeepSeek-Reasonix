@@ -99,6 +99,7 @@ type InMessage = { tabId?: string } & (
   | { cmd: "session_list" }
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_load"; name: string }
+  | { cmd: "session_rename"; name: string; title: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
   | { cmd: "settings_get" }
@@ -448,6 +449,13 @@ type EmittableEvent =
 const STDOUT_BACKPRESSURE_WAIT = new Int32Array(new SharedArrayBuffer(4));
 
 type SyncWriter = (fd: number, buffer: Buffer, offset: number, length: number) => number;
+
+const SESSION_TITLE_MAX_CHARS = 200;
+
+/** Trim + cap a user-provided session title; empty string means "clear summary". Exported for tests. */
+export function normalizeSessionTitle(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim().slice(0, SESSION_TITLE_MAX_CHARS);
+}
 
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
 export function writeAllSync(
@@ -2063,6 +2071,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "session_delete") {
       deleteSession(msg.name);
       emitSessions(tab);
+      return;
+    }
+    if (msg.cmd === "session_rename") {
+      try {
+        const trimmed = normalizeSessionTitle(msg.title);
+        patchSessionMeta(msg.name, { summary: trimmed || undefined });
+        emitSessions(tab);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `session_rename failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
       return;
     }
     if (msg.cmd === "session_load") {

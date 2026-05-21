@@ -582,6 +582,8 @@ export const zhCN: typeof en = {
     noMatches: "无匹配结果",
     messageCount: "{count} 条",
     deleteSession: "删除会话",
+    renameSession: "重命名会话",
+    renamePlaceholder: "会话标题",
     approvalRules: "审批规则",
     settings: "设置",
     cancel: "取消",

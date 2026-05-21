@@ -1161,9 +1161,27 @@ html[data-platform="macos"] .titlebar .tb-left {
   opacity: 0;
   transition: opacity 120ms, background 120ms, color 120ms;
 }
+.session-item .rename-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
 .session-item:hover .delete-btn,
 .session-item:focus-within .delete-btn,
-.session-item .delete-btn:focus-visible {
+.session-item .delete-btn:focus-visible,
+.session-item:hover .rename-btn,
+.session-item:focus-within .rename-btn,
+.session-item .rename-btn:focus-visible {
   opacity: 1;
 }
 .session-item .delete-btn:hover {
@@ -1172,6 +1190,31 @@ html[data-platform="macos"] .titlebar .tb-left {
 }
 .session-item .delete-btn:focus-visible {
   outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.session-item .rename-btn:hover {
+  background: var(--panel-2, rgba(255, 255, 255, 0.06));
+  color: var(--fg);
+}
+.session-item .rename-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.session-item[data-editing="true"] {
+  cursor: default;
+}
+.session-item .body .title-edit {
+  width: 100%;
+  font: inherit;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 2px 6px;
+  outline: none;
+}
+.session-item .body .title-edit:focus {
+  border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 

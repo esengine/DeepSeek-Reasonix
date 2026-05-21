@@ -4,6 +4,8 @@ import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import { Shortcut } from "./shortcut";
 
+const RENAME_MAX_CHARS = 200;
+
 type PendingDelete = {
   name: string;
   pretty: string;
@@ -43,6 +45,7 @@ export function Sidebar({
   onNewChat,
   onLoadSession,
   onDeleteSession,
+  onRenameSession,
   onOpenSettings,
   onOpenRules,
   onOpenCommands,
@@ -53,6 +56,7 @@ export function Sidebar({
   onNewChat: () => void;
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
+  onRenameSession: (name: string, title: string) => void;
   onOpenSettings: () => void;
   onOpenRules: () => void;
   onOpenCommands: () => void;
@@ -61,6 +65,8 @@ export function Sidebar({
   useLang();
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
   const filtered = query
     ? sessions.filter((s) => {
         const q = query.toLowerCase();
@@ -150,16 +156,26 @@ export function Sidebar({
             const active = s.name === activeName;
             const mtime = Date.parse(s.mtime);
             const updated = Number.isFinite(mtime) ? relative(Date.now() - mtime) : s.mtime;
+            const editing = editingName === s.name;
+            const currentSummary = s.summary?.trim() ?? "";
+            const commitRename = () => {
+              const next = editValue.trim().slice(0, RENAME_MAX_CHARS);
+              if (next !== currentSummary) onRenameSession(s.name, next);
+              setEditingName(null);
+              setEditValue("");
+            };
             return (
               <div
                 key={s.name}
                 className="session-item"
                 data-active={active}
-                onClick={() => onLoadSession(s.name)}
-                role="button"
-                tabIndex={0}
+                data-editing={editing || undefined}
+                onClick={editing ? undefined : () => onLoadSession(s.name)}
+                role={editing ? undefined : "button"}
+                tabIndex={editing ? -1 : 0}
                 title={s.name}
                 onKeyDown={(e) => {
+                  if (editing) return;
                   if (e.key === "Enter") onLoadSession(s.name);
                 }}
               >
@@ -168,34 +184,79 @@ export function Sidebar({
                   style={{ background: active ? "var(--accent)" : "var(--border-strong)" }}
                 />
                 <div className="body">
-                  <span className="title">{prettyName(s)}</span>
+                  {editing ? (
+                    <input
+                      className="title-edit"
+                      autoFocus
+                      value={editValue}
+                      maxLength={RENAME_MAX_CHARS}
+                      placeholder={t("sidebarPanel.renamePlaceholder")}
+                      aria-label={t("sidebarPanel.renameSession")}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitRename();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          setEditingName(null);
+                          setEditValue("");
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span className="title">{prettyName(s)}</span>
+                  )}
                   <span className="meta">
                     <span>{t("sidebarPanel.messageCount", { count: s.messageCount })}</span>
                     <span className="sep">·</span>
                     <span>{updated}</span>
                   </span>
                 </div>
-                <button
-                  type="button"
-                  className="delete-btn"
-                  title={t("sidebarPanel.deleteSession")}
-                  aria-label={t("sidebarPanel.deleteSession")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setPendingDelete({
-                      name: s.name,
-                      pretty: prettyName(s),
-                      x: rect.right,
-                      y: rect.bottom,
-                    });
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-                  }}
-                >
-                  <I.x size={12} />
-                </button>
+                {editing ? null : (
+                  <>
+                    <button
+                      type="button"
+                      className="rename-btn"
+                      title={t("sidebarPanel.renameSession")}
+                      aria-label={t("sidebarPanel.renameSession")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingName(s.name);
+                        setEditValue(currentSummary);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+                      }}
+                    >
+                      <I.pencil size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="delete-btn"
+                      title={t("sidebarPanel.deleteSession")}
+                      aria-label={t("sidebarPanel.deleteSession")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setPendingDelete({
+                          name: s.name,
+                          pretty: prettyName(s),
+                          x: rect.right,
+                          y: rect.bottom,
+                        });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+                      }}
+                    >
+                      <I.x size={12} />
+                    </button>
+                  </>
+                )}
               </div>
             );
           })}

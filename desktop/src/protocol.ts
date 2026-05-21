@@ -448,6 +448,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "session_list" }
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_load"; name: string }
+  | { cmd: "session_rename"; name: string; title: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
   | { cmd: "settings_get" }
