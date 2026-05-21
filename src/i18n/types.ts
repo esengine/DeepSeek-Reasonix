@@ -231,12 +231,20 @@ export interface TranslationSchema {
     editHistoryHelpUndo: string;
     editHistoryAlreadyReverted: string;
     editHistoryRevertFile: string;
+    mcpFailed: string;
+    mcpWarn: string;
   };
   mcpBrowse: {
     noResources: string;
     readOne: string;
     noPrompts: string;
     fetchOne: string;
+    noServerForResource: string;
+    resourceHint: string;
+    readFailed: string;
+    noServerForPrompt: string;
+    promptHint: string;
+    fetchFailed: string;
   };
   hooks: {
     head: string;
@@ -851,6 +859,8 @@ export interface TranslationSchema {
     failedSetupHint: string;
     failedSetupConfigHint: string;
     abortedHint: string;
+    toolsReady: string;
+    warnLabel: string;
   };
   checkpointPicker: {
     title: string;

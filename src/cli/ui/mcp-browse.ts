@@ -154,8 +154,8 @@ export async function handleMcpBrowseSlash(
     const server = findServerForResource(servers, arg);
     if (!server) {
       log.pushWarning(
-        `no server exposes resource "${arg}"`,
-        "`/resource` with no arg lists what's available.",
+        t("mcpBrowse.noServerForResource", { name: arg }),
+        t("mcpBrowse.resourceHint"),
       );
       return;
     }
@@ -163,7 +163,7 @@ export async function handleMcpBrowseSlash(
       const result = await server.readResource(arg);
       log.pushInfo(formatResourceContents(arg, result));
     } catch (err) {
-      log.pushWarning("readResource failed", (err as Error).message);
+      log.pushWarning(t("mcpBrowse.readFailed"), (err as Error).message);
     }
     return;
   }
@@ -171,16 +171,13 @@ export async function handleMcpBrowseSlash(
   // prompt
   const server = findServerForPrompt(servers, arg);
   if (!server) {
-    log.pushWarning(
-      `no server exposes prompt "${arg}"`,
-      "`/prompt` with no arg lists what's available.",
-    );
+    log.pushWarning(t("mcpBrowse.noServerForPrompt", { name: arg }), t("mcpBrowse.promptHint"));
     return;
   }
   try {
     const result = await server.getPrompt(arg);
     log.pushInfo(formatPromptMessages(arg, result));
   } catch (err) {
-    log.pushWarning("getPrompt failed", (err as Error).message);
+    log.pushWarning(t("mcpBrowse.fetchFailed"), (err as Error).message);
   }
 }

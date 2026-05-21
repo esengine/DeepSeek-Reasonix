@@ -625,6 +625,8 @@ export const zhCN: TranslationSchema = {
       "/undo                 → 最新的未撤销项   ·    /undo <id> [path]  → 指定批次或文件",
     editHistoryAlreadyReverted: "（已撤销 — /history 显示批次级状态）",
     editHistoryRevertFile: "/undo {id} {path}  → 仅还原此文件",
+    mcpFailed: "MCP {name} 失败",
+    mcpWarn: "MCP {name} 警告",
   },
   hooks: {
     head: "钩子 {tag} `{cmd}` {decision}{truncTag}",
@@ -1650,6 +1652,12 @@ export const zhCN: TranslationSchema = {
     readOne: "读取：`/resource <uri>` — 或在选择器中使用 Tab 键。",
     noPrompts: "没有任何已连接 MCP 服务器上的提示（或无服务器连接）。`/mcp` 显示当前列表。",
     fetchOne: "获取：`/prompt <name>` — 暂不支持参数；带必需参数的提示将返回服务器错误。",
+    noServerForResource: '没有服务器暴露资源 "{name}"',
+    resourceHint: "`/resource` 不带参数可查看可用列表。",
+    readFailed: "读取资源失败",
+    noServerForPrompt: '没有服务器暴露 prompt "{name}"',
+    promptHint: "`/prompt` 不带参数可查看可用列表。",
+    fetchFailed: "获取 prompt 失败",
   },
   mcpLifecycle: {
     handshake: "握手中…",
@@ -1663,6 +1671,8 @@ export const zhCN: TranslationSchema = {
     failedSetupHint: "→ 运行 `reasonix setup` 移除此条目，或修复底层问题（缺少 npm 包、网络等）。",
     failedSetupConfigHint: "→ 运行 `reasonix setup` 从已保存配置中移除损坏的条目。",
     abortedHint: "已中断 MCP 启动 — 跳过 {count} 个服务器。问题修复后用 /mcp 重新连接。",
+    toolsReady: "工具就绪",
+    warnLabel: "警告",
   },
   checkpointPicker: {
     title: "恢复检查点 \u2014 {workspace}",

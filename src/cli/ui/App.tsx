@@ -1219,8 +1219,8 @@ function AppInner({
         bumpReady();
       } else if (notice.kind === "failed") {
         log.pushWarning(
-          `MCP ${notice.name} failed`,
-          `${notice.reason}\nrun \`reasonix setup\` to remove this entry, or fix the underlying issue (missing npm package, network, etc.).`,
+          t("app.mcpFailed", { name: notice.name }),
+          `${notice.reason}\n${t("mcpLifecycle.failedSetupHint")}`,
         );
         bumpReady();
       } else if (notice.kind === "tools-ready") {
@@ -1235,7 +1235,7 @@ function AppInner({
         bumpReady();
       } else if (notice.kind === "warn") {
         log.pushWarning(
-          `MCP ${notice.name} warn`,
+          t("app.mcpWarn", { name: notice.name }),
           formatMcpLifecycleEvent({
             state: "warn",
             name: notice.name,

@@ -645,6 +645,8 @@ export const EN: TranslationSchema = {
       "/undo                 \u2192 newest non-undone   \u00b7    /undo <id> [path]  \u2192 target a specific batch or file",
     editHistoryAlreadyReverted: "(already reverted \u2014 /history shows the batch-level status)",
     editHistoryRevertFile: "/undo {id} {path}  \u2192 revert just this file",
+    mcpFailed: "MCP {name} failed",
+    mcpWarn: "MCP {name} warn",
   },
   hooks: {
     head: "hook {tag} `{cmd}` {decision}{truncTag}",
@@ -1740,6 +1742,12 @@ export const EN: TranslationSchema = {
       "No prompts on any connected MCP server (or no servers connected). `/mcp` shows the current set.",
     fetchOne:
       "Fetch one: `/prompt <name>` \u2014 args are not supported yet; prompts with required args will surface an error from the server.",
+    noServerForResource: 'no server exposes resource "{name}"',
+    resourceHint: "`/resource` with no arg lists what's available.",
+    readFailed: "readResource failed",
+    noServerForPrompt: 'no server exposes prompt "{name}"',
+    promptHint: "`/prompt` with no arg lists what's available.",
+    fetchFailed: "getPrompt failed",
   },
   mcpLifecycle: {
     handshake: "handshake\u2026",
@@ -1756,6 +1764,8 @@ export const EN: TranslationSchema = {
       "→ run `reasonix setup` to remove broken entries from your saved config.",
     abortedHint:
       "MCP startup aborted — {count} server(s) skipped. Run /mcp to retry once you've fixed the underlying issue.",
+    toolsReady: "tools ready",
+    warnLabel: "warn",
   },
   checkpointPicker: {
     title: "restore a checkpoint \u2014 {workspace}",
