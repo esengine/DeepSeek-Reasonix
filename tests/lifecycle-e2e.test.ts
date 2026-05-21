@@ -215,6 +215,117 @@ describe("strict engineering lifecycle e2e harness", () => {
     });
   });
 
+  it("covers a config and dependency migration with package, lockfile, and install evidence", async () => {
+    const blockedCalls: Array<{ name: string; args: Record<string, unknown> }> = [
+      {
+        name: "write_file",
+        args: { path: "package.json", content: '{"dependencies":{"zod":"latest"}}\n' },
+      },
+      { name: "write_file", args: { path: "pnpm-lock.yaml", content: "lockfileVersion: '9.0'\n" } },
+      {
+        name: "write_file",
+        args: { path: "tsconfig.json", content: '{"compilerOptions":{"strict":true}}\n' },
+      },
+      { name: "run_command", args: { command: "npm install zod", cwd: "/repo" } },
+    ];
+
+    for (const item of blockedCalls) {
+      const harness = createStrictLifecycleHarness();
+      const rejected = await harness.dispatch(item.name, item.args);
+
+      expect(JSON.parse(rejected)).toMatchObject({
+        rejectedReason: "engineering-lifecycle",
+        state: "armed",
+        nextAction: "submit_plan",
+      });
+    }
+
+    const harness = createStrictLifecycleHarness();
+    harness.queue({ type: "approve" });
+    await harness.dispatch("submit_plan", {
+      plan: "Migrate validation dependency and strict TypeScript config.",
+      steps: [
+        {
+          id: "step-1",
+          title: "Update dependency manifests",
+          action: "Update package.json, lockfile, and TypeScript config, then install deps.",
+          risk: "high",
+          targets: ["package.json", "pnpm-lock.yaml", "tsconfig.json"],
+          acceptance: "Dependency manifests and TypeScript config are updated.",
+          verification: ["npm install zod", "npm test -- tests/lifecycle.test.ts"],
+        },
+      ],
+    });
+
+    await harness.dispatch("write_file", {
+      path: "package.json",
+      content: '{"dependencies":{"zod":"latest"}}\n',
+    });
+    await harness.dispatch("write_file", {
+      path: "pnpm-lock.yaml",
+      content: "lockfileVersion: '9.0'\n",
+    });
+    await harness.dispatch("write_file", {
+      path: "tsconfig.json",
+      content: '{"compilerOptions":{"strict":true}}\n',
+    });
+    const install = await harness.dispatch("run_command", {
+      command: "npm install zod",
+      cwd: "/repo",
+    });
+    expect(install).toBe("exit 0\nnpm install zod");
+    expect(harness.lifecycle.snapshot()).toMatchObject({
+      state: "executing",
+      mutatedSinceLastStep: true,
+    });
+
+    const missingEvidence = await harness.dispatch("mark_step_complete", {
+      stepId: "step-1",
+      result: "Updated dependency manifests and TypeScript config.",
+    });
+    expect(JSON.parse(missingEvidence)).toMatchObject({
+      rejectedReason: "engineering-lifecycle-evidence",
+      stepId: "step-1",
+      nextAction: "add_evidence",
+    });
+
+    harness.queue({ type: "continue" });
+    const complete = await harness.dispatch("mark_step_complete", {
+      stepId: "step-1",
+      result: "Updated dependency manifests and TypeScript config.",
+      evidence: [
+        {
+          kind: "diff",
+          summary: "updated dependency manifests and TypeScript config",
+          paths: ["package.json", "pnpm-lock.yaml", "tsconfig.json"],
+        },
+        {
+          kind: "verification",
+          summary: "dependency install completed",
+          command: "npm install zod",
+        },
+        {
+          kind: "verification",
+          summary: "lifecycle regression tests passed",
+          command: "npm test -- tests/lifecycle.test.ts",
+        },
+      ],
+    });
+
+    expect(JSON.parse(complete)).toMatchObject({
+      kind: "step_completed",
+      stepId: "step-1",
+      evidenceSummary:
+        "diff: updated dependency manifests and TypeScript config; verification: dependency install completed; verification: lifecycle regression tests passed",
+    });
+    expect(harness.completions[0]?.evidence).toHaveLength(3);
+    expect(harness.lifecycle.snapshot()).toMatchObject({
+      state: "complete",
+      completedStepIds: ["step-1"],
+      mutatedSinceLastStep: false,
+    });
+  });
+
   it("preserves completed prefix through an accepted revision", async () => {
     const harness = createStrictLifecycleHarness();
     harness.queue({ type: "approve" });
