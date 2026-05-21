@@ -493,6 +493,49 @@ describe("strict engineering lifecycle e2e harness", () => {
     });
   });
 
+  it("recovers after the user cancels a proposed plan", async () => {
+    const harness = createStrictLifecycleHarness();
+
+    harness.queue({ type: "cancel", feedback: "too broad for this task" });
+    const cancelled = await harness.dispatch("submit_plan", {
+      plan: "Delete the old formatter and migrate all callers.",
+      steps: [
+        {
+          id: "step-1",
+          title: "Delete old formatter",
+          action: "Remove the old formatter file.",
+          risk: "high",
+        },
+      ],
+    });
+
+    expect(JSON.parse(cancelled).error).toMatch(/plan cancelled: too broad for this task/);
+    expect(harness.lifecycle.snapshot()).toMatchObject({
+      state: "cancelled",
+      planSteps: [],
+      completedStepIds: [],
+      mutatedSinceLastStep: false,
+    });
+
+    harness.lifecycle.observeUserPrompt("Fresh task: inspect the formatter before cleanup.");
+    expect(harness.lifecycle.snapshot()).toMatchObject({
+      state: "armed",
+      planSteps: [],
+      completedStepIds: [],
+      mutatedSinceLastStep: false,
+    });
+
+    const readOnly = await harness.dispatch("read_file", { path: "src/format.ts" });
+    expect(readOnly).toBe("read src/format.ts");
+
+    const freshMutation = await harness.dispatch("delete_file", { path: "src/format.old.ts" });
+    expect(JSON.parse(freshMutation)).toMatchObject({
+      rejectedReason: "engineering-lifecycle",
+      state: "armed",
+      nextAction: "submit_plan",
+    });
+  });
+
   it("cancels the runtime when the user stops at a checkpoint", async () => {
     const harness = createStrictLifecycleHarness();
     harness.queue({ type: "approve" });
@@ -527,6 +570,27 @@ describe("strict engineering lifecycle e2e harness", () => {
     expect(JSON.parse(afterStop)).toMatchObject({
       rejectedReason: "engineering-lifecycle",
       state: "cancelled",
+    });
+
+    harness.lifecycle.observeUserPrompt("Fresh task: inspect and rename another formatter.");
+    expect(harness.lifecycle.snapshot()).toMatchObject({
+      state: "armed",
+      planSteps: [],
+      completedStepIds: [],
+      mutatedSinceLastStep: false,
+    });
+
+    const readOnly = await harness.dispatch("read_file", { path: "src/another-format.ts" });
+    expect(readOnly).toBe("read src/another-format.ts");
+
+    const freshMutation = await harness.dispatch("move_file", {
+      source: "src/another-format.ts",
+      destination: "src/format-next.ts",
+    });
+    expect(JSON.parse(freshMutation)).toMatchObject({
+      rejectedReason: "engineering-lifecycle",
+      state: "armed",
+      nextAction: "submit_plan",
     });
   });
 });

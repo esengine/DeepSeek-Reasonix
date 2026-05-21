@@ -29,9 +29,13 @@ class QueueGate extends PauseGate {
     const verdict = this.verdicts.shift();
     if (!verdict) throw new Error(`no queued verdict for ${opts.kind}`);
 
-    if (opts.kind === "plan_proposed" && verdict.type === "approve") {
-      const payload = opts.payload as { steps?: PlanStep[] } | undefined;
-      this.lifecycle.recordPlanApproved(payload?.steps);
+    if (opts.kind === "plan_proposed") {
+      if (verdict.type === "approve") {
+        const payload = opts.payload as { steps?: PlanStep[] } | undefined;
+        this.lifecycle.recordPlanApproved(payload?.steps);
+      } else if (verdict.type === "cancel") {
+        this.lifecycle.cancel();
+      }
     }
     if (opts.kind === "plan_checkpoint") {
       this.lifecycle.recordCheckpointReached();
@@ -103,6 +107,16 @@ function registerMutationTools(
   registry: ToolRegistry,
   opts: StrictLifecycleHarnessOptions = {},
 ): void {
+  registry.register({
+    name: "read_file",
+    readOnly: true,
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    },
+    fn: (args: { path: string }) => `read ${args.path}`,
+  });
   registry.register({
     name: "delete_file",
     parameters: {
