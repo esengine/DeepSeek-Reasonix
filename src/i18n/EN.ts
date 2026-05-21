@@ -1514,8 +1514,10 @@ export const EN: TranslationSchema = {
       "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to another engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
     searxngNoResults:
       "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+    metasoMissingKey:
+      "web_search: Metaso requires an API key \u2014 set METASO_API_KEY or configure one with /search-engine metaso <key>. Get one at https://metaso.cn/search-api/playground",
     metasoDailyLimit:
-      "web_search: daily search limit reached for the default API key \u2014 set your own METASO_API_KEY env var or get one at https://metaso.cn/search-api/playground",
+      "web_search: Metaso daily search limit reached \u2014 set METASO_API_KEY or get a key at https://metaso.cn/search-api/playground",
     metasoUnauthorized:
       "web_search: Metaso API key rejected \u2014 check METASO_API_KEY or get one at https://metaso.cn/search-api/playground",
     metasoRateLimit:

@@ -1435,8 +1435,10 @@ export const zhCN: TranslationSchema = {
       "web_search: 无法访问 SearXNG 服务器 {endpoint} — try: 安装并启动 SearXNG（https://github.com/searxng/searxng，例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
     searxngNoResults:
       "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）— try: 使用更简单的关键词改写查询，或使用 /search-engine mojeek|searxng|metaso|tavily|perplexity|exa 切换引擎",
+    metasoMissingKey:
+      "web_search: Metaso 需要 API 密钥 — 设置 METASO_API_KEY，或使用 /search-engine metaso <key> 配置；可在 https://metaso.cn/search-api/playground 获取密钥",
     metasoDailyLimit:
-      "web_search: 默认 API 密钥的每日搜索次数已达上限 — 设置 METASO_API_KEY 环境变量，或在 https://metaso.cn/search-api/playground 获取自己的密钥",
+      "web_search: Metaso 每日搜索次数已达上限 — 设置 METASO_API_KEY，或在 https://metaso.cn/search-api/playground 获取密钥",
     metasoUnauthorized:
       "web_search: Metaso API 密钥被拒绝 — 检查 METASO_API_KEY，或在 https://metaso.cn/search-api/playground 获取密钥",
     metasoRateLimit:

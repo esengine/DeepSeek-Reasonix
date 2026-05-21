@@ -155,7 +155,7 @@ export interface ReasonixConfig {
   webSearchEngine?: "mojeek" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   /** Base URL for SearXNG instance (default http://localhost:8080). */
   webSearchEndpoint?: string;
-  /** Metaso API key. Falls back to METASO_API_KEY env var, then a built-in default. */
+  /** Metaso API key. Falls back to METASO_API_KEY env var. */
   metasoApiKey?: string;
   /** Tavily API key. Falls back to TAVILY_API_KEY env var. No baked-in default — free tier is 1000/mo per account, sharing would burn out. */
   tavilyApiKey?: string;
@@ -187,6 +187,8 @@ export interface ReasonixConfig {
   projects?: {
     [absoluteRootDir: string]: {
       shellAllowed?: string[];
+      /** Project-scoped hooks are arbitrary shell commands; load only after explicit trust. */
+      hooksTrusted?: boolean;
       /** Absolute directory prefixes the user pre-approved for outside-sandbox file access (#684). */
       pathAllowed?: string[];
     };
@@ -286,13 +288,11 @@ export function memoryTypeDefaults(
   return out;
 }
 
-const DEFAULT_METASO_API_KEY = "mk-E384C1DD5E8501BB7EFE27C949AFDE5B";
-
-export function loadMetasoApiKey(path: string = defaultConfigPath()): string {
-  if (process.env.METASO_API_KEY) return process.env.METASO_API_KEY;
+export function loadMetasoApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.METASO_API_KEY) return process.env.METASO_API_KEY.trim();
   const cfg = readConfig(path).metasoApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
-  return DEFAULT_METASO_API_KEY;
+  return undefined;
 }
 
 /** Tavily API key — env > config > undefined. Returning undefined means the caller must error out with a clear "go get one at tavily.com" message; we deliberately ship no default because the free 1000/mo quota wouldn't survive being shared. */
@@ -843,6 +843,22 @@ export function clearProjectShellAllowed(
   cfg.projects[key].shellAllowed = [];
   writeConfig(cfg, path);
   return existing.length;
+}
+
+export function projectHooksTrusted(rootDir: string, path: string = defaultConfigPath()): boolean {
+  const cfg = readConfig(path);
+  const key = findProjectKey(cfg, rootDir);
+  return key !== undefined && cfg.projects?.[key]?.hooksTrusted === true;
+}
+
+export function trustProjectHooks(rootDir: string, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  if (!cfg.projects) cfg.projects = {};
+  const key = findProjectKey(cfg, rootDir) ?? rootDir;
+  if (!cfg.projects[key]) cfg.projects[key] = {};
+  if (cfg.projects[key].hooksTrusted === true) return;
+  cfg.projects[key].hooksTrusted = true;
+  writeConfig(cfg, path);
 }
 
 export function loadProjectPathAllowed(

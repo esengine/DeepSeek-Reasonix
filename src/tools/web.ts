@@ -195,6 +195,7 @@ interface MetasoSearchResponse {
 async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(100, opts.topK ?? DEFAULT_TOPK));
   const apiKey = loadMetasoApiKey();
+  if (!apiKey) throw new Error(t("webErrors.metasoMissingKey"));
 
   let resp: Response;
   try {

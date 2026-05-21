@@ -48,10 +48,12 @@ const ok = (overrides: Partial<HookSpawnResult> = {}): HookSpawnResult => ({
 describe("loadHooks", () => {
   let home: string;
   let project: string;
+  let configPath: string;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "reasonix-hooks-home-"));
     project = mkdtempSync(join(tmpdir(), "reasonix-hooks-proj-"));
+    configPath = join(home, "config.json");
   });
   afterEach(() => {
     rmSync(home, { recursive: true, force: true });
@@ -62,14 +64,33 @@ describe("loadHooks", () => {
     expect(loadHooks({ homeDir: home, projectRoot: project })).toEqual([]);
   });
 
-  it("loads project then global, in array order, with scope tags", () => {
+  it("loads global hooks but skips untrusted project hooks", () => {
     writeSettings(home, {
       hooks: { Stop: [{ command: "echo global1" }, { command: "echo global2" }] },
     });
     writeSettings(project, {
       hooks: { Stop: [{ command: "echo proj" }] },
     });
-    const hooks = loadHooks({ homeDir: home, projectRoot: project });
+    const hooks = loadHooks({ homeDir: home, projectRoot: project, configPath });
+    expect(hooks.map((h) => `${h.scope}:${h.command}`)).toEqual([
+      "global:echo global1",
+      "global:echo global2",
+    ]);
+  });
+
+  it("loads trusted project then global, in array order, with scope tags", () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({ projects: { [project]: { hooksTrusted: true } } }),
+      "utf8",
+    );
+    writeSettings(home, {
+      hooks: { Stop: [{ command: "echo global1" }, { command: "echo global2" }] },
+    });
+    writeSettings(project, {
+      hooks: { Stop: [{ command: "echo proj" }] },
+    });
+    const hooks = loadHooks({ homeDir: home, projectRoot: project, configPath });
     expect(hooks.map((h) => `${h.scope}:${h.command}`)).toEqual([
       "project:echo proj",
       "global:echo global1",

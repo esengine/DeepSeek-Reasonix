@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMetasoApiKey } from "../src/config.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
@@ -301,6 +301,7 @@ describe("webSearch", () => {
 });
 
 describe("searchMetaso", () => {
+  const originalMetasoKey = process.env.METASO_API_KEY;
   const sampleResponse = {
     credits: 3,
     total: 72,
@@ -321,6 +322,32 @@ describe("searchMetaso", () => {
       },
     ],
   };
+
+  beforeEach(() => {
+    process.env.METASO_API_KEY = "test-metaso-key";
+  });
+
+  afterEach(() => {
+    if (originalMetasoKey === undefined) {
+      // biome-ignore lint/performance/noDelete: env var must be restored to absent
+      delete process.env.METASO_API_KEY;
+    } else {
+      process.env.METASO_API_KEY = originalMetasoKey;
+    }
+  });
+
+  it("requires an API key before contacting Metaso", async () => {
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.METASO_API_KEY;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(/Metaso.*API key/i);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 
   it("POSTs to metaso API with JSON body and auth header", async () => {
     const captured: { url: string; method: string; headers: Record<string, string>; body: string } =

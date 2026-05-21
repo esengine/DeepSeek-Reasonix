@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { projectHooksTrusted } from "./config.js";
 import { t } from "./i18n/index.js";
 
 export type HookEvent = "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "Stop";
@@ -109,13 +110,20 @@ function readSettingsFile(path: string): HookSettings | null {
 export interface LoadHookSettingsOptions {
   /** Absolute project root, if any. Without it, only global hooks load. */
   projectRoot?: string;
+  /** Override config path for tests. */
+  configPath?: string;
+  /** Tests and intentionally trusted callers can opt in without touching config. */
+  trustProjectHooks?: boolean;
   /** Override `~` for tests. */
   homeDir?: string;
 }
 
 export function loadHooks(opts: LoadHookSettingsOptions = {}): ResolvedHook[] {
   const out: ResolvedHook[] = [];
-  if (opts.projectRoot) {
+  if (
+    opts.projectRoot &&
+    (opts.trustProjectHooks === true || projectHooksTrusted(opts.projectRoot, opts.configPath))
+  ) {
     const projPath = projectSettingsPath(opts.projectRoot);
     const settings = readSettingsFile(projPath);
     if (settings) appendResolved(out, settings, "project", projPath);

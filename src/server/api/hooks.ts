@@ -2,6 +2,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { trustProjectHooks } from "../../config.js";
 import { HOOK_EVENTS, globalSettingsPath, loadHooks, projectSettingsPath } from "../../hooks.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
@@ -88,6 +89,7 @@ export async function handleHooks(
           body: { error: "no active project — open `/dashboard` from inside `reasonix code`" },
         };
       }
+      trustProjectHooks(cwd, ctx.configPath);
       path = projectSettingsPath(cwd);
     } else {
       path = globalSettingsPath();

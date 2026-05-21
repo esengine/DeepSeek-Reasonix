@@ -661,6 +661,7 @@ export interface TranslationSchema {
     endpointMustBeHttp: string;
     cannotReach: string;
     searxngNoResults: string;
+    metasoMissingKey: string;
     metasoDailyLimit: string;
     metasoUnauthorized: string;
     metasoRateLimit: string;
