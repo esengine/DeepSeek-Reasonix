@@ -1733,7 +1733,7 @@ function ChatPane(props: ChatPaneProps) {
         return;
       }
       const mentionMatch = /(?:^|\s)@([^\s@]*)$/.exec(text);
-      if (mentionMatch) {
+      if (mentionMatch && MODE === "attached") {
         const prefix = mentionMatch[1] ?? "";
         try {
           const r = await api<{ files: string[] }>("/files", {
