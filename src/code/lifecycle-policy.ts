@@ -182,7 +182,10 @@ function isPackageMutation(token: string | undefined): boolean {
     normalized === "install" ||
     normalized === "add" ||
     normalized === "remove" ||
-    normalized === "update"
+    normalized === "uninstall" ||
+    normalized === "update" ||
+    normalized === "upgrade" ||
+    normalized === "up"
   );
 }
 
@@ -208,5 +211,5 @@ function isHighRiskGitCommand(args: string[]): boolean {
 }
 
 function looksLikePathCheckout(arg: string): boolean {
-  return arg.includes("/") || arg.includes("\\") || arg.includes(".");
+  return arg.includes("\\") || arg.includes(".");
 }
