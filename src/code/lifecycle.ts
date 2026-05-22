@@ -1,5 +1,6 @@
 import type { ToolInterceptor } from "../tools.js";
 import type { PlanStep, StepEvidence } from "../tools/plan.js";
+import { classifyLifecycleToolCall } from "./lifecycle-policy.js";
 
 export type EngineeringLifecycleMode = "off" | "strict";
 export type EngineeringLifecycleState =
@@ -24,77 +25,12 @@ export interface EngineeringLifecycleOptions {
   mode?: EngineeringLifecycleMode;
 }
 
-const SAFE_TOOL_NAMES = new Set([
-  "read_file",
-  "list_directory",
-  "directory_tree",
-  "search_files",
-  "search_content",
-  "glob",
-  "get_file_info",
-  "semantic_search",
-  "web_search",
-  "web_fetch",
-  "recall_memory",
-  "todo_write",
-  "ask_choice",
-  "submit_plan",
-  "mark_step_complete",
-  "revise_plan",
-  "job_output",
-  "wait_for_job",
-  "list_jobs",
-]);
-
-const HIGH_RISK_TOOL_NAMES = new Set([
-  "multi_edit",
-  "move_file",
-  "delete_file",
-  "delete_directory",
-  "copy_file",
-  "create_directory",
-  "run_background",
-  "stop_job",
-]);
-
-const MUTATION_TOOL_NAMES = new Set([
-  "edit_file",
-  "write_file",
-  "multi_edit",
-  "move_file",
-  "delete_file",
-  "delete_directory",
-  "copy_file",
-  "create_directory",
-  "run_background",
-  "stop_job",
-]);
-
 export function isHighRiskLifecycleToolCall(name: string, args: Record<string, unknown>): boolean {
-  if (HIGH_RISK_TOOL_NAMES.has(name)) return true;
-  if (SAFE_TOOL_NAMES.has(name)) return false;
-  if (name === "write_file") {
-    const path = typeof args.path === "string" ? args.path : "";
-    return isPackageOrConfigPath(path);
-  }
-  if (name === "edit_file") {
-    const path = typeof args.path === "string" ? args.path : "";
-    return isPackageOrConfigPath(path);
-  }
-  if (name === "run_command") {
-    const command = typeof args.command === "string" ? args.command : "";
-    return isHighRiskCommand(command);
-  }
-  return false;
+  return classifyLifecycleToolCall(name, args).risk === "high-risk";
 }
 
 export function isLifecycleMutationToolCall(name: string, args: Record<string, unknown>): boolean {
-  if (MUTATION_TOOL_NAMES.has(name)) return true;
-  if (name === "run_command") {
-    const command = typeof args.command === "string" ? args.command : "";
-    return isHighRiskCommand(command);
-  }
-  return false;
+  return classifyLifecycleToolCall(name, args).risk !== "safe";
 }
 
 export class EngineeringLifecycleRuntime {
@@ -269,117 +205,4 @@ function toolResultLooksSuccessful(result: string): boolean {
   return !/(user rejected|rejected this edit|discarded|unavailable in plan mode|interceptor failed|\berror\b|failed)/i.test(
     text,
   );
-}
-
-function isPackageOrConfigPath(path: string): boolean {
-  const normalized = path.replaceAll("\\", "/").toLowerCase();
-  return (
-    /(^|\/)package(-lock)?\.json$/.test(normalized) ||
-    /(^|\/)pnpm-lock\.yaml$/.test(normalized) ||
-    /(^|\/)yarn\.lock$/.test(normalized) ||
-    /(^|\/)tsconfig[^/]*\.json$/.test(normalized) ||
-    /(^|\/)vitest\.config\./.test(normalized) ||
-    /(^|\/)biome\.json$/.test(normalized) ||
-    normalized.startsWith(".github/workflows/")
-  );
-}
-
-function isHighRiskCommand(command: string): boolean {
-  const tokens = shellTokens(command);
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]?.toLowerCase();
-    if (!token || !isCommandPosition(tokens, i)) continue;
-    if (
-      (token === "npm" || token === "pnpm" || token === "yarn") &&
-      isPackageMutation(tokens[i + 1])
-    ) {
-      return true;
-    }
-    if (token === "git" && isHighRiskGitCommand(tokens.slice(i + 1))) return true;
-    if (token === "rm" || token === "mv" || token === "cp") return true;
-  }
-  return false;
-}
-
-function shellTokens(command: string): string[] {
-  const out: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | null = null;
-  for (let i = 0; i < command.length; i++) {
-    const ch = command[i] ?? "";
-    if (quote) {
-      if (ch === quote) quote = null;
-      else current += ch;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (current) {
-        out.push(current);
-        current = "";
-      }
-      continue;
-    }
-    if (ch === ";" || ch === "|" || ch === "&") {
-      if (current) {
-        out.push(current);
-        current = "";
-      }
-      const next = command[i + 1];
-      if ((ch === "|" || ch === "&") && next === ch) {
-        out.push(`${ch}${next}`);
-        i++;
-      } else {
-        out.push(ch);
-      }
-      continue;
-    }
-    current += ch;
-  }
-  if (current) out.push(current);
-  return out;
-}
-
-function isCommandPosition(tokens: string[], index: number): boolean {
-  if (index === 0) return true;
-  const previous = tokens[index - 1];
-  return previous === ";" || previous === "|" || previous === "&&" || previous === "||";
-}
-
-function isPackageMutation(token: string | undefined): boolean {
-  const normalized = token?.toLowerCase();
-  return (
-    normalized === "install" ||
-    normalized === "add" ||
-    normalized === "remove" ||
-    normalized === "update"
-  );
-}
-
-function isHighRiskGitCommand(args: string[]): boolean {
-  const subcommandIndex = args.findIndex((arg) => arg && !arg.startsWith("-"));
-  const subcommand = args[subcommandIndex]?.toLowerCase();
-  if (!subcommand) return false;
-  if (
-    subcommand === "push" ||
-    subcommand === "reset" ||
-    subcommand === "clean" ||
-    subcommand === "switch"
-  ) {
-    return true;
-  }
-  if (subcommand !== "checkout") return false;
-  const checkoutArgs = args.slice(subcommandIndex + 1);
-  if (checkoutArgs[0] === "--") return false;
-  if (checkoutArgs.some((arg) => arg === "-b" || arg === "-B" || arg === "--orphan")) return true;
-  const positional = checkoutArgs.filter((arg) => arg && !arg.startsWith("-"));
-  if (positional.length === 0) return false;
-  return !positional.every(looksLikePathCheckout);
-}
-
-function looksLikePathCheckout(arg: string): boolean {
-  return arg.includes("/") || arg.includes("\\") || arg.includes(".");
 }
