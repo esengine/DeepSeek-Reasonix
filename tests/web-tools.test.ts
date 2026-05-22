@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMetasoApiKey } from "../src/config.js";
 import { ToolRegistry } from "../src/tools.js";
@@ -10,6 +11,10 @@ import {
   webFetch,
   webSearch,
 } from "../src/tools/web.js";
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
 
 describe("htmlToText", () => {
   it("strips script/style/nav/footer and preserves paragraph breaks", () => {
@@ -986,6 +991,12 @@ describe("registerWebTools", () => {
 });
 
 describe("webFetch", () => {
+  const mockedLookup = vi.mocked(lookup);
+
+  beforeEach(() => {
+    mockedLookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+  });
+
   it("extracts title + body text from an html response", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
@@ -1028,6 +1039,49 @@ describe("webFetch", () => {
     ) as unknown as typeof fetch;
     try {
       await expect(webFetch("https://example.com/missing")).rejects.toThrow(/web_fetch 404/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses literal internal addresses before fetching", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    try {
+      await expect(webFetch("http://127.0.0.1:9200/")).rejects.toThrow(
+        /refuses internal or reserved host: 127\.0\.0\.1/,
+      );
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses DNS names that resolve to internal addresses", async () => {
+    mockedLookup.mockResolvedValueOnce([{ address: "10.0.0.5", family: 4 }]);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://metadata.example/")).rejects.toThrow(
+        /refuses internal or reserved host: metadata\.example/,
+      );
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("refuses redirects to internal hosts", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("", { status: 302, headers: { Location: "http://169.254.169.254/" } }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webFetch("https://example.com/redirect")).rejects.toThrow(
+        /refuses internal or reserved host: 169\.254\.169\.254/,
+      );
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     } finally {
       globalThis.fetch = originalFetch;
     }

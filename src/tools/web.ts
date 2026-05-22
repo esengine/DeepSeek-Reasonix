@@ -1,5 +1,7 @@
 /** web_search uses Mojeek (DDG returns anti-bot 202 to unauthenticated POSTs); web_fetch sniffs HTML to text. */
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { parse as parseHtml } from "node-html-parser";
 import {
   loadExaApiKey,
@@ -59,6 +61,7 @@ const METASO_ENDPOINT = "https://metaso.cn/api/v1";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
 const EXA_ENDPOINT = "https://api.exa.ai/answer";
+const FETCH_MAX_REDIRECTS = 5;
 
 /** Pick a status-specific webErrors key so the model gets an actionable hint, not a bare status. */
 function searchStatusError(status: number): string {
@@ -73,6 +76,99 @@ function fetchStatusError(status: number, url: string): string {
   if (status === 403) return t("webErrors.fetchForbidden403", { url });
   if (status >= 500 && status <= 599) return t("webErrors.fetchServerError5xx", { status, url });
   return t("webErrors.fetchStatus", { status, url });
+}
+
+function parseIpv4(address: string): number | null {
+  const parts = address.split(".");
+  if (parts.length !== 4) return null;
+  let out = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    out = (out << 8) + n;
+  }
+  return out >>> 0;
+}
+
+function ipv4InRange(value: number, base: string, bits: number): boolean {
+  const parsed = parseIpv4(base);
+  if (parsed === null) return false;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (value & mask) === (parsed & mask);
+}
+
+function isPrivateIpv4(address: string): boolean {
+  const value = parseIpv4(address);
+  if (value === null) return false;
+  return (
+    ipv4InRange(value, "0.0.0.0", 8) ||
+    ipv4InRange(value, "10.0.0.0", 8) ||
+    ipv4InRange(value, "100.64.0.0", 10) ||
+    ipv4InRange(value, "127.0.0.0", 8) ||
+    ipv4InRange(value, "169.254.0.0", 16) ||
+    ipv4InRange(value, "172.16.0.0", 12) ||
+    ipv4InRange(value, "192.0.0.0", 24) ||
+    ipv4InRange(value, "192.0.2.0", 24) ||
+    ipv4InRange(value, "192.168.0.0", 16) ||
+    ipv4InRange(value, "198.18.0.0", 15) ||
+    ipv4InRange(value, "198.51.100.0", 24) ||
+    ipv4InRange(value, "203.0.113.0", 24) ||
+    ipv4InRange(value, "224.0.0.0", 4) ||
+    ipv4InRange(value, "240.0.0.0", 4)
+  );
+}
+
+function normalizeIpv6(address: string): string {
+  return address.toLowerCase().replace(/(^|:)0+([0-9a-f])/g, "$1$2");
+}
+
+function isPrivateIpv6(address: string): boolean {
+  const normalized = normalizeIpv6(address);
+  const mapped = /^::ffff:(?:0+:)?(\d+\.\d+\.\d+\.\d+)$/i.exec(normalized);
+  if (mapped) return isPrivateIpv4(mapped[1]!);
+  return (
+    normalized === "::" ||
+    normalized === "::1" ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("fe8") ||
+    normalized.startsWith("fe9") ||
+    normalized.startsWith("fea") ||
+    normalized.startsWith("feb") ||
+    normalized.startsWith("ff")
+  );
+}
+
+function isInternalAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return isPrivateIpv4(address);
+  if (family === 6) return isPrivateIpv6(address);
+  return false;
+}
+
+async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
+  const url = new URL(rawUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`web_fetch refuses non-HTTP URL: ${url.protocol}`);
+  }
+
+  const host = url.hostname;
+  const literal = isIP(host);
+  const addresses = literal
+    ? [host]
+    : (await lookup(host, { all: true, verbatim: true })).map((entry) => entry.address);
+  if (addresses.length === 0 || addresses.some(isInternalAddress)) {
+    throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
+  }
+  return url;
+}
+
+function redirectLocation(resp: Response, currentUrl: string): string | null {
+  if (resp.status < 300 || resp.status > 399) return null;
+  const location = resp.headers.get("location");
+  if (!location) return null;
+  return new URL(location, currentUrl).toString();
 }
 
 /** Distinguishes "truly 0 results" from "layout changed / blocked" so callers can tell. */
@@ -591,12 +687,23 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
   const cancel = () => ctl.abort();
   opts.signal?.addEventListener("abort", cancel, { once: true });
   let resp: Response;
+  let currentUrl = url;
   try {
-    resp = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html,text/plain,*/*" },
-      signal: ctl.signal,
-      redirect: "follow",
-    });
+    for (let redirects = 0; ; redirects++) {
+      const parsed = await assertPublicHttpUrl(currentUrl);
+      if (ctl.signal.aborted) throw new DOMException("aborted", "AbortError");
+      resp = await fetch(parsed, {
+        headers: { "User-Agent": USER_AGENT, Accept: "text/html,text/plain,*/*" },
+        signal: ctl.signal,
+        redirect: "manual",
+      });
+      const nextUrl = redirectLocation(resp, parsed.toString());
+      if (!nextUrl) break;
+      if (redirects >= FETCH_MAX_REDIRECTS) {
+        throw new Error(`web_fetch redirect limit exceeded for ${url}`);
+      }
+      currentUrl = nextUrl;
+    }
   } catch (err) {
     if (timedOut) {
       throw new Error(t("webErrors.fetchTimeout", { ms: timeoutMs, url }));
@@ -621,7 +728,7 @@ export async function webFetch(url: string, opts: WebFetchOptions = {}): Promise
   const finalText = truncated
     ? `${text.slice(0, maxChars)}\n\n[… truncated ${text.length - maxChars} chars …]`
     : text;
-  return { url, title, text: finalText, truncated };
+  return { url: currentUrl, title, text: finalText, truncated };
 }
 
 /** Streams + caps so chunked responses (or servers lying about Content-Length) can't balloon the heap. */
