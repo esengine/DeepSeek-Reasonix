@@ -773,8 +773,6 @@ const ChatInput = memo(function ChatInput({
     if (!text) return;
     const res = await onSubmit(text);
     if (res.accepted) setInput("");
-    // When busy, the server steers the text into the current turn
-    // instead of starting a new one, so still clear on accepted.
   }, [input, onSubmit]);
 
   const onInput = useCallback(

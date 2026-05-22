@@ -2635,10 +2635,6 @@ function AppInner({
         return;
       }
       if (busy || submittingRef.current) {
-        // Busy with an active turn: inject text as a mid-turn steer
-        // message instead of silently dropping it. The steer is
-        // consumed at the next iteration boundary inside step() and
-        // the model sees it as additional guidance in the same turn.
         if (busy && text.trim()) {
           if (isBusyPromptCommand(text)) {
             log.pushInfo(t("app.steerCommandRejected"));
@@ -2648,9 +2644,6 @@ function AppInner({
           resetCursor();
           pushHistory(text);
           loop.steer(text);
-          // Show header + pending text in ghost (light gray).
-          // When the loop consumes the steer, the steer event handler
-          // will promote it to a normal user message.
           log.pushInfo(t("app.steerInjected"));
           log.pushInfo(text, "ghost");
         }
@@ -3336,9 +3329,6 @@ function AppInner({
             });
           } else if (ev.role === "warning") {
             handleWarningEvent(ev, { log, setTurnOnPro });
-          } else if (ev.role === "steer") {
-            // The ghost preview from handleSubmit's steer branch already
-            // confirmed the message was queued; nothing more to show.
           }
         }
         flush();

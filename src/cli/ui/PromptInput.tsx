@@ -43,8 +43,6 @@ export interface PromptInputProps {
   onSubmit: (v: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  /** When true, the input stays editable during a busy turn — Enter fires normal onSubmit,
-   *  but the parent should detect the busy state and call loop.steer() instead of step(). */
   steerBusy?: boolean;
   /** ↑/↓ / Ctrl+N hand off here when no in-buffer cursor move applies — parent walks history and swaps `value` via `onChange`. */
   onHistoryPrev?: () => void;
@@ -121,8 +119,6 @@ export function PromptInput({
     setCursor(c + insertion.length);
   };
 
-  // Derived guard: input is only truly frozen when disabled AND no steer is pending.
-  // When steerBusy is active the user can still type; Enter routes via the steer path.
   const inputFrozen = disabled && !steerBusy;
   const inputActive = !disabled || !!steerBusy;
 

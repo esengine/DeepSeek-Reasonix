@@ -55,12 +55,11 @@ import { parseRateLimitedToolResult } from "./tools/rate-limit.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
 const ESCALATION_MODEL = "deepseek-v4-pro";
+export const MID_TURN_STEER_WRAPPER =
+  "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]";
 
 function formatSteerUserMessage(content: string): string {
-  return [
-    "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]",
-    content,
-  ].join("\n");
+  return [MID_TURN_STEER_WRAPPER, content].join("\n");
 }
 
 export {
@@ -502,11 +501,9 @@ export class CacheFirstLoop {
   }
   private _inflightCounter = 0;
 
-  private buildMessages(pendingUser: string | null): ChatMessage[] {
+  private buildMessages(): ChatMessage[] {
     const healedMessages = this.healActiveLogBeforeSend();
-    const msgs: ChatMessage[] = [...this.prefix.toMessages(), ...healedMessages];
-    if (pendingUser !== null) msgs.push({ role: "user", content: pendingUser });
-    return msgs;
+    return [...this.prefix.toMessages(), ...healedMessages];
   }
 
   private healActiveLogBeforeSend(): ChatMessage[] {
@@ -666,7 +663,6 @@ export class CacheFirstLoop {
     // first round-trip still leaves the message in the log; the user can
     // /retry without re-typing.
     this.appendAndPersist({ role: "user", content: userInput });
-    const pendingUser: string | null = null;
     const toolSpecs = this.prefix.tools();
     let rateLimitWarningShown = false;
 
@@ -718,11 +714,8 @@ export class CacheFirstLoop {
           content: t("loop.toolUploadStatus"),
         };
       }
-      let messages = this.buildMessages(pendingUser);
+      let messages = this.buildMessages();
 
-      // Consume one queued steer between model calls. This never mutates
-      // the currently running request; the steer becomes visible only in
-      // the next request payload.
       if (this._steerQueue.length > 0) {
         const steer = this._steerQueue.shift()!;
         this._steerConsumed = this._steerQueue.length === 0;
@@ -730,7 +723,7 @@ export class CacheFirstLoop {
           role: "user",
           content: formatSteerUserMessage(steer),
         });
-        messages = this.buildMessages(pendingUser);
+        messages = this.buildMessages();
         yield {
           turn: this._turn,
           role: "steer",
@@ -752,10 +745,10 @@ export class CacheFirstLoop {
             content: t("loop.preflightTruncateStatus"),
           };
           const result = this.context.mechanicalTruncate(this.model, {
-            allowEmpty: pendingUser !== null,
+            allowEmpty: false,
           });
           if (result.folded) {
-            messages = this.buildMessages(pendingUser);
+            messages = this.buildMessages();
             const after = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
             const stillFull = after.needsAction;
             yield {
@@ -1257,7 +1250,7 @@ export class CacheFirstLoop {
     return {
       client: this.client,
       signal: this._turnAbort.signal,
-      buildMessages: () => this.buildMessages(null),
+      buildMessages: () => this.buildMessages(),
       appendAndPersist: (m) => this.appendAndPersist(m),
       recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
       turn: this._turn,

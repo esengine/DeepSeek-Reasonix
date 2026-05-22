@@ -45,7 +45,6 @@ export interface ComposerAreaProps {
   input: string;
   setInput: (next: string) => void;
   busy: boolean;
-  /** When busy=true and steerBusy=true, the input stays editable and submit goes to handleSubmit's steer branch. */
   steerBusy?: boolean;
   onSubmit: (raw: string) => Promise<void>;
   onHistoryPrev: () => void;
