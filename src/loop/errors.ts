@@ -10,7 +10,7 @@ export function formatLoopError(err: Error, probe?: DeepSeekProbeResult): string
   if (msg.includes("maximum context length")) {
     const reqMatch = msg.match(/requested\s+(\d+)\s+tokens/);
     const requested = reqMatch
-      ? `${Number(reqMatch[1]).toLocaleString()} tokens`
+      ? `${Number(reqMatch[1]).toLocaleString("en-US")} tokens`
       : t("errors.contextOverflowTooMany");
     return t("errors.contextOverflow", { requested });
   }
