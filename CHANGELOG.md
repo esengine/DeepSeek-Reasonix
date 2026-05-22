@@ -96,6 +96,18 @@ why.
 (#1557), shrinking the orchestrator and unblocking risk policy reuse
 from non-lifecycle callers.
 
+**Edit safety.** `read-before-edit` is now enforced at the dispatch
+gate, not as a per-tool check (#1563) — `edit` / `multi_edit` refuse
+to fire on a file the model hasn't read this session, closing the
+race where a SEARCH block could match stale bytes after an external
+write.
+
+**Cache.** Fold-summary requests now reuse the live agent's system
+prompt + tool list as their prefix, so the cached bytes the main
+agent just paid for carry over to the summary call (#1565). Measured
+on a 48.7K-token fold: 0% → 99.6% cache hit, ~89% input cost
+reduction per fold.
+
 **Other:**
 - `fix(desktop)` drop `workspace:*` protocol for core-utils — desktop
   isn't a workspace member
