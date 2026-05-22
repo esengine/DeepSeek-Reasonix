@@ -4229,7 +4229,7 @@ function AppInner({
       <TickerProvider disabled={tickerSuspended}>
         <ViewportBudgetProvider>
           <InflightProvider inflight={loop.inflight}>
-            <Box flexDirection="row" height={stdout?.rows ?? 24}>
+            <Box flexDirection="row" {...(STATIC_HISTORY ? {} : { height: stdout?.rows ?? 24 })}>
               <Box flexDirection="column" flexGrow={1}>
                 <Box flexDirection="column" flexGrow={1}>
                   <LiveExpandContext.Provider value={liveExpand}>
