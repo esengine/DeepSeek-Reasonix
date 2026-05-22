@@ -4,7 +4,7 @@ import { h } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { ChatMessage, type ChatMsg, ToolCard, parseToolArgs } from "../components/chat-internals.js";
 import { t, useLang } from "../i18n/index.js";
-import { TOKEN, api } from "../lib/api.js";
+import { MODE, TOKEN, api } from "../lib/api.js";
 import { showToast } from "../lib/bus.js";
 import { parseHunks } from "../lib/diff-parser.js";
 // ChatStatusBar — inlined (mirrors chat.ts pattern)
@@ -1453,7 +1453,7 @@ interface PopoverItem {
   insert: string;
 }
 
-type PopoverKind = "slash" | null;
+type PopoverKind = "slash" | "mention" | null;
 
 interface ChatPaneProps {
   comments: LineComment[];
@@ -1732,6 +1732,26 @@ function ChatPane(props: ChatPaneProps) {
         setPopoverSel(0);
         return;
       }
+      const mentionMatch = /(?:^|\s)@([^\s@]*)$/.exec(text);
+      if (mentionMatch) {
+        const prefix = mentionMatch[1] ?? "";
+        try {
+          const r = await api<{ files: string[] }>("/files", {
+            method: "POST",
+            body: { prefix },
+          });
+          const items: PopoverItem[] = r.files.slice(0, 12).map((f) => ({
+            label: f,
+            insert: `@${f} `,
+          }));
+          setPopoverKind("mention");
+          setPopoverItems(items);
+          setPopoverSel(0);
+        } catch {
+          setPopoverKind(null);
+        }
+        return;
+      }
       setPopoverKind(null);
     },
     [slashCommands],
@@ -1740,7 +1760,14 @@ function ChatPane(props: ChatPaneProps) {
   const applyPopover = useCallback(() => {
     const item = popoverItems[popoverSel];
     if (!item) return false;
-    setInput(item.insert);
+    if (popoverKind === "slash") {
+      setInput(item.insert);
+    } else if (popoverKind === "mention") {
+      const m = /(?:^|\s)@([^\s@]*)$/.exec(input);
+      if (!m) return false;
+      const start = input.length - m[0].length + (m[0].startsWith(" ") ? 1 : 0);
+      setInput(`${input.slice(0, start)}${item.insert}`);
+    }
     setPopoverKind(null);
     return true;
   }, [popoverItems, popoverSel, popoverKind, input]);
@@ -1949,7 +1976,7 @@ function ChatPane(props: ChatPaneProps) {
               popoverKind && popoverItems.length > 0
                 ? html`
                   <div class="popover" style="position:absolute;bottom:calc(100% + 6px);left:0;width:380px;max-height:280px;overflow-y:auto;z-index:10">
-                    <div class="popover-h">${t("chat.slashCommands")}</div>
+                    <div class="popover-h">${popoverKind === "slash" ? t("chat.slashCommands") : t("chat.projectFiles")}</div>
                     ${popoverItems.map(
                       (it, i) => html`
                         <div
@@ -1960,7 +1987,7 @@ function ChatPane(props: ChatPaneProps) {
                             applyPopover();
                           }}
                         >
-                          <span class="g">/</span>
+                          <span class="g">${popoverKind === "slash" ? "/" : "@"}</span>
                           <span class="name">${it.label}</span>
                           ${it.meta ? html`<span class="meta">${it.meta}</span>` : null}
                         </div>
