@@ -23,6 +23,7 @@ interface SettingsData {
   preset?: string;
   reasoningEffort?: string;
   search?: boolean;
+  webSearchEngine?: string;
   model?: string;
   editMode?: string;
   proNext?: boolean;
@@ -630,6 +631,29 @@ export function SettingsPanel() {
             >${v.search ? t("common.on") : t("common.off")}</button>
           `,
           t("settings.webSearchNote"),
+        )}
+        ${fieldRow(
+          t("settings.webSearchEngine"),
+          html`
+            <select
+              value=${["bing", "searxng", "metaso", "tavily", "perplexity", "exa"].includes(
+                v.webSearchEngine ?? "",
+              )
+                ? v.webSearchEngine
+                : "bing"}
+              onChange=${(e: Event) =>
+                save({ webSearchEngine: (e.target as HTMLSelectElement).value })}
+              disabled=${saving || !v.search}
+            >
+              <option value="bing">${t("settings.webSearchEngineBing")}</option>
+              <option value="searxng">${t("settings.webSearchEngineSearxng")}</option>
+              <option value="metaso">${t("settings.webSearchEngineMetaso")}</option>
+              <option value="tavily">${t("settings.webSearchEngineTavily")}</option>
+              <option value="perplexity">${t("settings.webSearchEnginePerplexity")}</option>
+              <option value="exa">${t("settings.webSearchEngineExa")}</option>
+            </select>
+          `,
+          t("settings.webSearchEngineNote"),
         )}
       </div>
 

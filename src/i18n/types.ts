@@ -674,8 +674,8 @@ export interface TranslationSchema {
     rateLimit429: string;
     forbidden403: string;
     serverError5xx: string;
-    mojeekBlocked: string;
-    mojeekNoResults: string;
+    bingBlocked: string;
+    bingNoResults: string;
     invalidEndpoint: string;
     endpointMustBeHttp: string;
     cannotReach: string;

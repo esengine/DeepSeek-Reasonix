@@ -6,6 +6,7 @@ import {
   normalizeSkillPathEntries,
   normalizeSkillPaths,
   readConfig,
+  webSearchEngine as readWebSearchEngine,
   redactKey,
   saveEditMode,
   writeConfig,
@@ -22,6 +23,7 @@ interface SettingsBody {
   preset?: unknown;
   reasoningEffort?: unknown;
   search?: unknown;
+  webSearchEngine?: unknown;
   model?: unknown;
   proNext?: unknown;
   budgetUsd?: unknown;
@@ -43,6 +45,17 @@ function parseBody(raw: string): SettingsBody {
 // read time. Web sends new names in 0.12.x onward.
 const VALID_PRESETS = new Set(["auto", "flash", "pro", "fast", "smart", "max"]);
 const VALID_EFFORTS = new Set(["high", "max"]);
+// Legacy "mojeek" is intentionally absent — the engine was retired (PR
+// adding bing default). Old config values map to bing at read; the
+// dashboard can't write the dead name back.
+const VALID_WEB_SEARCH_ENGINES = new Set([
+  "bing",
+  "searxng",
+  "metaso",
+  "tavily",
+  "perplexity",
+  "exa",
+]);
 
 /** Twin of `config.savePreset`'s debug hook — the dashboard PATCH writes `cfg.preset` directly (no `savePreset()` round-trip), so instrument the bypass path too. Same env gate, same file. */
 function debugLogPresetWriteFromDashboard(preset: string): void {
@@ -84,6 +97,7 @@ export async function handleSettings(
         preset: cfg.preset ?? "auto",
         reasoningEffort: cfg.reasoningEffort ?? "max",
         search: cfg.search !== false,
+        webSearchEngine: readWebSearchEngine(ctx.configPath),
         editMode: cfg.editMode ?? "review",
         session: cfg.session ?? null,
         model: live?.model ?? null,
@@ -105,6 +119,7 @@ export async function handleSettings(
           preset: "next-session",
           reasoningEffort: "next-turn",
           search: "next-session",
+          webSearchEngine: "next-turn",
           model: "next-turn",
           proNext: "next-turn",
           budgetUsd: "live",
@@ -179,6 +194,27 @@ export async function handleSettings(
       }
       cfg.search = fields.search;
       changed.push("search");
+    }
+    if (fields.webSearchEngine !== undefined) {
+      if (
+        typeof fields.webSearchEngine !== "string" ||
+        !VALID_WEB_SEARCH_ENGINES.has(fields.webSearchEngine)
+      ) {
+        return {
+          status: 400,
+          body: {
+            error: "webSearchEngine must be bing | searxng | metaso | tavily | perplexity | exa",
+          },
+        };
+      }
+      cfg.webSearchEngine = fields.webSearchEngine as
+        | "bing"
+        | "searxng"
+        | "metaso"
+        | "tavily"
+        | "perplexity"
+        | "exa";
+      changed.push("webSearchEngine");
     }
     let modelPendingLive: string | null = null;
     let proNextPending: boolean | null = null;

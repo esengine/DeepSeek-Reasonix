@@ -166,8 +166,8 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "mojeek" (default, scrapes Mojeek), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), or "exa" (Exa API). */
-  webSearchEngine?: "mojeek" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), or "exa" (Exa API). */
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   /** Base URL for SearXNG instance (default http://localhost:8080). */
   webSearchEndpoint?: string;
   /** Metaso API key. Falls back to METASO_API_KEY env var. */
@@ -807,14 +807,17 @@ export function loadJavaSourceEnabled(path: string = defaultConfigPath()): boole
 
 export function webSearchEngine(
   path: string = defaultConfigPath(),
-): "mojeek" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" {
+): "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" {
   const cfg = readConfig(path).webSearchEngine;
   if (cfg === "searxng") return "searxng";
   if (cfg === "metaso") return "metaso";
   if (cfg === "tavily") return "tavily";
   if (cfg === "perplexity") return "perplexity";
   if (cfg === "exa") return "exa";
-  return "mojeek";
+  // Any other value (including legacy "mojeek" from configs predating the
+  // engine swap) falls through to bing. Read-only — we never rewrite the
+  // user's config, so `/search-engine mojeek` later still rejects loudly.
+  return "bing";
 }
 
 export function webSearchEndpoint(path: string = defaultConfigPath()): string {

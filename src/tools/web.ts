@@ -1,4 +1,4 @@
-/** web_search uses Mojeek (DDG returns anti-bot 202 to unauthenticated POSTs); web_fetch sniffs HTML to text. */
+/** web_search uses Bing (cn.bing.com — works from CN without proxy); web_fetch sniffs HTML to text. */
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -41,8 +41,8 @@ export interface WebFetchOptions {
 export interface WebSearchOptions {
   topK?: number;
   signal?: AbortSignal;
-  /** Backend engine: "mojeek" (scrapes Mojeek HTML), "searxng" (self-hosted SearXNG JSON API), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), or "exa" (Exa API). */
-  engine?: "mojeek" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), or "exa" (Exa API). */
+  engine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -52,11 +52,14 @@ const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_TOPK = 5;
 /** Bytes cap applied before `resp.text()` — char cap can't fire until the body is fully buffered. */
 const FETCH_MAX_BYTES = 10 * 1024 * 1024;
-// Real-browser UA. Servers like Mojeek are bot-friendly but still gate
-// obvious scraper UAs; a stock Chrome string avoids the fast-path block.
+// Real-browser UA. Most search backends gate obvious scraper UAs; a stock
+// Chrome string clears the fast-path block.
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const MOJEEK_ENDPOINT = "https://www.mojeek.com/search";
+// cn.bing.com over www.bing.com — CN endpoint returns raw URLs in the
+// HTML; the international endpoint wraps them in `bing.com/ck/a?u=a1<base64>`
+// click-tracking redirects we'd have to decode per result.
+const BING_ENDPOINT = "https://cn.bing.com/search";
 const METASO_ENDPOINT = "https://metaso.cn/api/v1";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
@@ -191,30 +194,30 @@ export async function webSearch(
   if (opts.engine === "exa") {
     return searchExa(query, opts);
   }
-  return searchMojeek(query, opts);
+  return searchBing(query, opts);
 }
 
-async function searchMojeek(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+async function searchBing(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
-  const resp = await fetch(`${MOJEEK_ENDPOINT}?q=${encodeURIComponent(query)}`, {
+  const resp = await fetch(`${BING_ENDPOINT}?q=${encodeURIComponent(query)}`, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9",
-      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     },
     signal: opts.signal,
     redirect: "follow",
   });
   if (!resp.ok) throw new Error(searchStatusError(resp.status));
   const html = await resp.text();
-  const results = parseMojeekResults(html).slice(0, topK);
+  const results = parseBingResults(html).slice(0, topK);
   if (results.length === 0) {
     if (/no results found|did not match any documents/i.test(html)) return [];
     if (/captcha|verify you are human|access denied|forbidden/i.test(html)) {
-      throw new Error(t("webErrors.mojeekBlocked"));
+      throw new Error(t("webErrors.bingBlocked"));
     }
     throw new Error(
-      t("webErrors.mojeekNoResults", {
+      t("webErrors.bingNoResults", {
         chars: html.length,
         preview: html.slice(0, 120).replace(/\s+/g, " "),
       }),
@@ -635,36 +638,23 @@ export function parseSearxngHtmlResults(html: string): SearchResult[] {
 }
 
 /** Title-anchor + snippet-paragraph passes paired positionally — robust to attribute reorder. */
-export function parseMojeekResults(html: string): SearchResult[] {
-  const titles: string[] = [];
-  const titleAnchorRe = /<a\b[^>]*\bclass="title"[^>]*>[\s\S]*?<\/a>/g;
+export function parseBingResults(html: string): SearchResult[] {
+  const blockRe = /<li[^>]*\bb_algo\b[^>]*>([\s\S]*?)<\/li>/g;
+  const h2Re = /<h2[^>]*>\s*<a\b[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>/;
+  const captionRe = /<div[^>]*\bb_caption\b[^>]*>\s*<p[^>]*>([\s\S]*?)<\/p>/;
+  const results: SearchResult[] = [];
   let m: RegExpExecArray | null;
   while (true) {
-    m = titleAnchorRe.exec(html);
+    m = blockRe.exec(html);
     if (m === null) break;
-    titles.push(m[0]);
-  }
-
-  const snippets: string[] = [];
-  const snippetRe = /<p\b[^>]*\bclass="s"[^>]*>([\s\S]*?)<\/p>/g;
-  while (true) {
-    m = snippetRe.exec(html);
-    if (m === null) break;
-    snippets.push(m[1] ?? "");
-  }
-
-  const hrefRe = /href="([^"]+)"/;
-  const innerRe = /<a\b[^>]*>([\s\S]*?)<\/a>/;
-  const results: SearchResult[] = [];
-  for (let i = 0; i < titles.length; i++) {
-    const anchor = titles[i]!;
-    const hrefMatch = anchor.match(hrefRe);
-    const innerMatch = anchor.match(innerRe);
-    if (!hrefMatch?.[1]) continue;
+    const block = m[1]!;
+    const h2 = h2Re.exec(block);
+    if (!h2?.[1]) continue;
+    const caption = captionRe.exec(block);
     results.push({
-      title: decodeHtmlEntities(stripHtml(innerMatch?.[1] ?? "")).trim(),
-      url: hrefMatch[1],
-      snippet: decodeHtmlEntities(stripHtml(snippets[i] ?? ""))
+      title: decodeHtmlEntities(stripHtml(h2[2] ?? "")).trim(),
+      url: h2[1],
+      snippet: decodeHtmlEntities(stripHtml(caption?.[1] ?? ""))
         .replace(/\s+/g, " ")
         .trim(),
     });

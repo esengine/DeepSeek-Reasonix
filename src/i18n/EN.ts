@@ -427,8 +427,8 @@ export const EN: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "switch web search backend — mojeek (default, no deps), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), or exa (AI-native)",
-      argsHint: "<mojeek|searxng|metaso|tavily|perplexity|exa> [<key>]",
+        "switch web search backend — bing (default, works from CN without proxy), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), or exa (AI-native)",
+      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa> [<key>]",
     },
   },
   wizard: {
@@ -1200,7 +1200,8 @@ export const EN: TranslationSchema = {
       currentEngine: "Current web search engine: {engine}",
       endpoint: "SearXNG endpoint: {url}",
       usageHeader: "Usage:",
-      usageMojeek: "  /search-engine mojeek            use Mojeek (default, no external deps)",
+      usageBing:
+        "  /search-engine bing              use Bing (default, works from CN without proxy)",
       usageSearxng: "  /search-engine searxng            use SearXNG at default endpoint",
       usageSearxngUrl: "  /search-engine searxng <url>      use SearXNG at custom endpoint",
       usageMetaso:
@@ -1510,25 +1511,25 @@ export const EN: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     rateLimit429:
       "web_search 429 \u2014 try: wait 10s before retrying, or rephrase the query; the search backend is rate-limiting this client",
     forbidden403:
-      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa, or wait and retry later",
+      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa, or wait and retry later",
     serverError5xx:
       "web_search {status} \u2014 try: open the search URL in a browser; if it loads this is transient and a retry in 30s may help",
-    mojeekBlocked:
-      "web_search: Mojeek anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
-    mojeekNoResults:
-      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+    bingBlocked:
+      "web_search: Bing anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+    bingNoResults:
+      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     invalidEndpoint:
       'web_search: invalid SearXNG endpoint "{endpoint}" \u2014 try: set a valid URL with /search-endpoint http://host:port',
     endpointMustBeHttp:
       "web_search: SearXNG endpoint must be http(s), got {protocol} \u2014 try: set a valid URL with /search-endpoint http://host:port",
     cannotReach:
-      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to another engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to another engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     searxngNoResults:
-      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     metasoMissingKey:
       "web_search: Metaso requires an API key \u2014 set METASO_API_KEY or configure one with /search-engine metaso <key>. Get one at https://metaso.cn/search-api/playground",
     metasoDailyLimit:
@@ -1538,7 +1539,7 @@ export const EN: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metaso rate-limited \u2014 wait and retry, or get your own API key at https://metaso.cn/search-api/playground",
     metasoServerError:
-      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     metasoParseError:
       "web_search: Metaso returned unparseable response (HTTP {status}) \u2014 try again later",
     metasoApiError: "web_search: Metaso API error (code {code}: {message}) \u2014 try again later",
@@ -1547,9 +1548,9 @@ export const EN: TranslationSchema = {
     tavilyUnauthorized:
       "web_search: Tavily API key rejected \u2014 check TAVILY_API_KEY or get one at https://tavily.com",
     tavilyRateLimit:
-      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa, or upgrade your Tavily plan",
+      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa, or upgrade your Tavily plan",
     tavilyServerError:
-      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     tavilyParseError:
       "web_search: Tavily returned unparseable response (HTTP {status}) \u2014 try again later",
     perplexityMissingKey:
@@ -1557,9 +1558,9 @@ export const EN: TranslationSchema = {
     perplexityUnauthorized:
       "web_search: Perplexity API key rejected \u2014 check PERPLEXITY_API_KEY or get one at https://perplexity.ai/settings/api",
     perplexityRateLimit:
-      "web_search: Perplexity rate-limited \u2014 wait and retry, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Perplexity rate-limited \u2014 wait and retry, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     perplexityServerError:
-      "web_search: Perplexity server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Perplexity server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     perplexityParseError:
       "web_search: Perplexity returned unparseable response (HTTP {status}) \u2014 try again later",
     exaMissingKey:
@@ -1569,7 +1570,7 @@ export const EN: TranslationSchema = {
     exaRateLimit:
       "web_search: Exa API rate-limited or monthly quota exceeded \u2014 wait or upgrade at https://exa.ai/pricing",
     exaServerError:
-      "web_search: Exa server error ({status}) \u2014 try again later, or switch engine with /search-engine mojeek|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Exa server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     exaParseError:
       "web_search: Exa returned unparseable response (HTTP {status}) \u2014 try again later",
     fetchStatus:

@@ -5,7 +5,7 @@ import { ToolRegistry } from "../src/tools.js";
 import {
   formatSearchResults,
   htmlToText,
-  parseMojeekResults,
+  parseBingResults,
   parseSearxngHtmlResults,
   registerWebTools,
   webFetch,
@@ -48,37 +48,30 @@ describe("htmlToText", () => {
   });
 });
 
-describe("parseMojeekResults", () => {
-  // Fixture mirrors the shape Mojeek actually returns as of April 2026.
+describe("parseBingResults", () => {
+  // Fixture mirrors the shape cn.bing.com returns as of 2026-05 (captured live).
+  // Each result is a `<li class="b_algo">` with `<h2><a href>` + `<div class="b_caption"><p>`.
   const sampleHtml = `
-    <ul class="results">
-      <li>
-        <a title="https://example.com/a" href="https://example.com/a" class="ob">
-          <p class="i"><span class="url">https://example.com</span></p>
-        </a>
-        <h2>
-          <a class="title" title="https://example.com/a" href="https://example.com/a">
-            Flutter 3.19 release notes
+    <ol id="b_results">
+      <li class="b_algo" data-id iid=SERP.5339>
+        <h2 class="">
+          <a target="_blank" href="https://example.com/a" h="ID=SERP,5145.2">
+            <strong>Flutter</strong> 3.19 release notes
           </a>
         </h2>
-        <p class="s">
-          Flutter 3.19 introduces <strong>new Navigator</strong>&nbsp;APIs &amp; more.
-        </p>
+        <div class="b_caption">
+          <p class="b_lineclamp2">Flutter 3.19 introduces <strong>new Navigator</strong>&nbsp;APIs &amp; more.</p>
+        </div>
       </li>
-      <li>
-        <a href="https://medium.com/flutter/x" class="ob">
-          <p class="i"><span class="url">medium.com</span></p>
-        </a>
-        <h2>
-          <a class="title" href="https://medium.com/flutter/x">What's new in 3.19</a>
-        </h2>
-        <p class="s">An overview post.</p>
+      <li class="b_algo" data-id iid=SERP.5340>
+        <h2><a target="_blank" href="https://medium.com/flutter/x">What's new in 3.19</a></h2>
+        <div class="b_caption"><p>An overview post.</p></div>
       </li>
-    </ul>
+    </ol>
   `;
 
-  it("extracts title/url/snippet from the expected markup", () => {
-    const items = parseMojeekResults(sampleHtml);
+  it("extracts title/url/snippet from b_algo blocks", () => {
+    const items = parseBingResults(sampleHtml);
     expect(items).toHaveLength(2);
     expect(items[0]).toEqual({
       title: "Flutter 3.19 release notes",
@@ -93,28 +86,31 @@ describe("parseMojeekResults", () => {
   });
 
   it("returns empty on markup that doesn't match the expected shape", () => {
-    expect(parseMojeekResults("<html><body>nothing here</body></html>")).toEqual([]);
+    expect(parseBingResults("<html><body>nothing here</body></html>")).toEqual([]);
   });
 
-  it("tolerates attribute-order swaps (href before class)", () => {
+  it("handles a b_algo block with no b_caption sibling (empty snippet)", () => {
     const html = `
-      <a href="https://example.com/z" class="title">Title Z</a>
-      <p class="s">Snippet Z.</p>
+      <li class="b_algo">
+        <h2><a href="https://example.com/s">Solo</a></h2>
+      </li>
     `;
-    const items = parseMojeekResults(html);
+    const items = parseBingResults(html);
     expect(items).toHaveLength(1);
     expect(items[0]).toEqual({
-      title: "Title Z",
-      url: "https://example.com/z",
-      snippet: "Snippet Z.",
+      title: "Solo",
+      url: "https://example.com/s",
+      snippet: "",
     });
   });
 
-  it("handles a title with no snippet sibling (empty snippet)", () => {
-    const html = `<a class="title" href="https://example.com/s">Solo</a>`;
-    const items = parseMojeekResults(html);
-    expect(items).toHaveLength(1);
-    expect(items[0]?.snippet).toBe("");
+  it("skips a b_algo block missing the h2 anchor", () => {
+    const html = `
+      <li class="b_algo">
+        <div class="b_caption"><p>orphan snippet</p></div>
+      </li>
+    `;
+    expect(parseBingResults(html)).toEqual([]);
   });
 });
 
@@ -168,12 +164,12 @@ describe("parseSearxngHtmlResults", () => {
 
 describe("webSearch", () => {
   const twoResultsHtml = `
-    <a class="title" href="https://example.com/a">A</a>
-    <p class="s">snippet A</p>
-    <a class="title" href="https://example.com/b">B</a>
-    <p class="s">snippet B</p>`;
+    <li class="b_algo"><h2><a href="https://example.com/a">A</a></h2>
+      <div class="b_caption"><p>snippet A</p></div></li>
+    <li class="b_algo"><h2><a href="https://example.com/b">B</a></h2>
+      <div class="b_caption"><p>snippet B</p></div></li>`;
 
-  it("GETs Mojeek with a browser UA and query string", async () => {
+  it("GETs cn.bing.com with a browser UA and query string", async () => {
     const captured: { url: string; method: string; ua: string } = { url: "", method: "", ua: "" };
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
@@ -188,7 +184,7 @@ describe("webSearch", () => {
     }) as unknown as typeof fetch;
     try {
       const out = await webSearch("flutter 3.19", { topK: 2 });
-      expect(captured.url).toContain("mojeek.com/search");
+      expect(captured.url).toContain("cn.bing.com/search");
       expect(captured.url).toContain("q=flutter%203.19");
       expect(captured.method).toBe("GET");
       expect(captured.ua).toMatch(/Mozilla\/5.0/);
@@ -942,10 +938,10 @@ describe("registerWebTools", () => {
 
   it("web_search dispatch returns formatted results", async () => {
     const html = `
-      <a class="title" href="https://example.com/a">A</a>
-      <p class="s">snippet A</p>
-      <a class="title" href="https://example.com/b">B</a>
-      <p class="s">snippet B</p>`;
+      <li class="b_algo"><h2><a href="https://example.com/a">A</a></h2>
+        <div class="b_caption"><p>snippet A</p></div></li>
+      <li class="b_algo"><h2><a href="https://example.com/b">B</a></h2>
+        <div class="b_caption"><p>snippet B</p></div></li>`;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
       async () => new Response(html, { status: 200, headers: { "Content-Type": "text/html" } }),

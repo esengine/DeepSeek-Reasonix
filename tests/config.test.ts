@@ -747,17 +747,25 @@ describe("config", () => {
   });
 
   describe("webSearchEngine", () => {
-    it("preserves each known engine end-to-end (no silent tavily→mojeek fall-through, #1309)", () => {
-      for (const engine of ["mojeek", "searxng", "metaso", "tavily"] as const) {
+    it("preserves each known engine end-to-end (no silent tavily→default fall-through, #1309)", () => {
+      for (const engine of ["bing", "searxng", "metaso", "tavily"] as const) {
         writeConfig({ webSearchEngine: engine }, path);
         expect(webSearchEngine(path)).toBe(engine);
       }
     });
 
-    it("defaults to mojeek when unset or unknown", () => {
-      expect(webSearchEngine(path)).toBe("mojeek");
-      writeConfig({ webSearchEngine: "garbage" as unknown as "mojeek" }, path);
-      expect(webSearchEngine(path)).toBe("mojeek");
+    it("defaults to bing when unset or unknown", () => {
+      expect(webSearchEngine(path)).toBe("bing");
+      writeConfig({ webSearchEngine: "garbage" as unknown as "bing" }, path);
+      expect(webSearchEngine(path)).toBe("bing");
+    });
+
+    it('legacy "mojeek" config value reads back as bing (read-only migration)', () => {
+      // Old configs predating the bing-default swap still have "mojeek" on disk.
+      // Loader maps unknown values to bing; user's config file isn't rewritten,
+      // so an explicit `/search-engine mojeek` later still rejects loudly.
+      writeConfig({ webSearchEngine: "mojeek" as unknown as "bing" }, path);
+      expect(webSearchEngine(path)).toBe("bing");
     });
   });
 });

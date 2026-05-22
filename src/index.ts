@@ -132,7 +132,7 @@ export type { RunCommandResult, ShellToolsOptions } from "./tools/shell.js";
 export {
   formatSearchResults,
   htmlToText,
-  parseMojeekResults,
+  parseBingResults,
   parseSearxngHtmlResults,
   registerWebTools,
   webFetch,
