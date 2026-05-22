@@ -1823,6 +1823,17 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .markdown tbody tr:hover {
   background: var(--card-hover);
 }
+.markdown-table-wrap {
+  width: calc(100% + 32px);
+  max-width: calc(100% + 32px);
+  overflow-x: auto;
+  margin: 14px -16px;
+}
+.markdown-table-wrap > table {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+}
 
 .msg-actions {
   display: flex;
