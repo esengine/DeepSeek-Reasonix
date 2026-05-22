@@ -42,10 +42,12 @@ function readMode(): Mode {
   return platformDefault();
 }
 
+const RESET_ALL = "\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007l\u001b[?1015l";
+
 const SEQUENCES: Record<Mode, { enable: string; disable: string }> = {
   "alternate-scroll": { enable: "\u001b[?1007h", disable: "\u001b[?1007l" },
   sgr: { enable: "\u001b[?1000h\u001b[?1006h", disable: "\u001b[?1006l\u001b[?1000l" },
-  off: { enable: "", disable: "" },
+  off: { enable: RESET_ALL, disable: "" },
 };
 
 let active = false;

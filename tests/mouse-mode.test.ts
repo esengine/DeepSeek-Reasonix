@@ -65,9 +65,13 @@ describe("mouse-mode enable/disable", () => {
     expect(writes.join("")).toBe("\u001b[?1007h");
   });
 
-  it("REASONIX_MOUSE_MODE=off skips writing any escape sequence", () => {
+  it("REASONIX_MOUSE_MODE=off resets every mouse-capture mode the terminal might be holding from a prior session", () => {
     process.env.REASONIX_MOUSE_MODE = "off";
     enableMouseMode();
+    expect(writes.join("")).toBe(
+      "\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
+    );
+    writes.length = 0;
     disableMouseMode();
     expect(writes).toEqual([]);
   });
