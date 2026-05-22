@@ -20,10 +20,12 @@ import {
 import type { ChatMessage } from "./types.js";
 
 function extractPinnedConstraints(systemPrompt: string): string {
-  const highPriority = systemPrompt.match(/# HIGH PRIORITY constraints[\s\S]*?(?=\n# |\n---|$)/);
-  const userMemory = systemPrompt.match(/# User memory[\s\S]*?(?=\n# |\n---|$)/);
-  const projectMemory = systemPrompt.match(/# Project memory[\s\S]*?(?=\n# |\n---|$)/);
-  return [highPriority?.[0], userMemory?.[0], projectMemory?.[0]].filter(Boolean).join("\n\n");
+  // matchAll because the system prompt can carry multiple blocks under the same
+  // prefix — e.g. global User memory + per-project User memory, or several
+  // Project memory files. Single .match() would only grab the first.
+  const pattern =
+    /# (?:HIGH PRIORITY constraints|User memory|Project memory)[\s\S]*?(?=\n# |\n---|$)/g;
+  return Array.from(systemPrompt.matchAll(pattern), (m) => m[0]).join("\n\n");
 }
 
 /** Auto-fold when a turn's response shows promptTokens above this fraction of ctxMax. */
