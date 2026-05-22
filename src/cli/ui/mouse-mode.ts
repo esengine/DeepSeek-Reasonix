@@ -17,6 +17,10 @@
 // either way (#1456-followup: WT users lost wheel scroll after the
 // alternate-scroll switch).
 //
+// Ghostty is another terminal that doesn't properly translate wheel events
+// to cursor keys under `?1007h`, despite being on macOS/Linux. Detect it
+// via `TERM_PROGRAM` and fall back to SGR as well.
+//
 // Escape hatch: `REASONIX_MOUSE_MODE=sgr|alternate-scroll|off` overrides
 // the platform default for users on terminals where the auto-pick is
 // wrong.
@@ -29,7 +33,13 @@ function platformDefault(): Mode {
   // don't honor `?1007h` (notably macOS Terminal.app) fall back to native
   // terminal scrollback, which is acceptable; broken in-app wheel for WT
   // users is not.
-  return process.platform === "win32" ? "sgr" : "alternate-scroll";
+  if (process.platform === "win32") return "sgr";
+  // Ghostty doesn't reliably translate wheel events to cursor keys
+  // under the alternate-scroll protocol. Fall back to SGR so the wheel
+  // still works (#1504).
+  const termProgram = process.env.TERM_PROGRAM ?? "";
+  if (termProgram.toLowerCase().includes("ghostty")) return "sgr";
+  return "alternate-scroll";
 }
 
 function readMode(): Mode {
