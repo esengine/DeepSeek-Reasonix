@@ -218,6 +218,12 @@ export function PromptInput({
   const cursorCellsInLine = stringCells(cursorLineText.slice(0, cursorCol), pastesRef.current);
   useEffect(() => {
     if (!stdout || disabled) return;
+    // Absolute positioning assumes the persistent UI is anchored to the
+    // terminal bottom (full-screen frame). Under STATIC_HISTORY the frame
+    // floats just below the Static items, so the absolute write desyncs
+    // Ink's cursor tracking and leaves ghost frames of the previous render.
+    const staticHistory = (process.env.REASONIX_STATIC_HISTORY ?? "").trim().toLowerCase();
+    if (staticHistory === "1" || staticHistory === "true" || staticHistory === "yes") return;
     const totalRows = stdout.rows;
     if (!totalRows || totalRows < 4) return;
     const linesBelow = Math.max(0, lines.length - 1 - cursorLine);
