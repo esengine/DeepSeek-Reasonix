@@ -8,6 +8,7 @@ import {
   matchesNoProxy,
   normalizeProxyUrl,
   parseNoProxy,
+  resolveBypassDeepSeekDirect,
   resolveNoProxy,
 } from "../src/net/proxy.js";
 
@@ -218,6 +219,27 @@ describe("installProxyIfConfigured", () => {
     expect(writes.join("")).toMatch(/NO_PROXY: .*api\.deepseek\.com/);
   });
 
+  it("bypassDeepSeekDirect=false drops api.deepseek.com from the install-time NO_PROXY list (#1497)", () => {
+    const result = installProxyIfConfigured(
+      { HTTPS_PROXY: "http://example:8080" },
+      { bypassDeepSeekDirect: false },
+    );
+    const raws = result?.noProxy.map((p) => p.raw) ?? [];
+    expect(raws).not.toContain("api.deepseek.com");
+    expect(raws).not.toContain("*.deepseek.com");
+    expect(raws).toContain("localhost");
+  });
+
+  it("env REASONIX_PROXY_DEEPSEEK_DIRECT=0 drops deepseek even without config override (#1497)", () => {
+    const result = installProxyIfConfigured({
+      HTTPS_PROXY: "http://example:8080",
+      REASONIX_PROXY_DEEPSEEK_DIRECT: "0",
+    });
+    const raws = result?.noProxy.map((p) => p.raw) ?? [];
+    expect(raws).not.toContain("api.deepseek.com");
+    expect(raws).toContain("127.0.0.1");
+  });
+
   it("returns reinstalled=true on subsequent installs", () => {
     installProxyIfConfigured({ HTTPS_PROXY: "http://first:8080" });
     const second = installProxyIfConfigured({ HTTPS_PROXY: "http://second:8080" });
@@ -263,9 +285,64 @@ describe("resolveNoProxy", () => {
     ]);
   });
 
-  it("api.deepseek.com always matches the resolved list — DeepSeek bypass is non-optional", () => {
+  it("api.deepseek.com matches the resolved list by default", () => {
     const r = resolveNoProxy({}, {});
     expect(matchesNoProxy("api.deepseek.com", r.all)).toBe(true);
+  });
+
+  it("config bypassDeepSeekDirect=false drops the DeepSeek bypass but keeps loopback (#1497)", () => {
+    const r = resolveNoProxy({}, { bypassDeepSeekDirect: false });
+    expect(matchesNoProxy("api.deepseek.com", r.all)).toBe(false);
+    expect(matchesNoProxy("sub.deepseek.com", r.all)).toBe(false);
+    expect(matchesNoProxy("localhost", r.all)).toBe(true);
+    expect(matchesNoProxy("127.0.0.1", r.all)).toBe(true);
+  });
+
+  it("env REASONIX_PROXY_DEEPSEEK_DIRECT=0 drops the DeepSeek bypass (#1497)", () => {
+    const r = resolveNoProxy({ REASONIX_PROXY_DEEPSEEK_DIRECT: "0" }, {});
+    expect(matchesNoProxy("api.deepseek.com", r.all)).toBe(false);
+    expect(matchesNoProxy("127.0.0.1", r.all)).toBe(true);
+  });
+
+  it("env REASONIX_PROXY_DEEPSEEK_DIRECT wins over config when set", () => {
+    const r = resolveNoProxy(
+      { REASONIX_PROXY_DEEPSEEK_DIRECT: "1" },
+      { bypassDeepSeekDirect: false },
+    );
+    expect(matchesNoProxy("api.deepseek.com", r.all)).toBe(true);
+  });
+});
+
+describe("resolveBypassDeepSeekDirect (#1497)", () => {
+  it("defaults to true when neither env nor config is set", () => {
+    expect(resolveBypassDeepSeekDirect({}, undefined)).toBe(true);
+  });
+
+  it("returns false when config is false and env is unset", () => {
+    expect(resolveBypassDeepSeekDirect({}, false)).toBe(false);
+  });
+
+  it("env false-y values flip the default off", () => {
+    for (const v of ["0", "false", "no", "off", "FALSE", "Off"]) {
+      expect(resolveBypassDeepSeekDirect({ REASONIX_PROXY_DEEPSEEK_DIRECT: v }, undefined)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("env truthy values force the bypass back on (override config false)", () => {
+    for (const v of ["1", "true", "yes", "on", "TRUE", "Yes"]) {
+      expect(resolveBypassDeepSeekDirect({ REASONIX_PROXY_DEEPSEEK_DIRECT: v }, false)).toBe(true);
+    }
+  });
+
+  it("unrecognized env values fall through to config", () => {
+    expect(resolveBypassDeepSeekDirect({ REASONIX_PROXY_DEEPSEEK_DIRECT: "maybe" }, false)).toBe(
+      false,
+    );
+    expect(
+      resolveBypassDeepSeekDirect({ REASONIX_PROXY_DEEPSEEK_DIRECT: "maybe" }, undefined),
+    ).toBe(true);
   });
 });
 

@@ -91,7 +91,10 @@ function checkProxy(): Check[] {
       },
     ];
   }
-  const resolved = resolveNoProxy(process.env, { extraNoProxy: cfg.noProxy });
+  const resolved = resolveNoProxy(process.env, {
+    extraNoProxy: cfg.noProxy,
+    bypassDeepSeekDirect: cfg.bypassDeepSeekDirect,
+  });
   const total = resolved.all.length;
   const sourceSummary = [
     `defaults ${resolved.defaults.length}`,

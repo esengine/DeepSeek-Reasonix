@@ -234,6 +234,17 @@ describe("config", () => {
     });
   });
 
+  it("loads proxy.bypassDeepSeekDirect when set (#1497)", () => {
+    writeConfig({ proxy: { bypassDeepSeekDirect: false } }, path);
+    expect(loadProxyConfig(path)).toEqual({ bypassDeepSeekDirect: false });
+
+    writeConfig({ proxy: { bypassDeepSeekDirect: true } }, path);
+    expect(loadProxyConfig(path)).toEqual({ bypassDeepSeekDirect: true });
+
+    writeConfig({ proxy: { bypassDeepSeekDirect: "yes" } as never }, path);
+    expect(loadProxyConfig(path)).toEqual({});
+  });
+
   it("redactKey hides the middle", () => {
     expect(redactKey("sk-1234567890abcdefghij")).toBe("sk-123…ghij");
     expect(redactKey("short")).toBe("****");

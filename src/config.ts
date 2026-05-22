@@ -123,6 +123,8 @@ export interface ProxyConfig {
   disabled?: boolean;
   /** Additional NO_PROXY patterns (curl syntax). Additive on top of env NO_PROXY and the default DeepSeek-bypass whitelist. */
   noProxy?: string[];
+  /** When false, route api.deepseek.com / *.deepseek.com through the proxy too (issue #1497 — corporate firewalls that block direct egress). Default true preserves the clash/v2ray US-exit-IP 403 fix. Env `REASONIX_PROXY_DEEPSEEK_DIRECT` overrides. */
+  bypassDeepSeekDirect?: boolean;
 }
 
 export interface ReasonixConfig {
@@ -588,6 +590,9 @@ export function loadProxyConfig(path: string = defaultConfigPath()): ProxyConfig
       (p): p is string => typeof p === "string" && p.trim() !== "",
     );
     if (entries.length > 0) out.noProxy = entries;
+  }
+  if (typeof cfg.bypassDeepSeekDirect === "boolean") {
+    out.bypassDeepSeekDirect = cfg.bypassDeepSeekDirect;
   }
   return out;
 }

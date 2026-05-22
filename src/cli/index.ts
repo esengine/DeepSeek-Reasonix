@@ -31,6 +31,7 @@ const cfgProxy = loadProxyConfig();
 installProxyIfConfigured(process.env, {
   disabled: cliNoProxy || cfgProxy.disabled === true,
   extraNoProxy: cfgProxy.noProxy,
+  bypassDeepSeekDirect: cfgProxy.bypassDeepSeekDirect,
 });
 
 markPhase("cli_module_loaded");
