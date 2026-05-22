@@ -1,6 +1,13 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
@@ -403,12 +410,40 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
 }
 
 export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPath()): void {
+  debugLogConfigWrite(cfg, path);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(cfg, null, 2), "utf8");
+  // Atomic — write to a sibling tmp then rename. A torn write (process
+  // killed mid-write, or another reader catching the file before
+  // writeFileSync finished) used to leave a 0-byte or truncated
+  // config.json, which readConfig would then parse as `{}` and the next
+  // saveX would silently overwrite every other field with that empty
+  // baseline (issue #1535 follow-on — preset reverting to default).
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf8");
   try {
-    chmodSync(path, 0o600);
+    chmodSync(tmp, 0o600);
   } catch {
     /* ignore on platforms without chmod */
+  }
+  renameSync(tmp, path);
+}
+
+/** Append timestamp + keys + preset + stack to REASONIX_DEBUG_PRESET when set. Catches every persisted config change including the dashboard PATCH path that bypasses savePreset(). Zero cost when unset. */
+function debugLogConfigWrite(cfg: ReasonixConfig, configPath: string): void {
+  const debugPath = process.env.REASONIX_DEBUG_PRESET;
+  if (!debugPath) return;
+  try {
+    const stack = new Error("trace").stack ?? "";
+    const keys = Object.keys(cfg).sort().join(",");
+    const presetField = cfg.preset === undefined ? "(absent)" : JSON.stringify(cfg.preset);
+    const line = `${new Date().toISOString()} writeConfig pid=${process.pid} → ${configPath}\n  keys=[${keys}]\n  preset=${presetField}\n${stack
+      .split("\n")
+      .slice(1, 10)
+      .map((l) => `  ${l.trim()}`)
+      .join("\n")}\n\n`;
+    appendFileSync(debugPath, line);
+  } catch {
+    /* diagnostic only */
   }
 }
 
@@ -1124,9 +1159,26 @@ export function loadPreset(path: string = defaultConfigPath()): PresetName | und
 
 /** Persist preset so `/preset pro` (or `/model deepseek-v4-pro`) sticks across relaunches. */
 export function savePreset(preset: PresetName, path: string = defaultConfigPath()): void {
+  debugLogPresetWrite(preset, path);
   const cfg = readConfig(path);
   cfg.preset = preset;
   writeConfig(cfg, path);
+}
+
+function debugLogPresetWrite(preset: PresetName, configPath: string): void {
+  const debugPath = process.env.REASONIX_DEBUG_PRESET;
+  if (!debugPath) return;
+  try {
+    const stack = new Error("trace").stack ?? "";
+    const line = `${new Date().toISOString()} savePreset(${JSON.stringify(preset)}) → ${configPath}\n${stack
+      .split("\n")
+      .slice(1, 8)
+      .map((l) => `  ${l.trim()}`)
+      .join("\n")}\n\n`;
+    appendFileSync(debugPath, line);
+  } catch {
+    /* diagnostic only */
+  }
 }
 
 export function loadIndexUserConfig(path: string = defaultConfigPath()): IndexUserConfig {

@@ -41,6 +41,7 @@ import {
   saveDesktopOpenTabs,
   saveEditMode,
   saveIndexConfig,
+  savePreset,
   saveReasoningEffort,
   saveSemanticEmbeddingConfig,
   saveTheme,
@@ -96,6 +97,39 @@ describe("config", () => {
   it("writeConfig + readConfig round-trip", () => {
     writeConfig({ apiKey: "sk-test123abcdefghijkl" }, path);
     expect(readConfig(path).apiKey).toBe("sk-test123abcdefghijkl");
+  });
+
+  it("writeConfig leaves no `.tmp` sibling behind on success", () => {
+    writeConfig({ apiKey: "sk-test123abcdefghijkl", preset: "auto" }, path);
+    const tmp = `${path}.${process.pid}.tmp`;
+    expect(existsSync(tmp)).toBe(false);
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it("savePreset records a trace line when REASONIX_DEBUG_PRESET is set", async () => {
+    const { readFileSync, existsSync: exists, mkdirSync: mk } = await import("node:fs");
+    const logPath = join(dir, "preset.log");
+    mk(dir, { recursive: true });
+    process.env.REASONIX_DEBUG_PRESET = logPath;
+    try {
+      savePreset("auto", path);
+      expect(exists(logPath)).toBe(true);
+      const contents = readFileSync(logPath, "utf8");
+      expect(contents).toContain('savePreset("auto")');
+      // writeConfig's own trace also fires — single savePreset call → both lines.
+      expect(contents).toContain("writeConfig pid=");
+      expect(contents).toContain('preset="auto"');
+    } finally {
+      // biome-ignore lint/performance/noDelete: process.env wants undefined, not the string "undefined"
+      delete process.env.REASONIX_DEBUG_PRESET;
+    }
+  });
+
+  it("savePreset writes nothing extra when REASONIX_DEBUG_PRESET is unset", () => {
+    // biome-ignore lint/performance/noDelete: same reason
+    delete process.env.REASONIX_DEBUG_PRESET;
+    savePreset("flash", path);
+    expect(readConfig(path).preset).toBe("flash");
   });
 
   it("saveApiKey trims whitespace", () => {
