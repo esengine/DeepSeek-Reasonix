@@ -1247,6 +1247,9 @@ export const zhCN: TranslationSchema = {
     typeaheadStaged: "\u25b8 {count} 行已暂存 \u00b7 esc 召回",
     steerPlaceholder: "输入消息以引导当前任务 — 忙碌时不支持命令",
     steerHint: "发送 — 回合内注入",
+    stashNothing: "没有可暂存的内容",
+    stashSaved: "已暂存",
+    stashRecall: "已恢复",
   },
   pathConfirm: {
     title: "沙箱外路径",
@@ -1771,6 +1774,7 @@ export const zhCN: TranslationSchema = {
     descCtrlO: "展开回复（仅流式输出期间）",
     descHelp: "显示所有命令",
     descShiftTab: "切换编辑模式",
+    descAltS: "暂存/恢复输入",
   },
   mcpCli: {
     bundledCatalog: "已打包的 MCP 服务器（离线目录）：",

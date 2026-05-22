@@ -1318,6 +1318,9 @@ export const EN: TranslationSchema = {
     typeaheadStaged: "\u25b8 {count} line(s) staged \u00b7 esc recall",
     steerPlaceholder: "type to steer the current task — commands are disabled while busy",
     steerHint: "send — injected mid-turn",
+    stashNothing: "Nothing to stash",
+    stashSaved: "Stashed",
+    stashRecall: "Recalled",
   },
   pathConfirm: {
     title: "Outside-sandbox path",
@@ -1869,6 +1872,7 @@ export const EN: TranslationSchema = {
     descCtrlO: "Expand reply (streaming only)",
     descHelp: "Show all commands",
     descShiftTab: "Switch edit mode",
+    descAltS: "Stash / recall input",
   },
   mcpCli: {
     bundledCatalog: "Bundled MCP servers (offline catalog):",

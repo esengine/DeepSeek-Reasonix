@@ -508,6 +508,7 @@ function AppInner({
   // Esc handler only fires once per turn (repeated presses would yield
   // stacked warning events).
   const abortedThisTurn = useRef(false);
+  const stashRef = useRef("");
   // Mirrors the live `busy` flag for /loop's timer (it has no React
   // closure handle, only refs). Skips the firing when a prior turn is
   // still running rather than queuing a duplicate submit.
@@ -1866,6 +1867,38 @@ function AppInner({
     // — the picker would move AND history recall would fire into the
     // (hidden) prompt buffer. Bail early.
     if (pendingShell || pendingPath) return;
+    // Alt+S — stash / recall the composer buffer. Ctrl+U clearing
+    // is a one-way delete; stash gives the user a reversible "save
+    // for later" so an accidental hotkey doesn't lose input.
+    if (
+      key.meta &&
+      key.input === "s" &&
+      !pendingPlan &&
+      !pendingReviseEditor &&
+      !pendingSessionsPicker &&
+      !pendingCheckpointPicker &&
+      !pendingMcpHub &&
+      !stagedInput &&
+      !pendingEditReview &&
+      !walkthroughActive &&
+      !pendingChoice &&
+      !stagedChoiceCustom &&
+      !pendingRevision
+    ) {
+      if (stashRef.current) {
+        const recalled = stashRef.current;
+        stashRef.current = input;
+        setInput(recalled);
+        log.pushInfo(t("composer.stashRecall"));
+      } else if (input.length > 0) {
+        stashRef.current = input;
+        setInput("");
+        log.pushInfo(t("composer.stashSaved"));
+      } else {
+        log.pushInfo(t("composer.stashNothing"));
+      }
+      return;
+    }
 
     // Picker arrow nav lives on the PromptInput → historyHandoff →
     // handleHistoryPrev/Next path (which checks pickers before recall).

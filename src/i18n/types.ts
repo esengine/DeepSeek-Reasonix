@@ -489,6 +489,12 @@ export interface TranslationSchema {
     steerPlaceholder: string;
     /** Status-line hint shown when steerBusy is active. */
     steerHint: string;
+    /** Info shown when Alt+S pressed on empty input with no stash. */
+    stashNothing: string;
+    /** Info shown when input was stashed (non-empty input → saved). */
+    stashSaved: string;
+    /** Info shown when stash was recalled into input. */
+    stashRecall: string;
   };
   pathConfirm: {
     title: string;
@@ -963,6 +969,7 @@ export interface TranslationSchema {
     descCtrlO: string;
     descHelp: string;
     descShiftTab: string;
+    descAltS: string;
   };
   mcpCli: {
     bundledCatalog: string;
