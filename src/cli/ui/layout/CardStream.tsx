@@ -197,7 +197,7 @@ function ScrollIndicator({
   );
 }
 
-function isFullySettled(card: Card): boolean {
+export function isFullySettled(card: Card): boolean {
   switch (card.kind) {
     case "streaming":
     case "tool":

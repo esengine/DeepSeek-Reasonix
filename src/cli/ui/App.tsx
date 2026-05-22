@@ -163,6 +163,7 @@ import { CardStream } from "./layout/CardStream.js";
 import { InputAreaWithHistoryHint } from "./layout/InputAreaWithHistoryHint.js";
 import { LiveExpandContext } from "./layout/LiveExpandContext.js";
 import { ModeStatusBar } from "./layout/LiveRows.js";
+import { StaticCardStream } from "./layout/StaticCardStream.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import type { StatusBarConfig } from "./layout/StatusRow.js";
 import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
@@ -320,6 +321,11 @@ const FLUSH_INTERVAL_MS = (() => {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 16 || parsed > 1000) return fallback;
   return Math.round(parsed);
+})();
+
+const STATIC_HISTORY = (() => {
+  const v = process.env.REASONIX_STATIC_HISTORY?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
 })();
 
 /**
@@ -4228,7 +4234,11 @@ function AppInner({
                 <Box flexDirection="column" flexGrow={1}>
                   <LiveExpandContext.Provider value={liveExpand}>
                     <VerboseContext.Provider value={verboseMode}>
-                      <CardStream suppressLive={modalOpen} />
+                      {STATIC_HISTORY ? (
+                        <StaticCardStream suppressLive={modalOpen} />
+                      ) : (
+                        <CardStream suppressLive={modalOpen} />
+                      )}
                     </VerboseContext.Provider>
                   </LiveExpandContext.Provider>
                   {/*
