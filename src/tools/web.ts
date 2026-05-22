@@ -639,25 +639,20 @@ export function parseSearxngHtmlResults(html: string): SearchResult[] {
 
 /** Title-anchor + snippet-paragraph passes paired positionally — robust to attribute reorder. */
 export function parseBingResults(html: string): SearchResult[] {
-  const blockRe = /<li[^>]*\bb_algo\b[^>]*>([\s\S]*?)<\/li>/g;
-  const h2Re = /<h2[^>]*>\s*<a\b[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>/;
-  const captionRe = /<div[^>]*\bb_caption\b[^>]*>\s*<p[^>]*>([\s\S]*?)<\/p>/;
+  // DOM walk rather than regex — `<li[^>]*\bclass\b[^>]*>` triggers
+  // polynomial backtracking on adversarial input (CodeQL js/polynomial-redos).
+  const root = parseHtml(html);
   const results: SearchResult[] = [];
-  let m: RegExpExecArray | null;
-  while (true) {
-    m = blockRe.exec(html);
-    if (m === null) break;
-    const block = m[1]!;
-    const h2 = h2Re.exec(block);
-    if (!h2?.[1]) continue;
-    const caption = captionRe.exec(block);
-    results.push({
-      title: decodeHtmlEntities(stripHtml(h2[2] ?? "")).trim(),
-      url: h2[1],
-      snippet: decodeHtmlEntities(stripHtml(caption?.[1] ?? ""))
-        .replace(/\s+/g, " ")
-        .trim(),
-    });
+  for (const li of root.querySelectorAll("li.b_algo")) {
+    const anchor = li.querySelector("h2 a[href]");
+    if (!anchor) continue;
+    const href = anchor.getAttribute("href");
+    if (!href) continue;
+    const title = anchor.textContent.trim();
+    if (!title) continue;
+    const cap = li.querySelector("div.b_caption p");
+    const snippet = cap ? cap.textContent.trim().replace(/\s+/g, " ") : "";
+    results.push({ title, url: href, snippet });
   }
   return results;
 }
