@@ -47,6 +47,18 @@ describe("formatLoopError", () => {
     expect(out).toContain("temperature");
   });
 
+  it("429 → concurrency-limit hint with cap numbers + remediation (#1522)", () => {
+    const raw = new Error(
+      'DeepSeek 429: {"error":{"message":"Too Many Requests, please reduce concurrency"}}',
+    );
+    const out = formatLoopError(raw);
+    expect(out).toMatch(/concurrency limit/);
+    expect(out).toMatch(/500/);
+    expect(out).toMatch(/2500/);
+    expect(out).toContain("reduce concurrency");
+    expect(out).toContain("platform.deepseek.com");
+  });
+
   it("400 (non-overflow) → extracts the inner error message, drops the JSON wrapping", () => {
     const raw = new Error(
       'DeepSeek 400: {"error":{"message":"request body malformed at messages[3].role"}}',

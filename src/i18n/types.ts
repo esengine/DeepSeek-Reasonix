@@ -288,6 +288,7 @@ export interface TranslationSchema {
     balance402: string;
     badparam422: string;
     badrequest400: string;
+    concurrency429: string;
     deepseek5xxHead: string;
     deepseek5xxReachable: string;
     deepseek5xxUnreachable: string;

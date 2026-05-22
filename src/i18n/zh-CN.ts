@@ -683,6 +683,8 @@ export const zhCN: TranslationSchema = {
       "余额不足（DeepSeek 402）：{inner}。在 https://platform.deepseek.com/top_up 充值 — 余额非零时面板顶栏会显示。",
     badparam422: "参数错误（DeepSeek 422）：{inner}",
     badrequest400: "请求错误（DeepSeek 400）：{inner}",
+    concurrency429:
+      "DeepSeek 并发超限（429）：{inner}。账号在跑的请求超过上限（v4-pro 500、v4-flash 2500，账号下所有 API key 累加）。通常是同一账号开了多个 Reasonix 进程，或者并行 subagent 一次发太多。等几秒重试、减少并行，或在 https://platform.deepseek.com 申请扩容。",
     deepseek5xxHead:
       "DeepSeek 服务不可用（{status}） — 这是 DeepSeek 服务端问题，不是 Reasonix 故障。已按指数退避重试 4 次。",
     deepseek5xxReachable:

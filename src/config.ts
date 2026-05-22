@@ -115,6 +115,7 @@ export interface PricingOverride {
 }
 
 export interface RateLimitConfig {
+  /** Client-side self-throttle in requests/minute — paces outbound chat calls with a min-interval timer. NOT a DeepSeek-enforced limit: DeepSeek's actual cap is concurrency, not RPM (500 for v4-pro, 2500 for v4-flash, account-wide), surfaced as HTTP 429. Set this only to be a polite neighbor on shared infra; single-user CLI rarely needs it. */
   rpm?: number;
 }
 
