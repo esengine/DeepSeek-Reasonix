@@ -43,6 +43,16 @@ export interface TranslationSchema {
   };
   sessions: {
     emptyHint: string;
+    listHeader: string;
+    inspectHint: string;
+    resumeHint: string;
+    noSession: string;
+    lookedAt: string;
+    noIdleSessions: string;
+    wouldPrune: string;
+    dryRunHint: string;
+    prunedCount: string;
+    daysInvalid: string;
   };
   ui: {
     welcome: string;
@@ -233,6 +243,8 @@ export interface TranslationSchema {
     editHistoryRevertFile: string;
     mcpFailed: string;
     mcpWarn: string;
+    unknownTheme: string;
+    themeSaved: string;
   };
   mcpBrowse: {
     noResources: string;
@@ -944,5 +956,26 @@ export interface TranslationSchema {
     descCtrlO: string;
     descHelp: string;
     descShiftTab: string;
+  };
+  mcpCli: {
+    bundledCatalog: string;
+    justFetched: string;
+    cachedAge: string;
+    moreAvailable: string;
+    allLoaded: string;
+    morePagesAvailable: string;
+    installHint: string;
+    usageSearch: string;
+    usageInstall: string;
+    noMatchesFor: string;
+    matchCount: string;
+    moreLoaded: string;
+    moreMatches: string;
+    installed: string;
+    noServerFound: string;
+    noServerTryMore: string;
+    noInstallMeta: string;
+    buildSpecFailed: string;
+    alreadyInstalled: string;
   };
 }

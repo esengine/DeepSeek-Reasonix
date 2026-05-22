@@ -46,6 +46,16 @@ export const EN: TranslationSchema = {
   sessions: {
     emptyHint:
       "no saved sessions yet — run `reasonix chat` (sessions are auto-saved unless --no-session).",
+    listHeader: "Saved sessions (~/.reasonix/sessions/):",
+    inspectHint: "Inspect:  reasonix sessions <name>",
+    resumeHint: "Resume:   reasonix chat --session <name>",
+    noSession: 'no session named "{name}" (or it\u2019s empty).',
+    lookedAt: "looked at: {path}",
+    noIdleSessions: "no sessions idle \u2265{days} days. Nothing pruned.",
+    wouldPrune: "would prune {count} session(s) idle \u2265{days} days:",
+    dryRunHint: "re-run without --dry-run to actually delete.",
+    prunedCount: "pruned {count} session(s) idle \u2265{days} days:",
+    daysInvalid: "--days must be a positive integer (got {days}).",
   },
   ui: {
     welcome: "Run `reasonix` any time to start chatting — your settings are remembered.",
@@ -647,6 +657,8 @@ export const EN: TranslationSchema = {
     editHistoryRevertFile: "/undo {id} {path}  \u2192 revert just this file",
     mcpFailed: "MCP {name} failed",
     mcpWarn: "MCP {name} warn",
+    unknownTheme: "unknown theme: {name}\navailable: {choices}",
+    themeSaved: "theme saved: {name}\nactive on next launch: {active}",
   },
   hooks: {
     head: "hook {tag} `{cmd}` {decision}{truncTag}",
@@ -1857,5 +1869,29 @@ export const EN: TranslationSchema = {
     descCtrlO: "Expand stream",
     descHelp: "Show all commands",
     descShiftTab: "Switch edit mode",
+  },
+  mcpCli: {
+    bundledCatalog: "Bundled MCP servers (offline catalog):",
+    justFetched: "just fetched",
+    cachedAge: "cached, {age}",
+    moreAvailable: "more available",
+    allLoaded: "all loaded",
+    morePagesAvailable:
+      "\u25b8 more pages available \u2014 `reasonix mcp list --pages <n>` or --all",
+    installHint: "Install:  reasonix mcp install <name>",
+    usageSearch: "usage: reasonix mcp search <query>",
+    usageInstall: "usage: reasonix mcp install <name>",
+    noMatchesFor: 'No matches for "{q}" across {count} loaded entries ({source})',
+    matchCount: '{count} match(es) for "{q}" in {source} registry ({loaded} entries scanned):',
+    moreLoaded: "\u2026 {count} more loaded \u2014 use `reasonix mcp search <query>` to filter",
+    moreMatches: "\u2026 {count} more matches",
+    installed: "Installed: {spec}",
+    noServerFound:
+      'No MCP server named "{target}" found after walking {pages} page(s) of the {source} registry.',
+    noServerTryMore: "Try: reasonix mcp install {target} --max-pages 100",
+    noInstallMeta:
+      'Could not derive install metadata for "{name}" \u2014 try `npx -y @smithery/cli install {name}` directly.',
+    buildSpecFailed: "Cannot build install spec for {name}: {message}",
+    alreadyInstalled: "Already installed: {spec}",
   },
 };
