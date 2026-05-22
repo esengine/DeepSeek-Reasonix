@@ -2,7 +2,6 @@ import { Box, Text, useStdout } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { useReserveRows } from "./layout/viewport-budget.js";
 import { type MultilineKey, lineAndColumn, processMultilineKey } from "./multiline-keys.js";
 import {
   PASTE_SENTINEL_RANGE,
@@ -72,14 +71,6 @@ export function PromptInput({
   mode,
   model,
 }: PromptInputProps) {
-  // Cap at 24 — collapseLinesForDisplay hides content past ~20 logical lines.
-  // Quantize spec.max to 4-row buckets so per-keystroke line-count changes
-  // don't churn viewport-budget; without this every single character that
-  // adds/removes a newline re-dispatches the allocator and reflows layout.
-  const inputLineCount = value.length > 0 ? value.split("\n").length : 1;
-  const reserveMax = Math.min(Math.ceil(inputLineCount / 4) * 4 + 3, 24);
-  useReserveRows("input", { min: 1, max: reserveMax });
-
   const [cursor, setCursor] = useState(value.length);
 
   useEffect(() => {

@@ -5,7 +5,6 @@ import { t } from "../../i18n/index.js";
 import { DenyContextInput } from "./DenyContextInput.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
-import { useReserveRows } from "./layout/viewport-budget.js";
 import { FG } from "./theme/tokens.js";
 
 export type ShellConfirmChoice = "run_once" | "always_allow" | "deny";
@@ -16,7 +15,6 @@ export interface ShellConfirmProps {
 }
 
 export function ShellConfirm({ prompt, onChoose }: ShellConfirmProps) {
-  useReserveRows("modal", { min: 8, max: 14 });
   const [phase, setPhase] = useState<"pick" | "deny">("pick");
 
   if (phase === "deny") {
