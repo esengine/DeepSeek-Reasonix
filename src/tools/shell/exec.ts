@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import * as pathMod from "node:path";
 import { parseCommandChain, runChain } from "../shell-chain.js";
 import { tokenizeCommand } from "./parse.js";
+import { needsPty, runWithPty } from "./pty-exec.js";
 
 export const DEFAULT_TIMEOUT_SEC = 60;
 export const DEFAULT_MAX_OUTPUT_CHARS = 32_000;
@@ -99,6 +100,15 @@ export async function runCommand(
   //      with verbatim args + manual quoting, so shell metacharacters
   //      in arguments stay literal.
   // Unix path is unchanged.
+  if (needsPty(cmd) && process.stdin.isTTY) {
+    const { bin: ptyBin, args: ptyArgs } = prepareSpawn(argv, { env: normalizedEnv });
+    return runWithPty(ptyBin, ptyArgs, {
+      cwd: opts.cwd,
+      timeoutSec,
+      maxOutputChars: maxChars,
+      env: { ...normalizedEnv, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+    });
+  }
   const { bin, args, spawnOverrides } = prepareSpawn(argv, { env: normalizedEnv });
   const effectiveSpawnOpts = { ...spawnOpts, ...spawnOverrides };
 

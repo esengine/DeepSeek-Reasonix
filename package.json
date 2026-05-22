@@ -80,6 +80,7 @@
     "ink": "^7.0.2",
     "ink-text-input": "^6.0.0",
     "node-html-parser": "^7.1.0",
+    "node-pty": "^1.1.0",
     "picomatch": "^4.0.4",
     "react": "^19.2.6",
     "string-width": "^7.2.0",
