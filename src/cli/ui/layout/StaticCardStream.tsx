@@ -1,4 +1,5 @@
 import { Box, Static } from "ink";
+// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX
 import React, { useMemo } from "react";
 import { CardRenderer } from "../cards/CardRenderer.js";
 import type { Card } from "../state/cards.js";

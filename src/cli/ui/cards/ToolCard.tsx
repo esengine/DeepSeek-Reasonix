@@ -1,6 +1,5 @@
 import { Box, Text, useStdout } from "ink";
 import React from "react";
-import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
@@ -9,6 +8,7 @@ import { Spinner } from "../primitives/Spinner.js";
 import type { ToolCard as ToolCardData } from "../state/cards.js";
 import { useIsInflight } from "../state/inflight-context.js";
 import { VerboseContext } from "../state/verbose-context.js";
+import { clipToCells } from "../text-width.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 
 const READ_TAIL = 2;

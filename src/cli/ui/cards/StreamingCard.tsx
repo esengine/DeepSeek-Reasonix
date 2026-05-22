@@ -1,6 +1,5 @@
 import { Box, Text, useStdout } from "ink";
 import React, { useContext } from "react";
-import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
 import { countTokensBounded } from "../../../tokenizer.js";
 import { LiveExpandContext } from "../layout/LiveExpandContext.js";
@@ -10,6 +9,7 @@ import { CardHeader } from "../primitives/CardHeader.js";
 import { PILL_MODEL, Pill, modelBadgeFor } from "../primitives/Pill.js";
 import { Spinner } from "../primitives/Spinner.js";
 import type { StreamingCard as StreamingCardData } from "../state/cards.js";
+import { clipToCells } from "../text-width.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 import { useSlowTick } from "../ticker.js";
 import { useIncrementalWrap } from "./useIncrementalWrap.js";

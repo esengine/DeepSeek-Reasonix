@@ -4,7 +4,7 @@ import React from "react";
 import stringWidth from "string-width";
 import { describe, expect, it } from "vitest";
 import { Markdown, plainText, tableLayout } from "../src/cli/ui/markdown.js";
-import { wrapToCells } from "../src/frame/width.js";
+import { wrapToCells } from "../src/cli/ui/text-width.js";
 
 /** Smoke tests — markdown parsing is delegated to `marked`; we only verify the component mounts and dispatches over the token kinds we care about. */
 

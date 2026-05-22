@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { wrapToCells } from "../../../frame/width.js";
+import { wrapToCells } from "../text-width.js";
 
 export interface WrapCache {
   text: string;

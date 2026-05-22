@@ -1,4 +1,4 @@
-import { wrapToCells } from "@/frame/width.js";
+import { wrapToCells } from "@/cli/ui/text-width.js";
 import { t, tObj } from "@/i18n/index.js";
 import { VERSION } from "@/version.js";
 import { formatDuration, formatLoopStatus, parseLoopCommand } from "../../loop.js";

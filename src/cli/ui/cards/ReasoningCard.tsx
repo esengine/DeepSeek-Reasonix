@@ -1,6 +1,5 @@
 import { Box, Text, useStdout } from "ink";
 import React from "react";
-import { clipToCells } from "../../../frame/width.js";
 import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
@@ -9,6 +8,7 @@ import { PILL_MODEL, PILL_SECTION, Pill, modelBadgeFor } from "../primitives/Pil
 import { Spinner } from "../primitives/Spinner.js";
 import type { ReasoningCard as ReasoningCardData } from "../state/cards.js";
 import { VerboseContext } from "../state/verbose-context.js";
+import { clipToCells } from "../text-width.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
 import { useIncrementalWrap } from "./useIncrementalWrap.js";
 

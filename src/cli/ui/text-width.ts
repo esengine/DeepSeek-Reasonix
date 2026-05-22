@@ -7,7 +7,7 @@ export function graphemes(s: string): string[] {
   return Array.from(segmenter.segment(s), (seg) => seg.segment);
 }
 
-/** Clamp into {0,1,2} — Frame grid only knows narrow + wide cells. */
+/** Narrow=1 / wide=2 / zero-width=0 cell width for a single grapheme cluster. */
 export function graphemeWidth(g: string): 0 | 1 | 2 {
   if (g.length === 0) return 0;
   const w = stringWidthLib(g);

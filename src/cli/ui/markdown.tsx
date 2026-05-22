@@ -5,8 +5,8 @@ import { Box, Text, Transform, useStdout } from "ink";
 import { type Token, type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
-import { wrapToCells } from "../../frame/width.js";
 import { decodeHtmlEntities } from "./html-entities.js";
+import { wrapToCells } from "./text-width.js";
 import { FG, SURFACE, TONE } from "./theme/tokens.js";
 
 /** Left margin consumed by card outer marginLeft + body paddingLeft + safety. */
