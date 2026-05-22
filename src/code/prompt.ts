@@ -68,7 +68,7 @@ the new lines
 >>>>>>> REPLACE
 
 Rules:
-- read_file first so your SEARCH matches byte-for-byte.
+- **Read before edit (enforced).** You MUST call \`read_file\` on the target this session before \`edit_file\` / \`multi_edit\` will accept it — the tool refuses unread targets up front, so SEARCH text is grounded in on-disk bytes, not a guess. A fold / mechanical truncate clears the tracker, so re-read after one of those before mutating. \`write_file\` counts as a read for that path (the content is what you just wrote).
 - One edit per block; multiple blocks per response are fine.
 - Create a new file with empty SEARCH:
     path/to/new.ts
