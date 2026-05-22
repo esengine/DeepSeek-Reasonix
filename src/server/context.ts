@@ -73,6 +73,7 @@ export interface DashboardContext {
   /** Snapshot of any modal currently up (for SSE clients that connect mid-modal). */
   getActiveModal?: () => ActiveModal | null;
   resolveShellConfirm?: (choice: "run_once" | "always_allow" | "deny") => void;
+  resolvePathConfirm?: (choice: "run_once" | "always_allow" | "deny") => void;
   resolveChoiceConfirm?: (choice: ChoiceResolution) => void;
   resolvePlanConfirm?: (choice: "approve" | "refine" | "cancel", text?: string) => void;
   resolveEditReview?: (choice: "apply" | "reject" | "apply-rest-of-turn" | "flip-to-auto") => void;
@@ -158,6 +159,14 @@ export type ActiveModal =
       command: string;
       allowPrefix: string;
       shellKind: "run_command" | "run_background";
+    }
+  | {
+      kind: "path";
+      path: string;
+      intent: "read" | "write";
+      toolName: string;
+      sandboxRoot: string;
+      allowPrefix: string;
     }
   | {
       kind: "choice";

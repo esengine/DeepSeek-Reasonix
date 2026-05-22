@@ -57,6 +57,14 @@ interface ShellModalSpec {
   shellKind?: string;
 }
 
+interface PathModalSpec {
+  path: string;
+  intent: "read" | "write";
+  toolName: string;
+  sandboxRoot: string;
+  allowPrefix: string;
+}
+
 interface ChoiceOption {
   id: string;
   title: string;
@@ -367,6 +375,34 @@ export function ShellModal({ modal, onResolve }: { modal: ShellModalSpec; onReso
         <button class="primary" onClick=${() => onResolve("shell", "run_once")}>${t("modal.runOnce")}</button>
         <button onClick=${() => onResolve("shell", "always_allow")}>${t("modal.alwaysAllow", { prefix: modal.allowPrefix ?? "" })}</button>
         <button class="danger" onClick=${() => onResolve("shell", "deny")}>${t("modal.deny")}</button>
+      </div>
+    <//>
+  `;
+}
+
+export function PathModal({ modal, onResolve }: { modal: PathModalSpec; onResolve: OnResolve }) {
+  useLang();
+  const intentLabel = modal.intent === "write" ? t("modal.pathWrite") : t("modal.pathRead");
+  return html`
+    <${ModalCard}
+      accent="#fbbf24"
+      icon="📂"
+      title=${t("modal.pathTitle")}
+      subtitle=${t("modal.pathSubtitle", { intent: intentLabel, tool: modal.toolName })}
+    >
+      <div class="modal-cmd"><code>${modal.path}</code></div>
+      <div class="modal-meta">
+        <div><span class="modal-meta-label">${t("modal.pathSandboxLabel")}</span> <code>${modal.sandboxRoot}</code></div>
+        ${
+          modal.allowPrefix && modal.allowPrefix !== modal.path
+            ? html`<div><span class="modal-meta-label">${t("modal.pathAllowPrefixLabel")}</span> <code>${modal.allowPrefix}</code></div>`
+            : null
+        }
+      </div>
+      <div class="modal-actions">
+        <button class="primary" onClick=${() => onResolve("path", "run_once")}>${t("modal.runOnce")}</button>
+        <button onClick=${() => onResolve("path", "always_allow")}>${t("modal.alwaysAllow", { prefix: modal.allowPrefix ?? modal.path })}</button>
+        <button class="danger" onClick=${() => onResolve("path", "deny")}>${t("modal.deny")}</button>
       </div>
     <//>
   `;

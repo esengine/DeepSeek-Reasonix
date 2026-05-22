@@ -1328,6 +1328,22 @@ function AppInner({
   }, [pendingShell, broadcastDashboardEvent]);
 
   useEffect(() => {
+    if (!pendingPath) return;
+    const modal: ActiveModal = {
+      kind: "path",
+      path: pendingPath.path,
+      intent: pendingPath.intent,
+      toolName: pendingPath.toolName,
+      sandboxRoot: pendingPath.sandboxRoot,
+      allowPrefix: pendingPath.allowPrefix,
+    };
+    broadcastDashboardEvent({ kind: "modal-up", modal });
+    return () => {
+      broadcastDashboardEvent({ kind: "modal-down", modalKind: "path" });
+    };
+  }, [pendingPath, broadcastDashboardEvent]);
+
+  useEffect(() => {
     if (!pendingChoice) return;
     const modal: ActiveModal = {
       kind: "choice",
@@ -2221,6 +2237,17 @@ function AppInner({
                 shellKind: ps.kind,
               };
             }
+            const pp = pendingPath;
+            if (pp) {
+              return {
+                kind: "path",
+                path: pp.path,
+                intent: pp.intent,
+                toolName: pp.toolName,
+                sandboxRoot: pp.sandboxRoot,
+                allowPrefix: pp.allowPrefix,
+              };
+            }
             const pc = pendingChoice;
             if (pc) {
               return {
@@ -2279,6 +2306,10 @@ function AppInner({
           },
           resolveShellConfirm: (choice) => {
             const fn = handleShellConfirmRef.current;
+            if (fn) Promise.resolve(fn(choice)).catch(() => undefined);
+          },
+          resolvePathConfirm: (choice) => {
+            const fn = handlePathConfirmRef.current;
             if (fn) Promise.resolve(fn(choice)).catch(() => undefined);
           },
           resolveChoiceConfirm: (choice) => {
@@ -2370,6 +2401,7 @@ function AppInner({
     session,
     togglePlanMode,
     pendingShell,
+    pendingPath,
     pendingChoice,
     pendingCheckpoint,
     pendingEditReview,
