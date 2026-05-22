@@ -166,10 +166,19 @@ export function useCompletionPickers({
         loading: browse.loading,
       };
     }
+    // When the user already typed a directory prefix (e.g. `@dir/fil`),
+    // filter search results to only files under that directory so a
+    // shorter same-name match from elsewhere (e.g. root `.gitignore`)
+    // doesn't steal the picker selection.
+    const dirPrefix = parsed.dir ? `${parsed.dir}/` : "";
+    let filtered = search.entries;
+    if (dirPrefix) {
+      filtered = search.entries.filter((e) => e.insertPath.startsWith(dirPrefix));
+    }
     return {
       kind: "search",
       filter: parsed.filter,
-      entries: search.entries,
+      entries: filtered,
       scanned: search.scanned,
       searching: search.searching,
     };
