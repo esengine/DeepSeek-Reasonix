@@ -33,6 +33,8 @@ function platformDefault(): Mode {
 }
 
 function readMode(): Mode {
+  const staticHistory = (process.env.REASONIX_STATIC_HISTORY ?? "").trim().toLowerCase();
+  if (staticHistory === "1" || staticHistory === "true" || staticHistory === "yes") return "off";
   const raw = (process.env.REASONIX_MOUSE_MODE ?? "").toLowerCase();
   if (raw === "sgr") return "sgr";
   if (raw === "alternate-scroll") return "alternate-scroll";
