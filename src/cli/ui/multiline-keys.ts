@@ -187,7 +187,8 @@ export function processMultilineKey(
   }
 
   if (key.return) {
-    if (key.shift || key.meta) return insertAt(value, cursor, "\n");
+    // Shift+Enter / Ctrl+Enter / Alt+Enter → 换行
+    if (key.shift || key.ctrl || key.meta) return insertAt(value, cursor, "\n");
     // Bash-style line continuation: trailing '\' + Enter (only when the
     // cursor sits at end-of-buffer, so a stray '\' mid-line doesn't
     // trigger it).

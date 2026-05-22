@@ -1834,6 +1834,8 @@ export const EN: TranslationSchema = {
     groupSystem: "System",
     descEnter: "Send message",
     descShiftEnter: "New line",
+    descCtrlEnter: "New line",
+    descCtrlJ: "New line",
     descCtrlU: "Clear input",
     descCtrlW: "Delete word",
     descCtrlP: "Toggle shortcut panel",

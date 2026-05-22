@@ -384,7 +384,7 @@ export function PromptInput({
 export function HintRow(): React.ReactElement {
   const items: Array<{ key: string; tKey: string }> = [
     { key: "\u23ce", tKey: "composer.hintSend" },
-    { key: "\u21e7\u23ce", tKey: "composer.hintNewline" },
+    { key: "\u21e7\u23ce / ^J", tKey: "composer.hintNewline" },
     { key: "^U", tKey: "composer.hintClear" },
     { key: "\u2191\u2193", tKey: "composer.hintHistory" },
     { key: "esc", tKey: "composer.hintAbort" },

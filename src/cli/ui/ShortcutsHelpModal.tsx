@@ -20,6 +20,8 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       { keys: "Enter", descKey: "shortcutsHelp.descEnter" },
       { keys: "Shift+Enter", descKey: "shortcutsHelp.descShiftEnter" },
+      { keys: "Ctrl+Enter", descKey: "shortcutsHelp.descCtrlEnter" },
+      { keys: "Ctrl+J", descKey: "shortcutsHelp.descCtrlJ" },
       { keys: "Ctrl+U", descKey: "shortcutsHelp.descCtrlU" },
       { keys: "Ctrl+W", descKey: "shortcutsHelp.descCtrlW" },
       { keys: "Ctrl+P", descKey: "shortcutsHelp.descCtrlP" },

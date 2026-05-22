@@ -1737,6 +1737,8 @@ export const zhCN: TranslationSchema = {
     groupSystem: "系统",
     descEnter: "发送消息",
     descShiftEnter: "换行",
+    descCtrlEnter: "换行",
+    descCtrlJ: "换行",
     descCtrlU: "清空输入",
     descCtrlW: "删除单词",
     descCtrlP: "打开/关闭快捷键面板",
