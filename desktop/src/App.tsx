@@ -2,6 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import {
+  isPermissionGranted as isNotificationPermissionGranted,
+  requestPermission as requestNotificationPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
@@ -51,6 +56,7 @@ import { Sidebar } from "./ui/sidebar";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import { StatusBar } from "./ui/statusbar";
+import { dispatchDesktopNotifications, deriveDesktopNotifications, type ApprovalSnapshot } from "./notifications";
 import {
   ActivePlanTaskCard,
   AssistantMsg,
@@ -1170,6 +1176,16 @@ function TabRuntime({
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
   const [jobsOpen, setJobsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const previousApprovalSnapshotRef = useRef<ApprovalSnapshot>({
+    confirms: [],
+    pathAccess: [],
+    choices: [],
+    plans: [],
+    checkpoints: [],
+    revisions: [],
+  });
+  const wasBusyRef = useRef(false);
+  const busyStartedAtRef = useRef<number | null>(null);
   const openSettingsAt = useCallback((page: SettingsPageId = "general") => {
     setSettingsPage(page);
     setSettingsOpen(true);
@@ -1386,6 +1402,54 @@ function TabRuntime({
     dispatch({ t: "shift_queued_send" });
     send(next);
   }, [state.busy, state.ready, state.queuedSends, send]);
+
+  useEffect(() => {
+    const currentSnapshot: ApprovalSnapshot = {
+      confirms: state.pendingConfirms.map((c) => ({ id: c.id, command: c.command })),
+      pathAccess: state.pendingPathAccess.map((p) => ({ id: p.id, path: p.path, intent: p.intent })),
+      choices: state.pendingChoices.map((c) => ({ id: c.id, question: c.question })),
+      plans: state.pendingPlans.map((p) => ({ id: p.id, summary: p.summary, plan: p.plan })),
+      checkpoints: state.pendingCheckpoints.map((c) => ({ id: c.id, title: c.title, result: c.result })),
+      revisions: state.pendingRevisions.map((r) => ({ id: r.id, summary: r.summary, reason: r.reason })),
+    };
+    const previousSnapshot = previousApprovalSnapshotRef.current;
+    const wasBusy = wasBusyRef.current;
+    const busyDurationMs = wasBusy && !state.busy && busyStartedAtRef.current
+      ? Date.now() - busyStartedAtRef.current
+      : 0;
+
+    if (state.busy && busyStartedAtRef.current === null) {
+      busyStartedAtRef.current = Date.now();
+    } else if (!state.busy) {
+      busyStartedAtRef.current = null;
+    }
+
+    previousApprovalSnapshotRef.current = currentSnapshot;
+    wasBusyRef.current = state.busy;
+
+    const notifications = deriveDesktopNotifications({
+      previous: previousSnapshot,
+      current: currentSnapshot,
+      wasBusy,
+      isBusy: state.busy,
+      busyDurationMs,
+      focused: false,
+    });
+    void dispatchDesktopNotifications(notifications, {
+      isFocused: () => getCurrentWindow().isFocused(),
+      isPermissionGranted: isNotificationPermissionGranted,
+      requestPermission: requestNotificationPermission,
+      sendNotification,
+    });
+  }, [
+    state.busy,
+    state.pendingChoices,
+    state.pendingCheckpoints,
+    state.pendingConfirms,
+    state.pendingPathAccess,
+    state.pendingPlans,
+    state.pendingRevisions,
+  ]);
 
   const resolveConfirm = useCallback(
     (id: number, response: ConfirmationChoice) => {

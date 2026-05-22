@@ -680,4 +680,16 @@ export const en = {
   panel: {
     renderError: "{panel} panel render error",
   },
+  notifications: {
+    approvalTitle: "Reasonix is waiting for approval",
+    inputTitle: "Reasonix is waiting for input",
+    planApprovalTitle: "Reasonix is waiting for plan approval",
+    checkpointApprovalTitle: "Reasonix is waiting for checkpoint approval",
+    revisionTitle: "Reasonix proposed a plan revision",
+    commandBody: "Command: {command}",
+    readBody: "Read: {path}",
+    writeBody: "Write: {path}",
+    turnCompleteTitle: "Reasonix task complete",
+    turnCompleteBody: "The current task finished and is ready for review.",
+  },
 };

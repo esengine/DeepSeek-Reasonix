@@ -666,4 +666,16 @@ export const zhCN: typeof en = {
   panel: {
     renderError: "{panel} 面板渲染错误",
   },
+  notifications: {
+    approvalTitle: "\u7b49\u5f85\u6279\u51c6",
+    inputTitle: "\u7b49\u5f85\u4f60\u8f93\u5165",
+    planApprovalTitle: "\u7b49\u5f85\u8ba1\u5212\u6279\u51c6",
+    checkpointApprovalTitle: "\u7b49\u5f85\u68c0\u67e5\u70b9\u6279\u51c6",
+    revisionTitle: "\u5df2\u63d0\u51fa\u8ba1\u5212\u4fee\u8ba2",
+    commandBody: "\u547d\u4ee4\uff1a{command}",
+    readBody: "\u8bfb\u53d6\uff1a{path}",
+    writeBody: "\u5199\u5165\uff1a{path}",
+    turnCompleteTitle: "\u4efb\u52a1\u5df2\u5b8c\u6210",
+    turnCompleteBody: "\u5f53\u524d\u4efb\u52a1\u5df2\u7ed3\u675f\uff0c\u53ef\u4ee5\u56de\u6765\u67e5\u770b\u7ed3\u679c\u4e86\u3002",
+  },
 };

@@ -17,6 +17,7 @@
     "process:allow-restart",
     "dialog:allow-open",
     "dialog:allow-save",
+    "notification:default",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://*" }, { "url": "http://*" }]
