@@ -37,4 +37,33 @@ describe("chatScroll wheel step (issue #1419)", () => {
     store.scrollPageUp();
     expect(store.getState().scrollRows).toBe(200 - SCROLL_PAGE_ROWS);
   });
+
+  it("wheelRows override scales each tick (issue #1494)", () => {
+    const store = createChatScrollStore({ wheelRows: 3 });
+    store.setMaxScroll(200);
+    store.scrollWheelUp();
+    expect(store.getState().scrollRows).toBe(200 - 3);
+  });
+
+  it("wheelRows clamps to [1, 10] and ignores non-positive / non-integer values", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [opt, expected] of [
+        [{ wheelRows: 0 }, SCROLL_WHEEL_ROWS],
+        [{ wheelRows: -5 }, SCROLL_WHEEL_ROWS],
+        [{ wheelRows: 2.5 }, SCROLL_WHEEL_ROWS],
+        [{ wheelRows: 99 }, 10],
+        [{}, SCROLL_WHEEL_ROWS],
+      ] as const) {
+        const store = createChatScrollStore(opt);
+        store.setMaxScroll(500);
+        const before = store.getState().scrollRows;
+        store.scrollWheelUp();
+        await vi.advanceTimersByTimeAsync(32);
+        expect(before - store.getState().scrollRows).toBe(expected);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

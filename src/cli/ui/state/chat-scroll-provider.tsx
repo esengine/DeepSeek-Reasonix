@@ -9,10 +9,12 @@ const Ctx = React.createContext<ChatScrollStore | null>(null);
 
 export function ChatScrollProvider({
   children,
+  wheelRows,
 }: {
   children: React.ReactNode;
+  wheelRows?: number;
 }): React.ReactElement {
-  const store = React.useMemo(() => createChatScrollStore(), []);
+  const store = React.useMemo(() => createChatScrollStore({ wheelRows }), [wheelRows]);
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
 }
 

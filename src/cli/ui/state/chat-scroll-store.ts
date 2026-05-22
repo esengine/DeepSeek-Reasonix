@@ -49,7 +49,16 @@ const initial: ChatScrollState = {
   cardHeights: EMPTY_HEIGHTS,
 };
 
-export function createChatScrollStore(): ChatScrollStore {
+export interface CreateChatScrollStoreOptions {
+  /** Override per-SGR-wheel-report step. Defaults to `SCROLL_WHEEL_ROWS`; clamped to [1, 10]. Sourced from `cfg.mouseWheelRows` so users on terminals that emit one report per notch (#1494) can opt out of the conservative default tuned for terminals that emit 2-5 (#1419). */
+  wheelRows?: number;
+}
+
+export function createChatScrollStore(opts: CreateChatScrollStoreOptions = {}): ChatScrollStore {
+  const wheelRows =
+    typeof opts.wheelRows === "number" && Number.isInteger(opts.wheelRows) && opts.wheelRows >= 1
+      ? Math.min(opts.wheelRows, 10)
+      : SCROLL_WHEEL_ROWS;
   let state = initial;
   const listeners = new Set<ScrollListener>();
   let pendingDelta = 0;
@@ -132,8 +141,8 @@ export function createChatScrollStore(): ChatScrollStore {
     scrollDown: () => schedule(SCROLL_ARROW_ROWS),
     scrollPageUp: () => schedule(-SCROLL_PAGE_ROWS),
     scrollPageDown: () => schedule(SCROLL_PAGE_ROWS),
-    scrollWheelUp: () => schedule(-SCROLL_WHEEL_ROWS),
-    scrollWheelDown: () => schedule(SCROLL_WHEEL_ROWS),
+    scrollWheelUp: () => schedule(-wheelRows),
+    scrollWheelDown: () => schedule(wheelRows),
     jumpToBottom() {
       pendingDelta = 0;
       if (flushTimer !== null) {

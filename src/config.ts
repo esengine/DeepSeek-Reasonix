@@ -173,6 +173,8 @@ export interface ReasonixConfig {
 
   /** TUI mouse-wheel scrolling via SGR mouse tracking. Default true. Set false to fall back to native terminal drag-select for copy (then wheel is terminal-dependent — most terminals translate wheel→arrow in alt-screen, some don't). */
   mouseTracking?: boolean;
+  /** Rows scrolled per single SGR mouse-wheel report. Default 1 — most terminals emit 2-5 reports per physical notch, so 1 already produces 2-5 rows per notch (#1419). Bump to 3-5 only if your terminal emits one report per notch and scrolling feels slow (#1494). Clamped to [1, 10]. */
+  mouseWheelRows?: number;
   dashboard?: {
     /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
     port?: number;
@@ -601,6 +603,12 @@ export function loadRateLimit(path: string = defaultConfigPath()): RateLimitConf
   const rpm = readConfig(path).rateLimit?.rpm;
   if (typeof rpm !== "number" || !Number.isInteger(rpm) || rpm <= 0) return undefined;
   return { rpm };
+}
+
+export function loadMouseWheelRows(path: string = defaultConfigPath()): number | undefined {
+  const raw = readConfig(path).mouseWheelRows;
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) return undefined;
+  return Math.min(raw, 10);
 }
 
 export function loadToolRateLimit(

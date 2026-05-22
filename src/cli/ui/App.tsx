@@ -39,6 +39,7 @@ import {
   editModeHintShown,
   loadBaseUrl,
   loadEngineeringLifecycleMode,
+  loadMouseWheelRows,
   loadReasoningEffort,
   loadTheme,
   markEditModeHintShown,
@@ -433,10 +434,11 @@ export function App(props: AppProps): React.ReactElement {
       showFeedbackHint: cfg.showFeedbackHint !== false,
     };
   }, []);
+  const wheelRows = React.useMemo(() => loadMouseWheelRows(), []);
   return (
     <ThemeProvider name={themeName}>
       <AgentStoreProvider session={session} initialCards={initialCards}>
-        <ChatScrollProvider>
+        <ChatScrollProvider wheelRows={wheelRows}>
           <AppInner
             {...props}
             themeName={themeName}

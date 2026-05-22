@@ -18,6 +18,7 @@ import {
   loadFilesystemOutlineThresholdBytes,
   loadIndexConfig,
   loadIndexUserConfig,
+  loadMouseWheelRows,
   loadPricingOverride,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
@@ -232,6 +233,29 @@ describe("config", () => {
     expect(loadToolRateLimit(path)).toMatchObject({
       aggregate: { maxCalls: 200, windowSeconds: 60 },
     });
+  });
+
+  it("loads mouseWheelRows when set, clamps to [1,10], drops invalid (#1494)", () => {
+    writeConfig({ mouseWheelRows: 3 }, path);
+    expect(loadMouseWheelRows(path)).toBe(3);
+
+    writeConfig({ mouseWheelRows: 99 }, path);
+    expect(loadMouseWheelRows(path)).toBe(10);
+
+    writeConfig({ mouseWheelRows: 0 }, path);
+    expect(loadMouseWheelRows(path)).toBeUndefined();
+
+    writeConfig({ mouseWheelRows: -1 }, path);
+    expect(loadMouseWheelRows(path)).toBeUndefined();
+
+    writeConfig({ mouseWheelRows: 2.5 }, path);
+    expect(loadMouseWheelRows(path)).toBeUndefined();
+
+    writeConfig({ mouseWheelRows: "3" as unknown as number }, path);
+    expect(loadMouseWheelRows(path)).toBeUndefined();
+
+    writeConfig({}, path);
+    expect(loadMouseWheelRows(path)).toBeUndefined();
   });
 
   it("loads proxy.bypassDeepSeekDirect when set (#1497)", () => {
