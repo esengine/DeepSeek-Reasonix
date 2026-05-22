@@ -487,7 +487,7 @@ function formatChipLabel(entry: PasteEntry | undefined, pasteId: number, budget:
   const lines = `${entry.lineCount} line${entry.lineCount === 1 ? "" : "s"}`;
   const bytes = formatBytesShort(entry.charCount);
   const kind = sniffChipKind(entry.content);
-  const full = `📋 pasted  ${lines} · ${bytes}  ·  ${kind}  ^O expand · ⌫ remove`;
+  const full = `📋 pasted  ${lines} · ${bytes}  ·  ${kind}  ⌫ remove`;
   if (full.length <= Math.max(40, budget)) return full;
   const compact = `📋 pasted  ${lines} · ${bytes}  ·  ${kind}`;
   if (compact.length <= Math.max(30, budget)) return compact;
