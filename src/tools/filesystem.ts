@@ -3,6 +3,7 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
 import picomatch from "picomatch";
+import { decodeFileBuffer, encodeFile } from "../code/file-encoding.js";
 import { addProjectPathAllowed, loadProjectPathAllowed } from "../config.js";
 import { type ConfirmationChoice, pauseGate as defaultPauseGate } from "../core/pause-gate.js";
 import { DEFAULT_INDEX_EXCLUDES } from "../index/config.js";
@@ -280,7 +281,7 @@ export function registerFilesystemTools(
         return `[refused: ${rel} appears to be binary (${formatBytes(sizeBytes)}) — read_file returns text only. Use get_file_info for stat.]`;
       }
 
-      const text = raw.toString("utf8");
+      const { text } = decodeFileBuffer(raw);
       let lines = text.split(/\r?\n/);
       // Most files end with '\n' which splits into an empty trailing
       // entry; drop it so head/tail/range counts match the user's
@@ -653,7 +654,13 @@ export function registerFilesystemTools(
     fn: async (args: { path: string; content: string }, ctx?: ToolCallContext) => {
       const abs = await safePath(args.path, "write_file", ctx, "write");
       await fs.mkdir(pathMod.dirname(abs), { recursive: true });
-      await fs.writeFile(abs, args.content, "utf8");
+      let encoding: ReturnType<typeof decodeFileBuffer>["encoding"] = "utf8";
+      try {
+        encoding = decodeFileBuffer(await fs.readFile(abs)).encoding;
+      } catch {
+        // New file or unreadable — fall back to utf8.
+      }
+      await fs.writeFile(abs, encodeFile(args.content, encoding));
       return `wrote ${args.content.length} chars to ${displayRel(rootDir, abs)}`;
     },
   });

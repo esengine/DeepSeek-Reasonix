@@ -3,6 +3,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import iconv from "iconv-lite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyEditBlock,
@@ -359,5 +360,66 @@ describe("applyEditBlocks (batch)", () => {
     expect(results[1]!.status).toBe("not-found");
     expect(readFileSync(join(root, "a.txt"), "utf8")).toBe("ALPHA\n");
     expect(readFileSync(join(root, "b.txt"), "utf8")).toBe("bravo\n"); // untouched
+  });
+});
+
+describe("edit pipeline preserves file encoding (#1445)", () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "edit-encoding-"));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("edits a GB18030 file and writes back in GB18030", () => {
+    const original = "标题\n旧内容\n尾部\n";
+    const file = join(root, "cn.txt");
+    writeFileSync(file, iconv.encode(original, "gb18030"));
+
+    const result = applyEditBlock(
+      { path: "cn.txt", search: "旧内容", replace: "新内容", offset: 0 },
+      root,
+    );
+    expect(result.status).toBe("applied");
+
+    const onDisk = readFileSync(file);
+    expect(iconv.decode(onDisk, "gb18030")).toBe("标题\n新内容\n尾部\n");
+    expect(() => new TextDecoder("utf-8", { fatal: true }).decode(onDisk)).toThrow();
+  });
+
+  it("edits a UTF-8 BOM file and preserves the BOM bytes", () => {
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const file = join(root, "bom.txt");
+    writeFileSync(file, Buffer.concat([bom, Buffer.from("hello world\n", "utf8")]));
+
+    const result = applyEditBlock(
+      { path: "bom.txt", search: "world", replace: "你好", offset: 0 },
+      root,
+    );
+    expect(result.status).toBe("applied");
+
+    const onDisk = readFileSync(file);
+    expect(onDisk[0]).toBe(0xef);
+    expect(onDisk[1]).toBe(0xbb);
+    expect(onDisk[2]).toBe(0xbf);
+    expect(onDisk.subarray(3).toString("utf8")).toBe("hello 你好\n");
+  });
+
+  it("snapshot + restore round-trips through GB18030 without re-encoding", () => {
+    const original = "保留编码\n";
+    const file = join(root, "cn.txt");
+    writeFileSync(file, iconv.encode(original, "gb18030"));
+
+    const snaps = snapshotBeforeEdits(
+      [{ path: "cn.txt", search: "x", replace: "y", offset: 0 }],
+      root,
+    );
+    expect(snaps[0]?.prevEncoding).toBe("gb18030");
+
+    writeFileSync(file, iconv.encode("被修改\n", "gb18030"));
+    const restored = restoreSnapshots(snaps, root);
+    expect(restored[0]?.status).toBe("applied");
+    expect(iconv.decode(readFileSync(file), "gb18030")).toBe(original);
   });
 });

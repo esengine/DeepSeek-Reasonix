@@ -75,6 +75,7 @@
     "cli-highlight": "^2.1.11",
     "commander": "^12.1.0",
     "eventsource-parser": "^3.0.0",
+    "iconv-lite": "^0.7.2",
     "ignore": "^7.0.5",
     "ink": "^7.0.2",
     "ink-text-input": "^6.0.0",

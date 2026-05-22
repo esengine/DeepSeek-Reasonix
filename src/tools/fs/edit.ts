@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
+import { type FileEncoding, decodeFileBuffer, encodeFile } from "../../code/file-encoding.js";
 
 function displayRel(rootDir: string, full: string): string {
   return pathMod.relative(rootDir, full).replaceAll("\\", "/");
@@ -13,7 +14,8 @@ export async function applyEdit(
   if (args.search.length === 0) {
     throw new Error("edit_file: search cannot be empty");
   }
-  const before = await fs.readFile(abs, "utf8");
+  const beforeBuf = await fs.readFile(abs);
+  const { text: before, encoding } = decodeFileBuffer(beforeBuf);
   const le = before.includes("\r\n") ? "\r\n" : "\n";
   const adaptedSearch = args.search.replace(/\r?\n/g, le);
   const adaptedReplace = args.replace.replace(/\r?\n/g, le);
@@ -29,7 +31,7 @@ export async function applyEdit(
   }
   const after =
     before.slice(0, firstIdx) + adaptedReplace + before.slice(firstIdx + adaptedSearch.length);
-  await fs.writeFile(abs, after, "utf8");
+  await fs.writeFile(abs, encodeFile(after, encoding));
   const rel = displayRel(rootDir, abs);
   const header = `edited ${rel} (${adaptedSearch.length}→${adaptedReplace.length} chars)`;
   const startLine = before.slice(0, firstIdx).split(/\r?\n/).length;
@@ -57,6 +59,7 @@ export async function applyMultiEdit(
     hunks: string[];
     deltaChars: number;
     touched: number;
+    encoding: FileEncoding;
   };
   const filesByPath = new Map<string, FileState>();
 
@@ -82,15 +85,17 @@ export async function applyMultiEdit(
     let state = filesByPath.get(e.abs);
     if (!state) {
       let before: string;
+      let encoding: FileEncoding;
       try {
-        before = await fs.readFile(e.abs, "utf8");
+        const buf = await fs.readFile(e.abs);
+        ({ text: before, encoding } = decodeFileBuffer(buf));
       } catch (err) {
         throw new Error(
           `multi_edit: edit #${i + 1} cannot read ${rel}: ${(err as Error).message} (no edits applied)`,
         );
       }
       const le = before.includes("\r\n") ? "\r\n" : "\n";
-      state = { before, buf: before, le, hunks: [], deltaChars: 0, touched: 0 };
+      state = { before, buf: before, le, hunks: [], deltaChars: 0, touched: 0, encoding };
       filesByPath.set(e.abs, state);
     }
     const adaptedSearch = e.search.replace(/\r?\n/g, state.le);
@@ -119,17 +124,17 @@ export async function applyMultiEdit(
 
   // Push to `attempted` BEFORE writeFile so a write that truncates or
   // partially-writes before failing is also rolled back.
-  const attempted: Array<{ abs: string; before: string }> = [];
+  const attempted: Array<{ abs: string; before: string; encoding: FileEncoding }> = [];
   try {
     for (const [abs, state] of filesByPath) {
-      attempted.push({ abs, before: state.before });
-      await fs.writeFile(abs, state.buf, "utf8");
+      attempted.push({ abs, before: state.before, encoding: state.encoding });
+      await fs.writeFile(abs, encodeFile(state.buf, state.encoding));
     }
   } catch (writeErr) {
     const rollbackFailures: string[] = [];
     for (const item of [...attempted].reverse()) {
       try {
-        await fs.writeFile(item.abs, item.before, "utf8");
+        await fs.writeFile(item.abs, encodeFile(item.before, item.encoding));
       } catch (restoreErr) {
         rollbackFailures.push(`${displayRel(rootDir, item.abs)}: ${(restoreErr as Error).message}`);
       }

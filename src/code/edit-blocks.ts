@@ -14,6 +14,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { type FileEncoding, decodeFileBuffer, encodeFile } from "./file-encoding.js";
 
 export interface EditBlock {
   /** Path as written by the model — relative to rootDir, or absolute. */
@@ -157,7 +158,7 @@ export function applyEditBlock(block: EditBlock, rootDir: string): ApplyResult {
         if (n <= 0) break;
         readBytes += n;
       }
-      const content = inBuf.toString("utf8", 0, readBytes);
+      const { text: content, encoding } = decodeFileBuffer(inBuf.subarray(0, readBytes));
       const le = lineEndingOf(content);
       const adaptedSearch = block.search.replace(/\r?\n/g, le);
       const adaptedReplace = block.replace.replace(/\r?\n/g, le);
@@ -184,7 +185,7 @@ export function applyEditBlock(block: EditBlock, rootDir: string): ApplyResult {
       // Truncate first so a shorter result doesn't leave stale tail
       // bytes; ftruncate also pads with NUL when the new length is
       // longer, which we then overwrite below.
-      const outBuf = Buffer.from(replaced, "utf8");
+      const outBuf = encodeFile(replaced, encoding);
       ftruncateSync(fd, outBuf.length);
       let written = 0;
       while (written < outBuf.length) {
@@ -210,7 +211,7 @@ export function toWholeFileEditBlock(path: string, content: string, rootDir: str
   let search = "";
   if (existsSync(abs)) {
     try {
-      search = readFileSync(abs, "utf8");
+      search = decodeFileBuffer(readFileSync(abs)).text;
     } catch {
       search = "";
     }
@@ -223,6 +224,8 @@ export interface EditSnapshot {
   path: string;
   /** `null` = file didn't exist; restore means delete. */
   prevContent: string | null;
+  /** Encoding the file used before the edit. Required to round-trip GB18030 / UTF-8-BOM on restore. */
+  prevEncoding?: FileEncoding;
 }
 
 /** De-duped by path — one "before" snapshot per file even with multiple blocks. */
@@ -240,7 +243,8 @@ export function snapshotBeforeEdits(blocks: EditBlock[], rootDir: string): EditS
       continue;
     }
     try {
-      snapshots.push({ path: b.path, prevContent: readFileSync(abs, "utf8") });
+      const { text, encoding } = decodeFileBuffer(readFileSync(abs));
+      snapshots.push({ path: b.path, prevContent: text, prevEncoding: encoding });
     } catch {
       // Unreadable (permission / binary) — record null so we at least
       // don't pretend the snapshot is authoritative. The restore path
@@ -272,7 +276,7 @@ export function restoreSnapshots(snapshots: EditSnapshot[], rootDir: string): Ap
           message: "removed (the edit had created it)",
         };
       }
-      writeFileSync(abs, snap.prevContent, "utf8");
+      writeFileSync(abs, encodeFile(snap.prevContent, snap.prevEncoding ?? "utf8"));
       return {
         path: snap.path,
         status: "applied",
