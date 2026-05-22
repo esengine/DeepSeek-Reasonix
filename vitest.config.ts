@@ -17,6 +17,7 @@ export default defineConfig({
       "@tauri-apps/api/window": resolve(here, "tests/mocks/tauri-api-window.ts"),
       "@tauri-apps/api/webview": resolve(here, "tests/mocks/tauri-api-webview.ts"),
       "@tauri-apps/plugin-dialog": resolve(here, "tests/mocks/tauri-plugin-dialog.ts"),
+      "@tauri-apps/plugin-notification": resolve(here, "tests/mocks/tauri-plugin-notification.ts"),
       "@tauri-apps/plugin-process": resolve(here, "tests/mocks/tauri-plugin-process.ts"),
       "@tauri-apps/plugin-updater": resolve(here, "tests/mocks/tauri-plugin-updater.ts"),
       "@tauri-apps/plugin-opener": resolve(here, "tests/mocks/tauri-plugin-opener.ts"),
