@@ -774,19 +774,6 @@ export interface TranslationSchema {
     categoryProject: string;
     categoryReference: string;
   };
-  copyMode: {
-    title: string;
-    help: string;
-    statusBar: string;
-    statusYanked: string;
-    statusEmpty: string;
-    empty: string;
-    labelUser: string;
-    labelAssistant: string;
-    labelReasoning: string;
-    yankedToast: string;
-    yankedToastFile: string;
-  };
   mcpHealth: {
     noData: string;
     healthy: string;

@@ -39,7 +39,6 @@ import {
   editModeHintShown,
   loadBaseUrl,
   loadEngineeringLifecycleMode,
-  loadMouseWheelRows,
   loadReasoningEffort,
   loadTheme,
   markEditModeHintShown,
@@ -130,7 +129,6 @@ import { type ThemeChoice, ThemePicker } from "./ThemePicker.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { WorkspacePicker } from "./WorkspacePicker.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
-import { CopyMode } from "./copy-mode/CopyMode.js";
 import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broadcast.js";
 import { useViewerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { formatEditResults } from "./edit-history.js";
@@ -159,8 +157,6 @@ import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useWorkspaceRoot } from "./hooks/useWorkspaceRoot.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { CardStream } from "./layout/CardStream.js";
-import { InputAreaWithHistoryHint } from "./layout/InputAreaWithHistoryHint.js";
 import { LiveExpandContext } from "./layout/LiveExpandContext.js";
 import { ModeStatusBar } from "./layout/LiveRows.js";
 import { StaticCardStream } from "./layout/StaticCardStream.js";
@@ -186,11 +182,6 @@ import {
 } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
-import {
-  ChatScrollProvider,
-  useChatScrollActions,
-  useChatScrollState,
-} from "./state/chat-scroll-provider.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
@@ -323,46 +314,6 @@ const FLUSH_INTERVAL_MS = (() => {
   return Math.round(parsed);
 })();
 
-const STATIC_HISTORY = (() => {
-  const v = process.env.REASONIX_STATIC_HISTORY?.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
-})();
-
-/**
- * Captures printable keys / backspace / Enter while history is unpinned so the
- * user can type blind and see the buffer when they scroll back. Lives in its
- * own leaf so AppInner doesn't subscribe to `pinned` —same trick as
- * `InputAreaWithHistoryHint` above.
- */
-function HistoryTypingCapture({
-  input,
-  setInput,
-  enabled,
-  onReturnToBottom,
-}: {
-  input: string;
-  setInput: (next: string) => void;
-  enabled: boolean;
-  onReturnToBottom: () => void;
-}): null {
-  const pinned = useChatScrollState((s) => s.pinned);
-  useKeystroke((ev) => {
-    if (ev.paste) return;
-    if (ev.return) {
-      onReturnToBottom();
-      return;
-    }
-    if (ev.backspace) {
-      setInput(input.slice(0, -1));
-      return;
-    }
-    if (ev.input.length > 0 && ev.input >= " ") {
-      setInput(input + ev.input);
-    }
-  }, enabled && !pinned);
-  return null;
-}
-
 /**
  * Single-line status pill rendered below the modeline whenever a /loop
  * is active. Re-renders every second so the countdown ticks.
@@ -440,18 +391,15 @@ export function App(props: AppProps): React.ReactElement {
       showFeedbackHint: cfg.showFeedbackHint !== false,
     };
   }, []);
-  const wheelRows = React.useMemo(() => loadMouseWheelRows(), []);
   return (
     <ThemeProvider name={themeName}>
       <AgentStoreProvider session={session} initialCards={initialCards}>
-        <ChatScrollProvider wheelRows={wheelRows}>
-          <AppInner
-            {...props}
-            themeName={themeName}
-            setThemeName={setThemeName}
-            statusBar={statusBar}
-          />
-        </ChatScrollProvider>
+        <AppInner
+          {...props}
+          themeName={themeName}
+          setThemeName={setThemeName}
+          statusBar={statusBar}
+        />
       </AgentStoreProvider>
     </ThemeProvider>
   );
@@ -517,8 +465,6 @@ function AppInner({
   const sessionOutputTokens = useAgentState((s) => s.status.sessionOutputTokens);
   const lastTurnMs = useAgentState((s) => s.status.lastTurnMs);
   const activityLabel = useActivityLabel();
-  const chatScroll = useChatScrollActions();
-  const composerPinned = useChatScrollState((s) => s.pinned);
   const [input, setInput] = useState("");
   const [composerCursor, setComposerCursor] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -709,7 +655,6 @@ function AppInner({
   const [pendingModelPicker, setPendingModelPicker] = useState(false);
   /** True while the ThemePicker is open mid-chat (triggered by bare `/theme`). */
   const [pendingThemePicker, setPendingThemePicker] = useState(false);
-  const [pendingCopyMode, setPendingCopyMode] = useState(false);
   const [pendingShortcuts, setPendingShortcuts] = useState(false);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
@@ -781,7 +726,6 @@ function AppInner({
     !!pendingMcpHub ||
     pendingModelPicker ||
     pendingThemePicker ||
-    pendingCopyMode ||
     pendingShortcuts ||
     !!stagedInput ||
     !!pendingEditReview ||
@@ -1666,21 +1610,6 @@ function AppInner({
       return next;
     });
   });
-
-  // Chat scroll keys. Mouse wheel + PgUp/PgDn always scroll; End jumps
-  // to bottom. ↑/↓ belong to the composer (prompt history / per-line
-  // cursor) whenever the composer is visible — so we only consume
-  // arrows here when the composer is hidden (chat is scrolled up and
-  // InputAreaWithHistoryHint has replaced it).
-  useKeystroke((ev) => {
-    if (ev.pageUp) chatScroll.scrollPageUp();
-    else if (ev.pageDown) chatScroll.scrollPageDown();
-    else if (ev.mouseScrollUp) chatScroll.scrollWheelUp();
-    else if (ev.mouseScrollDown) chatScroll.scrollWheelDown();
-    else if (ev.end) chatScroll.jumpToBottom();
-    else if (!composerPinned && ev.upArrow) chatScroll.scrollUp();
-    else if (!composerPinned && ev.downArrow) chatScroll.scrollDown();
-  }, !modalOpen);
 
   // Double-Esc — opens the rewind/edit picker when idle with an empty
   // composer. Tracks the prior Esc timestamp; a second Esc inside 500 ms
@@ -3005,11 +2934,6 @@ function AppInner({
           pushHistory(text);
           return;
         }
-        if (result.openCopyMode) {
-          setPendingCopyMode(true);
-          pushHistory(text);
-          return;
-        }
         if (result.openArgPickerFor) {
           pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
@@ -3841,9 +3765,6 @@ function AppInner({
     return pauseGate.on((request) => {
       const payload = request.payload as Record<string, unknown>;
       pendingGateIdRef.current = request.id;
-      // Modal pickers reserve viewport rows from the bottom; if the chat is
-      // scrolled up, the picker mounts off-screen and the user can't see it.
-      chatScroll.jumpToBottom();
 
       qq.handlePauseRequest(request.kind, payload);
 
@@ -4220,25 +4141,15 @@ function AppInner({
 
   return (
     <>
-      <HistoryTypingCapture
-        input={input}
-        setInput={setInput}
-        enabled={!modalOpen && !busy}
-        onReturnToBottom={chatScroll.jumpToBottom}
-      />
       <TickerProvider disabled={tickerSuspended}>
         <ViewportBudgetProvider>
           <InflightProvider inflight={loop.inflight}>
-            <Box flexDirection="row" {...(STATIC_HISTORY ? {} : { height: stdout?.rows ?? 24 })}>
+            <Box flexDirection="row">
               <Box flexDirection="column" flexGrow={1}>
                 <Box flexDirection="column" flexGrow={1}>
                   <LiveExpandContext.Provider value={liveExpand}>
                     <VerboseContext.Provider value={verboseMode}>
-                      {STATIC_HISTORY ? (
-                        <StaticCardStream suppressLive={modalOpen} />
-                      ) : (
-                        <CardStream suppressLive={modalOpen} />
-                      )}
+                      <StaticCardStream suppressLive={modalOpen} />
                     </VerboseContext.Provider>
                   </LiveExpandContext.Provider>
                   {/*
@@ -4470,23 +4381,6 @@ function AppInner({
                       log.pushInfo(
                         t("editPicker.forked", { turn: outcome.entry.userTurnIndex + 1 }),
                       );
-                    }}
-                  />
-                ) : pendingCopyMode ? (
-                  <CopyMode
-                    cards={agentStore.getState().cards}
-                    onClose={(yanked) => {
-                      setPendingCopyMode(false);
-                      if (yanked) {
-                        const path = yanked.filePath;
-                        const info = yanked.osc52
-                          ? t("copyMode.yankedToast", { size: yanked.size })
-                          : t("copyMode.yankedToastFile", {
-                              size: yanked.size,
-                              path: path ?? "unknown",
-                            });
-                        log.pushInfo(info);
-                      }
                     }}
                   />
                 ) : pendingModelPicker ? (

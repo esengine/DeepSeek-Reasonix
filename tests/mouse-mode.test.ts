@@ -36,18 +36,18 @@ describe("mouse-mode enable/disable", () => {
     }
   });
 
-  it("default picks the platform-appropriate protocol (SGR on Windows, alternate-scroll elsewhere)", () => {
+  it("default resets every mouse-capture mode so the terminal owns the wheel", () => {
     enableMouseMode();
-    const expected = process.platform === "win32" ? "\u001b[?1000h\u001b[?1006h" : "\u001b[?1007h";
-    expect(writes.join("")).toBe(expected);
+    expect(writes.join("")).toBe(
+      "\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
+    );
   });
 
-  it("default disable matches the enable sequence on the current platform", () => {
+  it("default disable is a no-op — there's nothing for us to clean up", () => {
     enableMouseMode();
     writes.length = 0;
     disableMouseMode();
-    const expected = process.platform === "win32" ? "\u001b[?1006l\u001b[?1000l" : "\u001b[?1007l";
-    expect(writes.join("")).toBe(expected);
+    expect(writes).toEqual([]);
   });
 
   it("REASONIX_MOUSE_MODE=sgr forces ?1000h + ?1006h capture even off Windows", () => {
@@ -76,11 +76,12 @@ describe("mouse-mode enable/disable", () => {
     expect(writes).toEqual([]);
   });
 
-  it("unknown REASONIX_MOUSE_MODE falls back to the platform default", () => {
+  it("unknown REASONIX_MOUSE_MODE falls back to off (reset-all)", () => {
     process.env.REASONIX_MOUSE_MODE = "garbage";
     enableMouseMode();
-    const expected = process.platform === "win32" ? "\u001b[?1000h\u001b[?1006h" : "\u001b[?1007h";
-    expect(writes.join("")).toBe(expected);
+    expect(writes.join("")).toBe(
+      "\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
+    );
   });
 
   it("enable is idempotent — second call is a no-op", () => {
