@@ -223,8 +223,13 @@ export class DeepSeekClient {
 
   async chat(opts: ChatRequestOptions): Promise<ChatResponse> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
-    const signal = opts.signal ?? ctrl.signal;
+    const timer = setTimeout(
+      () => ctrl.abort(new Error(`DeepSeek request timed out after ${this.timeoutMs}ms`)),
+      this.timeoutMs,
+    );
+    // Combine — `opts.signal ?? ctrl.signal` orphans the timer when the
+    // caller passes a signal, so timeoutMs never reaches fetch.
+    const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
 
     try {
       await this.waitForChatRateLimit(signal);
@@ -261,8 +266,14 @@ export class DeepSeekClient {
 
   async *stream(opts: ChatRequestOptions): AsyncGenerator<StreamChunk> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
-    const signal = opts.signal ?? ctrl.signal;
+    const timer = setTimeout(
+      () => ctrl.abort(new Error(`DeepSeek stream timed out after ${this.timeoutMs}ms`)),
+      this.timeoutMs,
+    );
+    // Combine — `opts.signal ?? ctrl.signal` orphans the timer when the
+    // caller passes a signal, leaving a stalled SSE body to hang forever
+    // on reader.read() (issue #1535).
+    const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
 
     let resp: Response;
     try {
