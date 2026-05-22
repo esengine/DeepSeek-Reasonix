@@ -52,6 +52,7 @@ import { type RepairReport, ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { ToolRegistry } from "./tools.js";
 import { parseRateLimitedToolResult } from "./tools/rate-limit.js";
+import { ReadTracker } from "./tools/read-tracker.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
 const ESCALATION_MODEL = "deepseek-v4-pro";
@@ -116,6 +117,8 @@ export class CacheFirstLoop {
   readonly scratch = new VolatileScratch();
   readonly stats = new SessionStats();
   readonly repair: ToolCallRepair;
+  /** Files the model has read this session; gates edit_file / multi_edit so SEARCH text matches on-disk bytes. Cleared on fold / mechanical truncate (the model's byte-level view of the elided history is gone). In-memory only — naturally empty on resume. */
+  readonly readTracker = new ReadTracker();
 
   // Mutable via configure() — slash commands in the TUI / library callers tweak
   // these mid-session so users don't have to restart.
@@ -265,6 +268,7 @@ export class CacheFirstLoop {
       getAbortSignal: () => this._turnAbort.signal,
       getCurrentTurn: () => this._turn,
       getSystemPrompt: () => this.prefix.system,
+      onLogRewrite: () => this.readTracker.reset(),
     });
   }
 
@@ -471,6 +475,7 @@ export class CacheFirstLoop {
         signal,
         maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
         confirmationGate: this.confirmationGate,
+        readTracker: this.readTracker,
       });
 
       const postReport = await runHooks({

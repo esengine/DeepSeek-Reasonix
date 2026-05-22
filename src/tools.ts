@@ -6,12 +6,15 @@ import {
   type ToolRateLimitOption,
   ToolRateLimiter,
 } from "./tools/rate-limit.js";
+import type { ReadTracker } from "./tools/read-tracker.js";
 import type { JSONSchema, ToolSpec } from "./types.js";
 
 export interface ToolCallContext {
   signal?: AbortSignal;
   /** Inject a mock PauseGate for tests. When absent, tools use the singleton. */
   confirmationGate?: PauseGate;
+  /** Per-session tracker of files the model has read. Filesystem tools mark on read/write, edit_file/multi_edit consult before mutating. */
+  readTracker?: ReadTracker;
 }
 
 export interface ToolDefinition<A = any, R = any> {
@@ -185,6 +188,8 @@ export class ToolRegistry {
       maxResultTokens?: number;
       /** Inject a mock PauseGate for tests. */
       confirmationGate?: PauseGate;
+      /** Session-scoped read tracker; filesystem tools mark on read/write, edit_file/multi_edit gate on it. */
+      readTracker?: ReadTracker;
     } = {},
   ): Promise<string> {
     const tool = this._tools.get(name);
@@ -288,6 +293,7 @@ export class ToolRegistry {
       const result = await tool.fn(args, {
         signal: opts.signal,
         confirmationGate: opts.confirmationGate,
+        readTracker: opts.readTracker,
       });
       const str = typeof result === "string" ? result : JSON.stringify(result);
       // Pre-clip at dispatch so a single fat result can't balloon the
@@ -393,6 +399,9 @@ function plainTextRejectedReason(name: string, result: string): string | null {
   if ((name === "edit_file" || name === "write_file") && /rejected this edit/i.test(result)) {
     return "edit-gate";
   }
+  if ((name === "edit_file" || name === "multi_edit") && /read_file first/i.test(result)) {
+    return "read-before-edit";
+  }
   if ((name === "run_command" || name === "run_background") && /\buser denied:/i.test(result)) {
     return "shell-gate";
   }
@@ -403,6 +412,8 @@ function rejectionRecoveryHint(reason: string): string {
   switch (reason) {
     case "edit-gate":
       return "Do not re-emit the same edit. Try a genuinely different edit or ask the user how to proceed.";
+    case "read-before-edit":
+      return "Call read_file on the target path first, then re-issue the edit.";
     case "shell-gate":
       return "Do not retry the same command. Use an allowlisted/read-only command, wait for approval, or ask the user how to proceed.";
     case "engineering-lifecycle":

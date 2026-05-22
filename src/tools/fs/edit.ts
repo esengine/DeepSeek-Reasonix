@@ -6,13 +6,22 @@ function displayRel(rootDir: string, full: string): string {
   return pathMod.relative(rootDir, full).replaceAll("\\", "/");
 }
 
+/** Marker substring in the gate-reject message so tools.ts's repeat-rejection tracker spots a 2nd identical unread-edit and switches to the sharper "stop retrying" hint. */
+export const READ_BEFORE_EDIT_MARKER = "read_file first";
+
 export async function applyEdit(
   rootDir: string,
   abs: string,
   args: { search: string; replace: string },
+  hasRead?: (abs: string) => boolean,
 ): Promise<string> {
   if (args.search.length === 0) {
     throw new Error("edit_file: search cannot be empty");
+  }
+  if (hasRead && !hasRead(abs)) {
+    throw new Error(
+      `edit_file: ${displayRel(rootDir, abs)} was not read this session — ${READ_BEFORE_EDIT_MARKER} so your SEARCH matches the bytes on disk.`,
+    );
   }
   const beforeBuf = await fs.readFile(abs);
   const { text: before, encoding } = decodeFileBuffer(beforeBuf);
@@ -48,6 +57,7 @@ export interface MultiEditEntry {
 export async function applyMultiEdit(
   rootDir: string,
   edits: ReadonlyArray<MultiEditEntry>,
+  hasRead?: (abs: string) => boolean,
 ): Promise<string> {
   if (edits.length === 0) {
     throw new Error("multi_edit: edits must contain at least one entry");
@@ -84,6 +94,11 @@ export async function applyMultiEdit(
     }
     let state = filesByPath.get(e.abs);
     if (!state) {
+      if (hasRead && !hasRead(e.abs)) {
+        throw new Error(
+          `multi_edit: edit #${i + 1} target ${rel} was not read this session — ${READ_BEFORE_EDIT_MARKER} (no edits applied)`,
+        );
+      }
       let before: string;
       let encoding: FileEncoding;
       try {

@@ -282,6 +282,10 @@ export function registerFilesystemTools(
       }
 
       const { text } = decodeFileBuffer(raw);
+      // Any successful read (full, range, head, tail, outline) marks the
+      // file as seen so the edit gate accepts subsequent edits. Partial-
+      // read mistakes still fail later via "search text not found".
+      ctx?.readTracker?.markRead(abs);
       let lines = text.split(/\r?\n/);
       // Most files end with '\n' which splits into an empty trailing
       // entry; drop it so head/tail/range counts match the user's
@@ -661,6 +665,9 @@ export function registerFilesystemTools(
         // New file or unreadable — fall back to utf8.
       }
       await fs.writeFile(abs, encodeFile(args.content, encoding));
+      // Just wrote the content; the model knows what's on disk, so a
+      // follow-up edit_file shouldn't be gated for re-reading.
+      ctx?.readTracker?.markRead(abs);
       return `wrote ${args.content.length} chars to ${displayRel(rootDir, abs)}`;
     },
   });
@@ -668,7 +675,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "edit_file",
     description:
-      "Apply a SEARCH/REPLACE edit to an existing file. `search` must match exactly (whitespace sensitive) — no regex. The match must be unique in the file; otherwise the edit is refused to avoid surprise rewrites.",
+      "Apply a SEARCH/REPLACE edit to an existing file. Call `read_file` on this path first this session — the tool refuses otherwise, since SEARCH must match on-disk bytes exactly. `search` is whitespace-sensitive plain text (no regex) and must be unique in the file; otherwise the edit is refused to avoid surprise rewrites.",
     parameters: {
       type: "object",
       properties: {
@@ -679,13 +686,18 @@ export function registerFilesystemTools(
       required: ["path", "search", "replace"],
     },
     fn: async (args: { path: string; search: string; replace: string }, ctx?: ToolCallContext) =>
-      applyEdit(rootDir, await safePath(args.path, "edit_file", ctx, "write"), args),
+      applyEdit(
+        rootDir,
+        await safePath(args.path, "edit_file", ctx, "write"),
+        args,
+        ctx?.readTracker ? (abs) => ctx.readTracker!.hasRead(abs) : undefined,
+      ),
   });
 
   registry.register({
     name: "multi_edit",
     description:
-      "Apply N SEARCH/REPLACE edits across ONE OR MORE files in one call. Edits validate across the full batch before writing. Validation failures leave all files untouched; disk write failures trigger best-effort rollback of files that may have been modified. Per-file edits run in array order, so a later edit can match text inserted by an earlier one. Same per-edit rules as edit_file: `search` is exact text (whitespace sensitive, no regex) and must be unique in its target file at the moment that edit applies. Use this for renames spanning multiple files, cross-file refactors, or any batch where you'd otherwise loop edit_file.",
+      "Apply N SEARCH/REPLACE edits across ONE OR MORE files in one call. Every target file must have been `read_file`'d this session — the tool refuses the whole batch otherwise. Edits validate across the full batch before writing. Validation failures leave all files untouched; disk write failures trigger best-effort rollback of files that may have been modified. Per-file edits run in array order, so a later edit can match text inserted by an earlier one. Same per-edit rules as edit_file: `search` is exact text (whitespace sensitive, no regex) and must be unique in its target file at the moment that edit applies. Use this for renames spanning multiple files, cross-file refactors, or any batch where you'd otherwise loop edit_file.",
     parameters: {
       type: "object",
       properties: {
@@ -722,7 +734,11 @@ export function registerFilesystemTools(
           replace: e?.replace,
         })),
       );
-      return applyMultiEdit(rootDir, resolved);
+      return applyMultiEdit(
+        rootDir,
+        resolved,
+        ctx?.readTracker ? (abs) => ctx.readTracker!.hasRead(abs) : undefined,
+      );
     },
   });
 

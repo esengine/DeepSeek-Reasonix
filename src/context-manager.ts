@@ -68,6 +68,8 @@ export interface ContextManagerDeps {
   getAbortSignal: () => AbortSignal;
   getCurrentTurn: () => number;
   getSystemPrompt: () => string;
+  /** Fired when the message log was rewritten by fold/mechanicalTruncate; lets the loop drop session-scoped caches whose validity rested on the elided history (e.g. read-before-edit tracker). */
+  onLogRewrite?: () => void;
 }
 
 export type PostUsageDecisionKind = "none" | "fold" | "exit-with-summary";
@@ -251,6 +253,7 @@ export class ContextManager {
     const replacement = [summaryMsg, ...tail];
     this.deps.log.compactInPlace(replacement);
     this.persistRewrite(replacement);
+    this.deps.onLogRewrite?.();
     return {
       folded: true,
       beforeMessages: all.length,
@@ -315,6 +318,7 @@ export class ContextManager {
     if (replacement.length === all.length) return noop;
     this.deps.log.compactInPlace(replacement);
     this.persistRewrite(replacement);
+    this.deps.onLogRewrite?.();
     return {
       folded: true,
       beforeMessages: all.length,
