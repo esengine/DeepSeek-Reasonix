@@ -34,11 +34,26 @@ export function ShellConfirm({ prompt, onChoose }: ShellConfirmProps) {
     );
   }
 
+  // toApprovalPrompt mints English labels for the ACP surface; the unified
+  // prompt.kind collapses foreground + background into "shell", so we recover
+  // the split from meta.wait (only set on background prompts).
+  const isBackground = prompt.meta?.wait !== undefined;
+  const prefix = String(prompt.data?.prefix ?? "");
+  const localTitle = isBackground
+    ? t("shellConfirm.promptTitleRunBackground")
+    : t("shellConfirm.promptTitleRunCommand");
+  const localActionLabel = (id: string, fallback: string): string => {
+    if (id === "run_once") return t("shellConfirm.actionRunOnce");
+    if (id === "always_allow") return t("shellConfirm.actionAlwaysAllow", { prefix });
+    if (id === "deny") return t("shellConfirm.actionDeny");
+    return fallback;
+  };
+
   return (
     <ApprovalCard
       tone={prompt.tone}
       glyph="?"
-      title={prompt.title}
+      title={localTitle}
       metaRight={t("shellConfirm.awaiting")}
       footerHint={t("shellConfirm.pickFooter")}
     >
@@ -55,7 +70,7 @@ export function ShellConfirm({ prompt, onChoose }: ShellConfirmProps) {
       <InfoRows meta={prompt.meta} />
       <SingleSelect
         initialValue={prompt.actions[0]?.id ?? "run_once"}
-        items={prompt.actions.map((a) => ({ value: a.id, label: a.label }))}
+        items={prompt.actions.map((a) => ({ value: a.id, label: localActionLabel(a.id, a.label) }))}
         onSubmit={(v) => {
           const action = prompt.actions.find((a) => a.id === v);
           if (action?.secondaryInput) {

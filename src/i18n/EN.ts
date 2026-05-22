@@ -1339,6 +1339,12 @@ export const EN: TranslationSchema = {
     pathLabel: "path",
     sandboxLabel: "sandbox",
     allowPrefixLabel: "prefix",
+    promptTitleRead: "Access path \u2014 read",
+    promptTitleWrite: "Access path \u2014 write",
+    actionAllowRead: "Allow read",
+    actionAllowWrite: "Allow write",
+    actionAlwaysAllow: "Always allow \u2014 {prefix}",
+    actionDeny: "Deny",
   },
   shellConfirm: {
     title: "Shell command",
@@ -1363,6 +1369,11 @@ export const EN: TranslationSchema = {
     waitLabel: "wait",
     previewMore: "… {n} more line hidden — press esc, ask the model to split it",
     previewMorePlural: "… {n} more lines hidden — press esc, ask the model to split it",
+    promptTitleRunCommand: "Run command",
+    promptTitleRunBackground: "Run background command",
+    actionRunOnce: "Run once",
+    actionAlwaysAllow: "Always allow \u2014 {prefix}",
+    actionDeny: "Deny",
   },
   editConfirm: {
     footer:

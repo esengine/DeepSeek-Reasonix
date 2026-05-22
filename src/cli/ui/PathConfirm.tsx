@@ -36,12 +36,26 @@ export function PathConfirm({ prompt, onChoose }: PathConfirmProps) {
 
   const path = prompt.subtitle ?? "";
   const allowPrefix = String(prompt.data?.prefix ?? "");
+  // prompt.kind collapses read/write into "path"; recover from data.intent.
+  const intent = prompt.data?.intent === "write" ? "write" : "read";
+  const localTitle =
+    intent === "write" ? t("pathConfirm.promptTitleWrite") : t("pathConfirm.promptTitleRead");
+  const localActionLabel = (id: string, fallback: string): string => {
+    if (id === "run_once") {
+      return intent === "write"
+        ? t("pathConfirm.actionAllowWrite")
+        : t("pathConfirm.actionAllowRead");
+    }
+    if (id === "always_allow") return t("pathConfirm.actionAlwaysAllow", { prefix: allowPrefix });
+    if (id === "deny") return t("pathConfirm.actionDeny");
+    return fallback;
+  };
 
   return (
     <ApprovalCard
       tone={prompt.tone}
       glyph="!"
-      title={prompt.title}
+      title={localTitle}
       metaRight={t("pathConfirm.awaiting")}
       footerHint={t("pathConfirm.pickFooter")}
     >
@@ -51,7 +65,7 @@ export function PathConfirm({ prompt, onChoose }: PathConfirmProps) {
       <InfoRows path={path} sandboxRoot={prompt.meta?.sandboxRoot} allowPrefix={allowPrefix} />
       <SingleSelect
         initialValue={prompt.actions[0]?.id ?? "run_once"}
-        items={prompt.actions.map((a) => ({ value: a.id, label: a.label }))}
+        items={prompt.actions.map((a) => ({ value: a.id, label: localActionLabel(a.id, a.label) }))}
         onSubmit={(v) => {
           const action = prompt.actions.find((a) => a.id === v);
           if (action?.secondaryInput) {

@@ -1,7 +1,8 @@
 import { render } from "ink-testing-library";
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ShellConfirm } from "../src/cli/ui/ShellConfirm.js";
+import { setLanguageRuntime } from "../src/i18n/index.js";
 
 function makeShellPrompt(command: string): import("@reasonix/core-utils").ApprovalPrompt {
   return {
@@ -27,6 +28,9 @@ function makeShellPrompt(command: string): import("@reasonix/core-utils").Approv
 }
 
 describe("ShellConfirm — renders with ApprovalPrompt", () => {
+  beforeEach(() => setLanguageRuntime("EN"));
+  afterEach(() => setLanguageRuntime("EN"));
+
   it("renders the action options and footer", () => {
     const { lastFrame, unmount } = render(
       <ShellConfirm prompt={makeShellPrompt("echo hello")} onChoose={() => {}} />,
@@ -44,10 +48,25 @@ describe("ShellConfirm — renders with ApprovalPrompt", () => {
       <ShellConfirm prompt={makeShellPrompt("rm -rf /")} onChoose={() => {}} />,
     );
     // Move to "deny" option and submit
-    stdin.write("[B[B"); // two down arrows
+    stdin.write("[B[B"); // two down arrows
     stdin.write("\r"); // enter
     const out = lastFrame() ?? "";
     unmount();
     expect(out).toContain("Deny");
+  });
+
+  it("translates title + action labels under zh-CN (#1560)", () => {
+    setLanguageRuntime("zh-CN");
+    const { lastFrame, unmount } = render(
+      <ShellConfirm prompt={makeShellPrompt("python script.py")} onChoose={() => {}} />,
+    );
+    const out = lastFrame() ?? "";
+    unmount();
+    expect(out).toContain("运行命令");
+    expect(out).toContain("运行一次");
+    expect(out).toContain("始终允许");
+    expect(out).toContain("拒绝");
+    expect(out).not.toContain("Run once");
+    expect(out).not.toContain("Always allow");
   });
 });

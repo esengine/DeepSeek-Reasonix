@@ -1266,6 +1266,12 @@ export const zhCN: TranslationSchema = {
     pathLabel: "路径",
     sandboxLabel: "沙箱",
     allowPrefixLabel: "前缀",
+    promptTitleRead: "访问路径 — 读取",
+    promptTitleWrite: "访问路径 — 写入",
+    actionAllowRead: "允许读取",
+    actionAllowWrite: "允许写入",
+    actionAlwaysAllow: "始终允许 — {prefix}",
+    actionDeny: "拒绝",
   },
   shellConfirm: {
     title: "Shell 命令",
@@ -1288,6 +1294,11 @@ export const zhCN: TranslationSchema = {
     waitLabel: "等待",
     previewMore: "… 还有 {n} 行未显示 — 按 esc 取消，让模型拆分后再试",
     previewMorePlural: "… 还有 {n} 行未显示 — 按 esc 取消，让模型拆分后再试",
+    promptTitleRunCommand: "运行命令",
+    promptTitleRunBackground: "运行后台命令",
+    actionRunOnce: "运行一次",
+    actionAlwaysAllow: "始终允许 — {prefix}",
+    actionDeny: "拒绝",
   },
   editConfirm: {
     footer:

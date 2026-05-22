@@ -508,6 +508,12 @@ export interface TranslationSchema {
     pathLabel: string;
     sandboxLabel: string;
     allowPrefixLabel: string;
+    promptTitleRead: string;
+    promptTitleWrite: string;
+    actionAllowRead: string;
+    actionAllowWrite: string;
+    actionAlwaysAllow: string;
+    actionDeny: string;
   };
   shellConfirm: {
     title: string;
@@ -530,6 +536,11 @@ export interface TranslationSchema {
     waitLabel: string;
     previewMore: string;
     previewMorePlural: string;
+    promptTitleRunCommand: string;
+    promptTitleRunBackground: string;
+    actionRunOnce: string;
+    actionAlwaysAllow: string;
+    actionDeny: string;
   };
   editConfirm: {
     footer: string;
