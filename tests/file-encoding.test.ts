@@ -19,8 +19,7 @@ describe("decodeFileBuffer (#1445)", () => {
     expect(decodeFileBuffer(buf)).toEqual({ text: "// hi 你好\n", encoding: "utf8-bom" });
   });
 
-  it("falls back to gb18030 on Windows for invalid-UTF-8 CN bytes", () => {
-    if (process.platform !== "win32") return;
+  it("falls back to gb18030 for invalid-UTF-8 CN bytes (any platform)", () => {
     const buf = iconv.encode("你好世界\n", "gb18030");
     expect(decodeFileBuffer(buf)).toEqual({ text: "你好世界\n", encoding: "gb18030" });
   });

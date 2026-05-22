@@ -21,15 +21,14 @@ export function decodeFileBuffer(buf: Buffer): DecodedFile {
   } catch {
     // Fall through.
   }
-  if (process.platform === "win32") {
-    try {
-      return {
-        text: new TextDecoder("gb18030", { fatal: true }).decode(buf),
-        encoding: "gb18030",
-      };
-    } catch {
-      // Fall through.
-    }
+  // GB18030 isn't platform-conditional — files originated on CN Windows can travel anywhere.
+  try {
+    return {
+      text: new TextDecoder("gb18030", { fatal: true }).decode(buf),
+      encoding: "gb18030",
+    };
+  } catch {
+    // Fall through.
   }
   return { text: buf.toString("utf8"), encoding: "utf8" };
 }
