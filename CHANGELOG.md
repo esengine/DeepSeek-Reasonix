@@ -3,6 +3,104 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0] — 2026-05-22
+
+**TUI — Static-history renderer.** The history pane is now rendered
+exclusively through Ink's `<Static>` (#1529, stages 1–4). The previous
+virtual-viewport machinery — viewport-budget row allocator, byte-virtual
+frame layer, manual scroll math — is gone. Net: less code on the hot
+path, no more "frame drift" on very long sessions, and the rewrite stays
+Ink-native instead of fighting it. Behind `REASONIX_STATIC_HISTORY` at
+stage 1, default-on by stage 2, scaffolding removed by stage 4.
+
+**Chat — queued mid-turn steers.** Typing while the model is mid-turn
+no longer fights the live render or drops the keystroke. New input
+queues, surfaces a small "queued" hint, and feeds into the next user
+turn cleanly (#1501). Pairs with the static-history switch so the
+queued line stays visible across re-renders.
+
+**Web search — Bing default, dashboard engine switcher.** Default web
+backend switches from Mojeek to Bing (#1558); the dashboard gains a
+visible engine switcher so you can flip between configured backends
+without editing config. Mojeek is dropped from the bundled set entirely
+in this release.
+
+**Plans — lifecycle evidence summaries.** Plan acceptance now surfaces
+the evidence captured at each lifecycle step (#1500), so the "why this
+plan is ready to accept" question has a structured answer instead of
+implicit trust. Builds on the strict-lifecycle observability that
+landed in 0.48.1.
+
+**Desktop — approval + completion notifications.** Native OS
+notifications for approval prompts and turn-complete events (#1519),
+so a long-running turn can land in the background and still surface.
+Uses `tauri-plugin-notification`.
+
+**i18n — CLI command output.** `/mcp`, `/sessions`, `/prune`, `/theme`
+output is now translated (#1524), closing the remaining English-only
+gap in CLI command surfaces. Approval-prompt confirm titles and action
+labels also get zh-CN (#1560/#1561).
+
+**Security.**
+- `web_fetch` now blocks SSRF — private/loopback/link-local targets are
+  rejected at the boundary (#1544)
+- Edit snapshots can no longer read outside the workspace (#1454)
+- Shell redirects (`>`, `>>`, `<`) are constrained to the sandbox
+  boundary (#1457)
+- New Task integrity guardrail catches objective simplification — i.e.
+  the model trying to redefine a hard requirement away (#1516)
+
+**Tools.** `run_command` description now actively discourages
+shell-based file edits in favor of the structured `edit` tool (#1514).
+A per-turn dispatch-rate limit lands for tool calls (#1356), keeping
+runaway loops from burning a quota slice in one turn.
+
+**TUI polish.**
+- `Ctrl+Enter` now inserts a newline (#1513) — matching how every
+  modern composer treats the modifier
+- `mouseWheelRows` config knob tunes scroll velocity per terminal
+  (#1511) so trackpad vs. wheel mouse don't fight the default
+- `@mention` file search is restricted to the current directory prefix
+  (#1548) so the picker doesn't dump the whole repo
+- Paste-sentinel label no longer claims `^O` expands the paste — the
+  shortcut never existed (#1517)
+
+**Context.** Pinned-constraint blocks are now preserved across context
+folds (#1515) and the fold tail captures all of them, not just the last
+(#1552). Memory constraints survive the fold instead of silently
+dropping out under pressure.
+
+**Client.**
+- DeepSeek 429s are translated into an actionable "concurrency limit
+  hit" hint instead of a raw HTTP error (#1526)
+- `timeoutMs` is now wired to `fetch` when the caller passes an
+  `AbortSignal` (#1535) — previously the timeout was silently ignored
+- `--no-proxy` / `REASONIX_NO_PROXY` opt-out is honored for the
+  DeepSeek direct-route default (#1507)
+
+**Files.** Read/edit/restore now preserve the source file's encoding
+(GB18030, UTF-8 BOM, etc.) instead of normalizing to UTF-8 on write
+(#1518). Important for CJK Windows projects.
+
+**Web/Dashboard.**
+- Path-access approval modal is bridged to the dashboard (#1538) so
+  the browser surface can resolve the same prompts as CLI/Desktop
+- `@mention` file picker popover lands in the dashboard ChatPane
+  (#1546), gated on attached mode (#1549)
+
+**Config.** Atomic config writes restore the preset-write diagnostic
+trace (#1555), so when a preset write goes wrong you can actually see
+why.
+
+**Refactor.** `lifecycle` extracts a standalone risk policy module
+(#1557), shrinking the orchestrator and unblocking risk policy reuse
+from non-lifecycle callers.
+
+**Other:**
+- `fix(desktop)` drop `workspace:*` protocol for core-utils — desktop
+  isn't a workspace member
+- `fix(desktop)` tsc errors blocking desktop bundle build
+
 ## [0.48.1] — 2026-05-21
 
 **`dsnix` — short alias.** A new `dsnix` shim package lands alongside
