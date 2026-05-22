@@ -1,6 +1,6 @@
 {
   "name": "dsnix",
-  "version": "0.48.1",
+  "version": "0.49.0",
   "description": "Short alias for reasonix — DeepSeek-native coding agent. Forwards to the reasonix CLI.",
   "bin": {
     "dsnix": "bin.cjs"
@@ -31,6 +31,6 @@
     "node": ">=22"
   },
   "dependencies": {
-    "reasonix": "0.48.1"
+    "reasonix": "0.49.0"
   }
 }
