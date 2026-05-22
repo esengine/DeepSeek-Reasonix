@@ -107,11 +107,11 @@ export function PromptInput({
     const insertion = shouldInlinePaste(content)
       ? content
       : (() => {
-        const id = nextPasteIdRef.current % PASTE_SENTINEL_RANGE;
-        nextPasteIdRef.current = id + 1;
-        pastesRef.current.set(id, makePasteEntry(id, content));
-        return encodePasteSentinel(id);
-      })();
+          const id = nextPasteIdRef.current % PASTE_SENTINEL_RANGE;
+          nextPasteIdRef.current = id + 1;
+          pastesRef.current.set(id, makePasteEntry(id, content));
+          return encodePasteSentinel(id);
+        })();
     const next = v.slice(0, c) + insertion + v.slice(c);
     lastLocalValueRef.current = next;
     cursorRef.current = c + insertion.length;
