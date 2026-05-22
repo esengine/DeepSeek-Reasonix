@@ -222,11 +222,14 @@ export function PromptInput({
     if (!totalRows || totalRows < 4) return;
     const linesBelow = Math.max(0, lines.length - 1 - cursorLine);
     const largeHint = showHugeBufferHints ? 1 : 0;
-    // Inside our bordered Box, below the visual cursor: remaining input
-    // lines, optional huge-hint, blank marginTop, HintRow, bottom border.
-    const rowsBelow = linesBelow + largeHint + 3 + rowsAfter;
+    // Rows inside PromptInput below the visual cursor:
+    //   remaining input lines + huge-hint + gap before mode/model + mode/model row + gap before disabled hint.
+    const rowsInsideBelow = linesBelow + largeHint + 2 + (mode || model ? 1 : 0);
+    // Rows after PromptInput (ComposerArea): StatusRow content (1) + StatusRow marginTop (1) + LoopStatusRow (0/1).
+    // Parent passes rowsAfter = 2 + (activeLoop ? 1 : 0) accounting for all three.
+    const rowsBelow = rowsInsideBelow + rowsAfter;
     const targetRow = Math.max(1, totalRows - rowsBelow);
-    // Column 1-indexed. No left border, paddingX=1, prompt prefix "› " = 2 cells.
+    // Column 1-indexed. Left border (1) + paddingX (1) + prompt prefix "› " (2 cells) + cursor cells.
     const targetCol = 1 + 1 + 2 + cursorCellsInLine;
     stdout.write(`\x1b[${targetRow};${targetCol}H`);
   }, [
@@ -237,6 +240,8 @@ export function PromptInput({
     lines.length,
     showHugeBufferHints,
     rowsAfter,
+    mode,
+    model,
   ]);
 
   return (
