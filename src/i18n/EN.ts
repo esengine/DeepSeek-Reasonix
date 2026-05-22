@@ -158,10 +158,6 @@ export const EN: TranslationSchema = {
           rows: [
             { key: "select text", text: "drag to select — terminal-native (no modifier needed)" },
             {
-              key: "/copy",
-              text: "vim/tmux-style copy mode — works in SSH/mosh/tmux where drag-select can't extend past the viewport",
-            },
-            {
               key: "copy",
               text: "Ctrl+Shift+C (Win/Linux) · Cmd+C (macOS) — or auto-copy-on-select if your terminal does it",
             },
@@ -255,9 +251,6 @@ export const EN: TranslationSchema = {
   },
   slash: {
     help: { description: "show the full command reference" },
-    copy: {
-      description: "open vim/tmux-style copy mode — j/k navigate, v select, y yank to clipboard",
-    },
     status: { description: "current model, flags, context, session" },
     preset: {
       description: "model bundle — auto escalates flash → pro, flash/pro lock",
@@ -705,6 +698,8 @@ export const EN: TranslationSchema = {
       "Out of balance (DeepSeek 402): {inner}. Top up at https://platform.deepseek.com/top_up — the panel header shows your balance once it's non-zero.",
     badparam422: "Invalid parameter (DeepSeek 422): {inner}",
     badrequest400: "Bad request (DeepSeek 400): {inner}",
+    concurrency429:
+      "DeepSeek concurrency limit hit (429): {inner}. The account has too many in-flight requests (cap: 500 for v4-pro, 2500 for v4-flash, summed across API keys account-wide). Usually means another Reasonix process is sharing the same key, or a parallel subagent fan-out overshot. Wait a few seconds and retry, reduce parallelism, or request a higher cap at https://platform.deepseek.com.",
     deepseek5xxHead:
       "DeepSeek service unavailable ({status}) — this is a DeepSeek-side problem, not Reasonix. Already retried 4× with backoff.",
     deepseek5xxReachable:
@@ -1660,19 +1655,6 @@ export const EN: TranslationSchema = {
     categoryProject: "project",
     categoryReference: "reference",
   },
-  copyMode: {
-    title: "── COPY MODE ──",
-    help: "j/k or ↑/↓ move · v select · y yank · g/G top/bottom · q quit",
-    statusBar: "line {cur}/{total} · selection: {sel}",
-    statusYanked: "yanked {size} chars (osc52={osc52})",
-    statusEmpty: "nothing selected",
-    empty: "(no chat content yet — say something to the model first)",
-    labelUser: "you",
-    labelAssistant: "assistant",
-    labelReasoning: "reasoning",
-    yankedToast: "▸ copied {size} chars to clipboard (osc52)",
-    yankedToastFile: "▸ copied {size} chars · file: {path}",
-  },
   mcpHealth: {
     noData: "no inspect data",
     healthy: "healthy \u00b7 {ms}ms",
@@ -1838,6 +1820,8 @@ export const EN: TranslationSchema = {
     groupSystem: "System",
     descEnter: "Send message",
     descShiftEnter: "New line",
+    descCtrlEnter: "New line",
+    descCtrlJ: "New line",
     descCtrlU: "Clear input",
     descCtrlW: "Delete word",
     descCtrlP: "Toggle shortcut panel",

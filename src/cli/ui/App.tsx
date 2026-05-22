@@ -39,7 +39,6 @@ import {
   editModeHintShown,
   loadBaseUrl,
   loadEngineeringLifecycleMode,
-  loadMouseWheelRows,
   loadReasoningEffort,
   loadTheme,
   markEditModeHintShown,
@@ -130,7 +129,6 @@ import { type ThemeChoice, ThemePicker } from "./ThemePicker.js";
 import { WelcomeBanner } from "./WelcomeBanner.js";
 import { WorkspacePicker } from "./WorkspacePicker.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
-import { CopyMode } from "./copy-mode/CopyMode.js";
 import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broadcast.js";
 import { useViewerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { formatEditResults } from "./edit-history.js";
@@ -159,13 +157,11 @@ import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useWorkspaceRoot } from "./hooks/useWorkspaceRoot.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { CardStream } from "./layout/CardStream.js";
-import { InputAreaWithHistoryHint } from "./layout/InputAreaWithHistoryHint.js";
 import { LiveExpandContext } from "./layout/LiveExpandContext.js";
 import { ModeStatusBar } from "./layout/LiveRows.js";
+import { StaticCardStream } from "./layout/StaticCardStream.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import type { StatusBarConfig } from "./layout/StatusRow.js";
-import { ViewportBudgetProvider } from "./layout/viewport-budget.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
@@ -185,11 +181,6 @@ import {
 } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
-import {
-  ChatScrollProvider,
-  useChatScrollActions,
-  useChatScrollState,
-} from "./state/chat-scroll-provider.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
@@ -323,41 +314,6 @@ const FLUSH_INTERVAL_MS = (() => {
 })();
 
 /**
- * Captures printable keys / backspace / Enter while history is unpinned so the
- * user can type blind and see the buffer when they scroll back. Lives in its
- * own leaf so AppInner doesn't subscribe to `pinned` —same trick as
- * `InputAreaWithHistoryHint` above.
- */
-function HistoryTypingCapture({
-  input,
-  setInput,
-  enabled,
-  onReturnToBottom,
-}: {
-  input: string;
-  setInput: (next: string) => void;
-  enabled: boolean;
-  onReturnToBottom: () => void;
-}): null {
-  const pinned = useChatScrollState((s) => s.pinned);
-  useKeystroke((ev) => {
-    if (ev.paste) return;
-    if (ev.return) {
-      onReturnToBottom();
-      return;
-    }
-    if (ev.backspace) {
-      setInput(input.slice(0, -1));
-      return;
-    }
-    if (ev.input.length > 0 && ev.input >= " ") {
-      setInput(input + ev.input);
-    }
-  }, enabled && !pinned);
-  return null;
-}
-
-/**
  * Single-line status pill rendered below the modeline whenever a /loop
  * is active. Re-renders every second so the countdown ticks.
  */
@@ -434,18 +390,15 @@ export function App(props: AppProps): React.ReactElement {
       showFeedbackHint: cfg.showFeedbackHint !== false,
     };
   }, []);
-  const wheelRows = React.useMemo(() => loadMouseWheelRows(), []);
   return (
     <ThemeProvider name={themeName}>
       <AgentStoreProvider session={session} initialCards={initialCards}>
-        <ChatScrollProvider wheelRows={wheelRows}>
-          <AppInner
-            {...props}
-            themeName={themeName}
-            setThemeName={setThemeName}
-            statusBar={statusBar}
-          />
-        </ChatScrollProvider>
+        <AppInner
+          {...props}
+          themeName={themeName}
+          setThemeName={setThemeName}
+          statusBar={statusBar}
+        />
       </AgentStoreProvider>
     </ThemeProvider>
   );
@@ -511,8 +464,6 @@ function AppInner({
   const sessionOutputTokens = useAgentState((s) => s.status.sessionOutputTokens);
   const lastTurnMs = useAgentState((s) => s.status.lastTurnMs);
   const activityLabel = useActivityLabel();
-  const chatScroll = useChatScrollActions();
-  const composerPinned = useChatScrollState((s) => s.pinned);
   const [input, setInput] = useState("");
   const [composerCursor, setComposerCursor] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -703,7 +654,6 @@ function AppInner({
   const [pendingModelPicker, setPendingModelPicker] = useState(false);
   /** True while the ThemePicker is open mid-chat (triggered by bare `/theme`). */
   const [pendingThemePicker, setPendingThemePicker] = useState(false);
-  const [pendingCopyMode, setPendingCopyMode] = useState(false);
   const [pendingShortcuts, setPendingShortcuts] = useState(false);
   // Stashed plan + intent while the user types free-form feedback
   // (refinement or last instructions on approve). When the picker
@@ -775,7 +725,6 @@ function AppInner({
     !!pendingMcpHub ||
     pendingModelPicker ||
     pendingThemePicker ||
-    pendingCopyMode ||
     pendingShortcuts ||
     !!stagedInput ||
     !!pendingEditReview ||
@@ -1660,21 +1609,6 @@ function AppInner({
       return next;
     });
   });
-
-  // Chat scroll keys. Mouse wheel + PgUp/PgDn always scroll; End jumps
-  // to bottom. ↑/↓ belong to the composer (prompt history / per-line
-  // cursor) whenever the composer is visible — so we only consume
-  // arrows here when the composer is hidden (chat is scrolled up and
-  // InputAreaWithHistoryHint has replaced it).
-  useKeystroke((ev) => {
-    if (ev.pageUp) chatScroll.scrollPageUp();
-    else if (ev.pageDown) chatScroll.scrollPageDown();
-    else if (ev.mouseScrollUp) chatScroll.scrollWheelUp();
-    else if (ev.mouseScrollDown) chatScroll.scrollWheelDown();
-    else if (ev.end) chatScroll.jumpToBottom();
-    else if (!composerPinned && ev.upArrow) chatScroll.scrollUp();
-    else if (!composerPinned && ev.downArrow) chatScroll.scrollDown();
-  }, !modalOpen);
 
   // Double-Esc — opens the rewind/edit picker when idle with an empty
   // composer. Tracks the prior Esc timestamp; a second Esc inside 500 ms
@@ -2999,11 +2933,6 @@ function AppInner({
           pushHistory(text);
           return;
         }
-        if (result.openCopyMode) {
-          setPendingCopyMode(true);
-          pushHistory(text);
-          return;
-        }
         if (result.openArgPickerFor) {
           pushHistory(text);
           setInput(`/${result.openArgPickerFor} `);
@@ -3835,9 +3764,6 @@ function AppInner({
     return pauseGate.on((request) => {
       const payload = request.payload as Record<string, unknown>;
       pendingGateIdRef.current = request.id;
-      // Modal pickers reserve viewport rows from the bottom; if the chat is
-      // scrolled up, the picker mounts off-screen and the user can't see it.
-      chatScroll.jumpToBottom();
 
       qq.handlePauseRequest(request.kind, payload);
 
@@ -4214,480 +4140,453 @@ function AppInner({
 
   return (
     <>
-      <HistoryTypingCapture
-        input={input}
-        setInput={setInput}
-        enabled={!modalOpen && !busy}
-        onReturnToBottom={chatScroll.jumpToBottom}
-      />
       <TickerProvider disabled={tickerSuspended}>
-        <ViewportBudgetProvider>
-          <InflightProvider inflight={loop.inflight}>
-            <Box flexDirection="row" height={stdout?.rows ?? 24}>
+        <InflightProvider inflight={loop.inflight}>
+          <Box flexDirection="row">
+            <Box flexDirection="column" flexGrow={1}>
               <Box flexDirection="column" flexGrow={1}>
-                <Box flexDirection="column" flexGrow={1}>
-                  <LiveExpandContext.Provider value={liveExpand}>
-                    <VerboseContext.Provider value={verboseMode}>
-                      <CardStream suppressLive={modalOpen} />
-                    </VerboseContext.Provider>
-                  </LiveExpandContext.Provider>
-                  {/*
+                <LiveExpandContext.Provider value={liveExpand}>
+                  <VerboseContext.Provider value={verboseMode}>
+                    <StaticCardStream suppressLive={modalOpen} />
+                  </VerboseContext.Provider>
+                </LiveExpandContext.Provider>
+                {/*
           Welcome card on the empty state. Visible only when nothing
           has happened yet (no past events, nothing in flight, no
           modal up). Removes the "what do I type?" friction without
           surviving past the first turn.
         */}
-                  {!hasConversation && !busy && !isStreaming && slashMatches === null ? (
-                    <Box flexGrow={1} justifyContent="center">
-                      <WelcomeBanner
-                        inCodeMode={!!codeMode}
-                        workspaceRoot={codeMode ? currentRootDir : undefined}
-                        dashboardUrl={dashboardUrl}
-                        languageVersion={languageVersion}
-                      />
-                    </Box>
-                  ) : null}
-                  <LiveActivityArea
-                    noTakeoverOverlay={noTakeoverOverlay}
-                    ongoingTool={ongoingTool}
-                    toolProgress={toolProgress}
-                    subagentActivities={subagentActivities}
-                    statusLine={statusLine}
-                    busy={busy}
-                    isStreaming={isStreaming}
-                    activityLabel={activityLabel}
-                    undoBanner={undoBanner}
-                    hideUndo={
-                      !!(
-                        pendingShell ||
-                        pendingPlan ||
-                        pendingReviseEditor ||
-                        pendingSessionsPicker ||
-                        pendingCheckpointPicker ||
-                        pendingMcpHub ||
-                        stagedInput ||
-                        pendingEditReview ||
-                        pendingChoice ||
-                        stagedChoiceCustom ||
-                        pendingRevision ||
-                        stagedCheckpointRevise ||
-                        pendingCheckpoint
-                      )
+                {!hasConversation && !busy && !isStreaming && slashMatches === null ? (
+                  <Box flexGrow={1} justifyContent="center">
+                    <WelcomeBanner
+                      inCodeMode={!!codeMode}
+                      workspaceRoot={codeMode ? currentRootDir : undefined}
+                      dashboardUrl={dashboardUrl}
+                      languageVersion={languageVersion}
+                    />
+                  </Box>
+                ) : null}
+                <LiveActivityArea
+                  noTakeoverOverlay={noTakeoverOverlay}
+                  ongoingTool={ongoingTool}
+                  toolProgress={toolProgress}
+                  subagentActivities={subagentActivities}
+                  statusLine={statusLine}
+                  busy={busy}
+                  isStreaming={isStreaming}
+                  activityLabel={activityLabel}
+                  undoBanner={undoBanner}
+                  hideUndo={
+                    !!(
+                      pendingShell ||
+                      pendingPlan ||
+                      pendingReviseEditor ||
+                      pendingSessionsPicker ||
+                      pendingCheckpointPicker ||
+                      pendingMcpHub ||
+                      stagedInput ||
+                      pendingEditReview ||
+                      pendingChoice ||
+                      stagedChoiceCustom ||
+                      pendingRevision ||
+                      stagedCheckpointRevise ||
+                      pendingCheckpoint
+                    )
+                  }
+                />
+              </Box>
+              {stagedInput ? (
+                <PlanRefineInput
+                  mode={stagedInput.mode}
+                  questions={stagedInput.questions}
+                  onSubmit={handleStagedInputSubmit}
+                  onCancel={handleStagedInputCancel}
+                />
+              ) : stagedChoiceCustom ? (
+                <PlanRefineInput
+                  mode="choice-custom"
+                  onSubmit={handleChoiceCustomSubmit}
+                  onCancel={handleChoiceCustomCancel}
+                />
+              ) : stagedCheckpointRevise ? (
+                <PlanRefineInput
+                  mode="checkpoint-revise"
+                  onSubmit={(text) => handleCheckpointReviseSubmit(text, stagedCheckpointRevise)}
+                  onCancel={handleCheckpointReviseCancel}
+                />
+              ) : pendingChoice ? (
+                <ChoiceConfirm
+                  question={pendingChoice.question}
+                  options={pendingChoice.options}
+                  allowCustom={pendingChoice.allowCustom}
+                  onChoose={stableHandleChoiceConfirm}
+                />
+              ) : pendingRevision ? (
+                <PlanReviseConfirm
+                  reason={pendingRevision.reason}
+                  oldRemaining={(planStepsRef.current ?? []).filter(
+                    (s) => !completedStepIdsRef.current.has(s.id),
+                  )}
+                  newRemaining={pendingRevision.remainingSteps}
+                  summary={pendingRevision.summary}
+                  onChoose={stableHandleReviseConfirm}
+                />
+              ) : pendingCheckpoint ? (
+                <PlanCheckpointConfirm
+                  stepId={pendingCheckpoint.stepId}
+                  title={pendingCheckpoint.title}
+                  completed={pendingCheckpoint.completed}
+                  total={pendingCheckpoint.total}
+                  steps={planStepsRef.current ?? undefined}
+                  completedStepIds={completedStepIdsRef.current}
+                  onChoose={stableHandleCheckpointConfirm}
+                />
+              ) : pendingCheckpointPicker ? (
+                <CheckpointPicker
+                  checkpoints={checkpointPickerList}
+                  workspace={currentRootDir}
+                  pickerPorts={pickerPorts}
+                  onChoose={(outcome) => {
+                    if (outcome.kind === "quit") {
+                      setPendingCheckpointPicker(false);
+                      return;
                     }
-                  />
-                </Box>
-                {stagedInput ? (
-                  <PlanRefineInput
-                    mode={stagedInput.mode}
-                    questions={stagedInput.questions}
-                    onSubmit={handleStagedInputSubmit}
-                    onCancel={handleStagedInputCancel}
-                  />
-                ) : stagedChoiceCustom ? (
-                  <PlanRefineInput
-                    mode="choice-custom"
-                    onSubmit={handleChoiceCustomSubmit}
-                    onCancel={handleChoiceCustomCancel}
-                  />
-                ) : stagedCheckpointRevise ? (
-                  <PlanRefineInput
-                    mode="checkpoint-revise"
-                    onSubmit={(text) => handleCheckpointReviseSubmit(text, stagedCheckpointRevise)}
-                    onCancel={handleCheckpointReviseCancel}
-                  />
-                ) : pendingChoice ? (
-                  <ChoiceConfirm
-                    question={pendingChoice.question}
-                    options={pendingChoice.options}
-                    allowCustom={pendingChoice.allowCustom}
-                    onChoose={stableHandleChoiceConfirm}
-                  />
-                ) : pendingRevision ? (
-                  <PlanReviseConfirm
-                    reason={pendingRevision.reason}
-                    oldRemaining={(planStepsRef.current ?? []).filter(
-                      (s) => !completedStepIdsRef.current.has(s.id),
-                    )}
-                    newRemaining={pendingRevision.remainingSteps}
-                    summary={pendingRevision.summary}
-                    onChoose={stableHandleReviseConfirm}
-                  />
-                ) : pendingCheckpoint ? (
-                  <PlanCheckpointConfirm
-                    stepId={pendingCheckpoint.stepId}
-                    title={pendingCheckpoint.title}
-                    completed={pendingCheckpoint.completed}
-                    total={pendingCheckpoint.total}
-                    steps={planStepsRef.current ?? undefined}
-                    completedStepIds={completedStepIdsRef.current}
-                    onChoose={stableHandleCheckpointConfirm}
-                  />
-                ) : pendingCheckpointPicker ? (
-                  <CheckpointPicker
-                    checkpoints={checkpointPickerList}
-                    workspace={currentRootDir}
-                    pickerPorts={pickerPorts}
-                    onChoose={(outcome) => {
-                      if (outcome.kind === "quit") {
-                        setPendingCheckpointPicker(false);
-                        return;
+                    if (outcome.kind === "restore") {
+                      const target = checkpointPickerList.find((c) => c.id === outcome.id);
+                      setPendingCheckpointPicker(false);
+                      if (!target) return;
+                      const result = restoreCheckpoint(currentRootDir, target.id);
+                      const lines = [
+                        `restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
+                      ];
+                      if (result.restored.length > 0) {
+                        lines.push(
+                          `  wrote ${result.restored.length} file${result.restored.length === 1 ? "" : "s"}`,
+                        );
                       }
-                      if (outcome.kind === "restore") {
-                        const target = checkpointPickerList.find((c) => c.id === outcome.id);
-                        setPendingCheckpointPicker(false);
-                        if (!target) return;
-                        const result = restoreCheckpoint(currentRootDir, target.id);
-                        const lines = [
-                          `restored "${target.name}" (${target.id.slice(0, 7)}, ${fmtAgo(target.createdAt)})`,
-                        ];
-                        if (result.restored.length > 0) {
-                          lines.push(
-                            `  wrote ${result.restored.length} file${result.restored.length === 1 ? "" : "s"}`,
-                          );
-                        }
-                        if (result.removed.length > 0) {
-                          lines.push(
-                            `  removed ${result.removed.length} file${result.removed.length === 1 ? "" : "s"}`,
-                          );
-                        }
-                        if (result.skipped.length > 0) {
-                          lines.push(
-                            `  skipped ${result.skipped.length} file${result.skipped.length === 1 ? "" : "s"}`,
-                          );
-                        }
-                        log.pushInfo(lines.join("\n"));
-                        return;
+                      if (result.removed.length > 0) {
+                        lines.push(
+                          `  removed ${result.removed.length} file${result.removed.length === 1 ? "" : "s"}`,
+                        );
                       }
-                      if (outcome.kind === "delete") {
-                        const target = checkpointPickerList.find((c) => c.id === outcome.id);
-                        if (!target) return;
-                        deleteCheckpoint(currentRootDir, target.id);
-                        setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
+                      if (result.skipped.length > 0) {
+                        lines.push(
+                          `  skipped ${result.skipped.length} file${result.skipped.length === 1 ? "" : "s"}`,
+                        );
                       }
-                    }}
-                  />
-                ) : pendingWorkspacePicker ? (
-                  <WorkspacePicker
-                    workspaces={workspacePickerList}
-                    currentWorkspace={currentRootDir}
-                    onChoose={(outcome) => {
-                      setPendingWorkspacePicker(false);
-                      if (outcome.kind === "quit") return;
-                      const result = switchWorkspaceRoot(outcome.path);
-                      log.pushInfo(result.info);
-                      if (!result.ok) return;
-                      setSessionsPickerList(listSessionsForWorkspace(outcome.path));
-                      setPendingSessionsPicker(true);
-                    }}
-                  />
-                ) : pendingSessionsPicker ? (
-                  <SessionPicker
-                    sessions={sessionsPickerList}
-                    workspace={currentRootDir}
-                    walletCurrency={walletCurrencyRef.current}
-                    pickerPorts={pickerPorts}
-                    onFocusChange={setSessionsPickerFocus}
-                    onChoose={(outcome) => {
-                      if (outcome.kind === "open") {
-                        setPendingSessionsPicker(false);
-                        if (onSwitchSession) {
-                          onSwitchSession(outcome.name);
-                        } else {
-                          log.pushInfo(
-                            `to switch to "${outcome.name}", quit and run: reasonix chat --session ${outcome.name}`,
-                          );
-                        }
-                        return;
+                      log.pushInfo(lines.join("\n"));
+                      return;
+                    }
+                    if (outcome.kind === "delete") {
+                      const target = checkpointPickerList.find((c) => c.id === outcome.id);
+                      if (!target) return;
+                      deleteCheckpoint(currentRootDir, target.id);
+                      setCheckpointPickerList([...listCheckpoints(currentRootDir)].reverse());
+                    }
+                  }}
+                />
+              ) : pendingWorkspacePicker ? (
+                <WorkspacePicker
+                  workspaces={workspacePickerList}
+                  currentWorkspace={currentRootDir}
+                  onChoose={(outcome) => {
+                    setPendingWorkspacePicker(false);
+                    if (outcome.kind === "quit") return;
+                    const result = switchWorkspaceRoot(outcome.path);
+                    log.pushInfo(result.info);
+                    if (!result.ok) return;
+                    setSessionsPickerList(listSessionsForWorkspace(outcome.path));
+                    setPendingSessionsPicker(true);
+                  }}
+                />
+              ) : pendingSessionsPicker ? (
+                <SessionPicker
+                  sessions={sessionsPickerList}
+                  workspace={currentRootDir}
+                  walletCurrency={walletCurrencyRef.current}
+                  pickerPorts={pickerPorts}
+                  onFocusChange={setSessionsPickerFocus}
+                  onChoose={(outcome) => {
+                    if (outcome.kind === "open") {
+                      setPendingSessionsPicker(false);
+                      if (onSwitchSession) {
+                        onSwitchSession(outcome.name);
+                      } else {
+                        log.pushInfo(
+                          `to switch to "${outcome.name}", quit and run: reasonix chat --session ${outcome.name}`,
+                        );
                       }
-                      if (outcome.kind === "new") {
-                        setPendingSessionsPicker(false);
-                        if (onSwitchSession) {
-                          onSwitchSession(freshSessionName(session));
-                        } else {
-                          log.pushInfo(
-                            "to start a fresh session, quit and run: reasonix chat (no --session flag)",
-                          );
-                        }
-                        return;
+                      return;
+                    }
+                    if (outcome.kind === "new") {
+                      setPendingSessionsPicker(false);
+                      if (onSwitchSession) {
+                        onSwitchSession(freshSessionName(session));
+                      } else {
+                        log.pushInfo(
+                          "to start a fresh session, quit and run: reasonix chat (no --session flag)",
+                        );
                       }
-                      if (outcome.kind === "delete") {
-                        deleteSession(outcome.name);
-                        setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
-                        return;
-                      }
-                      if (outcome.kind === "rename") {
-                        renameSession(outcome.name, outcome.newName);
-                        setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
-                        return;
-                      }
-                      if (outcome.kind === "quit") {
-                        setPendingSessionsPicker(false);
-                      }
-                    }}
-                  />
-                ) : pendingThemePicker ? (
-                  <ThemePicker
-                    currentPreference={loadTheme() ?? "auto"}
-                    activeTheme={themeName}
-                    onChoose={(outcome) => {
-                      setPendingThemePicker(false);
-                      if (outcome.kind === "quit") return;
-                      saveTheme(outcome.value);
-                      const active = resolveThemePreference(
-                        outcome.value,
-                        process.env.REASONIX_THEME,
-                      );
-                      setThemeName(active);
-                      log.pushInfo(`theme saved: ${outcome.value}\n  active now: ${active}`);
-                    }}
-                  />
-                ) : pendingEditPicker ? (
-                  <EditPicker
-                    entries={pendingEditPicker}
-                    onChoose={(outcome) => {
-                      setPendingEditPicker(null);
-                      if (outcome.kind === "cancel") return;
-                      const userText = loop.rewindToUserTurn(outcome.entry.userTurnIndex);
-                      if (userText === null) {
-                        log.pushInfo(t("editPicker.empty"));
-                        return;
-                      }
+                      return;
+                    }
+                    if (outcome.kind === "delete") {
+                      deleteSession(outcome.name);
+                      setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
+                      return;
+                    }
+                    if (outcome.kind === "rename") {
+                      renameSession(outcome.name, outcome.newName);
+                      setSessionsPickerList(listSessionsForWorkspace(currentRootDir));
+                      return;
+                    }
+                    if (outcome.kind === "quit") {
+                      setPendingSessionsPicker(false);
+                    }
+                  }}
+                />
+              ) : pendingThemePicker ? (
+                <ThemePicker
+                  currentPreference={loadTheme() ?? "auto"}
+                  activeTheme={themeName}
+                  onChoose={(outcome) => {
+                    setPendingThemePicker(false);
+                    if (outcome.kind === "quit") return;
+                    saveTheme(outcome.value);
+                    const active = resolveThemePreference(
+                      outcome.value,
+                      process.env.REASONIX_THEME,
+                    );
+                    setThemeName(active);
+                    log.pushInfo(`theme saved: ${outcome.value}\n  active now: ${active}`);
+                  }}
+                />
+              ) : pendingEditPicker ? (
+                <EditPicker
+                  entries={pendingEditPicker}
+                  onChoose={(outcome) => {
+                    setPendingEditPicker(null);
+                    if (outcome.kind === "cancel") return;
+                    const userText = loop.rewindToUserTurn(outcome.entry.userTurnIndex);
+                    if (userText === null) {
+                      log.pushInfo(t("editPicker.empty"));
+                      return;
+                    }
+                    agentStore.dispatch({
+                      type: "session.fork",
+                      cardId: outcome.entry.cardId,
+                    });
+                    setInput(outcome.entry.text);
+                    log.pushInfo(t("editPicker.forked", { turn: outcome.entry.userTurnIndex + 1 }));
+                  }}
+                />
+              ) : pendingModelPicker ? (
+                <ModelPicker
+                  models={models}
+                  current={loop.model}
+                  currentEffort={loop.reasoningEffort}
+                  currentAutoEscalate={loop.autoEscalate}
+                  onRefresh={refreshModels}
+                  onChoose={(outcome) => {
+                    setPendingModelPicker(false);
+                    if (outcome.kind === "select") {
+                      // Manual model pick = explicit pin: turn off auto-escalate
+                      // so flash doesn't get bumped, persist inferred preset.
+                      loop.configure({ model: outcome.id, autoEscalate: false });
+                      agentStore.dispatch({ type: "session.model.change", model: outcome.id });
+                      const inferred =
+                        outcome.id === "deepseek-v4-pro"
+                          ? "pro"
+                          : outcome.id === "deepseek-v4-flash"
+                            ? "flash"
+                            : null;
+                      setPreset(inferred ?? "flash");
                       agentStore.dispatch({
-                        type: "session.fork",
-                        cardId: outcome.entry.cardId,
+                        type: "session.preset.change",
+                        preset: inferred,
                       });
-                      setInput(outcome.entry.text);
-                      log.pushInfo(
-                        t("editPicker.forked", { turn: outcome.entry.userTurnIndex + 1 }),
-                      );
-                    }}
-                  />
-                ) : pendingCopyMode ? (
-                  <CopyMode
-                    cards={agentStore.getState().cards}
-                    onClose={(yanked) => {
-                      setPendingCopyMode(false);
-                      if (yanked) {
-                        const path = yanked.filePath;
-                        const info = yanked.osc52
-                          ? t("copyMode.yankedToast", { size: yanked.size })
-                          : t("copyMode.yankedToastFile", {
-                              size: yanked.size,
-                              path: path ?? "unknown",
-                            });
-                        log.pushInfo(info);
-                      }
-                    }}
-                  />
-                ) : pendingModelPicker ? (
-                  <ModelPicker
-                    models={models}
-                    current={loop.model}
-                    currentEffort={loop.reasoningEffort}
-                    currentAutoEscalate={loop.autoEscalate}
-                    onRefresh={refreshModels}
-                    onChoose={(outcome) => {
-                      setPendingModelPicker(false);
-                      if (outcome.kind === "select") {
-                        // Manual model pick = explicit pin: turn off auto-escalate
-                        // so flash doesn't get bumped, persist inferred preset.
-                        loop.configure({ model: outcome.id, autoEscalate: false });
-                        agentStore.dispatch({ type: "session.model.change", model: outcome.id });
-                        const inferred =
-                          outcome.id === "deepseek-v4-pro"
-                            ? "pro"
-                            : outcome.id === "deepseek-v4-flash"
-                              ? "flash"
-                              : null;
-                        setPreset(inferred ?? "flash");
-                        agentStore.dispatch({
-                          type: "session.preset.change",
-                          preset: inferred,
-                        });
-                        if (inferred) {
-                          try {
-                            savePreset(inferred);
-                          } catch {
-                            /* disk full / perms —runtime change still took effect */
-                          }
-                        }
-                        log.pushInfo(`model: ${outcome.id}`);
-                        return;
-                      }
-                      if (outcome.kind === "preset") {
-                        const p = PRESETS[outcome.name];
-                        loop.configure({
-                          model: p.model,
-                          autoEscalate: p.autoEscalate,
-                          reasoningEffort: p.reasoningEffort,
-                        });
-                        agentStore.dispatch({ type: "session.model.change", model: p.model });
-                        setPreset(outcome.name);
-                        agentStore.dispatch({
-                          type: "session.preset.change",
-                          preset: outcome.name,
-                        });
+                      if (inferred) {
                         try {
-                          savePreset(outcome.name);
+                          savePreset(inferred);
                         } catch {
                           /* disk full / perms —runtime change still took effect */
                         }
-                        log.pushInfo(`preset: ${outcome.name} - ${p.model}`);
                       }
-                    }}
-                  />
-                ) : pendingMcpHub ? (
-                  <McpHub
-                    initialTab={pendingMcpHub.tab}
-                    liveServers={liveMcpServers}
-                    configPath={defaultConfigPath()}
-                    pickerPorts={pickerPorts}
-                    onClose={() => setPendingMcpHub(null)}
-                    postInfo={(text) => log.pushInfo(text)}
-                    applyAppend={(target, addedTools) => {
-                      const updated = applyMcpAppend(loop, target, addedTools);
-                      setLiveMcpServers((prev) => replaceMcpServerSummary(prev, target, updated));
-                      return updated;
-                    }}
-                    reloadMcp={
-                      mcpRuntime
-                        ? async () => {
-                            const r = await mcpRuntime.reloadFromConfig(loop);
-                            setLiveMcpServers(r.summaries);
-                            return r;
-                          }
-                        : undefined
+                      log.pushInfo(`model: ${outcome.id}`);
+                      return;
                     }
-                  />
-                ) : pendingPlan ? (
-                  <PlanConfirm
-                    plan={pendingPlan}
-                    steps={planStepsRef.current ?? undefined}
-                    summary={planSummaryRef.current ?? undefined}
-                    onChoose={stableHandlePlanConfirm}
-                    projectRoot={currentRootDir}
-                  />
-                ) : pendingReviseEditor ? (
-                  <PlanReviseEditor
-                    steps={planStepsRef.current ?? []}
-                    completedStepIds={completedStepIdsRef.current}
-                    onAccept={(revised, skippedIds) => {
-                      planStepsRef.current = revised;
-                      for (const id of skippedIds) completedStepIdsRef.current.add(id);
-                      persistPlanState();
-                      const planText = pendingReviseEditor;
-                      setPendingReviseEditor(null);
-                      setPendingPlan(planText);
-                    }}
-                    onCancel={() => {
-                      const planText = pendingReviseEditor;
-                      setPendingReviseEditor(null);
-                      setPendingPlan(planText);
-                    }}
-                  />
-                ) : pendingShell ? (
-                  <ShellConfirm
-                    prompt={toApprovalPrompt({
-                      id: pendingShell.id,
-                      kind: pendingShell.kind,
-                      payload: {
-                        command: pendingShell.command,
-                        cwd: pendingShell.cwd,
-                        timeoutSec: pendingShell.timeoutSec,
-                        waitSec: pendingShell.waitSec,
-                      },
-                    })}
-                    onChoose={handleShellConfirm}
-                  />
-                ) : pendingPath ? (
-                  <PathConfirm
-                    prompt={toApprovalPrompt({
-                      id: pendingPath.id,
-                      kind: "path_access",
-                      payload: {
-                        path: pendingPath.path,
-                        intent: pendingPath.intent,
-                        toolName: pendingPath.toolName,
-                        sandboxRoot: pendingPath.sandboxRoot,
-                        allowPrefix: pendingPath.allowPrefix,
-                      },
-                    })}
-                    onChoose={handlePathConfirm}
-                  />
-                ) : pendingEditReview ? (
-                  <EditConfirm
-                    block={pendingEditReview}
-                    onChoose={(choice, denyContext) => {
-                      const resolve = editReviewResolveRef.current;
-                      if (resolve) {
-                        editReviewResolveRef.current = null;
-                        resolve({ choice, denyContext });
+                    if (outcome.kind === "preset") {
+                      const p = PRESETS[outcome.name];
+                      loop.configure({
+                        model: p.model,
+                        autoEscalate: p.autoEscalate,
+                        reasoningEffort: p.reasoningEffort,
+                      });
+                      agentStore.dispatch({ type: "session.model.change", model: p.model });
+                      setPreset(outcome.name);
+                      agentStore.dispatch({
+                        type: "session.preset.change",
+                        preset: outcome.name,
+                      });
+                      try {
+                        savePreset(outcome.name);
+                      } catch {
+                        /* disk full / perms —runtime change still took effect */
                       }
-                    }}
-                  />
-                ) : walkthroughActive && pendingEdits.current.length > 0 ? (
-                  <EditConfirm
-                    // pendingTick re-keys the modal so each apply/discard
-                    // forces a remount with the NEW first block. Without it,
-                    // EditConfirm's internal scroll state would persist
-                    // across blocks, which is the wrong UX.
-                    key={`walk-${pendingTick}`}
-                    block={pendingEdits.current[0]!}
-                    onChoose={handleWalkChoice}
-                  />
-                ) : (
-                  <ComposerArea
-                    editMode={editMode}
-                    pendingCount={pendingCount}
-                    modeFlash={modeFlash}
-                    planMode={planMode}
-                    undoArmed={!!undoBanner || hasUndoable()}
-                    jobs={codeMode ? codeMode.jobs : undefined}
-                    activeLoop={activeLoop}
-                    statusBar={statusBar}
-                    showShortcuts={pendingShortcuts}
-                    mode={
-                      editMode === "yolo"
-                        ? t("statsPanel.modeYolo")
-                        : editMode === "auto"
-                          ? t("statsPanel.modeAuto")
-                          : editMode === "review"
-                            ? t("statsPanel.modeReview")
-                            : editMode
+                      log.pushInfo(`preset: ${outcome.name} - ${p.model}`);
                     }
-                    model={
-                      (sessionPreset
-                        ? `${sessionPreset.charAt(0).toUpperCase() + sessionPreset.slice(1)} \u00b7 `
-                        : "") +
-                      (sessionModel === "deepseek-v4-pro"
-                        ? "Deepseek v4 pro"
-                        : sessionModel === "deepseek-v4-flash"
-                          ? "Deepseek v4 flash"
-                          : sessionModel)
+                  }}
+                />
+              ) : pendingMcpHub ? (
+                <McpHub
+                  initialTab={pendingMcpHub.tab}
+                  liveServers={liveMcpServers}
+                  configPath={defaultConfigPath()}
+                  pickerPorts={pickerPorts}
+                  onClose={() => setPendingMcpHub(null)}
+                  postInfo={(text) => log.pushInfo(text)}
+                  applyAppend={(target, addedTools) => {
+                    const updated = applyMcpAppend(loop, target, addedTools);
+                    setLiveMcpServers((prev) => replaceMcpServerSummary(prev, target, updated));
+                    return updated;
+                  }}
+                  reloadMcp={
+                    mcpRuntime
+                      ? async () => {
+                          const r = await mcpRuntime.reloadFromConfig(loop);
+                          setLiveMcpServers(r.summaries);
+                          return r;
+                        }
+                      : undefined
+                  }
+                />
+              ) : pendingPlan ? (
+                <PlanConfirm
+                  plan={pendingPlan}
+                  steps={planStepsRef.current ?? undefined}
+                  summary={planSummaryRef.current ?? undefined}
+                  onChoose={stableHandlePlanConfirm}
+                  projectRoot={currentRootDir}
+                />
+              ) : pendingReviseEditor ? (
+                <PlanReviseEditor
+                  steps={planStepsRef.current ?? []}
+                  completedStepIds={completedStepIdsRef.current}
+                  onAccept={(revised, skippedIds) => {
+                    planStepsRef.current = revised;
+                    for (const id of skippedIds) completedStepIdsRef.current.add(id);
+                    persistPlanState();
+                    const planText = pendingReviseEditor;
+                    setPendingReviseEditor(null);
+                    setPendingPlan(planText);
+                  }}
+                  onCancel={() => {
+                    const planText = pendingReviseEditor;
+                    setPendingReviseEditor(null);
+                    setPendingPlan(planText);
+                  }}
+                />
+              ) : pendingShell ? (
+                <ShellConfirm
+                  prompt={toApprovalPrompt({
+                    id: pendingShell.id,
+                    kind: pendingShell.kind,
+                    payload: {
+                      command: pendingShell.command,
+                      cwd: pendingShell.cwd,
+                      timeoutSec: pendingShell.timeoutSec,
+                      waitSec: pendingShell.waitSec,
+                    },
+                  })}
+                  onChoose={handleShellConfirm}
+                />
+              ) : pendingPath ? (
+                <PathConfirm
+                  prompt={toApprovalPrompt({
+                    id: pendingPath.id,
+                    kind: "path_access",
+                    payload: {
+                      path: pendingPath.path,
+                      intent: pendingPath.intent,
+                      toolName: pendingPath.toolName,
+                      sandboxRoot: pendingPath.sandboxRoot,
+                      allowPrefix: pendingPath.allowPrefix,
+                    },
+                  })}
+                  onChoose={handlePathConfirm}
+                />
+              ) : pendingEditReview ? (
+                <EditConfirm
+                  block={pendingEditReview}
+                  onChoose={(choice, denyContext) => {
+                    const resolve = editReviewResolveRef.current;
+                    if (resolve) {
+                      editReviewResolveRef.current = null;
+                      resolve({ choice, denyContext });
                     }
-                    input={input}
-                    setInput={setInput}
-                    busy={busy}
-                    onSubmit={handleSubmit}
-                    onHistoryPrev={handleHistoryPrev}
-                    onHistoryNext={handleHistoryNext}
-                    onOpenExternalEditor={handleOpenExternalEditor}
-                    onCursorChange={setComposerCursor}
-                    slashMatches={slashMatches}
-                    slashSelected={slashSelected}
-                    slashGroupMode={slashGroupMode}
-                    slashAdvancedHidden={slashAdvancedHidden}
-                    atState={atState}
-                    atSelected={atSelected}
-                    slashArgContext={slashArgContext}
-                    slashArgMatches={slashArgMatches}
-                    slashArgSelected={slashArgSelected}
-                  />
-                )}
-              </Box>
+                  }}
+                />
+              ) : walkthroughActive && pendingEdits.current.length > 0 ? (
+                <EditConfirm
+                  // pendingTick re-keys the modal so each apply/discard
+                  // forces a remount with the NEW first block. Without it,
+                  // EditConfirm's internal scroll state would persist
+                  // across blocks, which is the wrong UX.
+                  key={`walk-${pendingTick}`}
+                  block={pendingEdits.current[0]!}
+                  onChoose={handleWalkChoice}
+                />
+              ) : (
+                <ComposerArea
+                  editMode={editMode}
+                  pendingCount={pendingCount}
+                  modeFlash={modeFlash}
+                  planMode={planMode}
+                  undoArmed={!!undoBanner || hasUndoable()}
+                  jobs={codeMode ? codeMode.jobs : undefined}
+                  activeLoop={activeLoop}
+                  statusBar={statusBar}
+                  showShortcuts={pendingShortcuts}
+                  mode={
+                    editMode === "yolo"
+                      ? t("statsPanel.modeYolo")
+                      : editMode === "auto"
+                        ? t("statsPanel.modeAuto")
+                        : editMode === "review"
+                          ? t("statsPanel.modeReview")
+                          : editMode
+                  }
+                  model={
+                    (sessionPreset
+                      ? `${sessionPreset.charAt(0).toUpperCase() + sessionPreset.slice(1)} \u00b7 `
+                      : "") +
+                    (sessionModel === "deepseek-v4-pro"
+                      ? "Deepseek v4 pro"
+                      : sessionModel === "deepseek-v4-flash"
+                        ? "Deepseek v4 flash"
+                        : sessionModel)
+                  }
+                  input={input}
+                  setInput={setInput}
+                  busy={busy}
+                  onSubmit={handleSubmit}
+                  onHistoryPrev={handleHistoryPrev}
+                  onHistoryNext={handleHistoryNext}
+                  onOpenExternalEditor={handleOpenExternalEditor}
+                  onCursorChange={setComposerCursor}
+                  slashMatches={slashMatches}
+                  slashSelected={slashSelected}
+                  slashGroupMode={slashGroupMode}
+                  slashAdvancedHidden={slashAdvancedHidden}
+                  atState={atState}
+                  atSelected={atSelected}
+                  slashArgContext={slashArgContext}
+                  slashArgMatches={slashArgMatches}
+                  slashArgSelected={slashArgSelected}
+                />
+              )}
             </Box>
-          </InflightProvider>
-        </ViewportBudgetProvider>
+          </Box>
+        </InflightProvider>
       </TickerProvider>
     </>
   );

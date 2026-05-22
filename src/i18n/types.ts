@@ -288,6 +288,7 @@ export interface TranslationSchema {
     balance402: string;
     badparam422: string;
     badrequest400: string;
+    concurrency429: string;
     deepseek5xxHead: string;
     deepseek5xxReachable: string;
     deepseek5xxUnreachable: string;
@@ -773,19 +774,6 @@ export interface TranslationSchema {
     categoryProject: string;
     categoryReference: string;
   };
-  copyMode: {
-    title: string;
-    help: string;
-    statusBar: string;
-    statusYanked: string;
-    statusEmpty: string;
-    empty: string;
-    labelUser: string;
-    labelAssistant: string;
-    labelReasoning: string;
-    yankedToast: string;
-    yankedToastFile: string;
-  };
   mcpHealth: {
     noData: string;
     healthy: string;
@@ -925,6 +913,8 @@ export interface TranslationSchema {
     groupSystem: string;
     descEnter: string;
     descShiftEnter: string;
+    descCtrlEnter: string;
+    descCtrlJ: string;
     descCtrlU: string;
     descCtrlW: string;
     descCtrlP: string;

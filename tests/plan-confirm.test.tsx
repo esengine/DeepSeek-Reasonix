@@ -4,7 +4,6 @@ import React from "react";
 import stripAnsi from "strip-ansi";
 import { describe, expect, it } from "vitest";
 import { PlanConfirm } from "../src/cli/ui/PlanConfirm.js";
-import { ViewportBudgetProvider, useReserveRows } from "../src/cli/ui/layout/viewport-budget.js";
 import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 function bytesFor(plan: string, steps?: { id: string; title: string }[]): string {
@@ -17,7 +16,6 @@ function bytesFor(plan: string, steps?: { id: string; title: string }[]): string
 }
 
 function ModalHost({ children }: { children: React.ReactNode }): React.ReactElement {
-  useReserveRows("stream", { min: 0, max: 12 });
   return (
     <Box flexDirection="row" height={30}>
       <Box flexDirection="column" flexGrow={1}>
@@ -260,11 +258,9 @@ describe("PlanConfirm — issue #336 plan body must be visible", () => {
     planLines[161] = "- 禁用状态（第一页/最后一页）";
     const plan = planLines.join("\n");
     const { lastFrame, stdin, unmount } = render(
-      <ViewportBudgetProvider initialRows={30}>
-        <ModalHost>
-          <PlanConfirm plan={plan} steps={[]} onChoose={() => {}} />
-        </ModalHost>
-      </ViewportBudgetProvider>,
+      <ModalHost>
+        <PlanConfirm plan={plan} steps={[]} onChoose={() => {}} />
+      </ModalHost>,
     );
     stdin.write("\x10");
     await nextFrame();

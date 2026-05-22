@@ -156,8 +156,6 @@ const keys: SlashHandler = (_args, _loop, ctx) => {
   return {};
 };
 
-const copy: SlashHandler = () => ({ openCopyMode: true });
-
 const about: SlashHandler = () => {
   const lines = [
     t("handlers.basic.aboutHeader", { version: VERSION }),
@@ -176,6 +174,5 @@ export const handlers: Record<string, SlashHandler> = {
   retry,
   loop,
   keys,
-  copy,
   about,
 };

@@ -25,6 +25,7 @@ export function formatLoopError(err: Error, probe?: DeepSeekProbeResult): string
   if (status === "402") return t("errors.balance402", { inner });
   if (status === "422") return t("errors.badparam422", { inner });
   if (status === "400") return t("errors.badrequest400", { inner });
+  if (status === "429") return t("errors.concurrency429", { inner });
   if (is5xxStatus(status)) return formatDeepSeek5xx(status, probe);
   return msg;
 }

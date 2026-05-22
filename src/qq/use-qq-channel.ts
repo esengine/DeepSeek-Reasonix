@@ -870,10 +870,6 @@ export function useQQChannel({
         beginThemePicker(buildThemeChoices());
         return true;
       }
-      if (result.openCopyMode) {
-        notifyTerminalOnly("`/copy` follow-up interaction is currently terminal-only.");
-        return true;
-      }
       if (result.openArgPickerFor) {
         notifyTerminalOnly(
           `\`/${result.openArgPickerFor}\` needs terminal-side argument completion.`,

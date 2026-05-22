@@ -6,7 +6,6 @@ import { PlanStepList } from "./PlanStepList.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { useReserveRows, useTotalRows } from "./layout/viewport-budget.js";
 import { MarkdownView } from "./markdown-view.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
 import type { KeyEvent } from "./stdin-reader.js";
@@ -31,7 +30,7 @@ const EXPANDED_DETAIL_CHROME_ROWS = 4;
 
 function PlanConfirmInner({ plan, steps, summary, onChoose }: PlanConfirmProps) {
   const { stdout } = useStdout();
-  const totalRows = useTotalRows();
+  const totalRows = stdout?.rows ?? 40;
   const [expanded, setExpanded] = useState(false);
   const [detailOffset, setDetailOffset] = useState(0);
   const stepRows = steps?.length ?? 0;
@@ -44,12 +43,9 @@ function PlanConfirmInner({ plan, steps, summary, onChoose }: PlanConfirmProps) 
   );
 
   const oqRows = openQuestions ? Math.min(openQuestions.split("\n").length, 8) : 0;
-  const modalRows = useReserveRows("modal", {
-    min: 10,
-    max: expanded
-      ? Math.max(10, totalRows - EXPANDED_DETAIL_CHROME_ROWS)
-      : Math.max(16, Math.min(32, (hasSteps ? stepRows + 2 : 2) + oqRows + 14)),
-  });
+  const modalRows = expanded
+    ? Math.max(10, totalRows - EXPANDED_DETAIL_CHROME_ROWS)
+    : Math.max(16, Math.min(32, (hasSteps ? stepRows + 2 : 2) + oqRows + 14));
   const detailViewRows = expanded
     ? Math.max(10, modalRows - EXPANDED_MODAL_OVERHEAD_ROWS)
     : Math.max(

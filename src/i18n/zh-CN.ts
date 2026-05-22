@@ -151,10 +151,6 @@ export const zhCN: TranslationSchema = {
           rows: [
             { key: "选中文字", text: "直接拖动 — 终端原生（不需要任何修饰键）" },
             {
-              key: "/copy",
-              text: "vim/tmux 风格复制模式 — SSH / mosh / tmux 下拖选越过可视区无效时用这个",
-            },
-            {
               key: "复制",
               text: "Ctrl+Shift+C（Win/Linux）· Cmd+C（macOS）— 或选中即复制（看终端设置）",
             },
@@ -246,9 +242,6 @@ export const zhCN: TranslationSchema = {
   },
   slash: {
     help: { description: "显示完整命令参考" },
-    copy: {
-      description: "进入 vim/tmux 风格复制模式 — j/k 移动、v 起选区、y 复制到剪贴板",
-    },
     status: { description: "当前模型、标志、上下文、会话" },
     preset: {
       description: "模型组合 — 自动在 flash → pro 之间切换，或锁定 flash/pro",
@@ -683,6 +676,8 @@ export const zhCN: TranslationSchema = {
       "余额不足（DeepSeek 402）：{inner}。在 https://platform.deepseek.com/top_up 充值 — 余额非零时面板顶栏会显示。",
     badparam422: "参数错误（DeepSeek 422）：{inner}",
     badrequest400: "请求错误（DeepSeek 400）：{inner}",
+    concurrency429:
+      "DeepSeek 并发超限（429）：{inner}。账号在跑的请求超过上限（v4-pro 500、v4-flash 2500，账号下所有 API key 累加）。通常是同一账号开了多个 Reasonix 进程，或者并行 subagent 一次发太多。等几秒重试、减少并行，或在 https://platform.deepseek.com 申请扩容。",
     deepseek5xxHead:
       "DeepSeek 服务不可用（{status}） — 这是 DeepSeek 服务端问题，不是 Reasonix 故障。已按指数退避重试 4 次。",
     deepseek5xxReachable:
@@ -1576,19 +1571,6 @@ export const zhCN: TranslationSchema = {
     categoryProject: "项目",
     categoryReference: "参考",
   },
-  copyMode: {
-    title: "── 复制模式 ──",
-    help: "j/k 或 ↑/↓ 移动 · v 起选区 · y 复制 · g/G 顶/底 · q 退出",
-    statusBar: "第 {cur}/{total} 行 · 选区：{sel}",
-    statusYanked: "已复制 {size} 字符（osc52={osc52}）",
-    statusEmpty: "未选中内容",
-    empty: "（还没有聊天内容 — 先和模型说点什么）",
-    labelUser: "你",
-    labelAssistant: "助手",
-    labelReasoning: "推理",
-    yankedToast: "▸ 已复制 {size} 字符到剪贴板 (osc52)",
-    yankedToastFile: "▸ 已复制 {size} 字符 · 文件：{path}",
-  },
   mcpHealth: {
     noData: "无检查数据",
     healthy: "正常 \u00b7 {ms}ms",
@@ -1741,6 +1723,8 @@ export const zhCN: TranslationSchema = {
     groupSystem: "系统",
     descEnter: "发送消息",
     descShiftEnter: "换行",
+    descCtrlEnter: "换行",
+    descCtrlJ: "换行",
     descCtrlU: "清空输入",
     descCtrlW: "删除单词",
     descCtrlP: "打开/关闭快捷键面板",
