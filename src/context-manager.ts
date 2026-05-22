@@ -1,7 +1,6 @@
 import type { DeepSeekClient } from "./client.js";
 import { Usage } from "./client.js";
 import { healLoadedMessages } from "./loop.js";
-import { thinkingModeForModel } from "./loop.js";
 import { stripHallucinatedToolMarkup } from "./loop.js";
 import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
@@ -17,7 +16,7 @@ import {
   estimateConversationTokens,
   estimateRequestTokens,
 } from "./tokenizer.js";
-import type { ChatMessage } from "./types.js";
+import type { ChatMessage, ToolSpec } from "./types.js";
 
 function extractPinnedConstraints(systemPrompt: string): string {
   // matchAll because the system prompt can carry multiple blocks under the same
@@ -68,6 +67,9 @@ export interface ContextManagerDeps {
   getAbortSignal: () => AbortSignal;
   getCurrentTurn: () => number;
   getSystemPrompt: () => string;
+  /** Reuses the live prefix → fold summary call shares the cached bytes the main agent already paid for. */
+  getToolSpecs?: () => readonly ToolSpec[];
+  getFewShots?: () => readonly ChatMessage[];
 }
 
 export type PostUsageDecisionKind = "none" | "fold" | "exit-with-summary";
@@ -99,24 +101,33 @@ export interface FoldResult {
   summaryChars: number;
 }
 
-// Stub pins in head so the summarizer doesn't paraphrase them; dedupe by name, last invocation wins.
-function extractPinnedSkills(head: ChatMessage[]): {
-  stubbedHead: ChatMessage[];
-  pinnedBodies: string[];
-} {
+function buildFoldSummaryInstruction(pinnedSkillNames: string[]): string {
+  const base =
+    "Summarize the conversation above as one self-contained prose recap. Preserve the user's " +
+    "ORIGINAL OBJECTIVE (never paraphrase away negative constraints like 'do NOT do X'), all " +
+    "'do not' / 'never' / 'avoid' instructions, decisions reached, files inspected or modified, " +
+    "tool results still relevant, and any open todos. Skip turn-by-turn play-by-play. " +
+    "Output plain prose only — no tool calls, no markdown headings, no SEARCH/REPLACE blocks.";
+  if (pinnedSkillNames.length === 0) return base;
+  const list = pinnedSkillNames.map((n) => `"${n}"`).join(", ");
+  return `${base} The following skill memos are pinned verbatim and appended after your summary — do NOT quote or paraphrase their bodies: ${list}.`;
+}
+
+// Dedupe by name, last invocation wins. Read-only — leaves head bytes unchanged so the
+// summarizer call's prefix still matches what the main agent already cached.
+function collectPinnedSkills(head: ChatMessage[]): { names: string[]; bodies: string[] } {
   const pinned = new Map<string, string>();
-  const stubbedHead = head.map((msg) => {
-    if (typeof msg.content !== "string") return msg;
-    let hit = false;
-    const next = msg.content.replace(SKILL_PIN_REGEX, (full, name: string) => {
+  for (const msg of head) {
+    if (typeof msg.content !== "string") continue;
+    SKILL_PIN_REGEX.lastIndex = 0;
+    for (const match of msg.content.matchAll(SKILL_PIN_REGEX)) {
+      const name = match[1] as string;
+      const full = match[0];
       pinned.delete(name);
       pinned.set(name, full);
-      hit = true;
-      return `[skill ${JSON.stringify(name)} memo — preserved separately, do not summarize.]`;
-    });
-    return hit ? { ...msg, content: next } : msg;
-  });
-  return { stubbedHead, pinnedBodies: [...pinned.values()] };
+    }
+  }
+  return { names: [...pinned.keys()], bodies: [...pinned.values()] };
 }
 
 export class ContextManager {
@@ -227,8 +238,8 @@ export class ContextManager {
     const headTokens = totalTokens - cumTokens;
     if (headTokens < totalTokens * HISTORY_FOLD_MIN_SAVINGS_FRACTION) return noop;
 
-    const { stubbedHead, pinnedBodies } = extractPinnedSkills(head);
-    const summary = await this.summarizeForFold(stubbedHead);
+    const { names: pinnedNames, bodies: pinnedBodies } = collectPinnedSkills(head);
+    const summary = await this.summarizeForFold(head, pinnedNames);
     if (!summary.content) return noop;
 
     const memoTail =
@@ -342,23 +353,19 @@ export class ContextManager {
 
   private async summarizeForFold(
     messagesToSummarize: ChatMessage[],
+    pinnedSkillNames: string[],
   ): Promise<{ content: string; reasoningContent: string }> {
     const summaryModel = "deepseek-v4-flash";
-    const systemPrompt =
-      "You compress conversation history for a coding agent. Output one prose recap that preserves: " +
-      "the user's ORIGINAL OBJECTIVE (never paraphrase away nuance or negative constraints like 'do NOT do X'), " +
-      "all 'do not' / 'never' / 'avoid' instructions, decisions and conclusions reached, " +
-      "files inspected or modified, important tool results still relevant to ongoing work, " +
-      "and any open todos. Skip turn-by-turn play-by-play. No tool calls, no markdown headings, no SEARCH/REPLACE blocks — plain prose only.";
     const healed = healLoadedMessages(messagesToSummarize, DEFAULT_MAX_RESULT_CHARS).messages;
+    const agentSystem = this.deps.getSystemPrompt();
+    const fewShots = this.deps.getFewShots?.() ?? [];
+    const tools = this.deps.getToolSpecs?.() ?? [];
+    const instruction = buildFoldSummaryInstruction(pinnedSkillNames);
     const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: agentSystem },
+      ...fewShots.map((m) => ({ ...m })),
       ...healed,
-      {
-        role: "user",
-        content:
-          "Summarize the conversation above as plain prose. This summary replaces the original turns to free context — make it self-contained.",
-      },
+      { role: "user", content: instruction },
     ];
     const turnSignal = this.deps.getAbortSignal();
     const foldCtrl = new AbortController();
@@ -387,9 +394,9 @@ export class ContextManager {
         this.deps.client.chat({
           model: summaryModel,
           messages,
+          tools: tools.length ? (tools as ToolSpec[]) : undefined,
           signal: foldCtrl.signal,
-          thinking: thinkingModeForModel(summaryModel),
-          reasoningEffort: "high",
+          thinking: "disabled",
         }),
         abortPromise,
         timeoutPromise,
