@@ -23,12 +23,45 @@ if (!HOST_ARCH || !["win32", "darwin", "linux"].includes(PLAT)) {
 const isWin = PLAT === "win32";
 const targetExe = join(binDir, isWin ? "node.exe" : "node");
 
+function adhocSignMac(binPath) {
+  // #1611: child node needs com.apple.security.inherit so it inherits the
+  // parent .app's TCC grants (Documents folder etc.) instead of re-prompting
+  // on every spawn. Ad-hoc is enough for TCC; CI later overlays Developer ID.
+  const ents = join(here, "..", "src-tauri", "entitlements", "node-helper.plist");
+  if (!existsSync(ents)) {
+    console.warn(`entitlements missing: ${ents} — skipping ad-hoc sign`);
+    return;
+  }
+  try {
+    execSync(
+      `codesign --force --sign - --options runtime --entitlements "${ents}" "${binPath}"`,
+      { stdio: "inherit" },
+    );
+  } catch (e) {
+    console.warn(`ad-hoc codesign failed (non-fatal): ${e?.message ?? e}`);
+  }
+}
+
+function isAdhocSigned(binPath) {
+  try {
+    const out = execSync(`codesign -dvv "${binPath}" 2>&1`, { encoding: "utf8" });
+    return out.includes("Signature=adhoc") || /Authority=/.test(out);
+  } catch {
+    return false;
+  }
+}
+
 if (existsSync(targetExe) && statSync(targetExe).size > 1024 * 1024) {
   if (PLAT === "darwin") {
     try {
       const archs = execSync(`lipo -archs "${targetExe}"`, { encoding: "utf8" }).trim();
       if (archs.includes("arm64") && archs.includes("x86_64")) {
-        console.log(`${targetExe} already universal (${archs}) — delete to refetch`);
+        if (!isAdhocSigned(targetExe)) {
+          console.log(`${targetExe} universal but unsigned — applying ad-hoc sign`);
+          adhocSignMac(targetExe);
+        } else {
+          console.log(`${targetExe} already universal + signed (${archs}) — delete to refetch`);
+        }
         process.exit(0);
       }
       console.log(`${targetExe} present but not universal (${archs}) — rebuilding`);
@@ -127,6 +160,8 @@ if (PLAT === "darwin") {
 
   rmSync(arm.extractDir, { recursive: true, force: true });
   rmSync(x64.extractDir, { recursive: true, force: true });
+
+  adhocSignMac(targetExe);
 
   const archs = execSync(`lipo -archs "${targetExe}"`, { encoding: "utf8" }).trim();
   const mb = (statSync(targetExe).size / 1024 / 1024).toFixed(1);

@@ -16,6 +16,10 @@
     ]
   },
   "bundle": {
+    "macOS": {
+      "hardenedRuntime": true,
+      "entitlements": "entitlements/main.plist"
+    },
     "resources": {
       "binaries/node": "node"
     }
