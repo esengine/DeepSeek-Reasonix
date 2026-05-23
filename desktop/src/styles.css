@@ -249,6 +249,8 @@ html[data-platform="macos"] .app {
 }
 .app[data-ctx-collapsed="true"][data-side-collapsed="true"] {
   grid-template-columns: 0 1fr 0;
+  --thread-max-width: 1120px;
+  --composer-max-width: 1040px;
 }
 
 /* ---------- TABBAR ---------- */
@@ -1573,7 +1575,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   scroll-padding-bottom: 24px;
 }
 .thread-inner {
-  max-width: 740px;
+  max-width: var(--thread-max-width, 740px);
   margin: 0 auto;
   padding: 0 32px;
   display: flex;
@@ -2785,7 +2787,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   pointer-events: none;
 }
 .composer-inner {
-  max-width: 760px;
+  max-width: var(--composer-max-width, 760px);
   margin: 0 auto;
   position: relative;
   container-type: inline-size;
