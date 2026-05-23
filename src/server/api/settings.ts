@@ -288,7 +288,7 @@ export async function handleSettings(
           body: { error: "subagentModels must be an object mapping skill name → 'flash' | 'pro'" },
         };
       }
-      const sanitized: Record<string, "flash" | "pro"> = {};
+      const sanitized: Record<string, "flash" | "pro"> = Object.create(null);
       for (const [name, value] of Object.entries(fields.subagentModels)) {
         if (typeof name !== "string" || !name) continue;
         if (name === "__proto__" || name === "constructor" || name === "prototype") continue;
