@@ -2852,7 +2852,6 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   gap: 4px;
   padding: 6px 8px 8px 8px;
   min-width: 0;
-  overflow: hidden;
 }
 .composer-foot .cf-btn {
   padding: 5px 8px;

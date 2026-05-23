@@ -2917,6 +2917,8 @@ export function App() {
   const responsiveStageRef = useRef<ResponsiveStage | null>(null);
   const autoSideCollapsedRef = useRef(false);
   const autoCtxCollapsedRef = useRef(false);
+  const suppressSidePersistRef = useRef(false);
+  const suppressCtxPersistRef = useRef(false);
   const sideCollapsedRef = useRef(sideCollapsed);
   const ctxCollapsedRef = useRef(ctxCollapsed);
 
@@ -2928,6 +2930,10 @@ export function App() {
   }, [theme, themeStyle]);
 
   useEffect(() => {
+    if (suppressSidePersistRef.current) {
+      suppressSidePersistRef.current = false;
+      return;
+    }
     localStorage.setItem("reasonix.sideCollapsed", sideCollapsed ? "1" : "0");
   }, [sideCollapsed]);
 
@@ -2936,6 +2942,10 @@ export function App() {
   }, [sideCollapsed]);
 
   useEffect(() => {
+    if (suppressCtxPersistRef.current) {
+      suppressCtxPersistRef.current = false;
+      return;
+    }
     localStorage.setItem("reasonix.ctxCollapsed", ctxCollapsed ? "1" : "0");
   }, [ctxCollapsed]);
 
@@ -2952,6 +2962,24 @@ export function App() {
       const prev = responsiveStageRef.current;
 
       if (prev === null) {
+        if (next === RESPONSIVE_STAGE.NARROW) {
+          if (!ctxCollapsedRef.current) {
+            suppressCtxPersistRef.current = true;
+            setCtxCollapsed(true);
+            autoCtxCollapsedRef.current = true;
+          }
+          if (!sideCollapsedRef.current) {
+            suppressSidePersistRef.current = true;
+            setSideCollapsed(true);
+            autoSideCollapsedRef.current = true;
+          }
+        } else if (next === RESPONSIVE_STAGE.COMPACT) {
+          if (!ctxCollapsedRef.current) {
+            suppressCtxPersistRef.current = true;
+            setCtxCollapsed(true);
+            autoCtxCollapsedRef.current = true;
+          }
+        }
         responsiveStageRef.current = next;
         return;
       }
@@ -2960,28 +2988,34 @@ export function App() {
 
       if (next === RESPONSIVE_STAGE.WIDE) {
         if (autoCtxCollapsedRef.current) {
+          suppressCtxPersistRef.current = true;
           setCtxCollapsed(false);
           autoCtxCollapsedRef.current = false;
         }
         if (autoSideCollapsedRef.current) {
+          suppressSidePersistRef.current = true;
           setSideCollapsed(false);
           autoSideCollapsedRef.current = false;
         }
       } else if (next === RESPONSIVE_STAGE.COMPACT) {
         if (prev === RESPONSIVE_STAGE.WIDE && !ctxCollapsedRef.current) {
+          suppressCtxPersistRef.current = true;
           setCtxCollapsed(true);
           autoCtxCollapsedRef.current = true;
         }
         if (autoSideCollapsedRef.current) {
+          suppressSidePersistRef.current = true;
           setSideCollapsed(false);
           autoSideCollapsedRef.current = false;
         }
       } else if (next === RESPONSIVE_STAGE.NARROW) {
         if (!ctxCollapsedRef.current) {
+          suppressCtxPersistRef.current = true;
           setCtxCollapsed(true);
           autoCtxCollapsedRef.current = true;
         }
         if (!sideCollapsedRef.current) {
+          suppressSidePersistRef.current = true;
           setSideCollapsed(true);
           autoSideCollapsedRef.current = true;
         }
