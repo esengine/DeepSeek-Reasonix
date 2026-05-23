@@ -191,8 +191,8 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
     case "toast.hide":
       return { ...state, toasts: state.toasts.filter((t) => t.id !== event.id) };
 
-    case "live.show":
-      return appendCard(state, {
+    case "live.show": {
+      const card: LiveCard = {
         kind: "live",
         id: event.id,
         ts: event.ts,
@@ -200,7 +200,10 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         tone: event.tone,
         text: event.text,
         meta: event.meta,
-      });
+      };
+      const replaced = mutateCard(state, event.id, "live", () => card);
+      return replaced === state ? appendCard(state, card) : replaced;
+    }
 
     case "tip.show":
       return appendCard(state, {

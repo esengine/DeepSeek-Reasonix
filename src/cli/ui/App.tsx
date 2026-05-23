@@ -198,6 +198,8 @@ import { useEditHistory } from "./useEditHistory.js";
 import { useSessionInfo } from "./useSessionInfo.js";
 import { useSubagent } from "./useSubagent.js";
 
+const STASH_HINT_CARD_ID = "composer-stash-hint";
+
 function isBusyPromptCommand(text: string): boolean {
   const trimmed = text.trimStart();
   return trimmed.startsWith("/") || trimmed.startsWith("#") || detectBangCommand(trimmed) !== null;
@@ -1906,13 +1908,13 @@ function AppInner({
         const recalled = stashRef.current;
         stashRef.current = input;
         setInput(recalled);
-        log.pushInfo(t("composer.stashRecall"));
+        log.pushInfo(t("composer.stashRecall"), "info", STASH_HINT_CARD_ID);
       } else if (input.length > 0) {
         stashRef.current = input;
         setInput("");
-        log.pushInfo(t("composer.stashSaved"));
+        log.pushInfo(t("composer.stashSaved"), "info", STASH_HINT_CARD_ID);
       } else {
-        log.pushInfo(t("composer.stashNothing"));
+        log.pushInfo(t("composer.stashNothing"), "info", STASH_HINT_CARD_ID);
       }
       return;
     }

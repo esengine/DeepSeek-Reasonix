@@ -119,6 +119,38 @@ describe("ui reducer", () => {
     expect(s.cards).toHaveLength(0);
   });
 
+  it("replaces an existing live card when live.show reuses the id", () => {
+    const s = run([
+      {
+        type: "live.show",
+        id: "hint",
+        ts: 100,
+        variant: "stepProgress",
+        tone: "info",
+        text: "Stashed input",
+      },
+      {
+        type: "live.show",
+        id: "hint",
+        ts: 200,
+        variant: "stepProgress",
+        tone: "ok",
+        text: "Recalled input",
+        meta: "Alt+S",
+      },
+    ]);
+    expect(s.cards).toHaveLength(1);
+    expect(s.cards[0]).toMatchObject({
+      kind: "live",
+      id: "hint",
+      ts: 200,
+      variant: "stepProgress",
+      tone: "ok",
+      text: "Recalled input",
+      meta: "Alt+S",
+    });
+  });
+
   it("flags tool card as rejected when tool.end output carries plan-mode marker", () => {
     const planBounce = JSON.stringify({
       error: "write_file: unavailable in plan mode — ...",

@@ -21,6 +21,7 @@ export interface Scrollback {
   pushInfo(
     text: string,
     tone?: "info" | "ok" | "warn" | "err" | "ghost" | "brand" | "accent",
+    id?: string,
   ): string;
   /** Structured onboarding-tip card — replaces multi-line TIP strings stuffed into pushInfo. */
   pushTip(args: {
@@ -135,8 +136,7 @@ export function useScrollback(): Scrollback {
         });
         return id;
       },
-      pushInfo(text, tone = "info") {
-        const id = nextId("info");
+      pushInfo(text, tone = "info", id = nextId("info")) {
         dispatch({
           type: "live.show",
           id,
