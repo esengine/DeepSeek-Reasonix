@@ -47,6 +47,67 @@ function parseBody(raw: string): SettingsBody {
 // read time. Web sends new names in 0.12.x onward.
 const VALID_PRESETS = new Set(["auto", "flash", "pro", "fast", "smart", "max"]);
 const VALID_EFFORTS = new Set(["high", "max"]);
+// Legacy "mojeek" is intentionally absent — the engine was retired (PR
+// adding bing default). Old config values map to bing at read; the
+// dashboard can't write the dead name back.
+const VALID_WEB_SEARCH_ENGINES = new Set([
+  "bing",
+  "searxng",
+  "metaso",
+  "tavily",
+  "perplexity",
+  "exa",
+]);
+
+const VALID_EDIT_MODES = new Set(["review", "auto", "yolo"]);
+
+// Keep saveEditMode imported so future GET responses can include the
+// canonical default — used by the SPA when /api/overview hasn't yet
+// resolved. (Currently surfaced via /api/overview directly.)
+void saveEditMode;
+
+/** Twin of `config.savePreset`'s debug hook — the dashboard PATCH writes `cfg.preset` directly (no `savePreset()` round-trip), so instrument the bypass path too. Same env gate, same file. */
+function debugLogPresetWriteFromDashboard(preset: string): void {
+  const debugPath = process.env.REASONIX_DEBUG_PRESET;
+  if (!debugPath) return;
+  try {
+    const stack = new Error("trace").stack ?? "";
+    const line = `${new Date().toISOString()} dashboard PATCH /api/settings { preset: ${JSON.stringify(preset)} }\n${stack
+      .split("\n")
+      .slice(1, 8)
+      .map((l) => `  ${l.trim()}`)
+      .join("\n")}\n\n`;
+    appendFileSync(debugPath, line);
+  } catch {
+    /* diagnostic only */
+  }
+}
+
+export async function handleSettings(
+  method: string,
+  _rest: string[],
+  body: string,
+  ctx: DashboardContext,
+): Promise<ApiResult> {
+  if (method === "GET") {
+    const cfg = readConfig(ctx.configPath);
+    if (cfg.search === undefined) {
+      cfg.search = true;
+      writeConfig(cfg, ctx.configPath);
+    }
+    const live = ctx.loop;
+    return {
+      status: 200,
+      body: {
+        apiKey: cfg.apiKey ? redactKey(cfg.apiKey) : null,
+        apiKeySet: Boolean(cfg.apiKey),
+        baseUrl: cfg.baseUrl ?? null,
+        lang: getLanguage(),
+        preset: cfg.preset ?? "auto",
+        reasoningEffort: cfg.reasoningEffort ?? "max",
+        search: cfg.search !== false,
+        webSearchEngine: readWebSearchEngine(ctx.configPath),
+        editMode: ctx.getEditMode?.() ?? cfg.editMode ?? "review",
         session: cfg.session ?? null,
         model: live?.model ?? null,
         proNext: live?.proArmed ?? false,
@@ -249,64 +310,3 @@ const VALID_EFFORTS = new Set(["high", "max"]);
 
   return { status: 405, body: { error: "GET or POST only" } };
 }
-
-// Keep saveEditMode imported so future GET responses can include the
-// canonical default — used by the SPA when /api/overview hasn't yet
-// resolved. (Currently surfaced via /api/overview directly.)
-void saveEditMode;
-// Legacy "mojeek" is intentionally absent — the engine was retired (PR
-// adding bing default). Old config values map to bing at read; the
-// dashboard can't write the dead name back.
-const VALID_WEB_SEARCH_ENGINES = new Set([
-  "bing",
-  "searxng",
-  "metaso",
-  "tavily",
-  "perplexity",
-  "exa",
-]);
-
-const VALID_EDIT_MODES = new Set(["review", "auto", "yolo"]);
-
-/** Twin of `config.savePreset`'s debug hook — the dashboard PATCH writes `cfg.preset` directly (no `savePreset()` round-trip), so instrument the bypass path too. Same env gate, same file. */
-function debugLogPresetWriteFromDashboard(preset: string): void {
-  const debugPath = process.env.REASONIX_DEBUG_PRESET;
-  if (!debugPath) return;
-  try {
-    const stack = new Error("trace").stack ?? "";
-    const line = `${new Date().toISOString()} dashboard PATCH /api/settings { preset: ${JSON.stringify(preset)} }\n${stack
-      .split("\n")
-      .slice(1, 8)
-      .map((l) => `  ${l.trim()}`)
-      .join("\n")}\n\n`;
-    appendFileSync(debugPath, line);
-  } catch {
-    /* diagnostic only */
-  }
-}
-
-export async function handleSettings(
-  method: string,
-  _rest: string[],
-  body: string,
-  ctx: DashboardContext,
-): Promise<ApiResult> {
-  if (method === "GET") {
-    const cfg = readConfig(ctx.configPath);
-    if (cfg.search === undefined) {
-      cfg.search = true;
-      writeConfig(cfg, ctx.configPath);
-    }
-    const live = ctx.loop;
-    return {
-      status: 200,
-      body: {
-        apiKey: cfg.apiKey ? redactKey(cfg.apiKey) : null,
-        apiKeySet: Boolean(cfg.apiKey),
-        baseUrl: cfg.baseUrl ?? null,
-        lang: getLanguage(),
-        preset: cfg.preset ?? "auto",
-        reasoningEffort: cfg.reasoningEffort ?? "max",
-        search: cfg.search !== false,
-        webSearchEngine: readWebSearchEngine(ctx.configPath),
-        editMode: ctx.getEditMode?.() ?? cfg.editMode ?? "review",
