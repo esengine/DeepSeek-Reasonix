@@ -1,0 +1,98 @@
+[
+  {
+    "id": "read-only-explanation",
+    "language": "en",
+    "input": "Explain what the package.json scripts do. Do not edit files.",
+    "expectedRecommendation": "stay-light",
+    "expectedSignals": ["read-only"],
+    "tags": ["read-only", "small-task"]
+  },
+  {
+    "id": "small-single-file-fix",
+    "language": "en",
+    "input": "Fix a typo in README.md.",
+    "expectedRecommendation": "stay-light",
+    "expectedSignals": ["small-task", "single-file"],
+    "tags": ["small-task", "single-file"]
+  },
+  {
+    "id": "multi-file-api-rename",
+    "language": "en",
+    "input": "Rename the createClient API across src, update imports, and run tests.",
+    "expectedRecommendation": "strict-candidate",
+    "expectedSignals": ["multi-file", "refactor"],
+    "tags": ["multi-file", "refactor"]
+  },
+  {
+    "id": "module-move-with-references",
+    "language": "en",
+    "input": "Move the parser module, update all references, and refresh the tests.",
+    "expectedRecommendation": "strict-candidate",
+    "expectedSignals": ["multi-file", "refactor"],
+    "tags": ["multi-file", "refactor"]
+  },
+  {
+    "id": "dependency-migration",
+    "language": "en",
+    "input": "Upgrade zod, update package.json and pnpm-lock.yaml, then run npm install.",
+    "expectedRecommendation": "strict-candidate",
+    "expectedSignals": ["dependency-change", "package-or-config"],
+    "tags": ["dependency", "migration"]
+  },
+  {
+    "id": "configuration-migration",
+    "language": "en",
+    "input": "Migrate tsconfig and the GitHub Actions workflow for the new build.",
+    "expectedRecommendation": "strict-candidate",
+    "expectedSignals": ["migration", "package-or-config"],
+    "tags": ["config", "migration"]
+  },
+  {
+    "id": "failed-verification-revise-flow",
+    "language": "en",
+    "input": "Tests failed after step 2; revise_plan should replace the remaining steps.",
+    "expectedRecommendation": "strict-candidate",
+    "expectedSignals": ["failed-verification", "plan-revision"],
+    "tags": ["revise", "failure"]
+  },
+  {
+    "id": "explicit-strict-lifecycle",
+    "language": "en",
+    "input": "/plan strict refactor the shell gate and update the lifecycle tests",
+    "expectedRecommendation": "strict-candidate",
+    "expectedSignals": ["explicit-strict", "refactor"],
+    "tags": ["explicit-strict"]
+  },
+  {
+    "id": "broad-cleanup-suggest-plan",
+    "language": "en",
+    "input": "Clean up the routing layer across modules.",
+    "expectedRecommendation": "suggest-plan",
+    "expectedSignals": ["multi-file"],
+    "tags": ["suggest-plan", "multi-file"]
+  },
+  {
+    "id": "cancel-intent",
+    "language": "en",
+    "input": "Stop the current lifecycle task and cancel the plan.",
+    "expectedRecommendation": "stay-light",
+    "expectedSignals": ["cancel"],
+    "tags": ["cancel"]
+  },
+  {
+    "id": "zh-multi-file-refactor",
+    "language": "zh",
+    "input": "把 API 模块移动到新的目录，更新所有引用并跑测试。",
+    "expectedRecommendation": "strict-candidate",
+    "expectedSignals": ["multi-file", "refactor"],
+    "tags": ["zh", "multi-file", "refactor"]
+  },
+  {
+    "id": "zh-small-single-file-fix",
+    "language": "zh",
+    "input": "修一下 README 里的一个拼写错误。",
+    "expectedRecommendation": "stay-light",
+    "expectedSignals": ["small-task", "single-file"],
+    "tags": ["zh", "small-task", "single-file"]
+  }
+]
