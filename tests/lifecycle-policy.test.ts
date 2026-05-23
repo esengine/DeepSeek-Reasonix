@@ -109,9 +109,23 @@ describe("lifecycle risk policy", () => {
       reason: "high-risk-command",
     },
     {
+      name: "npm i dependency mutation",
+      toolName: "run_command",
+      args: { command: "npm i zod" },
+      risk: "high-risk",
+      reason: "high-risk-command",
+    },
+    {
       name: "npm uninstall dependency mutation",
       toolName: "run_command",
       args: { command: "npm uninstall left-pad" },
+      risk: "high-risk",
+      reason: "high-risk-command",
+    },
+    {
+      name: "npm un dependency mutation",
+      toolName: "run_command",
+      args: { command: "npm un left-pad" },
       risk: "high-risk",
       reason: "high-risk-command",
     },

@@ -180,9 +180,11 @@ function isPackageMutation(token: string | undefined): boolean {
   const normalized = token?.toLowerCase();
   return (
     normalized === "install" ||
+    normalized === "i" ||
     normalized === "add" ||
     normalized === "remove" ||
     normalized === "uninstall" ||
+    normalized === "un" ||
     normalized === "update" ||
     normalized === "upgrade" ||
     normalized === "up"
