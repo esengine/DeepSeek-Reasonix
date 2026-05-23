@@ -739,6 +739,8 @@ interface Tab {
   planTotalSteps: number;
   mcpRuntime: McpRuntime | null;
   mcpStatuses: Map<string, { kind: McpSpecStatus; reason?: string; toolCount?: number }>;
+  /** True while a session switch is in progress — prevents stale events from the old turn. */
+  switching: boolean;
 }
 
 let tabCounter = 0;
@@ -1232,6 +1234,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       planTotalSteps: 0,
       mcpRuntime: null,
       mcpStatuses: new Map(),
+      switching: false,
     };
     tab.currentSession = mintSessionFor(dir);
     tabs.set(tab.id, tab);
@@ -1386,20 +1389,28 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emit({ type: "$error", message: (err as Error).message }, tab.id);
       } finally {
         tab.aborter = null;
-        if (fromQQ && lastAssistantText && qqRuntime.channel && qqRuntime.replyThisTurn) {
-          await qqRuntime.channel.sendResponse(lastAssistantText).catch((err) => {
-            emit({ type: "$error", message: `qq send failed: ${(err as Error).message}` }, tab.id);
-          });
+        // If a session switch happened while this turn was running,
+        // suppress stale events to avoid UI state corruption (#1217).
+        if (!tab.switching) {
+          if (fromQQ && lastAssistantText && qqRuntime.channel && qqRuntime.replyThisTurn) {
+            await qqRuntime.channel.sendResponse(lastAssistantText).catch((err) => {
+              emit(
+                { type: "$error", message: `qq send failed: ${(err as Error).message}` },
+                tab.id,
+              );
+            });
+          }
+          qqRuntime.replyThisTurn = false;
+          emit({ type: "$turn_complete" }, tab.id);
+          if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
+            tab.completedStepIds.clear();
+            tab.planTotalSteps = 0;
+            emit({ type: "$plan_cleared" }, tab.id);
+          }
+          emitSessions(tab);
+          void emitBalance(tab);
         }
-        qqRuntime.replyThisTurn = false;
-        emit({ type: "$turn_complete" }, tab.id);
-        if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
-          tab.completedStepIds.clear();
-          tab.planTotalSteps = 0;
-          emit({ type: "$plan_cleared" }, tab.id);
-        }
-        emitSessions(tab);
-        void emitBalance(tab);
+        tab.switching = false;
       }
     });
   }
@@ -2090,6 +2101,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         const records = loadSessionMessages(msg.name);
         const meta = loadSessionMeta(msg.name);
+        // Mark switching BEFORE aborting — runTurn's finally block checks
+        // this flag to skip stale events (#1217).
+        tab.switching = true;
         abortTurn(tab);
         cancelPendingGates(tab);
         tab.currentSession = msg.name;
@@ -2133,6 +2147,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
+      // Mark switching BEFORE aborting — runTurn's finally block checks
+      // this flag to skip stale events (#1217).
+      tab.switching = true;
       abortTurn(tab);
       cancelPendingGates(tab);
       tab.currentSession = mintSessionFor(tab.rootDir);
