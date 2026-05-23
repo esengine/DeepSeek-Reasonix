@@ -4,7 +4,12 @@
 import "./heap-limit-launch.js";
 
 import { Command } from "commander";
-import { ensureDashboardToken, loadProxyConfig, readConfig } from "../config.js";
+import {
+  ensureDashboardToken,
+  loadDashboardEnabled,
+  loadProxyConfig,
+  readConfig,
+} from "../config.js";
 import { t } from "../i18n/index.js";
 import { VERSION } from "../index.js";
 import { listSessions } from "../memory/session.js";
@@ -200,7 +205,7 @@ program
         forceResume: !!opts.resume,
         forceNew: !!opts.new,
         budgetUsd: parseBudgetFlag(opts.budget),
-        noDashboard: opts.dashboard === false,
+        noDashboard: opts.dashboard === false || !loadDashboardEnabled(false),
         openDashboard: opts.openDashboard === true,
         dashboardPort: resolveDashboardPort(parseDashboardPortFlag(opts.dashboardPort), false),
         dashboardHost: resolveDashboardHost(opts.dashboardHost, false),
@@ -287,7 +292,7 @@ program
         mcpPrefix: opts.mcpPrefix,
         forceResume: continueOpts.forceResume,
         forceNew: !!opts.new,
-        noDashboard: opts.dashboard === false,
+        noDashboard: opts.dashboard === false || !loadDashboardEnabled(opts.config === false),
         openDashboard: opts.openDashboard === true,
         dashboardPort: resolveDashboardPort(
           parseDashboardPortFlag(opts.dashboardPort),

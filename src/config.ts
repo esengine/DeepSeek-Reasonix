@@ -185,6 +185,8 @@ export interface ReasonixConfig {
   /** Rows scrolled per single SGR mouse-wheel report. Default 1 — most terminals emit 2-5 reports per physical notch, so 1 already produces 2-5 rows per notch (#1419). Bump to 3-5 only if your terminal emits one report per notch and scrolling feels slow (#1494). Clamped to [1, 10]. */
   mouseWheelRows?: number;
   dashboard?: {
+    /** Whether the embedded dashboard auto-starts on launch. Default true. Set false to disable without passing --no-dashboard each time. */
+    enabled?: boolean;
     /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
     port?: number;
     /** Bind address (#968). Defaults to 127.0.0.1 (loopback only). Set to 0.0.0.0 / :: / a LAN IP to expose to other devices; the URL token is then the only auth, so keep it secret. */
@@ -408,6 +410,16 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
     /* missing or malformed → empty config */
   }
   return {};
+}
+
+/** Whether the dashboard auto-starts. Default true; only false when explicitly set in config. */
+export function loadDashboardEnabled(
+  noConfig = false,
+  path: string = defaultConfigPath(),
+): boolean {
+  if (noConfig) return true;
+  const v = readConfig(path).dashboard?.enabled;
+  return v !== false;
 }
 
 /** Get-or-mint a 32-byte hex dashboard token, persisting on first call so subsequent CLI boots reuse it (URLs survive restarts). Returns the existing token if it's already ≥16 chars. */
