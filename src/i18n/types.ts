@@ -247,6 +247,16 @@ export interface TranslationSchema {
     mcpWarn: string;
     unknownTheme: string;
     themeSaved: string;
+    noPendingEdits: string;
+    noMatchedApply: string;
+    noPendingDiscard: string;
+    noMatchedDiscard: string;
+    blocksStillPending: string;
+    nothingWritten: string;
+    discardedCount: string;
+    noEventsFor: string;
+    lookedAtFile: string;
+    sidecarHint: string;
   };
   mcpBrowse: {
     noResources: string;

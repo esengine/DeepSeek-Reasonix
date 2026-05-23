@@ -654,6 +654,20 @@ export const EN: TranslationSchema = {
     mcpWarn: "MCP {name} warn",
     unknownTheme: "unknown theme: {name}\navailable: {choices}",
     themeSaved: "theme saved: {name}\nactive on next launch: {active}",
+    noPendingEdits:
+      "nothing pending \u2014 the model hasn\u2019t proposed edits since the last /apply or /discard.",
+    noMatchedApply:
+      "\u25b8 no edits matched those indices \u2014 nothing applied. Use /apply with no args to commit them all.",
+    noPendingDiscard: "nothing pending to discard.",
+    noMatchedDiscard: "\u25b8 no edits matched those indices \u2014 nothing discarded.",
+    blocksStillPending:
+      "\u25b8 {count} edit block(s) still pending \u2014 /apply or /discard to clear them.",
+    nothingWritten: ". Nothing was written to disk.",
+    discardedCount: "\u25b8 discarded {count} pending edit block(s)",
+    noEventsFor: 'no events for session "{name}"',
+    lookedAtFile: "looked at: {path}",
+    sidecarHint:
+      "(sessions auto-create the sidecar on first turn \u2014 has this session run yet?)",
   },
   hooks: {
     head: "hook {tag} `{cmd}` {decision}{truncTag}",

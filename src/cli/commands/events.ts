@@ -2,6 +2,7 @@ import { eventLogPath } from "../../adapters/event-sink-jsonl.js";
 import { readEventLogFile } from "../../adapters/event-source-jsonl.js";
 import type { Event } from "../../core/events.js";
 import { replay as replayReducers } from "../../core/reducers.js";
+import { t } from "../../i18n/index.js";
 
 export interface EventsOptions {
   name: string;
@@ -17,9 +18,9 @@ export function eventsCommand(opts: EventsOptions): void {
   let events = readEventLogFile(path);
 
   if (events.length === 0) {
-    console.error(`no events for session "${opts.name}"`);
-    console.error(`looked at: ${path}`);
-    console.error("(sessions auto-create the sidecar on first turn — has this session run yet?)");
+    console.error(t("app.noEventsFor", { name: opts.name }));
+    console.error(t("app.lookedAtFile", { path }));
+    console.error(t("app.sidecarHint"));
     process.exit(1);
     return;
   }
