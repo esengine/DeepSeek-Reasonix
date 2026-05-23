@@ -1660,6 +1660,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   padding: 10px 14px;
 }
 
+.msg.user .msg-text,
+.msg.user .msg-text.user-pending {
+  white-space: pre-wrap;
+}
+
 .msg-text {
   font-size: 14px;
   line-height: 1.72;
