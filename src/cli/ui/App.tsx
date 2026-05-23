@@ -2450,8 +2450,16 @@ function AppInner({
   }, [log]);
 
   const getDashboardUrl = useCallback((): string | null => {
-    return dashboardRef.current?.url ?? null;
-  }, []);
+    const baseUrl = dashboardRef.current?.url ?? null;
+    if (!baseUrl || !session) return baseUrl;
+    try {
+      const url = new URL(baseUrl);
+      url.searchParams.set("session", session);
+      return url.toString();
+    } catch {
+      return baseUrl;
+    }
+  }, [session]);
 
   // Auto-start the dashboard once the TUI is mounted unless the user
   // opted out with --no-dashboard. The whole point is discoverability:
@@ -2464,14 +2472,15 @@ function AppInner({
     startDashboard()
       .then((url) => {
         if (!url) return;
-        log.pushInfo(`/dashboard  →  ${url}`);
-        if (openDashboard) openUrl(url);
+        const sessionUrl = getDashboardUrl() ?? url;
+        log.pushInfo(`/dashboard  →  ${sessionUrl}`);
+        if (openDashboard) openUrl(sessionUrl);
       })
       .catch((err) => {
         const reason = err instanceof Error ? err.message : String(err);
         log.pushInfo(t("ui.dashboardAutoStartFailed", { reason }));
       });
-  }, [noDashboard, openDashboard, startDashboard, log]);
+  }, [noDashboard, openDashboard, startDashboard, log, getDashboardUrl]);
 
   // Tear the dashboard down on unmount so the port doesn't leak when
   // the TUI exits via /exit, Ctrl+C, etc.
