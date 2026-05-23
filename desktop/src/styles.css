@@ -1665,6 +1665,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   line-height: 1.72;
   color: var(--fg);
   text-wrap: pretty;
+  white-space: pre-wrap;
 }
 .msg-text p {
   margin: 0 0 12px;
