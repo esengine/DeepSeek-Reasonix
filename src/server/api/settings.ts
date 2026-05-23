@@ -291,6 +291,7 @@ export async function handleSettings(
       const sanitized: Record<string, "flash" | "pro"> = {};
       for (const [name, value] of Object.entries(fields.subagentModels)) {
         if (typeof name !== "string" || !name) continue;
+        if (name === "__proto__" || name === "constructor" || name === "prototype") continue;
         if (value === "flash" || value === "pro") sanitized[name] = value;
       }
       cfg.subagentModels = Object.keys(sanitized).length > 0 ? sanitized : undefined;
