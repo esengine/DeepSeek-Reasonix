@@ -2101,9 +2101,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         const records = loadSessionMessages(msg.name);
         const meta = loadSessionMeta(msg.name);
-        // Mark switching BEFORE aborting — runTurn's finally block checks
-        // this flag to skip stale events (#1217).
-        tab.switching = true;
+        // Only set switching flag when there's a live turn to abort —
+        // otherwise the flag stays true and suppresses the first turn's events (#1217).
+        if (tab.aborter) tab.switching = true;
         abortTurn(tab);
         cancelPendingGates(tab);
         tab.currentSession = msg.name;
@@ -2147,9 +2147,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
-      // Mark switching BEFORE aborting — runTurn's finally block checks
-      // this flag to skip stale events (#1217).
-      tab.switching = true;
+      // Only set switching flag when there's a live turn to abort —
+      // otherwise the flag stays true and suppresses the first turn's events (#1217).
+      if (tab.aborter) tab.switching = true;
       abortTurn(tab);
       cancelPendingGates(tab);
       tab.currentSession = mintSessionFor(tab.rootDir);
