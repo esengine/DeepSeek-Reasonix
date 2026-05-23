@@ -739,6 +739,8 @@ interface Tab {
   planTotalSteps: number;
   mcpRuntime: McpRuntime | null;
   mcpStatuses: Map<string, { kind: McpSpecStatus; reason?: string; toolCount?: number }>;
+  /** True while a session switch is in progress — prevents stale events from the old turn. */
+  switching: boolean;
 }
 
 let tabCounter = 0;
@@ -1232,6 +1234,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       planTotalSteps: 0,
       mcpRuntime: null,
       mcpStatuses: new Map(),
+      switching: false,
     };
     tab.currentSession = mintSessionFor(dir);
     tabs.set(tab.id, tab);
@@ -2090,6 +2093,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         const records = loadSessionMessages(msg.name);
         const meta = loadSessionMeta(msg.name);
+        // Only set switching flag when there's a live turn to abort —
+        // otherwise the flag stays true and suppresses the first turn's events (#1217).
+        if (tab.aborter) tab.switching = true;
         abortTurn(tab);
         cancelPendingGates(tab);
         tab.currentSession = msg.name;
@@ -2133,6 +2139,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
+      // Only set switching flag when there's a live turn to abort —
+      // otherwise the flag stays true and suppresses the first turn's events (#1217).
+      if (tab.aborter) tab.switching = true;
       abortTurn(tab);
       cancelPendingGates(tab);
       tab.currentSession = mintSessionFor(tab.rootDir);
