@@ -67,6 +67,34 @@ describe("hydrateCardsFromMessages", () => {
     });
   });
 
+  it("hydrates run_command exit markers into tool card exitCode", () => {
+    const msgs: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call-1",
+            type: "function",
+            function: { name: "run_command", arguments: '{"command":"node test.mjs"}' },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call-1",
+        content: "$ node test.mjs\n[exit 1]\nAssertionError: expected 9000",
+      },
+    ];
+    const cards = hydrateCardsFromMessages(msgs);
+    expect(cards[0]).toMatchObject({
+      kind: "tool",
+      name: "run_command",
+      exitCode: 1,
+      done: true,
+    });
+  });
+
   it("keeps raw string args when the tool_call arguments aren't valid JSON", () => {
     const msgs: ChatMessage[] = [
       {

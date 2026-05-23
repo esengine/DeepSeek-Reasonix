@@ -133,6 +133,36 @@ describe("ui reducer", () => {
     expect(card.done).toBe(true);
   });
 
+  it("parses run_command exit markers into tool card exitCode", () => {
+    const s = run([
+      { type: "tool.start", id: "t1", name: "run_command", args: { command: "node test.mjs" } },
+      {
+        type: "tool.end",
+        id: "t1",
+        output: "$ node test.mjs\n[exit 1]\nAssertionError: expected 9000",
+        elapsedMs: 5,
+      },
+    ]);
+    const card = s.cards[0] as ToolCard;
+    expect(card.exitCode).toBe(1);
+    expect(card.done).toBe(true);
+  });
+
+  it("keeps explicit tool.end exitCode ahead of parsed shell output", () => {
+    const s = run([
+      { type: "tool.start", id: "t1", name: "run_command", args: { command: "node test.mjs" } },
+      {
+        type: "tool.end",
+        id: "t1",
+        output: "$ node test.mjs\n[exit 1]\nAssertionError",
+        exitCode: 2,
+        elapsedMs: 5,
+      },
+    ]);
+    const card = s.cards[0] as ToolCard;
+    expect(card.exitCode).toBe(2);
+  });
+
   it("does not flag rejection on a regular error output", () => {
     const s = run([
       { type: "tool.start", id: "t1", name: "edit_file", args: { path: "x" } },

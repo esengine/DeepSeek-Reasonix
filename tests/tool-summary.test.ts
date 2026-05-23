@@ -1,7 +1,12 @@
 /** summarizeToolResult — pure function; per-tool-name + structured-payload branches. */
 
 import { describe, expect, it } from "vitest";
-import { formatDuration, summarizeToolResult } from "../src/cli/ui/tool-summary.js";
+import {
+  extractToolExitCode,
+  formatDuration,
+  selectToolPreviewLines,
+  summarizeToolResult,
+} from "../src/cli/ui/tool-summary.js";
 
 describe("summarizeToolResult — error envelopes", () => {
   it("flags ERROR:-prefixed text as a real error and strips the prefix", () => {
@@ -178,5 +183,118 @@ describe("summarizeToolResult — generic fallback", () => {
     const out = summarizeToolResult("anything", "a".repeat(500));
     expect(out.summary).toMatch(/…/);
     expect(out.summary.length).toBeLessThanOrEqual(80);
+  });
+});
+
+describe("extractToolExitCode", () => {
+  it("parses shell result markers from run_command output", () => {
+    expect(extractToolExitCode("run_command", "$ node test.mjs\n[exit 1]\nError")).toBe(1);
+    expect(extractToolExitCode("run_command", "$ echo ok\n[exit 0]\nok")).toBe(0);
+  });
+
+  it("parses shell result markers from run_background output", () => {
+    expect(extractToolExitCode("run_background", "$ npm test\n[exit 2]\nfailed")).toBe(2);
+  });
+
+  it("ignores non-shell tools and non-marker text", () => {
+    expect(extractToolExitCode("read_file", "$ node test.mjs\n[exit 1]\nError")).toBeUndefined();
+    expect(extractToolExitCode("run_command", "the docs mention [exit 1] inline")).toBeUndefined();
+    expect(extractToolExitCode("run_command", "$ cmd\n[exit ?]\nunknown")).toBeUndefined();
+  });
+});
+
+describe("selectToolPreviewLines", () => {
+  const lineText = (rows: ReturnType<typeof selectToolPreviewLines>["rows"]): string[] =>
+    rows.flatMap((row) => (row.kind === "line" ? [row.text] : []));
+
+  it("pins Python unittest failure lines before noisy cleanup tail", () => {
+    const output = [
+      "$ python3 test_retry_policy.py",
+      "[exit 1]",
+      "test_exponential_backoff (__main__.RetryTests) ... FAIL",
+      "AssertionError: 300 != 800 : third retry should wait 800ms",
+      "cleanup: checked worker shard 1/30",
+      "cleanup: checked worker shard 2/30",
+      "cleanup: checked worker shard 3/30",
+      "cleanup: checked worker shard 4/30",
+      "cleanup: checked worker shard 5/30",
+      "cleanup: checked worker shard 6/30",
+    ].join("\n");
+
+    const rows = selectToolPreviewLines({
+      toolName: "run_command",
+      output,
+      exitCode: 1,
+      tailLines: 2,
+      verbose: false,
+    }).rows;
+
+    const lines = lineText(rows);
+    expect(lines).toContain("test_exponential_backoff (__main__.RetryTests) ... FAIL");
+    expect(lines).toContain("AssertionError: 300 != 800 : third retry should wait 800ms");
+    expect(lines.at(-2)).toBe("cleanup: checked worker shard 5/30");
+    expect(lines.at(-1)).toBe("cleanup: checked worker shard 6/30");
+    expect(rows.some((row) => row.kind === "hidden")).toBe(true);
+  });
+
+  it("pins Node assertion mismatch lines instead of showing only the process tail", () => {
+    const output = [
+      "$ node test.mjs",
+      "[exit 1]",
+      "AssertionError [ERR_ASSERTION]: VIP25 should reduce cart",
+      "actual: 10200",
+      "expected: 9000",
+      "operator: strictEqual",
+      "}",
+      "Node.js v22.22.0",
+    ].join("\n");
+
+    const rows = selectToolPreviewLines({
+      toolName: "run_command",
+      output,
+      exitCode: 1,
+      tailLines: 2,
+      verbose: false,
+    }).rows;
+
+    const lines = lineText(rows);
+    expect(lines).toContain("AssertionError [ERR_ASSERTION]: VIP25 should reduce cart");
+    expect(lines).toContain("actual: 10200");
+    expect(lines).toContain("expected: 9000");
+    expect(lines.at(-1)).toBe("Node.js v22.22.0");
+  });
+
+  it("keeps successful command previews on the ordinary tail path", () => {
+    const output = [
+      "$ node test.mjs",
+      "[exit 0]",
+      "AssertionError string in a successful fixture should not pin",
+      "line 1",
+      "line 2",
+      "line 3",
+    ].join("\n");
+
+    const rows = selectToolPreviewLines({
+      toolName: "run_command",
+      output,
+      exitCode: 0,
+      tailLines: 2,
+      verbose: false,
+    }).rows;
+
+    expect(lineText(rows)).toEqual(["line 2", "line 3"]);
+  });
+
+  it("keeps non-shell tools on the ordinary tail path", () => {
+    const output = "AssertionError: hidden\nmiddle\nlast";
+    const rows = selectToolPreviewLines({
+      toolName: "read_file",
+      output,
+      exitCode: 1,
+      tailLines: 1,
+      verbose: false,
+    }).rows;
+
+    expect(lineText(rows)).toEqual(["last"]);
   });
 });

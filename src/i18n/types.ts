@@ -762,6 +762,8 @@ export interface TranslationSchema {
     moreHitsPlural: string;
     earlierLine: string;
     earlierLines: string;
+    hiddenLine: string;
+    hiddenLines: string;
     earlierStackLine: string;
     earlierStackLines: string;
     agent: string;

@@ -1,3 +1,4 @@
+import { extractToolExitCode } from "../tool-summary.js";
 import type {
   Card,
   CardId,
@@ -61,17 +62,19 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       return mutateCard(state, event.id, "tool", (c) => ({ ...c, output: c.output + event.text }));
 
     case "tool.end": {
-      const finalOutput = event.output ?? "";
-      const rejected = isPlanModeRejection(finalOutput);
-      return mutateCard(state, event.id, "tool", (c) => ({
-        ...c,
-        done: true,
-        output: event.output ?? c.output,
-        exitCode: event.exitCode,
-        elapsedMs: event.elapsedMs,
-        ...(event.aborted ? { aborted: true } : {}),
-        ...(rejected ? { rejected: true } : {}),
-      }));
+      return mutateCard(state, event.id, "tool", (c) => {
+        const finalOutput = event.output ?? c.output;
+        const rejected = isPlanModeRejection(finalOutput);
+        return {
+          ...c,
+          done: true,
+          output: finalOutput,
+          exitCode: event.exitCode ?? extractToolExitCode(c.name, finalOutput),
+          elapsedMs: event.elapsedMs,
+          ...(event.aborted ? { aborted: true } : {}),
+          ...(rejected ? { rejected: true } : {}),
+        };
+      });
     }
 
     case "tool.retry":
