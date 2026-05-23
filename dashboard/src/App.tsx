@@ -38,6 +38,7 @@ import type {
   SettingsPatch,
   SkillInfo,
 } from "./protocol";
+import { readSessionFromUrl, writeSessionToUrl } from "./lib/session-url";
 import { type QQDesktopSettingsState } from "./qq-settings";
 import { Composer, type SlashCmd } from "./ui/composer";
 import { ContextPanel } from "./ui/context-panel";
@@ -1421,6 +1422,30 @@ function TabRuntime({
     if (!active) return;
     loadQQSettings();
   }, [active, loadQQSettings]);
+
+  const initialUrlSession = useRef<string | null>(readSessionFromUrl());
+  const urlSessionDispatched = useRef(false);
+  useEffect(() => {
+    if (!active) return;
+    if (urlSessionDispatched.current) return;
+    if (!state.ready) return;
+    if (state.sessions.length === 0) return;
+    urlSessionDispatched.current = true;
+    const target = initialUrlSession.current;
+    if (!target) return;
+    if (target === state.currentSession) return;
+    if (!state.sessions.some((s) => s.name === target)) {
+      writeSessionToUrl(null);
+      return;
+    }
+    sendRpc({ cmd: "session_load", name: target });
+  }, [active, state.ready, state.sessions, state.currentSession, sendRpc]);
+
+  useEffect(() => {
+    if (!active) return;
+    if (!urlSessionDispatched.current) return;
+    writeSessionToUrl(state.currentSession ?? null);
+  }, [active, state.currentSession]);
 
   useEffect(() => {
     // Every TabRuntime stays mounted (display:none on inactive), so each registers its own keydown — without this gate Cmd+N would fire newChat() in every tab and wipe the inactive ones' sessions.
