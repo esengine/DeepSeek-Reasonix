@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   clearDashboardToken,
   ensureDashboardToken,
+  loadDashboardEnabled,
   readConfig,
   saveDashboardPort,
 } from "../src/config.js";
@@ -83,5 +84,57 @@ describe("dashboard token + port persistence", () => {
     clearDashboardToken(cfgPath);
     const after = readFileSync(cfgPath, "utf8");
     expect(after).toBe(before);
+  });
+});
+
+describe("loadDashboardEnabled", () => {
+  let dir: string;
+  let cfgPath: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "reasonix-dash-enabled-"));
+    cfgPath = join(dir, "config.json");
+  });
+  afterEach(() => {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("defaults to true when no config file exists", () => {
+    expect(loadDashboardEnabled(false, cfgPath)).toBe(true);
+  });
+
+  it("defaults to true when dashboard section is absent", () => {
+    writeFileSync(cfgPath, JSON.stringify({ apiKey: "sk-x" }));
+    expect(loadDashboardEnabled(false, cfgPath)).toBe(true);
+  });
+
+  it("defaults to true when enabled field is absent", () => {
+    writeFileSync(cfgPath, JSON.stringify({ dashboard: { port: 8080 } }));
+    expect(loadDashboardEnabled(false, cfgPath)).toBe(true);
+  });
+
+  it("returns true when explicitly set to true", () => {
+    writeFileSync(cfgPath, JSON.stringify({ dashboard: { enabled: true } }));
+    expect(loadDashboardEnabled(false, cfgPath)).toBe(true);
+  });
+
+  it("returns false when explicitly set to false", () => {
+    writeFileSync(cfgPath, JSON.stringify({ dashboard: { enabled: false } }));
+    expect(loadDashboardEnabled(false, cfgPath)).toBe(false);
+  });
+
+  it("returns true when noConfig is true, ignoring config value", () => {
+    writeFileSync(cfgPath, JSON.stringify({ dashboard: { enabled: false } }));
+    expect(loadDashboardEnabled(true, cfgPath)).toBe(true);
+  });
+
+  it("preserves other dashboard fields", () => {
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({ dashboard: { enabled: false, port: 9090, host: "0.0.0.0" } }),
+    );
+    expect(loadDashboardEnabled(false, cfgPath)).toBe(false);
+    const cfg = readConfig(cfgPath);
+    expect(cfg.dashboard?.port).toBe(9090);
+    expect(cfg.dashboard?.host).toBe("0.0.0.0");
   });
 });
