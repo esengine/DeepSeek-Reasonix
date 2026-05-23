@@ -246,7 +246,20 @@ export type DashboardEvent =
       contentDelta?: string;
       reasoningDelta?: string;
     }
-  | { kind: "assistant_final"; id: string; text: string; reasoning?: string }
+  | {
+      kind: "assistant_final";
+      id: string;
+      text: string;
+      reasoning?: string;
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        prompt_cache_hit_tokens?: number;
+        prompt_cache_miss_tokens?: number;
+      };
+      costUsd?: number;
+    }
   | { kind: "tool_start"; id: string; toolName: string; args?: string }
   | { kind: "tool"; id: string; toolName: string; content: string; args?: string }
   | { kind: "warning"; id: string; text: string }

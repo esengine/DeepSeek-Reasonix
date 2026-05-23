@@ -231,6 +231,11 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
           a: ({ href, children }) => <SafeLink href={href}>{children}</SafeLink>,
           p: ({ children }) => <p>{withFilePills(children)}</p>,
           li: ({ children }) => <li>{withFilePills(children)}</li>,
+          table: ({ children }) => (
+            <div className="markdown-table-wrap">
+              <table>{children}</table>
+            </div>
+          ),
           td: ({ children }) => <td>{withFilePills(children)}</td>,
         }}
       >

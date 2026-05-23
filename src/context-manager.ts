@@ -47,9 +47,12 @@ export const PREFLIGHT_MECHANICAL_TARGET_FRACTION = 0.7;
  * `unexpected end of hex escape` truncation error. Token preflight alone misses this because the
  * model's 1M-token context window is far wider than the gateway's body limit. */
 export const MAX_BODY_BYTES = 700_000;
-/** Target body size after mechanical truncate when bytes — not tokens — were the trigger. */
+
 export const MAX_BODY_BYTES_TARGET = 500_000;
-/** Hard deadline for semantic fold summaries so a hung request cannot stall the turn loop. */
+
+/** Force fold when log entries exceed this count — prevents unbounded memory growth. */
+export const MAX_LOG_ENTRIES_FOR_FOLD = 500;
+
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
 /** Prepended to fold summary content so the model knows it's a synthesized recap. */
 export const HISTORY_FOLD_MARKER =
@@ -164,6 +167,15 @@ export class ContextManager {
       return { kind: "exit-with-summary", ...base };
     }
     if (alreadyFoldedThisTurn) return { kind: "none", ...base };
+    // Force fold when log grows too long — prevents unbounded memory growth.
+    if (this.deps.log.length > MAX_LOG_ENTRIES_FOR_FOLD) {
+      return {
+        kind: "fold",
+        ...base,
+        tailBudget: Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION),
+        aggressive: false,
+      };
+    }
     if (ratio > HISTORY_FOLD_AGGRESSIVE_THRESHOLD) {
       return {
         kind: "fold",

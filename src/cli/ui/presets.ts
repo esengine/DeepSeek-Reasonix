@@ -39,7 +39,7 @@ export const PRESET_DESCRIPTIONS: Record<
   },
   pro: {
     headline: "v4-pro always",
-    cost: "~3× flash (5/31 discount) / ~12× full price · for hard multi-turn work",
+    cost: "~3× flash · for hard multi-turn work",
   },
 };
 

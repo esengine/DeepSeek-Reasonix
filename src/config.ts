@@ -1,5 +1,6 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
+import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -407,6 +408,35 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
     /* missing or malformed → empty config */
   }
   return {};
+}
+
+/** Get-or-mint a 32-byte hex dashboard token, persisting on first call so subsequent CLI boots reuse it (URLs survive restarts). Returns the existing token if it's already ≥16 chars. */
+export function ensureDashboardToken(path: string = defaultConfigPath()): string {
+  const cfg = readConfig(path);
+  const existing = cfg.dashboard?.token?.trim();
+  if (existing && existing.length >= 16) return existing;
+  const minted = randomBytes(32).toString("hex");
+  const next: ReasonixConfig = { ...cfg, dashboard: { ...cfg.dashboard, token: minted } };
+  writeConfig(next, path);
+  return minted;
+}
+
+/** Persist the actual port the server bound to so the next boot reuses it (and falls back to ephemeral if it's taken). */
+export function saveDashboardPort(port: number, path: string = defaultConfigPath()): void {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return;
+  const cfg = readConfig(path);
+  if (cfg.dashboard?.port === port) return;
+  const next: ReasonixConfig = { ...cfg, dashboard: { ...cfg.dashboard, port } };
+  writeConfig(next, path);
+}
+
+/** Wipe the persisted dashboard token — next boot mints a fresh one. Used by `/dashboard reset-token`. */
+export function clearDashboardToken(path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  if (!cfg.dashboard?.token) return;
+  const { token: _drop, ...rest } = cfg.dashboard;
+  const next: ReasonixConfig = { ...cfg, dashboard: rest };
+  writeConfig(next, path);
 }
 
 export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPath()): void {

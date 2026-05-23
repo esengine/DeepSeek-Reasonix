@@ -33,15 +33,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Build (tsup + dashboard)
+        run: npm run build
+
       - name: Test (vitest + coverage)
         run: npm run test:coverage
 
       - name: Coverage job summary
         if: always()
         run: node scripts/coverage-summary.mjs
-
-      - name: Build (tsup)
-        run: npm run build
 
       # Smoke-test the bench harnesses themselves. --dry skips all LLM
       # calls, so this catches wiring regressions (task factories, CLI

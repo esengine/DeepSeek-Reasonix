@@ -3,12 +3,24 @@ import { deleteSession, listSessions, sessionPath } from "../../memory/session.j
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
 
+interface SessionToolCall {
+  id: string;
+  name: string;
+  /** Raw arguments string the model emitted (typically JSON). */
+  arguments: string;
+}
+
 interface SessionMessage {
   role: string;
   content?: string;
+  /** Assistant `reasoning_content` (R1 / V4 thinking). */
+  reasoning?: string;
+  /** Assistant tool_calls — emitted alongside `content` for tool-call turns. */
+  toolCalls?: SessionToolCall[];
+  /** Tool-result message: the call id this row answers. */
+  toolCallId?: string;
+  /** Tool-result message: the tool name (legacy `tool_name` or `name`). */
   toolName?: string;
-  /** Raw record. Kept for debug; SPA reads from `role`/`content` first. */
-  raw?: unknown;
 }
 
 function parseTranscript(path: string, maxBytes = 4 * 1024 * 1024): SessionMessage[] {
@@ -31,8 +43,23 @@ function parseTranscript(path: string, maxBytes = 4 * 1024 * 1024): SessionMessa
       const msg: SessionMessage = { role };
       if (typeof rec.content === "string") msg.content = rec.content;
       else if (rec.content !== undefined) msg.content = JSON.stringify(rec.content);
+      if (typeof rec.reasoning_content === "string") msg.reasoning = rec.reasoning_content;
+      if (Array.isArray(rec.tool_calls)) {
+        const calls: SessionToolCall[] = [];
+        for (const c of rec.tool_calls as Array<Record<string, unknown>>) {
+          const fn = (c?.function ?? {}) as Record<string, unknown>;
+          const id = typeof c?.id === "string" ? c.id : "";
+          const name = typeof fn.name === "string" ? fn.name : "";
+          const args = typeof fn.arguments === "string" ? fn.arguments : "";
+          if (id || name) calls.push({ id, name, arguments: args });
+        }
+        if (calls.length > 0) msg.toolCalls = calls;
+      }
+      if (typeof rec.tool_call_id === "string") msg.toolCallId = rec.tool_call_id;
+      else if (typeof rec.toolCallId === "string") msg.toolCallId = rec.toolCallId;
       if (typeof rec.tool_name === "string") msg.toolName = rec.tool_name;
-      if (typeof rec.toolName === "string") msg.toolName = rec.toolName;
+      else if (typeof rec.toolName === "string") msg.toolName = rec.toolName;
+      else if (typeof rec.name === "string" && role === "tool") msg.toolName = rec.name;
       out.push(msg);
     } catch {
       /* skip malformed line — same rule as the rest of Reasonix's JSONL readers */
@@ -47,9 +74,12 @@ export async function handleSessions(
   _body: string,
   ctx: DashboardContext,
 ): Promise<ApiResult> {
-  // Listing.
+  // Listing — workspace-scoped when the CLI knows its cwd. Without this,
+  // every subagent transcript and every other-workspace session lands in the
+  // sidebar; users have reported 10 000+ entries in `~/.reasonix/sessions/`.
   if (method === "GET" && rest.length === 0) {
-    const sessions = listSessions();
+    const workspaceFilter = ctx.getCurrentCwd?.();
+    const sessions = workspaceFilter ? listSessions({ workspaceFilter }) : listSessions();
     const currentName = ctx.getSessionName?.() ?? null;
     return {
       status: 200,
@@ -60,6 +90,7 @@ export async function handleSessions(
           size: s.size,
           messageCount: s.messageCount,
           mtime: s.mtime.getTime(),
+          summary: s.meta?.summary,
         })),
         currentSession: currentName,
         canSwitch: Boolean(ctx.switchSession),
@@ -67,8 +98,10 @@ export async function handleSessions(
     };
   }
 
-  // New session — mints a fresh session by calling switchSession(undefined),
-  // which routes through the same path the SessionPicker "new" branch takes.
+  // New session — mints a fresh session by calling switchSession(undefined).
+  // We echo the new session name back so the dashboard can update its own
+  // currentSession (and the URL via #1586's mirror effect) without having to
+  // diff the listing.
   if (method === "POST" && rest.length === 1 && rest[0] === "new") {
     if (!ctx.switchSession) {
       return {
@@ -78,7 +111,7 @@ export async function handleSessions(
     }
     const result = ctx.switchSession(undefined);
     if (!result.ok) return { status: 500, body: { error: result.reason } };
-    return { status: 200, body: { ok: true } };
+    return { status: 200, body: { ok: true, name: ctx.getSessionName?.() ?? null } };
   }
 
   if (rest.length === 0) {

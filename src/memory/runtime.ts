@@ -90,16 +90,12 @@ export class ImmutablePrefix {
 
 export class AppendOnlyLog {
   private _entries: ChatMessage[] = [];
-  /** Threshold for reporting unbounded growth — not a hard cap. */
-  private static readonly GROWTH_WARN_THRESHOLD = 500;
-  private _warnedAtSize = 0;
 
   append(message: ChatMessage): void {
     if (!message || typeof message !== "object" || !("role" in message)) {
       throw new Error(`invalid log entry: ${JSON.stringify(message)}`);
     }
     this._entries.push(message);
-    this.maybeReportGrowth();
   }
 
   extend(messages: ChatMessage[]): void {
@@ -109,7 +105,6 @@ export class AppendOnlyLog {
   /** The one append-only-breaking path — reserved for `/compact` + recovery. Use `append()` otherwise. */
   compactInPlace(replacement: ChatMessage[]): void {
     this._entries = [...replacement];
-    this._warnedAtSize = 0;
   }
 
   get entries(): readonly ChatMessage[] {
@@ -122,16 +117,6 @@ export class AppendOnlyLog {
 
   get length(): number {
     return this._entries.length;
-  }
-
-  /** Report when log grows beyond threshold — helps diagnose memory issues. */
-  private maybeReportGrowth(): void {
-    if (this._entries.length <= AppendOnlyLog.GROWTH_WARN_THRESHOLD) return;
-    if (this._entries.length - this._warnedAtSize < 100) return;
-    this._warnedAtSize = this._entries.length;
-    process.stderr.write(
-      `[memory] AppendOnlyLog: ${this._entries.length} entries — consider /compact\n`,
-    );
   }
 }
 
