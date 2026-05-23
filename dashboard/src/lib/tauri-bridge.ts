@@ -344,6 +344,7 @@ function emitServerSettings(settings: any, overview?: any): void {
     preset: settings?.preset ?? overview?.preset ?? "flash",
     editor: "code",
     webSearchEngine: settings?.webSearchEngine ?? "bing",
+    subagentModels: settings?.subagentModels ?? {},
     version: overview?.version ?? "",
     baseUrl: settings?.baseUrl ?? "",
     apiKeyPrefix: settings?.apiKey ?? "",

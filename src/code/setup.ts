@@ -6,6 +6,7 @@ import {
   loadJavaSourceEnabled,
   loadProjectShellAllowed,
   loadResolvedSkillPaths,
+  loadSubagentModels,
   loadToolRateLimit,
   readConfig,
   searchEnabled,
@@ -94,6 +95,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   registerSkillTools(tools, {
     projectRoot: opts.rootDir,
     customSkillPaths: loadResolvedSkillPaths(opts.rootDir),
+    subagentModels: loadSubagentModels(),
     onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal) => {
       if (!subagentClient) subagentClient = new DeepSeekClient({ baseUrl: loadBaseUrl() });

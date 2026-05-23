@@ -26,6 +26,7 @@ import {
   loadRateLimit,
   loadReasoningEffort,
   loadSemanticEmbeddingUserConfig,
+  loadSubagentModels,
   loadTheme,
   loadToolRateLimit,
   markEditModeHintShown,
@@ -44,6 +45,7 @@ import {
   savePreset,
   saveReasoningEffort,
   saveSemanticEmbeddingConfig,
+  saveSubagentModels,
   saveTheme,
   searchEnabled,
   webSearchEngine,
@@ -766,6 +768,34 @@ describe("config", () => {
       // so an explicit `/search-engine mojeek` later still rejects loudly.
       writeConfig({ webSearchEngine: "mojeek" as unknown as "bing" }, path);
       expect(webSearchEngine(path)).toBe("bing");
+    });
+  });
+
+  describe("subagentModels", () => {
+    it("round-trips flash/pro entries", () => {
+      saveSubagentModels({ explore: "pro", review: "flash" }, path);
+      expect(loadSubagentModels(path)).toEqual({ explore: "pro", review: "flash" });
+    });
+
+    it("drops unknown values without touching valid entries", () => {
+      writeConfig(
+        {
+          subagentModels: {
+            explore: "pro",
+            // biome-ignore lint/suspicious/noExplicitAny: invalid input we want to test the loader's filter
+            bogus: "fast" as any,
+          },
+        },
+        path,
+      );
+      expect(loadSubagentModels(path)).toEqual({ explore: "pro" });
+    });
+
+    it("clearing all entries removes the field from config", () => {
+      saveSubagentModels({ explore: "pro" }, path);
+      saveSubagentModels({}, path);
+      expect(loadSubagentModels(path)).toEqual({});
+      expect(readConfig(path).subagentModels).toBeUndefined();
     });
   });
 });

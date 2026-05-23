@@ -270,6 +270,7 @@ export type SettingsEvent = {
   preset: PresetName;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
+  subagentModels?: Record<string, "flash" | "pro">;
   version: string;
 };
 
@@ -302,6 +303,7 @@ export type SettingsPatch = {
   preset?: PresetName;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
+  subagentModels?: Record<string, "flash" | "pro">;
 };
 
 export type QQConfigPatch = {

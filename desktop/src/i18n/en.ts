@@ -267,6 +267,9 @@ export const en = {
     skillsLoaded: "Loaded · {count} · invoke via / commands",
     skillsEmpty:
       "No skills available. Create SKILL.md under ~/.reasonix/skills/ or .reasonix/skills/ in your project root.",
+    subagentModelFlash: "flash",
+    subagentModelPro: "pro",
+    subagentModelHint: "Model used when this skill spawns its isolated subagent",
     // Memory
     memorySection: "Long-term memory",
     memoryDesc:

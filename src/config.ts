@@ -225,6 +225,8 @@ export interface ReasonixConfig {
   skills?: {
     paths?: string[];
   };
+  /** Per-skill model override for `runAs: subagent` skills, keyed by skill name. Empty / missing entry → spawn site's default. */
+  subagentModels?: Record<string, "flash" | "pro">;
   /** Enable the `java_source` tool for finding and decompiling Java class source. Default off. */
   javaSource?: boolean;
   /** User-declared extensions to the built-in memory types (#709). Unknown types round-trip even without a declaration; declaring one lets you attach a default priority + lifecycle. */
@@ -778,6 +780,31 @@ export function saveSkillPaths(
   cfg.skills = { ...(cfg.skills ?? {}), paths: normalized };
   writeConfig(cfg, path);
   return normalized;
+}
+
+export function loadSubagentModels(
+  path: string = defaultConfigPath(),
+): Record<string, "flash" | "pro"> {
+  const raw = readConfig(path).subagentModels;
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, "flash" | "pro"> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    if (value === "flash" || value === "pro") out[name] = value;
+  }
+  return out;
+}
+
+export function saveSubagentModels(
+  map: Record<string, "flash" | "pro">,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  const out: Record<string, "flash" | "pro"> = {};
+  for (const [name, value] of Object.entries(map)) {
+    if (value === "flash" || value === "pro") out[name] = value;
+  }
+  cfg.subagentModels = Object.keys(out).length > 0 ? out : undefined;
+  writeConfig(cfg, path);
 }
 
 export function addSkillPath(

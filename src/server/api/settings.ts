@@ -29,6 +29,7 @@ interface SettingsBody {
   model?: unknown;
   budgetUsd?: unknown;
   skillPaths?: unknown;
+  subagentModels?: unknown;
 }
 
 function parseBody(raw: string): SettingsBody {
@@ -119,6 +120,7 @@ export async function handleSettings(
           cfg.skills?.paths ?? [],
           ctx.getCurrentCwd?.() ?? process.cwd(),
         ),
+        subagentModels: cfg.subagentModels ?? {},
         // Hint to the SPA which fields require restart.
         appliesAt: {
           apiKey: "next-session",
@@ -130,6 +132,7 @@ export async function handleSettings(
           model: "next-turn",
           budgetUsd: "live",
           skillPaths: "next-session",
+          subagentModels: "next-skill-run",
         },
       },
     };
@@ -272,6 +275,26 @@ export async function handleSettings(
         paths: normalizeSkillPaths(raw, ctx.getCurrentCwd?.() ?? process.cwd()),
       };
       changed.push("skillPaths");
+    }
+
+    if (fields.subagentModels !== undefined) {
+      if (
+        typeof fields.subagentModels !== "object" ||
+        fields.subagentModels === null ||
+        Array.isArray(fields.subagentModels)
+      ) {
+        return {
+          status: 400,
+          body: { error: "subagentModels must be an object mapping skill name → 'flash' | 'pro'" },
+        };
+      }
+      const sanitized: Record<string, "flash" | "pro"> = {};
+      for (const [name, value] of Object.entries(fields.subagentModels)) {
+        if (typeof name !== "string" || !name) continue;
+        if (value === "flash" || value === "pro") sanitized[name] = value;
+      }
+      cfg.subagentModels = Object.keys(sanitized).length > 0 ? sanitized : undefined;
+      changed.push("subagentModels");
     }
 
     if (changed.length > 0) {

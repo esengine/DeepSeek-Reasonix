@@ -199,6 +199,7 @@ export type Settings = {
   preset: "flash" | "pro";
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  subagentModels?: Record<string, "flash" | "pro">;
   version: string;
 };
 
@@ -783,6 +784,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           preset: ev.preset,
           editor: ev.editor,
           webSearchEngine: ev.webSearchEngine,
+          subagentModels: ev.subagentModels,
           version: ev.version,
         },
       };

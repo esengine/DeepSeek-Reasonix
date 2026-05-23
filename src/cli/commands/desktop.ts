@@ -29,6 +29,7 @@ import {
   loadReasoningEffort,
   loadRecentWorkspaces,
   loadResolvedSkillPaths,
+  loadSubagentModels,
   loadWorkspaceDir,
   pushRecentWorkspace,
   readConfig,
@@ -40,6 +41,7 @@ import {
   saveEditor,
   savePreset,
   saveReasoningEffort,
+  saveSubagentModels,
   saveWorkspaceDir,
   writeConfig,
 } from "../../config.js";
@@ -114,6 +116,7 @@ type InMessage = { tabId?: string } & (
       preset?: "flash" | "pro";
       editor?: string;
       webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+      subagentModels?: Record<string, "flash" | "pro">;
     }
   | { cmd: "qq_status_get" }
   | { cmd: "qq_connect" }
@@ -162,6 +165,7 @@ interface SettingsEvent {
   preset: "flash" | "pro";
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  subagentModels?: Record<string, "flash" | "pro">;
   version: string;
 }
 
@@ -564,6 +568,7 @@ function emitSettings(tab: Tab): void {
       preset: tab.currentPreset,
       editor: loadEditor(),
       webSearchEngine: readWebSearchEngine(),
+      subagentModels: loadSubagentModels(),
       version: VERSION,
     },
     tab.id,
@@ -693,6 +698,7 @@ function emitSkills(tab: Tab): void {
     const store = new SkillStore({
       projectRoot: tab.rootDir,
       customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+      subagentModels: loadSubagentModels(),
     });
     const items = store.list().map((s) => ({
       name: s.name,
@@ -2189,6 +2195,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           const cfg = readConfig();
           cfg.webSearchEngine = msg.webSearchEngine;
           writeConfig(cfg);
+        }
+        if (msg.subagentModels !== undefined) {
+          saveSubagentModels(msg.subagentModels);
+          emitSkills(tab);
         }
         if (msg.preset !== undefined) {
           tab.currentPreset = canonicalPresetName(msg.preset);

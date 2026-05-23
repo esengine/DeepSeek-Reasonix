@@ -266,6 +266,74 @@ describe("SkillStore", () => {
     expect(store.customRoots().map((r) => r.status)).toEqual(["missing", "not-directory"]);
   });
 
+  describe("subagentModels override", () => {
+    it("applies flash/pro override onto builtin subagent skills", () => {
+      const store = new SkillStore({
+        homeDir: home,
+        projectRoot,
+        subagentModels: { explore: "pro", review: "flash" },
+      });
+      const byName = new Map(store.list().map((s) => [s.name, s]));
+      expect(byName.get("explore")?.model).toBe("deepseek-v4-pro");
+      expect(byName.get("review")?.model).toBe("deepseek-v4-flash");
+    });
+
+    it("leaves inline skills (test) untouched even when their name appears in the override map", () => {
+      const store = new SkillStore({
+        homeDir: home,
+        projectRoot,
+        // `test` is shipped runAs=inline — overrides must not apply to inline skills.
+        subagentModels: { test: "pro" },
+      });
+      const test = store.list().find((s) => s.name === "test");
+      expect(test?.runAs).toBe("inline");
+      expect(test?.model).toBeUndefined();
+    });
+
+    it("no override → frontmatter model: still wins (no regression)", () => {
+      writeSkillDir(
+        projectRoot,
+        "project",
+        "custom-sub",
+        {
+          name: "custom-sub",
+          description: "custom subagent skill",
+          runAs: "subagent",
+          model: "deepseek-v4-pro",
+        },
+        "body",
+        home,
+      );
+      const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+      const sub = store.list().find((s) => s.name === "custom-sub");
+      expect(sub?.model).toBe("deepseek-v4-pro");
+    });
+
+    it("override beats frontmatter model: when both are set", () => {
+      writeSkillDir(
+        projectRoot,
+        "project",
+        "custom-sub",
+        {
+          name: "custom-sub",
+          description: "custom subagent skill",
+          runAs: "subagent",
+          model: "deepseek-v4-pro",
+        },
+        "body",
+        home,
+      );
+      const store = new SkillStore({
+        homeDir: home,
+        projectRoot,
+        disableBuiltins: true,
+        subagentModels: { "custom-sub": "flash" },
+      });
+      const sub = store.list().find((s) => s.name === "custom-sub");
+      expect(sub?.model).toBe("deepseek-v4-flash");
+    });
+  });
+
   describe("create() — /skill new scaffold (#366)", () => {
     it("writes a project-scope stub when projectRoot is set", () => {
       const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });

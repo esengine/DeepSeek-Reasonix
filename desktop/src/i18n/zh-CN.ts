@@ -259,6 +259,9 @@ export const zhCN: typeof en = {
     skillsLoaded: "已加载 · {count} · 通过 / 命令调用",
     skillsEmpty:
       "没有可用技能。可在 ~/.reasonix/skills/ 或 项目根/.reasonix/skills/ 下创建 SKILL.md。",
+    subagentModelFlash: "flash",
+    subagentModelPro: "pro",
+    subagentModelHint: "技能派生独立 subagent 时使用的模型",
     memorySection: "长期记忆",
     memoryDesc: "当前版本依赖内置 CLAUDE.md / AGENTS.md 注入；项目级别记忆在内核侧维护。",
     appMode: "应用模式",
