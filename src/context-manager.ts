@@ -54,6 +54,9 @@ export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
 /** Prepended to fold summary content so the model knows it's a synthesized recap. */
 export const HISTORY_FOLD_MARKER =
   "[CONVERSATION HISTORY SUMMARY — earlier turns folded for context efficiency]\n\n";
+/** Maximum log entries before triggering an automatic fold (regardless of token usage).
+ *  Each entry retains message content, tool calls, and role metadata — 500 entries ≈ 1 MB. */
+export const MAX_LOG_ENTRIES_FOR_FOLD = 500;
 /** Header that precedes preserved skill bodies in a fold's synthesized assistant message. */
 export const SKILL_PIN_MEMO_HEADER = "[Active skill memos — preserved verbatim across the fold:]";
 /** Matches the wrapper emitted by `run_skill` so the fold can lift bodies out before summarizing. */
@@ -164,6 +167,16 @@ export class ContextManager {
       return { kind: "exit-with-summary", ...base };
     }
     if (alreadyFoldedThisTurn) return { kind: "none", ...base };
+    // Fold when the log grows too large, even if token usage is low — prevents unbounded
+    // memory growth during long sessions with many small tool calls.
+    if (this.deps.log.length > MAX_LOG_ENTRIES_FOR_FOLD) {
+      return {
+        kind: "fold",
+        ...base,
+        tailBudget: Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION),
+        aggressive: false,
+      };
+    }
     if (ratio > HISTORY_FOLD_AGGRESSIVE_THRESHOLD) {
       return {
         kind: "fold",
