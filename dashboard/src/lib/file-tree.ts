@@ -66,6 +66,11 @@ export function useProjectTree() {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const refresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     if (MODE === "standalone") {
@@ -74,11 +79,13 @@ export function useProjectTree() {
       return;
     }
     let cancelled = false;
+    setLoading(true);
     api<ProjectTreeResult>("/project-tree")
       .then((r) => {
         if (!cancelled) {
           setTree(r.tree);
           setLoading(false);
+          setError(null);
         }
       })
       .catch((err) => {
@@ -89,9 +96,9 @@ export function useProjectTree() {
         }
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshKey]);
 
-  return { tree, loading, error };
+  return { tree, loading, error, refresh };
 }
 
 interface FileReadResult {

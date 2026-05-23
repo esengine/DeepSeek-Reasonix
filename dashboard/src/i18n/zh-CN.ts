@@ -43,6 +43,7 @@ export const zhCN = {
     clearFailed: "/clear 失败：{error}",
     chatSendBtn: "发送",
     fileTreeTitle: "文件",
+    refreshTree: "刷新文件树",
     codeViewerTitle: "代码查看器",
     chatPanelTitle: "对话",
     loadingFiles: "正在加载项目文件…",

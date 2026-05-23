@@ -43,6 +43,7 @@ export const en = {
     clearFailed: "/clear failed: {error}",
     chatSendBtn: "Send",
     fileTreeTitle: "Files",
+    refreshTree: "Refresh file tree",
     codeViewerTitle: "Code Viewer",
     chatPanelTitle: "Chat",
     loadingFiles: "Loading project files…",

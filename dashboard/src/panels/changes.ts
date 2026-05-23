@@ -147,7 +147,7 @@ function renderDiffHtml(patch: string, style: "unified" | "split"): string {
 
 export function ChangesPanel() {
   useLang();
-  const { tree, loading } = useProjectTree();
+  const { tree, loading, refresh: refreshTree } = useProjectTree();
   const {
     expanded,
     openFiles,
@@ -350,6 +350,7 @@ export function ChangesPanel() {
           <${ChatPane}
             comments=${comments}
             deleteComment=${deleteComment}
+            onToolComplete=${refreshTree}
           />
         </div>
       </div>
@@ -553,6 +554,12 @@ export function ChangesPanel() {
         <div class="changes-panel-header">
           <span class="glyph">▼</span>
           <span>${t("changes.fileTreeTitle")}</span>
+          <button
+            class="btn-icon"
+            title=${t("changes.refreshTree")}
+            onClick=${() => refreshTree()}
+            style=${{ marginLeft: "auto", cursor: "pointer", background: "none", border: "none", color: "inherit", fontSize: "14px" }}
+          >↻</button>
         </div>
         <${FileTreeToggle}
           showOnlyModified=${showOnlyModified}
@@ -1458,6 +1465,7 @@ type PopoverKind = "slash" | "mention" | null;
 interface ChatPaneProps {
   comments: LineComment[];
   deleteComment: (id: string) => void;
+  onToolComplete?: () => void;
 }
 
 function summarizeTool(activeTool: ActiveToolState | null): string | null {
@@ -1668,6 +1676,14 @@ function ChatPane(props: ChatPaneProps) {
             toolArgs: dash.args,
           },
         ]);
+        // Auto-refresh file tree when file-modifying tools complete
+        const fileTools = new Set([
+          "delete_file", "delete_directory", "write_file", "edit_file",
+          "multi_edit", "create_directory", "move_file", "copy_file",
+        ]);
+        if (dash.toolName && fileTools.has(dash.toolName) && props.onToolComplete) {
+          setTimeout(() => props.onToolComplete!(), 300);
+        }
         return;
       }
       if (dash.kind === "warning" || dash.kind === "error" || dash.kind === "info") {
@@ -1689,7 +1705,7 @@ function ChatPane(props: ChatPaneProps) {
       es.close();
       cancelStreamingRaf();
     };
-  }, [refetchCanonicalState, cancelStreamingRaf]);
+  }, [refetchCanonicalState, cancelStreamingRaf, props.onToolComplete]);
 
   useEffect(() => {
     if (!shouldAutoScroll.current) return;
