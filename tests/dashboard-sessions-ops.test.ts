@@ -95,11 +95,49 @@ describe("dashboard /sessions: new / switch / delete (attached)", () => {
     expect(names).toEqual(["alpha", "beta"]);
   });
 
-  it("POST /api/sessions/new calls switchSession(undefined)", async () => {
+  it("POST /api/sessions/new calls switchSession(undefined) and echoes the new name", async () => {
     const base = handle!.url.split("?")[0]!;
     const r = await call(`${base}api/sessions/new`, { method: "POST" });
     expect(r.status).toBe(200);
     expect(switchCalls).toEqual([undefined]);
+    expect(r.body.name).toBe("(fresh)");
+  });
+
+  it("GET /api/sessions filters out other-workspace sessions when getCurrentCwd is wired", async () => {
+    await handle?.close();
+    const otherWorkspace = mkdtempSync(join(tmpdir(), "reasonix-other-ws-"));
+    try {
+      // alpha+beta live in `dir`; this third session belongs to a different cwd.
+      appendSessionMessage("gamma", { role: "user", content: "noise" });
+      patchSessionMeta("gamma", { workspace: otherWorkspace });
+      // …and a subagent-style session with no workspace meta at all.
+      appendSessionMessage("subagent-sub-zz-202605170235", { role: "user", content: "x" });
+
+      handle = await startDashboardServer(
+        {
+          mode: "attached",
+          configPath: join(dir, "config.json"),
+          usageLogPath: join(dir, "usage.jsonl"),
+          getSessionName: () => currentName,
+          getCurrentCwd: () => dir,
+          switchSession: (name) => {
+            switchCalls.push(name);
+            currentName = name ?? "(fresh)";
+            return { ok: true as const };
+          },
+        },
+        { token: TOKEN },
+      );
+
+      const base = handle!.url.split("?")[0]!;
+      const r = await call(`${base}api/sessions`);
+      expect(r.status).toBe(200);
+      const names = r.body.sessions.map((s: any) => s.name).sort();
+      // gamma (other workspace) + subagent (no meta) MUST be filtered out.
+      expect(names).toEqual(["alpha", "beta"]);
+    } finally {
+      rmSync(otherWorkspace, { recursive: true, force: true });
+    }
   });
 
   it("POST /api/sessions/<name>/switch calls switchSession(name)", async () => {

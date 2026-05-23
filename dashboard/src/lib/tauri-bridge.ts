@@ -504,7 +504,17 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
       try {
         const data = await apiFetch("sessions/new", { method: "POST" });
         if (data?.ok) {
-          // 新建成功后重新拉取会话列表
+          const newName = typeof data.name === "string" ? data.name : "default";
+          // Treat a fresh session like a loaded-empty session so the reducer
+          // resets state.currentSession + messages. `$session_empty` is for
+          // "file exists but unparseable" and would render a scary error.
+          emitEvent({
+            type: "$session_loaded",
+            tabId: "tab-1",
+            name: newName,
+            messages: [],
+            carryover: { totalCostUsd: 0, cacheHitTokens: 0, cacheMissTokens: 0 },
+          });
           const listData = await apiFetch("sessions");
           if (listData?.sessions) {
             const items = listData.sessions.map((s: any) => ({
@@ -515,8 +525,6 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
             }));
             emitEvent({ type: "$sessions", tabId: "tab-1", items });
           }
-          // 清空当前聊天
-          emitEvent({ type: "$session_empty", tabId: "tab-1", name: "new-session", sizeBytes: 0 });
         }
       } catch { /* fallback */ }
       break;

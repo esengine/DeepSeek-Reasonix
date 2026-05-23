@@ -47,9 +47,12 @@ export async function handleSessions(
   _body: string,
   ctx: DashboardContext,
 ): Promise<ApiResult> {
-  // Listing.
+  // Listing — workspace-scoped when the CLI knows its cwd. Without this,
+  // every subagent transcript and every other-workspace session lands in the
+  // sidebar; users have reported 10 000+ entries in `~/.reasonix/sessions/`.
   if (method === "GET" && rest.length === 0) {
-    const sessions = listSessions();
+    const workspaceFilter = ctx.getCurrentCwd?.();
+    const sessions = workspaceFilter ? listSessions({ workspaceFilter }) : listSessions();
     const currentName = ctx.getSessionName?.() ?? null;
     return {
       status: 200,
@@ -60,6 +63,7 @@ export async function handleSessions(
           size: s.size,
           messageCount: s.messageCount,
           mtime: s.mtime.getTime(),
+          summary: s.meta?.summary,
         })),
         currentSession: currentName,
         canSwitch: Boolean(ctx.switchSession),
@@ -67,8 +71,10 @@ export async function handleSessions(
     };
   }
 
-  // New session — mints a fresh session by calling switchSession(undefined),
-  // which routes through the same path the SessionPicker "new" branch takes.
+  // New session — mints a fresh session by calling switchSession(undefined).
+  // We echo the new session name back so the dashboard can update its own
+  // currentSession (and the URL via #1586's mirror effect) without having to
+  // diff the listing.
   if (method === "POST" && rest.length === 1 && rest[0] === "new") {
     if (!ctx.switchSession) {
       return {
@@ -78,7 +84,7 @@ export async function handleSessions(
     }
     const result = ctx.switchSession(undefined);
     if (!result.ok) return { status: 500, body: { error: result.reason } };
-    return { status: 200, body: { ok: true } };
+    return { status: 200, body: { ok: true, name: ctx.getSessionName?.() ?? null } };
   }
 
   if (rest.length === 0) {
