@@ -200,7 +200,7 @@ export const zhCN = {
     presetTitle: "预设 — 模型承诺",
     presetAutoTitle: "auto — flash 基线；困难轮次自动升级为 pro（NEEDS_PRO / 失败阈值）",
     presetFlashTitle: "flash — 始终 flash；不自动升级。/pro 仍可用于一次性手动提升",
-    presetProTitle: "pro — 始终 pro；约 3 倍 flash 成本（5/31 折扣）。锁定困难的架构工作。",
+    presetProTitle: "pro — 始终 pro；约 3 倍 flash 成本。锁定困难的架构工作。",
     editGateTitle: "编辑门控 — Shift+Tab 在 TUI 中循环",
     editReviewTitle: "review — 编辑和非允许列表的 shell 命令都会先询问",
     editAutoTitle: "auto — 编辑自动应用，shell 仍会询问",

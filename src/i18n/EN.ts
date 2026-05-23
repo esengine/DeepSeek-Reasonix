@@ -785,8 +785,7 @@ export const EN: TranslationSchema = {
         "  auto   v4-flash → v4-pro on hard turns  ← default · cheap when easy, smart when hard",
       helpPresetFlash:
         "  flash  v4-flash always                  cheapest · predictable per-turn cost",
-      helpPresetPro:
-        "  pro    v4-pro   always                  ~3× flash (5/31) · hard multi-turn work",
+      helpPresetPro: "  pro    v4-pro   always                  ~3× flash · hard multi-turn work",
       helpSessionsTitle: "Sessions (auto-enabled by default, named 'default'):",
       helpSessionCustom: "  reasonix chat --session <name>   use a different named session",
       helpSessionNone: "  reasonix chat --no-session       disable persistence for this run",

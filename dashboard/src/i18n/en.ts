@@ -203,7 +203,7 @@ export const en = {
     presetFlashTitle:
       "flash — always flash; no auto-escalate. /pro still works for one-shot manual",
     presetProTitle:
-      "pro — always pro; ~3× flash cost (5/31 discount). Locks in on hard architecture work.",
+      "pro — always pro; ~3× flash cost. Locks in on hard architecture work.",
     editGateTitle: "edit gate — Shift+Tab cycles in TUI",
     editReviewTitle: "review — both edits and non-allowlisted shell ask first",
     editAutoTitle: "auto — edits auto-apply, shell still asks",
