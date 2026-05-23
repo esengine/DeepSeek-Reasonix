@@ -1,22 +1,14 @@
 import { type Dispatch, type SetStateAction, useState } from "react";
 
 export interface PresetMode {
-  /** Canonical preset bucket — `pro` if loop is on v4-pro, otherwise `auto`/`flash` (set by the dashboard's `applyPresetLive`). */
-  preset: "auto" | "flash" | "pro";
-  setPreset: Dispatch<SetStateAction<"auto" | "flash" | "pro">>;
-  /** `/pro` armed → next turn runs on v4-pro. State (rather than reading `loop.proArmed`) so toggles trigger StatsPanel re-render. */
-  proArmed: boolean;
-  setProArmed: Dispatch<SetStateAction<boolean>>;
-  /** True for the duration of a turn that ran on v4-pro because of /pro arming or `⇧ pro` auto-escalation. */
-  turnOnPro: boolean;
-  setTurnOnPro: Dispatch<SetStateAction<boolean>>;
+  /** Canonical preset bucket — `pro` if loop is on v4-pro, otherwise `flash`. */
+  preset: "flash" | "pro";
+  setPreset: Dispatch<SetStateAction<"flash" | "pro">>;
 }
 
-export function usePresetMode(model: string, initialPreset?: "auto" | "flash" | "pro"): PresetMode {
-  const [preset, setPreset] = useState<"auto" | "flash" | "pro">(
-    () => initialPreset ?? (model === "deepseek-v4-pro" ? "pro" : "auto"),
+export function usePresetMode(model: string, initialPreset?: "flash" | "pro"): PresetMode {
+  const [preset, setPreset] = useState<"flash" | "pro">(
+    () => initialPreset ?? (model === "deepseek-v4-pro" ? "pro" : "flash"),
   );
-  const [proArmed, setProArmed] = useState(false);
-  const [turnOnPro, setTurnOnPro] = useState(false);
-  return { preset, setPreset, proArmed, setProArmed, turnOnPro, setTurnOnPro };
+  return { preset, setPreset };
 }

@@ -27,8 +27,7 @@ import {
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
 
-/** Legacy `fast|smart|max` kept for back-compat with existing config.json files. */
-export type PresetName = "auto" | "flash" | "pro" | "fast" | "smart" | "max";
+export type PresetName = "flash" | "pro";
 
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates. */
 export type EditMode = "review" | "auto" | "yolo";
@@ -1199,7 +1198,9 @@ export function saveDesktopOpenTabs(
 }
 
 export function loadPreset(path: string = defaultConfigPath()): PresetName | undefined {
-  return readConfig(path).preset;
+  const raw = readConfig(path).preset as unknown;
+  if (raw === "flash" || raw === "pro") return raw;
+  return raw === undefined ? undefined : "flash";
 }
 
 /** Persist preset so `/preset pro` (or `/model deepseek-v4-pro`) sticks across relaunches. */

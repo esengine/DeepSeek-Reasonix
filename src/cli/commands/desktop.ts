@@ -111,7 +111,7 @@ type InMessage = { tabId?: string } & (
       budgetUsd?: number | null;
       baseUrl?: string;
       workspaceDir?: string;
-      preset?: "auto" | "flash" | "pro";
+      preset?: "flash" | "pro";
       editor?: string;
       webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
     }
@@ -159,7 +159,7 @@ interface SettingsEvent {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
-  preset: "auto" | "flash" | "pro";
+  preset: "flash" | "pro";
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   version: string;
@@ -720,7 +720,7 @@ interface Tab {
   readonly id: string;
   rootDir: string;
   currentSession: string;
-  currentPreset: "auto" | "flash" | "pro";
+  currentPreset: "flash" | "pro";
   currentModel: string;
   budgetUsd: number | undefined;
   /** null while the tab is bootstrapping — see `initTabToolset`. UI gates input on `$ready`, which only fires once this is set. */
@@ -769,7 +769,6 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = loadReasoningEffort();
-  const { autoEscalate } = resolvePreset(tab.currentPreset);
   const loop = new CacheFirstLoop({
     client,
     prefix,
@@ -778,7 +777,6 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     budgetUsd: tab.budgetUsd,
     session: tab.currentSession,
     reasoningEffort,
-    autoEscalate,
   });
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };

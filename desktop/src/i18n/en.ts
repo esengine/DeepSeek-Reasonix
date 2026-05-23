@@ -247,7 +247,6 @@ export const en = {
     apiKeySet: "Set · {prefix}…",
     // model descriptions
     defaultModelCurrent: "Default model · currently {model}",
-    modelAutoDesc: "Starts with flash, upgrades to pro for complex tasks — speed + quality.",
     modelFlashDesc: "General-purpose chat model — fast, long context, cost-friendly.",
     modelProDesc: "Deep reasoning model — interpretable chain-of-thought before final answer.",
     ctxWindow: "Context",
@@ -328,7 +327,6 @@ export const en = {
     copied: "copied",
   },
   preset: {
-    autoDesc: "Flash → Pro auto-upgrade",
     flashDesc: "Fast, cheap, long context",
     proDesc: "Deep reasoning",
   },

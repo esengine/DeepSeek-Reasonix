@@ -102,7 +102,7 @@ export function Wizard({
     language: getLanguage(),
     theme: resolveThemePreference(initial?.theme ?? loadTheme(), process.env.REASONIX_THEME),
     apiKey: existingApiKey ?? "",
-    preset: initial?.preset ?? "auto",
+    preset: initial?.preset ?? "flash",
     selectedCatalog: deriveInitialCatalog(initial?.mcp ?? []),
     catalogArgs: {},
   }));
@@ -709,8 +709,8 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
 }
 
 function presetItems(): SelectItem<PresetName>[] {
-  return (["auto", "flash", "pro"] as const).map((name) => ({
-    value: name as PresetName,
+  return (["flash", "pro"] as const).map((name) => ({
+    value: name,
     label: `${name} — ${PRESET_DESCRIPTIONS[name].headline}`,
     hint: PRESET_DESCRIPTIONS[name].cost,
   }));

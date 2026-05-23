@@ -17,8 +17,6 @@ export interface StatsPanelProps {
   editMode?: EditMode;
   balance?: { currency: string; total: number } | null;
   updateAvailable?: string | null;
-  proArmed?: boolean;
-  escalated?: boolean;
   budgetUsd?: number | null;
   rootDir?: string;
   sessionName?: string | null;
@@ -30,8 +28,6 @@ export function StatsPanel({
   editMode,
   balance,
   updateAvailable,
-  proArmed,
-  escalated,
   budgetUsd,
   rootDir,
   sessionName,
@@ -42,8 +38,6 @@ export function StatsPanel({
       <ChromeRow
         editMode={editMode}
         planMode={planMode}
-        proArmed={proArmed ?? false}
-        escalated={escalated ?? false}
         summary={summary}
         coldStart={coldStart}
         rootDir={rootDir}
@@ -62,8 +56,6 @@ export function StatsPanel({
 function ChromeRow({
   editMode,
   planMode,
-  proArmed,
-  escalated,
   summary,
   coldStart,
   rootDir,
@@ -73,8 +65,6 @@ function ChromeRow({
 }: {
   editMode?: EditMode;
   planMode?: boolean;
-  proArmed: boolean;
-  escalated: boolean;
   summary: SessionSummary;
   coldStart: boolean;
   rootDir?: string;
@@ -83,12 +73,6 @@ function ChromeRow({
   balance?: { currency: string; total: number } | null;
 }) {
   const modePill = pickModePill(planMode, editMode);
-  const proLabel = t("statsPanel.pro");
-  const proPill = escalated
-    ? { label: proLabel, color: COLOR.err }
-    : proArmed
-      ? { label: proLabel, color: COLOR.warn }
-      : null;
   const projectName = rootDir ? basename(rootDir) : null;
   const cachePct = (summary.cacheHitRatio * 100).toFixed(1);
   const cacheColor =
@@ -100,13 +84,10 @@ function ChromeRow({
   const cacheLabel = "[c ▰▰▰▰▰▰ 100%]";
   const updateLabel = updateAvailable ? `↑ ${updateAvailable}` : "";
 
-  // Greedy width-aware fit. Layout (every gap = 2 cells, applied as suffix
-  // to update/mode/pro and as prefix to balance/cache):
-  //   [brand][·project][›session]<spacer>[update][mode][pro][cost][balance][cache]
-  // Always shown: brand, project (if rootDir), mode (if set), pro (if armed),
-  //               cost. These carve fixedLeft / fixedRight first.
+  // Greedy width-aware fit. Layout (every gap = 2 cells):
+  //   [brand][·project][›session]<spacer>[update][mode][cost][balance][cache]
+  // Always shown: brand, project (if rootDir), mode (if set), cost.
   // Optional, dropped greedy by priority: balance > cache > session > update.
-  // The flexbox spacer can shrink to 0, so no minimum reserve.
   const { stdout } = useStdout();
   const cols = (stdout?.columns ?? 80) - 2; // subtract paddingX={1} on both sides
   const SEP_DOT = stringWidth("  ·  ");
@@ -116,8 +97,7 @@ function ChromeRow({
   const fixedLeft =
     stringWidth("◈ reasonix") + (projectName ? SEP_DOT + stringWidth(projectName) : 0);
   const modeW = modePill ? GAP + stringWidth(`[${modePill.label}]`) : 0;
-  const proW = proPill ? GAP + stringWidth(`[${proPill.label}]`) : 0;
-  const fixedRight = modeW + proW + stringWidth(costLabel);
+  const fixedRight = modeW + stringWidth(costLabel);
   let budget = cols - fixedLeft - fixedRight;
 
   const balW = balance ? GAP + stringWidth(balanceLabel) : 0;
@@ -173,14 +153,6 @@ function ChromeRow({
         <>
           <Text color={modePill.color} bold>
             {`[${modePill.label}]`}
-          </Text>
-          <Text>{"  "}</Text>
-        </>
-      ) : null}
-      {proPill ? (
-        <>
-          <Text color={proPill.color} bold>
-            {`[${proPill.label}]`}
           </Text>
           <Text>{"  "}</Text>
         </>

@@ -205,10 +205,8 @@ function isBusyPromptCommand(text: string): boolean {
 
 export interface AppProps {
   model: string;
-  /** Preset resolved at launch; keeps flash distinct from auto when both use deepseek-v4-flash. */
-  preset?: "auto" | "flash" | "pro";
-  /** Whether flash may auto-upgrade hard turns to pro. */
-  autoEscalate?: boolean;
+  /** Preset resolved at launch (flash | pro). */
+  preset?: "flash" | "pro";
   system: string;
   /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Must produce the same shape as `system` was built from. */
   rebuildSystem?: () => string;
@@ -438,7 +436,6 @@ type AppInnerProps = AppProps & {
 function AppInner({
   model,
   preset: initialPreset,
-  autoEscalate,
   system,
   rebuildSystem,
   transcript,
@@ -483,7 +480,7 @@ function AppInner({
   const cacheHitRatio = useAgentState((s) => s.status.cacheHit);
   const presetForDisplay = useAgentState((s) => {
     const p = s.status.preset;
-    return p === "auto" || p === "flash" || p === "pro" ? p : undefined;
+    return p === "flash" || p === "pro" ? p : undefined;
   });
   const sessionInputTokens = useAgentState((s) => s.status.sessionInputTokens);
   const sessionOutputTokens = useAgentState((s) => s.status.sessionOutputTokens);
@@ -586,10 +583,7 @@ function AppInner({
     editModeRef,
     modeFlash,
   } = useEditGate(!!codeMode);
-  const { preset, setPreset, proArmed, setProArmed, turnOnPro, setTurnOnPro } = usePresetMode(
-    model,
-    initialPreset,
-  );
+  const { preset, setPreset } = usePresetMode(model, initialPreset);
   const engineeringLifecycleBaseModeRef = useRef<EngineeringLifecycleMode>(
     loadEngineeringLifecycleMode(),
   );
@@ -1009,7 +1003,6 @@ function AppInner({
       // `/effort high` silently reverted to `max` on relaunch —the
       // loop's constructor default wins over persisted state.
       reasoningEffort: loadReasoningEffort(),
-      autoEscalate,
       rebuildSystem,
     });
     loopRef.current = l;
@@ -1159,14 +1152,12 @@ function AppInner({
   // would show the bare model id instead of the resolved preset.
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
   useEffect(() => {
-    const canonical: "auto" | "flash" | "pro" | null =
+    const canonical: "flash" | "pro" | null =
       initialPreset ??
       (loop.model === "deepseek-v4-pro"
         ? "pro"
         : loop.model === "deepseek-v4-flash"
-          ? loop.autoEscalate
-            ? "auto"
-            : "flash"
+          ? "flash"
           : null);
     agentStore.dispatch({ type: "session.preset.change", preset: canonical });
   }, []);
@@ -2193,15 +2184,13 @@ function AppInner({
           if (codeMode) togglePlanMode(on, source);
         },
         applyPresetLive: (name: string) => {
-          const settings = resolvePreset(name as PresetName);
+          const settings = resolvePreset(name);
           loop.configure({
             model: settings.model,
-            autoEscalate: settings.autoEscalate,
             reasoningEffort: settings.reasoningEffort,
           });
           agentStore.dispatch({ type: "session.model.change", model: settings.model });
-          const canonical: "auto" | "flash" | "pro" =
-            settings.model === "deepseek-v4-pro" ? "pro" : settings.autoEscalate ? "auto" : "flash";
+          const canonical: "flash" | "pro" = settings.model === "deepseek-v4-pro" ? "pro" : "flash";
           setPreset(canonical);
           agentStore.dispatch({ type: "session.preset.change", preset: canonical });
           try {
@@ -2218,10 +2207,6 @@ function AppInner({
           agentStore.dispatch({ type: "session.model.change", model });
         },
         getModels: () => modelsRef.current,
-        setProNextLive: (armed) => {
-          if (armed) loop.armProForNextTurn();
-          else loop.disarmPro();
-        },
         setBudgetUsdLive: (usd) => {
           loop.setBudget(usd);
         },
@@ -2659,11 +2644,10 @@ function AppInner({
 
   const handleQQModelPick = useCallback(
     (target: string): string => {
-      if (target === "auto" || target === "flash" || target === "pro") {
+      if (target === "flash" || target === "pro") {
         const preset = PRESETS[target];
         loop.configure({
           model: preset.model,
-          autoEscalate: preset.autoEscalate,
           reasoningEffort: preset.reasoningEffort,
         });
         agentStore.dispatch({ type: "session.model.change", model: preset.model });
@@ -2675,7 +2659,7 @@ function AppInner({
         return `preset: ${target} / ${preset.model}`;
       }
 
-      loop.configure({ model: target, autoEscalate: false });
+      loop.configure({ model: target });
       agentStore.dispatch({ type: "session.model.change", model: target });
       const inferred =
         target === "deepseek-v4-pro" ? "pro" : target === "deepseek-v4-flash" ? "flash" : null;
@@ -2961,14 +2945,6 @@ function AppInner({
                 return [...set];
               }
             : undefined,
-          armPro: () => {
-            loop.armProForNextTurn();
-            setProArmed(true);
-          },
-          disarmPro: () => {
-            loop.disarmPro();
-            setProArmed(false);
-          },
           startLoop,
           stopLoop,
           getLoopStatus,
@@ -3215,16 +3191,9 @@ function AppInner({
       // the armed mirror so the badge flips to "escalated" (via the
       // warning handler) rather than staying at "armed" during the
       // actual run.
-      if (proArmed) {
-        setProArmed(false);
-        setTurnOnPro(true);
-      } else {
-        setTurnOnPro(false);
-      }
-
       const flush = () => {
         if (!contentBuf.current && !reasoningBuf.current && !toolCallBuildBuf.current) return;
-        translator.flushBuffers(reasoningBuf.current, contentBuf.current, loop.currentCallModel);
+        translator.flushBuffers(reasoningBuf.current, contentBuf.current, loop.model);
         streamRef.text += contentBuf.current;
         streamRef.reasoning += reasoningBuf.current;
         if (toolCallBuildBuf.current) {
@@ -3429,7 +3398,7 @@ function AppInner({
               translator,
             });
           } else if (ev.role === "warning") {
-            handleWarningEvent(ev, { log, setTurnOnPro });
+            handleWarningEvent(ev, { log });
           }
         }
         flush();
@@ -3486,9 +3455,6 @@ function AppInner({
         setBusy(false);
         submittingRef.current = false;
         qq.clearTurnReply();
-        // Clear pro-on-turn badge; armed-for-next-turn already cleared
-        // at turn start when it was consumed.
-        setTurnOnPro(false);
         // Refresh balance lazily —don't block the return.
         refreshBalance();
       }
@@ -3538,9 +3504,6 @@ function AppInner({
       refreshBalance,
       refreshLatestVersion,
       refreshModels,
-      proArmed,
-      setProArmed,
-      setTurnOnPro,
       persistPlanState,
       stdout,
       stopLoop,
@@ -4542,14 +4505,11 @@ function AppInner({
                   models={models}
                   current={loop.model}
                   currentEffort={loop.reasoningEffort}
-                  currentAutoEscalate={loop.autoEscalate}
                   onRefresh={refreshModels}
                   onChoose={(outcome) => {
                     setPendingModelPicker(false);
                     if (outcome.kind === "select") {
-                      // Manual model pick = explicit pin: turn off auto-escalate
-                      // so flash doesn't get bumped, persist inferred preset.
-                      loop.configure({ model: outcome.id, autoEscalate: false });
+                      loop.configure({ model: outcome.id });
                       agentStore.dispatch({ type: "session.model.change", model: outcome.id });
                       const inferred =
                         outcome.id === "deepseek-v4-pro"
@@ -4576,7 +4536,6 @@ function AppInner({
                       const p = PRESETS[outcome.name];
                       loop.configure({
                         model: p.model,
-                        autoEscalate: p.autoEscalate,
                         reasoningEffort: p.reasoningEffort,
                       });
                       agentStore.dispatch({ type: "session.model.change", model: p.model });

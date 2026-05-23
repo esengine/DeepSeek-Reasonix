@@ -133,7 +133,7 @@ const sessionModelChange = z.object({
 
 const sessionPresetChange = z.object({
   type: z.literal("session.preset.change"),
-  preset: z.enum(["auto", "flash", "pro"]).nullable(),
+  preset: z.enum(["flash", "pro"]).nullable(),
 });
 
 const mcpLoading = z.object({

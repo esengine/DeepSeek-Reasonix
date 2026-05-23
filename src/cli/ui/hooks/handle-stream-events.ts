@@ -71,12 +71,8 @@ export function handleErrorEvent(ev: LoopEvent, ctx: ErrorContext): void {
 
 export interface WarningContext {
   log: Scrollback;
-  setTurnOnPro: Dispatch<SetStateAction<boolean>>;
 }
 
 export function handleWarningEvent(ev: LoopEvent, ctx: WarningContext): void {
   ctx.log.pushWarning(t("common.warning"), ev.content);
-  // Loop emits warnings starting with "⇧" whenever this turn is (or just
-  // became) running on pro — flip the badge so the escalation shows.
-  if (ev.content?.startsWith("⇧ ")) ctx.setTurnOnPro(true);
 }

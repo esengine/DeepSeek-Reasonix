@@ -19,14 +19,13 @@ import {
 import { fmtElapsed } from "./live";
 import { Shortcut } from "./shortcut";
 
-export type PresetName = "auto" | "flash" | "pro";
+export type PresetName = "flash" | "pro";
 export type EditMode = "review" | "auto" | "yolo";
 
 type PresetEntry = { label: string; badge: string; desc: TKey };
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
 
 const PRESET_INFO: Record<PresetName, PresetEntry> = {
-  auto: { label: "auto", badge: "AUTO", desc: "preset.autoDesc" },
   flash: { label: "v4-flash", badge: "FLASH", desc: "preset.flashDesc" },
   pro: { label: "v4-pro", badge: "PRO", desc: "preset.proDesc" },
 };
@@ -719,7 +718,7 @@ function ModelMenu({
   current: PresetName;
   onPick: (p: PresetName) => void;
 }) {
-  const order: PresetName[] = ["auto", "flash", "pro"];
+  const order: PresetName[] = ["flash", "pro"];
   return (
     <div
       className="popup"

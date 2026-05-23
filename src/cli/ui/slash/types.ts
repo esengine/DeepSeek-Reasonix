@@ -135,8 +135,6 @@ export interface SlashContext {
   refreshModels?: () => void;
   /** Ask the current model to summarize the active session into a short title and rename it. */
   generateSessionTitle?: () => Promise<string>;
-  armPro?: () => void;
-  disarmPro?: () => void;
   startLoop?: (intervalMs: number, prompt: string) => void;
   stopLoop?: () => void;
   getLoopStatus?: () => {

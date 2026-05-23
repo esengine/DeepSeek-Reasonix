@@ -729,14 +729,6 @@ function PageModels({
 }) {
   const presets = [
     {
-      id: "auto" as const,
-      name: "auto (flash → pro)",
-      badge: "AUTO",
-      desc: t("settings.modelAutoDesc"),
-      ctx: "—",
-      out: "—",
-    },
-    {
       id: "flash" as const,
       name: "deepseek-v4-flash",
       badge: "FLASH",

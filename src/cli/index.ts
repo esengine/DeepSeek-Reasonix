@@ -282,7 +282,6 @@ program
       await chatCommand({
         model: defaults.model,
         preset: defaults.preset,
-        autoEscalate: defaults.autoEscalate,
         system: chatRebuildSystem(),
         rebuildSystem: chatRebuildSystem,
         transcript: opts.transcript,

@@ -284,7 +284,6 @@ export interface TranslationSchema {
     preflightTruncated: string;
     preflightTruncatedStillFull: string;
     preflightNoFold: string;
-    flashEscalation: string;
     harvestStatus: string;
     repeatToolCallWarning: string;
     stormStuck: string;

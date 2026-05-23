@@ -251,7 +251,7 @@ export type NeedsSetupEvent = {
 
 export type EditMode = "review" | "auto" | "yolo";
 
-export type PresetName = "auto" | "flash" | "pro";
+export type PresetName = "flash" | "pro";
 
 export type WebSearchEngineName =
   | "bing"

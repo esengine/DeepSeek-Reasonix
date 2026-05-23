@@ -156,7 +156,6 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   await chatCommand({
     model: resolvedModel,
     preset: opts.model ? undefined : presetNameForSettings(presetSettings),
-    autoEscalate: opts.model ? false : presetSettings.autoEscalate,
     budgetUsd: opts.budgetUsd,
     system: codeRebuildSystem(),
     rebuildSystem: codeRebuildSystem,

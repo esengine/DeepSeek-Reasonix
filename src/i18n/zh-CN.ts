@@ -665,7 +665,6 @@ export const zhCN: TranslationSchema = {
       "预检：裁剪 {beforeMessages} 条消息 → {afterMessages} 后，请求仍约 {estimate}/{ctxMax} tokens（{pct}%）· body {bodyKB} KB — DeepSeek 大概率会返回 400。请运行 /clear 或 /new 重新开始。",
     preflightNoFold:
       "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）· body {bodyKB} KB 且没有可裁剪的内容 — DeepSeek 大概率会返回 400。请运行 /clear 或 /new 重新开始。",
-    flashEscalation: "⇧ flash 请求升级 — 本轮改用 {model}{reasonSuffix}",
     harvestStatus: "正在从推理过程提取计划状态…",
     repeatToolCallWarning: "拦截到重复工具调用 — 让模型察觉问题并换种方式重试。",
     stormStuck:
@@ -906,10 +905,9 @@ export const zhCN: TranslationSchema = {
       modelNotInCatalog:
         "model → {id}   （⚠ 不在获取的目录中：{list}。如果这是错误的，下次调用将返回 400 — 运行 /models 刷新。）",
       modelSet: "model → {id}",
-      presetAuto: "preset → auto  （v4-flash → v4-pro 在困难轮次切换 · 默认）",
-      presetFlash: "preset → flash  （始终使用 v4-flash · 最便宜 · /pro 仍可临时提升一轮）",
+      presetFlash: "preset → flash  （始终使用 v4-flash · 最便宜）",
       presetPro: "preset → pro  （始终使用 v4-pro · 约 3 倍 flash · 用于困难的多轮工作）",
-      presetUsage: "用法：/preset <auto|flash|pro>",
+      presetUsage: "用法：/preset <flash|pro>",
       proNothingArmed: "未启用 — /pro 不带参数将为下一轮启用 pro",
       proDisarmed: "▸ /pro 已解除 — 下一轮回退到当前预设",
       proUsage:

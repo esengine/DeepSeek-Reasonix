@@ -219,10 +219,8 @@ export const en = {
     sectionDefaults: "Defaults",
     preset: {
       label: "preset",
-      auto: "auto — flash → pro on hard turns",
-      autoDesc: "auto — flash baseline; auto-escalates to pro on hard turns",
-      flash: "flash — always flash, no auto-escalate",
-      flashDesc: "flash — always flash; no auto-escalate",
+      flash: "flash — always flash (cheapest, predictable)",
+      flashDesc: "flash — always flash (cheapest, predictable)",
       pro: "pro — always pro",
       proDesc: "pro — always pro; ~3× flash cost",
     },
@@ -240,11 +238,6 @@ export const en = {
     webSearchEnginePerplexity: "perplexity — AI-native (set PERPLEXITY_API_KEY)",
     webSearchEngineExa: "exa — AI-native 1000/mo free (set EXA_API_KEY)",
     webSearchEngineNote: "applies to the next web_search call",
-    sectionCompute: "Compute",
-    proNext: "/pro one-shot",
-    proArm: "Arm for next turn",
-    proArmed: "Armed — disarms after next turn",
-    proNextNote: "next turn runs on deepseek-v4-pro, then auto-disarms",
     sectionBudget: "Budget",
     budget: "Budget",
     budgetHint: "Set spending limits",
@@ -279,7 +272,6 @@ export const en = {
     sectionRuntime: "Runtime",
     activeModel: "active model",
     model: "Model",
-    modelAutoDesc: "Auto — flash → pro on hard turns",
     modelFlashDesc: "Flash — always flash",
     modelProDesc: "Pro — always pro",
     modelPricingLine: "${hit} hit · ${miss} miss · ${out} out  per 1M tok",
@@ -431,10 +423,7 @@ export const en = {
     effortMaxTitle: "max (default — best quality)",
     effortHighTitle: "high (cheaper / faster)",
     presetTitle: "preset — model commitment",
-    presetAutoTitle:
-      "auto — flash baseline; auto-escalates to pro on hard turns (NEEDS_PRO / failure threshold)",
-    presetFlashTitle:
-      "flash — always flash; no auto-escalate. /pro still works for one-shot manual",
+    presetFlashTitle: "flash — always flash (cheapest, predictable)",
     presetProTitle:
       "pro — always pro; ~3× flash cost. Locks in on hard architecture work.",
     editGateTitle: "edit gate — Shift+Tab cycles in TUI",
@@ -1307,8 +1296,7 @@ export const en = {
     version: "Version",
   },
   preset: {
-    autoDesc: "auto — flash baseline; auto-escalates to pro on hard turns",
-    flashDesc: "flash — always flash; no auto-escalate",
+    flashDesc: "flash — always flash (cheapest, predictable)",
     proDesc: "pro — always pro; ~3× flash cost",
   },
   editMode: {

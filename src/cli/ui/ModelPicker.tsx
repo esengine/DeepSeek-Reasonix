@@ -8,7 +8,7 @@ import { FG, TONE } from "./theme/tokens.js";
 
 export type ModelPickerOutcome =
   | { kind: "select"; id: string }
-  | { kind: "preset"; name: "auto" | "flash" | "pro" }
+  | { kind: "preset"; name: "flash" | "pro" }
   | { kind: "quit" };
 
 export interface ModelPickerProps {
@@ -18,14 +18,13 @@ export interface ModelPickerProps {
   current: string;
   /** Used to detect which preset (if any) the loop currently matches. */
   currentEffort: "high" | "max";
-  currentAutoEscalate: boolean;
   onChoose: (outcome: ModelPickerOutcome) => void;
   /** Triggers a refetch when the catalog is null/empty and the user presses [r]. */
   onRefresh?: () => void;
 }
 
 const PAGE_MARGIN = 8;
-const PRESET_NAMES = ["auto", "flash", "pro"] as const;
+const PRESET_NAMES = ["flash", "pro"] as const;
 type PresetName = (typeof PRESET_NAMES)[number];
 
 type Row = { kind: "preset"; name: PresetName } | { kind: "model"; id: string };
@@ -34,7 +33,6 @@ export function ModelPicker({
   models,
   current,
   currentEffort,
-  currentAutoEscalate,
   onChoose,
   onRefresh,
 }: ModelPickerProps): React.ReactElement {
@@ -44,7 +42,7 @@ export function ModelPicker({
   const modelRows: Row[] = modelList.map((id) => ({ kind: "model", id }));
   const rows: Row[] = [...presetRows, ...modelRows];
 
-  const activePreset = detectActivePreset(current, currentEffort, currentAutoEscalate);
+  const activePreset = detectActivePreset(current, currentEffort);
   const initialIndex = activePreset
     ? PRESET_NAMES.indexOf(activePreset)
     : presetRows.length + Math.max(0, modelList.indexOf(current));
@@ -196,14 +194,10 @@ function ModelRow({
   );
 }
 
-function detectActivePreset(
-  model: string,
-  effort: "high" | "max",
-  autoEscalate: boolean,
-): PresetName | null {
+function detectActivePreset(model: string, effort: "high" | "max"): PresetName | null {
   for (const name of PRESET_NAMES) {
     const p = PRESETS[name];
-    if (p.model === model && p.reasoningEffort === effort && p.autoEscalate === autoEscalate) {
+    if (p.model === model && p.reasoningEffort === effort) {
       return name;
     }
   }

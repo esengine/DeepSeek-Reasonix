@@ -196,7 +196,7 @@ export type Settings = {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
-  preset: "auto" | "flash" | "pro";
+  preset: "flash" | "pro";
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   version: string;
@@ -2089,7 +2089,7 @@ function TabRuntime({
                 }
                 busyElapsedMs={elapsed}
                 textareaRef={composerRef}
-                preset={state.settings?.preset ?? "auto"}
+                preset={state.settings?.preset ?? "flash"}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
                 onPresetChange={(preset) => {
                   saveSettings({ preset });

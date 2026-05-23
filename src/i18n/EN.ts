@@ -686,7 +686,6 @@ export const EN: TranslationSchema = {
       "preflight: request still ~{estimate}/{ctxMax} tokens ({pct}%) · body {bodyKB} KB after truncating {beforeMessages} messages → {afterMessages}. DeepSeek will likely 400. Run /clear or /new to start fresh.",
     preflightNoFold:
       "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) · body {bodyKB} KB and nothing left to truncate — DeepSeek will likely 400. Run /clear or /new to start fresh.",
-    flashEscalation: "⇧ flash requested escalation — retrying this turn on {model}{reasonSuffix}",
     harvestStatus: "extracting plan state from reasoning…",
     repeatToolCallWarning:
       "Caught a repeated tool call — let the model see the issue and retry with a different approach.",
@@ -954,10 +953,9 @@ export const EN: TranslationSchema = {
       modelNotInCatalog:
         "model → {id}   (⚠ not in the fetched catalog: {list}. If this is wrong the next call will 400 — run /models to refresh.)",
       modelSet: "model → {id}",
-      presetAuto: "preset → auto  (v4-flash → v4-pro on hard turns · default)",
-      presetFlash: "preset → flash  (v4-flash always · cheapest · /pro still bumps one turn)",
+      presetFlash: "preset → flash  (v4-flash always · cheapest)",
       presetPro: "preset → pro  (v4-pro always · ~3× flash · for hard multi-turn work)",
-      presetUsage: "usage: /preset <auto|flash|pro>",
+      presetUsage: "usage: /preset <flash|pro>",
       proNothingArmed: "nothing armed — /pro with no args will arm pro for your next turn",
       proDisarmed: "▸ /pro disarmed — next turn falls back to the current preset",
       proUsage:

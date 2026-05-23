@@ -242,7 +242,6 @@ export const zhCN: typeof en = {
     notSelected: "未选择",
     apiKeySet: "已设置 · {prefix}…",
     defaultModelCurrent: "默认模型 · 当前 {model}",
-    modelAutoDesc: "自动从 flash 起步，遇复杂任务升级到 pro，兼顾速度与质量。",
     modelFlashDesc: "通用对话模型，速度快、长上下文、价格友好。",
     modelProDesc: "深度推理模型，先生成可解释的思考链，再给最终答案。",
     ctxWindow: "上下文",
@@ -315,7 +314,6 @@ export const zhCN: typeof en = {
     copied: "已复制",
   },
   preset: {
-    autoDesc: "Flash → Pro 自动升级",
     flashDesc: "快、便宜、长上下文",
     proDesc: "深度推理",
   },
