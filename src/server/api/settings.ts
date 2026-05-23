@@ -288,13 +288,13 @@ export async function handleSettings(
           body: { error: "subagentModels must be an object mapping skill name → 'flash' | 'pro'" },
         };
       }
-      const sanitized: Record<string, "flash" | "pro"> = Object.create(null);
+      const sanitized = new Map<string, "flash" | "pro">();
       for (const [name, value] of Object.entries(fields.subagentModels)) {
         if (typeof name !== "string" || !name) continue;
         if (name === "__proto__" || name === "constructor" || name === "prototype") continue;
-        if (value === "flash" || value === "pro") sanitized[name] = value;
+        if (value === "flash" || value === "pro") sanitized.set(name, value);
       }
-      cfg.subagentModels = Object.keys(sanitized).length > 0 ? sanitized : undefined;
+      cfg.subagentModels = sanitized.size > 0 ? Object.fromEntries(sanitized) : undefined;
       changed.push("subagentModels");
     }
 
