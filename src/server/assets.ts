@@ -88,6 +88,14 @@ function injectTokenIntoChunkImports(body: string, token: string): string {
   );
 }
 
+/** Same trick for CSS `url(/assets/foo.woff)` — fonts referenced from a token-stripped stylesheet would 401 otherwise. */
+function injectTokenIntoCssAssetUrls(body: string, token: string): string {
+  return body.replace(
+    /url\((['"]?)(\/assets\/[\w./-]+\.(?:woff2?|ttf|otf|png|svg))(?:\?[^)'"]*)?\1\)/g,
+    (_, q: string, path: string) => `url(${q}${path}?token=${token}${q})`,
+  );
+}
+
 function loadApp(token: string): string {
   const raw = loadCachedText(join(ASSET_DIR, "dist", "app.js"));
   return injectTokenIntoChunkImports(raw, token);
@@ -110,13 +118,15 @@ function loadAppMap(): string | null {
   }
 }
 
-function loadCss(): string {
+function loadCss(token: string): string {
   // Try new React dashboard first, then fall back to old Preact
+  let raw: string;
   try {
-    return loadCachedText(join(ASSET_DIR, "dist", "app.css"));
+    raw = loadCachedText(join(ASSET_DIR, "dist", "app.css"));
   } catch {
-    return loadCachedText(join(ASSET_DIR, "app.css"));
+    raw = loadCachedText(join(ASSET_DIR, "app.css"));
   }
+  return injectTokenIntoCssAssetUrls(raw, token);
 }
 
 /** Token HTML-attribute-escaped in case a future mint produces non-hex bytes. */
@@ -135,9 +145,9 @@ export function renderIndexHtml(token: string, mode: "standalone" | "attached"):
 /** Vendor CSS the bundle pulls from npm and the build script copies into `dashboard/dist/`. */
 const VENDOR_CSS_NAMES = new Set(["vendor-hljs.css", "vendor-uplot.css"]);
 
-function loadVendorCss(name: string): string | null {
+function loadVendorCss(name: string, token: string): string | null {
   try {
-    return loadCachedText(join(ASSET_DIR, "dist", name));
+    return injectTokenIntoCssAssetUrls(loadCachedText(join(ASSET_DIR, "dist", name)), token);
   } catch {
     return null;
   }
@@ -202,7 +212,7 @@ export function serveAsset(
     return body == null ? null : { body, contentType: "application/json; charset=utf-8" };
   }
   if (name === "app.css") {
-    return { body: loadCss(), contentType: "text/css; charset=utf-8" };
+    return { body: loadCss(token), contentType: "text/css; charset=utf-8" };
   }
   // Same rewrite for chunk-to-chunk imports (e.g. vendor-markdown → vendor-react).
   if (/^vendor-[\w.-]+\.js$/.test(name)) {
@@ -211,7 +221,7 @@ export function serveAsset(
     return { body, contentType: "application/javascript; charset=utf-8" };
   }
   if (VENDOR_CSS_NAMES.has(name)) {
-    const body = loadVendorCss(name);
+    const body = loadVendorCss(name, token);
     if (body == null) return null;
     return { body, contentType: "text/css; charset=utf-8" };
   }

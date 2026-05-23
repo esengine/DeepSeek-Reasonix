@@ -4,7 +4,7 @@
 import "./heap-limit-launch.js";
 
 import { Command } from "commander";
-import { loadProxyConfig, readConfig } from "../config.js";
+import { ensureDashboardToken, loadProxyConfig, readConfig } from "../config.js";
 import { t } from "../i18n/index.js";
 import { VERSION } from "../index.js";
 import { listSessions } from "../memory/session.js";
@@ -112,19 +112,20 @@ function resolveDashboardHost(
   return typeof fromCfg === "string" && fromCfg.trim() ? fromCfg.trim() : undefined;
 }
 
-/** Resolution order: REASONIX_DASHBOARD_TOKEN env → config.dashboard.token → undefined (server mints a fresh per-boot token). Min 16 chars; shorter values are dropped with a warning to avoid trivially-guessable tokens. */
+/** Resolution order: REASONIX_DASHBOARD_TOKEN env → config.dashboard.token (minted + persisted on first call so the URL survives CLI restarts). Min 16 chars; shorter env overrides are dropped with a warning. */
 function resolveDashboardToken(noConfig: boolean): string | undefined {
   const fromEnv = process.env.REASONIX_DASHBOARD_TOKEN?.trim();
-  const fromCfg = noConfig ? undefined : readConfig().dashboard?.token?.trim();
-  const candidate = fromEnv || fromCfg;
-  if (!candidate) return undefined;
-  if (candidate.length < 16) {
-    process.stderr.write(
-      `▲ ignoring dashboard token (${candidate.length} chars; min 16) — using ephemeral per-boot token instead\n`,
-    );
-    return undefined;
+  if (fromEnv) {
+    if (fromEnv.length < 16) {
+      process.stderr.write(
+        `▲ ignoring dashboard token (${fromEnv.length} chars; min 16) — using ephemeral per-boot token instead\n`,
+      );
+      return undefined;
+    }
+    return fromEnv;
   }
-  return candidate;
+  if (noConfig) return undefined;
+  return ensureDashboardToken();
 }
 
 const program = new Command();

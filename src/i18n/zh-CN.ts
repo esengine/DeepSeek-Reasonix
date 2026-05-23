@@ -976,6 +976,8 @@ export const zhCN: TranslationSchema = {
       failed: "▸ 仪表板启动失败：{reason}",
       starting: "▸ 正在启动仪表板服务器…",
       copied: "▸ 仪表板 URL 已复制到剪贴板：{url}",
+      tokenResetting: "▸ 正在轮换仪表板 token 并重启服务…",
+      tokenReset: "▸ 仪表板 token 已轮换。新 URL：",
     },
     observability: {
       contextInfo: "上下文：~{total} / {max}（{pct}%）· 系统 {sys} · 工具 {tools} · 日志 {log}",

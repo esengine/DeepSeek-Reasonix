@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { isWebRuntime } from "./lib/tauri-bridge";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
@@ -64,6 +65,7 @@ import {
   UserMsg,
 } from "./ui/thread";
 import { WorkdirPop } from "./ui/workdir-pop";
+import { WorkdirInputModal } from "./ui/workdir-input-modal";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -1102,6 +1104,16 @@ function TabRuntime({
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
   const [jobsOpen, setJobsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  // Pending session swap — set on sidebar click, cleared once the bridge's
+  // $session_loaded lands (via the effect below). Big sessions take a beat to
+  // pull off disk; without this the click looks dead.
+  const [loadingSession, setLoadingSession] = useState<string | null>(null);
+  const [workdirModalOpen, setWorkdirModalOpen] = useState(false);
+  useEffect(() => {
+    if (loadingSession && state.currentSession === loadingSession) {
+      setLoadingSession(null);
+    }
+  }, [loadingSession, state.currentSession]);
   const openSettingsAt = useCallback((page: SettingsPageId = "general") => {
     setSettingsPage(page);
     setSettingsOpen(true);
@@ -1165,6 +1177,14 @@ function TabRuntime({
   }, [sendRpc]);
 
   const pickWorkspace = useCallback(async () => {
+    // Browsers can't expose absolute filesystem paths (webkitdirectory only
+    // hands back relative + File handles), so the web runtime opens a custom
+    // server-backed directory browser instead of the native dialog. Desktop
+    // (Tauri) still gets the OS picker for free.
+    if (isWebRuntime) {
+      setWorkdirModalOpen(true);
+      return;
+    }
     try {
       const picked = await openDialog({
         directory: true,
@@ -1440,12 +1460,6 @@ function TabRuntime({
     }
     sendRpc({ cmd: "session_load", name: target });
   }, [active, state.ready, state.sessions, state.currentSession, sendRpc]);
-
-  useEffect(() => {
-    if (!active) return;
-    if (!urlSessionDispatched.current) return;
-    writeSessionToUrl(state.currentSession ?? null);
-  }, [active, state.currentSession]);
 
   useEffect(() => {
     // Every TabRuntime stays mounted (display:none on inactive), so each registers its own keydown — without this gate Cmd+N would fire newChat() in every tab and wipe the inactive ones' sessions.
@@ -1735,8 +1749,11 @@ function TabRuntime({
         <Sidebar
           sessions={state.sessions}
           activeName={state.currentSession}
+          loadingName={loadingSession}
           onNewChat={() => { newChat(); onToggleMobileSide && mobileSideOpen && onToggleMobileSide(); }}
           onLoadSession={(name) => {
+            if (name === state.currentSession || name === loadingSession) return;
+            setLoadingSession(name);
             sendRpc({ cmd: "session_load", name });
             // 移动端选择会话后自动收起抽屉
             if (mobileSideOpen) onToggleMobileSide();
@@ -1772,7 +1789,12 @@ function TabRuntime({
                   setWdOpen(true);
                 }}
               />
-              <div className="thread" ref={threadRef}>
+              <div className="thread" ref={threadRef} style={{ position: "relative" }}>
+                {loadingSession ? (
+                  <div className="thread-loading-overlay">
+                    {t("sidebarPanel.loading")} {loadingSession}
+                  </div>
+                ) : null}
                 <div className="thread-inner" ref={threadInnerRef}>
                   {state.activePlan ? (
                     <>
@@ -1817,7 +1839,12 @@ function TabRuntime({
                     if (m.kind === "assistant") {
                       return (
                         <AssistantMsg
-                          key={`a-${m.turn}`}
+                          // Index, not turn — replayed transcripts arrive with turn=0
+                          // for every assistant row (the server doesn't reconstruct
+                          // turn numbers from JSONL), so a turn-keyed list collapsed
+                          // every assistant into one slot and switching sessions left
+                          // the same stale row visible.
+                          key={`a-${i}`}
                           segments={m.segments}
                           pending={m.pending}
                           model={state.model}
@@ -2026,6 +2053,16 @@ function TabRuntime({
           anchor={wdAnchor}
           onPick={(path) => saveSettings({ workspaceDir: path })}
           onBrowse={pickWorkspace}
+        />
+
+        <WorkdirInputModal
+          open={workdirModalOpen}
+          initialPath={state.settings?.workspaceDir}
+          onCancel={() => setWorkdirModalOpen(false)}
+          onConfirm={(path) => {
+            saveSettings({ workspaceDir: path });
+            setWorkdirModalOpen(false);
+          }}
         />
 
         {aboutOpen ? <AboutModal onClose={() => setAboutOpen(false)} /> : null}
@@ -2404,10 +2441,6 @@ function TabBar({
           </div>
         );
       })}
-      <div className="tab newtab" title={localizeShortcutText(t("app.tab.newTabTitle"))} onClick={onNew}>
-        <I.plus size={12} />
-        <span style={{ fontSize: 11, marginLeft: 4 }}>{t("app.tab.newTab")}</span>
-      </div>
     </div>
   );
 }

@@ -1030,6 +1030,8 @@ export const EN: TranslationSchema = {
       failed: "▸ dashboard failed to start: {reason}",
       starting: "▸ starting dashboard server…",
       copied: "▸ dashboard URL copied to clipboard: {url}",
+      tokenResetting: "▸ rotating dashboard token — restarting server…",
+      tokenReset: "▸ dashboard token rotated. New URL:",
     },
     observability: {
       contextInfo: "context: ~{total} of {max} ({pct}%) · system {sys} · tools {tools} · log {log}",

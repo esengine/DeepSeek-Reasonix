@@ -26,6 +26,8 @@ export interface DashboardServerHandle {
   port: number;
   /** Stop accepting new connections, drain, close. Idempotent. */
   close: () => Promise<void>;
+  /** Swap the live DashboardContext without rebinding the port. Lets the TUI hand off across session-remounts without losing the URL. */
+  updateContext: (ctx: DashboardContext) => void;
 }
 
 function mintToken(): string {
@@ -202,9 +204,10 @@ export function startDashboardServer(
   const host = opts.host ?? "127.0.0.1";
   const port = opts.port ?? 0;
 
+  const ctxRef: { current: DashboardContext } = { current: ctx };
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
-      dispatch(req, res, ctx, token).catch((err) => {
+      dispatch(req, res, ctxRef.current, token).catch((err) => {
         if (!res.headersSent) {
           res.writeHead(500, { "content-type": "application/json" });
         }
@@ -232,7 +235,10 @@ export function startDashboardServer(
           setTimeout(() => server.closeAllConnections?.(), 1000).unref();
         });
 
-      resolve({ url, token, port: finalPort, close });
+      const updateContext = (next: DashboardContext) => {
+        ctxRef.current = next;
+      };
+      resolve({ url, token, port: finalPort, close, updateContext });
     });
   });
 }

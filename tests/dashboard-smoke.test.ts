@@ -86,6 +86,21 @@ describe("dashboard server integration", () => {
     }
   });
 
+  it("serveAsset injects the token into CSS url() font references", async () => {
+    const { serveAsset } = await import("../src/server/assets.js");
+    const asset = serveAsset("app.css", "tknfont");
+    expect(asset).not.toBeNull();
+    const body = asset?.body as string;
+    // CSS-context `url()` strips the parent stylesheet's query string when the
+    // browser resolves font fetches, so the server has to bake the token in.
+    const assetUrls =
+      body.match(/url\([^)]*\/assets\/[\w./-]+\.(?:woff2?|ttf|otf|png|svg)[^)]*\)/g) ?? [];
+    expect(assetUrls.length).toBeGreaterThan(0);
+    for (const u of assetUrls) {
+      expect(u).toContain("?token=tknfont");
+    }
+  });
+
   it("vendor CSS files are served when present", async () => {
     const { serveAsset } = await import("../src/server/assets.js");
     const hljs = serveAsset("vendor-hljs.css");

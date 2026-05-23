@@ -1,4 +1,5 @@
 import { t } from "@/i18n/index.js";
+import { clearDashboardToken } from "../../../../config.js";
 import { writeClipboard } from "../../clipboard.js";
 import type { SlashHandler } from "../dispatch.js";
 
@@ -24,6 +25,34 @@ const dashboard: SlashHandler = (args, _loop, ctx) => {
     if (!url) return { info: t("handlers.dashboard.notRunning") };
     writeClipboard(url);
     return { info: t("handlers.dashboard.copied", { url }) };
+  }
+
+  if (sub === "reset-token") {
+    if (!ctx.stopDashboard) {
+      return { info: t("handlers.dashboard.stopNoCallback") };
+    }
+    clearDashboardToken();
+    (async () => {
+      try {
+        await ctx.stopDashboard?.();
+      } catch {
+        /* swallow — going down anyway */
+      }
+      try {
+        const url = await ctx.startDashboard!();
+        ctx.postInfo?.(
+          [
+            t("handlers.dashboard.tokenReset"),
+            `  ${url}`,
+            "",
+            t("handlers.dashboard.readyHint"),
+          ].join("\n"),
+        );
+      } catch (err) {
+        ctx.postInfo?.(t("handlers.dashboard.failed", { reason: (err as Error).message }));
+      }
+    })();
+    return { info: t("handlers.dashboard.tokenResetting") };
   }
 
   const existing = ctx.getDashboardUrl();

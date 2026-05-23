@@ -3,12 +3,24 @@ import { deleteSession, listSessions, sessionPath } from "../../memory/session.j
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
 
+interface SessionToolCall {
+  id: string;
+  name: string;
+  /** Raw arguments string the model emitted (typically JSON). */
+  arguments: string;
+}
+
 interface SessionMessage {
   role: string;
   content?: string;
+  /** Assistant `reasoning_content` (R1 / V4 thinking). */
+  reasoning?: string;
+  /** Assistant tool_calls — emitted alongside `content` for tool-call turns. */
+  toolCalls?: SessionToolCall[];
+  /** Tool-result message: the call id this row answers. */
+  toolCallId?: string;
+  /** Tool-result message: the tool name (legacy `tool_name` or `name`). */
   toolName?: string;
-  /** Raw record. Kept for debug; SPA reads from `role`/`content` first. */
-  raw?: unknown;
 }
 
 function parseTranscript(path: string, maxBytes = 4 * 1024 * 1024): SessionMessage[] {
@@ -31,8 +43,23 @@ function parseTranscript(path: string, maxBytes = 4 * 1024 * 1024): SessionMessa
       const msg: SessionMessage = { role };
       if (typeof rec.content === "string") msg.content = rec.content;
       else if (rec.content !== undefined) msg.content = JSON.stringify(rec.content);
+      if (typeof rec.reasoning_content === "string") msg.reasoning = rec.reasoning_content;
+      if (Array.isArray(rec.tool_calls)) {
+        const calls: SessionToolCall[] = [];
+        for (const c of rec.tool_calls as Array<Record<string, unknown>>) {
+          const fn = (c?.function ?? {}) as Record<string, unknown>;
+          const id = typeof c?.id === "string" ? c.id : "";
+          const name = typeof fn.name === "string" ? fn.name : "";
+          const args = typeof fn.arguments === "string" ? fn.arguments : "";
+          if (id || name) calls.push({ id, name, arguments: args });
+        }
+        if (calls.length > 0) msg.toolCalls = calls;
+      }
+      if (typeof rec.tool_call_id === "string") msg.toolCallId = rec.tool_call_id;
+      else if (typeof rec.toolCallId === "string") msg.toolCallId = rec.toolCallId;
       if (typeof rec.tool_name === "string") msg.toolName = rec.tool_name;
-      if (typeof rec.toolName === "string") msg.toolName = rec.toolName;
+      else if (typeof rec.toolName === "string") msg.toolName = rec.toolName;
+      else if (typeof rec.name === "string" && role === "tool") msg.toolName = rec.name;
       out.push(msg);
     } catch {
       /* skip malformed line — same rule as the rest of Reasonix's JSONL readers */
