@@ -50,6 +50,25 @@ export default defineConfig({
           if (/\.(woff2?|ttf|otf)$/.test(assetInfo.name ?? "")) return "assets/[name].[ext]";
           return "[name].[ext]";
         },
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("/katex/")) return "vendor-katex";
+          if (
+            id.includes("/react-markdown/") ||
+            id.includes("/remark-") ||
+            id.includes("/rehype-") ||
+            id.includes("/mdast-") ||
+            id.includes("/micromark") ||
+            id.includes("/unist-") ||
+            id.includes("/hast-")
+          )
+            return "vendor-markdown";
+          if (id.includes("/prism-react-renderer/")) return "vendor-prism";
+          if (id.includes("/lucide-react/")) return "vendor-icons";
+          if (id.includes("/react-virtuoso/")) return "vendor-virtuoso";
+          if (id.includes("/react/") || id.includes("/react-dom/") || id.includes("/scheduler/"))
+            return "vendor-react";
+        },
       },
     },
   },

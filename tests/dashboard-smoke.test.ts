@@ -60,6 +60,32 @@ describe("dashboard server integration", () => {
     expect(html).toContain("standalone");
   });
 
+  it("serveAsset rewrites cross-chunk imports in app.js to carry the token", async () => {
+    const { serveAsset } = await import("../src/server/assets.js");
+    const asset = serveAsset("app.js", "tkn123");
+    expect(asset).not.toBeNull();
+    const body = asset?.body as string;
+    // Vendor chunks must be reachable; browsers strip query strings on relative
+    // module resolution, so static imports need the token baked in by the server.
+    const vendorImports = body.match(/from\s*["']\.\/vendor-[\w-]+\.js[^"']*["']/g) ?? [];
+    expect(vendorImports.length).toBeGreaterThan(0);
+    for (const imp of vendorImports) {
+      expect(imp).toContain("?token=tkn123");
+    }
+  });
+
+  it("serveAsset rewrites cross-chunk imports inside vendor chunks too", async () => {
+    const { serveAsset } = await import("../src/server/assets.js");
+    // vendor-markdown imports vendor-react and vendor-katex — also relative.
+    const asset = serveAsset("vendor-markdown.js", "tkn456");
+    if (asset == null) return; // not a build with that chunk; ignore
+    const body = asset.body as string;
+    const vendorImports = body.match(/from\s*["']\.\/vendor-[\w-]+\.js[^"']*["']/g) ?? [];
+    for (const imp of vendorImports) {
+      expect(imp).toContain("?token=tkn456");
+    }
+  });
+
   it("vendor CSS files are served when present", async () => {
     const { serveAsset } = await import("../src/server/assets.js");
     const hljs = serveAsset("vendor-hljs.css");

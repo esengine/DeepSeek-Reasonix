@@ -80,8 +80,26 @@ function loadIndexTemplate(): string {
   return loadCachedText(join(ASSET_DIR, "index.html"));
 }
 
-function loadApp(): string {
-  return loadCachedText(join(ASSET_DIR, "dist", "app.js"));
+/** Append `?token=` to relative chunk imports — browsers drop the parent query on relative ESM resolution. */
+function injectTokenIntoChunkImports(body: string, token: string): string {
+  return body.replace(
+    /(from\s*|import\s*)(["'])(\.\/[\w.-]+\.js)\2/g,
+    (_, kw: string, q: string, path: string) => `${kw}${q}${path}?token=${token}${q}`,
+  );
+}
+
+function loadApp(token: string): string {
+  const raw = loadCachedText(join(ASSET_DIR, "dist", "app.js"));
+  return injectTokenIntoChunkImports(raw, token);
+}
+
+function loadChunk(name: string, token: string): string | null {
+  try {
+    const raw = loadCachedText(join(ASSET_DIR, "dist", name));
+    return injectTokenIntoChunkImports(raw, token);
+  } catch {
+    return null;
+  }
 }
 
 function loadAppMap(): string | null {
@@ -172,9 +190,12 @@ function loadDistFile(name: string): { body: string | Buffer; isBinary: boolean 
   return null;
 }
 
-export function serveAsset(name: string): { body: string | Buffer; contentType: string } | null {
+export function serveAsset(
+  name: string,
+  token = "",
+): { body: string | Buffer; contentType: string } | null {
   if (name === "app.js") {
-    return { body: loadApp(), contentType: "application/javascript; charset=utf-8" };
+    return { body: loadApp(token), contentType: "application/javascript; charset=utf-8" };
   }
   if (name === "app.js.map") {
     const body = loadAppMap();
@@ -182,6 +203,12 @@ export function serveAsset(name: string): { body: string | Buffer; contentType: 
   }
   if (name === "app.css") {
     return { body: loadCss(), contentType: "text/css; charset=utf-8" };
+  }
+  // Same rewrite for chunk-to-chunk imports (e.g. vendor-markdown → vendor-react).
+  if (/^vendor-[\w.-]+\.js$/.test(name)) {
+    const body = loadChunk(name, token);
+    if (body == null) return null;
+    return { body, contentType: "application/javascript; charset=utf-8" };
   }
   if (VENDOR_CSS_NAMES.has(name)) {
     const body = loadVendorCss(name);

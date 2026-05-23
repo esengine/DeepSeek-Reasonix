@@ -139,7 +139,7 @@ export async function dispatch(
       res.end();
       return;
     }
-    const asset = serveAsset(path.slice("/assets/".length));
+    const asset = serveAsset(path.slice("/assets/".length), expectedToken);
     if (!asset) {
       res.writeHead(404);
       res.end("not found");
