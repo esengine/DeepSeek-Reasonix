@@ -331,6 +331,26 @@ const RECENT_CARDS_WINDOW = 200;
 const MIN_ELIDE_OUTPUT_LENGTH = 4096;
 /** Marker for already-elided fields so we don't re-stub on every subsequent append. */
 const ELIDED_TOOL_OUTPUT_PREFIX = "[elided — older than the last ";
+/** Max cards to keep in React state. Older settled cards are removed (Terminal scrollback retains them). */
+const MAX_CARDS_IN_STATE = 150;
+
+/** Check if a card is fully settled (no longer streaming/running). */
+function isFullySettled(card: Card): boolean {
+  switch (card.kind) {
+    case "streaming":
+    case "tool":
+      return card.done || !!card.aborted;
+    case "reasoning":
+      return !card.streaming || !!card.aborted;
+    case "task":
+    case "subagent":
+      return card.status !== "running";
+    case "plan":
+      return card.steps.every((s) => s.status === "done" || s.status === "skipped");
+    default:
+      return true;
+  }
+}
 
 function elidedStub(originalChars: number): string {
   return `${ELIDED_TOOL_OUTPUT_PREFIX}${RECENT_CARDS_WINDOW} cards; ${originalChars.toLocaleString()} chars dropped to save memory. Full output is on disk in the session log.]`;
@@ -387,8 +407,24 @@ function elideOldCardContent(cards: ReadonlyArray<Card>): ReadonlyArray<Card> {
   return next ?? cards;
 }
 
+/** Remove oldest settled cards that have already been rendered by Static.
+ *  Terminal scrollback retains the visual output; only React state is freed. */
+function trimSettledCards(cards: readonly Card[]): readonly Card[] {
+  if (cards.length <= MAX_CARDS_IN_STATE) return cards;
+  // Walk from the start; once we've seen enough settled cards to drop, splice.
+  const excess = cards.length - MAX_CARDS_IN_STATE;
+  let dropCount = 0;
+  for (let i = 0; i < cards.length && dropCount < excess; i++) {
+    if (isFullySettled(cards[i]!)) dropCount++;
+  }
+  if (dropCount === 0) return cards;
+  return cards.slice(dropCount);
+}
+
 function appendCard(state: AgentState, card: Card): AgentState {
-  return { ...state, cards: [...elideOldCardContent(state.cards), card] };
+  const elided = elideOldCardContent(state.cards);
+  const withNew = [...elided, card];
+  return { ...state, cards: trimSettledCards(withNew) };
 }
 
 function mutateCard<K extends Card["kind"]>(

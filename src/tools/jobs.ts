@@ -108,6 +108,11 @@ export interface JobRecord {
 export class JobRegistry {
   private readonly jobs = new Map<number, InternalJob>();
   private nextId = 1;
+  /** Max completed jobs to retain for list_jobs / job_output lookups. */
+  private static readonly MAX_COMPLETED_JOBS = 50;
+  /** Interval (ms) between automatic cleanup sweeps. */
+  private static readonly CLEANUP_INTERVAL_MS = 30_000;
+  private lastCleanupAt = Date.now();
 
   /** Resolves on (a) ready signal, (b) early exit, or (c) waitSec deadline — child keeps running regardless. */
   async start(command: string, opts: JobStartOptions): Promise<JobStartResult> {
@@ -259,6 +264,7 @@ export class JobRegistry {
       job.exitCode = code;
       job.signalReady();
       job.signalClosed();
+      this.maybeCleanup();
     };
     child.on("exit", settleClosed);
     child.on("close", settleClosed);
@@ -407,6 +413,7 @@ export class JobRegistry {
   }
 
   list(): JobRecord[] {
+    this.maybeCleanup();
     return [...this.jobs.values()].map(snapshot);
   }
 
@@ -464,6 +471,26 @@ export class JobRegistry {
     let n = 0;
     for (const job of this.jobs.values()) if (job.running) n++;
     return n;
+  }
+
+  /** Evict oldest completed jobs when the map exceeds MAX_COMPLETED_JOBS. */
+  private maybeCleanup(): void {
+    const now = Date.now();
+    if (now - this.lastCleanupAt < JobRegistry.CLEANUP_INTERVAL_MS) return;
+    this.lastCleanupAt = now;
+
+    const completed: Array<{ id: number; startedAt: number }> = [];
+    for (const [id, job] of this.jobs) {
+      if (!job.running) completed.push({ id, startedAt: job.startedAt });
+    }
+    if (completed.length <= JobRegistry.MAX_COMPLETED_JOBS) return;
+
+    // Sort oldest first, drop the excess.
+    completed.sort((a, b) => a.startedAt - b.startedAt);
+    const toRemove = completed.length - JobRegistry.MAX_COMPLETED_JOBS;
+    for (let i = 0; i < toRemove; i++) {
+      this.jobs.delete(completed[i]!.id);
+    }
   }
 }
 

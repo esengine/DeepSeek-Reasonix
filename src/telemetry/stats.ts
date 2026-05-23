@@ -114,6 +114,8 @@ export interface SessionSummary {
 
 export class SessionStats {
   readonly turns: TurnStats[] = [];
+  /** Max turns to retain in memory — older turns are dropped but their costs are aggregated into carryover. */
+  private static readonly MAX_TURNS = 200;
   /** Cost from prior runs of a resumed session, restored from session meta. */
   private _carryoverCost = 0;
   /** Turn count from prior runs of a resumed session. */
@@ -167,6 +169,14 @@ export class SessionStats {
       cacheHitRatio: usage.cacheHitRatio,
     };
     this.turns.push(stats);
+    // Rolling window: drop oldest turns, aggregate their costs into carryover.
+    while (this.turns.length > SessionStats.MAX_TURNS) {
+      const oldest = this.turns.shift()!;
+      this._carryoverCost += oldest.cost;
+      this._carryoverTurns += 1;
+      this._carryoverCacheHit += oldest.usage.promptCacheHitTokens ?? 0;
+      this._carryoverCacheMiss += oldest.usage.promptCacheMissTokens ?? 0;
+    }
     return stats;
   }
 
