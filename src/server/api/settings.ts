@@ -103,7 +103,7 @@ export async function handleSettings(
         apiKeySet: Boolean(cfg.apiKey),
         baseUrl: cfg.baseUrl ?? null,
         lang: getLanguage(),
-        preset: cfg.preset ?? "flash",
+        preset: cfg.preset === "pro" ? "pro" : "flash",
         reasoningEffort: cfg.reasoningEffort ?? "max",
         search: cfg.search !== false,
         webSearchEngine: readWebSearchEngine(ctx.configPath),
