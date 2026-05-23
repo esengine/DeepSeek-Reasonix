@@ -23,67 +23,6 @@ function tailLinesFor(name: string): number {
     : OTHER_TAIL;
 }
 
-/** Patterns that indicate error/failure lines in command output. */
-const ERROR_PATTERNS =
-  /\b(?:error|fail|fatal|exception|assert(?:ion)?|traceback|panic|killed|segfault|exit\s+\d|errno|denied|not\s+found|no\s+such|cannot|could\s+not|unable\s+to|refused|timeout|timed?\s*out)\b/i;
-
-/** For failed commands, pick smart visible lines: error-relevant lines + tail. */
-function smartTruncate(
-  allLines: string[],
-  tailCount: number,
-  exitCode: number | undefined,
-): { visible: string[]; hidden: number; errorLinesFound: boolean } {
-  if (allLines.length <= tailCount) {
-    return { visible: allLines, hidden: 0, errorLinesFound: false };
-  }
-
-  const failed = exitCode !== undefined && exitCode !== 0;
-  if (!failed) {
-    const visible = allLines.slice(-tailCount);
-    return { visible, hidden: allLines.length - visible.length, errorLinesFound: false };
-  }
-
-  // For failed commands: collect error-relevant lines + tail lines
-  const errorIndices = new Set<number>();
-  for (let i = 0; i < allLines.length; i++) {
-    if (ERROR_PATTERNS.test(allLines[i]!)) {
-      errorIndices.add(i);
-      // Also include the line before and after for context
-      if (i > 0) errorIndices.add(i - 1);
-      if (i < allLines.length - 1) errorIndices.add(i + 1);
-    }
-  }
-
-  // Always include the tail
-  const tailStart = allLines.length - tailCount;
-  for (let i = tailStart; i < allLines.length; i++) {
-    errorIndices.add(i);
-  }
-
-  // Build visible set: error lines + tail, sorted, deduplicated
-  const sortedIndices = [...errorIndices].sort((a, b) => a - b);
-  const visible: string[] = [];
-  let lastIdx = -2;
-  for (const idx of sortedIndices) {
-    if (idx === lastIdx + 1) {
-      // Consecutive line - append directly
-      visible.push(allLines[idx]!);
-    } else if (idx > lastIdx) {
-      // Gap - add separator
-      const gap = idx - lastIdx - 1;
-      if (visible.length > 0) {
-        visible.push(`⋮ ${gap} line${gap > 1 ? "s" : ""} hidden`);
-      } else {
-        visible.push(allLines[idx]!);
-      }
-    }
-    lastIdx = idx;
-  }
-
-  const hidden = allLines.length - visible.length;
-  return { visible, hidden, errorLinesFound: errorIndices.size > tailCount };
-}
-
 export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
@@ -99,22 +38,8 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   const allLines = card.output.length > 0 ? card.output.split("\n") : [];
   const tail = tailLinesFor(card.name);
   const truncated = !verbose && allLines.length > tail;
-
-  let visible: string[];
-  let hidden: number;
-  let errorLinesFound: boolean;
-
-  if (truncated) {
-    const result = smartTruncate(allLines, tail, card.exitCode);
-    visible = result.visible;
-    hidden = result.hidden;
-    errorLinesFound = result.errorLinesFound;
-  } else {
-    visible = allLines;
-    hidden = 0;
-    errorLinesFound = false;
-  }
-
+  const visible = truncated ? allLines.slice(-tail) : allLines;
+  const hidden = truncated ? allLines.length - visible.length : 0;
   const isInflight = useIsInflight(card.id);
   const status = toolStatus(card, isInflight);
   const headColor = headerColorFor(status);
@@ -153,14 +78,9 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
           <>
             {hidden > 0 ? (
               <Text color={FG.faint}>
-                {card.exitCode !== undefined && card.exitCode !== 0
-                  ? t("cardLabels.earlierLinesFailed", {
-                      count: hidden,
-                      code: card.exitCode,
-                    })
-                  : t(hidden === 1 ? "cardLabels.earlierLine" : "cardLabels.earlierLines", {
-                      count: hidden,
-                    })}
+                {t(hidden === 1 ? "cardLabels.earlierLine" : "cardLabels.earlierLines", {
+                  count: hidden,
+                })}
               </Text>
             ) : null}
             {visible.map((line, i) => (

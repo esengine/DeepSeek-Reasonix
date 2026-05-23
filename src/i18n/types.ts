@@ -762,7 +762,6 @@ export interface TranslationSchema {
     moreHitsPlural: string;
     earlierLine: string;
     earlierLines: string;
-    earlierLinesFailed: string;
     earlierStackLine: string;
     earlierStackLines: string;
     agent: string;
