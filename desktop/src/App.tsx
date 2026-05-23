@@ -75,6 +75,23 @@ import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+const RIGHT_SIDEBAR_COLLAPSE_WIDTH = 1120;
+const LEFT_SIDEBAR_COLLAPSE_WIDTH = 760;
+
+const RESPONSIVE_STAGE = {
+  WIDE: "wide",
+  COMPACT: "compact",
+  NARROW: "narrow",
+} as const;
+
+type ResponsiveStage = (typeof RESPONSIVE_STAGE)[keyof typeof RESPONSIVE_STAGE];
+
+function responsiveStage(width: number): ResponsiveStage {
+  if (width < LEFT_SIDEBAR_COLLAPSE_WIDTH) return RESPONSIVE_STAGE.NARROW;
+  if (width < RIGHT_SIDEBAR_COLLAPSE_WIDTH) return RESPONSIVE_STAGE.COMPACT;
+  return RESPONSIVE_STAGE.WIDE;
+}
+
 export type AssistantSegment =
   | { kind: "text"; text: string }
   | { kind: "reasoning"; text: string }
@@ -2897,6 +2914,11 @@ export function App() {
   const [ctxCollapsed, setCtxCollapsed] = useState(
     () => localStorage.getItem("reasonix.ctxCollapsed") === "1",
   );
+  const responsiveStageRef = useRef<ResponsiveStage | null>(null);
+  const autoSideCollapsedRef = useRef(false);
+  const autoCtxCollapsedRef = useRef(false);
+  const sideCollapsedRef = useRef(sideCollapsed);
+  const ctxCollapsedRef = useRef(ctxCollapsed);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -2910,8 +2932,86 @@ export function App() {
   }, [sideCollapsed]);
 
   useEffect(() => {
+    sideCollapsedRef.current = sideCollapsed;
+  }, [sideCollapsed]);
+
+  useEffect(() => {
     localStorage.setItem("reasonix.ctxCollapsed", ctxCollapsed ? "1" : "0");
   }, [ctxCollapsed]);
+
+  useEffect(() => {
+    ctxCollapsedRef.current = ctxCollapsed;
+  }, [ctxCollapsed]);
+
+  useEffect(() => {
+    let raf = 0;
+
+    const sync = () => {
+      raf = 0;
+      const next = responsiveStage(window.innerWidth);
+      const prev = responsiveStageRef.current;
+
+      if (prev === null) {
+        responsiveStageRef.current = next;
+        return;
+      }
+
+      if (prev === next) return;
+
+      if (next === RESPONSIVE_STAGE.WIDE) {
+        if (autoCtxCollapsedRef.current) {
+          setCtxCollapsed(false);
+          autoCtxCollapsedRef.current = false;
+        }
+        if (autoSideCollapsedRef.current) {
+          setSideCollapsed(false);
+          autoSideCollapsedRef.current = false;
+        }
+      } else if (next === RESPONSIVE_STAGE.COMPACT) {
+        if (prev === RESPONSIVE_STAGE.WIDE && !ctxCollapsedRef.current) {
+          setCtxCollapsed(true);
+          autoCtxCollapsedRef.current = true;
+        }
+        if (autoSideCollapsedRef.current) {
+          setSideCollapsed(false);
+          autoSideCollapsedRef.current = false;
+        }
+      } else if (next === RESPONSIVE_STAGE.NARROW) {
+        if (!ctxCollapsedRef.current) {
+          setCtxCollapsed(true);
+          autoCtxCollapsedRef.current = true;
+        }
+        if (!sideCollapsedRef.current) {
+          setSideCollapsed(true);
+          autoSideCollapsedRef.current = true;
+        }
+      }
+
+      responsiveStageRef.current = next;
+    };
+
+    const onResize = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(sync);
+    };
+
+    sync();
+    window.addEventListener("resize", onResize);
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
+
+  const onToggleSide = useCallback(() => {
+    autoSideCollapsedRef.current = false;
+    setSideCollapsed((v) => !v);
+  }, []);
+
+  const onToggleCtx = useCallback(() => {
+    autoCtxCollapsedRef.current = false;
+    setCtxCollapsed((v) => !v);
+  }, []);
 
   useEffect(() => {
     // Chromium webview supports `zoom`; scales every px-based size without touching CSS rules.
@@ -3252,8 +3352,8 @@ export function App() {
           onSetCustomFontFamily={setCustomFontFamily}
           sideCollapsed={sideCollapsed}
           ctxCollapsed={ctxCollapsed}
-          onToggleSide={() => setSideCollapsed((v) => !v)}
-          onToggleCtx={() => setCtxCollapsed((v) => !v)}
+          onToggleSide={onToggleSide}
+          onToggleCtx={onToggleCtx}
           onToggleCurrency={onToggleCurrency}
           tabsList={tabs}
           activeTabId={activeTabId}

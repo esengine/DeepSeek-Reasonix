@@ -222,9 +222,11 @@ button:disabled {
 /* ---------- APP SHELL ---------- */
 
 .app {
+  --side-width: 244px;
+  --ctx-width: 320px;
   display: grid;
   grid-template-rows: 36px 36px 1fr 26px;
-  grid-template-columns: 244px 1fr 320px;
+  grid-template-columns: var(--side-width) minmax(0, 1fr) var(--ctx-width);
   grid-template-areas:
     "title  title   title"
     "tabs   tabs    tabs"
@@ -232,6 +234,7 @@ button:disabled {
     "status status  status";
   height: 100%;
   background: var(--bg);
+  transition: grid-template-columns 180ms ease;
 }
 
 html[data-platform="macos"] .app {
@@ -242,13 +245,10 @@ html[data-platform="macos"] .app {
 }
 
 .app[data-ctx-collapsed="true"] {
-  grid-template-columns: 244px 1fr 0;
+  --ctx-width: 0px;
 }
 .app[data-side-collapsed="true"] {
-  grid-template-columns: 0 1fr 320px;
-}
-.app[data-ctx-collapsed="true"][data-side-collapsed="true"] {
-  grid-template-columns: 0 1fr 0;
+  --side-width: 0px;
 }
 
 /* ---------- TABBAR ---------- */
@@ -2851,6 +2851,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   align-items: center;
   gap: 4px;
   padding: 6px 8px 8px 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 .composer-foot .cf-btn {
   padding: 5px 8px;
@@ -2873,6 +2875,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .composer-foot .grow {
   flex: 1;
+  min-width: 0;
 }
 .composer-foot .model-pill {
   padding: 4px 8px;
@@ -2881,11 +2884,18 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--border);
   color: var(--fg-2);
   font-family: inherit;
   cursor: pointer;
+}
+.composer-foot .model-pill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .composer-foot .model-pill:hover {
   background: var(--panel-2);
