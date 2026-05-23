@@ -9,7 +9,7 @@ import {
 } from "../src/code/lifecycle-intent-runner.js";
 
 const FIXTURE_PATH = resolve("tests/fixtures/lifecycle-intent-corpus.json");
-const NPX_BIN = process.platform === "win32" ? "npx.cmd" : "npx";
+const TSX_CLI = resolve("node_modules/tsx/dist/cli.mjs");
 
 function loadFixture(): LifecycleIntentCorpusCase[] {
   return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as LifecycleIntentCorpusCase[];
@@ -37,14 +37,18 @@ describe("lifecycle intent corpus runner", () => {
   });
 
   it("runs as an offline script without requiring an API key", () => {
-    const result = spawnSync(NPX_BIN, ["tsx", "scripts/evaluate-lifecycle-intent.mts", "--json"], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        DEEPSEEK_API_KEY: "",
+    const result = spawnSync(
+      process.execPath,
+      [TSX_CLI, "scripts/evaluate-lifecycle-intent.mts", "--json"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          DEEPSEEK_API_KEY: "",
+        },
+        timeout: 20_000,
       },
-      timeout: 20_000,
-    });
+    );
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
