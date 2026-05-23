@@ -261,11 +261,23 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   if (requestedSpecs.length > 0 && !tools) {
     tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
   }
+  const launchWorkspace = opts.codeMode?.rootDir ?? process.cwd();
+  let activeWorkspace = launchWorkspace;
+  const codeMode = opts.codeMode
+    ? {
+        ...opts.codeMode,
+        onRootChange: (newRoot: string) => {
+          activeWorkspace = newRoot;
+          opts.codeMode?.onRootChange?.(newRoot);
+        },
+      }
+    : undefined;
 
   const runtime = createMcpRuntime({
     getTools: () => tools,
     getMcpPrefix: () => opts.mcpPrefix,
     getRequestedCount: () => requestedSpecs.length,
+    getWorkspaceDir: () => activeWorkspace,
     progressSink,
   });
 
@@ -314,7 +326,6 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     opts.forceNew,
     opts.forceResume,
   );
-  const launchWorkspace = opts.codeMode?.rootDir ?? process.cwd();
   const showPicker =
     !opts.session && !opts.forceResume && listSessionsForWorkspace(launchWorkspace).length > 0;
 
@@ -374,6 +385,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       startupInfoHints={startupInfoHints}
       showPicker={showPicker}
       {...opts}
+      codeMode={codeMode}
       session={resolvedSession}
       qqChannel={qqChannel}
       qqSubmitRef={qqSubmitRef}

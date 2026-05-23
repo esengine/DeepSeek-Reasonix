@@ -1,5 +1,6 @@
 /** MCP client + bridge — in-process fake transport answering initialize / tools/list / tools/call. */
 
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { McpClient } from "../src/mcp/client.js";
 import { bridgeMcpTools, flattenMcpResult } from "../src/mcp/registry.js";
@@ -34,6 +35,8 @@ interface FakeServerOptions {
   getPrompt?: (name: string, args?: Record<string, string>) => GetPromptResult;
   /** Initialize capabilities override — defaults advertise tools only. */
   capabilities?: Record<string, unknown>;
+  /** Client responses to server-initiated requests. */
+  responses?: JsonRpcMessage[];
 }
 
 /** In-process MCP transport — responds in `send()` by pushing onto the queue. */
@@ -47,7 +50,10 @@ class FakeMcpTransport implements McpTransport {
 
   async send(msg: JsonRpcMessage): Promise<void> {
     if (this.closed) throw new Error("fake transport closed");
-    if (!("method" in msg)) return; // response frames from client? never happens
+    if (!("method" in msg)) {
+      this.opts.responses?.push(msg);
+      return;
+    }
     if (!("id" in msg)) {
       // notification — e.g. notifications/initialized — acknowledge silently
       this.opts.received!.push(msg as JsonRpcRequest);
@@ -77,6 +83,10 @@ class FakeMcpTransport implements McpTransport {
   async close(): Promise<void> {
     this.closed = true;
     while (this.waiters.length > 0) this.waiters.shift()!(null);
+  }
+
+  pushServerMessage(msg: JsonRpcMessage): void {
+    this.push(msg);
   }
 
   private handle(req: JsonRpcRequest): JsonRpcMessage {
@@ -184,6 +194,44 @@ describe("McpClient: initialize handshake", () => {
     expect(received[0]!.method).toBe("initialize");
     expect(received[1]!.method).toBe("notifications/initialized");
 
+    await client.close();
+  });
+
+  it("passes the workspace root in initialize params", async () => {
+    const received: JsonRpcRequest[] = [];
+    const workspaceDir = "/tmp/reasonix-workspace";
+    const workspaceUri = pathToFileURL(workspaceDir).href;
+    const transport = new FakeMcpTransport({ tools: [], received });
+    const client = new McpClient({ transport, workspaceDir });
+    await client.initialize();
+    const init = received.find((r) => r.method === "initialize")!;
+    const params = init.params as {
+      capabilities: Record<string, unknown>;
+      rootUri?: string;
+      workspaceFolders?: Array<{ uri: string; name?: string }>;
+    };
+    expect(params.capabilities).toHaveProperty("roots");
+    expect(params.rootUri).toBe(workspaceUri);
+    expect(params.workspaceFolders).toEqual([{ uri: workspaceUri, name: "reasonix-workspace" }]);
+    await client.close();
+  });
+
+  it("answers roots/list with the configured workspace root", async () => {
+    const responses: JsonRpcMessage[] = [];
+    const workspaceDir = "/tmp/reasonix-workspace";
+    const workspaceUri = pathToFileURL(workspaceDir).href;
+    const transport = new FakeMcpTransport({ tools: [], responses });
+    const client = new McpClient({ transport, workspaceDir });
+    await client.initialize();
+    transport.pushServerMessage({ jsonrpc: "2.0", id: "roots-1", method: "roots/list" });
+    for (let i = 0; responses.length === 0 && i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(responses[0]).toMatchObject({
+      jsonrpc: "2.0",
+      id: "roots-1",
+      result: { roots: [{ uri: workspaceUri, name: "reasonix-workspace" }] },
+    });
     await client.close();
   });
 

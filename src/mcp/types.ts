@@ -48,13 +48,22 @@ export interface McpClientCapabilities {
   resources?: Record<string, never>;
   /** Advertised when the client can consume `prompts/list` + `prompts/get`. */
   prompts?: Record<string, never>;
+  /** Advertised when the client can answer `roots/list`. */
+  roots?: { listChanged?: boolean };
   // sampling would go here — deferred.
+}
+
+export interface McpRoot {
+  uri: string;
+  name?: string;
 }
 
 export interface InitializeParams {
   protocolVersion: string;
   capabilities: McpClientCapabilities;
   clientInfo: McpClientInfo;
+  rootUri?: string;
+  workspaceFolders?: McpRoot[];
 }
 
 export interface InitializeResult {

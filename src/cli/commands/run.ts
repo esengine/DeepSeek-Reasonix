@@ -82,6 +82,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   const clients: McpClient[] = [];
   let tools: ToolRegistry | undefined;
   let successCount = 0;
+  const workspaceDir = process.cwd();
   if (normalizedSpecs.length > 0) {
     tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
     for (const spec of normalizedSpecs) {
@@ -101,8 +102,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
             ? opts.mcpPrefix
             : "";
         if (spec.transport === "stdio") preflightStdioSpec(spec);
-        const transport = buildTransportFromSpec(spec);
-        mcp = new McpClient({ transport });
+        const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
+        mcp = new McpClient({ transport, workspaceDir });
         await mcp.initialize();
         const bridge = await bridgeMcpTools(mcp, {
           registry: tools,

@@ -1282,6 +1282,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       },
       getMcpPrefix: () => undefined,
       getRequestedCount: () => requested,
+      getWorkspaceDir: () => tab.rootDir,
       progressSink: { current: null },
     });
     tab.mcpRuntime = runtime;

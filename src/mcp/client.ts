@@ -1,3 +1,5 @@
+import { basename, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { VERSION } from "../version.js";
 import type { McpTransport } from "./stdio.js";
 import {
@@ -19,6 +21,7 @@ import {
   MCP_PROTOCOL_VERSION,
   type McpClientInfo,
   type McpProgressHandler,
+  type McpRoot,
   type ProgressNotificationParams,
   type ReadResourceParams,
   type ReadResourceResult,
@@ -28,6 +31,7 @@ import {
 export interface McpClientOptions {
   transport: McpTransport;
   clientInfo?: McpClientInfo;
+  workspaceDir?: string;
   /** Per-request timeout. Default 60s. */
   requestTimeoutMs?: number;
 }
@@ -41,6 +45,8 @@ interface PendingRequest {
 export class McpClient {
   private readonly transport: McpTransport;
   private readonly clientInfo: McpClientInfo;
+  private readonly workspaceDir: string | undefined;
+  private readonly workspaceRoot: McpRoot | undefined;
   private readonly requestTimeoutMs: number;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private nextId = 1;
@@ -61,6 +67,14 @@ export class McpClient {
   constructor(opts: McpClientOptions) {
     this.transport = opts.transport;
     this.clientInfo = opts.clientInfo ?? { name: "reasonix", version: VERSION };
+    const workspaceDir = opts.workspaceDir?.trim();
+    if (workspaceDir) {
+      this.workspaceDir = resolve(workspaceDir);
+      this.workspaceRoot = {
+        uri: pathToFileURL(this.workspaceDir).href,
+        name: basename(this.workspaceDir) || this.workspaceDir,
+      };
+    }
     this.requestTimeoutMs = opts.requestTimeoutMs ?? 60_000;
   }
 
@@ -84,24 +98,32 @@ export class McpClient {
     return this._instructions;
   }
 
+  get workspaceRootDir(): string | undefined {
+    return this.workspaceDir;
+  }
+
   /** Compliant servers reject other methods until this completes. */
   async initialize(opts: { signal?: AbortSignal } = {}): Promise<InitializeResult> {
     if (this.initialized) throw new Error("MCP client already initialized");
     this.startReaderIfNeeded();
-    const result = await this.request<InitializeResult>(
-      "initialize",
-      {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        // Advertise every method the client can consume so servers know
-        // they can send listChanged notifications etc. Sub-feature flags
-        // (e.g. `resources.subscribe`) are omitted — we don't implement
-        // those yet and the empty object means "method-level support, no
-        // sub-features."
-        capabilities: { tools: {}, resources: {}, prompts: {} },
-        clientInfo: this.clientInfo,
-      } satisfies InitializeParams,
-      opts.signal,
-    );
+    const capabilities: InitializeParams["capabilities"] = {
+      tools: {},
+      resources: {},
+      prompts: {},
+      ...(this.workspaceRoot ? { roots: {} } : {}),
+    };
+    const params: InitializeParams = {
+      protocolVersion: MCP_PROTOCOL_VERSION,
+      capabilities,
+      clientInfo: this.clientInfo,
+      ...(this.workspaceRoot
+        ? {
+            rootUri: this.workspaceRoot.uri,
+            workspaceFolders: [this.workspaceRoot],
+          }
+        : {}),
+    };
+    const result = await this.request<InitializeResult>("initialize", params, opts.signal);
     this._serverCapabilities = result.capabilities ?? {};
     this._serverInfo = result.serverInfo ?? { name: "", version: "" };
     this._protocolVersion = result.protocolVersion ?? "";
@@ -298,7 +320,10 @@ export class McpClient {
       }
       return;
     }
-    if (!("result" in msg) && !("error" in msg)) return; // it's a request from server
+    if (!("result" in msg) && !("error" in msg)) {
+      this.handleServerRequest(msg as JsonRpcRequest);
+      return;
+    }
     const pending = this.pending.get(msg.id);
     if (!pending) return; // late response after timeout; drop
     this.pending.delete(msg.id);
@@ -309,5 +334,25 @@ export class McpClient {
     } else {
       pending.resolve(resp.result);
     }
+  }
+
+  private handleServerRequest(req: JsonRpcRequest): void {
+    if (req.method === "roots/list" && this.workspaceRoot) {
+      void this.transport
+        .send({
+          jsonrpc: "2.0",
+          id: req.id,
+          result: { roots: [this.workspaceRoot] },
+        })
+        .catch(() => undefined);
+      return;
+    }
+    void this.transport
+      .send({
+        jsonrpc: "2.0",
+        id: req.id,
+        error: { code: -32601, message: `method not found: ${req.method}` },
+      })
+      .catch(() => undefined);
   }
 }
