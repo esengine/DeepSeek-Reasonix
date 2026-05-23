@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+  PlanCard,
   ReasoningCard,
   StreamingCard,
   ToolCard,
@@ -175,6 +176,41 @@ describe("ui reducer", () => {
     ]);
     const card = s.cards[0] as ToolCard;
     expect(card.rejected).toBeUndefined();
+  });
+
+  it("advances the active plan cursor as steps are completed", () => {
+    const shown = run([
+      {
+        type: "plan.show",
+        id: "p1",
+        title: "Plan",
+        variant: "active",
+        steps: [
+          { id: "step-1", title: "One", status: "queued" },
+          { id: "step-2", title: "Two", status: "queued" },
+          { id: "step-3", title: "Three", status: "queued" },
+        ],
+      },
+    ]);
+    expect((shown.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual([
+      "running",
+      "queued",
+      "queued",
+    ]);
+
+    const afterFirst = reduce(shown, { type: "plan.step.complete", stepId: "step-1" });
+    expect((afterFirst.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual([
+      "done",
+      "running",
+      "queued",
+    ]);
+
+    const afterSecond = reduce(afterFirst, { type: "plan.step.complete", stepId: "step-2" });
+    expect((afterSecond.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual([
+      "done",
+      "done",
+      "running",
+    ]);
   });
 
   it("changes mode and accumulates session cost", () => {
