@@ -343,6 +343,7 @@ function emitServerSettings(settings: any, overview?: any): void {
     model: overview?.model ?? settings?.model ?? "deepseek-reasoner",
     preset: settings?.preset ?? overview?.preset ?? "auto",
     editor: "code",
+    webSearchEngine: settings?.webSearchEngine ?? "bing",
     version: overview?.version ?? "",
     baseUrl: settings?.baseUrl ?? "",
     apiKeyPrefix: settings?.apiKey ?? "",

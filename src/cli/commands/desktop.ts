@@ -32,6 +32,7 @@ import {
   loadWorkspaceDir,
   pushRecentWorkspace,
   readConfig,
+  webSearchEngine as readWebSearchEngine,
   saveApiKey,
   saveBaseUrl,
   saveDesktopOpenTabs,
@@ -112,6 +113,7 @@ type InMessage = { tabId?: string } & (
       workspaceDir?: string;
       preset?: "auto" | "flash" | "pro";
       editor?: string;
+      webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
     }
   | { cmd: "qq_status_get" }
   | { cmd: "qq_connect" }
@@ -159,6 +161,7 @@ interface SettingsEvent {
   model: string;
   preset: "auto" | "flash" | "pro";
   editor?: string;
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   version: string;
 }
 
@@ -560,6 +563,7 @@ function emitSettings(tab: Tab): void {
       model: tab.currentModel,
       preset: tab.currentPreset,
       editor: loadEditor(),
+      webSearchEngine: readWebSearchEngine(),
       version: VERSION,
     },
     tab.id,
@@ -2183,6 +2187,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           return;
         }
         if (msg.editor !== undefined) saveEditor(msg.editor);
+        if (msg.webSearchEngine !== undefined) {
+          const cfg = readConfig();
+          cfg.webSearchEngine = msg.webSearchEngine;
+          writeConfig(cfg);
+        }
         if (msg.preset !== undefined) {
           tab.currentPreset = canonicalPresetName(msg.preset);
           const resolved = resolvePreset(tab.currentPreset);

@@ -673,6 +673,34 @@ function PageGeneral({
             }}
           />
         </div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.webSearchEngine")}</div>
+            <div className="h">{t("settings.webSearchEngineNote")}</div>
+          </div>
+          <select
+            className="field"
+            value={settings.webSearchEngine ?? "bing"}
+            onChange={(e) =>
+              onSave({
+                webSearchEngine: e.target.value as
+                  | "bing"
+                  | "searxng"
+                  | "metaso"
+                  | "tavily"
+                  | "perplexity"
+                  | "exa",
+              })
+            }
+          >
+            <option value="bing">{t("settings.webSearchEngineBing")}</option>
+            <option value="searxng">{t("settings.webSearchEngineSearxng")}</option>
+            <option value="metaso">{t("settings.webSearchEngineMetaso")}</option>
+            <option value="tavily">{t("settings.webSearchEngineTavily")}</option>
+            <option value="perplexity">{t("settings.webSearchEnginePerplexity")}</option>
+            <option value="exa">{t("settings.webSearchEngineExa")}</option>
+          </select>
+        </div>
       </section>
     </>
   );

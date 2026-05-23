@@ -198,6 +198,7 @@ export type Settings = {
   model: string;
   preset: "auto" | "flash" | "pro";
   editor?: string;
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   version: string;
 };
 
@@ -781,6 +782,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           model: ev.model,
           preset: ev.preset,
           editor: ev.editor,
+          webSearchEngine: ev.webSearchEngine,
           version: ev.version,
         },
       };

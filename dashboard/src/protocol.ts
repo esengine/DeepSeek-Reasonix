@@ -249,6 +249,14 @@ export type EditMode = "review" | "auto" | "yolo";
 
 export type PresetName = "auto" | "flash" | "pro";
 
+export type WebSearchEngineName =
+  | "bing"
+  | "searxng"
+  | "metaso"
+  | "tavily"
+  | "perplexity"
+  | "exa";
+
 export type SettingsEvent = {
   type: "$settings";
   reasoningEffort: "high" | "max";
@@ -261,6 +269,7 @@ export type SettingsEvent = {
   model: string;
   preset: PresetName;
   editor?: string;
+  webSearchEngine?: WebSearchEngineName;
   version: string;
 };
 
@@ -292,6 +301,7 @@ export type SettingsPatch = {
   workspaceDir?: string;
   preset?: PresetName;
   editor?: string;
+  webSearchEngine?: WebSearchEngineName;
 };
 
 export type QQConfigPatch = {
