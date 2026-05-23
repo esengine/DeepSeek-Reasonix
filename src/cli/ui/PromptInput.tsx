@@ -209,8 +209,8 @@ export function PromptInput({
 
   return (
     <Box flexDirection="row">
-      <Box width={1} backgroundColor="#0153e5" />
-      <Box flexDirection="column" flexGrow={1} paddingX={1} backgroundColor="#1e1e1e">
+      <Box width={1} backgroundColor={TONE.brand} />
+      <Box flexDirection="column" flexGrow={1} paddingX={1} backgroundColor={SURFACE.bgInput}>
         <Box height={1} />
         {(() => {
           const rows: React.ReactNode[] = [];
@@ -336,7 +336,7 @@ export function PromptInput({
         <Box height={1} />
         {mode || model ? (
           <Box>
-            <Text color="#0153e5">{mode || ""}</Text>
+            <Text color={TONE.brand}>{mode || ""}</Text>
             {mode && model ? <Text color={FG.faint}>{" · "}</Text> : null}
             {model ? <Text color={FG.faint}>{model}</Text> : null}
           </Box>
