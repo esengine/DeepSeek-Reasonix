@@ -688,21 +688,27 @@ export class CacheFirstLoop {
 
       // Preflight context check. Local estimate of the outgoing payload
       // catches cases where prior usage didn't warn us (fresh resume, one
-      // huge tool result). Above 95% we truncate locally instead of making
-      // the user wait on another model call before their request goes out.
+      // huge tool result). Above the emergency threshold we try semantic
+      // fold first; mechanical drop is the last resort when fold cannot
+      // summarize (empty head, savings too small, summarizer failed).
       {
         const decision = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
         if (decision.needsAction) {
-          const { estimateTokens: estimate, estimateBytes, ctxMax } = decision;
+          const { estimateTokens: estimate, ctxMax } = decision;
           yield {
             turn: this._turn,
             role: "status",
             content: t("loop.preflightTruncateStatus"),
           };
-          const result = this.context.mechanicalTruncate(this.model, {
-            allowEmpty: false,
-          });
+          let result = await this.context.fold(this.model, { requireTailBoundary: true });
+          if (!result.folded) {
+            result = this.context.mechanicalTruncate(this.model, { allowEmpty: false });
+          }
           if (result.folded) {
+            // Block decideAfterUsage from folding again on the same turn — the
+            // log was just compacted; another fold would noop and the warning
+            // would be misleading.
+            this._foldedThisTurn = true;
             messages = this.buildMessages();
             const after = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
             const stillFull = after.needsAction;
@@ -715,7 +721,6 @@ export class CacheFirstLoop {
                   estimate: after.estimateTokens.toLocaleString(),
                   ctxMax: after.ctxMax.toLocaleString(),
                   pct: Math.round((after.estimateTokens / after.ctxMax) * 100),
-                  bodyKB: Math.round(after.estimateBytes / 1024).toLocaleString(),
                   beforeMessages: result.beforeMessages,
                   afterMessages: result.afterMessages,
                 },
@@ -729,7 +734,6 @@ export class CacheFirstLoop {
                 estimate: estimate.toLocaleString(),
                 ctxMax: ctxMax.toLocaleString(),
                 pct: Math.round((estimate / ctxMax) * 100),
-                bodyKB: Math.round(estimateBytes / 1024).toLocaleString(),
               }),
             };
           }

@@ -676,12 +676,13 @@ describe("CacheFirstLoop (non-streaming)", () => {
   });
 
   it("auto-folds history when promptTokens crosses the normal fold threshold", async () => {
-    // Shrink ctxMax so the seed log can trip the auto-fold threshold without
-    // also exceeding the preflight byte ceiling (~700 KB by default).
-    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 100_000;
-    // Aim just past the normal threshold but below the aggressive band.
+    // ctxMax sized so the seed log (~90K content tokens) stays under preflight's
+    // 95% threshold AND the fold tailBudget (20%) stays smaller than the log
+    // so fold has a meaningful head to compact. The mocked usage trips post-
+    // response auto-fold without preflight stealing the work.
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 200_000;
     const tripPrompt = Math.ceil(
-      100_000 *
+      200_000 *
         (HISTORY_FOLD_THRESHOLD + (HISTORY_FOLD_AGGRESSIVE_THRESHOLD - HISTORY_FOLD_THRESHOLD) / 2),
     );
     const reg = new ToolRegistry();
@@ -747,10 +748,9 @@ describe("CacheFirstLoop (non-streaming)", () => {
   }, 30_000);
 
   it("uses the aggressive fold tier when promptTokens crosses the aggressive threshold", async () => {
-    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 100_000;
-    // Halfway between the aggressive threshold and the force-summary line at 0.8.
+    DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL] = 200_000;
     const tripPrompt = Math.ceil(
-      100_000 * (HISTORY_FOLD_AGGRESSIVE_THRESHOLD + (0.8 - HISTORY_FOLD_AGGRESSIVE_THRESHOLD) / 2),
+      200_000 * (HISTORY_FOLD_AGGRESSIVE_THRESHOLD + (0.8 - HISTORY_FOLD_AGGRESSIVE_THRESHOLD) / 2),
     );
     const reg = new ToolRegistry();
     reg.register({

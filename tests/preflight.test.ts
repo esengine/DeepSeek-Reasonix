@@ -49,11 +49,11 @@ describe("preflight context-size check", () => {
     delete DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL];
   });
 
-  it("mechanically truncates when the estimated request exceeds 95% of the context window", async () => {
-    // Tiny 1000-token budget so modest content can overflow.
+  it("compacts when the estimated request exceeds 95% of the context window", async () => {
     DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL] = 1000;
 
-    const fetchFn = fakeFetch([{ content: "ack" }]);
+    // First response: summarizer ("ack"). Second: main agent reply.
+    const fetchFn = fakeFetch([{ content: "ack" }, { content: "done" }]);
     const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchFn });
     const loop = new CacheFirstLoop({
       client,
@@ -62,12 +62,6 @@ describe("preflight context-size check", () => {
       model: TEST_MODEL,
     });
 
-    // Seed the log with a PROPERLY paired (assistant.tool_calls ↔
-    // tool) turn so buildMessages doesn't strip the tool result as
-    // an orphan. The tool result is oversized enough to push the
-    // preflight estimate past 95% of the 1000-token budget. Realistic
-    // log-line content to avoid the tokenizer's BPE O(n²) pathological
-    // path on pure-repeat inputs.
     loop.log.append({ role: "user", content: "prior request" });
     loop.log.append({
       role: "assistant",
@@ -85,24 +79,20 @@ describe("preflight context-size check", () => {
       events.push({ role: ev.role, content: ev.content });
     }
 
-    // Preflight fires BEFORE the request, but the emergency path is
-    // local-only: no summary LLM call should run before the user's call.
     const warn = events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? ""));
     expect(warn).toBeDefined();
-    expect(warn!.content).toMatch(/truncated \d+ messages/);
-    expect(warn!.content).not.toMatch(/summary \d+ chars/);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(warn!.content).toMatch(/compacted \d+ messages/);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
 
-    // Loop still completed normally (no forced summary, no error).
     expect(events.find((e) => e.role === "error")).toBeUndefined();
     const finals = events.filter((e) => e.role === "assistant_final");
     expect(finals.length).toBe(1);
   });
 
-  it("mechanically truncates when oversized tool-call arguments dominate the estimate", async () => {
+  it("compacts when oversized tool-call arguments dominate the estimate", async () => {
     DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL] = 500;
 
-    const fetchFn = fakeFetch([{ content: "ack" }]);
+    const fetchFn = fakeFetch([{ content: "ack" }, { content: "done" }]);
     const loop = new CacheFirstLoop({
       client: new DeepSeekClient({ apiKey: "sk-test", fetch: fetchFn }),
       prefix: new ImmutablePrefix({ system: "s" }),
@@ -130,15 +120,15 @@ describe("preflight context-size check", () => {
 
     const warn = events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? ""));
     expect(warn).toBeDefined();
-    expect(warn!.content).toMatch(/truncated \d+ messages/);
-    expect(warn!.content).not.toMatch(/nothing left to truncate/);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(warn!.content).toMatch(/compacted \d+ messages/);
+    expect(warn!.content).not.toMatch(/nothing left to compact/);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
-  it("warns when truncation cannot get the full request under 95%", async () => {
+  it("warns when compaction cannot get the full request under 95%", async () => {
     DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL] = 500;
 
-    const fetchFn = fakeFetch([{ content: "ack" }]);
+    const fetchFn = fakeFetch([{ content: "ack" }, { content: "done" }]);
     const loop = new CacheFirstLoop({
       client: new DeepSeekClient({ apiKey: "sk-test", fetch: fetchFn }),
       prefix: new ImmutablePrefix({ system: "You are a careful assistant. ".repeat(300) }),
@@ -166,9 +156,9 @@ describe("preflight context-size check", () => {
     const warn = events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? ""));
     expect(warn).toBeDefined();
     expect(warn!.content).toMatch(/still/);
-    expect(warn!.content).toMatch(/truncat(?:ed|ing) \d+ messages/);
+    expect(warn!.content).toMatch(/compact(?:ed|ing) \d+ messages/);
     expect(warn!.content).not.toMatch(/Sending/);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
   it("does not clear the active tool turn when a tool result cannot fit the target", async () => {
@@ -229,10 +219,14 @@ describe("preflight context-size check", () => {
       events.push({ role: ev.role, content: ev.content });
     }
 
-    expect(payloads).toHaveLength(2);
-    expect(payloads[1]!.messages).not.toEqual([{ role: "system", content: "s" }]);
-    expect(payloads[1]!.messages.some((m) => m.role === "user")).toBe(true);
-    expect(payloads[1]!.messages.some((m) => m.role === "tool")).toBe(true);
+    // Preflight now calls fold (an extra LLM call to the summarizer) before
+    // mechanical fallback, so payloads = main + fold + main (3) instead of (2).
+    // The final-main payload is what we assert on.
+    expect(payloads.length).toBeGreaterThanOrEqual(2);
+    const finalMain = payloads[payloads.length - 1]!;
+    expect(finalMain.messages).not.toEqual([{ role: "system", content: "s" }]);
+    expect(finalMain.messages.some((m) => m.role === "user")).toBe(true);
+    expect(finalMain.messages.some((m) => m.role === "tool")).toBe(true);
     expect(loop.log.toMessages().some((m) => m.role === "user")).toBe(true);
     expect(
       events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? "")),
@@ -259,71 +253,6 @@ describe("preflight context-size check", () => {
     expect(anyPreflight).toBeUndefined();
   });
 
-  it("fires on body bytes alone when many under-cap tool results accumulate", async () => {
-    // Real-world failure: 156+ messages, each under the 32 KB per-tool cap, but the
-    // accumulated body exceeds DeepSeek's gateway limit (~880 KB). Token estimate
-    // stays well under 95%; only the byte signal trips.
-    DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL] = 5_000_000;
-
-    const fetchFn = fakeFetch([{ content: "ack" }]);
-    const loop = new CacheFirstLoop({
-      client: new DeepSeekClient({ apiKey: "sk-test", fetch: fetchFn }),
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-      model: TEST_MODEL,
-    });
-
-    // 40 paired turns × ~25 KB tool result ≈ 1 MB body — past the 700 KB byte
-    // ceiling but only ~250 K tokens (5% of the 5 M budget).
-    const per = "ERROR: step failed with trailing detail x\n".repeat(630); // ~25 KB
-    for (let i = 0; i < 40; i++) {
-      loop.log.append({ role: "user", content: `q${i}` });
-      loop.log.append({
-        role: "assistant",
-        content: "",
-        tool_calls: [
-          {
-            id: `c${i}`,
-            type: "function",
-            function: { name: "probe", arguments: "{}" },
-          },
-        ],
-      });
-      loop.log.append({ role: "tool", tool_call_id: `c${i}`, content: per });
-    }
-
-    const events: { role: string; content?: string }[] = [];
-    for await (const ev of loop.step("follow-up")) {
-      events.push({ role: ev.role, content: ev.content });
-    }
-
-    const warn = events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? ""));
-    expect(warn).toBeDefined();
-    expect(warn!.content).toMatch(/body \d/);
-    expect(warn!.content).toMatch(/truncated \d+ messages/);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-
-  it("decidePreflight reports bytes trigger when only bytes exceed the limit", () => {
-    DEEPSEEK_CONTEXT_TOKENS[TEST_MODEL] = 5_000_000;
-    const loop = new CacheFirstLoop({
-      client: new DeepSeekClient({ apiKey: "sk-test", fetch: fakeFetch([]) }),
-      prefix: new ImmutablePrefix({ system: "s" }),
-      stream: false,
-      model: TEST_MODEL,
-    });
-
-    const big = "ERROR: step failed with trailing detail x\n".repeat(20_000);
-    const messages: ChatMessage[] = [
-      { role: "user", content: "u" },
-      { role: "assistant", content: big },
-    ];
-    const decision = loop.context.decidePreflight(messages, undefined, TEST_MODEL);
-    expect(decision.needsAction).toBe(true);
-    expect(decision.trigger).toBe("bytes");
-    expect(decision.estimateBytes).toBeGreaterThan(700_000);
-  });
-
   it("warns (but does not block) when over 95% with nothing to truncate", async () => {
     // Tiny budget AND a system prompt that alone overwhelms it. The log
     // is empty, so truncation has nothing to shrink — the preflight surfaces
@@ -347,7 +276,7 @@ describe("preflight context-size check", () => {
 
     const warn = events.find((e) => e.role === "warning" && /^preflight:/.test(e.content ?? ""));
     expect(warn).toBeDefined();
-    expect(warn!.content).toMatch(/nothing left to truncate/);
+    expect(warn!.content).toMatch(/nothing left to compact/);
     // Run still reaches the final step — the user sees the warning
     // and can react, but we don't short-circuit on our own.
     const finals = events.filter((e) => e.role === "assistant_final");
