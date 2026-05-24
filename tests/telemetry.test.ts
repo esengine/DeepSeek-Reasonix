@@ -323,4 +323,23 @@ describe("SessionStats — issue #364 resume cache + context carryover", () => {
     expect(s.aggregateCacheHitRatio).toBe(0);
     expect(s.summary().lastPromptTokens).toBe(0);
   });
+
+  it("cumulativeCompletionTokens sums carryover + live turns so resume doesn't reset the counter", () => {
+    // Regression: #1667 persisted totalCompletionTokens but didn't seed it
+    // back into stats on resume, so the first patchSessionMeta after a
+    // restart overwrote the saved value with just the new turn's tally.
+    const s = new SessionStats();
+    s.seedCarryover({ totalCompletionTokens: 50_000 });
+    expect(s.cumulativeCompletionTokens).toBe(50_000);
+    s.record(1, "deepseek-chat", new Usage(2000, 500, 0, 0, 2000));
+    expect(s.cumulativeCompletionTokens).toBe(50_500);
+  });
+
+  it("seedCarryover ignores zero / negative totalCompletionTokens", () => {
+    const s = new SessionStats();
+    s.seedCarryover({ totalCompletionTokens: 0 });
+    expect(s.cumulativeCompletionTokens).toBe(0);
+    s.seedCarryover({ totalCompletionTokens: -1 });
+    expect(s.cumulativeCompletionTokens).toBe(0);
+  });
 });

@@ -230,6 +230,7 @@ export class CacheFirstLoop {
           turnCount: meta.turnCount,
           cacheHitTokens: meta.cacheHitTokens,
           cacheMissTokens: meta.cacheMissTokens,
+          totalCompletionTokens: meta.totalCompletionTokens,
           lastPromptTokens: meta.lastPromptTokens,
         });
       }
@@ -860,12 +861,11 @@ export class CacheFirstLoop {
         try {
           const last =
             this.stats.turns.length > 0 ? this.stats.turns[this.stats.turns.length - 1] : null;
-          const compTokens = this.stats.turns.reduce((sum, t) => sum + t.usage.completionTokens, 0);
           patchSessionMeta(this.sessionName, {
             totalCostUsd: this.stats.totalCost,
             cacheHitTokens: this.stats.cumulativeCacheHitTokens,
             cacheMissTokens: this.stats.cumulativeCacheMissTokens,
-            totalCompletionTokens: compTokens,
+            totalCompletionTokens: this.stats.cumulativeCompletionTokens,
             lastPromptTokens: last?.usage.promptTokens,
           });
         } catch {

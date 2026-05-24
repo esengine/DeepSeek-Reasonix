@@ -124,6 +124,7 @@ export class SessionStats {
   private _carryoverTurns = 0;
   private _carryoverCacheHit = 0;
   private _carryoverCacheMiss = 0;
+  private _carryoverCompletion = 0;
   /** Last turn's promptTokens before exit — surfaced via summary() until the next live turn lands. */
   private _carryoverLastPromptTokens = 0;
 
@@ -133,6 +134,7 @@ export class SessionStats {
     turnCount?: number;
     cacheHitTokens?: number;
     cacheMissTokens?: number;
+    totalCompletionTokens?: number;
     lastPromptTokens?: number;
   }): void {
     if (typeof opts.totalCostUsd === "number" && opts.totalCostUsd > 0) {
@@ -146,6 +148,9 @@ export class SessionStats {
     }
     if (typeof opts.cacheMissTokens === "number" && opts.cacheMissTokens > 0) {
       this._carryoverCacheMiss = opts.cacheMissTokens;
+    }
+    if (typeof opts.totalCompletionTokens === "number" && opts.totalCompletionTokens > 0) {
+      this._carryoverCompletion = opts.totalCompletionTokens;
     }
     if (typeof opts.lastPromptTokens === "number" && opts.lastPromptTokens > 0) {
       this._carryoverLastPromptTokens = opts.lastPromptTokens;
@@ -166,12 +171,20 @@ export class SessionStats {
     return miss;
   }
 
+  /** Cumulative completion (output) tokens across carryover + current turns. */
+  get cumulativeCompletionTokens(): number {
+    let comp = this._carryoverCompletion;
+    for (const t of this.turns) comp += t.usage.completionTokens;
+    return comp;
+  }
+
   reset(): void {
     this.turns.length = 0;
     this._carryoverCost = 0;
     this._carryoverTurns = 0;
     this._carryoverCacheHit = 0;
     this._carryoverCacheMiss = 0;
+    this._carryoverCompletion = 0;
     this._carryoverLastPromptTokens = 0;
   }
 
@@ -199,6 +212,7 @@ export class SessionStats {
       this._carryoverCost += t.cost;
       this._carryoverCacheHit += t.usage.promptCacheHitTokens;
       this._carryoverCacheMiss += t.usage.promptCacheMissTokens;
+      this._carryoverCompletion += t.usage.completionTokens;
     }
     this._carryoverTurns += excess;
   }
