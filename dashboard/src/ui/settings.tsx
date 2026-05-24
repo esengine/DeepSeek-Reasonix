@@ -616,6 +616,28 @@ function PageGeneral({
         </div>
         <div className="setting-row">
           <div className="l">
+            <div className="n">{t("settings.showSystemEvents")}</div>
+            <div className="h">{t("settings.showSystemEventsHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            <button
+              type="button"
+              data-on={settings.showSystemEvents !== false}
+              onClick={() => onSave({ showSystemEvents: true })}
+            >
+              {t("settings.shown")}
+            </button>
+            <button
+              type="button"
+              data-on={settings.showSystemEvents === false}
+              onClick={() => onSave({ showSystemEvents: false })}
+            >
+              {t("settings.hidden")}
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div className="l">
             <div className="n">{t("settings.budget")}</div>
             <div className="h">{t("settings.budgetHint")}</div>
           </div>

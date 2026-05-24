@@ -29,6 +29,7 @@ import {
   loadReasoningEffort,
   loadRecentWorkspaces,
   loadResolvedSkillPaths,
+  loadShowSystemEvents,
   loadSubagentModels,
   loadWorkspaceDir,
   pushRecentWorkspace,
@@ -41,6 +42,7 @@ import {
   saveEditor,
   savePreset,
   saveReasoningEffort,
+  saveShowSystemEvents,
   saveSubagentModels,
   saveWorkspaceDir,
   writeConfig,
@@ -117,6 +119,7 @@ type InMessage = { tabId?: string } & (
       editor?: string;
       webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
       subagentModels?: Record<string, "flash" | "pro">;
+      showSystemEvents?: boolean;
     }
   | { cmd: "qq_status_get" }
   | { cmd: "qq_connect" }
@@ -166,6 +169,7 @@ interface SettingsEvent {
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   subagentModels?: Record<string, "flash" | "pro">;
+  showSystemEvents?: boolean;
   version: string;
 }
 
@@ -569,6 +573,7 @@ function emitSettings(tab: Tab): void {
       editor: loadEditor(),
       webSearchEngine: readWebSearchEngine(),
       subagentModels: loadSubagentModels(),
+      showSystemEvents: loadShowSystemEvents(),
       version: VERSION,
     },
     tab.id,
@@ -2192,6 +2197,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           return;
         }
         if (msg.editor !== undefined) saveEditor(msg.editor);
+        if (msg.showSystemEvents !== undefined) saveShowSystemEvents(msg.showSystemEvents);
         if (msg.webSearchEngine !== undefined) {
           const cfg = readConfig();
           cfg.webSearchEngine = msg.webSearchEngine;

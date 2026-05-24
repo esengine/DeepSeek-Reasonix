@@ -194,6 +194,7 @@ export type Settings = {
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   subagentModels?: Record<string, "flash" | "pro">;
+  showSystemEvents?: boolean;
   version: string;
 };
 
@@ -736,6 +737,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           editor: ev.editor,
           webSearchEngine: ev.webSearchEngine,
           subagentModels: ev.subagentModels,
+          showSystemEvents: ev.showSystemEvents,
           version: ev.version,
         },
       };
@@ -1898,6 +1900,7 @@ function TabRuntime({
                       );
                     }
                     if (m.kind === "warning") {
+                      if (state.settings?.showSystemEvents === false) return null;
                       return (
                         <div key={m.id} className="sys-event-row" title={m.text}>
                           <span className="line" />

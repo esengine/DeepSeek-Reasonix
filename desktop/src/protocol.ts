@@ -275,6 +275,7 @@ export type SettingsEvent = {
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
   subagentModels?: Record<string, "flash" | "pro">;
+  showSystemEvents?: boolean;
   version: string;
 };
 
@@ -308,6 +309,7 @@ export type SettingsPatch = {
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
   subagentModels?: Record<string, "flash" | "pro">;
+  showSystemEvents?: boolean;
 };
 
 export type QQConfigPatch = {
