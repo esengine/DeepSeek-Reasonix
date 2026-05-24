@@ -113,7 +113,7 @@ export function StatusRow({
             <Gap />
             <Pill>
               <Text bold color={TONE.brand}>
-                {"▸ "}
+                {"↻ "}
               </Text>
               <Text bold color={FG.body}>
                 {`${formatCost(status.cost, status.costDisplayCurrency ?? status.balanceCurrency)} ${t("statusBar.turn")}`}
