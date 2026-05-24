@@ -77,4 +77,21 @@ describe("loopEventToDashboard", () => {
     expect(loopEventToDashboard(ev({ role: "assistant_final" }), ctx)).toBeNull();
     expect(loopEventToDashboard(ev({ role: "tool_call_delta" }), ctx)).toBeNull();
   });
+
+  it("tool_start and tool share the loop's callId so the dashboard can pair them", () => {
+    // Regression: previously the id was role+timestamp, so tool_start and
+    // tool got different ids — the dashboard reducer keys segments by it,
+    // so the result never landed and tool cards stayed in `running` forever.
+    const callId = "tc-7";
+    const startEv = loopEventToDashboard(
+      ev({ role: "tool_start", toolName: "read_file", toolArgs: "{}", callId }),
+      ctx,
+    );
+    const resultEv = loopEventToDashboard(
+      ev({ role: "tool", toolName: "read_file", content: "out", toolArgs: "{}", callId }),
+      ctx,
+    );
+    expect(startEv).toMatchObject({ kind: "tool_start", id: callId });
+    expect(resultEv).toMatchObject({ kind: "tool", id: callId });
+  });
 });
