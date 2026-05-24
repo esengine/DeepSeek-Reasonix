@@ -1,3 +1,8 @@
+export {
+  COMPACTION_SUMMARY_MARKER,
+  isCompactionSummary,
+  stripCompactionMarker,
+} from "./compaction.js";
 export { derivePrefix } from "./derive-prefix.js";
 export { tildeify } from "./tildeify.js";
 export { toolKindFor } from "./tool-kind.js";

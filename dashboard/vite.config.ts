@@ -20,6 +20,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      "@reasonix/core-utils/compaction": resolve(__dirname, "../packages/core-utils/src/compaction.ts"),
       "@reasonix/core-utils/derive-prefix": resolve(__dirname, "../packages/core-utils/src/derive-prefix.ts"),
       "@reasonix/core-utils": resolve(__dirname, "../packages/core-utils/src/index.ts"),
       "@tauri-apps/api/core": resolve(__dirname, "src/lib/tauri-bridge.ts"),

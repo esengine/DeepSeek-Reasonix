@@ -993,6 +993,8 @@ export const zhCN = {
     output: "输出",
     planDefaultTitle: "计划",
     prompt: "提示词",
+    compactionMeta: "{chars} 字符",
+    compactionName: "已压缩历史",
     reasoningComplete: "推理完成",
     reasoningName: "推理",
     result: "结果",

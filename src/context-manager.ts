@@ -1,3 +1,4 @@
+import { COMPACTION_SUMMARY_MARKER } from "@reasonix/core-utils";
 import type { DeepSeekClient } from "./client.js";
 import { Usage } from "./client.js";
 import { healLoadedMessages } from "./loop.js";
@@ -40,9 +41,9 @@ export const FORCE_SUMMARY_THRESHOLD = 0.8;
 export const TURN_START_FOLD_THRESHOLD = 0.9;
 /** Hard deadline for semantic fold summaries so a hung request cannot stall the turn loop. */
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
-/** Prepended to fold summary content so the model knows it's a synthesized recap. */
-export const HISTORY_FOLD_MARKER =
-  "[CONVERSATION HISTORY SUMMARY — earlier turns folded for context efficiency]\n\n";
+/** Prepended to fold summary content so the model knows it's a synthesized recap.
+ *  Re-export of the shared constant so existing imports keep resolving. */
+export const HISTORY_FOLD_MARKER = COMPACTION_SUMMARY_MARKER;
 /** Header that precedes preserved skill bodies in a fold's synthesized assistant message. */
 export const SKILL_PIN_MEMO_HEADER = "[Active skill memos — preserved verbatim across the fold:]";
 /** Matches the wrapper emitted by `run_skill` so the fold can lift bodies out before summarizing. */

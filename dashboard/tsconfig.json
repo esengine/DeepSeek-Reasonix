@@ -22,6 +22,7 @@
       "@tauri-apps/plugin-dialog": ["src/lib/tauri-bridge.ts"],
       "@tauri-apps/plugin-opener": ["src/lib/tauri-bridge.ts"],
       "@tauri-apps/plugin-process": ["src/lib/tauri-bridge.ts"],
+      "@reasonix/core-utils/compaction": ["../packages/core-utils/src/compaction.ts"],
       "@reasonix/core-utils/derive-prefix": ["../packages/core-utils/src/derive-prefix.ts"],
       "@reasonix/core-utils": ["../packages/core-utils/src/index.ts"]
     }

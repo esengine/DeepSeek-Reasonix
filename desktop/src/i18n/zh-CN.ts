@@ -505,6 +505,8 @@ export const zhCN: typeof en = {
   cards: {
     reasoningName: "思考",
     reasoningComplete: "完成",
+    compactionName: "已压缩历史",
+    compactionMeta: "{chars} 字符",
     shellAwaiting: "等待批准",
     shellRunning: "运行中",
     shellExecuteHint: "执行此命令",

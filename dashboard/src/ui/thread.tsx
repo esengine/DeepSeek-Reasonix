@@ -1,10 +1,11 @@
+import { isCompactionSummary, stripCompactionMarker } from "@reasonix/core-utils/compaction";
 import { derivePrefix } from "@reasonix/core-utils/derive-prefix";
 import { memo, useState, type ReactNode } from "react";
 import { Copy } from "lucide-react";
 import { I } from "../icons";
 import { t, useLang } from "../i18n";
 import type { AssistantSegment, ActivePlan, PendingPlan, PendingCheckpoint, PendingRevision, PendingConfirm, PendingChoice, SkillOrigin } from "../App";
-import { AssistantText, PlanCardView, ReasoningCard, ShellCard, ToolCard, type PlanItem } from "./cards";
+import { AssistantText, CompactionCard, PlanCardView, ReasoningCard, ShellCard, ToolCard, type PlanItem } from "./cards";
 import { ApprovalCard, TaskCard, type TaskStepView } from "./extra-cards";
 
 export function TurnDivider({ label }: { label: string }) {
@@ -112,6 +113,9 @@ export const AssistantMsg = memo(function AssistantMsg({
         {segments.map((s, i) => {
           if (s.kind === "text") {
             if (!s.text.trim()) return null;
+            if (isCompactionSummary(s.text)) {
+              return <CompactionCard key={i} summary={stripCompactionMarker(s.text)} />;
+            }
             return <AssistantText key={i} text={s.text} />;
           }
           if (s.kind === "reasoning") {

@@ -1019,6 +1019,8 @@ export const en = {
     output: "Output",
     planDefaultTitle: "Plan",
     prompt: "Prompt",
+    compactionMeta: "{chars} chars",
+    compactionName: "Compacted history",
     reasoningComplete: "Reasoning complete",
     reasoningName: "Reasoning",
     result: "Result",

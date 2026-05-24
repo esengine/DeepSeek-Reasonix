@@ -486,6 +486,8 @@ export const en = {
   cards: {
     reasoningName: "Thinking",
     reasoningComplete: "Complete",
+    compactionName: "Compacted history",
+    compactionMeta: "{chars} chars",
     shellAwaiting: "Waiting approval",
     shellRunning: "Running",
     shellExecuteHint: "execute this command",

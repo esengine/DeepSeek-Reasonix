@@ -1,4 +1,5 @@
 import type { ApprovalPrompt } from "@reasonix/core-utils";
+import { isCompactionSummary, stripCompactionMarker } from "@reasonix/core-utils/compaction";
 import { derivePrefix } from "@reasonix/core-utils/derive-prefix";
 import { Copy } from "lucide-react";
 import { type ReactNode, memo, useState } from "react";
@@ -16,6 +17,7 @@ import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import {
   AssistantText,
+  CompactionCard,
   PlanCardView,
   type PlanItem,
   ReasoningCard,
@@ -131,6 +133,9 @@ export const AssistantMsg = memo(function AssistantMsg({
         {segments.map((s, i) => {
           if (s.kind === "text") {
             if (!s.text.trim()) return null;
+            if (isCompactionSummary(s.text)) {
+              return <CompactionCard key={i} summary={stripCompactionMarker(s.text)} />;
+            }
             return <AssistantText key={i} text={s.text} />;
           }
           if (s.kind === "reasoning") {

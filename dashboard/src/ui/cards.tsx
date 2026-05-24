@@ -304,6 +304,28 @@ export function ShellCard({
   );
 }
 
+// ---- Compaction ----
+
+export function CompactionCard({ summary }: { summary: string }) {
+  useLang();
+  const charCount = summary.length;
+  return (
+    <Card
+      tone="default"
+      icon={<I.archive size={12} />}
+      kind="compaction"
+      name={t("cards.compactionName")}
+      meta={<span>{t("cards.compactionMeta", { chars: charCount.toLocaleString() })}</span>}
+      defaultOpen={false}
+      compact
+    >
+      <div className="compaction-body">
+        <Markdown source={summary} />
+      </div>
+    </Card>
+  );
+}
+
 // ---- Generic Tool ----
 
 export function ToolCard({
