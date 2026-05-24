@@ -77,9 +77,13 @@ export function StatusRow({
     if (ev.mouseRow < rows - 2) return;
     const cur = status.costDisplayCurrency ?? status.balanceCurrency ?? "CNY";
     const next = cur === "USD" ? "CNY" : "USD";
+    const label = next === "USD" ? "$" : "¥";
+    store.dispatch({ type: "session.update" as const, patch: { costDisplayCurrency: next } });
     store.dispatch({
-      type: "session.update" as const,
-      patch: { costDisplayCurrency: next },
+      type: "toast.show",
+      tone: "info",
+      title: `Costs: ${label}${next}`,
+      ttlMs: 2000,
     });
   });
 
