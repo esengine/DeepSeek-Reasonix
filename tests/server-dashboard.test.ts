@@ -755,12 +755,21 @@ describe("dashboard server: v0.13 panels", () => {
   let cfgPath: string;
   let usagePath: string;
   let handle: DashboardServerHandle | null = null;
+  let savedHome: string | undefined;
+  let savedUserProfile: string | undefined;
   const TOKEN = "d".repeat(64);
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "reasonix-dash-v013-"));
     cfgPath = join(dir, "config.json");
     usagePath = join(dir, "usage.jsonl");
+    // Handlers like /api/health still walk `homedir()/.reasonix/{sessions,memory,semantic}`,
+    // so without redirecting HOME the test reads the dev's real history. On a machine
+    // with ~20k sessions the readdir + per-file statSync chain blows past the 5s default.
+    savedHome = process.env.HOME;
+    savedUserProfile = process.env.USERPROFILE;
+    process.env.HOME = dir;
+    process.env.USERPROFILE = dir;
     handle = await startDashboardServer(
       {
         mode: "attached",
@@ -774,6 +783,12 @@ describe("dashboard server: v0.13 panels", () => {
   afterEach(async () => {
     await handle?.close();
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    // biome-ignore lint/performance/noDelete: env-var "= undefined" stringifies, must really unset
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    // biome-ignore lint/performance/noDelete: env-var "= undefined" stringifies, must really unset
+    if (savedUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = savedUserProfile;
   });
 
   it("GET /api/health returns disk + version + jobs shape", async () => {
