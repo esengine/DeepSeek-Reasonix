@@ -78,6 +78,7 @@ import {
 import { WorkdirPop } from "./ui/workdir-pop";
 import { parseEditResult } from "./ui/cards";
 import { useAutoCollapse } from "./ui/useAutoCollapse";
+import { useResizable } from "./ui/useResizable";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -1212,6 +1213,11 @@ interface TabRuntimeProps {
   onSetCustomFontFamily: (family: string) => void;
   sideCollapsed: boolean;
   ctxCollapsed: boolean;
+  sideWidth: number;
+  ctxWidth: number;
+  threadMaxWidth: number;
+  onSideResizeDown: (e: React.MouseEvent) => void;
+  onCtxResizeDown: (e: React.MouseEvent) => void;
   onToggleSide: () => void;
   onToggleCtx: () => void;
   onToggleCurrency: () => void;
@@ -1246,6 +1252,11 @@ function TabRuntime({
   onSetCustomFontFamily,
   sideCollapsed,
   ctxCollapsed,
+  sideWidth,
+  ctxWidth,
+  threadMaxWidth,
+  onSideResizeDown,
+  onCtxResizeDown,
   onToggleSide,
   onToggleCtx,
   onToggleCurrency,
@@ -1967,7 +1978,12 @@ function TabRuntime({
         data-theme-style={themeStyle}
         data-side-collapsed={sideCollapsed}
         data-ctx-collapsed={ctxCollapsed}
-        style={{ display: active ? undefined : "none" }}
+        style={{
+          display: active ? undefined : "none",
+          ["--side-width" as string]: sideCollapsed ? "0px" : `${sideWidth}px`,
+          ["--ctx-width" as string]: ctxCollapsed ? "0px" : `${ctxWidth}px`,
+          ["--thread-max-width" as string]: `${threadMaxWidth}px`,
+        }}
       >
         <TitleBar
           session={session}
@@ -2010,6 +2026,15 @@ function TabRuntime({
           onOpenCommands={() => palette.setOpen(true)}
           onOpenAbout={() => setAboutOpen(true)}
         />
+
+        {!sideCollapsed ? (
+          <div
+            className="resize-handle"
+            data-side="left"
+            data-dragging={undefined}
+            onMouseDown={onSideResizeDown}
+          />
+        ) : null}
 
         <main className="main" style={{ position: "relative" }}>
           {state.needsSetup ? (
@@ -2290,6 +2315,15 @@ function TabRuntime({
             </>
           )}
         </main>
+
+        {!ctxCollapsed ? (
+          <div
+            className="resize-handle"
+            data-side="right"
+            data-dragging={undefined}
+            onMouseDown={onCtxResizeDown}
+          />
+        ) : null}
 
         <ContextPanel
           settings={state.settings}
@@ -3076,6 +3110,12 @@ export function App() {
     releaseCollapsed: releaseCtxCollapsed,
   } = useAutoCollapse("reasonix.ctxCollapsed");
 
+  const { width: sideWidth, onMouseDown: onSideResizeDown } = useResizable("side", sideCollapsed);
+  const { width: ctxWidth, onMouseDown: onCtxResizeDown } = useResizable("ctx", ctxCollapsed);
+  const visibleSide = sideCollapsed ? 0 : sideWidth;
+  const visibleCtx = ctxCollapsed ? 0 : ctxWidth;
+  const threadMaxWidth = Math.max(580, Math.min(window.innerWidth - visibleSide - visibleCtx - 80, 1120));
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.themeStyle = themeStyle;
@@ -3460,6 +3500,11 @@ export function App() {
           onSetCustomFontFamily={setCustomFontFamily}
           sideCollapsed={sideCollapsed}
           ctxCollapsed={ctxCollapsed}
+          sideWidth={sideWidth}
+          ctxWidth={ctxWidth}
+          threadMaxWidth={threadMaxWidth}
+          onSideResizeDown={onSideResizeDown}
+          onCtxResizeDown={onCtxResizeDown}
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
           onToggleCurrency={onToggleCurrency}
