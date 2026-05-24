@@ -229,6 +229,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "read_file",
     parallelSafe: true,
+    skipTruncationSave: true,
     description: `Read a file under the sandbox root. Default returns FULL CONTENT for files ≤ ${Math.round(DEFAULT_OUTLINE_THRESHOLD_BYTES / 1024)} KiB. Optional scoping: head/tail (N lines), range "A-B" (1-indexed inclusive). Larger files auto-switch to outline mode (metadata + head + symbol outline for TS/JS/Python/Go/Rust/Markdown/Protobuf/text) — drill in with range or search_content. Files over ${Math.round(HARD_MAX_FILE_BYTES / (1024 * 1024))} MiB and binaries are refused — use get_file_info for stat.`,
     readOnly: true,
     stormExempt: true,
@@ -355,6 +356,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "list_directory",
     parallelSafe: true,
+    skipTruncationSave: true,
     description:
       "List entries in a directory under the sandbox root. Returns one line per entry, marking directories with a trailing slash. Not recursive — use directory_tree for that.",
     readOnly: true,
@@ -379,6 +381,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "directory_tree",
     parallelSafe: true,
+    skipTruncationSave: true,
     description: `Recursively list entries with indented tree structure (dirs marked '/'). Budget-aware: maxDepth defaults to 2, large subtrees (>50 children) auto-collapse to "[N hidden — list_directory to inspect]", and ${[...SKIP_DIR_NAMES].sort().join(" / ")} are skipped unless include_deps:true. For single-level use list_directory; for path lookups use search_files; for code lookups use search_content.`,
     readOnly: true,
     parameters: {
@@ -468,6 +471,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "search_files",
     parallelSafe: true,
+    skipTruncationSave: true,
     description:
       "Find files whose NAME matches a substring or regex. Case-insensitive. Walks the directory recursively under the sandbox root. Returns one path per line. Skips dependency / VCS / build directories (node_modules, .git, dist, build, .next, target, .venv) by default.",
     readOnly: true,
@@ -498,6 +502,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "search_content",
     parallelSafe: true,
+    skipTruncationSave: true,
     description:
       "Recursively grep file CONTENTS for a substring or regex — 'where is X called', 'what files contain Y'. Returns one match per line as `path:line: text`. Per-file hit cap 30; when the byte budget is mostly spent, remaining files switch to a `rel: N matches` histogram. Pass `summary_only:true` for just the histogram. Skips dependency / VCS / build dirs and binary files. For file NAMES use search_files.",
     readOnly: true,
@@ -566,6 +571,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "glob",
     parallelSafe: true,
+    skipTruncationSave: true,
     description:
       "List files matching a glob pattern, sorted by mtime (most-recently-modified first) by default. Use this for 'what changed lately', 'find all *.test.ts', 'all configs under src/'. Glob syntax matches the cross-tool standard: `*` (any chars in one segment), `**` (any segments), `?` (one char), `{a,b}` (alternation). Pattern matches against the path RELATIVE to the search root (e.g. 'src/**/*.ts' from project root). Skips node_modules / .git / dist / build / etc by default. Default limit 200; raise via `limit` (max 1000). Different from `search_files` (substring on basename) and `search_content` (matches inside file contents).",
     readOnly: true,
@@ -619,6 +625,7 @@ export function registerFilesystemTools(
   registry.register({
     name: "get_file_info",
     parallelSafe: true,
+    skipTruncationSave: true,
     description:
       "Stat a path under the sandbox root. Returns type (file|directory|symlink), size in bytes, mtime in ISO-8601.",
     readOnly: true,

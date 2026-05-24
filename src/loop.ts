@@ -451,6 +451,7 @@ export class CacheFirstLoop {
         maxResultTokens: DEFAULT_MAX_RESULT_TOKENS,
         confirmationGate: this.confirmationGate,
         readTracker: this.readTracker,
+        rootDir: this.hookCwd,
       });
 
       const postReport = await runHooks({

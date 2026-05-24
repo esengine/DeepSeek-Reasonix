@@ -251,18 +251,19 @@ function validateResultShape(result: CallToolResult): void {
 }
 
 /** Head + 1KB tail so error messages at end of stack traces aren't lost. */
-export function truncateForModel(s: string, maxChars: number): string {
+export function truncateForModel(s: string, maxChars: number, extraNote?: string): string {
   if (s.length <= maxChars) return s;
   const tailBudget = Math.min(1024, Math.floor(maxChars * 0.1));
   const headBudget = Math.max(0, maxChars - tailBudget);
   const head = s.slice(0, headBudget);
   const tail = s.slice(-tailBudget);
   const dropped = s.length - head.length - tail.length;
-  return `${head}\n\n[…truncated ${dropped} chars — raise BridgeOptions.maxResultChars, or call the tool with a narrower scope (filter, head, pagination)…]\n\n${tail}`;
+  const note = extraNote ? ` — ${extraNote}` : "";
+  return `${head}\n\n[…truncated ${dropped} chars — raise BridgeOptions.maxResultChars, or call the tool with a narrower scope (filter, head, pagination)${note}…]\n\n${tail}`;
 }
 
 /** Never tokenizes full input — pathological repetitive text (`AAAA…`) costs 30s+ on the pure-TS BPE port. */
-export function truncateForModelByTokens(s: string, maxTokens: number): string {
+export function truncateForModelByTokens(s: string, maxTokens: number, extraNote?: string): string {
   if (maxTokens <= 0) return "";
   // Every token is ≥1 char — if length ≤ budget, tokens ≤ budget.
   if (s.length <= maxTokens) return s;
@@ -292,7 +293,8 @@ export function truncateForModelByTokens(s: string, maxTokens: number): string {
   const ratio = sampleChars > 0 ? sampleTokens / sampleChars : 0.3;
   const estTotalTokens = Math.ceil(s.length * ratio);
   const droppedTokens = Math.max(0, estTotalTokens - sampleTokens);
-  return `${head}\n\n[…truncated ~${droppedTokens} tokens (${droppedChars} chars) — raise BridgeOptions.maxResultTokens, or call the tool with a narrower scope (filter, head, pagination)…]\n\n${tail}`;
+  const note = extraNote ? ` — ${extraNote}` : "";
+  return `${head}\n\n[…truncated ~${droppedTokens} tokens (${droppedChars} chars) — raise BridgeOptions.maxResultTokens, or call the tool with a narrower scope (filter, head, pagination)${note}…]\n\n${tail}`;
 }
 
 function sizePrefixToTokens(s: string, budget: number): string {

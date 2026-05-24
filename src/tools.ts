@@ -7,6 +7,7 @@ import {
   ToolRateLimiter,
 } from "./tools/rate-limit.js";
 import type { ReadTracker } from "./tools/read-tracker.js";
+import { saveTruncatedResult, shouldSkipSave } from "./tools/truncated-result-saver.js";
 import type { JSONSchema, ToolSpec } from "./types.js";
 
 export interface ToolCallContext {
@@ -29,6 +30,8 @@ export interface ToolDefinition<A = any, R = any> {
   parallelSafe?: boolean;
   /** Excluded from repeat-loop storm accounting; use only for cheap, state-inspection tools. */
   stormExempt?: boolean;
+  /** When true, skip saving full result to disk on truncation. Use for tools that might leak secrets (get_env) or return trivial data. */
+  skipTruncationSave?: boolean;
   fn: (args: A, ctx?: ToolCallContext) => R | Promise<R>;
 }
 
@@ -190,6 +193,8 @@ export class ToolRegistry {
       confirmationGate?: PauseGate;
       /** Session-scoped read tracker; filesystem tools mark on read/write, edit_file/multi_edit gate on it. */
       readTracker?: ReadTracker;
+      /** Project root directory for saving truncated results. Defaults to process.cwd(). */
+      rootDir?: string;
     } = {},
   ): Promise<string> {
     const tool = this._tools.get(name);
@@ -312,7 +317,22 @@ export class ToolRegistry {
       if (opts.maxResultChars !== undefined) {
         clipped = truncateForModel(clipped, opts.maxResultChars);
       }
-      finalResult = clipped;
+      // If truncated and the tool allows saving, persist the full result
+      // and re-truncate with the save-path note embedded in the marker.
+      if (clipped !== str && !shouldSkipSave(name, tool?.skipTruncationSave)) {
+        const relPath = saveTruncatedResult(str, name, opts.rootDir ?? process.cwd());
+        const note = `Full result saved at: ${relPath}`;
+        let annotated = str;
+        if (opts.maxResultTokens !== undefined) {
+          annotated = truncateForModelByTokens(annotated, opts.maxResultTokens, note);
+        }
+        if (opts.maxResultChars !== undefined) {
+          annotated = truncateForModel(annotated, opts.maxResultChars, note);
+        }
+        finalResult = annotated;
+      } else {
+        finalResult = clipped;
+      }
     } catch (err) {
       const e = err as Error & { toToolResult?: () => unknown };
       // Errors may opt into a richer tool-result shape by implementing

@@ -31,6 +31,7 @@ sessions/
 .reasonix/semantic/
 .reasonix/sessions/
 .reasonix/semantic-skip
+.reasonix/truncated-results/
 # Scratch entry regenerated each time scripts/bundle-codemirror.mjs runs.
 scripts/.cm-entry.mjs
 # Personal bun lockfile — project uses npm officially.
