@@ -1404,6 +1404,11 @@ function TabRuntime({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.retryNonce]);
 
+  const onEditUserMsg = useCallback((t: string) => {
+    setDraft(t);
+    composerRef.current?.focus();
+  }, []);
+
   useEffect(() => {
     if (state.busy || !state.ready || state.queuedSends.length === 0) return;
     const next = state.queuedSends[0];
@@ -1954,7 +1959,7 @@ function TabRuntime({
                       return (
                         <div key={`u-${i}`}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg text={m.text} skill={m.skill} onEdit={(t) => { setDraft(t); composerRef.current?.focus(); }} />
+                          <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
                         </div>
                       );
                     }

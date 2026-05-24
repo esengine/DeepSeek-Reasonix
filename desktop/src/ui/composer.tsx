@@ -340,6 +340,13 @@ export function Composer({
     textareaRef.current?.focus();
   };
 
+  const recordSendAndReset = () => {
+    const trimmed = draft.trim();
+    historyRef.current.push(trimmed);
+    if (historyRef.current.length > 100) historyRef.current.shift();
+    setBrowseIdx(-1);
+  };
+
   const navigateHistory = (dir: -1 | 1) => {
     const hist = historyRef.current;
     if (hist.length === 0) return;
@@ -428,7 +435,6 @@ export function Composer({
         return;
       }
     }
-    // macOS Chinese IME fires compositionend BEFORE the confirm Enter keydown.
     if (composingRef.current || Date.now() - compositionEndedAtRef.current < 50) return;
     if (e.key === "Enter" && !e.shiftKey && !popup) {
       e.preventDefault();
@@ -439,9 +445,7 @@ export function Composer({
           setChips([]);
         }
       } else if (!disabled && draft.trim()) {
-        historyRef.current.push(draft.trim());
-        if (historyRef.current.length > 100) historyRef.current.shift();
-        setBrowseIdx(-1);
+        recordSendAndReset();
         onSend();
         setChips([]);
       }
@@ -630,9 +634,7 @@ export function Composer({
                 disabled={disabled || !draft.trim()}
                 onClick={() => {
                   if (!disabled && draft.trim()) {
-                    historyRef.current.push(draft.trim());
-                    if (historyRef.current.length > 100) historyRef.current.shift();
-                    setBrowseIdx(-1);
+                    recordSendAndReset();
                     onSend();
                     setChips([]);
                   }
