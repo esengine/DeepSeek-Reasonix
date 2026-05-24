@@ -1662,13 +1662,15 @@ function TabRuntime({
       } else if (e.key === "Escape" && state.busy) {
         const target = e.target as HTMLElement | null;
         if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+        // A modal is open — let its own Esc handler close it.
+        if (settingsOpen || aboutOpen || jobsOpen || wdOpen) return;
         e.preventDefault();
         abort();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, state.busy, abort, newChat, settingsOpen, openSettingsAt]);
+  }, [active, state.busy, abort, newChat, settingsOpen, aboutOpen, jobsOpen, wdOpen, openSettingsAt]);
 
   const commands = buildCommands({
     newChat: () => {

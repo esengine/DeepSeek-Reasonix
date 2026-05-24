@@ -1,8 +1,21 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import { I } from "../icons";
+
+function useEscape(onClose: () => void): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+}
 
 const REPO_URL = "https://github.com/esengine/DeepSeek-Reasonix";
 const RELEASES_PAGE = `${REPO_URL}/releases`;
@@ -15,6 +28,7 @@ type CheckState =
   | { kind: "error"; message: string };
 
 export function AboutModal({ onClose }: { onClose: () => void }) {
+  useEscape(onClose);
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
 
   const openGitHub = useCallback(() => {
