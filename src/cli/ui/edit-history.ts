@@ -1,6 +1,5 @@
 import { formatAllBlockDiffs } from "../../code/diff-preview.js";
 import type { ApplyResult, EditBlock, EditSnapshot } from "../../code/edit-blocks.js";
-import { t } from "../../i18n/index.js";
 
 /** Session-only — restoring pre-apply content across restarts is git's job, not ours. */
 export interface EditHistoryEntry {
@@ -30,12 +29,6 @@ export function entryStatus(e: EditHistoryEntry): "applied" | "UNDONE" | "PARTIA
   if (e.undoneFiles.size === 0) return "applied";
   if (isEntryFullyUndone(e)) return "UNDONE";
   return "PARTIAL";
-}
-
-export function entryStatusLabel(status: "applied" | "UNDONE" | "PARTIAL"): string {
-  if (status === "applied") return t("app.editHistoryStatusApplied");
-  if (status === "PARTIAL") return t("app.editHistoryStatusPartial");
-  return t("app.editHistoryStatusUndone");
 }
 
 /** Status prefix is `✓`/`✗` so the line reads without color (piped, screenshots). */

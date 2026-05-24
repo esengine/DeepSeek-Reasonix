@@ -79,7 +79,6 @@ export function useCodeMode(opts: UseCodeModeOptions): UseCodeModeResult {
       if (remaining.length === 0) clearPendingEdits(session ?? null);
       else savePendingEdits(session ?? null, remaining);
       syncPendingCount();
-      const status = t("app.editHistoryStatusApplied");
       const tail =
         remaining.length > 0
           ? `  (${t("app.blocksStillPending", { count: remaining.length })})`
