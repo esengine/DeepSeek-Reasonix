@@ -626,6 +626,25 @@ function extractToolFiles(name: string, args: string): SessionFile[] {
   return [];
 }
 
+/** Return paths to remove from sessionFiles for move/delete tools. */
+function removeSessionFiles(name: string, args: string): string[] {
+  try {
+    const parsed = JSON.parse(args) as Record<string, unknown>;
+    if (name === "move_file" && typeof parsed.source === "string") {
+      return [parsed.source];
+    }
+    if (
+      (name === "delete_file" || name === "delete_directory") &&
+      typeof parsed.path === "string"
+    ) {
+      return [parsed.path];
+    }
+  } catch {
+    /* malformed args */
+  }
+  return [];
+}
+
 function mergeSessionFiles(existing: SessionFile[], adds: SessionFile[]): SessionFile[] {
   if (adds.length === 0) return existing;
   const next = [...existing];
@@ -922,6 +941,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           if (s.kind !== "tool") continue;
           // For replayed sessions we don't have tool.result ok-status here, but
           // segments only survive into history if the call completed. Trust it.
+          const stale = removeSessionFiles(s.name, s.args);
+          for (const p of stale) sessionFiles = sessionFiles.filter((f) => f.path !== p);
           sessionFiles = mergeSessionFiles(sessionFiles, extractToolFiles(s.name, s.args));
         }
       }
@@ -1063,9 +1084,12 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "tool.intent": {
       const adds = extractToolFiles(ev.name, ev.args);
+      const stale = removeSessionFiles(ev.name, ev.args);
+      let next = state.sessionFiles;
+      for (const p of stale) next = next.filter((f) => f.path !== p);
       return {
         ...state,
-        sessionFiles: mergeSessionFiles(state.sessionFiles, adds),
+        sessionFiles: mergeSessionFiles(next, adds),
         messages: state.messages.map((m) => {
           if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
           const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);

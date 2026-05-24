@@ -3398,6 +3398,13 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   cursor: pointer;
   color: var(--fg-2);
 }
+.tree .dir-node .chev {
+  display: inline-flex;
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--muted-2);
+  justify-content: center;
+}
 .tree .node:hover {
   background: var(--panel);
 }

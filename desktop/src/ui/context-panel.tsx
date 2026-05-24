@@ -151,6 +151,12 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
 
 function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Settings | null }) {
   const tree = useMemo(() => buildSessionTree(files), [files]);
+  const [opened, setOpened] = useState<string[]>([]);
+
+  const toggleDir = (key: string) => {
+    setOpened((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  };
+
   return (
     <div className="ctx-block">
       <div className="h">
@@ -163,28 +169,45 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
         {files.length === 0 ? (
           <div className="ctx-empty">{t("contextPanel.noFilesMsg")}</div>
         ) : (
-          tree.map((n) =>
-            n.kind === "dir" ? (
-              <div
-                className="node"
-                key={n.key}
-                data-d={n.depth}
-                data-kind="dir"
-                style={{ paddingLeft: 4 + n.depth * 14 }}
-              >
-                <span className="ico">
-                  <I.folder size={12} />
-                </span>
-                <span className="nm">{n.name}/</span>
-              </div>
-            ) : (
+          tree.map((n) => {
+            if (n.kind === "dir") {
+              const isOpen = opened.includes(n.key);
+              return (
+                <div
+                  className="node dir-node"
+                  key={n.key}
+                  data-d={n.depth}
+                  data-kind="dir"
+                  data-open={isOpen || undefined}
+                  style={{ paddingLeft: 4 + n.depth * 14 }}
+                  onClick={() => toggleDir(n.key)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggleDir(n.key);
+                    }
+                  }}
+                >
+                  <span className="chev">{isOpen ? <I.chev size={10} /> : <I.chevR size={10} />}</span>
+                  <span className="ico">
+                    <I.folder size={12} />
+                  </span>
+                  <span className="nm">{n.name}/</span>
+                </div>
+              );
+            }
+            const idx = n.key.lastIndexOf("/");
+            const hidden = idx >= 0 && !opened.includes(`d:${n.key.slice(2, idx)}`);
+            return (
               <div
                 className="node"
                 key={n.key}
                 data-d={n.depth}
                 data-kind="file"
                 title={n.path}
-                style={{ paddingLeft: 4 + n.depth * 14 }}
+                style={{ paddingLeft: 4 + n.depth * 14, display: hidden ? "none" : undefined }}
               >
                 <span className="ico">
                   <I.file size={12} />
@@ -193,32 +216,20 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
                   <span className="nm">{n.name}</span>
                   <span className="full-path">{n.path}</span>
                 </span>
-                <span
-                  className="dot"
-                  data-s={n.status}
-                  title={n.status === "m" ? t("contextPanel.fileModified") : t("contextPanel.fileInContext")}
-                />
-                <button
-                  type="button"
-                  className="tree-action"
-                  aria-label={t("contextPanel.openFile", { path: n.path })}
+                <span className="dot" data-s={n.status} title={n.status === "m" ? t("contextPanel.fileModified") : t("contextPanel.fileInContext")} />
+                <button type="button" className="tree-action" aria-label={t("contextPanel.openFile", { path: n.path })}
                   title={t("contextPanel.openFile", { path: n.path })}
-                  onClick={() => void openContextFile(n.path, settings)}
-                >
+                  onClick={(e) => { e.stopPropagation(); void openContextFile(n.path, settings); }}>
                   <I.file size={12} />
                 </button>
-                <button
-                  type="button"
-                  className="tree-action"
-                  aria-label={t("contextPanel.copyPath", { path: n.path })}
+                <button type="button" className="tree-action" aria-label={t("contextPanel.copyPath", { path: n.path })}
                   title={t("contextPanel.copyPath", { path: n.path })}
-                  onClick={() => void navigator.clipboard?.writeText(n.path)}
-                >
+                  onClick={(e) => { e.stopPropagation(); void navigator.clipboard?.writeText(n.path); }}>
                   <I.copy size={12} />
                 </button>
               </div>
-            ),
-          )
+            );
+          })
         )}
       </div>
     </div>
