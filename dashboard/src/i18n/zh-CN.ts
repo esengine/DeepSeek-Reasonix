@@ -1285,5 +1285,7 @@ export const zhCN = {
     autoHint: "编辑自动应用，shell 仍会询问",
     yolo: "YOLO",
     yoloHint: "编辑和 shell 都自动运行，绕过允许列表",
+    plan: "计划",
+    planHint: "只读探索 · 仅可写入计划",
   },
 };

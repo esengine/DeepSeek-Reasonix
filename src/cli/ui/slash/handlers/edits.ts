@@ -89,18 +89,28 @@ const mode: SlashHandler = (args, _loop, ctx) => {
   if (raw === "review") target = "review";
   else if (raw === "auto") target = "auto";
   else if (raw === "yolo") target = "yolo";
+  else if (raw === "plan") target = "plan";
   else if (raw === "") {
-    target = current === "review" ? "auto" : current === "auto" ? "yolo" : "review";
+    target =
+      current === "review"
+        ? "auto"
+        : current === "auto"
+          ? "yolo"
+          : current === "yolo"
+            ? "plan"
+            : "review";
   } else {
     return { info: t("handlers.edits.modeUsage") };
   }
   ctx.setEditMode(target);
   const banner =
-    target === "yolo"
-      ? t("handlers.edits.modeYolo")
-      : target === "auto"
-        ? t("handlers.edits.modeAuto")
-        : t("handlers.edits.modeReview");
+    target === "plan"
+      ? t("handlers.edits.planOn")
+      : target === "yolo"
+        ? t("handlers.edits.modeYolo")
+        : target === "auto"
+          ? t("handlers.edits.modeAuto")
+          : t("handlers.edits.modeReview");
   return { info: banner };
 };
 

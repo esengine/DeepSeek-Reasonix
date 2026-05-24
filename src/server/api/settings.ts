@@ -59,7 +59,7 @@ const VALID_WEB_SEARCH_ENGINES = new Set([
   "exa",
 ]);
 
-const VALID_EDIT_MODES = new Set(["review", "auto", "yolo"]);
+const VALID_EDIT_MODES = new Set(["review", "auto", "yolo", "plan"]);
 
 // Keep saveEditMode imported so future GET responses can include the
 // canonical default — used by the SPA when /api/overview hasn't yet

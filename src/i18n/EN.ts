@@ -408,8 +408,8 @@ export const EN: TranslationSchema = {
     },
     mode: {
       description:
-        "edit-gate: review (queue) · auto (apply+undo) · yolo (apply+auto-shell). Shift+Tab cycles.",
-      argsHint: "[review|auto|yolo]",
+        "edit-gate: review (queue) · auto (apply+undo) · yolo (apply+auto-shell) · plan (read-only). Shift+Tab cycles.",
+      argsHint: "[review|auto|yolo|plan]",
     },
     jobs: { description: "list background jobs started by run_background" },
     kill: {
@@ -905,7 +905,7 @@ export const EN: TranslationSchema = {
       planOff:
         "▸ plan mode OFF — write tools are live again. Model can still propose plans autonomously for large tasks.",
       modeCodeOnly: "/mode is only available inside `reasonix code`.",
-      modeUsage: "usage: /mode <review|auto|yolo>   (Shift+Tab also cycles)",
+      modeUsage: "usage: /mode <review|auto|yolo|plan>   (Shift+Tab also cycles)",
       modeYolo:
         "▸ edit mode: YOLO — edits AND shell commands auto-run with no prompt. /undo still rolls back edits. Use carefully.",
       modeAuto:

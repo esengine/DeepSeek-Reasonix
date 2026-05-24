@@ -658,6 +658,45 @@ function AppInner({
   // `planMode` because a pending plan is a one-shot decision even if
   // plan mode stays on (Refine keeps mode on; Approve/Cancel flip off).
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
+  /**
+   * Toggle plan mode on the local state AND on the ToolRegistry. The
+   * registry's copy is what actually gates dispatch; the local state
+   * drives the StatsPanel indicator and slash ergonomics. Kept in sync
+   * by funneling every toggle through this setter.
+   */
+  const togglePlanMode = useCallback(
+    (on: boolean, source?: PlanModeToggleSource) => {
+      setPlanMode(on);
+      tools?.setPlanMode(on);
+      if (on) {
+        engineeringLifecycleRef.current?.setMode("strict");
+      } else if (source === "slash") {
+        engineeringLifecycleRef.current?.setMode("off");
+      } else {
+        const state = engineeringLifecycleRef.current?.snapshot().state;
+        if (
+          state === undefined ||
+          state === "idle" ||
+          state === "complete" ||
+          state === "cancelled"
+        ) {
+          engineeringLifecycleRef.current?.setMode(engineeringLifecycleBaseModeRef.current);
+        }
+      }
+    },
+    [tools],
+  );
+
+  const applyEditMode = useCallback(
+    (mode: EditMode): EditMode => {
+      setEditMode(mode);
+      editModeRef.current = mode;
+      saveEditMode(mode);
+      togglePlanMode(mode === "plan");
+      return mode;
+    },
+    [editModeRef, setEditMode, togglePlanMode],
+  );
   /** While the user is interactively editing the proposed plan via PlanReviseEditor; null = not editing. */
   const [pendingReviseEditor, setPendingReviseEditor] = useState<string | null>(null);
   /** True while the SessionPicker is open mid-chat (triggered by `/sessions`). */
@@ -1799,17 +1838,20 @@ function AppInner({
       !stagedChoiceCustom &&
       !pendingRevision
     ) {
-      // Three-stop cycle: review —auto —yolo —review. yolo also
+      // Four-stop cycle: review —auto —yolo —plan —review. yolo also
       // disables shell confirmations so true zero-prompt iteration takes two Shift+Tabs from default.
       const cur = editModeRef.current;
-      const next: EditMode = cur === "review" ? "auto" : cur === "auto" ? "yolo" : "review";
-      setEditModeLive(next);
+      const next: EditMode =
+        cur === "review" ? "auto" : cur === "auto" ? "yolo" : cur === "yolo" ? "plan" : "review";
+      applyEditMode(next);
       const message =
-        next === "yolo"
-          ? t("app.editModeYolo")
-          : next === "auto"
-            ? t("app.editModeAuto")
-            : t("app.editModeReview");
+        next === "plan"
+          ? t("handlers.edits.planOn")
+          : next === "yolo"
+            ? t("app.editModeYolo")
+            : next === "auto"
+              ? t("app.editModeAuto")
+              : t("app.editModeReview");
       log.pushInfo(message);
       return;
     }
@@ -2054,7 +2096,7 @@ function AppInner({
         return applyNow();
       }
       if (choice === "flip-to-auto") {
-        setEditModeLive("auto");
+        applyEditMode("auto");
         log.pushInfo(t("app.flippedAutoSession"));
         return applyNow();
       }
@@ -2064,7 +2106,7 @@ function AppInner({
     return () => {
       tools.setToolInterceptor(null);
     };
-  }, [tools, codeMode, session, recordEdit, armUndoBanner, syncPendingCount, setEditMode]);
+  }, [tools, codeMode, session, recordEdit, armUndoBanner, syncPendingCount, applyEditMode]);
 
   const { codeApply, codeDiscard } = useCodeMode({
     codeMode: !!codeMode,
@@ -2078,35 +2120,6 @@ function AppInner({
   const prefixHash = loop.prefix.fingerprint;
 
   const writeTranscript = useTranscriptWriter(transcriptRef, model, prefixHash);
-
-  /**
-   * Toggle plan mode on the local state AND on the ToolRegistry. The
-   * registry's copy is what actually gates dispatch; the local state
-   * drives the StatsPanel indicator and slash ergonomics. Kept in sync
-   * by funneling every toggle through this setter.
-   */
-  const togglePlanMode = useCallback(
-    (on: boolean, source?: PlanModeToggleSource) => {
-      setPlanMode(on);
-      tools?.setPlanMode(on);
-      if (on) {
-        engineeringLifecycleRef.current?.setMode("strict");
-      } else if (source === "slash") {
-        engineeringLifecycleRef.current?.setMode("off");
-      } else {
-        const state = engineeringLifecycleRef.current?.snapshot().state;
-        if (
-          state === undefined ||
-          state === "idle" ||
-          state === "complete" ||
-          state === "cancelled"
-        ) {
-          engineeringLifecycleRef.current?.setMode(engineeringLifecycleBaseModeRef.current);
-        }
-      }
-    },
-    [tools],
-  );
 
   const {
     startLoop,
@@ -2433,19 +2446,272 @@ function AppInner({
       const { startDashboardServer } = await import("../../server/index.js");
       const { saveDashboardPort } = await import("../../config.js");
       const tryStart = (port: number | undefined) =>
-        startDashboardServer(buildCtx(), {
-          port,
-          host: dashboardHost,
-          token: dashboardToken,
-        });
+        startDashboardServer(
+          {
+            mode: "attached",
+            configPath: defaultConfigPath(),
+            usageLogPath: defaultUsageLogPath(),
+            loop,
+            tools,
+            getMcpServers: () => liveMcpServersRef.current,
+            getMcpFailures: () => mcpRuntime?.failures() ?? [],
+            getCurrentCwd: () => (codeMode ? currentRootDirRef.current : undefined),
+            getEditMode: () => (codeMode ? editModeRef.current : undefined),
+            getPlanMode: () => planModeRef.current,
+            getPendingEditCount: () => pendingEdits.current.length,
+            getLatestVersion: () => latestVersionRef.current,
+            getSessionName: () => session ?? null,
+            setEditMode: (m: EditMode) => {
+              return applyEditMode(m);
+            },
+            setPlanMode: (on: boolean, source?: PlanModeToggleSource) => {
+              if (codeMode) togglePlanMode(on, source);
+            },
+            applyPresetLive: (name: string) => {
+              const settings = resolvePreset(name as PresetName);
+              loop.configure({
+                model: settings.model,
+                autoEscalate: settings.autoEscalate,
+                reasoningEffort: settings.reasoningEffort,
+              });
+              agentStore.dispatch({ type: "session.model.change", model: settings.model });
+              const canonical: "auto" | "flash" | "pro" =
+                settings.model === "deepseek-v4-pro"
+                  ? "pro"
+                  : settings.autoEscalate
+                    ? "auto"
+                    : "flash";
+              setPreset(canonical);
+              agentStore.dispatch({ type: "session.preset.change", preset: canonical });
+              try {
+                savePreset(canonical);
+              } catch {
+                /* disk full / perms —runtime change still took effect */
+              }
+            },
+            applyEffortLive: (effort) => {
+              loop.configure({ reasoningEffort: effort });
+            },
+            applyModelLive: (model) => {
+              loop.configure({ model });
+              agentStore.dispatch({ type: "session.model.change", model });
+            },
+            getModels: () => modelsRef.current,
+            setProNextLive: (armed) => {
+              if (armed) loop.armProForNextTurn();
+              else loop.disarmPro();
+            },
+            setBudgetUsdLive: (usd) => {
+              loop.setBudget(usd);
+            },
+            getLoopRunStatus: () => getLoopStatus(),
+            startAutoLoop: (intervalMs, prompt) => startLoop(intervalMs, prompt),
+            stopAutoLoop: () => stopLoop(),
+            getMessages: (): DashboardMessage[] =>
+              cardsToDashboardMessages(agentStore.getState().cards),
+            subscribeEvents: (handler) => {
+              eventSubscribersRef.current.add(handler);
+              return () => {
+                eventSubscribersRef.current.delete(handler);
+              };
+            },
+            submitPrompt: (text: string): SubmitResult => {
+              if (busyRef.current) {
+                if (isBusyPromptCommand(text)) {
+                  return {
+                    accepted: false,
+                    reason: "commands are disabled while steering a busy turn",
+                  };
+                }
+                loop.steer(text);
+                return { accepted: true, reason: "steered" };
+              }
+              const fn = handleSubmitRef.current;
+              if (!fn) return { accepted: false, reason: "TUI not ready" };
+              fn(text).catch(() => undefined);
+              return { accepted: true };
+            },
+            abortTurn: () => {
+              if (submittingRef.current) loop.abort();
+            },
+            isBusy: () => busyRef.current,
+            getStats: () => {
+              const s = loop.stats.summary();
+              const ctxCap = DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS;
+              return {
+                turns: s.turns,
+                totalCostUsd: s.totalCostUsd,
+                lastTurnCostUsd: s.lastTurnCostUsd,
+                totalInputCostUsd: s.totalInputCostUsd,
+                totalOutputCostUsd: s.totalOutputCostUsd,
+                cacheHitRatio: s.cacheHitRatio,
+                lastPromptTokens: s.lastPromptTokens,
+                contextCapTokens: ctxCap,
+                balance: balanceRef.current
+                  ? [
+                      {
+                        currency: balanceRef.current.currency,
+                        total_balance: String(balanceRef.current.total),
+                      },
+                    ]
+                  : null,
+              };
+            },
+            getActiveModal: (): ActiveModal | null => {
+              const ps = pendingShell;
+              if (ps) {
+                return {
+                  kind: "shell",
+                  command: ps.command,
+                  allowPrefix: derivePrefix(ps.command),
+                  shellKind: ps.kind,
+                };
+              }
+              const pp = pendingPath;
+              if (pp) {
+                return {
+                  kind: "path",
+                  path: pp.path,
+                  intent: pp.intent,
+                  toolName: pp.toolName,
+                  sandboxRoot: pp.sandboxRoot,
+                  allowPrefix: pp.allowPrefix,
+                };
+              }
+              const pc = pendingChoice;
+              if (pc) {
+                return {
+                  kind: "choice",
+                  question: pc.question,
+                  options: pc.options,
+                  allowCustom: pc.allowCustom,
+                };
+              }
+              if (pendingPlanRef.current) {
+                return { kind: "plan", body: pendingPlanRef.current };
+              }
+              const er = pendingEditReview;
+              if (er) {
+                return {
+                  kind: "edit-review",
+                  path: er.path,
+                  search: er.search ?? "",
+                  replace: er.replace ?? "",
+                  preview: (er.search || er.replace || "").split("\n").slice(0, 12).join("\n"),
+                  total: pendingEdits.current.length,
+                  remaining: pendingEdits.current.length,
+                };
+              }
+              if (pendingRevision) {
+                return {
+                  kind: "revision",
+                  reason: pendingRevision.reason,
+                  remainingSteps: pendingRevision.remainingSteps.map((s) => ({
+                    id: s.id,
+                    title: s.title,
+                    action: s.action,
+                    ...(s.risk ? { risk: s.risk } : {}),
+                  })),
+                  ...(pendingRevision.summary ? { summary: pendingRevision.summary } : {}),
+                };
+              }
+              if (pendingCheckpoint) {
+                return {
+                  kind: "checkpoint",
+                  stepId: pendingCheckpoint.stepId,
+                  ...(pendingCheckpoint.title ? { title: pendingCheckpoint.title } : {}),
+                  completed: pendingCheckpoint.completed,
+                  total: pendingCheckpoint.total,
+                };
+              }
+              const picker = activePickerSnapshotRef.current;
+              if (picker) {
+                return { kind: "picker", ...picker };
+              }
+              const viewer = activeViewerSnapshotRef.current;
+              if (viewer) {
+                return { kind: "viewer", ...viewer };
+              }
+              return null;
+            },
+            resolveShellConfirm: (choice) => {
+              const fn = handleShellConfirmRef.current;
+              if (fn) Promise.resolve(fn(choice)).catch(() => undefined);
+            },
+            resolvePathConfirm: (choice) => {
+              const fn = handlePathConfirmRef.current;
+              if (fn) Promise.resolve(fn(choice)).catch(() => undefined);
+            },
+            resolveChoiceConfirm: (choice) => {
+              const fn = handleChoiceConfirmRef.current;
+              if (fn) fn(choice).catch(() => undefined);
+            },
+            resolvePlanConfirm: (choice, text) => {
+              if (choice === "cancel") {
+                handlePlanConfirmRef.current("cancel").catch(() => undefined);
+                return;
+              }
+              const plan = pendingPlanRef.current ?? "";
+              handleStagedInputSubmitRef.current(text ?? "", { plan, mode: choice }).catch(
+                () => undefined,
+              );
+            },
+            resolveEditReview: (choice) => {
+              const resolve = editReviewResolveRef.current;
+              if (resolve) {
+                editReviewResolveRef.current = null;
+                setPendingEditReview(null);
+                resolve({ choice, denyContext: undefined });
+              }
+            },
+            resolveCheckpointConfirm: (choice, text) => {
+              if (choice === "revise" && typeof text === "string") {
+                const snap = pendingCheckpoint;
+                setPendingCheckpoint(null);
+                if (!snap) return;
+                Promise.resolve(handleCheckpointReviseSubmitRef.current(text, snap)).catch(
+                  () => undefined,
+                );
+                return;
+              }
+              Promise.resolve(handleCheckpointConfirmRef.current(choice)).catch(() => undefined);
+            },
+            resolveReviseConfirm: (choice) => {
+              Promise.resolve(handleReviseConfirmRef.current(choice)).catch(() => undefined);
+            },
+            resolvePicker: (resolution) => {
+              const fn = activePickerResolverRef.current;
+              if (fn) Promise.resolve(fn(resolution)).catch(() => undefined);
+            },
+            resolveViewer: () => {
+              const fn = activeViewerResolverRef.current;
+              if (fn) Promise.resolve(fn()).catch(() => undefined);
+            },
+            reloadHooks: () => reloadHooks(codeMode ? currentRootDirRef.current : undefined),
+            addToolToPrefix: (spec) => loop.prefix.addTool(spec),
+            reloadMcp: mcpRuntime
+              ? async () => {
+                  const r = await mcpRuntime.reloadFromConfig(loop);
+                  setLiveMcpServers(r.summaries);
+                  return r.summaries.length;
+                }
+              : undefined,
+            switchSession: onSwitchSession
+              ? (name) => {
+                  onSwitchSession(name);
+                  return { ok: true as const };
+                }
+              : undefined,
+          },
+          { port, host: dashboardHost, token: dashboardToken },
+        );
+
       let handle: Awaited<ReturnType<typeof tryStart>>;
       try {
         handle = await tryStart(dashboardPort);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException)?.code;
         if (dashboardPort && (code === "EADDRINUSE" || code === "EACCES")) {
-          // Pinned port collided — fall back to ephemeral, then re-persist so
-          // the next boot tries the new port first.
           process.stderr.write(
             `▲ dashboard port ${dashboardPort} taken (${code}) — falling back to ephemeral\n`,
           );
@@ -2485,7 +2751,7 @@ function AppInner({
     stopLoop,
     pendingEdits,
     editModeRef,
-    setEditModeLive,
+    applyEditMode,
     currentRootDirRef,
     reloadHooks,
     setPreset,
@@ -2576,7 +2842,7 @@ function AppInner({
         // Flip the gate first, then apply the current block, then exit
         // the walk. Remaining blocks stay pending —the user can keep
         // walking via /walk again or commit them with /apply.
-        setEditModeLive("auto");
+        applyEditMode("auto");
         log.pushInfo(codeApply([1]));
         log.pushInfo(t("app.flippedAutoWalk"));
         setWalkthroughActive(false);
@@ -2588,7 +2854,7 @@ function AppInner({
       // the new first block thanks to pendingTick.
       if (pendingEdits.current.length === 0) setWalkthroughActive(false);
     },
-    [codeApply, codeDiscard, log, pendingEdits, setEditModeLive],
+    [applyEditMode, codeApply, codeDiscard, log, pendingEdits],
   );
 
   const pendingGateIdRef = useRef<number | null>(null);
@@ -2914,7 +3180,7 @@ function AppInner({
           planMode,
           setPlanMode: codeMode ? togglePlanMode : undefined,
           editMode: codeMode ? editMode : undefined,
-          setEditMode: codeMode ? setEditModeLive : undefined,
+          setEditMode: codeMode ? applyEditMode : undefined,
           touchedFiles: codeMode
             ? () => {
                 // Union of (files in completed/undone edit batches) +
@@ -3474,7 +3740,7 @@ function AppInner({
       sealCurrentEntry,
       editMode,
       editModeRef,
-      setEditModeLive,
+      applyEditMode,
       pendingEdits,
       syncPendingCount,
       reloadHooks,
@@ -4690,3 +4956,4 @@ function AppInner({
     </>
   );
 }
+

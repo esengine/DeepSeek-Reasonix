@@ -394,8 +394,8 @@ export const zhCN: TranslationSchema = {
     },
     mode: {
       description:
-        "编辑门控：review（排队）· auto（应用+撤消）· yolo（应用+自动 shell）。Shift+Tab 循环。",
-      argsHint: "[review|auto|yolo]",
+        "编辑门控：review（排队）· auto（应用+撤消）· yolo（应用+自动 shell）· plan（只读）。Shift+Tab 循环。",
+      argsHint: "[review|auto|yolo|plan]",
     },
     jobs: { description: "列出 run_background 启动的后台作业" },
     kill: {
@@ -859,7 +859,7 @@ export const zhCN: TranslationSchema = {
         "▸ 计划模式开启 — 写入工具被限制；模型必须先调用 `submit_plan` 才能执行任何操作。（模型也可以在计划模式关闭时自主调用 submit_plan 处理大型任务 — 此开关是更强的显式约束。）输入 /plan off 退出。",
       planOff: "▸ 计划模式关闭 — 写入工具再次可用。模型仍可为大型任务自主提出计划。",
       modeCodeOnly: "/mode 仅在 `reasonix code` 中可用。",
-      modeUsage: "用法：/mode <review|auto|yolo>   （Shift+Tab 也可循环）",
+      modeUsage: "用法：/mode <review|auto|yolo|plan>   （Shift+Tab 也可循环）",
       modeYolo:
         "▸ 编辑模式：YOLO — 编辑和 Shell 命令自动运行，无提示。/undo 仍可回滚编辑。请谨慎使用。",
       modeAuto:

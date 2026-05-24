@@ -16,7 +16,7 @@ function parseBody(raw: string): ModeBody {
   }
 }
 
-const VALID = new Set<EditMode>(["review", "auto", "yolo"]);
+const VALID = new Set<EditMode>(["review", "auto", "yolo", "plan"]);
 
 export async function handleEditMode(
   method: string,
@@ -39,7 +39,7 @@ export async function handleEditMode(
     }
     const { mode } = parseBody(body);
     if (typeof mode !== "string" || !VALID.has(mode as EditMode)) {
-      return { status: 400, body: { error: "mode must be review | auto | yolo" } };
+      return { status: 400, body: { error: "mode must be review | auto | yolo | plan" } };
     }
     const resolved = ctx.setEditMode(mode as EditMode);
     ctx.audit?.({ ts: Date.now(), action: "set-edit-mode", payload: { mode: resolved } });

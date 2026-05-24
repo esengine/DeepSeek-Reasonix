@@ -1311,5 +1311,7 @@ export const en = {
     autoHint: "edits auto-apply, shell still asks",
     yolo: "YOLO",
     yoloHint: "edits AND shell auto-run, allowlist bypassed",
+    plan: "Plan",
+    planHint: "read-only exploration · writes only plans",
   },
 };

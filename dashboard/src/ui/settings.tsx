@@ -602,7 +602,7 @@ function PageGeneral({
             <div className="h">{t("settings.editModeHint")}</div>
           </div>
           <div className="seg-ctrl">
-            {(["review", "auto", "yolo"] as const).map((m) => (
+            {(["review", "auto", "yolo", "plan"] as const).map((m) => (
               <button
                 type="button"
                 key={m}
@@ -1008,7 +1008,7 @@ function PageRules({
             <div className="h">{t("settings.editModeHint")}</div>
           </div>
           <div className="seg-ctrl">
-            {(["review", "auto", "yolo"] as const).map((m) => (
+            {(["review", "auto", "yolo", "plan"] as const).map((m) => (
               <button
                 type="button"
                 key={m}

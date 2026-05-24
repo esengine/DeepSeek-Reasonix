@@ -15,7 +15,7 @@ import { fmtElapsed } from "./live";
 import { Shortcut } from "./shortcut";
 
 export type PresetName = "flash" | "pro";
-export type EditMode = "review" | "auto" | "yolo";
+export type EditMode = "review" | "auto" | "yolo" | "plan";
 
 type PresetEntry = { label: string; badge: string; desc: TKey };
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
@@ -26,6 +26,7 @@ const PRESET_INFO: Record<PresetName, PresetEntry> = {
 };
 
 const MODE_INFO: ModeEntry[] = [
+  { k: "plan", label: "editMode.plan", icon: <I.bookmark size={11} />, hint: "editMode.planHint" },
   { k: "review", label: "editMode.review", icon: <I.shield size={11} />, hint: "editMode.reviewHint" },
   { k: "auto", label: "editMode.auto", icon: <I.zap size={11} />, hint: "editMode.autoHint" },
   { k: "yolo", label: "editMode.yolo", icon: <I.warn size={11} />, hint: "editMode.yoloHint" },
@@ -745,3 +746,4 @@ function ModelMenu({
     </div>
   );
 }
+

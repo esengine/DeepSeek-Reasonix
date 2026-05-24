@@ -1141,6 +1141,27 @@ describe("dashboard server: D-1 settings + auto-loop surface", () => {
     expect(editModeCalls).toEqual(["auto"]);
   });
 
+  it("POST /api/settings accepts plan editMode", async () => {
+    const editModeCalls: unknown[] = [];
+    const base = await boot({
+      getEditMode: () => "review",
+      setEditMode: (mode) => {
+        editModeCalls.push(mode);
+        return mode;
+      },
+    });
+    const r = await call(`${base}api/settings`, {
+      method: "POST",
+      token: TOKEN,
+      tokenInHeader: true,
+      body: { editMode: "plan" },
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.changed).toContain("editMode");
+    expect(readConfig(cfgPath).editMode).toBe("plan");
+    expect(editModeCalls).toEqual(["plan"]);
+  });
+
   it("POST /api/settings rejects invalid editMode", async () => {
     const base = await boot();
     const r = await call(`${base}api/settings`, {

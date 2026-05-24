@@ -1376,6 +1376,16 @@ describe("handleSlash", () => {
       expect(r.info).toMatch(/submit_plan/);
     });
 
+    it("/mode plan sets edit mode to plan", () => {
+      const calls: string[] = [];
+      const r = handleSlash("mode", ["plan"], makeLoop(), {
+        editMode: "review",
+        setEditMode: (mode) => calls.push(mode),
+      });
+      expect(calls).toEqual(["plan"]);
+      expect(r.info).toMatch(/plan mode ON/);
+    });
+
     it("/status surfaces plan mode when it's on", () => {
       const r = handleSlash("status", [], makeLoop(), { planMode: true });
       expect(r.info).toMatch(/plan\s+ON/);
