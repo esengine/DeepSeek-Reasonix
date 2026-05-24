@@ -1,7 +1,7 @@
 import { DeepSeekClient } from "../client.js";
 import {
-  loadBaseUrl,
   loadEditMode,
+  loadEndpoint,
   loadFilesystemOutlineThresholdBytes,
   loadJavaSourceEnabled,
   loadProjectShellAllowed,
@@ -98,7 +98,10 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     subagentModels: loadSubagentModels(),
     onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal) => {
-      if (!subagentClient) subagentClient = new DeepSeekClient({ baseUrl: loadBaseUrl() });
+      if (!subagentClient) {
+        const ep = loadEndpoint();
+        subagentClient = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
+      }
       const result = await spawnSubagent({
         client: subagentClient,
         parentRegistry: tools,

@@ -2,10 +2,11 @@ import type { WriteStream } from "node:fs";
 import { stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import {
+  bridgeEndpointEnv,
   defaultConfigPath,
   isPlausibleKey,
   loadApiKey,
-  loadBaseUrl,
+  loadEndpoint,
   loadToolRateLimit,
   normalizeMcpConfig,
   readConfig,
@@ -69,8 +70,8 @@ async function ensureApiKey(): Promise<string> {
 
 export async function runCommand(opts: RunOptions): Promise<void> {
   loadDotenv();
-  const apiKey = await ensureApiKey();
-  process.env.DEEPSEEK_API_KEY = apiKey;
+  await ensureApiKey();
+  bridgeEndpointEnv();
 
   // Optional MCP setup — mirrors chat's flow. Must happen before loop
   // construction so the tools make it into the prefix.
@@ -138,7 +139,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     if (successCount === 0) tools = undefined;
   }
 
-  const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
+  const ep = loadEndpoint();
+  const client = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
   const prefix = new ImmutablePrefix({
     system: opts.system,
     toolSpecs: tools?.specs(),

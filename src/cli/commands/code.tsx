@@ -5,7 +5,7 @@ import { basename, resolve } from "node:path";
 import { buildCodeToolset } from "../../code/setup.js";
 import {
   DEFAULT_MODEL,
-  loadApiKey,
+  bridgeEndpointEnv,
   loadModel,
   normalizeMcpConfig,
   readConfig,
@@ -64,10 +64,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   // does the same dance — code.tsx wraps chatCommand but must also seed env
   // before buildCodeToolset runs, which is BEFORE chatCommand.
   loadDotenv();
-  const cfgKey = loadApiKey();
-  if (cfgKey && !process.env.DEEPSEEK_API_KEY) {
-    process.env.DEEPSEEK_API_KEY = cfgKey;
-  }
+  bridgeEndpointEnv();
   const { codeSystemPrompt } = await import("../../code/prompt.js");
   const rootDir = resolve(opts.dir ?? process.cwd());
   // Per-directory session so switching projects doesn't mix histories.

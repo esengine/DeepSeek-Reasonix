@@ -25,9 +25,10 @@ import { codeSystemPrompt } from "../../code/prompt.js";
 import { buildCodeToolset } from "../../code/setup.js";
 import {
   DEFAULT_MODEL,
+  bridgeEndpointEnv,
   loadApiKey,
-  loadBaseUrl,
   loadEditMode,
+  loadEndpoint,
   loadModel,
   loadReasoningEffort,
   normalizeMcpConfig,
@@ -171,7 +172,8 @@ async function buildSession(opts: {
     hasSemanticSearch: toolset.semantic.enabled,
     modelId: model,
   });
-  const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
+  const ep = loadEndpoint();
+  const client = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
   const prefix = new ImmutablePrefix({ system, toolSpecs: toolset.tools.specs() });
   const loop = new CacheFirstLoop({
     client,
@@ -200,9 +202,7 @@ async function buildSession(opts: {
 
 export async function acpCommand(opts: AcpOptions): Promise<void> {
   loadDotenv();
-  if (loadApiKey()) {
-    process.env.DEEPSEEK_API_KEY = loadApiKey();
-  }
+  bridgeEndpointEnv();
 
   const defaultDir = resolveDir(opts.dir, process.cwd());
   const sessions = new Map<string, Session>();

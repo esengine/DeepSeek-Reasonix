@@ -613,16 +613,37 @@ export function saveLanguage(lang: LanguageCode, path: string = defaultConfigPat
   writeConfig(cfg, path);
 }
 
-/** Resolve the API key from env var first, then the config file. */
-export function loadApiKey(path: string = defaultConfigPath()): string | undefined {
-  if (process.env.DEEPSEEK_API_KEY) return process.env.DEEPSEEK_API_KEY;
-  return readConfig(path).apiKey;
+export interface ResolvedEndpoint {
+  baseUrl: string | undefined;
+  apiKey: string | undefined;
 }
 
-/** env > config > undefined. Client falls back to api.deepseek.com when undefined. */
+// (baseUrl, apiKey) is a tuple: whichever source defines baseUrl owns apiKey too,
+// so a stale env DEEPSEEK_API_KEY doesn't bleed into a custom config baseUrl (#1631).
+export function loadEndpoint(path: string = defaultConfigPath()): ResolvedEndpoint {
+  if (process.env.DEEPSEEK_BASE_URL) {
+    return { baseUrl: process.env.DEEPSEEK_BASE_URL, apiKey: process.env.DEEPSEEK_API_KEY };
+  }
+  const cfg = readConfig(path);
+  if (cfg.baseUrl) {
+    return { baseUrl: cfg.baseUrl, apiKey: cfg.apiKey };
+  }
+  return { baseUrl: undefined, apiKey: process.env.DEEPSEEK_API_KEY ?? cfg.apiKey };
+}
+
+export function loadApiKey(path: string = defaultConfigPath()): string | undefined {
+  return loadEndpoint(path).apiKey;
+}
+
 export function loadBaseUrl(path: string = defaultConfigPath()): string | undefined {
-  if (process.env.DEEPSEEK_BASE_URL) return process.env.DEEPSEEK_BASE_URL;
-  return readConfig(path).baseUrl;
+  return loadEndpoint(path).baseUrl;
+}
+
+// Mirrors the resolved tuple into env so subprocess constructions see the same pair.
+export function bridgeEndpointEnv(path: string = defaultConfigPath()): void {
+  const ep = loadEndpoint(path);
+  if (ep.apiKey) process.env.DEEPSEEK_API_KEY = ep.apiKey;
+  if (ep.baseUrl) process.env.DEEPSEEK_BASE_URL = ep.baseUrl;
 }
 
 function isNonNegativeNumber(value: unknown): value is number {

@@ -14,6 +14,7 @@ import {
   loadBaseUrl,
   loadDesktopOpenTabs,
   loadEditMode,
+  loadEndpoint,
   loadEngineeringLifecycleMode,
   loadFilesystemOutlineThresholdBytes,
   loadIndexConfig,
@@ -169,6 +170,54 @@ describe("config", () => {
     saveBaseUrl("https://self-hosted.example.com", path);
     saveBaseUrl("", path);
     expect(loadBaseUrl(path)).toBeUndefined();
+  });
+
+  it("loadEndpoint: config tuple wins when config sets baseUrl (#1631)", () => {
+    // Bug scenario: user has a global env DEEPSEEK_API_KEY for the default
+    // endpoint, then edits config to use a custom proxy with its own apiKey.
+    // Per-field env-first would pair the stale env key with the custom URL →
+    // auth fails. Tuple semantics keep them paired by source.
+    process.env.DEEPSEEK_API_KEY = "sk-stale-from-shell-rc-abc";
+    saveBaseUrl("https://new-api.example.com/v1", path);
+    saveApiKey("sk-new-api-token-xyz1234", path);
+    const ep = loadEndpoint(path);
+    expect(ep.baseUrl).toBe("https://new-api.example.com/v1");
+    expect(ep.apiKey).toBe("sk-new-api-token-xyz1234");
+  });
+
+  it("loadEndpoint: env tuple wins when env sets baseUrl", () => {
+    process.env.DEEPSEEK_BASE_URL = "https://env-proxy.example.com";
+    process.env.DEEPSEEK_API_KEY = "sk-env-tuple-token-abc";
+    saveBaseUrl("https://config-only.example.com", path);
+    saveApiKey("sk-config-token-xyz1234", path);
+    try {
+      const ep = loadEndpoint(path);
+      expect(ep.baseUrl).toBe("https://env-proxy.example.com");
+      expect(ep.apiKey).toBe("sk-env-tuple-token-abc");
+    } finally {
+      // biome-ignore lint/performance/noDelete: restore exact env state
+      delete process.env.DEEPSEEK_BASE_URL;
+    }
+  });
+
+  it("loadEndpoint: default endpoint pairs env apiKey > config apiKey", () => {
+    // Neither source sets baseUrl → default endpoint. Standard 12-factor
+    // env > config for the apiKey, unchanged from pre-fix behavior.
+    process.env.DEEPSEEK_API_KEY = "sk-env-default-token-abc";
+    saveApiKey("sk-config-token-xyz1234", path);
+    const ep = loadEndpoint(path);
+    expect(ep.baseUrl).toBeUndefined();
+    expect(ep.apiKey).toBe("sk-env-default-token-abc");
+  });
+
+  it("loadEndpoint: config baseUrl with no config apiKey returns undefined apiKey", () => {
+    // Surfaces a clean "no key" error rather than silently using the stale
+    // env key with the wrong endpoint.
+    process.env.DEEPSEEK_API_KEY = "sk-stale-from-shell-rc-abc";
+    saveBaseUrl("https://new-api.example.com/v1", path);
+    const ep = loadEndpoint(path);
+    expect(ep.baseUrl).toBe("https://new-api.example.com/v1");
+    expect(ep.apiKey).toBeUndefined();
   });
 
   it("loads pricingOverride with valid non-negative fields", () => {

@@ -19,13 +19,14 @@ import {
   DEFAULT_MODEL,
   type DesktopOpenTab,
   type EditMode,
+  bridgeEndpointEnv,
   isPlausibleKey,
   isReasoningEffort,
   loadApiKey,
-  loadBaseUrl,
   loadDesktopOpenTabs,
   loadEditMode,
   loadEditor,
+  loadEndpoint,
   loadModel,
   loadQQConfig,
   loadReasoningEffort,
@@ -556,7 +557,7 @@ function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
 }
 
 function emitSettings(tab: Tab): void {
-  const apiKey = loadApiKey();
+  const ep = loadEndpoint();
   const recent = loadRecentWorkspaces().filter((p) => p !== tab.rootDir);
   emit(
     {
@@ -564,8 +565,8 @@ function emitSettings(tab: Tab): void {
       reasoningEffort: loadReasoningEffort(),
       editMode: loadEditMode(),
       budgetUsd: tab.runtime?.loop.budgetUsd ?? null,
-      baseUrl: loadBaseUrl(),
-      apiKeyPrefix: apiKey ? `${apiKey.slice(0, 6)}…${apiKey.slice(-3)}` : undefined,
+      baseUrl: ep.baseUrl,
+      apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
       workspaceDir: tab.rootDir,
       recentWorkspaces: recent,
       model: tab.currentModel,
@@ -779,7 +780,8 @@ function mintSessionFor(rootDir: string): string {
 function buildRuntimeFor(tab: Tab): RuntimeState {
   if (!tab.toolset) throw new Error("buildRuntimeFor called before initTabToolset finished");
   const toolset = tab.toolset;
-  const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
+  const ep = loadEndpoint();
+  const client = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = loadReasoningEffort();
   const loop = new CacheFirstLoop({
@@ -1266,7 +1268,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       modelId: tab.currentModel,
     });
     if (loadApiKey()) {
-      process.env.DEEPSEEK_API_KEY = loadApiKey();
+      bridgeEndpointEnv();
       tab.runtime = buildRuntimeFor(tab);
       void bridgeTabMcp(tab);
     }
@@ -1934,7 +1936,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       try {
         saveApiKey(key);
-        process.env.DEEPSEEK_API_KEY = key;
+        bridgeEndpointEnv();
         for (const tab of tabs.values()) {
           // Skeleton tabs still mid-bootstrap pick up the new key inside
           // initTabToolset's tail when buildCodeToolset settles — don't

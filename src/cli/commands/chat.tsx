@@ -2,6 +2,7 @@ import { render } from "ink";
 import React, { useMemo, useState } from "react";
 import {
   type ReasoningEffort,
+  bridgeEndpointEnv,
   loadApiKey,
   loadToolRateLimit,
   readConfig,
@@ -166,14 +167,14 @@ function Root({
       <KeystrokeProvider>
         <Setup
           onReady={(k) => {
-            process.env.DEEPSEEK_API_KEY = k;
+            bridgeEndpointEnv();
             setKey(k);
           }}
         />
       </KeystrokeProvider>
     );
   }
-  process.env.DEEPSEEK_API_KEY = key;
+  bridgeEndpointEnv();
 
   if (pickerOpen) {
     return (

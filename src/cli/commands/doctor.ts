@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { DeepSeekClient, pickPrimaryBalance } from "../../client.js";
 import {
   defaultConfigPath,
-  loadBaseUrl,
+  loadEndpoint,
   loadProxyConfig,
   readConfig,
   resolveSemanticEmbeddingConfig,
@@ -217,7 +217,7 @@ async function checkApiReach(): Promise<Check> {
     };
   }
   try {
-    const client = new DeepSeekClient({ apiKey: key, baseUrl: loadBaseUrl() });
+    const client = new DeepSeekClient({ apiKey: key, baseUrl: loadEndpoint().baseUrl });
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 8_000);
     let balance: Awaited<ReturnType<DeepSeekClient["getBalance"]>>;
