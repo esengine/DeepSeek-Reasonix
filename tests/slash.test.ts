@@ -1469,15 +1469,15 @@ describe("handleSlash", () => {
     });
 
     it("persists a registered theme", () => {
-      const r = handleSlash("theme", ["tokyo-night"], makeLoop());
-      expect(r.info).toMatch(/theme saved: tokyo-night/);
+      const r = handleSlash("theme", ["midnight"], makeLoop());
+      expect(r.info).toMatch(/theme saved: midnight/);
       expect(r.openThemePicker).toBeUndefined();
-      expect(loadTheme()).toBe("tokyo-night");
+      expect(loadTheme()).toBe("midnight");
     });
 
     it("persists auto so env can resolve the active theme", () => {
       const r = handleSlash("theme", ["auto"], makeLoop());
-      expect(r.info).toMatch(/active on next launch: github-dark/);
+      expect(r.info).toMatch(/active on next launch: dark/);
       expect(loadTheme()).toBe("auto");
     });
 

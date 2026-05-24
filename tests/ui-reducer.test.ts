@@ -500,19 +500,19 @@ describe("balanceColor", () => {
   // USD balances are multiplied by USD_TO_CNY before the threshold check.
 
   it("CNY → threshold checked directly", () => {
-    expect(balanceColor(3, "CNY")).toBe("#ff8b81"); // err
-    expect(balanceColor(8, "CNY")).toBe("#f0b07d"); // warn
-    expect(balanceColor(25, "CNY")).toBe("#79c0ff"); // brand
+    expect(balanceColor(3, "CNY")).toBe("#f87171"); // err
+    expect(balanceColor(8, "CNY")).toBe("#fbbf24"); // warn
+    expect(balanceColor(25, "CNY")).toBe("#7dd3fc"); // brand
   });
 
   it("USD → converted to CNY before threshold check ($0.91 ≈ ¥6.55 → warn)", () => {
-    expect(balanceColor(0.5, "USD")).toBe("#ff8b81"); // ≈ ¥3.60 → err
-    expect(balanceColor(0.91, "USD")).toBe("#f0b07d"); // ≈ ¥6.55 → warn
-    expect(balanceColor(3.0, "USD")).toBe("#79c0ff"); // ≈ ¥21.60 → brand
+    expect(balanceColor(0.5, "USD")).toBe("#f87171"); // ≈ ¥3.60 → err
+    expect(balanceColor(0.91, "USD")).toBe("#fbbf24"); // ≈ ¥6.55 → warn
+    expect(balanceColor(3.0, "USD")).toBe("#7dd3fc"); // ≈ ¥21.60 → brand
   });
 
   it("undefined currency defaults to CNY (matches pre-fix behavior)", () => {
-    expect(balanceColor(8)).toBe("#f0b07d");
+    expect(balanceColor(8)).toBe("#fbbf24");
   });
 });
 

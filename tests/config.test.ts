@@ -554,9 +554,9 @@ describe("config", () => {
   });
 
   it("saveTheme + loadTheme round-trip a registered theme", () => {
-    saveTheme("tokyo-night", path);
-    expect(loadTheme(path)).toBe("tokyo-night");
-    expect(readConfig(path).theme).toBe("tokyo-night");
+    saveTheme("midnight", path);
+    expect(loadTheme(path)).toBe("midnight");
+    expect(readConfig(path).theme).toBe("midnight");
   });
 
   it("saveTheme + loadTheme round-trip auto", () => {
@@ -575,17 +575,17 @@ describe("config", () => {
   });
 
   it("resolveThemePreference lets env override auto but not registered config themes", () => {
-    expect(resolveThemePreference("auto", "github-light")).toBe("github-light");
-    expect(resolveThemePreference(undefined, "tokyo-night")).toBe("tokyo-night");
-    expect(resolveThemePreference("github-dark", "github-light")).toBe("github-dark");
-    expect(resolveThemePreference("auto", "unknown")).toBe("default");
+    expect(resolveThemePreference("auto", "light")).toBe("light");
+    expect(resolveThemePreference(undefined, "midnight")).toBe("midnight");
+    expect(resolveThemePreference("dark", "light")).toBe("dark");
+    expect(resolveThemePreference("auto", "unknown")).toBe("dark");
   });
 
   it("saveTheme doesn't clobber other persisted fields", () => {
     saveEditMode("auto", path);
-    saveTheme("github-light", path);
+    saveTheme("light", path);
     expect(loadEditMode(path)).toBe("auto");
-    expect(loadTheme(path)).toBe("github-light");
+    expect(loadTheme(path)).toBe("light");
   });
 
   it("editModeHintShown defaults to false and toggles on markEditModeHintShown", () => {

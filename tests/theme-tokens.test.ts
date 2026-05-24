@@ -18,15 +18,7 @@ describe("theme tokens", () => {
   });
 
   it("lists all registered themes", () => {
-    expect(listThemeNames()).toEqual([
-      "default",
-      "dark",
-      "light",
-      "tokyo-night",
-      "github-dark",
-      "github-light",
-      "high-contrast",
-    ]);
+    expect(listThemeNames()).toEqual(["dark", "light", "midnight", "deep-blue", "high-contrast"]);
   });
 
   it("provides complete token sets for every theme", () => {
@@ -42,48 +34,48 @@ describe("theme tokens", () => {
   });
 
   it("returns theme tokens by resolved name", () => {
-    expect(themeTokens("github-light")).toBe(THEMES["github-light"]);
-    expect(themeTokens("bad-name")).toBe(THEMES.default);
+    expect(themeTokens("light")).toBe(THEMES.light);
+    expect(themeTokens("bad-name")).toBe(THEMES.dark);
   });
 
   it("keeps legacy token exports bound to the active theme", () => {
-    const restore = setActiveTheme(THEMES["github-light"]);
-    expect(FG.body).toBe(THEMES["github-light"].fg.body);
-    expect(COLOR.primary).toBe(THEMES["github-light"].tone.brand);
+    const restore = setActiveTheme(THEMES.light);
+    expect(FG.body).toBe(THEMES.light.fg.body);
+    expect(COLOR.primary).toBe(THEMES.light.tone.brand);
 
     restore();
   });
 
   it("keeps legacy token exports object-compatible", () => {
-    const restore = setActiveTheme(THEMES["github-light"]);
+    const restore = setActiveTheme(THEMES.light);
 
-    expect(Object.keys(FG)).toEqual(Object.keys(THEMES["github-light"].fg));
-    expect({ ...COLOR }).toMatchObject({ primary: THEMES["github-light"].tone.brand });
+    expect(Object.keys(FG)).toEqual(Object.keys(THEMES.light.fg));
+    expect({ ...COLOR }).toMatchObject({ primary: THEMES.light.tone.brand });
     expect(JSON.parse(JSON.stringify(COLOR))).toMatchObject({
-      primary: THEMES["github-light"].tone.brand,
+      primary: THEMES.light.tone.brand,
     });
     expect(Array.isArray(GRADIENT)).toBe(true);
     expect([...GRADIENT]).toEqual([
-      THEMES["github-light"].tone.ok,
-      THEMES["github-light"].tone.brand,
-      THEMES["github-light"].tone.info,
-      THEMES["github-light"].toneActive.brand,
-      THEMES["github-light"].toneActive.violet,
-      THEMES["github-light"].tone.accent,
-      THEMES["github-light"].toneActive.accent,
-      THEMES["github-light"].tone.err,
+      THEMES.light.tone.ok,
+      THEMES.light.tone.brand,
+      THEMES.light.tone.info,
+      THEMES.light.toneActive.brand,
+      THEMES.light.toneActive.violet,
+      THEMES.light.tone.accent,
+      THEMES.light.toneActive.accent,
+      THEMES.light.tone.err,
     ]);
 
     restore();
   });
 
   it("restores legacy token exports after scoped active theme cleanup", () => {
-    const restoreDefault = setActiveTheme(THEMES.default);
-    const restoreLight = setActiveTheme(THEMES["github-light"]);
+    const restoreDark = setActiveTheme(THEMES.dark);
+    const restoreLight = setActiveTheme(THEMES.light);
 
-    expect(FG.body).toBe(THEMES["github-light"].fg.body);
+    expect(FG.body).toBe(THEMES.light.fg.body);
     restoreLight();
-    expect(FG.body).toBe(THEMES.default.fg.body);
-    restoreDefault();
+    expect(FG.body).toBe(THEMES.dark.fg.body);
+    restoreDark();
   });
 });

@@ -1,11 +1,4 @@
-export type ThemeName =
-  | "default"
-  | "dark"
-  | "light"
-  | "tokyo-night"
-  | "github-dark"
-  | "github-light"
-  | "high-contrast";
+export type ThemeName = "dark" | "light" | "midnight" | "deep-blue" | "high-contrast";
 
 export interface ThemeTokens {
   fg: {
@@ -81,40 +74,6 @@ function defineTheme(base: ThemeBase): ThemeTokens {
   return { ...base, card: card(base.fg, base.tone) };
 }
 
-const githubDark = defineTheme({
-  fg: {
-    strong: "#e6edf3",
-    body: "#c9d1d9",
-    sub: "#8b949e",
-    meta: "#6e7681",
-    faint: "#484f58",
-  },
-  tone: {
-    brand: "#79c0ff",
-    accent: "#d2a8ff",
-    violet: "#b395f5",
-    ok: "#7ee787",
-    warn: "#f0b07d",
-    err: "#ff8b81",
-    info: "#79c0ff",
-  },
-  toneActive: {
-    brand: "#a5d6ff",
-    accent: "#e2c5ff",
-    violet: "#c8aaff",
-    ok: "#a8f5ad",
-    warn: "#ffc99e",
-    err: "#ffaba3",
-    info: "#a5d6ff",
-  },
-  surface: {
-    bg: "#0a0c10",
-    bgInput: "#0d1015",
-    bgCode: "#06080c",
-    bgElev: "#11141a",
-  },
-});
-
 const dark = defineTheme({
   fg: {
     strong: "#f4f7fb",
@@ -143,7 +102,7 @@ const dark = defineTheme({
   },
   surface: {
     bg: "#0b1020",
-    bgInput: "#111827",
+    bgInput: "#0f172a",
     bgCode: "#080c16",
     bgElev: "#151d2f",
   },
@@ -177,13 +136,13 @@ const light = defineTheme({
   },
   surface: {
     bg: "#ffffff",
-    bgInput: "#f8fafc",
+    bgInput: "#f1f5f9",
     bgCode: "#f3f4f6",
     bgElev: "#eef2f7",
   },
 });
 
-const tokyoNight = defineTheme({
+const midnight = defineTheme({
   fg: {
     strong: "#c0caf5",
     body: "#a9b1d6",
@@ -217,37 +176,37 @@ const tokyoNight = defineTheme({
   },
 });
 
-const githubLight = defineTheme({
+const deepBlue = defineTheme({
   fg: {
-    strong: "#1f2328",
-    body: "#24292f",
-    sub: "#57606a",
-    meta: "#6e7781",
-    faint: "#8c959f",
+    strong: "#ffffff",
+    body: "#e0e0e0",
+    sub: "#b0b0b0",
+    meta: "#808080",
+    faint: "#606060",
   },
   tone: {
-    brand: "#0969da",
-    accent: "#8250df",
-    violet: "#6639ba",
-    ok: "#1a7f37",
-    warn: "#9a6700",
-    err: "#cf222e",
-    info: "#0969da",
+    brand: "#0153e5",
+    accent: "#4d94ff",
+    violet: "#7b68ee",
+    ok: "#4caf50",
+    warn: "#ff9800",
+    err: "#f44336",
+    info: "#2196f3",
   },
   toneActive: {
-    brand: "#0550ae",
-    accent: "#6639ba",
-    violet: "#512a97",
-    ok: "#116329",
-    warn: "#7d4e00",
-    err: "#a40e26",
-    info: "#0550ae",
+    brand: "#4d94ff",
+    accent: "#80b3ff",
+    violet: "#9b8bff",
+    ok: "#66bb6a",
+    warn: "#ffb74d",
+    err: "#ef5350",
+    info: "#42a5f5",
   },
   surface: {
-    bg: "#ffffff",
-    bgInput: "#f6f8fa",
-    bgCode: "#f6f8fa",
-    bgElev: "#eaeef2",
+    bg: "#0a0a0a",
+    bgInput: "#1e1e1e",
+    bgCode: "#141414",
+    bgElev: "#252525",
   },
 });
 
@@ -286,16 +245,14 @@ const highContrast = defineTheme({
 });
 
 export const THEMES = {
-  default: githubDark,
   dark,
   light,
-  "tokyo-night": tokyoNight,
-  "github-dark": githubDark,
-  "github-light": githubLight,
+  midnight,
+  "deep-blue": deepBlue,
   "high-contrast": highContrast,
 } as const satisfies Record<ThemeName, ThemeTokens>;
 
-export const DEFAULT_THEME_NAME: ThemeName = "default";
+export const DEFAULT_THEME_NAME: ThemeName = "dark";
 
 export function isThemeName(value: string): value is ThemeName {
   return Object.prototype.hasOwnProperty.call(THEMES, value);
@@ -303,6 +260,10 @@ export function isThemeName(value: string): value is ThemeName {
 
 export function resolveThemeName(value?: string | null): ThemeName {
   if (!value || value === "auto") return DEFAULT_THEME_NAME;
+  // Handle old theme names
+  if (value === "default" || value === "github-dark") return "dark";
+  if (value === "github-light") return "light";
+  if (value === "tokyo-night") return "midnight";
   return isThemeName(value) ? value : DEFAULT_THEME_NAME;
 }
 

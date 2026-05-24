@@ -56,6 +56,8 @@ export interface PromptInputProps {
   mode?: string;
   /** Current model for bottom status display. */
   model?: string;
+  /** True when viewing a historical input. */
+  isHistoryMode?: boolean;
 }
 
 export function PromptInput({
@@ -72,6 +74,7 @@ export function PromptInput({
   rowsAfter = 0,
   mode,
   model,
+  isHistoryMode,
 }: PromptInputProps) {
   const [cursor, setCursor] = useState(value.length);
 
@@ -334,8 +337,9 @@ export function PromptInput({
           </Box>
         ) : null}
         <Box height={1} />
-        {mode || model ? (
+        {mode || model || isHistoryMode ? (
           <Box>
+            {isHistoryMode ? <Text color={TONE.accent}>{"  ↑ history"}</Text> : null}
             <Text color={TONE.brand}>{mode || ""}</Text>
             {mode && model ? <Text color={FG.faint}>{" · "}</Text> : null}
             {model ? <Text color={FG.faint}>{model}</Text> : null}
@@ -692,7 +696,11 @@ function charCellsForText(ch: string): number {
 
 function renderSegment(seg: Segment, key: number, _inverse: boolean): React.ReactNode {
   if (seg.kind === "text") {
-    return <Text key={`s-${key}`}>{seg.text}</Text>;
+    return (
+      <Text key={`s-${key}`} color={FG.body}>
+        {seg.text}
+      </Text>
+    );
   }
   return (
     <Text key={`s-${key}`} backgroundColor={SURFACE.bgElev} color={FG.body}>

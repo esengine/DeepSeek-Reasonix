@@ -51,6 +51,7 @@ export interface ComposerAreaProps {
   onHistoryNext: () => void;
   onOpenExternalEditor: () => void;
   onCursorChange: (cursor: number) => void;
+  isHistoryMode?: boolean;
 
   // ── slash / @-mention / arg picker — derived from sub-component props
   slashMatches: SlashSuggestionsProps["matches"] | null;
@@ -94,6 +95,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     onHistoryNext,
     onOpenExternalEditor,
     onCursorChange,
+    isHistoryMode,
     slashMatches,
     slashSelected,
     slashGroupMode,
@@ -143,6 +145,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
           rowsAfter={1 + (activeLoop ? 1 : 0) + (jobs ? 1 : 0)}
           mode={mode}
           model={model}
+          isHistoryMode={isHistoryMode}
         />
         {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
         <StatusRow statusBar={statusBar} />

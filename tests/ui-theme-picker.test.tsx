@@ -32,13 +32,13 @@ describe("ThemePicker", () => {
   });
 
   it("marks the current preference and active theme", () => {
-    const text = renderPicker({ currentPreference: "auto", activeTheme: "github-dark" });
+    const text = renderPicker({ currentPreference: "auto", activeTheme: "dark" });
     expect(text).toMatch(/auto[\s\S]*current preference/);
-    expect(text).toMatch(/github-dark[\s\S]*active now/);
+    expect(text).toMatch(/dark[\s\S]*active now/);
   });
 
   it("renders the keybind hint footer", () => {
-    const text = renderPicker({ currentPreference: "tokyo-night", activeTheme: "tokyo-night" });
+    const text = renderPicker({ currentPreference: "midnight", activeTheme: "midnight" });
     expect(text).toContain("↑↓");
     expect(text).toContain("⏎");
     expect(text).toContain("esc");

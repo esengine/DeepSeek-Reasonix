@@ -17,7 +17,7 @@ const FIXTURE = {
   rows: 40,
   nodeVersion: "v22.10.0",
   locale: "zh-CN",
-  theme: "tokyo-night",
+  theme: "midnight",
   model: "deepseek-v4-flash",
   reasoningEffort: "high",
   editMode: "auto",
@@ -37,7 +37,7 @@ describe("buildFeedbackDiagnostic", () => {
     expect(out).toContain("**Size**: 142×40");
     expect(out).toContain("**Node**: v22.10.0");
     expect(out).toContain("**Locale**: zh-CN");
-    expect(out).toContain("**Theme**: tokyo-night");
+    expect(out).toContain("**Theme**: midnight");
     expect(out).toContain("**Model**: deepseek-v4-flash · effort=high");
     expect(out).toContain("**Mode**: edit=auto · plan=off");
     expect(out).toContain("**MCP**: 3 server(s)");
