@@ -261,6 +261,7 @@ interface SessionLoadedEvent {
     totalCostUsd: number;
     cacheHitTokens: number;
     cacheMissTokens: number;
+    totalCompletionTokens: number;
   };
 }
 
@@ -1814,6 +1815,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             totalCostUsd: meta.totalCostUsd ?? 0,
             cacheHitTokens: meta.cacheHitTokens ?? 0,
             cacheMissTokens: meta.cacheMissTokens ?? 0,
+            totalCompletionTokens: meta.totalCompletionTokens ?? 0,
           },
         },
         tab.id,
@@ -1833,19 +1835,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   // Restore the full tab set from the previous session — workspace dir,
-  // loaded session and focused tab (issues #933, #1244). `--dir` overrides
-  // saved tabs so a CLI-supplied workspace stays authoritative. Missing
-  // dirs are silently skipped — a deleted workspace shouldn't block boot.
-  const savedTabs = opts.dir
-    ? []
-    : loadDesktopOpenTabs().filter((t) => {
-        try {
-          return existsSync(t.dir) && statSync(t.dir).isDirectory();
-        } catch {
-          return false;
-        }
-      });
-  first = bootstrapTab(savedTabs[0]?.dir, savedTabs[0]);
+  // loaded session and focused tab (issues #933, #1244). Missing dirs
+  // are silently skipped — a deleted workspace shouldn't break boot.
+  const savedTabs = loadDesktopOpenTabs().filter((t) => {
+    try {
+      return existsSync(t.dir) && statSync(t.dir).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+  // When launched with --dir, find the matching saved tab so the user's
+  // previous session is restored automatically.
+  const startupDir = opts.dir;
+  const startupTab = startupDir
+    ? savedTabs.find((t) => resolve(t.dir) === resolve(startupDir))
+    : savedTabs[0];
+  first = bootstrapTab(opts.dir ?? savedTabs[0]?.dir, startupTab);
   const restored: Tab[] = [first];
   for (const t of savedTabs.slice(1)) restored.push(bootstrapTab(t.dir, t));
   // Mirror the persisted focus so the next persist round-trips it.
@@ -1975,6 +1980,30 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         if (!hasKey) emit({ type: "$needs_setup", reason: "no_api_key" }, t.id);
         else if (t.toolset) emit({ type: "$ready" }, t.id);
         void emitBalance(t);
+        // Re-emit session_loaded so the resumed session's messages and
+        // usage stats (cost, tokens, cache%) are restored on the frontend.
+        if (t.currentSession) {
+          try {
+            const msgs = buildLoadedMessages(loadSessionMessages(t.currentSession));
+            const meta = loadSessionMeta(t.currentSession);
+            emit(
+              {
+                type: "$session_loaded",
+                name: t.currentSession,
+                messages: msgs,
+                carryover: {
+                  totalCostUsd: meta.totalCostUsd ?? 0,
+                  cacheHitTokens: meta.cacheHitTokens ?? 0,
+                  cacheMissTokens: meta.cacheMissTokens ?? 0,
+                  totalCompletionTokens: meta.totalCompletionTokens ?? 0,
+                },
+              },
+              t.id,
+            );
+          } catch {
+            // unreadable jsonl — skip re-emit
+          }
+        }
       }
       return;
     }
@@ -2150,6 +2179,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               totalCostUsd: meta.totalCostUsd ?? 0,
               cacheHitTokens: meta.cacheHitTokens ?? 0,
               cacheMissTokens: meta.cacheMissTokens ?? 0,
+              totalCompletionTokens: meta.totalCompletionTokens ?? 0,
             },
           },
           tab.id,

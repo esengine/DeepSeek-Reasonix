@@ -864,6 +864,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           ...zeroUsage(),
           totalCostUsd: ev.carryover.totalCostUsd,
           totalPromptTokens: ev.carryover.cacheHitTokens + ev.carryover.cacheMissTokens,
+          totalCompletionTokens: ev.carryover.totalCompletionTokens ?? 0,
           cacheHitTokens: ev.carryover.cacheHitTokens,
           cacheMissTokens: ev.carryover.cacheMissTokens,
         },

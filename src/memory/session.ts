@@ -62,6 +62,8 @@ export interface SessionMeta {
   /** Cumulative cache hit / miss tokens across the session — survives resume so /status cache% isn't 0 on a fresh boot. */
   cacheHitTokens?: number;
   cacheMissTokens?: number;
+  /** Cumulative completion (output) tokens across the session. */
+  totalCompletionTokens?: number;
   /** Last turn's promptTokens — lets /status render the context bar before the next turn fires. */
   lastPromptTokens?: number;
   /** True when the session filename/summary was generated from conversation content. */

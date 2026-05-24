@@ -235,6 +235,7 @@ export type SessionLoadedEvent = {
     totalCostUsd: number;
     cacheHitTokens: number;
     cacheMissTokens: number;
+    totalCompletionTokens: number;
   };
 };
 

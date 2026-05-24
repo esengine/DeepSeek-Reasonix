@@ -40,6 +40,7 @@ import {
   archiveSession,
   loadSessionMessages,
   loadSessionMeta,
+  patchSessionMeta,
   rewriteSession,
 } from "./memory/session.js";
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
@@ -857,6 +858,24 @@ export class CacheFirstLoop {
       // Attribute under the actual model used (escalated → pro, else
       // this.model) so cost/usage logs reflect reality.
       const turnStats = this.stats.record(this._turn, this.model, usage ?? new Usage());
+
+      // Carry cumulative stats across app restarts.
+      if (this.sessionName) {
+        try {
+          const last =
+            this.stats.turns.length > 0 ? this.stats.turns[this.stats.turns.length - 1] : null;
+          const compTokens = this.stats.turns.reduce((sum, t) => sum + t.usage.completionTokens, 0);
+          patchSessionMeta(this.sessionName, {
+            totalCostUsd: this.stats.totalCost,
+            cacheHitTokens: this.stats.cumulativeCacheHitTokens,
+            cacheMissTokens: this.stats.cumulativeCacheMissTokens,
+            totalCompletionTokens: compTokens,
+            lastPromptTokens: last?.usage.promptTokens,
+          });
+        } catch {
+          // Best-effort; don't crash the turn loop on a write failure.
+        }
+      }
 
       this.scratch.reasoning = reasoningContent || null;
 

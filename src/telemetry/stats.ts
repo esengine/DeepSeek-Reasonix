@@ -152,6 +152,20 @@ export class SessionStats {
     }
   }
 
+  /** Cumulative cache hit tokens across carryover + current turns. */
+  get cumulativeCacheHitTokens(): number {
+    let hit = this._carryoverCacheHit;
+    for (const t of this.turns) hit += t.usage.promptCacheHitTokens;
+    return hit;
+  }
+
+  /** Cumulative cache miss tokens across carryover + current turns. */
+  get cumulativeCacheMissTokens(): number {
+    let miss = this._carryoverCacheMiss;
+    for (const t of this.turns) miss += t.usage.promptCacheMissTokens;
+    return miss;
+  }
+
   reset(): void {
     this.turns.length = 0;
     this._carryoverCost = 0;
