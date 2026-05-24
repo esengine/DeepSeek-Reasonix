@@ -22,6 +22,7 @@ import { Box, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for React.Fragment
 import React from "react";
 import type { SplitDiffRow } from "../../code/diff-preview.js";
+import { clipToCells, padToCells } from "./text-width.js";
 import { COLOR } from "./theme.js";
 
 export interface SplitDiffProps {
@@ -72,12 +73,11 @@ function Cell({
   const sign =
     side.kind === "del" ? "-" : side.kind === "add" ? "+" : side.kind === "pad" ? " " : " ";
   const raw = side.text;
-  const truncated = raw.length > inner ? `${raw.slice(0, inner - 1)}…` : raw;
-  // Pad to fixed width so the bg color stretches across the whole
-  // column even when the text is short — without this the red/green
-  // wash would only cover the actual chars and the rest of the row
-  // would be terminal default, which looks broken.
-  const padded = truncated.padEnd(inner);
+  // clipToCells / padToCells count visual cells, so CJK + emoji rows
+  // neither overflow (raw.length undercounts wide chars at the cut) nor
+  // get over-padded (padEnd pads by string length, not cells) — both
+  // would knock the column border out of alignment (#1671).
+  const padded = padToCells(clipToCells(raw, inner), inner);
 
   if (side.kind === "del") {
     return (

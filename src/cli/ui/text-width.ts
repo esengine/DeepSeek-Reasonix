@@ -21,6 +21,13 @@ export function stringWidth(s: string): number {
   return stringWidthLib(s);
 }
 
+/** Right-pad to `cells` visual columns — wide chars (CJK, emoji) count as 2. `padEnd` would pad by string length, which under-pads CJK because it counts each wide char as 1. */
+export function padToCells(text: string, cells: number): string {
+  const w = stringWidthLib(text);
+  if (w >= cells) return text;
+  return text + " ".repeat(cells - w);
+}
+
 /** Clip to `maxCells` visual cells; appends `…` if cut. Grapheme-safe. */
 export function clipToCells(s: string, maxCells: number): string {
   if (maxCells <= 0) return "";

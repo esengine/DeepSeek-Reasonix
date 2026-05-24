@@ -6,7 +6,7 @@ import { type Token, type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
 import { decodeHtmlEntities } from "./html-entities.js";
-import { wrapToCells } from "./text-width.js";
+import { padToCells, wrapToCells } from "./text-width.js";
 import { FG, SURFACE, TONE } from "./theme/tokens.js";
 
 /** Left margin consumed by card outer marginLeft + body paddingLeft + safety. */
@@ -187,13 +187,6 @@ function Blockquote({ token }: { token: Tokens.Blockquote }): React.ReactElement
       ))}
     </Box>
   );
-}
-
-/** Right-pad to `cells` visual columns — wide chars (CJK, emoji) count as 2. */
-function padToCells(text: string, cells: number): string {
-  const w = stringWidth(text);
-  if (w >= cells) return text;
-  return text + " ".repeat(cells - w);
 }
 
 function HorizontalRule(): React.ReactElement {

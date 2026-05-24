@@ -3,6 +3,7 @@ import {
   clipToCells,
   graphemeWidth,
   graphemes,
+  padToCells,
   stringWidth,
   wrapToCells,
 } from "../src/cli/ui/text-width.js";
@@ -74,6 +75,22 @@ describe("clipToCells", () => {
   });
   it("returns empty string at zero cap", () => {
     expect(clipToCells("anything", 0)).toBe("");
+  });
+});
+
+describe("padToCells", () => {
+  it("right-pads to the requested cell width for ASCII", () => {
+    expect(padToCells("hi", 6)).toBe("hi    ");
+    expect(stringWidth(padToCells("hi", 6))).toBe(6);
+  });
+  it("counts CJK as 2 cells when padding — padEnd would over-pad these", () => {
+    // "你好" = 2 chars, 4 cells. Need 2 spaces (not 8) to reach 6 cells.
+    expect(padToCells("你好", 6)).toBe("你好  ");
+    expect(stringWidth(padToCells("你好", 6))).toBe(6);
+  });
+  it("returns the input untouched when it already fills or exceeds the cells", () => {
+    expect(padToCells("hello", 5)).toBe("hello");
+    expect(padToCells("一二三", 4)).toBe("一二三"); // 6 cells > 4 → no pad, no trim
   });
 });
 
