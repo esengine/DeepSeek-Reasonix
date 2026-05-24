@@ -664,11 +664,6 @@ export class CacheFirstLoop {
         // Without finally the reset is lost and carryAbort locks every
         // future step() at iter 0.
         try {
-          yield {
-            turn: this._turn,
-            role: "warning",
-            content: t("loop.abortedAtIter", { iter }),
-          };
           const stoppedMsg =
             "[aborted by user (Esc) — no summary produced. Ask again or /retry when ready; prior tool output is still in the log.]";
           this.appendAndPersist(buildSyntheticAssistantMessage(stoppedMsg, this.model));

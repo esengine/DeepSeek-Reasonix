@@ -339,10 +339,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
       }
     }
 
-    // Warning fires with the abort notice.
-    const warnings = events.filter((e) => e.role === "warning");
-    expect(warnings.some((w) => /aborted at iter/.test(w.content ?? ""))).toBe(true);
-
     // Synthetic assistant_final is tagged forcedSummary and carries
     // the stopped-message text. It should NOT contain any model
     // output because no second API call was made.
@@ -362,9 +358,9 @@ describe("CacheFirstLoop (non-streaming)", () => {
     // Regression: a user pressing Esc once would put _turnAbort into
     // an aborted state; the iter-0 abort branch handled it but didn't
     // reset the controller. Every subsequent step() then carried the
-    // stale aborted state forward and bailed out with another
-    // "stopped without producing a summary" before any model call ran.
-    // The session was effectively dead until restart.
+    // stale aborted state forward and bailed out with the synthetic
+    // stopped-summary before any model call ran. The session was
+    // effectively dead until restart.
     const reg = new ToolRegistry();
     reg.register({
       name: "probe",
@@ -409,10 +405,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const finals = turn2Events.filter((e) => e.role === "assistant_final");
     expect(finals).toHaveLength(1);
     expect(finals[0]!.content).toBe("second turn ran cleanly");
-    // No "aborted at iter 0" warning on turn 2.
-    expect(
-      turn2Events.some((e) => e.role === "warning" && /aborted at iter/.test(e.content ?? "")),
-    ).toBe(false);
   });
 
   it("does not bleed when consumer breaks for-await mid-abort-yield", async () => {
@@ -453,9 +445,9 @@ describe("CacheFirstLoop (non-streaming)", () => {
         loop.abort();
         continue;
       }
-      if (aborted && ev.role === "warning") {
-        // Mirror desktop runTurn: drop out of for-await right after the
-        // abort warning, before assistant_final / done are drained.
+      if (aborted && ev.role === "assistant_final" && ev.forcedSummary) {
+        // Mirror desktop runTurn: drop out of for-await mid-abort-drain,
+        // before `done` is yielded — exercises the finally-block reset.
         break;
       }
     }
@@ -468,9 +460,6 @@ describe("CacheFirstLoop (non-streaming)", () => {
     const finals = turn2Events.filter((e) => e.role === "assistant_final");
     expect(finals).toHaveLength(1);
     expect(finals[0]!.content).toBe("second turn ran cleanly");
-    expect(
-      turn2Events.some((e) => e.role === "warning" && /aborted at iter/.test(e.content ?? "")),
-    ).toBe(false);
   });
 
   it("first all-suppressed storm self-corrects in-turn instead of stopping", async () => {

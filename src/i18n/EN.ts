@@ -685,8 +685,6 @@ export const EN: TranslationSchema = {
       "session budget exhausted — spent ${spent} ≥ cap ${cap}. Bump the cap with /budget <usd>, clear it with /budget off, or end the session.",
     budget80Pct: "▲ budget 80% used — ${spent} of ${cap}. Next turn or two likely trips the cap.",
     proArmed: "⇧ /pro armed — this turn runs on deepseek-v4-pro (one-shot · disarms after turn)",
-    abortedAtIter:
-      "aborted at iter {iter} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
     turnStartFoldStatus: "turn start: context approaching limit, compacting history…",
     turnStartFolded:

@@ -660,7 +660,6 @@ export const zhCN: TranslationSchema = {
       "会话预算已用完 — 已花费 ${spent} ≥ 上限 ${cap}。用 /budget <usd> 提高上限，/budget off 清除上限，或结束会话。",
     budget80Pct: "▲ 预算已用 80% — ${spent} / ${cap}。下一两轮可能就触顶。",
     proArmed: "⇧ /pro 已装备 — 本轮使用 deepseek-v4-pro（一次性 · 本轮后自动解除）",
-    abortedAtIter: "在第 {iter} 次工具调用处中断 — 未生成总结即停止（按 ↑ + Enter 或 /retry 恢复）",
     toolUploadStatus: "工具结果已上传 · 模型在生成下一条响应前思考中…",
     turnStartFoldStatus: "回合开始：上下文接近上限，正在压缩历史…",
     turnStartFolded:

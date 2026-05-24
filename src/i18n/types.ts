@@ -288,7 +288,6 @@ export interface TranslationSchema {
     budgetExhausted: string;
     budget80Pct: string;
     proArmed: string;
-    abortedAtIter: string;
     toolUploadStatus: string;
     turnStartFoldStatus: string;
     turnStartFolded: string;
