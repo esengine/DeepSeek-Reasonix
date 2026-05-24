@@ -224,6 +224,7 @@ button:disabled {
 .app {
   --side-width: 244px;
   --ctx-width: 320px;
+  position: relative;
   display: grid;
   grid-template-rows: 36px 36px 1fr 26px;
   grid-template-columns: var(--side-width) minmax(0, 1fr) var(--ctx-width);
@@ -246,13 +247,40 @@ html[data-platform="macos"] .app {
 
 .app[data-ctx-collapsed="true"] {
   --ctx-width: 0px;
+  --thread-max-width: 960px;
+  --composer-max-width: 880px;
 }
 .app[data-side-collapsed="true"] {
   --side-width: 0px;
+  --thread-max-width: 960px;
+  --composer-max-width: 880px;
 }
 .app[data-ctx-collapsed="true"][data-side-collapsed="true"] {
   --thread-max-width: 1120px;
   --composer-max-width: 1040px;
+}
+
+/* ---------- RESIZE HANDLES ---------- */
+
+.resize-handle {
+  position: absolute;
+  top: 36px;
+  bottom: 26px;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background 100ms;
+}
+.resize-handle:hover,
+.resize-handle[data-dragging="true"] {
+  background: var(--accent);
+}
+.resize-handle[data-side="left"] {
+  left: calc(var(--side-width) - 2px);
+}
+.resize-handle[data-side="right"] {
+  right: calc(var(--ctx-width) - 2px);
 }
 
 /* ---------- TABBAR ---------- */

@@ -29,7 +29,6 @@ const settings: Settings = {
   workspaceDir: "/repo",
   recentWorkspaces: [],
   model: "deepseek-reasoner",
-  preset: "pro",
   version: "0.0.0",
 };
 
