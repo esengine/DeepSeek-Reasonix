@@ -173,7 +173,7 @@ export function ReasoningCard({
           )}
         </>
       }
-      defaultOpen={false}
+      defaultOpen={streaming}
       compact
     >
       <div className="reason">

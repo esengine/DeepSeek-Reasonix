@@ -307,7 +307,7 @@ function SafeLink({ href, children }: { href?: string; children: ReactNode }) {
 function flattenChildText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(flattenChildText).join("");
-  if (isValidElement(node)) return flattenChildText(node.props.children);
+  if (isValidElement(node)) return flattenChildText((node.props as { children?: ReactNode }).children);
   return "";
 }
 

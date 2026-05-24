@@ -416,12 +416,13 @@ export function Composer({
       }
     }
     if (!popup) {
-      if (e.key === "ArrowUp") {
+      const ta = textareaRef.current;
+      if (e.key === "ArrowUp" && ta && ta.selectionStart === 0) {
         e.preventDefault();
         navigateHistory(-1);
         return;
       }
-      if (e.key === "ArrowDown") {
+      if (e.key === "ArrowDown" && ta && ta.selectionStart === draft.length) {
         e.preventDefault();
         navigateHistory(1);
         return;
