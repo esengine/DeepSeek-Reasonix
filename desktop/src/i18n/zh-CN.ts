@@ -384,6 +384,7 @@ export const zhCN: typeof en = {
       langSwitched: "已切换到{lang}",
       modelSwitched: "已切换到 {model}",
       modeSwitched: "模式: {mode}",
+      taskComplete: "任务已完成",
     },
     cmd: {
       newSession: "新建会话",
@@ -553,6 +554,8 @@ export const zhCN: typeof en = {
     filesCount: "{count} 个文件",
     fileModified: "已修改",
     fileInContext: "在上下文中",
+    openFile: "打开文件：{path}",
+    copyPath: "复制路径：{path}",
     mcpTitle: "MCP 服务器",
     mcpReadyAll: "{count} 个已就绪",
     mcpReadySome: "{ready}/{count} 已就绪",

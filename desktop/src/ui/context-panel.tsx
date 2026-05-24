@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useMemo, useState } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
 import { t, useLang } from "../i18n";
@@ -87,7 +89,7 @@ export function ContextPanel({
         </div>
 
         <PanelErrorBoundary key={tab} label={tab}>
-          {tab === "files" && <CtxFiles files={sessionFiles} />}
+          {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
           {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
           {tab === "memory" && <CtxMemory entries={memory} />}
           {tab === "rules" && <CtxRules settings={settings} />}
@@ -99,7 +101,22 @@ export function ContextPanel({
 
 type TreeNode =
   | { kind: "dir"; depth: number; name: string; key: string }
-  | { kind: "file"; depth: number; name: string; key: string; status: "c" | "m" };
+  | { kind: "file"; depth: number; name: string; path: string; key: string; status: "c" | "m" };
+
+async function openContextFile(path: string, settings: Settings | null): Promise<void> {
+  const workspaceDir = settings?.workspaceDir;
+  const sep = workspaceDir?.includes("\\") ? "\\" : "/";
+  const abs =
+    workspaceDir && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith("/")
+      ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "")}`
+      : path;
+  const editor = settings?.editor?.trim();
+  if (editor) {
+    await invoke("open_in_editor", { command: editor, path: abs, line: null });
+    return;
+  }
+  await openPath(abs);
+}
 
 function buildSessionTree(files: SessionFile[]): TreeNode[] {
   const sorted = [...files].sort((a, b) =>
@@ -108,7 +125,8 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
   const out: TreeNode[] = [];
   const seenDirs = new Set<string>();
   for (const f of sorted) {
-    const parts = f.path.replace(/\\/g, "/").split("/").filter(Boolean);
+    const displayPath = f.path.replace(/\\/g, "/");
+    const parts = displayPath.split("/").filter(Boolean);
     if (parts.length === 0) continue;
     let prefix = "";
     for (let i = 0; i < parts.length - 1; i++) {
@@ -124,6 +142,7 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
       kind: "file",
       depth: parts.length - 1,
       name: leaf,
+      path: displayPath,
       key: `f:${f.path}`,
       status: f.status,
     });
@@ -131,7 +150,7 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
   return out;
 }
 
-function CtxFiles({ files }: { files: SessionFile[] }) {
+function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Settings | null }) {
   const tree = useMemo(() => buildSessionTree(files), [files]);
   return (
     <div className="ctx-block">
@@ -147,7 +166,13 @@ function CtxFiles({ files }: { files: SessionFile[] }) {
         ) : (
           tree.map((n) =>
             n.kind === "dir" ? (
-              <div className="node" key={n.key} data-d={n.depth} data-kind="dir">
+              <div
+                className="node"
+                key={n.key}
+                data-d={n.depth}
+                data-kind="dir"
+                style={{ paddingLeft: 4 + n.depth * 14 }}
+              >
                 <span className="ico">
                   <I.folder size={12} />
                 </span>
@@ -159,17 +184,39 @@ function CtxFiles({ files }: { files: SessionFile[] }) {
                 key={n.key}
                 data-d={n.depth}
                 data-kind="file"
-                title={n.name}
+                title={n.path}
+                style={{ paddingLeft: 4 + n.depth * 14 }}
               >
                 <span className="ico">
                   <I.file size={12} />
                 </span>
-                <span className="nm">{n.name}</span>
+                <span className="node-text">
+                  <span className="nm">{n.name}</span>
+                  <span className="full-path">{n.path}</span>
+                </span>
                 <span
                   className="dot"
                   data-s={n.status}
                   title={n.status === "m" ? t("contextPanel.fileModified") : t("contextPanel.fileInContext")}
                 />
+                <button
+                  type="button"
+                  className="tree-action"
+                  aria-label={t("contextPanel.openFile", { path: n.path })}
+                  title={t("contextPanel.openFile", { path: n.path })}
+                  onClick={() => void openContextFile(n.path, settings)}
+                >
+                  <I.file size={12} />
+                </button>
+                <button
+                  type="button"
+                  className="tree-action"
+                  aria-label={t("contextPanel.copyPath", { path: n.path })}
+                  title={t("contextPanel.copyPath", { path: n.path })}
+                  onClick={() => void navigator.clipboard?.writeText(n.path)}
+                >
+                  <I.copy size={12} />
+                </button>
               </div>
             ),
           )

@@ -108,6 +108,20 @@ export function deriveDesktopNotifications(args: {
   return notifications;
 }
 
+export function shouldShowCompletionToast(args: {
+  wasBusy: boolean;
+  isBusy: boolean;
+  busyDurationMs: number;
+  focused: boolean;
+}): boolean {
+  return (
+    args.focused &&
+    args.wasBusy &&
+    !args.isBusy &&
+    args.busyDurationMs >= COMPLETION_NOTIFY_MIN_MS
+  );
+}
+
 let notificationPermissionAttempted = false;
 
 export async function dispatchDesktopNotifications(

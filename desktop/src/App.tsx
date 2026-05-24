@@ -56,7 +56,12 @@ import { Sidebar } from "./ui/sidebar";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import { StatusBar } from "./ui/statusbar";
-import { dispatchDesktopNotifications, deriveDesktopNotifications, type ApprovalSnapshot } from "./notifications";
+import {
+  dispatchDesktopNotifications,
+  deriveDesktopNotifications,
+  shouldShowCompletionToast,
+  type ApprovalSnapshot,
+} from "./notifications";
 import {
   ActivePlanTaskCard,
   AssistantMsg,
@@ -1431,21 +1436,37 @@ function TabRuntime({
     previousApprovalSnapshotRef.current = currentSnapshot;
     wasBusyRef.current = state.busy;
 
-    const notifications = deriveDesktopNotifications({
-      previous: previousSnapshot,
-      current: currentSnapshot,
-      wasBusy,
-      isBusy: state.busy,
-      busyDurationMs,
-      focused: false,
-    });
-    void dispatchDesktopNotifications(notifications, {
-      isFocused: () => getCurrentWindow().isFocused(),
-      isPermissionGranted: isNotificationPermissionGranted,
-      requestPermission: requestNotificationPermission,
-      sendNotification,
-    });
+    void getCurrentWindow()
+      .isFocused()
+      .catch(() => true)
+      .then((focused) => {
+        if (
+          shouldShowCompletionToast({
+            wasBusy,
+            isBusy: state.busy,
+            busyDurationMs,
+            focused,
+          })
+        ) {
+          flashToast(t("app.toast.taskComplete"), { duration: 2400 });
+        }
+        const notifications = deriveDesktopNotifications({
+          previous: previousSnapshot,
+          current: currentSnapshot,
+          wasBusy,
+          isBusy: state.busy,
+          busyDurationMs,
+          focused,
+        });
+        void dispatchDesktopNotifications(notifications, {
+          isFocused: async () => focused,
+          isPermissionGranted: isNotificationPermissionGranted,
+          requestPermission: requestNotificationPermission,
+          sendNotification,
+        });
+      });
   }, [
+    flashToast,
     state.busy,
     state.pendingChoices,
     state.pendingCheckpoints,

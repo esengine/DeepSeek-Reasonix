@@ -364,6 +364,7 @@ export const en = {
       langSwitched: "Switched to {lang}",
       modelSwitched: "Switched to {model}",
       modeSwitched: "Mode: {mode}",
+      taskComplete: "Task complete",
     },
     cmd: {
       newSession: "New session",
@@ -567,6 +568,8 @@ export const en = {
     filesCount: "{count} files",
     fileModified: "modified",
     fileInContext: "in context",
+    openFile: "Open file: {path}",
+    copyPath: "Copy path: {path}",
     mcpTitle: "MCP servers",
     mcpReadyAll: "{count} ready",
     mcpReadySome: "{ready}/{count} ready",

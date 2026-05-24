@@ -3240,25 +3240,57 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 }
 .tree .node[data-kind="file"] {
   cursor: default;
+  align-items: flex-start;
 }
 .tree .node .ico {
   color: var(--muted-2);
   flex-shrink: 0;
+  margin-top: 2px;
+}
+.tree .node-text {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  flex: 1;
 }
 .tree .node .nm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tree .node .full-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
 .tree .node .dot {
-  margin-left: auto;
+  margin-top: 7px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--success);
+  flex-shrink: 0;
 }
 .tree .node .dot[data-s="m"] {
   background: var(--warning);
+}
+.tree-action {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.tree-action:hover {
+  color: var(--fg);
+  background: var(--panel-2);
 }
 
 .ctx-empty {
