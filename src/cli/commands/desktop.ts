@@ -1490,9 +1490,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     return undefined;
   }
 
-  function abortTurn(tab: Tab): void {
+  function abortTurn(tab: Tab, opts: { discardCurrentTurn?: boolean } = {}): void {
     tab.aborter?.abort();
-    tab.runtime?.loop.abort();
+    tab.runtime?.loop.abort(opts.discardCurrentTurn ? { discardCurrentTurn: true } : undefined);
   }
 
   function tabSessionLabel(tab: Tab): string {
@@ -2049,7 +2049,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
 
     if (msg.cmd === "abort") {
-      abortTurn(tab);
+      abortTurn(tab, { discardCurrentTurn: true });
       cancelPendingGates(tab);
       return;
     }

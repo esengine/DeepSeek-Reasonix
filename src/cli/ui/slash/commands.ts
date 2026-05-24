@@ -244,11 +244,11 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "mode",
     group: "code",
-    argsHint: "[review|auto|yolo]",
+    argsHint: "[review|auto|yolo|plan]",
     summary:
-      "edit-gate: review (queue) · auto (apply+undo) · yolo (apply+auto-shell). Shift+Tab cycles.",
+      "edit-gate: review (queue) · auto (apply+undo) · yolo (apply+auto-shell) · plan (read-only). Shift+Tab cycles.",
     contextual: "code",
-    argCompleter: ["review", "auto", "yolo"],
+    argCompleter: ["review", "auto", "yolo", "plan"],
   },
   {
     cmd: "plan",

@@ -1,12 +1,12 @@
 /** apiKey is write-only on the wire; GET always returns a redacted form so dashboard screenshots don't leak credentials. */
 
 import {
-  DEFAULT_MODEL,
   type EditMode,
   REASONING_EFFORT_VALUES,
   type ReasoningEffort,
   isPlausibleKey,
   isReasoningEffort,
+  loadModel,
   normalizeSkillPathEntries,
   normalizeSkillPaths,
   readConfig,
@@ -53,7 +53,7 @@ const VALID_WEB_SEARCH_ENGINES = new Set([
   "exa",
 ]);
 
-const VALID_EDIT_MODES = new Set(["review", "auto", "yolo"]);
+const VALID_EDIT_MODES = new Set(["review", "auto", "yolo", "plan"]);
 
 void saveEditMode;
 
@@ -82,7 +82,7 @@ export async function handleSettings(
         webSearchEngine: readWebSearchEngine(ctx.configPath),
         editMode: ctx.getEditMode?.() ?? cfg.editMode ?? "review",
         session: cfg.session ?? null,
-        model: live?.model ?? cfg.model ?? DEFAULT_MODEL,
+        model: live?.model ?? loadModel(ctx.configPath),
         budgetUsd: live?.budgetUsd ?? null,
         sessionSpendUsd: ctx.getStats?.()?.totalCostUsd ?? null,
         skillPaths: normalizeSkillPaths(
@@ -146,7 +146,7 @@ export async function handleSettings(
     }
     if (fields.editMode !== undefined) {
       if (typeof fields.editMode !== "string" || !VALID_EDIT_MODES.has(fields.editMode)) {
-        return { status: 400, body: { error: "editMode must be review | auto | yolo" } };
+        return { status: 400, body: { error: "editMode must be review | auto | yolo | plan" } };
       }
       cfg.editMode = fields.editMode as EditMode;
       changed.push("editMode");

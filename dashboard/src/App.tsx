@@ -183,7 +183,7 @@ export type SessionInfo = {
 
 export type Settings = {
   reasoningEffort: "low" | "medium" | "high" | "max";
-  editMode: "review" | "auto" | "yolo";
+  editMode: "review" | "auto" | "yolo" | "plan";
   budgetUsd: number | null;
   baseUrl?: string;
   apiKeyPrefix?: string;

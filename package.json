@@ -1,6 +1,6 @@
 {
   "name": "reasonix",
-  "version": "0.49.0",
+  "version": "0.50.1",
   "description": "DeepSeek-native coding agent: cache-first loop, flash-first cost control, tool-call repair.",
   "type": "module",
   "bin": {
@@ -22,6 +22,7 @@
     "dashboard/index.html",
     "dashboard/app.css",
     "dashboard/dist",
+    "scripts/postinstall.mjs",
     "README.md",
     "LICENSE"
   ],
@@ -29,7 +30,7 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "npm --prefix dashboard ci --ignore-scripts && npm --prefix desktop ci --ignore-scripts",
+    "postinstall": "node scripts/postinstall.mjs",
     "build:dashboard": "npm --prefix dashboard run build",
     "build": "npm run build:dashboard && tsup && node scripts/copy-dashboard-vendor-css.mjs && node scripts/copy-tree-sitter-grammars.mjs",
     "dev": "tsx src/cli/index.ts",
@@ -44,7 +45,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard",
     "verify": "npm run build && npm run lint && npm run typecheck && npm run test --silent",
     "prepare": "simple-git-hooks || true",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm run test"
   },
   "simple-git-hooks": {
     "pre-commit": "npm run lint",

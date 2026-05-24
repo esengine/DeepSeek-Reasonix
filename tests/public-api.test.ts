@@ -110,6 +110,7 @@ const PUBLIC_API: readonly string[] = [
   "ListResourcesResult",
   "ListToolsResult",
   "LoadHookSettingsOptions",
+  "LoopAbortOptions",
   "LoopEvent",
   "MCP_PROTOCOL_VERSION",
   "MEMORY_INDEX_FILE",

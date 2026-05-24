@@ -3,6 +3,150 @@
 All notable changes to Reasonix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.1] — 2026-05-24
+
+**Install fix — `postinstall` no longer crashes on `npx`.** The
+`postinstall` hook added in 0.50.0 (#1584) ran `npm ci` inside
+`dashboard/` and `desktop/` to set up the dev workspace, but those
+directories aren't shipped in the published tarball. Result: `npx
+reasonix@0.50.0 code` failed during install with a `dashboard/package.json
+not found` error and the CLI never started. `postinstall` now delegates
+to `scripts/postinstall.mjs`, which exits 0 when `dashboard/package.json`
+is missing (i.e. anywhere except a git checkout). 0.50.0 is deprecated
+on npm.
+
+## [0.50.0] — 2026-05-24
+
+**Desktop dashboard — unified on the CLI-hosted React surface.** The
+old Tauri+Preact dashboard inside the desktop bundle is gone (#1418).
+Desktop now embeds the same CLI-hosted dashboard the browser surface
+already uses, so there's one React app rendering chat across all
+three surfaces (CLI, browser, desktop) instead of two divergent
+implementations drifting apart. Cuts the duplicate rendering paths
+that caused tool cards, code blocks, and compacted history to look
+subtly different depending on where you opened the same session.
+
+**Presets — flash/pro are the only knobs now.** The preset abstraction
+is removed (#1657, #1630): config now exposes `model` + `effort`
+directly instead of indirecting through `preset: auto | flash | pro`.
+The `/pro` switch is dropped too — flash and pro remain as direct
+model selections. Per-skill flash/pro override lands with a Settings
+UI (#1632) so subagents can opt into a heavier model without
+reconfiguring the parent.
+
+**Cumulative usage stats — persisted + auto-restored.** Session token
+totals and accumulated cost now write to the session meta on each
+turn and reload on startup (#1667, #1680 follow-up). Cost telemetry
+survives a CLI restart or desktop relaunch instead of resetting to
+zero, and the context-size readout shows the current window, not the
+all-time cumulative cache count (#1643). `SessionStats` caps at 200
+turns with cost carryover so long-lived sessions don't unbound (#1628).
+
+**Plans — `editMode="plan"` enforced at the dispatch gate.** Plan
+mode now blocks write tools at the `ToolRegistry` dispatch layer
+(#1681), not as a per-tool soft check. Plan steps also advance
+correctly when intermediate actions are skipped (#1629), so the
+"current step" indicator no longer stalls on a step the model already
+completed.
+
+**Context — fold once at turn start.** The pre-flight fold pass is
+gone — context folding now happens once at the start of each turn
+instead of being threaded through mid-turn checks (#1642, #1646). The
+obsolete byte-ceiling check is dropped too. Compacted history renders
+as a single collapsible card on all three surfaces (#1649), so the
+fold is visible without dominating the scrollback.
+
+**Desktop polish.**
+- Draggable sidebar resize + responsive conversation panel width (#1688)
+- Responsive sidebar collapse on narrow windows (#1585)
+- Copy/edit overlay, message-history navigation, IME guard, card collapse (#1645)
+- `Esc` closes the open modal instead of aborting the model turn (#1685)
+- QQ turn routing isolated by tab so cross-tab messages don't bleed (#1672)
+- Discard explicitly aborted turns instead of replaying them on resume (#1687)
+- Render `edit_file` / `multi_edit` results as DiffCard, matching CLI (#1662)
+- Code-block syntax highlighting follows light/dark theme (#1655)
+- System events surface as a show/hide toggle (#1654, #1650)
+- File paths + completion feedback surface in tool results (#1644)
+- Block right-click context menu in release builds (#1641)
+- Preserve code operators when rendering inline code (#1640)
+- Compact composer default preserved across relaunches (#1594)
+- Stale events no longer corrupt UI after a session switch (#1582)
+- macOS bundled Node inherits parent TCC grants so file/microphone
+  permission prompts attach to the desktop app, not the helper (#1614)
+- New `dashboard.enabled` config to suppress auto-start when the
+  dashboard isn't wanted (#1612)
+- Localize edit approval/discard messages + event errors with zh-CN (#1617)
+
+**Dashboard polish.**
+- Persistent active-session URL — shareable + refresh-safe (#1586,
+  #1589, #1599)
+- Code-block syntax highlighting follows light/dark theme (#1664)
+- IME confirm-enter no longer submits mid-composition (#1689)
+- Code-fence language detection fix mirrored from desktop (#1677, #1661)
+- Heavy vendor libs split into separate chunks for faster cold load (#1587)
+- Tool cards no longer stuck spinning when the turn ends without an
+  explicit completion event (#1676)
+- Markdown tables get a horizontal scrollbar instead of overflowing
+  the chat column (#1562)
+- Search-engine switcher restored in dashboard + desktop settings (#1618)
+- Composer queue-count label was reading the wrong variable name (#1674)
+- Long file paths stop stretching the chat bubble width (#1590)
+- Don't synthesize `$turn_complete` from per-iter `assistant_final` —
+  let the real completion event fire (#1673)
+
+**TUI.**
+- New `Alt+S` hotkey stashes the current input buffer and recalls it
+  later, like a one-slot clipboard for the composer
+- Static history is isolated from input re-renders, so typing during
+  a model turn doesn't repaint the whole scrollback (#1635)
+- Legacy mouse reports (X10) are dropped so terminals that emit them
+  by default no longer flood the input stream (#1637, #1648)
+- `multi_edit` is gated in review mode to match the single-edit
+  approval flow (#1647)
+- Shell command failure output is surfaced to the user instead of
+  silently truncated (#1608)
+
+**Diff rendering — CJK column-border alignment.** `SplitDiff` no
+longer misaligns the column border when CJK characters appear in
+either side of the diff (#1686). The width math now accounts for
+double-width graphemes when laying out the gutter.
+
+**Subagents — per-skill model override.** Each named skill
+(`/explore`, `/research`, `/review`, `/security-review`) can now
+override flash/pro independently (#1632), with a Settings UI to
+manage the overrides. Defaults flow from the parent session.
+
+**MCP.**
+- Workspace roots are passed to MCP servers on connect (#1625), so
+  servers that scope by root see the right project
+- `codeCommand` honors the full `normalizeMcpConfig` pipeline including
+  inline `mcpServers` blocks (#1603, follow-up to #1568)
+
+**Config.**
+- `(baseUrl, apiKey)` is resolved as a tuple instead of two
+  independent fields (#1658), so a partial override on one no longer
+  silently falls through to the env value of the other
+- Stale model IDs self-heal on load; v3 IDs are dropped from the
+  picker fallback list (#1663)
+- Theme rename follow-up from #1666 closes out the prompt-input + user
+  card token migration (#1678, #1666, #1623)
+
+**Memory.** `JobRegistry` self-cleans entries for completed jobs
+(#1620), so long sessions don't accumulate dead job records that
+never release their references.
+
+**Other.**
+- `chore(loop)` drop redundant abort warning, keep only the synthetic
+  final event (#1659)
+- `chore(theme)` finish theme rename follow-up after #1666 (#1678)
+- `chore(ui)` drop redundant `overflow-wrap` from inherited
+  descendants (#1675)
+- `fix(presets)` drop stale "5/31 discount" framing in pro cost copy
+  (#1583)
+- `chore(install)` include desktop deps in root postinstall (#1584)
+- `test(lifecycle)` cover deterministic policy corpus + npm package
+  aliases (#1574, #1621)
+
 ## [0.49.0] — 2026-05-22
 
 **TUI — Static-history renderer.** The history pane is now rendered

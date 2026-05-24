@@ -55,16 +55,18 @@ describe("ContextPanel files", () => {
 
   it("keeps each tracked file's full path visible", () => {
     const { container } = renderPanel();
-    fireEvent.click(container.querySelector('[data-kind="dir"]')!);
+
     const fileRow = container.querySelector('[data-kind="file"]');
+
     expect(fileRow?.textContent).toContain("src/new-file.ts");
     expect(fileRow?.getAttribute("title")).toBe("src/new-file.ts");
   });
 
   it("opens a tracked file from the file row action", async () => {
-    const { container } = renderPanel();
-    fireEvent.click(container.querySelector('[data-kind="dir"]')!);
+    renderPanel();
+
     fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));
+
     await waitFor(() => expect(openPath).toHaveBeenCalledWith("/repo/src/new-file.ts"));
   });
 });

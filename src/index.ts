@@ -41,6 +41,7 @@ export type {
 } from "./at-mentions.js";
 export type {
   CacheFirstLoopOptions,
+  LoopAbortOptions,
   LoopEvent,
   EventRole,
   ReconfigurableOptions,

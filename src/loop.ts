@@ -101,6 +101,11 @@ export interface ReconfigurableOptions {
   reasoningEffort?: ReasoningEffort;
 }
 
+export interface LoopAbortOptions {
+  /** Explicit user interrupts can discard the unfinished turn so the next prompt starts clean. */
+  discardCurrentTurn?: boolean;
+}
+
 export class CacheFirstLoop {
   readonly client: DeepSeekClient;
   readonly prefix: ImmutablePrefix;
@@ -137,6 +142,7 @@ export class CacheFirstLoop {
   private _streamPreference: boolean;
   /** Threaded through HTTP + every tool dispatch so Esc cancels in-flight work, not after. */
   private _turnAbort: AbortController = new AbortController();
+  private _discardAbortRequested = false;
   /** Authoritative running-id set — UI cards consult this instead of trusting end-event delivery. Insert at dispatch entry, delete in finally. */
   private readonly _inflight = new InflightSet();
 
@@ -496,8 +502,26 @@ export class CacheFirstLoop {
     return healed.messages;
   }
 
-  abort(): void {
+  abort(opts: LoopAbortOptions = {}): void {
+    if (opts.discardCurrentTurn) this._discardAbortRequested = true;
     this._turnAbort.abort();
+  }
+
+  private resetAbortState(): void {
+    this._turnAbort = new AbortController();
+    this._discardAbortRequested = false;
+  }
+
+  private discardLogFrom(index: number): void {
+    const preserved = this.log.entries.slice(0, index).map((m) => ({ ...m }));
+    this.log.compactInPlace(preserved);
+    if (this.sessionName) {
+      try {
+        rewriteSession(this.sessionName, preserved);
+      } catch {
+        /* disk-full / perms — in-memory compaction still applies */
+      }
+    }
   }
 
   /** Drop the last user message + everything after; caller re-sends. Persists to session file. */
@@ -620,6 +644,7 @@ export class CacheFirstLoop {
     // when the user navigates away before the model responds). A failed
     // first round-trip still leaves the message in the log; the user can
     // /retry without re-typing.
+    const turnStartLogIndex = this.log.length;
     this.appendAndPersist({ role: "user", content: userInput });
     const toolSpecs = this.prefix.tools();
     let rateLimitWarningShown = false;
@@ -666,9 +691,15 @@ export class CacheFirstLoop {
         // Without finally the reset is lost and carryAbort locks every
         // future step() at iter 0.
         try {
-          const stoppedMsg =
-            "[aborted by user (Esc) — no summary produced. Ask again or /retry when ready; prior tool output is still in the log.]";
-          this.appendAndPersist(buildSyntheticAssistantMessage(stoppedMsg, this.model));
+          const discardTurn = this._discardAbortRequested;
+          const stoppedMsg = discardTurn
+            ? "[aborted by user (Esc) — interrupted turn discarded. Ask again when ready.]"
+            : "[aborted by user (Esc) — no summary produced. Ask again or /retry when ready; prior tool output is still in the log.]";
+          if (discardTurn) {
+            this.discardLogFrom(turnStartLogIndex);
+          } else {
+            this.appendAndPersist(buildSyntheticAssistantMessage(stoppedMsg, this.model));
+          }
           yield {
             turn: this._turn,
             role: "assistant_final",
@@ -677,7 +708,7 @@ export class CacheFirstLoop {
           };
           yield { turn: this._turn, role: "done", content: stoppedMsg };
         } finally {
-          this._turnAbort = new AbortController();
+          this.resetAbortState();
         }
         this._steerQueue.length = 0;
         return;
@@ -833,10 +864,11 @@ export class CacheFirstLoop {
           // if the consumer breaks the for-await before draining `done`,
           // generator.return() would skip a bare post-yield reset and
           // leave carryAbort locked on the next step().
+          if (this._discardAbortRequested) this.discardLogFrom(turnStartLogIndex);
           try {
             yield { turn: this._turn, role: "done", content: "" };
           } finally {
-            this._turnAbort = new AbortController();
+            this.resetAbortState();
           }
           this._steerQueue.length = 0;
           return;

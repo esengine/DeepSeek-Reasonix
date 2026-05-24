@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
@@ -150,7 +150,32 @@ function buildSessionTree(files: SessionFile[]): TreeNode[] {
 }
 
 function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Settings | null }) {
-  const tree = useMemo(() => buildSessionTree(files), [files]);
+  const [existingPaths, setExistingPaths] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    const paths = files.map((f) => f.path);
+    if (paths.length === 0) {
+      setExistingPaths(new Set());
+      return;
+    }
+    let cancelled = false;
+    invoke<boolean[]>("files_exist", { paths }).then((results) => {
+      if (cancelled) return;
+      const s = new Set<string>();
+      for (let i = 0; i < paths.length; i++) {
+        if (results[i]) s.add(paths[i]!);
+      }
+      setExistingPaths(s);
+    });
+    return () => { cancelled = true; };
+  }, [files]);
+
+  const visibleFiles = useMemo(() => {
+    if (!existingPaths) return files;
+    return files.filter((f) => existingPaths.has(f.path));
+  }, [files, existingPaths]);
+
+  const tree = useMemo(() => buildSessionTree(visibleFiles), [visibleFiles]);
   const [opened, setOpened] = useState<string[]>([]);
 
   const toggleDir = (key: string) => {
@@ -162,11 +187,11 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
       <div className="h">
         <span>{t("contextPanel.filesTitle")}</span>
         <span className="right">
-          {files.length === 0 ? "—" : t("contextPanel.filesCount", { count: files.length })}
+          {visibleFiles.length === 0 ? "—" : t("contextPanel.filesCount", { count: visibleFiles.length })}
         </span>
       </div>
       <div className="tree">
-        {files.length === 0 ? (
+        {visibleFiles.length === 0 ? (
           <div className="ctx-empty">{t("contextPanel.noFilesMsg")}</div>
         ) : (
           tree.map((n) => {

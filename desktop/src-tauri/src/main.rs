@@ -105,6 +105,16 @@ fn walk_dir(dir: &Path, depth: u32, max_depth: u32, out: &mut Vec<FileEntry>) {
 }
 
 #[tauri::command]
+fn file_exists(path: String) -> bool {
+    std::path::Path::new(&path).exists()
+}
+
+#[tauri::command]
+fn files_exist(paths: Vec<String>) -> Vec<bool> {
+    paths.iter().map(|p| std::path::Path::new(p).exists()).collect()
+}
+
+#[tauri::command]
 fn list_workspace_tree(root: String, max_depth: u32) -> Result<Vec<FileEntry>, String> {
     let root_path = Path::new(&root);
     if !root_path.is_dir() {
