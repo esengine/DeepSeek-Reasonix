@@ -67,6 +67,15 @@ import {
   saveDesktopQQSettings,
   setDesktopQQEnabled,
 } from "../../desktop/qq-settings.js";
+import {
+  clearQQTurnRouting,
+  createQQTurnRoutingState,
+  markQQTurnFinished,
+  markQQTurnStarted,
+  setQQPendingInteraction,
+  shouldRouteQQForTab,
+  takeQQPendingInteraction,
+} from "../../desktop/qq-turn-routing.js";
 import { loadDotenv } from "../../env.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
@@ -928,9 +937,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     channel: null as QQChannel | null,
     runtimeState: "disconnected" as "disconnected" | "connecting" | "connected" | "failed",
     lastError: undefined as string | undefined,
-    pendingGateId: null as number | null,
-    interaction: { kind: null as string | null, payload: null as unknown },
-    replyThisTurn: false,
+    routing: createQQTurnRoutingState(),
   };
 
   function currentQqSettings(): QQSettingsEvent {
@@ -1026,14 +1033,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       .trim();
   }
 
-  function handleQQPauseReply(text: string): boolean {
-    if (qqRuntime.interaction.kind === null || qqRuntime.pendingGateId === null) return false;
-    qqRuntime.replyThisTurn = true;
+  function handleQQPauseReply(tab: Tab, text: string): boolean {
+    const pending = takeQQPendingInteraction(qqRuntime.routing, tab.id);
+    if (!pending) return false;
     const followup = stripFollowupPrefix(text);
-    const interaction = qqRuntime.interaction;
-    qqRuntime.interaction = { kind: null, payload: null };
-    const gateId = qqRuntime.pendingGateId;
-    qqRuntime.pendingGateId = null;
+    const interaction = pending;
+    const gateId = pending.gateId;
 
     switch (interaction.kind) {
       case "run_command":
@@ -1103,8 +1108,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   }
 
   function handleQQPauseRequest(tab: Tab, kind: string, payload: Record<string, unknown>): void {
-    if (!qqRuntime.channel) return;
-    qqRuntime.interaction = { kind, payload };
+    if (!qqRuntime.channel || !shouldRouteQQForTab(qqRuntime.routing, tab.id)) return;
     let qqMessage = "";
     switch (kind) {
       case "run_command":
@@ -1179,7 +1183,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           },
           tab.id,
         );
-        if (handleQQPauseReply(trimmed)) return;
+        if (handleQQPauseReply(tab, trimmed)) return;
         if (tab.aborter) {
           void channel
             .sendResponse(
@@ -1188,7 +1192,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             .catch(() => undefined);
           return;
         }
-        qqRuntime.replyThisTurn = true;
         void runTurn(tab, trimmed, true);
       },
       onError: (message) => {
@@ -1214,9 +1217,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
   async function stopDesktopQQ(shouldDisable = true): Promise<void> {
     const channel = qqRuntime.channel;
     qqRuntime.channel = null;
-    qqRuntime.interaction = { kind: null, payload: null };
-    qqRuntime.pendingGateId = null;
-    qqRuntime.replyThisTurn = false;
+    clearQQTurnRouting(qqRuntime.routing);
     if (channel) await channel.stop();
     if (shouldDisable) setDesktopQQEnabled(false);
     setQQRuntimeState("disconnected");
@@ -1370,7 +1371,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (!tab.runtime) return;
     const rt = tab.runtime;
     tab.aborter = new AbortController();
-    qqRuntime.replyThisTurn = fromQQ;
+    if (fromQQ) markQQTurnStarted(qqRuntime.routing, tab.id);
     let lastAssistantText = "";
     if (tab.currentSession) {
       const existing = loadSessionMeta(tab.currentSession).summary;
@@ -1407,7 +1408,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         // If a session switch happened while this turn was running,
         // suppress stale events to avoid UI state corruption (#1217).
         if (!tab.switching) {
-          if (fromQQ && lastAssistantText && qqRuntime.channel && qqRuntime.replyThisTurn) {
+          if (
+            fromQQ &&
+            lastAssistantText &&
+            qqRuntime.channel &&
+            shouldRouteQQForTab(qqRuntime.routing, tab.id)
+          ) {
             await qqRuntime.channel.sendResponse(lastAssistantText).catch((err) => {
               emit(
                 { type: "$error", message: `qq send failed: ${(err as Error).message}` },
@@ -1415,7 +1421,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               );
             });
           }
-          qqRuntime.replyThisTurn = false;
           emit({ type: "$turn_complete" }, tab.id);
           if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
             tab.completedStepIds.clear();
@@ -1425,6 +1430,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           emitSessions(tab);
           void emitBalance(tab);
         }
+        if (fromQQ) markQQTurnFinished(qqRuntime.routing, tab.id);
         tab.switching = false;
       }
     });
@@ -1586,7 +1592,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const tab = activeRunningTab();
     const tabId = tab?.id;
     if (tab) tab.pendingGateIds.add(req.id);
-    qqRuntime.pendingGateId = req.id;
     // Shared auto-resolve policy (e.g. plan_checkpoint in auto/yolo) — must
     // still run BEFORE we emit any UI event, otherwise the surface flickers
     // a card that we'd immediately tear down.
@@ -1624,6 +1629,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         timeoutSec?: number;
         waitSec?: number;
       };
+      if (tab) setQQPendingInteraction(qqRuntime.routing, tab.id, req.id, req.kind, payload);
       emit(
         {
           type: "$confirm_required",
@@ -1649,6 +1655,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         sandboxRoot: string;
         allowPrefix: string;
       };
+      if (tab) setQQPendingInteraction(qqRuntime.routing, tab.id, req.id, req.kind, payload);
       emit(
         {
           type: "$path_access_required",
@@ -1675,6 +1682,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         options: ChoiceOption[];
         allowCustom: boolean;
       };
+      if (tab) setQQPendingInteraction(qqRuntime.routing, tab.id, req.id, req.kind, payload);
       emit(
         {
           type: "$choice_required",
@@ -1693,6 +1701,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       if (tab) {
         tab.completedStepIds.clear();
         tab.planTotalSteps = payload.steps?.length ?? 0;
+        setQQPendingInteraction(qqRuntime.routing, tab.id, req.id, req.kind, payload);
       }
       emit(
         {
@@ -1714,7 +1723,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         result: string;
         notes?: string;
       };
-      if (tab) tab.completedStepIds.add(payload.stepId);
+      if (tab) {
+        tab.completedStepIds.add(payload.stepId);
+        setQQPendingInteraction(qqRuntime.routing, tab.id, req.id, req.kind, payload);
+      }
       emit(
         {
           type: "$step_completed",
@@ -1747,6 +1759,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         remainingSteps: PlanStepLite[];
         summary?: string;
       };
+      if (tab) setQQPendingInteraction(qqRuntime.routing, tab.id, req.id, req.kind, payload);
       emit(
         {
           type: "$revision_required",
