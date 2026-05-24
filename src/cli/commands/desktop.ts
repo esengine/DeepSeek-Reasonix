@@ -14,7 +14,7 @@ import {
 } from "../../at-mentions.js";
 import { pickPrimaryBalance } from "../../client.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
-import { buildCodeToolset } from "../../code/setup.js";
+import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
 import {
   type DesktopOpenTab,
   type EditMode,
@@ -553,12 +553,14 @@ function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
 
 function emitSettings(tab: Tab): void {
   const apiKey = loadApiKey();
+  const editMode = loadEditMode();
+  if (tab.toolset) applyPlanMode(tab.toolset.tools, editMode);
   const recent = loadRecentWorkspaces().filter((p) => p !== tab.rootDir);
   emit(
     {
       type: "$settings",
       reasoningEffort: loadReasoningEffort(),
-      editMode: loadEditMode(),
+      editMode,
       budgetUsd: tab.runtime?.loop.budgetUsd ?? null,
       baseUrl: loadBaseUrl(),
       apiKeyPrefix: apiKey ? `${apiKey.slice(0, 6)}…${apiKey.slice(-3)}` : undefined,
@@ -772,6 +774,7 @@ function mintSessionFor(rootDir: string): string {
 function buildRuntimeFor(tab: Tab): RuntimeState {
   if (!tab.toolset) throw new Error("buildRuntimeFor called before initTabToolset finished");
   const toolset = tab.toolset;
+  applyPlanMode(toolset.tools, loadEditMode());
   const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = loadReasoningEffort();
@@ -2177,11 +2180,16 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "settings_save") {
       try {
+        let editModeChanged = false;
         if (msg.reasoningEffort !== undefined) {
           saveReasoningEffort(msg.reasoningEffort);
           tab.runtime?.loop.configure({ reasoningEffort: msg.reasoningEffort });
         }
-        if (msg.editMode !== undefined) saveEditMode(msg.editMode);
+        if (msg.editMode !== undefined) {
+          saveEditMode(msg.editMode);
+          editModeChanged = true;
+          if (tab.toolset) applyPlanMode(tab.toolset.tools, msg.editMode);
+        }
         if (msg.budgetUsd !== undefined) {
           tab.budgetUsd = msg.budgetUsd ?? undefined;
           tab.runtime?.loop.setBudget(msg.budgetUsd);
@@ -2215,6 +2223,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             });
             if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
           }
+        }
+        if (editModeChanged && tab.runtime) {
+          tab.runtime = buildRuntimeFor(tab);
         }
         emitSettings(tab);
       } catch (err) {

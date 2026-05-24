@@ -2471,16 +2471,11 @@ function AppInner({
               const settings = resolvePreset(name as PresetName);
               loop.configure({
                 model: settings.model,
-                autoEscalate: settings.autoEscalate,
                 reasoningEffort: settings.reasoningEffort,
               });
               agentStore.dispatch({ type: "session.model.change", model: settings.model });
-              const canonical: "auto" | "flash" | "pro" =
-                settings.model === "deepseek-v4-pro"
-                  ? "pro"
-                  : settings.autoEscalate
-                    ? "auto"
-                    : "flash";
+              const canonical: "flash" | "pro" =
+                settings.model === "deepseek-v4-pro" ? "pro" : "flash";
               setPreset(canonical);
               agentStore.dispatch({ type: "session.preset.change", preset: canonical });
               try {
@@ -2497,10 +2492,6 @@ function AppInner({
               agentStore.dispatch({ type: "session.model.change", model });
             },
             getModels: () => modelsRef.current,
-            setProNextLive: (armed) => {
-              if (armed) loop.armProForNextTurn();
-              else loop.disarmPro();
-            },
             setBudgetUsdLive: (usd) => {
               loop.setBudget(usd);
             },
@@ -2652,9 +2643,9 @@ function AppInner({
                 return;
               }
               const plan = pendingPlanRef.current ?? "";
-              handleStagedInputSubmitRef.current(text ?? "", { plan, mode: choice }).catch(
-                () => undefined,
-              );
+              handleStagedInputSubmitRef
+                .current(text ?? "", { plan, mode: choice })
+                .catch(() => undefined);
             },
             resolveEditReview: (choice) => {
               const resolve = editReviewResolveRef.current;
@@ -2738,6 +2729,7 @@ function AppInner({
     codeMode,
     session,
     togglePlanMode,
+    setEditModeLive,
     pendingShell,
     pendingPath,
     pendingChoice,
@@ -4956,4 +4948,3 @@ function AppInner({
     </>
   );
 }
-

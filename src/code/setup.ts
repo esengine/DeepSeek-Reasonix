@@ -34,6 +34,7 @@ import { registerWebTools } from "../tools/web.js";
 
 export interface CodeToolsetOpts {
   rootDir: string;
+  configPath?: string;
   /** Fired after `install_skill` writes a new skill — desktop wires this to push a fresh `$skills` event so the sidebar updates without a tab reload. */
   onSkillInstalled?: SkillInstalledHook;
   /** Fired after `run_background` / `stop_job` mutate the JobRegistry — desktop pushes a fresh `$jobs` event so the popover updates without waiting for poll. */
@@ -50,8 +51,16 @@ export interface CodeToolset {
   semantic: { enabled: boolean };
 }
 
+export function applyPlanMode(
+  tools: ToolRegistry,
+  editMode: "review" | "auto" | "yolo" | "plan",
+): void {
+  tools.setPlanMode(editMode === "plan");
+}
+
 export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeToolset> {
   const tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
+  applyPlanMode(tools, loadEditMode(opts.configPath));
   const jobs = new JobRegistry();
 
   const outlineThresholdBytes = loadFilesystemOutlineThresholdBytes();
