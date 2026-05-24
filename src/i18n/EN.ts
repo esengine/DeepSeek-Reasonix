@@ -679,13 +679,9 @@ export const EN: TranslationSchema = {
     abortedAtIter:
       "aborted at iter {iter} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
-    preflightTruncateStatus: "preflight: context near full, compacting history…",
-    preflightTruncated:
-      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) — compacted {beforeMessages} messages → {afterMessages}. Sending.",
-    preflightTruncatedStillFull:
-      "preflight: request still ~{estimate}/{ctxMax} tokens ({pct}%) after compacting {beforeMessages} messages → {afterMessages}. DeepSeek will likely 400. Run /clear or /new to start fresh.",
-    preflightNoFold:
-      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) and nothing left to compact — DeepSeek will likely 400. Run /clear or /new to start fresh.",
+    turnStartFoldStatus: "turn start: context approaching limit, compacting history…",
+    turnStartFolded:
+      "turn start: request ~{estimate}/{ctxMax} tokens ({pct}%) — compacted {beforeMessages} messages → {afterMessages}. Sending.",
     harvestStatus: "extracting plan state from reasoning…",
     repeatToolCallWarning:
       "Caught a repeated tool call — let the model see the issue and retry with a different approach.",

@@ -11,11 +11,7 @@ import {
   DEFAULT_CONTEXT_TOKENS,
   type SessionStats,
 } from "./telemetry/stats.js";
-import {
-  countTokensBounded,
-  estimateConversationTokens,
-  estimateRequestTokens,
-} from "./tokenizer.js";
+import { countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ToolSpec } from "./types.js";
 
 function extractPinnedConstraints(systemPrompt: string): string {
@@ -39,10 +35,9 @@ export const HISTORY_FOLD_AGGRESSIVE_TAIL_FRACTION = 0.1;
 export const HISTORY_FOLD_MIN_SAVINGS_FRACTION = 0.3;
 /** Above this fraction we exit the turn with a summary instead of folding (defense in depth). */
 export const FORCE_SUMMARY_THRESHOLD = 0.8;
-/** Local preflight estimate above this fraction trips the emergency in-place compact path. */
-export const PREFLIGHT_EMERGENCY_THRESHOLD = 0.95;
-/** Emergency preflight target after local truncation, as a fraction of ctxMax. */
-export const PREFLIGHT_MECHANICAL_TARGET_FRACTION = 0.7;
+/** Turn-start local estimate above this fraction triggers a pre-iter fold. Covers cases the
+ * post-response fold can't (terminal prior turn, fresh session restore, huge user paste). */
+export const TURN_START_FOLD_THRESHOLD = 0.9;
 /** Hard deadline for semantic fold summaries so a hung request cannot stall the turn loop. */
 export const HISTORY_FOLD_SUMMARY_TIMEOUT_MS = 15_000;
 /** Prepended to fold summary content so the model knows it's a synthesized recap. */
@@ -64,7 +59,7 @@ export interface ContextManagerDeps {
   /** Reuses the live prefix → fold summary call shares the cached bytes the main agent already paid for. */
   getToolSpecs?: () => readonly ToolSpec[];
   getFewShots?: () => readonly ChatMessage[];
-  /** Fired when the message log was rewritten by fold/mechanicalTruncate; lets the loop drop session-scoped caches whose validity rested on the elided history (e.g. read-before-edit tracker). */
+  /** Fired when the message log was rewritten by fold; lets the loop drop session-scoped caches whose validity rested on the elided history (e.g. read-before-edit tracker). */
   onLogRewrite?: () => void;
 }
 
@@ -79,14 +74,6 @@ export interface PostUsageDecision {
   tailBudget?: number;
   /** True when this fold is in the 70-85% band — used in user-facing messaging. */
   aggressive?: boolean;
-}
-
-export interface PreflightDecision {
-  needsAction: boolean;
-  estimateTokens: number;
-  ctxMax: number;
-  /** Which signal tripped `needsAction`. `"none"` when below the threshold. */
-  trigger: "none" | "tokens";
 }
 
 export interface FoldResult {
@@ -176,21 +163,16 @@ export class ContextManager {
     return { kind: "none", ...base };
   }
 
-  /** Local-side preflight before sending a request — catches oversized payloads early. */
-  decidePreflight(
+  /** Turn-start estimate vs ctxMax — caller folds if the ratio crosses
+   *  TURN_START_FOLD_THRESHOLD. Replaces the old preflight/mechanical pair. */
+  estimateTurnStart(
     messages: ChatMessage[],
     toolSpecs: ReadonlyArray<unknown> | undefined | null,
     model: string,
-  ): PreflightDecision {
+  ): { estimateTokens: number; ctxMax: number; ratio: number } {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
     const estimate = estimateRequestTokens(messages, toolSpecs ?? null, true);
-    const tokensOver = estimate / ctxMax > PREFLIGHT_EMERGENCY_THRESHOLD;
-    return {
-      needsAction: tokensOver,
-      estimateTokens: estimate,
-      ctxMax,
-      trigger: tokensOver ? "tokens" : "none",
-    };
+    return { estimateTokens: estimate, ctxMax, ratio: estimate / ctxMax };
   }
 
   async fold(
@@ -268,65 +250,6 @@ export class ContextManager {
       beforeMessages: all.length,
       afterMessages: replacement.length,
       summaryChars: summary.content.length,
-    };
-  }
-
-  /** Local last-resort compaction: drop oldest entries until tokens fit the target.
-   * Used only when fold cannot summarize (empty log, savings too small, summarizer failed). */
-  mechanicalTruncate(
-    model: string,
-    opts?: { targetTokens?: number; allowEmpty?: boolean },
-  ): FoldResult {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
-    const targetTokens =
-      opts?.targetTokens ?? Math.floor(ctxMax * PREFLIGHT_MECHANICAL_TARGET_FRACTION);
-    const all = this.deps.log.toMessages();
-    const noop: FoldResult = {
-      folded: false,
-      beforeMessages: all.length,
-      afterMessages: all.length,
-      summaryChars: 0,
-    };
-    if (all.length === 0) return noop;
-
-    const tokenCounts = all.map((m) => estimateConversationTokens([m], true));
-    let latestUserBoundary = -1;
-    for (let i = all.length - 1; i >= 0; i--) {
-      if (all[i]!.role === "user") {
-        latestUserBoundary = i;
-        break;
-      }
-    }
-    let cumTokens = 0;
-    let boundary = all.length;
-    let foundSafeBoundary = false;
-    for (let i = all.length - 1; i >= 0; i--) {
-      const nextTokens = cumTokens + tokenCounts[i]!;
-      if (nextTokens > targetTokens) break;
-      cumTokens = nextTokens;
-      if (all[i]!.role === "user") {
-        boundary = i;
-        foundSafeBoundary = true;
-      }
-    }
-    if (boundary <= 0) return noop;
-
-    const replacement = foundSafeBoundary
-      ? all.slice(boundary)
-      : opts?.allowEmpty
-        ? []
-        : latestUserBoundary >= 0
-          ? all.slice(latestUserBoundary)
-          : all;
-    if (replacement.length === all.length) return noop;
-    this.deps.log.compactInPlace(replacement);
-    this.persistRewrite(replacement);
-    this.deps.onLogRewrite?.();
-    return {
-      folded: true,
-      beforeMessages: all.length,
-      afterMessages: replacement.length,
-      summaryChars: 0,
     };
   }
 

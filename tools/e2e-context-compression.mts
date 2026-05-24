@@ -96,8 +96,8 @@ async function scenarioPostResponseFold(): Promise<void> {
   }
 }
 
-async function scenarioPreflightEmergency(): Promise<void> {
-  console.log("\n=== Scenario 2: preflight emergency (estimate > 95%) ===");
+async function scenarioTurnStartFold(): Promise<void> {
+  console.log("\n=== Scenario 2: turn-start fold (estimate > 90%) ===");
   const client = new DeepSeekClient();
   const loop = new CacheFirstLoop({
     client,
@@ -105,7 +105,7 @@ async function scenarioPreflightEmergency(): Promise<void> {
     model: MODEL,
     stream: false,
   });
-  // Seed enough that the local request estimate already > 95% of TEST_CTX (47.5K).
+  // Seed enough that the turn-start estimate lands above 90% of TEST_CTX (45K).
   for (let i = 0; i < 100; i++) {
     loop.log.append({ role: "user", content: `Q${i}\n${fillerTurn(i, 30)}` });
     loop.log.append({ role: "assistant", content: `A${i}\n${fillerTurn(i, 30)}` });
@@ -123,28 +123,27 @@ async function scenarioPreflightEmergency(): Promise<void> {
   const afterMsgs = loop.log.length;
   const afterTokens = loop.context.getLogTokens();
 
-  const preflightStatus = events.find(
-    (e) => e.kind === "status" && /preflight|compact/i.test(e.content ?? ""),
+  const foldStatus = events.find(
+    (e) => e.kind === "status" && /turn start|compacting/i.test(e.content ?? ""),
   );
-  const preflightWarn = events.find(
-    (e) => e.kind === "warning" && /^preflight:/.test(e.content ?? ""),
+  const foldWarn = events.find(
+    (e) => e.kind === "warning" && /^turn start:/.test(e.content ?? ""),
   );
   const finalAns = events.find((e) => e.kind === "assistant_final");
 
   console.log(`  log: ${beforeMsgs} → ${afterMsgs} messages, ${beforeTokens} → ${afterTokens} tokens`);
-  console.log(`  preflight status? ${preflightStatus ? "yes — " + preflightStatus.content : "no"}`);
-  console.log(`  preflight warning? ${preflightWarn ? "yes — " + preflightWarn.content : "no"}`);
+  console.log(`  turn-start status? ${foldStatus ? "yes — " + foldStatus.content : "no"}`);
+  console.log(`  turn-start warning? ${foldWarn ? "yes — " + foldWarn.content : "no"}`);
   console.log(`  final answer received? ${finalAns ? "yes — " + finalAns.content : "NO"}`);
 
-  const compactedOK = preflightWarn?.content?.includes("compacted");
   if (!finalAns) {
     console.log("  ❌ FAIL: no final answer");
     process.exitCode = 1;
-  } else if (!preflightWarn) {
-    console.log("  ❌ FAIL: preflight did not fire despite log being over 95%");
+  } else if (!foldWarn) {
+    console.log("  ❌ FAIL: turn-start fold did not fire despite log being over 90%");
     process.exitCode = 1;
-  } else if (!compactedOK) {
-    console.log("  ⚠️  preflight fired but did not compact — see warning above");
+  } else if (!foldWarn.content?.includes("compacted")) {
+    console.log("  ⚠️  turn-start fired but did not compact — see warning above");
   } else {
     console.log("  ✅ PASS");
   }
@@ -163,16 +162,16 @@ async function scenarioBaselineNoFold(): Promise<void> {
   for await (const ev of loop.step("Say 'ok' and stop.")) {
     events.push({ kind: ev.role, content: ev.content?.slice(0, 200) });
   }
-  const preflightWarn = events.find(
-    (e) => e.kind === "warning" && /^preflight:/.test(e.content ?? ""),
+  const turnStartWarn = events.find(
+    (e) => e.kind === "warning" && /^turn start:/.test(e.content ?? ""),
   );
   const foldWarn = events.find((e) => e.kind === "warning" && /folded \d+/.test(e.content ?? ""));
   const finalAns = events.find((e) => e.kind === "assistant_final");
 
-  console.log(`  preflight fired? ${preflightWarn ? "yes (unexpected)" : "no (expected)"}`);
+  console.log(`  turn-start fired? ${turnStartWarn ? "yes (unexpected)" : "no (expected)"}`);
   console.log(`  fold fired? ${foldWarn ? "yes (unexpected)" : "no (expected)"}`);
   console.log(`  final answer received? ${finalAns ? "yes — " + finalAns.content : "NO"}`);
-  if (!finalAns || preflightWarn || foldWarn) {
+  if (!finalAns || turnStartWarn || foldWarn) {
     console.log("  ❌ FAIL");
     process.exitCode = 1;
   } else {
@@ -182,5 +181,5 @@ async function scenarioBaselineNoFold(): Promise<void> {
 
 await scenarioBaselineNoFold();
 await scenarioPostResponseFold();
-await scenarioPreflightEmergency();
+await scenarioTurnStartFold();
 console.log("\n=== Done ===");

@@ -9,7 +9,7 @@ import {
   truncateForModelByTokens,
 } from "./mcp/registry.js";
 
-import { ContextManager } from "./context-manager.js";
+import { ContextManager, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
 import { formatLoopError, is5xxError, probeDeepSeekReachable } from "./loop/errors.js";
@@ -621,6 +621,40 @@ export class CacheFirstLoop {
     const toolSpecs = this.prefix.tools();
     let rateLimitWarningShown = false;
 
+    // Turn-start fold: covers cases the post-response check can't see — terminal
+    // prior turn (no tool_calls → no decideAfterUsage), session restore from
+    // disk, huge user paste. Fires only above TURN_START_FOLD_THRESHOLD; the
+    // post-response 75% trigger handles routine growth.
+    {
+      const turnStart = this.context.estimateTurnStart(
+        this.buildMessages(),
+        this.prefix.toolSpecs,
+        this.model,
+      );
+      if (turnStart.ratio > TURN_START_FOLD_THRESHOLD) {
+        yield {
+          turn: this._turn,
+          role: "status",
+          content: t("loop.turnStartFoldStatus"),
+        };
+        const result = await this.context.fold(this.model, { requireTailBoundary: true });
+        if (result.folded) {
+          this._foldedThisTurn = true;
+          yield {
+            turn: this._turn,
+            role: "warning",
+            content: t("loop.turnStartFolded", {
+              estimate: turnStart.estimateTokens.toLocaleString(),
+              ctxMax: turnStart.ctxMax.toLocaleString(),
+              pct: Math.round(turnStart.ratio * 100),
+              beforeMessages: result.beforeMessages,
+              afterMessages: result.afterMessages,
+            }),
+          };
+        }
+      }
+    }
+
     for (let iter = 0; ; iter++) {
       if (signal.aborted) {
         // Reset in finally — the consumer (desktop runTurn) breaks the
@@ -684,60 +718,6 @@ export class CacheFirstLoop {
           role: "steer",
           content: steer,
         };
-      }
-
-      // Preflight context check. Local estimate of the outgoing payload
-      // catches cases where prior usage didn't warn us (fresh resume, one
-      // huge tool result). Above the emergency threshold we try semantic
-      // fold first; mechanical drop is the last resort when fold cannot
-      // summarize (empty head, savings too small, summarizer failed).
-      {
-        const decision = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
-        if (decision.needsAction) {
-          const { estimateTokens: estimate, ctxMax } = decision;
-          yield {
-            turn: this._turn,
-            role: "status",
-            content: t("loop.preflightTruncateStatus"),
-          };
-          let result = await this.context.fold(this.model, { requireTailBoundary: true });
-          if (!result.folded) {
-            result = this.context.mechanicalTruncate(this.model, { allowEmpty: false });
-          }
-          if (result.folded) {
-            // Block decideAfterUsage from folding again on the same turn — the
-            // log was just compacted; another fold would noop and the warning
-            // would be misleading.
-            this._foldedThisTurn = true;
-            messages = this.buildMessages();
-            const after = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
-            const stillFull = after.needsAction;
-            yield {
-              turn: this._turn,
-              role: "warning",
-              content: t(
-                stillFull ? "loop.preflightTruncatedStillFull" : "loop.preflightTruncated",
-                {
-                  estimate: after.estimateTokens.toLocaleString(),
-                  ctxMax: after.ctxMax.toLocaleString(),
-                  pct: Math.round((after.estimateTokens / after.ctxMax) * 100),
-                  beforeMessages: result.beforeMessages,
-                  afterMessages: result.afterMessages,
-                },
-              ),
-            };
-          } else {
-            yield {
-              turn: this._turn,
-              role: "warning",
-              content: t("loop.preflightNoFold", {
-                estimate: estimate.toLocaleString(),
-                ctxMax: ctxMax.toLocaleString(),
-                pct: Math.round((estimate / ctxMax) * 100),
-              }),
-            };
-          }
-        }
       }
 
       let assistantContent = "";
