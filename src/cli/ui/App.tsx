@@ -414,19 +414,9 @@ export function App(props: AppProps): React.ReactElement {
       showFeedbackHint: cfg.showFeedbackHint !== false,
     };
   }, []);
-  // Seed the cost display currency from config on first mount. When the
-  // wallet API later provides a balanceCurrency, that takes precedence
-  // at the per-card level — this is the fallback for users without a
-  // wallet who want USD instead of the default CNY.
+  // Seed the module-level cost-currency fallback from config.
   useEffect(() => {
-    const cfg = readConfig();
-    setDefaultCostCurrency(cfg.costCurrency);
-    if (cfg.costCurrency) {
-      agentStore.dispatch({
-        type: "session.update",
-        patch: { costDisplayCurrency: cfg.costCurrency },
-      });
-    }
+    setDefaultCostCurrency(readConfig().costCurrency);
   }, []);
   return (
     <ThemeProvider name={themeName}>
@@ -509,6 +499,17 @@ function AppInner({
   useEffect(() => {
     if (!isStreaming && liveExpand) setLiveExpand(false);
   }, [isStreaming, liveExpand]);
+  // Seed costDisplayCurrency into state so reactive components respond to the toggle.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
+  useEffect(() => {
+    const cfg = readConfig();
+    if (cfg.costCurrency) {
+      agentStore.dispatch({
+        type: "session.update",
+        patch: { costDisplayCurrency: cfg.costCurrency },
+      });
+    }
+  }, []);
   // ctrl-r toggles verbose mode — ReasoningCard / ToolCard skip elision while on.
   // Survives turn boundaries; resets on session restart.
   const [verboseMode, setVerboseMode] = useState(false);
