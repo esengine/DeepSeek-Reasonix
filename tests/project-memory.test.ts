@@ -2,7 +2,7 @@
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CODE_SYSTEM_PROMPT, codeSystemPrompt } from "../src/code/prompt.js";
 import {
@@ -71,22 +71,49 @@ describe("project-memory", () => {
       expect(mem?.content.length).toBeLessThan(PROJECT_MEMORY_MAX_CHARS + 64);
     });
 
-    it("falls back to AGENTS.md when REASONIX.md is absent", () => {
+    it("falls back to .claude/CLAUDE.md when REASONIX.md is absent", () => {
+      mkdirSync(join(root, ".claude"));
+      writeFileSync(join(root, ".claude", "CLAUDE.md"), "claude subdir content\n", "utf8");
+      const mem = readProjectMemory(root);
+      expect(mem?.content).toBe("claude subdir content");
+      expect(mem?.path).toBe(join(root, ".claude", "CLAUDE.md"));
+    });
+
+    it("falls back to root-level CLAUDE.md when .claude/CLAUDE.md is absent", () => {
+      writeFileSync(join(root, "CLAUDE.md"), "root claude content\n", "utf8");
+      const mem = readProjectMemory(root);
+      expect(mem?.content).toBe("root claude content");
+      expect(mem?.path.endsWith("CLAUDE.md")).toBe(true);
+    });
+
+    it(".claude/CLAUDE.md takes priority over root-level CLAUDE.md", () => {
+      mkdirSync(join(root, ".claude"));
+      writeFileSync(join(root, ".claude", "CLAUDE.md"), "subdir wins\n", "utf8");
+      writeFileSync(join(root, "CLAUDE.md"), "root loses\n", "utf8");
+      const mem = readProjectMemory(root);
+      expect(mem?.content).toBe("subdir wins");
+      expect(mem?.path).toBe(join(root, ".claude", "CLAUDE.md"));
+    });
+
+    it("falls back to AGENTS.md when no REASONIX.md or CLAUDE.md exists", () => {
       writeFileSync(join(root, "AGENTS.md"), "open-spec content\n", "utf8");
       const mem = readProjectMemory(root);
       expect(mem?.content).toBe("open-spec content");
       expect(mem?.path.endsWith("AGENTS.md")).toBe(true);
     });
 
-    it("falls back to AGENT.md (singular) when neither REASONIX.md nor AGENTS.md exists", () => {
+    it("falls back to AGENT.md (singular) when earlier candidates are absent", () => {
       writeFileSync(join(root, "AGENT.md"), "singular variant\n", "utf8");
       const mem = readProjectMemory(root);
       expect(mem?.content).toBe("singular variant");
       expect(mem?.path.endsWith("AGENT.md")).toBe(true);
     });
 
-    it("prefers REASONIX.md when multiple candidates exist", () => {
+    it("prefers REASONIX.md over CLAUDE.md candidates", () => {
       writeFileSync(join(root, "REASONIX.md"), "reasonix wins\n", "utf8");
+      mkdirSync(join(root, ".claude"));
+      writeFileSync(join(root, ".claude", "CLAUDE.md"), "claude loses\n", "utf8");
+      writeFileSync(join(root, "CLAUDE.md"), "root claude loses\n", "utf8");
       writeFileSync(join(root, "AGENTS.md"), "agents loses\n", "utf8");
       writeFileSync(join(root, "AGENT.md"), "agent loses too\n", "utf8");
       const mem = readProjectMemory(root);
@@ -95,7 +122,13 @@ describe("project-memory", () => {
     });
 
     it("PROJECT_MEMORY_FILES priority matches the documented read order", () => {
-      expect(PROJECT_MEMORY_FILES).toEqual(["REASONIX.md", "AGENTS.md", "AGENT.md"]);
+      expect(PROJECT_MEMORY_FILES).toEqual([
+        "REASONIX.md",
+        ".claude/CLAUDE.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        "AGENT.md",
+      ]);
     });
   });
 
@@ -105,8 +138,11 @@ describe("project-memory", () => {
     });
 
     it.each(PROJECT_MEMORY_FILES)("finds %s when it's the only candidate", (name) => {
-      writeFileSync(join(root, name), "x", "utf8");
-      expect(findProjectMemoryPath(root)?.endsWith(name)).toBe(true);
+      // .claude/CLAUDE.md needs its parent directory created first
+      const fullPath = join(root, name);
+      mkdirSync(dirname(fullPath), { recursive: true });
+      writeFileSync(fullPath, "x", "utf8");
+      expect(findProjectMemoryPath(root)).toBe(fullPath);
     });
   });
 
