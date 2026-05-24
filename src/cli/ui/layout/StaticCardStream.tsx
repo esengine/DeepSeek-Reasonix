@@ -1,15 +1,16 @@
 import { Box, Static } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX
 import React, { useMemo } from "react";
 import { CardRenderer } from "../cards/CardRenderer.js";
 import type { Card } from "../state/cards.js";
 import { useAgentState } from "../state/provider.js";
 
-export function StaticCardStream({
-  suppressLive = false,
-}: {
+interface StaticCardStreamProps {
   suppressLive?: boolean;
-}): React.ReactElement {
+}
+
+function StaticCardStreamInner({
+  suppressLive = false,
+}: StaticCardStreamProps): React.ReactElement {
   const cards = useAgentState((s) => s.cards);
   const { staticItems, dynamicItems, hasUnsettledDynamic } = useMemo(
     () => partition(cards),
@@ -38,6 +39,9 @@ export function StaticCardStream({
     </>
   );
 }
+
+export const StaticCardStream = React.memo(StaticCardStreamInner);
+StaticCardStream.displayName = "StaticCardStream";
 
 function partition(cards: readonly Card[]): {
   staticItems: Card[];
