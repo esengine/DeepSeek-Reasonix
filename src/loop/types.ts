@@ -17,10 +17,16 @@ export type EventRole =
   /** Mid-turn steer injected as queued user guidance without aborting the current turn. */
   | "steer";
 
+/** "low" = chatty / self-correcting / counter — Desktop+Dashboard filter these out by default.
+ *  Undefined / "high" = real event the user should see (compaction, abort, budget, rate-limit, etc.).
+ *  TUI ignores this and renders every warning. */
+export type EventSeverity = "low" | "high";
+
 export interface LoopEvent {
   turn: number;
   role: EventRole;
   content: string;
+  severity?: EventSeverity;
   reasoningDelta?: string;
   toolName?: string;
   /** Raw args JSON — needed by `reasonix diff` to explain why a tool was called. */

@@ -98,6 +98,7 @@ export type ChatMessage =
       pending: boolean;
     }
   | { kind: "status"; text: string }
+  | { kind: "warning"; id: string; text: string; severity: "low" | "high" }
   | { kind: "error"; message: string };
 
 export type PendingConfirm = {
@@ -960,6 +961,23 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "status":
       return state;
+    case "warning":
+      // High-severity only — eventize already drops "low". Render as a quiet
+      // inline divider so users see compaction / abort / rate-limit events
+      // without confusing them for errors.
+      if (ev.severity !== "high") return state;
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "warning",
+            id: `w-${ev.id}`,
+            text: ev.text,
+            severity: ev.severity,
+          },
+        ],
+      };
     default:
       return state;
   }
@@ -1876,6 +1894,15 @@ function TabRuntime({
                             <div className="tt">{t("app.errorLabel")}</div>
                             <div className="ds">{m.message}</div>
                           </div>
+                        </div>
+                      );
+                    }
+                    if (m.kind === "warning") {
+                      return (
+                        <div key={m.id} className="sys-event-row" title={m.text}>
+                          <span className="line" />
+                          <span className="label">{m.text}</span>
+                          <span className="line" />
                         </div>
                       );
                     }

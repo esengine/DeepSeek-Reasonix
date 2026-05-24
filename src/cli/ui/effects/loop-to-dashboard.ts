@@ -27,7 +27,7 @@ export function loopEventToDashboard(
         args: ev.toolArgs,
       };
     case "warning":
-      return { kind: "warning", id, text: ev.content };
+      return { kind: "warning", id, text: ev.content, severity: ev.severity };
     case "error":
       return { kind: "error", id, text: ev.content };
     case "status":

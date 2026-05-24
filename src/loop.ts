@@ -902,6 +902,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
+          severity: "low",
           content: t("loop.repeatToolCallWarning"),
         };
         continue;
@@ -915,6 +916,7 @@ export class CacheFirstLoop {
         yield {
           turn: this._turn,
           role: "warning",
+          severity: allSuppressed ? "high" : "low",
           content: `${phrase}${noteTail}`,
         };
       }

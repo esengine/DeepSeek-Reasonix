@@ -120,6 +120,53 @@ describe("Eventizer.consume", () => {
     expect(out[0]?.type).toBe("policy.escalated");
   });
 
+  it("drops low-severity warnings (chatty self-correcting messages)", () => {
+    const e = new Eventizer();
+    e.consume(lev({ turn: 1 }), ctx);
+    const out = e.consume(
+      lev({
+        turn: 1,
+        role: "warning",
+        severity: "low",
+        content: "Caught a repeated tool call",
+      }),
+      ctx,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("emits a typed warning event (not error) for high-severity loop warnings", () => {
+    const e = new Eventizer();
+    e.consume(lev({ turn: 1 }), ctx);
+    const out = e.consume(
+      lev({
+        turn: 1,
+        role: "warning",
+        severity: "high",
+        content: "context 76,500/100,000 (76%) — folded 30 messages → 12",
+      }),
+      ctx,
+    );
+    const warn = out.find((ev) => ev.type === "warning") as
+      | { text: string; severity: string }
+      | undefined;
+    expect(warn).toBeDefined();
+    expect(warn?.severity).toBe("high");
+    expect(warn?.text).toContain("folded 30 messages");
+    expect(out.find((ev) => ev.type === "error")).toBeUndefined();
+  });
+
+  it("treats unmarked warnings as high-severity (safer default for new emit sites)", () => {
+    const e = new Eventizer();
+    e.consume(lev({ turn: 1 }), ctx);
+    const out = e.consume(
+      lev({ turn: 1, role: "warning", content: "some new warning without severity" }),
+      ctx,
+    );
+    const warn = out.find((ev) => ev.type === "warning") as { severity: string } | undefined;
+    expect(warn?.severity).toBe("high");
+  });
+
   it("event ids are monotonic across consume calls", () => {
     const e = new Eventizer();
     const a = e.consume(lev({ turn: 1, role: "status", content: "a" }), ctx);

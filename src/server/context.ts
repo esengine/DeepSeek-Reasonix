@@ -235,6 +235,9 @@ export interface DashboardMessage {
   toolArgs?: string;
   /** Optional reasoning content for assistant messages (R1 / V4 thinking). */
   reasoning?: string;
+  /** For `role === "warning"`: "low" = chatty self-correcting / counter (UI suppresses by default),
+   *  "high" / undefined = real event (compaction, abort, rate-limit) to surface inline. */
+  severity?: "low" | "high";
 }
 
 export type DashboardEvent =
@@ -260,7 +263,7 @@ export type DashboardEvent =
     }
   | { kind: "tool_start"; id: string; toolName: string; args?: string }
   | { kind: "tool"; id: string; toolName: string; content: string; args?: string }
-  | { kind: "warning"; id: string; text: string }
+  | { kind: "warning"; id: string; text: string; severity?: "low" | "high" }
   | { kind: "error"; id: string; text: string }
   | { kind: "info"; id: string; text: string }
   | { kind: "user"; id: string; text: string }

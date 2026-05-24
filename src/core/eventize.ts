@@ -79,9 +79,11 @@ export class Eventizer {
         out.push(this.toolResultEvent(ev.turn, callId, ok, ev.content, 0));
         break;
       }
-      case "warning":
-        out.push(this.classifyWarning(ev));
+      case "warning": {
+        const classified = this.classifyWarning(ev);
+        if (classified) out.push(classified);
         break;
+      }
       case "error":
         out.push(this.errorEvent(ev.turn, ev.error ?? ev.content, false));
         break;
@@ -337,8 +339,10 @@ export class Eventizer {
     };
   }
 
-  /** Pattern-match warning text since LoopEvent doesn't carry a typed kind. */
-  private classifyWarning(ev: LoopEvent): Event {
+  /** Pattern-match warning text since LoopEvent doesn't carry a typed kind. Returns null
+   *  for low-severity warnings (self-correcting / counter messages); the UI surface drops
+   *  them entirely instead of rendering noise. */
+  private classifyWarning(ev: LoopEvent): Event | null {
     const c = ev.content;
     if (/\bauto-escalating to\b|\barmed\b.*pro|NEEDS_PRO/.test(c)) {
       return {
@@ -362,7 +366,15 @@ export class Eventizer {
         capUsd: 0,
       };
     }
-    return this.errorEvent(ev.turn, c, true);
+    if (ev.severity === "low") return null;
+    return {
+      id: ++this.nextId,
+      ts: new Date().toISOString(),
+      turn: ev.turn,
+      type: "warning",
+      text: c,
+      severity: ev.severity ?? "high",
+    };
   }
 }
 
