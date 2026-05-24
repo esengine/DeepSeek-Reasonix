@@ -53,7 +53,7 @@ const VALID_WEB_SEARCH_ENGINES = new Set([
   "exa",
 ]);
 
-const VALID_EDIT_MODES = new Set(["review", "auto", "yolo"]);
+const VALID_EDIT_MODES = new Set(["review", "auto", "yolo", "plan"]);
 
 void saveEditMode;
 
@@ -146,7 +146,7 @@ export async function handleSettings(
     }
     if (fields.editMode !== undefined) {
       if (typeof fields.editMode !== "string" || !VALID_EDIT_MODES.has(fields.editMode)) {
-        return { status: 400, body: { error: "editMode must be review | auto | yolo" } };
+        return { status: 400, body: { error: "editMode must be review | auto | yolo | plan" } };
       }
       cfg.editMode = fields.editMode as EditMode;
       changed.push("editMode");

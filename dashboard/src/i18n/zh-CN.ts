@@ -1285,6 +1285,8 @@ export const zhCN = {
     maxDesc: "DeepSeek 扩展；标准 OpenAI / vLLM 会拒绝",
   },
   editMode: {
+    plan: "计划",
+    planHint: "只读模式 · 所有写工具都不会派发",
     review: "审阅",
     reviewHint: "编辑和非允许列表的 shell 命令都会先询问",
     auto: "自动",

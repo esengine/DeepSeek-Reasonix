@@ -1310,6 +1310,8 @@ export const en = {
     maxDesc: "DeepSeek extension; rejected by stock OpenAI / vLLM",
   },
   editMode: {
+    plan: "Plan",
+    planHint: "read-only · all write tools refuse to dispatch",
     review: "Review",
     reviewHint: "both edits and non-allowlisted shell ask first",
     auto: "Auto",
