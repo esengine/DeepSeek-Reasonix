@@ -1,12 +1,12 @@
 /** apiKey is write-only on the wire; GET always returns a redacted form so dashboard screenshots don't leak credentials. */
 
 import {
-  DEFAULT_MODEL,
   type EditMode,
   REASONING_EFFORT_VALUES,
   type ReasoningEffort,
   isPlausibleKey,
   isReasoningEffort,
+  loadModel,
   normalizeSkillPathEntries,
   normalizeSkillPaths,
   readConfig,
@@ -82,7 +82,7 @@ export async function handleSettings(
         webSearchEngine: readWebSearchEngine(ctx.configPath),
         editMode: ctx.getEditMode?.() ?? cfg.editMode ?? "review",
         session: cfg.session ?? null,
-        model: live?.model ?? cfg.model ?? DEFAULT_MODEL,
+        model: live?.model ?? loadModel(ctx.configPath),
         budgetUsd: live?.budgetUsd ?? null,
         sessionSpendUsd: ctx.getStats?.()?.totalCostUsd ?? null,
         skillPaths: normalizeSkillPaths(
