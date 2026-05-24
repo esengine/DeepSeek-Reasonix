@@ -395,7 +395,7 @@ export function Composer({
         {queuedSends && queuedSends.length > 0 ? (
           <div className="composer-queued">
             <span className="composer-queued-label">
-              {t("composer.queueCount", { n: queuedSends.length })}
+              {t("composer.queueCount", { count: queuedSends.length })}
             </span>
             {queuedSends.map((text, i) => (
               <span key={i} className="composer-queue-chip" title={text}>
