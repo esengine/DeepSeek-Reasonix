@@ -122,6 +122,7 @@ const sessionUpdate = z.object({
     sessionCost: z.number().optional(),
     balance: z.number().optional(),
     balanceCurrency: z.string().optional(),
+    costDisplayCurrency: z.string().optional(),
     cacheHit: z.number().optional(),
   }),
 });

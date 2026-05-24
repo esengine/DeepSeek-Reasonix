@@ -190,7 +190,7 @@ import { VerboseContext } from "./state/verbose-context.js";
 import { isLegacyWindowsConsole } from "./terminal-host.js";
 import { ThemeProvider } from "./theme/context.js";
 import { listThemeNames } from "./theme/tokens.js";
-import { FG, type ThemeName } from "./theme/tokens.js";
+import { FG, type ThemeName, setDefaultCostCurrency } from "./theme/tokens.js";
 import { TickerProvider } from "./ticker.js";
 import { handleTurnInterrupt } from "./turn-interrupt.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
@@ -413,6 +413,20 @@ export function App(props: AppProps): React.ReactElement {
       showVersion: cfg.showVersion !== false,
       showFeedbackHint: cfg.showFeedbackHint !== false,
     };
+  }, []);
+  // Seed the cost display currency from config on first mount. When the
+  // wallet API later provides a balanceCurrency, that takes precedence
+  // at the per-card level — this is the fallback for users without a
+  // wallet who want USD instead of the default CNY.
+  useEffect(() => {
+    const cfg = readConfig();
+    setDefaultCostCurrency(cfg.costCurrency);
+    if (cfg.costCurrency) {
+      agentStore.dispatch({
+        type: "session.update",
+        patch: { costDisplayCurrency: cfg.costCurrency },
+      });
+    }
   }, []);
   return (
     <ThemeProvider name={themeName}>

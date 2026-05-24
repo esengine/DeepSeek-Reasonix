@@ -336,9 +336,20 @@ export function formatBalance(
   return opts?.label ? `w ${body}` : body;
 }
 
-/** Format an internal USD cost in the wallet's display currency. Undefined currency → CNY. */
+/** Module-level default cost currency, set at startup from user config.
+ *  `undefined` means "no user preference" — falls back to wallet currency or CNY. */
+let _defaultCostCurrency: string | undefined;
+
+/** Override the default cost display currency. Called at startup from App.tsx
+ *  with the user's `costCurrency` config value. Pass `undefined` to reset. */
+export function setDefaultCostCurrency(currency: string | undefined): void {
+  _defaultCostCurrency = currency;
+}
+
+/** Format an internal USD cost in the wallet's display currency. Falls back to
+ *  `_defaultCostCurrency` (set from config), then CNY. */
 export function formatCost(costUsd: number, currency?: string, fractionDigits = 4): string {
-  const cur = currency ?? "CNY";
+  const cur = currency ?? _defaultCostCurrency ?? "CNY";
   const amount = cur === "CNY" ? costUsd * USD_TO_CNY : costUsd;
   return formatBalance(amount, cur, { fractionDigits });
 }

@@ -216,6 +216,9 @@ export interface ReasonixConfig {
     showVersion?: boolean;
     showFeedbackHint?: boolean;
   };
+  /** Preferred display currency for costs (e.g. "USD" or "CNY"). When unset, falls back
+   *  to the wallet currency if available, then defaults to CNY. */
+  costCurrency?: string;
   projects?: {
     [absoluteRootDir: string]: {
       shellAllowed?: string[];
