@@ -92,6 +92,9 @@ function sseToIncoming(ev: any): Record<string, any>[] {
       break;
     }
     case "assistant_final": {
+      // Loop's `assistant_final` fires per model iteration (mid-turn it
+      // precedes tool dispatch); the real turn end is signaled by
+      // `busy-change` (busy=false), handled below.
       results.push({
         type: "model.final",
         tabId: "tab-1",
@@ -101,8 +104,6 @@ function sseToIncoming(ev: any): Record<string, any>[] {
         usage: ev.usage ?? undefined,
         costUsd: ev.costUsd ?? undefined,
       });
-      results.push({ type: "$turn_complete", tabId: "tab-1" });
-      sseTurnStarted = false;
       break;
     }
     case "tool_start": {
