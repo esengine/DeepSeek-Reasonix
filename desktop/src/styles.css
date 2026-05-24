@@ -1929,14 +1929,19 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   border-radius: 10px;
   background: var(--bg);
   overflow: hidden;
+  position: relative;
 }
 .markdown .codeblock-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--border);
+  padding: 2px 8px;
+  background: transparent;
   font-family: "Geist Mono", monospace;
   font-size: 11px;
   color: var(--muted);
@@ -1953,27 +1958,28 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .markdown .codeblock-head .copy-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   font-family: inherit;
   font-size: 11px;
   color: var(--muted);
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: none;
   border-radius: 4px;
   cursor: pointer;
+  opacity: 0.6;
 }
 .markdown .codeblock-head .copy-btn:hover {
-  color: var(--fg-2);
-  border-color: var(--border-strong);
+  opacity: 1;
+  background: var(--card);
 }
 .markdown .codeblock-head .copy-btn.done {
   color: var(--success);
-  border-color: var(--success-soft);
 }
 .markdown .codeview {
   margin: 0;
-  padding: 14px 16px;
+  padding: 22px 16px 14px;
   font-family: "Geist Mono", monospace;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;

@@ -7,7 +7,6 @@ import {
   createContext,
   isValidElement,
   memo,
-  type ReactElement,
   type ReactNode,
   useContext,
   useState,
@@ -215,16 +214,17 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
           pre: ({ children }) => {
             // react-markdown v9 nests children unpredictably — flatten all text.
             const rawText = flattenChildText(children).trimEnd();
-            const kids = Children.toArray(children);
-            const codeEl = kids.find(
-              (c): c is ReactElement =>
-                isValidElement(c) && typeof c.type === "string" && c.type.toLowerCase() === "code",
-            );
-            const lang = codeEl
-              ? /language-([\w-]+)/.exec(
-                  (codeEl.props as Record<string, unknown>).className as string ?? "",
-                )?.[1] ?? "text"
-              : "text";
+            // Extract lang from child element's className prop.
+            let lang = "text";
+            for (const kid of Children.toArray(children)) {
+              if (isValidElement(kid)) {
+                const cls = (kid.props as Record<string, unknown>).className;
+                if (typeof cls === "string") {
+                  const m = cls.match(/language-([\w-]+)/);
+                  if (m) { lang = m[1]!; break; }
+                }
+              }
+            }
             return <CodeBlock lang={lang} text={rawText} />;
           },
           code: ({ className, children }) => {
@@ -330,7 +330,6 @@ function CodeBlock({ lang, text }: { lang: string; text: string }): ReactNode {
         <span className="codeblock-copy-wrap">
           <button type="button" className={`copy-btn ${copied ? "done" : ""}`} onClick={onCopy}>
             {copied ? <Check size={11} /> : <Copy size={11} />}
-            {copied ? t("markdown.copied") : t("markdown.copy")}
           </button>
         </span>
       </div>
