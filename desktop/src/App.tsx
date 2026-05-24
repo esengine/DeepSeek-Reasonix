@@ -76,6 +76,7 @@ import {
   UserMsg,
 } from "./ui/thread";
 import { WorkdirPop } from "./ui/workdir-pop";
+import { parseEditResult } from "./ui/cards";
 import { useAutoCollapse } from "./ui/useAutoCollapse";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
@@ -520,6 +521,83 @@ export function reduce(state: State, action: Action): State {
 
 const READING_TOOLS = new Set(["read_file"]);
 const MODIFYING_TOOLS = new Set(["edit_file", "write_file"]);
+
+type FileStat = { filename: string; added: number; removed: number };
+type FileStats = { entries: FileStat[]; totalAdded: number; totalRemoved: number };
+
+function countFileStats(segments: AssistantSegment[]): FileStats | null {
+  const entries: FileStat[] = [];
+  for (const s of segments) {
+    if (s.kind !== "tool" || !s.result || s.ok === false) continue;
+    if (s.name === "edit_file" || s.name === "multi_edit") {
+      for (const f of parseEditResult(s.result)) {
+        let added = 0;
+        let removed = 0;
+        for (const ln of f.lines) {
+          if (ln.t === "add") added++;
+          else if (ln.t === "rm") removed++;
+        }
+        entries.push({ filename: f.filename, added, removed });
+      }
+    } else if (s.name === "write_file") {
+      let lines = 0;
+      try {
+        const parsed = JSON.parse(s.args);
+        if (typeof parsed.content === "string") {
+          lines = parsed.content.split("\n").length;
+        }
+      } catch {
+        /* args unparseable */
+      }
+      let filename = "";
+      try {
+        filename = JSON.parse(s.args)?.path ?? "";
+      } catch {
+        /* ignore */
+      }
+      entries.push({ filename, added: lines, removed: 0 });
+    }
+  }
+  if (entries.length === 0) return null;
+  const totalAdded = entries.reduce((s, e) => s + e.added, 0);
+  const totalRemoved = entries.reduce((s, e) => s + e.removed, 0);
+  return { entries, totalAdded, totalRemoved };
+}
+
+function DiffStats({ stats }: { stats: FileStats }) {
+  const [open, setOpen] = useState(false);
+  const total = stats.entries.length;
+  return (
+    <div className="diff-stats">
+      <button
+        type="button"
+        className="diff-stats-head"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="ico">
+          <I.diff size={11} />
+        </span>
+        <span>
+          {total} {total === 1 ? "file" : "files"} changed · +{stats.totalAdded} / −{stats.totalRemoved} {stats.totalRemoved === 1 ? "line" : "lines"}
+        </span>
+        <span className="chev">{open ? <I.chev size={10} /> : <I.chevR size={10} />}</span>
+      </button>
+      {open ? (
+        <div className="diff-stats-body">
+          {stats.entries.map((e) => (
+            <div key={e.filename} className="diff-stats-row">
+              <span className="fn">{e.filename}</span>
+              <span className="counts">
+                <span className="add">+{e.added}</span>
+                {e.removed > 0 ? <span className="rm"> / −{e.removed}</span> : null}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function extractToolFiles(name: string, args: string): SessionFile[] {
   try {
@@ -2011,17 +2089,20 @@ function TabRuntime({
                       );
                     }
                     if (m.kind === "assistant") {
+                      const stats = !m.pending ? countFileStats(m.segments) : null;
                       return (
-                        <AssistantMsg
-                          key={`a-${m.turn}`}
-                          segments={m.segments}
-                          pending={m.pending}
-                          model={state.model}
-                          onApproveConfirm={onApproveConfirm}
-                          onRejectConfirm={onRejectConfirm}
-                          onAlwaysAllowConfirm={onAlwaysAllowConfirm}
-                          pendingConfirms={state.pendingConfirms}
-                        />
+                        <div key={`a-${m.turn}`}>
+                          <AssistantMsg
+                            segments={m.segments}
+                            pending={m.pending}
+                            model={state.model}
+                            onApproveConfirm={onApproveConfirm}
+                            onRejectConfirm={onRejectConfirm}
+                            onAlwaysAllowConfirm={onAlwaysAllowConfirm}
+                            pendingConfirms={state.pendingConfirms}
+                          />
+                          {stats ? <DiffStats stats={stats} /> : null}
+                        </div>
                       );
                     }
                     if (m.kind === "error") {

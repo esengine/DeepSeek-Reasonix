@@ -1911,6 +1911,67 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   border-color: var(--success-soft);
 }
 
+/* ---------- DIFF STATS ---------- */
+
+.diff-stats {
+  padding: 2px 18px 2px 0;
+  font-size: 11px;
+  font-family: Geist Mono, monospace;
+}
+.diff-stats-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 3px 8px 3px 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  border-radius: 4px;
+  transition: color 100ms;
+}
+.diff-stats-head:hover {
+  color: var(--fg-2);
+}
+.diff-stats-head .ico {
+  color: var(--accent);
+  display: inline-flex;
+}
+.diff-stats-head .chev {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--muted-2);
+}
+.diff-stats-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 2px 20px;
+}
+.diff-stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 1px 0;
+  color: var(--muted);
+}
+.diff-stats-row .fn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-stats-row .counts {
+  flex-shrink: 0;
+}
+.diff-stats-row .add {
+  color: var(--success);
+}
+.diff-stats-row .rm {
+  color: var(--danger);
+}
+
 .markdown pre {
   margin: 14px 0;
   padding: 14px 16px;
