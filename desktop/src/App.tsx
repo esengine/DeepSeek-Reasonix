@@ -720,10 +720,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$ctx_breakdown": {
       const next: UsageStats = { ...state.usage, reservedTokens: ev.reservedTokens };
       if (typeof ev.logTokens === "number") {
-        // After /compact the backend sends a real-time log token count;
-        // reset the meter so it reflects the actual current context size.
         next.cacheHitTokens = 0;
         next.cacheMissTokens = ev.logTokens;
+        next.lastCallCacheHit = 0;
+        next.lastCallCacheMiss = ev.logTokens;
       }
       return { ...state, usage: next };
     }

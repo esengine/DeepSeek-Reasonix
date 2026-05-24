@@ -27,11 +27,10 @@ export function ContextPanel({
   useLang();
   const [tab, setTab] = useState<Tab>("files");
   const reserved = usage.reservedTokens;
-  // After a warm cache turn the API counts the reserved prefix inside cacheHit;
-  // subtract to keep the bar segments visually disjoint. Cold cache shows the
-  // reserved portion in cacheMiss instead, so do the same for `used`.
-  const cached = Math.max(0, usage.cacheHitTokens - reserved);
-  const used = Math.max(0, usage.cacheMissTokens - Math.max(0, reserved - usage.cacheHitTokens));
+  const lastHit = usage.lastCallCacheHit ?? 0;
+  const lastMiss = usage.lastCallCacheMiss ?? 0;
+  const cached = Math.max(0, lastHit - reserved);
+  const used = Math.max(0, lastMiss - Math.max(0, reserved - lastHit));
   const reservedPct = Math.min(100, (reserved / CONTEXT_MAX_TOKENS) * 100);
   const usedPct = Math.min(100, (used / CONTEXT_MAX_TOKENS) * 100);
   const cachedPct = Math.min(100, (cached / CONTEXT_MAX_TOKENS) * 100);
