@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import { I } from "../icons";
 
@@ -15,6 +15,16 @@ type CheckState =
   | { kind: "error"; message: string };
 
 export function AboutModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
 
   const openGitHub = useCallback(() => {

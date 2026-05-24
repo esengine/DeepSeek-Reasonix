@@ -170,13 +170,22 @@ export function Sidebar({
                 className="session-item"
                 data-active={active}
                 data-editing={editing || undefined}
-                onClick={editing ? undefined : () => onLoadSession(s.name)}
+                onClick={
+                  editing
+                    ? undefined
+                    : () => {
+                        // Skip the round-trip when clicking the already-loaded
+                        // session — a reload would clear live in-turn state (#1653).
+                        if (s.name === activeName) return;
+                        onLoadSession(s.name);
+                      }
+                }
                 role={editing ? undefined : "button"}
                 tabIndex={editing ? -1 : 0}
                 title={s.name}
                 onKeyDown={(e) => {
                   if (editing) return;
-                  if (e.key === "Enter") onLoadSession(s.name);
+                  if (e.key === "Enter" && s.name !== activeName) onLoadSession(s.name);
                 }}
               >
                 <span

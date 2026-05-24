@@ -108,6 +108,16 @@ export function SettingsModal({
 }) {
   const [page, setPage] = useState<PageId>(initialPage ?? "general");
   const [qqConfigureOpen, setQQConfigureOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const currentMeta = PAGE_META.find((p) => p.id === page) ?? PAGE_META[0]!;
   return (
     <div className="settings-mask" onClick={onClose}>
