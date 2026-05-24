@@ -94,18 +94,9 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "theme",
     group: "setup",
-    argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
+    argsHint: "[auto|dark|light|midnight|deep-blue|high-contrast]",
     summary: "show or persist the terminal theme preference. Bare opens picker.",
-    argCompleter: [
-      "auto",
-      "default",
-      "dark",
-      "light",
-      "tokyo-night",
-      "github-dark",
-      "github-light",
-      "high-contrast",
-    ],
+    argCompleter: ["auto", "dark", "light", "midnight", "deep-blue", "high-contrast"],
   },
 
   { cmd: "status", group: "info", summary: "current model, flags, context, session" },

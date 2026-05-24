@@ -261,7 +261,7 @@ export const zhCN: TranslationSchema = {
     models: { description: "列出从 DeepSeek /models 获取的可用模型" },
     theme: {
       description: "显示或持久化终端主题偏好。无参数时打开选择器。",
-      argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
+      argsHint: "[auto|dark|light|midnight|deep-blue|high-contrast]",
     },
     language: {
       description: "切换运行时语言",
@@ -430,12 +430,10 @@ export const zhCN: TranslationSchema = {
     themeSampleHeading: "示例",
     themeFooter: "[↑↓] 移动 · [Enter] 确认 · [Esc] 取消",
     themeCaption: {
-      default: "GitHub 深色（默认）",
-      dark: "深色调",
+      dark: "深色调（默认）",
       light: "清爽浅色",
-      "tokyo-night": "东京夜色",
-      "github-dark": "GitHub 深色",
-      "github-light": "GitHub 浅色",
+      midnight: "东京夜色",
+      "deep-blue": "深蓝纯黑",
       "high-contrast": "高对比度（无障碍）",
     },
     reviewLabelTheme: "主题",

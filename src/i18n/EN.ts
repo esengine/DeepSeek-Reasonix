@@ -271,7 +271,7 @@ export const EN: TranslationSchema = {
     models: { description: "list available models fetched from DeepSeek /models" },
     theme: {
       description: "show or persist the terminal theme preference. Bare opens picker.",
-      argsHint: "[auto|default|dark|light|tokyo-night|github-dark|github-light|high-contrast]",
+      argsHint: "[auto|dark|light|midnight|deep-blue|high-contrast]",
     },
     language: {
       description: "switch the runtime language",
@@ -448,12 +448,10 @@ export const EN: TranslationSchema = {
     themeSampleHeading: "Sample",
     themeFooter: "[↑↓] navigate · [Enter] confirm · [Esc] cancel",
     themeCaption: {
-      default: "GitHub dark (default)",
-      dark: "Cool dark tones",
+      dark: "Cool dark tones (default)",
       light: "Clean light mode",
-      "tokyo-night": "Tokyo Night palette",
-      "github-dark": "GitHub dark",
-      "github-light": "GitHub light",
+      midnight: "Tokyo Night palette",
+      "deep-blue": "Deep blue on black",
       "high-contrast": "Accessibility",
     },
     reviewLabelTheme: "Theme",
