@@ -6,9 +6,11 @@ import "./heap-limit-launch.js";
 import { Command } from "commander";
 import {
   ensureDashboardToken,
+  isReasoningEffort,
   loadDashboardEnabled,
   loadProxyConfig,
   readConfig,
+  saveReasoningEffort,
 } from "../config.js";
 import { t } from "../i18n/index.js";
 import { VERSION } from "../index.js";
@@ -24,6 +26,17 @@ async function maybeStartCpuProfile(flag: unknown): Promise<boolean> {
   if (flag === undefined || flag === false) return false;
   await startCpuProfile(typeof flag === "string" ? flag : undefined);
   return true;
+}
+
+function persistEffortFlag(flag: unknown): void {
+  if (typeof flag !== "string") return;
+  const v = flag.toLowerCase();
+  if (!isReasoningEffort(v)) return;
+  try {
+    saveReasoningEffort(v);
+  } catch {
+    /* best-effort */
+  }
 }
 
 // HTTPS_PROXY / HTTP_PROXY only reach Node's fetch via undici's global
@@ -173,6 +186,7 @@ program
   .command("code [dir]")
   .description(t("cli.code"))
   .option("-m, --model <id>", t("ui.modelOverride"))
+  .option("--effort <level>", t("ui.effortHintShort"))
   .option("--no-session", t("ui.noSession"))
   .option("--no-mouse", t("ui.noMouseHint"))
   .option("--no-proxy", t("ui.noProxyHint"))
@@ -194,6 +208,7 @@ program
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
   .action(async (dir: string | undefined, opts) => {
+    persistEffortFlag(opts.effort);
     const profiling = await maybeStartCpuProfile(opts.profile);
     try {
       const { codeCommand } = await import("./commands/code.js");
@@ -225,7 +240,7 @@ program
   .option("-m, --model <id>", t("ui.modelIdHint"))
   .option("-s, --system <prompt>", t("ui.systemPromptHint"))
   .option("--transcript <path>", t("ui.transcriptHint"))
-  .option("--preset <name>", t("ui.presetHint"))
+  .option("--effort <level>", t("ui.effortHint"))
   .option("--budget <usd>", t("ui.budgetHint"), (v) => Number.parseFloat(v))
   .option("--session <name>", t("ui.sessionNameHint"))
   .option("--no-session", t("ui.ephemeralHint"))
@@ -256,11 +271,12 @@ program
   .action(async (opts) => {
     const profiling = await maybeStartCpuProfile(opts.profile);
     try {
+      persistEffortFlag(opts.effort);
       const defaults = resolveDefaults({
         model: opts.model,
         mcp: opts.mcp as string[],
         session: opts.session,
-        preset: opts.preset,
+        effort: opts.effort,
         noConfig: opts.config === false,
       });
       // `-c` is "newest-touched session" + auto-resume; `-r` is "this
@@ -281,7 +297,7 @@ program
       const chatRebuildSystem = () => applyMemoryStack(chatBase, chatCwd);
       await chatCommand({
         model: defaults.model,
-        preset: defaults.preset,
+        reasoningEffort: defaults.reasoningEffort,
         system: chatRebuildSystem(),
         rebuildSystem: chatRebuildSystem,
         transcript: opts.transcript,
@@ -311,7 +327,7 @@ program
   .description(t("cli.run"))
   .option("-m, --model <id>", t("ui.modelIdHint"))
   .option("-s, --system <prompt>", t("ui.systemPromptHint"))
-  .option("--preset <name>", t("ui.presetHintShort"))
+  .option("--effort <level>", t("ui.effortHintShort"))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
   .option("--transcript <path>", t("ui.transcriptHintShort"))
   .option(
@@ -324,10 +340,11 @@ program
   .option("--no-config", t("ui.noConfigHint"))
   .option("--no-proxy", t("ui.noProxyHint"))
   .action(async (task: string, opts) => {
+    persistEffortFlag(opts.effort);
     const defaults = resolveDefaults({
       model: opts.model,
       mcp: opts.mcp as string[],
-      preset: opts.preset,
+      effort: opts.effort,
       noConfig: opts.config === false,
     });
     const { runCommand } = await import("./commands/run.js");
@@ -347,7 +364,7 @@ program
   .description("run reasonix as an Agent Client Protocol (ACP) agent on stdio NDJSON JSON-RPC")
   .option("-m, --model <id>", t("ui.modelIdHint"))
   .option("--dir <path>", "root directory for filesystem tools (default: cwd)")
-  .option("--preset <name>", t("ui.presetHintShort"))
+  .option("--effort <level>", t("ui.effortHintShort"))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
   .option("--transcript <path>", t("ui.transcriptHint"))
   .option("--yolo", t("ui.yoloHint"))
@@ -359,10 +376,11 @@ program
   )
   .option("--mcp-prefix <str>", t("ui.mcpPrefixHintShort"))
   .action(async (opts) => {
+    persistEffortFlag(opts.effort);
     const defaults = resolveDefaults({
       model: opts.model,
       mcp: opts.mcp as string[],
-      preset: opts.preset,
+      effort: opts.effort,
       noConfig: false,
     });
     const { acpCommand } = await import("./commands/acp.js");
@@ -382,13 +400,14 @@ program
   .description("headless JSON-RPC chat for the desktop client (internal)")
   .option("-m, --model <id>", t("ui.modelIdHint"))
   .option("--dir <path>", "root directory for filesystem tools (default: cwd)")
-  .option("--preset <name>", t("ui.presetHintShort"))
+  .option("--effort <level>", t("ui.effortHintShort"))
   .option("--budget <usd>", t("ui.budgetHintShort"), (v) => Number.parseFloat(v))
   .action(async (opts) => {
+    persistEffortFlag(opts.effort);
     const defaults = resolveDefaults({
       model: opts.model,
       mcp: [],
-      preset: opts.preset,
+      effort: opts.effort,
       noConfig: false,
     });
     const { desktopCommand } = await import("./commands/desktop.js");

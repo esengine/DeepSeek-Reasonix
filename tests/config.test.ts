@@ -42,7 +42,6 @@ import {
   saveDesktopOpenTabs,
   saveEditMode,
   saveIndexConfig,
-  savePreset,
   saveReasoningEffort,
   saveSemanticEmbeddingConfig,
   saveSubagentModels,
@@ -102,36 +101,10 @@ describe("config", () => {
   });
 
   it("writeConfig leaves no `.tmp` sibling behind on success", () => {
-    writeConfig({ apiKey: "sk-test123abcdefghijkl", preset: "auto" }, path);
+    writeConfig({ apiKey: "sk-test123abcdefghijkl", reasoningEffort: "high" }, path);
     const tmp = `${path}.${process.pid}.tmp`;
     expect(existsSync(tmp)).toBe(false);
     expect(existsSync(path)).toBe(true);
-  });
-
-  it("savePreset records a trace line when REASONIX_DEBUG_PRESET is set", async () => {
-    const { readFileSync, existsSync: exists, mkdirSync: mk } = await import("node:fs");
-    const logPath = join(dir, "preset.log");
-    mk(dir, { recursive: true });
-    process.env.REASONIX_DEBUG_PRESET = logPath;
-    try {
-      savePreset("auto", path);
-      expect(exists(logPath)).toBe(true);
-      const contents = readFileSync(logPath, "utf8");
-      expect(contents).toContain('savePreset("auto")');
-      // writeConfig's own trace also fires — single savePreset call → both lines.
-      expect(contents).toContain("writeConfig pid=");
-      expect(contents).toContain('preset="auto"');
-    } finally {
-      // biome-ignore lint/performance/noDelete: process.env wants undefined, not the string "undefined"
-      delete process.env.REASONIX_DEBUG_PRESET;
-    }
-  });
-
-  it("savePreset writes nothing extra when REASONIX_DEBUG_PRESET is unset", () => {
-    // biome-ignore lint/performance/noDelete: same reason
-    delete process.env.REASONIX_DEBUG_PRESET;
-    savePreset("flash", path);
-    expect(readConfig(path).preset).toBe("flash");
   });
 
   it("saveApiKey trims whitespace", () => {
@@ -311,11 +284,12 @@ describe("config", () => {
     expect(redactKey("")).toBe("");
   });
 
-  it("round-trips the full ReasonixConfig (preset, mcp, session, setupCompleted)", () => {
+  it("round-trips the full ReasonixConfig (model, effort, mcp, session, setupCompleted)", () => {
     writeConfig(
       {
         apiKey: "sk-test123abcdefghijkl",
-        preset: "smart",
+        model: "deepseek-v4-pro",
+        reasoningEffort: "medium",
         mcp: [
           "filesystem=npx -y @modelcontextprotocol/server-filesystem /tmp/safe",
           "memory=npx -y @modelcontextprotocol/server-memory",
@@ -326,7 +300,8 @@ describe("config", () => {
       path,
     );
     const loaded = readConfig(path);
-    expect(loaded.preset).toBe("smart");
+    expect(loaded.model).toBe("deepseek-v4-pro");
+    expect(loaded.reasoningEffort).toBe("medium");
     expect(loaded.mcp).toHaveLength(2);
     expect(loaded.session).toBe("work");
     expect(loaded.setupCompleted).toBe(true);
@@ -531,19 +506,21 @@ describe("config", () => {
     expect(loadFilesystemOutlineThresholdBytes(path)).toBeUndefined();
   });
 
-  it("loadReasoningEffort defaults to 'max' when unset", () => {
-    expect(loadReasoningEffort(path)).toBe("max");
-  });
-
-  it("saveReasoningEffort + loadReasoningEffort round-trip 'high'", () => {
-    saveReasoningEffort("high", path);
+  it("loadReasoningEffort defaults to 'high' when unset (safe for vLLM / Azure)", () => {
     expect(loadReasoningEffort(path)).toBe("high");
-    expect(readConfig(path).reasoningEffort).toBe("high");
   });
 
-  it("loadReasoningEffort coerces unknown values back to 'max'", () => {
+  it("saveReasoningEffort + loadReasoningEffort round-trip every supported value", () => {
+    for (const e of ["low", "medium", "high", "max"] as const) {
+      saveReasoningEffort(e, path);
+      expect(loadReasoningEffort(path)).toBe(e);
+      expect(readConfig(path).reasoningEffort).toBe(e);
+    }
+  });
+
+  it("loadReasoningEffort coerces unknown values back to the safe default", () => {
     writeConfig({ reasoningEffort: "turbo" as any }, path);
-    expect(loadReasoningEffort(path)).toBe("max");
+    expect(loadReasoningEffort(path)).toBe("high");
   });
 
   it("saveReasoningEffort doesn't clobber other persisted fields", () => {

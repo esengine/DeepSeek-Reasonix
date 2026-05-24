@@ -1,6 +1,12 @@
 import { render } from "ink";
 import React, { useMemo, useState } from "react";
-import { loadApiKey, loadToolRateLimit, readConfig, searchEnabled } from "../../config.js";
+import {
+  type ReasoningEffort,
+  loadApiKey,
+  loadToolRateLimit,
+  readConfig,
+  searchEnabled,
+} from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { t } from "../../i18n/index.js";
 import {
@@ -37,8 +43,7 @@ export type { McpLifecycleNotice, McpLifecycleSink, McpRuntime, ProgressInfo };
 
 export interface ChatOptions {
   model: string;
-  /** Preset resolved at launch (flash | pro). */
-  preset?: "flash" | "pro";
+  reasoningEffort?: ReasoningEffort;
   system: string;
   /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Should produce the same string `system` was built from. */
   rebuildSystem?: () => string;
@@ -214,7 +219,7 @@ function Root({
       <App
         key={activeSession ?? "__new__"}
         model={appProps.model}
-        preset={appProps.preset}
+        reasoningEffort={appProps.reasoningEffort}
         system={appProps.system}
         rebuildSystem={appProps.rebuildSystem}
         transcript={appProps.transcript}

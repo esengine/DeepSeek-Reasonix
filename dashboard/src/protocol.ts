@@ -247,7 +247,7 @@ export type NeedsSetupEvent = {
 
 export type EditMode = "review" | "auto" | "yolo";
 
-export type PresetName = "flash" | "pro";
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 export type WebSearchEngineName =
   | "bing"
@@ -259,7 +259,7 @@ export type WebSearchEngineName =
 
 export type SettingsEvent = {
   type: "$settings";
-  reasoningEffort: "high" | "max";
+  reasoningEffort: ReasoningEffort;
   editMode: EditMode;
   budgetUsd: number | null;
   baseUrl?: string;
@@ -267,7 +267,6 @@ export type SettingsEvent = {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
-  preset: PresetName;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
   subagentModels?: Record<string, "flash" | "pro">;
@@ -295,12 +294,12 @@ export type BalanceEvent = {
 };
 
 export type SettingsPatch = {
-  reasoningEffort?: "high" | "max";
+  reasoningEffort?: ReasoningEffort;
   editMode?: EditMode;
   budgetUsd?: number | null;
   baseUrl?: string;
   workspaceDir?: string;
-  preset?: PresetName;
+  model?: string;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
   subagentModels?: Record<string, "flash" | "pro">;
@@ -326,7 +325,7 @@ export type ModelTurnStartedEvent = {
   ts: string;
   turn: number;
   model: string;
-  reasoningEffort: "high" | "max";
+  reasoningEffort: ReasoningEffort;
   prefixHash: string;
 };
 

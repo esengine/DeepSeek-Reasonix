@@ -29,9 +29,10 @@ import {
 import {
   type EditMode,
   type EngineeringLifecycleMode,
-  type PresetName,
+  type ReasoningEffort,
   defaultConfigPath,
   editModeHintShown,
+  isReasoningEffort,
   loadBaseUrl,
   loadEngineeringLifecycleMode,
   loadReasoningEffort,
@@ -42,7 +43,8 @@ import {
   readConfig,
   resolveThemePreference,
   saveEditMode,
-  savePreset,
+  saveModel,
+  saveReasoningEffort,
   saveTheme,
 } from "../../config.js";
 import { Eventizer } from "../../core/eventize.js";
@@ -152,7 +154,6 @@ import { useHookList } from "./hooks/useHookList.js";
 import { useInputRecall } from "./hooks/useInputRecall.js";
 import { useLanguageReload } from "./hooks/useLanguageReload.js";
 import { useLoopMode } from "./hooks/useLoopMode.js";
-import { usePresetMode } from "./hooks/usePresetMode.js";
 import { useQuit } from "./hooks/useQuit.js";
 import { useScrollback } from "./hooks/useScrollback.js";
 import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
@@ -173,7 +174,6 @@ import { formatMcpSlowToast } from "./mcp-toast.js";
 import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
-import { PRESETS, resolvePreset } from "./presets.js";
 import {
   type McpServerSummary,
   type PlanModeToggleSource,
@@ -207,8 +207,7 @@ function isBusyPromptCommand(text: string): boolean {
 
 export interface AppProps {
   model: string;
-  /** Preset resolved at launch (flash | pro). */
-  preset?: "flash" | "pro";
+  reasoningEffort?: ReasoningEffort;
   system: string;
   /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Must produce the same shape as `system` was built from. */
   rebuildSystem?: () => string;
@@ -437,7 +436,7 @@ type AppInnerProps = AppProps & {
 
 function AppInner({
   model,
-  preset: initialPreset,
+  reasoningEffort: initialReasoningEffort,
   system,
   rebuildSystem,
   transcript,
@@ -472,7 +471,7 @@ function AppInner({
   const isStreaming = useAgentState((s) => s.cards.some((c) => c.kind === "streaming" && !c.done));
   const cardCount = useAgentState((s) => s.cards.length);
   const sessionModel = useAgentState((s) => s.session.model);
-  const sessionPreset = useAgentState((s) => s.status.preset);
+  const sessionEffort = useAgentState((s) => s.status.reasoningEffort);
   const ctxTokens = useAgentState((s) => s.status.promptTokens);
   const ctxCap = useAgentState(
     (s) => s.status.promptCap ?? DEEPSEEK_CONTEXT_TOKENS[s.session.model] ?? DEFAULT_CONTEXT_TOKENS,
@@ -480,10 +479,6 @@ function AppInner({
   const sessionCostUsd = useAgentState((s) => s.status.sessionCost);
   const lastTurnCostUsd = useAgentState((s) => s.status.cost);
   const cacheHitRatio = useAgentState((s) => s.status.cacheHit);
-  const presetForDisplay = useAgentState((s) => {
-    const p = s.status.preset;
-    return p === "flash" || p === "pro" ? p : undefined;
-  });
   const sessionInputTokens = useAgentState((s) => s.status.sessionInputTokens);
   const sessionOutputTokens = useAgentState((s) => s.status.sessionOutputTokens);
   const lastTurnMs = useAgentState((s) => s.status.lastTurnMs);
@@ -593,7 +588,6 @@ function AppInner({
     },
     [codeMode, editModeRef, setEditMode],
   );
-  const { preset, setPreset } = usePresetMode(model, initialPreset);
   const engineeringLifecycleBaseModeRef = useRef<EngineeringLifecycleMode>(
     loadEngineeringLifecycleMode(),
   );
@@ -1009,10 +1003,7 @@ function AppInner({
       session,
       hooks: hookList,
       hookCwd: currentRootDir,
-      // Restore the user's last-chosen effort cap. Without this a
-      // `/effort high` silently reverted to `max` on relaunch —the
-      // loop's constructor default wins over persisted state.
-      reasoningEffort: loadReasoningEffort(),
+      reasoningEffort: initialReasoningEffort ?? loadReasoningEffort(),
       rebuildSystem,
     });
     loopRef.current = l;
@@ -1156,20 +1147,12 @@ function AppInner({
     loop.hooks = hookList;
   }, [loop, hookList]);
 
-  // Seed status.preset from initial loop state so the StatusRow preset pill
-  // renders correctly on first paint —usePresetMode's React-state mirror
-  // doesn't propagate to the agent store, so without this dispatch the pill
-  // would show the bare model id instead of the resolved preset.
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only seed
   useEffect(() => {
-    const canonical: "flash" | "pro" | null =
-      initialPreset ??
-      (loop.model === "deepseek-v4-pro"
-        ? "pro"
-        : loop.model === "deepseek-v4-flash"
-          ? "flash"
-          : null);
-    agentStore.dispatch({ type: "session.preset.change", preset: canonical });
+    agentStore.dispatch({
+      type: "session.effort.change",
+      reasoningEffort: loop.reasoningEffort,
+    });
   }, []);
 
   // Deferred MCP bridge —fire addSpec for each requested server in the
@@ -2165,24 +2148,9 @@ function AppInner({
         setPlanMode: (on: boolean, source?: PlanModeToggleSource) => {
           if (codeMode) togglePlanMode(on, source);
         },
-        applyPresetLive: (name: string) => {
-          const settings = resolvePreset(name);
-          loop.configure({
-            model: settings.model,
-            reasoningEffort: settings.reasoningEffort,
-          });
-          agentStore.dispatch({ type: "session.model.change", model: settings.model });
-          const canonical: "flash" | "pro" = settings.model === "deepseek-v4-pro" ? "pro" : "flash";
-          setPreset(canonical);
-          agentStore.dispatch({ type: "session.preset.change", preset: canonical });
-          try {
-            savePreset(canonical);
-          } catch {
-            /* disk full / perms —runtime change still took effect */
-          }
-        },
         applyEffortLive: (effort) => {
           loop.configure({ reasoningEffort: effort });
+          agentStore.dispatch({ type: "session.effort.change", reasoningEffort: effort });
         },
         applyModelLive: (model) => {
           loop.configure({ model });
@@ -2488,7 +2456,6 @@ function AppInner({
     setEditModeLive,
     currentRootDirRef,
     reloadHooks,
-    setPreset,
     onSwitchSession,
     dashboardPort,
     dashboardHost,
@@ -2625,35 +2592,23 @@ function AppInner({
 
   const handleQQModelPick = useCallback(
     (target: string): string => {
-      if (target === "flash" || target === "pro") {
-        const preset = PRESETS[target];
-        loop.configure({
-          model: preset.model,
-          reasoningEffort: preset.reasoningEffort,
-        });
-        agentStore.dispatch({ type: "session.model.change", model: preset.model });
-        setPreset(target);
-        agentStore.dispatch({ type: "session.preset.change", preset: target });
+      if (isReasoningEffort(target)) {
+        const effort: ReasoningEffort = target;
+        loop.configure({ reasoningEffort: effort });
+        agentStore.dispatch({ type: "session.effort.change", reasoningEffort: effort });
         try {
-          savePreset(target);
+          saveReasoningEffort(effort);
         } catch {}
-        return `preset: ${target} / ${preset.model}`;
+        return `effort: ${effort}`;
       }
-
       loop.configure({ model: target });
       agentStore.dispatch({ type: "session.model.change", model: target });
-      const inferred =
-        target === "deepseek-v4-pro" ? "pro" : target === "deepseek-v4-flash" ? "flash" : null;
-      setPreset(inferred ?? "flash");
-      agentStore.dispatch({ type: "session.preset.change", preset: inferred });
-      if (inferred) {
-        try {
-          savePreset(inferred);
-        } catch {}
-      }
+      try {
+        saveModel(target);
+      } catch {}
       return `model: ${target}`;
     },
-    [agentStore, loop, setPreset],
+    [agentStore, loop],
   );
 
   const handleQQThemePick = useCallback(
@@ -2737,8 +2692,8 @@ function AppInner({
 
       // Slash-argument picker intercept —same shape as @-picker. For
       // file pickers (/edit) we splice + trailing space so the user
-      // keeps typing the instruction. For enum pickers (/preset,
-      // /model, /plan, — we splice without trailing space; those
+      // keeps typing the instruction. For enum pickers (/effort,
+      // /model, /plan) we splice without trailing space; those
       // commands take no further args, so the user presses Enter a
       // second time to run.
       if (slashArgMatches && slashArgMatches.length > 0 && slashArgContext) {
@@ -4492,45 +4447,26 @@ function AppInner({
                     if (outcome.kind === "select") {
                       loop.configure({ model: outcome.id });
                       agentStore.dispatch({ type: "session.model.change", model: outcome.id });
-                      const inferred =
-                        outcome.id === "deepseek-v4-pro"
-                          ? "pro"
-                          : outcome.id === "deepseek-v4-flash"
-                            ? "flash"
-                            : null;
-                      setPreset(inferred ?? "flash");
-                      agentStore.dispatch({
-                        type: "session.preset.change",
-                        preset: inferred,
-                      });
-                      if (inferred) {
-                        try {
-                          savePreset(inferred);
-                        } catch {
-                          /* disk full / perms —runtime change still took effect */
-                        }
+                      try {
+                        saveModel(outcome.id);
+                      } catch {
+                        /* disk full / perms — runtime change still took effect */
                       }
                       log.pushInfo(`model: ${outcome.id}`);
                       return;
                     }
-                    if (outcome.kind === "preset") {
-                      const p = PRESETS[outcome.name];
-                      loop.configure({
-                        model: p.model,
-                        reasoningEffort: p.reasoningEffort,
-                      });
-                      agentStore.dispatch({ type: "session.model.change", model: p.model });
-                      setPreset(outcome.name);
+                    if (outcome.kind === "effort") {
+                      loop.configure({ reasoningEffort: outcome.effort });
                       agentStore.dispatch({
-                        type: "session.preset.change",
-                        preset: outcome.name,
+                        type: "session.effort.change",
+                        reasoningEffort: outcome.effort,
                       });
                       try {
-                        savePreset(outcome.name);
+                        saveReasoningEffort(outcome.effort);
                       } catch {
-                        /* disk full / perms —runtime change still took effect */
+                        /* disk full / perms — runtime change still took effect */
                       }
-                      log.pushInfo(`preset: ${outcome.name} - ${p.model}`);
+                      log.pushInfo(`effort: ${outcome.effort}`);
                     }
                   }}
                 />
@@ -4653,16 +4589,7 @@ function AppInner({
                           ? t("statsPanel.modeReview")
                           : editMode
                   }
-                  model={
-                    (sessionPreset
-                      ? `${sessionPreset.charAt(0).toUpperCase() + sessionPreset.slice(1)} \u00b7 `
-                      : "") +
-                    (sessionModel === "deepseek-v4-pro"
-                      ? "Deepseek v4 pro"
-                      : sessionModel === "deepseek-v4-flash"
-                        ? "Deepseek v4 flash"
-                        : sessionModel)
-                  }
+                  model={`${sessionModel} \u00b7 ${sessionEffort ?? loop.reasoningEffort}`}
                   input={input}
                   setInput={setInput}
                   busy={busy}

@@ -131,9 +131,9 @@ const sessionModelChange = z.object({
   model: z.string().min(1),
 });
 
-const sessionPresetChange = z.object({
-  type: z.literal("session.preset.change"),
-  preset: z.enum(["flash", "pro"]).nullable(),
+const sessionEffortChange = z.object({
+  type: z.literal("session.effort.change"),
+  reasoningEffort: z.enum(["low", "medium", "high", "max"]),
 });
 
 const mcpLoading = z.object({
@@ -344,7 +344,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   languageChange,
   sessionUpdate,
   sessionModelChange,
-  sessionPresetChange,
+  sessionEffortChange,
   mcpLoading,
   focusMove,
   focusSet,

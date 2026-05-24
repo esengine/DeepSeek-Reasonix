@@ -130,11 +130,12 @@ export function StatusBar({
       ) : null}
       <span
         className="seg"
-        title={`model · preset ${settings?.preset ?? "flash"}`}
+        title={`model · effort ${settings?.reasoningEffort ?? "high"}`}
         onClick={onOpenSettings}
       >
         <I.brain size={11} style={{ color: "var(--violet)" }} />
         <span className="v vio">{settings?.model ?? "—"}</span>
+        <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
       <span className="seg" title={t("statusbar.switchCurrency")} onClick={onToggleCurrency}>
         <I.coin size={11} />

@@ -14,16 +14,12 @@ import { I } from "../icons";
 import { fmtElapsed } from "./live";
 import { Shortcut } from "./shortcut";
 
-export type PresetName = "flash" | "pro";
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
 export type EditMode = "review" | "auto" | "yolo";
 
-type PresetEntry = { label: string; badge: string; desc: TKey };
 type ModeEntry = { k: EditMode; label: TKey; icon: React.ReactNode; hint: TKey };
 
-const PRESET_INFO: Record<PresetName, PresetEntry> = {
-  flash: { label: "v4-flash", badge: "FLASH", desc: "preset.flashDesc" },
-  pro: { label: "v4-pro", badge: "PRO", desc: "preset.proDesc" },
-};
+const EFFORTS: readonly ReasoningEffort[] = ["low", "medium", "high", "max"];
 
 const MODE_INFO: ModeEntry[] = [
   { k: "review", label: "editMode.review", icon: <I.shield size={11} />, hint: "editMode.reviewHint" },
@@ -124,9 +120,10 @@ export function Composer({
   busy,
   busyLabel,
   busyElapsedMs,
-  preset,
   modelLabel,
-  onPresetChange,
+  reasoningEffort,
+  onModelChange,
+  onEffortChange,
   editMode,
   onEditModeChange,
   textareaRef,
@@ -149,9 +146,10 @@ export function Composer({
   /** Replaces the hint-row left side while the agent is running — typically "Reasoning" or "Skill · <name>". */
   busyLabel?: string;
   busyElapsedMs?: number;
-  preset: PresetName;
   modelLabel: string;
-  onPresetChange: (preset: PresetName) => void;
+  reasoningEffort: ReasoningEffort;
+  onModelChange: (model: string) => void;
+  onEffortChange: (effort: ReasoningEffort) => void;
   editMode: EditMode;
   onEditModeChange: (mode: EditMode) => void;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -534,18 +532,23 @@ export function Composer({
                 type="button"
                 className="model-pill"
                 onClick={() => setModelMenuOpen((v) => !v)}
-                title={t("composer.switchPreset")}
+                title={t("composer.switchModel")}
               >
                 <I.brain size={12} />
                 <span>{modelLabel}</span>
-                <span className="badge">{PRESET_INFO[preset].badge}</span>
+                <span className="badge">{reasoningEffort}</span>
                 <I.chev size={10} />
               </button>
               {modelMenuOpen ? (
-                <ModelMenu
-                  current={preset}
-                  onPick={(p) => {
-                    onPresetChange(p);
+                <ModelEffortMenu
+                  modelLabel={modelLabel}
+                  currentEffort={reasoningEffort}
+                  onPickModel={(m) => {
+                    onModelChange(m);
+                    setModelMenuOpen(false);
+                  }}
+                  onPickEffort={(e) => {
+                    onEffortChange(e);
                     setModelMenuOpen(false);
                   }}
                 />
@@ -700,14 +703,25 @@ function Popup({
   );
 }
 
-function ModelMenu({
-  current,
-  onPick,
+const KNOWN_MODELS: readonly string[] = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-chat",
+  "deepseek-reasoner",
+];
+
+function ModelEffortMenu({
+  modelLabel,
+  currentEffort,
+  onPickModel,
+  onPickEffort,
 }: {
-  current: PresetName;
-  onPick: (p: PresetName) => void;
+  modelLabel: string;
+  currentEffort: ReasoningEffort;
+  onPickModel: (model: string) => void;
+  onPickEffort: (effort: ReasoningEffort) => void;
 }) {
-  const order: PresetName[] = ["flash", "pro"];
+  const [draft, setDraft] = useState(modelLabel);
   return (
     <div
       className="popup"
@@ -715,30 +729,67 @@ function ModelMenu({
         bottom: "calc(100% + 6px)",
         left: "auto",
         right: 0,
-        width: 260,
+        width: 280,
         position: "absolute",
       }}
     >
       <div className="ph">
         <span className="tok">M</span>
-        <span>{t("composer.switchPreset")}</span>
+        <span>{t("composer.switchModel")}</span>
       </div>
       <div className="popup-list">
-        {order.map((p) => (
+        {KNOWN_MODELS.map((m) => (
           <div
-            key={p}
+            key={m}
             className="popup-item"
-            data-active={p === current}
-            onClick={() => onPick(p)}
+            data-active={m === modelLabel}
+            onClick={() => onPickModel(m)}
           >
             <span className="ico">
               <I.brain size={12} />
             </span>
             <div className="nm">
-              <span className="cmd">{PRESET_INFO[p].label}</span>
-              <div className="desc">{t(PRESET_INFO[p].desc)}</div>
+              <span className="cmd">{m}</span>
             </div>
-            <span className="kb">{PRESET_INFO[p].badge}</span>
+          </div>
+        ))}
+        <div style={{ padding: "6px 8px", display: "flex", gap: 6 }}>
+          <input
+            className="field mono"
+            style={{ flex: 1 }}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="custom model id"
+          />
+          <button
+            type="button"
+            className="btn"
+            disabled={!draft.trim() || draft.trim() === modelLabel}
+            onClick={() => onPickModel(draft.trim())}
+          >
+            {t("composer.confirm")}
+          </button>
+        </div>
+      </div>
+      <div className="ph" style={{ marginTop: 4 }}>
+        <span className="tok">E</span>
+        <span>{t("composer.switchEffort")}</span>
+      </div>
+      <div className="popup-list">
+        {EFFORTS.map((e) => (
+          <div
+            key={e}
+            className="popup-item"
+            data-active={e === currentEffort}
+            onClick={() => onPickEffort(e)}
+          >
+            <span className="ico">
+              <I.cpu size={12} />
+            </span>
+            <div className="nm">
+              <span className="cmd">{e}</span>
+              <div className="desc">{t(`effort.${e}Desc` as TKey)}</div>
+            </div>
           </div>
         ))}
       </div>

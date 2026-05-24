@@ -193,7 +193,7 @@ export type SessionInfo = {
 };
 
 export type Settings = {
-  reasoningEffort: "high" | "max";
+  reasoningEffort: "low" | "medium" | "high" | "max";
   editMode: "review" | "auto" | "yolo";
   budgetUsd: number | null;
   baseUrl?: string;
@@ -201,7 +201,6 @@ export type Settings = {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
-  preset: "flash" | "pro";
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
   subagentModels?: Record<string, "flash" | "pro">;
@@ -786,7 +785,6 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           workspaceDir: ev.workspaceDir,
           recentWorkspaces: ev.recentWorkspaces,
           model: ev.model,
-          preset: ev.preset,
           editor: ev.editor,
           webSearchEngine: ev.webSearchEngine,
           subagentModels: ev.subagentModels,
@@ -2112,11 +2110,15 @@ function TabRuntime({
                 }
                 busyElapsedMs={elapsed}
                 textareaRef={composerRef}
-                preset={state.settings?.preset ?? "flash"}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
-                onPresetChange={(preset) => {
-                  saveSettings({ preset });
-                  flashToast(t("app.toast.modelSwitched", { model: preset.toUpperCase() }));
+                reasoningEffort={state.settings?.reasoningEffort ?? "high"}
+                onModelChange={(model) => {
+                  saveSettings({ model });
+                  flashToast(t("app.toast.modelSwitched", { model }));
+                }}
+                onEffortChange={(reasoningEffort) => {
+                  saveSettings({ reasoningEffort });
+                  flashToast(t("app.toast.effortSwitched", { effort: reasoningEffort }));
                 }}
                 editMode={state.settings?.editMode ?? "review"}
                 onEditModeChange={(mode) => {

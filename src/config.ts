@@ -1,14 +1,7 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
 import { randomBytes } from "node:crypto";
-import {
-  appendFileSync,
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
@@ -27,12 +20,18 @@ import {
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
 
-export type PresetName = "flash" | "pro";
-
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates. */
 export type EditMode = "review" | "auto" | "yolo";
 
-export type ReasoningEffort = "high" | "max";
+export const DEFAULT_MODEL = "deepseek-v4-flash";
+
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
+
+export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = ["low", "medium", "high", "max"];
+
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return value === "low" || value === "medium" || value === "high" || value === "max";
+}
 
 export type EngineeringLifecycleMode = "off" | "strict";
 
@@ -139,7 +138,8 @@ export interface ReasonixConfig {
   apiKey?: string;
   baseUrl?: string;
   lang?: LanguageCode;
-  preset?: PresetName;
+  /** Persisted DeepSeek model id — `/model <id>` and the dashboard model picker write through this. */
+  model?: string;
   editMode?: EditMode;
   editModeHintShown?: boolean;
   mouseClipboardHintShown?: boolean;
@@ -453,14 +453,13 @@ export function clearDashboardToken(path: string = defaultConfigPath()): void {
 }
 
 export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPath()): void {
-  debugLogConfigWrite(cfg, path);
   mkdirSync(dirname(path), { recursive: true });
   // Atomic — write to a sibling tmp then rename. A torn write (process
   // killed mid-write, or another reader catching the file before
   // writeFileSync finished) used to leave a 0-byte or truncated
   // config.json, which readConfig would then parse as `{}` and the next
   // saveX would silently overwrite every other field with that empty
-  // baseline (issue #1535 follow-on — preset reverting to default).
+  // baseline (issue #1535).
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf8");
   try {
@@ -469,25 +468,6 @@ export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPat
     /* ignore on platforms without chmod */
   }
   renameSync(tmp, path);
-}
-
-/** Append timestamp + keys + preset + stack to REASONIX_DEBUG_PRESET when set. Catches every persisted config change including the dashboard PATCH path that bypasses savePreset(). Zero cost when unset. */
-function debugLogConfigWrite(cfg: ReasonixConfig, configPath: string): void {
-  const debugPath = process.env.REASONIX_DEBUG_PRESET;
-  if (!debugPath) return;
-  try {
-    const stack = new Error("trace").stack ?? "";
-    const keys = Object.keys(cfg).sort().join(",");
-    const presetField = cfg.preset === undefined ? "(absent)" : JSON.stringify(cfg.preset);
-    const line = `${new Date().toISOString()} writeConfig pid=${process.pid} → ${configPath}\n  keys=[${keys}]\n  preset=${presetField}\n${stack
-      .split("\n")
-      .slice(1, 10)
-      .map((l) => `  ${l.trim()}`)
-      .join("\n")}\n\n`;
-    appendFileSync(debugPath, line);
-  } catch {
-    /* diagnostic only */
-  }
 }
 
 /** Resolve the language from config file. */
@@ -1098,10 +1078,10 @@ export function mouseClipboardHintShown(path: string = defaultConfigPath()): boo
   return readConfig(path).mouseClipboardHintShown === true;
 }
 
-/** Unknown / missing fall back to "max" so hand-edited bad config can't silently override the default. */
+/** Unknown / missing fall back to "high" — the only value every OpenAI-compatible endpoint accepts (vLLM rejects "max"). */
 export function loadReasoningEffort(path: string = defaultConfigPath()): ReasoningEffort {
   const v = readConfig(path).reasoningEffort;
-  return v === "high" ? "high" : "max";
+  return isReasoningEffort(v) ? v : "high";
 }
 
 export function loadTheme(path: string = defaultConfigPath()): ThemeName | "auto" | undefined {
@@ -1132,6 +1112,19 @@ export function saveReasoningEffort(
 ): void {
   const cfg = readConfig(path);
   cfg.reasoningEffort = effort;
+  writeConfig(cfg, path);
+}
+
+export function loadModel(path: string = defaultConfigPath()): string {
+  const v = readConfig(path).model;
+  return typeof v === "string" && v.trim() ? v.trim() : DEFAULT_MODEL;
+}
+
+export function saveModel(model: string, path: string = defaultConfigPath()): void {
+  const trimmed = model.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  cfg.model = trimmed;
   writeConfig(cfg, path);
 }
 
@@ -1222,36 +1215,6 @@ export function saveDesktopOpenTabs(
     });
   cfg.desktopOpenTabs = cleaned.length === 0 ? undefined : cleaned;
   writeConfig(cfg, path);
-}
-
-export function loadPreset(path: string = defaultConfigPath()): PresetName | undefined {
-  const raw = readConfig(path).preset as unknown;
-  if (raw === "flash" || raw === "pro") return raw;
-  return raw === undefined ? undefined : "flash";
-}
-
-/** Persist preset so `/preset pro` (or `/model deepseek-v4-pro`) sticks across relaunches. */
-export function savePreset(preset: PresetName, path: string = defaultConfigPath()): void {
-  debugLogPresetWrite(preset, path);
-  const cfg = readConfig(path);
-  cfg.preset = preset;
-  writeConfig(cfg, path);
-}
-
-function debugLogPresetWrite(preset: PresetName, configPath: string): void {
-  const debugPath = process.env.REASONIX_DEBUG_PRESET;
-  if (!debugPath) return;
-  try {
-    const stack = new Error("trace").stack ?? "";
-    const line = `${new Date().toISOString()} savePreset(${JSON.stringify(preset)}) → ${configPath}\n${stack
-      .split("\n")
-      .slice(1, 8)
-      .map((l) => `  ${l.trim()}`)
-      .join("\n")}\n\n`;
-    appendFileSync(debugPath, line);
-  } catch {
-    /* diagnostic only */
-  }
 }
 
 export function loadIndexUserConfig(path: string = defaultConfigPath()): IndexUserConfig {

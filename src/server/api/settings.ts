@@ -1,9 +1,12 @@
 /** apiKey is write-only on the wire; GET always returns a redacted form so dashboard screenshots don't leak credentials. */
 
-import { appendFileSync } from "node:fs";
 import {
+  DEFAULT_MODEL,
   type EditMode,
+  REASONING_EFFORT_VALUES,
+  type ReasoningEffort,
   isPlausibleKey,
+  isReasoningEffort,
   normalizeSkillPathEntries,
   normalizeSkillPaths,
   readConfig,
@@ -21,7 +24,6 @@ interface SettingsBody {
   apiKey?: unknown;
   baseUrl?: unknown;
   lang?: unknown;
-  preset?: unknown;
   editMode?: unknown;
   reasoningEffort?: unknown;
   search?: unknown;
@@ -42,14 +44,6 @@ function parseBody(raw: string): SettingsBody {
   }
 }
 
-// Accept new (auto/flash/pro) and legacy (fast/smart/max) — server
-// stores whatever the user picked; resolvePreset() canonicalizes at
-// read time. Web sends new names in 0.12.x onward.
-const VALID_PRESETS = new Set(["flash", "pro"]);
-const VALID_EFFORTS = new Set(["high", "max"]);
-// Legacy "mojeek" is intentionally absent — the engine was retired (PR
-// adding bing default). Old config values map to bing at read; the
-// dashboard can't write the dead name back.
 const VALID_WEB_SEARCH_ENGINES = new Set([
   "bing",
   "searxng",
@@ -61,27 +55,7 @@ const VALID_WEB_SEARCH_ENGINES = new Set([
 
 const VALID_EDIT_MODES = new Set(["review", "auto", "yolo"]);
 
-// Keep saveEditMode imported so future GET responses can include the
-// canonical default — used by the SPA when /api/overview hasn't yet
-// resolved. (Currently surfaced via /api/overview directly.)
 void saveEditMode;
-
-/** Twin of `config.savePreset`'s debug hook — the dashboard PATCH writes `cfg.preset` directly (no `savePreset()` round-trip), so instrument the bypass path too. Same env gate, same file. */
-function debugLogPresetWriteFromDashboard(preset: string): void {
-  const debugPath = process.env.REASONIX_DEBUG_PRESET;
-  if (!debugPath) return;
-  try {
-    const stack = new Error("trace").stack ?? "";
-    const line = `${new Date().toISOString()} dashboard PATCH /api/settings { preset: ${JSON.stringify(preset)} }\n${stack
-      .split("\n")
-      .slice(1, 8)
-      .map((l) => `  ${l.trim()}`)
-      .join("\n")}\n\n`;
-    appendFileSync(debugPath, line);
-  } catch {
-    /* diagnostic only */
-  }
-}
 
 export async function handleSettings(
   method: string,
@@ -103,13 +77,12 @@ export async function handleSettings(
         apiKeySet: Boolean(cfg.apiKey),
         baseUrl: cfg.baseUrl ?? null,
         lang: getLanguage(),
-        preset: cfg.preset === "pro" ? "pro" : "flash",
-        reasoningEffort: cfg.reasoningEffort ?? "max",
+        reasoningEffort: isReasoningEffort(cfg.reasoningEffort) ? cfg.reasoningEffort : "high",
         search: cfg.search !== false,
         webSearchEngine: readWebSearchEngine(ctx.configPath),
         editMode: ctx.getEditMode?.() ?? cfg.editMode ?? "review",
         session: cfg.session ?? null,
-        model: live?.model ?? null,
+        model: live?.model ?? cfg.model ?? DEFAULT_MODEL,
         budgetUsd: live?.budgetUsd ?? null,
         sessionSpendUsd: ctx.getStats?.()?.totalCostUsd ?? null,
         skillPaths: normalizeSkillPaths(
@@ -121,11 +94,9 @@ export async function handleSettings(
           ctx.getCurrentCwd?.() ?? process.cwd(),
         ),
         subagentModels: cfg.subagentModels ?? {},
-        // Hint to the SPA which fields require restart.
         appliesAt: {
           apiKey: "next-session",
           baseUrl: "next-session",
-          preset: "next-session",
           reasoningEffort: "next-turn",
           search: "next-session",
           webSearchEngine: "next-turn",
@@ -140,13 +111,10 @@ export async function handleSettings(
 
   if (method === "POST") {
     const fields = parseBody(body);
-    // Single read up top, all field updates accumulate, single writeConfig at the end —
-    // a per-field write would clobber earlier per-field writes from the same POST.
     const cfg = readConfig(ctx.configPath);
     const changed: string[] = [];
     let langPending: LanguageCode | null = null;
-    let presetPendingLive: string | null = null;
-    let effortPendingLive: "high" | "max" | null = null;
+    let effortPendingLive: ReasoningEffort | null = null;
 
     if (fields.lang !== undefined) {
       const raw = String(fields.lang);
@@ -172,19 +140,9 @@ export async function handleSettings(
       if (typeof fields.baseUrl !== "string") {
         return { status: 400, body: { error: "baseUrl must be a string" } };
       }
-      // Empty means clear — falls back to DEEPSEEK_BASE_URL / built-in default.
       const trimmed = fields.baseUrl.trim();
       cfg.baseUrl = trimmed.length > 0 ? trimmed : undefined;
       changed.push("baseUrl");
-    }
-    if (fields.preset !== undefined) {
-      if (typeof fields.preset !== "string" || !VALID_PRESETS.has(fields.preset)) {
-        return { status: 400, body: { error: "preset must be flash | pro" } };
-      }
-      debugLogPresetWriteFromDashboard(fields.preset);
-      cfg.preset = fields.preset as "flash" | "pro";
-      presetPendingLive = fields.preset;
-      changed.push("preset");
     }
     if (fields.editMode !== undefined) {
       if (typeof fields.editMode !== "string" || !VALID_EDIT_MODES.has(fields.editMode)) {
@@ -194,14 +152,16 @@ export async function handleSettings(
       changed.push("editMode");
     }
     if (fields.reasoningEffort !== undefined) {
-      if (
-        typeof fields.reasoningEffort !== "string" ||
-        !VALID_EFFORTS.has(fields.reasoningEffort)
-      ) {
-        return { status: 400, body: { error: "reasoningEffort must be high | max" } };
+      const raw =
+        typeof fields.reasoningEffort === "string" ? fields.reasoningEffort.toLowerCase() : "";
+      if (!isReasoningEffort(raw)) {
+        return {
+          status: 400,
+          body: { error: `reasoningEffort must be one of: ${REASONING_EFFORT_VALUES.join(" | ")}` },
+        };
       }
-      cfg.reasoningEffort = fields.reasoningEffort as "high" | "max";
-      effortPendingLive = fields.reasoningEffort as "high" | "max";
+      cfg.reasoningEffort = raw;
+      effortPendingLive = raw;
       changed.push("reasoningEffort");
     }
     if (fields.search !== undefined) {
@@ -238,9 +198,9 @@ export async function handleSettings(
       if (typeof fields.model !== "string" || !fields.model.trim()) {
         return { status: 400, body: { error: "model must be a non-empty string" } };
       }
-      // Model is live-only (not in ReasonixConfig). Same as /model <id> slash — disk
-      // pickup goes through preset / startup flag, not direct cfg.model.
-      modelPendingLive = fields.model.trim();
+      const trimmed = fields.model.trim();
+      cfg.model = trimmed;
+      modelPendingLive = trimmed;
       changed.push("model");
     }
     if (fields.budgetUsd !== undefined) {
@@ -300,17 +260,12 @@ export async function handleSettings(
 
     if (changed.length > 0) {
       writeConfig(cfg, ctx.configPath);
-      // Runtime side-effects fire after the disk write succeeds —
-      // prevents an i18n change from being visible while the on-disk
-      // value still reflects the old setting (and vice-versa for
-      // preset / reasoningEffort).
       if (langPending) setLanguage(langPending);
       if (fields.editMode !== undefined) {
         const mode = fields.editMode as EditMode;
         if (ctx.setEditMode) ctx.setEditMode(mode);
         else saveEditMode(mode, ctx.configPath);
       }
-      if (presetPendingLive) ctx.applyPresetLive?.(presetPendingLive);
       if (effortPendingLive) ctx.applyEffortLive?.(effortPendingLive);
       if (modelPendingLive) ctx.applyModelLive?.(modelPendingLive);
       if (budgetPending !== undefined) ctx.setBudgetUsdLive?.(budgetPending);

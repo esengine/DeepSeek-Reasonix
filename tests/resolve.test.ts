@@ -7,9 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveContinueFlag, resolveDefaults } from "../src/cli/resolve.js";
 import { writeConfig } from "../src/config.js";
 
-// resolve.ts reads the real ~/.reasonix/config.json via readConfig().
-// Redirect HOME to a temp dir for each test so we never touch the
-// user's real config and we start each case with a clean slate.
 describe("resolveDefaults", () => {
   let home: string;
   const origHome = process.env.HOME;
@@ -18,7 +15,7 @@ describe("resolveDefaults", () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "reasonix-resolve-"));
     process.env.HOME = home;
-    process.env.USERPROFILE = home; // node:os homedir() uses this on Windows
+    process.env.USERPROFILE = home;
   });
 
   afterEach(() => {
@@ -37,46 +34,46 @@ describe("resolveDefaults", () => {
     }
   });
 
-  it("empty flags + empty config → flash + max", () => {
+  it("empty flags + empty config → flash + high", () => {
     const r = resolveDefaults({});
     expect(r.model).toBe("deepseek-v4-flash");
-    expect(r.reasoningEffort).toBe("max");
+    expect(r.reasoningEffort).toBe("high");
     expect(r.mcp).toEqual([]);
     expect(r.session).toBe("default");
   });
 
-  it("config.preset 'flash' resolves to flash + max", () => {
-    writeConfig({ preset: "flash" }, join(home, ".reasonix", "config.json"));
+  it("config.model overrides the default", () => {
+    writeConfig({ model: "deepseek-v4-pro" }, join(home, ".reasonix", "config.json"));
     const r = resolveDefaults({});
-    expect(r.model).toBe("deepseek-v4-flash");
-    expect(r.preset).toBe("flash");
-  });
-
-  it("legacy config.preset 'auto' silently coerces to flash", () => {
-    writeConfig({ preset: "auto" as never }, join(home, ".reasonix", "config.json"));
-    const r = resolveDefaults({});
-    expect(r.model).toBe("deepseek-v4-flash");
-    expect(r.preset).toBe("flash");
-  });
-
-  it("--preset pro overrides config.preset=flash", () => {
-    writeConfig({ preset: "flash" }, join(home, ".reasonix", "config.json"));
-    const r = resolveDefaults({ preset: "pro" });
     expect(r.model).toBe("deepseek-v4-pro");
-    expect(r.reasoningEffort).toBe("max");
   });
 
-  it("--model wins even when --preset is set", () => {
-    const r = resolveDefaults({ preset: "pro", model: "deepseek-v4-flash" });
-    expect(r.model).toBe("deepseek-v4-flash");
-    expect(r.preset).toBeUndefined();
-    expect(r.reasoningEffort).toBe("max");
+  it("config.reasoningEffort persists across launches", () => {
+    writeConfig({ reasoningEffort: "max" }, join(home, ".reasonix", "config.json"));
+    expect(resolveDefaults({}).reasoningEffort).toBe("max");
   });
 
-  it("--model with a custom id does not infer a preset", () => {
-    const r = resolveDefaults({ preset: "pro", model: "custom-model" });
-    expect(r.model).toBe("custom-model");
-    expect(r.preset).toBeUndefined();
+  it("--model wins over config.model", () => {
+    writeConfig({ model: "deepseek-v4-flash" }, join(home, ".reasonix", "config.json"));
+    const r = resolveDefaults({ model: "deepseek-v4-pro" });
+    expect(r.model).toBe("deepseek-v4-pro");
+  });
+
+  it("--effort wins over config.reasoningEffort", () => {
+    writeConfig({ reasoningEffort: "max" }, join(home, ".reasonix", "config.json"));
+    const r = resolveDefaults({ effort: "low" });
+    expect(r.reasoningEffort).toBe("low");
+  });
+
+  it("--effort accepts any of the four enum values", () => {
+    for (const e of ["low", "medium", "high", "max"] as const) {
+      expect(resolveDefaults({ effort: e }).reasoningEffort).toBe(e);
+    }
+  });
+
+  it("--effort with garbage value falls through to config / default", () => {
+    writeConfig({ reasoningEffort: "medium" }, join(home, ".reasonix", "config.json"));
+    expect(resolveDefaults({ effort: "absurd" }).reasoningEffort).toBe("medium");
   });
 
   it("--mcp overrides config.mcp wholesale (no merging)", () => {
@@ -99,10 +96,13 @@ describe("resolveDefaults", () => {
   });
 
   it("--no-config ignores the config entirely", () => {
-    writeConfig({ preset: "pro", mcp: ["x=cmd"] }, join(home, ".reasonix", "config.json"));
+    writeConfig(
+      { model: "deepseek-v4-pro", reasoningEffort: "max", mcp: ["x=cmd"] },
+      join(home, ".reasonix", "config.json"),
+    );
     const r = resolveDefaults({ noConfig: true });
     expect(r.model).toBe("deepseek-v4-flash");
-    expect(r.reasoningEffort).toBe("max");
+    expect(r.reasoningEffort).toBe("high");
     expect(r.mcp).toEqual([]);
   });
 

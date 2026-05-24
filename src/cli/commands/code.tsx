@@ -1,34 +1,21 @@
-/**
- * `reasonix code [dir]` — opinionated wrapper around `reasonix chat` for
- * code-editing workflows.
- *
- * What it does differently from plain chat:
- *   - Registers native filesystem tools rooted at the given directory
- *     (CWD by default). No subprocess, no `npx install` step, R1-
- *     friendly schemas. Replaced the old `@modelcontextprotocol/server-filesystem`
- *     subprocess in 0.4.9 because its `edit_file` argv shape was the
- *     biggest driver of R1 DSML hallucinations.
- *   - Uses a coding-focused system prompt (src/code/prompt.ts) that
- *     teaches the model to propose edits as SEARCH/REPLACE blocks.
- *   - Defaults to the `smart` preset (reasoner + harvest) because
- *     coding tasks pay back R1 thinking.
- *   - Scopes its session to the directory so projects don't share
- *     conversation history.
- *   - Hooks `codeMode` into the TUI so assistant replies get parsed
- *     for SEARCH/REPLACE blocks and applied on disk after each turn.
- */
+/** `reasonix code [dir]` — native filesystem tools + code system prompt, wraps `chat`. */
 
 import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { buildCodeToolset } from "../../code/setup.js";
-import { loadApiKey, loadPreset, normalizeMcpConfig, readConfig } from "../../config.js";
+import {
+  DEFAULT_MODEL,
+  loadApiKey,
+  loadModel,
+  normalizeMcpConfig,
+  readConfig,
+} from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { t } from "../../i18n/index.js";
 import { specToRaw } from "../../mcp/spec.js";
 import { detectForeignAgentPlatform } from "../../memory/project.js";
 import { sanitizeName } from "../../memory/session.js";
 import { markPhase } from "../startup-profile.js";
-import { presetNameForSettings, resolvePreset } from "../ui/presets.js";
 import { chatCommand } from "./chat.js";
 
 export interface CodeOptions {
@@ -70,9 +57,7 @@ export interface CodeOptions {
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   markPhase("code_command_enter");
-  const loadedPreset = loadPreset();
-  const presetSettings = resolvePreset(loadedPreset);
-  const resolvedModel = opts.model ?? presetSettings.model;
+  const resolvedModel = opts.model?.trim() || loadModel() || DEFAULT_MODEL;
   // Bridge .env + ~/.reasonix/config.json into process.env so buildCodeToolset's
   // eager DeepSeekClient constructions (subagent client; semantic embedder) can
   // pick up a key the user already configured via `reasonix setup`. chatCommand
@@ -155,7 +140,6 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     });
   await chatCommand({
     model: resolvedModel,
-    preset: opts.model ? undefined : presetNameForSettings(presetSettings),
     budgetUsd: opts.budgetUsd,
     system: codeRebuildSystem(),
     rebuildSystem: codeRebuildSystem,

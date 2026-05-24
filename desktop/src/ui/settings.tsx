@@ -629,20 +629,16 @@ function PageGeneral({
             <div className="h">{t("settings.reasoningEffortHint")}</div>
           </div>
           <div className="seg-ctrl">
-            <button
-              type="button"
-              data-on={settings.reasoningEffort === "high"}
-              onClick={() => onSave({ reasoningEffort: "high" })}
-            >
-              high
-            </button>
-            <button
-              type="button"
-              data-on={settings.reasoningEffort === "max"}
-              onClick={() => onSave({ reasoningEffort: "max" })}
-            >
-              max
-            </button>
+            {(["low", "medium", "high", "max"] as const).map((e) => (
+              <button
+                type="button"
+                key={e}
+                data-on={settings.reasoningEffort === e}
+                onClick={() => onSave({ reasoningEffort: e })}
+              >
+                {e}
+              </button>
+            ))}
           </div>
         </div>
         <div className="setting-row">
@@ -775,6 +771,16 @@ function ApiKeySection({
   );
 }
 
+const KNOWN_MODELS = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-chat",
+  "deepseek-reasoner",
+] as const;
+
+const EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
+type EffortValue = (typeof EFFORT_VALUES)[number];
+
 function PageModels({
   settings,
   onSave,
@@ -782,54 +788,75 @@ function PageModels({
   settings: SettingsType;
   onSave: (patch: SettingsPatch) => void;
 }) {
-  const presets = [
-    {
-      id: "flash" as const,
-      name: "deepseek-v4-flash",
-      badge: "FLASH",
-      desc: t("settings.modelFlashDesc"),
-      ctx: "1M",
-      out: "8K",
-    },
-    {
-      id: "pro" as const,
-      name: "deepseek-v4-pro",
-      badge: "PRO",
-      desc: t("settings.modelProDesc"),
-      ctx: "1M",
-      out: "32K",
-    },
-  ];
+  const [draft, setDraft] = useState(settings.model);
+  useEffect(() => setDraft(settings.model), [settings.model]);
+  const isKnown = (KNOWN_MODELS as readonly string[]).includes(settings.model);
   return (
-    <section className="section">
-      <div className="stitle">{t("settings.defaultModelCurrent", { model: settings.model })}</div>
-      <div className="model-grid">
-        {presets.map((m) => (
-          <div
-            key={m.id}
-            className="mcard"
-            data-on={settings.preset === m.id}
-            onClick={() => onSave({ preset: m.id })}
-          >
-            <div className="nm">
-              {m.name}
-              <span className="badge">{m.badge}</span>
+    <>
+      <section className="section">
+        <div className="stitle">{t("settings.defaultModelCurrent", { model: settings.model })}</div>
+        <div className="model-grid">
+          {KNOWN_MODELS.map((id) => (
+            <div
+              key={id}
+              className="mcard"
+              data-on={settings.model === id}
+              onClick={() => onSave({ model: id })}
+            >
+              <div className="nm">{id}</div>
             </div>
-            <div className="desc">{m.desc}</div>
-            <div className="spec">
-              <div>
-                <span className="k">{t("settings.ctxWindow")} </span>
-                <span className="v">{m.ctx}</span>
-              </div>
-              <div>
-                <span className="k">{t("settings.maxOutput")} </span>
-                <span className="v">{m.out}</span>
-              </div>
-            </div>
+          ))}
+        </div>
+        <div className="setting-row" style={{ marginTop: 12 }}>
+          <div className="l">
+            <div className="n">{t("settings.modelCustom")}</div>
+            <div className="h">{t("settings.modelCustomHint")}</div>
           </div>
-        ))}
-      </div>
-    </section>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              className="field mono"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="deepseek-v4-flash"
+            />
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!draft.trim() || draft.trim() === settings.model}
+              onClick={() => onSave({ model: draft.trim() })}
+            >
+              {t("settings.apiKeySave")}
+            </button>
+          </div>
+        </div>
+        {!isKnown ? (
+          <div className="h" style={{ marginTop: 6 }}>
+            {t("settings.modelCustomActive", { model: settings.model })}
+          </div>
+        ) : null}
+      </section>
+      <section className="section">
+        <div className="stitle">{t("settings.effortSection")}</div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.reasoningEffort")}</div>
+            <div className="h">{t("settings.reasoningEffortHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            {EFFORT_VALUES.map((e) => (
+              <button
+                type="button"
+                key={e}
+                data-on={settings.reasoningEffort === e}
+                onClick={() => onSave({ reasoningEffort: e as EffortValue })}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+    </>
   );
 }
 

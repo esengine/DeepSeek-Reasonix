@@ -25,7 +25,7 @@ import type {
 export interface EventizeContext {
   model: string;
   prefixHash: string;
-  reasoningEffort: "high" | "max";
+  reasoningEffort: import("../config.js").ReasoningEffort;
 }
 
 export class Eventizer {

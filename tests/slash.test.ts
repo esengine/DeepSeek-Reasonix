@@ -110,7 +110,7 @@ describe("handleSlash", () => {
   it("/help returns a multi-line message", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/status/);
-    expect(r.info).toMatch(/\/preset/);
+    expect(r.info).toMatch(/\/effort/);
     expect(r.info).toMatch(/\/compact/);
   });
 
@@ -154,7 +154,7 @@ describe("handleSlash", () => {
     const loop = makeLoop();
     const r = handleSlash("status", [], loop);
     expect(r.info).toMatch(/model\s+deepseek-/);
-    expect(r.info).toMatch(/effort=max/);
+    expect(r.info).toMatch(/effort=high/);
   });
 
   it("/model switches the model", () => {
@@ -180,9 +180,10 @@ describe("handleSlash", () => {
     expect(r.openModelPicker).toBe(true);
   });
 
-  it("/preset with no arg opens the unified picker", () => {
-    const r = handleSlash("preset", [], makeLoop());
-    expect(r.openModelPicker).toBe(true);
+  it("/effort with no arg returns the current value", () => {
+    const r = handleSlash("effort", [], makeLoop());
+    expect(r.info).toMatch(/effort/);
+    expect(r.info).toMatch(/low.*medium.*high.*max/);
   });
 
   it("unknown commands return an unknown flag with hint", () => {
@@ -233,36 +234,17 @@ describe("handleSlash", () => {
     expect(posted).toMatch(/nothing to fold|folded/);
   });
 
-  it("/preset flash = v4-flash", () => {
-    const loop = makeLoop();
-    handleSlash("model", ["deepseek-v4-pro"], loop);
-    handleSlash("preset", ["flash"], loop);
-    expect(loop.model).toBe("deepseek-v4-flash");
-    expect(loop.reasoningEffort).toBe("max");
+  it("/effort accepts each enum value", () => {
+    for (const e of ["low", "medium", "high", "max"] as const) {
+      const loop = makeLoop();
+      handleSlash("effort", [e], loop);
+      expect(loop.reasoningEffort).toBe(e);
+    }
   });
 
-  it("/preset pro = v4-pro pinned", () => {
-    const loop = makeLoop();
-    handleSlash("preset", ["pro"], loop);
-    expect(loop.model).toBe("deepseek-v4-pro");
-    expect(loop.reasoningEffort).toBe("max");
-  });
-
-  it("/preset auto (legacy) returns usage", () => {
-    const r = handleSlash("preset", ["auto"], makeLoop());
+  it("/effort with bad name returns usage", () => {
+    const r = handleSlash("effort", ["nonsense"], makeLoop());
     expect(r.info).toMatch(/usage/);
-  });
-
-  it("/preset with bad name returns usage", () => {
-    const r = handleSlash("preset", ["nonsense"], makeLoop());
-    expect(r.info).toMatch(/usage/);
-  });
-
-  it("/help mentions presets", () => {
-    const r = handleSlash("help", [], makeLoop());
-    expect(r.info).toMatch(/Presets/);
-    expect(r.info).toMatch(/flash/);
-    expect(r.info).toMatch(/pro/);
   });
 
   it("/help mentions sessions", () => {
@@ -388,7 +370,7 @@ describe("handleSlash", () => {
   describe("detectSlashArgContext", () => {
     it("returns null before the user commits to a slash name", () => {
       expect(detectSlashArgContext("/pr")).toBeNull();
-      expect(detectSlashArgContext("/preset")).toBeNull();
+      expect(detectSlashArgContext("/effort")).toBeNull();
     });
 
     it("returns null when the command doesn't exist", () => {
@@ -399,14 +381,13 @@ describe("handleSlash", () => {
       expect(detectSlashArgContext("just some text")).toBeNull();
     });
 
-    it("activates enum picker for /preset", () => {
-      const ctx = detectSlashArgContext("/preset fl");
+    it("activates enum picker for /effort", () => {
+      const ctx = detectSlashArgContext("/effort hi");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
-      expect(ctx!.spec.argCompleter).toEqual(["flash", "pro"]);
-      expect(ctx!.partial).toBe("fl");
-      // Offset is the char index where the partial starts in the buffer.
-      expect(ctx!.partialOffset).toBe("/preset ".length);
+      expect(ctx!.spec.argCompleter).toEqual(["low", "medium", "high", "max"]);
+      expect(ctx!.partial).toBe("hi");
+      expect(ctx!.partialOffset).toBe("/effort ".length);
     });
 
     it("activates model picker for /model", () => {
@@ -428,14 +409,13 @@ describe("handleSlash", () => {
     });
 
     it("surfaces a hint-only row once the user types a space inside the partial", () => {
-      // "/preset auto foo" — typed past the one enum slot.
-      const ctx = detectSlashArgContext("/preset auto foo");
+      const ctx = detectSlashArgContext("/effort high foo");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("hint");
     });
 
     it("returns picker with empty partial when the user just hit space", () => {
-      const ctx = detectSlashArgContext("/preset ");
+      const ctx = detectSlashArgContext("/effort ");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
       expect(ctx!.partial).toBe("");
@@ -450,15 +430,10 @@ describe("handleSlash", () => {
     });
 
     it("still surfaces picker kind when partial exactly matches an enum value", () => {
-      // Detector itself is kind-only — it doesn't know whether the
-      // partial is a complete match. The App's slashArgMatches memo
-      // is responsible for hiding the picker on exact match so Enter
-      // submits; this test documents that the detector's contract is
-      // "we're in picker mode" regardless of match state.
-      const ctx = detectSlashArgContext("/preset smart");
+      const ctx = detectSlashArgContext("/effort medium");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
-      expect(ctx!.partial).toBe("smart");
+      expect(ctx!.partial).toBe("medium");
     });
   });
 
@@ -546,7 +521,7 @@ describe("handleSlash", () => {
     for (const required of [
       "help",
       "status",
-      "preset",
+      "effort",
       "model",
       "language",
       "theme",

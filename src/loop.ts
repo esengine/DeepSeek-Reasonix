@@ -1,4 +1,5 @@
 import { type DeepSeekClient, Usage } from "./client.js";
+import type { ReasoningEffort } from "./config.js";
 import type { PauseGate } from "./core/pause-gate.js";
 import { pauseGate as defaultPauseGate } from "./core/pause-gate.js";
 import { type HookPayload, type ResolvedHook, runHooks } from "./hooks.js";
@@ -78,7 +79,7 @@ export interface CacheFirstLoopOptions {
   tools?: ToolRegistry;
   model?: string;
   stream?: boolean;
-  reasoningEffort?: "high" | "max";
+  reasoningEffort?: ReasoningEffort;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
   session?: string;
@@ -96,7 +97,7 @@ export interface ReconfigurableOptions {
   model?: string;
   stream?: boolean;
   /** V4 thinking mode only; deepseek-chat ignores. */
-  reasoningEffort?: "high" | "max";
+  reasoningEffort?: ReasoningEffort;
 }
 
 export class CacheFirstLoop {
@@ -114,7 +115,7 @@ export class CacheFirstLoop {
   // these mid-session so users don't have to restart.
   model: string;
   stream: boolean;
-  reasoningEffort: "high" | "max";
+  reasoningEffort: ReasoningEffort;
   budgetUsd: number | null;
   /** One-shot 80% warning latch — cleared by setBudget so a bump re-arms at the new boundary. */
   private _budgetWarned = false;
@@ -178,7 +179,7 @@ export class CacheFirstLoop {
     this.prefix = opts.prefix;
     this.tools = opts.tools ?? new ToolRegistry();
     this.model = opts.model ?? "deepseek-v4-flash";
-    this.reasoningEffort = opts.reasoningEffort ?? "max";
+    this.reasoningEffort = opts.reasoningEffort ?? "high";
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
 

@@ -57,7 +57,7 @@ describe("settings API — combined POST persistence (#274)", () => {
       JSON.stringify({
         lang: "EN",
         baseUrl: "https://example.com",
-        preset: "pro",
+        model: "deepseek-v4-pro",
         reasoningEffort: "high",
         search: false,
       }),
@@ -67,9 +67,32 @@ describe("settings API — combined POST persistence (#274)", () => {
     const cfg = readCfg(configPath);
     expect(cfg.lang).toBe("EN");
     expect(cfg.baseUrl).toBe("https://example.com");
-    expect(cfg.preset).toBe("pro");
+    expect(cfg.model).toBe("deepseek-v4-pro");
     expect(cfg.reasoningEffort).toBe("high");
     expect(cfg.search).toBe(false);
+  });
+
+  it("accepts the full effort enum (low | medium | high | max)", async () => {
+    for (const effort of ["low", "medium", "high", "max"] as const) {
+      const res = await handleSettings(
+        "POST",
+        [],
+        JSON.stringify({ reasoningEffort: effort }),
+        makeCtx(configPath),
+      );
+      expect(res.status).toBe(200);
+      expect(readCfg(configPath).reasoningEffort).toBe(effort);
+    }
+  });
+
+  it("rejects an invalid effort value", async () => {
+    const res = await handleSettings(
+      "POST",
+      [],
+      JSON.stringify({ reasoningEffort: "absurd" }),
+      makeCtx(configPath),
+    );
+    expect(res.status).toBe(400);
   });
 
   it("does not write to disk when no fields are provided", async () => {
@@ -301,23 +324,23 @@ describe("settings API — combined POST persistence (#274)", () => {
     ]);
   });
 
-  it("fires applyPresetLive only after the disk write succeeds", async () => {
+  it("fires applyEffortLive + applyModelLive only after the disk write succeeds", async () => {
     const calls: string[] = [];
     const ctx: DashboardContext = {
       ...makeCtx(configPath),
-      applyPresetLive: (n) => calls.push(`preset:${n}`),
       applyEffortLive: (e) => calls.push(`effort:${e}`),
+      applyModelLive: (m) => calls.push(`model:${m}`),
     };
     const res = await handleSettings(
       "POST",
       [],
-      JSON.stringify({ preset: "flash", reasoningEffort: "high" }),
+      JSON.stringify({ model: "deepseek-v4-pro", reasoningEffort: "high" }),
       ctx,
     );
     expect(res.status).toBe(200);
-    expect(calls).toEqual(["preset:flash", "effort:high"]);
+    expect(calls).toEqual(["effort:high", "model:deepseek-v4-pro"]);
     const cfg = readCfg(configPath);
-    expect(cfg.preset).toBe("flash");
+    expect(cfg.model).toBe("deepseek-v4-pro");
     expect(cfg.reasoningEffort).toBe("high");
   });
 

@@ -118,11 +118,7 @@ const DEFAULT_MAX_RESULT_CHARS = 8000;
 // frontmatter `model: deepseek-v4-pro` is the opt-in override for
 // skills that empirically benefit from the stronger model.
 const DEFAULT_SUBAGENT_MODEL = "deepseek-v4-flash";
-// Subagents default to effort=high — less thinking budget than a
-// main turn (which defaults to `max` in the preset). The parent's
-// task arg is already a distilled prompt; explore/research rarely
-// need deep chains of thought, and `high` saves output tokens.
-const DEFAULT_SUBAGENT_EFFORT: "high" | "max" = "high";
+const DEFAULT_SUBAGENT_EFFORT: import("../config.js").ReasoningEffort = "high";
 
 const SUBAGENT_TOOL_NAME = "spawn_subagent";
 /** spawn_subagent excluded → depth=1 hard cap; submit_plan excluded → no picker mid-parent-turn. */

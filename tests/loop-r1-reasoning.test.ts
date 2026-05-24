@@ -312,7 +312,7 @@ describe("R1 reasoning_content round-trip", () => {
     expect(assistant?.reasoning_content).toBe("v4-chat reasoning leaked");
   });
 
-  it("pins thinking=enabled + reasoning_effort=max for v4-pro (agent-class default)", async () => {
+  it("pins thinking=enabled for v4-pro and sends the configured reasoning_effort", async () => {
     const { fetch: fakeFetch, bodies } = capturingFetch([{ content: "done" }]);
     const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fakeFetch });
     const loop = new CacheFirstLoop({
@@ -320,6 +320,7 @@ describe("R1 reasoning_content round-trip", () => {
       prefix: new ImmutablePrefix({ system: "s" }),
       model: "deepseek-v4-pro",
       stream: false,
+      reasoningEffort: "max",
     });
     for await (const _ev of loop.step("hello")) {
       /* drain */
@@ -341,7 +342,7 @@ describe("R1 reasoning_content round-trip", () => {
       /* drain */
     }
     expect(bodies[0]!.extra_body?.thinking?.type).toBe("disabled");
-    expect(bodies[0]!.reasoning_effort).toBe("max");
+    expect(bodies[0]!.reasoning_effort).toBe("high");
   });
 
   it("omits thinking entirely for unknown models (let the server decide)", async () => {
@@ -357,9 +358,7 @@ describe("R1 reasoning_content round-trip", () => {
       /* drain */
     }
     expect(bodies[0]!.extra_body).toBeUndefined();
-    // reasoning_effort is always set — it's a benign field for models
-    // that don't know it (OpenAI just ignores unknown top-level fields).
-    expect(bodies[0]!.reasoning_effort).toBe("max");
+    expect(bodies[0]!.reasoning_effort).toBe("high");
   });
 
   it("skips extra_body for Azure endpoints (issue #1299)", async () => {
@@ -379,6 +378,6 @@ describe("R1 reasoning_content round-trip", () => {
       /* drain */
     }
     expect(bodies[0]!.extra_body).toBeUndefined();
-    expect(bodies[0]!.reasoning_effort).toBe("max");
+    expect(bodies[0]!.reasoning_effort).toBe("high");
   });
 });

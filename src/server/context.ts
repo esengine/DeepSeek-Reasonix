@@ -35,10 +35,8 @@ export interface DashboardContext {
 
   setEditMode?: (mode: EditMode) => EditMode;
   setPlanMode?: (on: boolean) => void;
-  /** Flips live loop model + escalation; persisted config alone wouldn't affect the running session. */
-  applyPresetLive?: (name: string) => void;
   /** Side-channel to live loop — settings POST persists, this flips the running session. */
-  applyEffortLive?: (effort: "high" | "max") => void;
+  applyEffortLive?: (effort: import("../config.js").ReasoningEffort) => void;
   /** Same model swap path /model <id> takes — live + persisted. */
   applyModelLive?: (model: string) => void;
   /** Cached model catalog. Null = in flight / failed; `[]` = API answered empty. */

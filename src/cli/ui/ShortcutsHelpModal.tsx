@@ -44,7 +44,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "/new", descKey: "shortcutsHelp.descNewSession" },
       { keys: "/sessions", descKey: "shortcutsHelp.descListSessions" },
       { keys: "/model", descKey: "shortcutsHelp.descSwitchModel" },
-      { keys: "/preset", descKey: "shortcutsHelp.descSwitchPreset" },
+      { keys: "/effort", descKey: "shortcutsHelp.descSwitchEffort" },
       { keys: "/theme", descKey: "shortcutsHelp.descSwitchTheme" },
     ],
   },

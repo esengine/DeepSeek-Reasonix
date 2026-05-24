@@ -186,7 +186,8 @@ async function checkConfig(): Promise<Check> {
   try {
     const cfg = readConfig(path);
     const parts: string[] = [];
-    if (cfg.preset) parts.push(`preset=${cfg.preset}`);
+    if (cfg.model) parts.push(`model=${cfg.model}`);
+    if (cfg.reasoningEffort) parts.push(`effort=${cfg.reasoningEffort}`);
     if (cfg.editMode) parts.push(`editMode=${cfg.editMode}`);
     if (cfg.mcp && cfg.mcp.length > 0) parts.push(`mcp=${cfg.mcp.length}`);
     return {

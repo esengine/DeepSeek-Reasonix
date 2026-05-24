@@ -69,18 +69,19 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   },
 
   {
-    cmd: "preset",
-    group: "setup",
-    argsHint: "<flash|pro>",
-    summary: "model bundle — flash (default, cheapest) or pro (~3× cost). Bare opens picker.",
-    argCompleter: ["flash", "pro"],
-  },
-  {
     cmd: "model",
     group: "setup",
     argsHint: "<id>",
     summary: "switch DeepSeek model id. Bare opens picker.",
     argCompleter: "models",
+  },
+  {
+    cmd: "effort",
+    group: "setup",
+    argsHint: "<low|medium|high|max>",
+    summary:
+      "reasoning_effort cap — high is the safe default (vLLM/Azure compatible); max is a DeepSeek extension.",
+    argCompleter: ["low", "medium", "high", "max"],
   },
   {
     cmd: "language",

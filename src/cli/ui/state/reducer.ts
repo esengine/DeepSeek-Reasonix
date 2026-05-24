@@ -132,10 +132,10 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         ? state
         : { ...state, session: { ...state.session, model: event.model } };
 
-    case "session.preset.change":
-      return state.status.preset === event.preset
+    case "session.effort.change":
+      return state.status.reasoningEffort === event.reasoningEffort
         ? state
-        : { ...state, status: { ...state.status, preset: event.preset } };
+        : { ...state, status: { ...state.status, reasoningEffort: event.reasoningEffort } };
 
     case "mcp.loading": {
       const current = state.status.mcpLoading;

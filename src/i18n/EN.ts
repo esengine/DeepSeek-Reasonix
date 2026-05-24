@@ -17,7 +17,7 @@ export const EN: TranslationSchema = {
   cli: {
     description: "DeepSeek-native agent framework — built for cache hits and cheap tokens.",
     continue: "Resume the most recently used chat session without showing the picker.",
-    setup: "Interactive wizard — API key, preset, MCP servers. Re-run any time to reconfigure.",
+    setup: "Interactive wizard — API key, MCP servers. Re-run any time to reconfigure.",
     code: "Code-editing chat — filesystem tools rooted at <dir> (default: cwd), coding system prompt, v4-flash baseline.",
     chat: "Interactive Ink TUI with live cache/cost panel.",
     run: "Run a single task non-interactively, streaming output.",
@@ -201,13 +201,13 @@ export const EN: TranslationSchema = {
     budgetHint: "session USD cap — warns at 80%, refuses next turn at 100%",
     modelIdHint: "DeepSeek model id (e.g. deepseek-v4-flash)",
     systemPromptHint: "override the default system prompt",
-    presetHint: "model bundle — auto|flash|pro",
+    effortHint: "reasoning effort — low|medium|high|max",
     sessionNameHint: "session name (default: 'default')",
     ephemeralHint: "disable session persistence for this run",
     mcpSpecHint: "MCP server spec (repeatable)",
     mcpPrefixHint: "prefix MCP tool names with this string",
     noConfigHint: "ignore ~/.reasonix/config.json for this run",
-    presetHintShort: "model bundle — auto|flash|pro",
+    effortHintShort: "reasoning effort — low|medium|high|max",
     budgetHintShort: "session USD cap",
     transcriptHintShort: "JSONL transcript path",
     mcpSpecHintShort: "MCP server spec (repeatable)",
@@ -262,9 +262,10 @@ export const EN: TranslationSchema = {
   slash: {
     help: { description: "show the full command reference" },
     status: { description: "current model, flags, context, session" },
-    preset: {
-      description: "model bundle — auto escalates flash → pro, flash/pro lock",
-      argsHint: "<auto|flash|pro>",
+    effort: {
+      description:
+        "reasoning_effort cap (low|medium|high|max); high is the safe default for vLLM/Azure",
+      argsHint: "<low|medium|high|max>",
     },
     model: { description: "switch DeepSeek model id", argsHint: "<id>" },
     models: { description: "list available models fetched from DeepSeek /models" },
@@ -277,10 +278,6 @@ export const EN: TranslationSchema = {
       argsHint: "<EN|zh-CN>",
       success: "Language switched to English.",
       unsupported: "Unsupported language code: {code}. Supported: {supported}.",
-    },
-    pro: {
-      description: "arm v4-pro for the NEXT turn only (one-shot · auto-disarms after turn)",
-      argsHint: "[off]",
     },
     budget: {
       description:
@@ -460,7 +457,6 @@ export const EN: TranslationSchema = {
       "high-contrast": "Accessibility",
     },
     reviewLabelTheme: "Theme",
-    presetTitle: "Pick a preset",
     mcpTitle: "Which MCP servers should Reasonix wire up for you?",
     mcpUserArgsHint: "(you'll provide {arg})",
     mcpFooterMulti:
@@ -475,7 +471,6 @@ export const EN: TranslationSchema = {
     reviewTitle: "Ready to save",
     reviewLabelApiKey: "API key",
     reviewLabelLanguage: "Language",
-    reviewLabelPreset: "Preset",
     reviewLabelMcp: "MCP",
     reviewMcpNone: "(none)",
     reviewMcpServers: "{count} server(s)",
@@ -718,7 +713,7 @@ export const EN: TranslationSchema = {
     deepseek5xxActionNetwork:
       " Try: (1) check your network, (2) wait 30s and retry, (3) status page: https://status.deepseek.com.",
     deepseek5xxActionRetry:
-      " Try: (1) wait 30s and retry, (2) /preset to switch model, (3) status page: https://status.deepseek.com.",
+      " Try: (1) wait 30s and retry, (2) /model to switch model, (3) status page: https://status.deepseek.com.",
     innerNoMessage: "(no message)",
     reasonAborted: "[aborted by user (Esc) — summarizing what I found so far]",
     reasonContextGuard:
@@ -775,12 +770,6 @@ export const EN: TranslationSchema = {
         "                             Same URL twice in one session fetches once (in-mem cache).",
       helpUrlPunct:
         "                             Trailing sentence punctuation (./,/)) is stripped automatically.",
-      helpPresetsTitle: "Presets (branch + harvest are NEVER auto-enabled — opt-in only):",
-      helpPresetAuto:
-        "  auto   v4-flash → v4-pro on hard turns  ← default · cheap when easy, smart when hard",
-      helpPresetFlash:
-        "  flash  v4-flash always                  cheapest · predictable per-turn cost",
-      helpPresetPro: "  pro    v4-pro   always                  ~3× flash · hard multi-turn work",
       helpSessionsTitle: "Sessions (auto-enabled by default, named 'default'):",
       helpSessionCustom: "  reasonix chat --session <name>   use a different named session",
       helpSessionNone: "  reasonix chat --no-session       disable persistence for this run",
@@ -949,15 +938,10 @@ export const EN: TranslationSchema = {
       modelNotInCatalog:
         "model → {id}   (⚠ not in the fetched catalog: {list}. If this is wrong the next call will 400 — run /models to refresh.)",
       modelSet: "model → {id}",
-      presetFlash: "preset → flash  (v4-flash always · cheapest)",
-      presetPro: "preset → pro  (v4-pro always · ~3× flash · for hard multi-turn work)",
-      presetUsage: "usage: /preset <flash|pro>",
-      proNothingArmed: "nothing armed — /pro with no args will arm pro for your next turn",
-      proDisarmed: "▸ /pro disarmed — next turn falls back to the current preset",
-      proUsage:
-        "usage: /pro       arm pro for the next turn (one-shot, auto-disarms after)\n       /pro off  cancel armed state before the next turn",
-      proArmed:
-        "▸ /pro armed — your NEXT message runs on {model} regardless of preset. Auto-disarms after one turn. Use /preset max for a persistent switch.",
+      effortStatus: "effort → {current}   (pick: {list})",
+      effortUsage:
+        "usage: /effort <{list}>   (high is the safe default; max is a DeepSeek extension)",
+      effortSet: "effort → {effort}",
       budgetNoCap:
         "no session budget set — Reasonix will keep going until you stop it. Set one with: /budget <usd>   (e.g. /budget 5)",
       budgetStatus:
@@ -1437,8 +1421,14 @@ export const EN: TranslationSchema = {
     loading: "  \u00b7  loading catalog\u2026",
     catalogEmpty: "  \u00b7  catalog empty \u2014 using known fallbacks",
     modelsAvailable: "  \u00b7  {count} models available",
-    presetsHeader: "    PRESETS  \u00b7  recommended \u2014 model + effort + auto-escalate",
-    modelsHeader: "    MODELS  \u00b7  raw pick \u2014 auto-escalate stays as-is",
+    effortHeader: "    EFFORT  \u00b7  reasoning_effort cap",
+    modelsHeader: "    MODELS  \u00b7  DeepSeek-compatible ids",
+    effortDesc: {
+      low: "fastest \u2014 minimal reasoning",
+      medium: "balanced",
+      high: "default \u2014 safe for vLLM / Azure",
+      max: "DeepSeek extension; rejected by stock OpenAI / vLLM",
+    },
     pickerFooter:
       "  \u2191\u2193 pick  \u00b7  \u23ce confirm  \u00b7  [r] refresh  \u00b7  esc cancel",
     currentLabel: "  \u00b7 current",
@@ -1862,7 +1852,7 @@ export const EN: TranslationSchema = {
     descNewSession: "New session",
     descListSessions: "List sessions",
     descSwitchModel: "Switch model",
-    descSwitchPreset: "Switch preset",
+    descSwitchEffort: "Switch reasoning effort",
     descSwitchTheme: "Switch theme",
     descCtrlC: "Quit",
     descEsc: "Stop / Cancel",

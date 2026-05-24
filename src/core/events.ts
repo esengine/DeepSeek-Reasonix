@@ -26,7 +26,7 @@ export interface SlashInvokedEvent extends EventBase {
 export interface ModelTurnStartedEvent extends EventBase {
   type: "model.turn.started";
   model: string;
-  reasoningEffort: "high" | "max";
+  reasoningEffort: import("../config.js").ReasoningEffort;
   prefixHash: string;
 }
 

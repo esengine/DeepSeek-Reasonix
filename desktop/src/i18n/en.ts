@@ -81,7 +81,8 @@ export const en = {
     commandPalette: "command palette",
     insertFile: "Insert file (@ mention)",
     insertImage: "Insert image (@ mention)",
-    switchPreset: "Switch model preset",
+    switchModel: "Switch model",
+    switchEffort: "Switch reasoning effort",
     slashHeader: "Commands — control agent, model, and session",
     atHeader: "Mentions — files in the workspace",
     noMatches: "No matches",
@@ -247,8 +248,10 @@ export const en = {
     apiKeySet: "Set · {prefix}…",
     // model descriptions
     defaultModelCurrent: "Default model · currently {model}",
-    modelFlashDesc: "General-purpose chat model — fast, long context, cost-friendly.",
-    modelProDesc: "Deep reasoning model — interpretable chain-of-thought before final answer.",
+    modelCustom: "Custom model id",
+    modelCustomHint: "Any OpenAI-compatible id your endpoint serves (vLLM, Ollama, Together, …).",
+    modelCustomActive: "Currently running on a custom id: {model}",
+    effortSection: "Reasoning effort",
     ctxWindow: "Context",
     maxOutput: "Output",
     // MCP
@@ -329,9 +332,11 @@ export const en = {
     copy: "copy",
     copied: "copied",
   },
-  preset: {
-    flashDesc: "Fast, cheap, long context",
-    proDesc: "Deep reasoning",
+  effort: {
+    lowDesc: "fastest — minimal reasoning",
+    mediumDesc: "balanced",
+    highDesc: "default — safe for vLLM / Azure",
+    maxDesc: "DeepSeek extension; rejected by stock OpenAI / vLLM",
   },
   checkpoint: {
     title: "Step complete",
@@ -362,7 +367,8 @@ export const en = {
       exportDialogTitle: "Export conversation",
       emptySession: "Session is empty",
       langSwitched: "Switched to {lang}",
-      modelSwitched: "Switched to {model}",
+      modelSwitched: "Model → {model}",
+      effortSwitched: "Effort → {effort}",
       modeSwitched: "Mode: {mode}",
       taskComplete: "Task complete",
     },

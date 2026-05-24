@@ -340,8 +340,7 @@ function emitServerSettings(settings: any, overview?: any): void {
     budgetUsd: settings?.budgetUsd ?? overview?.budgetUsd ?? null,
     workspaceDir: overview?.cwd ?? "",
     recentWorkspaces: [],
-    model: overview?.model ?? settings?.model ?? "deepseek-reasoner",
-    preset: settings?.preset ?? overview?.preset ?? "flash",
+    model: overview?.model ?? settings?.model ?? "deepseek-v4-flash",
     editor: "code",
     webSearchEngine: settings?.webSearchEngine ?? "bing",
     subagentModels: settings?.subagentModels ?? {},
@@ -864,7 +863,7 @@ const mockSessions = [
 const mockSettings = {
   reasoningEffort: "high", editMode: "review", budgetUsd: null,
   workspaceDir: "", recentWorkspaces: [],
-  model: "deepseek-reasoner", preset: "flash", version: "0.47.2",
+  model: "deepseek-v4-flash", version: "0.47.2",
 };
 
 const mockMessages: any[] = [

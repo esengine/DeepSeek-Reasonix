@@ -1,14 +1,14 @@
 import { Box, Text, useStdout } from "ink";
 import React, { useState } from "react";
+import { REASONING_EFFORT_VALUES, type ReasoningEffort } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { PRESETS, PRESET_DESCRIPTIONS } from "./presets.js";
 import { PILL_MODEL, Pill, modelBadgeFor } from "./primitives/Pill.js";
 import { FG, TONE } from "./theme/tokens.js";
 
 export type ModelPickerOutcome =
   | { kind: "select"; id: string }
-  | { kind: "preset"; name: "flash" | "pro" }
+  | { kind: "effort"; effort: ReasoningEffort }
   | { kind: "quit" };
 
 export interface ModelPickerProps {
@@ -16,18 +16,15 @@ export interface ModelPickerProps {
   models: ReadonlyArray<string> | null;
   /** Model id currently active in the loop — marked with the cursor on open. */
   current: string;
-  /** Used to detect which preset (if any) the loop currently matches. */
-  currentEffort: "high" | "max";
+  currentEffort: ReasoningEffort;
   onChoose: (outcome: ModelPickerOutcome) => void;
   /** Triggers a refetch when the catalog is null/empty and the user presses [r]. */
   onRefresh?: () => void;
 }
 
 const PAGE_MARGIN = 8;
-const PRESET_NAMES = ["flash", "pro"] as const;
-type PresetName = (typeof PRESET_NAMES)[number];
 
-type Row = { kind: "preset"; name: PresetName } | { kind: "model"; id: string };
+type Row = { kind: "effort"; effort: ReasoningEffort } | { kind: "model"; id: string };
 
 export function ModelPicker({
   models,
@@ -38,14 +35,15 @@ export function ModelPicker({
 }: ModelPickerProps): React.ReactElement {
   const modelList = (models && models.length > 0 ? models : FALLBACK_MODELS).slice();
   if (!modelList.includes(current)) modelList.unshift(current);
-  const presetRows: Row[] = PRESET_NAMES.map((name) => ({ kind: "preset", name }));
-  const modelRows: Row[] = modelList.map((id) => ({ kind: "model", id }));
-  const rows: Row[] = [...presetRows, ...modelRows];
 
-  const activePreset = detectActivePreset(current, currentEffort);
-  const initialIndex = activePreset
-    ? PRESET_NAMES.indexOf(activePreset)
-    : presetRows.length + Math.max(0, modelList.indexOf(current));
+  const effortRows: Row[] = REASONING_EFFORT_VALUES.map((effort) => ({
+    kind: "effort",
+    effort,
+  }));
+  const modelRows: Row[] = modelList.map((id) => ({ kind: "model", id }));
+  const rows: Row[] = [...effortRows, ...modelRows];
+
+  const initialIndex = effortRows.length + Math.max(0, modelList.indexOf(current));
   const [focus, setFocus] = useState(initialIndex);
   const { stdout } = useStdout();
   const termRows = stdout?.rows ?? 40;
@@ -58,7 +56,7 @@ export function ModelPicker({
     if (ev.return) {
       const target = rows[focus];
       if (!target) return;
-      if (target.kind === "preset") return onChoose({ kind: "preset", name: target.name });
+      if (target.kind === "effort") return onChoose({ kind: "effort", effort: target.effort });
       return onChoose({ kind: "select", id: target.id });
     }
     if (!ev.input) return;
@@ -77,7 +75,7 @@ export function ModelPicker({
   const loading = models === null;
   const empty = models !== null && models.length === 0;
 
-  let lastSection: "preset" | "model" | null = null;
+  let lastSection: Row["kind"] | null = null;
 
   return (
     <Box flexDirection="column" marginY={1}>
@@ -107,26 +105,26 @@ export function ModelPicker({
         const header = showHeader ? (
           <Box key={`hdr-${row.kind}`} marginTop={idx === 0 ? 0 : 1}>
             <Text color={FG.meta}>
-              {row.kind === "preset"
-                ? t("modelPicker.presetsHeader")
+              {row.kind === "effort"
+                ? t("modelPicker.effortHeader")
                 : t("modelPicker.modelsHeader")}
             </Text>
           </Box>
         ) : null;
         const body =
-          row.kind === "preset" ? (
-            <PresetRow
-              key={`p-${row.name}`}
-              name={row.name}
+          row.kind === "effort" ? (
+            <EffortRow
+              key={`e-${row.effort}`}
+              effort={row.effort}
               focused={focused}
-              active={activePreset === row.name}
+              active={row.effort === currentEffort}
             />
           ) : (
             <ModelRow
               key={`m-${row.id}`}
               id={row.id}
               focused={focused}
-              active={!activePreset && row.id === current}
+              active={row.id === current}
             />
           );
         return (
@@ -148,24 +146,22 @@ export function ModelPicker({
   );
 }
 
-function PresetRow({
-  name,
+function EffortRow({
+  effort,
   focused,
   active,
 }: {
-  name: PresetName;
+  effort: ReasoningEffort;
   focused: boolean;
   active: boolean;
 }): React.ReactElement {
-  const desc = PRESET_DESCRIPTIONS[name];
   return (
     <Box>
       <Text color={focused ? TONE.brand : FG.faint}>{focused ? "  ▸ " : "    "}</Text>
       <Text bold={focused} color={focused ? FG.strong : FG.sub}>
-        {name.padEnd(8)}
+        {effort.padEnd(8)}
       </Text>
-      <Text color={focused ? FG.body : FG.meta}>{desc.headline.padEnd(28)}</Text>
-      <Text color={FG.meta}>{`  ${desc.cost}`}</Text>
+      <Text color={FG.meta}>{t(`modelPicker.effortDesc.${effort}` as const)}</Text>
       {active ? <Text color={TONE.brand}>{t("modelPicker.currentLabel")}</Text> : null}
     </Box>
   );
@@ -194,17 +190,6 @@ function ModelRow({
   );
 }
 
-function detectActivePreset(model: string, effort: "high" | "max"): PresetName | null {
-  for (const name of PRESET_NAMES) {
-    const p = PRESETS[name];
-    if (p.model === model && p.reasoningEffort === effort) {
-      return name;
-    }
-  }
-  return null;
-}
-
-/** Hard-coded known DeepSeek ids — used when the API catalog hasn't loaded yet so the picker isn't empty on first open. */
 const FALLBACK_MODELS: ReadonlyArray<string> = [
   "deepseek-v4-flash",
   "deepseek-v4-pro",

@@ -1,13 +1,12 @@
-import { savePreset } from "@/config.js";
+import {
+  REASONING_EFFORT_VALUES,
+  type ReasoningEffort,
+  isReasoningEffort,
+  saveModel,
+  saveReasoningEffort,
+} from "@/config.js";
 import { t } from "@/i18n/index.js";
-import { PRESETS } from "../../presets.js";
 import type { SlashHandler } from "../dispatch.js";
-
-function inferPresetFromModel(id: string): "flash" | "pro" | null {
-  if (id === "deepseek-v4-pro") return "pro";
-  if (id === "deepseek-v4-flash") return "flash";
-  return null;
-}
 
 const model: SlashHandler = (args, loop, ctx) => {
   const id = args[0];
@@ -17,14 +16,10 @@ const model: SlashHandler = (args, loop, ctx) => {
   }
   loop.configure({ model: id });
   ctx.dispatch?.({ type: "session.model.change", model: id });
-  const inferred = inferPresetFromModel(id);
-  ctx.dispatch?.({ type: "session.preset.change", preset: inferred });
-  if (inferred) {
-    try {
-      savePreset(inferred);
-    } catch {
-      /* disk full / perms — runtime change still took effect */
-    }
+  try {
+    saveModel(id);
+  } catch {
+    /* disk full / perms — runtime change still took effect */
   }
   if (known && known.length > 0 && !known.includes(id)) {
     return {
@@ -34,33 +29,29 @@ const model: SlashHandler = (args, loop, ctx) => {
   return { info: t("handlers.model.modelSet", { id }) };
 };
 
-const preset: SlashHandler = (args, loop, ctx) => {
-  const name = (args[0] ?? "").toLowerCase();
-  const apply = (presetName: "flash" | "pro", p: (typeof PRESETS)[keyof typeof PRESETS]) => {
-    loop.configure({
-      model: p.model,
-      reasoningEffort: p.reasoningEffort,
-    });
-    ctx.dispatch?.({ type: "session.model.change", model: p.model });
-    ctx.dispatch?.({ type: "session.preset.change", preset: presetName });
-    try {
-      savePreset(presetName);
-    } catch {
-      /* disk full / perms — runtime change still took effect */
-    }
-  };
-  if (name === "flash") {
-    apply("flash", PRESETS.flash);
-    return { info: t("handlers.model.presetFlash") };
+const effort: SlashHandler = (args, loop) => {
+  const raw = (args[0] ?? "").toLowerCase();
+  if (raw === "") {
+    return {
+      info: t("handlers.model.effortStatus", {
+        current: loop.reasoningEffort,
+        list: REASONING_EFFORT_VALUES.join(" | "),
+      }),
+    };
   }
-  if (name === "pro") {
-    apply("pro", PRESETS.pro);
-    return { info: t("handlers.model.presetPro") };
+  if (!isReasoningEffort(raw)) {
+    return {
+      info: t("handlers.model.effortUsage", { list: REASONING_EFFORT_VALUES.join(" | ") }),
+    };
   }
-  if (name === "") {
-    return { openModelPicker: true };
+  const next: ReasoningEffort = raw;
+  loop.configure({ reasoningEffort: next });
+  try {
+    saveReasoningEffort(next);
+  } catch {
+    /* disk full / perms — runtime change still took effect */
   }
-  return { info: t("handlers.model.presetUsage") };
+  return { info: t("handlers.model.effortSet", { effort: next }) };
 };
 
 const budget: SlashHandler = (args, loop) => {
@@ -108,6 +99,6 @@ const budget: SlashHandler = (args, loop) => {
 
 export const handlers: Record<string, SlashHandler> = {
   model,
-  preset,
+  effort,
   budget,
 };
