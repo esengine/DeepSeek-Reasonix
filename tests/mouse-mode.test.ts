@@ -39,7 +39,7 @@ describe("mouse-mode enable/disable", () => {
   it("default resets every mouse-capture mode so the terminal owns the wheel", () => {
     enableMouseMode();
     expect(writes.join("")).toBe(
-      "\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
+      "\u001b[?9l\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1005l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
     );
   });
 
@@ -69,7 +69,7 @@ describe("mouse-mode enable/disable", () => {
     process.env.REASONIX_MOUSE_MODE = "off";
     enableMouseMode();
     expect(writes.join("")).toBe(
-      "\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
+      "\u001b[?9l\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1005l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
     );
     writes.length = 0;
     disableMouseMode();
@@ -80,7 +80,7 @@ describe("mouse-mode enable/disable", () => {
     process.env.REASONIX_MOUSE_MODE = "garbage";
     enableMouseMode();
     expect(writes.join("")).toBe(
-      "\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
+      "\u001b[?9l\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1005l\u001b[?1006l\u001b[?1007l\u001b[?1015l",
     );
   });
 

@@ -431,6 +431,19 @@ describe("StdinReader — SGR mouse reports (issue #867)", () => {
     reader.feed("[<not-a-mouse-report");
     expect(events).toEqual([{ input: "[<not-a-mouse-report" }]);
   });
+
+  it("drops legacy X10 mouse reports as a whole instead of leaking coordinate bytes", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[M`*%");
+    expect(events).toEqual([]);
+  });
+
+  it("drops legacy X10 mouse reports even when split after the prefix", () => {
+    const { reader, events } = setup();
+    reader.feed("\x1b[M");
+    reader.feed("`*%");
+    expect(events).toEqual([]);
+  });
 });
 
 describe("sanitizePasteText (issue #849)", () => {
