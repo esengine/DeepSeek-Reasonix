@@ -1,6 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { DoctorCheckEntry, PlanStep, TipSection } from "../state/cards.js";
 import { useDispatch } from "../state/provider.js";
+
+/** Throttle interval for streaming/reasoning chunk dispatches (~30fps). */
+const THROTTLE_MS = 33;
 
 let seq = 0;
 function nextId(prefix: string): string {
@@ -102,6 +105,39 @@ export interface Scrollback {
 
 export function useScrollback(): Scrollback {
   const dispatch = useDispatch();
+
+  // Throttle state for reasoning and streaming chunks
+  const reasoningBufferRef = useRef<Map<string, string>>(new Map());
+  const reasoningTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const streamingBufferRef = useRef<Map<string, string>>(new Map());
+  const streamingTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Cleanup on unmount - flush all buffers
+  useEffect(() => {
+    return () => {
+      for (const [id] of reasoningBufferRef.current) {
+        const buffered = reasoningBufferRef.current.get(id);
+        if (buffered && buffered.length > 0) {
+          dispatch({ type: "reasoning.chunk", id, text: buffered });
+        }
+        const timer = reasoningTimerRef.current.get(id);
+        if (timer) clearTimeout(timer);
+      }
+      reasoningBufferRef.current.clear();
+      reasoningTimerRef.current.clear();
+
+      for (const [id] of streamingBufferRef.current) {
+        const buffered = streamingBufferRef.current.get(id);
+        if (buffered && buffered.length > 0) {
+          dispatch({ type: "streaming.chunk", id, text: buffered });
+        }
+        const timer = streamingTimerRef.current.get(id);
+        if (timer) clearTimeout(timer);
+      }
+      streamingBufferRef.current.clear();
+      streamingTimerRef.current.clear();
+    };
+  }, [dispatch]);
 
   return useMemo<Scrollback>(
     () => ({
@@ -255,9 +291,32 @@ export function useScrollback(): Scrollback {
         return id;
       },
       appendReasoning(id, chunk) {
-        if (chunk.length > 0) dispatch({ type: "reasoning.chunk", id, text: chunk });
+        if (chunk.length === 0) return;
+        // Buffer tokens and throttle dispatch to reduce flicker
+        const current = reasoningBufferRef.current.get(id) ?? "";
+        reasoningBufferRef.current.set(id, current + chunk);
+        if (!reasoningTimerRef.current.has(id)) {
+          const timer = setTimeout(() => {
+            const buffered = reasoningBufferRef.current.get(id);
+            if (buffered && buffered.length > 0) {
+              dispatch({ type: "reasoning.chunk", id, text: buffered });
+              reasoningBufferRef.current.delete(id);
+            }
+            reasoningTimerRef.current.delete(id);
+          }, THROTTLE_MS);
+          reasoningTimerRef.current.set(id, timer);
+        }
       },
       endReasoning(id, paragraphs, tokens, aborted) {
+        // Flush buffer before ending to ensure all tokens are dispatched
+        const buffered = reasoningBufferRef.current.get(id);
+        if (buffered && buffered.length > 0) {
+          dispatch({ type: "reasoning.chunk", id, text: buffered });
+          reasoningBufferRef.current.delete(id);
+        }
+        const timer = reasoningTimerRef.current.get(id);
+        if (timer) clearTimeout(timer);
+        reasoningTimerRef.current.delete(id);
         dispatch({ type: "reasoning.end", id, paragraphs, tokens, aborted });
       },
       startStreaming(model) {
@@ -266,9 +325,32 @@ export function useScrollback(): Scrollback {
         return id;
       },
       appendStreaming(id, chunk) {
-        if (chunk.length > 0) dispatch({ type: "streaming.chunk", id, text: chunk });
+        if (chunk.length === 0) return;
+        // Buffer tokens and throttle dispatch to reduce flicker
+        const current = streamingBufferRef.current.get(id) ?? "";
+        streamingBufferRef.current.set(id, current + chunk);
+        if (!streamingTimerRef.current.has(id)) {
+          const timer = setTimeout(() => {
+            const buffered = streamingBufferRef.current.get(id);
+            if (buffered && buffered.length > 0) {
+              dispatch({ type: "streaming.chunk", id, text: buffered });
+              streamingBufferRef.current.delete(id);
+            }
+            streamingTimerRef.current.delete(id);
+          }, THROTTLE_MS);
+          streamingTimerRef.current.set(id, timer);
+        }
       },
       endStreaming(id, aborted) {
+        // Flush buffer before ending to ensure all tokens are dispatched
+        const buffered = streamingBufferRef.current.get(id);
+        if (buffered && buffered.length > 0) {
+          dispatch({ type: "streaming.chunk", id, text: buffered });
+          streamingBufferRef.current.delete(id);
+        }
+        const timer = streamingTimerRef.current.get(id);
+        if (timer) clearTimeout(timer);
+        streamingTimerRef.current.delete(id);
         dispatch({ type: "streaming.end", id, aborted });
       },
       startTool(name, args, presetId) {
