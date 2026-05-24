@@ -163,4 +163,65 @@ describe("loop persists user message at step entry (issue #943)", () => {
       ),
     ).toBe(false);
   });
+
+  it("can discard an explicitly aborted prompt before the next request (#1593)", async () => {
+    const requestMessages: ChatMessage[][] = [];
+    let callCount = 0;
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(
+        async (_url: unknown, init: { body?: string; signal?: AbortSignal } | undefined) => {
+          const body = init?.body ? JSON.parse(init.body) : {};
+          requestMessages.push(body.messages as ChatMessage[]);
+          if (callCount++ === 0) {
+            return new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () =>
+                reject(new DOMException("This operation was aborted", "AbortError")),
+              );
+            });
+          }
+          return new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  index: 0,
+                  message: { role: "assistant", content: "rewritten" },
+                  finish_reason: "stop",
+                },
+              ],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        },
+      ) as unknown as typeof fetch,
+      retry: { maxAttempts: 1 },
+    });
+
+    const sessionName = "bug1593-discard-explicit-abort";
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      session: sessionName,
+    });
+
+    const interrupted = (async () => {
+      for await (const ev of loop.step("完全重写这段一万字符结构化文本")) {
+        if (ev.role === "done") break;
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 10));
+    loop.abort({ discardCurrentTurn: true });
+    await interrupted;
+
+    await loop.run("请按这次要求完整重写，不要局部微调");
+
+    const secondRequestUsers = requestMessages[1]!
+      .filter((m) => m.role === "user")
+      .map((m) => m.content);
+    expect(secondRequestUsers).toEqual(["请按这次要求完整重写，不要局部微调"]);
+    expect(loadSessionMessages(sessionName).filter((m) => m.role === "user")).toHaveLength(1);
+  });
 });
