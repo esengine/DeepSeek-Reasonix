@@ -19,9 +19,10 @@
  */
 
 import { Box, Text, useStdout } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for React.Fragment
+// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import type { SplitDiffRow } from "../../code/diff-preview.js";
+import { stringWidth } from "./text-width.js";
 import { COLOR } from "./theme.js";
 
 export interface SplitDiffProps {
@@ -72,7 +73,8 @@ function Cell({
   const sign =
     side.kind === "del" ? "-" : side.kind === "add" ? "+" : side.kind === "pad" ? " " : " ";
   const raw = side.text;
-  const truncated = raw.length > inner ? `${raw.slice(0, inner - 1)}…` : raw;
+  // Use stringWidth for CJK/emoji-aware truncation — raw.length undercounts wide chars.
+  const truncated = stringWidth(raw) > inner ? `${raw.slice(0, inner - 1)}…` : raw;
   // Pad to fixed width so the bg color stretches across the whole
   // column even when the text is short — without this the red/green
   // wash would only cover the actual chars and the rest of the row
