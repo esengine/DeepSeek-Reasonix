@@ -76,6 +76,7 @@ import {
   UserMsg,
 } from "./ui/thread";
 import { WorkdirPop } from "./ui/workdir-pop";
+import { useAutoCollapse } from "./ui/useAutoCollapse";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -2938,19 +2939,18 @@ export function App() {
   const [customFontFamily, setCustomFontFamily] = useState<string>(() => {
     return localStorage.getItem("reasonix.customFontFamily") ?? "";
   });
-  const [sideCollapsed, setSideCollapsed] = useState(
-    () => localStorage.getItem("reasonix.sideCollapsed") === "1",
-  );
-  const [ctxCollapsed, setCtxCollapsed] = useState(
-    () => localStorage.getItem("reasonix.ctxCollapsed") === "1",
-  );
-  const responsiveStageRef = useRef<ResponsiveStage | null>(null);
-  const autoSideCollapsedRef = useRef(false);
-  const autoCtxCollapsedRef = useRef(false);
-  const suppressSidePersistRef = useRef(false);
-  const suppressCtxPersistRef = useRef(false);
-  const sideCollapsedRef = useRef(sideCollapsed);
-  const ctxCollapsedRef = useRef(ctxCollapsed);
+  const {
+    collapsed: sideCollapsed,
+    toggle: onToggleSide,
+    requireCollapsed: requireSideCollapsed,
+    releaseCollapsed: releaseSideCollapsed,
+  } = useAutoCollapse("reasonix.sideCollapsed");
+  const {
+    collapsed: ctxCollapsed,
+    toggle: onToggleCtx,
+    requireCollapsed: requireCtxCollapsed,
+    releaseCollapsed: releaseCtxCollapsed,
+  } = useAutoCollapse("reasonix.ctxCollapsed");
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -2960,98 +2960,28 @@ export function App() {
   }, [theme, themeStyle]);
 
   useEffect(() => {
-    if (suppressSidePersistRef.current) {
-      suppressSidePersistRef.current = false;
-      return;
-    }
-    localStorage.setItem("reasonix.sideCollapsed", sideCollapsed ? "1" : "0");
-  }, [sideCollapsed]);
-
-  useEffect(() => {
-    sideCollapsedRef.current = sideCollapsed;
-  }, [sideCollapsed]);
-
-  useEffect(() => {
-    if (suppressCtxPersistRef.current) {
-      suppressCtxPersistRef.current = false;
-      return;
-    }
-    localStorage.setItem("reasonix.ctxCollapsed", ctxCollapsed ? "1" : "0");
-  }, [ctxCollapsed]);
-
-  useEffect(() => {
-    ctxCollapsedRef.current = ctxCollapsed;
-  }, [ctxCollapsed]);
-
-  useEffect(() => {
     let raf = 0;
+    let prevStage: ResponsiveStage | null = null;
 
     const sync = () => {
       raf = 0;
       const next = responsiveStage(window.innerWidth);
-      const prev = responsiveStageRef.current;
-
-      if (prev === null) {
-        if (next === RESPONSIVE_STAGE.NARROW) {
-          if (!ctxCollapsedRef.current) {
-            suppressCtxPersistRef.current = true;
-            setCtxCollapsed(true);
-            autoCtxCollapsedRef.current = true;
-          }
-          if (!sideCollapsedRef.current) {
-            suppressSidePersistRef.current = true;
-            setSideCollapsed(true);
-            autoSideCollapsedRef.current = true;
-          }
-        } else if (next === RESPONSIVE_STAGE.COMPACT) {
-          if (!ctxCollapsedRef.current) {
-            suppressCtxPersistRef.current = true;
-            setCtxCollapsed(true);
-            autoCtxCollapsedRef.current = true;
-          }
-        }
-        responsiveStageRef.current = next;
-        return;
-      }
-
-      if (prev === next) return;
+      if (prevStage === next) return;
+      const prev = prevStage;
+      prevStage = next;
 
       if (next === RESPONSIVE_STAGE.WIDE) {
-        if (autoCtxCollapsedRef.current) {
-          suppressCtxPersistRef.current = true;
-          setCtxCollapsed(false);
-          autoCtxCollapsedRef.current = false;
-        }
-        if (autoSideCollapsedRef.current) {
-          suppressSidePersistRef.current = true;
-          setSideCollapsed(false);
-          autoSideCollapsedRef.current = false;
-        }
+        releaseCtxCollapsed();
+        releaseSideCollapsed();
       } else if (next === RESPONSIVE_STAGE.COMPACT) {
-        if (prev === RESPONSIVE_STAGE.WIDE && !ctxCollapsedRef.current) {
-          suppressCtxPersistRef.current = true;
-          setCtxCollapsed(true);
-          autoCtxCollapsedRef.current = true;
-        }
-        if (autoSideCollapsedRef.current) {
-          suppressSidePersistRef.current = true;
-          setSideCollapsed(false);
-          autoSideCollapsedRef.current = false;
-        }
-      } else if (next === RESPONSIVE_STAGE.NARROW) {
-        if (!ctxCollapsedRef.current) {
-          suppressCtxPersistRef.current = true;
-          setCtxCollapsed(true);
-          autoCtxCollapsedRef.current = true;
-        }
-        if (!sideCollapsedRef.current) {
-          suppressSidePersistRef.current = true;
-          setSideCollapsed(true);
-          autoSideCollapsedRef.current = true;
-        }
+        // Only force ctx collapse when entering compact from wider — coming
+        // from narrow, the user may have manually opened ctx and we keep that.
+        if (prev === null || prev === RESPONSIVE_STAGE.WIDE) requireCtxCollapsed();
+        releaseSideCollapsed();
+      } else {
+        requireCtxCollapsed();
+        requireSideCollapsed();
       }
-
-      responsiveStageRef.current = next;
     };
 
     const onResize = () => {
@@ -3065,17 +2995,7 @@ export function App() {
       if (raf) window.cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
     };
-  }, []);
-
-  const onToggleSide = useCallback(() => {
-    autoSideCollapsedRef.current = false;
-    setSideCollapsed((v) => !v);
-  }, []);
-
-  const onToggleCtx = useCallback(() => {
-    autoCtxCollapsedRef.current = false;
-    setCtxCollapsed((v) => !v);
-  }, []);
+  }, [requireCtxCollapsed, releaseCtxCollapsed, requireSideCollapsed, releaseSideCollapsed]);
 
   useEffect(() => {
     // Chromium webview supports `zoom`; scales every px-based size without touching CSS rules.
@@ -3352,16 +3272,16 @@ export function App() {
       } else if (mod && (e.key === "b" || e.key === "B")) {
         if (e.altKey) {
           e.preventDefault();
-          setCtxCollapsed((v) => !v);
+          onToggleCtx();
         } else {
           e.preventDefault();
-          setSideCollapsed((v) => !v);
+          onToggleSide();
         }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openTab, closeTab, activeTabId, tabs]);
+  }, [openTab, closeTab, activeTabId, tabs, onToggleCtx, onToggleSide]);
 
   const onSetTheme = useCallback((nextTheme: Theme) => {
     setTheme(nextTheme);

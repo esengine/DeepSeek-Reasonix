@@ -248,7 +248,7 @@ html[data-platform="macos"] .app {
   --ctx-width: 0px;
 }
 .app[data-side-collapsed="true"] {
---side-width: 0px;
+  --side-width: 0px;
 }
 .app[data-ctx-collapsed="true"][data-side-collapsed="true"] {
   --thread-max-width: 1120px;
