@@ -444,6 +444,14 @@ describe("StdinReader — SGR mouse reports (issue #867)", () => {
     reader.feed("`*%");
     expect(events).toEqual([]);
   });
+
+  it("drops a legacy X10 mouse-report flood without surfacing prompt input (#1598)", () => {
+    const { reader, events } = setup();
+    for (let i = 0; i < 1000; i++) {
+      reader.feed("\x1b[M`*%");
+    }
+    expect(events).toEqual([]);
+  });
 });
 
 describe("sanitizePasteText (issue #849)", () => {
