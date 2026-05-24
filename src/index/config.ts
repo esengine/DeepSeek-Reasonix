@@ -34,6 +34,8 @@ export interface IndexFilters {
 export const DEFAULT_INDEX_EXCLUDES = {
   dirs: [
     "node_modules",
+    ".devenv",
+    ".direnv",
     ".git",
     ".hg",
     ".svn",
