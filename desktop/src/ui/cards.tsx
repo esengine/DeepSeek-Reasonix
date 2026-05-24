@@ -400,6 +400,70 @@ export type DiffLine =
   | { t: "add"; r: number; s: string }
   | { t: "rm"; l: number; s: string };
 
+export function parseEditResult(text: string): { filename: string; lines: DiffLine[] }[] {
+  const files: { filename: string; lines: DiffLine[] }[] = [];
+  const lines = text.split("\n");
+
+  let currentFilename = "";
+  let currentLines: DiffLine[] = [];
+  let hunkStartLeft = 0;
+  let hunkStartRight = 0;
+  let leftLine = 0;
+  let rightLine = 0;
+
+  const flush = () => {
+    if (currentLines.length > 0) {
+      files.push({ filename: currentFilename, lines: currentLines });
+    }
+    currentLines = [];
+    hunkStartLeft = 0;
+    hunkStartRight = 0;
+    leftLine = 0;
+    rightLine = 0;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+
+    if (line.startsWith("edited ") || line.startsWith("multi_edit:")) {
+      const m = line.match(/^edited\s+(.+?)\s+\(/);
+      if (m) currentFilename = m[1]!;
+      continue;
+    }
+
+    if (line.startsWith("# ")) {
+      flush();
+      currentFilename = line.slice(2);
+      continue;
+    }
+
+    const hunkMatch = line.match(/^@@\s+-(\d+),(\d+)\s+\+(\d+),(\d+)\s+@@/);
+    if (hunkMatch) {
+      hunkStartLeft = Number(hunkMatch[1]!);
+      hunkStartRight = Number(hunkMatch[3]!);
+      leftLine = hunkStartLeft;
+      rightLine = hunkStartRight;
+      currentLines.push({ t: "hunk", s: line });
+      continue;
+    }
+
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      currentLines.push({ t: "add", r: rightLine, s: line.slice(1) });
+      rightLine++;
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      currentLines.push({ t: "rm", l: leftLine, s: line.slice(1) });
+      leftLine++;
+    } else if (line.startsWith(" ")) {
+      currentLines.push({ t: "ctx", l: leftLine, r: rightLine, s: line.slice(1) });
+      leftLine++;
+      rightLine++;
+    }
+  }
+
+  flush();
+  return files;
+}
+
 export function DiffCard({
   filename,
   lines,

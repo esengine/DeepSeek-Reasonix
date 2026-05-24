@@ -18,11 +18,13 @@ import { I } from "../icons";
 import {
   AssistantText,
   CompactionCard,
+  DiffCard,
   PlanCardView,
   type PlanItem,
   ReasoningCard,
   ShellCard,
   ToolCard,
+  parseEditResult,
 } from "./cards";
 import { ApprovalCard, TaskCard, type TaskStepView } from "./extra-cards";
 
@@ -190,6 +192,30 @@ export const AssistantMsg = memo(function AssistantMsg({
                       }
                     : undefined
                 }
+              />
+            );
+          }
+          if (s.result && (s.name === "edit_file" || s.name === "multi_edit")) {
+            const files = parseEditResult(s.result);
+            return files.length > 0 ? (
+              <>
+                {files.map((f, fi) => (
+                  <DiffCard
+                    key={`${i}-${fi}`}
+                    filename={f.filename}
+                    lines={f.lines}
+                    applied={s.ok !== false}
+                  />
+                ))}
+              </>
+            ) : (
+              <ToolCard
+                key={i}
+                name={s.name}
+                args={s.args}
+                result={s.result}
+                ok={s.ok}
+                durationMs={s.durationMs}
               />
             );
           }
