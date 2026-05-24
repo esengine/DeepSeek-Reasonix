@@ -1645,6 +1645,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .msg .body {
   flex: 1;
   min-width: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1657,6 +1658,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .msg.user .body {
   flex: none;
   max-width: 82%;
+  position: relative;
   background: var(--panel-2);
   border-radius: 12px;
   padding: 10px 14px;
@@ -1843,9 +1845,39 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 
 .msg-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 4px;
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 10;
+}
+.msg .body:hover .msg-actions {
+  opacity: 1;
+}
+.msg-actions .copy-btn,
+.msg-actions .edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+.msg-actions .copy-btn:hover,
+.msg-actions .edit-btn:hover {
+  color: var(--fg-2);
+  border-color: var(--border-strong);
+}
+.msg-actions .copy-btn.done {
+  color: var(--success);
+  border-color: var(--success-soft);
 }
 
 .markdown pre {
@@ -1872,14 +1904,16 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .markdown .codeblock-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 7px 14px;
+  padding: 6px 12px;
   background: var(--panel-2);
   border-bottom: 1px solid var(--border);
   font-family: "Geist Mono", monospace;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
+}
+.markdown .codeblock-head .codeblock-copy-wrap {
+  margin-left: auto;
 }
 .markdown .codeblock-lang {
   text-transform: lowercase;
@@ -1887,24 +1921,24 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   color: var(--fg-2);
   font-weight: 500;
 }
-.markdown .copy-btn {
+.markdown .codeblock-head .copy-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 2px 7px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
-  background: transparent;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
 }
-.markdown .copy-btn:hover {
+.markdown .codeblock-head .copy-btn:hover {
   color: var(--fg-2);
   border-color: var(--border-strong);
 }
-.markdown .copy-btn.done {
+.markdown .codeblock-head .copy-btn.done {
   color: var(--success);
   border-color: var(--success-soft);
 }

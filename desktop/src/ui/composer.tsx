@@ -178,6 +178,12 @@ export function Composer({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const nonceRef = useRef(0);
   const modelWrapRef = useRef<HTMLDivElement>(null);
+  // macOS Chinese IME fires compositionend BEFORE the confirm keydown.
+  const composingRef = useRef(false);
+  const compositionEndedAtRef = useRef(0);
+  const historyRef = useRef<string[]>([]);
+  const [browseIdx, setBrowseIdx] = useState(-1);
+  const savedDraftRef = useRef("");
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -334,6 +340,28 @@ export function Composer({
     textareaRef.current?.focus();
   };
 
+  const navigateHistory = (dir: -1 | 1) => {
+    const hist = historyRef.current;
+    if (hist.length === 0) return;
+    if (dir === -1) {
+      const nextIdx = browseIdx + 1;
+      if (nextIdx < hist.length) {
+        if (browseIdx === -1) savedDraftRef.current = draft;
+        setBrowseIdx(nextIdx);
+        setDraft(hist[hist.length - 1 - nextIdx]);
+      }
+    } else {
+      if (browseIdx > 0) {
+        const nextIdx = browseIdx - 1;
+        setBrowseIdx(nextIdx);
+        setDraft(hist[hist.length - 1 - nextIdx]);
+      } else if (browseIdx === 0) {
+        setBrowseIdx(-1);
+        setDraft(savedDraftRef.current);
+      }
+    }
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (popup) {
       if (e.key === "ArrowDown") {
@@ -387,6 +415,20 @@ export function Composer({
         dismiss();
       }
     }
+    if (!popup) {
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        navigateHistory(-1);
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        navigateHistory(1);
+        return;
+      }
+    }
+    // macOS Chinese IME fires compositionend BEFORE the confirm Enter keydown.
+    if (composingRef.current || Date.now() - compositionEndedAtRef.current < 50) return;
     if (e.key === "Enter" && !e.shiftKey && !popup) {
       e.preventDefault();
       if (busy) {
@@ -396,6 +438,9 @@ export function Composer({
           setChips([]);
         }
       } else if (!disabled && draft.trim()) {
+        historyRef.current.push(draft.trim());
+        if (historyRef.current.length > 100) historyRef.current.shift();
+        setBrowseIdx(-1);
         onSend();
         setChips([]);
       }
@@ -489,6 +534,11 @@ export function Composer({
             placeholder={t("composer.placeholder")}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+              compositionEndedAtRef.current = Date.now();
+            }}
             rows={DEFAULT_COMPOSER_ROWS}
             disabled={disabled}
           />
@@ -579,6 +629,9 @@ export function Composer({
                 disabled={disabled || !draft.trim()}
                 onClick={() => {
                   if (!disabled && draft.trim()) {
+                    historyRef.current.push(draft.trim());
+                    if (historyRef.current.length > 100) historyRef.current.shift();
+                    setBrowseIdx(-1);
                     onSend();
                     setChips([]);
                   }

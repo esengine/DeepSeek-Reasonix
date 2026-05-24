@@ -173,7 +173,7 @@ export function ReasoningCard({
           )}
         </>
       }
-      defaultOpen={streaming}
+      defaultOpen={false}
       compact
     >
       <div className="reason">
@@ -236,6 +236,7 @@ export function ShellCard({
       kind="shell"
       name="shell"
       compact
+      defaultOpen={state !== "done"}
       meta={
         <>
           {state === "await" ? (

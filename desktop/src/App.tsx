@@ -1931,7 +1931,7 @@ function TabRuntime({
                       return (
                         <div key={`u-${i}`}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg text={m.text} skill={m.skill} />
+                          <UserMsg text={m.text} skill={m.skill} onEdit={(t) => { setDraft(t); composerRef.current?.focus(); }} />
                         </div>
                       );
                     }

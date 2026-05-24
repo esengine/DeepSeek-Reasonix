@@ -674,6 +674,7 @@ export const en = {
     optionCount: "{count} options",
     subagent: "subagent",
     copyMessage: "Copy this message",
+    editMessage: "Edit this message and re-send",
     copyResponse: "Copy this response",
   },
   live: {

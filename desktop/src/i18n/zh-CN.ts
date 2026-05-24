@@ -660,6 +660,7 @@ export const zhCN: typeof en = {
     optionCount: "{count} 个选项",
     subagent: "subagent",
     copyMessage: "复制这条消息",
+    editMessage: "编辑并重新发送",
     copyResponse: "复制这条回复",
   },
   live: {
