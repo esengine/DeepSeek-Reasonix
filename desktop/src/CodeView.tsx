@@ -1,7 +1,7 @@
 import { Highlight, type PrismTheme } from "prism-react-renderer";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-const THEME: PrismTheme = {
+const DARK_THEME: PrismTheme = {
   plain: { color: "#dde1ea", backgroundColor: "transparent" },
   styles: [
     { types: ["comment", "prolog", "doctype", "cdata"], style: { color: "#6d6e80", fontStyle: "italic" } },
@@ -17,7 +17,44 @@ const THEME: PrismTheme = {
   ],
 };
 
-export const PRISM_THEME = THEME;
+const LIGHT_THEME: PrismTheme = {
+  plain: { color: "#24292e", backgroundColor: "transparent" },
+  styles: [
+    { types: ["comment", "prolog", "doctype", "cdata"], style: { color: "#6a737d", fontStyle: "italic" } },
+    { types: ["punctuation"], style: { color: "#24292e" } },
+    { types: ["property", "tag", "boolean", "number", "constant", "symbol", "deleted"], style: { color: "#d73a49" } },
+    { types: ["selector", "attr-name", "string", "char", "builtin", "inserted"], style: { color: "#032f62" } },
+    { types: ["operator", "entity", "url"], style: { color: "#d73a49" } },
+    { types: ["atrule", "attr-value", "keyword"], style: { color: "#d73a49" } },
+    { types: ["function", "class-name", "maybe-class-name"], style: { color: "#6f42c1", fontWeight: "500" } },
+    { types: ["regex", "important", "variable"], style: { color: "#e36209" } },
+    { types: ["important", "bold"], style: { fontWeight: "bold" } },
+    { types: ["italic"], style: { fontStyle: "italic" } },
+  ],
+};
+
+function usePrismTheme(): PrismTheme {
+  const [theme, setTheme] = useState<"dark" | "light">(() =>
+    document.documentElement.dataset.theme === "light" ? "light" : "dark",
+  );
+  const prevRef = useRef(theme);
+  useEffect(() => {
+    const el = document.documentElement;
+    const cb = () => {
+      const t = el.dataset.theme === "light" ? "light" : "dark";
+      if (t !== prevRef.current) {
+        prevRef.current = t;
+        setTheme(t);
+      }
+    };
+    const mo = new MutationObserver(cb);
+    mo.observe(el, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => mo.disconnect();
+  }, []);
+  return theme === "dark" ? DARK_THEME : LIGHT_THEME;
+}
+
+export const PRISM_THEME = DARK_THEME;
 
 const EXTS: Record<string, string> = {
   ts: "typescript", tsx: "tsx", mts: "typescript", cts: "typescript",
@@ -75,8 +112,9 @@ export function CodeView({
   startLine?: number;
   showLineNumbers?: boolean;
 }) {
+  const theme = usePrismTheme();
   return (
-    <Highlight theme={THEME} code={text} language={lang}>
+    <Highlight theme={theme} code={text} language={lang}>
       {({ className, tokens, getLineProps, getTokenProps }) => (
         <pre className={`codeview ${className}`}>
           {tokens.map((line, i) => (
