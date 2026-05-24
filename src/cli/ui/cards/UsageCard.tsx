@@ -5,6 +5,7 @@ import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { UsageCard as UsageCardData } from "../state/cards.js";
+import { useAgentState } from "../state/provider.js";
 import { FG, TONE, formatBalance, formatCost } from "../theme/tokens.js";
 
 const BAR_CELLS = 30;
@@ -27,7 +28,11 @@ function bar(ratio: number, color: string): React.ReactElement {
 }
 
 export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement {
-  if (card.compact) return <CompactUsageRow card={card} />;
+  // Read live display-currency toggle so the card re-renders when the
+  // user swaps currency via click or shortcut.
+  const costDisplayCurrency = useAgentState((s) => s.status.costDisplayCurrency);
+  const costCur = costDisplayCurrency ?? card.balanceCurrency;
+  if (card.compact) return <CompactUsageRow card={card} displayCurrency={costCur} />;
   const cap = Math.max(1, card.tokens.promptCap);
   const promptRatio = card.tokens.prompt / cap;
   const reasonRatio = card.tokens.reason / cap;
@@ -35,7 +40,7 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
 
   const headerMeta: string[] = [
     `${t("cardLabels.turn")} ${card.turn}`,
-    formatCost(card.cost, card.balanceCurrency),
+    formatCost(card.cost, costCur),
   ];
   if (card.elapsedMs !== undefined) headerMeta.push(`${(card.elapsedMs / 1000).toFixed(1)}s`);
   return (
@@ -71,7 +76,7 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
       <Box flexDirection="row" gap={1}>
         <Text color={FG.faint}>{t("cardLabels.session")}</Text>
         <Text bold color={FG.body}>
-          {`● ${formatCost(card.sessionCost, card.balanceCurrency, 3)}`}
+          {`● ${formatCost(card.sessionCost, costCur, 3)}`}
         </Text>
         {card.balance !== undefined ? (
           <>
@@ -86,7 +91,10 @@ export function UsageCard({ card }: { card: UsageCardData }): React.ReactElement
   );
 }
 
-function CompactUsageRow({ card }: { card: UsageCardData }): React.ReactElement {
+function CompactUsageRow({
+  card,
+  displayCurrency,
+}: { card: UsageCardData; displayCurrency?: string }): React.ReactElement {
   const elapsed = card.elapsedMs !== undefined ? ` · ${(card.elapsedMs / 1000).toFixed(1)}s` : "";
   return (
     <Box flexDirection="row" gap={1} marginTop={1}>
@@ -97,7 +105,7 @@ function CompactUsageRow({ card }: { card: UsageCardData }): React.ReactElement 
       </Text>
       <Text color={FG.faint}>{`· ${t("cardLabels.cache")}`}</Text>
       <Text color={TONE.ok}>{`${(card.cacheHit * 100).toFixed(0)}%`}</Text>
-      <Text color={FG.faint}>{`· ${formatCost(card.cost, card.balanceCurrency)}${elapsed}`}</Text>
+      <Text color={FG.faint}>{`· ${formatCost(card.cost, displayCurrency)}${elapsed}`}</Text>
       {card.balance !== undefined ? (
         <Text color={TONE.brand}>{`· ${formatBalance(card.balance, card.balanceCurrency)}`}</Text>
       ) : null}
