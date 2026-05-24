@@ -399,6 +399,15 @@ export type StatusEvent = {
   text: string;
 };
 
+export type WarningEvent = {
+  type: "warning";
+  id: number;
+  ts: string;
+  turn: number;
+  text: string;
+  severity: "low" | "high";
+};
+
 export type KernelErrorEvent = {
   type: "error";
   id: number;
@@ -444,6 +453,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ToolIntentEvent
   | ToolResultEvent
   | StatusEvent
+  | WarningEvent
   | KernelErrorEvent
   | RetryResultEvent
   | BtwResultEvent
