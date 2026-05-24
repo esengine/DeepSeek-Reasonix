@@ -19,6 +19,7 @@ import {
   loadFilesystemOutlineThresholdBytes,
   loadIndexConfig,
   loadIndexUserConfig,
+  loadModel,
   loadMouseWheelRows,
   loadPricingOverride,
   loadProjectPathAllowed,
@@ -183,6 +184,27 @@ describe("config", () => {
     const ep = loadEndpoint(path);
     expect(ep.baseUrl).toBe("https://new-api.example.com/v1");
     expect(ep.apiKey).toBe("sk-new-api-token-xyz1234");
+  });
+
+  it("loadModel falls back to default when persisted id is unsupported on the official endpoint", () => {
+    // Regression: v3-era `deepseek-chat`/`deepseek-reasoner` lingering in
+    // config — or any other unsupported id — would be sent verbatim and
+    // make the first chat request 400 with "supported API model names are
+    // deepseek-v4-pro or deepseek-v4-flash, but you passed …".
+    writeConfig({ model: "deepseek-chat" }, path);
+    expect(loadModel(path)).toBe("deepseek-v4-flash");
+    writeConfig({ model: "deepseek-made-up" }, path);
+    expect(loadModel(path)).toBe("deepseek-v4-flash");
+  });
+
+  it("loadModel passes through any persisted id when a custom baseUrl is set", () => {
+    writeConfig({ model: "my-self-hosted-7b", baseUrl: "https://self.example.com" }, path);
+    expect(loadModel(path)).toBe("my-self-hosted-7b");
+  });
+
+  it("loadModel keeps a supported v4 id on the official endpoint", () => {
+    writeConfig({ model: "deepseek-v4-pro" }, path);
+    expect(loadModel(path)).toBe("deepseek-v4-pro");
   });
 
   it("loadEndpoint: env tuple wins when env sets baseUrl", () => {

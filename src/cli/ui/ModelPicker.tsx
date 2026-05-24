@@ -190,9 +190,4 @@ function ModelRow({
   );
 }
 
-const FALLBACK_MODELS: ReadonlyArray<string> = [
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "deepseek-chat",
-  "deepseek-reasoner",
-];
+const FALLBACK_MODELS: ReadonlyArray<string> = ["deepseek-v4-flash", "deepseek-v4-pro"];

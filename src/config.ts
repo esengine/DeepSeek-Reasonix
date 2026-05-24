@@ -25,6 +25,13 @@ export type EditMode = "review" | "auto" | "yolo";
 
 export const DEFAULT_MODEL = "deepseek-v4-flash";
 
+/** Models the official api.deepseek.com endpoint currently accepts. v3-era
+ *  `deepseek-chat`/`deepseek-reasoner` are gone — sending them produces a 400. */
+export const SUPPORTED_OFFICIAL_MODELS: readonly string[] = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+];
+
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = ["low", "medium", "high", "max"];
@@ -1143,8 +1150,14 @@ export function saveReasoningEffort(
 }
 
 export function loadModel(path: string = defaultConfigPath()): string {
-  const v = readConfig(path).model;
-  return typeof v === "string" && v.trim() ? v.trim() : DEFAULT_MODEL;
+  const cfg = readConfig(path);
+  const raw = cfg.model;
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  if (!trimmed) return DEFAULT_MODEL;
+  // Custom-endpoint owners pick their own model namespace; trust them.
+  const customEndpoint = cfg.baseUrl?.trim() || process.env.DEEPSEEK_BASE_URL;
+  if (customEndpoint) return trimmed;
+  return SUPPORTED_OFFICIAL_MODELS.includes(trimmed) ? trimmed : DEFAULT_MODEL;
 }
 
 export function saveModel(model: string, path: string = defaultConfigPath()): void {

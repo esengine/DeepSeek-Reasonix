@@ -793,12 +793,7 @@ function ApiKeySection({
   );
 }
 
-const KNOWN_MODELS = [
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "deepseek-chat",
-  "deepseek-reasoner",
-] as const;
+const KNOWN_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
 
 const EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
 type EffortValue = (typeof EFFORT_VALUES)[number];
