@@ -1,5 +1,5 @@
 import { type WriteStream, statSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import { derivePrefix, toApprovalPrompt } from "@reasonix/core-utils";
 import { Box, Text, useStdin, useStdout } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,14 +17,9 @@ import {
   listCheckpoints,
   restoreCheckpoint,
 } from "../../code/checkpoints.js";
-import {
-  type EditBlock,
-  applyEditBlocks,
-  snapshotBeforeEdits,
-  toWholeFileEditBlock,
-} from "../../code/edit-blocks.js";
+import { type EditBlock, applyEditBlocks, snapshotBeforeEdits } from "../../code/edit-blocks.js";
 import { EngineeringLifecycleRuntime } from "../../code/lifecycle.js";
-import { clearPendingEdits, loadPendingEdits } from "../../code/pending-edits.js";
+import { clearPendingEdits, loadPendingEdits, savePendingEdits } from "../../code/pending-edits.js";
 import {
   clearPlanState,
   loadPlanState,
@@ -95,7 +90,6 @@ import {
 import { defaultUsageLogPath } from "../../telemetry/usage.js";
 import type { ToolRegistry } from "../../tools.js";
 import type { ChoiceOption } from "../../tools/choice.js";
-import { looksLikeAbsoluteSystemPath, pathIsUnder } from "../../tools/filesystem.js";
 import type { PlanStep, StepCompletion } from "../../tools/plan.js";
 import { formatCommandResult, runCommand } from "../../tools/shell.js";
 import { registerSkillTools } from "../../tools/skills.js";
@@ -133,7 +127,13 @@ import { WorkspacePicker } from "./WorkspacePicker.js";
 import { detectBangCommand, formatBangUserMessage } from "./bang.js";
 import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broadcast.js";
 import { useViewerBroadcast } from "./dashboard/use-picker-broadcast.js";
-import { formatEditResults } from "./edit-history.js";
+import { formatEditResults, formatPendingPreview } from "./edit-history.js";
+import {
+  buildEditToolBlocks,
+  formatQueuedReviewToolResult,
+  isReviewGatedEditTool,
+  shouldApplyEditToolImmediately,
+} from "./edit-tool-gate.js";
 import { loopEventToDashboard } from "./effects/loop-to-dashboard.js";
 import { appendGlobalMemory, appendProjectMemory, detectHashMemory } from "./hash-memory.js";
 import { applySlashResult } from "./hooks/apply-slash-result.js";
@@ -585,6 +585,14 @@ function AppInner({
     editModeRef,
     modeFlash,
   } = useEditGate(!!codeMode);
+  const setEditModeLive = useCallback(
+    (mode: EditMode) => {
+      editModeRef.current = mode;
+      setEditMode(mode);
+      if (codeMode) saveEditMode(mode);
+    },
+    [codeMode, editModeRef, setEditMode],
+  );
   const { preset, setPreset } = usePresetMode(model, initialPreset);
   const engineeringLifecycleBaseModeRef = useRef<EngineeringLifecycleMode>(
     loadEngineeringLifecycleMode(),
@@ -1795,7 +1803,7 @@ function AppInner({
       // disables shell confirmations so true zero-prompt iteration takes two Shift+Tabs from default.
       const cur = editModeRef.current;
       const next: EditMode = cur === "review" ? "auto" : cur === "auto" ? "yolo" : "review";
-      setEditMode(next);
+      setEditModeLive(next);
       const message =
         next === "yolo"
           ? t("app.editModeYolo")
@@ -1964,12 +1972,10 @@ function AppInner({
     return () => tools.setResultAugmenter(null);
   }, [tools, codeMode]);
 
-  // Edit-gate interceptor. Reroutes `edit_file` / `write_file` tool
-  // calls through the review queue (in `review` mode) or the auto-apply
-  // snapshot/banner path (in `auto` mode) so the model's tool usage
-  // respects the same gate as its text-form SEARCH/REPLACE output.
-  // Without this, edit_file bypasses `/apply` entirely —which was the
-  // bug that made the preview flow feel absent pre-0.5.24.
+  // Edit-gate interceptor. Reroutes edit tools through the review queue
+  // (in review mode) or the auto-apply snapshot/banner path (in auto
+  // mode) so the model's tool usage respects the same gate as its
+  // text-form SEARCH/REPLACE output.
   //
   // `editModeRef` is read inside the closure so mode cycles don't need
   // to reinstall the hook. Cleanup clears the slot on unmount so a
@@ -1979,48 +1985,17 @@ function AppInner({
   useEffect(() => {
     if (!tools || !codeMode) return;
     tools.setToolInterceptor(async (name, args) => {
-      if (name !== "edit_file" && name !== "write_file") return null;
-      const rawPath = typeof args.path === "string" ? args.path : "";
-      if (!rawPath) return null;
+      if (!isReviewGatedEditTool(name)) return null;
 
       // Read root via ref so a workspace swap (which runs reregisterTools
       // for read_file/run_command) is also visible to this interceptor
       // otherwise edit_file writes to the OLD root while read_file looks in
       // the NEW one, producing ENOENT on the next read of a just-edited file.
       const rootForEdit = currentRootDirRef.current;
-      const absRoot = resolve(rootForEdit);
+      const blocks = buildEditToolBlocks(name, args, rootForEdit);
+      if (!blocks || blocks.length === 0) return null;
 
-      // Absolute system paths (issue #942): defer outside-rootDir writes to the tool fn's safePath gate instead of stripping the leading slash and silently rewriting to <rootDir>/...
-      let relPath: string;
-      if (looksLikeAbsoluteSystemPath(rawPath)) {
-        const abs = resolve(rawPath);
-        if (!pathIsUnder(abs, absRoot)) return null;
-        const rel = relative(absRoot, abs);
-        if (!rel) return null;
-        relPath = rel;
-      } else {
-        let stripped = rawPath;
-        while (stripped.startsWith("/") || stripped.startsWith("\\")) {
-          stripped = stripped.slice(1);
-        }
-        if (!stripped) return null;
-        relPath = stripped;
-      }
-      let block: EditBlock;
-      if (name === "edit_file") {
-        const search = typeof args.search === "string" ? args.search : "";
-        const replace = typeof args.replace === "string" ? args.replace : "";
-        if (!search) return null; // let the tool fn surface the "empty search" error
-        block = { path: relPath, search, replace, offset: 0 };
-      } else {
-        // write_file: capture the current content (if any) as SEARCH so
-        // the queued block is a literal whole-file overwrite. For new
-        // files SEARCH stays empty —applyEditBlock's create-new sentinel.
-        const content = typeof args.content === "string" ? args.content : "";
-        block = toWholeFileEditBlock(relPath, content, rootForEdit);
-      }
-
-      // Helper: apply the current block + record into history + arm
+      // Helper: apply the current block(s) + record into history + arm
       // undo. Used by auto mode AND by the various "apply" branches
       // of the review modal so we don't duplicate the snapshot /
       // apply / banner logic.
@@ -2030,27 +2005,34 @@ function AppInner({
       // after —ToolCard renders that with the same text. Pushing here
       // would produce "result shown twice".
       const applyNow = (): string => {
-        const snaps = snapshotBeforeEdits([block], rootForEdit);
-        const results = applyEditBlocks([block], rootForEdit);
+        const snaps = snapshotBeforeEdits(blocks, rootForEdit);
+        const results = applyEditBlocks(blocks, rootForEdit);
         const good = results.some((r) => r.status === "applied" || r.status === "created");
         if (good) {
-          recordEdit("auto", [block], results, snaps);
+          recordEdit("auto", blocks, results, snaps);
           armUndoBanner(results);
         }
         return formatEditResults(results);
       };
 
-      // yolo behaves like auto for edit application —the only extra
-      // power yolo adds is bypassing shell confirmations (handled in
-      // shell.ts via the allowAll getter).
-      if (editModeRef.current === "auto" || editModeRef.current === "yolo") return applyNow();
+      if (shouldApplyEditToolImmediately(editModeRef.current, turnEditPolicyRef.current)) {
+        return applyNow();
+      }
+
+      if (name === "multi_edit") {
+        pendingEdits.current = [...pendingEdits.current, ...blocks];
+        savePendingEdits(session ?? null, pendingEdits.current);
+        syncPendingCount();
+        log.pushInfo(formatPendingPreview(pendingEdits.current));
+        return formatQueuedReviewToolResult(blocks.length);
+      }
 
       // review mode, tool-call path: suspend the interceptor on the
       // per-edit modal unless the user has already hit "apply-rest-of-
       // turn" earlier in the same turn. Text-form SEARCH/REPLACE blocks
       // in assistant_final still queue for end-of-turn preview —they
       // land all at once with no mid-stream opportunity to prompt.
-      if (turnEditPolicyRef.current === "apply-all") return applyNow();
+      const block = blocks[0]!;
 
       const { choice, denyContext } = await new Promise<EditReviewResult>((resolveChoice) => {
         editReviewResolveRef.current = resolveChoice;
@@ -2072,7 +2054,7 @@ function AppInner({
         return applyNow();
       }
       if (choice === "flip-to-auto") {
-        setEditMode("auto");
+        setEditModeLive("auto");
         log.pushInfo(t("app.flippedAutoSession"));
         return applyNow();
       }
@@ -2177,9 +2159,7 @@ function AppInner({
         getLatestVersion: () => latestVersionRef.current,
         getSessionName: () => session ?? null,
         setEditMode: (m: EditMode) => {
-          setEditMode(m);
-          editModeRef.current = m;
-          saveEditMode(m);
+          setEditModeLive(m);
           return m;
         },
         setPlanMode: (on: boolean, source?: PlanModeToggleSource) => {
@@ -2505,7 +2485,7 @@ function AppInner({
     stopLoop,
     pendingEdits,
     editModeRef,
-    setEditMode,
+    setEditModeLive,
     currentRootDirRef,
     reloadHooks,
     setPreset,
@@ -2596,8 +2576,7 @@ function AppInner({
         // Flip the gate first, then apply the current block, then exit
         // the walk. Remaining blocks stay pending —the user can keep
         // walking via /walk again or commit them with /apply.
-        setEditMode("auto");
-        saveEditMode("auto");
+        setEditModeLive("auto");
         log.pushInfo(codeApply([1]));
         log.pushInfo(t("app.flippedAutoWalk"));
         setWalkthroughActive(false);
@@ -2609,7 +2588,7 @@ function AppInner({
       // the new first block thanks to pendingTick.
       if (pendingEdits.current.length === 0) setWalkthroughActive(false);
     },
-    [codeApply, codeDiscard, log, pendingEdits, setEditMode],
+    [codeApply, codeDiscard, log, pendingEdits, setEditModeLive],
   );
 
   const pendingGateIdRef = useRef<number | null>(null);
@@ -2935,7 +2914,7 @@ function AppInner({
           planMode,
           setPlanMode: codeMode ? togglePlanMode : undefined,
           editMode: codeMode ? editMode : undefined,
-          setEditMode: codeMode ? setEditMode : undefined,
+          setEditMode: codeMode ? setEditModeLive : undefined,
           touchedFiles: codeMode
             ? () => {
                 // Union of (files in completed/undone edit batches) +
@@ -3495,7 +3474,7 @@ function AppInner({
       sealCurrentEntry,
       editMode,
       editModeRef,
-      setEditMode,
+      setEditModeLive,
       pendingEdits,
       syncPendingCount,
       reloadHooks,
