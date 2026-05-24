@@ -14,7 +14,7 @@ import {
 } from "../../at-mentions.js";
 import { pickPrimaryBalance } from "../../client.js";
 import { codeSystemPrompt } from "../../code/prompt.js";
-import { buildCodeToolset } from "../../code/setup.js";
+import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
 import {
   DEFAULT_MODEL,
   type DesktopOpenTab,
@@ -559,12 +559,14 @@ function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
 
 function emitSettings(tab: Tab): void {
   const ep = loadEndpoint();
+  const editMode = loadEditMode();
+  if (tab.toolset) applyPlanMode(tab.toolset.tools, editMode);
   const recent = loadRecentWorkspaces().filter((p) => p !== tab.rootDir);
   emit(
     {
       type: "$settings",
       reasoningEffort: loadReasoningEffort(),
-      editMode: loadEditMode(),
+      editMode,
       budgetUsd: tab.runtime?.loop.budgetUsd ?? null,
       baseUrl: ep.baseUrl,
       apiKeyPrefix: ep.apiKey ? `${ep.apiKey.slice(0, 6)}…${ep.apiKey.slice(-3)}` : undefined,
@@ -781,6 +783,7 @@ function mintSessionFor(rootDir: string): string {
 function buildRuntimeFor(tab: Tab): RuntimeState {
   if (!tab.toolset) throw new Error("buildRuntimeFor called before initTabToolset finished");
   const toolset = tab.toolset;
+  applyPlanMode(toolset.tools, loadEditMode());
   const ep = loadEndpoint();
   const client = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
@@ -2217,7 +2220,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           saveReasoningEffort(msg.reasoningEffort);
           tab.runtime?.loop.configure({ reasoningEffort: msg.reasoningEffort });
         }
-        if (msg.editMode !== undefined) saveEditMode(msg.editMode);
+        if (msg.editMode !== undefined) {
+          saveEditMode(msg.editMode);
+          if (tab.toolset) applyPlanMode(tab.toolset.tools, msg.editMode);
+        }
         if (msg.budgetUsd !== undefined) {
           tab.budgetUsd = msg.budgetUsd ?? undefined;
           tab.runtime?.loop.setBudget(msg.budgetUsd);

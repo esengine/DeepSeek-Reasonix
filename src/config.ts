@@ -20,8 +20,8 @@ import {
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
 
-/** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates. */
-export type EditMode = "review" | "auto" | "yolo";
+/** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
+export type EditMode = "review" | "auto" | "yolo" | "plan";
 
 export const DEFAULT_MODEL = "deepseek-v4-flash";
 
@@ -1073,7 +1073,7 @@ export function clearProjectPathAllowed(
 /** Unknown values fall back to "review" so hand-edited bad config gets the safe default. */
 export function loadEditMode(path: string = defaultConfigPath()): EditMode {
   const v = readConfig(path).editMode;
-  if (v === "auto" || v === "yolo") return v;
+  if (v === "auto" || v === "yolo" || v === "plan") return v;
   return "review";
 }
 

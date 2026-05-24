@@ -1,5 +1,6 @@
 import { DeepSeekClient } from "../client.js";
 import {
+  type EditMode,
   loadEditMode,
   loadEndpoint,
   loadFilesystemOutlineThresholdBytes,
@@ -34,6 +35,8 @@ import { registerWebTools } from "../tools/web.js";
 
 export interface CodeToolsetOpts {
   rootDir: string;
+  /** Override the default `~/.reasonix/config.json` lookup — primarily for tests that pin a tmp config. */
+  configPath?: string;
   /** Fired after `install_skill` writes a new skill — desktop wires this to push a fresh `$skills` event so the sidebar updates without a tab reload. */
   onSkillInstalled?: SkillInstalledHook;
   /** Fired after `run_background` / `stop_job` mutate the JobRegistry — desktop pushes a fresh `$jobs` event so the popover updates without waiting for poll. */
@@ -50,8 +53,14 @@ export interface CodeToolset {
   semantic: { enabled: boolean };
 }
 
+/** Mirror `editMode === "plan"` into the registry's dispatch gate — keeps a single source of truth (the persisted EditMode) for the read-only mode. */
+export function applyPlanMode(tools: ToolRegistry, editMode: EditMode): void {
+  tools.setPlanMode(editMode === "plan");
+}
+
 export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeToolset> {
   const tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
+  applyPlanMode(tools, loadEditMode(opts.configPath));
   const jobs = new JobRegistry();
 
   const outlineThresholdBytes = loadFilesystemOutlineThresholdBytes();
