@@ -171,6 +171,9 @@ export function Composer({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const nonceRef = useRef(0);
   const modelWrapRef = useRef<HTMLDivElement>(null);
+  // macOS Chinese IME fires compositionend before the confirm keydown.
+  const composingRef = useRef(false);
+  const compositionEndedAtRef = useRef(0);
 
   // Programmatic draft transitions to "/" (e.g. /help suggestion in EmptyState, #929) must open the slash popup, since handleChange only fires on actual user input.
   const prevDraftRef = useRef(draft);
@@ -374,6 +377,7 @@ export function Composer({
         dismiss();
       }
     }
+    if (composingRef.current || Date.now() - compositionEndedAtRef.current < 50) return;
     if (e.key === "Enter" && !e.shiftKey && !popup) {
       e.preventDefault();
       if (busy) {
@@ -476,6 +480,13 @@ export function Composer({
             placeholder={t("composer.placeholder")}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+              compositionEndedAtRef.current = Date.now();
+            }}
             rows={2}
             disabled={disabled}
           />
