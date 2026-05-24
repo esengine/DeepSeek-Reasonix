@@ -1813,6 +1813,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   border-radius: 10px;
   background: var(--panel-2);
   font-family: "Geist Mono", monospace;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
   font-size: 13px;
   line-height: 1.62;
   overflow-x: auto;
@@ -1870,6 +1872,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   margin: 0;
   padding: 14px 16px;
   font-family: "Geist Mono", monospace;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
   font-size: 13px;
   line-height: 1.62;
   overflow-x: auto;
