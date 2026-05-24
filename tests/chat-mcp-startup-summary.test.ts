@@ -273,8 +273,6 @@ describe("chatCommand MCP startup summary states", { timeout: 30_000 }, () => {
     expect(mocks.initializeMock).not.toHaveBeenCalled();
   });
 
-  const COPY_HINT = "/copy  →  vim-style copy mode (j/k navigate, v select, y yank to clipboard)";
-
   it("adds empty-MCP hint exactly when setup is completed and configured MCP list is empty", async () => {
     const props = await captureStartupState({
       readConfig: { setupCompleted: true, mcp: [] },
@@ -283,17 +281,17 @@ describe("chatCommand MCP startup summary states", { timeout: 30_000 }, () => {
 
     expect(props.startupInfoHints).toEqual([
       "\u2139 no MCP servers configured \u2014 try: `reasonix setup` to re-pick, or `reasonix mcp install filesystem` \u00b7 shell commands gate per-call (allow once / allow always / deny), no global allow-all",
-      COPY_HINT,
     ]);
+    expect(props.startupInfoHints.join("\n")).not.toContain("/copy");
   });
 
-  it("does not add empty-MCP hint when configured MCP list is non-empty", async () => {
+  it("does not add startup hints when configured MCP list is non-empty", async () => {
     const props = await captureStartupState({
       readConfig: { setupCompleted: true, mcp: ["fs=npx -y @scope/fs /tmp"] },
       mcp: ["fs=npx -y @scope/fs /tmp"],
     });
 
-    expect(props.startupInfoHints).toEqual([COPY_HINT]);
+    expect(props.startupInfoHints).toEqual([]);
   });
 
   it("renders empty-MCP hint in zh-CN locale", async () => {
@@ -304,7 +302,7 @@ describe("chatCommand MCP startup summary states", { timeout: 30_000 }, () => {
     });
     expect(props.startupInfoHints).toEqual([
       "\u2139 未配置 MCP 服务器 —— 可尝试：`reasonix setup` 重新选择，或 `reasonix mcp install filesystem` · shell 命令按次审批（allow once / allow always / deny），无全局放行",
-      COPY_HINT,
     ]);
+    expect(props.startupInfoHints.join("\n")).not.toContain("/copy");
   });
 });
