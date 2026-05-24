@@ -1,4 +1,5 @@
 import { handleAbort } from "./api/abort.js";
+import { handleBrowse } from "./api/browse.js";
 import { handleCheckpointCreate } from "./api/checkpoint-create.js";
 import { handleCheckpointDelete } from "./api/checkpoint-delete.js";
 import { handleCheckpointDiffs } from "./api/checkpoint-diffs.js";
@@ -92,6 +93,8 @@ export async function handleApi(
         return await handleSlash(method, rest, body, ctx);
       case "files":
         return await handleFiles(method, rest, body, ctx);
+      case "browse":
+        return await handleBrowse(method, rest, body, ctx, query);
       case "project-tree":
         return await handleProjectTree(method, rest, body, ctx);
       case "git-diffs":

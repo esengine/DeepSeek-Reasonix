@@ -51,6 +51,8 @@ if (!import.meta.env.DEV) {
   );
 }
 
+window.addEventListener("contextmenu", (e) => e.preventDefault());
+
 const host = document.getElementById("root");
 if (!host) throw new Error("#root missing");
 

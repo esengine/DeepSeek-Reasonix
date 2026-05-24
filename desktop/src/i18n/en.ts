@@ -156,6 +156,14 @@ export const en = {
     budget: "Budget cap",
     budgetHint: "USD per session. Empty = no cap.",
     budgetPlaceholder: "no cap",
+    webSearchEngine: "search engine",
+    webSearchEngineBing: "bing — default, works from CN without proxy",
+    webSearchEngineSearxng: "searxng — self-hosted (set endpoint via /se searxng <url>)",
+    webSearchEngineMetaso: "metaso — 100/day free (CN-friendly, free key at metaso.cn)",
+    webSearchEngineTavily: "tavily — 1000/mo free (set TAVILY_API_KEY)",
+    webSearchEnginePerplexity: "perplexity — AI-native (set PERPLEXITY_API_KEY)",
+    webSearchEngineExa: "exa — AI-native 1000/mo free (set EXA_API_KEY)",
+    webSearchEngineNote: "applies to the next web_search call",
     baseUrl: "DeepSeek base URL",
     baseUrlHint: "Override only if using a proxy. Empty = official endpoint. Restart required.",
     workspace: "Workspace",
@@ -239,7 +247,6 @@ export const en = {
     apiKeySet: "Set · {prefix}…",
     // model descriptions
     defaultModelCurrent: "Default model · currently {model}",
-    modelAutoDesc: "Starts with flash, upgrades to pro for complex tasks — speed + quality.",
     modelFlashDesc: "General-purpose chat model — fast, long context, cost-friendly.",
     modelProDesc: "Deep reasoning model — interpretable chain-of-thought before final answer.",
     ctxWindow: "Context",
@@ -260,6 +267,9 @@ export const en = {
     skillsLoaded: "Loaded · {count} · invoke via / commands",
     skillsEmpty:
       "No skills available. Create SKILL.md under ~/.reasonix/skills/ or .reasonix/skills/ in your project root.",
+    subagentModelFlash: "flash",
+    subagentModelPro: "pro",
+    subagentModelHint: "Model used when this skill spawns its isolated subagent",
     // Memory
     memorySection: "Long-term memory",
     memoryDesc:
@@ -320,7 +330,6 @@ export const en = {
     copied: "copied",
   },
   preset: {
-    autoDesc: "Flash → Pro auto-upgrade",
     flashDesc: "Fast, cheap, long context",
     proDesc: "Deep reasoning",
   },
@@ -355,6 +364,7 @@ export const en = {
       langSwitched: "Switched to {lang}",
       modelSwitched: "Switched to {model}",
       modeSwitched: "Mode: {mode}",
+      taskComplete: "Task complete",
     },
     cmd: {
       newSession: "New session",
@@ -476,6 +486,8 @@ export const en = {
   cards: {
     reasoningName: "Thinking",
     reasoningComplete: "Complete",
+    compactionName: "Compacted history",
+    compactionMeta: "{chars} chars",
     shellAwaiting: "Waiting approval",
     shellRunning: "Running",
     shellExecuteHint: "execute this command",
@@ -558,6 +570,8 @@ export const en = {
     filesCount: "{count} files",
     fileModified: "modified",
     fileInContext: "in context",
+    openFile: "Open file: {path}",
+    copyPath: "Copy path: {path}",
     mcpTitle: "MCP servers",
     mcpReadyAll: "{count} ready",
     mcpReadySome: "{ready}/{count} ready",
@@ -668,6 +682,7 @@ export const en = {
     optionCount: "{count} options",
     subagent: "subagent",
     copyMessage: "Copy this message",
+    editMessage: "Edit this message and re-send",
     copyResponse: "Copy this response",
   },
   live: {

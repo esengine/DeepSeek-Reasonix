@@ -1099,14 +1099,12 @@ describe("dashboard server: D-1 settings + auto-loop surface", () => {
     return handle.url.split("?")[0]!;
   }
 
-  it("POST /api/settings routes proNext / budgetUsd / model to live callbacks", async () => {
+  it("POST /api/settings routes budgetUsd / model to live callbacks", async () => {
     const calls: Record<string, unknown[]> = {
-      proNext: [],
       budgetUsd: [],
       model: [],
     };
     const base = await boot({
-      setProNextLive: (v) => calls.proNext!.push(v),
       setBudgetUsdLive: (v) => calls.budgetUsd!.push(v),
       applyModelLive: (v) => calls.model!.push(v),
     });
@@ -1114,11 +1112,10 @@ describe("dashboard server: D-1 settings + auto-loop surface", () => {
       method: "POST",
       token: TOKEN,
       tokenInHeader: true,
-      body: { proNext: true, budgetUsd: 2.5, model: "deepseek-v4-pro" },
+      body: { budgetUsd: 2.5, model: "deepseek-v4-pro" },
     });
     expect(r.status).toBe(200);
-    expect(r.body.changed).toEqual(expect.arrayContaining(["proNext", "budgetUsd", "model"]));
-    expect(calls.proNext).toEqual([true]);
+    expect(r.body.changed).toEqual(expect.arrayContaining(["budgetUsd", "model"]));
     expect(calls.budgetUsd).toEqual([2.5]);
     expect(calls.model).toEqual(["deepseek-v4-pro"]);
   });

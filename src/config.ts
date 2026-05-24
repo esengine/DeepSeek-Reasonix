@@ -1,5 +1,6 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
+import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -26,8 +27,7 @@ import {
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
 
-/** Legacy `fast|smart|max` kept for back-compat with existing config.json files. */
-export type PresetName = "auto" | "flash" | "pro" | "fast" | "smart" | "max";
+export type PresetName = "flash" | "pro";
 
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates. */
 export type EditMode = "review" | "auto" | "yolo";
@@ -184,6 +184,8 @@ export interface ReasonixConfig {
   /** Rows scrolled per single SGR mouse-wheel report. Default 1 — most terminals emit 2-5 reports per physical notch, so 1 already produces 2-5 rows per notch (#1419). Bump to 3-5 only if your terminal emits one report per notch and scrolling feels slow (#1494). Clamped to [1, 10]. */
   mouseWheelRows?: number;
   dashboard?: {
+    /** Whether the embedded dashboard auto-starts on launch. Default true. Set false to disable without passing --no-dashboard each time. */
+    enabled?: boolean;
     /** Pin the embedded dashboard to a fixed port — required for stable SSH tunnels. 0/absent → ephemeral. */
     port?: number;
     /** Bind address (#968). Defaults to 127.0.0.1 (loopback only). Set to 0.0.0.0 / :: / a LAN IP to expose to other devices; the URL token is then the only auth, so keep it secret. */
@@ -223,6 +225,8 @@ export interface ReasonixConfig {
   skills?: {
     paths?: string[];
   };
+  /** Per-skill model override for `runAs: subagent` skills, keyed by skill name. Empty / missing entry → spawn site's default. */
+  subagentModels?: Record<string, "flash" | "pro">;
   /** Enable the `java_source` tool for finding and decompiling Java class source. Default off. */
   javaSource?: boolean;
   /** User-declared extensions to the built-in memory types (#709). Unknown types round-trip even without a declaration; declaring one lets you attach a default priority + lifecycle. */
@@ -407,6 +411,45 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
     /* missing or malformed → empty config */
   }
   return {};
+}
+
+/** Whether the dashboard auto-starts. Default true; only false when explicitly set in config. */
+export function loadDashboardEnabled(
+  noConfig = false,
+  path: string = defaultConfigPath(),
+): boolean {
+  if (noConfig) return true;
+  const v = readConfig(path).dashboard?.enabled;
+  return v !== false;
+}
+
+/** Get-or-mint a 32-byte hex dashboard token, persisting on first call so subsequent CLI boots reuse it (URLs survive restarts). Returns the existing token if it's already ≥16 chars. */
+export function ensureDashboardToken(path: string = defaultConfigPath()): string {
+  const cfg = readConfig(path);
+  const existing = cfg.dashboard?.token?.trim();
+  if (existing && existing.length >= 16) return existing;
+  const minted = randomBytes(32).toString("hex");
+  const next: ReasonixConfig = { ...cfg, dashboard: { ...cfg.dashboard, token: minted } };
+  writeConfig(next, path);
+  return minted;
+}
+
+/** Persist the actual port the server bound to so the next boot reuses it (and falls back to ephemeral if it's taken). */
+export function saveDashboardPort(port: number, path: string = defaultConfigPath()): void {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return;
+  const cfg = readConfig(path);
+  if (cfg.dashboard?.port === port) return;
+  const next: ReasonixConfig = { ...cfg, dashboard: { ...cfg.dashboard, port } };
+  writeConfig(next, path);
+}
+
+/** Wipe the persisted dashboard token — next boot mints a fresh one. Used by `/dashboard reset-token`. */
+export function clearDashboardToken(path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  if (!cfg.dashboard?.token) return;
+  const { token: _drop, ...rest } = cfg.dashboard;
+  const next: ReasonixConfig = { ...cfg, dashboard: rest };
+  writeConfig(next, path);
 }
 
 export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPath()): void {
@@ -737,6 +780,31 @@ export function saveSkillPaths(
   cfg.skills = { ...(cfg.skills ?? {}), paths: normalized };
   writeConfig(cfg, path);
   return normalized;
+}
+
+export function loadSubagentModels(
+  path: string = defaultConfigPath(),
+): Record<string, "flash" | "pro"> {
+  const raw = readConfig(path).subagentModels;
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, "flash" | "pro"> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    if (value === "flash" || value === "pro") out[name] = value;
+  }
+  return out;
+}
+
+export function saveSubagentModels(
+  map: Record<string, "flash" | "pro">,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  const out: Record<string, "flash" | "pro"> = {};
+  for (const [name, value] of Object.entries(map)) {
+    if (value === "flash" || value === "pro") out[name] = value;
+  }
+  cfg.subagentModels = Object.keys(out).length > 0 ? out : undefined;
+  writeConfig(cfg, path);
 }
 
 export function addSkillPath(
@@ -1157,7 +1225,9 @@ export function saveDesktopOpenTabs(
 }
 
 export function loadPreset(path: string = defaultConfigPath()): PresetName | undefined {
-  return readConfig(path).preset;
+  const raw = readConfig(path).preset as unknown;
+  if (raw === "flash" || raw === "pro") return raw;
+  return raw === undefined ? undefined : "flash";
 }
 
 /** Persist preset so `/preset pro` (or `/model deepseek-v4-pro`) sticks across relaunches. */

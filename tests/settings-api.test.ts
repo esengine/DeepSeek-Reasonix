@@ -320,4 +320,17 @@ describe("settings API — combined POST persistence (#274)", () => {
     expect(cfg.preset).toBe("flash");
     expect(cfg.reasoningEffort).toBe("high");
   });
+
+  it("drops prototype-pollution keys from subagentModels", async () => {
+    const res = await handleSettings(
+      "POST",
+      [],
+      `{"subagentModels":{"__proto__":"flash","constructor":"pro","prototype":"flash","explore":"pro"}}`,
+      makeCtx(configPath),
+    );
+    expect(res.status).toBe(200);
+    const cfg = readCfg(configPath);
+    expect(cfg.subagentModels).toEqual({ explore: "pro" });
+    expect(({} as Record<string, unknown>).flash).toBeUndefined();
+  });
 });

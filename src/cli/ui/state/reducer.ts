@@ -1,7 +1,9 @@
+import { extractToolExitCode } from "../tool-summary.js";
 import type {
   Card,
   CardId,
   LiveCard,
+  PlanStep,
   ReasoningCard,
   StreamingCard,
   ToolCard,
@@ -61,17 +63,19 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       return mutateCard(state, event.id, "tool", (c) => ({ ...c, output: c.output + event.text }));
 
     case "tool.end": {
-      const finalOutput = event.output ?? "";
-      const rejected = isPlanModeRejection(finalOutput);
-      return mutateCard(state, event.id, "tool", (c) => ({
-        ...c,
-        done: true,
-        output: event.output ?? c.output,
-        exitCode: event.exitCode,
-        elapsedMs: event.elapsedMs,
-        ...(event.aborted ? { aborted: true } : {}),
-        ...(rejected ? { rejected: true } : {}),
-      }));
+      return mutateCard(state, event.id, "tool", (c) => {
+        const finalOutput = event.output ?? c.output;
+        const rejected = isPlanModeRejection(finalOutput);
+        return {
+          ...c,
+          done: true,
+          output: finalOutput,
+          exitCode: event.exitCode ?? extractToolExitCode(c.name, finalOutput),
+          elapsedMs: event.elapsedMs,
+          ...(event.aborted ? { aborted: true } : {}),
+          ...(rejected ? { rejected: true } : {}),
+        };
+      });
     }
 
     case "tool.retry":
@@ -188,8 +192,8 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
     case "toast.hide":
       return { ...state, toasts: state.toasts.filter((t) => t.id !== event.id) };
 
-    case "live.show":
-      return appendCard(state, {
+    case "live.show": {
+      const card: LiveCard = {
         kind: "live",
         id: event.id,
         ts: event.ts,
@@ -197,7 +201,10 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         tone: event.tone,
         text: event.text,
         meta: event.meta,
-      });
+      };
+      const replaced = mutateCard(state, event.id, "live", () => card);
+      return replaced === state ? appendCard(state, card) : replaced;
+    }
 
     case "tip.show":
       return appendCard(state, {
@@ -246,7 +253,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         id: event.id,
         ts: Date.now(),
         title: event.title,
-        steps: event.steps,
+        steps: event.variant === "active" ? advanceActivePlanSteps(event.steps) : event.steps,
         variant: event.variant,
       });
 
@@ -279,7 +286,7 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         });
         if (!stepChanged) return c;
         changed = true;
-        return { ...c, steps: next };
+        return { ...c, steps: c.variant === "active" ? advanceActivePlanSteps(next) : next };
       });
       return changed ? { ...state, cards } : state;
     }
@@ -440,6 +447,19 @@ function nextId(prefix: string): string {
 
 function makeUserCard(text: string): UserCard {
   return { kind: "user", id: nextId("user"), ts: Date.now(), text };
+}
+
+function isSettledPlanStatus(status: PlanStep["status"]): boolean {
+  return status === "done" || status === "failed" || status === "blocked" || status === "skipped";
+}
+
+function advanceActivePlanSteps(steps: ReadonlyArray<PlanStep>): PlanStep[] {
+  const runningIndex = steps.findIndex((s) => !isSettledPlanStatus(s.status));
+  return steps.map((s, i) => {
+    if (isSettledPlanStatus(s.status)) return s;
+    const status: PlanStep["status"] = i === runningIndex ? "running" : "queued";
+    return s.status === status ? s : { ...s, status };
+  });
 }
 
 function makeReasoningCard(id: string, model?: string): ReasoningCard {

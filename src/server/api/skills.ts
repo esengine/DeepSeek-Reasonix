@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { loadResolvedSkillPaths } from "../../config.js";
+import { loadResolvedSkillPaths, loadSubagentModels } from "../../config.js";
 import { parseFrontmatter } from "../../frontmatter.js";
 import { SKILLS_DIRNAME, SKILL_FILE, SkillStore, validateSkillFrontmatter } from "../../skills.js";
 import { readUsageLog } from "../../telemetry/usage.js";
@@ -181,6 +181,7 @@ export async function handleSkills(
     const store = new SkillStore({
       projectRoot: cwd,
       customSkillPaths: loadResolvedSkillPaths(cwd ?? process.cwd(), ctx.configPath),
+      subagentModels: loadSubagentModels(ctx.configPath),
     });
     const customRoots = store.customRoots();
     return {

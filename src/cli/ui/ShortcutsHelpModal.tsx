@@ -26,6 +26,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "Ctrl+W", descKey: "shortcutsHelp.descCtrlW" },
       { keys: "Ctrl+P", descKey: "shortcutsHelp.descCtrlP" },
       { keys: "Ctrl+X", descKey: "shortcutsHelp.descCtrlX" },
+      { keys: "Alt+S", descKey: "shortcutsHelp.descAltS" },
     ],
   },
   {

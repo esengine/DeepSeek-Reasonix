@@ -1,14 +1,13 @@
-/** Precedence: per-setting flag > --preset > config.preset > "auto" defaults. */
+/** Precedence: per-setting flag > --preset > config.preset > "flash" defaults. */
 
 import { type PresetName, type ReasonixConfig, normalizeMcpConfig, readConfig } from "../config.js";
 import { loadDotMcpJson } from "../mcp/dot-mcp-json.js";
 import { specToRaw } from "../mcp/spec.js";
-import { presetNameForSettings, resolvePreset } from "./ui/presets.js";
+import { canonicalPresetName, presetNameForSettings, resolvePreset } from "./ui/presets.js";
 
 export interface ResolvedDefaults {
   model: string;
-  preset?: "auto" | "flash" | "pro";
-  autoEscalate: boolean;
+  preset?: PresetName;
   reasoningEffort: "high" | "max";
   mcp: string[];
   session: string | undefined;
@@ -32,7 +31,6 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
 
   const model = flags.model ?? presetSettings.model;
   const presetName = flags.model ? undefined : presetNameForSettings(presetSettings);
-  const autoEscalate = flags.model ? false : presetSettings.autoEscalate;
   const reasoningEffort = presetSettings.reasoningEffort;
 
   // Project-level `.mcp.json` merges in before normalization. Project entries
@@ -51,7 +49,7 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
 
   const session = resolveSession(flags.session, cfg.session);
 
-  return { model, preset: presetName, autoEscalate, reasoningEffort, mcp, session };
+  return { model, preset: presetName, reasoningEffort, mcp, session };
 }
 
 function mergeDotMcpJson(cfg: ReasonixConfig, projectRoot: string): ReasonixConfig {
@@ -64,22 +62,9 @@ function pickPreset(
   flagPreset: string | undefined,
   configPreset: PresetName | undefined,
 ): PresetName {
-  if (flagPreset && isPresetName(flagPreset)) return flagPreset;
+  if (flagPreset) return canonicalPresetName(flagPreset);
   if (configPreset) return configPreset;
-  return "auto";
-}
-
-function isPresetName(s: string): s is PresetName {
-  return (
-    s === "auto" ||
-    s === "flash" ||
-    s === "pro" ||
-    // Legacy names — kept callable so old `--preset smart` invocations
-    // and stale config.json entries don't error out.
-    s === "fast" ||
-    s === "smart" ||
-    s === "max"
-  );
+  return "flash";
 }
 
 function resolveSession(

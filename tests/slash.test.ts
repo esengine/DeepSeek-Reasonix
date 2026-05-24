@@ -233,21 +233,12 @@ describe("handleSlash", () => {
     expect(posted).toMatch(/nothing to fold|folded/);
   });
 
-  it("/preset auto = v4-flash with auto-escalate", () => {
+  it("/preset flash = v4-flash", () => {
     const loop = makeLoop();
     handleSlash("model", ["deepseek-v4-pro"], loop);
-    handleSlash("preset", ["auto"], loop);
-    expect(loop.model).toBe("deepseek-v4-flash");
-    expect(loop.reasoningEffort).toBe("max");
-    expect(loop.autoEscalate).toBe(true);
-  });
-
-  it("/preset flash = v4-flash, no auto-escalate", () => {
-    const loop = makeLoop();
     handleSlash("preset", ["flash"], loop);
     expect(loop.model).toBe("deepseek-v4-flash");
     expect(loop.reasoningEffort).toBe("max");
-    expect(loop.autoEscalate).toBe(false);
   });
 
   it("/preset pro = v4-pro pinned", () => {
@@ -255,7 +246,11 @@ describe("handleSlash", () => {
     handleSlash("preset", ["pro"], loop);
     expect(loop.model).toBe("deepseek-v4-pro");
     expect(loop.reasoningEffort).toBe("max");
-    expect(loop.autoEscalate).toBe(false);
+  });
+
+  it("/preset auto (legacy) returns usage", () => {
+    const r = handleSlash("preset", ["auto"], makeLoop());
+    expect(r.info).toMatch(/usage/);
   });
 
   it("/preset with bad name returns usage", () => {
@@ -266,7 +261,6 @@ describe("handleSlash", () => {
   it("/help mentions presets", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/Presets/);
-    expect(r.info).toMatch(/auto/);
     expect(r.info).toMatch(/flash/);
     expect(r.info).toMatch(/pro/);
   });
@@ -409,7 +403,7 @@ describe("handleSlash", () => {
       const ctx = detectSlashArgContext("/preset fl");
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
-      expect(ctx!.spec.argCompleter).toEqual(["auto", "flash", "pro"]);
+      expect(ctx!.spec.argCompleter).toEqual(["flash", "pro"]);
       expect(ctx!.partial).toBe("fl");
       // Offset is the char index where the partial starts in the buffer.
       expect(ctx!.partialOffset).toBe("/preset ".length);

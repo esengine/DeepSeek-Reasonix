@@ -44,6 +44,10 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */
 export const DEFAULT_CONTEXT_TOKENS = 131_072;
 
+/** Maximum turns retained in memory before old entries are rolled into carryover.
+ *  Each TurnStats holds usage + cost + model — at N=200 this caps memory at ~50KB. */
+export const MAX_TURNS = 200;
+
 export function costUsd(model: string, usage: Usage, path?: string): number {
   const p = pricingFor(model, path);
   if (!p) return 0;
@@ -167,7 +171,22 @@ export class SessionStats {
       cacheHitRatio: usage.cacheHitRatio,
     };
     this.turns.push(stats);
+    this.trimOldTurns();
     return stats;
+  }
+
+  /** Drop oldest turns beyond MAX_TURNS, folding their costs into carryover so
+   *  session totals remain accurate even after trimming. */
+  private trimOldTurns(): void {
+    if (this.turns.length <= MAX_TURNS) return;
+    const excess = this.turns.length - MAX_TURNS;
+    const dropped = this.turns.splice(0, excess);
+    for (const t of dropped) {
+      this._carryoverCost += t.cost;
+      this._carryoverCacheHit += t.usage.promptCacheHitTokens;
+      this._carryoverCacheMiss += t.usage.promptCacheMissTokens;
+    }
+    this._carryoverTurns += excess;
   }
 
   get totalCost(): number {

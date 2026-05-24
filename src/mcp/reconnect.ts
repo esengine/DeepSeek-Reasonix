@@ -58,11 +58,13 @@ export async function reconnectMcpServer(args: ReconnectArgs): Promise<Reconnect
       ms: Date.now() - t0,
     };
   }
+  const workspaceDir = args.host.client.workspaceRootDir;
   const transport = buildTransportFromSpec(parsed, {
     env: args.env,
     headers: args.headers,
+    cwd: workspaceDir,
   });
-  const next = new McpClient({ transport });
+  const next = new McpClient({ transport, workspaceDir });
   try {
     await next.initialize();
     const listed = await next.listTools();

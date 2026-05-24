@@ -1,21 +1,28 @@
 import { Box, Static } from "ink";
-// biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX
 import React, { useMemo } from "react";
 import { CardRenderer } from "../cards/CardRenderer.js";
 import type { Card } from "../state/cards.js";
 import { useAgentState } from "../state/provider.js";
 
-export function StaticCardStream({
-  suppressLive = false,
-}: {
+interface StaticCardStreamProps {
   suppressLive?: boolean;
-}): React.ReactElement {
+}
+
+function StaticCardStreamInner({
+  suppressLive = false,
+}: StaticCardStreamProps): React.ReactElement {
   const cards = useAgentState((s) => s.cards);
-  const { settled, live } = useMemo(() => partition(cards), [cards]);
-  const visibleLive = suppressLive && live.length > 0 ? live.slice(0, -1) : live;
+  const { staticItems, dynamicItems, hasUnsettledDynamic } = useMemo(
+    () => partition(cards),
+    [cards],
+  );
+  const visibleDynamic =
+    suppressLive && hasUnsettledDynamic && dynamicItems.length > 0
+      ? dynamicItems.slice(0, -1)
+      : dynamicItems;
   return (
     <>
-      <Static items={settled}>
+      <Static items={staticItems}>
         {(card) => (
           <Box key={card.id} flexDirection="column" flexShrink={0}>
             <CardRenderer card={card} />
@@ -23,7 +30,7 @@ export function StaticCardStream({
         )}
       </Static>
       <Box flexDirection="column" flexShrink={0}>
-        {visibleLive.map((card) => (
+        {visibleDynamic.map((card) => (
           <Box key={card.id} flexDirection="column" flexShrink={0}>
             <CardRenderer card={card} />
           </Box>
@@ -33,10 +40,28 @@ export function StaticCardStream({
   );
 }
 
-function partition(cards: readonly Card[]): { settled: Card[]; live: Card[] } {
-  const firstUnsettled = cards.findIndex((c) => !isFullySettled(c));
-  if (firstUnsettled === -1) return { settled: [...cards], live: [] };
-  return { settled: cards.slice(0, firstUnsettled), live: cards.slice(firstUnsettled) };
+export const StaticCardStream = React.memo(StaticCardStreamInner);
+StaticCardStream.displayName = "StaticCardStream";
+
+function partition(cards: readonly Card[]): {
+  staticItems: Card[];
+  dynamicItems: Card[];
+  hasUnsettledDynamic: boolean;
+} {
+  const firstDynamic = cards.findIndex((c) => !isFullySettled(c) || isVerboseSensitive(c));
+  if (firstDynamic === -1) {
+    return { staticItems: [...cards], dynamicItems: [], hasUnsettledDynamic: false };
+  }
+  const dynamicItems = cards.slice(firstDynamic);
+  return {
+    staticItems: cards.slice(0, firstDynamic),
+    dynamicItems,
+    hasUnsettledDynamic: dynamicItems.some((c) => !isFullySettled(c)),
+  };
+}
+
+function isVerboseSensitive(card: Card): boolean {
+  return card.kind === "reasoning" || card.kind === "tool";
 }
 
 function isFullySettled(card: Card): boolean {

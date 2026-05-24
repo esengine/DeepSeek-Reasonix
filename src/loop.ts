@@ -9,16 +9,10 @@ import {
   truncateForModelByTokens,
 } from "./mcp/registry.js";
 
-import { ContextManager } from "./context-manager.js";
+import { ContextManager, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
 import { formatLoopError, is5xxError, probeDeepSeekReachable } from "./loop/errors.js";
-import {
-  NEEDS_PRO_BUFFER_CHARS,
-  isEscalationRequest,
-  looksLikePartialEscalationMarker,
-  parseEscalationMarker,
-} from "./loop/escalation.js";
 import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "./loop/force-summary.js";
 import {
   fixToolCallPairing,
@@ -55,7 +49,6 @@ import { parseRateLimitedToolResult } from "./tools/rate-limit.js";
 import { ReadTracker } from "./tools/read-tracker.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
-const ESCALATION_MODEL = "deepseek-v4-pro";
 export const MID_TURN_STEER_WRAPPER =
   "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]";
 
@@ -86,7 +79,6 @@ export interface CacheFirstLoopOptions {
   model?: string;
   stream?: boolean;
   reasoningEffort?: "high" | "max";
-  autoEscalate?: boolean;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
   session?: string;
@@ -105,8 +97,6 @@ export interface ReconfigurableOptions {
   stream?: boolean;
   /** V4 thinking mode only; deepseek-chat ignores. */
   reasoningEffort?: "high" | "max";
-  /** `false` pins to `model` — disables the model-marker scavenge that flips flash→pro. */
-  autoEscalate?: boolean;
 }
 
 export class CacheFirstLoop {
@@ -125,7 +115,6 @@ export class CacheFirstLoop {
   model: string;
   stream: boolean;
   reasoningEffort: "high" | "max";
-  autoEscalate = true;
   budgetUsd: number | null;
   /** One-shot 80% warning latch — cleared by setBudget so a bump re-arms at the new boundary. */
   private _budgetWarned = false;
@@ -171,8 +160,6 @@ export class CacheFirstLoop {
     return this._steerConsumed;
   }
 
-  private _proArmedForNextTurn = false;
-  private _escalateThisTurn = false;
   private _turnSelfCorrected = false;
   private _foldedThisTurn = false;
   private context!: ContextManager;
@@ -192,7 +179,6 @@ export class CacheFirstLoop {
     this.tools = opts.tools ?? new ToolRegistry();
     this.model = opts.model ?? "deepseek-v4-flash";
     this.reasoningEffort = opts.reasoningEffort ?? "max";
-    if (opts.autoEscalate !== undefined) this.autoEscalate = opts.autoEscalate;
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
 
@@ -379,7 +365,6 @@ export class CacheFirstLoop {
       this.stream = opts.stream;
     }
     if (opts.reasoningEffort !== undefined) this.reasoningEffort = opts.reasoningEffort;
-    if (opts.autoEscalate !== undefined) this.autoEscalate = opts.autoEscalate;
   }
 
   /** `null` disables the cap; any change re-arms the 80% warning. */
@@ -388,30 +373,9 @@ export class CacheFirstLoop {
     this._budgetWarned = false;
   }
 
-  /** Single-turn upgrade consumed at next step() — distinct from `/preset max` (persistent). */
-  armProForNextTurn(): void {
-    this._proArmedForNextTurn = true;
-  }
-  /** Cancel `/pro` arming before the next turn starts. */
-  disarmPro(): void {
-    this._proArmedForNextTurn = false;
-  }
-  /** UI surface — true while `/pro` is queued but hasn't fired yet. */
-  get proArmed(): boolean {
-    return this._proArmedForNextTurn;
-  }
-  /** UI surface — true while the current turn is running on pro (armed or auto-escalated). */
-  get escalatedThisTurn(): boolean {
-    return this._escalateThisTurn;
-  }
-
-  /** UI surface — model id of the call about to run (or running) right now, including escalation. */
+  /** UI surface — model id of the call about to run (or running) right now. */
   get currentCallModel(): string {
-    return this.modelForCurrentCall();
-  }
-
-  private modelForCurrentCall(): string {
-    return this._escalateThisTurn ? ESCALATION_MODEL : this.model;
+    return this.model;
   }
 
   /** A call counts as mutating when its definition reports `readOnly !== true` and any dynamic `readOnlyCheck` doesn't override that for these args. */
@@ -628,18 +592,8 @@ export class CacheFirstLoop {
     // calls that are now legitimately on-task. The window repopulates
     // naturally as this turn's tool calls flow through.
     this.repair.resetStorm();
-    // Per-turn escalation state: reset at turn start, then consume the
-    // /pro armed flag into `_escalateThisTurn` (one-shot — next turn
-    // starts fresh on flash unless re-armed or the model self-escalates).
     this._turnSelfCorrected = false;
-    this._escalateThisTurn = false;
     this._foldedThisTurn = false;
-    let armedConsumed = false;
-    if (this._proArmedForNextTurn) {
-      this._escalateThisTurn = true;
-      this._proArmedForNextTurn = false;
-      armedConsumed = true;
-    }
     // Fresh controller for this turn: the prior step's signal has
     // already fired (or stayed clean); either way we don't want its
     // state to bleed into the new turn.
@@ -656,13 +610,6 @@ export class CacheFirstLoop {
     this._turnAbort = new AbortController();
     if (carryAbort) this._turnAbort.abort();
     const signal = this._turnAbort.signal;
-    if (armedConsumed) {
-      yield {
-        turn: this._turn,
-        role: "warning",
-        content: t("loop.proArmed"),
-      };
-    }
     // Persist the user message before the first API round-trip so a
     // mid-stream abort or a session switch doesn't drop the prompt and
     // leave a new session orphaned without a .jsonl on disk (issue #943
@@ -673,6 +620,40 @@ export class CacheFirstLoop {
     this.appendAndPersist({ role: "user", content: userInput });
     const toolSpecs = this.prefix.tools();
     let rateLimitWarningShown = false;
+
+    // Turn-start fold: covers cases the post-response check can't see — terminal
+    // prior turn (no tool_calls → no decideAfterUsage), session restore from
+    // disk, huge user paste. Fires only above TURN_START_FOLD_THRESHOLD; the
+    // post-response 75% trigger handles routine growth.
+    {
+      const turnStart = this.context.estimateTurnStart(
+        this.buildMessages(),
+        this.prefix.toolSpecs,
+        this.model,
+      );
+      if (turnStart.ratio > TURN_START_FOLD_THRESHOLD) {
+        yield {
+          turn: this._turn,
+          role: "status",
+          content: t("loop.turnStartFoldStatus"),
+        };
+        const result = await this.context.fold(this.model, { requireTailBoundary: true });
+        if (result.folded) {
+          this._foldedThisTurn = true;
+          yield {
+            turn: this._turn,
+            role: "warning",
+            content: t("loop.turnStartFolded", {
+              estimate: turnStart.estimateTokens.toLocaleString(),
+              ctxMax: turnStart.ctxMax.toLocaleString(),
+              pct: Math.round(turnStart.ratio * 100),
+              beforeMessages: result.beforeMessages,
+              afterMessages: result.afterMessages,
+            }),
+          };
+        }
+      }
+    }
 
     for (let iter = 0; ; iter++) {
       if (signal.aborted) {
@@ -739,56 +720,6 @@ export class CacheFirstLoop {
         };
       }
 
-      // Preflight context check. Local estimate of the outgoing payload
-      // catches cases where prior usage didn't warn us (fresh resume, one
-      // huge tool result). Above 95% we truncate locally instead of making
-      // the user wait on another model call before their request goes out.
-      {
-        const decision = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
-        if (decision.needsAction) {
-          const { estimateTokens: estimate, estimateBytes, ctxMax } = decision;
-          yield {
-            turn: this._turn,
-            role: "status",
-            content: t("loop.preflightTruncateStatus"),
-          };
-          const result = this.context.mechanicalTruncate(this.model, {
-            allowEmpty: false,
-          });
-          if (result.folded) {
-            messages = this.buildMessages();
-            const after = this.context.decidePreflight(messages, this.prefix.toolSpecs, this.model);
-            const stillFull = after.needsAction;
-            yield {
-              turn: this._turn,
-              role: "warning",
-              content: t(
-                stillFull ? "loop.preflightTruncatedStillFull" : "loop.preflightTruncated",
-                {
-                  estimate: after.estimateTokens.toLocaleString(),
-                  ctxMax: after.ctxMax.toLocaleString(),
-                  pct: Math.round((after.estimateTokens / after.ctxMax) * 100),
-                  bodyKB: Math.round(after.estimateBytes / 1024).toLocaleString(),
-                  beforeMessages: result.beforeMessages,
-                  afterMessages: result.afterMessages,
-                },
-              ),
-            };
-          } else {
-            yield {
-              turn: this._turn,
-              role: "warning",
-              content: t("loop.preflightNoFold", {
-                estimate: estimate.toLocaleString(),
-                ctxMax: ctxMax.toLocaleString(),
-                pct: Math.round((estimate / ctxMax) * 100),
-                bodyKB: Math.round(estimateBytes / 1024).toLocaleString(),
-              }),
-            };
-          }
-        }
-      }
-
       let assistantContent = "";
       let reasoningContent = "";
       let toolCalls: ToolCall[] = [];
@@ -804,16 +735,7 @@ export class CacheFirstLoop {
           // user sees progress on long multi-tool turns instead of a
           // stagnant "building tool call" spinner.
           const readyIndices = new Set<number>();
-          const callModel = this.modelForCurrentCall();
-          // Escalation-marker buffer: delay the first few assistant_delta
-          // yields so a "<<<NEEDS_PRO>>>" lead-in never flashes on-screen
-          // before we abort + retry. Only active on flash AND when the
-          // user hasn't disabled auto-escalation (the `flash` preset
-          // turns this off — model output flows through verbatim, no
-          // marker handling). pro never requests its own escalation.
-          const bufferForEscalation = this.autoEscalate && callModel !== ESCALATION_MODEL;
-          let escalationBuf = "";
-          let escalationBufFlushed = false;
+          const callModel = this.model;
           for await (const chunk of this.client.stream({
             model: callModel,
             messages,
@@ -836,36 +758,11 @@ export class CacheFirstLoop {
             }
             if (chunk.contentDelta) {
               assistantContent += chunk.contentDelta;
-              if (bufferForEscalation && !escalationBufFlushed) {
-                escalationBuf += chunk.contentDelta;
-                // Early exit: marker matches — break and let the
-                // post-call retry path take over. No delta was yielded
-                // so the user sees nothing flicker.
-                if (isEscalationRequest(escalationBuf)) {
-                  break;
-                }
-                // Flush once we have enough content to rule out the
-                // marker (clearly not a partial match anymore, or past
-                // the look-ahead window).
-                if (
-                  escalationBuf.length >= NEEDS_PRO_BUFFER_CHARS ||
-                  !looksLikePartialEscalationMarker(escalationBuf)
-                ) {
-                  escalationBufFlushed = true;
-                  yield {
-                    turn: this._turn,
-                    role: "assistant_delta",
-                    content: escalationBuf,
-                  };
-                  escalationBuf = "";
-                }
-              } else {
-                yield {
-                  turn: this._turn,
-                  role: "assistant_delta",
-                  content: chunk.contentDelta,
-                };
-              }
+              yield {
+                turn: this._turn,
+                role: "assistant_delta",
+                content: chunk.contentDelta,
+              };
             }
             if (chunk.toolCallDelta) {
               const d = chunk.toolCallDelta;
@@ -907,21 +804,8 @@ export class CacheFirstLoop {
             if (chunk.usage) usage = chunk.usage;
           }
           toolCalls = [...callBuf.values()];
-          // Stream ended before the escalation buffer got flushed —
-          // either a short response or a partial marker match. If the
-          // buffer ISN'T the marker, flush it as the final delta so
-          // the user sees it. Marker-match is handled post-call.
-          if (bufferForEscalation && !escalationBufFlushed && escalationBuf.length > 0) {
-            if (!isEscalationRequest(escalationBuf)) {
-              yield {
-                turn: this._turn,
-                role: "assistant_delta",
-                content: escalationBuf,
-              };
-            }
-          }
         } else {
-          const callModel = this.modelForCurrentCall();
+          const callModel = this.model;
           const resp = await this.client.chat({
             model: callModel,
             messages,
@@ -970,49 +854,9 @@ export class CacheFirstLoop {
         return;
       }
 
-      // Self-reported escalation: the model (flash) emitted the
-      // NEEDS_PRO marker as its lead-in. Abort this call's accounting,
-      // flip the turn to pro, and re-enter the iter without advancing
-      // the counter — next attempt runs on v4-pro with the same
-      // messages. Only triggers when the call was on a model OTHER
-      // than the escalation model; if the user already configured
-      // v4-pro (via /preset max etc.), the marker is taken as a
-      // no-op content and passed through verbatim, so there's no
-      // infinite-retry loop.
-      if (
-        this.autoEscalate &&
-        this.modelForCurrentCall() !== ESCALATION_MODEL &&
-        isEscalationRequest(assistantContent)
-      ) {
-        const { reason } = parseEscalationMarker(assistantContent);
-        this._escalateThisTurn = true;
-        const reasonSuffix = reason ? ` — ${reason}` : "";
-        yield {
-          turn: this._turn,
-          role: "warning",
-          content: t("loop.flashEscalation", { model: ESCALATION_MODEL, reasonSuffix }),
-        };
-        // Reset per-iter state. We don't record stats for the rejected
-        // flash call (cost is small — a ~20-token lead-in that we broke
-        // out of early on streaming) — recording would attribute a
-        // phantom call to the session total.
-        assistantContent = "";
-        reasoningContent = "";
-        toolCalls = [];
-        usage = null;
-        // Redo this iter on pro — `iter--` cancels the `iter++` the
-        // for loop runs on `continue`.
-        iter--;
-        continue;
-      }
-
       // Attribute under the actual model used (escalated → pro, else
       // this.model) so cost/usage logs reflect reality.
-      const turnStats = this.stats.record(
-        this._turn,
-        this.modelForCurrentCall(),
-        usage ?? new Usage(),
-      );
+      const turnStats = this.stats.record(this._turn, this.model, usage ?? new Usage());
 
       this.scratch.reasoning = reasoningContent || null;
 
@@ -1023,12 +867,7 @@ export class CacheFirstLoop {
       );
 
       this.appendAndPersist(
-        buildAssistantMessage(
-          assistantContent,
-          repairedCalls,
-          this.modelForCurrentCall(),
-          reasoningContent,
-        ),
+        buildAssistantMessage(assistantContent, repairedCalls, this.model, reasoningContent),
       );
 
       yield {
@@ -1049,12 +888,7 @@ export class CacheFirstLoop {
       if (allSuppressed && !this._turnSelfCorrected) {
         this._turnSelfCorrected = true;
         this.replaceTailAssistantMessage(
-          buildAssistantMessage(
-            assistantContent,
-            toolCalls,
-            this.modelForCurrentCall(),
-            reasoningContent,
-          ),
+          buildAssistantMessage(assistantContent, toolCalls, this.model, reasoningContent),
         );
         for (const call of toolCalls) {
           this.appendAndPersist({

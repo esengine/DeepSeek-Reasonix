@@ -88,6 +88,7 @@ export async function loadMcpServers(
   tools: import("../../tools.js").ToolRegistry,
   specs: string[],
   globalPrefix: string | undefined,
+  workspaceDir: string = process.cwd(),
 ): Promise<McpClient[]> {
   const clients: McpClient[] = [];
   if (specs.length === 0) return clients;
@@ -106,8 +107,8 @@ export async function loadMcpServers(
       const t0 = Date.now();
       const prefix = resolveMcpPrefix(spec.name, normalizedSpecs.length, globalPrefix);
       if (spec.transport === "stdio") preflightStdioSpec(spec);
-      const transport = buildTransportFromSpec(spec);
-      mcp = new McpClient({ transport });
+      const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
+      mcp = new McpClient({ transport, workspaceDir });
       await mcp.initialize();
       const bridge = await bridgeMcpTools(mcp, {
         registry: tools,
@@ -158,7 +159,12 @@ async function buildSession(opts: {
   const model = opts.modelOverride || resolved.model;
   const toolset = await buildCodeToolset({ rootDir: opts.rootDir });
   // Bridge MCP tools BEFORE building the prefix so their specs make it into the cache key.
-  const mcpClients = await loadMcpServers(toolset.tools, opts.mcpSpecs ?? [], opts.mcpPrefix);
+  const mcpClients = await loadMcpServers(
+    toolset.tools,
+    opts.mcpSpecs ?? [],
+    opts.mcpPrefix,
+    opts.rootDir,
+  );
   const system = codeSystemPrompt(opts.rootDir, {
     hasSemanticSearch: toolset.semantic.enabled,
     modelId: model,

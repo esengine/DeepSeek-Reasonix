@@ -1,4 +1,5 @@
-export const DEFAULT_COMPOSER_ROWS = 5;
+export const DEFAULT_COMPOSER_ROWS = 2;
+export const AUTOSIZE_COMPOSER_ROWS = 5;
 export const MAX_COMPOSER_ROWS = 15;
 
 export type ComposerTextareaSizing = {
@@ -16,11 +17,14 @@ export function getComposerTextareaSizing({
   verticalPaddingPx: number;
 }): ComposerTextareaSizing {
   const safeRows = Math.max(1, Math.ceil(contentRows));
-  const visibleRows = Math.min(Math.max(safeRows, DEFAULT_COMPOSER_ROWS), MAX_COMPOSER_ROWS);
+  const visibleRows =
+    safeRows < AUTOSIZE_COMPOSER_ROWS
+      ? DEFAULT_COMPOSER_ROWS
+      : Math.min(safeRows, MAX_COMPOSER_ROWS);
 
   return {
     heightPx: visibleRows * lineHeightPx + verticalPaddingPx,
-    overflowY: safeRows > MAX_COMPOSER_ROWS ? "auto" : "hidden",
+    overflowY: safeRows > visibleRows ? "auto" : "hidden",
   };
 }
 

@@ -37,10 +37,8 @@ export type { McpLifecycleNotice, McpLifecycleSink, McpRuntime, ProgressInfo };
 
 export interface ChatOptions {
   model: string;
-  /** Preset resolved at launch; keeps flash distinct from auto when both use the same model. */
-  preset?: "auto" | "flash" | "pro";
-  /** Whether flash may auto-upgrade hard turns to pro. */
-  autoEscalate?: boolean;
+  /** Preset resolved at launch (flash | pro). */
+  preset?: "flash" | "pro";
   system: string;
   /** Re-runs the prompt builder on /new so REASONIX.md edits don't need a restart. Should produce the same string `system` was built from. */
   rebuildSystem?: () => string;
@@ -217,7 +215,6 @@ function Root({
         key={activeSession ?? "__new__"}
         model={appProps.model}
         preset={appProps.preset}
-        autoEscalate={appProps.autoEscalate}
         system={appProps.system}
         rebuildSystem={appProps.rebuildSystem}
         transcript={appProps.transcript}
@@ -264,11 +261,23 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   if (requestedSpecs.length > 0 && !tools) {
     tools = new ToolRegistry({ rateLimit: loadToolRateLimit() });
   }
+  const launchWorkspace = opts.codeMode?.rootDir ?? process.cwd();
+  let activeWorkspace = launchWorkspace;
+  const codeMode = opts.codeMode
+    ? {
+        ...opts.codeMode,
+        onRootChange: (newRoot: string) => {
+          activeWorkspace = newRoot;
+          opts.codeMode?.onRootChange?.(newRoot);
+        },
+      }
+    : undefined;
 
   const runtime = createMcpRuntime({
     getTools: () => tools,
     getMcpPrefix: () => opts.mcpPrefix,
     getRequestedCount: () => requestedSpecs.length,
+    getWorkspaceDir: () => activeWorkspace,
     progressSink,
   });
 
@@ -317,7 +326,6 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     opts.forceNew,
     opts.forceResume,
   );
-  const launchWorkspace = opts.codeMode?.rootDir ?? process.cwd();
   const showPicker =
     !opts.session && !opts.forceResume && listSessionsForWorkspace(launchWorkspace).length > 0;
 
@@ -377,6 +385,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       startupInfoHints={startupInfoHints}
       showPicker={showPicker}
       {...opts}
+      codeMode={codeMode}
       session={resolvedSession}
       qqChannel={qqChannel}
       qqSubmitRef={qqSubmitRef}

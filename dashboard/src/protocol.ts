@@ -247,7 +247,15 @@ export type NeedsSetupEvent = {
 
 export type EditMode = "review" | "auto" | "yolo";
 
-export type PresetName = "auto" | "flash" | "pro";
+export type PresetName = "flash" | "pro";
+
+export type WebSearchEngineName =
+  | "bing"
+  | "searxng"
+  | "metaso"
+  | "tavily"
+  | "perplexity"
+  | "exa";
 
 export type SettingsEvent = {
   type: "$settings";
@@ -261,6 +269,8 @@ export type SettingsEvent = {
   model: string;
   preset: PresetName;
   editor?: string;
+  webSearchEngine?: WebSearchEngineName;
+  subagentModels?: Record<string, "flash" | "pro">;
   version: string;
 };
 
@@ -292,6 +302,8 @@ export type SettingsPatch = {
   workspaceDir?: string;
   preset?: PresetName;
   editor?: string;
+  webSearchEngine?: WebSearchEngineName;
+  subagentModels?: Record<string, "flash" | "pro">;
 };
 
 export type QQConfigPatch = {

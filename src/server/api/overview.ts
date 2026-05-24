@@ -59,7 +59,7 @@ export async function handleOverview(
     pendingEdits: ctx.getPendingEditCount?.() ?? null,
     mcpServerCount: ctx.getMcpServers?.().length ?? null,
     toolCount: ctx.tools ? ctx.tools.size : null,
-    preset: cfg.preset ?? "auto",
+    preset: cfg.preset === "pro" ? "pro" : "flash",
     reasoningEffort: cfg.reasoningEffort ?? "max",
     budgetUsd: ctx.loop?.budgetUsd ?? null,
     stats: ctx.getStats?.() ?? null,

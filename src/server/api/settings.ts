@@ -27,9 +27,9 @@ interface SettingsBody {
   search?: unknown;
   webSearchEngine?: unknown;
   model?: unknown;
-  proNext?: unknown;
   budgetUsd?: unknown;
   skillPaths?: unknown;
+  subagentModels?: unknown;
 }
 
 function parseBody(raw: string): SettingsBody {
@@ -45,7 +45,7 @@ function parseBody(raw: string): SettingsBody {
 // Accept new (auto/flash/pro) and legacy (fast/smart/max) — server
 // stores whatever the user picked; resolvePreset() canonicalizes at
 // read time. Web sends new names in 0.12.x onward.
-const VALID_PRESETS = new Set(["auto", "flash", "pro", "fast", "smart", "max"]);
+const VALID_PRESETS = new Set(["flash", "pro"]);
 const VALID_EFFORTS = new Set(["high", "max"]);
 // Legacy "mojeek" is intentionally absent — the engine was retired (PR
 // adding bing default). Old config values map to bing at read; the
@@ -103,14 +103,13 @@ export async function handleSettings(
         apiKeySet: Boolean(cfg.apiKey),
         baseUrl: cfg.baseUrl ?? null,
         lang: getLanguage(),
-        preset: cfg.preset ?? "auto",
+        preset: cfg.preset === "pro" ? "pro" : "flash",
         reasoningEffort: cfg.reasoningEffort ?? "max",
         search: cfg.search !== false,
         webSearchEngine: readWebSearchEngine(ctx.configPath),
         editMode: ctx.getEditMode?.() ?? cfg.editMode ?? "review",
         session: cfg.session ?? null,
         model: live?.model ?? null,
-        proNext: live?.proArmed ?? false,
         budgetUsd: live?.budgetUsd ?? null,
         sessionSpendUsd: ctx.getStats?.()?.totalCostUsd ?? null,
         skillPaths: normalizeSkillPaths(
@@ -121,6 +120,7 @@ export async function handleSettings(
           cfg.skills?.paths ?? [],
           ctx.getCurrentCwd?.() ?? process.cwd(),
         ),
+        subagentModels: cfg.subagentModels ?? {},
         // Hint to the SPA which fields require restart.
         appliesAt: {
           apiKey: "next-session",
@@ -130,9 +130,9 @@ export async function handleSettings(
           search: "next-session",
           webSearchEngine: "next-turn",
           model: "next-turn",
-          proNext: "next-turn",
           budgetUsd: "live",
           skillPaths: "next-session",
+          subagentModels: "next-skill-run",
         },
       },
     };
@@ -179,10 +179,10 @@ export async function handleSettings(
     }
     if (fields.preset !== undefined) {
       if (typeof fields.preset !== "string" || !VALID_PRESETS.has(fields.preset)) {
-        return { status: 400, body: { error: "preset must be auto | flash | pro" } };
+        return { status: 400, body: { error: "preset must be flash | pro" } };
       }
       debugLogPresetWriteFromDashboard(fields.preset);
-      cfg.preset = fields.preset as "auto" | "flash" | "pro" | "fast" | "smart" | "max";
+      cfg.preset = fields.preset as "flash" | "pro";
       presetPendingLive = fields.preset;
       changed.push("preset");
     }
@@ -233,7 +233,6 @@ export async function handleSettings(
       changed.push("webSearchEngine");
     }
     let modelPendingLive: string | null = null;
-    let proNextPending: boolean | null = null;
     let budgetPending: number | null | undefined;
     if (fields.model !== undefined) {
       if (typeof fields.model !== "string" || !fields.model.trim()) {
@@ -243,14 +242,6 @@ export async function handleSettings(
       // pickup goes through preset / startup flag, not direct cfg.model.
       modelPendingLive = fields.model.trim();
       changed.push("model");
-    }
-    if (fields.proNext !== undefined) {
-      if (typeof fields.proNext !== "boolean") {
-        return { status: 400, body: { error: "proNext must be a boolean" } };
-      }
-      // Not persisted: arming is per-turn ephemeral. Live-only side effect.
-      proNextPending = fields.proNext;
-      changed.push("proNext");
     }
     if (fields.budgetUsd !== undefined) {
       if (fields.budgetUsd === null) {
@@ -286,6 +277,27 @@ export async function handleSettings(
       changed.push("skillPaths");
     }
 
+    if (fields.subagentModels !== undefined) {
+      if (
+        typeof fields.subagentModels !== "object" ||
+        fields.subagentModels === null ||
+        Array.isArray(fields.subagentModels)
+      ) {
+        return {
+          status: 400,
+          body: { error: "subagentModels must be an object mapping skill name → 'flash' | 'pro'" },
+        };
+      }
+      const sanitized = new Map<string, "flash" | "pro">();
+      for (const [name, value] of Object.entries(fields.subagentModels)) {
+        if (typeof name !== "string" || !name) continue;
+        if (name === "__proto__" || name === "constructor" || name === "prototype") continue;
+        if (value === "flash" || value === "pro") sanitized.set(name, value);
+      }
+      cfg.subagentModels = sanitized.size > 0 ? Object.fromEntries(sanitized) : undefined;
+      changed.push("subagentModels");
+    }
+
     if (changed.length > 0) {
       writeConfig(cfg, ctx.configPath);
       // Runtime side-effects fire after the disk write succeeds —
@@ -301,7 +313,6 @@ export async function handleSettings(
       if (presetPendingLive) ctx.applyPresetLive?.(presetPendingLive);
       if (effortPendingLive) ctx.applyEffortLive?.(effortPendingLive);
       if (modelPendingLive) ctx.applyModelLive?.(modelPendingLive);
-      if (proNextPending !== null) ctx.setProNextLive?.(proNextPending);
       if (budgetPending !== undefined) ctx.setBudgetUsdLive?.(budgetPending);
       ctx.audit?.({ ts: Date.now(), action: "set-settings", payload: { fields: changed } });
     }

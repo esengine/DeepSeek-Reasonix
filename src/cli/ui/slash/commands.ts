@@ -71,9 +71,9 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "preset",
     group: "setup",
-    argsHint: "<auto|flash|pro>",
-    summary: "model bundle — auto escalates flash → pro, flash/pro lock. Bare opens picker.",
-    argCompleter: ["auto", "flash", "pro"],
+    argsHint: "<flash|pro>",
+    summary: "model bundle — flash (default, cheapest) or pro (~3× cost). Bare opens picker.",
+    argCompleter: ["flash", "pro"],
   },
   {
     cmd: "model",
@@ -314,13 +314,6 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     contextual: "code",
   },
 
-  {
-    cmd: "pro",
-    group: "advanced",
-    argsHint: "[off]",
-    summary: "arm v4-pro for the NEXT turn only (one-shot · auto-disarms after turn)",
-    argCompleter: ["off"],
-  },
   {
     cmd: "budget",
     group: "advanced",

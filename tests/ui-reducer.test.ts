@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+  PlanCard,
   ReasoningCard,
   StreamingCard,
   ToolCard,
@@ -119,6 +120,38 @@ describe("ui reducer", () => {
     expect(s.cards).toHaveLength(0);
   });
 
+  it("replaces an existing live card when live.show reuses the id", () => {
+    const s = run([
+      {
+        type: "live.show",
+        id: "hint",
+        ts: 100,
+        variant: "stepProgress",
+        tone: "info",
+        text: "Stashed input",
+      },
+      {
+        type: "live.show",
+        id: "hint",
+        ts: 200,
+        variant: "stepProgress",
+        tone: "ok",
+        text: "Recalled input",
+        meta: "Alt+S",
+      },
+    ]);
+    expect(s.cards).toHaveLength(1);
+    expect(s.cards[0]).toMatchObject({
+      kind: "live",
+      id: "hint",
+      ts: 200,
+      variant: "stepProgress",
+      tone: "ok",
+      text: "Recalled input",
+      meta: "Alt+S",
+    });
+  });
+
   it("flags tool card as rejected when tool.end output carries plan-mode marker", () => {
     const planBounce = JSON.stringify({
       error: "write_file: unavailable in plan mode — ...",
@@ -133,6 +166,36 @@ describe("ui reducer", () => {
     expect(card.done).toBe(true);
   });
 
+  it("parses run_command exit markers into tool card exitCode", () => {
+    const s = run([
+      { type: "tool.start", id: "t1", name: "run_command", args: { command: "node test.mjs" } },
+      {
+        type: "tool.end",
+        id: "t1",
+        output: "$ node test.mjs\n[exit 1]\nAssertionError: expected 9000",
+        elapsedMs: 5,
+      },
+    ]);
+    const card = s.cards[0] as ToolCard;
+    expect(card.exitCode).toBe(1);
+    expect(card.done).toBe(true);
+  });
+
+  it("keeps explicit tool.end exitCode ahead of parsed shell output", () => {
+    const s = run([
+      { type: "tool.start", id: "t1", name: "run_command", args: { command: "node test.mjs" } },
+      {
+        type: "tool.end",
+        id: "t1",
+        output: "$ node test.mjs\n[exit 1]\nAssertionError",
+        exitCode: 2,
+        elapsedMs: 5,
+      },
+    ]);
+    const card = s.cards[0] as ToolCard;
+    expect(card.exitCode).toBe(2);
+  });
+
   it("does not flag rejection on a regular error output", () => {
     const s = run([
       { type: "tool.start", id: "t1", name: "edit_file", args: { path: "x" } },
@@ -145,6 +208,41 @@ describe("ui reducer", () => {
     ]);
     const card = s.cards[0] as ToolCard;
     expect(card.rejected).toBeUndefined();
+  });
+
+  it("advances the active plan cursor as steps are completed", () => {
+    const shown = run([
+      {
+        type: "plan.show",
+        id: "p1",
+        title: "Plan",
+        variant: "active",
+        steps: [
+          { id: "step-1", title: "One", status: "queued" },
+          { id: "step-2", title: "Two", status: "queued" },
+          { id: "step-3", title: "Three", status: "queued" },
+        ],
+      },
+    ]);
+    expect((shown.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual([
+      "running",
+      "queued",
+      "queued",
+    ]);
+
+    const afterFirst = reduce(shown, { type: "plan.step.complete", stepId: "step-1" });
+    expect((afterFirst.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual([
+      "done",
+      "running",
+      "queued",
+    ]);
+
+    const afterSecond = reduce(afterFirst, { type: "plan.step.complete", stepId: "step-2" });
+    expect((afterSecond.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual([
+      "done",
+      "done",
+      "running",
+    ]);
   });
 
   it("changes mode and accumulates session cost", () => {

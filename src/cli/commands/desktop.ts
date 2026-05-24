@@ -29,9 +29,11 @@ import {
   loadReasoningEffort,
   loadRecentWorkspaces,
   loadResolvedSkillPaths,
+  loadSubagentModels,
   loadWorkspaceDir,
   pushRecentWorkspace,
   readConfig,
+  webSearchEngine as readWebSearchEngine,
   saveApiKey,
   saveBaseUrl,
   saveDesktopOpenTabs,
@@ -39,6 +41,7 @@ import {
   saveEditor,
   savePreset,
   saveReasoningEffort,
+  saveSubagentModels,
   saveWorkspaceDir,
   writeConfig,
 } from "../../config.js";
@@ -110,8 +113,10 @@ type InMessage = { tabId?: string } & (
       budgetUsd?: number | null;
       baseUrl?: string;
       workspaceDir?: string;
-      preset?: "auto" | "flash" | "pro";
+      preset?: "flash" | "pro";
       editor?: string;
+      webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+      subagentModels?: Record<string, "flash" | "pro">;
     }
   | { cmd: "qq_status_get" }
   | { cmd: "qq_connect" }
@@ -157,8 +162,10 @@ interface SettingsEvent {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
-  preset: "auto" | "flash" | "pro";
+  preset: "flash" | "pro";
   editor?: string;
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  subagentModels?: Record<string, "flash" | "pro">;
   version: string;
 }
 
@@ -560,6 +567,8 @@ function emitSettings(tab: Tab): void {
       model: tab.currentModel,
       preset: tab.currentPreset,
       editor: loadEditor(),
+      webSearchEngine: readWebSearchEngine(),
+      subagentModels: loadSubagentModels(),
       version: VERSION,
     },
     tab.id,
@@ -689,6 +698,7 @@ function emitSkills(tab: Tab): void {
     const store = new SkillStore({
       projectRoot: tab.rootDir,
       customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+      subagentModels: loadSubagentModels(),
     });
     const items = store.list().map((s) => ({
       name: s.name,
@@ -716,7 +726,7 @@ interface Tab {
   readonly id: string;
   rootDir: string;
   currentSession: string;
-  currentPreset: "auto" | "flash" | "pro";
+  currentPreset: "flash" | "pro";
   currentModel: string;
   budgetUsd: number | undefined;
   /** null while the tab is bootstrapping — see `initTabToolset`. UI gates input on `$ready`, which only fires once this is set. */
@@ -739,6 +749,8 @@ interface Tab {
   planTotalSteps: number;
   mcpRuntime: McpRuntime | null;
   mcpStatuses: Map<string, { kind: McpSpecStatus; reason?: string; toolCount?: number }>;
+  /** True while a session switch is in progress — prevents stale events from the old turn. */
+  switching: boolean;
 }
 
 let tabCounter = 0;
@@ -763,7 +775,6 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
   const client = new DeepSeekClient({ baseUrl: loadBaseUrl() });
   const prefix = new ImmutablePrefix({ system: tab.system, toolSpecs: toolset.tools.specs() });
   const reasoningEffort = loadReasoningEffort();
-  const { autoEscalate } = resolvePreset(tab.currentPreset);
   const loop = new CacheFirstLoop({
     client,
     prefix,
@@ -772,7 +783,6 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     budgetUsd: tab.budgetUsd,
     session: tab.currentSession,
     reasoningEffort,
-    autoEscalate,
   });
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };
@@ -1232,6 +1242,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       planTotalSteps: 0,
       mcpRuntime: null,
       mcpStatuses: new Map(),
+      switching: false,
     };
     tab.currentSession = mintSessionFor(dir);
     tabs.set(tab.id, tab);
@@ -1277,6 +1288,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       },
       getMcpPrefix: () => undefined,
       getRequestedCount: () => requested,
+      getWorkspaceDir: () => tab.rootDir,
       progressSink: { current: null },
     });
     tab.mcpRuntime = runtime;
@@ -1386,20 +1398,28 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emit({ type: "$error", message: (err as Error).message }, tab.id);
       } finally {
         tab.aborter = null;
-        if (fromQQ && lastAssistantText && qqRuntime.channel && qqRuntime.replyThisTurn) {
-          await qqRuntime.channel.sendResponse(lastAssistantText).catch((err) => {
-            emit({ type: "$error", message: `qq send failed: ${(err as Error).message}` }, tab.id);
-          });
+        // If a session switch happened while this turn was running,
+        // suppress stale events to avoid UI state corruption (#1217).
+        if (!tab.switching) {
+          if (fromQQ && lastAssistantText && qqRuntime.channel && qqRuntime.replyThisTurn) {
+            await qqRuntime.channel.sendResponse(lastAssistantText).catch((err) => {
+              emit(
+                { type: "$error", message: `qq send failed: ${(err as Error).message}` },
+                tab.id,
+              );
+            });
+          }
+          qqRuntime.replyThisTurn = false;
+          emit({ type: "$turn_complete" }, tab.id);
+          if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
+            tab.completedStepIds.clear();
+            tab.planTotalSteps = 0;
+            emit({ type: "$plan_cleared" }, tab.id);
+          }
+          emitSessions(tab);
+          void emitBalance(tab);
         }
-        qqRuntime.replyThisTurn = false;
-        emit({ type: "$turn_complete" }, tab.id);
-        if (tab.planTotalSteps > 0 && tab.completedStepIds.size >= tab.planTotalSteps) {
-          tab.completedStepIds.clear();
-          tab.planTotalSteps = 0;
-          emit({ type: "$plan_cleared" }, tab.id);
-        }
-        emitSessions(tab);
-        void emitBalance(tab);
+        tab.switching = false;
       }
     });
   }
@@ -2090,6 +2110,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       try {
         const records = loadSessionMessages(msg.name);
         const meta = loadSessionMeta(msg.name);
+        // Only set switching flag when there's a live turn to abort —
+        // otherwise the flag stays true and suppresses the first turn's events (#1217).
+        if (tab.aborter) tab.switching = true;
         abortTurn(tab);
         cancelPendingGates(tab);
         tab.currentSession = msg.name;
@@ -2133,6 +2156,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       return;
     }
     if (msg.cmd === "new_chat") {
+      // Only set switching flag when there's a live turn to abort —
+      // otherwise the flag stays true and suppresses the first turn's events (#1217).
+      if (tab.aborter) tab.switching = true;
       abortTurn(tab);
       cancelPendingGates(tab);
       tab.currentSession = mintSessionFor(tab.rootDir);
@@ -2166,6 +2192,15 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           return;
         }
         if (msg.editor !== undefined) saveEditor(msg.editor);
+        if (msg.webSearchEngine !== undefined) {
+          const cfg = readConfig();
+          cfg.webSearchEngine = msg.webSearchEngine;
+          writeConfig(cfg);
+        }
+        if (msg.subagentModels !== undefined) {
+          saveSubagentModels(msg.subagentModels);
+          emitSkills(tab);
+        }
         if (msg.preset !== undefined) {
           tab.currentPreset = canonicalPresetName(msg.preset);
           const resolved = resolvePreset(tab.currentPreset);

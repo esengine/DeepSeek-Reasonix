@@ -130,7 +130,7 @@ export function StatusBar({
       ) : null}
       <span
         className="seg"
-        title={`model · preset ${settings?.preset ?? "auto"}`}
+        title={`model · preset ${settings?.preset ?? "flash"}`}
         onClick={onOpenSettings}
       >
         <I.brain size={11} style={{ color: "var(--violet)" }} />

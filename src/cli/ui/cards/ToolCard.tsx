@@ -10,6 +10,7 @@ import { useIsInflight } from "../state/inflight-context.js";
 import { VerboseContext } from "../state/verbose-context.js";
 import { clipToCells } from "../text-width.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
+import { selectToolPreviewLines } from "../tool-summary.js";
 
 const READ_TAIL = 2;
 const OTHER_TAIL = 5;
@@ -35,18 +36,22 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   );
 
   const verbose = React.useContext(VerboseContext);
-  const allLines = card.output.length > 0 ? card.output.split("\n") : [];
   const tail = tailLinesFor(card.name);
-  const truncated = !verbose && allLines.length > tail;
-  const visible = truncated ? allLines.slice(-tail) : allLines;
-  const hidden = truncated ? allLines.length - visible.length : 0;
+  const preview = selectToolPreviewLines({
+    toolName: card.name,
+    output: card.output,
+    exitCode: card.exitCode,
+    tailLines: tail,
+    verbose,
+  });
+  const firstHiddenRow = preview.rows.findIndex((row) => row.kind === "hidden");
   const isInflight = useIsInflight(card.id);
   const status = toolStatus(card, isInflight);
   const headColor = headerColorFor(status);
   const errColor = card.exitCode && card.exitCode !== 0 ? TONE.err : FG.sub;
   // Rejected calls show a single trailing badge — the verbose JSON error body
   // is already conveyed by the badge, so dropping the body keeps the card tight.
-  const showBody = !card.rejected && (subagentMarkdown !== null || visible.length > 0);
+  const showBody = !card.rejected && (subagentMarkdown !== null || preview.rows.length > 0);
 
   const meta: MetaItem[] = [];
   if (card.retry) {
@@ -76,26 +81,46 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
           <Markdown text={subagentMarkdown} width={lineCells} />
         ) : (
           <>
-            {hidden > 0 ? (
-              <Text color={FG.faint}>
-                {t(hidden === 1 ? "cardLabels.earlierLine" : "cardLabels.earlierLines", {
-                  count: hidden,
-                })}
-              </Text>
-            ) : null}
-            {visible.map((line, i) => (
-              <Text
-                key={`${card.id}:${hidden + i}`}
-                color={errColor}
-                dimColor={!card.exitCode || card.exitCode === 0}
-              >
-                {clipToCells(line, lineCells) || " "}
-              </Text>
-            ))}
+            {preview.rows.map((row, i) =>
+              row.kind === "hidden" ? (
+                <Text key={`${card.id}:hidden:${i}`} color={FG.faint}>
+                  {t(
+                    hiddenRowLabelKey({
+                      count: row.count,
+                      includeShortcut: i === firstHiddenRow,
+                    }),
+                    { count: row.count },
+                  )}
+                </Text>
+              ) : (
+                <Text
+                  key={`${card.id}:line:${row.index}`}
+                  color={errColor}
+                  dimColor={!card.exitCode || card.exitCode === 0}
+                >
+                  {clipToCells(row.text, lineCells) || " "}
+                </Text>
+              ),
+            )}
           </>
         ))}
     </Card>
   );
+}
+
+function hiddenRowLabelKey({
+  count,
+  includeShortcut,
+}: {
+  count: number;
+  includeShortcut: boolean;
+}):
+  | "cardLabels.earlierLine"
+  | "cardLabels.earlierLines"
+  | "cardLabels.hiddenLine"
+  | "cardLabels.hiddenLines" {
+  if (includeShortcut) return count === 1 ? "cardLabels.earlierLine" : "cardLabels.earlierLines";
+  return count === 1 ? "cardLabels.hiddenLine" : "cardLabels.hiddenLines";
 }
 
 function unwrapSubagentMarkdown(name: string, output: string): string | null {

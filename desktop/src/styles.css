@@ -248,7 +248,11 @@ html[data-platform="macos"] .app {
   --ctx-width: 0px;
 }
 .app[data-side-collapsed="true"] {
-  --side-width: 0px;
+--side-width: 0px;
+}
+.app[data-ctx-collapsed="true"][data-side-collapsed="true"] {
+  --thread-max-width: 1120px;
+  --composer-max-width: 1040px;
 }
 
 /* ---------- TABBAR ---------- */
@@ -1573,7 +1577,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   scroll-padding-bottom: 24px;
 }
 .thread-inner {
-  max-width: 740px;
+  max-width: var(--thread-max-width, 740px);
   margin: 0 auto;
   padding: 0 32px;
   display: flex;
@@ -1643,6 +1647,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .msg .body {
   flex: 1;
   min-width: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1655,9 +1660,15 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .msg.user .body {
   flex: none;
   max-width: 82%;
+  position: relative;
   background: var(--panel-2);
   border-radius: 12px;
   padding: 10px 14px;
+}
+
+.msg.user .msg-text,
+.msg.user .msg-text.user-pending {
+  white-space: pre-wrap;
 }
 
 .msg-text {
@@ -1823,11 +1834,52 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .markdown tbody tr:hover {
   background: var(--card-hover);
 }
+.markdown-table-wrap {
+  width: calc(100% + 32px);
+  max-width: calc(100% + 32px);
+  overflow-x: auto;
+  margin: 14px -16px;
+}
+.markdown-table-wrap > table {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+}
 
 .msg-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 4px;
+  position: absolute;
+  bottom: -6px;
+  right: -6px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 10;
+}
+.msg .body:hover .msg-actions {
+  opacity: 1;
+}
+.msg-actions .copy-btn,
+.msg-actions .edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+.msg-actions .copy-btn:hover,
+.msg-actions .edit-btn:hover {
+  color: var(--fg-2);
+  border-color: var(--border-strong);
+}
+.msg-actions .copy-btn.done {
+  color: var(--success);
+  border-color: var(--success-soft);
 }
 
 .markdown pre {
@@ -1837,6 +1889,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   border-radius: 10px;
   background: var(--panel-2);
   font-family: "Geist Mono", monospace;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
   font-size: 13px;
   line-height: 1.62;
   overflow-x: auto;
@@ -1854,14 +1908,16 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .markdown .codeblock-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 7px 14px;
+  padding: 6px 12px;
   background: var(--panel-2);
   border-bottom: 1px solid var(--border);
   font-family: "Geist Mono", monospace;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
+}
+.markdown .codeblock-head .codeblock-copy-wrap {
+  margin-left: auto;
 }
 .markdown .codeblock-lang {
   text-transform: lowercase;
@@ -1869,24 +1925,24 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   color: var(--fg-2);
   font-weight: 500;
 }
-.markdown .copy-btn {
+.markdown .codeblock-head .copy-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 2px 7px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
-  background: transparent;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
 }
-.markdown .copy-btn:hover {
+.markdown .codeblock-head .copy-btn:hover {
   color: var(--fg-2);
   border-color: var(--border-strong);
 }
-.markdown .copy-btn.done {
+.markdown .codeblock-head .copy-btn.done {
   color: var(--success);
   border-color: var(--success-soft);
 }
@@ -1894,6 +1950,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   margin: 0;
   padding: 14px 16px;
   font-family: "Geist Mono", monospace;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
   font-size: 13px;
   line-height: 1.62;
   overflow-x: auto;
@@ -2774,7 +2832,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   pointer-events: none;
 }
 .composer-inner {
-  max-width: 760px;
+  max-width: var(--composer-max-width, 760px);
   margin: 0 auto;
   position: relative;
   container-type: inline-size;
@@ -2838,7 +2896,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   padding: 12px 14px 6px;
   font-size: 14px;
   line-height: 1.55;
-  min-height: calc(5 * 1.55em + 18px);
+  min-height: calc(2 * 1.55em + 18px);
   overflow-y: hidden;
   font-family: inherit;
 }
@@ -3227,25 +3285,57 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 }
 .tree .node[data-kind="file"] {
   cursor: default;
+  align-items: flex-start;
 }
 .tree .node .ico {
   color: var(--muted-2);
   flex-shrink: 0;
+  margin-top: 2px;
+}
+.tree .node-text {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  flex: 1;
 }
 .tree .node .nm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tree .node .full-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
 .tree .node .dot {
-  margin-left: auto;
+  margin-top: 7px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--success);
+  flex-shrink: 0;
 }
 .tree .node .dot[data-s="m"] {
   background: var(--warning);
+}
+.tree-action {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.tree-action:hover {
+  color: var(--fg);
+  background: var(--panel-2);
 }
 
 .ctx-empty {

@@ -98,15 +98,16 @@ fn resolve_cli(app: &AppHandle) -> Result<(String, Vec<String>)> {
 }
 
 /// Walk every PATH match for `node` and return the first one that is
-/// (a) a real file > 100 KB and (b) NOT inside Windows' App Execution
-/// Alias directory — those Microsoft Store stubs are 0-byte and triggered
-/// the original "%1 is not a valid Win32 application" (error 193).
+/// (a) a real file > 50 KB on macOS/Linux, or > 100 KB on Windows, and
+/// (b) NOT inside Windows' App Execution Alias directory.
+/// Threshold must accommodate Homebrew Node ~68 KB on arm64 macOS.
 fn find_real_node() -> Result<PathBuf> {
     let names: &[&str] = if cfg!(windows) {
         &["node.exe", "node"]
     } else {
         &["node"]
     };
+    let min_size: u64 = if cfg!(windows) { 100_000 } else { 50_000 };
     let mut tried: Vec<String> = Vec::new();
     for name in names {
         if let Ok(iter) = which_all(*name) {
@@ -114,7 +115,7 @@ fn find_real_node() -> Result<PathBuf> {
                 let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
                 let lower = p.to_string_lossy().to_lowercase();
                 let is_ms_store_shim = lower.contains("windowsapps");
-                let too_small = size < 100_000;
+                let too_small = size < min_size;
                 if !too_small && !is_ms_store_shim {
                     return Ok(p);
                 }

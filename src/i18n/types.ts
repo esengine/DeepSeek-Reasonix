@@ -280,11 +280,8 @@ export interface TranslationSchema {
     proArmed: string;
     abortedAtIter: string;
     toolUploadStatus: string;
-    preflightTruncateStatus: string;
-    preflightTruncated: string;
-    preflightTruncatedStillFull: string;
-    preflightNoFold: string;
-    flashEscalation: string;
+    turnStartFoldStatus: string;
+    turnStartFolded: string;
     harvestStatus: string;
     repeatToolCallWarning: string;
     stormStuck: string;
@@ -489,6 +486,12 @@ export interface TranslationSchema {
     steerPlaceholder: string;
     /** Status-line hint shown when steerBusy is active. */
     steerHint: string;
+    /** Info shown when Alt+S pressed on empty input with no stash. */
+    stashNothing: string;
+    /** Info shown when input was stashed (non-empty input → saved). */
+    stashSaved: string;
+    /** Info shown when stash was recalled into input. */
+    stashRecall: string;
   };
   pathConfirm: {
     title: string;
@@ -762,6 +765,8 @@ export interface TranslationSchema {
     moreHitsPlural: string;
     earlierLine: string;
     earlierLines: string;
+    hiddenLine: string;
+    hiddenLines: string;
     earlierStackLine: string;
     earlierStackLines: string;
     agent: string;
@@ -963,6 +968,7 @@ export interface TranslationSchema {
     descCtrlO: string;
     descHelp: string;
     descShiftTab: string;
+    descAltS: string;
   };
   mcpCli: {
     bundledCatalog: string;

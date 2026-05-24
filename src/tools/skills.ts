@@ -24,6 +24,8 @@ export interface SkillToolsOptions {
   disableBuiltins?: boolean;
   /** Called synchronously after `install_skill` successfully writes a new skill file. */
   onSkillInstalled?: SkillInstalledHook;
+  /** Per-skill model override for `runAs: subagent` skills — sourced from config.json's `subagentModels`. */
+  subagentModels?: Record<string, "flash" | "pro">;
 }
 
 interface BuiltinSubagentToolSpec {
@@ -94,6 +96,7 @@ export function registerSkillTools(
     projectRoot: opts.projectRoot,
     customSkillPaths: opts.customSkillPaths,
     disableBuiltins: opts.disableBuiltins,
+    subagentModels: opts.subagentModels,
   });
   const subagentRunner = opts.subagentRunner;
   const onSkillInstalled = opts.onSkillInstalled;

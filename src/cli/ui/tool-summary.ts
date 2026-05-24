@@ -10,6 +10,25 @@ export interface ToolSummary {
   isError: boolean;
 }
 
+export type ToolPreviewRow =
+  | { kind: "hidden"; count: number }
+  | { kind: "line"; index: number; text: string };
+
+export interface ToolPreview {
+  rows: ToolPreviewRow[];
+  hidden: number;
+  truncated: boolean;
+}
+
+const SHELL_TOOL_NAMES = new Set(["run_command", "run_background"]);
+const FAILURE_LINE_PATTERN = /(AssertionError|Error:|FAIL|FAILED|expected|actual|✗)/;
+const FAILURE_SCAN_LINES = 200;
+const FAILURE_PINNED_LINES = 3;
+
+function isShellTool(toolName: string): boolean {
+  return SHELL_TOOL_NAMES.has(toolName);
+}
+
 function clip(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, Math.max(1, max - TRAILING_ELLIPSIS.length)) + TRAILING_ELLIPSIS;
@@ -21,6 +40,80 @@ function firstNonEmptyLine(text: string): string {
     if (trimmed) return trimmed;
   }
   return "";
+}
+
+export function extractToolExitCode(toolName: string, output: string): number | undefined {
+  if (!isShellTool(toolName)) return undefined;
+  const match = output.match(/(?:^|\r?\n)\[exit (-?\d+)\](?=\r?\n|$)/);
+  if (!match?.[1]) return undefined;
+  return Number.parseInt(match[1], 10);
+}
+
+export function selectToolPreviewLines(input: {
+  toolName: string;
+  output: string;
+  exitCode?: number;
+  tailLines: number;
+  verbose: boolean;
+  maxScanLines?: number;
+  maxPinnedLines?: number;
+}): ToolPreview {
+  const lines = input.output.length > 0 ? input.output.split("\n") : [];
+  if (input.verbose || lines.length <= input.tailLines) {
+    return {
+      rows: lines.map((text, index) => ({ kind: "line", index, text })),
+      hidden: 0,
+      truncated: false,
+    };
+  }
+
+  const indexes = new Set<number>();
+  const failedShell =
+    isShellTool(input.toolName) && input.exitCode !== undefined && input.exitCode !== 0;
+
+  if (failedShell) {
+    const scanLimit = Math.min(lines.length, input.maxScanLines ?? FAILURE_SCAN_LINES);
+    const pinnedLimit = input.maxPinnedLines ?? FAILURE_PINNED_LINES;
+    let pinned = 0;
+    for (let i = 0; i < scanLimit && pinned < pinnedLimit; i++) {
+      if (FAILURE_LINE_PATTERN.test(lines[i] ?? "")) {
+        indexes.add(i);
+        pinned++;
+      }
+    }
+  }
+
+  const tailStart = Math.max(0, lines.length - input.tailLines);
+  for (let i = tailStart; i < lines.length; i++) {
+    indexes.add(i);
+  }
+
+  return buildPreviewRows(lines, indexes);
+}
+
+function buildPreviewRows(lines: string[], indexes: ReadonlySet<number>): ToolPreview {
+  const rows: ToolPreviewRow[] = [];
+  let hidden = 0;
+  let previous = -1;
+  const sorted = [...indexes].filter((i) => i >= 0 && i < lines.length).sort((a, b) => a - b);
+
+  for (const index of sorted) {
+    const gap = index - previous - 1;
+    if (gap > 0) {
+      rows.push({ kind: "hidden", count: gap });
+      hidden += gap;
+    }
+    rows.push({ kind: "line", index, text: lines[index] ?? "" });
+    previous = index;
+  }
+
+  const trailing = lines.length - previous - 1;
+  if (trailing > 0) {
+    rows.push({ kind: "hidden", count: trailing });
+    hidden += trailing;
+  }
+
+  return { rows, hidden, truncated: hidden > 0 };
 }
 
 export function formatDuration(ms: number): string {

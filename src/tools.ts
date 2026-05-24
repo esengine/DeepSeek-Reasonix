@@ -399,6 +399,12 @@ function plainTextRejectedReason(name: string, result: string): string | null {
   if ((name === "edit_file" || name === "write_file") && /rejected this edit/i.test(result)) {
     return "edit-gate";
   }
+  if (
+    (name === "edit_file" || name === "write_file" || name === "multi_edit") &&
+    /queued \d+ edits? for review/i.test(result)
+  ) {
+    return "edit-gate";
+  }
   if ((name === "edit_file" || name === "multi_edit") && /read_file first/i.test(result)) {
     return "read-before-edit";
   }

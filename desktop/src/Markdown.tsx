@@ -213,14 +213,19 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
         rehypePlugins={[[rehypeKatex, { throwOnError: false }]]}
         components={{
           pre: ({ children }) => {
-            const codeEl = Children.toArray(children).find(
-              (c): c is ReactElement<{ className?: string; children?: ReactNode }> =>
-                isValidElement(c) && c.type === "code",
+            // react-markdown v9 nests children unpredictably — flatten all text.
+            const rawText = flattenChildText(children).trimEnd();
+            const kids = Children.toArray(children);
+            const codeEl = kids.find(
+              (c): c is ReactElement =>
+                isValidElement(c) && typeof c.type === "string" && c.type.toLowerCase() === "code",
             );
-            if (!codeEl) return <pre>{children}</pre>;
-            const text = String(codeEl.props.children ?? "").replace(/\n$/, "");
-            const lang = /language-([\w-]+)/.exec(codeEl.props.className ?? "")?.[1] ?? "text";
-            return <CodeBlock lang={lang} text={text} />;
+            const lang = codeEl
+              ? /language-([\w-]+)/.exec(
+                  (codeEl.props as Record<string, unknown>).className as string ?? "",
+                )?.[1] ?? "text"
+              : "text";
+            return <CodeBlock lang={lang} text={rawText} />;
           },
           code: ({ className, children }) => {
             const text = String(children ?? "");
@@ -231,6 +236,11 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
           a: ({ href, children }) => <SafeLink href={href}>{children}</SafeLink>,
           p: ({ children }) => <p>{withFilePills(children)}</p>,
           li: ({ children }) => <li>{withFilePills(children)}</li>,
+          table: ({ children }) => (
+            <div className="markdown-table-wrap">
+              <table>{children}</table>
+            </div>
+          ),
           td: ({ children }) => <td>{withFilePills(children)}</td>,
         }}
       >
@@ -293,6 +303,14 @@ function SafeLink({ href, children }: { href?: string; children: ReactNode }) {
   );
 }
 
+/** Recursively extract plain text from React children (handles nested elements, fragments, etc.). */
+function flattenChildText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(flattenChildText).join("");
+  if (isValidElement(node)) return flattenChildText((node.props as { children?: ReactNode }).children);
+  return "";
+}
+
 function CodeBlock({ lang, text }: { lang: string; text: string }): ReactNode {
   useLang();
   const [copied, setCopied] = useState(false);
@@ -309,10 +327,12 @@ function CodeBlock({ lang, text }: { lang: string; text: string }): ReactNode {
     <div className="codeblock">
       <div className="codeblock-head">
         <span className="codeblock-lang">{lang}</span>
-        <button type="button" className={`copy-btn ${copied ? "done" : ""}`} onClick={onCopy}>
-          {copied ? <Check size={11} /> : <Copy size={11} />}
-          {copied ? t("markdown.copied") : t("markdown.copy")}
-        </button>
+        <span className="codeblock-copy-wrap">
+          <button type="button" className={`copy-btn ${copied ? "done" : ""}`} onClick={onCopy}>
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+            {copied ? t("markdown.copied") : t("markdown.copy")}
+          </button>
+        </span>
       </div>
       <CodeView text={text} lang={lang} />
     </div>

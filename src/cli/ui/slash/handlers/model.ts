@@ -3,7 +3,7 @@ import { t } from "@/i18n/index.js";
 import { PRESETS } from "../../presets.js";
 import type { SlashHandler } from "../dispatch.js";
 
-function inferPresetFromModel(id: string): "auto" | "flash" | "pro" | null {
+function inferPresetFromModel(id: string): "flash" | "pro" | null {
   if (id === "deepseek-v4-pro") return "pro";
   if (id === "deepseek-v4-flash") return "flash";
   return null;
@@ -15,9 +15,7 @@ const model: SlashHandler = (args, loop, ctx) => {
   if (!id) {
     return { openModelPicker: true };
   }
-  // Manual model pick = explicit pin: disable auto-escalate so flash doesn't
-  // get bumped, and persist the inferred preset so a relaunch keeps the choice.
-  loop.configure({ model: id, autoEscalate: false });
+  loop.configure({ model: id });
   ctx.dispatch?.({ type: "session.model.change", model: id });
   const inferred = inferPresetFromModel(id);
   ctx.dispatch?.({ type: "session.preset.change", preset: inferred });
@@ -38,13 +36,9 @@ const model: SlashHandler = (args, loop, ctx) => {
 
 const preset: SlashHandler = (args, loop, ctx) => {
   const name = (args[0] ?? "").toLowerCase();
-  const apply = (
-    presetName: "auto" | "flash" | "pro",
-    p: (typeof PRESETS)[keyof typeof PRESETS],
-  ) => {
+  const apply = (presetName: "flash" | "pro", p: (typeof PRESETS)[keyof typeof PRESETS]) => {
     loop.configure({
       model: p.model,
-      autoEscalate: p.autoEscalate,
       reasoningEffort: p.reasoningEffort,
     });
     ctx.dispatch?.({ type: "session.model.change", model: p.model });
@@ -55,10 +49,6 @@ const preset: SlashHandler = (args, loop, ctx) => {
       /* disk full / perms — runtime change still took effect */
     }
   };
-  if (name === "auto") {
-    apply("auto", PRESETS.auto);
-    return { info: t("handlers.model.presetAuto") };
-  }
   if (name === "flash") {
     apply("flash", PRESETS.flash);
     return { info: t("handlers.model.presetFlash") };
@@ -71,28 +61,6 @@ const preset: SlashHandler = (args, loop, ctx) => {
     return { openModelPicker: true };
   }
   return { info: t("handlers.model.presetUsage") };
-};
-
-const ESCALATION_MODEL_ID = "deepseek-v4-pro";
-
-const pro: SlashHandler = (args, loop, ctx) => {
-  const arg = (args[0] ?? "").toLowerCase();
-  if (arg === "off" || arg === "cancel" || arg === "disarm") {
-    if (!loop.proArmed) {
-      return { info: t("handlers.model.proNothingArmed") };
-    }
-    if (ctx.disarmPro) ctx.disarmPro();
-    else loop.disarmPro();
-    return { info: t("handlers.model.proDisarmed") };
-  }
-  if (arg && arg !== "on" && arg !== "arm") {
-    return { info: t("handlers.model.proUsage") };
-  }
-  if (ctx.armPro) ctx.armPro();
-  else loop.armProForNextTurn();
-  return {
-    info: t("handlers.model.proArmed", { model: ESCALATION_MODEL_ID }),
-  };
 };
 
 const budget: SlashHandler = (args, loop) => {
@@ -141,6 +109,5 @@ const budget: SlashHandler = (args, loop) => {
 export const handlers: Record<string, SlashHandler> = {
   model,
   preset,
-  pro,
   budget,
 };

@@ -7,6 +7,7 @@
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./compaction": "./src/compaction.ts",
     "./derive-prefix": "./src/derive-prefix.ts",
     "./tildeify": "./src/tildeify.ts",
     "./tool-kind": "./src/tool-kind.ts",

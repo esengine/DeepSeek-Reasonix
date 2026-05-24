@@ -63,6 +63,8 @@ export interface SkillStoreOptions {
   customSkillPaths?: readonly string[];
   /** Suppress bundled built-ins — for tests asserting exact list contents. */
   disableBuiltins?: boolean;
+  /** Per-skill model override applied to `runAs: subagent` skills (overrides frontmatter `model:`). */
+  subagentModels?: Record<string, "flash" | "pro">;
 }
 
 /** Reject skill files that would silently disappear from the prefix index — `description:` is what `applySkillsIndex` keys on. */
@@ -91,11 +93,17 @@ function parseAllowedTools(raw: string | undefined): readonly string[] | undefin
   return names.length > 0 ? Object.freeze(names) : undefined;
 }
 
+/** flash/pro preset → concrete deepseek model id. Kept local so this file doesn't import the CLI preset bundle. */
+function subagentModelForPreset(preset: "flash" | "pro"): string {
+  return preset === "pro" ? "deepseek-v4-pro" : "deepseek-v4-flash";
+}
+
 export class SkillStore {
   private readonly homeDir: string;
   private readonly projectRoot: string | undefined;
   private readonly customSkillPaths: readonly string[];
   private readonly disableBuiltins: boolean;
+  private readonly subagentModels: Record<string, "flash" | "pro">;
 
   constructor(opts: SkillStoreOptions = {}) {
     this.homeDir = opts.homeDir ?? homedir();
@@ -105,6 +113,7 @@ export class SkillStore {
       opts.customSkillPaths?.map((p) => resolveCustomSkillPath(p, baseDir, this.homeDir)) ?? [],
     );
     this.disableBuiltins = opts.disableBuiltins === true;
+    this.subagentModels = opts.subagentModels ?? {};
   }
 
   /** True iff this store was configured with a project root. */
@@ -166,7 +175,17 @@ export class SkillStore {
         if (!byName.has(skill.name)) byName.set(skill.name, skill);
       }
     }
-    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return [...byName.values()]
+      .map((s) => this.applyModelOverride(s))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Apply `subagentModels` config override on top of frontmatter `model:`. Inline skills are unaffected. */
+  private applyModelOverride(skill: Skill): Skill {
+    if (skill.runAs !== "subagent") return skill;
+    const override = this.subagentModels[skill.name];
+    if (!override) return skill;
+    return { ...skill, model: subagentModelForPreset(override) };
   }
 
   /** Scaffold a new skill stub at the chosen scope. Refuses to overwrite. */

@@ -1,4 +1,5 @@
 import type { ApprovalPrompt } from "@reasonix/core-utils";
+import { isCompactionSummary, stripCompactionMarker } from "@reasonix/core-utils/compaction";
 import { derivePrefix } from "@reasonix/core-utils/derive-prefix";
 import { Copy } from "lucide-react";
 import { type ReactNode, memo, useState } from "react";
@@ -16,6 +17,7 @@ import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import {
   AssistantText,
+  CompactionCard,
   PlanCardView,
   type PlanItem,
   ReasoningCard,
@@ -37,10 +39,12 @@ export const UserMsg = memo(function UserMsg({
   text,
   time,
   skill,
+  onEdit,
 }: {
   text: string;
   time?: string;
   skill?: SkillOrigin;
+  onEdit?: (text: string) => void;
 }) {
   useLang();
   const [copied, setCopied] = useState(false);
@@ -71,6 +75,16 @@ export const UserMsg = memo(function UserMsg({
         </div>
         <div className="msg-text">{text}</div>
         <div className="msg-actions">
+          {onEdit ? (
+            <button
+              type="button"
+              className="edit-btn"
+              onClick={() => onEdit(text)}
+              title={t("thread.editMessage")}
+            >
+              <I.pencil size={11} />
+            </button>
+          ) : null}
           <button
             type="button"
             className={`copy-btn ${copied ? "done" : ""}`}
@@ -131,6 +145,9 @@ export const AssistantMsg = memo(function AssistantMsg({
         {segments.map((s, i) => {
           if (s.kind === "text") {
             if (!s.text.trim()) return null;
+            if (isCompactionSummary(s.text)) {
+              return <CompactionCard key={i} summary={stripCompactionMarker(s.text)} />;
+            }
             return <AssistantText key={i} text={s.text} />;
           }
           if (s.kind === "reasoning") {

@@ -40,6 +40,7 @@ function relative(ms: number): string {
 export function Sidebar({
   sessions,
   activeName,
+  loadingName,
   onNewChat,
   onLoadSession,
   onDeleteSession,
@@ -50,6 +51,8 @@ export function Sidebar({
 }: {
   sessions: SessionInfo[];
   activeName?: string;
+  /** Name of the session currently being loaded — drives the per-row spinner. */
+  loadingName?: string | null;
   onNewChat: () => void;
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
@@ -148,6 +151,7 @@ export function Sidebar({
           ) : null}
           {filtered.map((s) => {
             const active = s.name === activeName;
+            const loading = s.name === loadingName;
             const mtime = Date.parse(s.mtime);
             const updated = Number.isFinite(mtime) ? relative(Date.now() - mtime) : s.mtime;
             return (
@@ -155,6 +159,8 @@ export function Sidebar({
                 key={s.name}
                 className="session-item"
                 data-active={active}
+                data-loading={loading || undefined}
+                style={loadingName && !loading ? { opacity: 0.5, pointerEvents: "none" } : undefined}
                 onClick={() => onLoadSession(s.name)}
                 role="button"
                 tabIndex={0}
@@ -165,14 +171,27 @@ export function Sidebar({
               >
                 <span
                   className="state"
-                  style={{ background: active ? "var(--accent)" : "var(--border-strong)" }}
+                  style={{
+                    background: loading
+                      ? "var(--accent)"
+                      : active
+                        ? "var(--accent)"
+                        : "var(--border-strong)",
+                    animation: loading ? "session-pulse 0.9s ease-in-out infinite" : undefined,
+                  }}
                 />
                 <div className="body">
                   <span className="title">{prettyName(s)}</span>
                   <span className="meta">
-                    <span>{t("sidebarPanel.messageCount", { count: s.messageCount })}</span>
-                    <span className="sep">·</span>
-                    <span>{updated}</span>
+                    {loading ? (
+                      <span>{t("sidebarPanel.loading")}</span>
+                    ) : (
+                      <>
+                        <span>{t("sidebarPanel.messageCount", { count: s.messageCount })}</span>
+                        <span className="sep">·</span>
+                        <span>{updated}</span>
+                      </>
+                    )}
                   </span>
                 </div>
                 <button

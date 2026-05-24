@@ -225,9 +225,10 @@ export function looksLikeUnbracketedPaste(chunk: string): boolean {
 
 export class StdinReader {
   private subscribers = new Set<Subscriber>();
-  private state: "idle" | "esc" | "csi" | "ss3" | "paste" = "idle";
+  private state: "idle" | "esc" | "csi" | "ss3" | "paste" | "legacyMouse" = "idle";
   /** Buffer for partial sequences across chunks. */
   private csiBuf = "";
+  private legacyMouseBuf = "";
   /** Buffer for paste content. */
   private pasteBuf = "";
   private escTimer: NodeJS.Timeout | null = null;
@@ -277,6 +278,7 @@ export class StdinReader {
     this.cancelEscTimer();
     this.state = "idle";
     this.csiBuf = "";
+    this.legacyMouseBuf = "";
     this.pasteBuf = "";
     this.started = false;
   }
@@ -369,6 +371,12 @@ export class StdinReader {
       // ── CSI accumulator ──
       if (this.state === "csi") {
         const ch = chunk[i]!;
+        if (this.csiBuf.length === 0 && ch === "M") {
+          this.state = "legacyMouse";
+          this.legacyMouseBuf = "";
+          i++;
+          continue;
+        }
         this.csiBuf += ch;
         if (isCsiFinal(ch)) {
           this.dispatchCsi(this.csiBuf);
@@ -380,6 +388,18 @@ export class StdinReader {
           if (this.state === "csi") this.state = "idle";
         }
         i++;
+        continue;
+      }
+
+      if (this.state === "legacyMouse") {
+        const need = 3 - this.legacyMouseBuf.length;
+        const take = Math.min(need, chunk.length - i);
+        this.legacyMouseBuf += chunk.slice(i, i + take);
+        i += take;
+        if (this.legacyMouseBuf.length === 3) {
+          this.legacyMouseBuf = "";
+          this.state = "idle";
+        }
         continue;
       }
 

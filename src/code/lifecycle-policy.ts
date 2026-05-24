@@ -180,9 +180,14 @@ function isPackageMutation(token: string | undefined): boolean {
   const normalized = token?.toLowerCase();
   return (
     normalized === "install" ||
+    normalized === "i" ||
     normalized === "add" ||
     normalized === "remove" ||
-    normalized === "update"
+    normalized === "uninstall" ||
+    normalized === "un" ||
+    normalized === "update" ||
+    normalized === "upgrade" ||
+    normalized === "up"
   );
 }
 
@@ -208,5 +213,5 @@ function isHighRiskGitCommand(args: string[]): boolean {
 }
 
 function looksLikePathCheckout(arg: string): boolean {
-  return arg.includes("/") || arg.includes("\\") || arg.includes(".");
+  return arg.includes("\\") || arg.includes(".");
 }

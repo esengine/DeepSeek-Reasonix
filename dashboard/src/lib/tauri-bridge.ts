@@ -15,6 +15,9 @@ const rawMode = modeMeta?.getAttribute("content") ?? "";
 const isServerMode = rawMode !== "" && rawMode !== "__REASONIX_MODE__";
 const MODE = isServerMode ? "server" : "mock";
 
+/** Web vs. native dispatcher hint — `true` whenever the dashboard is served by the CLI server, false in the Tauri desktop wrapper where native dialogs work. */
+export const isWebRuntime = isServerMode;
+
 console.log(`[tauri-bridge] mode=${MODE}${isServerMode ? ` mode="${rawMode}"` : ""}`);
 
 // 事件广播
@@ -338,8 +341,10 @@ function emitServerSettings(settings: any, overview?: any): void {
     workspaceDir: overview?.cwd ?? "",
     recentWorkspaces: [],
     model: overview?.model ?? settings?.model ?? "deepseek-reasoner",
-    preset: settings?.preset ?? overview?.preset ?? "auto",
+    preset: settings?.preset ?? overview?.preset ?? "flash",
     editor: "code",
+    webSearchEngine: settings?.webSearchEngine ?? "bing",
+    subagentModels: settings?.subagentModels ?? {},
     version: overview?.version ?? "",
     baseUrl: settings?.baseUrl ?? "",
     apiKeyPrefix: settings?.apiKey ?? "",
@@ -447,37 +452,74 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
     }
     case "session_load": {
       try {
-        // 先切换到目标会话
         const switchData = await apiFetch(`sessions/${encodeURIComponent(payload.name)}/switch`, { method: "POST" });
         if (!switchData?.ok) {
-          console.warn("[tauri-bridge] session switch failed:", payload.name);
+          console.warn("[tauri-bridge] session switch failed:", payload.name, switchData);
           break;
         }
-        // 再加载会话消息
         const data = await apiFetch(`sessions/${encodeURIComponent(payload.name)}`);
-        if (data?.messages) {
-          const messages = data.messages.map((m: any) => {
-            if (m.role === "user") {
-              return { kind: "user" as const, text: m.content ?? "" };
-            }
-            if (m.role === "assistant") {
-              return {
-                kind: "assistant" as const,
-                turn: m.turn ?? 0,
-                segments: m.content ? [{ kind: "text" as const, text: m.content }] : [],
-                pending: false,
-              };
-            }
-            return null;
-          }).filter(Boolean);
-          emitEvent({
-            type: "$session_loaded",
-            tabId: "tab-1",
-            name: payload.name,
-            messages,
-            carryover: { totalCostUsd: 0, cacheHitTokens: 0, cacheMissTokens: 0 },
-          });
+        if (!Array.isArray(data?.messages)) {
+          console.warn("[tauri-bridge] session_load: GET response missing messages", data);
+          break;
         }
+        const raw = data.messages as any[];
+        // Pre-pass: map tool-result rows by their call id so we can stitch
+        // them into the assistant message that issued the call. Without
+        // this, every tool segment in the replay shows "(no result)".
+        const toolResults = new Map<string, { content: string; name?: string }>();
+        for (const m of raw) {
+          if (m?.role === "tool" && typeof m.toolCallId === "string") {
+            toolResults.set(m.toolCallId, {
+              content: typeof m.content === "string" ? m.content : "",
+              name: typeof m.toolName === "string" ? m.toolName : undefined,
+            });
+          }
+        }
+        const messages: any[] = [];
+        for (const m of raw) {
+          if (m?.role === "user") {
+            messages.push({ kind: "user" as const, text: m.content ?? "" });
+            continue;
+          }
+          if (m?.role === "assistant") {
+            const segments: any[] = [];
+            if (typeof m.reasoning === "string" && m.reasoning.length > 0) {
+              segments.push({ kind: "reasoning" as const, text: m.reasoning });
+            }
+            if (typeof m.content === "string" && m.content.length > 0) {
+              segments.push({ kind: "text" as const, text: m.content });
+            }
+            if (Array.isArray(m.toolCalls)) {
+              for (const tc of m.toolCalls) {
+                const result = toolResults.get(tc.id);
+                segments.push({
+                  kind: "tool" as const,
+                  callId: tc.id,
+                  name: tc.name || result?.name || "tool",
+                  args: tc.arguments ?? "",
+                  startedAt: 0,
+                  result: result?.content,
+                  ok: result != null,
+                  durationMs: 0,
+                });
+              }
+            }
+            messages.push({
+              kind: "assistant" as const,
+              turn: m.turn ?? 0,
+              segments,
+              pending: false,
+            });
+          }
+          // tool-role messages are absorbed into their matching assistant segment above.
+        }
+        emitEvent({
+          type: "$session_loaded",
+          tabId: "tab-1",
+          name: payload.name,
+          messages,
+          carryover: { totalCostUsd: 0, cacheHitTokens: 0, cacheMissTokens: 0 },
+        });
       } catch (err) {
         console.warn("[tauri-bridge] session load failed:", err);
       }
@@ -504,7 +546,17 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
       try {
         const data = await apiFetch("sessions/new", { method: "POST" });
         if (data?.ok) {
-          // 新建成功后重新拉取会话列表
+          const newName = typeof data.name === "string" ? data.name : "default";
+          // Treat a fresh session like a loaded-empty session so the reducer
+          // resets state.currentSession + messages. `$session_empty` is for
+          // "file exists but unparseable" and would render a scary error.
+          emitEvent({
+            type: "$session_loaded",
+            tabId: "tab-1",
+            name: newName,
+            messages: [],
+            carryover: { totalCostUsd: 0, cacheHitTokens: 0, cacheMissTokens: 0 },
+          });
           const listData = await apiFetch("sessions");
           if (listData?.sessions) {
             const items = listData.sessions.map((s: any) => ({
@@ -515,8 +567,6 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
             }));
             emitEvent({ type: "$sessions", tabId: "tab-1", items });
           }
-          // 清空当前聊天
-          emitEvent({ type: "$session_empty", tabId: "tab-1", name: "new-session", sizeBytes: 0 });
         }
       } catch { /* fallback */ }
       break;
@@ -814,7 +864,7 @@ const mockSessions = [
 const mockSettings = {
   reasoningEffort: "high", editMode: "review", budgetUsd: null,
   workspaceDir: "", recentWorkspaces: [],
-  model: "deepseek-reasoner", preset: "auto", version: "0.47.2",
+  model: "deepseek-reasoner", preset: "flash", version: "0.47.2",
 };
 
 const mockMessages: any[] = [

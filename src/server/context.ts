@@ -43,8 +43,6 @@ export interface DashboardContext {
   applyModelLive?: (model: string) => void;
   /** Cached model catalog. Null = in flight / failed; `[]` = API answered empty. */
   getModels?: () => string[] | null;
-  /** One-shot v4-pro arming for the next turn. `armed=false` cancels a pending arm. */
-  setProNextLive?: (armed: boolean) => void;
   /** Session USD cap; null disables. Re-arms the 80% warning latch. */
   setBudgetUsdLive?: (usd: number | null) => void;
   /** Auto-resubmit timer status — same shape `useLoopMode` exposes to slash handlers. */

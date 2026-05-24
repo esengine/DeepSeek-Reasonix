@@ -658,14 +658,9 @@ export const zhCN: TranslationSchema = {
     proArmed: "⇧ /pro 已装备 — 本轮使用 deepseek-v4-pro（一次性 · 本轮后自动解除）",
     abortedAtIter: "在第 {iter} 次工具调用处中断 — 未生成总结即停止（按 ↑ + Enter 或 /retry 恢复）",
     toolUploadStatus: "工具结果已上传 · 模型在生成下一条响应前思考中…",
-    preflightTruncateStatus: "预检：上下文接近上限，正在裁剪最早历史…",
-    preflightTruncated:
-      "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）· body {bodyKB} KB — 已裁剪 {beforeMessages} 条消息 → {afterMessages}。发送中。",
-    preflightTruncatedStillFull:
-      "预检：裁剪 {beforeMessages} 条消息 → {afterMessages} 后，请求仍约 {estimate}/{ctxMax} tokens（{pct}%）· body {bodyKB} KB — DeepSeek 大概率会返回 400。请运行 /clear 或 /new 重新开始。",
-    preflightNoFold:
-      "预检：请求约 {estimate}/{ctxMax} tokens（{pct}%）· body {bodyKB} KB 且没有可裁剪的内容 — DeepSeek 大概率会返回 400。请运行 /clear 或 /new 重新开始。",
-    flashEscalation: "⇧ flash 请求升级 — 本轮改用 {model}{reasonSuffix}",
+    turnStartFoldStatus: "回合开始：上下文接近上限，正在压缩历史…",
+    turnStartFolded:
+      "回合开始：请求约 {estimate}/{ctxMax} tokens（{pct}%）— 已压缩 {beforeMessages} 条消息 → {afterMessages}。发送中。",
     harvestStatus: "正在从推理过程提取计划状态…",
     repeatToolCallWarning: "拦截到重复工具调用 — 让模型察觉问题并换种方式重试。",
     stormStuck:
@@ -906,10 +901,9 @@ export const zhCN: TranslationSchema = {
       modelNotInCatalog:
         "model → {id}   （⚠ 不在获取的目录中：{list}。如果这是错误的，下次调用将返回 400 — 运行 /models 刷新。）",
       modelSet: "model → {id}",
-      presetAuto: "preset → auto  （v4-flash → v4-pro 在困难轮次切换 · 默认）",
-      presetFlash: "preset → flash  （始终使用 v4-flash · 最便宜 · /pro 仍可临时提升一轮）",
+      presetFlash: "preset → flash  （始终使用 v4-flash · 最便宜）",
       presetPro: "preset → pro  （始终使用 v4-pro · 约 3 倍 flash · 用于困难的多轮工作）",
-      presetUsage: "用法：/preset <auto|flash|pro>",
+      presetUsage: "用法：/preset <flash|pro>",
       proNothingArmed: "未启用 — /pro 不带参数将为下一轮启用 pro",
       proDisarmed: "▸ /pro 已解除 — 下一轮回退到当前预设",
       proUsage:
@@ -976,6 +970,8 @@ export const zhCN: TranslationSchema = {
       failed: "▸ 仪表板启动失败：{reason}",
       starting: "▸ 正在启动仪表板服务器…",
       copied: "▸ 仪表板 URL 已复制到剪贴板：{url}",
+      tokenResetting: "▸ 正在轮换仪表板 token 并重启服务…",
+      tokenReset: "▸ 仪表板 token 已轮换。新 URL：",
     },
     observability: {
       contextInfo: "上下文：~{total} / {max}（{pct}%）· 系统 {sys} · 工具 {tools} · 日志 {log}",
@@ -1248,6 +1244,9 @@ export const zhCN: TranslationSchema = {
     typeaheadStaged: "\u25b8 {count} 行已暂存 \u00b7 esc 召回",
     steerPlaceholder: "输入消息以引导当前任务 — 忙碌时不支持命令",
     steerHint: "发送 — 回合内注入",
+    stashNothing: "没有可暂存的内容",
+    stashSaved: "已暂存",
+    stashRecall: "已恢复",
   },
   pathConfirm: {
     title: "沙箱外路径",
@@ -1556,8 +1555,10 @@ export const zhCN: TranslationSchema = {
     hitsPlural: "{count} 条结果 · {files} 个文件",
     moreHitSingular: "⋮ +{count} 条结果",
     moreHitsPlural: "⋮ +{count} 条结果",
-    earlierLine: "⋮ 前 {count} 行（使用 /tool 阅读全文）",
-    earlierLines: "⋮ 前 {count} 行（使用 /tool 阅读全文）",
+    earlierLine: "⋮ {count} 行已隐藏（Ctrl+R 查看完整输出）",
+    earlierLines: "⋮ {count} 行已隐藏（Ctrl+R 查看完整输出）",
+    hiddenLine: "⋮ {count} 行已隐藏",
+    hiddenLines: "⋮ {count} 行已隐藏",
     earlierStackLine: "⋮ 前 {count} 行堆栈已隐藏",
     earlierStackLines: "⋮ 前 {count} 行堆栈已隐藏",
     agent: "代理 · {name}",
@@ -1772,6 +1773,7 @@ export const zhCN: TranslationSchema = {
     descCtrlO: "展开回复（仅流式输出期间）",
     descHelp: "显示所有命令",
     descShiftTab: "切换编辑模式",
+    descAltS: "暂存/恢复输入",
   },
   mcpCli: {
     bundledCatalog: "已打包的 MCP 服务器（离线目录）：",

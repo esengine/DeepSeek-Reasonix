@@ -236,6 +236,7 @@ export function ShellCard({
       kind="shell"
       name="shell"
       compact
+      defaultOpen={state !== "done"}
       meta={
         <>
           {state === "await" ? (
@@ -299,6 +300,28 @@ export function ShellCard({
             </div>
           </div>
         ) : null}
+      </div>
+    </Card>
+  );
+}
+
+// ---- Compaction ----
+
+export function CompactionCard({ summary }: { summary: string }) {
+  useLang();
+  const charCount = summary.length;
+  return (
+    <Card
+      tone="default"
+      icon={<I.archive size={12} />}
+      kind="compaction"
+      name={t("cards.compactionName")}
+      meta={<span>{t("cards.compactionMeta", { chars: charCount.toLocaleString() })}</span>}
+      defaultOpen={false}
+      compact
+    >
+      <div className="compaction-body">
+        <Markdown source={summary} />
       </div>
     </Card>
   );

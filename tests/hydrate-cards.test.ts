@@ -1,3 +1,4 @@
+import { COMPACTION_SUMMARY_MARKER } from "@reasonix/core-utils";
 import { describe, expect, it } from "vitest";
 import { hydrateCardsFromMessages } from "../src/cli/ui/state/hydrate.js";
 import type { ChatMessage } from "../src/types.js";
@@ -21,6 +22,19 @@ describe("hydrateCardsFromMessages", () => {
     expect(cards.map((c) => c.kind)).toEqual(["user", "streaming"]);
     expect(cards[0]).toMatchObject({ kind: "user", text: "hi" });
     expect(cards[1]).toMatchObject({ kind: "streaming", text: "hello there", done: true });
+  });
+
+  it("turns a fold summary assistant message into a CompactionCard", () => {
+    const msgs: ChatMessage[] = [
+      { role: "assistant", content: `${COMPACTION_SUMMARY_MARKER}earlier turns explored auth.` },
+      { role: "user", content: "continue" },
+    ];
+    const cards = hydrateCardsFromMessages(msgs);
+    expect(cards.map((c) => c.kind)).toEqual(["compaction", "user"]);
+    expect(cards[0]).toMatchObject({
+      kind: "compaction",
+      summary: "earlier turns explored auth.",
+    });
   });
 
   it("emits a ReasoningCard before the StreamingCard when reasoning_content is present", () => {
@@ -63,6 +77,34 @@ describe("hydrateCardsFromMessages", () => {
       name: "shell",
       args: { cmd: "ls" },
       output: "a.txt\nb.txt",
+      done: true,
+    });
+  });
+
+  it("hydrates run_command exit markers into tool card exitCode", () => {
+    const msgs: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call-1",
+            type: "function",
+            function: { name: "run_command", arguments: '{"command":"node test.mjs"}' },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call-1",
+        content: "$ node test.mjs\n[exit 1]\nAssertionError: expected 9000",
+      },
+    ];
+    const cards = hydrateCardsFromMessages(msgs);
+    expect(cards[0]).toMatchObject({
+      kind: "tool",
+      name: "run_command",
+      exitCode: 1,
       done: true,
     });
   });

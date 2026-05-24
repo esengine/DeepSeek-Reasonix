@@ -1,4 +1,6 @@
+import { isCompactionSummary, stripCompactionMarker } from "@reasonix/core-utils";
 import type { ChatMessage } from "../../../types.js";
+import { extractToolExitCode } from "../tool-summary.js";
 import type { Card, ToolCard } from "./cards.js";
 
 /** Rebuild cards from a persisted ChatMessage[] so resumed sessions render their history. */
@@ -33,7 +35,16 @@ export function hydrateCardsFromMessages(messages: ReadonlyArray<ChatMessage>): 
       }
       const text = typeof m.content === "string" ? m.content : "";
       if (text) {
-        cards.push({ kind: "streaming", id: id("streaming"), ts, text, done: true });
+        if (isCompactionSummary(text)) {
+          cards.push({
+            kind: "compaction",
+            id: id("compaction"),
+            ts,
+            summary: stripCompactionMarker(text),
+          });
+        } else {
+          cards.push({ kind: "streaming", id: id("streaming"), ts, text, done: true });
+        }
       }
       if (m.tool_calls?.length) {
         for (const tc of m.tool_calls) {
@@ -66,6 +77,8 @@ export function hydrateCardsFromMessages(messages: ReadonlyArray<ChatMessage>): 
       const text = typeof m.content === "string" ? m.content : "";
       if (card) {
         card.output = text;
+        const exitCode = extractToolExitCode(card.name, text);
+        if (exitCode !== undefined) card.exitCode = exitCode;
         card.done = true;
       }
     }

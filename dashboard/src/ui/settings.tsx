@@ -166,7 +166,13 @@ export function SettingsModal({
                 onRemove={onRemoveMcpSpec}
               />
             )}
-            {page === "skills" && <PageSkills skills={skills} />}
+            {page === "skills" && (
+              <PageSkills
+                skills={skills}
+                subagentModels={settings.subagentModels ?? {}}
+                onSave={onSave}
+              />
+            )}
             {page === "memory" && <PageMemory />}
             {page === "rules" && <PageRules settings={settings} onSave={onSave} />}
             {page === "billing" && (
@@ -624,6 +630,34 @@ function PageGeneral({
             }}
           />
         </div>
+        <div className="setting-row">
+          <div className="l">
+            <div className="n">{t("settings.webSearchEngine")}</div>
+            <div className="h">{t("settings.webSearchEngineNote")}</div>
+          </div>
+          <select
+            className="field"
+            value={settings.webSearchEngine ?? "bing"}
+            onChange={(e) =>
+              onSave({
+                webSearchEngine: e.target.value as
+                  | "bing"
+                  | "searxng"
+                  | "metaso"
+                  | "tavily"
+                  | "perplexity"
+                  | "exa",
+              })
+            }
+          >
+            <option value="bing">{t("settings.webSearchEngineBing")}</option>
+            <option value="searxng">{t("settings.webSearchEngineSearxng")}</option>
+            <option value="metaso">{t("settings.webSearchEngineMetaso")}</option>
+            <option value="tavily">{t("settings.webSearchEngineTavily")}</option>
+            <option value="perplexity">{t("settings.webSearchEnginePerplexity")}</option>
+            <option value="exa">{t("settings.webSearchEngineExa")}</option>
+          </select>
+        </div>
       </section>
     </>
   );
@@ -700,14 +734,6 @@ function PageModels({
   onSave: (patch: SettingsPatch) => void;
 }) {
   const presets = [
-    {
-      id: "auto" as const,
-      name: "auto (flash → pro)",
-      badge: "AUTO",
-      desc: t("settings.modelAutoDesc"),
-      ctx: "—",
-      out: "—",
-    },
     {
       id: "flash" as const,
       name: "deepseek-v4-flash",
@@ -861,7 +887,18 @@ function PageMCP({
   );
 }
 
-function PageSkills({ skills }: { skills: SkillInfo[] }) {
+function PageSkills({
+  skills,
+  subagentModels,
+  onSave,
+}: {
+  skills: SkillInfo[];
+  subagentModels: Record<string, "flash" | "pro">;
+  onSave: (patch: SettingsPatch) => void;
+}) {
+  const setSubagentModel = (name: string, value: "flash" | "pro") => {
+    onSave({ subagentModels: { ...subagentModels, [name]: value } });
+  };
   return (
     <section className="section">
       <div className="stitle">{t("settings.skillsLoaded", { count: skills.length })}</div>
@@ -901,6 +938,20 @@ function PageSkills({ skills }: { skills: SkillInfo[] }) {
                   {s.model ? ` · ${s.model}` : ""}
                 </div>
               </div>
+              {s.runAs === "subagent" ? (
+                <select
+                  className="field"
+                  style={{ marginLeft: "auto", minWidth: 96 }}
+                  value={subagentModels[s.name] ?? "flash"}
+                  onChange={(e) =>
+                    setSubagentModel(s.name, e.target.value as "flash" | "pro")
+                  }
+                  title={t("settings.subagentModelHint")}
+                >
+                  <option value="flash">{t("settings.subagentModelFlash")}</option>
+                  <option value="pro">{t("settings.subagentModelPro")}</option>
+                </select>
+              ) : null}
             </div>
             <div className="desc">{s.description}</div>
             <div

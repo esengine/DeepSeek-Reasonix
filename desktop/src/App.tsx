@@ -56,7 +56,12 @@ import { Sidebar } from "./ui/sidebar";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import { StatusBar } from "./ui/statusbar";
-import { dispatchDesktopNotifications, deriveDesktopNotifications, type ApprovalSnapshot } from "./notifications";
+import {
+  dispatchDesktopNotifications,
+  deriveDesktopNotifications,
+  shouldShowCompletionToast,
+  type ApprovalSnapshot,
+} from "./notifications";
 import {
   ActivePlanTaskCard,
   AssistantMsg,
@@ -213,8 +218,10 @@ export type Settings = {
   workspaceDir: string;
   recentWorkspaces: string[];
   model: string;
-  preset: "auto" | "flash" | "pro";
+  preset: "flash" | "pro";
   editor?: string;
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  subagentModels?: Record<string, "flash" | "pro">;
   version: string;
 };
 
@@ -735,10 +742,10 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$ctx_breakdown": {
       const next: UsageStats = { ...state.usage, reservedTokens: ev.reservedTokens };
       if (typeof ev.logTokens === "number") {
-        // After /compact the backend sends a real-time log token count;
-        // reset the meter so it reflects the actual current context size.
         next.cacheHitTokens = 0;
         next.cacheMissTokens = ev.logTokens;
+        next.lastCallCacheHit = 0;
+        next.lastCallCacheMiss = ev.logTokens;
       }
       return { ...state, usage: next };
     }
@@ -798,6 +805,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           model: ev.model,
           preset: ev.preset,
           editor: ev.editor,
+          webSearchEngine: ev.webSearchEngine,
+          subagentModels: ev.subagentModels,
           version: ev.version,
         },
       };
@@ -1444,21 +1453,37 @@ function TabRuntime({
     previousApprovalSnapshotRef.current = currentSnapshot;
     wasBusyRef.current = state.busy;
 
-    const notifications = deriveDesktopNotifications({
-      previous: previousSnapshot,
-      current: currentSnapshot,
-      wasBusy,
-      isBusy: state.busy,
-      busyDurationMs,
-      focused: false,
-    });
-    void dispatchDesktopNotifications(notifications, {
-      isFocused: () => getCurrentWindow().isFocused(),
-      isPermissionGranted: isNotificationPermissionGranted,
-      requestPermission: requestNotificationPermission,
-      sendNotification,
-    });
+    void getCurrentWindow()
+      .isFocused()
+      .catch(() => true)
+      .then((focused) => {
+        if (
+          shouldShowCompletionToast({
+            wasBusy,
+            isBusy: state.busy,
+            busyDurationMs,
+            focused,
+          })
+        ) {
+          flashToast(t("app.toast.taskComplete"), { duration: 2400 });
+        }
+        const notifications = deriveDesktopNotifications({
+          previous: previousSnapshot,
+          current: currentSnapshot,
+          wasBusy,
+          isBusy: state.busy,
+          busyDurationMs,
+          focused,
+        });
+        void dispatchDesktopNotifications(notifications, {
+          isFocused: async () => focused,
+          isPermissionGranted: isNotificationPermissionGranted,
+          requestPermission: requestNotificationPermission,
+          sendNotification,
+        });
+      });
   }, [
+    flashToast,
     state.busy,
     state.pendingChoices,
     state.pendingCheckpoints,
@@ -1946,7 +1971,7 @@ function TabRuntime({
                       return (
                         <div key={`u-${i}`}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg text={m.text} skill={m.skill} />
+                          <UserMsg text={m.text} skill={m.skill} onEdit={(t) => { setDraft(t); composerRef.current?.focus(); }} />
                         </div>
                       );
                     }
@@ -2104,7 +2129,7 @@ function TabRuntime({
                 }
                 busyElapsedMs={elapsed}
                 textareaRef={composerRef}
-                preset={state.settings?.preset ?? "auto"}
+                preset={state.settings?.preset ?? "flash"}
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
                 onPresetChange={(preset) => {
                   saveSettings({ preset });

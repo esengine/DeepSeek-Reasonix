@@ -29,11 +29,11 @@ describe("/preset apply — issue #770", () => {
   it("does not write reasoningEffort to disk when switching preset", () => {
     vi.mocked(saveReasoningEffort).mockClear();
     vi.mocked(savePreset).mockClear();
-    for (const name of ["auto", "flash", "pro"] as const) {
+    for (const name of ["flash", "pro"] as const) {
       handleSlash("preset", [name], makeLoop());
     }
     expect(saveReasoningEffort).not.toHaveBeenCalled();
-    expect(vi.mocked(savePreset).mock.calls.map((c) => c[0])).toEqual(["auto", "flash", "pro"]);
+    expect(vi.mocked(savePreset).mock.calls.map((c) => c[0])).toEqual(["flash", "pro"]);
   });
 
   it("still flips the live loop's reasoningEffort when preset is applied", () => {

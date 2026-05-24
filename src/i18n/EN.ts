@@ -679,14 +679,9 @@ export const EN: TranslationSchema = {
     abortedAtIter:
       "aborted at iter {iter} — stopped without producing a summary (press ↑ + Enter or /retry to resume)",
     toolUploadStatus: "tool result uploaded · model thinking before next response…",
-    preflightTruncateStatus: "preflight: context near full, truncating oldest history…",
-    preflightTruncated:
-      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) · body {bodyKB} KB — truncated {beforeMessages} messages → {afterMessages}. Sending.",
-    preflightTruncatedStillFull:
-      "preflight: request still ~{estimate}/{ctxMax} tokens ({pct}%) · body {bodyKB} KB after truncating {beforeMessages} messages → {afterMessages}. DeepSeek will likely 400. Run /clear or /new to start fresh.",
-    preflightNoFold:
-      "preflight: request ~{estimate}/{ctxMax} tokens ({pct}%) · body {bodyKB} KB and nothing left to truncate — DeepSeek will likely 400. Run /clear or /new to start fresh.",
-    flashEscalation: "⇧ flash requested escalation — retrying this turn on {model}{reasonSuffix}",
+    turnStartFoldStatus: "turn start: context approaching limit, compacting history…",
+    turnStartFolded:
+      "turn start: request ~{estimate}/{ctxMax} tokens ({pct}%) — compacted {beforeMessages} messages → {afterMessages}. Sending.",
     harvestStatus: "extracting plan state from reasoning…",
     repeatToolCallWarning:
       "Caught a repeated tool call — let the model see the issue and retry with a different approach.",
@@ -954,10 +949,9 @@ export const EN: TranslationSchema = {
       modelNotInCatalog:
         "model → {id}   (⚠ not in the fetched catalog: {list}. If this is wrong the next call will 400 — run /models to refresh.)",
       modelSet: "model → {id}",
-      presetAuto: "preset → auto  (v4-flash → v4-pro on hard turns · default)",
-      presetFlash: "preset → flash  (v4-flash always · cheapest · /pro still bumps one turn)",
+      presetFlash: "preset → flash  (v4-flash always · cheapest)",
       presetPro: "preset → pro  (v4-pro always · ~3× flash · for hard multi-turn work)",
-      presetUsage: "usage: /preset <auto|flash|pro>",
+      presetUsage: "usage: /preset <flash|pro>",
       proNothingArmed: "nothing armed — /pro with no args will arm pro for your next turn",
       proDisarmed: "▸ /pro disarmed — next turn falls back to the current preset",
       proUsage:
@@ -1030,6 +1024,8 @@ export const EN: TranslationSchema = {
       failed: "▸ dashboard failed to start: {reason}",
       starting: "▸ starting dashboard server…",
       copied: "▸ dashboard URL copied to clipboard: {url}",
+      tokenResetting: "▸ rotating dashboard token — restarting server…",
+      tokenReset: "▸ dashboard token rotated. New URL:",
     },
     observability: {
       contextInfo: "context: ~{total} of {max} ({pct}%) · system {sys} · tools {tools} · log {log}",
@@ -1318,6 +1314,9 @@ export const EN: TranslationSchema = {
     typeaheadStaged: "\u25b8 {count} line(s) staged \u00b7 esc recall",
     steerPlaceholder: "type to steer the current task — commands are disabled while busy",
     steerHint: "send — injected mid-turn",
+    stashNothing: "Nothing to stash",
+    stashSaved: "Stashed",
+    stashRecall: "Recalled",
   },
   pathConfirm: {
     title: "Outside-sandbox path",
@@ -1640,8 +1639,10 @@ export const EN: TranslationSchema = {
     hitsPlural: "{count} hits \u00b7 {files} files",
     moreHitSingular: "\u22ee +{count} more hit",
     moreHitsPlural: "\u22ee +{count} more hits",
-    earlierLine: "\u22ee {count} earlier line (use /tool to read full)",
-    earlierLines: "\u22ee {count} earlier lines (use /tool to read full)",
+    earlierLine: "\u22ee {count} hidden line (Ctrl+R for full output)",
+    earlierLines: "\u22ee {count} hidden lines (Ctrl+R for full output)",
+    hiddenLine: "\u22ee {count} hidden line",
+    hiddenLines: "\u22ee {count} hidden lines",
     earlierStackLine: "\u22ee {count} earlier stack line hidden",
     earlierStackLines: "\u22ee {count} earlier stack lines hidden",
     agent: "agent \u00b7 {name}",
@@ -1869,6 +1870,7 @@ export const EN: TranslationSchema = {
     descCtrlO: "Expand reply (streaming only)",
     descHelp: "Show all commands",
     descShiftTab: "Switch edit mode",
+    descAltS: "Stash / recall input",
   },
   mcpCli: {
     bundledCatalog: "Bundled MCP servers (offline catalog):",

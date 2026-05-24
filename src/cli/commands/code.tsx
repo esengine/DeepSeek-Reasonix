@@ -21,9 +21,10 @@
 import { readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { buildCodeToolset } from "../../code/setup.js";
-import { loadApiKey, loadPreset, readConfig } from "../../config.js";
+import { loadApiKey, loadPreset, normalizeMcpConfig, readConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { t } from "../../i18n/index.js";
+import { specToRaw } from "../../mcp/spec.js";
 import { detectForeignAgentPlatform } from "../../memory/project.js";
 import { sanitizeName } from "../../memory/session.js";
 import { markPhase } from "../startup-profile.js";
@@ -155,7 +156,6 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   await chatCommand({
     model: resolvedModel,
     preset: opts.model ? undefined : presetNameForSettings(presetSettings),
-    autoEscalate: opts.model ? false : presetSettings.autoEscalate,
     budgetUsd: opts.budgetUsd,
     system: codeRebuildSystem(),
     rebuildSystem: codeRebuildSystem,
@@ -175,7 +175,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
         currentRoot = newRoot;
       },
     },
-    mcp: readConfig().mcp,
+    mcp: normalizeMcpConfig(readConfig()).map(specToRaw),
     forceResume: opts.forceResume,
     forceNew: opts.forceNew,
     noDashboard: opts.noDashboard,
