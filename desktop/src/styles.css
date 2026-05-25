@@ -4751,6 +4751,18 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   margin-top: 2px;
 }
 .scard .grow { flex: 1; }
+.scard .mcp-spec-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.scard .mcp-spec-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.scard .mcp-remove {
+  flex: 0 0 auto;
+}
 .scard .desc {
   font-size: 14px;
   color: var(--fg-2);

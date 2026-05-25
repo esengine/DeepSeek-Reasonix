@@ -940,14 +940,15 @@ function PageMCP({
                 <span className="ico">
                   <I.wrench size={14} />
                 </span>
-                <div>
+                <div className="mcp-spec-body">
                   <div className="nm">{s.name ?? "(anonymous)"}</div>
-                  <div className="sub">{s.summary}</div>
+                  <div className="sub mcp-spec-summary" title={s.summary}>
+                    {s.summary}
+                  </div>
                 </div>
-                <span className="grow" />
                 <button
                   type="button"
-                  className="btn ghost"
+                  className="btn ghost mcp-remove"
                   style={{ color: "var(--danger)" }}
                   onClick={() => onRemove(s.raw)}
                 >
