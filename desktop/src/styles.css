@@ -3135,6 +3135,17 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
+  padding-right: 20px;
+}
+.ctx-body::-webkit-scrollbar {
+  width: 8px;
+}
+.ctx-body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+.ctx-body::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
 }
 
 .ctx-block {
