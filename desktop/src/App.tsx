@@ -20,6 +20,11 @@ import {
 import { getLang, setLang, t, useLang } from "./i18n";
 import { I } from "./icons";
 import {
+  buildSlashSettingsDescriptors,
+  parseSlashSettingsCommand,
+  type SlashSettingsCommand,
+} from "./slash-settings";
+import {
   FONT_FAMILY,
   FONT_FAMILY_STACK,
   FONT_SCALE,
@@ -317,6 +322,7 @@ type Action =
   | { t: "enqueue_send"; text: string }
   | { t: "dequeue_send"; index: number }
   | { t: "shift_queued_send" }
+  | { t: "settings_patch"; patch: SettingsPatch }
   | { t: "push_status"; text: string };
 
 function fallbackSkillDesc(skill: SkillInfo): string {
@@ -395,6 +401,10 @@ export function reduce(state: State, action: Action): State {
       };
     case "incoming":
       return applyIncoming(state, action.event);
+    case "settings_patch":
+      return state.settings
+        ? { ...state, settings: { ...state.settings, ...action.patch } }
+        : state;
     case "batch_delta": {
       const collapsed: DeltaBatchItem[] = [];
       for (const item of action.items) {
@@ -1372,6 +1382,13 @@ function TabRuntime({
     (patch: SettingsPatch) => sendRpc({ cmd: "settings_save", ...patch }),
     [sendRpc],
   );
+  const applySettingsPatch = useCallback(
+    (patch: SettingsPatch) => {
+      dispatch({ t: "settings_patch", patch });
+      saveSettings(patch);
+    },
+    [saveSettings],
+  );
   const loadQQSettings = useCallback(() => sendRpc({ cmd: "qq_status_get" }), [sendRpc]);
   const connectQQ = useCallback(() => sendRpc({ cmd: "qq_connect" }), [sendRpc]);
   const disconnectQQ = useCallback(() => sendRpc({ cmd: "qq_disconnect" }), [sendRpc]);
@@ -1421,6 +1438,37 @@ function TabRuntime({
       window.setTimeout(() => setToast(null), opts?.duration ?? 1600);
     },
     [],
+  );
+
+  const applyReasoningEffort = useCallback(
+    (reasoningEffort: Settings["reasoningEffort"]) => {
+      applySettingsPatch({ reasoningEffort });
+      flashToast(t("app.toast.effortSwitched", { effort: reasoningEffort }));
+    },
+    [applySettingsPatch, flashToast],
+  );
+
+  const applyEditMode = useCallback(
+    (mode: Settings["editMode"]) => {
+      applySettingsPatch({ editMode: mode });
+      if (mode === "yolo") {
+        flashToast(t("app.yolo.toast"), { yolo: true, duration: 3000 });
+      } else {
+        flashToast(t("app.toast.modeSwitched", { mode: mode.toUpperCase() }));
+      }
+    },
+    [applySettingsPatch, flashToast],
+  );
+
+  const applySlashSettingsCommand = useCallback(
+    (command: SlashSettingsCommand) => {
+      if (command.type === "reasoningEffort") {
+        applyReasoningEffort(command.reasoningEffort);
+      } else {
+        applyEditMode(command.editMode);
+      }
+    },
+    [applyEditMode, applyReasoningEffort],
   );
 
   // Drag-and-drop: dropping files/folders onto the window inserts them
@@ -1492,6 +1540,13 @@ function TabRuntime({
       const text = (override ?? draft).trim();
       if (!text || !state.ready || state.busy) return;
 
+      const settingsCommand = parseSlashSettingsCommand(text);
+      if (settingsCommand) {
+        applySlashSettingsCommand(settingsCommand);
+        if (!override) setDraft("");
+        return;
+      }
+
       // /btw <question> — route to side-question RPC instead of user_input.
       // Empty payload used to silently swallow the keystroke (#1370); surface
       // the usage hint as a status message so the user knows what's expected.
@@ -1534,7 +1589,15 @@ function TabRuntime({
       sendRpc({ cmd: "user_input", text });
       if (!override) setDraft("");
     },
-    [draft, state.ready, state.busy, state.skills, sendRpc, recordAbortDraft],
+    [
+      draft,
+      state.ready,
+      state.busy,
+      state.skills,
+      sendRpc,
+      recordAbortDraft,
+      applySlashSettingsCommand,
+    ],
   );
 
   const abort = useCallback(() => {
@@ -1848,6 +1911,17 @@ function TabRuntime({
     hasMessages: state.messages.length > 0,
   });
 
+  const slashSettingCommands: SlashCmd[] = buildSlashSettingsDescriptors().map(
+    ({ cmd, action }) => ({
+      cmd,
+      desc:
+        action.type === "editMode"
+          ? t("app.cmd.setMode", { mode: action.editMode })
+          : t("app.cmd.setEffort", { effort: action.reasoningEffort }),
+      run: () => applySlashSettingsCommand(action),
+    }),
+  );
+
   const slashCommands: SlashCmd[] = [
     {
       cmd: "/help",
@@ -1878,6 +1952,7 @@ function TabRuntime({
       },
     },
     { cmd: "/model", desc: t("app.cmd.switchModel"), run: () => openSettingsAt("models") },
+    ...slashSettingCommands,
     { cmd: "/theme", desc: t("app.cmd.toggleTheme"), run: onToggleTheme },
     {
       cmd: "/currency",
@@ -2325,22 +2400,12 @@ function TabRuntime({
                 modelLabel={state.settings?.model ?? "deepseek-v4-flash"}
                 reasoningEffort={state.settings?.reasoningEffort ?? "high"}
                 onModelChange={(model) => {
-                  saveSettings({ model });
+                  applySettingsPatch({ model });
                   flashToast(t("app.toast.modelSwitched", { model }));
                 }}
-                onEffortChange={(reasoningEffort) => {
-                  saveSettings({ reasoningEffort });
-                  flashToast(t("app.toast.effortSwitched", { effort: reasoningEffort }));
-                }}
+                onEffortChange={applyReasoningEffort}
                 editMode={state.settings?.editMode ?? "review"}
-                onEditModeChange={(mode) => {
-                  saveSettings({ editMode: mode });
-                  if (mode === "yolo") {
-                    flashToast(t("app.yolo.toast"), { yolo: true, duration: 3000 });
-                  } else {
-                    flashToast(t("app.toast.modeSwitched", { mode: mode.toUpperCase() }));
-                  }
-                }}
+                onEditModeChange={applyEditMode}
                 workspaceDir={state.settings?.workspaceDir}
                 slashCommands={slashCommands}
                 onMentionQuery={queryMentions}

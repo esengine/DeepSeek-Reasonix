@@ -405,6 +405,8 @@ export const zhCN: typeof en = {
       abort: "中断流式输出",
       copyLast: "复制最后一条回复",
       switchModel: "切换模型",
+      setMode: "切换模式为 {mode}",
+      setEffort: "切换推理强度为 {effort}",
       toggleTheme: "切换深浅主题",
       toggleCurrency: "切换货币显示 (CNY / USD)",
       toggleLang: "切换界面语言 (中 / 英)",

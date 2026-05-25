@@ -385,6 +385,8 @@ export const en = {
       abort: "Stop streaming output",
       copyLast: "Copy last reply",
       switchModel: "Switch model",
+      setMode: "Set mode to {mode}",
+      setEffort: "Set reasoning effort to {effort}",
       toggleTheme: "Toggle theme",
       toggleCurrency: "Toggle currency (CNY / USD)",
       toggleLang: "Toggle language (CN / EN)",

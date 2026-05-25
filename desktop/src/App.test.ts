@@ -241,4 +241,27 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
     expect(next.pendingConfirms).toHaveLength(0);
     expect(next.pendingPathAccess).toHaveLength(0);
   });
+
+  it("patches settings optimistically for desktop setting commands", () => {
+    const state = {
+      ...initialState(),
+      settings: {
+        reasoningEffort: "medium",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "deepseek-v4-flash",
+        version: "0.50.1",
+      },
+    };
+
+    const next = reduce(state, {
+      t: "settings_patch",
+      patch: { reasoningEffort: "low", editMode: "auto" },
+    });
+
+    expect(next.settings?.reasoningEffort).toBe("low");
+    expect(next.settings?.editMode).toBe("auto");
+  });
 });
