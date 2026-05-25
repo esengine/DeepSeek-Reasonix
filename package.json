@@ -22,6 +22,7 @@
     "dashboard/index.html",
     "dashboard/app.css",
     "dashboard/dist",
+    "patches",
     "scripts/postinstall.mjs",
     "README.md",
     "LICENSE"
@@ -88,6 +89,7 @@
     "string-width": "^7.2.0",
     "undici": "^8.2.0",
     "web-tree-sitter": "^0.26.9",
+    "patch-package": "^8.0.1",
     "ws": "^8.20.1",
     "zod": "^4.4.1"
   },
@@ -108,7 +110,6 @@
     "ink-testing-library": "^4.0.0",
     "jsdom": "^29.1.1",
     "marked": "^15.0.12",
-    "patch-package": "^8.0.1",
     "preact": "^10.22.0",
     "react-test-renderer": "^19.2.6",
     "simple-git-hooks": "^2.13.1",
