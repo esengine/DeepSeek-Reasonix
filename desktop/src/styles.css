@@ -280,7 +280,7 @@ html[data-platform="macos"] .app {
   left: calc(var(--side-width) - 2px);
 }
 .resize-handle[data-side="right"] {
-  right: calc(var(--ctx-width) - 2px);
+  right: var(--ctx-width);
 }
 
 /* ---------- TABBAR ---------- */
