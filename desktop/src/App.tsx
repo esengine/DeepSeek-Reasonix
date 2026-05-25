@@ -699,7 +699,7 @@ function appendTextSegment(
   return [...segments, { kind, text }];
 }
 
-function applyIncoming(state: State, ev: IncomingEvent): State {
+export function applyIncoming(state: State, ev: IncomingEvent): State {
   switch (ev.type) {
     case "user.message": {
       return {
