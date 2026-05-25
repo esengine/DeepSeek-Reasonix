@@ -204,6 +204,7 @@ import { listThemeNames } from "./theme/tokens.js";
 import { FG, type ThemeName } from "./theme/tokens.js";
 import { TickerProvider } from "./ticker.js";
 import { handleTurnInterrupt } from "./turn-interrupt.js";
+import { codeUndoContextMessage, codeUndoInfo } from "./undo-context.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
 import { useEditHistory } from "./useEditHistory.js";
 import { useSessionInfo } from "./useSessionInfo.js";
@@ -1890,7 +1891,9 @@ function AppInner({
       undoBanner
     ) {
       const out = codeUndo([]);
-      log.pushInfo(out);
+      const contextMessage = codeUndoContextMessage(out);
+      if (contextMessage) loop.appendAndPersist({ role: "system", content: contextMessage });
+      log.pushInfo(codeUndoInfo(out));
       return;
     }
     // Space toggles pause on the active undo countdown. Same gating as

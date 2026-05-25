@@ -9,14 +9,20 @@ import {
 import type { EditMode } from "@/config.js";
 import { t } from "@/i18n/index.js";
 import { parseEditIndices } from "../../edit-history.js";
+import { codeUndoContextMessage, codeUndoInfo } from "../../undo-context.js";
 import type { SlashHandler } from "../dispatch.js";
 import { runGitCommit, stripOuterQuotes } from "../helpers.js";
 
-const undo: SlashHandler = (args, _loop, ctx) => {
+const undo: SlashHandler = (args, loop, ctx) => {
   if (!ctx.codeUndo) {
     return { info: t("handlers.edits.undoCodeOnly") };
   }
-  return { info: ctx.codeUndo(args) };
+  const result = ctx.codeUndo(args);
+  const contextMessage = codeUndoContextMessage(result);
+  if (contextMessage) {
+    loop.appendAndPersist({ role: "system", content: contextMessage });
+  }
+  return { info: codeUndoInfo(result) };
 };
 
 const history: SlashHandler = (_args, _loop, ctx) => {

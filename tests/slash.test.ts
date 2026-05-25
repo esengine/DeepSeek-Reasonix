@@ -324,6 +324,22 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/restored 2 file/);
   });
 
+  it("/undo records reverted edits in model context", () => {
+    const loop = makeLoop();
+    const r = handleSlash("undo", [], loop, {
+      codeUndo: () => ({
+        info: "▸ undo: reverted demo.txt from batch #1",
+        contextEvent: { batchId: 1, source: "auto", paths: ["demo.txt"] },
+      }),
+    });
+
+    expect(r.info).toContain("reverted demo.txt");
+    expect(loop.log.entries.at(-1)).toMatchObject({
+      role: "system",
+      content: expect.stringContaining("The user ran /undo and reverted edit batch #1"),
+    });
+  });
+
   it("/help mentions /undo and /commit", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/undo/);
