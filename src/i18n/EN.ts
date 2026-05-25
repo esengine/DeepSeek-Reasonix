@@ -724,6 +724,10 @@ export const EN: TranslationSchema = {
       " Try: (1) check your network, (2) wait 30s and retry, (3) status page: https://status.deepseek.com.",
     deepseek5xxActionRetry:
       " Try: (1) wait 30s and retry, (2) /model to switch model, (3) status page: https://status.deepseek.com.",
+    upstream5xxHead:
+      "Upstream service unavailable ({status}) at {host} — the configured API endpoint returned a server error, not a Reasonix bug. Already retried 4× with backoff.",
+    upstream5xxActionRetry:
+      " Try: (1) check that the local/proxy model server is up, (2) wait and retry, (3) /model to switch model.",
     innerNoMessage: "(no message)",
     reasonAborted: "[aborted by user (Esc) — summarizing what I found so far]",
     reasonContextGuard:

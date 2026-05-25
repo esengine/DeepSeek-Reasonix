@@ -13,7 +13,12 @@ import {
 import { ContextManager, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
-import { formatLoopError, is5xxError, probeDeepSeekReachable } from "./loop/errors.js";
+import {
+  formatLoopError,
+  is5xxError,
+  isDeepSeekHost,
+  probeDeepSeekReachable,
+} from "./loop/errors.js";
 import { type ForceSummaryContext, forceSummaryAfterIterLimit } from "./loop/force-summary.js";
 import {
   fixToolCallPairing,
@@ -873,12 +878,15 @@ export class CacheFirstLoop {
           this._steerQueue.length = 0;
           return;
         }
-        const probe = is5xxError(err) ? await probeDeepSeekReachable(this.client) : undefined;
+        const upstreamHost = this.client.baseUrl;
+        const dsHost = isDeepSeekHost(upstreamHost);
+        const probe =
+          is5xxError(err) && dsHost ? await probeDeepSeekReachable(this.client) : undefined;
         yield {
           turn: this._turn,
           role: "error",
           content: "",
-          error: formatLoopError(err as Error, probe),
+          error: formatLoopError(err as Error, probe, { upstreamHost }),
         };
         this._steerQueue.length = 0;
         return;

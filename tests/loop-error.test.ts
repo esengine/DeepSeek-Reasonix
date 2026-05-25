@@ -129,6 +129,26 @@ describe("formatLoopError", () => {
     const out = formatLoopError(new Error("DeepSeek 500: "));
     expect(out).toMatch(/service unavailable \(500\)/);
   });
+
+  it("5xx from a non-DeepSeek host → generic upstream wording, no DS hint, no probe", () => {
+    const out = formatLoopError(new Error("DeepSeek 500: "), undefined, {
+      upstreamHost: "http://localhost:11434/v1",
+    });
+    expect(out).toMatch(/Upstream service unavailable \(500\)/);
+    expect(out).toContain("localhost:11434");
+    expect(out).not.toContain("status.deepseek.com");
+    expect(out).not.toMatch(/DeepSeek-side problem/);
+    expect(out).not.toMatch(/main API answered/);
+    expect(out).not.toMatch(/unreachable from your network/);
+  });
+
+  it("5xx from api.deepseek.com → still gets the DS-specific wording (allow-list)", () => {
+    const out = formatLoopError(new Error("DeepSeek 503: "), undefined, {
+      upstreamHost: "https://api.deepseek.com",
+    });
+    expect(out).toMatch(/DeepSeek-side problem/);
+    expect(out).toContain("status.deepseek.com");
+  });
 });
 
 describe("formatLoopError — zh-CN runtime switch", () => {
@@ -143,6 +163,18 @@ describe("formatLoopError — zh-CN runtime switch", () => {
     expect(out).toContain("503");
     expect(out).toContain("DeepSeek 服务端问题");
     expect(out).toContain("status.deepseek.com");
+  });
+
+  it("non-DS host 5xx translates when language is zh-CN, omits DS-specific hints", () => {
+    setLanguageRuntime("zh-CN");
+    const out = formatLoopError(new Error("DeepSeek 502: "), undefined, {
+      upstreamHost: "http://192.168.1.5:8080/v1",
+    });
+    expect(out).toContain("上游服务不可用");
+    expect(out).toContain("502");
+    expect(out).toContain("192.168.1.5:8080");
+    expect(out).not.toContain("status.deepseek.com");
+    expect(out).not.toContain("DeepSeek 服务端问题");
   });
 
   it("401 auth error translates when language is zh-CN, preserves the inner DS message", () => {

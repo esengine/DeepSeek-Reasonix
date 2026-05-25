@@ -698,6 +698,10 @@ export const zhCN: TranslationSchema = {
       " 建议：(1) 检查网络，(2) 等 30 秒后重试，(3) 查看状态页 https://status.deepseek.com。",
     deepseek5xxActionRetry:
       " 建议：(1) 等 30 秒后重试，(2) 用 /model 切换模型，(3) 查看状态页 https://status.deepseek.com。",
+    upstream5xxHead:
+      "上游服务不可用（{status}），目标地址 {host} — 你配置的 API 端点返回了服务器错误，不是 Reasonix 故障。已按指数退避重试 4 次。",
+    upstream5xxActionRetry:
+      " 建议：(1) 确认本地/代理模型服务在线，(2) 等一会儿再重试，(3) 用 /model 切换模型。",
     innerNoMessage: "（无错误信息）",
     reasonAborted: "[用户已中断（Esc） — 正在总结到目前为止的发现]",
     reasonContextGuard: "[上下文额度即将耗尽 — 在下一次调用溢出之前先总结]",
