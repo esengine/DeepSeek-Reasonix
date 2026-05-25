@@ -2695,12 +2695,20 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .mem-row {
   padding: 6px 8px;
+  width: 100%;
+  border: 0;
   border-radius: 6px;
   display: flex;
   gap: 8px;
   align-items: flex-start;
   background: var(--panel);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
   margin-bottom: 4px;
+}
+.mem-row[data-active="true"] {
+  background: var(--accent-soft);
 }
 .mem-row:last-child {
   margin-bottom: 0;
@@ -2718,6 +2726,20 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .mem-row .txt {
   font-size: 14px;
   color: var(--fg-2);
+  line-height: 1.5;
+}
+.mem-detail {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  white-space: pre-wrap;
+  color: var(--fg-1);
+  font-family: var(--mono);
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -6988,5 +7010,80 @@ html[data-web="true"] .win-controls {
   }
   .splash .splash-content {
     max-width: 100%;
+  }
+}
+.muted-card {
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.memory-browser {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1.1fr);
+  gap: 12px;
+  min-height: 320px;
+}
+
+.memory-list,
+.memory-detail {
+  min-width: 0;
+  max-height: 52vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.memory-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.memory-item[data-active="true"] {
+  background: var(--accent-soft);
+}
+
+.memory-kind,
+.memory-path {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.memory-name {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.memory-detail {
+  margin: 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+@media (max-width: 860px) {
+  .memory-browser {
+    grid-template-columns: 1fr;
   }
 }

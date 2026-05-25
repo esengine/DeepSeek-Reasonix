@@ -2,7 +2,13 @@ import { type ReactNode, useEffect, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { setLang, t, useLang } from "../i18n";
 import { I } from "../icons";
-import type { McpSpecInfo, SettingsPatch, SkillInfo } from "../protocol";
+import type {
+  McpSpecInfo,
+  MemoryDetail,
+  MemoryEntryInfo,
+  SettingsPatch,
+  SkillInfo,
+} from "../protocol";
 import {
   describeQQRowSummary,
   getQQConnectIntent,
@@ -60,6 +66,8 @@ export function SettingsModal({
   mcpSpecs,
   mcpBridged,
   skills,
+  memory,
+  memoryDetail,
   qq,
   onClose,
   onSave,
@@ -72,6 +80,7 @@ export function SettingsModal({
   onPickWorkspace,
   onAddMcpSpec,
   onRemoveMcpSpec,
+  onReadMemory,
 }: {
   settings: SettingsType;
   balance: Balance | null;
@@ -89,6 +98,8 @@ export function SettingsModal({
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   skills: SkillInfo[];
+  memory: MemoryEntryInfo[];
+  memoryDetail: MemoryDetail | null;
   qq: QQDesktopSettingsState | null;
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
@@ -101,6 +112,7 @@ export function SettingsModal({
   onPickWorkspace: () => void;
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
+  onReadMemory: (path: string) => void;
 }) {
   const [page, setPage] = useState<PageId>(initialPage ?? "general");
   const [qqConfigureOpen, setQQConfigureOpen] = useState(false);
@@ -173,7 +185,9 @@ export function SettingsModal({
                 onSave={onSave}
               />
             )}
-            {page === "memory" && <PageMemory />}
+            {page === "memory" && (
+              <PageMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
+            )}
             {page === "rules" && <PageRules settings={settings} onSave={onSave} />}
             {page === "billing" && (
               <PageBilling balance={balance} usage={usage} currency={currency} />
@@ -1015,22 +1029,42 @@ function PageSkills({
   );
 }
 
-function PageMemory() {
+function PageMemory({
+  entries,
+  detail,
+  onRead,
+}: {
+  entries: MemoryEntryInfo[];
+  detail: MemoryDetail | null;
+  onRead: (path: string) => void;
+}) {
   return (
     <section className="section">
       <div className="stitle">{t("settings.memorySection")}</div>
-      <div
-        style={{
-          padding: 16,
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          fontSize: 12,
-          color: "var(--muted)",
-        }}
-      >
-        {t("settings.memoryDesc")}
-      </div>
+      {entries.length === 0 ? (
+        <div className="muted-card">{t("settings.memoryDesc")}</div>
+      ) : (
+        <div className="memory-browser">
+          <div className="memory-list">
+            {entries.map((m) => (
+              <button
+                type="button"
+                className="memory-item"
+                data-active={detail?.path === m.path}
+                key={m.path}
+                onClick={() => onRead(m.path)}
+              >
+                <span className="memory-kind">{m.kind.replace("_", " ")}</span>
+                <span className="memory-name">{m.description || m.name}</span>
+                <span className="memory-path">{m.path}</span>
+              </button>
+            ))}
+          </div>
+          <pre className="memory-detail">
+            {detail ? detail.body : t("settings.memoryDesc")}
+          </pre>
+        </div>
+      )}
     </section>
   );
 }

@@ -63,6 +63,12 @@ import {
 import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { augmentProcessPath } from "../../desktop/login-shell-path.js";
 import {
+  type MemoryEntryDetail,
+  type MemoryEntryInfo,
+  collectMemoryEntriesForWorkspace,
+  readMemoryEntryDetail,
+} from "../../desktop/memory-browser.js";
+import {
   loadDesktopQQState,
   saveDesktopQQSettings,
   setDesktopQQEnabled,
@@ -85,10 +91,10 @@ import {
   loadSessionMessages,
   loadSessionMeta,
   patchSessionMeta,
+  patchSessionWorkspaceIfMissing,
   sessionPath,
   timestampSuffix,
 } from "../../memory/session.js";
-import { MemoryStore } from "../../memory/user.js";
 import { QQChannel } from "../../qq/channel.js";
 import { SkillStore } from "../../skills.js";
 import { countTokensBounded } from "../../tokenizer.js";
@@ -116,6 +122,7 @@ type InMessage = { tabId?: string } & (
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_load"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
+  | { cmd: "memory_read"; path: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
   | { cmd: "settings_get" }
@@ -213,7 +220,13 @@ interface PlanRequiredEvent {
 
 interface SessionsEvent {
   type: "$sessions";
-  items: { name: string; messageCount: number; mtime: string }[];
+  items: {
+    name: string;
+    messageCount: number;
+    mtime: string;
+    summary?: string;
+    workspaceStatus?: "matched" | "legacy_missing_meta";
+  }[];
 }
 
 interface MentionResultsEvent {
@@ -372,15 +385,14 @@ interface CtxBreakdownEvent {
   logTokens?: number;
 }
 
-interface MemoryEntryInfo {
-  name: string;
-  scope: "project" | "global";
-  description: string;
-}
-
 interface MemoryEvent {
   type: "$memory";
   entries: MemoryEntryInfo[];
+}
+
+interface MemoryDetailEvent {
+  type: "$memory_detail";
+  detail: MemoryEntryDetail;
 }
 
 interface SkillInfo {
@@ -466,6 +478,7 @@ type EmittableEvent =
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent
+  | MemoryDetailEvent
   | JobsEvent;
 
 const STDOUT_BACKPRESSURE_WAIT = new Int32Array(new SharedArrayBuffer(4));
@@ -629,6 +642,7 @@ function emitSessions(tab: Tab): void {
       messageCount: s.messageCount,
       mtime: s.mtime.toISOString(),
       summary: s.meta.summary,
+      workspaceStatus: s.workspaceStatus,
     }));
     emit({ type: "$sessions", items }, tab.id);
   } catch (err) {
@@ -683,12 +697,7 @@ function emitMcpSpecs(tab: Tab): void {
 
 function emitMemory(tab: Tab): void {
   try {
-    const store = new MemoryStore({ projectRoot: tab.rootDir });
-    const entries: MemoryEntryInfo[] = store.list().map((e) => ({
-      name: e.name,
-      scope: e.scope,
-      description: e.description,
-    }));
+    const entries = collectMemoryEntriesForWorkspace(tab.rootDir);
     emit({ type: "$memory", entries }, tab.id);
   } catch (err) {
     emit({ type: "$error", message: `memory_get failed: ${(err as Error).message}` }, tab.id);
@@ -2160,6 +2169,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "session_load") {
       try {
         const records = loadSessionMessages(msg.name);
+        const backfilledWorkspace = patchSessionWorkspaceIfMissing(msg.name, tab.rootDir);
         const meta = loadSessionMeta(msg.name);
         // Only set switching flag when there's a live turn to abort —
         // otherwise the flag stays true and suppresses the first turn's events (#1217).
@@ -2201,9 +2211,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           },
           tab.id,
         );
+        if (backfilledWorkspace) emitSessions(tab);
       } catch (err) {
         process.stderr.write(`session_load: "${msg.name}" threw — ${(err as Error).message}\n`);
         emit({ type: "$error", message: `session_load failed: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "memory_read") {
+      try {
+        const detail = readMemoryEntryDetail({ path: msg.path }, tab.rootDir);
+        emit({ type: "$memory_detail", detail }, tab.id);
+      } catch (err) {
+        emit({ type: "$error", message: `memory_read failed: ${(err as Error).message}` }, tab.id);
       }
       return;
     }

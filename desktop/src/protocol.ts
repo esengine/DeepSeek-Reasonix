@@ -102,7 +102,13 @@ export type PlanClearedEvent = { type: "$plan_cleared" };
 
 export type SessionsEvent = {
   type: "$sessions";
-  items: { name: string; messageCount: number; mtime: string; summary?: string }[];
+  items: {
+    name: string;
+    messageCount: number;
+    mtime: string;
+    summary?: string;
+    workspaceStatus?: "matched" | "legacy_missing_meta";
+  }[];
 };
 
 export type MentionResultsEvent = {
@@ -174,14 +180,27 @@ export type CtxBreakdownEvent = {
 };
 
 export type MemoryEntryInfo = {
+  kind: "project_file" | "global_file" | "structured";
   name: string;
   scope: "project" | "global";
+  path: string;
   description: string;
+  type?: string;
 };
 
 export type MemoryEvent = {
   type: "$memory";
   entries: MemoryEntryInfo[];
+};
+
+export type MemoryDetail = MemoryEntryInfo & {
+  body: string;
+  createdAt?: string;
+};
+
+export type MemoryDetailEvent = {
+  type: "$memory_detail";
+  detail: MemoryDetail;
 };
 
 export type RetryResultEvent = { type: "$retry_result"; text: string };
@@ -446,6 +465,7 @@ export type IncomingEvent = { tabId?: string } & (
   | SkillsEvent
   | CtxBreakdownEvent
   | MemoryEvent
+  | MemoryDetailEvent
   | JobsEvent
   | UserMessageEvent
   | ModelTurnStartedEvent
@@ -473,6 +493,7 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_load"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
+  | { cmd: "memory_read"; path: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
   | { cmd: "settings_get" }

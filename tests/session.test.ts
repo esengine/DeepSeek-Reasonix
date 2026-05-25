@@ -24,6 +24,7 @@ import {
   loadSessionMessages,
   normalizeWorkspace,
   patchSessionMeta,
+  patchSessionWorkspaceIfMissing,
   pruneStaleSessions,
   renameSession,
   resolveSession,
@@ -163,6 +164,25 @@ describe("session persistence", () => {
     patchSessionMeta("there", { workspace: "/proj/b" });
     const names = listSessionsForWorkspace("/proj/a").map((s) => s.name);
     expect(names).toEqual(["here"]);
+  });
+
+  it("listSessionsForWorkspace includes legacy code-<workspace> sessions missing workspace meta", () => {
+    appendSessionMessage("code-a-202605251200", { role: "user", content: "x" });
+    appendSessionMessage("code-b-202605251200", { role: "user", content: "x" });
+    appendSessionMessage("untagged", { role: "user", content: "x" });
+
+    const matched = listSessionsForWorkspace("/proj/a");
+
+    expect(matched.map((s) => s.name)).toEqual(["code-a-202605251200"]);
+    expect(matched[0]!.workspaceStatus).toBe("legacy_missing_meta");
+    expect(matched[0]!.meta.workspace).toBeUndefined();
+  });
+
+  it("patchSessionWorkspaceIfMissing backfills workspace meta on first legacy load", () => {
+    appendSessionMessage("code-a-202605251200", { role: "user", content: "x" });
+
+    expect(patchSessionWorkspaceIfMissing("code-a-202605251200", "/proj/a")).toBe(true);
+    expect(listSessionsForWorkspace("/proj/a")[0]!.workspaceStatus).toBe("matched");
   });
 
   it("listSessionsForWorkspace tolerates trailing-slash drift", () => {

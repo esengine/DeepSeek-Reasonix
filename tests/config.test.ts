@@ -830,7 +830,6 @@ describe("config", () => {
         {
           subagentModels: {
             explore: "pro",
-            // biome-ignore lint/suspicious/noExplicitAny: invalid input we want to test the loader's filter
             bogus: "fast" as any,
           },
         },

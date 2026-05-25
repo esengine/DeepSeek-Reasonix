@@ -75,6 +75,11 @@ describe("mouse-mode enable/disable", () => {
     expect(writes.join("")).toBe("\u001b[?1006l\u001b[?1000l");
   });
 
+  it("app history scroll mode enables SGR mouse tracking by default", () => {
+    enableMouseMode("app");
+    expect(writes.join("")).toBe("\u001b[?1000h\u001b[?1006h");
+  });
+
   it("REASONIX_MOUSE_MODE=alternate-scroll forces ?1007h even on Windows", () => {
     process.env.REASONIX_MOUSE_MODE = "alternate-scroll";
     enableMouseMode();

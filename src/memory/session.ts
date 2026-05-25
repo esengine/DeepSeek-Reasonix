@@ -48,6 +48,8 @@ export interface SessionInfo {
   messageCount: number;
   mtime: Date;
   meta: SessionMeta;
+  /** How this item matched a workspace-scoped list. */
+  workspaceStatus?: "matched" | "legacy_missing_meta";
 }
 
 export interface SessionMeta {
@@ -193,10 +195,17 @@ export function appendSessionMessage(name: string, message: ChatMessage): void {
   }
 }
 
-export function listSessions(opts?: { workspaceFilter?: string }): SessionInfo[] {
+export function listSessions(opts?: {
+  workspaceFilter?: string;
+  includeLegacyWorkspaceMatches?: boolean;
+}): SessionInfo[] {
   const dir = sessionsDir();
   if (!existsSync(dir)) return [];
   const want = opts?.workspaceFilter ? normalizeWorkspace(opts.workspaceFilter) : null;
+  const legacyPrefix =
+    want && opts?.includeLegacyWorkspaceMatches
+      ? legacySessionPrefixForWorkspace(opts.workspaceFilter!)
+      : null;
   try {
     // Exclude `.events.jsonl` sidecars — they share the .jsonl suffix.
     const files = readdirSync(dir).filter(
@@ -210,13 +219,22 @@ export function listSessions(opts?: { workspaceFilter?: string }): SessionInfo[]
         // Workspace pre-filter: cheap meta read first, skip the
         // (potentially multi-MB) jsonl read for sessions that don't
         // belong to the current workspace. Issue #1179.
+        let workspaceStatus: SessionInfo["workspaceStatus"] | undefined;
         if (want !== null) {
-          if (typeof meta.workspace !== "string") return [];
-          if (normalizeWorkspace(meta.workspace) !== want) return [];
+          if (typeof meta.workspace === "string") {
+            if (normalizeWorkspace(meta.workspace) !== want) return [];
+            workspaceStatus = "matched";
+          } else if (legacyPrefix && name.startsWith(legacyPrefix)) {
+            workspaceStatus = "legacy_missing_meta";
+          } else {
+            return [];
+          }
         }
         const stat = statSync(path);
         const messageCount = countLines(path);
-        return [{ name, path, size: stat.size, messageCount, mtime: stat.mtime, meta }];
+        return [
+          { name, path, size: stat.size, messageCount, mtime: stat.mtime, meta, workspaceStatus },
+        ];
       })
       .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
   } catch {
@@ -239,9 +257,24 @@ export function normalizeWorkspace(
   return posixPath.resolve(p);
 }
 
-/** Sessions without `meta.workspace` are still hidden — resume by name still works. */
 export function listSessionsForWorkspace(workspace: string): SessionInfo[] {
-  return listSessions({ workspaceFilter: workspace });
+  return listSessions({ workspaceFilter: workspace, includeLegacyWorkspaceMatches: true });
+}
+
+export function legacySessionPrefixForWorkspace(workspace: string): string {
+  const normalized = normalizeWorkspace(workspace);
+  const base =
+    process.platform === "win32" ? win32Path.basename(normalized) : posixPath.basename(normalized);
+  return `${sanitizeName(`code-${base}`)}-`;
+}
+
+export function patchSessionWorkspaceIfMissing(name: string, workspace: string): boolean {
+  const meta = loadSessionMeta(name);
+  if (typeof meta.workspace === "string") return false;
+  const prefix = legacySessionPrefixForWorkspace(workspace);
+  if (!sanitizeName(name).startsWith(prefix)) return false;
+  patchSessionMeta(name, { workspace });
+  return true;
 }
 
 function metaPath(name: string): string {

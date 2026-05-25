@@ -31,12 +31,15 @@ import {
 import {
   type EditMode,
   type EngineeringLifecycleMode,
+  type HistoryScrollMode,
   type ReasoningEffort,
   defaultConfigPath,
   editModeHintShown,
   isReasoningEffort,
   loadEndpoint,
   loadEngineeringLifecycleMode,
+  loadHistoryScrollMode,
+  loadMouseWheelRows,
   loadReasoningEffort,
   loadTheme,
   markEditModeHintShown,
@@ -142,6 +145,7 @@ import {
 } from "./edit-tool-gate.js";
 import { loopEventToDashboard } from "./effects/loop-to-dashboard.js";
 import { appendGlobalMemory, appendProjectMemory, detectHashMemory } from "./hash-memory.js";
+import { type ResolvedHistoryScrollMode, resolveHistoryScrollMode } from "./history-scroll-mode.js";
 import { applySlashResult } from "./hooks/apply-slash-result.js";
 import { handleAssistantFinal } from "./hooks/handle-assistant-final.js";
 import {
@@ -164,6 +168,7 @@ import { useToolProgressDisplay } from "./hooks/useToolProgressDisplay.js";
 import { useTranscriptWriter } from "./hooks/useTranscriptWriter.js";
 import { useWorkspaceRoot } from "./hooks/useWorkspaceRoot.js";
 import { useKeystroke } from "./keystroke-context.js";
+import { CardStream } from "./layout/CardStream.js";
 import { LiveExpandContext } from "./layout/LiveExpandContext.js";
 import { ModeStatusBar } from "./layout/LiveRows.js";
 import { StaticCardStream } from "./layout/StaticCardStream.js";
@@ -187,6 +192,7 @@ import {
 } from "./slash.js";
 import { TurnTranslator } from "./state/TurnTranslator.js";
 import { cardsToDashboardMessages } from "./state/cards-to-messages.js";
+import { ChatScrollProvider, useChatScrollActions } from "./state/chat-scroll-provider.js";
 import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
@@ -304,6 +310,8 @@ export interface AppProps {
   qqSubmitRef?: { current: ((text: string) => void) | null };
   /** Ref filled by App on mount so QQ errors appear in the TUI log. */
   qqErrorRef?: { current: ((msg: string) => void) | null };
+  /** Resolved chat-history scroll mode, computed by the launcher from config/env. */
+  historyScrollMode?: ResolvedHistoryScrollMode;
 }
 
 // Module-level so the embedded dashboard server survives App remounts (chat.tsx
@@ -411,15 +419,25 @@ export function App(props: AppProps): React.ReactElement {
       showFeedbackHint: cfg.showFeedbackHint !== false,
     };
   }, []);
+  const historyScrollMode = React.useMemo(
+    () =>
+      props.historyScrollMode ??
+      resolveHistoryScrollMode({ configured: loadHistoryScrollMode() as HistoryScrollMode }),
+    [props.historyScrollMode],
+  );
+  const wheelRows = React.useMemo(() => loadMouseWheelRows(), []);
   return (
     <ThemeProvider name={themeName}>
       <AgentStoreProvider session={session} initialCards={initialCards}>
-        <AppInner
-          {...props}
-          themeName={themeName}
-          setThemeName={setThemeName}
-          statusBar={statusBar}
-        />
+        <ChatScrollProvider wheelRows={wheelRows}>
+          <AppInner
+            {...props}
+            historyScrollMode={historyScrollMode}
+            themeName={themeName}
+            setThemeName={setThemeName}
+            statusBar={statusBar}
+          />
+        </ChatScrollProvider>
       </AgentStoreProvider>
     </ThemeProvider>
   );
@@ -429,6 +447,7 @@ type AppInnerProps = AppProps & {
   themeName: ThemeName;
   setThemeName: React.Dispatch<React.SetStateAction<ThemeName>>;
   statusBar: StatusBarConfig;
+  historyScrollMode: ResolvedHistoryScrollMode;
 };
 
 function AppInner({
@@ -455,6 +474,7 @@ function AppInner({
   qqChannel,
   qqSubmitRef,
   qqErrorRef,
+  historyScrollMode,
   themeName,
   setThemeName,
   statusBar,
@@ -809,6 +829,7 @@ function AppInner({
     history: promptHistory,
     isHistoryMode,
   } = useInputRecall(setInput);
+  const chatScroll = useChatScrollActions();
   const { setRawMode, isRawModeSupported } = useStdin();
   // Ctrl+X —hand the composer buffer to $EDITOR. Raw-mode flip lets the
   // editor own line-buffered input; result replaces the composer value.
@@ -1661,6 +1682,29 @@ function AppInner({
       return next;
     });
   });
+
+  useKeystroke((ev) => {
+    if (ev.paste || modalOpen) return;
+    if (ev.mouseScrollUp) {
+      chatScroll.scrollWheelUp();
+      return;
+    }
+    if (ev.mouseScrollDown) {
+      chatScroll.scrollWheelDown();
+      return;
+    }
+    if (ev.pageUp && (busy || input.length === 0)) {
+      chatScroll.scrollPageUp();
+      return;
+    }
+    if (ev.pageDown && (busy || input.length === 0)) {
+      chatScroll.scrollPageDown();
+      return;
+    }
+    if (ev.end && (busy || input.length === 0)) {
+      chatScroll.jumpToBottom();
+    }
+  }, historyScrollMode === "app");
 
   // Double-Esc — opens the rewind/edit picker when idle with an empty
   // composer. Tracks the prior Esc timestamp; a second Esc inside 500 ms
@@ -4232,7 +4276,11 @@ function AppInner({
               <Box flexDirection="column" flexGrow={1}>
                 <LiveExpandContext.Provider value={liveExpand}>
                   <VerboseContext.Provider value={verboseMode}>
-                    <StaticCardStream suppressLive={modalOpen} />
+                    {historyScrollMode === "app" ? (
+                      <CardStream suppressLive={modalOpen} />
+                    ) : (
+                      <StaticCardStream suppressLive={modalOpen} />
+                    )}
                   </VerboseContext.Provider>
                 </LiveExpandContext.Provider>
                 {/*

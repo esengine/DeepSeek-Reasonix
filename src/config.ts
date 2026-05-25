@@ -41,6 +41,7 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
 }
 
 export type EngineeringLifecycleMode = "off" | "strict";
+export type HistoryScrollMode = "auto" | "native" | "app";
 
 export type EmbeddingProvider = "ollama" | "openai-compat";
 
@@ -190,6 +191,8 @@ export interface ReasonixConfig {
   mouseTracking?: boolean;
   /** Rows scrolled per single SGR mouse-wheel report. Default 1 — most terminals emit 2-5 reports per physical notch, so 1 already produces 2-5 rows per notch (#1419). Bump to 3-5 only if your terminal emits one report per notch and scrolling feels slow (#1494). Clamped to [1, 10]. */
   mouseWheelRows?: number;
+  /** Chat-history scrolling: "native" leaves terminal scrollback in charge; "app" captures wheel/PgUp/PgDn/End inside the TUI; "auto" enables app mode for terminals with known jumpy native scrollback. */
+  historyScrollMode?: HistoryScrollMode;
   dashboard?: {
     /** Whether the embedded dashboard auto-starts on launch. Default true. Set false to disable without passing --no-dashboard each time. */
     enabled?: boolean;
@@ -705,6 +708,11 @@ export function loadMouseWheelRows(path: string = defaultConfigPath()): number |
   const raw = readConfig(path).mouseWheelRows;
   if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) return undefined;
   return Math.min(raw, 10);
+}
+
+export function loadHistoryScrollMode(path: string = defaultConfigPath()): HistoryScrollMode {
+  const raw = readConfig(path).historyScrollMode;
+  return raw === "native" || raw === "app" || raw === "auto" ? raw : "auto";
 }
 
 export function loadToolRateLimit(

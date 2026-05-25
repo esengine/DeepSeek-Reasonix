@@ -32,6 +32,7 @@ import type {
   IncomingEvent,
   JobInfo,
   McpSpecInfo,
+  MemoryDetail,
   MemoryEntryInfo,
   OutgoingCommand,
   PlanVerdict,
@@ -179,6 +180,7 @@ export type SessionInfo = {
   messageCount: number;
   mtime: string;
   summary?: string;
+  workspaceStatus?: "matched" | "legacy_missing_meta";
 };
 
 export type Settings = {
@@ -238,6 +240,7 @@ type State = {
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
+  memoryDetail: MemoryDetail | null;
   jobs: JobInfo[];
   /** Live "skill running" indicator — set when a `skill_run` RPC dispatches, cleared on `$turn_complete`. */
   activeSkill: SkillOrigin | null;
@@ -679,7 +682,16 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$ctx_breakdown":
       return { ...state, usage: { ...state.usage, reservedTokens: ev.reservedTokens } };
     case "$memory":
-      return { ...state, memory: ev.entries };
+      return {
+        ...state,
+        memory: ev.entries,
+        memoryDetail:
+          state.memoryDetail && ev.entries.some((entry) => entry.path === state.memoryDetail?.path)
+            ? state.memoryDetail
+            : null,
+      };
+    case "$memory_detail":
+      return { ...state, memoryDetail: ev.detail };
     case "$jobs":
       return { ...state, jobs: ev.items };
     case "$balance":
@@ -1105,6 +1117,7 @@ function TabRuntime({
     skills: [],
     sessionFiles: [],
     memory: [],
+    memoryDetail: null,
     jobs: [],
     activeSkill: null,
     queuedSends: [],
@@ -2052,6 +2065,8 @@ function TabRuntime({
           mcpBridged={state.mcpBridged}
           sessionFiles={state.sessionFiles}
           memory={state.memory}
+          memoryDetail={state.memoryDetail}
+          onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
         />
 
         <StatusBar
@@ -2121,6 +2136,8 @@ function TabRuntime({
             mcpSpecs={state.mcpSpecs}
             mcpBridged={state.mcpBridged}
             skills={state.skills}
+            memory={state.memory}
+            memoryDetail={state.memoryDetail}
             qq={state.qq}
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
@@ -2135,6 +2152,7 @@ function TabRuntime({
             onPickWorkspace={pickWorkspace}
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}
+            onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
           />
         ) : null}
 

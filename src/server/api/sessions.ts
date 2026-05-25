@@ -1,5 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { deleteSession, listSessions, sessionPath } from "../../memory/session.js";
+import {
+  deleteSession,
+  listSessions,
+  listSessionsForWorkspace,
+  sessionPath,
+} from "../../memory/session.js";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
 
@@ -79,7 +84,7 @@ export async function handleSessions(
   // sidebar; users have reported 10 000+ entries in `~/.reasonix/sessions/`.
   if (method === "GET" && rest.length === 0) {
     const workspaceFilter = ctx.getCurrentCwd?.();
-    const sessions = workspaceFilter ? listSessions({ workspaceFilter }) : listSessions();
+    const sessions = workspaceFilter ? listSessionsForWorkspace(workspaceFilter) : listSessions();
     const currentName = ctx.getSessionName?.() ?? null;
     return {
       status: 200,
@@ -91,6 +96,7 @@ export async function handleSessions(
           messageCount: s.messageCount,
           mtime: s.mtime.getTime(),
           summary: s.meta?.summary,
+          workspaceStatus: s.workspaceStatus,
         })),
         currentSession: currentName,
         canSwitch: Boolean(ctx.switchSession),

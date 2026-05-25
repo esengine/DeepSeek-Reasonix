@@ -4,6 +4,7 @@ import {
   type ReasoningEffort,
   bridgeEndpointEnv,
   loadApiKey,
+  loadHistoryScrollMode,
   loadToolRateLimit,
   readConfig,
   searchEnabled,
@@ -28,6 +29,8 @@ import { App } from "../ui/App.js";
 import { SessionPicker } from "../ui/SessionPicker.js";
 import { Setup } from "../ui/Setup.js";
 import { drainTtyResponses } from "../ui/drain-tty.js";
+import type { ResolvedHistoryScrollMode } from "../ui/history-scroll-mode.js";
+import { resolveHistoryScrollMode } from "../ui/history-scroll-mode.js";
 import { KeystrokeProvider } from "../ui/keystroke-context.js";
 import { disableMouseMode, enableMouseMode } from "../ui/mouse-mode.js";
 import { installResizeBroadcaster } from "../ui/resize-broadcaster.js";
@@ -122,6 +125,8 @@ interface RootProps extends ChatOptions {
   mcpRuntime: McpRuntime;
   /** One-time startup info rows shown after App mounts. */
   startupInfoHints: string[];
+  /** Resolved app/native scroll behavior for chat history. */
+  historyScrollMode: ResolvedHistoryScrollMode;
   /** Pre-created QQ channel (started before TUI mounts). */
   qqChannel?: QQChannel;
   /** App fills this ref on mount so QQ messages flow into the TUI input queue. */
@@ -139,6 +144,7 @@ function Root({
   showPicker,
   mcpRuntime,
   startupInfoHints,
+  historyScrollMode,
   ...appProps
 }: RootProps) {
   const [key, setKey] = useState<string | undefined>(initialKey);
@@ -241,6 +247,7 @@ function Root({
         qqChannel={appProps.qqChannel}
         qqSubmitRef={appProps.qqSubmitRef}
         qqErrorRef={appProps.qqErrorRef}
+        historyScrollMode={historyScrollMode}
         onSwitchSession={setActiveSession}
       />
     </KeystrokeProvider>
@@ -292,6 +299,11 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const mcpSpecs = [...requestedSpecs];
   const mcpServers: McpServerSummary[] = [];
   const cfg = readConfig();
+  const historyScrollMode = resolveHistoryScrollMode({
+    configured: loadHistoryScrollMode(),
+    env: process.env,
+    platform: process.platform,
+  });
   const startupInfoHints: string[] = [];
   if (cfg.setupCompleted === true && (cfg.mcp?.length ?? 0) === 0 && mcpSpecs.length === 0) {
     startupInfoHints.push(t("mcpHealth.emptyHint"));
@@ -365,7 +377,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // mode on in most terminals). exit hooks cover hard kills so the
   // sequence doesn't leak into the parent shell.
   if (!opts.noMouse && cfg.mouseTracking !== false) {
-    enableMouseMode();
+    enableMouseMode(historyScrollMode);
     process.once("exit", disableMouseMode);
     process.once("SIGINT", () => {
       disableMouseMode();
@@ -386,6 +398,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       mcpRuntime={runtime}
       progressSink={progressSink}
       startupInfoHints={startupInfoHints}
+      historyScrollMode={historyScrollMode}
       showPicker={showPicker}
       {...opts}
       codeMode={codeMode}

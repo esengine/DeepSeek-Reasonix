@@ -6,13 +6,15 @@
 // REASONIX_MOUSE_MODE remains an escape hatch.
 
 type Mode = "alternate-scroll" | "sgr" | "off" | "apple-terminal-off";
+export type MouseHistoryMode = "native" | "app";
 
-function readMode(): Mode {
+function readMode(historyMode: MouseHistoryMode): Mode {
   const raw = (process.env.REASONIX_MOUSE_MODE ?? "").toLowerCase();
   if (raw === "sgr") return "sgr";
   if (raw === "alternate-scroll") return "alternate-scroll";
+  if (raw === "off") return "off";
   if (process.env.TERM_PROGRAM === "Apple_Terminal" && raw === "") return "apple-terminal-off";
-  return "off";
+  return historyMode === "app" ? "sgr" : "off";
 }
 
 const RESET_ALL =
@@ -28,10 +30,10 @@ const SEQUENCES: Record<Mode, { enable: string; disable: string }> = {
 let active = false;
 let activeMode: Mode = "off";
 
-export function enableMouseMode(): void {
+export function enableMouseMode(historyMode: MouseHistoryMode = "native"): void {
   if (active) return;
   if (!process.stdout.isTTY) return;
-  activeMode = readMode();
+  activeMode = readMode(historyMode);
   const seq = SEQUENCES[activeMode].enable;
   if (seq) process.stdout.write(seq);
   active = true;

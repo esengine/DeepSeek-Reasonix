@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
-import type { McpSpecInfo, MemoryEntryInfo } from "../protocol";
+import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
 
 type Tab = "files" | "tools" | "memory" | "rules";
@@ -18,6 +18,8 @@ export function ContextPanel({
   mcpBridged,
   sessionFiles,
   memory,
+  memoryDetail,
+  onReadMemory,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -25,6 +27,8 @@ export function ContextPanel({
   mcpBridged: boolean;
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
+  memoryDetail: MemoryDetail | null;
+  onReadMemory: (path: string) => void;
 }) {
   useLang();
   const [tab, setTab] = useState<Tab>("files");
@@ -90,7 +94,9 @@ export function ContextPanel({
         <PanelErrorBoundary key={tab} label={tab}>
           {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
           {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
-          {tab === "memory" && <CtxMemory entries={memory} />}
+          {tab === "memory" && (
+            <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
+          )}
           {tab === "rules" && <CtxRules settings={settings} />}
         </PanelErrorBoundary>
       </div>
@@ -283,7 +289,15 @@ function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }
   );
 }
 
-function CtxMemory({ entries }: { entries: MemoryEntryInfo[] }) {
+function CtxMemory({
+  entries,
+  detail,
+  onRead,
+}: {
+  entries: MemoryEntryInfo[];
+  detail: MemoryDetail | null;
+  onRead: (path: string) => void;
+}) {
   return (
     <div className="ctx-block">
       <div className="h">
@@ -297,13 +311,20 @@ function CtxMemory({ entries }: { entries: MemoryEntryInfo[] }) {
       ) : (
         <div className="mem">
           {entries.map((m) => (
-            <div className="mem-row" key={`${m.scope}/${m.name}`}>
+            <button
+              type="button"
+              className="mem-row"
+              data-active={detail?.path === m.path}
+              key={m.path}
+              onClick={() => onRead(m.path)}
+            >
               <span className="scope" data-s={m.scope}>
                 {m.scope === "project" ? t("contextPanel.scopeProject") : t("contextPanel.scopeGlobal")}
               </span>
               <span className="txt">{m.description || m.name}</span>
-            </div>
+            </button>
           ))}
+          {detail ? <pre className="mem-detail">{detail.body}</pre> : null}
         </div>
       )}
     </div>
