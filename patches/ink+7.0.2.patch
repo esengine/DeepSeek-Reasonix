@@ -1,0 +1,68 @@
+diff --git a/node_modules/ink/build/ink.js b/node_modules/ink/build/ink.js
+index 98ba6ef..79e37a2 100644
+--- a/node_modules/ink/build/ink.js
++++ b/node_modules/ink/build/ink.js
+@@ -144,6 +144,7 @@ export default class Ink {
+     lastOutput;
+     lastOutputToRender;
+     lastOutputHeight;
++    lastStaticOutput;
+     lastTerminalWidth;
+     container;
+     rootNode;
+@@ -225,6 +226,7 @@ export default class Ink {
+         this.lastOutput = '';
+         this.lastOutputToRender = '';
+         this.lastOutputHeight = 0;
++        this.lastStaticOutput = '';
+         this.lastTerminalWidth = getWindowSize(this.options.stdout).columns;
+         // This variable is used only in debug mode to store full static output
+         // so that it's rerendered every time, not just new static parts, like in non-debug mode
+@@ -265,6 +267,7 @@ export default class Ink {
+             this.log.clear();
+             this.lastOutput = '';
+             this.lastOutputToRender = '';
++            this.lastStaticOutput = '';
+         }
+         this.calculateLayout();
+         this.onRender();
+@@ -698,6 +701,31 @@ export default class Ink {
+             isUnmounting: this.isUnmounting,
+         });
+         if (shouldClearTerminal) {
++            // Skip full clear+rewrite when nothing actually changed — prevents
++            // visible flicker from redundant terminal repaints on overflow frames.
++            if (output === this.lastOutput && staticOutput === this.lastStaticOutput) {
++                return;
++            }
++            // When output height is stable and only a few lines changed,
++            // do incremental update instead of full clear+rewrite.
++            const prevLines = this.lastOutput ? this.lastOutput.split('\n') : [];
++            const nextLines = output.split('\n');
++            let changedCount = 0;
++            const minLen = Math.min(prevLines.length, nextLines.length);
++            for (let i = 0; i < minLen; i++) {
++                if (prevLines[i] !== nextLines[i]) changedCount++;
++            }
++            changedCount += Math.abs(nextLines.length - prevLines.length);
++            if (changedCount <= 10 && this.lastOutputHeight > 0) {
++                // Few changes — incremental update via log, avoids full clear
++                this.log.clear();
++                this.throttledLog(outputToRender);
++                this.lastOutput = output;
++                this.lastOutputToRender = outputToRender;
++                this.lastOutputHeight = outputHeight;
++                this.lastStaticOutput = staticOutput;
++                return;
++            }
+             const sync = this.shouldSync();
+             if (sync) {
+                 this.options.stdout.write(bsu);
+@@ -706,6 +734,7 @@ export default class Ink {
+             this.lastOutput = output;
+             this.lastOutputToRender = outputToRender;
+             this.lastOutputHeight = outputHeight;
++            this.lastStaticOutput = staticOutput;
+             this.log.sync(outputToRender);
+             if (sync) {
+                 this.options.stdout.write(esu);

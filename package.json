@@ -108,6 +108,7 @@
     "ink-testing-library": "^4.0.0",
     "jsdom": "^29.1.1",
     "marked": "^15.0.12",
+    "patch-package": "^8.0.1",
     "preact": "^10.22.0",
     "react-test-renderer": "^19.2.6",
     "simple-git-hooks": "^2.13.1",

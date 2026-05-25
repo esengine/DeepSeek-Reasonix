@@ -4,6 +4,9 @@
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
+// Apply Ink rendering patch (flicker fix for overflow frames)
+execSync("npx patch-package --error-on-fail", { stdio: "inherit" });
+
 if (!existsSync("dashboard/package.json")) process.exit(0);
 
 execSync("npm --prefix dashboard ci --ignore-scripts", { stdio: "inherit" });
