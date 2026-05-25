@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface JumpBarProps {
   messages: { kind: string; text?: string; turn?: number }[];
@@ -7,6 +7,7 @@ interface JumpBarProps {
 
 export function JumpBar({ messages, threadEl }: JumpBarProps) {
   const [hovered, setHovered] = useState<number | null>(null);
+  const [active, setActive] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const previewTop = useRef(0);
   const [showPreview, setShowPreview] = useState(false);
@@ -21,20 +22,30 @@ export function JumpBar({ messages, threadEl }: JumpBarProps) {
     [messages],
   );
 
+  useEffect(() => {
+    if (items.length > 0) setActive(items[items.length - 1]!.turn);
+  }, [items]);
+
+  // Scroll active bar into view when it changes
+  useEffect(() => {
+    if (active === null) return;
+    const el = barRef.current?.querySelector(`[data-turn="${active}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
   if (items.length < 2) return null;
 
-  const visible = items;
-  const hoverIdx = hovered !== null ? visible.findIndex((v) => v.turn === hovered) : -1;
-  const hoverText = hovered !== null ? visible.find((v) => v.turn === hovered)?.text : null;
+  const hoverIdx = hovered !== null ? items.findIndex((v) => v.turn === hovered) : -1;
+  const hoverText = hovered !== null ? items.find((v) => v.turn === hovered)?.text : null;
 
   const onMove = (e: React.MouseEvent) => {
     const el = barRef.current;
     if (!el) return;
-    const items = el.querySelectorAll<HTMLElement>(".jump-item");
+    const q = el.querySelectorAll<HTMLElement>(".jump-item");
     const barRect = el.getBoundingClientRect();
     let closest = -1;
     let closestDist = Infinity;
-    items.forEach((item, i) => {
+    q.forEach((item, i) => {
       const r = item.getBoundingClientRect();
       const midY = r.top + r.height / 2;
       const dist = Math.abs(e.clientY - midY);
@@ -44,35 +55,34 @@ export function JumpBar({ messages, threadEl }: JumpBarProps) {
         previewTop.current = midY - barRect.top;
       }
     });
-    if (closest >= 0 && closest < visible.length) {
-      const turn = visible[closest]?.turn;
-      if (turn !== undefined) {
-        setHovered(turn);
-        setShowPreview(true);
-      }
+    if (closest >= 0 && closest < items.length) {
+      const turn = items[closest]?.turn;
+      if (turn !== undefined) { setHovered(turn); setShowPreview(true); }
     }
   };
 
   const scrollTo = (turn: number) => {
-    const el = threadEl?.querySelector(`[data-turn="${turn}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  const barProps = (idx: number): { style: React.CSSProperties; "data-d"?: string } => {
-    if (hoverIdx < 0) return { style: { width: 12 } };
-    const d = Math.abs(idx - hoverIdx);
-    const width = d === 0 ? 32 : d === 1 ? 20 : d === 2 ? 14 : 12;
-    return { style: { width, transitionDelay: `${d * 20}ms` }, "data-d": d <= 2 ? String(d) : undefined };
+    setActive(turn);
+    threadEl?.querySelector(`[data-turn="${turn}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
     <div className="jump-bar" ref={barRef} onMouseMove={onMove} onMouseLeave={() => { setHovered(null); setShowPreview(false); }}>
       <div className="jump-scroll">
-        {visible.map((item, idx) => (
-        <div className="jump-item" key={item.turn} onClick={() => scrollTo(item.turn)}>
-          <div className="jump-dot" {...barProps(idx)} />
-        </div>
-      ))}
+        {items.map((item, idx) => {
+          const dist = hoverIdx >= 0 ? Math.abs(idx - hoverIdx) : -1;
+          const isActive = active === item.turn;
+          const isHov = dist === 0;
+          const isNear = dist === 1 || dist === 2;
+          const w = isHov ? 32 : isNear ? (dist === 1 ? 20 : 14) : isActive ? 18 : 12;
+          const bg = isHov || isNear ? undefined : isActive ? "var(--accent)" : undefined;
+          return (
+            <div className="jump-item" key={item.turn} data-turn={item.turn} onClick={() => scrollTo(item.turn)}>
+              <div className="jump-dot" style={{ width: w, transitionDelay: `${dist * 20}ms`, background: bg }}
+                data-d={dist >= 0 && dist <= 2 ? String(dist) : undefined} />
+            </div>
+          );
+        })}
       </div>
       {showPreview && hoverText && (
         <div className="jump-preview" style={{ top: previewTop.current }}>
