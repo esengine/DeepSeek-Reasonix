@@ -1,4 +1,4 @@
-/** R1 thinking-mode contract — `reasoning_content` must round-trip on the next request or DeepSeek 400s. */
+/** R1 thinking-mode contract — tool-call reasoning_content must round-trip; stale plain reasoning must age out. */
 
 import { describe, expect, it, vi } from "vitest";
 import { DeepSeekClient } from "../src/client.js";
@@ -189,16 +189,13 @@ describe("R1 reasoning_content round-trip", () => {
     expect(assistantWithCalls?.reasoning_content).toBe("I should call noop to check something.");
   });
 
-  it("also preserves reasoning_content on plain-text reasoner turns", async () => {
-    // 0.5.18 regression: R1 requires reasoning_content on ANY
-    // assistant message the model produced in thinking mode, not just
-    // ones with tool_calls. 0.5.15 scoped the fix too narrowly and a
-    // plan-approval flow (submit_plan → "plan submitted" plain-text
-    // turn → approval) kept 400ing on the follow-up request.
+  it("omits stale reasoning_content from plain-text turns on the next user request", async () => {
+    // DeepSeek V4 ignores reasoning_content from prior no-tool turns.
+    // Carrying it forward only bloats long-session request bodies.
     const { fetch: fakeFetch, bodies } = capturingFetch([
       {
         content: "a plain answer",
-        reasoning_content: "reasoning attached to a plain-text turn",
+        reasoning_content: "reasoning attached to a plain-text turn".repeat(200),
       },
       { content: "follow-up" },
     ]);
@@ -220,7 +217,57 @@ describe("R1 reasoning_content round-trip", () => {
     const turn2Messages = bodies[1]!.messages;
     const assistant = turn2Messages.find((m) => m.role === "assistant");
     expect(assistant).toBeDefined();
-    expect(assistant?.reasoning_content).toBe("reasoning attached to a plain-text turn");
+    expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(false);
+    expect(JSON.stringify(turn2Messages)).not.toContain("reasoning attached to a plain-text turn");
+  });
+
+  it("preserves tool-call reasoning_content across later user turns", async () => {
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "noop",
+      readOnly: true,
+      fn: () => "ok",
+    });
+    const { fetch: fakeFetch, bodies } = capturingFetch([
+      {
+        content: "",
+        reasoning_content: "tool-call reasoning must stay available",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "noop", arguments: "{}" },
+          },
+        ],
+      },
+      { content: "done", reasoning_content: "plain final reasoning can age out" },
+      { content: "follow-up" },
+    ]);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fakeFetch });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() }),
+      tools,
+      model: "deepseek-v4-pro",
+      stream: false,
+    });
+
+    for await (const _ev of loop.step("please noop")) {
+      /* drain */
+    }
+    for await (const _ev of loop.step("next")) {
+      /* drain */
+    }
+
+    const turn2Messages = bodies[2]!.messages;
+    const assistantWithCalls = turn2Messages.find(
+      (m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) > 0,
+    );
+    const finalAssistant = turn2Messages
+      .filter((m) => m.role === "assistant" && (m.tool_calls?.length ?? 0) === 0)
+      .at(-1);
+    expect(assistantWithCalls?.reasoning_content).toBe("tool-call reasoning must stay available");
+    expect(Object.hasOwn(finalAssistant!, "reasoning_content")).toBe(false);
   });
 
   it("stamps empty reasoning_content on a thinking-mode turn that returned null reasoning", async () => {
@@ -251,10 +298,8 @@ describe("R1 reasoning_content round-trip", () => {
     const turn2Messages = bodies[1]!.messages;
     const assistant = turn2Messages.find((m) => m.role === "assistant");
     expect(assistant).toBeDefined();
-    // Field must be PRESENT (even empty) — presence is what satisfies
-    // DeepSeek's thinking-mode validator.
-    expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(true);
-    expect(assistant?.reasoning_content).toBe("");
+    // Plain assistant turns do not need stale reasoning in later user requests.
+    expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(false);
   });
 
   it("does NOT stamp reasoning_content on a deepseek-chat turn that returned null", async () => {
@@ -284,12 +329,10 @@ describe("R1 reasoning_content round-trip", () => {
     expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(false);
   });
 
-  it("preserves reasoning_content on deepseek-chat when V4 returns non-empty content", async () => {
-    // V4-era deepseek-chat returns reasoning_content even with thinking
-    // disabled. Whitelist by model name was too narrow — must keep the
-    // field whenever the producer emitted any. Caught by tau-bench when
-    // 24/24 reasonix runs failed with "reasoning_content must be passed
-    // back to the API."
+  it("omits stale plain deepseek-chat reasoning_content on the next user request", async () => {
+    // V4-era deepseek-chat can surface reasoning_content even with thinking
+    // disabled. Once the turn is a plain historical assistant message,
+    // carrying that body forward just grows the next request.
     const { fetch: fakeFetch, bodies } = capturingFetch([
       { content: "ok", reasoning_content: "v4-chat reasoning leaked" },
       { content: "bye" },
@@ -309,7 +352,7 @@ describe("R1 reasoning_content round-trip", () => {
     }
     const turn2Messages = bodies[1]!.messages;
     const assistant = turn2Messages.find((m) => m.role === "assistant");
-    expect(assistant?.reasoning_content).toBe("v4-chat reasoning leaked");
+    expect(Object.hasOwn(assistant!, "reasoning_content")).toBe(false);
   });
 
   it("pins thinking=enabled for v4-pro and sends the configured reasoning_effort", async () => {
