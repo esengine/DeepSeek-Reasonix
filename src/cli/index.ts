@@ -6,6 +6,10 @@ import "./node-version-guard.js";
 // (issue #1011). Side-effect on module load, before any heavy import below runs.
 import "./heap-limit-launch.js";
 
+// Wrap stdout/stderr before any third-party lib gets a chance to emit BEL on
+// Windows cmd, which would beep the system bell every render (#1786).
+import "./strip-bel.js";
+
 import { Command } from "commander";
 import {
   ensureDashboardToken,
