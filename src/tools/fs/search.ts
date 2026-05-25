@@ -77,6 +77,7 @@ const SUMMARY_MODE_TRIGGER_RATIO = 0.8;
 // immediately trip this guard; 120 s leaves room for a second slow file
 // plus the rest of the walk before declaring the search a lost cause.
 const WALK_DEADLINE_MS = 120_000;
+const REGEX_METACHARS = /[\\.+*?()[\]{}|^$]/;
 
 export async function searchContent(
   ctx: SearchContext,
@@ -97,15 +98,18 @@ export async function searchContent(
   const ctxLines = Math.max(0, Math.min(20, Math.floor(args.context ?? 0)));
   const summaryOnly = args.summary_only === true;
   const reFlags = caseSensitive ? "" : "i";
-  // We track the regex by source + flags rather than holding an instance — the
-  // actual re.test runs inside a worker so catastrophic backtracking can be
-  // killed via worker.terminate().
+  // Patterns with no regex metacharacters take the main-thread `text.includes`
+  // path below — building a worker dispatch for plain literals dominates wall
+  // time on multi-file scans (#1748).
+  const hasMeta = REGEX_METACHARS.test(args.pattern);
   let reSource: string | null = null;
-  try {
-    new RegExp(args.pattern, reFlags);
-    reSource = args.pattern;
-  } catch {
-    reSource = null;
+  if (hasMeta) {
+    try {
+      new RegExp(args.pattern, reFlags);
+      reSource = args.pattern;
+    } catch {
+      reSource = null;
+    }
   }
   const needle = caseSensitive ? args.pattern : args.pattern.toLowerCase();
   const matches: string[] = [];
@@ -196,9 +200,10 @@ export async function searchContent(
       if (firstNul !== -1 && firstNul < 8 * 1024) continue;
       const text = raw.toString("utf8");
       const rel = displayRel(ctx.rootDir, full);
-      const lines = text.split(/\r?\n/);
       let hits: number[];
+      let lines: string[];
       if (reSource !== null) {
+        lines = text.split(/\r?\n/);
         try {
           hits = await getRegexRunner().testLines(text, reSource, reFlags, {
             signal: args.signal,
@@ -212,9 +217,14 @@ export async function searchContent(
           continue;
         }
       } else {
+        const haystack = caseSensitive ? text : text.toLowerCase();
+        if (haystack.indexOf(needle) === -1) {
+          scanned++;
+          continue;
+        }
+        lines = text.split(/\r?\n/);
         hits = [];
         for (let li = 0; li < lines.length; li++) {
-          throwIfAborted(args.signal);
           const lineForCheck = caseSensitive ? lines[li]! : lines[li]!.toLowerCase();
           if (lineForCheck.includes(needle)) hits.push(li);
         }
