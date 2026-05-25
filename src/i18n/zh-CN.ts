@@ -903,6 +903,7 @@ export const zhCN: TranslationSchema = {
       modelSet: "model → {id}",
       effortStatus: "effort → {current}   （可选：{list}）",
       effortUsage: "用法：/effort <{list}>   （high 为安全默认；max 是 DeepSeek 扩展）",
+      effortUsageNoMax: "用法：/effort <{list}>",
       effortSet: "effort → {effort}",
       budgetNoCap:
         "未设置会话预算 — Reasonix 将持续运行直到您停止。使用以下方式设置：/budget <usd>   （例如 /budget 5）",

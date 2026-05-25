@@ -1,6 +1,6 @@
 import { Box, Text, useStdout } from "ink";
 import React, { useState } from "react";
-import { REASONING_EFFORT_VALUES, type ReasoningEffort } from "../../config.js";
+import type { ReasoningEffort } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { PILL_MODEL, Pill, modelBadgeFor } from "./primitives/Pill.js";
@@ -17,6 +17,8 @@ export interface ModelPickerProps {
   /** Model id currently active in the loop — marked with the cursor on open. */
   current: string;
   currentEffort: ReasoningEffort;
+  /** Effort enum filtered for the active endpoint — drops "max" on non-DeepSeek hosts (#1794). */
+  effortChoices: ReadonlyArray<ReasoningEffort>;
   onChoose: (outcome: ModelPickerOutcome) => void;
   /** Triggers a refetch when the catalog is null/empty and the user presses [r]. */
   onRefresh?: () => void;
@@ -30,13 +32,14 @@ export function ModelPicker({
   models,
   current,
   currentEffort,
+  effortChoices,
   onChoose,
   onRefresh,
 }: ModelPickerProps): React.ReactElement {
   const modelList = (models && models.length > 0 ? models : FALLBACK_MODELS).slice();
   if (!modelList.includes(current)) modelList.unshift(current);
 
-  const effortRows: Row[] = REASONING_EFFORT_VALUES.map((effort) => ({
+  const effortRows: Row[] = effortChoices.map((effort) => ({
     kind: "effort",
     effort,
   }));

@@ -955,6 +955,7 @@ export const EN: TranslationSchema = {
       effortStatus: "effort → {current}   (pick: {list})",
       effortUsage:
         "usage: /effort <{list}>   (high is the safe default; max is a DeepSeek extension)",
+      effortUsageNoMax: "usage: /effort <{list}>",
       effortSet: "effort → {effort}",
       budgetNoCap:
         "no session budget set — Reasonix will keep going until you stop it. Set one with: /budget <usd>   (e.g. /budget 5)",

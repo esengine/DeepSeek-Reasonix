@@ -9,6 +9,7 @@ function renderPicker(props: {
   models: ReadonlyArray<string> | null;
   current: string;
   currentEffort?: ReasoningEffort;
+  effortChoices?: ReadonlyArray<ReasoningEffort>;
 }): string {
   const stdout = makeFakeStdout();
   const { unmount } = render(
@@ -16,6 +17,7 @@ function renderPicker(props: {
       models: props.models,
       current: props.current,
       currentEffort: props.currentEffort ?? "high",
+      effortChoices: props.effortChoices ?? ["low", "medium", "high", "max"],
       onChoose: () => {},
     }),
     { stdout: stdout as never, stdin: makeFakeStdin() as never },
@@ -45,6 +47,19 @@ describe("ModelPicker (#371)", () => {
     expect(text).toContain("medium");
     expect(text).toContain("high");
     expect(text).toContain("max");
+  });
+
+  it("hides `max` when the active endpoint is non-DeepSeek (#1794)", () => {
+    const text = renderPicker({
+      models: ["deepseek-v4-flash"],
+      current: "deepseek-v4-flash",
+      effortChoices: ["low", "medium", "high"],
+    });
+    expect(text).toContain("EFFORT");
+    expect(text).toContain("low");
+    expect(text).toContain("medium");
+    expect(text).toContain("high");
+    expect(text).not.toMatch(/\bmax\b/);
   });
 
   it("marks the active effort with `current`", () => {

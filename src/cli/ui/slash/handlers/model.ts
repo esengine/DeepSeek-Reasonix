@@ -1,11 +1,11 @@
 import {
-  REASONING_EFFORT_VALUES,
   type ReasoningEffort,
   isReasoningEffort,
   saveModel,
   saveReasoningEffort,
 } from "@/config.js";
 import { t } from "@/i18n/index.js";
+import { effortChoicesForBaseUrl } from "../../effort-choices.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const model: SlashHandler = (args, loop, ctx) => {
@@ -30,19 +30,18 @@ const model: SlashHandler = (args, loop, ctx) => {
 };
 
 const effort: SlashHandler = (args, loop) => {
+  const choices = effortChoicesForBaseUrl(loop.client.baseUrl);
+  const list = choices.join(" | ");
+  const usageKey =
+    choices.length === 4 ? "handlers.model.effortUsage" : "handlers.model.effortUsageNoMax";
   const raw = (args[0] ?? "").toLowerCase();
   if (raw === "") {
     return {
-      info: t("handlers.model.effortStatus", {
-        current: loop.reasoningEffort,
-        list: REASONING_EFFORT_VALUES.join(" | "),
-      }),
+      info: t("handlers.model.effortStatus", { current: loop.reasoningEffort, list }),
     };
   }
-  if (!isReasoningEffort(raw)) {
-    return {
-      info: t("handlers.model.effortUsage", { list: REASONING_EFFORT_VALUES.join(" | ") }),
-    };
+  if (!isReasoningEffort(raw) || !choices.includes(raw as ReasoningEffort)) {
+    return { info: t(usageKey, { list }) };
   }
   const next: ReasoningEffort = raw;
   loop.configure({ reasoningEffort: next });

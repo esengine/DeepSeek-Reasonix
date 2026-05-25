@@ -10,8 +10,9 @@ import {
   rankPickerCandidates,
   walkFilesStream,
 } from "../../at-mentions.js";
-import { loadResolvedSkillPaths } from "../../config.js";
+import { type ReasoningEffort, loadResolvedSkillPaths } from "../../config.js";
 import { SkillStore } from "../../skills.js";
+import { effortArgsHintFor } from "./effort-choices.js";
 import {
   type McpServerSummary,
   type SlashArgContext,
@@ -31,6 +32,8 @@ export interface UseCompletionPickersParams {
   mcpServers: McpServerSummary[] | undefined;
   /** Cross-session slash invocation counts — used to sort suggestions by frequency. */
   slashUsage?: Readonly<Record<string, number>>;
+  /** Filtered effort enum for the active endpoint — drops "max" on non-DeepSeek hosts (#1794). */
+  effortChoices: readonly ReasoningEffort[];
 }
 
 export interface AtPickerEntry {
@@ -97,13 +100,15 @@ export function useCompletionPickers({
   models,
   mcpServers,
   slashUsage,
+  effortChoices,
 }: UseCompletionPickersParams): UseCompletionPickersResult {
   // ── slash-name picker ──
   const [slashSelected, setSlashSelected] = useState(0);
   const slashMatches = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ")) return null;
-    return suggestSlashCommands(input.slice(1), !!codeMode, slashUsage);
-  }, [input, codeMode, slashUsage]);
+    const raw = suggestSlashCommands(input.slice(1), !!codeMode, slashUsage);
+    return raw.map((spec) => rewriteEffortSpec(spec, effortChoices));
+  }, [input, codeMode, slashUsage, effortChoices]);
   const slashGroupMode = input === "/";
   const slashAdvancedHidden = useMemo(
     () => (slashGroupMode ? countAdvancedCommands(!!codeMode) : 0),
@@ -209,8 +214,12 @@ export function useCompletionPickers({
   const slashArgContext = useMemo<SlashArgContext | null>(() => {
     if (!input.startsWith("/")) return null;
     if (slashMatches !== null) return null;
-    return detectSlashArgContext(input, !!codeMode);
-  }, [input, slashMatches, codeMode]);
+    const ctx = detectSlashArgContext(input, !!codeMode);
+    if (!ctx) return null;
+    return ctx.kind === "picker"
+      ? { ...ctx, spec: rewriteEffortSpec(ctx.spec, effortChoices) }
+      : ctx;
+  }, [input, slashMatches, codeMode, effortChoices]);
 
   // Path completion: async directory listing for `argCompleter: "path"`.
   const slashArgPathCandidates = usePathCandidates(
@@ -568,4 +577,20 @@ function rankSearchHits(
       isDir: false,
     };
   });
+}
+
+/** Drops `max` from the /effort spec's argsHint + argCompleter when the
+ *  active endpoint is non-DeepSeek so vLLM/Azure users don't see an option
+ *  that would 400 their next call (#1794). No-op for any other command. */
+function rewriteEffortSpec(
+  spec: SlashCommandSpec,
+  effortChoices: readonly ReasoningEffort[],
+): SlashCommandSpec {
+  if (spec.cmd !== "effort") return spec;
+  if (effortChoices.length === 4) return spec;
+  return {
+    ...spec,
+    argsHint: effortArgsHintFor(effortChoices),
+    argCompleter: [...effortChoices],
+  };
 }

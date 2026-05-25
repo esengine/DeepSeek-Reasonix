@@ -247,6 +247,33 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/usage/);
   });
 
+  it("/effort rejects `max` on non-DeepSeek endpoints (#1794)", () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      baseUrl: "http://localhost:8080/v1",
+      fetch: vi.fn() as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({ client, prefix: new ImmutablePrefix({ system: "s" }) });
+    const r = handleSlash("effort", ["max"], loop);
+    expect(r.info).toMatch(/usage/);
+    expect(r.info).not.toMatch(/\bmax\b/);
+    expect(loop.reasoningEffort).not.toBe("max");
+  });
+
+  it("/effort status on non-DeepSeek endpoint omits `max` from the list (#1794)", () => {
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      baseUrl: "http://localhost:8080/v1",
+      fetch: vi.fn() as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({ client, prefix: new ImmutablePrefix({ system: "s" }) });
+    const r = handleSlash("effort", [], loop);
+    expect(r.info).toMatch(/low/);
+    expect(r.info).toMatch(/medium/);
+    expect(r.info).toMatch(/high/);
+    expect(r.info).not.toMatch(/\bmax\b/);
+  });
+
   it("/help mentions sessions", () => {
     const r = handleSlash("help", [], makeLoop());
     expect(r.info).toMatch(/\/sessions/);

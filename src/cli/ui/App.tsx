@@ -144,6 +144,7 @@ import {
   shouldApplyEditToolImmediately,
 } from "./edit-tool-gate.js";
 import { loopEventToDashboard } from "./effects/loop-to-dashboard.js";
+import { effortChoicesForBaseUrl } from "./effort-choices.js";
 import { appendGlobalMemory, appendProjectMemory, detectHashMemory } from "./hash-memory.js";
 import { type ResolvedHistoryScrollMode, resolveHistoryScrollMode } from "./history-scroll-mode.js";
 import { applySlashResult } from "./hooks/apply-slash-result.js";
@@ -1482,6 +1483,10 @@ function AppInner({
     };
   }, [pendingCheckpoint, broadcastDashboardEvent]);
 
+  // `max` is a DeepSeek-only reasoning extension — drop it from /effort
+  // suggestions + picker when the active endpoint is third-party (#1794).
+  const effortChoices = React.useMemo(() => effortChoicesForBaseUrl(loop.client.baseUrl), [loop]);
+
   // Three mutually-exclusive input-prefix pickers (slash name, @ file
   // mention, slash argument) —state + memos + commit callbacks live
   // in a dedicated hook so App.tsx only sees the small surface it
@@ -1512,6 +1517,7 @@ function AppInner({
     models,
     mcpServers: liveMcpServers,
     slashUsage,
+    effortChoices,
   });
 
   useEffect(() => {
@@ -4517,6 +4523,7 @@ function AppInner({
                   models={models}
                   current={loop.model}
                   currentEffort={loop.reasoningEffort}
+                  effortChoices={effortChoices}
                   onRefresh={refreshModels}
                   onChoose={(outcome) => {
                     setPendingModelPicker(false);
