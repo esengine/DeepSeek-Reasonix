@@ -41,8 +41,8 @@ export const de: TranslationSchema = {
   },
   stats: {
     ...EN.stats,
-    usageHint: "führe `reasonix chat`, `reasonix code` oder `reasonix run <task>` aus – jeder Turn",
-    usageDetail: "hängt eine Zeile an das Log an; `reasonix stats` fasst sie zusammen.",
+    usageHint: "Führe `reasonix chat`, `reasonix code` oder `reasonix run <task>` aus – jeden Turn",
+    usageDetail: "Hängt eine Zeile an das Log an; `reasonix stats` fasst sie zusammen.",
   },
   run: {
     ...EN.run,
@@ -58,26 +58,92 @@ export const de: TranslationSchema = {
     inspectHint: "Ansehen:       reasonix sessions <name>",
     resumeHint: "Fortsetzen:    reasonix chat --session <name>",
     noSession: 'keine Sitzung namens "{name}" (oder sie ist leer).',
-    lookedAt: "angesehen: {path}",
-    noIdleSessions: "keine Sitzungen seit >= {days} Tagen inaktiv. Nichts bereinigt.",
-    wouldPrune: "würde {count} Sitzung(en) bereinigen, die >= {days} Tage inaktiv sind:",
-    dryRunHint: "ohne --dry-run erneut ausführen, um wirklich zu löschen.",
+    lookedAt: "Angesehen: {path}",
+    noIdleSessions: "Keine Sitzungen seit >= {days} Tagen inaktiv. Nichts bereinigt.",
+    wouldPrune: "Würde {count} Sitzung(en) bereinigen, die >= {days} Tage inaktiv sind:",
+    dryRunHint: "Ohne --dry-run erneut ausführen, um wirklich zu löschen.",
     prunedCount: "{count} Sitzung(en) bereinigt, die >= {days} Tage inaktiv waren:",
     daysInvalid: "--days muss eine positive ganze Zahl sein (erhalten: {days}).",
   },
   ui: {
     ...EN.ui,
+    tipShownOnce: "einmal angezeigt",
+    modelOverride: "das Standardmodell überschreiben",
+    noSession: "Sitzungsspeicherung für diesen Durchlauf deaktivieren",
+    noMouseHint:
+      "SGR-Mausverfolgung deaktivieren; stellt die native Auswahl per Ziehen und Rechtsklick wieder her",
+    noProxyHint: "HTTPS_PROXY / HTTP_PROXY für diesen Durchlauf ignorieren; direkt verbinden",
+    resumeHint: "die angegebene Sitzung zwangsweise fortsetzen (auch wenn sie inaktiv ist)",
+    newHint: "Eine neue Sitzung erzwingen (--session / --continue ignorieren)",
+    transcriptHint: "Pfad zum Speichern der JSONL-Ausgabe",
+    budgetHint: "Sitzungs-USD-Obergrenze – warnt bei 80 %, verweigert den nächsten Zug bei 100 %",
+    modelIdHint: "DeepSeek-Modell-ID (z. B. deepseek-v4-flash)",
+    systemPromptHint: "die Standard-Systemeingabeaufforderung überschreiben",
+    effortHint: "Denkaufwand – niedrig|mittel|hoch|maximal",
+    sessionNameHint: "Sitzungsname (Standard: „default“)",
+    ephemeralHint: "Sitzungsspeicherung für diesen Durchlauf deaktivieren",
+    mcpSpecHint: "MCP-Server-Spezifikation (wiederholbar)",
+    mcpPrefixHint: "Stelle diesen String vor die Namen der MCP-Tools",
+    noConfigHint: "Ignoriere bei diesem Durchlauf die Datei ~/.reasonix/config.json",
+    effortHintShort: "Denkaufwand – niedrig|mittel|hoch|maximal",
+    budgetHintShort: "Sitzungs-USD-Obergrenze",
+    transcriptHintShort: "Pfad zum JSONL-Transkript",
+    mcpSpecHintShort: "MCP-Server-Spezifikation (wiederholbar)",
+    mcpPrefixHintShort: "Präfix für MCP-Toolnamen",
+    dryRunHint: "anzeigen, was installiert würde, ohne es tatsächlich zu installieren",
+    rebuildHint: "den Index komplett neu erstellen",
+    embedModelHint: "Name des Einbettungsmodells",
+    projectDirHint: "Projektstammverzeichnis",
+    ollamaUrlHint: "Ollama-Server-URL",
+    skipPromptsHint: "Bestätigungsaufforderungen überspringen",
+    verboseHint: "Alle Metadaten der Sitzung anzeigen",
+    pruneDaysHint:
+      "Sitzungen löschen, die seit mindestens dieser Anzahl von Tagen inaktiv sind (Standard: 90)",
+    pruneDryRunHint: "Liste auf, was gelöscht würde, ohne etwas zu entfernen",
+    eventTypeHint: "Nach Veranstaltungstyp filtern",
+    eventSinceHint: "Beginne mit dieser Ereignis-ID",
+    eventTailHint: "Nur die letzten N Ereignisse anzeigen",
+    jsonHint: "Ausgabe als JSON",
+    projectionHint: "Zeige den voraussichtlichen Zustand bei jedem Ereignis an",
+    printHint: "Anzeige über stdout statt über die TUI",
+    headHint: "Zeige nur die ersten N Ereignisse an",
+    tailHint: "Nur die letzten N Ereignisse anzeigen",
+    mdReportHint: "Erstelle einen Markdown-Diff-Bericht unter diesem Pfad",
+    printHintTable: "Eine Tabelle auf die Standardausgabe ausgeben",
+    tuiHint: "Öffne die interaktive TUI",
+    labelAHint: "Bezeichnung für den linken Bereich",
+    labelBHint: "Bezeichnung für den rechten Bereich",
+    mcpListDescription: "Durchsuche das MCP-Register (offiziell → smithery → lokaler Fallback)",
+    mcpInspectDescription:
+      "die Spezifikationen eines MCP-Servers prüfen (Tools, Ressourcen, Eingabeaufforderungen)",
+    mcpSearchDescription:
+      "Suche in der MCP-Registrierung nach Servern, die einer Suchanfrage entsprechen",
+    mcpInstallDescription:
+      "Einen MCP-Server anhand seines Namens installieren (schreibt dessen Spezifikation in deine Konfiguration)",
+    mcpBrowseDescription:
+      "Interaktiver Marktplatz-Browser – tippe, um zu filtern, drücke die Eingabetaste, um zu installieren",
+    mcpLocalHint: "Nur den mitgelieferten Offline-Katalog anzeigen",
+    mcpRefreshHint: "den 24-Stunden-Cache umgehen und neu abrufen",
+    mcpLimitHint: "Maximale Anzahl der anzuzeigenden Einträge",
+    mcpPagesHint: "Lade gleich so viele Seiten (Standard: 1)",
+    mcpAllHint: "Jede Seite laden (beim ersten Mal etwas langsam)",
+    mcpMaxPagesHint:
+      "Begrenze die Anzahl der Seiten, die bei der Suche durchsucht werden sollen (Standard: 20)",
+    jsonHintCatalog: "Ausgabe als JSON",
+    jsonHintReport: "Gib den Inspektionsbericht als JSON aus",
+    modelOverrideFlash: "das Modell überschreiben (Standard: deepseek-v4-flash)",
+    skipConfirmHint: "Die Bestätigungsabfrage überspringen",
     welcome:
       "Starte jederzeit `reasonix`, um zu chatten – deine Einstellungen bleiben gespeichert.",
     taglineChat: "DeepSeek-nativer Agent",
     taglineCode: "DeepSeek-nativer Coding-Agent",
     taglineSub: "cache-first · flash-first",
-    startSessionHint: "tippe eine Nachricht, um deine Sitzung zu starten",
+    startSessionHint: "Tippe eine Nachricht, um deine Sitzung zu starten",
     inputPlaceholder: "Frag etwas... (tippe / für Befehle, @ für Dateien)",
     busy: "Denke nach...",
     thinking: "▸ denke nach...",
     undo: "Rückgängig",
-    undoHint: "drücke innerhalb von 5s u zum Rückgängigmachen",
+    undoHint: "Drücke innerhalb von 5s zum Rückgängig machen",
     applied: "angewendet",
     rejected: "abgelehnt",
     noDashboard: "Automatisch gestartetes eingebettetes Web-Dashboard unterdrücken.",
@@ -113,10 +179,11 @@ export const de: TranslationSchema = {
   },
   slash: {
     ...EN.slash,
-    help: { ...EN.slash.help, description: "vollständige Befehlsreferenz anzeigen" },
-    status: { ...EN.slash.status, description: "aktuelles Modell, Flags, Kontext und Sitzung" },
+    help: { ...EN.slash.help, description: "Vollständige Befehlsreferenz anzeigen" },
+    status: { ...EN.slash.status, description: "Aktuelles Modell, Flags, Kontext und Sitzung" },
     effort: {
       ...EN.slash.effort,
+      argsHint: "<niedrig|mittel|hoch|max>",
       description:
         "Reasoning-Effort-Grenze (low|medium|high|max); high ist der sichere Standard für vLLM/Azure",
     },
@@ -147,11 +214,13 @@ export const de: TranslationSchema = {
     },
     prompt: {
       ...EN.slash.prompt,
+      argsHint: "[Name]",
       description:
         "MCP-Prompts durchsuchen + abrufen (kein Arg → Namen auflisten; <name> → Prompt rendern)",
     },
     memory: {
       ...EN.slash.memory,
+      argsHint: "[Liste|<Name> anzeigen|<Name> vergessen|<Bereich> löschen – Bestätigen]",
       description: "Pinned Memory anzeigen / verwalten (REASONIX.md + ~/.reasonix/memory)",
     },
     skill: {
@@ -161,16 +230,20 @@ export const de: TranslationSchema = {
     },
     hooks: {
       ...EN.slash.hooks,
+      argsHint: "[Neu laden]",
       description:
         "Aktive Hooks auflisten (settings.json unter .reasonix/) · reload liest von Platte neu",
     },
     permissions: {
       ...EN.slash.permissions,
+      argsHint:
+        "[Liste|<Präfix> hinzufügen|<Präfix|N> entfernen|Löschen (Bestätigung erforderlich)]",
       description:
         "Shell-Allowlist anzeigen / bearbeiten (builtin schreibgeschützt · pro Projekt: ~/.reasonix/config.json)",
     },
     dashboard: {
       ...EN.slash.dashboard,
+      argsHint: "[Stopp]",
       description: "Eingebettetes Web-Dashboard starten (127.0.0.1, token-gesichert)",
     },
     update: {
@@ -184,8 +257,9 @@ export const de: TranslationSchema = {
     },
     cost: {
       ...EN.slash.cost,
+      argsHint: "[Text]",
       description:
-        "pur → letzter Turn (Kostenkarte); mit Text → Kostenschätzung fürs Senden (worst-case + likely-cache)",
+        "ohne Text → Ausgaben letzter Turn (Kostenkarte); mit Text → Kostenschätzung für als nächster Senden (worst-case + likely-cache)",
     },
     doctor: {
       ...EN.slash.doctor,
@@ -201,11 +275,13 @@ export const de: TranslationSchema = {
     },
     compact: {
       ...EN.slash.compact,
+      argsHint: "[Token]",
       description:
         "Überdimensionierte Tool-Ergebnisse + Tool-Call-Args im Log kürzen; Grenze in Tokens, Standard 4000",
     },
     cwd: {
       ...EN.slash.cwd,
+      argsHint: "[Pfad]",
       description:
         "Workspace-Root mid-Session wechseln — FS-/Shell-/Memory-Tools neu ausrichten, Projekt-Hooks neu laden, @-Mention-Walker aktualisieren",
     },
@@ -257,6 +333,7 @@ export const de: TranslationSchema = {
     },
     loop: {
       ...EN.slash.loop,
+      argsHint: "<5s..6h> <Eingabeaufforderung>  ·  Stopp  ·  (keine Argumente = Status)",
       description:
         "Prompt automatisch alle <intervall> erneut senden, bis du etwas eingibst / Esc / /loop stop",
     },
@@ -293,6 +370,7 @@ export const de: TranslationSchema = {
     commit: { ...EN.slash.commit, description: "git add -A && git commit -m ..." },
     checkpoint: {
       ...EN.slash.checkpoint,
+      argsHint: "[Name|Liste|<ID> löschen]",
       description:
         "Jede Datei, die die Sitzung berührt hat, als Schnappschuss sichern (Cursor-artiger interner Speicher, nicht Git). /checkpoint allein listet auf.",
     },
@@ -302,11 +380,13 @@ export const de: TranslationSchema = {
     },
     plan: {
       ...EN.slash.plan,
+      argsHint: "[Ein|Aus]",
       description:
         "Schreibgeschützten Plan-Modus umschalten (Schreibzugriffe blockiert bis submit_plan + Genehmigung)",
     },
     mode: {
       ...EN.slash.mode,
+      argsHint: "[Rezension|Auto|YOLO]",
       description:
         "Edit-Gate: review (Warteschlange) · auto (anwenden+rückgängig) · yolo (anwenden+auto-shell). Shift+Tab schaltet um.",
     },
@@ -316,14 +396,17 @@ export const de: TranslationSchema = {
     },
     kill: {
       ...EN.slash.kill,
+      argsHint: "Bezeichner",
       description: "Hintergrund-Job nach ID beenden (SIGTERM → SIGKILL nach Gnadenfrist)",
     },
     logs: {
       ...EN.slash.logs,
+      argsHint: "<id> [Zeilen]",
       description: "Ausgabe eines Hintergrund-Jobs anzeigen (Standard letzte 80 Zeilen)",
     },
     btw: {
       ...EN.slash.btw,
+      argsHint: "<Frage>",
       description:
         "Kurze Randfrage stellen — wird von Grund auf beantwortet, nie zum Gesprächskontext hinzugefügt",
     },
@@ -334,6 +417,7 @@ export const de: TranslationSchema = {
     },
     theme: {
       ...EN.slash.theme,
+      argsHint: "[auto|dunkel|hell|mitternachtsblau|tiefblau|hoher Kontrast]",
       description: "Terminal-Theme anzeigen oder speichern. Ohne Argument öffnet die Auswahl.",
     },
     exit: { ...EN.slash.exit, description: "TUI beenden" },
@@ -402,8 +486,8 @@ export const de: TranslationSchema = {
     ...EN.themePicker,
     header: "Theme",
     footer: "↑↓ auswählen · ⏎ bestätigen · Esc abbrechen",
-    currentPref: "aktuelle Einstellung",
-    activeNow: "jetzt aktiv",
+    currentPref: "Aktuelle Einstellung",
+    activeNow: "Jetzt aktiv",
     autoDesc: "REASONIX_THEME oder Standard verwenden",
   },
   planFlow: {
@@ -418,13 +502,13 @@ export const de: TranslationSchema = {
     picker: {
       ...EN.planFlow.picker,
       accept: "akzeptieren",
-      acceptHint: "jetzt ausführen, in Reihenfolge",
+      acceptHint: "Jetzt ausführen, in Reihenfolge",
       refine: "verfeinern",
-      refineHint: "dem Agenten mehr Anweisungen geben, neuen Plan entwerfen",
+      refineHint: "Dem Agenten mehr Anweisungen geben, neuen Plan entwerfen",
       revise: "überarbeiten",
       reviseHint: "Plan inline bearbeiten vor der Ausführung (Schritte überspringen/neu ordnen)",
       reject: "ablehnen",
-      rejectHint: "verwerfen, Agent versucht von Grund auf neu",
+      rejectHint: "Verwerfen, Agent versucht von Grund auf neu",
     },
     refineFooter: "⏎ senden  ·  Esc zurück zur Auswahl",
     refineQuestionsHeading: "Beantworte diese oder beschreibe die gewünschte Änderung:",
@@ -432,32 +516,32 @@ export const de: TranslationSchema = {
       ...EN.planFlow.modes,
       approve: {
         ...EN.planFlow.modes.approve,
-        title: "genehmigen — letzte Anweisungen?",
+        title: "Genehmigen — letzte Anweisungen?",
         hint: "Beantworte Fragen aus dem Plan, füge Einschränkungen hinzu oder drücke einfach Enter zur Genehmigung.",
         blankHint: " (Enter ohne Text = ohne Zusatzanweisungen genehmigen.)",
       },
       refine: {
         ...EN.planFlow.modes.refine,
-        title: "verfeinern — was soll das Modell ändern?",
+        title: "Verfeinern — was soll das Modell ändern?",
         hint: "Beschreibe, was falsch ist oder fehlt, oder beantworte Fragen aus dem Plan.",
         blankHint: " (Enter ohne Text = Modell wählt sichere Standardwerte für offene Fragen.)",
       },
       reject: {
         ...EN.planFlow.modes.reject,
-        title: "ablehnen — sag dem Modell warum (optional)",
+        title: "Ablehnen — sag dem Modell warum (optional)",
         hint: "Sag dem Modell, was es an deinem Ziel falsch verstanden hat oder was du stattdessen möchtest.",
         blankHint:
           " (Enter ohne Text = ohne Erklärung abbrechen; das Modell fragt, was du möchtest.)",
       },
       "checkpoint-revise": {
         ...EN.planFlow.modes["checkpoint-revise"],
-        title: "überarbeiten — was soll sich vor dem nächsten Schritt ändern?",
+        title: "Überarbeiten — was soll sich vor dem nächsten Schritt ändern?",
         hint: "Umfangsänderung, Schritte überspringen, alternativer Ansatz — das Modell passt den Restplan an.",
         blankHint: " (Enter ohne Text = mit aktuellem Plan fortfahren.)",
       },
       "choice-custom": {
         ...EN.planFlow.modes["choice-custom"],
-        title: "benutzerdefinierte Antwort — schreibe, was passt",
+        title: "Benutzerdefinierte Antwort — schreibe, was passt",
         hint: "Freitext-Antwort. Das Modell liest sie wörtlich und fährt fort — keine Notwendigkeit, die aufgeführten Optionen zu treffen.",
         blankHint: " (Enter ohne Text = Modell fragen, was du eigentlich möchtest.)",
       },
@@ -517,20 +601,20 @@ export const de: TranslationSchema = {
       "▸ Auf AUTO umgeschaltet — zukünftige Edits werden sofort angewandt. Walk beendet.",
     notedMemory: "▸ vermerkt ({scope}) — {verb} {path}",
     notedVerbCreated: "erstellt",
-    notedVerbAppended: "angehängt an",
+    notedVerbAppended: "Angehängt an",
     memoryWriteFailed: "# Speicherschreibfehler",
     verboseOn: "▸ Ausführlicher Modus an — vollständiges Reasoning + Tool-Ausgabe",
     verboseOff: "▸ Ausführlicher Modus aus — head/tail-Kürzung wiederhergestellt",
     steerInjected: "▸ Steuerung in Warteschlange — wird nach dem aktuellen Schritt hinzugefügt",
     steerCommandRejected: "▸ Befehle sind deaktiviert, während ein Turn gesteuert wird",
-    btwUsage: "▸ /btw <Frage> — eine Randfrage stellen, ohne den Gesprächskontext zu belasten.",
+    btwUsage: "▸ /btw <Frage> — eine Randfrage stellen, ohne den Gesprächskontext zu verschmutzen.",
     btwHeader: "≫ btw",
     restoreCodeOnly: "▸ /restore ist nur im Code-Modus verfügbar",
     hookUserPromptSubmit: "UserPromptSubmit-Hook",
     hookStop: "Stop-Hook",
-    atMentions: "▸ @-Erwähnungen: {parts}",
+    atMentions: "▸ @mentions: {parts}",
     atUrl: "▸ @url: {parts}",
-    atUrlFailed: "@url-Erweiterung fehlgeschlagen",
+    atUrlFailed: "@url Erweiterung fehlgeschlagen",
     sessionTitleNoSession: "▸ Keine persistierte Sitzung aktiv, also nichts umzubenennen.",
     sessionTitleNoContent: "▸ Noch nicht genug Gesprächsinhalt, um diese Sitzung zu benennen.",
     sessionTitleNoTitle: "▸ Das Modell hat keinen brauchbaren Sitzungstitel zurückgegeben.",
@@ -548,7 +632,7 @@ export const de: TranslationSchema = {
     startingBackground: "▸ starte (Hintergrund): {cmd}",
     checkpointSaved:
       "⛁ Checkpoint gespeichert · {id} · {count} Datei{en} · /restore {id} zum Zurücksetzen",
-    continuingAfter: "▸ fortgesetzt nach {label}{counter}",
+    continuingAfter: "▸ fortgesetzen nach {label}{counter}",
     planStoppedAt: "▸ Plan angehalten bei {label}{counter}",
     revisingAfter: "▸ überarbeite nach {label} — {feedback}",
     historyScrollHint: " ↑ lese Verlauf · Ende / Bild↓ zurück zum Ende · ↓ eine Zeile vor",
@@ -568,7 +652,8 @@ export const de: TranslationSchema = {
       "/show <id>            → Zusammenfassung pro Datei    ·    /show <id> <pfad>  → vollständige Diff einer Datei",
     editHistoryHelpUndo:
       "/undo                 → neueste nicht-rückgängige   ·    /undo <id> [pfad]  → gezielten Batch oder Datei rückgängig machen",
-    editHistoryAlreadyReverted: "(bereits rückgängig gemacht — /history zeigt den Batch-Status)",
+    editHistoryAlreadyReverted:
+      "(bereits rückgängig gemacht — /history zeigt den batch-level Status)",
     editHistoryRevertFile: "/undo {id} {path}  → nur diese Datei rückgängig machen",
     mcpFailed: "MCP {name} fehlgeschlagen",
     mcpWarn: "MCP {name} Warnung",
@@ -585,7 +670,7 @@ export const de: TranslationSchema = {
     nothingWritten: ". Nichts auf Platte geschrieben.",
     discardedCount: "▸ {count} ausstehende Edit-Block(s) verworfen",
     noEventsFor: 'Keine Ereignisse für Sitzung "{name}"',
-    lookedAtFile: "angesehen: {path}",
+    lookedAtFile: "Angesehen: {path}",
     sidecarHint:
       "(Sitzungen erstellen den Sidecar automatisch beim ersten Turn — wurde diese Sitzung bereits ausgeführt?)",
   },
@@ -639,7 +724,7 @@ export const de: TranslationSchema = {
     ...EN.errors,
     contextOverflow:
       "Context-Überlauf (DeepSeek 400): Sitzungsverlauf ist {requested}, über dem Prompt-Limit des Modells (V4: 1M Tokens; legacy chat/reasoner: 131k). Meist ist ein einzelnes Tool-Ergebnis zu groß geworden. Reasonix begrenzt neue Tool-Ergebnisse auf 8k Tokens und heilt überdimensionierte Verläufe automatisch beim Sitzungsladen – ein Neustart behebt es oft. Falls es weiterhin überläuft, führe /new für einen frischen Start aus oder öffne /sessions und drücke [d], um diese Sitzung zu löschen.",
-    contextOverflowTooMany: "zu viele Tokens",
+    contextOverflowTooMany: "Zu viele Tokens",
     auth401:
       "Authentifizierung fehlgeschlagen (DeepSeek 401): {inner}. Dein API-Schlüssel wird abgewiesen. Behebe mit `reasonix setup` oder `export DEEPSEEK_API_KEY=sk-...`. Erhalte einen unter https://platform.deepseek.com/api_keys.",
     balance402:
@@ -669,9 +754,9 @@ export const de: TranslationSchema = {
       "[Context-Budget wird knapp — fasse zusammen, bevor der nächste Aufruf überläuft]",
     reasonStuck:
       "[festgefahren bei wiederholtem Tool-Aufruf — erkläre, was versucht wurde und was den Fortschritt blockiert]",
-    labelAborted: "vom Benutzer abgebrochen",
+    labelAborted: "Vom Benutzer abgebrochen",
     labelContextGuard: "Context-Guard ausgelöst (Prompt > 80 % des Fensters)",
-    labelStuck: "festgefahren (wiederholter Tool-Aufruf durch Storm-Breaker unterdrückt)",
+    labelStuck: "Festgefahren (wiederholter Tool-Aufruf durch Storm-Breaker unterdrückt)",
   },
   handlers: {
     ...EN.handlers,
@@ -727,11 +812,11 @@ export const de: TranslationSchema = {
       helpSessionCustom:
         "  reasonix chat --session <name>   eine andere benannte Sitzung verwenden",
       helpSessionNone: "  reasonix chat --no-session       Persistenz für diesen Lauf deaktivieren",
-      retryNone: "nichts zu wiederholen — keine vorherige Benutzernachricht im Log dieser Sitzung.",
+      retryNone: "Nichts zu wiederholen — keine vorherige Benutzernachricht im Log dieser Sitzung.",
       retryInfo: '▸ wiederhole: "{preview}"',
       loopTuiOnly: "/loop ist nur in der interaktiven TUI verfügbar (nicht in run/replay).",
       loopStopped: "▸ Loop gestoppt.",
-      loopNoActive: "kein aktiver Loop zum Stoppen.",
+      loopNoActive: "Kein aktiver Loop zum Stoppen.",
       loopNoActiveHint:
         "kein aktiver Loop. Starte einen mit `/loop <intervall> <prompt>` (z.B. /loop 30s npm test).\nWird abgebrochen bei: /loop stop · Esc · /clear /new · jeder benutzereingegebene Prompt.",
       loopStarted:
@@ -741,8 +826,8 @@ export const de: TranslationSchema = {
       aboutWebsiteLabel: "Webseite",
       aboutRepoLabel: "GitHub ",
       aboutLicenseLabel: "Lizenz",
-      unknownCommand: "unbekannter Befehl: /{cmd} — meintest du {list}?",
-      unknownCommandShort: "unbekannter Befehl: /{cmd}  (siehe /help)",
+      unknownCommand: "Unbekannter Befehl: /{cmd} — meintest du {list}?",
+      unknownCommandShort: "Unbekannter Befehl: /{cmd}  (siehe /help)",
     },
     sessions: {
       ...EN.handlers.sessions,
@@ -762,8 +847,8 @@ export const de: TranslationSchema = {
         "QQ-Setup: gib deine QQ-Open-Platform-App-ID ein, dann Enter. Tippe /cancel zum Abbrechen.",
       promptAppSecret:
         "QQ-Setup: gib dein QQ-Open-Platform-App-Secret ein, dann Enter. Tippe /cancel zum Abbrechen.",
-      setupWaitingAppId: "warte auf App-ID",
-      setupWaitingAppSecret: "warte auf App-Secret",
+      setupWaitingAppId: "Warte auf App-ID",
+      setupWaitingAppSecret: "Warte auf App-Secret",
       setupCancelled: "QQ-Setup abgebrochen.",
       credentialsRequired: "QQ-App-ID und App-Secret sind erforderlich.",
       connected:
@@ -778,7 +863,7 @@ export const de: TranslationSchema = {
       stateEnabled: "aktiviert",
       stateDisabled: "deaktiviert",
       stateConfigured: "konfiguriert",
-      stateNotConfigured: "nicht konfiguriert",
+      stateNotConfigured: "Nicht konfiguriert",
       sandbox: "Sandbox",
       production: "Produktion",
       none: "keine",
@@ -788,7 +873,7 @@ export const de: TranslationSchema = {
       accessOwnerWithAllowlist: "Besitzer {owner}, Allowlist {count}",
       accessAllowlist: "Allowlist {count}",
       accessRuntime: "Erstabsender (nur zur Laufzeit, {owner})",
-      accessOpen: "offen (ungebunden)",
+      accessOpen: "Offen (ungebunden)",
       lockAlreadyRunning:
         "QQ-Kanal läuft bereits in Prozess {pid}. Stoppe diesen Prozess, bevor du einen weiteren QQ-Kanal startest.",
       unauthorizedMessage:
@@ -811,7 +896,7 @@ export const de: TranslationSchema = {
       hooksReloaded: "▸ Hooks neu geladen · {count} aktiv",
       hooksUsage:
         "Verwendung: /hooks            aktive Hooks auflisten\n       /hooks reload     settings.json-Dateien neu lesen",
-      hooksNone: "keine Hooks konfiguriert.",
+      hooksNone: "Keine Hooks konfiguriert.",
       hooksDropHint:
         "Lege eine settings.json mit einem `hooks`-Schlüssel in einem der folgenden Pfade ab:",
       hooksProject: "  · {path} (Projekt)",
@@ -829,21 +914,21 @@ export const de: TranslationSchema = {
       updateRetryHint2:
         "oder führe `reasonix update` in einem anderen Terminal aus, um es synchron zu erzwingen.",
       updateLatest: "Neueste:  reasonix {version}",
-      updateUpToDate: "du bist auf dem neuesten Stand. Nichts zu tun.",
+      updateUpToDate: "Du bist auf dem neuesten Stand. Nichts zu tun.",
       updateNpxHint:
         "du verwendest npx — der nächste `npx reasonix ...`-Start lädt automatisch die neueste Version.",
-      updateNpxForce: "um früher zu aktualisieren: `npm cache clean --force`.",
-      updateUpgradeHint: "zum Aktualisieren beende diese Sitzung und führe aus:",
+      updateNpxForce: "Um früher zu aktualisieren: `npm cache clean --force`.",
+      updateUpgradeHint: "Zum Aktualisieren beende diese Sitzung und führe aus:",
       updateUpgradeCmd1: "  reasonix update           (interaktiv, --dry-run wird unterstützt)",
       updateUpgradeCmd2: "  {command}   (direkt)",
       updateInSessionDisabled:
         "Die Installation innerhalb einer Sitzung ist bewusst deaktiviert — der Installationsprozess würde",
       updateInSessionDisabled2:
         "die Darstellung dieser TUI beeinträchtigen und Windows kann die laufende Binärdatei sperren.",
-      statsNoData: "noch keine Nutzungsdaten.",
+      statsNoData: "Noch keine Nutzungsdaten.",
       statsEveryTurn:
         "jeder hier ausgeführte Turn hängt einen Datensatz an — die Turns dieser Sitzung",
-      statsWillAppear: "werden im Dashboard angezeigt, sobald du eine Nachricht sendest.",
+      statsWillAppear: "Werden im Dashboard angezeigt, sobald du eine Nachricht sendest.",
     },
     edits: {
       ...EN.handlers.edits,
@@ -1025,7 +1110,7 @@ export const de: TranslationSchema = {
       statusEdits: "  Edits   {count} ausstehend (/apply zum Übernehmen, /discard zum Verwerfen)",
       statusPlan: "  Plan    EIN — Schreibzugriffe blockiert (submit_plan + Genehmigung)",
       statusLifecycle: "  Lebenszyklus {mode}/{state} · {progress}{evidence}",
-      lifecycleNoPlan: "kein Plan",
+      lifecycleNoPlan: "Kein Plan",
       lifecycleEvidencePending: "Nachweis ausstehend",
       lifecycleRejected: "Lebenszyklus: {tool} blockiert in {state} — nächster: {next}",
       lifecycleEvidenceRejected:
@@ -1067,12 +1152,12 @@ export const de: TranslationSchema = {
       doneUsage:
         "Verwendung: /plans done <stepId>  ·  /plans done all — manuelle Überschreibung, wenn das Modell vergessen hat, mark_step_complete aufzurufen",
       doneUnavailable: "/plans done ist nur innerhalb einer aktiven Sitzung verfügbar.",
-      doneNoPlan: "kein aktiver Plan — nichts als erledigt zu markieren.",
+      doneNoPlan: "Kein aktiver Plan — nichts als erledigt zu markieren.",
       doneNotInPlan:
         "Schritt `{id}` ist nicht im aktiven Plan. Führe /plans aus, um die Schritt-IDs zu sehen.",
       doneAlready: "Schritt `{id}` wurde bereits als erledigt markiert.",
       doneOk: "▸ Schritt `{id}` als erledigt markiert.",
-      doneAllNoop: "jeder Schritt ist bereits erledigt.",
+      doneAllNoop: "Jeder Schritt ist bereits erledigt.",
       doneAllOk: "▸ {count} Schritt(e) als erledigt markiert.",
     },
     jobs: {
@@ -1090,13 +1175,13 @@ export const de: TranslationSchema = {
       killStopping:
         "▸ stoppe Job {id} (Tree-Kill: SIGTERM → SIGKILL nach 2s Gnadenfrist; Windows: taskkill /T /F)",
       killStatus: "▸ Job {id} {status}",
-      killStillAlive: "nach SIGKILL noch am Leben (!) — melde dies als Fehler",
+      killStillAlive: "Nach SIGKILL noch am Leben (!) — melde dies als Fehler",
       logsUsage: "Verwendung: /logs <id> [zeilen]   (Standard letzte 80 Zeilen)",
       logsNotFound: "Job {id}: nicht gefunden",
       logsStatus: "[Job {id} · {status}]\n$ {command}",
-      logsRunning: "läuft · PID {pid}",
-      logsExited: "beendet {code}",
-      logsFailed: "fehlgeschlagen ({reason})",
+      logsRunning: "Läuft · PID {pid}",
+      logsExited: "Beendet {code}",
+      logsFailed: "Fehlgeschlagen ({reason})",
       logsStopped: "gestoppt",
     },
     memory: {
@@ -1110,10 +1195,10 @@ export const de: TranslationSchema = {
       listHeader: "Benutzer-Memories ({count}):",
       listFooter: "Body anzeigen: /memory show <name>   Löschen: /memory forget <name>",
       showUsage: "Verwendung: /memory show <name>  oder  /memory show <scope>/<name>",
-      showNotFound: "kein Memory gefunden: {target}",
+      showNotFound: "Kein Memory gefunden: {target}",
       showFailed: "Anzeige fehlgeschlagen: {reason}",
       forgetUsage: "Verwendung: /memory forget <name>  oder  /memory forget <scope>/<name>",
-      forgetNotFound: "kein Memory gefunden: {target}",
+      forgetNotFound: "Kein Memory gefunden: {target}",
       forgetInfo:
         "▸ {scope}/{name} entfernt. Nächstes /new oder der nächste Start wird es nicht mehr sehen.",
       forgetFailed: "Konnte {scope}/{name} nicht entfernen (bereits weg?)",
@@ -1122,7 +1207,7 @@ export const de: TranslationSchema = {
       clearConfirm:
         "Alle Memories im Bereich {scope} werden gelöscht. Führe den Befehl mit dem Wort 'confirm' erneut aus: /memory clear {scope} confirm",
       cleared: "▸ Bereich {scope} geleert — {count} Memory-Datei(en) gelöscht.",
-      noMemory: "kein Memory in {root} eingefügt.",
+      noMemory: "Kein Memory in {root} eingefügt.",
       layers: "Drei Ebenen sind verfügbar:",
       layerProject: "  1. {file} — commitierbares Team-Memory (im Repo).",
       layerGlobal: "  2. ~/.reasonix/memory/global/ — dein projektübergreifendes privates Memory.",
@@ -1212,7 +1297,7 @@ export const de: TranslationSchema = {
     },
     skill: {
       ...EN.handlers.skill,
-      listEmpty: "keine Skills gefunden. Reasonix liest Skills von:",
+      listEmpty: "Keine Skills gefunden. Reasonix liest Skills von:",
       listProjectScope:
         "  · <projekt>/.reasonix/skills/<name>/SKILL.md  (oder <name>.md)  — Projekt-Bereich",
       listGlobalScope:
@@ -1227,8 +1312,8 @@ export const de: TranslationSchema = {
       listEmptyNewHint:
         "Erstelle einen mit: /skill new <name>  (Projekt-Bereich) — es gibt noch kein entferntes Register; du erstellst Skills direkt.",
       showUsage: "Verwendung: /skill show <name>",
-      showNotFound: "kein Skill gefunden: {name}",
-      runNotFound: "kein Skill gefunden: {name}  (versuche /skill list)",
+      showNotFound: "Kein Skill gefunden: {name}",
+      runNotFound: "Kein Skill gefunden: {name}  (versuche /skill list)",
       runInfo: "▸ führe Skill aus: {name}{args}",
       newUsage: "Verwendung: /skill new <name> [--global]",
       newCreated:
@@ -1257,10 +1342,10 @@ export const de: TranslationSchema = {
     left: " übrig",
     slow: "langsam",
     disconnect: "trennen",
-    reconnecting: "verbinde neu…",
-    approvingIn: "genehmige in ",
-    escToInterrupt: "s · Esc zum Unterbrechen",
-    recordingGlyph: "●AUFN",
+    reconnecting: "Verbinde neu…",
+    approvingIn: "Genehmige in ",
+    escToInterrupt: "Esc zum Unterbrechen",
+    recordingGlyph: "Aufnahme",
     mb: " MB",
     evt: " Ereignis",
     editsLabel: "Edits:",
@@ -1280,14 +1365,14 @@ export const de: TranslationSchema = {
     queuedApplyDiscard: "{count} in Warteschlange · y anwenden · n verwerfen",
     editsQueued: "Edits in Warteschlange · y anwenden · n verwerfen",
     shiftTabFlip: "   {mid} · Shift+Tab zum Umschalten",
-    queuedDots: "in Warteschlange…",
+    queuedDots: "In Warteschlange…",
   },
   composer: {
     ...EN.composer,
-    placeholder: "frag etwas  ·  slash für Befehle  ·  at-Zeichen für Dateien",
+    placeholder: "Frag etwas  ·  slash für Befehle  ·  at-Zeichen für Dateien",
     waitingForResponse: "…warte auf Antwort…",
     hintSend: "senden",
-    hintNewline: "neue Zeile",
+    hintNewline: "Neue Zeile",
     hintClear: "leeren",
     hintScroll: "scrollen",
     hintHistory: "Verlauf",
@@ -1296,14 +1381,14 @@ export const de: TranslationSchema = {
     abortedHint: "Turn vom Benutzer abgebrochen · erneut Esc zum Leeren · ⏎ für eine Folgefrage",
     editorNoRawMode:
       "externer Editor nicht verfügbar — stdin unterstützt Raw-Mode-Umschaltung auf diesem Terminal nicht",
-    editorFailed: "externer Editor:",
+    editorFailed: "Externer Editor:",
     editorMissing:
       "kein $EDITOR / $VISUAL / $GIT_EDITOR gesetzt — exportiere einen (z.B. `export EDITOR=nano`) und versuche es erneut",
     editorExited: "Editor mit Code {code} beendet",
     typeaheadStaged: "▸ {count} Zeile(n) bereitgestellt · Esc zurückrufen",
     steerPlaceholder:
       "tippe, um die aktuelle Aufgabe zu steuern — Befehle sind deaktiviert, solange beschäftigt",
-    steerHint: "senden — mid-Turn eingefügt",
+    steerHint: "Senden — mid-Turn eingefügt",
     stashNothing: "Nichts zu speichern",
     stashSaved: "Gespeichert",
     stashRecall: "Abgerufen",
@@ -1319,9 +1404,9 @@ export const de: TranslationSchema = {
     denyFooter:
       "Kontext eingeben  ·  ⏎ mit Grund absenden  ·  Esc überspringen (ohne Grund ablehnen)",
     pickFooter: "↑↓ auswählen  ·  ⏎ bestätigen  ·  Tab Kontext hinzufügen  ·  Esc abbrechen",
-    allowOnce: "einmal erlauben",
-    allowOnceDesc: "diesen Zugriff erlauben; das Verzeichnis für den Rest dieser Sitzung merken",
-    allowAlways: "immer erlauben",
+    allowOnce: "Einmal erlauben",
+    allowOnceDesc: "Diesen Zugriff erlauben; das Verzeichnis für den Rest dieser Sitzung merken",
+    allowAlways: "Immer erlauben",
     allowAlwaysDesc:
       "`{prefix}` für dieses Projekt merken (gespeichert in ~/.reasonix/config.json)",
     deny: "ablehnen",
@@ -1341,16 +1426,16 @@ export const de: TranslationSchema = {
     title: "Shell-Befehl",
     bgTitle: "Hintergrundprozess",
     subtitle: "Modell möchte einen Shell-Befehl ausführen",
-    bgSubtitle: "langlebiger Prozess — läuft nach Genehmigung weiter, /kill zum Stoppen",
+    bgSubtitle: "Langlebiger Prozess — läuft nach Genehmigung weiter, /kill zum Stoppen",
     denyTitle: "Ablehnen — Kontext angeben",
     optional: "optional",
     denyFooter:
       "Kontext eingeben  ·  ⏎ mit Grund absenden  ·  Esc überspringen (ohne Grund ablehnen)",
     awaiting: "wartet",
     pickFooter: "↑↓ auswählen  ·  ⏎ bestätigen  ·  Tab Kontext hinzufügen  ·  Esc abbrechen",
-    allowOnce: "einmal erlauben",
-    allowOnceDesc: "diesen Befehl ausführen, beim nächsten Mal erneut fragen",
-    allowAlways: "immer erlauben",
+    allowOnce: "Einmal erlauben",
+    allowOnceDesc: "Diesen Befehl ausführen, beim nächsten Mal erneut fragen",
+    allowAlways: "Immer erlauben",
     allowAlwaysDesc: "`{prefix}` für dieses Projekt merken",
     deny: "ablehnen",
     denyDesc: "Tab drücken, um dem Modell den Grund mitzuteilen",
@@ -1373,7 +1458,7 @@ export const de: TranslationSchema = {
     newTag: "NEU",
     editTag: "BEARBEITET",
     linesCount: "-{removed} +{added} Zeilen",
-    viewingRange: "zeige {start}-{end}/{total}",
+    viewingRange: "Zeige {start}-{end}/{total}",
     denyFooter: "⏎ absenden  ·  Esc überspringen (ohne Grund ablehnen)",
     oldLabel: "  - alt",
     newLabel: "  + neu",
@@ -1386,9 +1471,9 @@ export const de: TranslationSchema = {
   },
   editPicker: {
     ...EN.editPicker,
-    title: "vorherige Nachricht bearbeiten",
+    title: "Vorherige Nachricht bearbeiten",
     hint: "↑↓ auswählen · Enter zum Laden in den Composer · Esc abbrechen",
-    empty: "noch keine Benutzer-Turns — nichts zu bearbeiten",
+    empty: "Noch keine Benutzer-Turns — nichts zu bearbeiten",
     dismiss: "Esc zum Schließen",
     forked: "▸ bei Turn #{turn} abgezweigt — Puffer enthält den Originaltext",
   },
@@ -1409,11 +1494,11 @@ export const de: TranslationSchema = {
     searchHint: "  tippen zum Filtern  ·  ⏎ Treffer öffnen  ·  Esc zurücksetzen",
     searchEmpty: "  keine Sitzungen entsprechen dieser Suche",
     emptyHint: "  ⏎ neue Sitzung  ·  Esc beenden",
-    justNow: "gerade eben",
-    minAgo: "vor {count} Min",
+    justNow: "Gerade eben",
+    minAgo: "Vor {count} Min",
     yesterday: "gestern",
-    hoursAgo: "vor {count}h",
-    daysAgo: "vor {count} Tagen",
+    hoursAgo: "Vor {count}h",
+    daysAgo: "Vor {count} Tagen",
   },
   workspacePicker: {
     ...EN.workspacePicker,
@@ -1440,7 +1525,7 @@ export const de: TranslationSchema = {
     modelsHeader: "    MODELLE  ·  DeepSeek-kompatible IDs",
     effortDesc: {
       ...EN.modelPicker.effortDesc,
-      low: "am schnellsten — minimales Reasoning",
+      low: "Am schnellsten — minimales Reasoning",
       medium: "ausgewogen",
       high: "Standard — sicher für vLLM / Azure",
       max: "DeepSeek-Erweiterung; von stock OpenAI / vLLM abgelehnt",
@@ -1450,7 +1535,7 @@ export const de: TranslationSchema = {
   },
   slashSuggestions: {
     ...EN.slashSuggestions,
-    noMatch: "kein Slash-Befehl entspricht diesem Präfix",
+    noMatch: "Kein Slash-Befehl entspricht diesem Präfix",
     backspaceHint: " — Rücktaste zum Bearbeiten, oder /help für die vollständige Liste",
     commandCount: "{count} Befehl",
     commandCountPlural: "{count} Befehle",
@@ -1467,13 +1552,13 @@ export const de: TranslationSchema = {
     groupJobs: "JOBS",
     groupAdvanced: "ERWEITERT",
     groupDetailSetup: "Modell + Kosten",
-    groupDetailInfo: "aktueller Zustand",
-    groupDetailChat: "tägliche Turn-Operationen",
+    groupDetailInfo: "Aktueller Zustand",
+    groupDetailChat: "Tägliche Turn-Operationen",
     groupDetailExtend: "MCP, Memory, Skills",
-    groupDetailSession: "gespeicherte Sitzungen",
+    groupDetailSession: "Gespeicherte Sitzungen",
     groupDetailCode: "Edits + Pläne (Code-Modus)",
     groupDetailJobs: "Hintergrundprozesse (Code-Modus)",
-    groupDetailAdvanced: "selten oder einmalig",
+    groupDetailAdvanced: "Selten oder einmalig",
   },
   atMentions: {
     ...EN.atMentions,
@@ -1486,8 +1571,8 @@ export const de: TranslationSchema = {
     matches: "Treffer",
     forFilter: 'für "{filter}"',
     noMatch: 'keine Dateien entsprechen "{filter}"',
-    emptyDir: "leeres Verzeichnis",
-    scanning: "durchsuche Verzeichnisbaum…",
+    emptyDir: "Leeres Verzeichnis",
+    scanning: "Durchsuche Verzeichnisbaum…",
     footerBrowse: "↑↓ navigieren · Tab in Ordner eintauchen · ⏎ einfügen · Esc abbrechen",
     footerBrowseSearch: "↑↓ navigieren · Tab / ⏎ als @pfad einfügen · Esc abbrechen",
     footerInsert: "↑↓ navigieren · Tab / ⏎ als @pfad einfügen · Esc abbrechen",
@@ -1525,7 +1610,7 @@ export const de: TranslationSchema = {
   doctorErrors: {
     ...EN.doctorErrors,
     unreadable: "{path} nicht lesbar — {message}",
-    cannotList: "kann nicht auflisten — {message}",
+    cannotList: "Kann nicht auflisten — {message}",
     parseFailed: "settings.json konnte nicht geparst werden — {message}",
     probeFailed: "Test fehlgeschlagen — {message}",
   },
@@ -1662,7 +1747,7 @@ export const de: TranslationSchema = {
     earlierStackLines: "⋮ {count} frühere Stack-Zeilen ausgeblendet",
     agent: "Agent · {name}",
     response: "Antwort",
-    writing: "schreibe …",
+    writing: "Schreibe …",
     tok: "Tok",
     pilcrow: "¶",
     aborted: "abgebrochen",
@@ -1701,10 +1786,10 @@ export const de: TranslationSchema = {
   },
   mcpHealth: {
     ...EN.mcpHealth,
-    noData: "keine Inspektionsdaten",
-    healthy: "gesund · {ms}ms",
-    slow: "langsam · {ms}ms",
-    verySlow: "sehr langsam · {ms}ms",
+    noData: "Keine Inspektionsdaten",
+    healthy: "Gesund · {ms}ms",
+    slow: "Langsam · {ms}ms",
+    verySlow: "Sehr langsam · {ms}ms",
     slowToast: "⚠ MCP `{name}` langsam · {seconds}s p95 über die letzten {sampleSize} Aufrufe",
     emptyHint:
       "ℹ keine MCP-Server konfiguriert — versuche: `reasonix setup` zur erneuten Auswahl, oder `reasonix mcp install filesystem` · Shell-Befehle werden pro Aufruf abgefragt (einmal erlauben / immer erlauben / ablehnen), kein globales Allow-All",
@@ -1738,20 +1823,20 @@ export const de: TranslationSchema = {
     matchSingular: "{n} Treffer",
     matchPlural: "{n} Treffer",
     loading: "lade…",
-    noEntries: "keine Einträge",
-    opening: "öffne Registry…",
+    noEntries: "Keine Einträge",
+    opening: "Öffne Registry…",
     cached: "· zwischengespeichert",
     exhausted: "· erschöpft",
-    loadingMore: "lade mehr…",
-    allLoaded: "alle Seiten geladen",
-    fetchingDetail: "hole Smithery-Details…",
+    loadingMore: "Lade mehr…",
+    allLoaded: "Alle Seiten geladen",
+    fetchingDetail: "Hole Smithery-Details…",
     noInstallInfo:
       "keine Installationsinfo für {name} - versuche `npx -y @smithery/cli install {name}`",
-    alreadyInstalled: "bereits installiert: {spec}",
-    installed: "installiert → {spec}",
+    alreadyInstalled: "Bereits installiert: {spec}",
+    installed: "Installiert → {spec}",
     uninstalled: "{name} deinstalliert",
     installFailed: "Installation fehlgeschlagen: {message}",
-    notInstalled: "nicht installiert: {name}",
+    notInstalled: "Nicht installiert: {name}",
     bridged: "✓ {name} installiert - verbunden",
     bridgeFailed: "▲ {name} installiert - Verbindung fehlgeschlagen: {reason}",
     bridgeReloadFailed:
@@ -1823,7 +1908,7 @@ export const de: TranslationSchema = {
     ...EN.planReviseConfirm,
     title: "Plan-Überarbeitung vorgeschlagen",
     metaRight: "−{removed}  +{added}  ·  {kept} behalten",
-    updatedSummary: "aktualisierte Zusammenfassung: {summary}",
+    updatedSummary: "Aktualisierte Zusammenfassung: {summary}",
     acceptLabel: "Überarbeitung annehmen — neue Schrittliste anwenden",
     acceptHint:
       "Ersetzt den Restplan durch die vorgeschlagenen Schritte. Erledigte Schritte bleiben unberührt.",
@@ -1844,7 +1929,7 @@ export const de: TranslationSchema = {
   },
   recordView: {
     ...EN.recordView,
-    userPrefix: "du » ",
+    userPrefix: "Du » ",
     assistant: "Assistent",
     toolPrefix: "Tool<",
     argsLabel: "  Args: ",
@@ -1856,9 +1941,9 @@ export const de: TranslationSchema = {
   },
   replayApp: {
     ...EN.replayApp,
-    emptyTranscript: "leeres Transkript",
+    emptyTranscript: "Leeres Transkript",
     turnProgress: "Turn {current}/{total}",
-    noRecords: "keine Datensätze",
+    noRecords: "Keine Datensätze",
     untracked: "(nicht verfolgt)",
     churned: "(umgewandelt ×{count})",
   },
@@ -1909,10 +1994,10 @@ export const de: TranslationSchema = {
   mcpCli: {
     ...EN.mcpCli,
     bundledCatalog: "Mitgelieferte MCP-Server (Offline-Katalog):",
-    justFetched: "gerade abgerufen",
-    cachedAge: "zwischengespeichert, {age}",
-    moreAvailable: "mehr verfügbar",
-    allLoaded: "alle geladen",
+    justFetched: "Gerade abgerufen",
+    cachedAge: "Zwischengespeichert, {age}",
+    moreAvailable: "Mehr verfügbar",
+    allLoaded: "Alle geladen",
     morePagesAvailable: "▸ mehr Seiten verfügbar — `reasonix mcp list --pages <n>` oder --all",
     installHint: "Installieren:  reasonix mcp install <name>",
     usageSearch: "Verwendung: reasonix mcp search <abfrage>",
