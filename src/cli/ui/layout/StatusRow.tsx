@@ -4,10 +4,9 @@ import React from "react";
 import { t } from "../../../i18n/index.js";
 import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS } from "../../../telemetry/stats.js";
 import { VERSION } from "../../../version.js";
-import { useKeystroke } from "../keystroke-context.js";
 import { formatTokens } from "../primitives.js";
 import { Countdown } from "../primitives/Countdown.js";
-import { useAgentState, useAgentStore } from "../state/provider.js";
+import { useAgentState } from "../state/provider.js";
 import type { Mode, NetworkState, StatusBar } from "../state/state.js";
 import { GLYPH } from "../theme.js";
 import { FG, SURFACE, TONE, balanceColor, formatBalance, formatCost } from "../theme/tokens.js";
@@ -68,25 +67,6 @@ export function StatusRow({
     cols >= WALLET_MIN_COLS &&
     ((hasSession && statusBar.showSessionCost) || (hasBalance && statusBar.showBalance));
 
-  const store = useAgentStore();
-  const rows = stdout?.rows ?? 40;
-  // Click-to-toggle: a mouse click on the status bar (bottom ~2 rows)
-  // flips the display currency between USD and CNY.
-  useKeystroke((ev) => {
-    if (!ev.mouseClick || !ev.mouseRow) return;
-    if (ev.mouseRow < rows - 2) return;
-    const cur = status.costDisplayCurrency ?? status.balanceCurrency ?? "CNY";
-    const next = cur === "USD" ? "CNY" : "USD";
-    const label = next === "USD" ? "$" : "¥";
-    store.dispatch({ type: "session.update" as const, patch: { costDisplayCurrency: next } });
-    store.dispatch({
-      type: "toast.show",
-      tone: "info",
-      title: `Costs: ${label}${next}`,
-      ttlMs: 2000,
-    });
-  });
-
   return (
     <Box flexDirection="row" flexShrink={0} marginTop={1}>
       <Box flexDirection="row" flexWrap="wrap" flexGrow={1}>
@@ -113,7 +93,7 @@ export function StatusRow({
             <Gap />
             <Pill>
               <Text bold color={TONE.brand}>
-                {"↻ "}
+                {"▸ "}
               </Text>
               <Text bold color={FG.body}>
                 {`${formatCost(status.cost, status.costDisplayCurrency ?? status.balanceCurrency)} ${t("statusBar.turn")}`}

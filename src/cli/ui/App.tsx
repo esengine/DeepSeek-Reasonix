@@ -190,7 +190,7 @@ import { VerboseContext } from "./state/verbose-context.js";
 import { isLegacyWindowsConsole } from "./terminal-host.js";
 import { ThemeProvider } from "./theme/context.js";
 import { listThemeNames } from "./theme/tokens.js";
-import { FG, type ThemeName, setDefaultCostCurrency } from "./theme/tokens.js";
+import { FG, type ThemeName } from "./theme/tokens.js";
 import { TickerProvider } from "./ticker.js";
 import { handleTurnInterrupt } from "./turn-interrupt.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
@@ -413,10 +413,6 @@ export function App(props: AppProps): React.ReactElement {
       showVersion: cfg.showVersion !== false,
       showFeedbackHint: cfg.showFeedbackHint !== false,
     };
-  }, []);
-  // Seed the module-level cost-currency fallback from config.
-  useEffect(() => {
-    setDefaultCostCurrency(readConfig().costCurrency);
   }, []);
   return (
     <ThemeProvider name={themeName}>
