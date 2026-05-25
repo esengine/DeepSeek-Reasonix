@@ -684,6 +684,11 @@ export const zhCN: typeof en = {
     editMessage: "编辑并重新发送",
     copyResponse: "复制这条回复",
   },
+  questionNav: {
+    label: "问题导航",
+    question: "问题",
+    jumpTo: "跳到问题 {n}",
+  },
   live: {
     reasoning: "live · reasoning",
     running: "运行中",

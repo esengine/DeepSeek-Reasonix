@@ -698,6 +698,11 @@ export const en = {
     editMessage: "Edit this message and re-send",
     copyResponse: "Copy this response",
   },
+  questionNav: {
+    label: "Question navigation",
+    question: "Question",
+    jumpTo: "Jump to question {n}",
+  },
   live: {
     reasoning: "live · reasoning",
     running: "running",

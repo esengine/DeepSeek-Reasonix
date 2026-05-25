@@ -9,7 +9,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
 import {
@@ -58,6 +58,7 @@ import { useElapsed } from "./ui/live";
 import { AboutModal } from "./ui/about";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { Sidebar } from "./ui/sidebar";
+import { QuestionNav, type QuestionNavItem } from "./ui/question-nav";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import { StatusBar } from "./ui/statusbar";
@@ -1310,6 +1311,7 @@ function TabRuntime({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const threadInnerRef = useRef<HTMLDivElement>(null);
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
   const [jobsOpen, setJobsOpen] = useState(false);
@@ -1571,6 +1573,35 @@ function TabRuntime({
     composerRef.current?.focus();
   }, []);
 
+  const questionNavItems = useMemo<QuestionNavItem[]>(() => {
+    let ordinal = 0;
+    return state.messages.flatMap((m, messageIndex) => {
+      if (m.kind !== "user") return [];
+      ordinal += 1;
+      return [{ messageIndex, ordinal, turn: m.turn, text: m.text }];
+    });
+  }, [state.messages]);
+
+  useEffect(() => {
+    if (questionNavItems.length === 0) {
+      setActiveQuestionIndex(null);
+      return;
+    }
+    setActiveQuestionIndex((current) =>
+      current !== null && questionNavItems.some((item) => item.messageIndex === current)
+        ? current
+        : questionNavItems[0]?.messageIndex ?? null,
+    );
+  }, [questionNavItems]);
+
+  const scrollToQuestion = useCallback((messageIndex: number) => {
+    const root = threadRef.current;
+    const target = root?.querySelector<HTMLElement>(`[data-question-index="${messageIndex}"]`);
+    if (!root || !target) return;
+    setActiveQuestionIndex(messageIndex);
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
   useEffect(() => {
     if (state.busy || !state.ready || state.queuedSends.length === 0) return;
     const next = state.queuedSends[0];
@@ -1738,6 +1769,45 @@ function TabRuntime({
       clearTimeout(timer);
     };
   }, [state.currentSession]);
+
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el || questionNavItems.length === 0) return;
+    let raf = 0;
+    const updateActiveQuestion = () => {
+      raf = 0;
+      const marks = Array.from(el.querySelectorAll<HTMLElement>("[data-question-index]"));
+      if (marks.length === 0) return;
+      const center = el.getBoundingClientRect().top + el.clientHeight / 2;
+      let bestIndex: number | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const mark of marks) {
+        const raw = mark.dataset.questionIndex;
+        if (!raw) continue;
+        const rect = mark.getBoundingClientRect();
+        const distance = Math.abs(rect.top + rect.height / 2 - center);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = Number(raw);
+        }
+      }
+      if (bestIndex !== null && Number.isFinite(bestIndex)) {
+        setActiveQuestionIndex(bestIndex);
+      }
+    };
+    const onScroll = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(updateActiveQuestion);
+    };
+    updateActiveQuestion();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, [questionNavItems]);
 
   useEffect(() => {
     if (!active) return;
@@ -2149,7 +2219,7 @@ function TabRuntime({
                       const prev = state.messages[i - 1];
                       const needsDivider = !prev || prev.kind === "user";
                       return (
-                        <div key={`u-${i}`}>
+                        <div key={`u-${i}`} data-question-index={i}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
                           <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
                         </div>
@@ -2305,6 +2375,11 @@ function TabRuntime({
                   </button>
                 ) : null}
               </div>
+              <QuestionNav
+                items={questionNavItems}
+                activeMessageIndex={activeQuestionIndex}
+                onPick={scrollToQuestion}
+              />
 
               <Composer
                 draft={draft}
