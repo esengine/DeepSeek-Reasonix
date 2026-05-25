@@ -98,6 +98,7 @@ import { useAutoCollapse } from "./ui/useAutoCollapse";
 import { useResizable } from "./ui/useResizable";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
+import { getThreadMaxWidth } from "./ui/thread-layout";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 const RIGHT_SIDEBAR_COLLAPSE_WIDTH = 1120;
@@ -3250,9 +3251,10 @@ export function App() {
 
   const { width: sideWidth, onMouseDown: onSideResizeDown } = useResizable("side", sideCollapsed);
   const { width: ctxWidth, onMouseDown: onCtxResizeDown } = useResizable("ctx", ctxCollapsed);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const visibleSide = sideCollapsed ? 0 : sideWidth;
   const visibleCtx = ctxCollapsed ? 0 : ctxWidth;
-  const threadMaxWidth = Math.max(580, Math.min(window.innerWidth - visibleSide - visibleCtx - 80, 1120));
+  const threadMaxWidth = getThreadMaxWidth({ viewportWidth, visibleSide, visibleCtx });
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -3267,7 +3269,9 @@ export function App() {
 
     const sync = () => {
       raf = 0;
-      const next = responsiveStage(window.innerWidth);
+      const width = window.innerWidth;
+      setViewportWidth(width);
+      const next = responsiveStage(width);
       if (prevStage === next) return;
       const prev = prevStage;
       prevStage = next;

@@ -35,6 +35,7 @@ vi.mock("./theme", () => ({
 }));
 
 import { reduce } from "./App";
+import { getThreadMaxWidth } from "./ui/thread-layout";
 
 function initialState(): Parameters<typeof reduce>[0] {
   return {
@@ -263,5 +264,22 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
 
     expect(next.settings?.reasoningEffort).toBe("low");
     expect(next.settings?.editMode).toBe("auto");
+  });
+});
+
+describe("desktop thread layout", () => {
+  it("recomputes the thread cap from the latest viewport width", () => {
+    const side = 244;
+    const ctx = 320;
+
+    expect(
+      getThreadMaxWidth({ viewportWidth: 1000, visibleSide: side, visibleCtx: ctx }),
+    ).toBe(580);
+    expect(
+      getThreadMaxWidth({ viewportWidth: 1400, visibleSide: side, visibleCtx: ctx }),
+    ).toBe(756);
+    expect(
+      getThreadMaxWidth({ viewportWidth: 1800, visibleSide: side, visibleCtx: ctx }),
+    ).toBe(1120);
   });
 });
