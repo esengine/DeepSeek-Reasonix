@@ -239,6 +239,10 @@ const planDrop = z.object({
   type: z.literal("plan.drop"),
 });
 
+const planIdle = z.object({
+  type: z.literal("plan.idle"),
+});
+
 const usageShow = z.object({
   type: z.literal("usage.show"),
   id: cardId,
@@ -365,6 +369,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   planShow,
   planStepComplete,
   planDrop,
+  planIdle,
   ctxShow,
   doctorShow,
   usageShow,

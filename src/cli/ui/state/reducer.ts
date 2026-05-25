@@ -298,6 +298,26 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       return changed ? { ...state, cards } : state;
     }
 
+    case "plan.idle": {
+      // Turn ended — nothing is actually executing, so a "running" step on the
+      // live plan is a lie. Demote it back to "queued"; the next mark_step_complete
+      // will re-advance the running marker via advanceActivePlanSteps. Issue #1784.
+      let changed = false;
+      const cards = state.cards.map((c) => {
+        if (c.kind !== "plan" || c.variant !== "active") return c;
+        let stepChanged = false;
+        const next = c.steps.map((s) => {
+          if (s.status !== "running") return s;
+          stepChanged = true;
+          return { ...s, status: "queued" as const };
+        });
+        if (!stepChanged) return c;
+        changed = true;
+        return { ...c, steps: next };
+      });
+      return changed ? { ...state, cards } : state;
+    }
+
     case "ctx.show":
       return appendCard(state, {
         kind: "ctx",

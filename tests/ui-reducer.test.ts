@@ -245,6 +245,50 @@ describe("ui reducer", () => {
     ]);
   });
 
+  it("plan.idle demotes a stuck `running` step back to `queued` when the turn ends (#1784)", () => {
+    const shown = run([
+      {
+        type: "plan.show",
+        id: "p1",
+        title: "Plan",
+        variant: "active",
+        steps: [
+          { id: "step-1", title: "One", status: "queued" },
+          { id: "step-2", title: "Two", status: "queued" },
+        ],
+      },
+    ]);
+    const afterFirst = reduce(shown, { type: "plan.step.complete", stepId: "step-1" });
+    expect((afterFirst.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual([
+      "done",
+      "running",
+    ]);
+
+    const idle = reduce(afterFirst, { type: "plan.idle" });
+    expect((idle.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual(["done", "queued"]);
+
+    // Next turn marks step-2 done — the running marker advances normally.
+    const afterSecond = reduce(idle, { type: "plan.step.complete", stepId: "step-2" });
+    expect((afterSecond.cards[0] as PlanCard).steps.map((s) => s.status)).toEqual(["done", "done"]);
+  });
+
+  it("plan.idle leaves replay-variant plans untouched", () => {
+    const shown = run([
+      {
+        type: "plan.show",
+        id: "p1",
+        title: "Plan",
+        variant: "replay",
+        steps: [
+          { id: "step-1", title: "One", status: "running" },
+          { id: "step-2", title: "Two", status: "queued" },
+        ],
+      },
+    ]);
+    const idle = reduce(shown, { type: "plan.idle" });
+    expect(idle.cards[0]).toBe(shown.cards[0]);
+  });
+
   it("changes mode and accumulates session cost", () => {
     const s = run([
       { type: "mode.change", mode: "ask" },

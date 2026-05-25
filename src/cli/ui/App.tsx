@@ -3464,6 +3464,7 @@ function AppInner({
           translator.abort();
         }
         clearToolProgressDisplay();
+        agentStore.dispatch({ type: "plan.idle" });
         setSummary(loop.stats.summary());
         busyRef.current = false;
         setBusy(false);
