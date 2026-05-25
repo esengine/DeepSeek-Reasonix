@@ -172,10 +172,10 @@ function Hero() {
             </a>
           </div>
           <div className="hero-stats">
-            <div className="hero-stat"><b>94<span style={{fontFamily:'var(--mono)',fontStyle:'normal',fontSize:18,marginLeft:2,color:'var(--cream-mute)'}}>%</span></b><span>Cache Hit</span></div>
-            <div className="hero-stat"><b>2.5<span style={{fontFamily:'var(--mono)',fontStyle:'normal',fontSize:18,marginLeft:2,color:'var(--cream-mute)'}}>×</span></b><span>Cost Down</span></div>
-            <div className="hero-stat"><b>2837</b><span>Tests</span></div>
-            <div className="hero-stat"><b>MIT</b><span>License</span></div>
+            <div className="hero-stat"><b>94<span className="metric-unit">%</span></b><span className="metric-label">Cache Hit</span></div>
+            <div className="hero-stat"><b>2.5<span className="metric-unit">×</span></b><span className="metric-label">Cost Down</span></div>
+            <div className="hero-stat"><b>2837</b><span className="metric-label">Tests</span></div>
+            <div className="hero-stat"><b>MIT</b><span className="metric-label">License</span></div>
           </div>
         </div>
         <div style={{position:'relative'}}>

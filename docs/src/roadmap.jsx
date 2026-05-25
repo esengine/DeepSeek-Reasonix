@@ -74,7 +74,7 @@ function Roadmap() {
               <h4>{t(c.title, lang)}</h4>
             </header>
             <ul>
-              {c.items.map((it, idx) => <li key={idx}>{t(it, lang)}</li>)}
+              {c.items.map((it, idx) => <li key={idx}><span>{t(it, lang)}</span></li>)}
             </ul>
           </div>
         ))}

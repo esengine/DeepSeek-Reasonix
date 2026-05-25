@@ -12,14 +12,13 @@ function Nav({ active }) {
   }, []);
 
   const NAV_LINKS = [
-    { href: "index.html#install",  label: { zh: "安装",     en: "Install" } },
-    { href: "index.html#agents",   label: { zh: "原理",     en: "How it works" } },
-    { href: "index.html#features", label: { zh: "特性",     en: "Features" } },
-    { href: "index.html#config",   label: { zh: "配置",     en: "Config" } },
-    { href: "configuration.html",  label: { zh: "Guide",    en: "Guide" } },
-    { href: "download.html",       label: { zh: "下载",     en: "Download" }, key: "download" },
-    { href: "index.html#roadmap",  label: { zh: "Roadmap",  en: "Roadmap" } },
-    { href: "index.html#faq",      label: { zh: "FAQ",      en: "FAQ" } },
+    { href: "index.html#install",  label: { zh: "安装",     en: "Install" }, priority: "primary" },
+    { href: "index.html#agents",   label: { zh: "原理",     en: "How it works" }, priority: "secondary" },
+    { href: "index.html#features", label: { zh: "特性",     en: "Features" }, priority: "primary" },
+    { href: "index.html#config",   label: { zh: "配置",     en: "Config" }, priority: "secondary" },
+    { href: "configuration.html",  label: { zh: "Guide",    en: "Guide" }, priority: "persist" },
+    { href: "index.html#roadmap",  label: { zh: "Roadmap",  en: "Roadmap" }, priority: "tertiary" },
+    { href: "index.html#faq",      label: { zh: "FAQ",      en: "FAQ" }, priority: "tertiary" },
   ];
 
   return (
@@ -36,7 +35,10 @@ function Nav({ active }) {
             <a
               key={t(l.label, "en")}
               href={l.href}
-              className={l.key && active === l.key ? "on" : ""}
+              className={[
+                `nav-link-${l.priority}`,
+                l.key && active === l.key ? "on" : "",
+              ].filter(Boolean).join(" ")}
               style={l.key && active === l.key ? { color: "var(--accent)" } : {}}
             >
               {t(l.label, lang)}
