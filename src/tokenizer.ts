@@ -183,10 +183,21 @@ function byteLevelEncode(s: string, byteToChar: string[]): string {
   return out;
 }
 
+/** Repetitive tool output / identifier chunks re-encode thousands of times per session; LRU bounds at ~400KB. */
+const BPE_CACHE_LIMIT = 8192;
+const bpeCache = new Map<string, string[]>();
+
 function bpeEncode(piece: string, mergeRank: Map<string, number>): string[] {
   if (piece.length <= 1) return piece ? [piece] : [];
-  let word: string[] = Array.from(piece);
-  while (true) {
+  const cached = bpeCache.get(piece);
+  if (cached !== undefined) {
+    // LRU bump — re-insert moves the key to the most-recent position.
+    bpeCache.delete(piece);
+    bpeCache.set(piece, cached);
+    return cached;
+  }
+  const word: string[] = Array.from(piece);
+  while (word.length > 1) {
     let bestIdx = -1;
     let bestRank = Number.POSITIVE_INFINITY;
     for (let i = 0; i < word.length - 1; i++) {
@@ -195,17 +206,17 @@ function bpeEncode(piece: string, mergeRank: Map<string, number>): string[] {
       if (rank !== undefined && rank < bestRank) {
         bestRank = rank;
         bestIdx = i;
-        if (rank === 0) break; // 0 is already the best possible
+        if (rank === 0) break;
       }
     }
     if (bestIdx < 0) break;
-    word = [
-      ...word.slice(0, bestIdx),
-      word[bestIdx]! + word[bestIdx + 1]!,
-      ...word.slice(bestIdx + 2),
-    ];
-    if (word.length === 1) break;
+    word.splice(bestIdx, 2, word[bestIdx]! + word[bestIdx + 1]!);
   }
+  if (bpeCache.size >= BPE_CACHE_LIMIT) {
+    const oldest = bpeCache.keys().next().value;
+    if (oldest !== undefined) bpeCache.delete(oldest);
+  }
+  bpeCache.set(piece, word);
   return word;
 }
 
@@ -490,7 +501,60 @@ export function formatDeepSeekPrompt(
   return prompt;
 }
 
-/** Token-count the FULL conversation as the API would see it: wraps messages in V4 chat template, then encodes once. */
+const PER_MESSAGE_TEMPLATE_TOKENS = 6;
+
+/** Keyed by content string itself — WeakMap-on-message can't be used because
+ *  callers spread `{...e}` defensive copies, breaking identity every turn. */
+const CONTENT_CACHE_LIMIT = 4096;
+const contentTokenCache = new Map<string, number>();
+
+function cachedBoundedTokens(s: string): number {
+  if (s.length === 0) return 0;
+  const cached = contentTokenCache.get(s);
+  if (cached !== undefined) {
+    contentTokenCache.delete(s);
+    contentTokenCache.set(s, cached);
+    return cached;
+  }
+  const n = countTokensBounded(s);
+  if (contentTokenCache.size >= CONTENT_CACHE_LIMIT) {
+    const oldest = contentTokenCache.keys().next().value;
+    if (oldest !== undefined) contentTokenCache.delete(oldest);
+  }
+  contentTokenCache.set(s, n);
+  return n;
+}
+
+function tokensForMessage(
+  m: {
+    role?: string;
+    content?: string | null;
+    tool_calls?: unknown;
+    reasoning_content?: string | null;
+  },
+  dropThisReasoning: boolean,
+): number {
+  let n = 0;
+  if (typeof m.content === "string" && m.content.length > 0) {
+    n += cachedBoundedTokens(m.content);
+  }
+  if (m.role === "assistant") {
+    if (
+      !dropThisReasoning &&
+      typeof m.reasoning_content === "string" &&
+      m.reasoning_content.length > 0
+    ) {
+      n += cachedBoundedTokens(m.reasoning_content);
+    }
+    const tcs = m.tool_calls;
+    if (Array.isArray(tcs) && tcs.length > 0) {
+      n += cachedBoundedTokens(JSON.stringify(tcs));
+    }
+  }
+  return n;
+}
+
+/** Per-message bounded sum, not a full-prompt rebuild — used for fold-threshold checks where ±5% slop is fine. */
 export function estimateConversationTokens(
   messages: Array<{
     role?: string;
@@ -502,7 +566,25 @@ export function estimateConversationTokens(
   drop_thinking = false,
 ): number {
   if (messages.length === 0) return 0;
-  return countTokensBounded(formatDeepSeekPrompt(messages, drop_thinking));
+  let lastUserOrDev = -1;
+  if (drop_thinking) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const r = messages[i]!.role;
+      if (r === "user" || r === "developer") {
+        lastUserOrDev = i;
+        break;
+      }
+    }
+  }
+  let total = 2;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    if (drop_thinking && i < lastUserOrDev && m.role === "developer") continue;
+    total += PER_MESSAGE_TEMPLATE_TOKENS;
+    const dropReasoning = drop_thinking && i < lastUserOrDev && m.role === "assistant";
+    total += tokensForMessage(m, dropReasoning);
+  }
+  return total;
 }
 
 /** Total request tokens (messages + tool specs) as the API counts them. Tool specs rendered via V4 TOOLS_TEMPLATE and added to message token count. */

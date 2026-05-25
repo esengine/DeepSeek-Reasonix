@@ -1,4 +1,4 @@
-import { countTokens } from "../tokenizer.js";
+import { countTokens, countTokensBounded } from "../tokenizer.js";
 import { ToolRegistry } from "../tools.js";
 import type { JSONSchema } from "../types.js";
 import type { McpClient } from "./client.js";
@@ -264,14 +264,18 @@ export function truncateForModel(s: string, maxChars: number): string {
 /** Never tokenizes full input — pathological repetitive text (`AAAA…`) costs 30s+ on the pure-TS BPE port. */
 export function truncateForModelByTokens(s: string, maxTokens: number): string {
   if (maxTokens <= 0) return "";
-  // Every token is ≥1 char — if length ≤ budget, tokens ≤ budget.
   if (s.length <= maxTokens) return s;
-  // Small enough to tokenize-check without pathological cost: confirm
-  // whether we're actually over budget. (Threshold is the char-bound
-  // worst case for English/code — ~4 chars/token.)
+  // Sample-based estimate: only ever tokenizes 2KB of head+tail regardless
+  // of input size. If a healthy safety margin still puts us under budget,
+  // skip the precise check — a few-percent under-truncation is far cheaper
+  // than tokenizing every fat tool result.
   if (s.length <= maxTokens * 4) {
-    const tokens = countTokens(s);
-    if (tokens <= maxTokens) return s;
+    const est = countTokensBounded(s);
+    if (Math.ceil(est * 1.15) <= maxTokens) return s;
+    if (est <= maxTokens) {
+      const tokens = countTokens(s);
+      if (tokens <= maxTokens) return s;
+    }
   }
 
   const markerOverhead = 48; // rough token cost of the truncation marker
