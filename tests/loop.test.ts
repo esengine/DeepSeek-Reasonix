@@ -1075,6 +1075,36 @@ describe("CacheFirstLoop - setBudget / clearLog / retryLastUser", () => {
     expect(loop.currentTurn).toBe(0);
   });
 
+  it("clearLog drains the steer queue so the next turn doesn't replay prior intent", async () => {
+    const fetchSpy = vi.fn(
+      async (_url: any, init: any) =>
+        new Response(
+          JSON.stringify({
+            _echo_messages: JSON.parse(init.body).messages,
+            choices: [
+              { index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 1, total_tokens: 11 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ) as unknown as typeof fetch;
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchSpy });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+    });
+    loop.steer("finish the refactor i started in the prior session");
+    loop.clearLog();
+    for await (const _ev of loop.step("hello")) {
+      /* drain */
+    }
+    const sent = JSON.parse((fetchSpy as any).mock.calls[0][1].body).messages as ChatMessage[];
+    const userBodies = sent.filter((m) => m.role === "user").map((m) => m.content);
+    expect(userBodies).toEqual(["hello"]);
+  });
+
   it("clearLog returns 0 dropped when already empty", () => {
     const client = makeClient([{ content: "ok" }]);
     const loop = new CacheFirstLoop({

@@ -336,6 +336,10 @@ export class CacheFirstLoop {
     this.stats.reset();
     this._turn = 0;
     this._budgetWarned = false;
+    // Drain leftover steer text — otherwise the first step() after /new
+    // injects it as a user message and the next turn leaks prior intent.
+    this._steerQueue.length = 0;
+    this._steerConsumed = false;
     let systemRebuilt = false;
     if (this._rebuildSystem) {
       try {
@@ -362,6 +366,8 @@ export class CacheFirstLoop {
     this.log.compactInPlace([]);
     this.scratch.reset();
     this._inflight.clear();
+    this._steerQueue.length = 0;
+    this._steerConsumed = false;
     this.sessionName = opts.sessionName;
     if (this._rebuildSystem) {
       try {
