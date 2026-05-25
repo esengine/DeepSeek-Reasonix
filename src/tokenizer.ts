@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { LruCache } from "./core/lru.js";
 
 interface AddedToken {
   id: number;
@@ -151,6 +152,12 @@ function loadTokenizer(): LoadedTokenizer {
   return cached;
 }
 
+/** Force the BPE vocab to load now (gunzip + JSON.parse + Map build ≈ 100ms, 35MB heap).
+ *  Idempotent. Call once at idle after first paint so the first user turn doesn't pay it. */
+export function warmupTokenizer(): void {
+  loadTokenizer();
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -184,18 +191,12 @@ function byteLevelEncode(s: string, byteToChar: string[]): string {
 }
 
 /** Repetitive tool output / identifier chunks re-encode thousands of times per session; LRU bounds at ~400KB. */
-const BPE_CACHE_LIMIT = 8192;
-const bpeCache = new Map<string, string[]>();
+const bpeCache = new LruCache<string, string[]>(8192);
 
 function bpeEncode(piece: string, mergeRank: Map<string, number>): string[] {
   if (piece.length <= 1) return piece ? [piece] : [];
   const cached = bpeCache.get(piece);
-  if (cached !== undefined) {
-    // LRU bump — re-insert moves the key to the most-recent position.
-    bpeCache.delete(piece);
-    bpeCache.set(piece, cached);
-    return cached;
-  }
+  if (cached !== undefined) return cached;
   const word: string[] = Array.from(piece);
   while (word.length > 1) {
     let bestIdx = -1;
@@ -211,10 +212,6 @@ function bpeEncode(piece: string, mergeRank: Map<string, number>): string[] {
     }
     if (bestIdx < 0) break;
     word.splice(bestIdx, 2, word[bestIdx]! + word[bestIdx + 1]!);
-  }
-  if (bpeCache.size >= BPE_CACHE_LIMIT) {
-    const oldest = bpeCache.keys().next().value;
-    if (oldest !== undefined) bpeCache.delete(oldest);
   }
   bpeCache.set(piece, word);
   return word;
@@ -503,24 +500,14 @@ export function formatDeepSeekPrompt(
 
 const PER_MESSAGE_TEMPLATE_TOKENS = 6;
 
-/** Keyed by content string itself — WeakMap-on-message can't be used because
- *  callers spread `{...e}` defensive copies, breaking identity every turn. */
-const CONTENT_CACHE_LIMIT = 4096;
-const contentTokenCache = new Map<string, number>();
+/** Keyed by content string — WeakMap-on-message can't be used because callers spread `{...e}` defensive copies, breaking identity every turn. */
+const contentTokenCache = new LruCache<string, number>(4096);
 
 function cachedBoundedTokens(s: string): number {
   if (s.length === 0) return 0;
   const cached = contentTokenCache.get(s);
-  if (cached !== undefined) {
-    contentTokenCache.delete(s);
-    contentTokenCache.set(s, cached);
-    return cached;
-  }
+  if (cached !== undefined) return cached;
   const n = countTokensBounded(s);
-  if (contentTokenCache.size >= CONTENT_CACHE_LIMIT) {
-    const oldest = contentTokenCache.keys().next().value;
-    if (oldest !== undefined) contentTokenCache.delete(oldest);
-  }
   contentTokenCache.set(s, n);
   return n;
 }

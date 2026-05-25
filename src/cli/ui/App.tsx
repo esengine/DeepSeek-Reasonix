@@ -92,6 +92,7 @@ import {
   type SessionSummary,
 } from "../../telemetry/stats.js";
 import { defaultUsageLogPath } from "../../telemetry/usage.js";
+import { warmupTokenizer } from "../../tokenizer.js";
 import type { ToolRegistry } from "../../tools.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { PlanStep, StepCompletion } from "../../tools/plan.js";
@@ -513,6 +514,8 @@ function AppInner({
   useEffect(() => {
     markPhase("first_paint");
     dumpStartupProfile();
+    // Tokenizer cold-load is ~100ms + 35MB; amortize while the user reads the banner.
+    setTimeout(warmupTokenizer, 0);
   }, []);
 
   // Live MCP server list: initialized from the boot-time prop, then

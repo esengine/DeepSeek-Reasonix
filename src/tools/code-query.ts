@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { resolve as pathResolve } from "node:path";
-import {
-  type CodeMatchKind,
-  type FindInCodeOptions,
-  findInCode,
-} from "../code-query/find-in-code.js";
-import { grammarForPath } from "../code-query/parser.js";
-import { extractSymbols } from "../code-query/symbols.js";
+import type { CodeMatchKind, FindInCodeOptions } from "../code-query/find-in-code.js";
+import { grammarForPath } from "../code-query/grammar-map.js";
+import { lazy } from "../core/lazy.js";
 import type { ToolRegistry } from "../tools.js";
+
+/** web-tree-sitter is a multi-MB Emscripten runtime — defer until the model actually
+ *  dispatches one of these tools so sessions that never touch code_query don't pay for it. */
+const loadSymbols = lazy(() => import("../code-query/symbols.js"));
+const loadFindInCode = lazy(() => import("../code-query/find-in-code.js"));
 
 export interface CodeQueryToolOpts {
   rootDir: string;
@@ -42,6 +43,7 @@ export function registerCodeQueryTools(registry: ToolRegistry, opts: CodeQueryTo
         return JSON.stringify({ path: args.path, error: UNSUPPORTED });
       }
       const source = await readFile(filePath, "utf8");
+      const { extractSymbols } = await loadSymbols();
       const symbols = await extractSymbols(filePath, source);
       return JSON.stringify({ path: args.path, symbols });
     },
@@ -81,6 +83,7 @@ export function registerCodeQueryTools(registry: ToolRegistry, opts: CodeQueryTo
       const source = await readFile(filePath, "utf8");
       const kind = (args.kind ?? "any") as CodeMatchKind | "any";
       const findOpts: FindInCodeOptions = kind === "any" ? {} : { kind };
+      const { findInCode } = await loadFindInCode();
       const matches = await findInCode(filePath, source, args.name, findOpts);
       return JSON.stringify({ path: args.path, matches });
     },

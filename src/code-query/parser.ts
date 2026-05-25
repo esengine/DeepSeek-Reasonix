@@ -5,26 +5,11 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Language, Parser, type Tree } from "web-tree-sitter";
+import { type GrammarName, grammarForPath } from "./grammar-map.js";
+
+export { type GrammarName, grammarForPath } from "./grammar-map.js";
 
 const localRequire = createRequire(import.meta.url);
-
-export type GrammarName = "typescript" | "tsx" | "javascript" | "python" | "go" | "rust" | "java";
-
-const EXT_TO_GRAMMAR: Record<string, GrammarName> = {
-  ".ts": "typescript",
-  ".mts": "typescript",
-  ".cts": "typescript",
-  ".tsx": "tsx",
-  ".js": "javascript",
-  ".mjs": "javascript",
-  ".cjs": "javascript",
-  ".jsx": "javascript",
-  ".py": "python",
-  ".pyi": "python",
-  ".go": "go",
-  ".rs": "rust",
-  ".java": "java",
-};
 
 export interface ParserOptions {
   grammarDir?: string;
@@ -33,14 +18,6 @@ export interface ParserOptions {
 let parserInitPromise: Promise<void> | null = null;
 const languageCache = new Map<GrammarName, Promise<Language>>();
 let resolvedGrammarDir: string | null = null;
-
-export function grammarForPath(filePath: string): GrammarName | null {
-  const lower = filePath.toLowerCase();
-  for (const ext of Object.keys(EXT_TO_GRAMMAR)) {
-    if (lower.endsWith(ext)) return EXT_TO_GRAMMAR[ext]!;
-  }
-  return null;
-}
 
 export function setGrammarDir(dir: string): void {
   resolvedGrammarDir = dir;
