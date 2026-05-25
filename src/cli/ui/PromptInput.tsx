@@ -216,7 +216,7 @@ export function PromptInput({
     const linesBelow = Math.max(0, lines.length - 1 - cursorLine);
     const largeHint = showHugeBufferHints ? 1 : 0;
     const frozenHint = inputFrozen || steerBusy ? 2 : 0;
-    const modeRow = mode || model || isHistoryMode || planMode ? 1 : 0;
+    const modeRow = mode || model ? 1 : 0;
     const rowsInsideBelow = linesBelow + largeHint + 2 + modeRow + frozenHint;
     const rowsBelow = rowsInsideBelow + rowsAfter;
     const targetRow = Math.max(1, totalRows - rowsBelow);
@@ -228,16 +228,14 @@ export function PromptInput({
   }, [
     cursorLine,
     cursorCol,
-    lines.length,
+    lines,
     showHugeBufferHints,
     inputFrozen,
     steerBusy,
     mode,
     model,
-    isHistoryMode,
-    planMode,
     rowsAfter,
-    stdout?.rows,
+    stdout,
   ]);
 
   return (
