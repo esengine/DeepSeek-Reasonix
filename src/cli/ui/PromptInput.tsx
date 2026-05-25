@@ -58,6 +58,8 @@ export interface PromptInputProps {
   model?: string;
   /** True when viewing a historical input. */
   isHistoryMode?: boolean;
+  /** True when plan mode is active — shows [PLAN] badge. */
+  planMode?: boolean;
 }
 
 export function PromptInput({
@@ -75,6 +77,7 @@ export function PromptInput({
   mode,
   model,
   isHistoryMode,
+  planMode,
 }: PromptInputProps) {
   const [cursor, setCursor] = useState(value.length);
 
@@ -337,10 +340,17 @@ export function PromptInput({
           </Box>
         ) : null}
         <Box height={1} />
-        {mode || model || isHistoryMode ? (
+        {mode || model || isHistoryMode || planMode ? (
           <Box>
             {isHistoryMode ? <Text color={TONE.accent}>{"  ↑ history"}</Text> : null}
             <Text color={TONE.brand}>{mode || ""}</Text>
+            {planMode ? (
+              <Text color={FG.body}>
+                {"  ["}
+                {t("statsPanel.modePlan")}
+                {"]"}
+              </Text>
+            ) : null}
             {mode && model ? <Text color={FG.faint}>{" · "}</Text> : null}
             {model ? <Text color={FG.faint}>{model}</Text> : null}
           </Box>

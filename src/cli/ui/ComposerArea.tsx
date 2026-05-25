@@ -146,6 +146,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
           mode={mode}
           model={model}
           isHistoryMode={isHistoryMode}
+          planMode={planMode}
         />
         {activeLoop ? <LoopStatusRow loop={activeLoop} /> : null}
         <StatusRow statusBar={statusBar} />
