@@ -221,6 +221,8 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       return {
         ...state,
         cards: [],
+        cardIndex: new Map(),
+        elideCursor: 0,
         focusedCardId: null,
         toasts: [],
         status: {
@@ -234,9 +236,13 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
       };
 
     case "session.fork": {
-      const idx = state.cards.findIndex((c) => c.id === event.cardId);
-      if (idx < 0) return state;
-      return { ...state, cards: state.cards.slice(0, idx), focusedCardId: null };
+      const idx = state.cardIndex.get(event.cardId);
+      if (idx === undefined) return state;
+      const cards = state.cards.slice(0, idx);
+      const cardIndex = new Map<CardId, number>();
+      for (let i = 0; i < cards.length; i++) cardIndex.set(cards[i]!.id, i);
+      const elideCursor = Math.min(state.elideCursor, cards.length);
+      return { ...state, cards, cardIndex, elideCursor, focusedCardId: null };
     }
 
     case "session.workspace.change":
@@ -260,18 +266,19 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
     case "plan.drop": {
       // Latest still-active plan flips to "replay" — preserves it in scrollback
       // but signals "no longer the live plan" to selectors and UI.
-      let dropped = false;
-      const cards = state.cards.map((c, i) => {
-        if (dropped) return c;
-        if (c.kind !== "plan" || c.variant !== "active") return c;
-        // Walk from end — only the LAST active plan should drop.
-        if (state.cards.slice(i + 1).some((cc) => cc.kind === "plan" && cc.variant === "active")) {
-          return c;
+      let lastActiveIdx = -1;
+      for (let i = state.cards.length - 1; i >= 0; i--) {
+        const c = state.cards[i]!;
+        if (c.kind === "plan" && c.variant === "active") {
+          lastActiveIdx = i;
+          break;
         }
-        dropped = true;
-        return { ...c, variant: "replay" as const };
-      });
-      return dropped ? { ...state, cards } : state;
+      }
+      if (lastActiveIdx < 0) return state;
+      const cards = state.cards.slice();
+      const target = cards[lastActiveIdx] as Extract<Card, { kind: "plan" }>;
+      cards[lastActiveIdx] = { ...target, variant: "replay" as const };
+      return { ...state, cards };
     }
 
     case "plan.step.complete": {
@@ -378,24 +385,57 @@ function stubHeavyContent(c: Card): Card {
   }
 }
 
-function elideOldCardContent(cards: ReadonlyArray<Card>): ReadonlyArray<Card> {
-  // Caller is about to append a new card. Anticipate that — once
-  // cards.length hits the window, the very next append starts eliding.
-  if (cards.length < RECENT_CARDS_WINDOW) return cards;
+/** True when card content is fixed at append time — never mutated, never grows. */
+function isImmutableCardKind(kind: Card["kind"]): boolean {
+  return (
+    kind === "user" ||
+    kind === "plan" ||
+    kind === "usage" ||
+    kind === "ctx" ||
+    kind === "doctor" ||
+    kind === "tip" ||
+    kind === "live" ||
+    kind === "memory" ||
+    kind === "search" ||
+    kind === "error" ||
+    kind === "warn" ||
+    kind === "compaction"
+  );
+}
+
+function elideFromCursor(
+  cards: ReadonlyArray<Card>,
+  cursor: number,
+): { cards: ReadonlyArray<Card>; cursor: number } {
+  if (cards.length < RECENT_CARDS_WINDOW) return { cards, cursor };
   const cutoff = cards.length + 1 - RECENT_CARDS_WINDOW;
   let next: Card[] | null = null;
-  for (let i = 0; i < cutoff; i++) {
+  let nextCursor = cursor;
+  for (let i = cursor; i < cutoff; i++) {
     const c = cards[i]!;
     const stubbed = stubHeavyContent(c);
-    if (stubbed === c) continue;
-    if (next === null) next = cards.slice();
-    next[i] = stubbed;
+    if (stubbed !== c) {
+      if (next === null) next = cards.slice();
+      next[i] = stubbed;
+      nextCursor = i + 1;
+      continue;
+    }
+    if (isImmutableCardKind(c.kind)) {
+      nextCursor = i + 1;
+      continue;
+    }
+    // Card may still grow into stub-eligible size — leave cursor here, recheck next append.
+    break;
   }
-  return next ?? cards;
+  return { cards: next ?? cards, cursor: nextCursor };
 }
 
 function appendCard(state: AgentState, card: Card): AgentState {
-  return { ...state, cards: [...elideOldCardContent(state.cards), card] };
+  const { cards: elided, cursor } = elideFromCursor(state.cards, state.elideCursor);
+  const cards = [...elided, card];
+  // Mutate the existing index — append-only mutation; structural rebuilds (fork/reset) replace it.
+  (state.cardIndex as Map<CardId, number>).set(card.id, cards.length - 1);
+  return { ...state, cards, cardIndex: state.cardIndex, elideCursor: cursor };
 }
 
 function mutateCard<K extends Card["kind"]>(
@@ -404,10 +444,12 @@ function mutateCard<K extends Card["kind"]>(
   kind: K,
   patch: (card: Extract<Card, { kind: K }>) => Extract<Card, { kind: K }>,
 ): AgentState {
-  const idx = state.cards.findIndex((c) => c.id === id && c.kind === kind);
-  if (idx < 0) return state;
+  const idx = state.cardIndex.get(id);
+  if (idx === undefined) return state;
+  const existing = state.cards[idx];
+  if (!existing || existing.kind !== kind) return state;
   const next = state.cards.slice();
-  next[idx] = patch(state.cards[idx] as Extract<Card, { kind: K }>);
+  next[idx] = patch(existing as Extract<Card, { kind: K }>);
   return { ...state, cards: next };
 }
 
