@@ -81,7 +81,7 @@
     "eventsource-parser": "^3.0.0",
     "iconv-lite": "^0.7.2",
     "ignore": "^7.0.5",
-    "ink": "^7.0.2",
+    "ink": "^7.0.4",
     "ink-text-input": "^6.0.0",
     "node-html-parser": "^7.1.0",
     "picomatch": "^4.0.4",
@@ -89,7 +89,6 @@
     "string-width": "^7.2.0",
     "undici": "^8.2.0",
     "web-tree-sitter": "^0.26.9",
-    "patch-package": "^8.0.1",
     "ws": "^8.20.1",
     "zod": "^4.4.1"
   },
