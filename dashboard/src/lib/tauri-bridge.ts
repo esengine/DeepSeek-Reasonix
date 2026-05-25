@@ -352,6 +352,98 @@ function emitServerSettings(settings: any, overview?: any): void {
 }
 
 // 初始化 Server 状态
+function emitMcpSpecsFromServer(specs: any[] | undefined, bridged: any[] | undefined): void {
+  const live = new Map<string, any>();
+  for (const s of bridged ?? []) {
+    if (typeof s?.spec === "string") live.set(s.spec, s);
+  }
+  const out = (specs ?? []).map((s: any) => {
+    const liveEntry = live.get(s.raw);
+    return {
+      raw: s.raw,
+      name: s.name ?? null,
+      transport: s.transport,
+      summary: s.summary,
+      parseError: s.parseError,
+      status: liveEntry ? "connected" : s.parseError ? "failed" : "configured",
+      statusReason: liveEntry ? undefined : s.parseError,
+      toolCount: liveEntry?.toolCount,
+    };
+  });
+  emitEvent({
+    type: "$mcp_specs",
+    tabId: "tab-1",
+    specs: out,
+    bridged: out.length > 0 && out.every((s) => s.status === "connected"),
+  });
+}
+
+function emitSkillsFromServer(data: any): void {
+  const items: any[] = [];
+  const tag = (rows: any[] | undefined, scope: string) => {
+    for (const r of rows ?? []) {
+      items.push({
+        name: r.name,
+        description: r.description ?? "",
+        scope,
+        path: r.path ?? "",
+        runAs: r.runAs ?? "inline",
+        model: r.model,
+      });
+    }
+  };
+  tag(data?.builtin, "builtin");
+  tag(data?.global, "global");
+  tag(data?.custom, "global");
+  tag(data?.project, "project");
+  emitEvent({ type: "$skills", tabId: "tab-1", items });
+}
+
+function emitMemoryFromServer(data: any): void {
+  const entries: any[] = [];
+  for (const f of data?.global?.files ?? []) {
+    entries.push({ name: f.name, scope: "global", description: f.description ?? "" });
+  }
+  for (const f of data?.projectMem?.files ?? []) {
+    entries.push({ name: f.name, scope: "project", description: f.description ?? "" });
+  }
+  if (data?.project?.exists) {
+    entries.push({
+      name: data.project.file ?? "REASONIX.md",
+      scope: "project",
+      description: data.project.path ?? "",
+    });
+  }
+  emitEvent({ type: "$memory", tabId: "tab-1", entries });
+}
+
+async function loadAndEmitMcp(): Promise<void> {
+  try {
+    const [specsResp, liveResp] = await Promise.all([apiFetch("mcp/specs"), apiFetch("mcp")]);
+    emitMcpSpecsFromServer(specsResp?.specs, liveResp?.servers);
+  } catch (err) {
+    console.warn("[tauri-bridge] mcp fetch failed:", err);
+  }
+}
+
+async function loadAndEmitSkills(): Promise<void> {
+  try {
+    const data = await apiFetch("skills");
+    if (data) emitSkillsFromServer(data);
+  } catch (err) {
+    console.warn("[tauri-bridge] skills fetch failed:", err);
+  }
+}
+
+async function loadAndEmitMemory(): Promise<void> {
+  try {
+    const data = await apiFetch("memory");
+    if (data) emitMemoryFromServer(data);
+  } catch (err) {
+    console.warn("[tauri-bridge] memory fetch failed:", err);
+  }
+}
+
 async function serverInit(): Promise<void> {
   document.documentElement.dataset.web = "true";
 
@@ -395,6 +487,10 @@ async function serverInit(): Promise<void> {
   } catch (err) {
     console.warn("[tauri-bridge] server init failed:", err);
   }
+
+  // Sidebar/right-rail panels — desktop pushes these on tab open; web has
+  // to pull them or every panel renders empty forever (#1715).
+  void Promise.all([loadAndEmitMcp(), loadAndEmitSkills(), loadAndEmitMemory()]);
 
   emitEvent({ type: "$ready", tabId: "tab-1" });
   emitEvent({
@@ -707,6 +803,18 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
       try { await apiFetch("skills/run", { method: "POST", body: JSON.stringify(body) }); } catch {}
       break;
     }
+    case "mcp_specs_get": {
+      await loadAndEmitMcp();
+      break;
+    }
+    case "skills_get": {
+      await loadAndEmitSkills();
+      break;
+    }
+    case "memory_get": {
+      await loadAndEmitMemory();
+      break;
+    }
     case "mcp_specs_add":
     case "mcp_specs_remove": {
       // MCP 操作通过 REST API 管理
@@ -715,6 +823,7 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
           method: "POST",
           body: JSON.stringify({ action: cmd === "mcp_specs_add" ? "add" : "remove", spec: payload.spec }),
         });
+        await loadAndEmitMcp();
       } catch {}
       break;
     }
