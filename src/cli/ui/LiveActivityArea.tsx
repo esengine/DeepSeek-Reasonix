@@ -9,6 +9,7 @@ import React from "react";
 import { OngoingToolRow, SubagentLiveStack, ThinkingRow, UndoBanner } from "./layout/LiveRows.js";
 import { ToastRail } from "./layout/ToastRail.js";
 import { PlanLiveRow } from "./layout/plan-live-row.js";
+import { useRenderTrace } from "./render-trace.js";
 
 import type { SubagentActivity } from "./useSubagent.js";
 
@@ -48,6 +49,7 @@ export const LiveActivityArea: React.FC<LiveActivityAreaProps> = React.memo(
     undoBanner,
     hideUndo,
   }) => {
+    useRenderTrace("LiveActivityArea");
     return (
       <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
         {noTakeoverOverlay && ongoingTool ? (

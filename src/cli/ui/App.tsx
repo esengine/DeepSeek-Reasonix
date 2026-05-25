@@ -123,6 +123,7 @@ import { PlanReviseEditor } from "./PlanReviseEditor.js";
 import { PromptInput } from "./PromptInput.js";
 import { SessionPicker } from "./SessionPicker.js";
 import { ShellConfirm, type ShellConfirmChoice } from "./ShellConfirm.js";
+import { useRenderTrace } from "./render-trace.js";
 
 import { SlashArgPicker } from "./SlashArgPicker.js";
 import { SlashSuggestions } from "./SlashSuggestions.js";
@@ -465,6 +466,7 @@ function AppInner({
   setThemeName,
   statusBar,
 }: AppInnerProps) {
+  useRenderTrace("AppInner");
   markPhase("app_inner_start");
   const log = useScrollback();
   const agentStore = useAgentStore();

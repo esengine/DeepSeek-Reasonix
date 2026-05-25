@@ -8,6 +8,7 @@ import React from "react";
 
 import type { EditMode } from "../../config.js";
 import type { JobRegistry } from "../../tools/jobs.js";
+import { useRenderTrace } from "./render-trace.js";
 
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { PromptInput } from "./PromptInput.js";
@@ -106,6 +107,7 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     slashArgMatches,
     slashArgSelected,
   }) => {
+    useRenderTrace("ComposerArea");
     const inputArea = (
       <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
         <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">

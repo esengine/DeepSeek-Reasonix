@@ -1,6 +1,7 @@
 import { Box, Static } from "ink";
 import React, { useMemo } from "react";
 import { CardRenderer } from "../cards/CardRenderer.js";
+import { useRenderTrace } from "../render-trace.js";
 import type { Card } from "../state/cards.js";
 import { useAgentState } from "../state/provider.js";
 
@@ -11,6 +12,7 @@ interface StaticCardStreamProps {
 function StaticCardStreamInner({
   suppressLive = false,
 }: StaticCardStreamProps): React.ReactElement {
+  useRenderTrace("StaticCardStream");
   const cards = useAgentState((s) => s.cards);
   const { staticItems, dynamicItems, hasUnsettledDynamic } = useMemo(
     () => partition(cards),
