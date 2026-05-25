@@ -42,19 +42,26 @@ const SESSION: SessionInfo = {
   model: "deepseek-chat",
 };
 
+/** Unique per-card marker (UCM-N) gets embedded in card content so the probe
+ *  can count exactly which cards reached the rendered frame. */
+function ucm(i: number): string {
+  return `UCM-${i.toString(36)}`;
+}
+
 function makeCards(n: number): Card[] {
   const out: Card[] = [];
   const body = "lorem ipsum dolor sit amet ".repeat(40);
   for (let i = 0; i < n; i++) {
+    const marker = ucm(i);
     const mod = i % 3;
     if (mod === 0) {
-      out.push({ id: `u-${i}`, ts: i, kind: "user", text: `turn ${i} user prompt` });
+      out.push({ id: `u-${i}`, ts: i, kind: "user", text: `${marker} user prompt` });
     } else if (mod === 1) {
       out.push({
         id: `a-${i}`,
         ts: i,
         kind: "streaming",
-        text: body,
+        text: `${marker}\n${body}`,
         done: true,
         model: "deepseek-chat",
         endedAt: i + 1,
@@ -65,8 +72,8 @@ function makeCards(n: number): Card[] {
         ts: i,
         kind: "tool",
         name: "read_file",
-        args: { path: `f${i}.txt` },
-        output: body,
+        args: { path: `${marker}.txt` },
+        output: `${marker}\n${body}`,
         done: true,
         elapsedMs: 12,
       });
@@ -89,19 +96,30 @@ const TickHarness = forwardRef<TickHandle>(function TickHarness(_, ref): React.R
   );
 });
 
-async function scenarioInkMount(cards: Card[]): Promise<number> {
-  const start = performance.now();
-  const { unmount } = inkRender(
+interface MountResult {
+  firstPaintMs: number;
+  visibleCards: number;
+}
+
+async function scenarioInkMount(cards: Card[]): Promise<MountResult> {
+  // First synchronous render — measures the user-visible first paint cost.
+  // ink-testing-library does not fire React useEffect, so progressive batches
+  // scheduled via setImmediate never run here — the lastFrame reflects exactly
+  // what Ink committed on the synchronous mount, i.e. the INITIAL_BATCH window.
+  const firstPaintStart = performance.now();
+  const { lastFrame, unmount } = inkRender(
     React.createElement(
       AgentStoreProvider,
       { session: SESSION, initialCards: cards },
       React.createElement(StaticCardStream, { suppressLive: false }),
     ),
   );
-  await new Promise((r) => setTimeout(r, 0));
-  const ms = performance.now() - start;
+  const firstPaintMs = performance.now() - firstPaintStart;
+  const frame = lastFrame() ?? "";
+  const distinct = new Set<string>();
+  for (const m of frame.matchAll(/UCM-[0-9a-z]+/g)) distinct.add(m[0]);
   unmount();
-  return ms;
+  return { firstPaintMs, visibleCards: distinct.size };
 }
 
 async function scenarioTickCounts(cards: Card[]): Promise<{ wallMs: number }> {
@@ -151,10 +169,10 @@ async function main(): Promise<void> {
     `\n== probe-render-large-session ==\n  cards loaded: ${CARDS}\n  ticks driven: ${TICKS}\n\n`,
   );
 
-  // (a) Ink real-layout mount — what session-restore actually pays
-  const mountMs = await scenarioInkMount(cards);
+  // (a) Ink first-paint cost — what session-restore freezes on
+  const mount = await scenarioInkMount(cards);
   process.stdout.write(
-    `(a) ink mount of ${CARDS} cards: ${mountMs.toFixed(0)} ms  (${(mountMs / CARDS).toFixed(2)} ms/card)\n\n`,
+    `(a) ink first paint of ${CARDS}-card backlog:\n  wall:           ${mount.firstPaintMs.toFixed(0)} ms\n  visible cards:  ${mount.visibleCards}  (rest drain via setImmediate batches in real Ink)\n\n`,
   );
 
   // (b) Sibling-tick re-renders via react-test-renderer — does memo hold?
