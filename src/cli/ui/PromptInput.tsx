@@ -207,6 +207,39 @@ export function PromptInput({
   const renderItems = collapseLinesForDisplay(lines, cursorLine);
   const showHugeBufferHints = lines.length > 20;
 
+  // Sync system cursor so IME candidate windows pop up next to the visual ▌
+  // instead of at the bottom of the output. The row count accounts for every
+  // rendered row inside PromptInput below the cursor line.
+  useEffect(() => {
+    const totalRows = stdout?.rows;
+    if (!totalRows || totalRows < 4) return;
+    const linesBelow = Math.max(0, lines.length - 1 - cursorLine);
+    const largeHint = showHugeBufferHints ? 1 : 0;
+    const frozenHint = inputFrozen || steerBusy ? 2 : 0;
+    const modeRow = mode || model || isHistoryMode || planMode ? 1 : 0;
+    const rowsInsideBelow = linesBelow + largeHint + 2 + modeRow + frozenHint;
+    const rowsBelow = rowsInsideBelow + rowsAfter;
+    const targetRow = Math.max(1, totalRows - rowsBelow);
+    const cursorLineText = cursorLine >= 0 && cursorLine < lines.length ? lines[cursorLine]! : "";
+    const textBeforeCursor = cursorLineText.slice(0, cursorCol);
+    const cursorCells = stringCells(textBeforeCursor, pastesRef.current);
+    const targetCol = 1 + 1 + 2 + cursorCells;
+    stdout.write(`\x1b[${targetRow};${targetCol}H`);
+  }, [
+    cursorLine,
+    cursorCol,
+    lines.length,
+    showHugeBufferHints,
+    inputFrozen,
+    steerBusy,
+    mode,
+    model,
+    isHistoryMode,
+    planMode,
+    rowsAfter,
+    stdout?.rows,
+  ]);
+
   return (
     <Box flexDirection="row">
       <Box width={1} backgroundColor="#0153e5" />
