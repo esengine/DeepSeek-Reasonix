@@ -237,6 +237,9 @@ button:disabled {
   background: var(--bg);
   transition: grid-template-columns 180ms ease;
 }
+.app[data-dragging="true"] {
+  transition: none;
+}
 
 html[data-platform="macos"] .app {
   overflow: hidden;
@@ -266,7 +269,7 @@ html[data-platform="macos"] .app {
   position: absolute;
   top: 36px;
   bottom: 26px;
-  width: 5px;
+  width: 1px;
   cursor: col-resize;
   z-index: 10;
   background: transparent;
@@ -277,7 +280,7 @@ html[data-platform="macos"] .app {
   background: var(--accent);
 }
 .resize-handle[data-side="left"] {
-  left: calc(var(--side-width) - 2px);
+  left: var(--side-width);
 }
 .resize-handle[data-side="right"] {
   right: var(--ctx-width);
@@ -1611,6 +1614,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   display: flex;
   flex-direction: column;
   gap: 28px;
+}
+/* Skip offscreen message layout during resize — critical for long sessions */
+.thread-inner > div[data-turn] {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 100px;
 }
 
 /* ---------- JUMP BAR (message navigation dock) ---------- */
