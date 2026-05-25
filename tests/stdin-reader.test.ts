@@ -452,6 +452,26 @@ describe("StdinReader — SGR mouse reports (issue #867)", () => {
     }
     expect(events).toEqual([]);
   });
+
+  it("drops ESC-stripped legacy X10 mouse reports instead of leaking prompt input (#1598)", () => {
+    const { reader, events } = setup();
+    reader.feed("[M`*%");
+    expect(events).toEqual([]);
+  });
+
+  it("drops an ESC-stripped legacy X10 mouse-report flood without surfacing prompt input (#1598)", () => {
+    const { reader, events } = setup();
+    for (let i = 0; i < 1000; i++) {
+      reader.feed("[M`*%");
+    }
+    expect(events).toEqual([]);
+  });
+
+  it("keeps printable text around an ESC-stripped legacy X10 report intact", () => {
+    const { reader, events } = setup();
+    reader.feed("ab[M`*%cd");
+    expect(events).toEqual([{ input: "ab" }, { input: "cd" }]);
+  });
 });
 
 describe("sanitizePasteText (issue #849)", () => {
