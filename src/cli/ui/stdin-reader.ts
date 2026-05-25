@@ -102,10 +102,19 @@ function tryEscapelessCsi(chunk: string, i: number): { advance: number; ev: KeyE
   for (const entry of CSI_TAIL_MAP) {
     const candidate = `[${entry.tail}`;
     if (chunk.slice(i, i + candidate.length) === candidate) {
+      // Don't grab `[D` out of typed/pasted `[DEBUG]` — issue #1771.
+      const after = chunk[i + candidate.length];
+      if (after !== undefined && !isCsiContinuationByte(after)) return null;
       return { advance: candidate.length, ev: entry.ev };
     }
   }
   return null;
+}
+
+function isCsiContinuationByte(ch: string): boolean {
+  if (ch === "[" || ch === "\x1b") return true;
+  const code = ch.charCodeAt(0);
+  return code < 0x20 || code === 0x7f;
 }
 
 /** `[<btn;col;row[Mm]` — SGR mouse report body (without leading ESC). */

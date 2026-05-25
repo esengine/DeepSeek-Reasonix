@@ -259,10 +259,25 @@ describe("StdinReader — bracketed paste", () => {
     expect(events).toEqual([{ input: "ab" }, { input: "stuff", paste: true }]);
   });
 
-  it("printable runs do not eat a following ESC-less arrow tail", () => {
+  it("ESC-less arrow tail followed by another CSI prefix still recovers", () => {
     const { reader, events } = setup();
-    reader.feed("ab[Ccd");
-    expect(events).toEqual([{ input: "ab" }, { input: "", rightArrow: true }, { input: "cd" }]);
+    reader.feed("[C[A");
+    expect(events).toEqual([
+      { input: "", rightArrow: true },
+      { input: "", upArrow: true },
+    ]);
+  });
+
+  it("typed `[DEBUG]` is not misread as left-arrow + EBUG] (#1771)", () => {
+    const { reader, events } = setup();
+    reader.feed("[DEBUG]");
+    expect(events).toEqual([{ input: "[DEBUG]" }]);
+  });
+
+  it("typed `[ABC]`-shaped tokens stay intact (no upArrow split)", () => {
+    const { reader, events } = setup();
+    reader.feed("[Aabc");
+    expect(events).toEqual([{ input: "[Aabc" }]);
   });
 });
 
