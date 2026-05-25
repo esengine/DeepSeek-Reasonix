@@ -122,24 +122,32 @@ dragging 12KB through every future prompt.
 A proactive 40% context-ratio threshold runs the same shrink pre-emptively
 inside long multi-iter turns before the 80% emergency threshold fires.
 
-#### 4.3 `/pro` single-turn arming
+#### 4.3 Model selection (`/model`)
 
-Users who predict a hard task type `/pro`; the **next** turn runs on
-`v4-pro`, then auto-disarms. No preset churn, no forgotten revert. Armed
-state is visible as a yellow `⇧ pro armed` pill in the header.
+Users switch between flash and pro via `/model flash` or `/model pro`
+(persistent — applies to every turn until changed). Model can also be
+set in `.reasonix/settings.json` under the `model` key. No one-shot
+arming; no forgotten revert risk when switching is explicit and sticky.
 
-#### 4.4 Failure-signal auto-escalation
+> **History.** Pre-0.50.0, `/pro` offered single-turn arming — type `/pro`,
+> the next turn ran on v4-pro then auto-disarmed. Removed in 0.50.0
+> (#1657, #1630) when presets were collapsed into direct model selection.
 
-The loop counts visible "flash is struggling" events per turn:
-- `edit_file` / `write_file` SEARCH-not-found errors
-- ToolCallRepair fires (scavenge / truncation-fix / storm-break)
+#### 4.4 Model self-report escalation (`<<<NEEDS_PRO>>>`)
 
-Once the count hits `FAILURE_ESCALATION_THRESHOLD` (3), the **remainder of
-the current turn** runs on `v4-pro`. Announced via a yellow warning row —
-no silent cost surprises. Counter + escalation flag reset at every turn
-start.
+The model itself decides when a task exceeds its current tier. If a task
+clearly needs stronger reasoning, the model emits a `<<<NEEDS_PRO>>>`
+marker as the first line of its response. The system aborts the current
+flash call and retries the turn on pro. Two forms:
 
-Header shows a red `⇧ pro escalated` pill while the turn is on pro.
+- `<<<NEEDS_PRO>>>` — bare marker, no rationale.
+- `<<<NEEDS_PRO: <reason>>>>` — includes a one-sentence rationale the
+  user sees in a warning row.
+
+On the pro tier, the marker is a no-op — pro is the top, so the contract
+tells the model it can't escalate further. This is purely self-report:
+there is no failure-counter threshold, no scavenge/storm counting, no
+automatic escalation based on tool errors.
 
 #### Cost transparency
 
