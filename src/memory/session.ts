@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, posix as posixPath, win32 as win32Path } from "node:path";
+import { atomicWriteSync } from "../core/atomic-write.js";
 import type { ChatMessage } from "../types.js";
 
 const SESSION_SIDECAR_EXTS = [
@@ -332,24 +333,12 @@ export function rewriteSession(name: string, messages: ChatMessage[]): void {
   mkdirSync(dirname(path), { recursive: true });
   const body = messages.map((m) => JSON.stringify(m)).join("\n");
   const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-  try {
-    writeFileSync(tmp, body ? `${body}\n` : "", "utf8");
-    chmodPrivate(tmp);
-    if (existsSync(path) && statSync(path).size > 0) {
-      const backup = sessionBackupPath(path);
-      copyFileSync(path, backup);
-      chmodPrivate(backup);
-    }
-    renameSync(tmp, path);
-    chmodPrivate(path);
-  } catch (err) {
-    try {
-      unlinkSync(tmp);
-    } catch {
-      /* tmp may not exist */
-    }
-    throw err;
+  if (existsSync(path) && statSync(path).size > 0) {
+    const backup = sessionBackupPath(path);
+    copyFileSync(path, backup);
+    chmodPrivate(backup);
   }
+  atomicWriteSync(path, body ? `${body}\n` : "", tmp);
 }
 
 /** Rotate the live jsonl + sidecars to `<name>__archive_<ts>` so /new doesn't destroy history. Returns the archive name, or null if there was nothing to archive. */

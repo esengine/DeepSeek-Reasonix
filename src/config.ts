@@ -1,11 +1,12 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { type ThemeName, isThemeName, resolveThemeName } from "./cli/ui/theme/tokens.js";
+import { atomicWriteSync } from "./core/atomic-write.js";
 import type { LanguageCode } from "./i18n/types.js";
 import {
   type IndexUserConfig,
@@ -477,13 +478,7 @@ export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPat
   // saveX would silently overwrite every other field with that empty
   // baseline (issue #1535).
   const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(cfg, null, 2), "utf8");
-  try {
-    chmodSync(tmp, 0o600);
-  } catch {
-    /* ignore on platforms without chmod */
-  }
-  renameSync(tmp, path);
+  atomicWriteSync(path, JSON.stringify(cfg, null, 2), tmp);
 }
 
 /** Resolve the language from config file. */
