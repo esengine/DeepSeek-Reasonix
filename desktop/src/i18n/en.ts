@@ -423,6 +423,10 @@ export const en = {
     jumpToBottom: "Jump to bottom",
     splashSubtitle: "DeepSeek Agents",
     connecting: "Connecting to reasonix core…",
+    startupFailedTitle: "Reasonix could not start",
+    startupFailedMessage: "The desktop backend failed before opening a workspace.",
+    startupFailedRetry: "Retry",
+    startupFailedUnknown: "Unknown startup error",
     langZH: "Chinese",
     langEN: "English",
     titlebar: {

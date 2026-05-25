@@ -443,6 +443,10 @@ export const zhCN: typeof en = {
     jumpToBottom: "回到底部",
     splashSubtitle: "DeepSeek Agents",
     connecting: "正在连接 reasonix 内核…",
+    startupFailedTitle: "Reasonix 无法启动",
+    startupFailedMessage: "桌面后端在打开工作区前启动失败。",
+    startupFailedRetry: "重试",
+    startupFailedUnknown: "未知启动错误",
     langZH: "中文",
     langEN: "English",
     titlebar: {

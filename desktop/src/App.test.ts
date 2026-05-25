@@ -243,7 +243,7 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
   });
 
   it("patches settings optimistically for desktop setting commands", () => {
-    const state = {
+    const state: Parameters<typeof reduce>[0] = {
       ...initialState(),
       settings: {
         reasoningEffort: "medium",

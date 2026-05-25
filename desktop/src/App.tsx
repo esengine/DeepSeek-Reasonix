@@ -68,6 +68,11 @@ import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
 import { StatusBar } from "./ui/statusbar";
 import {
+  StartupFailure,
+  coerceStartupFailure,
+  type StartupFailureState,
+} from "./ui/startup-failure";
+import {
   dispatchDesktopNotifications,
   deriveDesktopNotifications,
   shouldShowCompletionToast,
@@ -3166,10 +3171,13 @@ type TabMeta = { id: string; workspaceDir?: string; busy?: boolean };
 export function App() {
   const [tabs, setTabs] = useState<TabMeta[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
+  const [startupFailure, setStartupFailure] = useState<StartupFailureState | null>(null);
+  const [startupRetryNonce, setStartupRetryNonce] = useState(0);
   const dispatchersRef = useRef<Map<string, TabDispatcher>>(new Map());
   const pendingEventsRef = useRef<Map<string, TabAction[]>>(new Map());
   const pendingDeltasRef = useRef<Map<string, DeltaBatchItem[]>>(new Map());
   const rafScheduledRef = useRef(false);
+  const startupStderrRef = useRef<string[]>([]);
   const tabsRef = useRef<TabMeta[]>([]);
   useEffect(() => {
     tabsRef.current = tabs;
@@ -3322,6 +3330,10 @@ export function App() {
     }
   }, []);
 
+  const retryStartup = useCallback(() => {
+    setStartupRetryNonce((n) => n + 1);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -3386,6 +3398,8 @@ export function App() {
     };
 
     const setup = async () => {
+      startupStderrRef.current = [];
+      setStartupFailure(null);
       const subs = await Promise.all([
         listen<{ data: string }>("rpc:event", (e) => {
           try {
@@ -3469,10 +3483,27 @@ export function App() {
           }
         }),
         listen<{ data: string }>("rpc:stderr", (e) => {
+          startupStderrRef.current = [...startupStderrRef.current, e.payload.data].slice(-12);
+          setStartupFailure((prev) =>
+            prev
+              ? coerceStartupFailure(
+                  prev.details[0] ?? t("app.startupFailedUnknown"),
+                  startupStderrRef.current,
+                )
+              : prev,
+          );
           console.warn("[reasonix stderr]", e.payload.data);
         }),
         listen<{ code: number | null }>("rpc:exit", (e) => {
           for (const tabId of dispatchersRef.current.keys()) flushTabDeltas(tabId);
+          if (dispatchersRef.current.size === 0) {
+            setStartupFailure(
+              coerceStartupFailure(
+                new Error(`reasonix exited (code ${e.payload.code ?? "?"})`),
+                startupStderrRef.current,
+              ),
+            );
+          }
           for (const dispatch of dispatchersRef.current.values()) {
             dispatch({ t: "rpc_exit", code: e.payload.code });
           }
@@ -3494,7 +3525,10 @@ export function App() {
           });
         }
       } catch (err) {
-        if (!cancelled) console.error("rpc_spawn failed", err);
+        if (!cancelled) {
+          setStartupFailure(coerceStartupFailure(err, startupStderrRef.current));
+          console.error("rpc_spawn failed", err);
+        }
       }
     };
     void setup();
@@ -3502,7 +3536,7 @@ export function App() {
       cancelled = true;
       for (const c of cleanups) c();
     };
-  }, [deliverToTab]);
+  }, [deliverToTab, startupRetryNonce]);
 
   // Tell the backend which tab is focused so a restart can reopen on it (#1244).
   useEffect(() => {
@@ -3580,6 +3614,10 @@ export function App() {
       return next;
     });
   }, []);
+
+  if (startupFailure && tabs.length === 0) {
+    return <StartupFailure details={startupFailure.details} onRetry={retryStartup} />;
+  }
 
   return (
     <>

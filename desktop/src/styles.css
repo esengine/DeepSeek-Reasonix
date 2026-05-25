@@ -3006,6 +3006,61 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   color: var(--fg-2);
 }
 
+.startup-failure {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.startup-failure-panel {
+  width: min(620px, 100%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+}
+.startup-failure-kicker {
+  margin: 0 0 8px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.startup-failure h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+.startup-failure p {
+  color: var(--fg-2);
+}
+.startup-failure pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: var(--danger);
+  padding: 12px;
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.startup-failure button {
+  margin-top: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: oklch(99% 0 0);
+  padding: 8px 14px;
+  font: inherit;
+}
+
 /* part 4 — composer, status, context, menus */
 
 /* ---------- COMPOSER ---------- */
