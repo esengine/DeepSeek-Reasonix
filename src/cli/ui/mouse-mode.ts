@@ -1,15 +1,17 @@
 // Reasonix is append-only now: the terminal owns scrollback, copy, and the
-// mouse wheel. We never want to capture the wheel, and on startup we emit
-// disables for every common mouse-capture mode so stale state from a prior
-// crashed TUI in the same terminal can't keep eating wheel events. The
-// REASONIX_MOUSE_MODE env var stays as an escape hatch.
+// mouse wheel. On most terminals, startup emits disables for common
+// mouse-capture modes so stale state from a prior crashed TUI can't keep
+// eating wheel events. Apple Terminal has had native crashes in its renderer
+// after receiving these private mouse-mode toggles, so its default is silent.
+// REASONIX_MOUSE_MODE remains an escape hatch.
 
-type Mode = "alternate-scroll" | "sgr" | "off";
+type Mode = "alternate-scroll" | "sgr" | "off" | "apple-terminal-off";
 
 function readMode(): Mode {
   const raw = (process.env.REASONIX_MOUSE_MODE ?? "").toLowerCase();
   if (raw === "sgr") return "sgr";
   if (raw === "alternate-scroll") return "alternate-scroll";
+  if (process.env.TERM_PROGRAM === "Apple_Terminal" && raw === "") return "apple-terminal-off";
   return "off";
 }
 
@@ -20,6 +22,7 @@ const SEQUENCES: Record<Mode, { enable: string; disable: string }> = {
   "alternate-scroll": { enable: "\u001b[?1007h", disable: "\u001b[?1007l" },
   sgr: { enable: "\u001b[?1000h\u001b[?1006h", disable: "\u001b[?1006l\u001b[?1000l" },
   off: { enable: RESET_ALL, disable: "" },
+  "apple-terminal-off": { enable: "", disable: "" },
 };
 
 let active = false;

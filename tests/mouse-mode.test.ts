@@ -6,6 +6,7 @@ describe("mouse-mode enable/disable", () => {
   let origWrite: typeof process.stdout.write;
   let origIsTTY: boolean | undefined;
   let origModeEnv: string | undefined;
+  let origTermProgram: string | undefined;
 
   beforeEach(() => {
     writes = [];
@@ -17,8 +18,11 @@ describe("mouse-mode enable/disable", () => {
     origIsTTY = process.stdout.isTTY;
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
     origModeEnv = process.env.REASONIX_MOUSE_MODE;
+    origTermProgram = process.env.TERM_PROGRAM;
     // biome-ignore lint/performance/noDelete: env restoration needs absence, not "undefined"
     delete process.env.REASONIX_MOUSE_MODE;
+    // biome-ignore lint/performance/noDelete: env restoration needs absence, not "undefined"
+    delete process.env.TERM_PROGRAM;
     // Reset module state — disable first to clear `active` from any prior test.
     disableMouseMode();
     writes.length = 0;
@@ -34,6 +38,12 @@ describe("mouse-mode enable/disable", () => {
     } else {
       process.env.REASONIX_MOUSE_MODE = origModeEnv;
     }
+    if (origTermProgram === undefined) {
+      // biome-ignore lint/performance/noDelete: env restoration needs absence, not "undefined"
+      delete process.env.TERM_PROGRAM;
+    } else {
+      process.env.TERM_PROGRAM = origTermProgram;
+    }
   });
 
   it("default resets every mouse-capture mode so the terminal owns the wheel", () => {
@@ -47,6 +57,12 @@ describe("mouse-mode enable/disable", () => {
     enableMouseMode();
     writes.length = 0;
     disableMouseMode();
+    expect(writes).toEqual([]);
+  });
+
+  it("does not send default mouse reset sequences to Apple Terminal", () => {
+    process.env.TERM_PROGRAM = "Apple_Terminal";
+    enableMouseMode();
     expect(writes).toEqual([]);
   });
 
