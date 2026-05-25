@@ -742,6 +742,32 @@ describe("dashboard server: chat bridge", () => {
     ac.abort();
   });
 
+  it("GET /api/events replays the active modal so mid-modal connects see the gate (#1770)", async () => {
+    const base = await boot({
+      isBusy: () => false,
+      subscribeEvents: () => () => undefined,
+      getActiveModal: () => ({
+        kind: "shell",
+        command: "npm install",
+        allowPrefix: "npm",
+        shellKind: "stdin",
+      }),
+    });
+    const ac = new AbortController();
+    const res = await fetch(`${base}api/events?token=${TOKEN}`, { signal: ac.signal });
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    let combined = "";
+    for (let i = 0; i < 3 && !combined.includes("modal-up"); i++) {
+      const { value } = await reader.read();
+      if (value) combined += new TextDecoder().decode(value);
+    }
+    expect(combined).toContain("modal-up");
+    expect(combined).toContain("npm install");
+    reader.cancel().catch(() => undefined);
+    ac.abort();
+  });
+
   it("GET /api/events without a subscribeEvents callback returns 503", async () => {
     const base = await boot({});
     const r = await fetch(`${base}api/events?token=${TOKEN}`);
