@@ -1486,6 +1486,12 @@ describe("handleSlash", () => {
       expect(r.info).toBe("Language switched to English.");
     });
 
+    it("switches to German", () => {
+      const r = handleSlash("language", ["de"], makeLoop());
+      expect(getLanguage()).toBe("de");
+      expect(r.info).toBe("Sprache auf Deutsch umgestellt.");
+    });
+
     it("returns error for unsupported language", () => {
       const r = handleSlash("language", ["fr"], makeLoop());
       expect(r.info).toMatch(/Unsupported/);

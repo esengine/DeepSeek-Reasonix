@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
-import { setLang, t, useLang } from "../i18n";
+import { getLangLabel, getSupportedLangs, setLang, t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, SettingsPatch, SkillInfo } from "../protocol";
 import {
@@ -591,16 +591,11 @@ function PageGeneral({
             <div className="h">{t("settings.languageHint")}</div>
           </div>
           <div className="seg-ctrl">
-            <button
-              type="button"
-              data-on={lang === "zh-CN"}
-              onClick={() => setLang("zh-CN")}
-            >
-              {t("settings.langZhCn")}
-            </button>
-            <button type="button" data-on={lang === "en"} onClick={() => setLang("en")}>
-              {t("settings.langEn")}
-            </button>
+            {getSupportedLangs().map((code) => (
+              <button type="button" key={code} data-on={lang === code} onClick={() => setLang(code)}>
+                {getLangLabel(code)}
+              </button>
+            ))}
           </div>
         </div>
       </section>

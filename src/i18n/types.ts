@@ -1,4 +1,4 @@
-export type LanguageCode = "EN" | "zh-CN";
+export type LanguageCode = "EN" | "zh-CN" | "de";
 
 export interface TranslationSchema {
   common: {

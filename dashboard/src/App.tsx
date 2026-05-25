@@ -6,7 +6,7 @@ import { isWebRuntime } from "./lib/tauri-bridge";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
-import { getLang, setLang, t, useLang } from "./i18n";
+import { getLang, getLangLabel, getSupportedLangs, setLang, t, useLang } from "./i18n";
 import { I } from "./icons";
 import {
   FONT_FAMILY,
@@ -1601,9 +1601,10 @@ function TabRuntime({
       cmd: "/lang",
       desc: t("app.cmd.toggleLang"),
       run: () => {
-        const next = getLang() === "zh-CN" ? "en" : "zh-CN";
+        const langs = getSupportedLangs();
+        const next = langs[(langs.indexOf(getLang()) + 1) % langs.length] ?? "en";
         setLang(next);
-        const langName = next === "zh-CN" ? t("app.langZH") : t("app.langEN");
+        const langName = getLangLabel(next);
         flashToast(t("app.toast.langSwitched", { lang: langName }));
       },
     },

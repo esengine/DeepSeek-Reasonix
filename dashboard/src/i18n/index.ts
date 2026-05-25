@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { de } from "./de";
 import { en } from "./en";
 import { zhCN } from "./zh-CN";
 
-export type Lang = "en" | "zh-CN";
+export type Lang = "en" | "zh-CN" | "de";
 
-const SUPPORTED: ReadonlySet<Lang> = new Set<Lang>(["en", "zh-CN"]);
+const SUPPORTED_LANGS: readonly Lang[] = ["en", "zh-CN", "de"];
+const SUPPORTED: ReadonlySet<Lang> = new Set<Lang>(SUPPORTED_LANGS);
+const LANG_LABELS: Record<Lang, string> = { en: "English", "zh-CN": "简体中文", de: "Deutsch" };
 const STORAGE_KEY = "reasonix.lang";
 
 type Listener = () => void;
@@ -18,7 +21,10 @@ function detectDefault(): Lang {
     /* private mode */
   }
   const nav = typeof navigator !== "undefined" ? navigator.language : "";
-  return nav.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+  const lower = nav.toLowerCase();
+  if (lower.startsWith("zh")) return "zh-CN";
+  if (lower.startsWith("de")) return "de";
+  return "en";
 }
 
 let currentLang: Lang = detectDefault();
@@ -36,6 +42,14 @@ syncHtmlLang(currentLang);
 
 export function getLang(): Lang {
   return currentLang;
+}
+
+export function getSupportedLangs(): readonly Lang[] {
+  return SUPPORTED_LANGS;
+}
+
+export function getLangLabel(lang: Lang): string {
+  return LANG_LABELS[lang];
 }
 
 export function setLang(lang: Lang): void {
@@ -63,7 +77,7 @@ export function useLang(): Lang {
   return currentLang;
 }
 
-const dicts = { en, "zh-CN": zhCN } as const;
+const dicts = { en, "zh-CN": zhCN, de } as const;
 
 type Dict = typeof en;
 type Path<T, K extends keyof T = keyof T> = K extends string

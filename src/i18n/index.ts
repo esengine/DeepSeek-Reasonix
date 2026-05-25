@@ -1,20 +1,30 @@
 import { loadLanguage, saveLanguage } from "../config.js";
 import { EN } from "./EN.js";
+import { de } from "./de.js";
 import type { LanguageCode, TranslationSchema } from "./types.js";
 import { zhCN } from "./zh-CN.js";
 
 const translations: Record<LanguageCode, TranslationSchema> = {
   EN,
   "zh-CN": zhCN,
+  de,
 };
 
 /** Map a system locale (e.g. "zh-CN", "en-US") to a supported LanguageCode, or null. */
-export function detectSystemLanguage(
-  locale: string = Intl.DateTimeFormat().resolvedOptions().locale,
-): LanguageCode | null {
+export function detectSystemLanguage(locale: string = systemLocale()): LanguageCode | null {
   if (locale.startsWith("zh")) return "zh-CN";
   if (locale.startsWith("en")) return "EN";
+  if (locale.startsWith("de")) return "de";
   return null;
+}
+
+function systemLocale(): string {
+  return (
+    process.env.LC_ALL ||
+    process.env.LC_MESSAGES ||
+    process.env.LANG ||
+    Intl.DateTimeFormat().resolvedOptions().locale
+  );
 }
 
 let currentLang: LanguageCode = loadLanguage() ?? detectSystemLanguage() ?? "EN";
