@@ -1,5 +1,12 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,33 +15,18 @@ import {
   cleanupOldResults,
   saveTruncatedResult,
   shouldSkipSave,
+  storageDir,
 } from "../src/tools/truncated-result-saver.js";
-
-/** Create an isolated temp rootDir for each test. */
-function tempRoot(): string {
-  const dir = join(tmpdir(), `trunc-test-${randomUUID().slice(0, 8)}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-/** Remove the temp rootDir. */
-function removeRoot(dir: string): void {
-  try {
-    rmSync(dir, { recursive: true, force: true });
-  } catch {
-    // best-effort
-  }
-}
 
 describe("saveTruncatedResult", () => {
   let rootDir: string;
 
   beforeEach(() => {
-    rootDir = tempRoot();
+    rootDir = mkdtempSync(join(tmpdir(), "reasonix-trunc-save-"));
   });
 
   afterEach(() => {
-    removeRoot(rootDir);
+    rmSync(rootDir, { recursive: true, force: true });
   });
 
   it("writes content to .reasonix/truncated-results/", () => {
@@ -69,16 +61,25 @@ describe("saveTruncatedResult", () => {
   });
 
   it("falls back to ~/.reasonix when rootDir is empty", () => {
-    const content = "fallback test";
-    const path = saveTruncatedResult(content, "web_search", "");
-    // Should be an absolute path since no rootDir to relativize against
-    expect(path).toMatch(/\.reasonix\/truncated-results\//);
-    expect(existsSync(path)).toBe(true);
-    // Cleanup
+    // Redirect HOME so os.homedir() points to a temp dir instead of real home.
+    const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
+    const fakeHome = mkdtempSync(join(tmpdir(), "reasonix-trunc-home-"));
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+
     try {
-      rmSync(path);
-    } catch {
-      // best-effort
+      const content = "fallback test";
+      const path = saveTruncatedResult(content, "web_search", "");
+      // Should be an absolute path since no rootDir to relativize against
+      expect(path).toMatch(/\.reasonix\/truncated-results\//);
+      expect(existsSync(path)).toBe(true);
+    } finally {
+      if (origHome === undefined) process.env.HOME = undefined;
+      else process.env.HOME = origHome;
+      if (origUserProfile === undefined) process.env.USERPROFILE = undefined;
+      else process.env.USERPROFILE = origUserProfile;
+      rmSync(fakeHome, { recursive: true, force: true });
     }
   });
 
@@ -97,12 +98,12 @@ describe("cleanupOldResults", () => {
   let rootDir: string;
 
   beforeEach(() => {
-    rootDir = tempRoot();
-    mkdirSync(join(rootDir, ".reasonix", "truncated-results"), { recursive: true });
+    rootDir = mkdtempSync(join(tmpdir(), "reasonix-trunc-cln-"));
+    mkdirSync(storageDir(rootDir), { recursive: true });
   });
 
   afterEach(() => {
-    removeRoot(rootDir);
+    rmSync(rootDir, { recursive: true, force: true });
   });
 
   it("removes files older than maxAgeMs", () => {
@@ -110,31 +111,28 @@ describe("cleanupOldResults", () => {
     // Create an old file by writing it with an mtime in the past
     const oldFile = join(dir, "1000000000000-old.txt");
     writeFileSync(oldFile, "old content");
-    // Manually set mtime to 30 days ago (works on posix)
-    const past = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000); // 60 days ago
+    // Manually set mtime to 60 days ago (works on posix)
+    const past = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
     try {
-      // This only works on some platforms
-      const { utimesSync } = require("node:fs") as {
-        utimesSync: (path: string, atime: Date, mtime: Date) => void;
-      };
       utimesSync(oldFile, past, past);
     } catch {
       // skip on platforms that don't support utimes
     }
 
     // Create a new file
-    const newFile = join(dir, "9999999999999-new.txt");
-    writeFileSync(newFile, "new content");
+    writeFileSync(join(dir, "9999999999999-new.txt"), "new content");
 
     cleanupOldResults(rootDir, 30 * 24 * 60 * 60 * 1000);
 
-    // Old file should be gone — but only if utimes worked (posix)
-    // We just verify the function ran without error
-    expect(existsSync(dir)).toBe(true);
+    // Old file should be removed, new file kept.
+    expect(existsSync(oldFile)).toBe(false);
+    expect(existsSync(join(dir, "9999999999999-new.txt"))).toBe(true);
   });
 
   it("is a no-op on missing directory", () => {
-    expect(() => cleanupOldResults(tempRoot(), 1000)).not.toThrow();
+    const missing = mkdtempSync(join(tmpdir(), "reasonix-trunc-missing-"));
+    rmSync(missing, { recursive: true, force: true });
+    expect(() => cleanupOldResults(missing, 1000)).not.toThrow();
   });
 });
 

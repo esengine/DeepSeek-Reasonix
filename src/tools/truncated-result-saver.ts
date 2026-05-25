@@ -11,7 +11,7 @@ import {
 import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
-const TRUNCATED_DIR = ".reasonix/truncated-results";
+const TRUNCATED_DIR = "truncated-results";
 const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 /** Sanitize a tool name for safe use in a filename. */
@@ -20,8 +20,8 @@ function sanitizeToolName(name: string): string {
 }
 
 /** Resolve the absolute storage directory for truncated results. */
-function storageDir(rootDir: string): string {
-  const base = rootDir ? resolve(rootDir) : join(homedir(), ".reasonix");
+export function storageDir(rootDir: string): string {
+  const base = rootDir ? join(resolve(rootDir), ".reasonix") : join(homedir(), ".reasonix");
   return join(base, TRUNCATED_DIR);
 }
 
@@ -33,12 +33,11 @@ function resultFilename(toolName: string): string {
   return `${ts}-${suffix}-${safeName}.txt`;
 }
 
-/**
- * Save the full content of a truncated tool result to a file.
- * Returns the relative path (from project root) that the model can read_file.
- * When rootDir is empty or unset, falls back to ~/.reasonix/truncated-results/.
- */
+/** Save truncated result to .reasonix/truncated-results/; returns relative path. */
 export function saveTruncatedResult(content: string, toolName: string, rootDir: string): string {
+  // Tidy old files before writing a new one so the directory doesn't grow unbounded.
+  cleanupOldResults(rootDir);
+
   const dir = storageDir(rootDir);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -56,18 +55,16 @@ export function saveTruncatedResult(content: string, toolName: string, rootDir: 
   }
 
   // Return a relative path the model can pass to read_file.
+  // Normalize to forward slashes for cross-platform consistency.
   if (rootDir) {
     const absRoot = resolve(rootDir);
-    return relative(absRoot, absPath);
+    return relative(absRoot, absPath).replaceAll("\\", "/");
   }
   // Fallback: return absolute path.
-  return absPath;
+  return absPath.replaceAll("\\", "/");
 }
 
-/**
- * Remove truncated result files older than `maxAgeMs` from the storage directory.
- * Safe to call at startup or before the first save — no-op on missing directory.
- */
+/** Remove truncated result files older than maxAgeMs. No-op on missing dir. */
 export function cleanupOldResults(rootDir: string, maxAgeMs: number = DEFAULT_MAX_AGE_MS): void {
   const dir = storageDir(rootDir);
   if (!existsSync(dir)) return;
