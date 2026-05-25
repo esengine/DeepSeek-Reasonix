@@ -109,6 +109,7 @@
     "jsdom": "^29.1.1",
     "marked": "^15.0.12",
     "preact": "^10.22.0",
+    "react-test-renderer": "^19.2.6",
     "simple-git-hooks": "^2.13.1",
     "strip-ansi": "^7.1.0",
     "tree-sitter-go": "^0.25.0",

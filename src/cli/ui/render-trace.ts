@@ -51,3 +51,20 @@ export function useRenderTrace(name: string): void {
 
 /** True when `REASONIX_TRACE_RENDERS` is set — skip expensive wiring otherwise. */
 export const renderTraceEnabled = enabled;
+
+/** Snapshot the trace counters. Used by probes that need raw numbers instead of stderr scraping. */
+export function readRenderTraceStats(): Map<
+  string,
+  { count: number; totalMs: number; maxMs: number }
+> {
+  const out = new Map<string, { count: number; totalMs: number; maxMs: number }>();
+  for (const [name, s] of stats) {
+    out.set(name, { count: s.count, totalMs: s.totalMs, maxMs: s.maxMs });
+  }
+  return out;
+}
+
+/** Wipe accumulated counters. Used by probes between scenarios. */
+export function resetRenderTraceStats(): void {
+  stats.clear();
+}
