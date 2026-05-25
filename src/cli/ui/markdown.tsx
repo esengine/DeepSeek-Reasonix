@@ -137,8 +137,12 @@ function ListItem({
 
 function CodeBlock({ token }: { token: Tokens.Code }): React.ReactElement {
   const lang = token.lang?.split(/\s+/)[0] ?? "";
-  const colored = highlightCode(decodeHtmlEntities(token.text), lang);
-  const lines = colored.split("\n");
+  // highlight.js tokenization runs every render unless memoized — multi-block
+  // assistant replies were re-highlighting on every parent re-render (slow tick, theme, resize).
+  const lines = React.useMemo(
+    () => highlightCode(decodeHtmlEntities(token.text), lang).split("\n"),
+    [token.text, lang],
+  );
   return (
     <Box flexDirection="column">
       {lang ? (
