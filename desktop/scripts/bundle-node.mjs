@@ -29,23 +29,21 @@ function adhocSignMac(binPath) {
   // on every spawn. Ad-hoc is enough for TCC; CI later overlays Developer ID.
   const ents = join(here, "..", "src-tauri", "entitlements", "node-helper.plist");
   if (!existsSync(ents)) {
-    console.warn(`entitlements missing: ${ents} — skipping ad-hoc sign`);
-    return;
+    throw new Error(`entitlements missing: ${ents}`);
   }
-  try {
-    execSync(
-      `codesign --force --sign - --options runtime --entitlements "${ents}" "${binPath}"`,
-      { stdio: "inherit" },
-    );
-  } catch (e) {
-    console.warn(`ad-hoc codesign failed (non-fatal): ${e?.message ?? e}`);
+  execSync(
+    `codesign --force --sign - --options runtime --entitlements "${ents}" "${binPath}"`,
+    { stdio: "inherit" },
+  );
+  if (!hasMacTccInheritance(binPath)) {
+    throw new Error(`codesign did not apply com.apple.security.inherit to ${binPath}`);
   }
 }
 
-function isAdhocSigned(binPath) {
+function hasMacTccInheritance(binPath) {
   try {
-    const out = execSync(`codesign -dvv "${binPath}" 2>&1`, { encoding: "utf8" });
-    return out.includes("Signature=adhoc") || /Authority=/.test(out);
+    const out = execSync(`codesign -d --entitlements :- "${binPath}" 2>&1`, { encoding: "utf8" });
+    return out.includes("com.apple.security.inherit") && out.includes("<true/>");
   } catch {
     return false;
   }
@@ -56,11 +54,11 @@ if (existsSync(targetExe) && statSync(targetExe).size > 1024 * 1024) {
     try {
       const archs = execSync(`lipo -archs "${targetExe}"`, { encoding: "utf8" }).trim();
       if (archs.includes("arm64") && archs.includes("x86_64")) {
-        if (!isAdhocSigned(targetExe)) {
-          console.log(`${targetExe} universal but unsigned — applying ad-hoc sign`);
+        if (!hasMacTccInheritance(targetExe)) {
+          console.log(`${targetExe} universal but missing TCC inheritance — applying ad-hoc sign`);
           adhocSignMac(targetExe);
         } else {
-          console.log(`${targetExe} already universal + signed (${archs}) — delete to refetch`);
+          console.log(`${targetExe} already universal + TCC-inheriting (${archs}) — delete to refetch`);
         }
         process.exit(0);
       }

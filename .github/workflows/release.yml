@@ -104,6 +104,7 @@ jobs:
           echo "node archs: $archs"
           echo "$archs" | grep -q "arm64"
           echo "$archs" | grep -q "x86_64"
+          codesign -d --entitlements :- src-tauri/binaries/node 2>&1 | grep -q "com.apple.security.inherit"
 
       - name: Build & verify desktop frontend
         working-directory: desktop
@@ -172,3 +173,13 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target.tauri }}
+
+      - name: Verify app Node inherits TCC grants (macOS)
+        if: startsWith(matrix.target.os, 'macos-')
+        working-directory: desktop
+        shell: bash
+        run: |
+          node_bin=$(find src-tauri/target -path '*/release/bundle/macos/*.app/Contents/Resources/node' -type f | head -n 1)
+          test -n "$node_bin"
+          codesign -vvv --strict "$node_bin"
+          codesign -d --entitlements :- "$node_bin" 2>&1 | grep -q "com.apple.security.inherit"
