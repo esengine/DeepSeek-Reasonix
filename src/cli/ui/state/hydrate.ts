@@ -1,6 +1,7 @@
 import { isCompactionSummary, stripCompactionMarker } from "@reasonix/core-utils";
 import type { ChatMessage } from "../../../types.js";
 import { extractToolExitCode } from "../tool-summary.js";
+import { elideHydratedCards } from "./card-elision.js";
 import type { Card, ToolCard } from "./cards.js";
 
 /** Rebuild cards from a persisted ChatMessage[] so resumed sessions render their history. */
@@ -84,5 +85,5 @@ export function hydrateCardsFromMessages(messages: ReadonlyArray<ChatMessage>): 
     }
   }
 
-  return cards;
+  return [...elideHydratedCards(cards)];
 }

@@ -2,7 +2,12 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { setLanguageRuntime } from "../src/i18n/index.js";
-import { formatLoopError, healLoadedMessages, stripHallucinatedToolMarkup } from "../src/loop.js";
+import {
+  formatLoopError,
+  healLoadedMessages,
+  healLoadedMessagesByTokens,
+  stripHallucinatedToolMarkup,
+} from "../src/loop.js";
 import type { ChatMessage } from "../src/types.js";
 
 describe("formatLoopError", () => {
@@ -148,6 +153,37 @@ describe("formatLoopError", () => {
     });
     expect(out).toMatch(/DeepSeek-side problem/);
     expect(out).toContain("status.deepseek.com");
+  });
+});
+
+describe("healLoadedMessagesByTokens", () => {
+  it("shrinks oversized paired tool-call args when loading an old session", () => {
+    const bigArgs = JSON.stringify({
+      path: "src/large.ts",
+      content: Array.from({ length: 1200 }, (_, i) => `line ${i}: replacement`).join("\n"),
+    });
+    const messages: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "c1", type: "function", function: { name: "write_blob", arguments: bigArgs } },
+        ],
+      },
+      { role: "tool", tool_call_id: "c1", content: "ok" },
+    ];
+
+    const healed = healLoadedMessagesByTokens(messages, 500);
+
+    expect(healed.healedCount).toBe(1);
+    expect(healed.tokensSaved).toBeGreaterThan(0);
+    const assistant = healed.messages[0];
+    if (assistant?.role !== "assistant" || !assistant.tool_calls) {
+      throw new Error("assistant tool call missing");
+    }
+    const savedArgs = assistant.tool_calls[0]!.function.arguments;
+    expect(savedArgs.length).toBeLessThan(bigArgs.length / 5);
+    expect(JSON.parse(savedArgs).content).toMatch(/shrunk/);
   });
 });
 

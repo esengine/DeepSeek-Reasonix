@@ -185,6 +185,33 @@ describe("cards memory budget end-to-end (issue #1031)", () => {
     expect(ratio).toBeLessThan(1.5);
   });
 
+  it("elides old tool arguments, not just old tool output", () => {
+    let state = initialState(session);
+    const turns = 400;
+    const argPayload = "input payload\n".repeat(2000);
+    const rawArgsBytes = bytesUtf8(JSON.stringify({ path: "big.txt", content: argPayload }));
+
+    for (let i = 0; i < turns; i++) {
+      const id = `tool-arg-${i}`;
+      state = reduce(state, {
+        type: "tool.start",
+        id,
+        name: "write_file",
+        args: { path: "big.txt", content: argPayload },
+      });
+      state = reduce(state, {
+        type: "tool.end",
+        id,
+        output: "ok",
+        elapsedMs: 1,
+      });
+    }
+
+    const r = measureCards(state.cards);
+    const retainedArgBytes = r.byField.get("tool.args") ?? 0;
+    expect(retainedArgBytes).toBeLessThan(rawArgsBytes * turns * 0.6);
+  });
+
   it("actual V8 heap delta on a long session stays under 100 MB (smoke check)", () => {
     if (typeof globalThis.gc !== "function") {
       console.log("(skipped — run with NODE_OPTIONS=--expose-gc for real heap delta)");

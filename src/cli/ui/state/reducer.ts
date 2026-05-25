@@ -1,4 +1,5 @@
 import { extractToolExitCode } from "../tool-summary.js";
+import { elideFromCursor } from "./card-elision.js";
 import type {
   Card,
   CardId,
@@ -337,97 +338,6 @@ export function reduce(state: AgentState, event: AgentEvent): AgentState {
         elapsedMs: event.elapsedMs,
       });
   }
-}
-
-/** Heavy card fields older than this many cards get stubbed so a 7-hour session doesn't drag GBs of one-off file reads / reasoning streams / diff hunks through the heap (issue #1031). */
-const RECENT_CARDS_WINDOW = 200;
-/** Don't bother eliding tiny payloads — the stub is itself ~150 chars and the savings aren't worth the lost context. */
-const MIN_ELIDE_OUTPUT_LENGTH = 4096;
-/** Marker for already-elided fields so we don't re-stub on every subsequent append. */
-const ELIDED_TOOL_OUTPUT_PREFIX = "[elided — older than the last ";
-
-function elidedStub(originalChars: number): string {
-  return `${ELIDED_TOOL_OUTPUT_PREFIX}${RECENT_CARDS_WINDOW} cards; ${originalChars.toLocaleString()} chars dropped to save memory. Full output is on disk in the session log.]`;
-}
-
-function stubHeavyContent(c: Card): Card {
-  switch (c.kind) {
-    case "tool": {
-      const out = (c as ToolCard).output;
-      if (typeof out !== "string") return c;
-      if (out.length <= MIN_ELIDE_OUTPUT_LENGTH) return c;
-      if (out.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) return c;
-      return { ...(c as ToolCard), output: elidedStub(out.length) };
-    }
-    case "reasoning": {
-      const r = c as ReasoningCard;
-      if (r.streaming) return c;
-      if (r.text.length <= MIN_ELIDE_OUTPUT_LENGTH) return c;
-      if (r.text.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) return c;
-      return { ...r, text: elidedStub(r.text.length) };
-    }
-    case "streaming": {
-      const s = c as StreamingCard;
-      if (!s.done) return c;
-      if (s.text.length <= MIN_ELIDE_OUTPUT_LENGTH) return c;
-      if (s.text.startsWith(ELIDED_TOOL_OUTPUT_PREFIX)) return c;
-      return { ...s, text: elidedStub(s.text.length) };
-    }
-    case "diff": {
-      if (c.hunks.length === 0) return c;
-      let totalChars = 0;
-      for (const h of c.hunks) for (const l of h.lines) totalChars += l.text.length;
-      if (totalChars <= MIN_ELIDE_OUTPUT_LENGTH) return c;
-      return { ...c, hunks: [] };
-    }
-    default:
-      return c;
-  }
-}
-
-/** True when card content is fixed at append time — never mutated, never grows. */
-function isImmutableCardKind(kind: Card["kind"]): boolean {
-  return (
-    kind === "user" ||
-    kind === "plan" ||
-    kind === "usage" ||
-    kind === "ctx" ||
-    kind === "doctor" ||
-    kind === "tip" ||
-    kind === "live" ||
-    kind === "memory" ||
-    kind === "search" ||
-    kind === "error" ||
-    kind === "warn" ||
-    kind === "compaction"
-  );
-}
-
-function elideFromCursor(
-  cards: ReadonlyArray<Card>,
-  cursor: number,
-): { cards: ReadonlyArray<Card>; cursor: number } {
-  if (cards.length < RECENT_CARDS_WINDOW) return { cards, cursor };
-  const cutoff = cards.length + 1 - RECENT_CARDS_WINDOW;
-  let next: Card[] | null = null;
-  let nextCursor = cursor;
-  for (let i = cursor; i < cutoff; i++) {
-    const c = cards[i]!;
-    const stubbed = stubHeavyContent(c);
-    if (stubbed !== c) {
-      if (next === null) next = cards.slice();
-      next[i] = stubbed;
-      nextCursor = i + 1;
-      continue;
-    }
-    if (isImmutableCardKind(c.kind)) {
-      nextCursor = i + 1;
-      continue;
-    }
-    // Card may still grow into stub-eligible size — leave cursor here, recheck next append.
-    break;
-  }
-  return { cards: next ?? cards, cursor: nextCursor };
 }
 
 function appendCard(state: AgentState, card: Card): AgentState {

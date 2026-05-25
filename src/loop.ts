@@ -113,6 +113,13 @@ export interface LoopAbortOptions {
   discardCurrentTurn?: boolean;
 }
 
+function shrinkMessageForRetention(message: ChatMessage): ChatMessage {
+  if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) return message;
+  return (
+    shrinkOversizedToolCallArgsByTokens([message], DEFAULT_MAX_RESULT_TOKENS).messages[0] ?? message
+  );
+}
+
 export class CacheFirstLoop {
   readonly client: DeepSeekClient;
   readonly prefix: ImmutablePrefix;
@@ -258,7 +265,7 @@ export class CacheFirstLoop {
         }
         if (healedCount > 0) {
           process.stderr.write(
-            `▸ session "${this.sessionName}": healed ${healedCount} entr${healedCount === 1 ? "y" : "ies"}${tokensSaved > 0 ? ` (shrunk ${tokensSaved.toLocaleString()} tokens of oversized tool output)` : " (dropped dangling tool_calls tail)"}. Rewrote session file.\n`,
+            `▸ session "${this.sessionName}": healed ${healedCount} entr${healedCount === 1 ? "y" : "ies"}${tokensSaved > 0 ? ` (shrunk ${tokensSaved.toLocaleString()} tokens of oversized tool output/arguments)` : " (dropped dangling tool_calls tail)"}. Rewrote session file.\n`,
           );
         }
       }
@@ -296,10 +303,11 @@ export class CacheFirstLoop {
   }
 
   appendAndPersist(message: ChatMessage): void {
-    this.log.append(message);
+    const retained = shrinkMessageForRetention(message);
+    this.log.append(retained);
     if (this.sessionName) {
       try {
-        appendSessionMessage(this.sessionName, message);
+        appendSessionMessage(this.sessionName, retained);
       } catch {
         /* disk full or permission denied shouldn't kill the chat */
       }
@@ -308,11 +316,12 @@ export class CacheFirstLoop {
 
   /** Swap the just-appended assistant entry — used by self-correction to restore the original tool_calls without dropping reasoning_content. */
   private replaceTailAssistantMessage(message: ChatMessage): void {
+    const retained = shrinkMessageForRetention(message);
     const entries = this.log.entries;
     const tail = entries[entries.length - 1];
     if (!tail || tail.role !== "assistant") return;
     const kept = entries.slice(0, -1);
-    kept.push(message);
+    kept.push(retained);
     this.log.compactInPlace(kept);
     if (this.sessionName) {
       try {
@@ -508,8 +517,14 @@ export class CacheFirstLoop {
   private healActiveLogBeforeSend(): ChatMessage[] {
     const current = this.log.toMessages();
     const healed = healLoadedMessages(current, DEFAULT_MAX_RESULT_CHARS);
-    const pruned = stripDroppableReasoningContent(healed.messages);
-    if (healed.healedCount === 0 && pruned.prunedCount === 0) return current;
+    const argsShrunk = shrinkOversizedToolCallArgsByTokens(
+      healed.messages,
+      DEFAULT_MAX_RESULT_TOKENS,
+    );
+    const pruned = stripDroppableReasoningContent(argsShrunk.messages);
+    if (healed.healedCount === 0 && argsShrunk.healedCount === 0 && pruned.prunedCount === 0) {
+      return current;
+    }
     this.log.compactInPlace(pruned.messages);
     if (this.sessionName) {
       try {

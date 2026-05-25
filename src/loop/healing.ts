@@ -1,5 +1,9 @@
 import type { ChatMessage, ToolCall } from "../types.js";
-import { shrinkOversizedToolResults, shrinkOversizedToolResultsByTokens } from "./shrink.js";
+import {
+  shrinkOversizedToolCallArgsByTokens,
+  shrinkOversizedToolResults,
+  shrinkOversizedToolResultsByTokens,
+} from "./shrink.js";
 import { isThinkingModeModel } from "./thinking.js";
 
 let _stampSeq = 0;
@@ -98,11 +102,16 @@ export function healLoadedMessagesByTokens(
 } {
   const shrunk = shrinkOversizedToolResultsByTokens(messages, maxTokens);
   const paired = fixToolCallPairing(shrunk.messages);
-  const healedCount = shrunk.healedCount + paired.droppedAssistantCalls + paired.droppedStrayTools;
+  const argsShrunk = shrinkOversizedToolCallArgsByTokens(paired.messages, maxTokens);
+  const healedCount =
+    shrunk.healedCount +
+    argsShrunk.healedCount +
+    paired.droppedAssistantCalls +
+    paired.droppedStrayTools;
   return {
-    messages: paired.messages,
+    messages: argsShrunk.messages,
     healedCount,
-    tokensSaved: shrunk.tokensSaved,
-    charsSaved: shrunk.charsSaved,
+    tokensSaved: shrunk.tokensSaved + argsShrunk.tokensSaved,
+    charsSaved: shrunk.charsSaved + argsShrunk.charsSaved,
   };
 }

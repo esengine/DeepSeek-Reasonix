@@ -531,7 +531,43 @@ function tailLines(s: string, n: number): string {
   return lines.slice(-n).join("\n");
 }
 
-function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
+const LOADED_RECENT_MESSAGE_WINDOW = 200;
+const LOADED_MIN_ELIDE_CHARS = 4096;
+const LOADED_ELIDED_PREFIX = "[elided — older than the last ";
+
+function elideLoadedField(value: string): string {
+  if (value.length <= LOADED_MIN_ELIDE_CHARS) return value;
+  if (value.startsWith(LOADED_ELIDED_PREFIX)) return value;
+  return `${LOADED_ELIDED_PREFIX}${LOADED_RECENT_MESSAGE_WINDOW} messages; ${value.length.toLocaleString()} chars dropped to save memory. Full content is on disk in the session log.]`;
+}
+
+function elideLoadedMessages(messages: LoadedMessage[]): LoadedMessage[] {
+  if (messages.length < LOADED_RECENT_MESSAGE_WINDOW) return messages;
+  const cutoff = messages.length - LOADED_RECENT_MESSAGE_WINDOW;
+  return messages.map((msg, i) => {
+    if (i >= cutoff || msg.kind !== "assistant") return msg;
+    return {
+      ...msg,
+      segments: msg.segments.map((segment) => {
+        switch (segment.kind) {
+          case "reasoning":
+          case "text":
+            return { ...segment, text: elideLoadedField(segment.text) };
+          case "tool":
+            return {
+              ...segment,
+              args: elideLoadedField(segment.args),
+              ...(segment.result !== undefined ? { result: elideLoadedField(segment.result) } : {}),
+            };
+          default:
+            return segment;
+        }
+      }),
+    };
+  });
+}
+
+export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
   const out: LoadedMessage[] = [];
   let turn = 0;
   let pendingAssistantIdx = -1;
@@ -576,7 +612,7 @@ function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
       }
     }
   }
-  return out;
+  return elideLoadedMessages(out);
 }
 
 function emitSettings(tab: Tab): void {
