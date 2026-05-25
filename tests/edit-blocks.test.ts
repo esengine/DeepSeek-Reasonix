@@ -235,8 +235,17 @@ describe("applyEditBlock", () => {
     const outside = resolve(root, "..", "outside-symlink-target.txt");
     const link = join(root, "linked.txt");
     writeFileSync(outside, "hello world\n", "utf8");
+    let symlinksWorked = true;
     try {
       symlinkSync(outside, link);
+    } catch {
+      symlinksWorked = false;
+    }
+    if (!symlinksWorked) {
+      rmSync(outside, { force: true });
+      return;
+    }
+    try {
       const result = applyEditBlock(
         { path: "linked.txt", search: "hello", replace: "goodbye", offset: 0 },
         root,
