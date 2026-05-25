@@ -13,6 +13,7 @@ import {
 import { ContextManager, TURN_START_FOLD_THRESHOLD } from "./context-manager.js";
 import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
+import { dispatchToolCallsChunked } from "./loop/dispatch.js";
 import {
   formatLoopError,
   is5xxError,
@@ -34,6 +35,7 @@ import {
   shrinkOversizedToolResults,
   shrinkOversizedToolResultsByTokens,
 } from "./loop/shrink.js";
+import { streamModelResponse } from "./loop/streaming.js";
 import {
   isThinkingModeModel,
   stripHallucinatedToolMarkup,
@@ -52,7 +54,6 @@ import {
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
 import { ToolRegistry } from "./tools.js";
-import { parseRateLimitedToolResult } from "./tools/rate-limit.js";
 import { ReadTracker } from "./tools/read-tracker.js";
 import type { ChatMessage, ToolCall } from "./types.js";
 
@@ -652,7 +653,7 @@ export class CacheFirstLoop {
     const turnStartLogIndex = this.log.length;
     this.appendAndPersist({ role: "user", content: userInput });
     const toolSpecs = this.prefix.tools();
-    let rateLimitWarningShown = false;
+    const rateLimitState = { shown: false };
 
     // Turn-start fold: covers cases the post-response check can't see — terminal
     // prior turn (no tool_calls → no decideAfterUsage), session restore from
@@ -761,83 +762,19 @@ export class CacheFirstLoop {
 
       try {
         if (this.stream) {
-          const callBuf: Map<number, ToolCall> = new Map();
-          // Indices whose accumulated args have parsed as valid JSON at
-          // least once. Purely informational — we don't dispatch until
-          // the stream ends (that's the eager-dispatch feature we
-          // intentionally punted) but the UI shows "N ready" so the
-          // user sees progress on long multi-tool turns instead of a
-          // stagnant "building tool call" spinner.
-          const readyIndices = new Set<number>();
-          const callModel = this.model;
-          for await (const chunk of this.client.stream({
-            model: callModel,
+          const result = yield* streamModelResponse({
+            client: this.client,
+            model: this.model,
             messages,
-            tools: toolSpecs.length ? toolSpecs : undefined,
+            toolSpecs,
             signal,
-            thinking: thinkingModeForModel(callModel),
             reasoningEffort: this.reasoningEffort,
-          })) {
-            // DeepSeek transition chunks carry both reasoning_content and
-            // content; emit reasoning first so consumers can merge
-            // consecutive same-kind segments instead of fragmenting.
-            if (chunk.reasoningDelta) {
-              reasoningContent += chunk.reasoningDelta;
-              yield {
-                turn: this._turn,
-                role: "assistant_delta",
-                content: "",
-                reasoningDelta: chunk.reasoningDelta,
-              };
-            }
-            if (chunk.contentDelta) {
-              assistantContent += chunk.contentDelta;
-              yield {
-                turn: this._turn,
-                role: "assistant_delta",
-                content: chunk.contentDelta,
-              };
-            }
-            if (chunk.toolCallDelta) {
-              const d = chunk.toolCallDelta;
-              const cur = callBuf.get(d.index) ?? {
-                id: d.id,
-                type: "function" as const,
-                function: { name: "", arguments: "" },
-              };
-              if (d.id) cur.id = d.id;
-              if (d.name) cur.function.name = (cur.function.name ?? "") + d.name;
-              if (d.argumentsDelta)
-                cur.function.arguments = (cur.function.arguments ?? "") + d.argumentsDelta;
-              callBuf.set(d.index, cur);
-
-              // Mark this index "ready" once its args first parse as
-              // valid JSON. JSON.parse is sub-millisecond on typical
-              // tool-call payloads; skip the check once already ready.
-              if (
-                !readyIndices.has(d.index) &&
-                cur.function.name &&
-                looksLikeCompleteJson(cur.function.arguments ?? "")
-              ) {
-                readyIndices.add(d.index);
-              }
-
-              // Skip the id-only opener: name is empty until the next chunk.
-              if (cur.function.name) {
-                yield {
-                  turn: this._turn,
-                  role: "tool_call_delta",
-                  content: "",
-                  toolName: cur.function.name,
-                  toolCallArgsChars: (cur.function.arguments ?? "").length,
-                  toolCallIndex: d.index,
-                  toolCallReadyCount: readyIndices.size,
-                };
-              }
-            }
-            if (chunk.usage) usage = chunk.usage;
-          }
-          toolCalls = [...callBuf.values()];
+            turn: this._turn,
+          });
+          assistantContent = result.assistantContent;
+          reasoningContent = result.reasoningContent;
+          toolCalls = result.toolCalls;
+          usage = result.usage;
         } else {
           const callModel = this.model;
           const resp = await this.client.chat({
@@ -1039,105 +976,16 @@ export class CacheFirstLoop {
         return;
       }
 
-      const dispatchSerial =
-        (process.env.REASONIX_TOOL_DISPATCH ?? "auto").toLowerCase() === "serial";
-      const parallelMaxParsed = Number.parseInt(process.env.REASONIX_PARALLEL_MAX ?? "", 10);
-      const parallelMax =
-        Number.isFinite(parallelMaxParsed) && parallelMaxParsed >= 1
-          ? Math.min(parallelMaxParsed, 16)
-          : 3;
-
-      let callIdx = 0;
-      while (callIdx < repairedCalls.length) {
-        // Group consecutive parallel-safe calls; an unsafe call breaks
-        // the chunk and runs alone (serial barrier).
-        const chunk: ToolCall[] = [];
-        if (!dispatchSerial) {
-          while (
-            callIdx < repairedCalls.length &&
-            chunk.length < parallelMax &&
-            this.tools.isParallelSafe(repairedCalls[callIdx]?.function?.name ?? "")
-          ) {
-            chunk.push(repairedCalls[callIdx++]!);
-          }
-        }
-        if (chunk.length === 0) {
-          chunk.push(repairedCalls[callIdx++]!);
-        }
-
-        // tool_start announces every call in the chunk BEFORE any
-        // dispatch awaits — TUI shows live indicators for each, and the
-        // gap between assistant_final and the first tool_result yield is
-        // never silent. Pre-add to the inflight set so the spinner is
-        // already correct on the very first card render — runOneToolCall's
-        // own add is then idempotent and its finally is the cleanup contract.
-        for (const call of chunk) {
-          const callId = this.inflightIdFor(call);
-          this._inflight.add(callId);
-          yield {
-            turn: this._turn,
-            role: "tool_start",
-            content: "",
-            toolName: call.function?.name ?? "",
-            toolArgs: call.function?.arguments ?? "{}",
-            callId,
-          };
-        }
-
-        // Race the chunk; collect outcomes in declared order so history
-        // append + tool yields are deterministic regardless of which
-        // call settles first.
-        const settled = await Promise.allSettled(chunk.map((c) => this.runOneToolCall(c, signal)));
-
-        for (let k = 0; k < chunk.length; k++) {
-          const call = chunk[k]!;
-          const name = call.function?.name ?? "";
-          const args = call.function?.arguments ?? "{}";
-          const s = settled[k]!;
-
-          let result: string;
-          let preWarnings: LoopEvent[] = [];
-          let postWarnings: LoopEvent[] = [];
-          if (s.status === "fulfilled") {
-            preWarnings = s.value.preWarnings;
-            postWarnings = s.value.postWarnings;
-            result = s.value.result;
-          } else {
-            const err = s.reason instanceof Error ? s.reason : new Error(String(s.reason));
-            result = JSON.stringify({ error: `${err.name}: ${err.message}` });
-          }
-
-          for (const w of preWarnings) yield w;
-          for (const w of postWarnings) yield w;
-
-          // Keep the structured result in history; the warning is only host-side visibility.
-          const rateLimited = parseRateLimitedToolResult(result);
-          if (rateLimited && !rateLimitWarningShown) {
-            rateLimitWarningShown = true;
-            yield {
-              turn: this._turn,
-              role: "warning",
-              content: rateLimited.message,
-            };
-          }
-
-          this.appendAndPersist({
-            role: "tool",
-            tool_call_id: call.id ?? "",
-            name,
-            content: result,
-          });
-
-          yield {
-            turn: this._turn,
-            role: "tool",
-            content: result,
-            toolName: name,
-            toolArgs: args,
-            callId: this.inflightIdFor(call),
-          };
-        }
-      }
+      yield* dispatchToolCallsChunked(repairedCalls, {
+        turn: this._turn,
+        signal,
+        isParallelSafe: (name) => this.tools.isParallelSafe(name),
+        inflightIdFor: (call) => this.inflightIdFor(call),
+        inflightAdd: (id) => this._inflight.add(id),
+        runOne: (call, sig) => this.runOneToolCall(call, sig),
+        appendAndPersist: (m) => this.appendAndPersist(m),
+        rateLimitState,
+      });
     }
     // Unreachable — the for-loop above is unbounded. The model exits the
     // loop via return statements when it produces no more tool calls,
