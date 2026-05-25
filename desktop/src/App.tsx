@@ -57,6 +57,7 @@ import { JobsPop } from "./ui/jobs-pop";
 import { useElapsed } from "./ui/live";
 import { AboutModal } from "./ui/about";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
+import { JumpBar } from "./ui/jump-bar";
 import { Sidebar } from "./ui/sidebar";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
@@ -2079,6 +2080,7 @@ function TabRuntime({
         ) : null}
 
         <main className="main" style={{ position: "relative" }}>
+          <JumpBar messages={state.messages} threadEl={threadRef.current} />
           {state.needsSetup ? (
             <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
@@ -2149,7 +2151,7 @@ function TabRuntime({
                       const prev = state.messages[i - 1];
                       const needsDivider = !prev || prev.kind === "user";
                       return (
-                        <div key={`u-${i}`}>
+                        <div key={`u-${i}`} data-turn={m.turn}>
                           {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
                           <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
                         </div>
@@ -2366,7 +2368,6 @@ function TabRuntime({
             onMouseDown={onCtxResizeDown}
           />
         ) : null}
-
         <ContextPanel
           settings={state.settings}
           usage={state.usage}

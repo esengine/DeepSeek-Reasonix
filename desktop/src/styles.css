@@ -1613,6 +1613,74 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   gap: 28px;
 }
 
+/* ---------- JUMP BAR (message navigation dock) ---------- */
+
+.jump-bar {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 12px;
+  z-index: 20;
+}
+.jump-scroll {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 84%, transparent 100%);
+}
+.jump-scroll::-webkit-scrollbar {
+  display: none;
+}
+.jump-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 32px;
+  min-height: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.jump-dot {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  transition: background 200ms, width 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.jump-dot[data-active] {
+  background: var(--accent);
+}
+.jump-preview {
+  position: absolute;
+  right: 100%;
+  top: 0;
+  transform: translateY(-50%);
+  margin-right: 12px;
+  padding: 4px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--fg);
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: var(--shadow-sm);
+  z-index: 21;
+  pointer-events: none;
+}
+
 /* Jump-to-bottom button — shown when user has scrolled up during streaming */
 .thread-jump-bottom {
   position: sticky;
