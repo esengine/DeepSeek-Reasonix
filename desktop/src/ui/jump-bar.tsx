@@ -58,28 +58,19 @@ export function JumpBar({ messages, threadEl }: JumpBarProps) {
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const w = (idx: number): number => {
-    if (hoverIdx < 0) return 12;
+  const barProps = (idx: number): { style: React.CSSProperties; "data-d"?: string } => {
+    if (hoverIdx < 0) return { style: { width: 12 } };
     const d = Math.abs(idx - hoverIdx);
-    if (d === 0) return 32;
-    if (d === 1) return 20;
-    if (d === 2) return 14;
-    return 12;
+    const width = d === 0 ? 32 : d === 1 ? 20 : d === 2 ? 14 : 12;
+    return { style: { width, transitionDelay: `${d * 20}ms` }, "data-d": d <= 2 ? String(d) : undefined };
   };
-
-  const delay = (idx: number): string =>
-    hoverIdx < 0 ? "0ms" : `${Math.abs(idx - hoverIdx) * 20}ms`;
 
   return (
     <div className="jump-bar" ref={barRef} onMouseMove={onMove} onMouseLeave={() => { setHovered(null); setShowPreview(false); }}>
       <div className="jump-scroll">
         {visible.map((item, idx) => (
         <div className="jump-item" key={item.turn} onClick={() => scrollTo(item.turn)}>
-          <div
-            className="jump-dot"
-            style={{ width: w(idx), transitionDelay: delay(idx) }}
-            data-active={hoverIdx >= 0 && Math.abs(idx - hoverIdx) <= 2 || undefined}
-          />
+          <div className="jump-dot" {...barProps(idx)} />
         </div>
       ))}
       </div>
