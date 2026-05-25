@@ -80,7 +80,7 @@ export async function handleApi(
       case "hooks":
         return await handleHooks(method, rest, body, ctx);
       case "memory":
-        return await handleMemory(method, rest, body, ctx);
+        return await handleMemory(method, rest, body, ctx, query);
       case "skills":
         return await handleSkills(method, rest, body, ctx);
       case "mcp":

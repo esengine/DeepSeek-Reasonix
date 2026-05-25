@@ -227,10 +227,12 @@ function sseToIncoming(ev: any): Record<string, any>[] {
 
 function connectSSE(): void {
   if (sse) sse.close();
-  const token = document.querySelector('meta[name="reasonix-token"]')?.getAttribute("content") ?? "";
-  const sseUrl = token && token !== "__REASONIX_TOKEN__"
-    ? `/api/events?token=${encodeURIComponent(token)}`
-    : "/api/events";
+  const token =
+    document.querySelector('meta[name="reasonix-token"]')?.getAttribute("content") ?? "";
+  const sseUrl =
+    token && token !== "__REASONIX_TOKEN__"
+      ? `/api/events?token=${encodeURIComponent(token)}`
+      : "/api/events";
   sse = new EventSource(sseUrl);
   sse.onmessage = (msg: MessageEvent) => {
     try {
@@ -296,15 +298,13 @@ function startStatsPolling(): void {
               type: "$balance",
               tabId: "tab-1",
               currency: firstBalance.currency,
-              total: parseFloat(firstBalance.total_balance) || 0,
+              total: Number.parseFloat(firstBalance.total_balance) || 0,
               isAvailable: true,
             });
           }
         }
         // 更新 usage stats（缓存命中率、tokens、金额）
-        const totalTokens = Math.round(
-          stats.totalCostUsd > 0 ? (stats.cacheHitRatio * 10000) : 0
-        );
+        const totalTokens = Math.round(stats.totalCostUsd > 0 ? stats.cacheHitRatio * 10000 : 0);
         // 通过 $settings 事件附带更新 usage 相关信息
         // 注意：usage 主要由 model.final 事件更新，这里只更新 balance
       }
@@ -318,7 +318,7 @@ function startStatsPolling(): void {
 async function apiFetch(endpoint: string, options?: RequestInit): Promise<any> {
   const token = document.querySelector('meta[name="reasonix-token"]')?.getAttribute("content");
   const headers: Record<string, string> = {
-    ...(options?.headers as Record<string, string> ?? {}),
+    ...((options?.headers as Record<string, string>) ?? {}),
   };
   if (token && token !== "__REASONIX_TOKEN__") {
     headers["x-reasonix-token"] = token;
@@ -329,7 +329,11 @@ async function apiFetch(endpoint: string, options?: RequestInit): Promise<any> {
   const res = await fetch(`/api/${endpoint}`, { ...options, headers });
   if (res.status === 204) return null;
   const text = await res.text();
-  try { return JSON.parse(text); } catch { return text; }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 function emitServerSettings(settings: any, overview?: any): void {
@@ -399,22 +403,8 @@ function emitSkillsFromServer(data: any): void {
   emitEvent({ type: "$skills", tabId: "tab-1", items });
 }
 
-function emitMemoryFromServer(data: any): void {
-  const entries: any[] = [];
-  for (const f of data?.global?.files ?? []) {
-    entries.push({ name: f.name, scope: "global", description: f.description ?? "" });
-  }
-  for (const f of data?.projectMem?.files ?? []) {
-    entries.push({ name: f.name, scope: "project", description: f.description ?? "" });
-  }
-  if (data?.project?.exists) {
-    entries.push({
-      name: data.project.file ?? "REASONIX.md",
-      scope: "project",
-      description: data.project.path ?? "",
-    });
-  }
-  emitEvent({ type: "$memory", tabId: "tab-1", entries });
+function emitMemoryEntriesFromServer(entries: any[] | undefined): void {
+  emitEvent({ type: "$memory", tabId: "tab-1", entries: entries ?? [] });
 }
 
 async function loadAndEmitMcp(): Promise<void> {
@@ -437,10 +427,19 @@ async function loadAndEmitSkills(): Promise<void> {
 
 async function loadAndEmitMemory(): Promise<void> {
   try {
-    const data = await apiFetch("memory");
-    if (data) emitMemoryFromServer(data);
+    const data = await apiFetch("memory/entries");
+    emitMemoryEntriesFromServer(data?.entries);
   } catch (err) {
     console.warn("[tauri-bridge] memory fetch failed:", err);
+  }
+}
+
+async function loadAndEmitMemoryDetail(path: string): Promise<void> {
+  try {
+    const data = await apiFetch(`memory/read?path=${encodeURIComponent(path)}`);
+    if (data?.detail) emitEvent({ type: "$memory_detail", tabId: "tab-1", detail: data.detail });
+  } catch (err) {
+    console.warn("[tauri-bridge] memory read failed:", err);
   }
 }
 
@@ -479,7 +478,7 @@ async function serverInit(): Promise<void> {
           type: "$balance",
           tabId: "tab-1",
           currency: firstBalance.currency,
-          total: parseFloat(firstBalance.total_balance) || 0,
+          total: Number.parseFloat(firstBalance.total_balance) || 0,
           isAvailable: true,
         });
       }
@@ -543,12 +542,16 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
           }));
           emitEvent({ type: "$sessions", tabId: "tab-1", items });
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       break;
     }
     case "session_load": {
       try {
-        const switchData = await apiFetch(`sessions/${encodeURIComponent(payload.name)}/switch`, { method: "POST" });
+        const switchData = await apiFetch(`sessions/${encodeURIComponent(payload.name)}/switch`, {
+          method: "POST",
+        });
         if (!switchData?.ok) {
           console.warn("[tauri-bridge] session switch failed:", payload.name, switchData);
           break;
@@ -635,7 +638,9 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
           }));
           emitEvent({ type: "$sessions", tabId: "tab-1", items });
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       break;
     }
     case "new_chat": {
@@ -664,14 +669,21 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
             emitEvent({ type: "$sessions", tabId: "tab-1", items });
           }
         }
-      } catch { /* fallback */ }
+      } catch {
+        /* fallback */
+      }
       break;
     }
     case "settings_get": {
       try {
-        const [settings, overview] = await Promise.all([apiFetch("settings"), apiFetch("overview")]);
+        const [settings, overview] = await Promise.all([
+          apiFetch("settings"),
+          apiFetch("overview"),
+        ]);
         if (settings) emitServerSettings(settings, overview);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       break;
     }
     case "settings_save": {
@@ -681,9 +693,14 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
           body: JSON.stringify(payload),
         });
         // 保存后主动拉取最新设置以同步 UI
-        const [settings, overview] = await Promise.all([apiFetch("settings"), apiFetch("overview")]);
+        const [settings, overview] = await Promise.all([
+          apiFetch("settings"),
+          apiFetch("overview"),
+        ]);
         if (settings) emitServerSettings(settings, overview);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       break;
     }
     case "setup_save_key": {
@@ -734,12 +751,16 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
         if (data?.jobs) {
           emitEvent({ type: "$jobs", tabId: "tab-1", items: data.jobs });
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       break;
     }
     case "mention_query": {
       try {
-        const data = await apiFetch(`files/search?q=${encodeURIComponent(payload.query)}&nonce=${payload.nonce}`);
+        const data = await apiFetch(
+          `files/search?q=${encodeURIComponent(payload.query)}&nonce=${payload.nonce}`,
+        );
         if (data) {
           emitEvent({
             type: "$mention_results",
@@ -749,12 +770,16 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
             results: data.results ?? [],
           });
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       break;
     }
     case "mention_preview": {
       try {
-        const data = await apiFetch(`file-read?path=${encodeURIComponent(payload.path)}&nonce=${payload.nonce}`);
+        const data = await apiFetch(
+          `file-read?path=${encodeURIComponent(payload.path)}&nonce=${payload.nonce}`,
+        );
         if (data) {
           emitEvent({
             type: "$mention_preview",
@@ -765,7 +790,9 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
             totalLines: data.totalLines ?? 0,
           });
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       break;
     }
     // ── 桌面端特有操作（Web 版无操作或静默忽略） ──
@@ -782,25 +809,35 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
       break;
     }
     case "jobs_stop": {
-      try { await apiFetch(`jobs/${payload.jobId}/stop`, { method: "POST" }); } catch {}
+      try {
+        await apiFetch(`jobs/${payload.jobId}/stop`, { method: "POST" });
+      } catch {}
       break;
     }
     case "jobs_stop_all": {
-      try { await apiFetch("jobs/stop-all", { method: "POST" }); } catch {}
+      try {
+        await apiFetch("jobs/stop-all", { method: "POST" });
+      } catch {}
       break;
     }
     case "compact_history": {
-      try { await apiFetch("messages/compact", { method: "POST" }); } catch {}
+      try {
+        await apiFetch("messages/compact", { method: "POST" });
+      } catch {}
       break;
     }
     case "retry": {
-      try { await apiFetch("submit", { method: "POST", body: JSON.stringify({ retry: true }) }); } catch {}
+      try {
+        await apiFetch("submit", { method: "POST", body: JSON.stringify({ retry: true }) });
+      } catch {}
       break;
     }
     case "skill_run": {
       const body: Record<string, any> = { name: payload.name };
       if (payload.args) body.args = payload.args;
-      try { await apiFetch("skills/run", { method: "POST", body: JSON.stringify(body) }); } catch {}
+      try {
+        await apiFetch("skills/run", { method: "POST", body: JSON.stringify(body) });
+      } catch {}
       break;
     }
     case "mcp_specs_get": {
@@ -815,13 +852,20 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
       await loadAndEmitMemory();
       break;
     }
+    case "memory_read": {
+      if (typeof payload.path === "string") await loadAndEmitMemoryDetail(payload.path);
+      break;
+    }
     case "mcp_specs_add":
     case "mcp_specs_remove": {
       // MCP 操作通过 REST API 管理
       try {
         await apiFetch("mcp", {
           method: "POST",
-          body: JSON.stringify({ action: cmd === "mcp_specs_add" ? "add" : "remove", spec: payload.spec }),
+          body: JSON.stringify({
+            action: cmd === "mcp_specs_add" ? "add" : "remove",
+            spec: payload.spec,
+          }),
         });
         await loadAndEmitMcp();
       } catch {}
@@ -865,20 +909,31 @@ export async function invoke(cmd: string, args?: any): Promise<any> {
     const payload = JSON.parse(args.line);
     if (payload.cmd === "user_input") {
       emitEvent({
-        type: "user.message", tabId: "tab-1",
-        id: Date.now(), ts: new Date().toISOString(), turn: 2, text: payload.text,
+        type: "user.message",
+        tabId: "tab-1",
+        id: Date.now(),
+        ts: new Date().toISOString(),
+        turn: 2,
+        text: payload.text,
       });
       mockAssistantTurn(payload.text);
     } else if (payload.cmd === "session_list") {
       emitEvent({ type: "$sessions", tabId: "tab-1", items: mockSessions });
     } else if (payload.cmd === "session_load") {
       emitEvent({
-        type: "$session_loaded", tabId: "tab-1", name: payload.name,
+        type: "$session_loaded",
+        tabId: "tab-1",
+        name: payload.name,
         messages: mockMessages,
         carryover: { totalCostUsd: 0.045, cacheHitTokens: 2500, cacheMissTokens: 1400 },
       });
     } else if (payload.cmd === "new_chat") {
-      emitEvent({ type: "$session_empty", tabId: "tab-1", name: "desktop-new-session", sizeBytes: 0 });
+      emitEvent({
+        type: "$session_empty",
+        tabId: "tab-1",
+        name: "desktop-new-session",
+        sizeBytes: 0,
+      });
     } else if (payload.cmd === "settings_get") {
       emitEvent({ type: "$settings", tabId: "tab-1", ...mockSettings });
     }
@@ -896,7 +951,7 @@ export async function invoke(cmd: string, args?: any): Promise<any> {
 // 2. @tauri-apps/api/event
 export async function listen<T = any>(
   eventName: string,
-  callback: EventCallback<T>
+  callback: EventCallback<T>,
 ): Promise<UnlistenFn> {
   let bucket = listeners.get(eventName);
   if (!bucket) {
@@ -924,10 +979,18 @@ export function getCurrentWebview(): any {
 export function getCurrentWindow(): any {
   return {
     isMaximized: async () => false,
-    minimize: async () => { console.log("[tauri-bridge] minimize (no-op)"); },
-    close: async () => { console.log("[tauri-bridge] close (no-op)"); },
-    toggleMaximize: async () => { console.log("[tauri-bridge] toggleMaximize (no-op)"); },
-    listen: async (_event: string, _callback: any): Promise<() => void> => () => {},
+    minimize: async () => {
+      console.log("[tauri-bridge] minimize (no-op)");
+    },
+    close: async () => {
+      console.log("[tauri-bridge] close (no-op)");
+    },
+    toggleMaximize: async () => {
+      console.log("[tauri-bridge] toggleMaximize (no-op)");
+    },
+    listen:
+      async (_event: string, _callback: any): Promise<() => void> =>
+      () => {},
     label: "main",
   };
 }
@@ -963,17 +1026,36 @@ export async function relaunch(): Promise<void> {
 }
 
 // // ═══ Mock 数据（仅 Vite 开发模式使用）
-// 
+//
 const mockSessions = [
-  { name: "desktop-20260520-1", messageCount: 8, mtime: new Date().toISOString(), summary: "项目工程模块重构及自适应 UI 设计" },
-  { name: "desktop-20260519-2", messageCount: 14, mtime: new Date(Date.now() - 86400000).toISOString(), summary: "编写 WebSocket 桥接与 RPC 行协议对接逻辑" },
-  { name: "desktop-20260518-3", messageCount: 4, mtime: new Date(Date.now() - 172800000).toISOString(), summary: "测试移动端 TextArea 与 Dynamic Viewport" },
+  {
+    name: "desktop-20260520-1",
+    messageCount: 8,
+    mtime: new Date().toISOString(),
+    summary: "项目工程模块重构及自适应 UI 设计",
+  },
+  {
+    name: "desktop-20260519-2",
+    messageCount: 14,
+    mtime: new Date(Date.now() - 86400000).toISOString(),
+    summary: "编写 WebSocket 桥接与 RPC 行协议对接逻辑",
+  },
+  {
+    name: "desktop-20260518-3",
+    messageCount: 4,
+    mtime: new Date(Date.now() - 172800000).toISOString(),
+    summary: "测试移动端 TextArea 与 Dynamic Viewport",
+  },
 ];
 
 const mockSettings = {
-  reasoningEffort: "high", editMode: "review", budgetUsd: null,
-  workspaceDir: "", recentWorkspaces: [],
-  model: "deepseek-v4-flash", version: "0.47.2",
+  reasoningEffort: "high",
+  editMode: "review",
+  budgetUsd: null,
+  workspaceDir: "",
+  recentWorkspaces: [],
+  model: "deepseek-v4-flash",
+  version: "0.47.2",
 };
 
 const mockMessages: any[] = [
@@ -993,8 +1075,12 @@ function mockAssistantTurn(_promptText: string) {
   emitEvent({ type: "status", text: "DeepSeek R1 思考中...", tabId: "tab-1" });
   setTimeout(() => {
     emitEvent({
-      type: "model.turn.started", tabId: "tab-1", id: Date.now(),
-      turn: 2, model: "deepseek-reasoner", reasoningEffort: "high",
+      type: "model.turn.started",
+      tabId: "tab-1",
+      id: Date.now(),
+      turn: 2,
+      model: "deepseek-reasoner",
+      reasoningEffort: "high",
     });
   }, 600);
   // reasoning deltas
@@ -1013,15 +1099,24 @@ function mockAssistantTurn(_promptText: string) {
   delay += 500;
   setTimeout(() => {
     emitEvent({
-      type: "tool.intent", tabId: "tab-1", name: "list_dir",
-      args: JSON.stringify({ DirectoryPath: "d:/AI/workspace/dashboard" }), callId: "call_12345",
+      type: "tool.intent",
+      tabId: "tab-1",
+      name: "list_dir",
+      args: JSON.stringify({ DirectoryPath: "d:/AI/workspace/dashboard" }),
+      callId: "call_12345",
     });
   }, delay);
   delay += 1000;
   setTimeout(() => {
     emitEvent({
-      type: "tool.result", tabId: "tab-1", name: "list_dir", ok: true,
-      output: JSON.stringify([{ name: "package.json", sizeBytes: 864 }, { name: "src", isDir: true }]),
+      type: "tool.result",
+      tabId: "tab-1",
+      name: "list_dir",
+      ok: true,
+      output: JSON.stringify([
+        { name: "package.json", sizeBytes: 864 },
+        { name: "src", isDir: true },
+      ]),
       callId: "call_12345",
     });
   }, delay);
@@ -1040,7 +1135,14 @@ function mockAssistantTurn(_promptText: string) {
     delay += 500;
   });
   setTimeout(() => {
-    emitEvent({ type: "model.final", tabId: "tab-1", turn: 2, content: chunks.join(""), reasoningContent: lines.join(""), costUsd: 0.002 });
+    emitEvent({
+      type: "model.final",
+      tabId: "tab-1",
+      turn: 2,
+      content: chunks.join(""),
+      reasoningContent: lines.join(""),
+      costUsd: 0.002,
+    });
     emitEvent({ type: "$turn_complete", tabId: "tab-1" });
   }, delay + 400);
 }
@@ -1049,7 +1151,12 @@ function mockSetupAndReady() {
   document.documentElement.dataset.web = "true";
   setTimeout(() => emitEvent({ type: "$ready", tabId: "tab-1" }), 100);
   setTimeout(() => {
-    emitEvent({ type: "$tab_opened", tabId: "tab-1", workspaceDir: "d:\\AI\\workspace", active: true });
+    emitEvent({
+      type: "$tab_opened",
+      tabId: "tab-1",
+      workspaceDir: "d:\\AI\\workspace",
+      active: true,
+    });
   }, 150);
   setTimeout(() => emitEvent({ type: "$settings", tabId: "tab-1", ...mockSettings }), 200);
   setTimeout(() => emitEvent({ type: "$sessions", tabId: "tab-1", items: mockSessions }), 350);

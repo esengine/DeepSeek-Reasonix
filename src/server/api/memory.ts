@@ -13,6 +13,10 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
 import {
+  collectMemoryEntriesForWorkspace,
+  readMemoryEntryDetail,
+} from "../../desktop/memory-browser.js";
+import {
   PROJECT_MEMORY_FILE,
   findProjectMemoryPath,
   resolveProjectMemoryWritePath,
@@ -72,10 +76,33 @@ export async function handleMemory(
   rest: string[],
   body: string,
   ctx: DashboardContext,
+  query: URLSearchParams = new URLSearchParams(),
 ): Promise<ApiResult> {
   const cwd = ctx.getCurrentCwd?.();
   const globalDir = globalMemoryDir();
   const projectMemDir = cwd ? projectMemoryDir(cwd) : "";
+
+  // Browser shape — matches the $memory event payload emitted by desktop.ts
+  // so the web dashboard's memory panel (project file + global file +
+  // structured entries with `kind`/`path`/`type`) renders the same as Tauri.
+  if (method === "GET" && rest[0] === "entries") {
+    if (!cwd) return { status: 200, body: { entries: [] } };
+    try {
+      return { status: 200, body: { entries: collectMemoryEntriesForWorkspace(cwd) } };
+    } catch (err) {
+      return { status: 500, body: { error: (err as Error).message } };
+    }
+  }
+  if (method === "GET" && rest[0] === "read") {
+    if (!cwd) return { status: 503, body: { error: "no active project" } };
+    const path = query.get("path");
+    if (!path) return { status: 400, body: { error: "path query parameter required" } };
+    try {
+      return { status: 200, body: { detail: readMemoryEntryDetail({ path }, cwd) } };
+    } catch (err) {
+      return { status: 404, body: { error: (err as Error).message } };
+    }
+  }
 
   if (method === "GET" && rest.length === 0) {
     const existingProjectMemory = cwd ? findProjectMemoryPath(cwd) : null;
