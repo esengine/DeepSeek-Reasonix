@@ -88,7 +88,12 @@ import {
   takeQQPendingInteraction,
 } from "../../desktop/qq-turn-routing.js";
 import { loadDotenv } from "../../env.js";
-import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
+import {
+  CacheFirstLoop,
+  DeepSeekClient,
+  ImmutablePrefix,
+  type LoopAbortOptions,
+} from "../../index.js";
 import { parseMcpSpec } from "../../mcp/spec.js";
 import {
   deleteSession,
@@ -119,6 +124,11 @@ export interface DesktopOptions {
   budgetUsd?: number;
   /** Root directory the agent's filesystem tools operate inside. Defaults to cwd. */
   dir?: string;
+}
+
+export function desktopUserAbortLoopOptions(): LoopAbortOptions | undefined {
+  // User-facing Abort stops generation; it must not erase a prompt that remains visible in chat.
+  return undefined;
 }
 
 type InMessage = { tabId?: string } & (
@@ -1651,9 +1661,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     return undefined;
   }
 
-  function abortTurn(tab: Tab, opts: { discardCurrentTurn?: boolean } = {}): void {
+  function abortTurn(tab: Tab, opts: LoopAbortOptions = {}): void {
     tab.aborter?.abort();
-    tab.runtime?.loop.abort(opts.discardCurrentTurn ? { discardCurrentTurn: true } : undefined);
+    tab.runtime?.loop.abort(opts);
   }
 
   function tabSessionLabel(tab: Tab): string {
@@ -2210,7 +2220,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
 
     if (msg.cmd === "abort") {
-      abortTurn(tab, { discardCurrentTurn: true });
+      abortTurn(tab, desktopUserAbortLoopOptions());
       cancelPendingGates(tab);
       return;
     }
