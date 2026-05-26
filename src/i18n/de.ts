@@ -53,11 +53,11 @@ export const de: TranslationSchema = {
   sessions: {
     ...EN.sessions,
     emptyHint:
-      "noch keine gespeicherten Sitzungen – starte `reasonix chat` (Sitzungen werden automatisch gespeichert, außer mit --no-session).",
+      "Noch keine gespeicherten Sitzungen – starte `reasonix chat` (Sitzungen werden automatisch gespeichert, außer mit --no-session).",
     listHeader: "Gespeicherte Sitzungen (~/.reasonix/sessions/):",
     inspectHint: "Ansehen:       reasonix sessions <name>",
     resumeHint: "Fortsetzen:    reasonix chat --session <name>",
-    noSession: 'keine Sitzung namens "{name}" (oder sie ist leer).',
+    noSession: 'Keine Sitzung namens "{name}" (oder sie ist leer).',
     lookedAt: "Angesehen: {path}",
     noIdleSessions: "Keine Sitzungen seit >= {days} Tagen inaktiv. Nichts bereinigt.",
     wouldPrune: "Würde {count} Sitzung(en) bereinigen, die >= {days} Tage inaktiv sind:",
@@ -73,19 +73,19 @@ export const de: TranslationSchema = {
     noMouseHint:
       "SGR-Mausverfolgung deaktivieren; stellt die native Auswahl per Ziehen und Rechtsklick wieder her",
     noProxyHint: "HTTPS_PROXY / HTTP_PROXY für diesen Durchlauf ignorieren; direkt verbinden",
-    resumeHint: "die angegebene Sitzung zwangsweise fortsetzen (auch wenn sie inaktiv ist)",
+    resumeHint: "die angegebene Sitzung fortsetzen (auch wenn inaktiv)",
     newHint: "Eine neue Sitzung erzwingen (--session / --continue ignorieren)",
     transcriptHint: "Pfad zum Speichern der JSONL-Ausgabe",
     budgetHint: "Sitzungs-USD-Obergrenze – warnt bei 80 %, verweigert den nächsten Zug bei 100 %",
     modelIdHint: "DeepSeek-Modell-ID (z. B. deepseek-v4-flash)",
-    systemPromptHint: "die Standard-Systemeingabeaufforderung überschreiben",
-    effortHint: "Denkaufwand – niedrig|mittel|hoch|maximal",
+    systemPromptHint: "den Standard-System-Prompt überschreiben",
+    effortHint: "Reasoning-Effort – niedrig|mittel|hoch|maximal",
     sessionNameHint: "Sitzungsname (Standard: „default“)",
     ephemeralHint: "Sitzungsspeicherung für diesen Durchlauf deaktivieren",
     mcpSpecHint: "MCP-Server-Spezifikation (wiederholbar)",
-    mcpPrefixHint: "Stelle diesen String vor die Namen der MCP-Tools",
+    mcpPrefixHint: "Präfix für MCP-Toolnamen",
     noConfigHint: "Ignoriere bei diesem Durchlauf die Datei ~/.reasonix/config.json",
-    effortHintShort: "Denkaufwand – niedrig|mittel|hoch|maximal",
+    effortHintShort: "Reasoning-Effort – niedrig|mittel|hoch|maximal",
     budgetHintShort: "Sitzungs-USD-Obergrenze",
     transcriptHintShort: "Pfad zum JSONL-Transkript",
     mcpSpecHintShort: "MCP-Server-Spezifikation (wiederholbar)",
@@ -100,7 +100,7 @@ export const de: TranslationSchema = {
     pruneDaysHint:
       "Sitzungen löschen, die seit mindestens dieser Anzahl von Tagen inaktiv sind (Standard: 90)",
     pruneDryRunHint: "Liste auf, was gelöscht würde, ohne etwas zu entfernen",
-    eventTypeHint: "Nach Veranstaltungstyp filtern",
+    eventTypeHint: "Nach Ereignistyp filtern",
     eventSinceHint: "Beginne mit dieser Ereignis-ID",
     eventTailHint: "Nur die letzten N Ereignisse anzeigen",
     jsonHint: "Ausgabe als JSON",
@@ -133,6 +133,8 @@ export const de: TranslationSchema = {
     jsonHintReport: "Gib den Inspektionsbericht als JSON aus",
     modelOverrideFlash: "das Modell überschreiben (Standard: deepseek-v4-flash)",
     skipConfirmHint: "Die Bestätigungsabfrage überspringen",
+    yoloHint:
+      "Plan-Checkpoints für diesen Aufruf automatisch genehmigen (entspricht editMode=yolo, ohne die Konfiguration zu ändern)",
     welcome:
       "Starte jederzeit `reasonix`, um zu chatten – deine Einstellungen bleiben gespeichert.",
     taglineChat: "DeepSeek-nativer Agent",
@@ -143,7 +145,7 @@ export const de: TranslationSchema = {
     busy: "Denke nach...",
     thinking: "▸ denke nach...",
     undo: "Rückgängig",
-    undoHint: "Drücke innerhalb von 5s zum Rückgängig machen",
+    undoHint: "Drücke innerhalb von 5s zum Rückgängig-Machen",
     applied: "angewendet",
     rejected: "abgelehnt",
     noDashboard: "Automatisch gestartetes eingebettetes Web-Dashboard unterdrücken.",
@@ -259,7 +261,7 @@ export const de: TranslationSchema = {
       ...EN.slash.cost,
       argsHint: "[Text]",
       description:
-        "ohne Text → Ausgaben letzter Turn (Kostenkarte); mit Text → Kostenschätzung für als nächster Senden (worst-case + likely-cache)",
+        "Ohne Text → Ausgaben letzter Turn (Kostenkarte); Mit Text → Kostenschätzung für als nächster Senden (worst-case + likely-cache)",
     },
     doctor: {
       ...EN.slash.doctor,
@@ -578,7 +580,7 @@ export const de: TranslationSchema = {
       "↑↓ fokussieren  ·  Leertaste überspringen umschalten  ·  k/j verschieben  ·  ⏎ akzeptieren  ·  Esc abbrechen",
     riskMed: " mittel",
     riskHigh: " hoch",
-    completeMsg: "▸ Plan abgeschlossen — alle {total} Schritt{e} erledigt · archiviert",
+    completeMsg: "▸ Plan abgeschlossen — alle {total} Schritt(e) erledigt · archiviert",
   },
   app: {
     ...EN.app,
@@ -631,8 +633,8 @@ export const de: TranslationSchema = {
     runningCommand: "▸ führe aus: {cmd}",
     startingBackground: "▸ starte (Hintergrund): {cmd}",
     checkpointSaved:
-      "⛁ Checkpoint gespeichert · {id} · {count} Datei{en} · /restore {id} zum Zurücksetzen",
-    continuingAfter: "▸ fortgesetzen nach {label}{counter}",
+      "⛁ Checkpoint gespeichert · {id} · {count} Datei(en) · /restore {id} zum Zurücksetzen",
+    continuingAfter: "▸ fortgesetzt nach {label}{counter}",
     planStoppedAt: "▸ Plan angehalten bei {label}{counter}",
     revisingAfter: "▸ überarbeite nach {label} — {feedback}",
     historyScrollHint: " ↑ lese Verlauf · Ende / Bild↓ zurück zum Ende · ↓ eine Zeile vor",
@@ -818,7 +820,7 @@ export const de: TranslationSchema = {
       loopStopped: "▸ Loop gestoppt.",
       loopNoActive: "Kein aktiver Loop zum Stoppen.",
       loopNoActiveHint:
-        "kein aktiver Loop. Starte einen mit `/loop <intervall> <prompt>` (z.B. /loop 30s npm test).\nWird abgebrochen bei: /loop stop · Esc · /clear /new · jeder benutzereingegebene Prompt.",
+        "Kein aktiver Loop. Starte einen mit `/loop <intervall> <prompt>` (z.B. /loop 30s npm test).\nWird abgebrochen bei: /loop stop · Esc · /clear /new · jeder benutzereingegebene Prompt.",
       loopStarted:
         '▸ Loop gestartet — »{prompt}" wird alle {duration} erneut gesendet. Tippe etwas (oder /loop stop) zum Abbrechen.',
       keysNeedsTui: "/keys benötigt einen TUI-Kontext (postKeys angeschlossen).",
@@ -916,7 +918,7 @@ export const de: TranslationSchema = {
       updateLatest: "Neueste:  reasonix {version}",
       updateUpToDate: "Du bist auf dem neuesten Stand. Nichts zu tun.",
       updateNpxHint:
-        "du verwendest npx — der nächste `npx reasonix ...`-Start lädt automatisch die neueste Version.",
+        "Du verwendest npx — der nächste `npx reasonix ...`-Start lädt automatisch die neueste Version.",
       updateNpxForce: "Um früher zu aktualisieren: `npm cache clean --force`.",
       updateUpgradeHint: "Zum Aktualisieren beende diese Sitzung und führe aus:",
       updateUpgradeCmd1: "  reasonix update           (interaktiv, --dry-run wird unterstützt)",
@@ -927,7 +929,7 @@ export const de: TranslationSchema = {
         "die Darstellung dieser TUI beeinträchtigen und Windows kann die laufende Binärdatei sperren.",
       statsNoData: "Noch keine Nutzungsdaten.",
       statsEveryTurn:
-        "jeder hier ausgeführte Turn hängt einen Datensatz an — die Turns dieser Sitzung",
+        "Jeder hier ausgeführte Turn hängt einen Datensatz an — die Turns dieser Sitzung",
       statsWillAppear: "Werden im Dashboard angezeigt, sobald du eine Nachricht sendest.",
     },
     edits: {
@@ -960,7 +962,7 @@ export const de: TranslationSchema = {
       checkpointCodeOnly:
         "/checkpoint ist nur innerhalb von `reasonix code` verfügbar — der Chat-Modus wendet keine Edits an.",
       checkpointNone:
-        "noch keine Checkpoints — `/checkpoint <name>` sichert jede Datei, die die Sitzung berührt hat. Später mit `/restore <name>` wiederherstellbar.",
+        "Noch keine Checkpoints — `/checkpoint <name>` sichert jede Datei, die die Sitzung berührt hat. Später mit `/restore <name>` wiederherstellbar.",
       checkpointHeader: "◈ Checkpoints · {count} gespeichert",
       checkpointRestoreHint:
         "  /restore <name|id> · /checkpoint forget <id> · /checkpoint <name> zum Hinzufügen",
@@ -973,14 +975,14 @@ export const de: TranslationSchema = {
       checkpointSavedEmpty:
         '▸ Checkpoint "{name}" gespeichert ({id}) — aber es wurden noch keine Dateien berührt, daher ist es eine leere Basislinie. Nach diesem Punkt vorgenommene Edits können rückgängig gemacht werden.',
       checkpointSaved:
-        '▸ Checkpoint "{name}" gespeichert ({id}) — {files} Datei{en}, {size} KB. Wiederherstellen: /restore {name}',
+        '▸ Checkpoint "{name}" gespeichert ({id}) — {files} Datei(en), {size} KB. Wiederherstellen: /restore {name}',
       restoreCodeOnly: "/restore ist nur innerhalb von `reasonix code` verfügbar.",
       restoreUsage: "Verwendung: /restore <name|id>   (siehe /checkpoint list für IDs)",
       restoreNoMatch: '▸ kein Checkpoint gefunden für "{target}" — versuche /checkpoint list',
       restoreInfo: '▸ "{name}" ({id}) wiederhergestellt von {when}',
-      restoreWrote: "  · {count} Datei{en} zurückgeschrieben",
-      restoreRemoved: "  · {count} Datei{en} entfernt (existierten zum Checkpoint-Zeitpunkt nicht)",
-      restoreSkipped: "  ✗ {count} Datei{en} übersprungen:",
+      restoreWrote: "  · {count} Datei(en) zurückgeschrieben",
+      restoreRemoved: "  · {count} Datei(en) entfernt (existierten zum Checkpoint-Zeitpunkt nicht)",
+      restoreSkipped: "  ✗ {count} Datei(en) übersprungen:",
       cwdCodeOnly: "/cwd ist nur innerhalb von `reasonix code` verfügbar.",
       cwdUsage:
         "Verwendung: /cwd <pfad>   (aktuelles Root: {current}). Richtet Dateisystem-/Shell-/Memory-Tools auf <pfad> neu aus.",
@@ -989,7 +991,7 @@ export const de: TranslationSchema = {
     model: {
       ...EN.handlers.model,
       modelHint:
-        "versuche deepseek-v4-flash oder deepseek-v4-pro — führe /models aus, um die Live-Liste abzurufen",
+        "Versuche deepseek-v4-flash oder deepseek-v4-pro — führe /models aus, um die Live-Liste abzurufen",
       modelUsage: "Verwendung: /model <id>   ({hint})",
       modelNotInCatalog:
         "Modell → {id}   (⚠ nicht im abgerufenen Katalog: {list}. Falls das falsch ist, wird der nächste Aufruf 400 geben — führe /models zum Aktualisieren aus.)",
@@ -1034,9 +1036,9 @@ export const de: TranslationSchema = {
         "▸ kein solcher Projekt-Eintrag: {prefix}   (versuche /permissions list, um zu sehen, was gespeichert ist)",
       clearAlready: "▸ Projekt-Allowlist ist bereits leer.",
       clearConfirm:
-        "Es werden {count} Projekt-Allowlist-Einträg{e} für {root} gelöscht. Führe den Befehl mit dem Wort 'confirm' erneut aus: /permissions clear confirm",
+        "Es werden {count} Projekt-Allowlist-Einträg(e) für {root} gelöscht. Führe den Befehl mit dem Wort 'confirm' erneut aus: /permissions clear confirm",
       clearedNone: "▸ Projekt-Allowlist war bereits leer — nichts geändert.",
-      cleared: "▸ {count} Projekt-Allowlist-Einträg{e} gelöscht.",
+      cleared: "▸ {count} Projekt-Allowlist-Einträg(e) gelöscht.",
       usage:
         'Verwendung: /permissions [list]                   aktuellen Status anzeigen\n       /permissions add <präfix>            speichern (z.B. "npm run build")\n       /permissions remove <präfix-oder-N>    Eintrag entfernen\n       /permissions clear confirm           alle Projekteinträge löschen',
       modeYolo:
@@ -1084,7 +1086,7 @@ export const de: TranslationSchema = {
         "▸ {before} Nachrichten → {after} gefaltet (Zusammenfassung {chars} Zeichen). Fahre fort.",
       compactFailed: "▸ Falten fehlgeschlagen: {reason}",
       costNoTurn:
-        "noch kein Turn — `/cost` zeigt die Token- und Kostenaufschlüsselung des letzten Turns.",
+        "Noch kein Turn — `/cost` zeigt die Token- und Kostenaufschlüsselung des letzten Turns.",
       costNeedsTui: "/cost benötigt einen TUI-Kontext (postUsage angeschlossen).",
       costNoPricing:
         '▸ /cost: keine Preistabelle für Modell "{model}". Füge eine in telemetry/stats.ts hinzu.',
@@ -1129,24 +1131,24 @@ export const de: TranslationSchema = {
     plans: {
       ...EN.handlers.plans,
       noSession:
-        "keine Sitzung angehängt — `/plans` ist pro Sitzung. Führe `reasonix code` in einem Projekt aus, um eine Sitzung zu erhalten.",
+        "Keine Sitzung angehängt — `/plans` ist pro Sitzung. Führe `reasonix code` in einem Projekt aus, um eine Sitzung zu erhalten.",
       activePlan:
-        "▸ aktiver Plan{label} — {done}/{total} Schritt{e} erledigt · zuletzt bearbeitet {when}",
+        "▸ aktiver Plan{label} — {done}/{total} Schritt(e) erledigt · zuletzt bearbeitet {when}",
       activeNone: "▸ aktiver Plan: (keiner)",
       noArchives:
-        "noch keine archivierten Pläne für diese Sitzung — sie werden automatisch archiviert, wenn alle Schritte erledigt sind",
+        "Noch keine archivierten Pläne für diese Sitzung — sie werden automatisch archiviert, wenn alle Schritte erledigt sind",
       archivedHeader: "Archiviert ({count}):",
       evidencePending:
         "  ! Nachweis ausstehend — aktueller Schritt benötigt Verifikation/Diff/Checkpoint/manuellen Nachweis",
       evidenceLine: "  Nachweis {stepId}: {summary}",
       archivedEvidenceLine: "    Nachweis: {summary}",
       replayNoSession:
-        "keine Sitzung angehängt — `/replay` ist pro Sitzung. Führe `reasonix code` in einem Projekt aus, um eine Sitzung zu erhalten.",
+        "Keine Sitzung angehängt — `/replay` ist pro Sitzung. Führe `reasonix code` in einem Projekt aus, um eine Sitzung zu erhalten.",
       replayNoArchives:
-        "noch keine archivierten Pläne für diese Sitzung — `/replay` wird aktiv, sobald ein Plan abgeschlossen ist (auto-archiviert wenn alle Schritte erledigt).",
+        "Noch keine archivierten Pläne für diese Sitzung — `/replay` wird aktiv, sobald ein Plan abgeschlossen ist (auto-archiviert wenn alle Schritte erledigt).",
       replayInvalidIndex:
-        "ungültiger Index — `/replay` akzeptiert 1..{max} (neuester = 1). Verwende `/plans`, um die Liste zu sehen.",
-      archivedRow: "  ✓ {when}  {total} Schritt{e} · {completion}  {label}",
+        "Ungültiger Index — `/replay` akzeptiert 1..{max} (neuester = 1). Verwende `/plans`, um die Liste zu sehen.",
+      archivedRow: "  ✓ {when}  {total} Schritt(e) · {completion}  {label}",
       completionComplete: "abgeschlossen",
       stopAborted:
         "▸ Plan gestoppt — Modell abgebrochen; tippe eine Folgenachricht, um fortzufahren oder eine neue Aufgabe zu starten.",
@@ -1174,7 +1176,7 @@ export const de: TranslationSchema = {
       killNotFound: "Job {id}: nicht gefunden",
       killAlreadyExited: "Job {id} bereits beendet ({code})",
       killStopping:
-        "▸ stoppe Job {id} (Tree-Kill: SIGTERM → SIGKILL nach 2s Gnadenfrist; Windows: taskkill /T /F)",
+        "▸ stoppe Job {id} (Prozessbaum: SIGTERM → SIGKILL nach 2s Gnadenfrist; Windows: taskkill /T /F)",
       killStatus: "▸ Job {id} {status}",
       killStillAlive: "Nach SIGKILL noch am Leben (!) — melde dies als Fehler",
       logsUsage: "Verwendung: /logs <id> [zeilen]   (Standard letzte 80 Zeilen)",
@@ -1190,9 +1192,9 @@ export const de: TranslationSchema = {
       disabled:
         "Memory ist deaktiviert (REASONIX_MEMORY=off in der Umgebung). Entferne die Variable zur Reaktivierung — es werden weder REASONIX.md noch ~/.reasonix/memory-Inhalte eingefügt.",
       noRoot:
-        "kein Arbeitsverzeichnis in dieser Sitzung — `/memory` benötigt ein Root, um REASONIX.md aufzulösen. (Läuft in einer Test-Umgebung?)",
+        "Kein Arbeitsverzeichnis in dieser Sitzung — `/memory` benötigt ein Root, um REASONIX.md aufzulösen. (Läuft in einer Test-Umgebung?)",
       listEmpty:
-        "noch keine Benutzer-Memories. Das Modell kann `remember` aufrufen, um einen zu speichern, oder du kannst Dateien manuell in ~/.reasonix/memory/global/ oder dem projektspezifischen Unterverzeichnis erstellen.",
+        "Noch keine Benutzer-Memories. Das Modell kann `remember` aufrufen, um einen zu speichern, oder du kannst Dateien manuell in ~/.reasonix/memory/global/ oder dem projektspezifischen Unterverzeichnis erstellen.",
       listHeader: "Benutzer-Memories ({count}):",
       listFooter: "Body anzeigen: /memory show <name>   Löschen: /memory forget <name>",
       showUsage: "Verwendung: /memory show <name>  oder  /memory show <scope>/<name>",
@@ -1225,7 +1227,7 @@ export const de: TranslationSchema = {
     mcp: {
       ...EN.handlers.mcp,
       noServers:
-        'keine MCP-Server angehängt. Führe `reasonix setup` aus, um welche auszuwählen, oder starte mit --mcp "<spec>". `reasonix mcp list` zeigt den Katalog. Hinweis: vom Modell aufgerufene Shell-Befehle werden pro Aufruf abgefragt (einmal erlauben / immer erlauben / ablehnen) — kein globales Allow-All-Flag.',
+        'Keine MCP-Server angehängt. Führe `reasonix setup` aus, um welche auszuwählen, oder starte mit --mcp "<spec>". `reasonix mcp list` zeigt den Katalog. Hinweis: vom Modell aufgerufene Shell-Befehle werden pro Aufruf abgefragt (einmal erlauben / immer erlauben / ablehnen) — kein globales Allow-All-Flag.',
       toolsLabel: "  Tools     {count}",
       resourcesHint: "`/resource` zum Durchsuchen+Lesen",
       promptsHint: "`/prompt` zum Durchsuchen+Abrufen",
@@ -1240,7 +1242,7 @@ export const de: TranslationSchema = {
         "Verwendung: /mcp {action} <name>  ·  wähle einen in /mcp angezeigten Namen (anonyme Server können nicht nach Namen umgeschaltet werden).",
       usageReconnect:
         "Verwendung: /mcp reconnect <name>  ·  wähle einen in /mcp angezeigten Namen.",
-      unknownServer: 'unbekannter MCP-Server "{name}". Bekannt: {list}.',
+      unknownServer: 'Unbekannter MCP-Server "{name}". Bekannt: {list}.',
       noneList: "(keine)",
       reconnectNoTui: "/mcp reconnect benötigt die interaktive TUI (postInfo nicht angeschlossen).",
       liveTab: "Live",
@@ -1370,7 +1372,7 @@ export const de: TranslationSchema = {
   },
   composer: {
     ...EN.composer,
-    placeholder: "Frag etwas  ·  slash für Befehle  ·  at-Zeichen für Dateien",
+    placeholder: "Frag etwas  ·  / für Befehle  ·  @ für Dateien",
     waitingForResponse: "…warte auf Antwort…",
     hintSend: "senden",
     hintNewline: "Neue Zeile",
@@ -1381,14 +1383,14 @@ export const de: TranslationSchema = {
     hintQuit: "beenden",
     abortedHint: "Turn vom Benutzer abgebrochen · erneut Esc zum Leeren · ⏎ für eine Folgefrage",
     editorNoRawMode:
-      "externer Editor nicht verfügbar — stdin unterstützt Raw-Mode-Umschaltung auf diesem Terminal nicht",
+      "Externer Editor nicht verfügbar — stdin unterstützt Raw-Mode-Umschaltung auf diesem Terminal nicht",
     editorFailed: "Externer Editor:",
     editorMissing:
-      "kein $EDITOR / $VISUAL / $GIT_EDITOR gesetzt — exportiere einen (z.B. `export EDITOR=nano`) und versuche es erneut",
+      "Kein $EDITOR / $VISUAL / $GIT_EDITOR gesetzt — exportiere einen (z.B. `export EDITOR=nano`) und versuche es erneut",
     editorExited: "Editor mit Code {code} beendet",
     typeaheadStaged: "▸ {count} Zeile(n) bereitgestellt · Esc zurückrufen",
     steerPlaceholder:
-      "tippe, um die aktuelle Aufgabe zu steuern — Befehle sind deaktiviert, solange beschäftigt",
+      "Tippe, um die aktuelle Aufgabe zu steuern — Befehle sind deaktiviert, solange beschäftigt",
     steerHint: "Senden — mid-Turn eingefügt",
     stashNothing: "Nichts zu speichern",
     stashSaved: "Gespeichert",
@@ -1440,7 +1442,7 @@ export const de: TranslationSchema = {
     allowAlwaysDesc: "`{prefix}` für dieses Projekt merken",
     deny: "ablehnen",
     denyDesc: "Tab drücken, um dem Modell den Grund mitzuteilen",
-    cwdLabel: "awd",
+    cwdLabel: "CWD",
     timeoutLabel: "Timeout",
     waitLabel: "warten",
     previewMore: "… {n} weitere Zeile ausgeblendet — Esc drücken, Modell bitten, sie aufzuteilen",
@@ -1487,13 +1489,13 @@ export const de: TranslationSchema = {
     turns: "{count} Turns",
     pickerHint:
       "↑↓ auswählen · / suchen · ⏎ öffnen · [n] neu · [d] löschen · [r] umbenennen · Esc beenden",
-    empty: "  noch keine gespeicherten Sitzungen in diesem Arbeitsbereich — drücke ",
+    empty: "  Noch keine gespeicherten Sitzungen in diesem Arbeitsbereich — drücke ",
     emptyNew: " um eine neue zu starten",
     renamePrompt: '  "{from}" umbenennen → ',
     renameHint: "  ⏎ Umbenennung bestätigen  ·  Esc abbrechen",
     searchPrompt: "  Sitzungen durchsuchen: /",
-    searchHint: "  tippen zum Filtern  ·  ⏎ Treffer öffnen  ·  Esc zurücksetzen",
-    searchEmpty: "  keine Sitzungen entsprechen dieser Suche",
+    searchHint: "  Tippen zum Filtern  ·  ⏎ Treffer öffnen  ·  Esc zurücksetzen",
+    searchEmpty: "  Keine Sitzungen entsprechen dieser Suche",
     emptyHint: "  ⏎ neue Sitzung  ·  Esc beenden",
     justNow: "Gerade eben",
     minAgo: "Vor {count} Min",
@@ -1511,10 +1513,10 @@ export const de: TranslationSchema = {
     pickerHint:
       "↑↓ auswählen · / suchen · ⏎ wechseln + Sitzung auswählen · Esc beenden · /cwd <pfad> fügt einen hinzu",
     empty:
-      "  noch keine bekannten Arbeitsbereiche — führe /cwd <pfad> einmal aus, um einen hinzuzufügen",
+      "  Noch keine bekannten Arbeitsbereiche — führe /cwd <pfad> einmal aus, um einen hinzuzufügen",
     searchPrompt: "  Arbeitsbereiche durchsuchen: /",
-    searchHint: "  tippen zum Filtern  ·  ⏎ wechseln + Sitzung auswählen  ·  Esc zurücksetzen",
-    searchEmpty: "  keine Arbeitsbereiche entsprechen dieser Suche",
+    searchHint: "  Tippen zum Filtern  ·  ⏎ wechseln + Sitzung auswählen  ·  Esc zurücksetzen",
+    searchEmpty: "  Keine Arbeitsbereiche entsprechen dieser Suche",
   },
   modelPicker: {
     ...EN.modelPicker,
@@ -1571,7 +1573,7 @@ export const de: TranslationSchema = {
     match: "Treffer",
     matches: "Treffer",
     forFilter: 'für "{filter}"',
-    noMatch: 'keine Dateien entsprechen "{filter}"',
+    noMatch: 'Keine Dateien entsprechen "{filter}"',
     emptyDir: "Leeres Verzeichnis",
     scanning: "Durchsuche Verzeichnisbaum…",
     footerBrowse: "↑↓ navigieren · Tab in Ordner eintauchen · ⏎ einfügen · Esc abbrechen",
@@ -1620,13 +1622,13 @@ export const de: TranslationSchema = {
     status:
       "web_search {status} — versuche: Das Such-Backend hat einen Fehler zurückgegeben; formuliere die Abfrage um oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     rateLimit429:
-      "web_search 429 — versuche: 10s warten vor erneuter Abfrage oder Abfrage umformulieren; das Such-Backend ratelimited diesen Client",
+      "web_search 429 — versuche: 10s warten vor erneuter Abfrage oder Abfrage umformulieren; das Such-Backend hat das Rate-Limit für diesen Client erreicht",
     forbidden403:
       "web_search 403 — versuche: Das Such-Backend blockiert diesen Client; wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa oder warte und versuche es später erneut",
     serverError5xx:
       "web_search {status} — versuche: Öffne die Such-URL in einem Browser; falls sie lädt, ist dies vorübergehend und ein erneuter Versuch in 30s kann helfen",
     bingBlocked:
-      "web_search: Bing-Anti-Bot-Seite — ratelimited oder blockiert — versuche: 30s warten und erneut versuchen, oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Bing-Anti-Bot-Seite — Rate-Limit erreicht oder blockiert — versuche: 30s warten und erneut versuchen, oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     bingNoResults:
       "web_search: 0 Ergebnisse, aber die Antwort sieht nicht wie eine echte leere Seite aus ({chars} Zeichen, erste 120: {preview}) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     invalidEndpoint:
@@ -1644,7 +1646,7 @@ export const de: TranslationSchema = {
     metasoUnauthorized:
       "web_search: Metaso-API-Schlüssel abgelehnt — überprüfe METASO_API_KEY oder erhalte einen unter https://metaso.cn/search-api/playground",
     metasoRateLimit:
-      "web_search: Metaso ratelimited — warte und versuche es erneut, oder erhalte einen eigenen API-Schlüssel unter https://metaso.cn/search-api/playground",
+      "web_search: Metaso-Rate-Limit erreicht — warte und versuche es erneut, oder erhalte einen eigenen API-Schlüssel unter https://metaso.cn/search-api/playground",
     metasoServerError:
       "web_search: Metaso-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     metasoParseError:
@@ -1656,7 +1658,7 @@ export const de: TranslationSchema = {
     tavilyUnauthorized:
       "web_search: Tavily-API-Schlüssel abgelehnt — überprüfe TAVILY_API_KEY oder erhalte einen unter https://tavily.com",
     tavilyRateLimit:
-      "web_search: Tavily ratelimited oder monatliches Kontingent überschritten — warte, wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa oder upgrade deinen Tavily-Plan",
+      "web_search: Tavily-Rate-Limit erreicht oder monatliches Kontingent überschritten — warte, wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa oder upgrade deinen Tavily-Plan",
     tavilyServerError:
       "web_search: Tavily-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     tavilyParseError:
@@ -1666,7 +1668,7 @@ export const de: TranslationSchema = {
     perplexityUnauthorized:
       "web_search: Perplexity-API-Schlüssel abgelehnt — überprüfe PERPLEXITY_API_KEY oder erhalte einen unter https://perplexity.ai/settings/api",
     perplexityRateLimit:
-      "web_search: Perplexity ratelimited — warte und versuche es erneut, oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Perplexity-Rate-Limit erreicht — warte und versuche es erneut, oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     perplexityServerError:
       "web_search: Perplexity-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     perplexityParseError:
@@ -1676,7 +1678,7 @@ export const de: TranslationSchema = {
     exaUnauthorized:
       "web_search: Exa-API-Schlüssel abgelehnt — überprüfe EXA_API_KEY oder erhalte einen unter https://exa.ai",
     exaRateLimit:
-      "web_search: Exa-API ratelimited oder monatliches Kontingent überschritten — warte oder upgrade unter https://exa.ai/pricing",
+      "web_search: Exa-API-Rate-Limit erreicht oder monatliches Kontingent überschritten — warte oder upgrade unter https://exa.ai/pricing",
     exaServerError:
       "web_search: Exa-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa",
     exaParseError:
@@ -1718,7 +1720,7 @@ export const de: TranslationSchema = {
     reasoningEllipsis: "Reasoning…",
     error: "Fehler",
     doctor: "Doctor",
-    you: "du",
+    you: "Du",
     task: "Aufgabe",
   },
   cardLabels: {
@@ -1810,7 +1812,7 @@ export const de: TranslationSchema = {
   },
   slashArgPicker: {
     ...EN.slashArgPicker,
-    noMatch: 'keine Übereinstimmung für "{partial}"',
+    noMatch: 'Keine Übereinstimmung für "{partial}"',
     keepTyping: " — tippe weiter, oder Rücktaste zum Bearbeiten",
     above: "   ↑ {hidden} darüber",
     below: "   ↓ {hidden} darunter",
@@ -1832,7 +1834,7 @@ export const de: TranslationSchema = {
     allLoaded: "Alle Seiten geladen",
     fetchingDetail: "Hole Smithery-Details…",
     noInstallInfo:
-      "keine Installationsinfo für {name} - versuche `npx -y @smithery/cli install {name}`",
+      "Keine Installationsinfo für {name} - versuche `npx -y @smithery/cli install {name}`",
     alreadyInstalled: "Bereits installiert: {spec}",
     installed: "Installiert → {spec}",
     uninstalled: "{name} deinstalliert",
@@ -1870,10 +1872,10 @@ export const de: TranslationSchema = {
       "Keine Prompts auf einem verbundenen MCP-Server (oder keine Server verbunden). `/mcp` zeigt den aktuellen Satz.",
     fetchOne:
       "Rufe einen ab: `/prompt <name>` — Argumente werden noch nicht unterstützt; Prompts mit erforderlichen Argumenten geben einen Fehler vom Server zurück.",
-    noServerForResource: 'kein Server bietet Ressource "{name}"',
+    noServerForResource: 'Kein Server bietet Ressource "{name}"',
     resourceHint: "`/resource` ohne Argument listet verfügbare Ressourcen.",
     readFailed: "readResource fehlgeschlagen",
-    noServerForPrompt: 'kein Server bietet Prompt "{name}"',
+    noServerForPrompt: 'Kein Server bietet Prompt "{name}"',
     promptHint: "`/prompt` ohne Argument listet verfügbare Prompts.",
     fetchFailed: "getPrompt fehlgeschlagen",
   },
@@ -1900,7 +1902,7 @@ export const de: TranslationSchema = {
     ...EN.checkpointPicker,
     title: "Checkpoint wiederherstellen — {workspace}",
     header: " ◈ REASONIX · Checkpoint auswählen ",
-    empty: "  noch keine Checkpoints in diesem Arbeitsbereich - siehe /checkpoint zum Erstellen",
+    empty: "  Noch keine Checkpoints in diesem Arbeitsbereich - siehe /checkpoint zum Erstellen",
     more: "     … {hidden} weitere",
     footer: "  ↑↓ auswählen  ·  ⏎ wiederherstellen  ·  [d] vergessen  ·  Esc beenden",
     footerEmpty: "  Esc beenden",
