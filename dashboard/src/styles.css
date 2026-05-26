@@ -797,6 +797,7 @@ html[data-platform="macos"] .titlebar .tb-left {
 
 .sidebar {
   grid-area: side;
+  container: sidebar / inline-size;
   background: var(--bg-2);
   border-right: 1px solid var(--border);
   display: flex;
@@ -863,7 +864,13 @@ html[data-platform="macos"] .titlebar .tb-left {
   padding: 1px 5px;
   box-shadow: none;
 }
+@container sidebar (max-width: 190px) {
+  .side-head .new-btn .shortcut {
+    display: none;
+  }
+}
 .side-head .icon-btn {
+  flex: 0 0 auto;
   width: 30px;
   height: 30px;
   border-radius: 6px;

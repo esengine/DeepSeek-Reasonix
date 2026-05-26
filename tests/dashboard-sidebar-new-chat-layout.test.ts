@@ -11,6 +11,7 @@ function cssRule(selector: string): string {
 
 describe("dashboard sidebar new chat button layout", () => {
   it("keeps localized labels on one line in the compact desktop sidebar", () => {
+    expect(cssRule(".sidebar")).toContain("container: sidebar / inline-size");
     expect(cssRule(".side-head .new-btn")).toContain("flex-wrap: nowrap");
     expect(cssRule(".side-head .new-btn")).toContain("min-width: 0");
     expect(cssRule(".side-head .new-btn svg")).toContain("flex: 0 0 auto");
@@ -19,5 +20,8 @@ describe("dashboard sidebar new chat button layout", () => {
       "text-overflow: ellipsis",
     );
     expect(cssRule(".side-head .new-btn .shortcut")).toContain("flex: 0 0 auto");
+    expect(css).toContain("@container sidebar (max-width: 190px)");
+    expect(css).toContain("display: none");
+    expect(cssRule(".side-head .icon-btn")).toContain("flex: 0 0 auto");
   });
 });
