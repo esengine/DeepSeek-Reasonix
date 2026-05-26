@@ -5,6 +5,7 @@ mod rpc;
 use rpc::{RpcState, rpc_kill, rpc_send, rpc_spawn};
 use serde::Serialize;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// #892: bundled libwayland in AppImage can ABI-mismatch the host Wayland
 /// compositor → WebKitWebProcess `abort()`s on EGL display creation. Redirect
@@ -208,6 +209,24 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, &content).map_err(|e| format!("write failed: {e}"))
 }
 
+#[tauri::command]
+fn save_clipboard_image(bytes: Vec<u8>, extension: Option<String>) -> Result<String, String> {
+    let ext = extension
+        .as_deref()
+        .map(|s| s.trim().trim_start_matches('.').to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "png".to_string());
+    let dir = std::env::temp_dir().join("reasonix-pasted-images");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir failed: {e}"))?;
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("clock error: {e}"))?
+        .as_millis();
+    let path = dir.join(format!("reasonix-pasted-{ts}.{ext}"));
+    std::fs::write(&path, bytes).map_err(|e| format!("write failed: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 fn main() {
     #[cfg(target_os = "linux")]
     linux_webkit_compat();
@@ -227,7 +246,8 @@ fn main() {
             open_in_editor,
             list_workspace_tree,
             git_status,
-            write_text_file
+            write_text_file,
+            save_clipboard_image
         ])
         .setup(|app| {
             use tauri::Manager;

@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import type React from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { t, type TKey } from "../i18n";
 import { I } from "../icons";
@@ -117,6 +118,27 @@ function atIcon(k: MentionItem["kind"]) {
   return <I.at size={12} />;
 }
 
+function guessImageExtension(mime: string): string {
+  const normalized = mime.toLowerCase();
+  if (normalized === "image/jpeg") return "jpg";
+  if (normalized === "image/png") return "png";
+  if (normalized === "image/gif") return "gif";
+  if (normalized === "image/webp") return "webp";
+  if (normalized === "image/svg+xml") return "svg";
+  const slash = normalized.indexOf("/");
+  return slash >= 0 ? normalized.slice(slash + 1).replace(/[^a-z0-9]+/g, "") || "png" : "png";
+}
+
+function dataUrlToBytes(dataUrl: string): Uint8Array {
+  const idx = dataUrl.indexOf(",");
+  if (idx < 0) throw new Error("invalid data URL");
+  const base64 = dataUrl.slice(idx + 1);
+  const bin = atob(base64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 export function Composer({
   draft,
   setDraft,
@@ -144,7 +166,7 @@ export function Composer({
   onDequeueSend,
 }: {
   draft: string;
-  setDraft: (s: string) => void;
+  setDraft: React.Dispatch<React.SetStateAction<string>>;
   onSend: () => void;
   onAbort: () => void;
   disabled?: boolean;
@@ -183,6 +205,19 @@ export function Composer({
   const historyRef = useRef<string[]>([]);
   const [browseIdx, setBrowseIdx] = useState(-1);
   const savedDraftRef = useRef("");
+
+  const insertMention = (picked: string) => {
+    const rel =
+      workspaceDir && picked.startsWith(workspaceDir)
+        ? picked.slice(workspaceDir.length).replace(/^[\\/]+/, "")
+        : picked;
+    setDraft((current) =>
+      current ? `${current.replace(/\s+$/, "")} @${rel} ` : `@${rel} `,
+    );
+    setChips((c) => [...c, { kind: "at", label: rel }]);
+    onMentionPicked?.(rel);
+    textareaRef.current?.focus();
+  };
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -231,16 +266,36 @@ export function Composer({
             : undefined,
       });
       if (typeof picked !== "string" || !picked) return;
-      const rel =
-        workspaceDir && picked.startsWith(workspaceDir)
-          ? picked.slice(workspaceDir.length).replace(/^[\\/]+/, "")
-          : picked;
-      setDraft(draft ? `${draft.replace(/\s+$/, "")} @${rel} ` : `@${rel} `);
-      setChips((c) => [...c, { kind: "at", label: rel }]);
-      onMentionPicked?.(rel);
-      textareaRef.current?.focus();
+      insertMention(picked);
     } catch (err) {
       console.error("attach failed", err);
+    }
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const imageItem = items.find((item) => item.type.startsWith("image/"));
+    if (!imageItem) return;
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+        reader.onload = () => {
+          if (typeof reader.result === "string") resolve(reader.result);
+          else reject(new Error("unexpected clipboard payload"));
+        };
+        reader.readAsDataURL(file);
+      });
+      const savedPath = await invoke<string>("save_clipboard_image", {
+        bytes: Array.from(dataUrlToBytes(dataUrl)),
+        extension: guessImageExtension(file.type),
+      });
+      insertMention(savedPath);
+    } catch (err) {
+      console.error("clipboard image paste failed", err);
     }
   };
 
@@ -541,6 +596,7 @@ export function Composer({
             value={draft}
             placeholder={t("composer.placeholder")}
             onChange={handleChange}
+            onPaste={(e) => void handlePaste(e)}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => {
