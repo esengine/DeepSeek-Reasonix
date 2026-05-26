@@ -129,16 +129,6 @@ function guessImageExtension(mime: string): string {
   return slash >= 0 ? normalized.slice(slash + 1).replace(/[^a-z0-9]+/g, "") || "png" : "png";
 }
 
-function dataUrlToBytes(dataUrl: string): Uint8Array {
-  const idx = dataUrl.indexOf(",");
-  if (idx < 0) throw new Error("invalid data URL");
-  const base64 = dataUrl.slice(idx + 1);
-  const bin = atob(base64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
 export function Composer({
   draft,
   setDraft,
@@ -280,17 +270,9 @@ export function Composer({
     if (!file) return;
     e.preventDefault();
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(reader.error ?? new Error("read failed"));
-        reader.onload = () => {
-          if (typeof reader.result === "string") resolve(reader.result);
-          else reject(new Error("unexpected clipboard payload"));
-        };
-        reader.readAsDataURL(file);
-      });
+      const buffer = await file.arrayBuffer();
       const savedPath = await invoke<string>("save_clipboard_image", {
-        bytes: Array.from(dataUrlToBytes(dataUrl)),
+        bytes: buffer,
         extension: guessImageExtension(file.type),
       });
       insertMention(savedPath);
