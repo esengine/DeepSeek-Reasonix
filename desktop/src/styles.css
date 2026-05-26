@@ -5164,6 +5164,24 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   background: oklch(100% 0 0 / 0.1);
 }
 
+.update-overlay {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  pointer-events: none;
+  animation: rise 0.18s ease-out;
+}
+.update-overlay-card {
+  pointer-events: auto;
+  background: var(--card);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-lg);
+  min-width: 360px;
+  max-width: min(560px, calc(100vw - 32px));
+}
+
 /* ============================================================
    TONE PALETTE — systematized
    ============================================================ */

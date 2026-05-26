@@ -1225,11 +1225,6 @@ interface TabRuntimeProps {
   tabId: string;
   active: boolean;
   currency: "CNY" | "USD";
-  pendingUpdate: Update | null;
-  updateStatus: "idle" | "installing" | "error";
-  updateProgress: { downloaded: number; total: number | null } | null;
-  installUpdate: () => void;
-  dismissUpdate: () => void;
   registerDispatch: (tabId: string, d: TabDispatcher | null) => void;
   onNewTab: () => void;
   onCloseTab: () => void;
@@ -1264,11 +1259,6 @@ function TabRuntime({
   tabId,
   active,
   currency,
-  pendingUpdate,
-  updateStatus,
-  updateProgress,
-  installUpdate,
-  dismissUpdate,
   registerDispatch,
   onNewTab,
   onCloseTab,
@@ -2201,17 +2191,6 @@ function TabRuntime({
               />
               <div className="thread" ref={threadRef}>
                 <div className="thread-inner" ref={threadInnerRef}>
-                  {pendingUpdate ? (
-                    <UpdateBanner
-                      version={pendingUpdate.version}
-                      currentVersion={pendingUpdate.currentVersion}
-                      status={updateStatus}
-                      progress={updateProgress}
-                      onInstall={installUpdate}
-                      onDismiss={dismissUpdate}
-                    />
-                  ) : null}
-
                   {state.activePlan ? (
                     <>
                       <PlanBanner
@@ -3112,7 +3091,7 @@ function NeedsSetupView({
   );
 }
 
-function UpdateBanner({
+function UpdateOverlay({
   version,
   currentVersion,
   status,
@@ -3149,31 +3128,30 @@ function UpdateBanner({
           : t("app.update.installing")
         : t("app.update.clickToInstall");
   return (
-    <div
-      className="plan-banner"
-      style={{ background: "var(--accent-soft)", borderColor: "var(--accent)" }}
-    >
-      <span className="ico">
-        <I.download size={14} />
-      </span>
-      <div className="body">
-        <div className="t">
-          {t("app.update.available", { current: currentVersion, latest: version })}
-        </div>
-        <div className="s">{statusText}</div>
-        {status === "installing" && ratio !== null ? (
-          <div className="meter-mini" aria-label="download progress">
-            <span style={{ width: `${Math.round(ratio * 100)}%` }} />
+    <div className="update-overlay" aria-live="polite">
+      <div className="plan-banner update-overlay-card">
+        <span className="ico">
+          <I.download size={14} />
+        </span>
+        <div className="body">
+          <div className="t">
+            {t("app.update.available", { current: currentVersion, latest: version })}
           </div>
-        ) : null}
-      </div>
-      <div className="prog">
-        <button type="button" onClick={onInstall} disabled={status === "installing"}>
-          {t("app.update.install")}
-        </button>
-        <button type="button" onClick={onDismiss} disabled={status === "installing"}>
-          {t("app.update.later")}
-        </button>
+          <div className="s">{statusText}</div>
+          {status === "installing" && ratio !== null ? (
+            <div className="meter-mini" aria-label="download progress">
+              <span style={{ width: `${Math.round(ratio * 100)}%` }} />
+            </div>
+          ) : null}
+        </div>
+        <div className="prog">
+          <button type="button" onClick={onInstall} disabled={status === "installing"}>
+            {t("app.update.install")}
+          </button>
+          <button type="button" onClick={onDismiss} disabled={status === "installing"}>
+            {t("app.update.later")}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -3650,11 +3628,6 @@ export function App() {
           tabId={t.id}
           active={t.id === activeTabId}
           currency={currency}
-          pendingUpdate={pendingUpdate}
-          updateStatus={updateStatus}
-          updateProgress={updateProgress}
-          installUpdate={installUpdate}
-          dismissUpdate={() => setPendingUpdate(null)}
           registerDispatch={registerDispatch}
           onNewTab={openTab}
           onCloseTab={() => closeTab(t.id)}
@@ -3685,6 +3658,16 @@ export function App() {
           setActiveTabId={setActiveTabId}
         />
       ))}
+      {pendingUpdate ? (
+        <UpdateOverlay
+          version={pendingUpdate.version}
+          currentVersion={pendingUpdate.currentVersion}
+          status={updateStatus}
+          progress={updateProgress}
+          onInstall={installUpdate}
+          onDismiss={() => setPendingUpdate(null)}
+        />
+      ) : null}
     </>
   );
 }
