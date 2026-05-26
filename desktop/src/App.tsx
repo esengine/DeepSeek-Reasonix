@@ -45,6 +45,8 @@ import type {
   CheckpointVerdict,
   ChoiceVerdict,
   ConfirmationChoice,
+  ExternalSessionApp,
+  ExternalSessionSource,
   IncomingEvent,
   JobInfo,
   McpSpecInfo,
@@ -285,6 +287,7 @@ type State = {
   activePlan: ActivePlan | null;
   usage: UsageStats;
   sessions: SessionInfo[];
+  externalImportSources: ExternalSessionApp[];
   settings: Settings | null;
   qq: QQDesktopSettingsState | null;
   balance: Balance | null;
@@ -860,6 +863,23 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "$sessions":
       return { ...state, sessions: ev.items };
+    case "$session_import_sources":
+      return { ...state, externalImportSources: ev.apps };
+    case "$session_import_result":
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          {
+            kind: "status",
+            text: t("sidebarPanel.importResult", {
+              imported: ev.imported,
+              skipped: ev.skipped,
+              failed: ev.failed,
+            }),
+          },
+        ],
+      };
     case "$mcp_specs":
       return {
         ...state,
@@ -1327,6 +1347,7 @@ function TabRuntime({
     activePlan: null,
     usage: zeroUsage(),
     sessions: [],
+    externalImportSources: [],
     settings: null,
     qq: null,
     balance: null,
@@ -2177,6 +2198,7 @@ function TabRuntime({
 
         <Sidebar
           sessions={state.sessions}
+          importSources={state.externalImportSources}
           activeName={state.currentSession}
           onNewChat={newChat}
           onLoadSession={(name) => {
@@ -2185,6 +2207,13 @@ function TabRuntime({
           }}
           onDeleteSession={(name) => sendRpc({ cmd: "session_delete", name })}
           onRenameSession={(name, title) => sendRpc({ cmd: "session_rename", name, title })}
+          onRefreshImportSources={() => sendRpc({ cmd: "session_import_scan" })}
+          onImportDetectedSessions={(sources: ExternalSessionSource[]) =>
+            sendRpc({ cmd: "session_import_bulk", sources })
+          }
+          onImportSession={({ source, path, name }) =>
+            sendRpc({ cmd: "session_import", source, path, ...(name ? { name } : {}) })
+          }
           onOpenSettings={() => openSettingsAt("general")}
           onOpenRules={() => openSettingsAt("rules")}
           onOpenCommands={() => palette.setOpen(true)}

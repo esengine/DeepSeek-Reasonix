@@ -61,6 +61,7 @@ function initialState(): Parameters<typeof reduce>[0] {
       reservedTokens: 0,
     },
     sessions: [],
+    externalImportSources: [],
     settings: null,
     qq: null,
     balance: null,

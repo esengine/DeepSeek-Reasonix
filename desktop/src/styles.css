@@ -1442,6 +1442,259 @@ html[data-platform="macos"] .titlebar .tb-left {
   background: oklch(52% 0.22 25);
 }
 
+.session-import-popover {
+  position: fixed;
+  z-index: 80;
+  width: 320px;
+  max-width: min(320px, calc(100vw - 16px));
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  color: var(--fg);
+  animation: rise 0.16s ease-out;
+}
+.session-import-popover .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.session-import-popover .head .close {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-2);
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.session-import-popover .head .close:hover {
+  background: var(--panel);
+  color: var(--fg);
+}
+.session-import-popover .import-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.session-import-popover .import-tabs button,
+.session-import-popover .import-detected-head button,
+.session-import-popover .import-app-row {
+  border: 1px solid var(--border-strong);
+  font-family: inherit;
+  cursor: pointer;
+}
+.session-import-popover .import-tabs button {
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg-2);
+  padding: 7px 8px;
+  font-size: 12px;
+}
+.session-import-popover .import-tabs button[data-on="true"] {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border-strong));
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg));
+  color: var(--fg);
+}
+.session-import-popover .import-detected-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+  font-size: 11px;
+  color: var(--muted-2);
+}
+.session-import-popover .import-detected-head button {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-import-popover .import-app-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.session-import-popover .import-empty {
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--muted-2);
+  font-size: 12px;
+}
+.session-import-popover .import-app-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 9px;
+  text-align: left;
+}
+.session-import-popover .import-app-row[data-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+.session-import-popover .app-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklab, var(--accent) 18%, var(--panel));
+  color: var(--fg);
+}
+.session-import-popover .app-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-import-popover .app-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.session-import-popover .app-meta,
+.session-import-popover .hint {
+  font-size: 11px;
+  color: var(--muted-2);
+}
+.session-import-popover .hint {
+  margin: 9px 0 2px;
+}
+.session-import-popover .switch {
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  position: relative;
+}
+.session-import-popover .switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.14s ease;
+}
+.session-import-popover .switch[data-on="true"] {
+  background: var(--accent);
+}
+.session-import-popover .switch[data-on="true"]::after {
+  transform: translateX(14px);
+}
+.session-import-popover .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.session-import-popover .label {
+  font-size: 11px;
+  color: var(--muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.session-import-popover input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.session-import-popover input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent);
+}
+.session-import-popover .seg {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.session-import-popover .seg button,
+.session-import-popover .path-row button,
+.session-import-popover .actions button {
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.session-import-popover .seg button {
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--fg-2);
+  padding: 8px 10px;
+}
+.session-import-popover .seg button[data-on="true"] {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border-strong));
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg));
+  color: var(--fg);
+}
+.session-import-popover .path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.session-import-popover .path-row button {
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--fg);
+  padding: 0 12px;
+}
+.session-import-popover .actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.session-import-popover .actions button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+}
+.session-import-popover .actions button.cancel {
+  background: transparent;
+  color: var(--fg-2);
+}
+.session-import-popover .actions button.confirm {
+  background: var(--accent);
+  border-color: transparent;
+  color: white;
+}
+.session-import-popover .actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Folder-delete confirm needs more room: workspace name + session count */
 .folder-menu { max-width: 260px; }
 .folder-menu .sm-confirm-desc {

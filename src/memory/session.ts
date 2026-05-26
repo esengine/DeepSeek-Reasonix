@@ -71,6 +71,10 @@ export interface SessionMeta {
   lastPromptTokens?: number;
   /** True when the session filename/summary was generated from conversation content. */
   autoTitleGenerated?: boolean;
+  /** Source app when the session was imported from another local AI client. */
+  importedSource?: "claude" | "codex";
+  /** Absolute path of the source transcript used for import. */
+  importedPath?: string;
 }
 
 export function sessionsDir(): string {

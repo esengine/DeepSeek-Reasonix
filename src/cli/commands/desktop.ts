@@ -100,6 +100,12 @@ import {
   timestampSuffix,
 } from "../../memory/session.js";
 import { QQChannel } from "../../qq/channel.js";
+import {
+  type ExternalSessionSource,
+  discoverExternalSessionApps,
+  importExternalSession,
+  importExternalSessions,
+} from "../../session-import.js";
 import { SkillStore } from "../../skills.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
@@ -126,6 +132,9 @@ type InMessage = { tabId?: string } & (
   | { cmd: "session_delete"; name: string }
   | { cmd: "session_load"; name: string }
   | { cmd: "session_rename"; name: string; title: string }
+  | { cmd: "session_import"; source: ExternalSessionSource; path: string; name?: string }
+  | { cmd: "session_import_scan" }
+  | { cmd: "session_import_bulk"; sources: ExternalSessionSource[] }
   | { cmd: "memory_read"; path: string }
   | { cmd: "new_chat" }
   | { cmd: "setup_save_key"; key: string }
@@ -243,6 +252,18 @@ interface SessionsEvent {
     summary?: string;
     workspaceStatus?: "matched" | "legacy_missing_meta";
   }[];
+}
+
+interface SessionImportSourcesEvent {
+  type: "$session_import_sources";
+  apps: ReturnType<typeof discoverExternalSessionApps>;
+}
+
+interface SessionImportResultEvent {
+  type: "$session_import_result";
+  imported: number;
+  skipped: number;
+  failed: number;
 }
 
 interface MentionResultsEvent {
@@ -478,6 +499,8 @@ type EmittableEvent =
   | StepCompletedEvent
   | PlanClearedEvent
   | SessionsEvent
+  | SessionImportSourcesEvent
+  | SessionImportResultEvent
   | SessionLoadedEvent
   | SessionEmptyEvent
   | NeedsSetupEvent
@@ -722,6 +745,56 @@ function emitSessions(tab: Tab): void {
   } catch (err) {
     emit({ type: "$error", message: `session_list failed: ${(err as Error).message}` }, tab.id);
   }
+}
+
+function loadSessionIntoTab(
+  tab: Tab,
+  name: string,
+  actions: {
+    abortTurn: (tab: Tab) => void;
+    cancelPendingGates: (tab: Tab) => void;
+    persistOpenTabs: () => void;
+  },
+): void {
+  const records = loadSessionMessages(name);
+  const backfilledWorkspace = patchSessionWorkspaceIfMissing(name, tab.rootDir);
+  const meta = loadSessionMeta(name);
+  // Only set switching flag when there's a live turn to abort —
+  // otherwise the flag stays true and suppresses the first turn's events (#1217).
+  if (tab.aborter) tab.switching = true;
+  actions.abortTurn(tab);
+  actions.cancelPendingGates(tab);
+  tab.currentSession = name;
+  actions.persistOpenTabs();
+  if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+  const loadedMessages = buildLoadedMessages(records);
+  if (loadedMessages.length === 0) {
+    let sizeBytes = 0;
+    try {
+      sizeBytes = statSync(sessionPath(name)).size;
+    } catch {
+      /* file may not exist */
+    }
+    process.stderr.write(
+      `session_load: "${name}" returned 0 messages (file size=${sizeBytes}B) — empty or unreadable jsonl\n`,
+    );
+    emit({ type: "$session_empty", name, sizeBytes }, tab.id);
+  }
+  emit(
+    {
+      type: "$session_loaded",
+      name,
+      messages: loadedMessages,
+      carryover: {
+        totalCostUsd: meta.totalCostUsd ?? 0,
+        cacheHitTokens: meta.cacheHitTokens ?? 0,
+        cacheMissTokens: meta.cacheMissTokens ?? 0,
+        totalCompletionTokens: meta.totalCompletionTokens ?? 0,
+      },
+    },
+    tab.id,
+  );
+  if (backfilledWorkspace) emitSessions(tab);
 }
 
 function summarizeMcpSpec(raw: string): McpSpecInfo {
@@ -2240,52 +2313,77 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       }
       return;
     }
-    if (msg.cmd === "session_load") {
+    if (msg.cmd === "session_import") {
       try {
-        const records = loadSessionMessages(msg.name);
-        const backfilledWorkspace = patchSessionWorkspaceIfMissing(msg.name, tab.rootDir);
-        const meta = loadSessionMeta(msg.name);
-        // Only set switching flag when there's a live turn to abort —
-        // otherwise the flag stays true and suppresses the first turn's events (#1217).
-        if (tab.aborter) tab.switching = true;
-        abortTurn(tab);
-        cancelPendingGates(tab);
-        tab.currentSession = msg.name;
-        persistOpenTabs();
-        if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
-        const loadedMessages = buildLoadedMessages(records);
-        // Empty load is a known silent-failure path (file 0 bytes, all
-        // lines malformed, etc.). Log to stderr so a terminal-launched
-        // desktop reports something diagnostic, and emit a $session_empty
-        // event so the UI can surface "loaded but empty" instead of
-        // looking like the click did nothing. Issue #1179.
-        if (loadedMessages.length === 0) {
-          let sizeBytes = 0;
-          try {
-            sizeBytes = statSync(sessionPath(msg.name)).size;
-          } catch {
-            /* file may not exist */
-          }
-          process.stderr.write(
-            `session_load: "${msg.name}" returned 0 messages (file size=${sizeBytes}B) — empty or unreadable jsonl\n`,
-          );
-          emit({ type: "$session_empty", name: msg.name, sizeBytes }, tab.id);
-        }
+        const result = importExternalSession({
+          source: msg.source,
+          path: msg.path,
+          name: msg.name,
+          workspace: tab.rootDir,
+        });
+        emitSessions(tab);
+        loadSessionIntoTab(tab, result.name, {
+          abortTurn,
+          cancelPendingGates,
+          persistOpenTabs,
+        });
+      } catch (err) {
+        emit(
+          { type: "$error", message: `session_import failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "session_import_scan") {
+      try {
+        emit({ type: "$session_import_sources", apps: discoverExternalSessionApps() }, tab.id);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `session_import_scan failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "session_import_bulk") {
+      try {
+        const result = importExternalSessions({
+          sources: msg.sources,
+          workspace: tab.rootDir,
+        });
+        emitSessions(tab);
         emit(
           {
-            type: "$session_loaded",
-            name: msg.name,
-            messages: loadedMessages,
-            carryover: {
-              totalCostUsd: meta.totalCostUsd ?? 0,
-              cacheHitTokens: meta.cacheHitTokens ?? 0,
-              cacheMissTokens: meta.cacheMissTokens ?? 0,
-              totalCompletionTokens: meta.totalCompletionTokens ?? 0,
-            },
+            type: "$session_import_result",
+            imported: result.imported,
+            skipped: result.skipped,
+            failed: result.failed,
           },
           tab.id,
         );
-        if (backfilledWorkspace) emitSessions(tab);
+        if (result.latestName) {
+          loadSessionIntoTab(tab, result.latestName, {
+            abortTurn,
+            cancelPendingGates,
+            persistOpenTabs,
+          });
+        }
+      } catch (err) {
+        emit(
+          { type: "$error", message: `session_import_bulk failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "session_load") {
+      try {
+        loadSessionIntoTab(tab, msg.name, {
+          abortTurn,
+          cancelPendingGates,
+          persistOpenTabs,
+        });
       } catch (err) {
         process.stderr.write(`session_load: "${msg.name}" threw — ${(err as Error).message}\n`);
         emit({ type: "$error", message: `session_load failed: ${(err as Error).message}` }, tab.id);
