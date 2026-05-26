@@ -67,6 +67,12 @@ describe("codeSystemPrompt", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/not a sub-profile/);
   });
 
+  it("keeps generated script tests rooted at the workspace instead of input data dirs", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/generated scripts from the workspace root/i);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/do not `cd` into input/i);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/pass data paths as arguments/i);
+  });
+
   describe("audit-mode rails (#610)", () => {
     it("warns against theorizing on auto-preview output instead of reading the dispatch site", () => {
       expect(CODE_SYSTEM_PROMPT).toMatch(/Auto-preview is for locating, not auditing/);
