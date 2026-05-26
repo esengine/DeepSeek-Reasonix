@@ -636,7 +636,7 @@ function PageGeneral({
             value={editorDraft}
             placeholder="cursor --goto"
             onChange={(e) => setEditorDraft(e.target.value)}
-            onBlur={() => onSave({ editor: editorDraft || undefined })}
+            onBlur={() => onSave({ editor: editorDraft.trim() })}
           />
         </div>
       </section>
@@ -952,7 +952,7 @@ function ApiKeySection({
           className="field mono"
           value={urlDraft}
           onChange={(e) => setUrlDraft(e.target.value)}
-          onBlur={() => onSave({ baseUrl: urlDraft.trim() || undefined })}
+          onBlur={() => onSave({ baseUrl: urlDraft.trim() })}
         />
       </div>
     </section>
