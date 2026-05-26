@@ -813,9 +813,11 @@ html[data-platform="macos"] .titlebar .tb-left {
 }
 .side-head .new-btn {
   flex: 1;
+  min-width: 0;
   height: 30px;
   display: inline-flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 0 10px;
   font-size: 14px;
@@ -824,6 +826,15 @@ html[data-platform="macos"] .titlebar .tb-left {
   background: var(--accent);
   color: oklch(99% 0 0);
   box-shadow: var(--shadow-sm);
+}
+.side-head .new-btn svg {
+  flex: 0 0 auto;
+}
+.side-head .new-btn > span:not(.shortcut) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .side-head .new-btn:hover {
   background: var(--accent-strong);
@@ -837,6 +848,7 @@ html[data-platform="macos"] .titlebar .tb-left {
   font-weight: 500;
 }
 .side-head .new-btn .shortcut {
+  flex: 0 0 auto;
   margin-left: auto;
 }
 .side-head .new-btn .shortcut kbd {
