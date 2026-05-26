@@ -124,3 +124,28 @@ describe("DeepSeekClient usage parsing", () => {
     expect(resp.usage.promptCacheMissTokens).toBe(42);
   });
 });
+
+describe("DeepSeekClient request serialization", () => {
+  it("replaces lone UTF-16 surrogates before sending JSON", async () => {
+    let sentBody = "";
+    const spy = vi.fn(async (_url: unknown, init: unknown) => {
+      sentBody = String((init as RequestInit).body ?? "");
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: spy as unknown as typeof fetch,
+    });
+
+    await client.chat({
+      model: "deepseek-chat",
+      messages: [{ role: "user", content: `bad ${String.fromCharCode(0xd800)} text` }],
+    });
+
+    expect(sentBody).not.toMatch(/\\ud[89ab][0-9a-f]{2}/i);
+    expect(JSON.parse(sentBody).messages[0].content).toBe("bad \uFFFD text");
+  });
+});

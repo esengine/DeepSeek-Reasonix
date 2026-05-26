@@ -108,6 +108,49 @@ export interface DeepSeekClientOptions {
   retry?: RetryOptions;
 }
 
+// DeepSeek's strict JSON parser rejects lone UTF-16 surrogate escapes
+// (`\ud800`, `\udc00`) even though JavaScript can carry them in strings.
+function replaceLoneSurrogates(value: string): string {
+  let out = "";
+  let last = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        i++;
+      } else {
+        out += value.slice(last, i);
+        out += "\uFFFD";
+        last = i + 1;
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      out += value.slice(last, i);
+      out += "\uFFFD";
+      last = i + 1;
+    }
+  }
+  if (last === 0) return value;
+  return out + value.slice(last);
+}
+
+function sanitizeJsonTransportValue(value: unknown): unknown {
+  if (typeof value === "string") return replaceLoneSurrogates(value);
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeJsonTransportValue(item));
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    out[key] = sanitizeJsonTransportValue(item);
+  }
+  return out;
+}
+
+function stringifyJsonTransport(value: unknown): string {
+  return JSON.stringify(sanitizeJsonTransportValue(value));
+}
+
 export class DeepSeekClient {
   readonly apiKey: string;
   readonly baseUrl: string;
@@ -257,7 +300,7 @@ export class DeepSeekClient {
             Authorization: `Bearer ${this.apiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(this.buildPayload(opts, false)),
+          body: stringifyJsonTransport(this.buildPayload(opts, false)),
           signal,
         },
         { ...this.retry, signal },
@@ -306,7 +349,7 @@ export class DeepSeekClient {
             "Content-Type": "application/json",
             Accept: "text/event-stream",
           },
-          body: JSON.stringify(this.buildPayload(opts, true)),
+          body: stringifyJsonTransport(this.buildPayload(opts, true)),
           signal,
         },
         { ...this.retry, signal },
