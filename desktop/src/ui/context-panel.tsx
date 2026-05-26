@@ -110,11 +110,14 @@ type TreeNode =
 
 async function openContextFile(path: string, settings: Settings | null): Promise<void> {
   const workspaceDir = settings?.workspaceDir;
-  const sep = workspaceDir?.includes("\\") ? "\\" : "/";
+  const isWindows = workspaceDir?.includes("\\") ?? false;
+  const sep = isWindows ? "\\" : "/";
   const abs =
     workspaceDir && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith("/")
-      ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "")}`
-      : path;
+      ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "").replace(/\//g, sep)}`
+      : isWindows
+        ? path.replace(/\//g, "\\")
+        : path;
   const editor = settings?.editor?.trim();
   if (editor) {
     await invoke("open_in_editor", { command: editor, path: abs, line: null });

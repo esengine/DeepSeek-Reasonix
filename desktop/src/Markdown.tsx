@@ -37,10 +37,14 @@ export const WorkspaceProvider = WorkspaceContext.Provider;
 
 function resolveAgainstWorkspace(rel: string, ws: string | undefined): string {
   if (!ws) return rel;
-  if (/^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith("/")) return rel;
-  const sep = ws.includes("\\") ? "\\" : "/";
+  const isWindows = ws.includes("\\");
+  if (/^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith("/")) {
+    return isWindows ? rel.replace(/\//g, "\\") : rel;
+  }
+  const sep = isWindows ? "\\" : "/";
   const trimmed = ws.replace(/[\\/]$/, "");
-  return `${trimmed}${sep}${rel.replace(/^\.[\\/]/, "")}`;
+  const relative = rel.replace(/^\.[\\/]/, "").replace(/\//g, sep);
+  return `${trimmed}${sep}${relative}`;
 }
 
 const KNOWN_EXTS =
