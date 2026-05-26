@@ -47,6 +47,16 @@ export function SlashArgPicker({
   pathCandidates,
 }: SlashArgPickerProps): React.ReactElement | null {
   const color = useColor();
+  const headerArgsHint = (() => {
+    const argsKey = `slash.${spec.cmd}.argsHint`;
+    const translatedArgs = t(argsKey);
+    return translatedArgs === argsKey ? (spec.argsHint ?? "") : translatedArgs;
+  })();
+  const headerSummary = (() => {
+    const descKey = `slash.${spec.cmd}.description`;
+    const translated = t(descKey);
+    return translated === descKey ? spec.summary : translated;
+  })();
   const headerRow = (
     <Box>
       <Text color={color.accent} bold>
@@ -55,8 +65,8 @@ export function SlashArgPicker({
       <Text color={color.accent} bold>
         {`/${spec.cmd}`}
       </Text>
-      {spec.argsHint ? <Text dimColor>{` ${spec.argsHint}`}</Text> : null}
-      <Text dimColor>{`  ${spec.summary}`}</Text>
+      {headerArgsHint ? <Text dimColor>{` ${headerArgsHint}`}</Text> : null}
+      <Text dimColor>{`  ${headerSummary}`}</Text>
     </Box>
   );
 
