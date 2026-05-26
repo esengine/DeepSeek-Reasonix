@@ -10,7 +10,7 @@ function cssRule(selector: string): string {
 }
 
 describe("dashboard sidebar new chat button layout", () => {
-  it("keeps the English label on one line in the compact desktop sidebar", () => {
+  it("keeps localized labels on one line in the compact desktop sidebar", () => {
     expect(cssRule(".side-head .new-btn")).toContain("flex-wrap: nowrap");
     expect(cssRule(".side-head .new-btn")).toContain("min-width: 0");
     expect(cssRule(".side-head .new-btn svg")).toContain("flex: 0 0 auto");
