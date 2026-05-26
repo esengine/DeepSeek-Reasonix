@@ -197,22 +197,19 @@ describe("McpClient: initialize handshake", () => {
     await client.close();
   });
 
-  it("passes the workspace root in initialize params", async () => {
+  it("advertises the roots capability when a workspace is configured", async () => {
     const received: JsonRpcRequest[] = [];
     const workspaceDir = "/tmp/reasonix-workspace";
-    const workspaceUri = pathToFileURL(workspaceDir).href;
     const transport = new FakeMcpTransport({ tools: [], received });
     const client = new McpClient({ transport, workspaceDir });
     await client.initialize();
     const init = received.find((r) => r.method === "initialize")!;
     const params = init.params as {
       capabilities: Record<string, unknown>;
-      rootUri?: string;
-      workspaceFolders?: Array<{ uri: string; name?: string }>;
-    };
+    } & Record<string, unknown>;
     expect(params.capabilities).toHaveProperty("roots");
-    expect(params.rootUri).toBe(workspaceUri);
-    expect(params.workspaceFolders).toEqual([{ uri: workspaceUri, name: "reasonix-workspace" }]);
+    expect(params).not.toHaveProperty("rootUri");
+    expect(params).not.toHaveProperty("workspaceFolders");
     await client.close();
   });
 

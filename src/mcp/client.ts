@@ -116,12 +116,6 @@ export class McpClient {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities,
       clientInfo: this.clientInfo,
-      ...(this.workspaceRoot
-        ? {
-            rootUri: this.workspaceRoot.uri,
-            workspaceFolders: [this.workspaceRoot],
-          }
-        : {}),
     };
     const result = await this.request<InitializeResult>("initialize", params, opts.signal);
     this._serverCapabilities = result.capabilities ?? {};

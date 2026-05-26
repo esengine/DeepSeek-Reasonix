@@ -62,8 +62,6 @@ export interface InitializeParams {
   protocolVersion: string;
   capabilities: McpClientCapabilities;
   clientInfo: McpClientInfo;
-  rootUri?: string;
-  workspaceFolders?: McpRoot[];
 }
 
 export interface InitializeResult {
