@@ -16,6 +16,7 @@ import { bootstrapSemanticSearchInCodeMode } from "../index/semantic/tool.js";
 import { ToolRegistry } from "../tools.js";
 import { registerChoiceTool } from "../tools/choice.js";
 import { registerCodeQueryTools } from "../tools/code-query.js";
+import { registerCodexTools } from "../tools/codex.js";
 import { registerFilesystemTools } from "../tools/filesystem.js";
 import { registerJavaSourceTool } from "../tools/java-source.js";
 import { JobRegistry } from "../tools/jobs.js";
@@ -77,6 +78,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     });
     registerMemoryTools(tools, { projectRoot: root });
     registerCodeQueryTools(tools, { rootDir: root });
+    registerCodexTools(tools, { rootDir: root });
   };
 
   const reBootstrapSemantic = async (root: string): Promise<{ enabled: boolean }> => {
