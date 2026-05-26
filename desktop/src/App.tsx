@@ -242,13 +242,14 @@ export type Settings = {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
-  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "ollama";
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
     tavily?: string;
     perplexity?: string;
     exa?: string;
+    ollama?: string;
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
@@ -348,6 +349,7 @@ function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
     tavilyApiKey: _tavily,
     perplexityApiKey: _perplexity,
     exaApiKey: _exa,
+    ollamaApiKey: _ollama,
     webSearchEndpoint,
     ...rest
   } = patch;

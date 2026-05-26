@@ -285,7 +285,8 @@ export type WebSearchEngineName =
   | "metaso"
   | "tavily"
   | "perplexity"
-  | "exa";
+  | "exa"
+  | "ollama";
 
 export type SettingsEvent = {
   type: "$settings";

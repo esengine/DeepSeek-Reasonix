@@ -182,6 +182,7 @@ export const de: typeof en = {
     webSearchEngineTavily: "tavily — 1000/Monat kostenlos (TAVILY_API_KEY setzen)",
     webSearchEnginePerplexity: "perplexity — AI-native (PERPLEXITY_API_KEY setzen)",
     webSearchEngineExa: "exa — AI-native 1000/Monat kostenlos (EXA_API_KEY setzen)",
+    webSearchEngineOllama: "ollama — Ollama Cloud-Websuche (OLLAMA_API_KEY setzen)",
     webSearchEngineNote: "gilt für den nächsten web_search-Aufruf",
     webSearchEndpoint: "SearXNG-Endpunkt",
     webSearchEndpointHint: "Basis-URL der SearXNG-Instanz. Leer = http://localhost:8080.",
@@ -192,6 +193,7 @@ export const de: typeof en = {
       tavily: "Tavily API-Key",
       perplexity: "Perplexity API-Key",
       exa: "Exa API-Key",
+      ollama: "Ollama API-Key",
     },
     baseUrl: "DeepSeek-Basis-URL",
     baseUrlHint:

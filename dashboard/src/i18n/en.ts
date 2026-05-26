@@ -237,6 +237,7 @@ export const en = {
     webSearchEngineTavily: "tavily — 1000/mo free (set TAVILY_API_KEY)",
     webSearchEnginePerplexity: "perplexity — AI-native (set PERPLEXITY_API_KEY)",
     webSearchEngineExa: "exa — AI-native 1000/mo free (set EXA_API_KEY)",
+    webSearchEngineOllama: "ollama — Ollama cloud web search (set OLLAMA_API_KEY)",
     webSearchEngineNote: "applies to the next web_search call",
     sectionBudget: "Budget",
     budget: "Budget",

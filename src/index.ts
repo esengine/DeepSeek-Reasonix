@@ -297,6 +297,7 @@ export {
   loadMetasoApiKey,
   loadPerplexityApiKey,
   loadExaApiKey,
+  loadOllamaApiKey,
   readConfig,
   redactKey,
   saveApiKey,

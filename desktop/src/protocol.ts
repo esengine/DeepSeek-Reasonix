@@ -273,7 +273,8 @@ export type EditMode = "review" | "auto" | "yolo" | "plan";
 
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
-export type WebSearchEngineName = "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+export type WebSearchEngineName = "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa"
+  | "ollama";
 
 export type SettingsEvent = {
   type: "$settings";
@@ -293,6 +294,7 @@ export type SettingsEvent = {
     tavily?: string;
     perplexity?: string;
     exa?: string;
+    ollama?: string;
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
@@ -333,6 +335,7 @@ export type SettingsPatch = {
   tavilyApiKey?: string | null;
   perplexityApiKey?: string | null;
   exaApiKey?: string | null;
+  ollamaApiKey?: string | null;
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
 };

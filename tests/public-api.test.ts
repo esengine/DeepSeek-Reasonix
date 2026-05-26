@@ -284,6 +284,7 @@ const PUBLIC_API: readonly string[] = [
   "loadExaApiKey",
   "loadHooks",
   "loadMetasoApiKey",
+  "loadOllamaApiKey",
   "loadPerplexityApiKey",
   "loadSessionMessages",
   "matchesTool",

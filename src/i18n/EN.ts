@@ -424,8 +424,8 @@ export const EN: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "switch web search backend — bing (default, works from CN without proxy), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), or exa (AI-native)",
-      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa> [<key>]",
+        "switch web search backend — bing (default, works from CN without proxy), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), or ollama (Ollama cloud web search)",
+      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|ollama> [<key>]",
     },
   },
   wizard: {
@@ -1207,6 +1207,8 @@ export const EN: TranslationSchema = {
         "  /search-engine perplexity          use Perplexity AI (AI-native answer + citations — set PERPLEXITY_API_KEY or perplexityApiKey in config; get one at https://perplexity.ai/settings/api)",
       usageExa:
         "  /search-engine exa                 use Exa API (AI-native answer + citations, free 1000/mo — set EXA_API_KEY or exaApiKey in config; sign up at https://exa.ai)",
+      usageOllama:
+        "  /search-engine ollama              use Ollama cloud web search — set OLLAMA_API_KEY or ollamaApiKey in config; get one at https://ollama.com/settings/keys",
       alias: "Alias: /se",
       searxngInfo:
         "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
@@ -1220,6 +1222,8 @@ export const EN: TranslationSchema = {
       switchedPerplexityNote:
         " Set PERPLEXITY_API_KEY or `perplexityApiKey` in config; get one at https://perplexity.ai/settings/api.",
       switchedExaNote: " Set EXA_API_KEY or `exaApiKey` in config; sign up at https://exa.ai.",
+      switchedOllamaNote:
+        " Set OLLAMA_API_KEY or `ollamaApiKey` in config; get one at https://ollama.com/settings/keys.",
       keyNeeded:
         'No API key configured for "{engine}".\n\n  1. Set the {envVar} environment variable\n  2. Or provide one inline:  /search-engine {engine} <your-key>\n  3. Or add "{engine}ApiKey" to ~/.reasonix/config.json\n\nThen retry /search-engine {engine}.',
       keySaved: " API key saved to config.",

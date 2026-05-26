@@ -826,7 +826,15 @@ describe("config", () => {
 
   describe("webSearchEngine", () => {
     it("preserves each known engine end-to-end (no silent tavily→default fall-through, #1309)", () => {
-      for (const engine of ["bing", "searxng", "metaso", "tavily"] as const) {
+      for (const engine of [
+        "bing",
+        "searxng",
+        "metaso",
+        "tavily",
+        "perplexity",
+        "exa",
+        "ollama",
+      ] as const) {
         writeConfig({ webSearchEngine: engine }, path);
         expect(webSearchEngine(path)).toBe(engine);
       }

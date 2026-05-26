@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadMetasoApiKey } from "../src/config.js";
+import { loadMetasoApiKey, writeConfig } from "../src/config.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
   formatSearchResults,
@@ -923,15 +923,17 @@ describe("formatSearchResults", () => {
 });
 
 describe("registerWebTools", () => {
+  const isolatedConfigPath = "/tmp/reasonix-web-tools-test-config-does-not-exist.json";
+
   it("registers web_search and web_fetch", () => {
     const registry = new ToolRegistry();
-    registerWebTools(registry);
+    registerWebTools(registry, { configPath: isolatedConfigPath });
     expect(registry.size).toBe(2);
   });
 
   it("web_fetch refuses non-http(s) urls", async () => {
     const registry = new ToolRegistry();
-    registerWebTools(registry);
+    registerWebTools(registry, { configPath: isolatedConfigPath });
     const out = await registry.dispatch("web_fetch", JSON.stringify({ url: "file:///etc/passwd" }));
     expect(out).toMatch(/must start with http/);
   });
@@ -948,7 +950,7 @@ describe("registerWebTools", () => {
     ) as unknown as typeof fetch;
     try {
       const registry = new ToolRegistry();
-      registerWebTools(registry);
+      registerWebTools(registry, { configPath: isolatedConfigPath });
       const out = await registry.dispatch(
         "web_search",
         JSON.stringify({ query: "flutter 3.19", topK: 2 }),
@@ -972,7 +974,7 @@ describe("registerWebTools", () => {
     ) as unknown as typeof fetch;
     try {
       const registry = new ToolRegistry();
-      registerWebTools(registry);
+      registerWebTools(registry, { configPath: isolatedConfigPath });
       const out = await registry.dispatch(
         "web_fetch",
         JSON.stringify({ url: "https://example.com/" }),
@@ -980,6 +982,78 @@ describe("registerWebTools", () => {
       expect(out).toContain("Demo");
       expect(out).toContain("https://example.com/");
       expect(out).toContain("Hello world.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_search can dispatch through Ollama cloud", async () => {
+    const configPath = "/tmp/reasonix-web-tools-ollama-search-test.json";
+    writeConfig({ webSearchEngine: "ollama", ollamaApiKey: "ollama-test-key" }, configPath);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      expect(_url).toBe("https://ollama.com/api/web_search");
+      expect((init as RequestInit).headers).toMatchObject({
+        Authorization: "Bearer ollama-test-key",
+      });
+      expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+        query: "reasonix",
+        max_results: 2,
+      });
+      return new Response(
+        JSON.stringify({
+          results: [
+            { title: "Reasonix", url: "https://example.com/r", content: "Result body" },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry, { configPath });
+      const out = await registry.dispatch(
+        "web_search",
+        JSON.stringify({ query: "reasonix", topK: 2 }),
+      );
+      expect(out).toContain("https://example.com/r");
+      expect(out).toContain("Result body");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("web_fetch can dispatch through Ollama cloud when selected", async () => {
+    const configPath = "/tmp/reasonix-web-tools-ollama-fetch-test.json";
+    writeConfig({ webSearchEngine: "ollama", ollamaApiKey: "ollama-test-key" }, configPath);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      expect(_url).toBe("https://ollama.com/api/web_fetch");
+      expect((init as RequestInit).headers).toMatchObject({
+        Authorization: "Bearer ollama-test-key",
+      });
+      expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+        url: "https://example.com/page",
+      });
+      return new Response(
+        JSON.stringify({
+          title: "Fetched",
+          content: "Fetched content",
+          links: ["https://example.com/next"],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const registry = new ToolRegistry();
+      registerWebTools(registry, { configPath });
+      const out = await registry.dispatch(
+        "web_fetch",
+        JSON.stringify({ url: "https://example.com/page" }),
+      );
+      expect(out).toContain("Fetched");
+      expect(out).toContain("Fetched content");
+      expect(out).toContain("https://example.com/next");
     } finally {
       globalThis.fetch = originalFetch;
     }

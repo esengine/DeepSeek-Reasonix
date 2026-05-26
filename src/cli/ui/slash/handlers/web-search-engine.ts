@@ -1,6 +1,7 @@
 import {
   loadExaApiKey,
   loadMetasoApiKey,
+  loadOllamaApiKey,
   loadPerplexityApiKey,
   loadTavilyApiKey,
   readConfig,
@@ -21,7 +22,8 @@ export const handlers: Record<string, SlashHandler> = {
         engine !== "metaso" &&
         engine !== "tavily" &&
         engine !== "perplexity" &&
-        engine !== "exa")
+        engine !== "exa" &&
+        engine !== "ollama")
     ) {
       return {
         info: [
@@ -36,6 +38,7 @@ export const handlers: Record<string, SlashHandler> = {
           t("handlers.webSearchEngine.usageTavily"),
           t("handlers.webSearchEngine.usagePerplexity"),
           t("handlers.webSearchEngine.usageExa"),
+          t("handlers.webSearchEngine.usageOllama"),
           "",
           t("handlers.webSearchEngine.alias"),
           "",
@@ -47,7 +50,7 @@ export const handlers: Record<string, SlashHandler> = {
 
     const cfg = readConfig();
 
-    const apiKeyEngines = new Set(["tavily", "perplexity", "exa", "metaso"]);
+    const apiKeyEngines = new Set(["tavily", "perplexity", "exa", "metaso", "ollama"]);
     if (apiKeyEngines.has(engine)) {
       const loadKey =
         engine === "tavily"
@@ -56,7 +59,9 @@ export const handlers: Record<string, SlashHandler> = {
             ? loadPerplexityApiKey
             : engine === "exa"
               ? loadExaApiKey
-              : loadMetasoApiKey;
+              : engine === "ollama"
+                ? loadOllamaApiKey
+                : loadMetasoApiKey;
 
       if (args[1]) {
         cfg.webSearchEngine = engine;
@@ -96,7 +101,9 @@ export const handlers: Record<string, SlashHandler> = {
               ? t("handlers.webSearchEngine.switchedPerplexityNote")
               : engine === "exa"
                 ? t("handlers.webSearchEngine.switchedExaNote")
-                : "";
+                : engine === "ollama"
+                  ? t("handlers.webSearchEngine.switchedOllamaNote")
+                  : "";
     const detail =
       engine === "searxng"
         ? t("handlers.webSearchEngine.confirmedDetail", { endpoint: webSearchEndpoint() })

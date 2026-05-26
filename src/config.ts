@@ -178,8 +178,8 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), or "exa" (Exa API). */
-  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), or "ollama" (Ollama cloud web search). */
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "ollama";
   /** Base URL for SearXNG instance (default http://localhost:8080). */
   webSearchEndpoint?: string;
   /** Metaso API key. Falls back to METASO_API_KEY env var. */
@@ -190,6 +190,8 @@ export interface ReasonixConfig {
   perplexityApiKey?: string;
   /** Exa API key. Falls back to EXA_API_KEY env var. Free 1000/mo signup at https://exa.ai */
   exaApiKey?: string;
+  /** Ollama cloud API key. Falls back to OLLAMA_API_KEY env var. Used for Ollama web_search/web_fetch. */
+  ollamaApiKey?: string;
 
   /** TUI mouse-wheel scrolling via SGR mouse tracking. Default true. Set false to fall back to native terminal drag-select for copy (then wheel is terminal-dependent — most terminals translate wheel→arrow in alt-screen, some don't). */
   mouseTracking?: boolean;
@@ -360,6 +362,15 @@ export function loadPerplexityApiKey(path: string = defaultConfigPath()): string
 export function loadExaApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.EXA_API_KEY) return process.env.EXA_API_KEY.trim();
   const cfg = readConfig(path).exaApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
+/** Ollama cloud API key — env > config > undefined. */
+export function loadOllamaApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.OLLAMA_API_KEY) return process.env.OLLAMA_API_KEY.trim();
+  if (process.env.ollamaApiKey) return process.env.ollamaApiKey.trim();
+  const cfg = readConfig(path).ollamaApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
   return undefined;
 }
@@ -906,13 +917,14 @@ export function loadJavaSourceEnabled(path: string = defaultConfigPath()): boole
 
 export function webSearchEngine(
   path: string = defaultConfigPath(),
-): "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" {
+): "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "ollama" {
   const cfg = readConfig(path).webSearchEngine;
   if (cfg === "searxng") return "searxng";
   if (cfg === "metaso") return "metaso";
   if (cfg === "tavily") return "tavily";
   if (cfg === "perplexity") return "perplexity";
   if (cfg === "exa") return "exa";
+  if (cfg === "ollama") return "ollama";
   // Any other value (including legacy "mojeek" from configs predating the
   // engine swap) falls through to bing. Read-only — we never rewrite the
   // user's config, so `/search-engine mojeek` later still rejects loudly.

@@ -51,6 +51,7 @@ const VALID_WEB_SEARCH_ENGINES = new Set([
   "tavily",
   "perplexity",
   "exa",
+  "ollama",
 ]);
 
 const VALID_EDIT_MODES = new Set(["review", "auto", "yolo", "plan"]);
@@ -179,7 +180,8 @@ export async function handleSettings(
         return {
           status: 400,
           body: {
-            error: "webSearchEngine must be bing | searxng | metaso | tavily | perplexity | exa",
+            error:
+              "webSearchEngine must be bing | searxng | metaso | tavily | perplexity | exa | ollama",
           },
         };
       }
@@ -189,7 +191,8 @@ export async function handleSettings(
         | "metaso"
         | "tavily"
         | "perplexity"
-        | "exa";
+        | "exa"
+        | "ollama";
       changed.push("webSearchEngine");
     }
     let modelPendingLive: string | null = null;

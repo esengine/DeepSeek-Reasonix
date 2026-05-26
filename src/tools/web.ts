@@ -6,6 +6,7 @@ import { parse as parseHtml } from "node-html-parser";
 import {
   loadExaApiKey,
   loadMetasoApiKey,
+  loadOllamaApiKey,
   loadPerplexityApiKey,
   loadTavilyApiKey,
   webSearchEndpoint as loadWebSearchEndpoint,
@@ -35,14 +36,18 @@ export interface WebFetchOptions {
   maxChars?: number;
   /** Timeout in ms. Defaults to 15_000. */
   timeoutMs?: number;
+  /** Config path for provider-specific keys. Defaults to ~/.reasonix/config.json. */
+  configPath?: string;
   signal?: AbortSignal;
 }
 
 export interface WebSearchOptions {
   topK?: number;
   signal?: AbortSignal;
-  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), or "exa" (Exa API). */
-  engine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  /** Config path for provider-specific keys. Defaults to ~/.reasonix/config.json. */
+  configPath?: string;
+  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), or "ollama" (Ollama cloud web search). */
+  engine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "ollama";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -64,6 +69,8 @@ const METASO_ENDPOINT = "https://metaso.cn/api/v1";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
 const EXA_ENDPOINT = "https://api.exa.ai/answer";
+const OLLAMA_WEB_SEARCH_ENDPOINT = "https://ollama.com/api/web_search";
+const OLLAMA_WEB_FETCH_ENDPOINT = "https://ollama.com/api/web_fetch";
 const FETCH_MAX_REDIRECTS = 5;
 
 /** Pick a status-specific webErrors key so the model gets an actionable hint, not a bare status. */
@@ -193,6 +200,9 @@ export async function webSearch(
   }
   if (opts.engine === "exa") {
     return searchExa(query, opts);
+  }
+  if (opts.engine === "ollama") {
+    return searchOllama(query, opts);
   }
   return searchBing(query, opts);
 }
@@ -591,6 +601,141 @@ async function searchExa(query: string, opts: WebSearchOptions = {}): Promise<Se
   return results;
 }
 
+interface OllamaSearchItem {
+  title?: string;
+  url?: string;
+  content?: string;
+}
+
+interface OllamaSearchResponse {
+  results?: OllamaSearchItem[];
+}
+
+async function searchOllama(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadOllamaApiKey(opts.configPath);
+  if (!apiKey) {
+    throw new Error(
+      "web_search: Ollama web search requires an API key — set OLLAMA_API_KEY, `ollamaApiKey`, or use /search-engine ollama <key>.",
+    );
+  }
+
+  let resp: Response;
+  try {
+    resp = await fetch(OLLAMA_WEB_SEARCH_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ query, max_results: topK }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: OLLAMA_WEB_SEARCH_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error("web_search: Ollama API key rejected — check OLLAMA_API_KEY.");
+    }
+    if (resp.status === 429) {
+      throw new Error("web_search: Ollama web search is rate-limited or quota-limited.");
+    }
+    throw new Error(`web_search: Ollama web search returned HTTP ${resp.status}.`);
+  }
+
+  let data: OllamaSearchResponse;
+  try {
+    data = (await resp.json()) as OllamaSearchResponse;
+  } catch {
+    throw new Error(`web_search: Ollama returned unparseable response (HTTP ${resp.status}).`);
+  }
+
+  return (data.results ?? []).slice(0, topK).map((r, i) => ({
+    title: r.title || `Result ${i + 1}`,
+    url: r.url || "",
+    snippet: r.content ?? "",
+  }));
+}
+
+interface OllamaFetchResponse {
+  title?: string;
+  content?: string;
+  links?: string[];
+}
+
+async function webFetchOllama(
+  url: string,
+  opts: WebFetchOptions = {},
+): Promise<PageContent & { links?: string[] }> {
+  const apiKey = loadOllamaApiKey(opts.configPath);
+  if (!apiKey) {
+    throw new Error(
+      "web_fetch: Ollama web fetch requires an API key — set OLLAMA_API_KEY, `ollamaApiKey`, or use /search-engine ollama <key>.",
+    );
+  }
+
+  const ctrl = new AbortController();
+  const timeout = setTimeout(
+    () =>
+      ctrl.abort(
+        new Error(
+          t("webErrors.fetchTimeout", { ms: opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS, url }),
+        ),
+      ),
+    opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
+  );
+  const signal = opts.signal ? AbortSignal.any([opts.signal, ctrl.signal]) : ctrl.signal;
+
+  let resp: Response;
+  try {
+    resp = await fetch(OLLAMA_WEB_FETCH_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ url }),
+      signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error("web_fetch: Ollama API key rejected — check OLLAMA_API_KEY.");
+    }
+    if (resp.status === 429) {
+      throw new Error("web_fetch: Ollama web fetch is rate-limited or quota-limited.");
+    }
+    throw new Error(`web_fetch: Ollama web fetch returned HTTP ${resp.status} for ${url}.`);
+  }
+
+  let data: OllamaFetchResponse;
+  try {
+    data = (await resp.json()) as OllamaFetchResponse;
+  } catch {
+    throw new Error(`web_fetch: Ollama returned unparseable response for ${url}.`);
+  }
+
+  const maxChars = opts.maxChars ?? DEFAULT_FETCH_MAX_CHARS;
+  const text = data.content ?? "";
+  return {
+    url,
+    title: data.title,
+    text: text.length > maxChars ? text.slice(0, maxChars) : text,
+    truncated: text.length > maxChars,
+    links: data.links,
+  };
+}
+
 /** Parse SearXNG HTML search results using node-html-parser. */
 export function parseSearxngHtmlResults(html: string): SearchResult[] {
   const root = parseHtml(html);
@@ -849,6 +994,8 @@ export interface WebToolsOptions {
   defaultTopK?: number;
   /** Byte cap for `web_fetch` extracted text. */
   maxFetchChars?: number;
+  /** Config path to read at tool-call time. Defaults to ~/.reasonix/config.json. */
+  configPath?: string;
 }
 
 export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions = {}): ToolRegistry {
@@ -874,13 +1021,14 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
     },
     fn: async (args: { query: string; topK?: number }, ctx) => {
       // Read at call time, not registration time — `/search-engine` mutates config mid-session (#1309).
-      const engine = loadWebSearchEngine();
-      const endpoint = loadWebSearchEndpoint();
+      const engine = loadWebSearchEngine(opts.configPath);
+      const endpoint = loadWebSearchEndpoint(opts.configPath);
       const results = await webSearch(args.query, {
         topK: args.topK ?? defaultTopK,
         signal: ctx?.signal,
         engine,
         endpoint,
+        configPath: opts.configPath,
       });
       return formatSearchResults(args.query, results);
     },
@@ -902,6 +1050,16 @@ export function registerWebTools(registry: ToolRegistry, opts: WebToolsOptions =
     fn: async (args: { url: string }, ctx) => {
       if (!/^https?:\/\//i.test(args.url)) {
         throw new Error(t("webErrors.fetchInvalidUrl"));
+      }
+      if (loadWebSearchEngine(opts.configPath) === "ollama") {
+        const page = await webFetchOllama(args.url, {
+          maxChars: maxFetchChars,
+          signal: ctx?.signal,
+          configPath: opts.configPath,
+        });
+        const header = page.title ? `${page.title}\n${page.url}` : page.url;
+        const links = page.links?.length ? `\n\nlinks:\n${page.links.join("\n")}` : "";
+        return `${header}\n\n${page.text}${links}`;
       }
       const page = await webFetch(args.url, { maxChars: maxFetchChars, signal: ctx?.signal });
       const header = page.title ? `${page.title}\n${page.url}` : page.url;

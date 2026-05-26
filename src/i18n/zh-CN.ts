@@ -408,8 +408,8 @@ export const zhCN: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "切换网络搜索后端 — bing（默认，国内裸 IP 直连）、searxng（自托管）、metaso（每日 100 次）、tavily（每月 1000 次免费）、perplexity（AI 直接回答）或 exa（AI 直接回答）",
-      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa> [<key>]",
+        "切换网络搜索后端 — bing（默认，国内裸 IP 直连）、searxng（自托管）、metaso（每日 100 次）、tavily（每月 1000 次免费）、perplexity（AI 直接回答）、exa（AI 直接回答）或 ollama（Ollama 云端搜索）",
+      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|ollama> [<key>]",
     },
   },
   wizard: {
@@ -1138,6 +1138,8 @@ export const zhCN: TranslationSchema = {
         "  /search-engine perplexity          使用 Perplexity AI（AI 直接回答 + 引用 — 设置 PERPLEXITY_API_KEY 或 config 的 perplexityApiKey；在 https://perplexity.ai/settings/api 获取密钥）",
       usageExa:
         "  /search-engine exa                 使用 Exa API（AI 直接回答 + 引用，每月 1000 次免费 — 设置 EXA_API_KEY 或 config 的 exaApiKey；注册 https://exa.ai）",
+      usageOllama:
+        "  /search-engine ollama              使用 Ollama 云端网页搜索 — 设置 OLLAMA_API_KEY 或 config 的 ollamaApiKey；在 https://ollama.com/settings/keys 获取密钥",
       alias: "别名：/se",
       searxngInfo: "SearXNG 是一个自托管的元搜索引擎（https://github.com/searxng/searxng）。",
       searxngInstall: "安装命令：  docker run -d -p 8080:8080 searxng/searxng",
@@ -1150,6 +1152,8 @@ export const zhCN: TranslationSchema = {
         " 请设置环境变量 PERPLEXITY_API_KEY 或 config 中的 `perplexityApiKey`；在 https://perplexity.ai/settings/api 获取密钥。",
       switchedExaNote:
         " 请设置环境变量 EXA_API_KEY 或 config 中的 `exaApiKey`；注册 https://exa.ai。",
+      switchedOllamaNote:
+        " 请设置环境变量 OLLAMA_API_KEY 或 config 中的 `ollamaApiKey`；在 https://ollama.com/settings/keys 获取密钥。",
       keyNeeded:
         '未配置 "{engine}" 的 API 密钥。\n\n  1. 设置环境变量 {envVar}\n  2. 或内联提供：/search-engine {engine} <your-key>\n  3. 或在 ~/.reasonix/config.json 中添加 "{engine}ApiKey"\n\n完成后重新执行 /search-engine {engine}。',
       keySaved: " API 密钥已保存到配置。",
