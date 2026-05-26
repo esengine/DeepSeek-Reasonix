@@ -2,6 +2,7 @@ import { loadLanguage, saveLanguage } from "../config.js";
 import { EN } from "./EN.js";
 import { de } from "./de.js";
 import { ru } from "./ru.js";
+import { JA } from "./JA.js";
 import type { LanguageCode, TranslationSchema } from "./types.js";
 import { zhCN } from "./zh-CN.js";
 
@@ -10,6 +11,7 @@ const translations: Record<LanguageCode, TranslationSchema> = {
   "zh-CN": zhCN,
   de,
   ru,
+  ja,
 };
 
 /** Map a system locale (e.g. "zh-CN", "en-US") to a supported LanguageCode, or null. */
@@ -18,6 +20,7 @@ export function detectSystemLanguage(locale: string = systemLocale()): LanguageC
   if (locale.startsWith("en")) return "EN";
   if (locale.startsWith("de")) return "de";
   if (locale.startsWith("ru")) return "ru";
+  if (locale.startsWith("ja")) return "ja";
   return null;
 }
 
