@@ -231,11 +231,19 @@ interface QQSettingsEvent {
   access: string;
 }
 
+interface BalanceInfoItem {
+  currency: string;
+  total: number;
+  granted?: number;
+  toppedUp?: number;
+}
+
 interface BalanceEvent {
   type: "$balance";
   currency: string;
   total: number;
   isAvailable: boolean;
+  balanceInfos: BalanceInfoItem[];
 }
 
 interface PlanRequiredEvent {
@@ -726,12 +734,19 @@ async function emitBalance(tab: Tab): Promise<void> {
   if (!bal) return;
   const primary = pickPrimaryBalance(bal.balance_infos);
   if (!primary) return;
+  const balanceInfos = bal.balance_infos.map((info) => ({
+    currency: info.currency,
+    total: Number(info.total_balance),
+    granted: info.granted_balance ? Number(info.granted_balance) : undefined,
+    toppedUp: info.topped_up_balance ? Number(info.topped_up_balance) : undefined,
+  }));
   emit(
     {
       type: "$balance",
       currency: primary.currency,
       total: Number(primary.total_balance),
       isAvailable: bal.is_available,
+      balanceInfos,
     },
     tab.id,
   );

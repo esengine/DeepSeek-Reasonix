@@ -137,10 +137,18 @@ export function StatusBar({
         <span className="v vio">{settings?.model ?? "—"}</span>
         <span className="v">{settings?.reasoningEffort ?? "high"}</span>
       </span>
-      <span className="seg" title={t("statusbar.switchCurrency")} onClick={onToggleCurrency}>
+      <span className="seg" title={balance && balance.infos.length > 0
+        ? balance.infos.map((i) => `${i.currency} ${i.total.toFixed(2)}`).join(" / ")
+        : undefined}>
         <I.coin size={11} />
         <span>{t("statusbar.balance")}</span>
-        <span className="v ok">{balanceLabel}</span>
+        <span className="v ok">
+          {balance && balance.infos.length > 0
+            ? balance.infos.map((info) =>
+                `${info.currency === "USD" ? "$" : "¥"} ${info.total.toFixed(2)}`
+              ).join(" / ")
+            : balanceLabel}
+        </span>
       </span>
       <span
         ref={themeButtonRef}

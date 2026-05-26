@@ -337,11 +337,19 @@ export type QQSettingsEvent = {
   access: string;
 };
 
+export type BalanceInfoItem = {
+  currency: string;
+  total: number;
+  granted?: number;
+  toppedUp?: number;
+};
+
 export type BalanceEvent = {
   type: "$balance";
   currency: string;
   total: number;
   isAvailable: boolean;
+  balanceInfos: BalanceInfoItem[];
 };
 
 export type SettingsPatch = {
