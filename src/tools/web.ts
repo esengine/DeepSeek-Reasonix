@@ -157,6 +157,41 @@ function isInternalAddress(address: string): boolean {
   return false;
 }
 
+/**
+ * Fallback DNS resolver via Cloudflare DoH (DNS-over-HTTPS).
+ * Used when system DNS returns fake internal IPs (e.g. TUN Fake-IP mode).
+ */
+interface DohAnswer {
+  type: number;
+  data: string;
+}
+
+interface DohResponse {
+  Status: number;
+  Answer?: DohAnswer[];
+}
+
+async function dohResolve(host: string): Promise<string[]> {
+  const url = new URL("https://1.1.1.1/dns-query");
+  url.searchParams.set("name", host);
+  url.searchParams.set("type", "A");
+
+  const resp = await fetch(url.toString(), {
+    headers: { Accept: "application/dns-json" },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!resp.ok) throw new Error(`DoH resolve failed: HTTP ${resp.status} for ${host}`);
+
+  const data = (await resp.json()) as DohResponse;
+  if (data.Status !== 0)
+    throw new Error(`DoH resolve failed: DNS status ${data.Status} for ${host}`);
+
+  const addresses = (data.Answer ?? []).filter((a) => a.type === 1).map((a) => a.data);
+
+  if (addresses.length === 0) throw new Error(`DoH resolve returned no A records for ${host}`);
+  return addresses;
+}
+
 async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
   const url = new URL(rawUrl);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -165,12 +200,30 @@ async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
 
   const host = url.hostname;
   const literal = isIP(host);
-  const addresses = literal
-    ? [host]
-    : (await lookup(host, { all: true, verbatim: true })).map((entry) => entry.address);
-  if (addresses.length === 0 || addresses.some(isInternalAddress)) {
+  if (literal) {
+    if (isInternalAddress(host)) {
+      throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
+    }
+    return url;
+  }
+
+  // Primary: system DNS
+  const sysAddrs = (await lookup(host, { all: true, verbatim: true })).map((e) => e.address);
+
+  if (sysAddrs.length === 0) {
     throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
   }
+
+  if (sysAddrs.some(isInternalAddress)) {
+    // System DNS returned fake/internal addresses (e.g. TUN Fake-IP) —
+    // fall back to DoH to get the real public IPs
+    const dohAddrs = await dohResolve(host).catch(() => null);
+    if (!dohAddrs || dohAddrs.some(isInternalAddress)) {
+      throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
+    }
+    // DoH resolved to public IPs → host is legitimate
+  }
+
   return url;
 }
 
