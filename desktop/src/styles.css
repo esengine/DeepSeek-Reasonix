@@ -1608,6 +1608,23 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   margin-right: 5px;
   scroll-padding-bottom: 24px;
 }
+.thread::-webkit-scrollbar {
+  width: 8px;
+}
+.thread::-webkit-scrollbar-thumb {
+  background-clip: content-box;
+  border: 2px solid transparent;
+  background-color: var(--border);
+  border-radius: 999px;
+  transition: border-width 150ms, background-color 200ms;
+}
+.thread::-webkit-scrollbar-thumb:hover {
+  border-width: 0;
+  background-color: var(--border-strong);
+}
+.thread::-webkit-scrollbar-track {
+  background: transparent;
+}
 .thread-inner {
   max-width: var(--thread-max-width, 740px);
   margin: 0 auto;
@@ -1625,7 +1642,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 
 .jump-bar {
   position: absolute;
-  right: 0;
+  right: 13px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
