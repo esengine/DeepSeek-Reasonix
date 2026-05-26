@@ -52,6 +52,7 @@ export function Sidebar({
   sessions,
   importSources,
   activeName,
+  workspaceDir,
   onNewChat,
   onLoadSession,
   onDeleteSession,
@@ -59,6 +60,7 @@ export function Sidebar({
   onRefreshImportSources,
   onImportDetectedSessions,
   onImportSession,
+  onOpenWorkdir,
   onOpenSettings,
   onOpenRules,
   onOpenCommands,
@@ -67,6 +69,7 @@ export function Sidebar({
   sessions: SessionInfo[];
   importSources: ExternalSessionApp[];
   activeName?: string;
+  workspaceDir?: string;
   onNewChat: () => void;
   onLoadSession: (name: string) => void;
   onDeleteSession: (name: string) => void;
@@ -74,6 +77,7 @@ export function Sidebar({
   onRefreshImportSources: () => void;
   onImportDetectedSessions: (sources: ImportSource[]) => void;
   onImportSession: (payload: { source: ImportSource; path: string; name?: string }) => void;
+  onOpenWorkdir: (anchor: { top?: number; bottom?: number; left: number }) => void;
   onOpenSettings: () => void;
   onOpenRules: () => void;
   onOpenCommands: () => void;
@@ -85,6 +89,9 @@ export function Sidebar({
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const workspaceLabel = workspaceDir
+    ? workspaceDir.split(/[\\/]/).pop() || workspaceDir
+    : t("sidebarPanel.noWorkspace");
   const filtered = query
     ? sessions.filter((s) => {
         const q = query.toLowerCase();
@@ -140,6 +147,31 @@ export function Sidebar({
           onClick={onOpenCommands}
         >
           <I.history size={14} />
+        </button>
+      </div>
+
+      <div className="side-workspace">
+        <button
+          type="button"
+          className="workspace-btn"
+          title={
+            workspaceDir
+              ? t("sidebarPanel.switchWorkspace", { workspace: workspaceDir })
+              : t("sidebarPanel.pickWorkspace")
+          }
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            onOpenWorkdir({ top: rect.bottom + 6, left: rect.left });
+          }}
+        >
+          <span className="ico">
+            <I.folder size={13} />
+          </span>
+          <span className="body">
+            <span className="label">{t("sidebarPanel.workspace")}</span>
+            <span className="name">{workspaceLabel}</span>
+          </span>
+          <I.chev size={12} />
         </button>
       </div>
 

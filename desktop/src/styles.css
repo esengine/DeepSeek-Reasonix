@@ -902,6 +902,59 @@ html[data-platform="macos"] .titlebar .tb-left {
   background: var(--card-hover);
 }
 
+.side-workspace {
+  padding: 0 12px 8px;
+}
+.side-workspace .workspace-btn {
+  width: 100%;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: var(--fg-2);
+  background: var(--card);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+.side-workspace .workspace-btn:hover {
+  color: var(--fg);
+  border-color: var(--border-strong);
+  background: var(--card-hover);
+}
+.side-workspace .workspace-btn .ico {
+  display: inline-flex;
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+.side-workspace .workspace-btn .body {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.side-workspace .workspace-btn .label {
+  color: var(--muted);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+.side-workspace .workspace-btn .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+.side-workspace .workspace-btn > svg {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
 .search-row {
   padding: 0 12px 10px;
 }

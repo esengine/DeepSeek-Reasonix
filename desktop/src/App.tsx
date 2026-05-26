@@ -2202,6 +2202,7 @@ function TabRuntime({
           sessions={state.sessions}
           importSources={state.externalImportSources}
           activeName={state.currentSession}
+          workspaceDir={state.settings?.workspaceDir}
           onNewChat={newChat}
           onLoadSession={(name) => {
             clearAbortDraft();
@@ -2216,6 +2217,10 @@ function TabRuntime({
           onImportSession={({ source, path, name }) =>
             sendRpc({ cmd: "session_import", source, path, ...(name ? { name } : {}) })
           }
+          onOpenWorkdir={(anchor) => {
+            setWdAnchor(anchor);
+            setWdOpen(true);
+          }}
           onOpenSettings={() => openSettingsAt("general")}
           onOpenRules={() => openSettingsAt("rules")}
           onOpenCommands={() => palette.setOpen(true)}
