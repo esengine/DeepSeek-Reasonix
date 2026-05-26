@@ -1605,7 +1605,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   flex: 1;
   overflow-y: auto;
   padding: 28px 0 40px;
-  margin-right: 4.5px;
+  margin-right: 5px;
   scroll-padding-bottom: 24px;
 }
 .thread-inner {
