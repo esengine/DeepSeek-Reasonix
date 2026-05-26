@@ -3462,7 +3462,7 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 
 .ctx-body {
   flex: 1;
-  margin-right: 8px;
+  margin-right: 12px;
   overflow-y: auto;
   padding: 12px;
   padding-right: 20px;
