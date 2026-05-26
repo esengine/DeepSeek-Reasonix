@@ -136,7 +136,6 @@ export const AssistantMsg = memo(function AssistantMsg({
     }
   };
   // Render tool segments — consecutive tools get grouped into a collapsible section
-  const [toolOpen, setToolOpen] = useState(false);
   const rendered: ReactNode[] = [];
 
   let firstReasoningShown = false;
@@ -145,23 +144,28 @@ export const AssistantMsg = memo(function AssistantMsg({
   function flushToolGroup(): void {
     if (!toolGroup) return;
     const { segments: tSegs } = toolGroup;
+    const groupKey = toolGroup.indices[0]!;
     if (tSegs.length === 1) {
       // Single tool — render inline without group wrapper
-      rendered.push(renderTool(tSegs[0]!, toolGroup.indices[0]!));
+      rendered.push(renderTool(tSegs[0]!, groupKey));
     } else {
-      rendered.push(
-        <div key={`tool-group-${toolGroup.indices[0]}`} className="tool-group">
-          <button className="tool-group-header" onClick={() => setToolOpen((o) => !o)}>
-            <span>{tSegs.length > 1 ? t("thread.toolCalls", { count: tSegs.length }) : t("thread.oneToolCall")}</span>
-            <span className={`chevron ${toolOpen ? "open" : ""}`}>{I.chev({ size: 12 })}</span>
-          </button>
-          {toolOpen && (
-            <div className="tool-group-body">
-              {tSegs.map((ts, tgi) => renderTool(ts, toolGroup!.indices[tgi]!, true))}
-            </div>
-          )}
-        </div>,
-      );
+      const GroupShell = ({ groupKey, segs }: { groupKey: number; segs: (AssistantSegment & { kind: "tool" })[] }) => {
+        const [open, setOpen] = useState(false);
+        return (
+          <div key={`tool-group-${groupKey}`} className="tool-group">
+            <button className="tool-group-header" onClick={() => setOpen((o) => !o)}>
+              <span>{segs.length > 1 ? t("thread.toolCalls", { count: segs.length }) : t("thread.oneToolCall")}</span>
+              <span className={`chevron ${open ? "open" : ""}`}>{I.chev({ size: 12 })}</span>
+            </button>
+            {open && (
+              <div className="tool-group-body">
+                {segs.map((ts) => renderTool(ts, segs.indexOf(ts), true))}
+              </div>
+            )}
+          </div>
+        );
+      };
+      rendered.push(<GroupShell key={`tool-group-${groupKey}`} groupKey={groupKey} segs={tSegs} />);
     }
     toolGroup = null;
   }
