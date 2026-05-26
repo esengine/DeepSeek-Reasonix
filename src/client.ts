@@ -17,16 +17,31 @@ export class Usage {
     return denom > 0 ? this.promptCacheHitTokens / denom : 0;
   }
 
+  static hasApiUsage(raw: unknown): raw is RawUsage {
+    if (!raw || typeof raw !== "object") return false;
+    const u = raw as RawUsage;
+    return (
+      typeof u.prompt_tokens === "number" ||
+      typeof u.completion_tokens === "number" ||
+      typeof u.total_tokens === "number" ||
+      typeof u.prompt_cache_hit_tokens === "number" ||
+      typeof u.prompt_cache_miss_tokens === "number" ||
+      typeof u.prompt_eval_count === "number" ||
+      typeof u.eval_count === "number"
+    );
+  }
+
   static fromApi(raw: RawUsage | undefined | null): Usage {
     const u = raw ?? {};
-    const promptTokens = u.prompt_tokens ?? 0;
+    const promptTokens = u.prompt_tokens ?? u.prompt_eval_count ?? 0;
+    const completionTokens = u.completion_tokens ?? u.eval_count ?? 0;
     const cacheHitTokens = u.prompt_cache_hit_tokens ?? 0;
     const cacheMissTokens =
       u.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - cacheHitTokens);
     return new Usage(
       promptTokens,
-      u.completion_tokens ?? 0,
-      u.total_tokens ?? 0,
+      completionTokens,
+      u.total_tokens ?? promptTokens + completionTokens,
       cacheHitTokens,
       cacheMissTokens,
     );
@@ -256,7 +271,7 @@ export class DeepSeekClient {
         content: choice.content ?? "",
         reasoningContent: choice.reasoning_content ?? null,
         toolCalls: choice.tool_calls ?? [],
-        usage: Usage.fromApi(data.usage),
+        usage: Usage.fromApi(data.usage ?? data),
         raw: data,
       };
     } finally {
@@ -333,8 +348,9 @@ export class DeepSeekClient {
               argumentsDelta: tc.function?.arguments,
             };
           }
-          if (json.usage) {
-            chunk.usage = Usage.fromApi(json.usage);
+          const rawUsage = json.usage ?? (Usage.hasApiUsage(json) ? json : undefined);
+          if (rawUsage) {
+            chunk.usage = Usage.fromApi(rawUsage);
           }
           queue.push(chunk);
         } catch {

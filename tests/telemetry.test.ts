@@ -38,6 +38,18 @@ describe("Usage.cacheHitRatio", () => {
     expect(u.promptCacheHitTokens).toBe(800);
     expect(u.promptCacheMissTokens).toBe(200);
   });
+
+  it("maps Ollama native usage fields into prompt and completion tokens", () => {
+    const u = Usage.fromApi({
+      prompt_eval_count: 1234,
+      eval_count: 56,
+    });
+    expect(u.promptTokens).toBe(1234);
+    expect(u.completionTokens).toBe(56);
+    expect(u.totalTokens).toBe(1290);
+    expect(u.promptCacheHitTokens).toBe(0);
+    expect(u.promptCacheMissTokens).toBe(1234);
+  });
 });
 
 describe("costUsd", () => {

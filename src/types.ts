@@ -46,6 +46,10 @@ export interface RawUsage {
   total_tokens?: number;
   prompt_cache_hit_tokens?: number;
   prompt_cache_miss_tokens?: number;
+  /** Ollama native API: input tokens processed. */
+  prompt_eval_count?: number;
+  /** Ollama native API: output tokens generated. */
+  eval_count?: number;
 }
 
 export interface ChatRequestOptions {

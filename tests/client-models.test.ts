@@ -104,3 +104,23 @@ describe("DeepSeekClient rateLimit", () => {
     }
   });
 });
+
+describe("DeepSeekClient usage parsing", () => {
+  it("parses Ollama native top-level token metrics", async () => {
+    const client = new DeepSeekClient({
+      apiKey: "ollama",
+      fetch: makeFetch(200, {
+        model: "gpt-oss:20b",
+        message: { role: "assistant", content: "ok" },
+        done: true,
+        prompt_eval_count: 42,
+        eval_count: 7,
+      }),
+    });
+    const resp = await client.chat({ model: "gpt-oss:20b", messages: [] });
+    expect(resp.usage.promptTokens).toBe(42);
+    expect(resp.usage.completionTokens).toBe(7);
+    expect(resp.usage.totalTokens).toBe(49);
+    expect(resp.usage.promptCacheMissTokens).toBe(42);
+  });
+});
