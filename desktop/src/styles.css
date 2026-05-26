@@ -3300,7 +3300,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  width: 420px;
+  width: min(720px, calc(100vw - 32px));
   max-height: 320px;
   background: var(--card);
   border: 1px solid var(--border-strong);
@@ -3332,7 +3332,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .popup-list {
   overflow-y: auto;
+  overflow-x: auto;
   padding: 4px;
+}
+.at-popup-list .popup-item {
+  min-width: max-content;
 }
 .popup-item {
   display: grid;

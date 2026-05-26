@@ -275,7 +275,10 @@ export function Composer({
     popup?.kind === "slash" ? slashItems : popup?.kind === "at" ? atItems : [];
 
   useEffect(() => {
-    setActiveIdx(0);
+    setActiveIdx((i) => {
+      if (!items.length) return 0;
+      return Math.min(i, items.length - 1);
+    });
   }, [items.length, popup?.kind]);
 
   useEffect(() => {
@@ -687,11 +690,14 @@ function Popup({
   onHover: (i: number, item: SlashCmd | MentionItem) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  const lastActiveRef = useRef<number>(-1);
 
   useEffect(() => {
+    if (lastActiveRef.current === activeIdx) return;
+    lastActiveRef.current = activeIdx;
     requestAnimationFrame(() => {
       const el = listRef.current?.querySelector<HTMLElement>(`[data-active="true"]`);
-      el?.scrollIntoView({ block: "nearest" });
+      el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     });
   }, [activeIdx]);
 
@@ -709,7 +715,7 @@ function Popup({
           <I.x size={11} />
         </span>
       </div>
-      <div className="popup-list" ref={listRef}>
+      <div className={`popup-list ${kind === "at" ? "at-popup-list" : ""}`} ref={listRef}>
         {items.length === 0 ? (
           <div
             style={{
