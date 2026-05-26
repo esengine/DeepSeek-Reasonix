@@ -627,11 +627,18 @@ export interface ResolvedEndpoint {
   apiKey: string | undefined;
 }
 
+// DEEPSEEK_BASE_URL is the original name; DEEPSEEK_API_BASE_URL is accepted as an
+// alias so users who copy the OPENAI_BASE_URL pattern land on a working name (#1876).
+export function resolveBaseUrlEnv(): string | undefined {
+  return process.env.DEEPSEEK_BASE_URL || process.env.DEEPSEEK_API_BASE_URL || undefined;
+}
+
 // (baseUrl, apiKey) is a tuple: whichever source defines baseUrl owns apiKey too,
 // so a stale env DEEPSEEK_API_KEY doesn't bleed into a custom config baseUrl (#1631).
 export function loadEndpoint(path: string = defaultConfigPath()): ResolvedEndpoint {
-  if (process.env.DEEPSEEK_BASE_URL) {
-    return { baseUrl: process.env.DEEPSEEK_BASE_URL, apiKey: process.env.DEEPSEEK_API_KEY };
+  const envBaseUrl = resolveBaseUrlEnv();
+  if (envBaseUrl) {
+    return { baseUrl: envBaseUrl, apiKey: process.env.DEEPSEEK_API_KEY };
   }
   const cfg = readConfig(path);
   if (cfg.baseUrl) {
@@ -1162,7 +1169,7 @@ export function loadModel(path: string = defaultConfigPath()): string {
   const trimmed = typeof raw === "string" ? raw.trim() : "";
   if (!trimmed) return DEFAULT_MODEL;
   // Custom-endpoint owners pick their own model namespace; trust them.
-  const customEndpoint = cfg.baseUrl?.trim() || process.env.DEEPSEEK_BASE_URL;
+  const customEndpoint = cfg.baseUrl?.trim() || resolveBaseUrlEnv();
   if (customEndpoint) return trimmed;
   return SUPPORTED_OFFICIAL_MODELS.includes(trimmed) ? trimmed : DEFAULT_MODEL;
 }

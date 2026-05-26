@@ -1,5 +1,5 @@
 import { type EventSourceMessage, createParser } from "eventsource-parser";
-import { loadRateLimit } from "./config.js";
+import { loadRateLimit, resolveBaseUrlEnv } from "./config.js";
 import { type RetryOptions, fetchWithRetry } from "./retry.js";
 import type { ChatMessage, ChatRequestOptions, RawUsage, ToolCall, ToolSpec } from "./types.js";
 
@@ -110,7 +110,7 @@ export class DeepSeekClient {
       );
     }
     this.apiKey = apiKey;
-    let url = opts.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com";
+    let url = opts.baseUrl ?? resolveBaseUrlEnv() ?? "https://api.deepseek.com";
     // Manual trim — `/\/+$/` is O(n²) on slash-heavy non-matches per CodeQL js/polynomial-redos.
     while (url.endsWith("/")) url = url.slice(0, -1);
     this.baseUrl = url;
