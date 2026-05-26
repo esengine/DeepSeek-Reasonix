@@ -256,6 +256,42 @@ describe("installProxyIfConfigured", () => {
     expect(installProxyIfConfigured({ HTTPS_PROXY: "http://[invalid:::" })).toBeNull();
     expect(writes.join("")).toMatch(/ignoring proxy env value/);
   });
+
+  it("opts.url (cfg.proxy.url) installs even when no env var is set — source=config (#1868)", () => {
+    const result = installProxyIfConfigured({}, { url: "http://127.0.0.1:7897" });
+    expect(result?.url).toBe("http://127.0.0.1:7897/");
+    expect(result?.source).toBe("config");
+    expect(writes.join("")).toMatch(/source: config/);
+  });
+
+  it("opts.url wins over HTTPS_PROXY env var (config beats env, #1868)", () => {
+    const result = installProxyIfConfigured(
+      { HTTPS_PROXY: "http://env.example:8080" },
+      { url: "http://cfg.example:7897" },
+    );
+    expect(result?.url).toBe("http://cfg.example:7897/");
+    expect(result?.source).toBe("config");
+  });
+
+  it("opts.url is normalized like env values (bare host:port → http://, #1868)", () => {
+    const result = installProxyIfConfigured({}, { url: "127.0.0.1:7897" });
+    expect(result?.url).toBe("http://127.0.0.1:7897/");
+  });
+
+  it("malformed opts.url is rejected with a config-flavored warning, not env (#1868)", () => {
+    const result = installProxyIfConfigured({}, { url: "http://[invalid:::" });
+    expect(result).toBeNull();
+    expect(writes.join("")).toMatch(/ignoring proxy config value/);
+  });
+
+  it("whitespace-only opts.url falls back to env detection", () => {
+    const result = installProxyIfConfigured(
+      { HTTPS_PROXY: "http://env.example:8080" },
+      { url: "   " },
+    );
+    expect(result?.url).toBe("http://env.example:8080/");
+    expect(result?.source).toBe("env");
+  });
 });
 
 describe("resolveNoProxy", () => {

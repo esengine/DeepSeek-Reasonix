@@ -162,19 +162,24 @@ class SelectiveProxyDispatcher {
 
 let installed = false;
 
-export interface ProxyInstallResult {
-  url: string;
-  reinstalled: boolean;
-  noProxy: readonly NoProxyPattern[];
-}
-
 export interface InstallProxyOptions {
   /** Skip proxy install entirely — for `--no-proxy` / `cfg.proxy.disabled` / env-driven kill-switch. */
   disabled?: boolean;
+  /** Config-supplied proxy URL. Wins over env detection so desktop-GUI users who can't reliably set HTTPS_PROXY can still route via `cfg.proxy.url` (issue #1868). */
+  url?: string;
   /** Additional NO_PROXY patterns layered on top of defaults + env. Sourced from `cfg.proxy.noProxy` / `REASONIX_NO_PROXY`. */
   extraNoProxy?: readonly string[];
   /** When false, route api.deepseek.com / *.deepseek.com through the proxy too (issue #1497). Default true preserves the clash/v2ray US-exit-IP 403 fix. */
   bypassDeepSeekDirect?: boolean;
+}
+
+export type ProxyUrlSource = "config" | "env";
+
+export interface ProxyInstallResult {
+  url: string;
+  source: ProxyUrlSource;
+  reinstalled: boolean;
+  noProxy: readonly NoProxyPattern[];
 }
 
 export interface ResolvedNoProxy {
@@ -229,21 +234,24 @@ export function resolveNoProxy(
   };
 }
 
-/** Sets the undici global dispatcher to a SelectiveProxyDispatcher (proxy for non-NO_PROXY hosts, direct for matches). Returns the proxy URL + parsed NO_PROXY patterns, or null when no env var is set, the value is unparseable, the ProxyAgent ctor throws, or opts.disabled is true. Idempotent. */
+/** Sets the undici global dispatcher to a SelectiveProxyDispatcher (proxy for non-NO_PROXY hosts, direct for matches). `opts.url` (from `cfg.proxy.url`) wins over env detection; falls back to HTTPS_PROXY / HTTP_PROXY / ALL_PROXY. Returns the proxy URL + source + parsed NO_PROXY patterns, or null when nothing is configured, the value is unparseable, the ProxyAgent ctor throws, or opts.disabled is true. Idempotent. */
 export function installProxyIfConfigured(
   env: NodeJS.ProcessEnv = process.env,
   opts: InstallProxyOptions = {},
 ): ProxyInstallResult | null {
   if (opts.disabled) return null;
-  const raw = detectProxyUrl(env);
+  const configRaw = typeof opts.url === "string" && opts.url.trim() !== "" ? opts.url.trim() : null;
+  const raw = configRaw ?? detectProxyUrl(env);
   if (!raw) return null;
   const url = normalizeProxyUrl(raw);
   if (!url) {
+    const origin = configRaw ? "config value" : "env value";
     process.stderr.write(
-      `▲ ignoring proxy env value ${JSON.stringify(raw)} — not a valid URL. Expected something like \`http://host:port\` or \`socks5://host:port\`.\n`,
+      `▲ ignoring proxy ${origin} ${JSON.stringify(raw)} — not a valid URL. Expected something like \`http://host:port\` or \`socks5://host:port\`.\n`,
     );
     return null;
   }
+  const source: ProxyUrlSource = configRaw ? "config" : "env";
 
   // Default whitelist always applies; env NO_PROXY, REASONIX_NO_PROXY, and
   // opts.extraNoProxy (config) all layer on top additively. Composition lives
@@ -258,8 +266,8 @@ export function installProxyIfConfigured(
     setGlobalDispatcher(new SelectiveProxyDispatcher(url, patterns) as unknown as Dispatcher);
     installed = true;
     const bypassList = patterns.map((p) => p.raw).join(",");
-    process.stderr.write(`[proxy] using ${url} (NO_PROXY: ${bypassList})\n`);
-    return { url, reinstalled, noProxy: patterns };
+    process.stderr.write(`[proxy] using ${url} (source: ${source}, NO_PROXY: ${bypassList})\n`);
+    return { url, source, reinstalled, noProxy: patterns };
   } catch (err) {
     process.stderr.write(
       `▲ proxy install failed (${(err as Error).message}); continuing without proxy.\n`,

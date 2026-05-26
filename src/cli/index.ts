@@ -55,6 +55,7 @@ const cliNoProxy = process.argv.includes("--no-proxy");
 const cfgProxy = loadProxyConfig();
 installProxyIfConfigured(process.env, {
   disabled: cliNoProxy || cfgProxy.disabled === true,
+  url: cfgProxy.url,
   extraNoProxy: cfgProxy.noProxy,
   bypassDeepSeekDirect: cfgProxy.bypassDeepSeekDirect,
 });

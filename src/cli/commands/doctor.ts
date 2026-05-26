@@ -58,14 +58,17 @@ export async function runDoctorChecks(projectRoot: string): Promise<DoctorCheck[
 const PROXY_PROBE_HOSTS = ["api.deepseek.com", "github.com", "api.github.com"] as const;
 
 function checkProxy(): Check[] {
-  const url = detectProxyUrl();
+  const cfg = loadProxyConfig();
+  const envUrl = detectProxyUrl();
+  const url = cfg.url ?? envUrl;
   if (!url) {
     return [
       {
         id: "proxy",
         label: "http proxy   ",
         level: "ok",
-        detail: "no HTTPS_PROXY / HTTP_PROXY / ALL_PROXY set — direct connection",
+        detail:
+          "no proxy configured (cfg.proxy.url / HTTPS_PROXY / HTTP_PROXY / ALL_PROXY unset) — direct connection",
       },
     ];
   }
@@ -80,14 +83,14 @@ function checkProxy(): Check[] {
   } catch {
     /* not a URL — leave raw */
   }
-  const cfg = loadProxyConfig();
+  const urlSource = cfg.url ? "cfg.proxy.url" : "HTTPS_PROXY";
   if (cfg.disabled) {
     return [
       {
         id: "proxy",
         label: "http proxy   ",
         level: "ok",
-        detail: `HTTPS_PROXY=${redacted} is set but cfg.proxy.disabled — Reasonix routes direct`,
+        detail: `${urlSource}=${redacted} is set but cfg.proxy.disabled — Reasonix routes direct`,
       },
     ];
   }
@@ -108,7 +111,7 @@ function checkProxy(): Check[] {
     id: "proxy",
     label: "http proxy   ",
     level: "ok",
-    detail: `routing fetch through ${redacted} (NO_PROXY: ${total} pattern${total === 1 ? "" : "s"} — ${sourceSummary})`,
+    detail: `routing fetch through ${redacted} via ${urlSource} (NO_PROXY: ${total} pattern${total === 1 ? "" : "s"} — ${sourceSummary})`,
   };
   const probes = PROXY_PROBE_HOSTS.map(
     (h) => `${h} → ${matchesNoProxy(h, resolved.all) ? "direct" : "via proxy"}`,

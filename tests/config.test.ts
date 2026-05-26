@@ -285,6 +285,14 @@ describe("config", () => {
     expect(loadProxyConfig(path)).toEqual({});
   });
 
+  it("loads proxy.url and trims it; ignores blank values (#1868)", () => {
+    writeConfig({ proxy: { url: "  http://127.0.0.1:7897  " } }, path);
+    expect(loadProxyConfig(path)).toEqual({ url: "http://127.0.0.1:7897" });
+
+    writeConfig({ proxy: { url: "   " } }, path);
+    expect(loadProxyConfig(path)).toEqual({});
+  });
+
   it("loads toolRateLimit with defaults and opt-out", () => {
     writeConfig(
       {

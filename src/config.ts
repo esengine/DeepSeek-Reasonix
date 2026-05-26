@@ -136,6 +136,8 @@ export interface RateLimitConfig {
 }
 
 export interface ProxyConfig {
+  /** Proxy URL (e.g. `http://127.0.0.1:7897`, `socks5://host:1080`). Takes precedence over HTTPS_PROXY / HTTP_PROXY / ALL_PROXY env vars when set, so desktop users on Windows can route through Clash without fighting GUI env-var propagation (issue #1868). */
+  url?: string;
   /** Skip proxy detection entirely — equivalent to launching with `--no-proxy`. */
   disabled?: boolean;
   /** Additional NO_PROXY patterns (curl syntax). Additive on top of env NO_PROXY and the default DeepSeek-bypass whitelist. */
@@ -681,6 +683,7 @@ export function loadProxyConfig(path: string = defaultConfigPath()): ProxyConfig
   const cfg = readConfig(path).proxy;
   if (!cfg || typeof cfg !== "object") return {};
   const out: ProxyConfig = {};
+  if (typeof cfg.url === "string" && cfg.url.trim() !== "") out.url = cfg.url.trim();
   if (cfg.disabled === true) out.disabled = true;
   if (Array.isArray(cfg.noProxy)) {
     const entries = cfg.noProxy.filter(
