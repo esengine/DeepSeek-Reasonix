@@ -34,6 +34,14 @@ function hasNonAscii(s: string): boolean {
   return false;
 }
 
+function isPotentialImeCommitInput(s: string): boolean {
+  if (s.length === 0) return false;
+  if (hasNonAscii(s)) return true;
+  // WeChat IME English mode can commit an ASCII word as one burst, then
+  // pass the confirming Enter through as the next key event.
+  return s.length > 1;
+}
+
 export function shouldInlinePaste(content: string): boolean {
   return !content.includes("\n") && content.length <= INLINE_PASTE_THRESHOLD;
 }
@@ -90,10 +98,12 @@ export function PromptInput({
   const pastesRef = useRef<Map<number, PasteEntry>>(new Map());
   const nextPasteIdRef = useRef<number>(0);
 
-  // CJK IMEs commit the candidate then often pass the trigger Enter through
+  // IMEs commit the candidate then often pass the trigger Enter through
   // as a real keystroke; terminals can't expose composition state. If submit
-  // fires within IME_GUARD_MS of non-ASCII input we treat it as that commit-Enter.
-  const lastNonAsciiInputAtRef = useRef(0);
+  // fires within IME_GUARD_MS of a likely IME commit we treat it as that
+  // commit-Enter. CJK commits are non-ASCII; WeChat English-mode commits are
+  // ASCII bursts rather than ordinary per-key input.
+  const lastImeCommitInputAtRef = useRef(0);
 
   // Refs (not props/state) — multiple keystrokes in one stdin chunk dispatch
   // before re-render, so the handler must read the latest value/cursor.
@@ -136,8 +146,8 @@ export function PromptInput({
       if (ev.input.length > 0) registerPaste(ev.input);
       return;
     }
-    if (ev.input.length > 0 && hasNonAscii(ev.input)) {
-      lastNonAsciiInputAtRef.current = Date.now();
+    if (isPotentialImeCommitInput(ev.input)) {
+      lastImeCommitInputAtRef.current = Date.now();
     }
     const key: MultilineKey = {
       input: ev.input,
@@ -172,8 +182,8 @@ export function PromptInput({
       setCursor(action.cursor);
     }
     if (action.submit) {
-      if (Date.now() - lastNonAsciiInputAtRef.current < IME_GUARD_MS) {
-        lastNonAsciiInputAtRef.current = 0;
+      if (Date.now() - lastImeCommitInputAtRef.current < IME_GUARD_MS) {
+        lastImeCommitInputAtRef.current = 0;
         return;
       }
       const raw = action.submitValue ?? lastLocalValueRef.current;
