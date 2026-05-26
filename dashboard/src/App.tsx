@@ -649,6 +649,23 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           },
         ],
       };
+    case "$modal_dismissed":
+      switch (ev.kind) {
+        case "shell":
+          return { ...state, pendingConfirms: [] };
+        case "path":
+          return { ...state, pendingPathAccess: [] };
+        case "choice":
+          return { ...state, pendingChoices: [] };
+        case "plan":
+          return { ...state, pendingPlans: [] };
+        case "checkpoint":
+          return { ...state, pendingCheckpoints: [] };
+        case "revision":
+          return { ...state, pendingRevisions: [] };
+        default:
+          return state;
+      }
     case "$step_completed": {
       if (!state.activePlan) return state;
       const stepIds = new Set(state.activePlan.completedStepIds);
@@ -1365,7 +1382,7 @@ function TabRuntime({
 
   const resolveConfirm = useCallback(
     (id: number, response: ConfirmationChoice) => {
-      sendRpc({ cmd: "confirm_response", id, response });
+      sendRpc({ cmd: "confirm_response", id, response, kind: "shell" });
       dispatch({ t: "resolve_confirm", id });
     },
     [sendRpc],
@@ -1384,7 +1401,7 @@ function TabRuntime({
   );
   const resolvePathAccess = useCallback(
     (id: number, response: ConfirmationChoice) => {
-      sendRpc({ cmd: "confirm_response", id, response });
+      sendRpc({ cmd: "confirm_response", id, response, kind: "path" });
       dispatch({ t: "resolve_path_access", id });
     },
     [sendRpc],

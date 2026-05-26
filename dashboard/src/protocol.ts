@@ -88,6 +88,17 @@ export type RevisionRequiredEvent = {
 
 export type RevisionVerdict = { type: "accepted" } | { type: "rejected" } | { type: "cancelled" };
 
+export type ModalKind =
+  | "shell"
+  | "path"
+  | "choice"
+  | "plan"
+  | "checkpoint"
+  | "revision"
+  | "edit-review";
+
+export type ModalDismissedEvent = { type: "$modal_dismissed"; kind: ModalKind };
+
 export type StepCompletedEvent = {
   type: "$step_completed";
   stepId: string;
@@ -450,6 +461,7 @@ export type IncomingEvent = { tabId?: string } & (
   | BalanceEvent
   | CheckpointRequiredEvent
   | RevisionRequiredEvent
+  | ModalDismissedEvent
   | StepCompletedEvent
   | PlanClearedEvent
   | MentionResultsEvent
@@ -479,7 +491,7 @@ export type IncomingEvent = { tabId?: string } & (
 export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "user_input"; text: string }
   | { cmd: "abort" }
-  | { cmd: "confirm_response"; id: number; response: ConfirmationChoice }
+  | { cmd: "confirm_response"; id: number; response: ConfirmationChoice; kind: "shell" | "path" }
   | { cmd: "choice_response"; id: number; response: ChoiceVerdict }
   | { cmd: "plan_response"; id: number; response: PlanVerdict }
   | { cmd: "checkpoint_response"; id: number; response: CheckpointVerdict }

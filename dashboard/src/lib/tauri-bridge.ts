@@ -197,7 +197,10 @@ function sseToIncoming(ev: any): Record<string, any>[] {
       break;
     }
     case "modal-down": {
-      // Modal closed — normally handled by user action response
+      // Sync close from another surface (TUI or sibling tab).
+      if (typeof ev.modalKind === "string") {
+        results.push({ type: "$modal_dismissed", tabId: "tab-1", kind: ev.modalKind });
+      }
       break;
     }
     case "warning":
@@ -711,37 +714,51 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
       break;
     }
     case "confirm_response": {
-      await apiFetch("modal", {
+      const kind = payload.kind === "path" ? "path" : "shell";
+      await apiFetch("modal/resolve", {
         method: "POST",
-        body: JSON.stringify({ id: payload.id, response: payload.response }),
+        body: JSON.stringify({ kind, choice: payload.response.type }),
       }).catch(() => {});
       break;
     }
     case "choice_response": {
-      await apiFetch("modal", {
+      const r = payload.response;
+      let choice: Record<string, unknown>;
+      if (r.type === "pick") choice = { kind: "pick", optionId: r.optionId };
+      else if (r.type === "text") choice = { kind: "custom", text: r.text };
+      else choice = { kind: "cancel" };
+      await apiFetch("modal/resolve", {
         method: "POST",
-        body: JSON.stringify({ id: payload.id, response: payload.response }),
+        body: JSON.stringify({ kind: "choice", choice }),
       }).catch(() => {});
       break;
     }
     case "plan_response": {
-      await apiFetch("modal", {
+      const r = payload.response;
+      await apiFetch("modal/resolve", {
         method: "POST",
-        body: JSON.stringify({ id: payload.id, response: payload.response }),
+        body: JSON.stringify({ kind: "plan", choice: r.type, text: r.feedback }),
       }).catch(() => {});
       break;
     }
     case "checkpoint_response": {
-      await apiFetch("modal", {
+      const r = payload.response;
+      const text = r.type === "revise" ? r.feedback : undefined;
+      await apiFetch("modal/resolve", {
         method: "POST",
-        body: JSON.stringify({ id: payload.id, response: payload.response }),
+        body: JSON.stringify({ kind: "checkpoint", choice: r.type, text }),
       }).catch(() => {});
       break;
     }
     case "revision_response": {
-      await apiFetch("modal", {
+      const r = payload.response;
+      // Server takes "accept" / "reject"; verdict uses past-participle.
+      const choice =
+        r.type === "accepted" ? "accept" : r.type === "rejected" ? "reject" : null;
+      if (choice === null) break;
+      await apiFetch("modal/resolve", {
         method: "POST",
-        body: JSON.stringify({ id: payload.id, response: payload.response }),
+        body: JSON.stringify({ kind: "revision", choice }),
       }).catch(() => {});
       break;
     }
