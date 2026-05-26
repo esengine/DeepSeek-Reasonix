@@ -27,13 +27,17 @@ import {
   loadEditMode,
   loadEditor,
   loadEndpoint,
+  loadExaApiKey,
+  loadMetasoApiKey,
   loadModel,
+  loadPerplexityApiKey,
   loadQQConfig,
   loadReasoningEffort,
   loadRecentWorkspaces,
   loadResolvedSkillPaths,
   loadShowSystemEvents,
   loadSubagentModels,
+  loadTavilyApiKey,
   loadWorkspaceDir,
   pushRecentWorkspace,
   readConfig,
@@ -136,6 +140,11 @@ type InMessage = { tabId?: string } & (
       model?: string;
       editor?: string;
       webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+      webSearchEndpoint?: string | null;
+      metasoApiKey?: string | null;
+      tavilyApiKey?: string | null;
+      perplexityApiKey?: string | null;
+      exaApiKey?: string | null;
       subagentModels?: Record<string, "flash" | "pro">;
       showSystemEvents?: boolean;
     }
@@ -185,6 +194,13 @@ interface SettingsEvent {
   model: string;
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  webSearchEndpoint?: string;
+  webSearchApiKeys?: {
+    metaso?: string;
+    tavily?: string;
+    perplexity?: string;
+    exa?: string;
+  };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
   version: string;
@@ -615,6 +631,26 @@ export function buildLoadedMessages(records: ChatMessage[]): LoadedMessage[] {
   return elideLoadedMessages(out);
 }
 
+function maskApiKey(key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  if (key.length <= 7) return `${key.slice(0, 2)}…`;
+  return `${key.slice(0, 6)}…${key.slice(-3)}`;
+}
+
+function collectWebSearchApiKeyPrefixes(): {
+  metaso?: string;
+  tavily?: string;
+  perplexity?: string;
+  exa?: string;
+} {
+  return {
+    metaso: maskApiKey(loadMetasoApiKey()),
+    tavily: maskApiKey(loadTavilyApiKey()),
+    perplexity: maskApiKey(loadPerplexityApiKey()),
+    exa: maskApiKey(loadExaApiKey()),
+  };
+}
+
 function emitSettings(tab: Tab): void {
   const ep = loadEndpoint();
   const editMode = loadEditMode();
@@ -633,6 +669,8 @@ function emitSettings(tab: Tab): void {
       model: tab.currentModel,
       editor: loadEditor(),
       webSearchEngine: readWebSearchEngine(),
+      webSearchEndpoint: readConfig().webSearchEndpoint,
+      webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
       subagentModels: loadSubagentModels(),
       showSystemEvents: loadShowSystemEvents(),
       version: VERSION,
@@ -2304,9 +2342,31 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
         if (msg.editor !== undefined) saveEditor(msg.editor);
         if (msg.showSystemEvents !== undefined) saveShowSystemEvents(msg.showSystemEvents);
-        if (msg.webSearchEngine !== undefined) {
+        if (
+          msg.webSearchEngine !== undefined ||
+          msg.webSearchEndpoint !== undefined ||
+          msg.metasoApiKey !== undefined ||
+          msg.tavilyApiKey !== undefined ||
+          msg.perplexityApiKey !== undefined ||
+          msg.exaApiKey !== undefined
+        ) {
           const cfg = readConfig();
-          cfg.webSearchEngine = msg.webSearchEngine;
+          if (msg.webSearchEngine !== undefined) cfg.webSearchEngine = msg.webSearchEngine;
+          if (msg.webSearchEndpoint !== undefined) {
+            cfg.webSearchEndpoint = msg.webSearchEndpoint?.trim() || undefined;
+          }
+          if (msg.metasoApiKey !== undefined) {
+            cfg.metasoApiKey = msg.metasoApiKey?.trim() || undefined;
+          }
+          if (msg.tavilyApiKey !== undefined) {
+            cfg.tavilyApiKey = msg.tavilyApiKey?.trim() || undefined;
+          }
+          if (msg.perplexityApiKey !== undefined) {
+            cfg.perplexityApiKey = msg.perplexityApiKey?.trim() || undefined;
+          }
+          if (msg.exaApiKey !== undefined) {
+            cfg.exaApiKey = msg.exaApiKey?.trim() || undefined;
+          }
           writeConfig(cfg);
         }
         if (msg.subagentModels !== undefined) {

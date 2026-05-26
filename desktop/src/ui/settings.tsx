@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { type ReactNode, useEffect, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { getLangLabel, getSupportedLangs, setLang, t, useLang } from "../i18n";
@@ -744,8 +745,151 @@ function PageGeneral({
             <option value="exa">{t("settings.webSearchEngineExa")}</option>
           </select>
         </div>
+        <WebSearchEngineCredentials settings={settings} onSave={onSave} />
       </section>
     </>
+  );
+}
+
+const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
+  engine: "metaso" | "tavily" | "perplexity" | "exa";
+  patchKey: "metasoApiKey" | "tavilyApiKey" | "perplexityApiKey" | "exaApiKey";
+  signupUrl: string;
+}> = [
+  { engine: "metaso", patchKey: "metasoApiKey", signupUrl: "https://metaso.cn/settings/api" },
+  { engine: "tavily", patchKey: "tavilyApiKey", signupUrl: "https://app.tavily.com" },
+  {
+    engine: "perplexity",
+    patchKey: "perplexityApiKey",
+    signupUrl: "https://www.perplexity.ai/settings/api",
+  },
+  { engine: "exa", patchKey: "exaApiKey", signupUrl: "https://dashboard.exa.ai/api-keys" },
+];
+
+function WebSearchEngineCredentials({
+  settings,
+  onSave,
+}: {
+  settings: SettingsType;
+  onSave: (patch: SettingsPatch) => void;
+}) {
+  const engine = settings.webSearchEngine ?? "bing";
+  if (engine === "bing") return null;
+  if (engine === "searxng") {
+    return <SearxngEndpointRow settings={settings} onSave={onSave} />;
+  }
+  const field = SEARCH_ENGINE_API_KEY_FIELDS.find((f) => f.engine === engine);
+  if (!field) return null;
+  const prefix = settings.webSearchApiKeys?.[engine];
+  return (
+    <WebSearchApiKeyRow
+      engine={engine}
+      patchKey={field.patchKey}
+      signupUrl={field.signupUrl}
+      prefix={prefix}
+      onSave={onSave}
+    />
+  );
+}
+
+function SearxngEndpointRow({
+  settings,
+  onSave,
+}: {
+  settings: SettingsType;
+  onSave: (patch: SettingsPatch) => void;
+}) {
+  const [draft, setDraft] = useState(settings.webSearchEndpoint ?? "");
+  useEffect(() => {
+    setDraft(settings.webSearchEndpoint ?? "");
+  }, [settings.webSearchEndpoint]);
+  return (
+    <div className="setting-row">
+      <div className="l">
+        <div className="n">{t("settings.webSearchEndpoint")}</div>
+        <div className="h">{t("settings.webSearchEndpointHint")}</div>
+      </div>
+      <input
+        className="field mono"
+        value={draft}
+        placeholder="http://localhost:8080"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          const next = draft.trim();
+          if (next === (settings.webSearchEndpoint ?? "")) return;
+          onSave({ webSearchEndpoint: next || null });
+        }}
+      />
+    </div>
+  );
+}
+
+function WebSearchApiKeyRow({
+  engine,
+  patchKey,
+  signupUrl,
+  prefix,
+  onSave,
+}: {
+  engine: "metaso" | "tavily" | "perplexity" | "exa";
+  patchKey: "metasoApiKey" | "tavilyApiKey" | "perplexityApiKey" | "exaApiKey";
+  signupUrl: string;
+  prefix?: string;
+  onSave: (patch: SettingsPatch) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const label = t(`settings.webSearchApiKey.${engine}` as const);
+  return (
+    <div className="setting-row">
+      <div className="l">
+        <div className="n">{label}</div>
+        <div className="h">
+          {prefix ? t("settings.apiKeySet", { prefix }) : t("settings.apiKeyNotSet")}{" "}
+          <a
+            href={signupUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              void openUrl(signupUrl).catch(() => undefined);
+            }}
+          >
+            {t("settings.webSearchApiKeySignup")}
+          </a>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input
+          className="field mono"
+          type="password"
+          value={draft}
+          placeholder={prefix ?? ""}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!draft.trim()}
+          onClick={() => {
+            const trimmed = draft.trim();
+            if (!trimmed) return;
+            onSave({ [patchKey]: trimmed } as SettingsPatch);
+            setDraft("");
+          }}
+        >
+          {t("settings.apiKeySave")}
+        </button>
+        {prefix ? (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => onSave({ [patchKey]: null } as SettingsPatch)}
+          >
+            {t("settings.webSearchApiKeyClear")}
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

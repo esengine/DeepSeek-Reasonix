@@ -158,12 +158,14 @@ export const de: typeof en = {
     effortHighDesc: "schneller, weniger Denken",
     effortMaxDesc: "tieferes Reasoning, langsamer",
     editMode: "Edit-Gate",
-    editModeHint: "Tool-Genehmigungsverhalten — Änderungen werden auf Platte gespeichert, wirken beim nächsten Tool-Aufruf.",
+    editModeHint:
+      "Tool-Genehmigungsverhalten — Änderungen werden auf Platte gespeichert, wirken beim nächsten Tool-Aufruf.",
     editModeReview: "review",
     editModeAuto: "auto",
     editModeYolo: "yolo",
     showSystemEvents: "Systemereignisse",
-    showSystemEventsHint: "Zeige leise Inline-Hinweise zur Kontextkomprimierung, Abbruch und Ratelimit-Pausen.",
+    showSystemEventsHint:
+      "Zeige leise Inline-Hinweise zur Kontextkomprimierung, Abbruch und Ratelimit-Pausen.",
     shown: "angezeigt",
     hidden: "ausgeblendet",
     editModeReviewDesc: "jeden Schreibzugriff genehmigen",
@@ -175,13 +177,25 @@ export const de: typeof en = {
     webSearchEngine: "Suchmaschine",
     webSearchEngineBing: "bing — Standard, funktioniert von CN ohne Proxy",
     webSearchEngineSearxng: "searxng — selbst gehostet (Endpunkt via /se searxng <url>)",
-    webSearchEngineMetaso: "metaso — 100/Tag kostenlos (CN-freundlich, kostenloser Schlüssel auf metaso.cn)",
+    webSearchEngineMetaso:
+      "metaso — 100/Tag kostenlos (CN-freundlich, kostenloser Schlüssel auf metaso.cn)",
     webSearchEngineTavily: "tavily — 1000/Monat kostenlos (TAVILY_API_KEY setzen)",
     webSearchEnginePerplexity: "perplexity — AI-native (PERPLEXITY_API_KEY setzen)",
     webSearchEngineExa: "exa — AI-native 1000/Monat kostenlos (EXA_API_KEY setzen)",
     webSearchEngineNote: "gilt für den nächsten web_search-Aufruf",
+    webSearchEndpoint: "SearXNG-Endpunkt",
+    webSearchEndpointHint: "Basis-URL der SearXNG-Instanz. Leer = http://localhost:8080.",
+    webSearchApiKeySignup: "(Schlüssel holen)",
+    webSearchApiKeyClear: "Löschen",
+    webSearchApiKey: {
+      metaso: "Metaso API-Key",
+      tavily: "Tavily API-Key",
+      perplexity: "Perplexity API-Key",
+      exa: "Exa API-Key",
+    },
     baseUrl: "DeepSeek-Basis-URL",
-    baseUrlHint: "Nur bei Verwendung eines Proxys überschreiben. Leer = offizieller Endpunkt. Neustart erforderlich.",
+    baseUrlHint:
+      "Nur bei Verwendung eines Proxys überschreiben. Leer = offizieller Endpunkt. Neustart erforderlich.",
     workspace: "Arbeitsbereich",
     workspaceHint:
       "Root-Verzeichnis, in dem Agent-Tools arbeiten. Wechseln speichert in der Konfiguration und lädt Tools neu.",
@@ -261,7 +275,8 @@ export const de: typeof en = {
     apiKeySet: "Gesetzt · {prefix}…",
     defaultModelCurrent: "Standardmodell · aktuell {model}",
     modelCustom: "Benutzerdefinierte Modell-ID",
-    modelCustomHint: "Jede OpenAI-kompatible ID, die dein Endpunkt bereitstellt (vLLM, Ollama, Together, …).",
+    modelCustomHint:
+      "Jede OpenAI-kompatible ID, die dein Endpunkt bereitstellt (vLLM, Ollama, Together, …).",
     modelCustomActive: "Läuft aktuell auf benutzerdefinierter ID: {model}",
     effortSection: "Reasoning-Effort",
     ctxWindow: "Kontext",
@@ -282,14 +297,15 @@ export const de: typeof en = {
       "Keine Skills verfügbar. Erstelle SKILL.md unter ~/.reasonix/skills/ oder .reasonix/skills/ in deinem Projekt-Root.",
     subagentModelFlash: "flash",
     subagentModelPro: "pro",
-    subagentModelHint: "Modell, das verwendet wird, wenn dieser Skill seinen isolierten Subagenten startet",
+    subagentModelHint:
+      "Modell, das verwendet wird, wenn dieser Skill seinen isolierten Subagenten startet",
     memorySection: "Langzeit-Memory",
     memoryDesc:
       "Aktuelle Version verwendet die eingebaute CLAUDE.md / AGENTS.md-Injektion. Projekt-Level-Memory wird auf Kernel-Ebene verwaltet.",
     appMode: "Anwendungsmodus",
     ruleAutoApprovalSection: "Auto-genehmigte Befehle",
     ruleAutoApprovalHint:
-      'Klicke in der ApprovalCard auf »Immer erlauben«, um einen Befehlspräfix zur Whitelist hinzuzufügen; nachfolgende passende Befehle werden nicht mehr nachfragen.',
+      "Klicke in der ApprovalCard auf »Immer erlauben«, um einen Befehlspräfix zur Whitelist hinzuzufügen; nachfolgende passende Befehle werden nicht mehr nachfragen.",
     balanceLabel: "Wallet-Guthaben",
     balanceLow: "Unzureichend",
     balanceAvailable: "Verfügbar",
@@ -360,7 +376,8 @@ export const de: typeof en = {
     continue: "Fortsetzen",
     revise: "Überarbeiten…",
     stop: "Stopp",
-    revisePlaceholder: "Was muss sich vor dem nächsten Schritt ändern? (leer lassen zum Fortfahren)",
+    revisePlaceholder:
+      "Was muss sich vor dem nächsten Schritt ändern? (leer lassen zum Fortfahren)",
     sendRevise: "Überarbeitung senden",
   },
   revision: {
@@ -397,6 +414,7 @@ export const de: typeof en = {
       abort: "Streaming stoppen",
       copyLast: "Letzte Antwort kopieren",
       switchModel: "Modell wechseln",
+      searchEngine: "Suchmaschine + API-Keys konfigurieren",
       setMode: "Modus auf {mode} setzen",
       setEffort: "Reasoning-Effort auf {effort} setzen",
       toggleTheme: "Theme wechseln",
@@ -439,7 +457,8 @@ export const de: typeof en = {
     splashSubtitle: "DeepSeek-Agenten",
     connecting: "Verbinde mit reasonix core...",
     startupFailedTitle: "Reasonix konnte nicht starten",
-    startupFailedMessage: "Das Desktop-Backend ist fehlgeschlagen, bevor ein Arbeitsbereich geöffnet wurde.",
+    startupFailedMessage:
+      "Das Desktop-Backend ist fehlgeschlagen, bevor ein Arbeitsbereich geöffnet wurde.",
     startupFailedRetry: "Erneut versuchen",
     startupFailedUnknown: "Unbekannter Startfehler",
     langZH: "Chinesisch",

@@ -243,6 +243,13 @@ export type Settings = {
   model: string;
   editor?: string;
   webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa";
+  webSearchEndpoint?: string;
+  webSearchApiKeys?: {
+    metaso?: string;
+    tavily?: string;
+    perplexity?: string;
+    exa?: string;
+  };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
   version: string;
@@ -335,6 +342,22 @@ type Action =
   | { t: "settings_patch"; patch: SettingsPatch }
   | { t: "push_status"; text: string };
 
+function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
+  const {
+    metasoApiKey: _metaso,
+    tavilyApiKey: _tavily,
+    perplexityApiKey: _perplexity,
+    exaApiKey: _exa,
+    webSearchEndpoint,
+    ...rest
+  } = patch;
+  const sanitized: Partial<Settings> = { ...rest };
+  if (webSearchEndpoint !== undefined) {
+    sanitized.webSearchEndpoint = webSearchEndpoint ?? undefined;
+  }
+  return sanitized;
+}
+
 function fallbackSkillDesc(skill: SkillInfo): string {
   const scope =
     skill.scope === "builtin"
@@ -413,7 +436,7 @@ export function reduce(state: State, action: Action): State {
       return applyIncoming(state, action.event);
     case "settings_patch":
       return state.settings
-        ? { ...state, settings: { ...state.settings, ...action.patch } }
+        ? { ...state, settings: { ...state.settings, ...sanitizeSettingsPatch(action.patch) } }
         : state;
     case "batch_delta": {
       const collapsed: DeltaBatchItem[] = [];
@@ -920,6 +943,8 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           model: ev.model,
           editor: ev.editor,
           webSearchEngine: ev.webSearchEngine,
+          webSearchEndpoint: ev.webSearchEndpoint,
+          webSearchApiKeys: ev.webSearchApiKeys,
           subagentModels: ev.subagentModels,
           showSystemEvents: ev.showSystemEvents,
           version: ev.version,
@@ -1592,6 +1617,11 @@ function TabRuntime({
       const skillMatch = text.match(/^\/([a-zA-Z0-9_-]+)(\s+.*)?$/);
       if (skillMatch) {
         const [, name, args] = skillMatch;
+        if (name === "search-engine" || name === "se") {
+          openSettingsAt("general");
+          if (!override) setDraft("");
+          return;
+        }
         const skill = state.skills.find((s) => s.name === name);
         if (skill) {
           const clientId = `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1617,6 +1647,7 @@ function TabRuntime({
       sendRpc,
       recordAbortDraft,
       applySlashSettingsCommand,
+      openSettingsAt,
     ],
   );
 
@@ -1972,6 +2003,11 @@ function TabRuntime({
       },
     },
     { cmd: "/model", desc: t("app.cmd.switchModel"), run: () => openSettingsAt("models") },
+    {
+      cmd: "/search-engine",
+      desc: t("app.cmd.searchEngine"),
+      run: () => openSettingsAt("general"),
+    },
     ...slashSettingCommands,
     { cmd: "/theme", desc: t("app.cmd.toggleTheme"), run: onToggleTheme },
     {
