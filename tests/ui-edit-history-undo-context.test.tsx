@@ -10,8 +10,8 @@ import {
   type UndoAppliedEvent,
   codeUndoInfo,
   formatUndoContextMessage,
-  useEditHistory,
-} from "../src/cli/ui/useEditHistory.js";
+} from "../src/cli/ui/undo-context.js";
+import { useEditHistory } from "../src/cli/ui/useEditHistory.js";
 import { type EditBlock, applyEditBlocks, snapshotBeforeEdits } from "../src/code/edit-blocks.js";
 
 afterEach(() => {

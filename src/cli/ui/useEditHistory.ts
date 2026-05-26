@@ -15,15 +15,6 @@ import {
 } from "./edit-history.js";
 import type { CodeUndoResult } from "./undo-context.js";
 
-export {
-  codeUndoContextMessage,
-  codeUndoInfo,
-  formatUndoContextMessage,
-  type CodeUndoOutput,
-  type CodeUndoResult,
-  type UndoAppliedEvent,
-} from "./undo-context.js";
-
 export interface UndoBannerState {
   results: ApplyResult[];
   expiresAt: number;
