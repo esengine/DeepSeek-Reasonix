@@ -26,7 +26,6 @@ export function JumpBar({ messages, threadEl }: JumpBarProps) {
     if (items.length > 0) setActive(items[items.length - 1]!.turn);
   }, [items]);
 
-  // Scroll active bar into view when it changes
   useEffect(() => {
     if (active === null) return;
     const el = barRef.current?.querySelector(`[data-turn="${active}"]`);
@@ -57,32 +56,45 @@ export function JumpBar({ messages, threadEl }: JumpBarProps) {
     });
     if (closest >= 0 && closest < items.length) {
       const turn = items[closest]?.turn;
-      if (turn !== undefined) { setHovered(turn); setShowPreview(true); }
+      if (turn !== undefined) {
+        setHovered(turn);
+        setShowPreview(true);
+      }
     }
   };
 
   const scrollTo = (turn: number) => {
     setActive(turn);
-    threadEl?.querySelector(`[data-turn="${turn}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    threadEl
+      ?.querySelector(`[data-turn="${turn}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const dotProps = (
+    idx: number,
+    turn: number,
+  ): { style: React.CSSProperties; "data-d"?: string } => {
+    const isActive = active === turn;
+    if (hoverIdx < 0) {
+      return { style: { width: isActive ? 18 : 12, background: isActive ? "var(--accent)" : undefined } };
+    }
+    const d = Math.abs(idx - hoverIdx);
+    const width = d === 0 ? 32 : d === 1 ? 20 : d === 2 ? 14 : isActive ? 18 : 12;
+    const background = d <= 2 ? undefined : isActive ? "var(--accent)" : undefined;
+    return {
+      style: { width, transitionDelay: `${d * 20}ms`, background },
+      "data-d": d <= 2 ? String(d) : undefined,
+    };
   };
 
   return (
     <div className="jump-bar" ref={barRef} onMouseMove={onMove} onMouseLeave={() => { setHovered(null); setShowPreview(false); }}>
       <div className="jump-scroll">
-        {items.map((item, idx) => {
-          const dist = hoverIdx >= 0 ? Math.abs(idx - hoverIdx) : -1;
-          const isActive = active === item.turn;
-          const isHov = dist === 0;
-          const isNear = dist === 1 || dist === 2;
-          const w = isHov ? 32 : isNear ? (dist === 1 ? 20 : 14) : isActive ? 18 : 12;
-          const bg = isHov || isNear ? undefined : isActive ? "var(--accent)" : undefined;
-          return (
-            <div className="jump-item" key={item.turn} data-turn={item.turn} onClick={() => scrollTo(item.turn)}>
-              <div className="jump-dot" style={{ width: w, transitionDelay: `${dist * 20}ms`, background: bg }}
-                data-d={dist >= 0 && dist <= 2 ? String(dist) : undefined} />
-            </div>
-          );
-        })}
+        {items.map((item, idx) => (
+          <div className="jump-item" key={item.turn} data-turn={item.turn} onClick={() => scrollTo(item.turn)}>
+            <div className="jump-dot" {...dotProps(idx, item.turn)} />
+          </div>
+        ))}
       </div>
       {showPreview && hoverText && (
         <div className="jump-preview" style={{ top: previewTop.current }}>
