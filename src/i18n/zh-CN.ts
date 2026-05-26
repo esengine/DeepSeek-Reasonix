@@ -338,7 +338,6 @@ export const zhCN: TranslationSchema = {
     qq: {
       description:
         "连接/查看/断开 QQ 通道，首次连接需提供 AppId + AppSecret（可选沙箱模式 sandbox）",
-      argsHint: "<connect连接 | status状态 | disconnect断开>",
     },
     setup: { description: "提醒您退出并运行 `reasonix setup`" },
     semantic: {
