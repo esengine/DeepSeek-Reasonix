@@ -157,7 +157,7 @@ export const AssistantMsg = memo(function AssistantMsg({
           </button>
           {toolOpen && (
             <div className="tool-group-body">
-              {tSegs.map((ts, tgi) => renderTool(ts, toolGroup!.indices[tgi]!))}
+              {tSegs.map((ts, tgi) => renderTool(ts, toolGroup!.indices[tgi]!, true))}
             </div>
           )}
         </div>,
@@ -166,7 +166,7 @@ export const AssistantMsg = memo(function AssistantMsg({
     toolGroup = null;
   }
 
-  function renderTool(s: AssistantSegment & { kind: "tool" }, idx: number): ReactNode {
+  function renderTool(s: AssistantSegment & { kind: "tool" }, idx: number, expanded?: boolean): ReactNode {
     const pendingConfirm =
       (s.name === "run_command" || s.name === "run_background") && s.result === undefined
         ? pendingConfirms.find((c) => c.command === extractCommand(s.args))
@@ -188,6 +188,7 @@ export const AssistantMsg = memo(function AssistantMsg({
           output={s.result}
           state={state}
           durationMs={s.durationMs}
+          defaultOpen={expanded}
           onApprove={pendingConfirm ? () => onApproveConfirm(pendingConfirm.id) : undefined}
           onReject={pendingConfirm ? () => onRejectConfirm(pendingConfirm.id) : undefined}
           onAlwaysAllow={
@@ -209,11 +210,11 @@ export const AssistantMsg = memo(function AssistantMsg({
           ))}
         </>
       ) : (
-        <ToolCard key={idx} name={s.name} args={s.args} result={s.result} ok={s.ok} durationMs={s.durationMs} />
+        <ToolCard key={idx} name={s.name} args={s.args} result={s.result} ok={s.ok} durationMs={s.durationMs} defaultOpen={expanded} />
       );
     }
     return (
-      <ToolCard key={idx} name={s.name} args={s.args} result={s.result} ok={s.ok} durationMs={s.durationMs} />
+      <ToolCard key={idx} name={s.name} args={s.args} result={s.result} ok={s.ok} durationMs={s.durationMs} defaultOpen={expanded} />
     );
   }
 
