@@ -54,6 +54,17 @@ async function wait(ms = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForCursorMoveAfter(
+  stdout: ReturnType<typeof makeFakeStdout>,
+  before: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (cursorMoves(stdout.text()).length > before) return;
+    await wait(25);
+  }
+  expect(cursorMoves(stdout.text()).length).toBeGreaterThan(before);
+}
+
 async function feed(reader: FakeReader, ev: Partial<KeyEvent>): Promise<void> {
   reader.feed(ev);
   await wait();
@@ -150,13 +161,17 @@ describe("PromptInput system cursor sync", () => {
     );
     await wait(180);
 
-    const before = stdout.text().length;
+    const beforeText = stdout.text().length;
+    const beforeMoves = cursorMoves(stdout.text()).length;
     await feed(reader, { input: "a" });
+    await waitForCursorMoveAfter(stdout, beforeMoves);
     await wait(180);
 
-    const delta = stdout.text().slice(before);
+    const output = stdout.text();
+    const delta = output.slice(beforeText);
+    const newMoves = cursorMoves(output).slice(beforeMoves);
     expect(delta).not.toMatch(FULL_FRAME_ERASE_RE);
-    expect(delta).toContain("› a");
+    expect(newMoves).toContain("\x1b[28;5H");
 
     unmount();
   });
