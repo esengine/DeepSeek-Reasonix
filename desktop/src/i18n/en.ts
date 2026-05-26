@@ -692,6 +692,8 @@ export const en = {
     unknownKind: "# unknown card kind — fallback render",
   },
   thread: {
+    toolCalls: "{count} tool calls",
+    oneToolCall: "1 tool call",
     keepSteps: "Keep {n} remaining step(s)",
     keepOriginal: "Keep original",
     you: "You",

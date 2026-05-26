@@ -677,6 +677,8 @@ export const zhCN: typeof en = {
     unknownKind: "# 未知卡片类型 — fallback 渲染",
   },
   thread: {
+    toolCalls: "{count} 个工具调用",
+    oneToolCall: "1 个工具调用",
     keepSteps: "保留剩余 {n} 步",
     keepOriginal: "保留原计划",
     you: "你",

@@ -2033,6 +2033,40 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   max-width: 60ch;
 }
 
+.tool-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.tool-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
+  background: var(--panel);
+  cursor: pointer;
+  border: none;
+}
+.tool-group-header:hover {
+  background: var(--panel-2);
+}
+.tool-group-header .chevron {
+  margin-left: auto;
+  transition: transform 150ms;
+}
+.tool-group-header .chevron.open {
+  transform: rotate(180deg);
+}
+.tool-group-body {
+  border-top: 1px solid var(--border);
+}
+.tool-group-body > * + * {
+  border-top: 1px solid var(--border);
+}
 .msg {
   display: flex;
   gap: 14px;

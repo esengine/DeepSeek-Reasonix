@@ -135,6 +135,121 @@ export const AssistantMsg = memo(function AssistantMsg({
       /* ignore */
     }
   };
+  // Render tool segments — consecutive tools get grouped into a collapsible section
+  const [toolOpen, setToolOpen] = useState(false);
+  const rendered: ReactNode[] = [];
+
+  let firstReasoningShown = false;
+  let toolGroup: { segments: (AssistantSegment & { kind: "tool" })[]; indices: number[] } | null = null;
+
+  function flushToolGroup(): void {
+    if (!toolGroup) return;
+    const { segments: tSegs } = toolGroup;
+    if (tSegs.length === 1) {
+      // Single tool — render inline without group wrapper
+      rendered.push(renderTool(tSegs[0]!, toolGroup.indices[0]!));
+    } else {
+      rendered.push(
+        <div key={`tool-group-${toolGroup.indices[0]}`} className="tool-group">
+          <button className="tool-group-header" onClick={() => setToolOpen((o) => !o)}>
+            <span>{tSegs.length > 1 ? t("thread.toolCalls", { count: tSegs.length }) : t("thread.oneToolCall")}</span>
+            <span className={`chevron ${toolOpen ? "open" : ""}`}>{I.chev({ size: 12 })}</span>
+          </button>
+          {toolOpen && (
+            <div className="tool-group-body">
+              {tSegs.map((ts, tgi) => renderTool(ts, toolGroup!.indices[tgi]!))}
+            </div>
+          )}
+        </div>,
+      );
+    }
+    toolGroup = null;
+  }
+
+  function renderTool(s: AssistantSegment & { kind: "tool" }, idx: number): ReactNode {
+    const pendingConfirm =
+      (s.name === "run_command" || s.name === "run_background") && s.result === undefined
+        ? pendingConfirms.find((c) => c.command === extractCommand(s.args))
+        : undefined;
+    if (s.name === "run_command" || s.name === "run_background") {
+      const cmd = extractCommand(s.args) ?? s.args;
+      const state: "await" | "running" | "done" | "failed" =
+        s.result === undefined
+          ? pendingConfirm
+            ? "await"
+            : "running"
+          : s.ok === false
+            ? "failed"
+            : "done";
+      return (
+        <ShellCard
+          key={idx}
+          command={cmd}
+          output={s.result}
+          state={state}
+          durationMs={s.durationMs}
+          onApprove={pendingConfirm ? () => onApproveConfirm(pendingConfirm.id) : undefined}
+          onReject={pendingConfirm ? () => onRejectConfirm(pendingConfirm.id) : undefined}
+          onAlwaysAllow={
+            pendingConfirm
+              ? () => {
+                  onAlwaysAllowConfirm(pendingConfirm.id, derivePrefix(cmd));
+                }
+              : undefined
+          }
+        />
+      );
+    }
+    if (s.result && (s.name === "edit_file" || s.name === "multi_edit")) {
+      const files = parseEditResult(s.result);
+      return files.length > 0 ? (
+        <>
+          {files.map((f, fi) => (
+            <DiffCard key={`${idx}-${fi}`} filename={f.filename} lines={f.lines} applied={s.ok !== false} />
+          ))}
+        </>
+      ) : (
+        <ToolCard key={idx} name={s.name} args={s.args} result={s.result} ok={s.ok} durationMs={s.durationMs} />
+      );
+    }
+    return (
+      <ToolCard key={idx} name={s.name} args={s.args} result={s.result} ok={s.ok} durationMs={s.durationMs} />
+    );
+  }
+
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i]!;
+    if (s.kind === "text") {
+      flushToolGroup();
+      if (!s.text.trim()) continue;
+      if (isCompactionSummary(s.text)) {
+        rendered.push(<CompactionCard key={`t-${i}`} summary={stripCompactionMarker(s.text)} />);
+      } else {
+        rendered.push(<AssistantText key={`t-${i}`} text={s.text} />);
+      }
+      continue;
+    }
+    if (s.kind === "reasoning") {
+      flushToolGroup();
+      if (!firstReasoningShown) {
+        firstReasoningShown = true;
+        rendered.push(
+          <ReasoningCard key={`r-${i}`} text={s.text} streaming={pending && i === segments.length - 1} />,
+        );
+      }
+      // Subsequent reasoning segments are intermediate tool-calling thought — hidden
+      continue;
+    }
+    // Tool segment — accumulate into group
+    if (!toolGroup) {
+      toolGroup = { segments: [], indices: [] };
+    }
+    toolGroup.segments.push(s);
+    toolGroup.indices.push(i);
+  }
+
+  flushToolGroup();
+
   return (
     <div className="msg assistant">
       <div className="avatar">DS</div>
@@ -144,92 +259,7 @@ export const AssistantMsg = memo(function AssistantMsg({
           {model ? <span className="model">{model}</span> : null}
           {time ? <span className="time">{time}</span> : null}
         </div>
-        {segments.map((s, i) => {
-          if (s.kind === "text") {
-            if (!s.text.trim()) return null;
-            if (isCompactionSummary(s.text)) {
-              return <CompactionCard key={i} summary={stripCompactionMarker(s.text)} />;
-            }
-            return <AssistantText key={i} text={s.text} />;
-          }
-          if (s.kind === "reasoning") {
-            return (
-              <ReasoningCard
-                key={i}
-                text={s.text}
-                streaming={pending && i === segments.length - 1}
-              />
-            );
-          }
-          // tool segment
-          const pendingConfirm =
-            (s.name === "run_command" || s.name === "run_background") && s.result === undefined
-              ? pendingConfirms.find((c) => c.command === extractCommand(s.args))
-              : undefined;
-          if (s.name === "run_command" || s.name === "run_background") {
-            const cmd = extractCommand(s.args) ?? s.args;
-            const state: "await" | "running" | "done" | "failed" =
-              s.result === undefined
-                ? pendingConfirm
-                  ? "await"
-                  : "running"
-                : s.ok === false
-                  ? "failed"
-                  : "done";
-            return (
-              <ShellCard
-                key={i}
-                command={cmd}
-                output={s.result}
-                state={state}
-                durationMs={s.durationMs}
-                onApprove={pendingConfirm ? () => onApproveConfirm(pendingConfirm.id) : undefined}
-                onReject={pendingConfirm ? () => onRejectConfirm(pendingConfirm.id) : undefined}
-                onAlwaysAllow={
-                  pendingConfirm
-                    ? () => {
-                        onAlwaysAllowConfirm(pendingConfirm.id, derivePrefix(cmd));
-                      }
-                    : undefined
-                }
-              />
-            );
-          }
-          if (s.result && (s.name === "edit_file" || s.name === "multi_edit")) {
-            const files = parseEditResult(s.result);
-            return files.length > 0 ? (
-              <>
-                {files.map((f, fi) => (
-                  <DiffCard
-                    key={`${i}-${fi}`}
-                    filename={f.filename}
-                    lines={f.lines}
-                    applied={s.ok !== false}
-                  />
-                ))}
-              </>
-            ) : (
-              <ToolCard
-                key={i}
-                name={s.name}
-                args={s.args}
-                result={s.result}
-                ok={s.ok}
-                durationMs={s.durationMs}
-              />
-            );
-          }
-          return (
-            <ToolCard
-              key={i}
-              name={s.name}
-              args={s.args}
-              result={s.result}
-              ok={s.ok}
-              durationMs={s.durationMs}
-            />
-          );
-        })}
+        {rendered}
         {content ? (
           <div className="msg-actions">
             <button
