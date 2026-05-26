@@ -218,6 +218,7 @@ export function ShellCard({
   onApprove,
   onReject,
   onAlwaysAllow,
+  defaultOpen: _defaultOpen,
 }: {
   command: string;
   output?: string;
@@ -226,6 +227,7 @@ export function ShellCard({
   onApprove?: () => void;
   onReject?: () => void;
   onAlwaysAllow?: () => void;
+  defaultOpen?: boolean;
 }) {
   useLang();
   const tone: Tone = state === "failed" ? "danger" : state === "done" ? "success" : "warning";
@@ -236,7 +238,7 @@ export function ShellCard({
       kind="shell"
       name="shell"
       compact
-      defaultOpen={false}
+      defaultOpen={_defaultOpen ?? false}
       meta={
         <>
           {state === "await" ? (
@@ -335,12 +337,14 @@ export function ToolCard({
   result,
   ok,
   durationMs,
+  defaultOpen: _defaultOpen,
 }: {
   name: string;
   args?: string;
   result?: string;
   ok?: boolean;
   durationMs?: number;
+  defaultOpen?: boolean;
 }) {
   useLang();
   const running = result === undefined;
@@ -351,7 +355,7 @@ export function ToolCard({
       icon={<I.wrench size={12} />}
       kind="tool"
       name={name}
-      defaultOpen={false}
+      defaultOpen={_defaultOpen ?? false}
       compact
       meta={
         <>
