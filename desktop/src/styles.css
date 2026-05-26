@@ -1615,10 +1615,9 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   flex-direction: column;
   gap: 28px;
 }
-/* Skip offscreen message layout during resize — critical for long sessions */
 .thread-inner > div[data-turn] {
   content-visibility: auto;
-  contain-intrinsic-size: 1px 100px;
+  contain-intrinsic-size: auto 100px;
 }
 
 /* ---------- JUMP BAR (message navigation dock) ---------- */

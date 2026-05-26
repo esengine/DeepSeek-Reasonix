@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getThreadMaxWidth } from "./thread-layout";
 
 const MIN_WIDTH = 160;
 const MAX_WIDTH_PCT = 0.4;
@@ -68,18 +69,18 @@ export function useResizable(
       next = Math.max(MIN_WIDTH, Math.min(next, maxW));
       widthRef.current = next;
 
-      // Update CSS variable + React state every frame
       appEl.style.setProperty(cssVar, `${next}px`);
       setWidth(next);
 
-      // Sync thread/composer max-width in lockstep
       const otherVar = side === "side" ? "--ctx-width" : "--side-width";
-      const o = parseFloat(appEl.style.getPropertyValue(otherVar)) || 0;
-      const sideW = side === "side" ? next : o;
-      const ctxW = side === "ctx" ? next : o;
-      const tMax = String(Math.max(580, Math.min(window.innerWidth - sideW - ctxW - 80, 1120)));
-      appEl.style.setProperty("--thread-max-width", tMax);
-      appEl.style.setProperty("--composer-max-width", tMax);
+      const otherW = Number.parseFloat(appEl.style.getPropertyValue(otherVar)) || 0;
+      const tMax = getThreadMaxWidth({
+        viewportWidth: window.innerWidth,
+        visibleSide: side === "side" ? next : otherW,
+        visibleCtx: side === "ctx" ? next : otherW,
+      });
+      appEl.style.setProperty("--thread-max-width", `${tMax}px`);
+      appEl.style.setProperty("--composer-max-width", `${tMax}px`);
     };
 
     const onUp = () => {
