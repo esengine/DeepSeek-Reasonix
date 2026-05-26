@@ -269,7 +269,7 @@ html[data-platform="macos"] .app {
   position: absolute;
   top: 36px;
   bottom: 26px;
-  width: 5px;
+  width: 4px;
   cursor: col-resize;
   z-index: 10;
   background: transparent;
@@ -277,13 +277,13 @@ html[data-platform="macos"] .app {
 }
 .resize-handle:hover,
 .resize-handle[data-dragging="true"] {
-  background: var(--accent);
+  background: transparent;
 }
 .resize-handle[data-side="left"] {
   left: calc(var(--side-width) - 2px);
 }
 .resize-handle[data-side="right"] {
-  right: calc(var(--ctx-width) - 2px);
+  right: calc(var(--ctx-width) - 4px);
 }
 
 /* ---------- TABBAR ---------- */
@@ -3462,6 +3462,7 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 
 .ctx-body {
   flex: 1;
+  margin-right: 8px;
   overflow-y: auto;
   padding: 12px;
   padding-right: 20px;
@@ -7053,3 +7054,4 @@ html[data-platform="macos"] .splash {
     grid-template-columns: 1fr;
   }
 }
+
