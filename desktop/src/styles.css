@@ -269,7 +269,7 @@ html[data-platform="macos"] .app {
   position: absolute;
   top: 36px;
   bottom: 26px;
-  width: 1px;
+  width: 5px;
   cursor: col-resize;
   z-index: 10;
   background: transparent;
@@ -280,10 +280,10 @@ html[data-platform="macos"] .app {
   background: var(--accent);
 }
 .resize-handle[data-side="left"] {
-  left: var(--side-width);
+  left: calc(var(--side-width) - 2px);
 }
 .resize-handle[data-side="right"] {
-  right: var(--ctx-width);
+  right: calc(var(--ctx-width) - 2px);
 }
 
 /* ---------- TABBAR ---------- */
