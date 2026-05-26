@@ -1,6 +1,7 @@
 import { render } from "ink";
 import React from "react";
 import { describe, expect, it } from "vitest";
+import * as chatCommand from "../src/cli/commands/chat.js";
 import { PromptInput } from "../src/cli/ui/PromptInput.js";
 import {
   type KeystrokeHandler,
@@ -13,6 +14,7 @@ import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
 
 const ESC = String.fromCharCode(27);
 const CURSOR_MOVE_RE = new RegExp(`${ESC}\\[\\d+;\\d+H`, "g");
+const FULL_FRAME_ERASE_RE = new RegExp(`${ESC}\\[2K${ESC}\\[1A${ESC}\\[2K`);
 
 class FakeReader implements KeystrokeReader {
   private readonly handlers = new Set<KeystrokeHandler>();
@@ -36,6 +38,16 @@ class FakeReader implements KeystrokeReader {
 
 function cursorMoves(text: string): string[] {
   return text.match(CURSOR_MOVE_RE) ?? [];
+}
+
+function chatRenderOptions(): Record<string, unknown> {
+  return (
+    (
+      chatCommand as {
+        CHAT_RENDER_OPTIONS?: Record<string, unknown>;
+      }
+    ).CHAT_RENDER_OPTIONS ?? {}
+  );
 }
 
 async function wait(ms = 0): Promise<void> {
@@ -123,6 +135,28 @@ describe("PromptInput system cursor sync", () => {
     const afterMoves = cursorMoves(stdout.text());
     const newMoves = afterMoves.slice(before);
     expect(newMoves).toEqual(["\x1b[28;9H"]);
+
+    unmount();
+  });
+
+  it("uses incremental chat rendering so prompt edits do not erase the whole frame", async () => {
+    const reader = new FakeReader();
+    const stdout = makeFakeStdout();
+    const { unmount } = render(
+      <KeystrokeProvider reader={reader}>
+        <PromptHarness />
+      </KeystrokeProvider>,
+      { stdout: stdout as never, stdin: makeFakeStdin() as never, ...chatRenderOptions() },
+    );
+    await wait(180);
+
+    const before = stdout.text().length;
+    await feed(reader, { input: "a" });
+    await wait(180);
+
+    const delta = stdout.text().slice(before);
+    expect(delta).not.toMatch(FULL_FRAME_ERASE_RE);
+    expect(delta).toContain("› a");
 
     unmount();
   });

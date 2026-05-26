@@ -45,6 +45,11 @@ import {
 
 export type { McpLifecycleNotice, McpLifecycleSink, McpRuntime, ProgressInfo };
 
+export const CHAT_RENDER_OPTIONS = {
+  exitOnCtrlC: true,
+  incrementalRendering: true,
+} as const;
+
 export interface ChatOptions {
   model: string;
   reasoningEffort?: ReasoningEffort;
@@ -407,7 +412,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       qqSubmitRef={qqSubmitRef}
       qqErrorRef={qqErrorRef}
     />,
-    { exitOnCtrlC: true },
+    CHAT_RENDER_OPTIONS,
   );
   try {
     await waitUntilExit();
