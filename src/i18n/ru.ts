@@ -29,7 +29,8 @@ export const ru: TranslationSchema = {
     doctor: "Проверка здоровья одной командой.",
     commit: "Составить сообщение коммита из staged-diff.",
     sessions: "Список сохранённых сессий или просмотр одной по имени.",
-    pruneSessions: "Удалить сессии, неактивные ≥N дней (по умолч. 90). --dry-run для предпросмотра.",
+    pruneSessions:
+      "Удалить сессии, неактивные ≥N дней (по умолч. 90). --dry-run для предпросмотра.",
     events: "Красивый вывод журнала событий ядра.",
     replay: "Интерактивная Ink TUI для просмотра транскрипта.",
     diff: "Сравнение двух транскриптов в разделённой Ink TUI.",
@@ -114,7 +115,8 @@ export const ru: TranslationSchema = {
     mcpInspectDescription: "проверить спецификацию MCP-сервера (инструменты, ресурсы, промпты)",
     mcpSearchDescription: "поиск MCP-серверов по запросу в реестре",
     mcpInstallDescription: "установить MCP-сервер по имени (записывает спецификацию в конфиг)",
-    mcpBrowseDescription: "интерактивный обзор маркетплейса — ввод для фильтра, Enter для установки",
+    mcpBrowseDescription:
+      "интерактивный обзор маркетплейса — ввод для фильтра, Enter для установки",
     mcpLocalHint: "показать только встроенный офлайн-каталог",
     mcpRefreshHint: "пропустить 24ч кэш и загрузить заново",
     mcpLimitHint: "макс. записей для показа",
@@ -186,6 +188,7 @@ export const ru: TranslationSchema = {
     },
     language: {
       ...EN.slash.language,
+      description: "сменить язык интерфейса",
       argsHint: "<EN|zh-CN|de|ru>",
       success: "Язык переключён на русский.",
       unsupported: "Неподдерживаемый код языка: {code}. Доступны: {supported}.",
@@ -213,7 +216,8 @@ export const ru: TranslationSchema = {
     },
     skill: {
       ...EN.slash.skill,
-      description: "список / запуск скиллов пользователя (проектные + кастомные + глобальные + встроенные)",
+      description:
+        "список / запуск скиллов пользователя (проектные + кастомные + глобальные + встроенные)",
     },
     hooks: {
       ...EN.slash.hooks,
@@ -229,7 +233,10 @@ export const ru: TranslationSchema = {
       ...EN.slash.dashboard,
       description: "запустить встроенную веб-панель (127.0.0.1, доступ по токену)",
     },
-    update: { ...EN.slash.update, description: "показать текущую vs последнюю версию + команду обновления" },
+    update: {
+      ...EN.slash.update,
+      description: "показать текущую vs последнюю версию + команду обновления",
+    },
     stats: {
       ...EN.slash.stats,
       description:
@@ -240,9 +247,18 @@ export const ru: TranslationSchema = {
       description:
         "без аргументов → траты последнего шага; с текстом → оценка стоимости отправки (худший случай + вероятный кэш)",
     },
-    doctor: { ...EN.slash.doctor, description: "проверка здоровья (api / config / api-reach / index / hooks / project)" },
-    context: { ...EN.slash.context, description: "разбивка окна контекста (system / tools / log / input)" },
-    retry: { ...EN.slash.retry, description: "отрезать и переотправить последнее сообщение (новый sample)" },
+    doctor: {
+      ...EN.slash.doctor,
+      description: "проверка здоровья (api / config / api-reach / index / hooks / project)",
+    },
+    context: {
+      ...EN.slash.context,
+      description: "разбивка окна контекста (system / tools / log / input)",
+    },
+    retry: {
+      ...EN.slash.retry,
+      description: "отрезать и переотправить последнее сообщение (новый sample)",
+    },
     compact: {
       ...EN.slash.compact,
       description:
@@ -253,17 +269,31 @@ export const ru: TranslationSchema = {
       description:
         "сменить корень рабочей области mid-session — перенаправляет fs/shell/memory инструменты, перезагружает хуки проекта, обновляет @-упоминания",
     },
-    stop: { ...EN.slash.stop, description: "прервать текущий шаг модели (печатная альтернатива Esc)" },
-    feedback: { ...EN.slash.feedback, description: "открыть GitHub issue с диагностической информацией (скопирована в буфер)" },
-    about: { ...EN.slash.about, description: "информация о проекте — версия, сайт, репозиторий, лицензия" },
+    stop: {
+      ...EN.slash.stop,
+      description: "прервать текущий шаг модели (печатная альтернатива Esc)",
+    },
+    feedback: {
+      ...EN.slash.feedback,
+      description: "открыть GitHub issue с диагностической информацией (скопирована в буфер)",
+    },
+    about: {
+      ...EN.slash.about,
+      description: "информация о проекте — версия, сайт, репозиторий, лицензия",
+    },
     keys: { ...EN.slash.keys, description: "справочник клавиш + мыши + копирования/вставки" },
-    plans: { ...EN.slash.plans, description: "список активных и архивных планов этой сессии, новейшие первыми" },
+    plans: {
+      ...EN.slash.plans,
+      description: "список активных и архивных планов этой сессии, новейшие первыми",
+    },
     replay: {
       ...EN.slash.replay,
-      description:
-        "загрузить архивный план как read-only снимок Time Travel (по умолч.: новейший)",
+      description: "загрузить архивный план как read-only снимок Time Travel (по умолч.: новейший)",
     },
-    sessions: { ...EN.slash.sessions, description: "список сохранённых сессий (текущая отмечена ▸)" },
+    sessions: {
+      ...EN.slash.sessions,
+      description: "список сохранённых сессий (текущая отмечена ▸)",
+    },
     title: { ...EN.slash.title, description: "попросить модель переименовать сессию из разговора" },
     qq: {
       ...EN.slash.qq,
@@ -271,8 +301,14 @@ export const ru: TranslationSchema = {
         "подключить, проверить или отключить QQ-канал для этой сессии (первое подключение проводит через App ID / App Secret настройку)",
     },
     setup: { ...EN.slash.setup, description: "напоминает выйти и запустить `reasonix setup`" },
-    semantic: { ...EN.slash.semantic, description: "показать статус semantic_search — построен? Ollama установлен? как включить" },
-    clear: { ...EN.slash.clear, description: "очистить только видимый скроллбек (лог/контекст сохраняется)" },
+    semantic: {
+      ...EN.slash.semantic,
+      description: "показать статус semantic_search — построен? Ollama установлен? как включить",
+    },
+    clear: {
+      ...EN.slash.clear,
+      description: "очистить только видимый скроллбек (лог/контекст сохраняется)",
+    },
     new: { ...EN.slash.new, description: "начать новый разговор (очистить контекст + скроллбек)" },
     loop: {
       ...EN.slash.loop,
@@ -292,7 +328,8 @@ export const ru: TranslationSchema = {
     },
     discard: {
       ...EN.slash.discard,
-      description: "отменить ожидающие правки без записи (без аргумента → все; индексы → указанные)",
+      description:
+        "отменить ожидающие правки без записи (без аргумента → все; индексы → указанные)",
     },
     walk: {
       ...EN.slash.walk,
@@ -300,7 +337,10 @@ export const ru: TranslationSchema = {
         "проходить правки по одной (в стиле git-add-p: y/n на блок, a = применить остальные, A = AUTO)",
     },
     undo: { ...EN.slash.undo, description: "отменить последний применённый пакет правок" },
-    history: { ...EN.slash.history, description: "список всех пакетов правок этой сессии (ID для /show, отметки отмены)" },
+    history: {
+      ...EN.slash.history,
+      description: "список всех пакетов правок этой сессии (ID для /show, отметки отмены)",
+    },
     show: {
       ...EN.slash.show,
       description: "показать сохранённый diff правки (без ID — новейшая неотменённая)",
@@ -325,7 +365,10 @@ export const ru: TranslationSchema = {
       description:
         "edit-gate: review (очередь) · auto (применить+отменить) · yolo (применить+авто-shell). Shift+Tab переключает.",
     },
-    jobs: { ...EN.slash.jobs, description: "список фоновых задач, запущенных через run_background" },
+    jobs: {
+      ...EN.slash.jobs,
+      description: "список фоновых задач, запущенных через run_background",
+    },
     kill: {
       ...EN.slash.kill,
       description: "остановить фоновую задачу по ID (SIGTERM → SIGKILL после паузы)",

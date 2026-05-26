@@ -69,6 +69,7 @@ const LANGUAGE_LABELS: Record<LanguageCode, string> = {
   EN: "English",
   "zh-CN": "简体中文",
   de: "Deutsch",
+  ru: "Русский",
 };
 
 export function Wizard({
