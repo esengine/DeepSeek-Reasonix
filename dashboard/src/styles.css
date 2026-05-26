@@ -5790,6 +5790,9 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 .ms-seg[data-on="true"][data-k="review"] {
   background: var(--tone-info-soft); color: var(--tone-info);
 }
+.ms-seg[data-on="true"][data-k="plan"] {
+  background: var(--tone-warn-soft); color: var(--tone-warn);
+}
 .ms-seg[data-on="true"][data-k="auto"] {
   background: var(--accent-soft); color: var(--accent);
 }
