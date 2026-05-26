@@ -24,6 +24,13 @@
     }
   },
   "files": {
-    "ignore": ["dist", "node_modules", "coverage", "*.d.ts", "dashboard/codemirror.js"]
+    "ignore": [
+      "dist",
+      "node_modules",
+      "coverage",
+      "*.d.ts",
+      "dashboard/codemirror.js",
+      "src/vendor/**"
+    ]
   }
 }

@@ -7,11 +7,10 @@ import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import { PILL_MODEL, Pill, modelBadgeFor } from "../primitives/Pill.js";
-import { Spinner } from "../primitives/Spinner.js";
+import { PULSE_CIRCLE, Pulse } from "../primitives/Pulse.js";
 import type { StreamingCard as StreamingCardData } from "../state/cards.js";
 import { clipToCells } from "../text-width.js";
 import { FG, TONE, TONE_ACTIVE } from "../theme/tokens.js";
-import { useSlowTick } from "../ticker.js";
 import { useIncrementalWrap } from "./useIncrementalWrap.js";
 
 /** Streaming preview tail length — bounded live region so chunks don't thrash whole-card layout. */
@@ -98,9 +97,6 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const expanded = useContext(LiveExpandContext);
-  // Re-render at 1Hz so the rate keeps updating even when chunks stall.
-  // Frozen once `card.done` is true — settled cards render via Static.
-  useSlowTick();
   const liveRate = useLiveTokenRate(card, !card.done && !card.aborted);
   const lineCells = Math.max(20, cols - 4);
   const visualLines = useIncrementalWrap(card.text, lineCells);
@@ -139,7 +135,11 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
   const droppedAbove = Math.max(0, visualLines.length - visible.length);
   const aborted = !!card.aborted;
   const headColor = aborted ? TONE.err : TONE_ACTIVE.brand;
-  const glyph = aborted ? "⊘" : "●";
+  const glyph: string | React.ReactElement = aborted ? (
+    "⊘"
+  ) : (
+    <Pulse active frames={PULSE_CIRCLE} settled="●" color={headColor} />
+  );
   const headLabel = aborted ? t("cardLabels.aborted") : t("cardLabels.writing");
 
   const liveRatePill =
@@ -160,7 +160,6 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
           <>
             {liveRatePill}
             {expandPill}
-            {aborted ? null : <Spinner kind="braille" color={TONE_ACTIVE.brand} />}
             {modelPill}
           </>
         }

@@ -1,10 +1,10 @@
 /** ToolCard preview rendering for elided command output and pinned failure lines. */
 
-import { render } from "ink-testing-library";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { ToolCard } from "../src/cli/ui/cards/ToolCard.js";
 import type { ToolCard as ToolCardData } from "../src/cli/ui/state/cards.js";
+import { render } from "./helpers/ink-test.js";
 
 function shellCard(output: string): ToolCardData {
   return {

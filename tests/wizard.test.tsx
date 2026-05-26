@@ -1,11 +1,11 @@
 /** Wizard data-transform — buildSpec → parseMcpSpec round-trip; bugs here = silent config-save failures. */
 
-import { render } from "ink-testing-library";
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Wizard, buildSpec, validateDeepSeekApiKey } from "../src/cli/ui/Wizard.js";
 import { setLanguageRuntime, t } from "../src/i18n/index.js";
 import { parseMcpSpec } from "../src/mcp/spec.js";
+import { render } from "./helpers/ink-test.js";
 
 describe("Wizard.buildSpec → parseMcpSpec round-trip", () => {
   it("builds a filesystem spec the parser accepts", () => {

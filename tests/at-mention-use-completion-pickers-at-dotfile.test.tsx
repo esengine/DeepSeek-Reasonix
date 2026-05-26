@@ -8,10 +8,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Box, Text } from "ink";
-import { render } from "ink-testing-library";
 import React, { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useCompletionPickers } from "../src/cli/ui/useCompletionPickers.js";
+import { render } from "./helpers/ink-test.js";
 
 /** Wraps `useCompletionPickers` in a renderable Ink component and
  *  surfaces the picker state as plain text so we can snapshot it. */

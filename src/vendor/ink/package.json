@@ -1,0 +1,10 @@
+{
+  "name": "ink",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "sideEffects": false
+}

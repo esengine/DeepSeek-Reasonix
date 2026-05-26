@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import stripAnsi from "strip-ansi";
 
 /** Stdin shim for Ink 7's useInput raw-mode check; CI's process.stdin isn't a TTY. ink-testing-library covers this but pins stdout columns to 100 with no override — tests asserting layout width need 120. */
 export function makeFakeStdin() {
@@ -15,7 +16,15 @@ export function makeFakeStdin() {
   return ee;
 }
 
-/** Captures Ink writes; .text() returns ANSI-SGR-stripped output at fixed 120×30. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: CSI N C is exactly what we're matching to restore visual gaps the new ink renderer encodes as cursor-forward instead of literal spaces.
+const CURSOR_FORWARD = /\x1b\[(\d*)C/g;
+
+function normalize(raw: string): string {
+  const widened = raw.replace(CURSOR_FORWARD, (_m, n) => " ".repeat(Number(n) || 1));
+  return stripAnsi(widened);
+}
+
+/** Captures Ink writes; .text() returns text with cursor-forward gaps re-expanded to spaces and all other ANSI stripped. Use .raw() when assertions need the bytes (e.g. OSC-8 emission). */
 export function makeFakeStdout() {
   const chunks: string[] = [];
   return {
@@ -29,8 +38,10 @@ export function makeFakeStdout() {
     on() {},
     off() {},
     text(): string {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI SGR codes
-      return chunks.join("").replace(/\x1b\[[0-9;]*m/g, "");
+      return normalize(chunks.join(""));
+    },
+    raw(): string {
+      return chunks.join("");
     },
   };
 }

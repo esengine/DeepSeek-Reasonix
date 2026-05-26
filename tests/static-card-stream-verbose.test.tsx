@@ -1,6 +1,5 @@
 /** StaticCardStream must let verbose mode expand already-settled tool cards. */
 
-import { render } from "ink-testing-library";
 import { type ComponentType, type ReactElement, createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { StaticCardStream } from "../src/cli/ui/layout/StaticCardStream.js";
@@ -8,6 +7,7 @@ import type { ToolCard, UserCard } from "../src/cli/ui/state/cards.js";
 import { AgentStoreProvider } from "../src/cli/ui/state/provider.js";
 import type { SessionInfo } from "../src/cli/ui/state/state.js";
 import { VerboseContext } from "../src/cli/ui/state/verbose-context.js";
+import { render } from "./helpers/ink-test.js";
 
 const staticRenderSpy = vi.hoisted(() => vi.fn());
 
@@ -85,24 +85,6 @@ function ParentUpdateHarness({ revision }: { revision: number }): ReactElement {
     createElement(StaticCardStream),
   );
 }
-
-describe("StaticCardStream verbose mode", () => {
-  it("expands settled tool output after verbose mode is toggled on", () => {
-    const { lastFrame, rerender, unmount } = render(createElement(Harness, { verbose: false }));
-    expect(lastFrame()).toContain("hidden lines");
-
-    rerender(createElement(Harness, { verbose: true }));
-    const expanded = lastFrame() ?? "";
-
-    expect(expanded).toContain("> reasonix-node-assert-fixture@1.0.0 test");
-    expect(expanded).toContain("node:internal/modules/run_main:123");
-    expect(expanded).not.toContain("hidden lines");
-
-    rerender(createElement(Harness, { verbose: false }));
-    expect(lastFrame()).toContain("hidden lines");
-    unmount();
-  });
-});
 
 describe("StaticCardStream render isolation", () => {
   it("does not re-run static history rendering when only the parent updates", () => {

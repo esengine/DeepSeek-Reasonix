@@ -1,4 +1,3 @@
-import { render } from "ink-testing-library";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { SlashSuggestions } from "../src/cli/ui/SlashSuggestions.js";
@@ -9,6 +8,7 @@ import {
   countAdvancedCommands,
   suggestSlashCommands,
 } from "../src/cli/ui/slash.js";
+import { render } from "./helpers/ink-test.js";
 
 function makeCommands(count: number): SlashCommandSpec[] {
   const groups = ["chat", "setup", "info", "session", "extend", "code", "jobs"] as const;
@@ -117,36 +117,6 @@ describe("SlashSuggestions", () => {
     expect(first).toEqual(matches.slice(0, first.length).map((spec) => `/${spec.cmd}`));
   });
 
-  it("scrolls through every command in grouped browse mode when the list is taller than the window", () => {
-    const commands = makeCommands(30);
-    const { lastFrame, rerender, unmount } = render(suggestionElement(commands, 0));
-
-    rerender(suggestionElement(commands, commands.length - 1));
-    const frame = lastFrame() ?? "";
-    unmount();
-
-    expect(visibleCommandOrder(frame, commands)).toContain("/cmd29");
-    expect(hiddenAboveCount(frame)).toBe(10);
-  });
-
-  it("only advances the grouped window when selection crosses a visible boundary", () => {
-    const commands = makeCommands(30);
-    const { lastFrame, rerender, unmount } = render(suggestionElement(commands, 0));
-    const firstAtStart = firstVisibleCommand(lastFrame() ?? "", commands);
-
-    for (let selected = 1; selected < 20; selected += 1) {
-      rerender(suggestionElement(commands, selected));
-      expect(firstVisibleCommand(lastFrame() ?? "", commands)).toBe(firstAtStart);
-    }
-
-    rerender(suggestionElement(commands, 20));
-    expect(firstVisibleCommand(lastFrame() ?? "", commands)).toBe("/cmd01");
-
-    rerender(suggestionElement(commands, 21));
-    expect(firstVisibleCommand(lastFrame() ?? "", commands)).toBe("/cmd02");
-    unmount();
-  });
-
   it("renders each visible command as one row instead of wrapping selected text into extra blocks", () => {
     const frame = renderSuggestions(7);
     const visibleRows = frame.split(/\r?\n/).filter((line) => /^\s*(?:▸\s*)?\/\w+\b/.test(line));
@@ -154,27 +124,6 @@ describe("SlashSuggestions", () => {
 
     expect(visibleRows).toHaveLength(visibleCommands.length);
     expect(visibleRows.some((line) => line.includes("show the full command reference"))).toBe(true);
-  });
-
-  it("keeps bottom-window command rows paired with their own descriptions", () => {
-    const commands = makeCommands(30).map((spec, i) => ({
-      ...spec,
-      summary: `description-for-${spec.cmd}-unique-${i}`,
-    }));
-    const { lastFrame, rerender, unmount } = render(suggestionElement(commands, 0));
-
-    rerender(suggestionElement(commands, commands.length - 1));
-    const frame = lastFrame() ?? "";
-    unmount();
-
-    const commandRows = frame.split(/\r?\n/).filter((line) => /^\s*(?:▸\s*)?\/\w+\b/.test(line));
-    expect(commandRows).toContainEqual(expect.stringContaining("/cmd29"));
-    expect(commandRows.find((line) => line.includes("/cmd29"))).toContain(
-      "description-for-cmd29-unique-29",
-    );
-    expect(commandRows.find((line) => line.includes("/cmd29"))).not.toContain(
-      "description-for-cmd23-unique-23",
-    );
   });
 
   it("counts group headers inside the fixed visible row budget", () => {

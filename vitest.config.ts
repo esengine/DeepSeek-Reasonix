@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(here, "src"),
+      ink: resolve(here, "src/vendor/ink/index.js"),
       react: resolve(here, "node_modules/react"),
       "react-dom": resolve(here, "node_modules/react-dom"),
       "react-dom/client": resolve(here, "node_modules/react-dom/client.js"),

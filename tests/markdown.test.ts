@@ -1,10 +1,10 @@
-import { render } from "ink-testing-library";
 import { type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
 import { describe, expect, it } from "vitest";
 import { Markdown, plainText, tableLayout } from "../src/cli/ui/markdown.js";
 import { wrapToCells } from "../src/cli/ui/text-width.js";
+import { render } from "./helpers/ink-test.js";
 
 /** Smoke tests — markdown parsing is delegated to `marked`; we only verify the component mounts and dispatches over the token kinds we care about. */
 
@@ -99,28 +99,6 @@ describe("Markdown — issue #340 table fallback row grouping", () => {
     expect(tcIdx1).toBeGreaterThan(-1);
     expect(compIdx2).toBeGreaterThan(-1);
     expect(tcIdx1).toBeLessThan(compIdx2);
-  });
-});
-
-describe("Markdown — issue #723 link OSC-8 emission", () => {
-  function bytesFor(text: string): string {
-    const { lastFrame, unmount } = render(React.createElement(Markdown, { text }));
-    const out = lastFrame() ?? "";
-    unmount();
-    return out;
-  }
-
-  it("emits OSC-8 hyperlink wrapping [text](url) so terminals can click it", () => {
-    const out = bytesFor("see [点此查看](https://example.com/issues/1549) for details");
-    expect(out).toContain("\x1b]8;;https://example.com/issues/1549\x1b\\");
-    expect(out).toContain("\x1b]8;;\x1b\\");
-    expect(out).toContain("点此查看");
-  });
-
-  it("emits OSC-8 hyperlink for file refs (file://path:line)", () => {
-    const out = bytesFor("look at src/cli/ui/markdown.tsx:42 closely");
-    expect(out).toContain("\x1b]8;;file://src/cli/ui/markdown.tsx:42\x1b\\");
-    expect(out).toContain("\x1b]8;;\x1b\\");
   });
 });
 

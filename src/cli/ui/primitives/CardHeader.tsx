@@ -6,7 +6,7 @@ import { ActiveCardContext } from "./Card.js";
 export type MetaItem = string | { text: string; color: string };
 
 export interface CardHeaderProps {
-  glyph: string;
+  glyph: string | React.ReactElement;
   tone: string;
   title: string;
   /** Body-tone text after the title, separated by a space (no `·`). */
@@ -29,7 +29,7 @@ export function CardHeader({
   const visibleMeta = active ? meta : meta?.filter((item) => typeof item !== "string");
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color={tone}>{glyph}</Text>
+      {typeof glyph === "string" ? <Text color={tone}>{glyph}</Text> : glyph}
       <Text bold color={tone}>
         {title}
       </Text>

@@ -1,7 +1,7 @@
-import { render } from "ink-testing-library";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { PlanCheckpointConfirm } from "../src/cli/ui/PlanCheckpointConfirm.js";
+import { render } from "./helpers/ink-test.js";
 
 describe("PlanCheckpointConfirm", () => {
   it("labels the primary action as finish when the last step is complete", () => {

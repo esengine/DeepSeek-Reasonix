@@ -1,8 +1,8 @@
-import { render } from "ink-testing-library";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ShellConfirm } from "../src/cli/ui/ShellConfirm.js";
 import { setLanguageRuntime } from "../src/i18n/index.js";
+import { render } from "./helpers/ink-test.js";
 
 function makeShellPrompt(command: string): import("@reasonix/core-utils").ApprovalPrompt {
   return {

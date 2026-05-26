@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
-import { Spinner } from "../primitives/Spinner.js";
+import { PULSE_CIRCLE, PULSE_DIAMOND, Pulse } from "../primitives/Pulse.js";
 import type { LiveCard as LiveCardData } from "../state/cards.js";
 import { FG, TONE } from "../theme/tokens.js";
 
@@ -16,7 +16,7 @@ const TONE_TO_COLOR = {
 } as const;
 
 const VARIANT_GLYPH = {
-  thinking: null,
+  thinking: "◆",
   undo: "↶",
   ctxPressure: "⚠",
   aborted: "—",
@@ -24,19 +24,23 @@ const VARIANT_GLYPH = {
   checkpoint: "●",
   stepProgress: "✓",
   mcpEvent: "●",
-  sessionOp: "○",
+  sessionOp: "●",
 } as const;
+
+const PULSING_VARIANTS = new Set<LiveCardData["variant"]>(["thinking", "retry", "sessionOp"]);
 
 export function LiveCard({ card }: { card: LiveCardData }): React.ReactElement {
   const color = TONE_TO_COLOR[card.tone];
-  const glyph = VARIANT_GLYPH[card.variant];
+  const isPulsing = PULSING_VARIANTS.has(card.variant);
+  const frames = card.variant === "thinking" ? PULSE_DIAMOND : PULSE_CIRCLE;
+  const settled = VARIANT_GLYPH[card.variant];
   return (
     <Box paddingLeft={2} flexDirection="row" gap={1}>
-      {card.variant === "thinking" ? (
-        <Spinner kind="circle" color={color} bold />
+      {isPulsing ? (
+        <Pulse active frames={frames} settled={settled} color={color} />
       ) : (
         <Text bold color={color}>
-          {glyph}
+          {VARIANT_GLYPH[card.variant]}
         </Text>
       )}
       <Text color={FG.body}>{card.text}</Text>

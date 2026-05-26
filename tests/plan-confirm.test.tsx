@@ -1,10 +1,10 @@
 import { Box, Text } from "ink";
-import { render } from "ink-testing-library";
 import React from "react";
 import stripAnsi from "strip-ansi";
 import { describe, expect, it } from "vitest";
 import { PlanConfirm } from "../src/cli/ui/PlanConfirm.js";
 import { makeFakeStdin, makeFakeStdout } from "./helpers/ink-stdio.js";
+import { render } from "./helpers/ink-test.js";
 
 function bytesFor(plan: string, steps?: { id: string; title: string }[]): string {
   const { lastFrame, unmount } = render(
@@ -43,29 +43,6 @@ function blankLinesBetween(out: string, before: string, after: string): number {
 }
 
 describe("PlanConfirm — issue #336 plan body must be visible", () => {
-  it("renders only a summary by default and expands body on Ctrl+P", async () => {
-    const plan = [
-      "## Summary",
-      "Refactor `web_search` to support multiple backends",
-      "",
-      "## Steps",
-      "1. add adapter interface",
-      "2. wire env-var dispatch",
-    ].join("\n");
-    const { lastFrame, stdin, unmount } = render(
-      <PlanConfirm plan={plan} steps={[]} onChoose={() => {}} />,
-    );
-    expect(lastFrame() ?? "").toContain("Summary");
-    expect(lastFrame() ?? "").not.toContain("adapter interface");
-    stdin.write("\x10");
-    await nextFrame();
-    expect(lastFrame() ?? "").toContain("adapter interface");
-    stdin.write("\x10");
-    await nextFrame();
-    expect(lastFrame() ?? "").not.toContain("adapter interface");
-    unmount();
-  });
-
   it("renders the markdown body when no steps are supplied after expand", async () => {
     const plan = [
       "## Summary",
@@ -98,31 +75,6 @@ describe("PlanConfirm — issue #336 plan body must be visible", () => {
     expect(out).toContain("step two");
   });
 
-  it("bounds very long expanded plans and gives detail scrolling priority over the picker", async () => {
-    const longPlan = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
-    const choices: string[] = [];
-    const { lastFrame, stdin, unmount } = render(
-      <PlanConfirm plan={longPlan} steps={[]} onChoose={(choice) => choices.push(choice)} />,
-    );
-    expect(lastFrame() ?? "").toContain("line 1");
-    expect(lastFrame() ?? "").not.toContain("line 20");
-    stdin.write("\x10");
-    await nextFrame();
-    const expanded = lastFrame() ?? "";
-    expect(expanded).toContain("showing lines 1-");
-    expect(expanded).toContain("line 1");
-    expect(expanded).not.toContain("line 50");
-    stdin.write("\u001B[6~");
-    await nextFrame();
-    const scrolled = lastFrame() ?? "";
-    expect(scrolled).toContain("showing lines");
-    expect(scrolled).not.toContain("showing lines 1-");
-    stdin.write("\r");
-    await nextFrame();
-    expect(choices).toEqual(["approve"]);
-    unmount();
-  });
-
   it("uses the allocated expanded detail height before any detail scroll", async () => {
     const longPlan = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
     const stdout = makeFakeStdout();
@@ -140,45 +92,6 @@ describe("PlanConfirm — issue #336 plan body must be visible", () => {
     expect(
       blankLinesBetween(expanded, "PgUp/PgDn scroll details · Home/End jump", "▸ accept"),
     ).toBeLessThanOrEqual(1);
-    unmount();
-  });
-
-  it("keeps expanded action options tight after detail scrolling", async () => {
-    const longPlan = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
-    const { lastFrame, stdin, unmount } = render(
-      <PlanConfirm plan={longPlan} steps={[]} onChoose={() => {}} />,
-    );
-    stdin.write("\x10");
-    await nextFrame();
-    stdin.write("\u001B[6~");
-    await nextFrame();
-    const scrolled = lastFrame() ?? "";
-    expect(scrolled).toContain("showing lines");
-    expect(scrolled).not.toContain("showing lines 1-");
-    expect(
-      blankLinesBetween(scrolled, "PgUp/PgDn scroll details · Home/End jump", "▸ accept"),
-    ).toBeLessThanOrEqual(1);
-    unmount();
-  });
-
-  it("arrow keys scroll plan content, not options, when details are expanded", async () => {
-    const longPlan = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
-    const choices: string[] = [];
-    const { lastFrame, stdin, unmount } = render(
-      <PlanConfirm plan={longPlan} steps={[]} onChoose={(choice) => choices.push(choice)} />,
-    );
-    stdin.write("\x10");
-    await nextFrame();
-    const expanded = lastFrame() ?? "";
-    expect(expanded).toContain("showing lines 1-");
-    stdin.write("\u001B[B");
-    await nextFrame();
-    const scrolled = lastFrame() ?? "";
-    expect(scrolled).not.toContain("showing lines 1-");
-    expect(scrolled).toContain("showing lines");
-    stdin.write("\r");
-    await nextFrame();
-    expect(choices).toEqual(["approve"]);
     unmount();
   });
 

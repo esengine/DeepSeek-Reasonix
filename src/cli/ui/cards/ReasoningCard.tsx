@@ -2,10 +2,9 @@ import { Box, Text, useStdout } from "ink";
 import React from "react";
 import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
-import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
 import { CursorBlock } from "../primitives/CursorBlock.js";
-import { PILL_MODEL, PILL_SECTION, Pill, modelBadgeFor } from "../primitives/Pill.js";
-import { Spinner } from "../primitives/Spinner.js";
+import { PILL_MODEL, Pill, modelBadgeFor } from "../primitives/Pill.js";
+import { PULSE_DIAMOND, Pulse } from "../primitives/Pulse.js";
 import type { ReasoningCard as ReasoningCardData } from "../state/cards.js";
 import { VerboseContext } from "../state/verbose-context.js";
 import { clipToCells } from "../text-width.js";
@@ -38,7 +37,7 @@ export function ReasoningCard({
 
   return (
     <Card tone={tone}>
-      <ReasoningHeader card={card} isEmpty={isEmpty} />
+      <ReasoningHeader card={card} isEmpty={isEmpty} expanded={expanded} />
       {showBody &&
         (isEmpty ? (
           <EmptyHint />
@@ -56,46 +55,41 @@ export function ReasoningCard({
 function ReasoningHeader({
   card,
   isEmpty,
+  expanded,
 }: {
   card: ReasoningCardData;
   isEmpty: boolean;
+  expanded: boolean;
 }): React.ReactElement {
   const streamingActive = card.streaming && !card.aborted;
-  const headColor = card.aborted
-    ? TONE.err
+  const baseTitle = card.aborted
+    ? t("cardTitles.reasoningAborted")
     : streamingActive
-      ? TONE_ACTIVE.accent
-      : isEmpty
-        ? FG.faint
-        : TONE.accent;
-  const glyph = streamingActive ? "○" : "●";
-  const title = streamingActive
-    ? t("cardTitles.reasoningEllipsis")
-    : card.aborted
-      ? t("cardTitles.reasoningAborted")
+      ? t("cardTitles.reasoningEllipsis")
       : t("cardTitles.reasoning");
-  const pill = isEmpty ? PILL_SECTION.empty : PILL_SECTION.reason;
-  const meta: MetaItem[] = [];
+  const metaParts: string[] = [];
   const m = headerMeta(card);
-  if (m) meta.push(m);
+  if (m) metaParts.push(m);
   const duration = headerDuration(card);
-  if (duration) meta.push(duration);
+  if (duration) metaParts.push(duration);
+  const metaTrail = metaParts.length > 0 ? ` · ${metaParts.join(" · ")}` : "";
+  const collapsedHint = !expanded && card.text.length > 0 ? "  (⌃o to expand)" : "";
   const modelBadge = card.model ? modelBadgeFor(card.model) : null;
   return (
-    <CardHeader
-      glyph={glyph}
-      tone={headColor}
-      title={title}
-      meta={meta.length > 0 ? meta : undefined}
-      right={
-        <>
-          {streamingActive ? <Spinner kind="braille" color={TONE_ACTIVE.accent} /> : null}
-          {modelBadge ? (
-            <Pill label={modelBadge.label} {...PILL_MODEL[modelBadge.kind]} bold={false} />
-          ) : null}
-        </>
-      }
-    />
+    <Box flexDirection="row" gap={1}>
+      <Pulse
+        active={streamingActive}
+        frames={PULSE_DIAMOND}
+        settled="◆"
+        color={card.aborted ? TONE.err : FG.faint}
+      />
+      <Text italic dimColor color={card.aborted ? TONE.err : undefined}>
+        {`${baseTitle}${metaTrail}${collapsedHint}`}
+      </Text>
+      {modelBadge ? (
+        <Pill label={modelBadge.label} {...PILL_MODEL[modelBadge.kind]} bold={false} />
+      ) : null}
+    </Box>
   );
 }
 

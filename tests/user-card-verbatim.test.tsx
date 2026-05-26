@@ -1,8 +1,8 @@
-import { render } from "ink-testing-library";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { UserCard } from "../src/cli/ui/cards/UserCard.js";
 import type { UserCard as UserCardData } from "../src/cli/ui/state/cards.js";
+import { render } from "./helpers/ink-test.js";
 
 function userCard(text: string): UserCardData {
   return { kind: "user", id: "u1", ts: Date.now(), text };

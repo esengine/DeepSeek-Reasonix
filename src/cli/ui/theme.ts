@@ -3,6 +3,7 @@ import { useThemeTokens } from "./theme/context.js";
 import {
   CARD,
   FG as TOKEN_FG,
+  MESSAGE_BG as TOKEN_MESSAGE_BG,
   SURFACE as TOKEN_SURFACE,
   TONE,
   TONE_ACTIVE,
@@ -90,6 +91,7 @@ function currentTheme(): ThemeTokens {
     tone: TONE,
     toneActive: TONE_ACTIVE,
     surface: TOKEN_SURFACE,
+    messageBg: TOKEN_MESSAGE_BG,
     card: CARD,
   };
 }

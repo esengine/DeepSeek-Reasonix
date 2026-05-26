@@ -1,13 +1,13 @@
 /** Progressive `<Static>` priming — first paint shows a small chunk; backlog
  *  drains via setImmediate so the event loop stays responsive. */
 
-import { render } from "ink-testing-library";
 import { type ComponentType, type ReactElement, createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { StaticCardStream } from "../src/cli/ui/layout/StaticCardStream.js";
 import type { UserCard } from "../src/cli/ui/state/cards.js";
 import { AgentStoreProvider } from "../src/cli/ui/state/provider.js";
 import type { SessionInfo } from "../src/cli/ui/state/state.js";
+import { render } from "./helpers/ink-test.js";
 
 let lastStaticItems: unknown[] = [];
 

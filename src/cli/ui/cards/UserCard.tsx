@@ -4,24 +4,21 @@ import React from "react";
 import { t } from "../../../i18n/index.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import type { UserCard as UserCardData } from "../state/cards.js";
-import { CARD, FG, SURFACE } from "../theme/tokens.js";
+import { CARD, FG, MESSAGE_BG } from "../theme/tokens.js";
 import { formatRelativeTime } from "./time.js";
 
 export function UserCard({ card }: { card: UserCardData }): React.ReactElement {
   return (
-    <Box flexDirection="row">
-      <Box width={1} backgroundColor={CARD.user.color} flexShrink={0} />
-      <Box flexDirection="column" flexGrow={1} paddingLeft={1} backgroundColor={SURFACE.bgInput}>
-        <CardHeader
-          glyph={CARD.user.glyph}
-          tone={CARD.user.color}
-          title={t("cardTitles.you")}
-          meta={[formatRelativeTime(card.ts)]}
-        />
-        <Box flexDirection="row" gap={1}>
-          <Text color={FG.sub}>↳</Text>
-          <Text>{card.text}</Text>
-        </Box>
+    <Box flexDirection="column" width="100%" paddingX={1} backgroundColor={MESSAGE_BG.user}>
+      <CardHeader
+        glyph={CARD.user.glyph}
+        tone={CARD.user.color}
+        title={t("cardTitles.you")}
+        meta={[formatRelativeTime(card.ts)]}
+      />
+      <Box flexDirection="row" gap={1}>
+        <Text color={FG.sub}>↳</Text>
+        <Text>{card.text}</Text>
       </Box>
     </Box>
   );

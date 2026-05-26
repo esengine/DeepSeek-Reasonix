@@ -22,7 +22,8 @@
     "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "ink": ["src/vendor/ink"]
     },
     "types": ["node"]
   },

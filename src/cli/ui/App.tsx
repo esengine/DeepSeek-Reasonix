@@ -198,11 +198,10 @@ import { hydrateCardsFromMessages } from "./state/hydrate.js";
 import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
 import { VerboseContext } from "./state/verbose-context.js";
-import { terminalFlushIntervalMs } from "./terminal-host.js";
 import { ThemeProvider } from "./theme/context.js";
 import { listThemeNames } from "./theme/tokens.js";
 import { FG, type ThemeName } from "./theme/tokens.js";
-import { TickerProvider } from "./ticker.js";
+import { TickerProvider, useSlowTick } from "./ticker.js";
 import { handleTurnInterrupt } from "./turn-interrupt.js";
 import { useCompletionPickers } from "./useCompletionPickers.js";
 import { useEditHistory } from "./useEditHistory.js";
@@ -334,16 +333,6 @@ let persistentDashboardHandle: DashboardServerHandle | null = null;
 const persistentEventSubscribers = new Set<(ev: DashboardEvent) => void>();
 
 /**
- * Throttle interval in ms. 50ms —20Hz —slow enough that cursor-up
- * repaints on winpty/MINTTY/ConEmu/tmux don't leave half-drawn frames,
- * fast enough that streaming text still reads as continuous. Legacy
- * Windows conhost, Windows Terminal, and WSL can paint rapid Ink frames
- * visibly during reasoning streams (#1300, #1714), so drop to ~7Hz there.
- * Override via `REASONIX_FLUSH_MS` if you want 60Hz on a terminal you trust.
- */
-const FLUSH_INTERVAL_MS = terminalFlushIntervalMs();
-
-/**
  * Single-line status pill rendered below the modeline whenever a /loop
  * is active. Re-renders every second so the countdown ticks.
  */
@@ -352,11 +341,7 @@ function LoopStatusRow({
 }: {
   loop: { prompt: string; intervalMs: number; nextFireAt: number; iter: number };
 }) {
-  const [, setTick] = React.useState(0);
-  React.useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
+  useSlowTick();
   const nextFireMs = Math.max(0, loop.nextFireAt - Date.now());
   return (
     <Box>
@@ -3217,7 +3202,6 @@ function AppInner({
         reasoningBuf.current = "";
         toolCallBuildBuf.current = null;
       };
-      const timer = setInterval(flush, FLUSH_INTERVAL_MS);
 
       // Expand `@path/to/file.ts` mentions in code mode: the model
       // gets the inlined content appended under a "Referenced files"
@@ -3319,6 +3303,7 @@ function AppInner({
           } else if (ev.role === "assistant_delta") {
             if (ev.content) contentBuf.current += ev.content;
             if (ev.reasoningDelta) reasoningBuf.current += ev.reasoningDelta;
+            flush();
           } else if (ev.role === "tool_call_delta") {
             if (ev.toolName) {
               toolCallBuildBuf.current = {
@@ -3327,6 +3312,7 @@ function AppInner({
                 index: ev.toolCallIndex,
                 readyCount: ev.toolCallReadyCount,
               };
+              flush();
             }
           } else if (ev.role === "assistant_final") {
             lastAssistantText = ev.content || streamRef.text;
@@ -3456,7 +3442,7 @@ function AppInner({
         }
         qq.maybeSendFinalReply(lastAssistantText);
       } finally {
-        clearInterval(timer);
+        flush();
         // Esc aborted the turn —close any in-flight cards (streaming /
         // reasoning / tool / branch) so they leave the live region. Without
         // this, stranded done=false cards stick in CardStream's live tail.

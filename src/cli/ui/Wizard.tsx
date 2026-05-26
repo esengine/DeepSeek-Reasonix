@@ -2,7 +2,7 @@
 
 import { mkdirSync, statSync } from "node:fs";
 import { Box, Text, useApp, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { TextInput } from "ink";
 // biome-ignore lint/style/useImportType: JSX (jsx: "react") needs React as a value at runtime
 import React, { useEffect, useState } from "react";
 import {

@@ -1,8 +1,8 @@
-import { render } from "ink-testing-library";
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { HintRow } from "../src/cli/ui/PromptInput.js";
 import { setLanguageRuntime, t } from "../src/i18n/index.js";
+import { render } from "./helpers/ink-test.js";
 
 describe("composer hint bar — issue #564", () => {
   afterEach(() => {

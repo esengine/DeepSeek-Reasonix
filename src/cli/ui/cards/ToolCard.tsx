@@ -4,7 +4,7 @@ import { t } from "../../../i18n/index.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader, type MetaItem } from "../primitives/CardHeader.js";
-import { Spinner } from "../primitives/Spinner.js";
+import { PULSE_SQUARE, Pulse } from "../primitives/Pulse.js";
 import type { ToolCard as ToolCardData } from "../state/cards.js";
 import { useIsInflight } from "../state/inflight-context.js";
 import { VerboseContext } from "../state/verbose-context.js";
@@ -62,19 +62,20 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   }
   for (const part of metaTrail(card)) meta.push(part);
 
+  const headerGlyph =
+    status === "running" ? (
+      <Pulse active frames={PULSE_SQUARE} settled="▣" color={headColor} />
+    ) : (
+      statusGlyph(status)
+    );
   return (
     <Card tone={headColor}>
       <CardHeader
-        glyph={statusGlyph(status)}
+        glyph={headerGlyph}
         tone={headColor}
         title={card.name}
         subtitle={argsLabel || undefined}
         meta={meta.length > 0 ? meta : undefined}
-        right={
-          status === "running" ? (
-            <Spinner kind="braille" color={TONE_ACTIVE.brand} bold />
-          ) : undefined
-        }
       />
       {showBody &&
         (subagentMarkdown !== null ? (

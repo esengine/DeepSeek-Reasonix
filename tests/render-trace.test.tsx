@@ -1,7 +1,7 @@
-import { render } from "ink-testing-library";
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { renderTraceEnabled, useRenderTrace } from "../src/cli/ui/render-trace.js";
+import { render } from "./helpers/ink-test.js";
 
 describe("render-trace", () => {
   it("is disabled when REASONIX_TRACE_RENDERS is unset (default for tests)", () => {

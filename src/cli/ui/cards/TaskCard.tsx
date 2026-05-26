@@ -5,6 +5,7 @@ import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
 import { PILL_PATH, Pill } from "../primitives/Pill.js";
+import { PULSE_TRIANGLE, Pulse } from "../primitives/Pulse.js";
 import type { TaskCard as TaskCardData, TaskStep } from "../state/cards.js";
 import { useThemeTokens } from "../theme/context.js";
 
@@ -38,7 +39,13 @@ export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
   return (
     <Card tone={taskColor[card.status]}>
       <CardHeader
-        glyph={TASK_GLYPH[card.status]}
+        glyph={
+          card.status === "running" ? (
+            <Pulse active frames={PULSE_TRIANGLE} settled="▶" color={taskColor[card.status]} />
+          ) : (
+            TASK_GLYPH[card.status]
+          )
+        }
         tone={taskColor[card.status]}
         title={t("cardTitles.task")}
         subtitle={`${card.index} / ${card.total}  ${card.title}`}
@@ -46,7 +53,11 @@ export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
       />
       {card.steps.map((step) => (
         <Box key={step.id} flexDirection="row" gap={1}>
-          <Text color={stepColor[step.status]}>{STEP_GLYPH[step.status]}</Text>
+          {step.status === "running" ? (
+            <Pulse active frames={PULSE_TRIANGLE} settled="▶" color={stepColor[step.status]} />
+          ) : (
+            <Text color={stepColor[step.status]}>{STEP_GLYPH[step.status]}</Text>
+          )}
           <Text bold color={fg.body}>
             {(step.toolName ?? t("cardLabels.stepLabel")).padEnd(7)}
           </Text>

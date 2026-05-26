@@ -1,7 +1,7 @@
-import { render } from "ink-testing-library";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLanguageRuntime } from "../src/i18n/index.js";
+import { render } from "./helpers/ink-test.js";
 const { useQQChannel } = await import("../src/qq/use-qq-channel.js");
 
 type QQConfigState = {

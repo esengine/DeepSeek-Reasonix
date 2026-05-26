@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { Box, Text, useStdout } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/index.js";
@@ -25,7 +26,6 @@ export const INLINE_PASTE_THRESHOLD = 200;
 // for human cadence) still submits; wide enough that CJK IME commit-then-
 // Enter (terminal flushes both together) falls inside the window.
 const IME_GUARD_MS = 50;
-const SYSTEM_CURSOR_SYNC_IDLE_MS = 120;
 
 function hasNonAscii(s: string): boolean {
   for (let i = 0; i < s.length; i++) {
@@ -89,7 +89,6 @@ export function PromptInput({
   // Paste registry — keyed by sentinel id, holds original content.
   const pastesRef = useRef<Map<number, PasteEntry>>(new Map());
   const nextPasteIdRef = useRef<number>(0);
-  const lastCursorSyncRef = useRef<string | null>(null);
 
   // CJK IMEs commit the candidate then often pass the trigger Enter through
   // as a real keystroke; terminals can't expose composition state. If submit
@@ -215,40 +214,32 @@ export function PromptInput({
   const renderItems = collapseLinesForDisplay(lines, cursorLine);
   const showHugeBufferHints = lines.length > 20;
 
-  const systemCursorSync = (() => {
-    const totalRows = stdout?.rows;
-    if (!totalRows || totalRows < 4) return null;
-    const linesBelow = Math.max(0, lines.length - 1 - cursorLine);
-    const largeHint = showHugeBufferHints ? 1 : 0;
-    const frozenHint = inputFrozen || steerBusy ? 2 : 0;
-    const modeRow = mode || model ? 1 : 0;
-    const rowsInsideBelow = linesBelow + largeHint + 2 + modeRow + frozenHint;
-    const rowsBelow = rowsInsideBelow + rowsAfter;
-    const targetRow = Math.max(1, totalRows - rowsBelow);
-    const cursorLineText = cursorLine >= 0 && cursorLine < lines.length ? lines[cursorLine]! : "";
-    const textBeforeCursor = cursorLineText.slice(0, cursorCol);
-    const cursorCells = stringCells(textBeforeCursor, pastesRef.current);
-    const targetCol = 1 + 1 + 2 + cursorCells;
-    return `\x1b[${targetRow};${targetCol}H`;
+  // Ink owns cursor positioning end-to-end; out-of-band CUP writes desync
+  // its frame buffer and leave residual glyphs on next diff.
+
+  const borderLabel = (() => {
+    const parts: string[] = [];
+    if (planMode) parts.push(chalk.hex(TONE.warn)(`[${t("statsPanel.modePlan")}]`));
+    if (isHistoryMode) parts.push(chalk.hex(TONE.accent)("↑ history"));
+    if (mode) parts.push(chalk.hex(TONE.brand)(mode));
+    if (model) parts.push(chalk.hex(FG.faint)(model));
+    return parts.length > 0 ? ` ${parts.join(chalk.hex(FG.faint)(" · "))} ` : undefined;
   })();
 
-  // Sync after input/rendering goes idle. Direct CUP writes are outside Ink's
-  // frame buffer, so de-duping them avoids visible repaints on Windows terminals.
-  useEffect(() => {
-    if (systemCursorSync === null || lastCursorSyncRef.current === systemCursorSync) return;
-    const timer = setTimeout(() => {
-      if (lastCursorSyncRef.current === systemCursorSync) return;
-      stdout.write(systemCursorSync);
-      lastCursorSyncRef.current = systemCursorSync;
-    }, SYSTEM_CURSOR_SYNC_IDLE_MS);
-    return () => clearTimeout(timer);
-  }, [systemCursorSync, stdout]);
-
   return (
-    <Box flexDirection="row">
-      <Box width={1} backgroundColor={TONE.brand} />
-      <Box flexDirection="column" flexGrow={1} paddingX={1} backgroundColor={SURFACE.bgInput}>
-        <Box height={1} />
+    <Box
+      flexDirection="column"
+      paddingX={1}
+      borderStyle="round"
+      borderLeft={false}
+      borderRight={false}
+      borderColor={inputActive ? TONE.brand : FG.faint}
+      borderText={
+        borderLabel ? { content: borderLabel, position: "top", align: "end", offset: 2 } : undefined
+      }
+      width="100%"
+    >
+      <Box flexDirection="column" flexGrow={1}>
         {(() => {
           const rows: React.ReactNode[] = [];
           let firstRowEmitted = false;
@@ -370,23 +361,6 @@ export function PromptInput({
             </Text>
           </Box>
         ) : null}
-        <Box height={1} />
-        {mode || model || isHistoryMode || planMode ? (
-          <Box>
-            {isHistoryMode ? <Text color={TONE.accent}>{"  ↑ history"}</Text> : null}
-            <Text color={TONE.brand}>{mode || ""}</Text>
-            {planMode ? (
-              <Text color={FG.body}>
-                {"  ["}
-                {t("statsPanel.modePlan")}
-                {"]"}
-              </Text>
-            ) : null}
-            {mode && model ? <Text color={FG.faint}>{" · "}</Text> : null}
-            {model ? <Text color={FG.faint}>{model}</Text> : null}
-          </Box>
-        ) : null}
-        <Box height={1} />
         {inputFrozen ? (
           <Box marginTop={1}>
             <Text color={FG.faint}>{"  esc to stop"}</Text>
