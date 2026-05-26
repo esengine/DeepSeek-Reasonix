@@ -1002,9 +1002,7 @@ describe("registerWebTools", () => {
       });
       return new Response(
         JSON.stringify({
-          results: [
-            { title: "Reasonix", url: "https://example.com/r", content: "Result body" },
-          ],
+          results: [{ title: "Reasonix", url: "https://example.com/r", content: "Result body" }],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
