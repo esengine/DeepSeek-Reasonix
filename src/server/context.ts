@@ -135,6 +135,12 @@ export interface DashboardStats {
   totalOutputCostUsd: number;
   /** Cache hit ratio across the session, 0..1. */
   cacheHitRatio: number;
+  /** Cumulative prompt cache-hit tokens across the live session. */
+  cacheHitTokens?: number;
+  /** Cumulative prompt cache-miss tokens across the live session. */
+  cacheMissTokens?: number;
+  /** Cumulative output tokens across the live session. */
+  totalCompletionTokens?: number;
   /** Prompt tokens of the most recent turn — feeds the ctx gauge. */
   lastPromptTokens: number;
   /** Per-model context cap in tokens (1_000_000 for V4). */

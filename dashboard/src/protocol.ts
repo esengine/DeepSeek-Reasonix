@@ -111,6 +111,7 @@ export type PlanClearedEvent = { type: "$plan_cleared" };
 
 export type SessionsEvent = {
   type: "$sessions";
+  currentSession?: string | null;
   items: {
     name: string;
     messageCount: number;
@@ -118,6 +119,15 @@ export type SessionsEvent = {
     summary?: string;
     workspaceStatus?: "matched" | "legacy_missing_meta";
   }[];
+};
+
+export type SessionUsageEvent = {
+  type: "$session_usage";
+  totalCostUsd: number;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
 };
 
 export type MentionResultsEvent = {
@@ -454,6 +464,7 @@ export type IncomingEvent = { tabId?: string } & (
   | ChoiceRequiredEvent
   | PlanRequiredEvent
   | SessionsEvent
+  | SessionUsageEvent
   | SessionLoadedEvent
   | SessionEmptyEvent
   | NeedsSetupEvent

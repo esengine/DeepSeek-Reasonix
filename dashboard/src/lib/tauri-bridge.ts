@@ -278,39 +278,19 @@ function connectSSE(): void {
     setTimeout(connectSSE, Math.min(delay, 30000));
   };
 
-  // SSE 连接成功后，开始定期轮询 overview 更新 balance/stats
+  // SSE 连接成功后，开始定期轮询 overview/sessions 更新右侧状态和会话列表
   startStatsPolling();
 }
 
-// 定期轮询 stats/balance
+// 定期轮询 stats/balance/sessions
 let statsPollTimer: ReturnType<typeof setInterval> | null = null;
 
 function startStatsPolling(): void {
   if (statsPollTimer) clearInterval(statsPollTimer);
-  // 每 5 秒轮询一次 overview 获取最新 stats/balance
+  // 每 5 秒轮询一次，补偿 SSE 重连、App remount、以及其他终端写入 session 文件的情况。
   statsPollTimer = setInterval(async () => {
     try {
-      const overview = await apiFetch("overview");
-      if (overview?.stats) {
-        const stats = overview.stats;
-        // 更新 balance
-        if (stats.balance) {
-          const firstBalance = stats.balance[0];
-          if (firstBalance) {
-            emitEvent({
-              type: "$balance",
-              tabId: "tab-1",
-              currency: firstBalance.currency,
-              total: Number.parseFloat(firstBalance.total_balance) || 0,
-              isAvailable: true,
-            });
-          }
-        }
-        // 更新 usage stats（缓存命中率、tokens、金额）
-        const totalTokens = Math.round(stats.totalCostUsd > 0 ? stats.cacheHitRatio * 10000 : 0);
-        // 通过 $settings 事件附带更新 usage 相关信息
-        // 注意：usage 主要由 model.final 事件更新，这里只更新 balance
-      }
+      await refreshServerSnapshots();
     } catch {
       // 静默失败，等待下次轮询
     }
@@ -356,6 +336,68 @@ function emitServerSettings(settings: any, overview?: any): void {
     baseUrl: settings?.baseUrl ?? "",
     apiKeyPrefix: settings?.apiKey ?? "",
   });
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function mapSessionItem(s: any) {
+  return {
+    name: s.name,
+    messageCount: s.messageCount,
+    mtime: new Date(s.mtime).toISOString(),
+    summary: s.summary,
+    workspaceStatus: s.workspaceStatus,
+  };
+}
+
+function emitSessionsSnapshot(sessionsData: any): void {
+  if (!sessionsData?.sessions) return;
+  emitEvent({
+    type: "$sessions",
+    tabId: "tab-1",
+    currentSession:
+      typeof sessionsData.currentSession === "string" ? sessionsData.currentSession : null,
+    items: sessionsData.sessions.map(mapSessionItem),
+  });
+}
+
+function emitOverviewSnapshot(overview: any): void {
+  const stats = overview?.stats;
+  if (!stats) return;
+
+  const cacheHitTokens = finiteNumber(stats.cacheHitTokens);
+  const cacheMissTokens = finiteNumber(stats.cacheMissTokens);
+  emitEvent({
+    type: "$session_usage",
+    tabId: "tab-1",
+    totalCostUsd: finiteNumber(stats.totalCostUsd),
+    totalPromptTokens: cacheHitTokens + cacheMissTokens,
+    totalCompletionTokens: finiteNumber(stats.totalCompletionTokens),
+    cacheHitTokens,
+    cacheMissTokens,
+  });
+
+  if (stats.balance) {
+    const firstBalance = stats.balance[0];
+    if (firstBalance) {
+      emitEvent({
+        type: "$balance",
+        tabId: "tab-1",
+        currency: firstBalance.currency,
+        total: Number.parseFloat(firstBalance.total_balance) || 0,
+        isAvailable: true,
+      });
+    }
+  }
+}
+
+async function refreshServerSnapshots(): Promise<void> {
+  const [sessionsData, overview] = await Promise.all([apiFetch("sessions"), apiFetch("overview")]);
+  emitSessionsSnapshot(sessionsData);
+  emitOverviewSnapshot(overview);
 }
 
 // 初始化 Server 状态
@@ -459,33 +501,8 @@ async function serverInit(): Promise<void> {
     ]);
     wsDir = overview?.cwd ?? "";
     if (settings) emitServerSettings(settings, overview);
-    if (sessionsData?.sessions) {
-      const items = sessionsData.sessions.map((s: any) => ({
-        name: s.name,
-        messageCount: s.messageCount,
-        mtime: new Date(s.mtime).toISOString(),
-        summary: s.summary,
-      }));
-      emitEvent({
-        type: "$sessions",
-        tabId: "tab-1",
-        items,
-      });
-    }
-    // 从 overview 中提取 balance 和 stats
-    const stats = overview?.stats;
-    if (stats?.balance) {
-      const firstBalance = stats.balance[0];
-      if (firstBalance) {
-        emitEvent({
-          type: "$balance",
-          tabId: "tab-1",
-          currency: firstBalance.currency,
-          total: Number.parseFloat(firstBalance.total_balance) || 0,
-          isAvailable: true,
-        });
-      }
-    }
+    emitSessionsSnapshot(sessionsData);
+    emitOverviewSnapshot(overview);
   } catch (err) {
     console.warn("[tauri-bridge] server init failed:", err);
   }
@@ -536,15 +553,7 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
     case "session_list": {
       try {
         const data = await apiFetch("sessions");
-        if (data?.sessions) {
-          const items = data.sessions.map((s: any) => ({
-            name: s.name,
-            messageCount: s.messageCount,
-            mtime: new Date(s.mtime).toISOString(),
-            summary: s.summary,
-          }));
-          emitEvent({ type: "$sessions", tabId: "tab-1", items });
-        }
+        emitSessionsSnapshot(data);
       } catch {
         /* ignore */
       }
@@ -632,15 +641,7 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
         await apiFetch(`sessions/${encodeURIComponent(payload.name)}`, { method: "DELETE" });
         // 删除后刷新列表
         const data = await apiFetch("sessions");
-        if (data?.sessions) {
-          const items = data.sessions.map((s: any) => ({
-            name: s.name,
-            messageCount: s.messageCount,
-            mtime: new Date(s.mtime).toISOString(),
-            summary: s.summary,
-          }));
-          emitEvent({ type: "$sessions", tabId: "tab-1", items });
-        }
+        emitSessionsSnapshot(data);
       } catch {
         /* ignore */
       }
@@ -662,15 +663,9 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
             carryover: { totalCostUsd: 0, cacheHitTokens: 0, cacheMissTokens: 0 },
           });
           const listData = await apiFetch("sessions");
-          if (listData?.sessions) {
-            const items = listData.sessions.map((s: any) => ({
-              name: s.name,
-              messageCount: s.messageCount,
-              mtime: new Date(s.mtime).toISOString(),
-              summary: s.summary,
-            }));
-            emitEvent({ type: "$sessions", tabId: "tab-1", items });
-          }
+          emitSessionsSnapshot(listData);
+          const overview = await apiFetch("overview");
+          emitOverviewSnapshot(overview);
         }
       } catch {
         /* fallback */

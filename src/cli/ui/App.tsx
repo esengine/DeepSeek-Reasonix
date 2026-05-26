@@ -2267,6 +2267,9 @@ function AppInner({
             totalInputCostUsd: s.totalInputCostUsd,
             totalOutputCostUsd: s.totalOutputCostUsd,
             cacheHitRatio: s.cacheHitRatio,
+            cacheHitTokens: loop.stats.cumulativeCacheHitTokens,
+            cacheMissTokens: loop.stats.cumulativeCacheMissTokens,
+            totalCompletionTokens: loop.stats.cumulativeCompletionTokens,
             lastPromptTokens: s.lastPromptTokens,
             contextCapTokens: ctxCap,
             // useSessionInfo's Balance is a flat { currency, total }; the
