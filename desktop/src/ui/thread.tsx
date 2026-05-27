@@ -2,7 +2,7 @@ import type { ApprovalPrompt } from "@reasonix/core-utils";
 import { isCompactionSummary, stripCompactionMarker } from "@reasonix/core-utils/compaction";
 import { derivePrefix } from "@reasonix/core-utils/derive-prefix";
 import { Copy } from "lucide-react";
-import { type ReactNode, memo, useState } from "react";
+import { type ReactNode, memo, useEffect, useRef, useState } from "react";
 import type {
   ActivePlan,
   AssistantSegment,
@@ -365,12 +365,81 @@ export function PlanApprovalCard({
 }: {
   p: PendingPlan;
   onApprove: () => void;
-  onRefine: () => void;
-  onCancel: () => void;
+  onRefine: (feedback?: string) => void;
+  onCancel: (feedback?: string) => void;
 }) {
   useLang();
+  const [feedbackMode, setFeedbackMode] = useState<"cancel" | "refine" | null>(null);
+  const [feedbackText, setFeedbackText] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (feedbackMode && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [feedbackMode]);
+
+  const handleSendFeedback = () => {
+    const fb = feedbackText.trim() || undefined;
+    if (feedbackMode === "cancel") onCancel(fb);
+    else if (feedbackMode === "refine") onRefine(fb);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendFeedback();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      if (feedbackMode === "cancel") onCancel();
+      else if (feedbackMode === "refine") onRefine();
+    }
+  };
+
   const stepCount = p.steps?.length ?? 0;
   const sub = stepCount > 0 ? t("thread.planStepCount", { count: stepCount }) : undefined;
+
+  if (feedbackMode) {
+    const isCancel = feedbackMode === "cancel";
+    return (
+      <div className="approval" data-tone="info">
+        <div className="ap-head">
+          <span className="ap-ico">
+            <I.shield size={13} />
+          </span>
+          <div>
+            <div className="ap-kind">{t("thread.planConfirmationKind")}</div>
+            <div className="ap-title">
+              {isCancel ? t("thread.cancelFeedbackLabel") : t("thread.refineFeedbackLabel")}
+            </div>
+          </div>
+        </div>
+        <div className="ap-body">
+          <textarea
+            ref={inputRef}
+            className="approval-textarea"
+            value={feedbackText}
+            onChange={(e) => setFeedbackText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={t("modal.planFeedbackPlaceholder")}
+          />
+        </div>
+        <div className="ap-foot">
+          <button type="button" className="btn primary" onClick={handleSendFeedback}>
+            {t("thread.sendFeedback")}
+          </button>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => (isCancel ? onCancel() : onRefine())}
+          >
+            {t("thread.skipFeedback")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ApprovalCard
       kind={t("thread.planConfirmationKind")}
@@ -392,8 +461,8 @@ export function PlanApprovalCard({
       secondaryLabel={t("thread.cancel")}
       tertiaryLabel={t("thread.refine")}
       onPrimary={onApprove}
-      onSecondary={onCancel}
-      onTertiary={onRefine}
+      onSecondary={() => setFeedbackMode("cancel")}
+      onTertiary={() => setFeedbackMode("refine")}
     />
   );
 }

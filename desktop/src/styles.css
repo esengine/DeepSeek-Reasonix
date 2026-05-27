@@ -5696,6 +5696,30 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   border-radius: 3px;
   font-size: 14px;
 }
+.approval-textarea {
+  width: 100%;
+  min-height: 72px;
+  max-height: 200px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.approval-textarea::placeholder {
+  color: var(--muted-2);
+}
+.approval-textarea:focus {
+  border-color: var(--approval-accent, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--approval-accent, var(--accent)) 20%, transparent);
+}
 .approval .ap-preview {
   margin: 0 14px 10px;
   padding: 10px 12px;

@@ -2448,8 +2448,8 @@ function TabRuntime({
                       key={`pp-${p.id}`}
                       p={p}
                       onApprove={() => resolvePlan(p.id, { type: "approve" })}
-                      onRefine={() => resolvePlan(p.id, { type: "refine" })}
-                      onCancel={() => resolvePlan(p.id, { type: "cancel" })}
+                      onRefine={(feedback) => resolvePlan(p.id, { type: "refine", feedback })}
+                      onCancel={(feedback) => resolvePlan(p.id, { type: "cancel", feedback })}
                     />
                   ))}
                   {state.pendingCheckpoints.map((c) => (
