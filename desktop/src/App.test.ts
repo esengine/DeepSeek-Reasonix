@@ -155,6 +155,40 @@ describe("Desktop App reducer — usage", () => {
     expect(next.usage.lastCallCacheMiss).toBe(1234);
   });
 
+  it("settles the pending assistant message when an error ends the turn (#1660)", () => {
+    const base = initialState();
+    const state = {
+      ...base,
+      busy: true,
+      messages: [
+        ...base.messages,
+        {
+          kind: "assistant" as const,
+          turn: 1,
+          segments: [{ kind: "reasoning" as const, text: "thinking…" }],
+          pending: true,
+        },
+      ],
+    };
+    const next = reduce(state, {
+      t: "incoming",
+      event: {
+        type: "error",
+        id: 1,
+        ts: "2026-05-27T00:00:00.000Z",
+        turn: 1,
+        message: "SSE body read failed: terminated",
+        recoverable: false,
+      },
+    });
+
+    expect(next.busy).toBe(false);
+    const assistant = next.messages.find((m) => m.kind === "assistant");
+    expect(assistant?.pending).toBe(false);
+    const error = next.messages.find((m) => m.kind === "error");
+    expect(error?.message).toBe("SSE body read failed: terminated");
+  });
+
   it("keeps cumulative usage when live context breakdown refreshes", () => {
     const base = initialState();
     const next = reduce(

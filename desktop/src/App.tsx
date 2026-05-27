@@ -1062,12 +1062,18 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       // ones so a session full of self-repaired loops doesn't look
       // like everything's on fire (#1456-followup).
       const recoverable = ev.type === "error" ? ev.recoverable : false;
+      // Loop has returned (any error path ends the turn); flip the still-
+      // streaming assistant message to settled so the UI doesn't keep
+      // showing a "thinking" spinner above the error card (#1660).
+      const settled = state.messages.map((m) =>
+        m.kind === "assistant" && m.pending ? { ...m, pending: false } : m,
+      );
       return {
         ...state,
         busy: false,
         activeSkill: null,
         messages: [
-          ...state.messages,
+          ...settled,
           { kind: "error", message: ev.message, id: nextErrorId(), recoverable },
         ],
       };
