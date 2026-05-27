@@ -1967,10 +1967,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 
 .thread {
   flex: 1;
-  overflow-y: auto;
-  padding: 28px 0 40px;
-  margin-right: 5px;
-  scroll-padding-bottom: 24px;
+  min-height: 0;
+  position: relative;
 }
 .thread::-webkit-scrollbar {
   width: 8px;
@@ -1991,11 +1989,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .thread-inner {
   max-width: var(--thread-max-width, 740px);
-  margin: 0 auto;
+  margin: 0 auto 28px;
   padding: 0 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
+}
+.thread-inner--standalone {
+  margin-top: 28px;
 }
 .thread-inner > div[data-turn] {
   content-visibility: auto;

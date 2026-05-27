@@ -66,6 +66,7 @@ import { useElapsed } from "./ui/live";
 import { AboutModal } from "./ui/about";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { JumpBar } from "./ui/jump-bar";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Sidebar } from "./ui/sidebar";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
@@ -1396,6 +1397,7 @@ function TabRuntime({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const threadInnerRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
   const [jobsOpen, setJobsOpen] = useState(false);
@@ -1851,6 +1853,8 @@ function TabRuntime({
   // Read the latest session inside the stable restore callback below.
   const currentSessionRef = useRef(state.currentSession);
   currentSessionRef.current = state.currentSession;
+  const messageItems = state.messages;
+
   const restoreScrollTop = useCallback(() => {
     const session = currentSessionRef.current;
     if (!session) return null;
@@ -1859,7 +1863,8 @@ function TabRuntime({
     return Number.isFinite(n) ? n : null;
   }, []);
 
-  const { showJumpButton, scrollToBottom } = useAutoScroll(
+  const [showJumpButton, setShowJumpButton] = useState(false);
+  const { scrollToBottom } = useAutoScroll(
     threadRef,
     threadInnerRef,
     state.busy,
@@ -2317,186 +2322,70 @@ function TabRuntime({
                 }}
               />
               <div className="thread" ref={threadRef}>
-                <div className="thread-inner" ref={threadInnerRef}>
-                  {state.activePlan ? (
-                    <>
-                      <PlanBanner
-                        plan={state.activePlan}
-                        onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
-                      />
-                      <ActivePlanTaskCard plan={state.activePlan} />
-                    </>
-                  ) : null}
-
-                  {state.messages.length === 0 ? (
+                {state.messages.length === 0 ? (
+                  <div className="thread-inner thread-inner--standalone">
                     <EmptyState
                       onPick={(text) => {
                         const trimmed = text.trim();
                         if (trimmed.startsWith("/")) {
                           const cmd = trimmed.split(/\s+/)[0] ?? "";
                           const match = slashCommands.find((s) => s.cmd === cmd);
-                          if (match) {
-                            match.run();
-                            return;
-                          }
+                          if (match) { match.run(); return; }
                         }
                         send(text);
                       }}
                       workspaceDir={state.settings?.workspaceDir}
                     />
-                  ) : null}
-
-                  {state.messages.map((m, i) => {
-                    if (m.kind === "user") {
-                      const dividerLabel = `turn ${m.turn}`;
-                      const prev = state.messages[i - 1];
-                      const needsDivider = !prev || prev.kind === "user";
-                      return (
-                        <div key={`u-${i}`} data-turn={m.turn}>
-                          {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
-                        </div>
-                      );
-                    }
-                    if (m.kind === "assistant") {
-                      const stats = !m.pending ? countFileStats(m.segments) : null;
-                      return (
-                        <div key={`a-${m.turn}`}>
-                          <AssistantMsg
-                            segments={m.segments}
-                            pending={m.pending}
-                            model={state.model}
-                            onApproveConfirm={onApproveConfirm}
-                            onRejectConfirm={onRejectConfirm}
-                            onAlwaysAllowConfirm={onAlwaysAllowConfirm}
-                            pendingConfirms={state.pendingConfirms}
+                  </div>
+                ) : (
+                  <Virtuoso
+                    ref={virtuosoRef}
+                    style={{ height: "100%" }}
+                    totalCount={messageItems.length}
+                    followOutput={"auto"}
+                    atBottomStateChange={(atBottom) => setShowJumpButton(!atBottom)}
+                    components={{
+                      Header: state.activePlan ? () => (
+                        <div className="thread-inner">
+                          <PlanBanner
+                            plan={state.activePlan!}
+                            onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
                           />
-                          {stats ? <DiffStats stats={stats} /> : null}
+                          <ActivePlanTaskCard plan={state.activePlan!} />
                         </div>
-                      );
-                    }
-                    if (m.kind === "error") {
-                      const toneVar = m.recoverable ? "var(--tone-warn)" : "var(--tone-err)";
-                      const bgVar = m.recoverable
-                        ? "var(--warn-soft, var(--danger-soft))"
-                        : "var(--danger-soft)";
-                      const labelKey = m.recoverable ? "app.warningLabel" : "app.errorLabel";
-                      return (
-                        <div
-                          key={m.id}
-                          className="warn-card"
-                          style={{ borderColor: toneVar, background: bgVar, position: "relative" }}
-                        >
-                          <span className="ico" style={{ color: toneVar }}>
-                            <I.warning size={16} />
-                          </span>
-                          <div style={{ flex: 1 }}>
-                            <div className="tt">{t(labelKey)}</div>
-                            <div className="ds">{m.message}</div>
+                      ) : undefined,
+                    }}
+                    itemContent={(index) => {
+                      const m = state.messages[index]!;
+                      if (m.kind === "user") {
+                        return (
+                          <div className="thread-inner" data-turn={m.turn}>
+                            <TurnDivider label={`turn ${m.turn}`} />
+                            <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
                           </div>
-                          <button
-                            type="button"
-                            className="warn-card-dismiss"
-                            title={t("app.dismissError")}
-                            onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: toneVar,
-                              cursor: "pointer",
-                              padding: "4px",
-                              alignSelf: "flex-start",
-                            }}
-                          >
-                            <I.x size={14} />
-                          </button>
-                        </div>
-                      );
-                    }
-                    if (m.kind === "warning") {
-                      if (state.settings?.showSystemEvents === false) return null;
-                      return (
-                        <div key={m.id} className="sys-event-row" title={m.text}>
-                          <span className="line" />
-                          <span className="label">{m.text}</span>
-                          <span className="line" />
-                        </div>
-                      );
-                    }
-                    return null;
-                  })}
-
-                  {/* Pending approvals */}
-                  {state.pendingPlans.map((p) => (
-                    <PlanApprovalCard
-                      key={`pp-${p.id}`}
-                      p={p}
-                      onApprove={() => resolvePlan(p.id, { type: "approve" })}
-                      onRefine={(feedback) => resolvePlan(p.id, { type: "refine", feedback })}
-                      onCancel={(feedback) => resolvePlan(p.id, { type: "cancel", feedback })}
-                    />
-                  ))}
-                  {state.pendingCheckpoints.map((c) => (
-                    <CheckpointApprovalCard
-                      key={`cp-${c.id}`}
-                      c={c}
-                      onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
-                      onRevise={() => resolveCheckpoint(c.id, { type: "revise" })}
-                      onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
-                    />
-                  ))}
-                  {state.pendingRevisions.map((r) => (
-                    <RevisionApprovalCard
-                      key={`rv-${r.id}`}
-                      r={r}
-                      onAccept={() => resolveRevision(r.id, { type: "accepted" })}
-                      onReject={() => resolveRevision(r.id, { type: "rejected" })}
-                    />
-                  ))}
-                  {state.pendingConfirms.map((c) => (
-                    <ConfirmApprovalCard
-                      key={`cc-${c.id}`}
-                      prompt={c.prompt}
-                      onAllow={() => resolveConfirm(c.id, { type: "run_once" })}
-                      onAlwaysAllow={(prefix) =>
-                        resolveConfirm(c.id, { type: "always_allow", prefix })
+                        );
                       }
-                      onDeny={() => resolveConfirm(c.id, { type: "deny" })}
-                    />
-                  ))}
-                  {state.pendingPathAccess.map((p) => (
-                    <PathAccessApprovalCard
-                      key={`pa-${p.id}`}
-                      prompt={p.prompt}
-                      onAllow={() => resolvePathAccess(p.id, { type: "run_once" })}
-                      onAlwaysAllow={(prefix) =>
-                        resolvePathAccess(p.id, { type: "always_allow", prefix })
+                      if (m.kind === "assistant") {
+                        const stats = !m.pending ? countFileStats(m.segments) : null;
+                        return (
+                          <div className="thread-inner">
+                            <AssistantMsg
+                              segments={m.segments}
+                              pending={m.pending}
+                              model={state.model}
+                              onApproveConfirm={onApproveConfirm}
+                              onRejectConfirm={onRejectConfirm}
+                              onAlwaysAllowConfirm={onAlwaysAllowConfirm}
+                              pendingConfirms={state.pendingConfirms}
+                            />
+                            {stats ? <DiffStats stats={stats} /> : null}
+                          </div>
+                        );
                       }
-                      onDeny={() => resolvePathAccess(p.id, { type: "deny" })}
-                    />
-                  ))}
-                  {state.pendingChoices.map((c) => (
-                    <ChoiceApprovalCard
-                      key={`ch-${c.id}`}
-                      c={c}
-                      onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
-                      onCancel={() => resolveChoice(c.id, { type: "cancel" })}
-                    />
-                  ))}
-
-                  {!state.ready ? (
-                    <div
-                      style={{
-                        padding: 12,
-                        color: "var(--muted)",
-                        fontFamily: "Geist Mono, monospace",
-                        fontSize: 11,
-                      }}
-                    >
-                      {t("app.connecting")}
-                    </div>
-                  ) : null}
-                </div>
+                      return null;
+                    }}
+                  />
+                )}
                 {showJumpButton ? (
                   <button
                     className="thread-jump-bottom"
@@ -2508,6 +2397,18 @@ function TabRuntime({
                   </button>
                 ) : null}
               </div>
+
+              {state.pendingPlans.length > 0 || state.pendingCheckpoints.length > 0 || state.pendingRevisions.length > 0 || state.pendingConfirms.length > 0 || state.pendingPathAccess.length > 0 || state.pendingChoices.length > 0 || !state.ready ? (
+                <div style={{ maxWidth: "var(--thread-max-width, 740px)", margin: "0 auto", padding: "0 32px", width: "100%" }}>
+                  {state.pendingPlans.map((p) => (<PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />))}
+                  {state.pendingCheckpoints.map((c) => (<CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />))}
+                  {state.pendingRevisions.map((r) => (<RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />))}
+                  {state.pendingConfirms.map((c) => (<ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />))}
+                  {state.pendingPathAccess.map((p) => (<PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />))}
+                  {state.pendingChoices.map((c) => (<ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />))}
+                  {!state.ready ? (<div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div>) : null}
+                </div>
+              ) : null}
 
               <Composer
                 draft={draft}
