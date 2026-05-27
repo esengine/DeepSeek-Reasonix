@@ -2297,7 +2297,10 @@ function TabRuntime({
         ) : null}
 
         <main className="main" style={{ position: "relative" }}>
-          <JumpBar messages={state.messages} threadEl={threadRef.current} />
+          <JumpBar messages={state.messages} threadEl={threadRef.current} onScrollToTurn={(turn) => {
+            const idx = state.messages.findIndex((m) => (m.kind === "user" || m.kind === "assistant") && m.turn === turn);
+            if (idx >= 0) virtuosoRef.current?.scrollToIndex(idx);
+          }} />
           {state.needsSetup ? (
             <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
