@@ -6,6 +6,7 @@ import {
   chmodSync,
   closeSync,
   copyFileSync,
+  fstatSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -200,10 +201,10 @@ const READ_CHUNK_SIZE = 65536; // Balance I/O overhead vs read amplification for
 export function readTailMessages(path: string, count: number): ChatMessage[] {
   if (!existsSync(path)) return [];
   try {
-    const { size } = statSync(path);
-    if (size === 0) return [];
     const fd = openSync(path, "r");
     try {
+      const { size } = fstatSync(fd);
+      if (size === 0) return [];
       const out: ChatMessage[] = [];
       let pos = size;
       let leftover = "";
