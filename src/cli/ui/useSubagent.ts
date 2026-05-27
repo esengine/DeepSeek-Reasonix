@@ -139,6 +139,9 @@ export interface UseSubagentParams {
   log: Scrollback;
   /** Read live wallet currency at end-event time so the cost suffix follows the wallet symbol. */
   getWalletCurrency?: () => string | undefined;
+  /** Called when a subagent completes successfully — lets the caller fold
+   *  subagent usage into the parent session's stats. (#2008) */
+  onSubagentEnd?: (model: string, usage: import("../../client.js").Usage) => void;
 }
 
 export interface UseSubagentResult {
@@ -151,6 +154,7 @@ export function useSubagent({
   session,
   log,
   getWalletCurrency,
+  onSubagentEnd,
 }: UseSubagentParams): UseSubagentResult {
   const [activities, setActivities] = useState<ReadonlyArray<SubagentActivity>>([]);
   // Share the process-wide singleton so `buildCodeToolset`'s pre-mount
@@ -163,6 +167,10 @@ export function useSubagent({
   useEffect(() => {
     getWalletCurrencyRef.current = getWalletCurrency;
   }, [getWalletCurrency]);
+  const onSubagentEndRef = useRef(onSubagentEnd);
+  useEffect(() => {
+    onSubagentEndRef.current = onSubagentEnd;
+  }, [onSubagentEnd]);
 
   useEffect(() => {
     sinkRef.current.current = (ev: SubagentEvent) => {
@@ -211,6 +219,7 @@ export function useSubagent({
               durationMs: ev.elapsedMs ?? 0,
             },
           });
+          onSubagentEndRef.current?.(ev.model, ev.usage);
         }
         return;
       }

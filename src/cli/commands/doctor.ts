@@ -8,6 +8,7 @@ import {
   defaultConfigPath,
   loadEndpoint,
   loadProxyConfig,
+  normalizeMcpConfig,
   readConfig,
   resolveSemanticEmbeddingConfig,
 } from "../../config.js";
@@ -192,7 +193,8 @@ async function checkConfig(): Promise<Check> {
     if (cfg.model) parts.push(`model=${cfg.model}`);
     if (cfg.reasoningEffort) parts.push(`effort=${cfg.reasoningEffort}`);
     if (cfg.editMode) parts.push(`editMode=${cfg.editMode}`);
-    if (cfg.mcp && cfg.mcp.length > 0) parts.push(`mcp=${cfg.mcp.length}`);
+    const mcpCount = normalizeMcpConfig(cfg).length;
+    if (mcpCount > 0) parts.push(`mcp=${mcpCount}`);
     return {
       id: "config",
       label: "config       ",

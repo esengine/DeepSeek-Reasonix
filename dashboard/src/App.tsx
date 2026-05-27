@@ -69,6 +69,7 @@ import { WorkdirPop } from "./ui/workdir-pop";
 import { WorkdirInputModal } from "./ui/workdir-input-modal";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
+import { elideTranscriptMessages } from "./ui/transcript-elision";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 export type AssistantSegment =
@@ -193,7 +194,7 @@ export type Settings = {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
-  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  webSearchEngine?: "bing" | "bing-intl" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
   version: string;
@@ -306,6 +307,10 @@ function nextMessageTurn(messages: ChatMessage[]): number {
 }
 
 function reduce(state: State, action: Action): State {
+  return withElidedTranscript(reduceRaw(state, action));
+}
+
+function reduceRaw(state: State, action: Action): State {
   switch (action.t) {
     case "send_user": {
       return {
@@ -470,6 +475,11 @@ function reduce(state: State, action: Action): State {
   }
 }
 
+function withElidedTranscript(state: State): State {
+  const messages = elideTranscriptMessages(state.messages);
+  return messages === state.messages ? state : { ...state, messages };
+}
+
 const READING_TOOLS = new Set(["read_file"]);
 const MODIFYING_TOOLS = new Set(["edit_file", "write_file"]);
 
@@ -548,6 +558,10 @@ function appendTextSegment(
 }
 
 export function applyIncoming(state: State, ev: IncomingEvent): State {
+  return withElidedTranscript(applyIncomingRaw(state, ev));
+}
+
+function applyIncomingRaw(state: State, ev: IncomingEvent): State {
   switch (ev.type) {
     case "user.message": {
       const last = state.messages[state.messages.length - 1];
@@ -1586,11 +1600,50 @@ function TabRuntime({
         if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
         e.preventDefault();
         abort();
+      } else if (e.key === "Enter" && !mod && !e.shiftKey && !e.altKey) {
+        // Defer to any control that already handles Enter — native inputs/buttons,
+        // ARIA button/link widgets (sidebar rows, file pills), or anything that called
+        // preventDefault — so we only grant when focus is on inert layout (#2015).
+        if (e.defaultPrevented) return;
+        const target = e.target as HTMLElement | null;
+        if (
+          target?.isContentEditable ||
+          target?.closest('input, textarea, button, select, a, [role="button"], [role="link"]')
+        ) {
+          return;
+        }
+        if (settingsOpen || jobsOpen || wdOpen) return;
+        // Enter grants the pending authorization prompt (run once), matching the
+        // TUI where Enter confirms the highlighted choice (#1962).
+        const confirm = state.pendingConfirms.at(-1);
+        if (confirm) {
+          e.preventDefault();
+          resolveConfirm(confirm.id, { type: "run_once" });
+          return;
+        }
+        const pathAccess = state.pendingPathAccess.at(-1);
+        if (pathAccess) {
+          e.preventDefault();
+          resolvePathAccess(pathAccess.id, { type: "run_once" });
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, state.busy, abort, newChat, settingsOpen, openSettingsAt]);
+  }, [
+    active,
+    state.busy,
+    state.pendingConfirms,
+    state.pendingPathAccess,
+    resolveConfirm,
+    resolvePathAccess,
+    settingsOpen,
+    jobsOpen,
+    wdOpen,
+    abort,
+    newChat,
+    openSettingsAt,
+  ]);
 
   const commands = buildCommands({
     newChat: () => {

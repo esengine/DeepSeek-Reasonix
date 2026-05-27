@@ -53,6 +53,7 @@ import {
   loadSessionMeta,
   patchSessionMeta,
   rewriteSession,
+  sessionPath,
 } from "./memory/session.js";
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
@@ -126,7 +127,7 @@ export class CacheFirstLoop {
   readonly client: DeepSeekClient;
   readonly prefix: ImmutablePrefix;
   readonly tools: ToolRegistry;
-  readonly log = new AppendOnlyLog();
+  readonly log: AppendOnlyLog;
   readonly scratch = new VolatileScratch();
   readonly stats = new SessionStats();
   readonly repair: ToolCallRepair;
@@ -201,6 +202,10 @@ export class CacheFirstLoop {
     this.client = opts.client;
     this.prefix = opts.prefix;
     this.tools = opts.tools ?? new ToolRegistry();
+    this.sessionName = opts.session ?? null;
+    this.log = new AppendOnlyLog({
+      sessionPath: this.sessionName ? sessionPath(this.sessionName) : undefined,
+    });
     this.model = opts.model ?? "deepseek-v4-flash";
     this.reasoningEffort = opts.reasoningEffort ?? "high";
     this.budgetUsd =
@@ -231,7 +236,6 @@ export class CacheFirstLoop {
     });
 
     // Heal-on-load: oversized tool results would 400 the next call before the user types.
-    this.sessionName = opts.session ?? null;
     if (this.sessionName) {
       const prior = loadSessionMessages(this.sessionName);
       const shrunk = healLoadedMessagesByTokens(prior, DEFAULT_MAX_RESULT_TOKENS);
@@ -242,7 +246,7 @@ export class CacheFirstLoop {
       const messages = pruned.messages;
       const healedCount = shrunk.healedCount + stamped.stampedCount;
       const tokensSaved = shrunk.tokensSaved;
-      for (const msg of messages) this.log.append(msg);
+      this.log.initWindow(messages);
       this.resumedMessageCount = messages.length;
       this._turn = messages.reduce((n, m) => (m.role === "assistant" ? n + 1 : n), 0);
       // Carry forward cumulative cost / turn count so the TUI's session
@@ -517,7 +521,7 @@ export class CacheFirstLoop {
   }
 
   private healActiveLogBeforeSend(): ChatMessage[] {
-    const current = this.log.toMessages();
+    const current = this.log.toFullHistory();
     const healed = healLoadedMessages(current, DEFAULT_MAX_RESULT_CHARS);
     const argsShrunk = shrinkOversizedToolCallArgsByTokens(
       healed.messages,
@@ -549,7 +553,10 @@ export class CacheFirstLoop {
   }
 
   private discardLogFrom(index: number): void {
-    const preserved = this.log.entries.slice(0, index).map((m) => ({ ...m }));
+    const preserved = this.log
+      .toFullHistory()
+      .slice(0, index)
+      .map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
     if (this.sessionName) {
       try {
@@ -562,7 +569,7 @@ export class CacheFirstLoop {
 
   /** Drop the last user message + everything after; caller re-sends. Persists to session file. */
   retryLastUser(): string | null {
-    const entries = this.log.entries;
+    const entries = this.log.toFullHistory();
     let lastUserIdx = -1;
     for (let i = entries.length - 1; i >= 0; i--) {
       if (entries[i]!.role === "user") {
@@ -587,7 +594,7 @@ export class CacheFirstLoop {
 
   /** Rewind to the N-th user turn (0-indexed). Drops that turn + everything after. */
   rewindToUserTurn(userTurnIndex: number): string | null {
-    const entries = this.log.entries;
+    const entries = this.log.toFullHistory();
     let count = 0;
     let targetIdx = -1;
     for (let i = 0; i < entries.length; i++) {

@@ -134,9 +134,9 @@ body[data-drag-over="1"]::after {
   --muted: oklch(54% 0.005 260);
   --muted-2: oklch(68% 0.004 260);
 
-  --accent: oklch(58% 0.18 36);
-  --accent-soft: oklch(58% 0.18 36 / 0.1);
-  --accent-strong: oklch(52% 0.2 34);
+  --accent: oklch(56% 0.12 285);
+  --accent-soft: oklch(56% 0.12 285 / 0.1);
+  --accent-strong: oklch(50% 0.14 285);
 
   --success: oklch(48% 0.13 155);
   --success-soft: oklch(48% 0.13 155 / 0.1);
@@ -832,6 +832,7 @@ html[data-platform="macos"] .titlebar .tb-left {
 
 .sidebar {
   grid-area: side;
+  container: sidebar / inline-size;
   background: var(--bg-2);
   border-right: 1px solid var(--border);
   display: flex;
@@ -848,9 +849,11 @@ html[data-platform="macos"] .titlebar .tb-left {
 }
 .side-head .new-btn {
   flex: 1;
+  min-width: 0;
   height: 30px;
   display: inline-flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 0 10px;
   font-size: 14px;
@@ -863,6 +866,15 @@ html[data-platform="macos"] .titlebar .tb-left {
 .side-head .new-btn:hover {
   background: var(--accent-strong);
 }
+.side-head .new-btn svg {
+  flex: 0 0 auto;
+}
+.side-head .new-btn > span:not(.shortcut) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .side-head .new-btn kbd {
   font-family: inherit;
   font-size: 14px;
@@ -872,6 +884,8 @@ html[data-platform="macos"] .titlebar .tb-left {
   font-weight: 500;
 }
 .side-head .new-btn .shortcut {
+  display: none;
+  flex: 0 0 auto;
   margin-left: auto;
 }
 .side-head .new-btn .shortcut kbd {
@@ -886,7 +900,26 @@ html[data-platform="macos"] .titlebar .tb-left {
   padding: 1px 5px;
   box-shadow: none;
 }
+@container sidebar (min-width: 191px) {
+  .side-head .new-btn .shortcut {
+    display: inline-flex;
+  }
+}
+@container sidebar (max-width: 240px) {
+  .side-head .new-btn .shortcut {
+    display: none;
+  }
+}
+@container sidebar (max-width: 190px) {
+  .side-head .new-btn > span:not(.shortcut) {
+    display: none;
+  }
+  .side-head .new-btn {
+    justify-content: center;
+  }
+}
 .side-head .icon-btn {
+  flex: 0 0 auto;
   width: 30px;
   height: 30px;
   border-radius: 6px;
@@ -961,11 +994,14 @@ html[data-platform="macos"] .titlebar .tb-left {
 .search-row .input {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: 8px;
+  padding: 6px 9px;
   border-radius: 6px;
   background: var(--card);
   border: 1px solid var(--border);
+}
+.search-row .input > svg {
+  flex-shrink: 0;
 }
 .search-row input {
   background: none;
@@ -973,9 +1009,13 @@ html[data-platform="macos"] .titlebar .tb-left {
   outline: none;
   width: 100%;
   font-size: 14px;
+  min-width: 0;
 }
 .search-row input::placeholder {
   color: var(--muted-2);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .search-row .input kbd {
   font-family: inherit;
@@ -1234,8 +1274,23 @@ html[data-platform="macos"] .titlebar .tb-left {
 .session-item .body .meta .sep {
   color: var(--border-strong);
 }
+.session-item .body .meta .count,
+.session-item .body .meta .time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+@container (max-width: 180px) {
+  .session-item .body .meta .count,
+  .session-item .body .meta .sep {
+    display: none;
+  }
+}
 .session-item .delete-btn {
-  flex-shrink: 0;
+  position: absolute;
+  top: 5px;
+  right: 8px;
   width: 22px;
   height: 22px;
   display: flex;
@@ -1250,7 +1305,9 @@ html[data-platform="macos"] .titlebar .tb-left {
   transition: opacity 120ms, background 120ms, color 120ms;
 }
 .session-item .rename-btn {
-  flex-shrink: 0;
+  position: absolute;
+  top: 5px;
+  right: 34px;
   width: 22px;
   height: 22px;
   display: flex;
@@ -1271,6 +1328,7 @@ html[data-platform="macos"] .titlebar .tb-left {
 .session-item:focus-within .rename-btn,
 .session-item .rename-btn:focus-visible {
   opacity: 1;
+  background: var(--panel-2);
 }
 .session-item .delete-btn:hover {
   background: var(--panel-2, rgba(255, 80, 80, 0.12));
@@ -1909,10 +1967,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 
 .thread {
   flex: 1;
-  overflow-y: auto;
-  padding: 28px 0 40px;
-  margin-right: 5px;
-  scroll-padding-bottom: 24px;
+  min-height: 0;
+  position: relative;
 }
 .thread::-webkit-scrollbar {
   width: 8px;
@@ -1933,11 +1989,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .thread-inner {
   max-width: var(--thread-max-width, 740px);
-  margin: 0 auto;
+  margin: 0 auto 28px;
   padding: 0 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
+}
+.thread-inner--standalone {
+  margin-top: 28px;
 }
 .thread-inner > div[data-turn] {
   content-visibility: auto;
@@ -2086,6 +2142,40 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   max-width: 60ch;
 }
 
+.tool-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.tool-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
+  background: var(--panel);
+  cursor: pointer;
+  border: none;
+}
+.tool-group-header:hover {
+  background: var(--panel-2);
+}
+.tool-group-header .chevron {
+  margin-left: auto;
+  transition: transform 150ms;
+}
+.tool-group-header .chevron.open {
+  transform: rotate(180deg);
+}
+.tool-group-body {
+  border-top: 1px solid var(--border);
+}
+.tool-group-body > * + * {
+  border-top: 1px solid var(--border);
+}
 .msg {
   display: flex;
   gap: 14px;
@@ -5754,6 +5844,30 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   border-radius: 3px;
   font-size: 14px;
 }
+.approval-textarea {
+  width: 100%;
+  min-height: 72px;
+  max-height: 200px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.approval-textarea::placeholder {
+  color: var(--muted-2);
+}
+.approval-textarea:focus {
+  border-color: var(--approval-accent, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--approval-accent, var(--accent)) 20%, transparent);
+}
 .approval .ap-preview {
   margin: 0 14px 10px;
   padding: 10px 12px;
@@ -7510,4 +7624,3 @@ html[data-platform="macos"] .splash {
     grid-template-columns: 1fr;
   }
 }
-

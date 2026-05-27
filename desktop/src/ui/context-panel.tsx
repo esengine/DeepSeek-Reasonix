@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
+<<<<<<< feat/desktop-markdown-plan-memory
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActivePlan, ArchivedPlan, PendingPlan, SessionFile, Settings, UsageStats } from "../App";
+=======
+import { useMemo, useState } from "react";
+import type { SessionFile, Settings, UsageStats } from "../App";
+>>>>>>> main
 import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";

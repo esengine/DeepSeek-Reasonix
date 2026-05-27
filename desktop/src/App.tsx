@@ -66,6 +66,7 @@ import { useElapsed } from "./ui/live";
 import { AboutModal } from "./ui/about";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { JumpBar } from "./ui/jump-bar";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Sidebar } from "./ui/sidebar";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
@@ -101,6 +102,7 @@ import { useResizable } from "./ui/useResizable";
 import { useAutoScroll } from "./ui/useAutoScroll";
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { getThreadMaxWidth } from "./ui/thread-layout";
+import { elideTranscriptMessages } from "./ui/transcript-elision";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 const RIGHT_SIDEBAR_COLLAPSE_WIDTH = 1120;
@@ -257,7 +259,7 @@ export type Settings = {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
-  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  webSearchEngine?: "bing" | "bing-intl" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
@@ -436,6 +438,10 @@ function nextErrorId(): string {
 }
 
 export function reduce(state: State, action: Action): State {
+  return withElidedTranscript(reduceRaw(state, action));
+}
+
+function reduceRaw(state: State, action: Action): State {
   switch (action.t) {
     case "send_user": {
       return {
@@ -653,6 +659,11 @@ export function reduce(state: State, action: Action): State {
   }
 }
 
+function withElidedTranscript(state: State): State {
+  const messages = elideTranscriptMessages(state.messages);
+  return messages === state.messages ? state : { ...state, messages };
+}
+
 const READING_TOOLS = new Set(["read_file"]);
 const MODIFYING_TOOLS = new Set(["edit_file", "write_file"]);
 
@@ -809,6 +820,10 @@ function appendTextSegment(
 }
 
 export function applyIncoming(state: State, ev: IncomingEvent): State {
+  return withElidedTranscript(applyIncomingRaw(state, ev));
+}
+
+function applyIncomingRaw(state: State, ev: IncomingEvent): State {
   switch (ev.type) {
     case "user.message": {
       return {
@@ -1214,20 +1229,20 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           { kind: "assistant", turn: ev.turn, segments: [], pending: true },
         ],
       };
-    case "model.delta":
-      return {
-        ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          if (ev.channel === "content") {
-            return { ...m, segments: appendTextSegment(m.segments, "text", ev.text) };
-          }
-          if (ev.channel === "reasoning") {
-            return { ...m, segments: appendTextSegment(m.segments, "reasoning", ev.text) };
-          }
-          return m;
-        }),
-      };
+    case "model.delta": {
+      // Walk backwards — streaming always targets the latest assistant message
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        let updated = m;
+        if (ev.channel === "content") updated = { ...m, segments: appendTextSegment(m.segments, "text", ev.text) };
+        else if (ev.channel === "reasoning") updated = { ...m, segments: appendTextSegment(m.segments, "reasoning", ev.text) };
+        const next = [...state.messages];
+        next[i] = updated;
+        return { ...state, messages: next };
+      }
+      return state;
+    }
     case "model.final": {
       const u = ev.usage;
       const promptTokens =
@@ -1247,89 +1262,73 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         reservedTokens: state.usage.reservedTokens,
         liveLogTokens: state.usage.liveLogTokens,
       };
-      return {
-        ...state,
-        usage,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          return { ...m, pending: false };
-        }),
-      };
+      // Walk backwards to clear pending flag on the matching assistant
+      let settledPending = false;
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        if (m.pending) {
+          const s = [...state.messages];
+          s[i] = { ...m, pending: false };
+          state = { ...state, messages: s };
+        }
+        settledPending = true;
+        break;
+      }
+      return settledPending ? { ...state, usage } : { ...state, usage };
     }
-    case "tool.preparing":
-      return {
-        ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return m;
-          return {
-            ...m,
-            segments: [
-              ...m.segments,
-              {
-                kind: "tool",
-                callId: ev.callId,
-                name: ev.name,
-                args: "",
-                startedAt: Date.now(),
-              },
-            ],
-          };
-        }),
-      };
+    case "tool.preparing": {
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return state;
+        const next = [...state.messages];
+        next[i] = { ...m, segments: [...m.segments, { kind: "tool" as const, callId: ev.callId, name: ev.name, args: "", startedAt: Date.now() }] };
+        return { ...state, messages: next };
+      }
+      return state;
+    }
     case "tool.intent": {
       const adds = extractToolFiles(ev.name, ev.args);
-      return {
-        ...state,
-        sessionFiles: mergeSessionFiles(state.sessionFiles, adds),
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
-          if (idx >= 0) {
-            const segs = [...m.segments];
-            const seg = segs[idx];
-            if (seg?.kind === "tool") {
-              segs[idx] = { ...seg, args: ev.args };
-            }
-            return { ...m, segments: segs };
-          }
-          return {
-            ...m,
-            segments: [
-              ...m.segments,
-              {
-                kind: "tool",
-                callId: ev.callId,
-                name: ev.name,
-                args: ev.args,
-                startedAt: Date.now(),
-              },
-            ],
-          };
-        }),
-      };
+      let nextState = { ...state, sessionFiles: mergeSessionFiles(state.sessionFiles, adds) };
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
+        if (idx >= 0) {
+          const segs = [...m.segments];
+          if (segs[idx]?.kind === "tool") segs[idx] = { ...(segs[idx] as AssistantSegment & { kind: "tool" }), args: ev.args };
+          const msgs = [...nextState.messages];
+          msgs[i] = { ...m, segments: segs };
+          nextState = { ...nextState, messages: msgs };
+        } else {
+          const msgs = [...nextState.messages];
+          msgs[i] = { ...m, segments: [...m.segments, { kind: "tool" as const, callId: ev.callId, name: ev.name, args: ev.args, startedAt: Date.now() }] };
+          nextState = { ...nextState, messages: msgs };
+        }
+        break;
+      }
+      return nextState;
     }
-    case "tool.result":
-      return {
-        ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant") return m;
-          let mutated = false;
-          const segs = m.segments.map((s) => {
-            if (s.kind === "tool" && s.callId === ev.callId) {
-              mutated = true;
-              return {
-                ...s,
-                result: ev.output,
-                ok: ev.ok,
-                durationMs: Date.now() - s.startedAt,
-              };
-            }
-            return s;
-          });
-          return mutated ? { ...m, segments: segs } : m;
-        }),
-      };
+    case "tool.result": {
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant") continue;
+        let mutated = false;
+        const segs = m.segments.map((s) => {
+          if (s.kind === "tool" && s.callId === ev.callId) {
+            mutated = true;
+            return { ...s, result: ev.output, ok: ev.ok, durationMs: Date.now() - s.startedAt };
+          }
+          return s;
+        });
+        if (!mutated) continue;
+        const next = [...state.messages];
+        next[i] = { ...m, segments: segs };
+        return { ...state, messages: next };
+      }
+      return state;
+    }
     case "$retry_result":
       return { ...state, retryText: ev.text, retryNonce: state.retryNonce + 1 };
     case "$btw_result":
@@ -1562,6 +1561,7 @@ function TabRuntime({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const threadInnerRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
   const [jobsOpen, setJobsOpen] = useState(false);
@@ -2017,6 +2017,8 @@ function TabRuntime({
   // Read the latest session inside the stable restore callback below.
   const currentSessionRef = useRef(state.currentSession);
   currentSessionRef.current = state.currentSession;
+  const messageItems = state.messages;
+
   const restoreScrollTop = useCallback(() => {
     const session = currentSessionRef.current;
     if (!session) return null;
@@ -2025,7 +2027,8 @@ function TabRuntime({
     return Number.isFinite(n) ? n : null;
   }, []);
 
-  const { showJumpButton, scrollToBottom } = useAutoScroll(
+  const [showJumpButton, setShowJumpButton] = useState(false);
+  const { scrollToBottom } = useAutoScroll(
     threadRef,
     threadInnerRef,
     state.busy,
@@ -2108,6 +2111,32 @@ function TabRuntime({
         if (settingsOpen || aboutOpen || jobsOpen || wdOpen) return;
         e.preventDefault();
         abort();
+      } else if (e.key === "Enter" && !mod && !e.shiftKey && !e.altKey) {
+        // Defer to any control that already handles Enter — native inputs/buttons,
+        // ARIA button/link widgets (sidebar rows, file pills), or anything that called
+        // preventDefault — so we only grant when focus is on inert layout (#2015).
+        if (e.defaultPrevented) return;
+        const target = e.target as HTMLElement | null;
+        if (
+          target?.isContentEditable ||
+          target?.closest('input, textarea, button, select, a, [role="button"], [role="link"]')
+        ) {
+          return;
+        }
+        if (settingsOpen || aboutOpen || jobsOpen || wdOpen) return;
+        // Enter grants the pending authorization prompt (run once), matching the
+        // TUI where Enter confirms the highlighted choice (#1962).
+        const confirm = state.pendingConfirms.at(-1);
+        if (confirm) {
+          e.preventDefault();
+          resolveConfirm(confirm.id, { type: "run_once" });
+          return;
+        }
+        const pathAccess = state.pendingPathAccess.at(-1);
+        if (pathAccess) {
+          e.preventDefault();
+          resolvePathAccess(pathAccess.id, { type: "run_once" });
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -2115,6 +2144,10 @@ function TabRuntime({
   }, [
     active,
     state.busy,
+    state.pendingConfirms,
+    state.pendingPathAccess,
+    resolveConfirm,
+    resolvePathAccess,
     abort,
     newChat,
     settingsOpen,
@@ -2453,186 +2486,70 @@ function TabRuntime({
                 }}
               />
               <div className="thread" ref={threadRef}>
-                <div className="thread-inner" ref={threadInnerRef}>
-                  {state.activePlan ? (
-                    <>
-                      <PlanBanner
-                        plan={state.activePlan}
-                        onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
-                      />
-                      <ActivePlanTaskCard plan={state.activePlan} />
-                    </>
-                  ) : null}
-
-                  {state.messages.length === 0 ? (
+                {state.messages.length === 0 ? (
+                  <div className="thread-inner thread-inner--standalone">
                     <EmptyState
                       onPick={(text) => {
                         const trimmed = text.trim();
                         if (trimmed.startsWith("/")) {
                           const cmd = trimmed.split(/\s+/)[0] ?? "";
                           const match = slashCommands.find((s) => s.cmd === cmd);
-                          if (match) {
-                            match.run();
-                            return;
-                          }
+                          if (match) { match.run(); return; }
                         }
                         send(text);
                       }}
                       workspaceDir={state.settings?.workspaceDir}
                     />
-                  ) : null}
-
-                  {state.messages.map((m, i) => {
-                    if (m.kind === "user") {
-                      const dividerLabel = `turn ${m.turn}`;
-                      const prev = state.messages[i - 1];
-                      const needsDivider = !prev || prev.kind === "user";
-                      return (
-                        <div key={`u-${i}`} data-turn={m.turn}>
-                          {needsDivider ? <TurnDivider label={dividerLabel} /> : null}
-                          <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
-                        </div>
-                      );
-                    }
-                    if (m.kind === "assistant") {
-                      const stats = !m.pending ? countFileStats(m.segments) : null;
-                      return (
-                        <div key={`a-${m.turn}`}>
-                          <AssistantMsg
-                            segments={m.segments}
-                            pending={m.pending}
-                            model={state.model}
-                            onApproveConfirm={onApproveConfirm}
-                            onRejectConfirm={onRejectConfirm}
-                            onAlwaysAllowConfirm={onAlwaysAllowConfirm}
-                            pendingConfirms={state.pendingConfirms}
+                  </div>
+                ) : (
+                  <Virtuoso
+                    ref={virtuosoRef}
+                    style={{ height: "100%" }}
+                    totalCount={messageItems.length}
+                    followOutput={"auto"}
+                    atBottomStateChange={(atBottom) => setShowJumpButton(!atBottom)}
+                    components={{
+                      Header: state.activePlan ? () => (
+                        <div className="thread-inner">
+                          <PlanBanner
+                            plan={state.activePlan!}
+                            onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
                           />
-                          {stats ? <DiffStats stats={stats} /> : null}
+                          <ActivePlanTaskCard plan={state.activePlan!} />
                         </div>
-                      );
-                    }
-                    if (m.kind === "error") {
-                      const toneVar = m.recoverable ? "var(--tone-warn)" : "var(--tone-err)";
-                      const bgVar = m.recoverable
-                        ? "var(--warn-soft, var(--danger-soft))"
-                        : "var(--danger-soft)";
-                      const labelKey = m.recoverable ? "app.warningLabel" : "app.errorLabel";
-                      return (
-                        <div
-                          key={m.id}
-                          className="warn-card"
-                          style={{ borderColor: toneVar, background: bgVar, position: "relative" }}
-                        >
-                          <span className="ico" style={{ color: toneVar }}>
-                            <I.warning size={16} />
-                          </span>
-                          <div style={{ flex: 1 }}>
-                            <div className="tt">{t(labelKey)}</div>
-                            <div className="ds">{m.message}</div>
+                      ) : undefined,
+                    }}
+                    itemContent={(index) => {
+                      const m = state.messages[index]!;
+                      if (m.kind === "user") {
+                        return (
+                          <div className="thread-inner" data-turn={m.turn}>
+                            <TurnDivider label={`turn ${m.turn}`} />
+                            <UserMsg text={m.text} skill={m.skill} onEdit={onEditUserMsg} />
                           </div>
-                          <button
-                            type="button"
-                            className="warn-card-dismiss"
-                            title={t("app.dismissError")}
-                            onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: toneVar,
-                              cursor: "pointer",
-                              padding: "4px",
-                              alignSelf: "flex-start",
-                            }}
-                          >
-                            <I.x size={14} />
-                          </button>
-                        </div>
-                      );
-                    }
-                    if (m.kind === "warning") {
-                      if (state.settings?.showSystemEvents === false) return null;
-                      return (
-                        <div key={m.id} className="sys-event-row" title={m.text}>
-                          <span className="line" />
-                          <span className="label">{m.text}</span>
-                          <span className="line" />
-                        </div>
-                      );
-                    }
-                    return null;
-                  })}
-
-                  {/* Pending approvals */}
-                  {state.pendingPlans.map((p) => (
-                    <PlanApprovalCard
-                      key={`pp-${p.id}`}
-                      p={p}
-                      onApprove={() => resolvePlan(p.id, { type: "approve" })}
-                      onRefine={() => resolvePlan(p.id, { type: "refine" })}
-                      onCancel={() => resolvePlan(p.id, { type: "cancel" })}
-                    />
-                  ))}
-                  {state.pendingCheckpoints.map((c) => (
-                    <CheckpointApprovalCard
-                      key={`cp-${c.id}`}
-                      c={c}
-                      onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
-                      onRevise={() => resolveCheckpoint(c.id, { type: "revise" })}
-                      onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
-                    />
-                  ))}
-                  {state.pendingRevisions.map((r) => (
-                    <RevisionApprovalCard
-                      key={`rv-${r.id}`}
-                      r={r}
-                      onAccept={() => resolveRevision(r.id, { type: "accepted" })}
-                      onReject={() => resolveRevision(r.id, { type: "rejected" })}
-                    />
-                  ))}
-                  {state.pendingConfirms.map((c) => (
-                    <ConfirmApprovalCard
-                      key={`cc-${c.id}`}
-                      prompt={c.prompt}
-                      onAllow={() => resolveConfirm(c.id, { type: "run_once" })}
-                      onAlwaysAllow={(prefix) =>
-                        resolveConfirm(c.id, { type: "always_allow", prefix })
+                        );
                       }
-                      onDeny={() => resolveConfirm(c.id, { type: "deny" })}
-                    />
-                  ))}
-                  {state.pendingPathAccess.map((p) => (
-                    <PathAccessApprovalCard
-                      key={`pa-${p.id}`}
-                      prompt={p.prompt}
-                      onAllow={() => resolvePathAccess(p.id, { type: "run_once" })}
-                      onAlwaysAllow={(prefix) =>
-                        resolvePathAccess(p.id, { type: "always_allow", prefix })
+                      if (m.kind === "assistant") {
+                        const stats = !m.pending ? countFileStats(m.segments) : null;
+                        return (
+                          <div className="thread-inner">
+                            <AssistantMsg
+                              segments={m.segments}
+                              pending={m.pending}
+                              model={state.model}
+                              onApproveConfirm={onApproveConfirm}
+                              onRejectConfirm={onRejectConfirm}
+                              onAlwaysAllowConfirm={onAlwaysAllowConfirm}
+                              pendingConfirms={state.pendingConfirms}
+                            />
+                            {stats ? <DiffStats stats={stats} /> : null}
+                          </div>
+                        );
                       }
-                      onDeny={() => resolvePathAccess(p.id, { type: "deny" })}
-                    />
-                  ))}
-                  {state.pendingChoices.map((c) => (
-                    <ChoiceApprovalCard
-                      key={`ch-${c.id}`}
-                      c={c}
-                      onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
-                      onCancel={() => resolveChoice(c.id, { type: "cancel" })}
-                    />
-                  ))}
-
-                  {!state.ready ? (
-                    <div
-                      style={{
-                        padding: 12,
-                        color: "var(--muted)",
-                        fontFamily: "Geist Mono, monospace",
-                        fontSize: 11,
-                      }}
-                    >
-                      {t("app.connecting")}
-                    </div>
-                  ) : null}
-                </div>
+                      return null;
+                    }}
+                  />
+                )}
                 {showJumpButton ? (
                   <button
                     className="thread-jump-bottom"
@@ -2644,6 +2561,18 @@ function TabRuntime({
                   </button>
                 ) : null}
               </div>
+
+              {state.pendingPlans.length > 0 || state.pendingCheckpoints.length > 0 || state.pendingRevisions.length > 0 || state.pendingConfirms.length > 0 || state.pendingPathAccess.length > 0 || state.pendingChoices.length > 0 || !state.ready ? (
+                <div style={{ maxWidth: "var(--thread-max-width, 740px)", margin: "0 auto", padding: "0 32px", width: "100%" }}>
+                  {state.pendingPlans.map((p) => (<PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />))}
+                  {state.pendingCheckpoints.map((c) => (<CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />))}
+                  {state.pendingRevisions.map((r) => (<RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />))}
+                  {state.pendingConfirms.map((c) => (<ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />))}
+                  {state.pendingPathAccess.map((p) => (<PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />))}
+                  {state.pendingChoices.map((c) => (<ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />))}
+                  {!state.ready ? (<div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div>) : null}
+                </div>
+              ) : null}
 
               <Composer
                 draft={draft}

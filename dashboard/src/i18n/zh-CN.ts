@@ -232,6 +232,7 @@ export const zhCN = {
     webSearchNote: "web_fetch + web_search 工具",
     webSearchEngine: "搜索引擎",
     webSearchEngineBing: "bing — 默认，国内裸 IP 直连，无需代理",
+    webSearchEngineBingIntl: "bing-intl — 国际版索引，走 www.bing.com",
     webSearchEngineSearxng: "searxng — 自托管（端点用 /se searxng <url> 配置）",
     webSearchEngineMetaso: "metaso — 每日 100 次免费（国内友好，metaso.cn 可领免费 key）",
     webSearchEngineTavily: "tavily — 每月 1000 次免费（设置 TAVILY_API_KEY）",

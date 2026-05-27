@@ -296,7 +296,7 @@ export type EditMode = "review" | "auto" | "yolo" | "plan";
 
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
-export type WebSearchEngineName = "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa"
+export type WebSearchEngineName = "bing" | "bing-intl" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa"
   | "brave" | "ollama";
 
 export type SettingsEvent = {

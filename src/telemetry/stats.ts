@@ -202,6 +202,14 @@ export class SessionStats {
     return stats;
   }
 
+  /** Fold external usage (e.g. subagent child-loop) into session totals without creating a turn entry. (#2008) */
+  recordExternal(model: string, usage: Usage): void {
+    this._carryoverCost += costUsd(model, usage);
+    this._carryoverCacheHit += usage.promptCacheHitTokens;
+    this._carryoverCacheMiss += usage.promptCacheMissTokens;
+    this._carryoverCompletion += usage.completionTokens;
+  }
+
   /** Drop oldest turns beyond MAX_TURNS, folding their costs into carryover so
    *  session totals remain accurate even after trimming. */
   private trimOldTurns(): void {

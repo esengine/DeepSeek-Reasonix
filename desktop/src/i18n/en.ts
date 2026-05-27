@@ -164,6 +164,7 @@ export const en = {
     budgetPlaceholder: "no cap",
     webSearchEngine: "search engine",
     webSearchEngineBing: "bing — default, works from CN without proxy",
+    webSearchEngineBingIntl: "bing-intl — international index via www.bing.com",
     webSearchEngineSearxng: "searxng — self-hosted (set endpoint via /se searxng <url>)",
     webSearchEngineMetaso: "metaso — 100/day free (CN-friendly, free key at metaso.cn)",
     webSearchEngineTavily: "tavily — 1000/mo free (set TAVILY_API_KEY)",
@@ -318,8 +319,8 @@ export const en = {
     shortcutSettings: "Settings",
   },
   modal: {
-    planFeedbackPlaceholder: "Optional feedback — write here if you want changes",
-    choiceCustomPlaceholder: "Or type your own answer…",
+    planFeedbackPlaceholder: "What problems does the plan have? What needs to be improved?",
+    choiceCustomPlaceholder: "Where can the plan be further refined?",
   },
   plan: {
     activeTitle: "Active plan",
@@ -710,6 +711,8 @@ export const en = {
     unknownKind: "# unknown card kind — fallback render",
   },
   thread: {
+    toolCalls: "{count} tool calls",
+    oneToolCall: "1 tool call",
     keepSteps: "Keep {n} remaining step(s)",
     keepOriginal: "Keep original",
     you: "You",
@@ -723,7 +726,14 @@ export const en = {
     approve: "Approve",
     cancel: "Cancel",
     refine: "Refine",
+<<<<<<< feat/desktop-markdown-plan-memory
     planViewInPanel: "Full plan available in the Plans panel →",
+=======
+    sendFeedback: "Send",
+    skipFeedback: "Skip",
+    cancelFeedbackLabel: "Cancel — what went wrong?",
+    refineFeedbackLabel: "Refine — what should change?",
+>>>>>>> main
     checkpointKind: "plan checkpoint",
     checkpointTitle: "step {completed} / {total} complete",
     checkpointSub: "checkpoint · {completed} / {total}",

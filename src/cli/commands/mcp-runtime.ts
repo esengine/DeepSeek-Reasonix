@@ -186,7 +186,7 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
       if (spec.transport === "stdio") preflightStdioSpec(spec);
       const workspaceDir = ctx.getWorkspaceDir?.();
       const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
-      mcp = new McpClient({ transport, workspaceDir });
+      mcp = new McpClient({ transport, workspaceDir, requestTimeoutMs: spec.requestTimeoutMs });
       await mcp.initialize({ signal });
       const host: McpClientHost = { client: mcp };
       const bridge = await bridgeMcpTools(mcp, {

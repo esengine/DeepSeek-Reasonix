@@ -164,6 +164,7 @@ export const zhCN: typeof en = {
     budgetPlaceholder: "不限",
     webSearchEngine: "搜索引擎",
     webSearchEngineBing: "bing — 默认，国内裸 IP 直连，无需代理",
+    webSearchEngineBingIntl: "bing-intl — 国际版索引，走 www.bing.com",
     webSearchEngineSearxng: "searxng — 自托管（端点用 /se searxng <url> 配置）",
     webSearchEngineMetaso: "metaso — 每日 100 次免费（国内友好，metaso.cn 可领免费 key）",
     webSearchEngineTavily: "tavily — 每月 1000 次免费（设置 TAVILY_API_KEY）",
@@ -304,8 +305,8 @@ export const zhCN: typeof en = {
     shortcutSettings: "设置",
   },
   modal: {
-    planFeedbackPlaceholder: "可选反馈 — 想要修改时写这里",
-    choiceCustomPlaceholder: "或者自己写一个答案…",
+    planFeedbackPlaceholder: "计划存在哪些问题？需要改进哪些地方？",
+    choiceCustomPlaceholder: "计划可以如何进一步细化？",
   },
   plan: {
     activeTitle: "进行中的计划",
@@ -695,6 +696,8 @@ export const zhCN: typeof en = {
     unknownKind: "# 未知卡片类型 — fallback 渲染",
   },
   thread: {
+    toolCalls: "{count} 个工具调用",
+    oneToolCall: "1 个工具调用",
     keepSteps: "保留剩余 {n} 步",
     keepOriginal: "保留原计划",
     you: "你",

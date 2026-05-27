@@ -2,7 +2,7 @@
 
 import { Box, Text, render, useApp, useInput } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { readConfig, writeConfig } from "../../config.js";
+import { normalizeMcpConfig, readConfig, writeConfig } from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { loadOverlay } from "../../mcp/marketplace-overlay/loader.js";
 import {
@@ -115,7 +115,10 @@ function McpBrowseApp() {
         const spec = specStringFor(entry.name, entry.install);
         const cfg = readConfig();
         const existing = cfg.mcp ?? [];
-        if (existing.includes(spec)) {
+        const installedName = entry.name;
+        const normalized = normalizeMcpConfig(cfg);
+        const nameCollision = normalized.some((s) => s.name === installedName);
+        if (existing.includes(spec) || nameCollision) {
           setStatus(`already installed: ${spec}`);
           return;
         }

@@ -114,7 +114,7 @@ export async function loadMcpServers(
       const prefix = resolveMcpPrefix(spec.name, normalizedSpecs.length, globalPrefix);
       if (spec.transport === "stdio") preflightStdioSpec(spec);
       const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
-      mcp = new McpClient({ transport, workspaceDir });
+      mcp = new McpClient({ transport, workspaceDir, requestTimeoutMs: spec.requestTimeoutMs });
       await mcp.initialize();
       const bridge = await bridgeMcpTools(mcp, {
         registry: tools,

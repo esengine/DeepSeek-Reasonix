@@ -106,4 +106,51 @@ describe("desktop incoming QQ/user message rendering", () => {
       turn: 2,
     });
   });
+
+  it("elides old heavy assistant segments during long live desktop sessions", () => {
+    const big = "long-session-payload\n".repeat(500);
+    const messages: ChatMessage[] = Array.from({ length: 250 }, (_, i) => ({
+      kind: "assistant",
+      turn: i + 1,
+      pending: false,
+      segments: [
+        { kind: "reasoning", text: `${big}reasoning-${i}` },
+        { kind: "text", text: `${big}text-${i}` },
+        {
+          kind: "tool",
+          callId: `tool-${i}`,
+          name: "read_file",
+          args: JSON.stringify({ path: `file-${i}.txt`, content: `${big}args-${i}` }),
+          startedAt: 0,
+          result: `${big}result-${i}`,
+          ok: true,
+        },
+      ],
+    }));
+
+    const next = applyIncoming(makeState(messages), {
+      type: "model.turn.started",
+      turn: 999,
+      model: "deepseek-v4-flash",
+    } as IncomingEvent);
+
+    const oldest = next.messages[0];
+    expect(oldest?.kind).toBe("assistant");
+    if (oldest?.kind !== "assistant") return;
+    expect(oldest.segments[0]?.kind).toBe("reasoning");
+    expect(oldest.segments[1]?.kind).toBe("text");
+    expect(oldest.segments[2]?.kind).toBe("tool");
+    expect(oldest.segments[0]?.text).toMatch(/^\[elided/);
+    expect(oldest.segments[1]?.text).toMatch(/^\[elided/);
+    if (oldest.segments[2]?.kind === "tool") {
+      expect(oldest.segments[2].args).toMatch(/^\[elided/);
+      expect(oldest.segments[2].result).toMatch(/^\[elided/);
+    }
+
+    const recent = next.messages[240];
+    expect(recent?.kind).toBe("assistant");
+    if (recent?.kind !== "assistant") return;
+    expect(recent.segments[1]?.kind).toBe("text");
+    expect(recent.segments[1]?.text).toContain("text-240");
+  });
 });

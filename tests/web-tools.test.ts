@@ -112,6 +112,33 @@ describe("parseBingResults", () => {
     `;
     expect(parseBingResults(html)).toEqual([]);
   });
+
+  // www.bing.com (bing-intl) wraps organic links in /ck/a click-tracking redirects,
+  // emitted as root-relative hrefs with a base64url-encoded target in the `u=a1…` param.
+  it("decodes relative /ck/a click-tracking hrefs to the real target", () => {
+    const target = "https://github.com/flutter/flutter";
+    const u = `a1${Buffer.from(target).toString("base64url")}`;
+    const html = `
+      <li class="b_algo">
+        <h2><a href="/ck/a?!&&p=abc123&u=${u}&ntb=1">Flutter repo</a></h2>
+        <div class="b_caption"><p>The Flutter SDK.</p></div>
+      </li>
+    `;
+    const items = parseBingResults(html);
+    expect(items).toHaveLength(1);
+    expect(items[0].url).toBe(target);
+  });
+
+  it("decodes absolute bing.com/ck/a hrefs too", () => {
+    const target = "https://en.wikipedia.org/wiki/Dart";
+    const u = `a1${Buffer.from(target).toString("base64url")}`;
+    const html = `
+      <li class="b_algo">
+        <h2><a href="https://www.bing.com/ck/a?u=${u}">Dart</a></h2>
+      </li>
+    `;
+    expect(parseBingResults(html)[0].url).toBe(target);
+  });
 });
 
 describe("parseSearxngHtmlResults", () => {

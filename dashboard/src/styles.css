@@ -849,6 +849,7 @@ html[data-platform="macos"] .titlebar .tb-left {
   font-weight: 500;
 }
 .side-head .new-btn .shortcut {
+  display: none;
   flex: 0 0 auto;
   margin-left: auto;
 }
@@ -864,9 +865,9 @@ html[data-platform="macos"] .titlebar .tb-left {
   padding: 1px 5px;
   box-shadow: none;
 }
-@container sidebar (max-width: 190px) {
+@container sidebar (min-width: 191px) {
   .side-head .new-btn .shortcut {
-    display: none;
+    display: inline-flex;
   }
 }
 .side-head .icon-btn {

@@ -1,6 +1,6 @@
 /** Spec mutations don't auto-reload — adding a server shifts the system prefix and zeroes the next cache hit. */
 
-import { readConfig, writeConfig } from "../../config.js";
+import { normalizeMcpConfig, readConfig, writeConfig } from "../../config.js";
 import {
   fetchSmitheryDetail,
   handleToFetchResult,
@@ -89,13 +89,18 @@ export async function handleMcp(
     };
   }
 
-  // Persisted spec list — what config.mcp[] holds. May differ from
-  // bridged set (a recent edit hasn't been reloaded yet).
+  // Persisted spec list — includes both legacy cfg.mcp and canonical cfg.mcpServers.
   if (method === "GET" && rest[0] === "specs") {
     const cfg = readConfig(ctx.configPath);
+    const allSpecs = normalizeMcpConfig(cfg).map((s) => {
+      if (s.transport === "stdio") {
+        return `${s.name}=${s.command}${s.args.length ? ` ${s.args.join(" ")}` : ""}`;
+      }
+      return `${s.name}=${s.url}`;
+    });
     return {
       status: 200,
-      body: { specs: cfg.mcp ?? [], failures: ctx.getMcpFailures?.() ?? [] },
+      body: { specs: allSpecs, failures: ctx.getMcpFailures?.() ?? [] },
     };
   }
 
@@ -107,6 +112,12 @@ export async function handleMcp(
     const cfg = readConfig(ctx.configPath);
     const list = cfg.mcp ?? [];
     if (list.includes(spec)) {
+      return { status: 200, body: { added: false, alreadyPresent: true } };
+    }
+    // Check for name collision with mcpServers entries
+    const normalized = normalizeMcpConfig(cfg);
+    const parsedName = spec.split("=")[0];
+    if (parsedName && normalized.some((s) => s.name === parsedName)) {
       return { status: 200, body: { added: false, alreadyPresent: true } };
     }
     cfg.mcp = [...list, spec.trim()];

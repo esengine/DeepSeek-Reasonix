@@ -19,6 +19,7 @@ export const handlers: Record<string, SlashHandler> = {
     if (
       !engine ||
       (engine !== "bing" &&
+        engine !== "bing-intl" &&
         engine !== "searxng" &&
         engine !== "metaso" &&
         engine !== "tavily" &&
@@ -34,6 +35,7 @@ export const handlers: Record<string, SlashHandler> = {
           "",
           t("handlers.webSearchEngine.usageHeader"),
           t("handlers.webSearchEngine.usageBing"),
+          t("handlers.webSearchEngine.usageBingIntl"),
           t("handlers.webSearchEngine.usageSearxng"),
           t("handlers.webSearchEngine.usageSearxngUrl"),
           t("handlers.webSearchEngine.usageMetaso"),

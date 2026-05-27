@@ -284,9 +284,11 @@ export function Sidebar({
                     <span className="title">{prettyName(s)}</span>
                   )}
                   <span className="meta">
-                    <span>{t("sidebarPanel.messageCount", { count: s.messageCount })}</span>
+                    <span className="count">
+                      {t("sidebarPanel.messageCount", { count: s.messageCount })}
+                    </span>
                     <span className="sep">·</span>
-                    <span>{updated}</span>
+                    <span className="time">{updated}</span>
                   </span>
                 </div>
                 {editing ? null : (

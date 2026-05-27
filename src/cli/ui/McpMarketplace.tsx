@@ -2,7 +2,7 @@
 
 import { Box, Text } from "ink";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { readConfig, writeConfig } from "../../config.js";
+import { normalizeMcpConfig, readConfig, writeConfig } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { loadOverlay } from "../../mcp/marketplace-overlay/loader.js";
 import {
@@ -96,7 +96,11 @@ function isInstalled(installedSpecs: string[], entry: RegistryEntry): string | n
   if (!entry.install) return null;
   try {
     const spec = specStringFor(entry.name, entry.install);
-    return installedSpecs.includes(spec) ? spec : null;
+    if (installedSpecs.includes(spec)) return spec;
+    // Also check for name collision with mcpServers entries
+    const normalized = normalizeMcpConfig(readConfig());
+    if (normalized.some((s) => s.name === entry.name)) return spec;
+    return null;
   } catch {
     return null;
   }

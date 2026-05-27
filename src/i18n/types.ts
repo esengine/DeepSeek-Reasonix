@@ -952,6 +952,7 @@ export interface TranslationSchema {
     review: string;
     securityReview: string;
     test: string;
+    qq: string;
   };
   shortcutsHelp: {
     title: string;
