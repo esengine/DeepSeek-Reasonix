@@ -611,6 +611,78 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(summary!.content).toMatch(/context budget running low/);
   });
 
+  it("force-summary calls the active model, not a hard-coded one (third-party endpoint compat)", async () => {
+    const seenModels: string[] = [];
+    const responses: FakeResponseShape[] = [
+      {
+        content: "",
+        tool_calls: [{ id: "c", type: "function", function: { name: "probe", arguments: "{}" } }],
+        usage: {
+          prompt_tokens: 900_000,
+          completion_tokens: 10,
+          total_tokens: 900_010,
+          prompt_cache_hit_tokens: 0,
+          prompt_cache_miss_tokens: 900_000,
+        },
+      },
+      { content: "summary text" },
+    ];
+    let i = 0;
+    const captureFetch: typeof fetch = vi.fn(async (_url: any, init: any) => {
+      const body = init?.body ? JSON.parse(init.body) : {};
+      if (typeof body.model === "string") seenModels.push(body.model);
+      const resp = responses[i++] ?? responses[responses.length - 1]!;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: resp.content ?? "",
+                tool_calls: resp.tool_calls ?? undefined,
+              },
+              finish_reason: resp.tool_calls ? "tool_calls" : "stop",
+            },
+          ],
+          usage: resp.usage ?? {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            total_tokens: 120,
+            prompt_cache_hit_tokens: 0,
+            prompt_cache_miss_tokens: 100,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const reg = new ToolRegistry();
+    reg.register({
+      name: "probe",
+      description: "no-op",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+    const thirdPartyModel = "mimo-v2.5-pro";
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: captureFetch });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s", toolSpecs: reg.specs() }),
+      tools: reg,
+      stream: false,
+      maxToolIters: 64,
+      model: thirdPartyModel,
+    });
+
+    for await (const _ of loop.step("analyze the repo")) {
+      // drain
+    }
+
+    expect(seenModels.length).toBeGreaterThanOrEqual(2);
+    expect(seenModels.every((m) => m === thirdPartyModel)).toBe(true);
+  });
+
   it("compactHistory replaces head with summary, keeps tail within token budget", async () => {
     const responses: FakeResponseShape[] = [
       { content: "User explored auth and billing modules; landed on session refactor plan." },

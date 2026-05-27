@@ -16,6 +16,8 @@ export interface ForceSummaryContext {
   appendAndPersist: (msg: ChatMessage) => void;
   recordStats: (model: string, usage: Usage) => TurnStats;
   turn: number;
+  /** Model to call for the summary itself — must be valid on the user's endpoint. */
+  model: string;
 }
 
 export async function* forceSummaryAfterIterLimit(
@@ -36,13 +38,11 @@ export async function* forceSummaryAfterIterLimit(
       content:
         "The turn is being force-summarized (context guard or stuck-state). Summarize in plain prose what you learned from the tool results above. Do NOT emit any tool calls, function-call markup, DSML invocations, or SEARCH/REPLACE edit blocks — they will be silently discarded. Just plain text.",
     });
-    // Pin to flash + thinking disabled — the task is "paraphrase tool
-    // results into prose", which needs zero reasoning. Letting flash
-    // think here burns reasoning tokens on a job that's structurally
-    // bounded (no decisions, no tools). Pro is 12× overkill.
-    const summaryModel = "deepseek-v4-flash";
+    // Use the active turn model — pinning a specific name (e.g. flash) 400s
+    // on third-party endpoints that don't advertise it. `thinking: disabled`
+    // still keeps reasoning tokens off the bill for the bounded paraphrase.
     const resp = await ctx.client.chat({
-      model: summaryModel,
+      model: ctx.model,
       messages,
       signal: ctx.signal,
       thinking: "disabled",
@@ -52,9 +52,8 @@ export async function* forceSummaryAfterIterLimit(
     const summary = cleaned || t("summary.hallucinatedFallback");
     const reasonPrefix = reasonPrefixFor(opts.reason);
     const annotated = `${reasonPrefix}\n\n${summary}`;
-    // Record under the actual model used (flash), so per-turn cost reflects reality.
-    const summaryStats = ctx.recordStats(summaryModel, resp.usage ?? new Usage());
-    ctx.appendAndPersist(buildAssistantMessage(summary, [], summaryModel, resp.reasoningContent));
+    const summaryStats = ctx.recordStats(ctx.model, resp.usage ?? new Usage());
+    ctx.appendAndPersist(buildAssistantMessage(summary, [], ctx.model, resp.reasoningContent));
     yield {
       turn: ctx.turn,
       role: "assistant_final",

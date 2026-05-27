@@ -1051,6 +1051,7 @@ export class CacheFirstLoop {
       appendAndPersist: (m) => this.appendAndPersist(m),
       recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
       turn: this._turn,
+      model: this.model,
     };
   }
 
