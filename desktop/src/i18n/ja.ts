@@ -170,6 +170,8 @@ export const ja = {
     webSearchEngineTavily: "tavily — 1000回/月無料 (TAVILY_API_KEY を設定)",
     webSearchEnginePerplexity: "perplexity — AIネイティブ (PERPLEXITY_API_KEY を設定)",
     webSearchEngineExa: "exa — AIネイティブ 1000回/月無料 (EXA_API_KEY を設定)",
+    webSearchEngineBrave: "brave — 独立したインデックス、2000回/月無料 (BRAVE_SEARCH_API_KEY を設定)",
+    webSearchEngineOllama: "ollama — Ollama クラウドウェブ検索 (OLLAMA_API_KEY を設定)",
     webSearchEngineNote: "次の web_search 呼び出しに適用されます",
     webSearchEndpoint: "SearXNG エンドポイント",
     webSearchEndpointHint: "SearXNGインスタンスのベースURL。デフォルトは http://localhost:8080。",
