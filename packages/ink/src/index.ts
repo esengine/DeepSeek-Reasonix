@@ -128,13 +128,23 @@ export function useBoxMetrics(ref: { current: DOMElement | null }): {
 } {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const lastRef = useRef<DOMElement | null>(null);
+  const scheduledRef = useRef(false);
   useEffect(() => {
     if (!ref.current) return;
     lastRef.current = ref.current;
-    const { width, height } = measureElement(ref.current);
-    setSize((prev) =>
-      prev.width === width && prev.height === height ? prev : { width, height },
-    );
+    if (scheduledRef.current) return;
+    scheduledRef.current = true;
+    // Defer measure off the React commit batch — re-measuring synchronously
+    // in the same depth-counted chain crashes with "Maximum update depth
+    // exceeded" when Box content doesn't converge in one layout pass.
+    setTimeout(() => {
+      scheduledRef.current = false;
+      if (!ref.current) return;
+      const { width, height } = measureElement(ref.current);
+      setSize((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height },
+      );
+    }, 0);
   });
   return size;
 }
