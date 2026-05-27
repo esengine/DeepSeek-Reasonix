@@ -1930,7 +1930,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .thread {
   flex: 1;
   min-height: 0;
-  position: relative;
+  height: 0;
 }
 .thread::-webkit-scrollbar {
   width: 8px;
@@ -2032,8 +2032,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 
 /* Jump-to-bottom button — shown when user has scrolled up during streaming */
 .thread-jump-bottom {
-  position: sticky;
-  bottom: 16px;
+  position: fixed;
+  bottom: 100px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
