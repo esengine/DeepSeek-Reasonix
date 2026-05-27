@@ -333,29 +333,39 @@ export function PlanApprovalCard({
   useLang();
   const stepCount = p.steps?.length ?? 0;
   const sub = stepCount > 0 ? t("thread.planStepCount", { count: stepCount }) : undefined;
+  const isRefining = p.refining === true;
+  const body = (
+    <>
+      {isRefining && (
+        <div className="plan-refining-bar" style={{ marginBottom: 8 }}>
+          <span className="plan-refining-dot" />
+          {t("contextPanel.planRefiningInProgress")}
+        </div>
+      )}
+      {p.summary ? (
+        <div style={{ marginBottom: 6, opacity: isRefining ? 0.5 : 1 }}>
+          <Markdown source={p.summary} />
+        </div>
+      ) : null}
+      <div className="plan-view-hint" style={{ opacity: isRefining ? 0.5 : 1 }}>
+        {t("thread.planViewInPanel")}
+      </div>
+    </>
+  );
   return (
     <ApprovalCard
       kind={t("thread.planConfirmationKind")}
       tone="info"
       title={t("thread.startPlan")}
       sub={sub}
-      body={
-        <>
-          {p.summary ? (
-            <div style={{ marginBottom: 6 }}>
-              <Markdown source={p.summary} />
-            </div>
-          ) : null}
-          <Markdown source={p.plan} />
-        </>
-      }
+      body={body}
       meta={`plan/#${p.id}`}
       primaryLabel={t("thread.approve")}
       secondaryLabel={t("thread.cancel")}
       tertiaryLabel={t("thread.refine")}
-      onPrimary={onApprove}
-      onSecondary={onCancel}
-      onTertiary={onRefine}
+      onPrimary={isRefining ? undefined : onApprove}
+      onSecondary={isRefining ? undefined : onCancel}
+      onTertiary={isRefining ? undefined : onRefine}
     />
   );
 }

@@ -60,7 +60,7 @@ import type {
 } from "./protocol";
 import { type QQDesktopSettingsState } from "./qq-settings";
 import { Composer, type SlashCmd } from "./ui/composer";
-import { ContextPanel } from "./ui/context-panel";
+import { ContextPanel, type CtxTab } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
 import { useElapsed } from "./ui/live";
 import { AboutModal } from "./ui/about";
@@ -180,6 +180,8 @@ export type PendingPlan = {
   plan: string;
   summary?: string;
   steps?: PlanStep[];
+  /** true while the model is reworking the plan after a refine request. */
+  refining?: boolean;
 };
 
 export type PlanStep = {
@@ -195,6 +197,15 @@ export type ActivePlan = {
   steps: PlanStep[];
   completedStepIds: string[];
   stepResults: Record<string, string>;
+};
+
+export type ArchivedPlan = {
+  plan: string;
+  summary?: string;
+  steps: PlanStep[];
+  completedStepIds: string[];
+  archivedAt: number;
+  status: "completed" | "cancelled";
 };
 
 export type PendingCheckpoint = {
@@ -297,6 +308,7 @@ type State = {
   pendingCheckpoints: PendingCheckpoint[];
   pendingRevisions: PendingRevision[];
   activePlan: ActivePlan | null;
+  planArchived: ArchivedPlan[];
   usage: UsageStats;
   sessions: SessionInfo[];
   externalImportSources: ExternalSessionApp[];
@@ -328,6 +340,26 @@ export type SessionFile = {
   status: "c" | "m";
 };
 
+function planStorageKey(workspaceDir: string): string {
+  try {
+    return `reasonix:planArchived:${btoa(workspaceDir).replace(/[/+=]/g, "_")}`;
+  } catch {
+    return "reasonix:planArchived:default";
+  }
+}
+
+function loadPersistedPlans(workspaceDir: string): ArchivedPlan[] {
+  try {
+    const raw = localStorage.getItem(planStorageKey(workspaceDir));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as ArchivedPlan[];
+  } catch {
+    return [];
+  }
+}
+
 type DeltaBatchItem = {
   turn: number;
   channel: "content" | "reasoning";
@@ -355,7 +387,8 @@ type Action =
   | { t: "dequeue_send"; index: number }
   | { t: "shift_queued_send" }
   | { t: "settings_patch"; patch: SettingsPatch }
-  | { t: "push_status"; text: string };
+  | { t: "push_status"; text: string }
+  | { t: "plans_loaded_for_workspace"; plans: ArchivedPlan[]; workspaceDir: string };
 
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
   const {
@@ -495,6 +528,7 @@ export function reduce(state: State, action: Action): State {
         pendingCheckpoints: [],
         pendingRevisions: [],
         activePlan: null,
+        planArchived: [],
         usage: zeroUsage(),
         sessionFiles: [],
         activeSkill: null,
@@ -517,9 +551,13 @@ export function reduce(state: State, action: Action): State {
         pendingChoices: state.pendingChoices.filter((c) => c.id !== action.id),
       };
     case "resolve_plan": {
-      const removed = state.pendingPlans.find((p) => p.id === action.id);
+      const removedIdx = state.pendingPlans.findIndex((p) => p.id === action.id);
+      if (removedIdx < 0) return state;
+      const removed = state.pendingPlans[removedIdx]!;
       let activePlan = state.activePlan;
-      if (removed && action.verdict.type === "approve") {
+      let planArchived = state.planArchived;
+      let pendingPlans = state.pendingPlans.slice();
+      if (action.verdict.type === "approve") {
         const pendingSteps = (removed as PendingPlan & { steps?: PlanStep[] }).steps;
         activePlan = {
           plan: removed.plan,
@@ -528,12 +566,25 @@ export function reduce(state: State, action: Action): State {
           completedStepIds: [],
           stepResults: {},
         };
+        pendingPlans.splice(removedIdx, 1);
+      } else if (action.verdict.type === "cancel") {
+        planArchived = [
+          ...planArchived,
+          {
+            plan: removed.plan,
+            summary: removed.summary,
+            steps: (removed as PendingPlan & { steps?: PlanStep[] }).steps ?? [],
+            completedStepIds: [],
+            archivedAt: Date.now(),
+            status: "cancelled" as const,
+          },
+        ];
+        pendingPlans.splice(removedIdx, 1);
+      } else {
+        // "refine" — keep the plan visible, mark as refining.
+        pendingPlans[removedIdx] = { ...removed, refining: true };
       }
-      return {
-        ...state,
-        pendingPlans: state.pendingPlans.filter((p) => p.id !== action.id),
-        activePlan,
-      };
+      return { ...state, pendingPlans, activePlan, planArchived };
     }
     case "resolve_checkpoint":
       return {
@@ -557,8 +608,23 @@ export function reduce(state: State, action: Action): State {
         activePlan,
       };
     }
-    case "dismiss_plan":
-      return { ...state, activePlan: null };
+    case "dismiss_plan": {
+      const archived: ArchivedPlan | null = state.activePlan
+        ? {
+            plan: state.activePlan.plan,
+            summary: state.activePlan.summary,
+            steps: state.activePlan.steps,
+            completedStepIds: state.activePlan.completedStepIds,
+            archivedAt: Date.now(),
+            status: "completed" as const,
+          }
+        : null;
+      return {
+        ...state,
+        activePlan: null,
+        planArchived: archived ? [...state.planArchived, archived] : state.planArchived,
+      };
+    }
     case "dismiss_error":
       return {
         ...state,
@@ -581,6 +647,9 @@ export function reduce(state: State, action: Action): State {
       return { ...state, queuedSends: state.queuedSends.slice(1) };
     case "push_status":
       return { ...state, messages: [...state.messages, { kind: "status", text: action.text }] };
+    case "plans_loaded_for_workspace":
+      if (state.settings?.workspaceDir !== action.workspaceDir) return state;
+      return { ...state, planArchived: action.plans };
   }
 }
 
@@ -818,6 +887,19 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "$plan_required": {
       const steps = Array.isArray(ev.steps) ? (ev.steps as PlanStep[]) : undefined;
+      const refiningIdx = state.pendingPlans.findIndex((p) => p.refining);
+      if (refiningIdx >= 0) {
+        // Update the refining plan in-place rather than adding a new entry.
+        const updated = state.pendingPlans.slice();
+        updated[refiningIdx] = {
+          id: ev.id,
+          plan: ev.plan,
+          summary: ev.summary,
+          refining: false,
+          ...(steps ? { steps } : {}),
+        };
+        return { ...state, pendingPlans: updated };
+      }
       return {
         ...state,
         pendingPlans: [
@@ -842,9 +924,27 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           },
         ],
       };
-    case "$revision_required":
+    case "$revision_required": {
+      // Archive any refining pending plans — the revision replaces them.
+      const refinedPlans: ArchivedPlan[] = [];
+      const pendingPlans = state.pendingPlans.filter((p) => {
+        if (p.refining) {
+          refinedPlans.push({
+            plan: p.plan,
+            summary: p.summary,
+            steps: (p as PendingPlan & { steps?: PlanStep[] }).steps ?? [],
+            completedStepIds: [],
+            archivedAt: Date.now(),
+            status: "completed" as const,
+          });
+          return false;
+        }
+        return true;
+      });
       return {
         ...state,
+        pendingPlans,
+        planArchived: [...state.planArchived, ...refinedPlans],
         pendingRevisions: [
           ...state.pendingRevisions,
           {
@@ -855,6 +955,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           },
         ],
       };
+    }
     case "$step_completed": {
       if (!state.activePlan) return state;
       const stepIds = new Set(state.activePlan.completedStepIds);
@@ -868,13 +969,25 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         },
       };
     }
-    case "$plan_cleared":
+    case "$plan_cleared": {
+      const archived: ArchivedPlan | null = state.activePlan
+        ? {
+            plan: state.activePlan.plan,
+            summary: state.activePlan.summary,
+            steps: state.activePlan.steps,
+            completedStepIds: state.activePlan.completedStepIds,
+            archivedAt: Date.now(),
+            status: "completed" as const,
+          }
+        : null;
       return {
         ...state,
         activePlan: null,
         pendingCheckpoints: [],
         pendingRevisions: [],
+        planArchived: archived ? [...state.planArchived, archived] : state.planArchived,
       };
+    }
     case "$sessions":
       return { ...state, sessions: ev.items };
     case "$session_import_sources":
@@ -961,6 +1074,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingCheckpoints: wsChanged ? [] : state.pendingCheckpoints,
         pendingRevisions: wsChanged ? [] : state.pendingRevisions,
         activePlan: wsChanged ? null : state.activePlan,
+        planArchived: wsChanged ? [] : state.planArchived,
         usage: wsChanged ? zeroUsage() : state.usage,
         sessionFiles: wsChanged ? [] : state.sessionFiles,
         retryNonce: wsChanged ? 0 : state.retryNonce,
@@ -1028,6 +1142,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingCheckpoints: [],
         pendingRevisions: [],
         activePlan: null,
+        planArchived: [],
         usage: {
           ...zeroUsage(),
           totalCostUsd: ev.carryover.totalCostUsd,
@@ -1316,6 +1431,10 @@ interface TabRuntimeProps {
   onCtxResizeDown: (e: React.MouseEvent) => void;
   onToggleSide: () => void;
   onToggleCtx: () => void;
+  openCtx: () => void;
+  setCtxWidth: (w: number) => void;
+  requireSideCollapsed: () => void;
+  releaseSideCollapsed: () => void;
   onToggleCurrency: () => void;
   tabsList: { id: string; workspaceDir?: string }[];
   activeTabId: string;
@@ -1350,6 +1469,10 @@ function TabRuntime({
   onCtxResizeDown,
   onToggleSide,
   onToggleCtx,
+  openCtx,
+  setCtxWidth,
+  requireSideCollapsed,
+  releaseSideCollapsed,
   onToggleCurrency,
   tabsList,
   activeTabId,
@@ -1367,6 +1490,7 @@ function TabRuntime({
     pendingCheckpoints: [],
     pendingRevisions: [],
     activePlan: null,
+    planArchived: [],
     usage: zeroUsage(),
     sessions: [],
     externalImportSources: [],
@@ -1388,6 +1512,46 @@ function TabRuntime({
   });
   useLang();
   useDisableTextAssist();
+  // Load plan archives for the current workspace when workspaceDir becomes known or changes.
+  useEffect(() => {
+    const ws = state.settings?.workspaceDir;
+    if (!ws) return;
+    const plans = loadPersistedPlans(ws);
+    dispatch({ t: "plans_loaded_for_workspace", plans, workspaceDir: ws });
+  }, [state.settings?.workspaceDir]);
+
+  // Persist plan archives scoped to the current workspace.
+  useEffect(() => {
+    const ws = state.settings?.workspaceDir;
+    if (!ws) return;
+    try {
+      localStorage.setItem(planStorageKey(ws), JSON.stringify(state.planArchived));
+    } catch {
+      /* quota exceeded — silently drop */
+    }
+  }, [state.planArchived, state.settings?.workspaceDir]);
+
+  const [ctxTab, setCtxTab] = useState<CtxTab>("files");
+  const [ctxSelectedPlanIdx, setCtxSelectedPlanIdx] = useState<number | null>(null);
+
+  // Auto-open right panel and collapse left sidebar when plans need approval.
+  const prevPendingLenRef = useRef(0);
+  useEffect(() => {
+    const curr = state.pendingPlans.length;
+    const prev = prevPendingLenRef.current;
+    prevPendingLenRef.current = curr;
+
+    if (curr > prev) {
+      openCtx();
+      setCtxTab("plan");
+      setCtxWidth(Math.floor(window.innerWidth * 0.4));
+      setCtxSelectedPlanIdx(0);
+      requireSideCollapsed();
+    } else if (curr === 0 && prev > 0) {
+      releaseSideCollapsed();
+    }
+  }, [state.pendingPlans.length, openCtx, setCtxWidth, requireSideCollapsed, releaseSideCollapsed]);
+
   const [draft, setDraft] = useState("");
   const [toast, setToast] = useState<{ msg: string; yolo?: boolean } | null>(null);
   const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());
@@ -2540,6 +2704,13 @@ function TabRuntime({
           memory={state.memory}
           memoryDetail={state.memoryDetail}
           onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
+          activePlan={state.activePlan}
+          pendingPlans={state.pendingPlans}
+          planArchived={state.planArchived}
+          activeTab={ctxTab}
+          onTabChange={setCtxTab}
+          selectedPlanIdx={ctxSelectedPlanIdx}
+          onPlanSelect={setCtxSelectedPlanIdx}
         />
 
         <StatusBar
@@ -3322,12 +3493,14 @@ export function App() {
   const {
     collapsed: ctxCollapsed,
     toggle: onToggleCtx,
+    open: openCtx,
     requireCollapsed: requireCtxCollapsed,
     releaseCollapsed: releaseCtxCollapsed,
   } = useAutoCollapse("reasonix.ctxCollapsed");
 
   const { width: sideWidth, onMouseDown: onSideResizeDown } = useResizable("side", sideCollapsed);
-  const { width: ctxWidth, onMouseDown: onCtxResizeDown } = useResizable("ctx", ctxCollapsed);
+  const { width: ctxWidth, setWidth: setCtxWidth, onMouseDown: onCtxResizeDown } = useResizable("ctx", ctxCollapsed);
+
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const visibleSide = sideCollapsed ? 0 : sideWidth;
   const visibleCtx = ctxCollapsed ? 0 : ctxWidth;
@@ -3758,6 +3931,10 @@ export function App() {
           onCtxResizeDown={onCtxResizeDown}
           onToggleSide={onToggleSide}
           onToggleCtx={onToggleCtx}
+          openCtx={openCtx}
+          setCtxWidth={setCtxWidth}
+          requireSideCollapsed={requireSideCollapsed}
+          releaseSideCollapsed={releaseSideCollapsed}
           onToggleCurrency={onToggleCurrency}
           tabsList={tabs}
           activeTabId={activeTabId}

@@ -1,14 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useMemo, useState } from "react";
-import type { SessionFile, Settings, UsageStats } from "../App";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ActivePlan, ArchivedPlan, PendingPlan, SessionFile, Settings, UsageStats } from "../App";
 import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
 
-type Tab = "files" | "tools" | "memory" | "rules";
+export type CtxTab = "files" | "tools" | "memory" | "rules" | "plan";
 
 const CONTEXT_MAX_TOKENS = 1_000_000;
 
@@ -21,6 +21,13 @@ export function ContextPanel({
   memory,
   memoryDetail,
   onReadMemory,
+  activePlan,
+  pendingPlans,
+  planArchived,
+  activeTab,
+  onTabChange,
+  selectedPlanIdx: externalSelectedPlanIdx,
+  onPlanSelect,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -30,9 +37,42 @@ export function ContextPanel({
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
   onReadMemory: (path: string) => void;
+  activePlan: ActivePlan | null;
+  pendingPlans: PendingPlan[];
+  planArchived: ArchivedPlan[];
+  activeTab?: CtxTab;
+  onTabChange?: (tab: CtxTab) => void;
+  selectedPlanIdx?: number | null;
+  onPlanSelect?: (idx: number | null) => void;
 }) {
   useLang();
-  const [tab, setTab] = useState<Tab>("files");
+  const [tab, setTabInternal] = useState<CtxTab>("files");
+  const [internalSelectedPlanIdx, setInternalSelectedPlanIdx] = useState<number | null>(null);
+
+  const selectedPlanIdx = externalSelectedPlanIdx !== undefined ? externalSelectedPlanIdx : internalSelectedPlanIdx;
+  const setSelectedPlanIdx = onPlanSelect ?? setInternalSelectedPlanIdx;
+
+  const setTab = useCallback(
+    (next: CtxTab) => {
+      setTabInternal(next);
+      onTabChange?.(next);
+    },
+    [onTabChange],
+  );
+
+  // Sync external tab override
+  useEffect(() => {
+    if (activeTab && activeTab !== tab) setTabInternal(activeTab);
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-load first memory entry when switching to the memory tab.
+  const prevTabRef = useRef<CtxTab>("files");
+  useEffect(() => {
+    if (tab === "memory" && prevTabRef.current !== "memory" && memory.length > 0 && !memoryDetail) {
+      onReadMemory(memory[0]!.path);
+    }
+    prevTabRef.current = tab;
+  }, [tab, memory, memoryDetail, onReadMemory]);
   const reserved = usage.reservedTokens;
   const lastHit = usage.lastCallCacheHit ?? 0;
   const lastMiss = usage.lastCallCacheMiss ?? 0;
@@ -58,6 +98,9 @@ export function ContextPanel({
         </div>
         <div className="ctx-tab" data-active={tab === "rules"} onClick={() => setTab("rules")}>
           {t("contextPanel.rulesTab")}
+        </div>
+        <div className="ctx-tab" data-active={tab === "plan"} onClick={() => setTab("plan")}>
+          {t("contextPanel.planTab")}
         </div>
       </div>
 
@@ -102,6 +145,15 @@ export function ContextPanel({
               <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
             )}
             {tab === "rules" && <CtxRules settings={settings} />}
+            {tab === "plan" && (
+              <CtxPlan
+                activePlan={activePlan}
+                pendingPlans={pendingPlans}
+                planArchived={planArchived}
+                selectedIdx={selectedPlanIdx}
+                onSelect={(idx) => setSelectedPlanIdx(idx === selectedPlanIdx ? null : idx)}
+              />
+            )}
           </PanelErrorBoundary>
         </div>
       </div>
@@ -376,6 +428,148 @@ function CtxRules({ settings }: { settings: Settings | null }) {
           <div className="desc">{r.desc}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+type PlanEntry =
+  | { kind: "active"; plan: ActivePlan }
+  | { kind: "pending"; plan: PendingPlan }
+  | { kind: "archived"; plan: ArchivedPlan; index: number };
+
+function CtxPlan({
+  activePlan,
+  pendingPlans,
+  planArchived,
+  selectedIdx,
+  onSelect,
+}: {
+  activePlan: ActivePlan | null;
+  pendingPlans: PendingPlan[];
+  planArchived: ArchivedPlan[];
+  selectedIdx: number | null;
+  onSelect: (idx: number) => void;
+}) {
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+
+  const entries: PlanEntry[] = [];
+  if (activePlan) entries.push({ kind: "active", plan: activePlan });
+  for (const p of pendingPlans) entries.push({ kind: "pending", plan: p });
+  for (let i = 0; i < planArchived.length; i++) {
+    entries.push({ kind: "archived", plan: planArchived[i]!, index: i });
+  }
+
+  // Highlight: first active/pending plan when nothing explicit is selected.
+  const effectiveIdx =
+    selectedIdx !== null
+      ? selectedIdx
+      : entries.findIndex((e) => e.kind === "active" || e.kind === "pending");
+
+  // Detail is only shown when the user (or system) explicitly selects an entry.
+  const showDetail = selectedIdx !== null && effectiveIdx >= 0;
+  const selected = showDetail ? (entries[effectiveIdx] ?? null) : null;
+
+  const detailBody =
+    selected?.kind === "active" || selected?.kind === "pending"
+      ? (selected.plan as ActivePlan | PendingPlan).plan
+      : selected?.kind === "archived"
+        ? (selected.plan as ArchivedPlan).plan
+        : null;
+
+  const isSelectedRefining =
+    selected?.kind === "pending" && (selected.plan as PendingPlan).refining === true;
+
+  return (
+    <div
+      className="ctx-block"
+      style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+    >
+      <div className="h">
+        <span>{t("contextPanel.planTitle")}</span>
+        <span className="right">
+          {entries.length === 0 ? "—" : t("contextPanel.itemCount", { count: entries.length })}
+        </span>
+      </div>
+      {entries.length === 0 ? (
+        <div className="ctx-empty">{t("contextPanel.noPlansMsg")}</div>
+      ) : (
+        <div className={`mem${showDetail ? " mem--split" : ""}`}>
+          <div className="mem-list">
+            {entries.map((e, i) => {
+              const summary =
+                e.kind === "active" || e.kind === "pending"
+                  ? (e.plan as ActivePlan | PendingPlan).summary
+                  : (e.plan as ArchivedPlan).summary;
+              const isRefining =
+                e.kind === "pending" && (e.plan as PendingPlan).refining === true;
+              const label =
+                e.kind === "active"
+                  ? t("contextPanel.planActive")
+                  : isRefining
+                    ? t("contextPanel.planRefining")
+                    : e.kind === "pending"
+                      ? t("contextPanel.planPending")
+                      : (e.plan as ArchivedPlan).status === "cancelled"
+                        ? t("contextPanel.planCancelled")
+                        : t("contextPanel.planArchived");
+              const tone =
+                e.kind === "active"
+                  ? "ok"
+                  : isRefining
+                    ? "accent"
+                    : e.kind === "pending"
+                      ? "warn"
+                      : (e.kind === "archived" && (e.plan as ArchivedPlan).status === "cancelled")
+                        ? "err"
+                        : "muted";
+              const tipText = summary || t("contextPanel.planUntitled");
+              return (
+                <button
+                  type="button"
+                  className="mem-row"
+                  data-active={effectiveIdx === i}
+                  data-compact={showDetail}
+                  key={`${e.kind}-${i}`}
+                  onClick={() => onSelect(i)}
+                  onMouseEnter={
+                    showDetail
+                      ? (ev) => {
+                          const r = ev.currentTarget.getBoundingClientRect();
+                          setTooltip({ text: tipText, x: r.right + 8, y: r.top + r.height / 2 });
+                        }
+                      : undefined
+                  }
+                  onMouseLeave={showDetail ? () => setTooltip(null) : undefined}
+                >
+                  <span className="scope" data-s={tone}>
+                    {label}
+                  </span>
+                  <span className="txt">{tipText}</span>
+                </button>
+              );
+            })}
+          </div>
+          {detailBody ? (
+            <div className="mem-detail">
+              {isSelectedRefining && (
+                <div className="plan-refining-bar">
+                  <span className="plan-refining-dot" />
+                  {t("contextPanel.planRefiningInProgress")}
+                </div>
+              )}
+              <Markdown source={detailBody} />
+            </div>
+          ) : null}
+        </div>
+      )}
+      {tooltip && (
+        <div
+          className="plan-name-tooltip"
+          style={{ left: tooltip.x, top: tooltip.y }}
+        >
+          {tooltip.text}
+        </div>
+      )}
     </div>
   );
 }

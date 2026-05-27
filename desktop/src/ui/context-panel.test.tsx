@@ -44,6 +44,9 @@ function renderPanel() {
       memory={[]}
       memoryDetail={null}
       onReadMemory={() => {}}
+      activePlan={null}
+      pendingPlans={[]}
+      planArchived={[]}
     />,
   );
 }
@@ -84,6 +87,9 @@ describe("ContextPanel files", () => {
         memory={[]}
         memoryDetail={null}
         onReadMemory={() => {}}
+        activePlan={null}
+        pendingPlans={[]}
+        planArchived={[]}
       />,
     );
 
