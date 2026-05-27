@@ -99,7 +99,7 @@ import { WorkdirPop } from "./ui/workdir-pop";
 import { parseEditResult } from "./ui/cards";
 import { useAutoCollapse } from "./ui/useAutoCollapse";
 import { useResizable } from "./ui/useResizable";
-import { useAutoScroll } from "./ui/useAutoScroll";
+// Scroll handling: Virtuoso followOutput + scrollToIndex (replaces useAutoScroll).
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 import { elideTranscriptMessages } from "./ui/transcript-elision";
@@ -1396,7 +1396,6 @@ function TabRuntime({
   >(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
-  const threadInnerRef = useRef<HTMLDivElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
@@ -1850,46 +1849,55 @@ function TabRuntime({
     [sendRpc],
   );
 
-  // Read the latest session inside the stable restore callback below.
-  const currentSessionRef = useRef(state.currentSession);
-  currentSessionRef.current = state.currentSession;
   const messageItems = state.messages;
 
-  const restoreScrollTop = useCallback(() => {
-    const session = currentSessionRef.current;
-    if (!session) return null;
-    const raw = localStorage.getItem(`reasonix.scroll.${session}`);
-    const n = raw ? Number(raw) : Number.NaN;
-    return Number.isFinite(n) ? n : null;
-  }, []);
-
   const [showJumpButton, setShowJumpButton] = useState(false);
-  const { scrollToBottom } = useAutoScroll(
-    threadRef,
-    threadInnerRef,
-    state.busy,
-    restoreScrollTop,
-  );
+
+  // Initial scroll to bottom when session loads.
+  useEffect(() => {
+    if (messageItems.length > 0) {
+      const id = setTimeout(() => {
+        virtuosoRef.current?.scrollToIndex({ index: messageItems.length - 1, behavior: "auto" });
+      }, 100);
+      return () => clearTimeout(id);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const scrollToBottom = useCallback(() => {
+    const len = messageItems.length;
+    if (len > 0) virtuosoRef.current?.scrollToIndex({ index: len - 1, behavior: "smooth" });
+  }, [messageItems.length]);
+
+  // Scroll to bottom when busy becomes true (user just sent a message).
+  const prevBusyRef = useRef(state.busy);
+  useEffect(() => {
+    if (state.busy && !prevBusyRef.current) {
+      scrollToBottom();
+    }
+    prevBusyRef.current = state.busy;
+  }, [state.busy, scrollToBottom]);
 
   // Persist the transcript scroll offset per session so a restart reopens
   // the conversation where the user left it (#1244).
   useEffect(() => {
-    const el = threadRef.current;
-    const session = state.currentSession;
-    if (!el || !session) return;
-    const key = `reasonix.scroll.${session}`;
+    const scroller = threadRef.current?.firstElementChild;
+    if (!scroller || !state.currentSession) return;
+    const key = `reasonix.scroll.${state.currentSession}`;
     let timer: ReturnType<typeof setTimeout>;
     const onScroll = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
-        if (atBottom) localStorage.removeItem(key);
-        else localStorage.setItem(key, String(Math.round(el.scrollTop)));
+        const { scrollTop, scrollHeight, clientHeight } = scroller as HTMLElement;
+        if (scrollTop + clientHeight >= scrollHeight - 80) {
+          localStorage.removeItem(key);
+        } else {
+          localStorage.setItem(key, String(Math.round(scrollTop)));
+        }
       }, 250);
     };
-    el.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => {
-      el.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("scroll", onScroll);
       clearTimeout(timer);
     };
   }, [state.currentSession]);
@@ -2297,7 +2305,10 @@ function TabRuntime({
         ) : null}
 
         <main className="main" style={{ position: "relative" }}>
-          <JumpBar messages={state.messages} threadEl={threadRef.current} />
+          <JumpBar messages={state.messages} onScrollToTurn={(turn) => {
+            const idx = state.messages.findIndex((m) => (m.kind === "user" || m.kind === "assistant") && m.turn === turn);
+            if (idx >= 0) virtuosoRef.current?.scrollToIndex(idx);
+          }} />
           {state.needsSetup ? (
             <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
@@ -2389,7 +2400,7 @@ function TabRuntime({
                 {showJumpButton ? (
                   <button
                     className="thread-jump-bottom"
-                    onClick={() => scrollToBottom(true)}
+                    onClick={() => scrollToBottom()}
                     title={t("app.jumpToBottom") ?? "Jump to bottom"}
                     aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
                   >
