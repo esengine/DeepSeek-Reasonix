@@ -1113,20 +1113,20 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
           { kind: "assistant", turn: ev.turn, segments: [], pending: true },
         ],
       };
-    case "model.delta":
-      return {
-        ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          if (ev.channel === "content") {
-            return { ...m, segments: appendTextSegment(m.segments, "text", ev.text) };
-          }
-          if (ev.channel === "reasoning") {
-            return { ...m, segments: appendTextSegment(m.segments, "reasoning", ev.text) };
-          }
-          return m;
-        }),
-      };
+    case "model.delta": {
+      // Walk backwards — streaming always targets the latest assistant message
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        let updated = m;
+        if (ev.channel === "content") updated = { ...m, segments: appendTextSegment(m.segments, "text", ev.text) };
+        else if (ev.channel === "reasoning") updated = { ...m, segments: appendTextSegment(m.segments, "reasoning", ev.text) };
+        const next = [...state.messages];
+        next[i] = updated;
+        return { ...state, messages: next };
+      }
+      return state;
+    }
     case "model.final": {
       const u = ev.usage;
       const promptTokens =
@@ -1146,89 +1146,73 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
         reservedTokens: state.usage.reservedTokens,
         liveLogTokens: state.usage.liveLogTokens,
       };
-      return {
-        ...state,
-        usage,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          return { ...m, pending: false };
-        }),
-      };
+      // Walk backwards to clear pending flag on the matching assistant
+      let settledPending = false;
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        if (m.pending) {
+          const s = [...state.messages];
+          s[i] = { ...m, pending: false };
+          state = { ...state, messages: s };
+        }
+        settledPending = true;
+        break;
+      }
+      return settledPending ? { ...state, usage } : { ...state, usage };
     }
-    case "tool.preparing":
-      return {
-        ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return m;
-          return {
-            ...m,
-            segments: [
-              ...m.segments,
-              {
-                kind: "tool",
-                callId: ev.callId,
-                name: ev.name,
-                args: "",
-                startedAt: Date.now(),
-              },
-            ],
-          };
-        }),
-      };
+    case "tool.preparing": {
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        if (m.segments.some((s) => s.kind === "tool" && s.callId === ev.callId)) return state;
+        const next = [...state.messages];
+        next[i] = { ...m, segments: [...m.segments, { kind: "tool" as const, callId: ev.callId, name: ev.name, args: "", startedAt: Date.now() }] };
+        return { ...state, messages: next };
+      }
+      return state;
+    }
     case "tool.intent": {
       const adds = extractToolFiles(ev.name, ev.args);
-      return {
-        ...state,
-        sessionFiles: mergeSessionFiles(state.sessionFiles, adds),
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant" || m.turn !== ev.turn) return m;
-          const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
-          if (idx >= 0) {
-            const segs = [...m.segments];
-            const seg = segs[idx];
-            if (seg?.kind === "tool") {
-              segs[idx] = { ...seg, args: ev.args };
-            }
-            return { ...m, segments: segs };
-          }
-          return {
-            ...m,
-            segments: [
-              ...m.segments,
-              {
-                kind: "tool",
-                callId: ev.callId,
-                name: ev.name,
-                args: ev.args,
-                startedAt: Date.now(),
-              },
-            ],
-          };
-        }),
-      };
+      let nextState = { ...state, sessionFiles: mergeSessionFiles(state.sessionFiles, adds) };
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant" || m.turn !== ev.turn) continue;
+        const idx = m.segments.findIndex((s) => s.kind === "tool" && s.callId === ev.callId);
+        if (idx >= 0) {
+          const segs = [...m.segments];
+          if (segs[idx]?.kind === "tool") segs[idx] = { ...(segs[idx] as AssistantSegment & { kind: "tool" }), args: ev.args };
+          const msgs = [...nextState.messages];
+          msgs[i] = { ...m, segments: segs };
+          nextState = { ...nextState, messages: msgs };
+        } else {
+          const msgs = [...nextState.messages];
+          msgs[i] = { ...m, segments: [...m.segments, { kind: "tool" as const, callId: ev.callId, name: ev.name, args: ev.args, startedAt: Date.now() }] };
+          nextState = { ...nextState, messages: msgs };
+        }
+        break;
+      }
+      return nextState;
     }
-    case "tool.result":
-      return {
-        ...state,
-        messages: state.messages.map((m) => {
-          if (m.kind !== "assistant") return m;
-          let mutated = false;
-          const segs = m.segments.map((s) => {
-            if (s.kind === "tool" && s.callId === ev.callId) {
-              mutated = true;
-              return {
-                ...s,
-                result: ev.output,
-                ok: ev.ok,
-                durationMs: Date.now() - s.startedAt,
-              };
-            }
-            return s;
-          });
-          return mutated ? { ...m, segments: segs } : m;
-        }),
-      };
+    case "tool.result": {
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const m = state.messages[i]!;
+        if (m.kind !== "assistant") continue;
+        let mutated = false;
+        const segs = m.segments.map((s) => {
+          if (s.kind === "tool" && s.callId === ev.callId) {
+            mutated = true;
+            return { ...s, result: ev.output, ok: ev.ok, durationMs: Date.now() - s.startedAt };
+          }
+          return s;
+        });
+        if (!mutated) continue;
+        const next = [...state.messages];
+        next[i] = { ...m, segments: segs };
+        return { ...state, messages: next };
+      }
+      return state;
+    }
     case "$retry_result":
       return { ...state, retryText: ev.text, retryNonce: state.retryNonce + 1 };
     case "$btw_result":
