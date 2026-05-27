@@ -1944,6 +1944,32 @@ function TabRuntime({
         if (settingsOpen || aboutOpen || jobsOpen || wdOpen) return;
         e.preventDefault();
         abort();
+      } else if (e.key === "Enter" && !mod && !e.shiftKey && !e.altKey) {
+        // Defer to any control that already handles Enter — native inputs/buttons,
+        // ARIA button/link widgets (sidebar rows, file pills), or anything that called
+        // preventDefault — so we only grant when focus is on inert layout (#2015).
+        if (e.defaultPrevented) return;
+        const target = e.target as HTMLElement | null;
+        if (
+          target?.isContentEditable ||
+          target?.closest('input, textarea, button, select, a, [role="button"], [role="link"]')
+        ) {
+          return;
+        }
+        if (settingsOpen || aboutOpen || jobsOpen || wdOpen) return;
+        // Enter grants the pending authorization prompt (run once), matching the
+        // TUI where Enter confirms the highlighted choice (#1962).
+        const confirm = state.pendingConfirms.at(-1);
+        if (confirm) {
+          e.preventDefault();
+          resolveConfirm(confirm.id, { type: "run_once" });
+          return;
+        }
+        const pathAccess = state.pendingPathAccess.at(-1);
+        if (pathAccess) {
+          e.preventDefault();
+          resolvePathAccess(pathAccess.id, { type: "run_once" });
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1951,6 +1977,10 @@ function TabRuntime({
   }, [
     active,
     state.busy,
+    state.pendingConfirms,
+    state.pendingPathAccess,
+    resolveConfirm,
+    resolvePathAccess,
     abort,
     newChat,
     settingsOpen,
