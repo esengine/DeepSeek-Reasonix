@@ -168,7 +168,8 @@ export const ja = {
     restoreBtn: "復元",
     restoreConfirm: '"{name}" を復元しますか？現在のファイルが上書きされます。',
     deleteBtn: "削除",
-    deleteConfirm: 'チェックポイント "{name}" を削除しますか？スナップショットは削除され、ファイルはそのままです。',
+    deleteConfirm:
+      'チェックポイント "{name}" を削除しますか？スナップショットは削除され、ファイルはそのままです。',
     createBtn: "スナップショット",
     createPlaceholder: "スナップショット名…",
     backToList: "リストに戻る",
@@ -237,6 +238,8 @@ export const ja = {
     webSearchEngineTavily: "tavily — 1000回/月無料 (TAVILY_API_KEY を設定)",
     webSearchEnginePerplexity: "perplexity — AIネイティブ (PERPLEXITY_API_KEY を設定)",
     webSearchEngineExa: "exa — AIネイティブ 1000回/月無料 (EXA_API_KEY を設定)",
+    webSearchEngineBrave: "brave — 独立インデックス、2000回/月無料 (BRAVE_SEARCH_API_KEY を設定)",
+    webSearchEngineOllama: "ollama — Ollama クラウド Web 検索 (OLLAMA_API_KEY を設定)",
     webSearchEngineNote: "次の web_search 呼び出しに適用",
     sectionBudget: "予算",
     budget: "予算",
@@ -421,7 +424,7 @@ export const ja = {
     eventStreamError: "イベントストリームが中断されました — 再接続中…",
     semanticBanner: "このプロジェクトではセマンティック検索が有効になっていません。",
     semanticBannerDesc:
-      'インデックスを一度構築すると、モデルは正確な文字列のgrepではなく意味でコードを見つけられるようになります（「認証失敗をどのように処理しているか？」など）。',
+      "インデックスを一度構築すると、モデルは正確な文字列のgrepではなく意味でコードを見つけられるようになります（「認証失敗をどのように処理しているか？」など）。",
     semanticBannerBtn: "構築する →",
     semanticBannerDismiss: "閉じる（再表示しない）",
     slashCommands: "スラッシュコマンド",
@@ -545,7 +548,8 @@ export const ja = {
     newHint: "Archive the current conversation and start a fresh one",
     switchBtn: "Switch to this session",
     deleteBtn: "Delete",
-    deleteConfirm: "Delete session \"{name}\"? This removes the transcript file and cannot be undone.",
+    deleteConfirm:
+      'Delete session "{name}"? This removes the transcript file and cannot be undone.',
     cantDeleteActive: "Switch to a different session before deleting this one.",
     attachRequired:
       "Live session operations need an attached CLI session. Launch via reasonix chat or open the dashboard from inside a TUI session.",

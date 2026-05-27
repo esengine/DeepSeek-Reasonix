@@ -36,15 +36,26 @@ describe("detectSystemLanguage", () => {
     expect(detectSystemLanguage("de")).toBe("de");
   });
 
+  it("maps ja-* variants to ja", () => {
+    expect(detectSystemLanguage("ja-JP")).toBe("ja");
+    expect(detectSystemLanguage("ja")).toBe("ja");
+  });
+
   it("returns null for unsupported locales", () => {
-    expect(detectSystemLanguage("ja-JP")).toBeNull();
     expect(detectSystemLanguage("fr-FR")).toBeNull();
     expect(detectSystemLanguage("")).toBeNull();
   });
 
   it("default arg reads from Intl — returns a valid LanguageCode or null", () => {
     const result = detectSystemLanguage();
-    expect(result === null || result === "EN" || result === "zh-CN" || result === "de").toBe(true);
+    expect(
+      result === null ||
+        result === "EN" ||
+        result === "zh-CN" ||
+        result === "de" ||
+        result === "ru" ||
+        result === "ja",
+    ).toBe(true);
   });
 
   it("default arg reads de from locale environment variables", () => {

@@ -8,7 +8,12 @@ export type Lang = "en" | "zh-CN" | "de" | "ja";
 
 const SUPPORTED_LANGS: readonly Lang[] = ["en", "zh-CN", "de", "ja"];
 const SUPPORTED: ReadonlySet<Lang> = new Set<Lang>(SUPPORTED_LANGS);
-const LANG_LABELS: Record<Lang, string> = { en: "English", "zh-CN": "简体中文", de: "Deutsch", ja: "日本語" };
+const LANG_LABELS: Record<Lang, string> = {
+  en: "English",
+  "zh-CN": "简体中文",
+  de: "Deutsch",
+  ja: "日本語",
+};
 const STORAGE_KEY = "reasonix.lang";
 
 type Listener = () => void;

@@ -147,7 +147,8 @@ export const ja = {
     effortHighDesc: "高速、思考少なめ",
     effortMaxDesc: "深い推論、低速",
     editMode: "編集ゲート",
-    editModeHint: "ツール承認動作 — 変更はディスクに保存され、次のツール呼び出しから有効になります。",
+    editModeHint:
+      "ツール承認動作 — 変更はディスクに保存され、次のツール呼び出しから有効になります。",
     editModeReview: "review",
     editModeAuto: "auto",
     editModeYolo: "yolo",
@@ -191,7 +192,7 @@ export const ja = {
       "ファイルリンク/パスをクリックしたときに使用。システムデフォルト = OSのファイル関連付け。その他はPATHに必要。",
     editorSystem: "システムデフォルト",
     editorCustom: "カスタム",
-    editorPlaceholder: "例: \"code\", \"subl\", または実行ファイルのフルパス",
+    editorPlaceholder: '例: "code", "subl", または実行ファイルのフルパス',
     editorDefault: "(デフォルト)",
     apiKey: "APIキー",
     apiKeyHint: "DeepSeekキー — ~/.reasonix/config.json (0600) に保存。",

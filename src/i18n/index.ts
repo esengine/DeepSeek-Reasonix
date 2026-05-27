@@ -1,8 +1,8 @@
 import { loadLanguage, saveLanguage } from "../config.js";
 import { EN } from "./EN.js";
+import { JA } from "./JA.js";
 import { de } from "./de.js";
 import { ru } from "./ru.js";
-import { JA } from "./JA.js";
 import type { LanguageCode, TranslationSchema } from "./types.js";
 import { zhCN } from "./zh-CN.js";
 
@@ -11,7 +11,7 @@ const translations: Record<LanguageCode, TranslationSchema> = {
   "zh-CN": zhCN,
   de,
   ru,
-  ja,
+  ja: JA,
 };
 
 /** Map a system locale (e.g. "zh-CN", "en-US") to a supported LanguageCode, or null. */

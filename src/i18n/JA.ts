@@ -15,7 +15,8 @@ export const JA: TranslationSchema = {
     noTurns: "(まだターンがありません)",
   },
   cli: {
-    description: "DeepSeekネイティブのエージェントフレームワーク — キャッシュヒットと低コストトークンのために設計。",
+    description:
+      "DeepSeekネイティブのエージェントフレームワーク — キャッシュヒットと低コストトークンのために設計。",
     continue: "最後に使用したチャットセッションをピッカーなしで再開します。",
     setup: "対話型ウィザード — APIキー、MCPサーバー。いつでも再実行して再設定できます。",
     code: "コード編集チャット — <dir>（デフォルト: cwd）をルートとするファイルシステムツール、コーディング用システムプロンプト、v4-flash ベースライン。",
@@ -25,7 +26,8 @@ export const JA: TranslationSchema = {
     doctor: "ワンコマンドのヘルスチェック。",
     commit: "ステージされた差分からコミットメッセージを生成します。",
     sessions: "保存されたチャットセッションを一覧表示、または名前で詳細を表示します。",
-    pruneSessions: "アイドル状態がN日以上の保存セッションを削除します（デフォルト90）。--dry-run でプレビュー。",
+    pruneSessions:
+      "アイドル状態がN日以上の保存セッションを削除します（デフォルト90）。--dry-run でプレビュー。",
     events: "カーネルイベントログのサイドカーを整形表示します。",
     replay: "トランスクリプトをスクラブする対話型 Ink TUI。",
     diff: "2つのトランスクリプトを分割ペインの Ink TUI で比較します。",
@@ -85,8 +87,10 @@ export const JA: TranslationSchema = {
       "コードシステムプロンプトにファイルの内容を追加します。デフォルトプロンプトは置き換えません。UTF-8、cwdからの相対パスまたは絶対パス。",
     resumedSession:
       '▸ セッション "{name}" を再開しました（{count}件の既存メッセージ）· /new で新規開始 · /sessions で管理',
-    newSession: '▸ セッション "{name}" (新規) — チャットに応じて自動保存 · /sessions で名前変更または削除',
-    ephemeralSession: "▸ エフェメラルチャット（セッション永続化なし）— --no-session を外すと有効になります",
+    newSession:
+      '▸ セッション "{name}" (新規) — チャットに応じて自動保存 · /sessions で名前変更または削除',
+    ephemeralSession:
+      "▸ エフェメラルチャット（セッション永続化なし）— --no-session を外すと有効になります",
     restoredEdits:
       "▸ 中断された前回の実行から {count} 件の保留中編集ブロックを復元しました — /apply でコミット、/discard で破棄。",
     resumedPlan: "プランを再開しました · {when}{summary}",
@@ -116,12 +120,18 @@ export const JA: TranslationSchema = {
               key: "右クリック",
               text: "ターミナルネイティブのメニュー（Windows Terminal等での貼り付け/コピー）",
             },
-            { key: "ホイール", text: "チャット履歴をスクロール（Web/クラウド/SSHターミナルでも動作）" },
+            {
+              key: "ホイール",
+              text: "チャット履歴をスクロール（Web/クラウド/SSHターミナルでも動作）",
+            },
             {
               key: "↑ / ↓",
               text: "プロンプト履歴（複数行ドラフトでは行単位カーソル）— Ctrl+P / Ctrl+N でも可",
             },
-            { key: "PgUp / PgDn", text: "チャット履歴をスクロール（マウスホイールもここにルーティング）" },
+            {
+              key: "PgUp / PgDn",
+              text: "チャット履歴をスクロール（マウスホイールもここにルーティング）",
+            },
           ],
         },
       ],
@@ -146,7 +156,10 @@ export const JA: TranslationSchema = {
             { key: "Tab", text: "@メンション補完 · フォルダ展開 · スラッシュコマンド確定" },
             { key: "Shift+Tab", text: "編集ゲート: review ↔ AUTO モード切替" },
             { key: "Esc", text: "ピッカーを閉じる · 実行中のモデルターンを中断" },
-            { key: "Ctrl+C", text: "実行中のモデルターンを中断（コピーではありません — クリップボード参照）" },
+            {
+              key: "Ctrl+C",
+              text: "実行中のモデルターンを中断（コピーではありません — クリップボード参照）",
+            },
             { key: "PgUp / PgDn", text: "チャット履歴を1ページずつスクロール" },
             { key: "End", text: "チャットを最新行にジャンプ" },
             {
@@ -158,9 +171,15 @@ export const JA: TranslationSchema = {
         {
           title: "マウス",
           rows: [
-            { key: "ホイール", text: "チャット履歴をスクロール（Web/クラウド/SSHターミナルでも動作）" },
+            {
+              key: "ホイール",
+              text: "チャット履歴をスクロール（Web/クラウド/SSHターミナルでも動作）",
+            },
             { key: "ドラッグ", text: "テキストをネイティブ選択 — 直接コピー可能、修飾キー不要" },
-            { key: "右クリック", text: "ターミナルネイティブ（Windows Terminal等での貼り付けメニュー）" },
+            {
+              key: "右クリック",
+              text: "ターミナルネイティブ（Windows Terminal等での貼り付けメニュー）",
+            },
           ],
         },
         {
@@ -302,7 +321,8 @@ export const JA: TranslationSchema = {
       argsHint: "[list|paths|show <name>|<name> [args]]",
     },
     hooks: {
-      description: "アクティブなフックを一覧 (.reasonix/ 下の settings.json) · reload でディスクから再読込",
+      description:
+        "アクティブなフックを一覧 (.reasonix/ 下の settings.json) · reload でディスクから再読込",
       argsHint: "[reload]",
     },
     permissions: {
@@ -314,7 +334,9 @@ export const JA: TranslationSchema = {
       description: "埋め込みWebダッシュボードを起動 (127.0.0.1, トークン認証)",
       argsHint: "[stop]",
     },
-    update: { description: "現在のバージョンと最新バージョン + アップグレード用シェルコマンドを表示" },
+    update: {
+      description: "現在のバージョンと最新バージョン + アップグレード用シェルコマンドを表示",
+    },
     stats: {
       description:
         "セッション横断のコストダッシュボード（今日/週/月/全期間 · キャッシュヒット · Claude比較）",
@@ -343,7 +365,8 @@ export const JA: TranslationSchema = {
     keys: { description: "キーボード + マウス + コピー/貼り付け リファレンス" },
     plans: { description: "このセッションのアクティブおよびアーカイブ済みプランを新しい順に表示" },
     replay: {
-      description: "アーカイブ済みプランを読み取り専用のタイムトラベルスナップショットとして読み込み（デフォルト: 最新）",
+      description:
+        "アーカイブ済みプランを読み取り専用のタイムトラベルスナップショットとして読み込み（デフォルト: 最新）",
       argsHint: "[N]",
     },
     sessions: { description: "保存されたセッションを一覧（現在のセッションは ▸ で表示）" },
@@ -360,8 +383,7 @@ export const JA: TranslationSchema = {
     clear: { description: "表示されているスクロールバックのみをクリア（ログ/コンテキストは保持）" },
     new: { description: "新しい会話を開始（コンテキストとスクロールバックをクリア）" },
     loop: {
-      description:
-        "<prompt> を <interval> ごとに自動再送信（何か入力 / Esc / /loop stop で停止）",
+      description: "<prompt> を <interval> ごとに自動再送信（何か入力 / Esc / /loop stop で停止）",
       argsHint: "<5s..6h> <prompt>  ·  stop  ·  (引数なし = 状態表示)",
     },
     exit: { description: "TUIを終了" },
@@ -376,7 +398,8 @@ export const JA: TranslationSchema = {
       argsHint: "[N|N,M|N-M]",
     },
     discard: {
-      description: "保留中の編集ブロックを書き込まずに破棄（引数なし → すべて; インデックス → そのサブセット）",
+      description:
+        "保留中の編集ブロックを書き込まずに破棄（引数なし → すべて; インデックス → そのサブセット）",
       argsHint: "[N|N,M|N-M]",
     },
     walk: {
@@ -384,7 +407,9 @@ export const JA: TranslationSchema = {
         "保留中の編集を1ブロックずつ確認（git-add-p スタイル: ブロックごとに y/n、a で残りを適用、A でAUTOに切替）",
     },
     undo: { description: "最後に適用された編集バッチをロールバック" },
-    history: { description: "このセッションの全編集バッチを一覧（/show用のID、取り消しマーカー付き）" },
+    history: {
+      description: "このセッションの全編集バッチを一覧（/show用のID、取り消しマーカー付き）",
+    },
     show: {
       description: "保存された編集差分を表示（idを省略すると最新の未取り消し分）",
       argsHint: "[id]",
@@ -400,7 +425,8 @@ export const JA: TranslationSchema = {
       argsHint: "<name|id>",
     },
     plan: {
-      description: "読み取り専用プランモードの切替（submit_plan + 承認まで書き込みがブロックされます）",
+      description:
+        "読み取り専用プランモードの切替（submit_plan + 承認まで書き込みがブロックされます）",
       argsHint: "[on|off]",
     },
     mode: {
@@ -418,8 +444,7 @@ export const JA: TranslationSchema = {
       argsHint: "<id> [lines]",
     },
     btw: {
-      description:
-        "簡単な脇道の質問 — 白紙状態から回答し、会話コンテキストには追加されません",
+      description: "簡単な脇道の質問 — 白紙状態から回答し、会話コンテキストには追加されません",
       argsHint: "<question>",
     },
     "search-engine": {
@@ -436,7 +461,8 @@ export const JA: TranslationSchema = {
     apiKeyGetOne: "取得先: https://platform.deepseek.com/api_keys",
     apiKeySavedLocally: "{path} にローカル保存されました",
     apiKeyInputLabel: "key › ",
-    apiKeyInvalid: "キーが短すぎます — 完全なトークンを貼り付けてください（16文字以上、スペースなし）。",
+    apiKeyInvalid:
+      "キーが短すぎます — 完全なトークンを貼り付けてください（16文字以上、スペースなし）。",
     apiKeyChecking: "APIキーを確認中…",
     apiKeyRejected:
       "DeepSeekがこのAPIキーを拒否しました。有効なキーを貼り付けるか、Escでセットアップをキャンセルしてください。",
@@ -526,8 +552,7 @@ export const JA: TranslationSchema = {
       reject: {
         title: "拒否中 — モデルに理由を伝えてください（任意）",
         hint: "モデルが目標について何を誤解したか、代わりに何が欲しいかを伝えてください。",
-        blankHint:
-          "（空でEnter = 説明なしでキャンセル; モデルが希望を尋ねます）",
+        blankHint: "（空でEnter = 説明なしでキャンセル; モデルが希望を尋ねます）",
       },
       "checkpoint-revise": {
         title: "編集中 — 次のステップの前に何を変更しますか？",
@@ -578,11 +603,13 @@ export const JA: TranslationSchema = {
       "▸ 編集モード: YOLO — 編集とシェルコマンドが自動実行されます。/undo で編集のロールバックは可能です。注意して使用してください。",
     editModeAuto:
       "▸ 編集モード: AUTO — 編集が即時適用されます; 5秒以内に u を押すと元に戻せます（スペースでタイマー一時停止）。シェルコマンドは確認あり。",
-    editModeReview: "▸ 編集モード: review — 編集は /apply（または y）/ /discard（または n）のキューに入ります",
+    editModeReview:
+      "▸ 編集モード: review — 編集は /apply（または y）/ /discard（または n）のキューに入ります",
     rejectedEdit: "▸ {path} への編集を拒否しました{context}",
     autoApprovingRest: "▸ このターンの残りの編集を自動承認します",
     flippedAutoSession: "▸ セッションの残りをAUTOモードに切り替えました（永続化）",
-    flippedAutoWalk: "▸ AUTOモードに切り替え — 以降の編集は即時適用されます。ウォークを終了しました。",
+    flippedAutoWalk:
+      "▸ AUTOモードに切り替え — 以降の編集は即時適用されます。ウォークを終了しました。",
     dashboardStopped: "▸ ダッシュボードを停止しました。",
     notedMemory: "▸ メモ ({scope}) — {verb} {path}",
     notedScopeProject: "プロジェクト",
@@ -604,7 +631,8 @@ export const JA: TranslationSchema = {
     atMentions: "▸ @メンション: {parts}",
     atUrl: "▸ @url: {parts}",
     atUrlFailed: "@url 展開に失敗しました",
-    sessionTitleNoSession: "▸ 永続化されたセッションがアクティブでないため、名前変更する対象がありません。",
+    sessionTitleNoSession:
+      "▸ 永続化されたセッションがアクティブでないため、名前変更する対象がありません。",
     sessionTitleNoContent: "▸ このセッションに名前を付けるのに十分な会話内容がまだありません。",
     sessionTitleNoTitle: "▸ モデルが使用可能なセッションタイトルを返しませんでした。",
     sessionTitleUpdated: '▸ セッションタイトルを更新しました: "{title}"',
@@ -613,7 +641,8 @@ export const JA: TranslationSchema = {
     sessionTitleAutoRenamed: '▸ セッションを自動命名しました "{name}" — {title}',
     workspaceSwitched: "▸ ワークスペースを {root} に切り替えました",
     semanticRepointed: "▸ semantic_search の参照先を {root} に変更しました",
-    semanticDisabledForRoot: "▸ semantic_search を無効化しました（{root} に互換インデックスがありません）",
+    semanticDisabledForRoot:
+      "▸ semantic_search を無効化しました（{root} に互換インデックスがありません）",
     semanticRebootstrapFailed: "▸ semantic_search の再ブートストラップに失敗しました: {reason}",
     denied: "▸ 拒否: {cmd}{context}",
     alwaysAllowed: '▸ "{prefix}" を {dir} で常に許可',
@@ -632,7 +661,8 @@ export const JA: TranslationSchema = {
       "使い方: /show [id] [path]   （idを省略すると最新; path はファイル別サマリーから）",
     editHistoryIdNotFound: "編集 #{id} はありません — /history で有効なIDを確認してください",
     editHistoryLookupFailed: "予期せぬエラー: 履歴の検索に失敗しました",
-    editHistoryBatchNoFile: 'バッチ #{id} に "{path}" は含まれていません — このバッチのファイル: {files}',
+    editHistoryBatchNoFile:
+      'バッチ #{id} に "{path}" は含まれていません — このバッチのファイル: {files}',
     editHistoryNoEdits2: "このセッションでは編集が記録されていません — /history は空です",
     editHistoryStatusApplied: "適用済み",
     editHistoryStatusPartial: "一部適用",
@@ -652,7 +682,8 @@ export const JA: TranslationSchema = {
     noMatchedApply:
       "\u25b8 どの編集もそれらのインデックスに一致しませんでした — 何も適用されていません。引数なしの /apply ですべてコミットしてください。",
     noPendingDiscard: "破棄する保留中の編集はありません。",
-    noMatchedDiscard: "\u25b8 どの編集もそれらのインデックスに一致しませんでした — 何も破棄されていません。",
+    noMatchedDiscard:
+      "\u25b8 どの編集もそれらのインデックスに一致しませんでした — 何も破棄されていません。",
     blocksStillPending:
       "\u25b8 {count} 件の編集ブロックがまだ保留中です — /apply または /discard でクリアしてください。",
     nothingWritten: "。ディスクには何も書き込まれませんでした。",
@@ -681,7 +712,8 @@ export const JA: TranslationSchema = {
   loop: {
     budgetExhausted:
       "セッション予算を使い切りました — 消費 ${spent} ≥ 上限 ${cap}。/budget <usd> で上限を引き上げるか、/budget off でクリアするか、セッションを終了してください。",
-    budget80Pct: "▲ 予算の80%を使用 — ${spent} / ${cap}。次の1〜2ターンで上限に達する可能性があります。",
+    budget80Pct:
+      "▲ 予算の80%を使用 — ${spent} / ${cap}。次の1〜2ターンで上限に達する可能性があります。",
     proArmed: "⇧ /pro 武装 — このターンは deepseek-v4-pro で実行（1回限り · ターン後に解除）",
     toolUploadStatus: "ツール結果をアップロードしました · 次の応答前にモデルが思考中…",
     turnStartFoldStatus: "ターン開始: コンテキストが上限に接近中、履歴を圧縮中…",
@@ -692,7 +724,8 @@ export const JA: TranslationSchema = {
       "繰り返しツール呼び出しを検出 — モデルに問題を認識させ、別のアプローチで再試行させます。",
     stormStuck:
       "スタックしたリトライループを停止 — モデルが自己修正の促し後も同じツールを同一引数で呼び続けました。/retry を試すか、言い換えるか、根本的なブロッカーを解決してください。",
-    stormSuppressed: "{count} 件の繰り返しツール呼び出しを抑制 — 同じ名前+引数が3回以上発行されました。",
+    stormSuppressed:
+      "{count} 件の繰り返しツール呼び出しを抑制 — 同じ名前+引数が3回以上発行されました。",
     compactingHistoryStatus: "履歴を圧縮中{aggressiveTag}…",
     aggressiveTag: "（強制）",
     foldedHistory:
@@ -755,8 +788,7 @@ export const JA: TranslationSchema = {
         "                             許可リストは不要 — ユーザー入力 = 明示的同意。",
       helpShellExample: "                             例: !git status   !ls src/   !npm test",
       helpShellGateTitle: "モデルが起動するシェルコマンド（毎回承認）:",
-      helpShellGate:
-        "  ↑↓ + ⏎                   各呼び出しで `allow once` / `allow always`",
+      helpShellGate: "  ↑↓ + ⏎                   各呼び出しで `allow once` / `allow always`",
       helpShellGateDetail:
         "                             / `deny` のプロンプトを表示。`allow always` で",
       helpShellGatePolicy:
@@ -764,8 +796,7 @@ export const JA: TranslationSchema = {
       helpMemoryTitle: "クイックメモリ:",
       helpMemoryPin:
         "  #<note>                  <note> を <project>/REASONIX.md に追記（コミット可能）。",
-      helpMemoryPinEx:
-        "                             例: #findByEmail は大文字小文字を区別しない",
+      helpMemoryPinEx: "                             例: #findByEmail は大文字小文字を区別しない",
       helpMemoryGlobal:
         "  #g <note>                <note> を ~/.reasonix/REASONIX.md に追記（グローバル、コミット不可）。",
       helpMemoryGlobalEx: "                             例: #g npm ではなく pnpm を使う",
@@ -774,7 +805,8 @@ export const JA: TranslationSchema = {
       helpMemoryEscape:
         "                             `\\#text` でリテラルの `#text` をモデルに送信。",
       helpFileTitle: "ファイル参照（コードモード）:",
-      helpFile: "  @path/to/file            送信時にファイル内容を [Referenced files] にインライン展開。",
+      helpFile:
+        "  @path/to/file            送信時にファイル内容を [Referenced files] にインライン展開。",
       helpFilePicker:
         "                             `@` を入力するとピッカーが開きます（↑↓ 移動、Tab/Enter 選択）。",
       helpUrlTitle: "URL参照:",
@@ -782,12 +814,12 @@ export const JA: TranslationSchema = {
         "  @https://example.com     URLを取得し、HTMLを除去して [Referenced URLs] にインライン展開。",
       helpUrlCache:
         "                             同じURLはセッション内で1回のみ取得（インメモリキャッシュ）。",
-      helpUrlPunct:
-        "                             文末の句読点（./,/)）は自動的に除去されます。",
+      helpUrlPunct: "                             文末の句読点（./,/)）は自動的に除去されます。",
       helpSessionsTitle: "セッション（デフォルトで自動有効、名前は 'default'）:",
       helpSessionCustom: "  reasonix chat --session <name>   別の名前付きセッションを使用",
       helpSessionNone: "  reasonix chat --no-session       この実行の永続化を無効化",
-      retryNone: "再試行するものがありません — このセッションのログにユーザーメッセージがありません。",
+      retryNone:
+        "再試行するものがありません — このセッションのログにユーザーメッセージがありません。",
       retryInfo: '▸ 再試行中: "{preview}"',
       loopTuiOnly: "/loop は対話型TUIでのみ利用可能です（run/replay では使えません）。",
       loopStopped: "▸ ループを停止しました。",
@@ -855,7 +887,8 @@ export const JA: TranslationSchema = {
       missingAppId: "QQ App ID が必要です。`/qq connect` を実行して設定してください。",
       missingAppSecret: "QQ App Secret が必要です。`/qq connect` を実行して設定してください。",
       authFailed: "QQ ボット認証に失敗しました — App ID と App Secret を確認してください。",
-      readyTimeout: "QQ ボットが15秒以内に READY を受信しませんでした — App ID と App Secret を確認してください。",
+      readyTimeout:
+        "QQ ボットが15秒以内に READY を受信しませんでした — App ID と App Secret を確認してください。",
     },
     admin: {
       doctorNeedsTui: "/doctor は TUI コンテキストが必要です（postDoctor wired）。",
@@ -876,15 +909,16 @@ export const JA: TranslationSchema = {
       hooksSources: "ソース: project={project} · global={global}",
       updateCurrent: "現在: reasonix {version}",
       updateLatestPending: "最新:  （未解決 — バックグラウンドチェック中またはオフライン）",
-      updateRetryHint: "新しいレジストリ取得をトリガーしました — 数秒後に `/update` を再試行してください。",
-      updateRetryHint2: "または別の端末で `reasonix update` を実行して同期的に強制取得してください。",
+      updateRetryHint:
+        "新しいレジストリ取得をトリガーしました — 数秒後に `/update` を再試行してください。",
+      updateRetryHint2:
+        "または別の端末で `reasonix update` を実行して同期的に強制取得してください。",
       updateLatest: "最新:  reasonix {version}",
       updateUpToDate: "最新バージョンです。何もする必要はありません。",
       updateNpxHint: "npx 経由で実行中です — 次回の `npx reasonix ...` 起動時に自動取得されます。",
       updateNpxForce: "より早く強制リフレッシュするには: `npm cache clean --force`。",
       updateUpgradeHint: "アップグレードするには、このセッションを終了して以下を実行してください:",
-      updateUpgradeCmd1:
-        "  reasonix update           （対話的、--dry-run でドライラン可能）",
+      updateUpgradeCmd1: "  reasonix update           （対話的、--dry-run でドライラン可能）",
       updateUpgradeCmd2: "  {command}   （直接）",
       updateInSessionDisabled:
         "セッション内インストールは意図的に無効化されています — インストールのスポーンにより",
@@ -899,7 +933,8 @@ export const JA: TranslationSchema = {
         "/undo は `reasonix code` 内でのみ利用可能です — チャットモードでは編集を適用しません。",
       historyCodeOnly: "/history は `reasonix code` 内でのみ利用可能です。",
       showCodeOnly: "/show は `reasonix code` 内でのみ利用可能です。",
-      applyCodeOnly: "/apply は `reasonix code` 内でのみ利用可能です（ここで適用するものはありません）。",
+      applyCodeOnly:
+        "/apply は `reasonix code` 内でのみ利用可能です（ここで適用するものはありません）。",
       discardCodeOnly: "/discard は `reasonix code` 内でのみ利用可能です。",
       planCodeOnly:
         "/plan は `reasonix code` 内でのみ利用可能です — チャットモードではツール書き込みを制御しません。",
@@ -913,8 +948,10 @@ export const JA: TranslationSchema = {
         "▸ 編集モード: YOLO — 編集とシェルコマンドがプロンプトなしで自動実行されます。/undo で編集のロールバックは可能です。注意して使用してください。",
       modeAuto:
         "▸ 編集モード: AUTO — 編集が即時適用されます; 5秒以内に u を押すか、後で /undo で元に戻せます。シェルコマンドは確認あり。",
-      modeReview: "▸ 編集モード: review — 編集は /apply（または y）/ /discard（または n）のキューに入ります",
-      commitCodeOnly: "/commit は `reasonix code` 内でのみ利用可能です（git リポジトリが必要です）。",
+      modeReview:
+        "▸ 編集モード: review — 編集は /apply（または y）/ /discard（または n）のキューに入ります",
+      commitCodeOnly:
+        "/commit は `reasonix code` 内でのみ利用可能です（git リポジトリが必要です）。",
       commitUsage:
         '使い方: /commit "コミットメッセージ"  — {root} で `git add -A && git commit -m "…"` を実行します',
       walkCodeOnly: "/walk は `reasonix code` 内でのみ利用可能です。",
@@ -926,7 +963,8 @@ export const JA: TranslationSchema = {
       checkpointRestoreHint:
         "  /restore <name|id> · /checkpoint forget <id> · /checkpoint <name> で追加",
       checkpointForgetUsage: "使い方: /checkpoint forget <id|name>",
-      checkpointNoMatch: '▸ "{name}" に一致するチェックポイントはありません — /checkpoint list を参照',
+      checkpointNoMatch:
+        '▸ "{name}" に一致するチェックポイントはありません — /checkpoint list を参照',
       checkpointDeleted: "▸ チェックポイント {id} ({name}) を削除しました",
       checkpointDeleteFailed: "▸ {id} の削除に失敗しました（既に存在しませんか？）",
       checkpointSaveUsage: "使い方: /checkpoint <name>   （または /checkpoint list で既存を表示）",
@@ -936,10 +974,12 @@ export const JA: TranslationSchema = {
         '▸ チェックポイント "{name}" を保存しました ({id}) — {files} ファイル, {size} KB。復元: /restore {name}',
       restoreCodeOnly: "/restore は `reasonix code` 内でのみ利用可能です。",
       restoreUsage: "使い方: /restore <name|id>   （/checkpoint list でIDを確認）",
-      restoreNoMatch: '▸ "{target}" に一致するチェックポイントはありません — /checkpoint list を試してください',
+      restoreNoMatch:
+        '▸ "{target}" に一致するチェックポイントはありません — /checkpoint list を試してください',
       restoreInfo: '▸ "{name}" ({id}) を {when} から復元しました',
       restoreWrote: "  · {count} ファイルを書き戻しました",
-      restoreRemoved: "  · {count} ファイルを削除しました（チェックポイント時点では存在しませんでした）",
+      restoreRemoved:
+        "  · {count} ファイルを削除しました（チェックポイント時点では存在しませんでした）",
       restoreSkipped: "  ✗ {count} ファイルをスキップしました:",
       cwdCodeOnly: "/cwd は `reasonix code` 内でのみ利用可能です。",
       cwdUsage:
@@ -947,20 +987,19 @@ export const JA: TranslationSchema = {
       cwdUsageNoCurrent: "使い方: /cwd <path>   ワークスペースルートを <path> に変更します。",
     },
     model: {
-      modelHint: "deepseek-v4-flash または deepseek-v4-pro を試してください — /models で最新リストを取得",
+      modelHint:
+        "deepseek-v4-flash または deepseek-v4-pro を試してください — /models で最新リストを取得",
       modelUsage: "使い方: /model <id>   ({hint})",
       modelNotInCatalog:
         "model → {id}   （⚠ 取得済みカタログにありません: {list}。間違いの場合、次の呼び出しが400になります — /models で更新してください。）",
       modelSet: "model → {id}",
       effortStatus: "effort → {current}   （選択肢: {list}）",
-      effortUsage:
-        "使い方: /effort <{list}>   （high が安全なデフォルト; max はDeepSeek拡張）",
+      effortUsage: "使い方: /effort <{list}>   （high が安全なデフォルト; max はDeepSeek拡張）",
       effortUsageNoMax: "使い方: /effort <{list}>",
       effortSet: "effort → {effort}",
       budgetNoCap:
         "セッション予算が設定されていません — 停止するまで続行します。設定: /budget <usd>   （例: /budget 5）",
-      budgetStatus:
-        "budget: ${spent} / ${cap} ({pct}%) · /budget off で解除、/budget <usd> で変更",
+      budgetStatus: "budget: ${spent} / ${cap} ({pct}%) · /budget off で解除、/budget <usd> で変更",
       budgetOff: "budget → off（上限なし）",
       budgetUsage:
         '使い方: /budget <usd>   （"{arg}" が指定されました — 正の数値である必要があります。例: /budget 5 または /budget 12.50）',
@@ -982,7 +1021,8 @@ export const JA: TranslationSchema = {
       removeUsage:
         "使い方: /permissions remove <prefix-or-index>   （例: /permissions remove 3、または /permissions remove npm）",
       removeEmpty: "▸ 削除するプロジェクト許可リストエントリはありません。",
-      removeIndexOob: "▸ インデックスが範囲外です: {idx}（プロジェクトリストには {count} エントリあります）",
+      removeIndexOob:
+        "▸ インデックスが範囲外です: {idx}（プロジェクトリストには {count} エントリあります）",
       removeNothing: "▸ 削除するものがありません。",
       removeBuiltin:
         "▸ `{prefix}` はビルトイン許可リストに含まれています（読み取り専用）。ビルトインエントリは実行時に削除できません — バイナリに組み込まれています。",
@@ -1005,7 +1045,8 @@ export const JA: TranslationSchema = {
       projectHeader: "プロジェクト許可リスト ({count}) — {root}",
       projectNone1: '  （なし — ShellConfirmプロンプトで "always allow" を選ぶか、',
       projectNone2: "   `/permissions add <prefix>` で直接追加してください。）",
-      projectNoRoot: "プロジェクト許可リスト — （プロジェクトルートなし; チャットモードではビルトインエントリのみ表示）",
+      projectNoRoot:
+        "プロジェクト許可リスト — （プロジェクトルートなし; チャットモードではビルトインエントリのみ表示）",
       builtinHeader: "ビルトイン許可リスト ({count}) — 読み取り専用、組み込み",
       subcommands:
         "サブコマンド: /permissions add <prefix> · /permissions remove <prefix-or-N> · /permissions clear confirm",
@@ -1029,10 +1070,13 @@ export const JA: TranslationSchema = {
     observability: {
       contextInfo: "context: ~{total} / {max} ({pct}%) · system {sys} · tools {tools} · log {log}",
       compactStarting: "▸ 古いターンをサマリーに折りたたみ中…",
-      compactNoop: "▸ 折りたたむものがありません — ログが既に小さいか、最近のターンのみで予算を超えています。",
-      compactDone: "▸ {before} メッセージ → {after} に折りたたみ（サマリー {chars} 文字）。続行します。",
+      compactNoop:
+        "▸ 折りたたむものがありません — ログが既に小さいか、最近のターンのみで予算を超えています。",
+      compactDone:
+        "▸ {before} メッセージ → {after} に折りたたみ（サマリー {chars} 文字）。続行します。",
       compactFailed: "▸ 折りたたみに失敗しました: {reason}",
-      costNoTurn: "まだターンがありません — `/cost` は最新ターンのトークンと消費の内訳を表示します。",
+      costNoTurn:
+        "まだターンがありません — `/cost` は最新ターンのトークンと消費の内訳を表示します。",
       costNeedsTui: "/cost は TUI コンテキストが必要です（postUsage wired）。",
       costNoPricing:
         '▸ /cost: モデル "{model}" の価格テーブルがありません。telemetry/stats.ts に追加してください。',
@@ -1040,8 +1084,10 @@ export const JA: TranslationSchema = {
         "▸ /cost 見積もり · {model} · {prompt} プロンプトトークン（sys {sys} + tools {tools} + log {log} + msg {msg}）",
       costWorstCase:
         "  最悪ケース（完全ミス）: {input} 入力 + ~{output} 出力（{avg} 平均）≈ {total}",
-      costLikely: "  想定（{pct}% セッションキャッシュヒット）: {input} 入力 + ~{output} 出力 ≈ {total}",
-      costLikelyCold: "  想定: キャッシュが溜まるまで最悪ケースと同じ（まだ完了したターンがありません）",
+      costLikely:
+        "  想定（{pct}% セッションキャッシュヒット）: {input} 入力 + ~{output} 出力 ≈ {total}",
+      costLikelyCold:
+        "  想定: キャッシュが溜まるまで最悪ケースと同じ（まだ完了したターンがありません）",
       statusModel: "  model   {model}",
       statusFlags: "  flags   stream={stream} · effort={effort}",
       statusCtx: "  ctx     {bar} {used}/{max} ({pct}%)",
@@ -1051,8 +1097,7 @@ export const JA: TranslationSchema = {
       statusBudget: "  budget  ${spent} / ${cap} ({pct}%){tag}",
       statusSession: '  session "{name}" · {count} メッセージ（再開 {resumed}）',
       statusSessionEphemeral: "  session（エフェメラル — 永続化なし）",
-      statusWorkspace:
-        "  workspace {path} · 起動時に固定（--dir <path> で再起動すると切り替え）",
+      statusWorkspace: "  workspace {path} · 起動時に固定（--dir <path> で再起動すると切り替え）",
       statusMcp: "  mcp     {servers} サーバー, {tools} ツール登録済み",
       statusEdits: "  edits   {count} 件保留（/apply でコミット、/discard で破棄）",
       statusPlan: "  plan    ON — 書き込み制御中（submit_plan + 承認）",
@@ -1065,8 +1110,7 @@ export const JA: TranslationSchema = {
         "lifecycle: {tool} の繰り返し拒否 — 同一引数で再試行しないでください",
       statusModeYolo:
         "  mode    YOLO — 編集+シェルがプロンプトなしで自動実行（/undo でロールバック · Shift+Tab で切替）",
-      statusModeAuto:
-        "  mode    AUTO — 編集が即時適用（5秒以内に u で取消 · Shift+Tab で切替）",
+      statusModeAuto: "  mode    AUTO — 編集が即時適用（5秒以内に u で取消 · Shift+Tab で切替）",
       statusModeReview: "  mode    review — 編集は /apply または y のキュー（Shift+Tab で切替）",
       statusDash: "  dash    {url}（ブラウザで開く · /dashboard stop）",
     },
@@ -1096,7 +1140,8 @@ export const JA: TranslationSchema = {
         "使い方: /plans done <stepId>  ·  /plans done all — モデルが mark_step_complete の呼び出しを忘れた場合の手動上書き",
       doneUnavailable: "/plans done はアクティブなセッション内でのみ利用可能です。",
       doneNoPlan: "アクティブなプランがありません — 完了とマークするものがありません。",
-      doneNotInPlan: "ステップ `{id}` はアクティブプランにありません。/plans でステップIDを確認してください。",
+      doneNotInPlan:
+        "ステップ `{id}` はアクティブプランにありません。/plans でステップIDを確認してください。",
       doneAlready: "ステップ `{id}` は既に完了とマークされています。",
       doneOk: "▸ ステップ `{id}` を完了とマークしました。",
       doneAllNoop: "すべてのステップが既に完了しています。",
@@ -1150,7 +1195,8 @@ export const JA: TranslationSchema = {
       layers: "3つのレイヤーが利用可能です:",
       layerProject: "  1. {file} — コミット可能なチームメモリ（リポジトリ内）。",
       layerGlobal: "  2. ~/.reasonix/memory/global/ — プロジェクト横断のプライベートメモリ。",
-      layerProjectHash: "  3. ~/.reasonix/memory/<project-hash>/ — このプロジェクトのプライベートメモリ。",
+      layerProjectHash:
+        "  3. ~/.reasonix/memory/<project-hash>/ — このプロジェクトのプライベートメモリ。",
       askModel: "モデルに `remember` を依頼するか、手動でファイルを編集してください。",
       changesNote:
         "変更は次回の /new または起動時に反映されます — プレフィックスキャッシュを保温するため、システムプロンプトはセッションごとに1回ハッシュ化されます。",
@@ -1213,13 +1259,13 @@ export const JA: TranslationSchema = {
       searxngInstall: "インストール:  docker run -d -p 8080:8080 searxng/searxng",
       switched: 'Web検索エンジンを "{engine}" に切り替えました。{note}',
       switchedSearxngNote: " SearXNG が {endpoint} で実行されていることを確認してください。",
-      switchedMetasoNote:
-        " 1日100回のクォータがあります（独自APIキーでより高い上限に設定可能）。",
+      switchedMetasoNote: " 1日100回のクォータがあります（独自APIキーでより高い上限に設定可能）。",
       switchedTavilyNote:
         " TAVILY_API_KEY または `tavilyApiKey` を設定してください; 無料1000回/月 https://tavily.com。",
       switchedPerplexityNote:
         " PERPLEXITY_API_KEY または `perplexityApiKey` を設定してください; https://perplexity.ai/settings/api で取得。",
-      switchedExaNote: " EXA_API_KEY または `exaApiKey` を設定してください; https://exa.ai で登録。",
+      switchedExaNote:
+        " EXA_API_KEY または `exaApiKey` を設定してください; https://exa.ai で登録。",
       keyNeeded:
         '"{engine}" のAPIキーが設定されていません。\n\n  1. {envVar} 環境変数を設定\n  2. またはインラインで提供:  /search-engine {engine} <your-key>\n  3. または "{engine}ApiKey" を ~/.reasonix/config.json に追加\n\nその後 /search-engine {engine} を再試行してください。',
       keySaved: " APIキーを設定に保存しました。",
@@ -1231,9 +1277,11 @@ export const JA: TranslationSchema = {
       listEmpty: "スキルが見つかりません。Reasonix は以下からスキルを読み取ります:",
       listProjectScope:
         "  · <project>/.reasonix/skills/<name>/SKILL.md  （または <name>.md） — プロジェクトスコープ",
-      listGlobalScope: "  · ~/.reasonix/skills/<name>/SKILL.md  （または <name>.md） — グローバルスコープ",
+      listGlobalScope:
+        "  · ~/.reasonix/skills/<name>/SKILL.md  （または <name>.md） — グローバルスコープ",
       listProjectOnly: "  （プロジェクトスコープは `reasonix code` 内でのみアクティブ）",
-      listFrontmatter: "各ファイルのフロントマターには少なくとも `name` と `description` が必要です。",
+      listFrontmatter:
+        "各ファイルのフロントマターには少なくとも `name` と `description` が必要です。",
       listInvoke:
         "スキルは `/skill <name> [args]` で呼び出すか、モデルに `run_skill` の呼び出しを依頼してください。",
       listHeader: "ユーザースキル ({count}):",
@@ -1245,7 +1293,8 @@ export const JA: TranslationSchema = {
       runNotFound: "スキルが見つかりません: {name}  （/skill list を試してください）",
       runInfo: "▸ スキル実行中: {name}{args}",
       newUsage: "使い方: /skill new <name> [--global]",
-      newCreated: "▸ スキルを作成しました: {name}\n  {path}\n  編集後、`/skill {name}` で呼び出せます",
+      newCreated:
+        "▸ スキルを作成しました: {name}\n  {path}\n  編集後、`/skill {name}` で呼び出せます",
       newError: "▲ /skill new に失敗しました: {reason}",
       pathsHeader: "スキルパス（優先順）:",
       pathsPriority:
@@ -1294,7 +1343,8 @@ export const JA: TranslationSchema = {
     queuedDots: "キュー中\u2026",
   },
   composer: {
-    placeholder: "何でも聞いてください  \u00b7  スラッシュでコマンド  \u00b7  アットマークでファイル",
+    placeholder:
+      "何でも聞いてください  \u00b7  スラッシュでコマンド  \u00b7  アットマークでファイル",
     waitingForResponse: "\u2026応答待機中\u2026",
     hintSend: "送信",
     hintNewline: "改行",
@@ -1303,7 +1353,8 @@ export const JA: TranslationSchema = {
     hintHistory: "履歴",
     hintAbort: "中断",
     hintQuit: "終了",
-    abortedHint: "ユーザーによりターン中断 \u00b7 もう一度escでクリア \u00b7 \u23ce でフォローアップ",
+    abortedHint:
+      "ユーザーによりターン中断 \u00b7 もう一度escでクリア \u00b7 \u23ce でフォローアップ",
     editorNoRawMode:
       "外部エディタが利用できません \u2014 この端末ではstdinのraw-mode切替がサポートされていません",
     editorFailed: "外部エディタ:",
@@ -1383,8 +1434,7 @@ export const JA: TranslationSchema = {
     denyFooter: "\u23ce 送信  \u00b7  esc スキップ（理由なしで拒否）",
     oldLabel: "  - 旧",
     newLabel: "  + 新",
-    sideBySide:
-      "   サイドバイサイド \u00b7 左が削除行、右が追加行 \u00b7 オフセットでペアリング",
+    sideBySide: "   サイドバイサイド \u00b7 左が削除行、右が追加行 \u00b7 オフセットでペアリング",
     linesAbove: "  \u2191 上に {count} 行  (\u2191/k または PgUp)",
     linesAbovePlural: "  \u2191 上に {count} 行  (\u2191/k または PgUp)",
     linesBelow: "  \u2193 下に {count} 行  (\u2193/j または Space/PgDn)",
@@ -1557,7 +1607,8 @@ export const JA: TranslationSchema = {
       "web_search: Metasoサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
     metasoParseError:
       "web_search: Metasoが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
-    metasoApiError: "web_search: Metaso APIエラー (コード {code}: {message}) \u2014 後で再試行してください",
+    metasoApiError:
+      "web_search: Metaso APIエラー (コード {code}: {message}) \u2014 後で再試行してください",
     tavilyMissingKey:
       "web_search: TavilyバックエンドにはAPIキーが必要です \u2014 TAVILY_API_KEY 環境変数または ~/.reasonix/config.json の `tavilyApiKey` を設定してください。無料1000回/月の登録は https://tavily.com から",
     tavilyUnauthorized:
@@ -1588,6 +1639,16 @@ export const JA: TranslationSchema = {
       "web_search: Exaサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
     exaParseError:
       "web_search: Exaが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
+    braveMissingKey:
+      "web_search: Brave SearchにはAPIキーが必要です \u2014 BRAVE_SEARCH_API_KEY（または BRAVE_API_KEY）環境変数、または ~/.reasonix/config.json の `braveApiKey` を設定してください。https://brave.com/search/api/ で月2000回まで無料登録できます",
+    braveUnauthorized:
+      "web_search: Brave Search APIキーが拒否されました \u2014 BRAVE_SEARCH_API_KEY を確認するか、https://brave.com/search/api/ から取得してください",
+    braveRateLimit:
+      "web_search: Brave Search APIがレート制限または月間クォータを超過しました \u2014 待つか、https://brave.com/search/api/ でアップグレードしてください",
+    braveServerError:
+      "web_search: Brave Searchサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa|brave でエンジンを切り替えてください",
+    braveParseError:
+      "web_search: Brave Searchが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     fetchStatus:
       "web_fetch {status} ({url}) \u2014 対処: ブラウザでURLが解決できるか確認してください。ステータスはホストがエラーページを返したことを示しています",
     fetchRateLimit429:
@@ -1730,7 +1791,8 @@ export const JA: TranslationSchema = {
     loadingMore: "さらに読み込み中\u2026",
     allLoaded: "全ページ読み込み済み",
     fetchingDetail: "smithery詳細を取得中\u2026",
-    noInstallInfo: "{name} のインストール情報がありません - `npx -y @smithery/cli install {name}` を試してください",
+    noInstallInfo:
+      "{name} のインストール情報がありません - `npx -y @smithery/cli install {name}` を試してください",
     alreadyInstalled: "インストール済み: {spec}",
     installed: "インストール済み \u2192 {spec}",
     uninstalled: "{name} をアンインストールしました",
@@ -1753,7 +1815,8 @@ export const JA: TranslationSchema = {
   },
   mcpBrowser: {
     title: "\u25c8 MCP ブラウザ",
-    empty: "MCPサーバーが接続されていません。`reasonix setup` を実行して選択するか、--mcp で起動してください。",
+    empty:
+      "MCPサーバーが接続されていません。`reasonix setup` を実行して選択するか、--mcp で起動してください。",
     serverCount: "{count} サーバー",
     footer: "\u2191\u2193 選択 \u00b7 [r] 再接続 \u00b7 [d] 無効化 \u00b7 esc 終了",
   },
@@ -1793,7 +1856,8 @@ export const JA: TranslationSchema = {
   checkpointPicker: {
     title: "チェックポイントを復元 \u2014 {workspace}",
     header: " \u25c8 REASONIX \u00b7 チェックポイントを選択 ",
-    empty: "  このワークスペースにはまだチェックポイントがありません - /checkpoint で作成してください",
+    empty:
+      "  このワークスペースにはまだチェックポイントがありません - /checkpoint で作成してください",
     more: "     \u2026 さらに {hidden} 件",
     footer: "  \u2191\u2193 選択  \u00b7  \u23ce 復元  \u00b7  [d] 削除  \u00b7  esc 終了",
     footerEmpty: "  esc 終了",
@@ -1803,7 +1867,8 @@ export const JA: TranslationSchema = {
     metaRight: "\u2212{removed}  +{added}  \u00b7  {kept} 保持",
     updatedSummary: "更新されたサマリー: {summary}",
     acceptLabel: "修正を承認 - 新しいステップリストを適用",
-    acceptHint: "残りのプランを提案されたステップで置き換えます。完了済みステップは変更されません。",
+    acceptHint:
+      "残りのプランを提案されたステップで置き換えます。完了済みステップは変更されません。",
     rejectLabel: "拒否 - 元のプランを維持",
     rejectHint: "提案を破棄します。モデルは元の残りステップで続行します。",
   },
@@ -1890,7 +1955,8 @@ export const JA: TranslationSchema = {
     usageInstall: "使い方: reasonix mcp install <name>",
     noMatchesFor: '{count} 件の読み込み済みエントリ中に "{q}" の一致はありません（{source}）',
     matchCount: '{source} レジストリで "{q}" に {count} 件一致（{loaded} エントリをスキャン）:',
-    moreLoaded: "\u2026 さらに {count} 件読み込み済み \u2014 `reasonix mcp search <query>` でフィルタしてください",
+    moreLoaded:
+      "\u2026 さらに {count} 件読み込み済み \u2014 `reasonix mcp search <query>` でフィルタしてください",
     moreMatches: "\u2026 さらに {count} 件一致",
     installed: "インストール済み: {spec}",
     noServerFound:
