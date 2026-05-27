@@ -343,7 +343,37 @@ function finiteNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function mapSessionItem(s: any) {
+interface ServerSessionItem {
+  name: string;
+  messageCount: number;
+  mtime: number;
+  summary?: string;
+  workspaceStatus?: "matched" | "legacy_missing_meta";
+}
+
+interface ServerSessionsResponse {
+  sessions?: ServerSessionItem[];
+  currentSession?: string | null;
+}
+
+interface ServerBalanceEntry {
+  currency: string;
+  total_balance: string;
+}
+
+interface ServerOverviewStats {
+  totalCostUsd?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  totalCompletionTokens?: number;
+  balance?: ServerBalanceEntry[];
+}
+
+interface ServerOverviewResponse {
+  stats?: ServerOverviewStats;
+}
+
+function mapSessionItem(s: ServerSessionItem) {
   return {
     name: s.name,
     messageCount: s.messageCount,
@@ -353,7 +383,7 @@ function mapSessionItem(s: any) {
   };
 }
 
-function emitSessionsSnapshot(sessionsData: any): void {
+function emitSessionsSnapshot(sessionsData: ServerSessionsResponse | null | undefined): void {
   if (!sessionsData?.sessions) return;
   emitEvent({
     type: "$sessions",
@@ -364,7 +394,7 @@ function emitSessionsSnapshot(sessionsData: any): void {
   });
 }
 
-function emitOverviewSnapshot(overview: any): void {
+function emitOverviewSnapshot(overview: ServerOverviewResponse | null | undefined): void {
   const stats = overview?.stats;
   if (!stats) return;
 
@@ -380,17 +410,15 @@ function emitOverviewSnapshot(overview: any): void {
     cacheMissTokens,
   });
 
-  if (stats.balance) {
-    const firstBalance = stats.balance[0];
-    if (firstBalance) {
-      emitEvent({
-        type: "$balance",
-        tabId: "tab-1",
-        currency: firstBalance.currency,
-        total: Number.parseFloat(firstBalance.total_balance) || 0,
-        isAvailable: true,
-      });
-    }
+  const firstBalance = stats.balance?.[0];
+  if (firstBalance) {
+    emitEvent({
+      type: "$balance",
+      tabId: "tab-1",
+      currency: firstBalance.currency,
+      total: Number.parseFloat(firstBalance.total_balance) || 0,
+      isAvailable: true,
+    });
   }
 }
 
