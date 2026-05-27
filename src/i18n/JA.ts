@@ -653,6 +653,8 @@ export const JA: TranslationSchema = {
     continuingAfter: "▸ {label}{counter} の後に続行",
     planStoppedAt: "▸ {label}{counter} でプランを停止",
     revisingAfter: "▸ {label} の後に修正 — {feedback}",
+    explicitPlanIntentArmed:
+      "▸ 明示的な plan-first リクエストを検出 — strict lifecycle を有効化しました。/plan off で終了できます。",
     historyScrollHint: " ↑ 履歴を読込中 · End / PgDn で最下部に戻る · ↓ で1行進む",
     editHistoryTitle: "編集履歴（古い順）:",
     editHistoryNoCodeMode: "コードモードではありません",

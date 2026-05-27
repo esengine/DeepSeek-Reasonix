@@ -227,6 +227,7 @@ export interface TranslationSchema {
     continuingAfter: string;
     planStoppedAt: string;
     revisingAfter: string;
+    explicitPlanIntentArmed: string;
     historyScrollHint: string;
     editHistoryTitle: string;
     editHistoryNoCodeMode: string;

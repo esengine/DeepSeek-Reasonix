@@ -624,6 +624,8 @@ export const EN: TranslationSchema = {
     continuingAfter: "▸ continuing after {label}{counter}",
     planStoppedAt: "▸ plan stopped at {label}{counter}",
     revisingAfter: "▸ revising after {label} — {feedback}",
+    explicitPlanIntentArmed:
+      "▸ explicit plan-first request detected — strict lifecycle enabled. Use /plan off to leave.",
     historyScrollHint: " ↑ reading history · End / PgDn returns to bottom · ↓ advances one line",
     editHistoryTitle: "Edit history (oldest first):",
     editHistoryNoCodeMode: "not in code mode",

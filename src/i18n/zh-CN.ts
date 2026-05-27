@@ -604,6 +604,8 @@ export const zhCN: TranslationSchema = {
     continuingAfter: "▸ 在 {label}{counter} 之后继续",
     planStoppedAt: "▸ 计划在 {label}{counter} 处停止",
     revisingAfter: "▸ 在 {label} 之后修订 — {feedback}",
+    explicitPlanIntentArmed:
+      "▸ 检测到明确的先规划请求 — 已启用 strict lifecycle。可用 /plan off 退出。",
     historyScrollHint: " ↑ 正在查看历史 · End / PgDn 返回底部 · ↓ 向下滚动一行",
     editHistoryTitle: "编辑历史（从旧到新）：",
     editHistoryNoCodeMode: "不在代码模式中",
