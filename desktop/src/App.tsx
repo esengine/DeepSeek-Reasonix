@@ -2361,9 +2361,8 @@ function TabRuntime({
                         );
                       }
                       if (m.kind === "assistant") {
-                        const stats = !m.pending ? countFileStats(m.segments) : null;
                         return (
-                          <div className="thread-inner">
+                          <div className="thread-inner" key={`a-${m.turn}-${m.segments.length}-${m.pending}`}>
                             <AssistantMsg
                               segments={m.segments}
                               pending={m.pending}
@@ -2373,7 +2372,10 @@ function TabRuntime({
                               onAlwaysAllowConfirm={onAlwaysAllowConfirm}
                               pendingConfirms={state.pendingConfirms}
                             />
-                            {stats ? <DiffStats stats={stats} /> : null}
+                            {!m.pending && (() => {
+                              const stats = countFileStats(m.segments);
+                              return stats ? <DiffStats stats={stats} /> : null;
+                            })()}
                           </div>
                         );
                       }
