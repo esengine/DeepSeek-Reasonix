@@ -4,10 +4,13 @@ import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   statSync,
@@ -187,6 +190,68 @@ function readSessionMessages(
     }
   }
   return { messages: out, hadContent: raw.trim().length > 0 };
+}
+
+const READ_CHUNK_SIZE = 65536; // 64KB per backward scan chunk
+
+/**
+ * Read only the last `count` messages from a JSONL session file by scanning
+ * backwards from end-of-file. Returns at most `count` messages, newest first.
+ * Falls back to the full file read if backward scan fails.
+ */
+export function readTailMessages(path: string, count: number): ChatMessage[] {
+  if (!existsSync(path)) return [];
+  try {
+    const { size } = statSync(path);
+    if (size === 0) return [];
+    const fd = openSync(path, "r");
+    try {
+      const out: ChatMessage[] = [];
+      let pos = size;
+      let leftover = "";
+      while (pos > 0 && out.length < count) {
+        const chunkSize = Math.min(READ_CHUNK_SIZE, pos);
+        pos -= chunkSize;
+        const buf = Buffer.alloc(chunkSize);
+        readSync(fd, buf, 0, chunkSize, pos);
+        const chunk = buf.toString("utf8") + leftover;
+        const lines = chunk.split("\n");
+        // First element may be partial (we're in the middle of a line)
+        leftover = lines[0]!;
+        // Parse complete lines in reverse (except the first which is partial)
+        for (let i = lines.length - 1; i >= 1 && out.length < count; i--) {
+          const trimmed = lines[i]!.trim();
+          if (!trimmed) continue;
+          try {
+            const msg = JSON.parse(trimmed) as ChatMessage;
+            if (msg && typeof msg === "object" && "role" in msg) out.push(msg);
+          } catch {
+            /* skip malformed */
+          }
+        }
+      }
+      // Try to parse the leftover (first line of the first chunk)
+      if (out.length < count && leftover.trim()) {
+        try {
+          const msg = JSON.parse(leftover.trim()) as ChatMessage;
+          if (msg && typeof msg === "object" && "role" in msg) out.push(msg);
+        } catch {
+          /* skip */
+        }
+      }
+      return out.reverse();
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    // Fallback to full file read
+    return loadSessionMessagesFromPath(path);
+  }
+}
+
+function loadSessionMessagesFromPath(path: string): ChatMessage[] {
+  const raw = readSessionMessages(path);
+  return raw?.messages ?? [];
 }
 
 export function appendSessionMessage(name: string, message: ChatMessage): void {
