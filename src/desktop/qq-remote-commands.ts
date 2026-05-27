@@ -3,6 +3,7 @@ export type QQRemoteDesktopCommand =
   | { kind: "new" }
   | { kind: "abort" }
   | { kind: "compact" }
+  | { kind: "retry" }
   | { kind: "btw"; text: string }
   | { kind: "skill"; name: string; args?: string };
 
@@ -17,6 +18,7 @@ export function parseQQRemoteDesktopCommand(
   if (trimmed === "/new") return { kind: "new" };
   if (trimmed === "/abort") return { kind: "abort" };
   if (trimmed === "/compact") return { kind: "compact" };
+  if (trimmed === "/retry") return { kind: "retry" };
 
   const btwMatch = /^\/btw(?:\s+([\s\S]+))?$/.exec(trimmed);
   if (btwMatch) {
@@ -28,7 +30,13 @@ export function parseQQRemoteDesktopCommand(
   if (!skillMatch) return null;
   const [, rawName, rawArgs] = skillMatch;
   if (!rawName) return null;
-  if (rawName === "help" || rawName === "new" || rawName === "abort" || rawName === "compact") {
+  if (
+    rawName === "help" ||
+    rawName === "new" ||
+    rawName === "abort" ||
+    rawName === "compact" ||
+    rawName === "retry"
+  ) {
     return null;
   }
   const names = new Set(skillNames);
@@ -47,6 +55,7 @@ export function qqRemoteDesktopHelpText(skillNames: Iterable<string>): string {
     "- /new",
     "- /abort",
     "- /compact",
+    "- /retry",
     "- /btw <question>",
     `${skillHint}`.trimEnd(),
     "",

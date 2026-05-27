@@ -1340,6 +1340,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               .catch(() => undefined);
           });
         return true;
+      case "retry": {
+        if (!tab.runtime) {
+          sendQQInfo("Desktop is not configured yet.", tab);
+          return true;
+        }
+        const prev = tab.runtime.loop.retryLastUser();
+        if (!prev) {
+          sendQQInfo(
+            "There is no previous local user message to retry in this desktop conversation.",
+            tab,
+          );
+          return true;
+        }
+        void runTurn(tab, prev, true);
+        return true;
+      }
       case "btw":
         if (!tab.runtime) {
           sendQQInfo("Desktop is not configured yet.", tab);

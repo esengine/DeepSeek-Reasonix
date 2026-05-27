@@ -13,6 +13,7 @@ describe("desktop QQ remote commands", () => {
     expect(parseQQRemoteDesktopCommand("/new", skills)).toEqual({ kind: "new" });
     expect(parseQQRemoteDesktopCommand("/abort", skills)).toEqual({ kind: "abort" });
     expect(parseQQRemoteDesktopCommand("/compact", skills)).toEqual({ kind: "compact" });
+    expect(parseQQRemoteDesktopCommand("/retry", skills)).toEqual({ kind: "retry" });
     expect(parseQQRemoteDesktopCommand("/btw what's up", skills)).toEqual({
       kind: "btw",
       text: "what's up",
@@ -25,7 +26,6 @@ describe("desktop QQ remote commands", () => {
   });
 
   it("does not treat UI-only or ambiguous slash text as QQ desktop commands", () => {
-    expect(parseQQRemoteDesktopCommand("/retry", skills)).toBeNull();
     expect(parseQQRemoteDesktopCommand("/theme", skills)).toBeNull();
     expect(parseQQRemoteDesktopCommand("/skill qq", skills)).toBeNull();
     expect(parseQQRemoteDesktopCommand("/btw", skills)).toBeNull();
@@ -37,6 +37,7 @@ describe("desktop QQ remote commands", () => {
     expect(qqRemoteCommandBypassesBusy({ kind: "new" })).toBe(true);
     expect(qqRemoteCommandBypassesBusy({ kind: "abort" })).toBe(true);
     expect(qqRemoteCommandBypassesBusy({ kind: "compact" })).toBe(false);
+    expect(qqRemoteCommandBypassesBusy({ kind: "retry" })).toBe(false);
     expect(qqRemoteCommandBypassesBusy({ kind: "btw", text: "hi" })).toBe(false);
     expect(qqRemoteCommandBypassesBusy({ kind: "skill", name: "qq" })).toBe(false);
   });
@@ -47,6 +48,7 @@ describe("desktop QQ remote commands", () => {
     expect(help).toContain("/new");
     expect(help).toContain("/abort");
     expect(help).toContain("/compact");
+    expect(help).toContain("/retry");
     expect(help).toContain("/btw <question>");
     expect(help).toContain("/<skill> [args]");
     expect(help).toContain("agent-reach, qq");
