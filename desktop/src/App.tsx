@@ -2342,7 +2342,7 @@ function TabRuntime({
                 ) : (
                   <Virtuoso
                     ref={virtuosoRef}
-                    style={{ height: "100%" }}
+                    style={{ height: "100%", minHeight: 0 }}
                     totalCount={messageItems.length}
                     followOutput={"auto"}
                     atBottomStateChange={(atBottom) => setShowJumpButton(!atBottom)}
