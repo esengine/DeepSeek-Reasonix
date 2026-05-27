@@ -3302,14 +3302,14 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   line-height: 1.5;
 }
 .mem-detail {
-  max-height: 220px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   margin: 8px 0 0;
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
-  white-space: pre-wrap;
   color: var(--fg-1);
   font-family: var(--mono);
   font-size: 12px;
@@ -3787,9 +3787,29 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 .ctx-body {
   flex: 1;
   margin-right: 12px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 12px;
   padding-right: 20px;
+}
+.ctx-body-tokens {
+  flex-shrink: 0;
+}
+.ctx-body-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ctx-body-tab::-webkit-scrollbar {
+  width: 8px;
+}
+.ctx-body-tab::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+.ctx-body-tab::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
 }
 .ctx-body::-webkit-scrollbar {
   width: 8px;

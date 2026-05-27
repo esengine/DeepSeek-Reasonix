@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useMemo, useState } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
+import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
@@ -61,7 +62,7 @@ export function ContextPanel({
       </div>
 
       <div className="ctx-body">
-        <div className="ctx-block">
+        <div className="ctx-block ctx-body-tokens">
           <div className="h">
             <span>{t("contextPanel.contextTokens")}</span>
             <span className="right">
@@ -93,14 +94,16 @@ export function ContextPanel({
           </div>
         </div>
 
-        <PanelErrorBoundary key={tab} label={tab}>
-          {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
-          {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
-          {tab === "memory" && (
-            <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
-          )}
-          {tab === "rules" && <CtxRules settings={settings} />}
-        </PanelErrorBoundary>
+        <div className="ctx-body-tab">
+          <PanelErrorBoundary key={tab} label={tab}>
+            {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
+            {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
+            {tab === "memory" && (
+              <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
+            )}
+            {tab === "rules" && <CtxRules settings={settings} />}
+          </PanelErrorBoundary>
+        </div>
       </div>
     </aside>
   );
@@ -304,7 +307,7 @@ function CtxMemory({
   onRead: (path: string) => void;
 }) {
   return (
-    <div className="ctx-block">
+    <div className="ctx-block" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div className="h">
         <span>{t("contextPanel.memoryTitle")}</span>
         <span className="right">
@@ -314,22 +317,28 @@ function CtxMemory({
       {entries.length === 0 ? (
         <div className="ctx-empty">{t("contextPanel.noMemoriesMsg")}</div>
       ) : (
-        <div className="mem">
-          {entries.map((m) => (
-            <button
-              type="button"
-              className="mem-row"
-              data-active={detail?.path === m.path}
-              key={m.path}
-              onClick={() => onRead(m.path)}
-            >
-              <span className="scope" data-s={m.scope}>
-                {m.scope === "project" ? t("contextPanel.scopeProject") : t("contextPanel.scopeGlobal")}
-              </span>
-              <span className="txt">{m.description || m.name}</span>
-            </button>
-          ))}
-          {detail ? <pre className="mem-detail">{detail.body}</pre> : null}
+        <div className="mem" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <div style={{ flexShrink: 0 }}>
+            {entries.map((m) => (
+              <button
+                type="button"
+                className="mem-row"
+                data-active={detail?.path === m.path}
+                key={m.path}
+                onClick={() => onRead(m.path)}
+              >
+                <span className="scope" data-s={m.scope}>
+                  {m.scope === "project" ? t("contextPanel.scopeProject") : t("contextPanel.scopeGlobal")}
+                </span>
+                <span className="txt">{m.description || m.name}</span>
+              </button>
+            ))}
+          </div>
+          {detail ? (
+            <div className="mem-detail">
+              <Markdown source={detail.body} />
+            </div>
+          ) : null}
         </div>
       )}
     </div>
