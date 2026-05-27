@@ -7,7 +7,7 @@ function fakeLoop(messages: ChatMessage[]): CacheFirstLoop {
   return {
     model: "deepseek-v4-flash",
     prefix: { system: "system", toolSpecs: [] },
-    log: { toMessages: () => messages },
+    log: { toMessages: () => messages, toFullHistory: () => messages },
   } as unknown as CacheFirstLoop;
 }
 
