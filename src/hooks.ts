@@ -174,6 +174,7 @@ export interface HookPayload {
   toolResult?: string;
   prompt?: string;
   lastAssistantText?: string;
+  last_assistant_message?: string;
   turn?: number;
 }
 
