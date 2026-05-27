@@ -192,12 +192,10 @@ function readSessionMessages(
   return { messages: out, hadContent: raw.trim().length > 0 };
 }
 
-const READ_CHUNK_SIZE = 65536; // 64KB per backward scan chunk
+const READ_CHUNK_SIZE = 65536; // Balance I/O overhead vs read amplification for tail scans.
 
 /**
- * Read only the last `count` messages from a JSONL session file by scanning
- * backwards from end-of-file. Returns at most `count` messages, newest first.
- * Falls back to the full file read if backward scan fails.
+ * Backward JSONL scanner — reads tail N messages. Falls back to full file read.
  */
 export function readTailMessages(path: string, count: number): ChatMessage[] {
   if (!existsSync(path)) return [];
@@ -216,9 +214,9 @@ export function readTailMessages(path: string, count: number): ChatMessage[] {
         readSync(fd, buf, 0, chunkSize, pos);
         const chunk = buf.toString("utf8") + leftover;
         const lines = chunk.split("\n");
-        // First element may be partial (we're in the middle of a line)
+        // First chunk's start may split a line; carry it over to the next iteration.
         leftover = lines[0]!;
-        // Parse complete lines in reverse (except the first which is partial)
+        // Process complete lines from the tail of this chunk backward.
         for (let i = lines.length - 1; i >= 1 && out.length < count; i--) {
           const trimmed = lines[i]!.trim();
           if (!trimmed) continue;
@@ -230,7 +228,7 @@ export function readTailMessages(path: string, count: number): ChatMessage[] {
           }
         }
       }
-      // Try to parse the leftover (first line of the first chunk)
+      // Catch the partial line from the very first read chunk.
       if (out.length < count && leftover.trim()) {
         try {
           const msg = JSON.parse(leftover.trim()) as ChatMessage;
@@ -244,7 +242,6 @@ export function readTailMessages(path: string, count: number): ChatMessage[] {
       closeSync(fd);
     }
   } catch {
-    // Fallback to full file read
     return loadSessionMessagesFromPath(path);
   }
 }
