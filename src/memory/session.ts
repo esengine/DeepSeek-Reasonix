@@ -260,6 +260,7 @@ export function appendSessionMessage(name: string, message: ChatMessage): void {
   } catch {
     /* chmod not supported on this platform */
   }
+  invalidatePromptHistoryCache();
 }
 
 export function listSessions(opts?: {
@@ -328,6 +329,179 @@ export function listSessionsForWorkspace(workspace: string): SessionInfo[] {
   return listSessions({ workspaceFilter: workspace, includeLegacyWorkspaceMatches: true });
 }
 
+export type PromptHistoryDirection = "older" | "newer";
+
+export interface PromptHistoryCursor {
+  sessionName: string;
+  /** Zero-based message index inside the persisted session JSONL. */
+  messageIndex: number;
+}
+
+export interface PromptHistoryEntry {
+  value: string;
+  cursor: PromptHistoryCursor;
+}
+
+export interface PromptHistoryStepOptions {
+  direction: PromptHistoryDirection;
+  cursor?: PromptHistoryCursor | null;
+  startSessionName?: string | null;
+  stopSessionName?: string | null;
+  workspace?: string;
+}
+
+interface PromptHistorySessionInfo {
+  name: string;
+  path: string;
+  mtime: Date;
+  workspace?: string;
+}
+
+interface PromptHistorySessionCache {
+  sessions: PromptHistorySessionInfo[];
+  lastUpdated: number;
+}
+
+let globalPromptHistoryCache: PromptHistorySessionCache | null = null;
+// Invalidation is the correctness path; TTL only backs up external mtime changes.
+const CACHE_TTL_MS = 5000;
+
+function invalidatePromptHistoryCache(): void {
+  globalPromptHistoryCache = null;
+}
+
+function listSessionsForPromptHistory(workspace?: string): PromptHistorySessionInfo[] {
+  const dir = sessionsDir();
+  if (!existsSync(dir)) return [];
+
+  let sessions: PromptHistorySessionInfo[] = [];
+  const now = Date.now();
+
+  if (globalPromptHistoryCache && now - globalPromptHistoryCache.lastUpdated < CACHE_TTL_MS) {
+    sessions = globalPromptHistoryCache.sessions;
+  } else {
+    try {
+      const files = readdirSync(dir).filter(
+        (f) => f.endsWith(".jsonl") && !f.endsWith(".events.jsonl"),
+      );
+      sessions = files.flatMap((file) => {
+        const path = join(dir, file);
+        const name = file.replace(/\.jsonl$/, "");
+        const meta = loadSessionMeta(name);
+        const stat = statSync(path);
+        return [
+          {
+            name,
+            path,
+            mtime: stat.mtime,
+            workspace: meta.workspace,
+          },
+        ];
+      });
+      sessions.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+      globalPromptHistoryCache = {
+        sessions,
+        lastUpdated: now,
+      };
+    } catch {
+      return [];
+    }
+  }
+
+  if (workspace) {
+    const want = normalizeWorkspace(workspace);
+    return sessions.filter((s) => {
+      if (typeof s.workspace === "string") {
+        return normalizeWorkspace(s.workspace) === want;
+      }
+      const legacyPrefix = legacySessionPrefixForWorkspace(workspace);
+      return s.name.startsWith(legacyPrefix);
+    });
+  }
+
+  return sessions;
+}
+
+export function promptHistoryStep(opts: PromptHistoryStepOptions): PromptHistoryEntry | null {
+  const sessions = listSessionsForPromptHistory(opts.workspace);
+  if (sessions.length === 0) return null;
+  if (opts.direction === "newer" && !opts.cursor) return null;
+
+  const cursorSession = opts.cursor?.sessionName;
+  const startSession = cursorSession ?? opts.startSessionName ?? null;
+  const foundStart = startSession
+    ? sessions.findIndex((session) => session.name === sanitizeName(startSession))
+    : -1;
+  const startIndex =
+    foundStart >= 0 ? foundStart : opts.direction === "older" ? 0 : sessions.length - 1;
+  const stopIndex = opts.stopSessionName
+    ? sessions.findIndex((session) => session.name === sanitizeName(opts.stopSessionName!))
+    : -1;
+
+  for (let offset = 0; offset < sessions.length; offset++) {
+    const sessionIndex = opts.direction === "older" ? startIndex + offset : startIndex - offset;
+    if (sessionIndex < 0 || sessionIndex >= sessions.length) break;
+    if (opts.direction === "newer" && stopIndex >= 0 && sessionIndex < stopIndex) break;
+
+    const session = sessions[sessionIndex];
+    if (!session) continue;
+    const messages = loadSessionMessages(session.name);
+    const cursorIndex =
+      offset === 0 && opts.cursor?.sessionName === session.name
+        ? opts.cursor.messageIndex
+        : undefined;
+    const entry = findPromptHistoryEntryInMessages({
+      sessionName: session.name,
+      messages,
+      direction: opts.direction,
+      cursorIndex,
+    });
+    if (entry) return entry;
+  }
+
+  return null;
+}
+
+function findPromptHistoryEntryInMessages({
+  sessionName,
+  messages,
+  direction,
+  cursorIndex,
+}: {
+  sessionName: string;
+  messages: ChatMessage[];
+  direction: PromptHistoryDirection;
+  cursorIndex?: number;
+}): PromptHistoryEntry | null {
+  if (direction === "older") {
+    const start =
+      cursorIndex === undefined
+        ? messages.length - 1
+        : Math.min(cursorIndex - 1, messages.length - 1);
+    for (let i = start; i >= 0; i--) {
+      const value = promptHistoryValue(messages[i]);
+      if (!value) continue;
+      return { value, cursor: { sessionName, messageIndex: i } };
+    }
+    return null;
+  }
+
+  const start =
+    cursorIndex === undefined ? 0 : Math.max(0, Math.min(cursorIndex + 1, messages.length));
+  for (let i = start; i < messages.length; i++) {
+    const value = promptHistoryValue(messages[i]);
+    if (!value) continue;
+    return { value, cursor: { sessionName, messageIndex: i } };
+  }
+  return null;
+}
+
+function promptHistoryValue(message: ChatMessage | undefined): string | null {
+  if (!message || message.role !== "user") return null;
+  const value = typeof message.content === "string" ? message.content.trim() : "";
+  return value || null;
+}
+
 export function legacySessionPrefixForWorkspace(workspace: string): string {
   const normalized = normalizeWorkspace(workspace);
   const base =
@@ -370,6 +544,7 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
   } catch {
     /* chmod not supported */
   }
+  invalidatePromptHistoryCache();
   return next;
 }
 
@@ -393,6 +568,7 @@ export function renameSession(oldName: string, newName: string): boolean {
       }
     }
   }
+  invalidatePromptHistoryCache();
   return true;
 }
 
@@ -420,6 +596,7 @@ export function deleteSession(name: string): boolean {
         /* expected when the sidecar doesn't exist */
       }
     }
+    invalidatePromptHistoryCache();
     return true;
   } catch {
     return false;
@@ -438,6 +615,7 @@ export function rewriteSession(name: string, messages: ChatMessage[]): void {
     chmodPrivate(backup);
   }
   atomicWriteSync(path, body ? `${body}\n` : "", tmp);
+  invalidatePromptHistoryCache();
 }
 
 /** Rotate the live jsonl + sidecars to `<name>__archive_<ts>` so /new doesn't destroy history. Returns the archive name, or null if there was nothing to archive. */

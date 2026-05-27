@@ -25,6 +25,7 @@ import {
   normalizeWorkspace,
   patchSessionMeta,
   patchSessionWorkspaceIfMissing,
+  promptHistoryStep,
   pruneStaleSessions,
   renameSession,
   resolveSession,
@@ -214,6 +215,148 @@ describe("session persistence", () => {
     appendFileSync(p, JSON.stringify({ role: "user", content: "b" }), "utf8");
     const item = listSessions().find((s) => s.name === "tail")!;
     expect(item.messageCount).toBe(2);
+  });
+
+  it("promptHistoryStep browses same-session prompts in both directions", () => {
+    appendSessionMessage("chat", { role: "user", content: "one" });
+    appendSessionMessage("chat", { role: "assistant", content: "ok" });
+    appendSessionMessage("chat", { role: "user", content: "two" });
+    patchSessionMeta("chat", { workspace: "/proj/a" });
+
+    const latest = promptHistoryStep({
+      direction: "older",
+      startSessionName: "chat",
+      workspace: "/proj/a",
+    });
+    expect(latest?.value).toBe("two");
+
+    const previous = promptHistoryStep({
+      direction: "older",
+      cursor: latest!.cursor,
+      workspace: "/proj/a",
+    });
+    expect(previous?.value).toBe("one");
+
+    const newer = promptHistoryStep({
+      direction: "newer",
+      cursor: previous!.cursor,
+      stopSessionName: "chat",
+      workspace: "/proj/a",
+    });
+    expect(newer?.value).toBe("two");
+
+    expect(
+      promptHistoryStep({
+        direction: "newer",
+        cursor: latest!.cursor,
+        stopSessionName: "chat",
+        workspace: "/proj/a",
+      }),
+    ).toBeNull();
+  });
+
+  it("promptHistoryStep preserves duplicate prompts as separate history entries", () => {
+    appendSessionMessage("dupes", { role: "user", content: "repeat" });
+    appendSessionMessage("dupes", { role: "assistant", content: "ok" });
+    appendSessionMessage("dupes", { role: "user", content: "repeat" });
+    patchSessionMeta("dupes", { workspace: "/proj/a" });
+
+    const latest = promptHistoryStep({
+      direction: "older",
+      startSessionName: "dupes",
+      workspace: "/proj/a",
+    });
+    expect(latest).toMatchObject({
+      value: "repeat",
+      cursor: { sessionName: "dupes", messageIndex: 2 },
+    });
+
+    const previous = promptHistoryStep({
+      direction: "older",
+      cursor: latest!.cursor,
+      workspace: "/proj/a",
+    });
+    expect(previous).toMatchObject({
+      value: "repeat",
+      cursor: { sessionName: "dupes", messageIndex: 0 },
+    });
+  });
+
+  it("promptHistoryStep sees workspace metadata patched after the cache was warmed", () => {
+    appendSessionMessage("plain", { role: "user", content: "now visible" });
+
+    expect(
+      promptHistoryStep({
+        direction: "older",
+        startSessionName: "plain",
+        workspace: "/proj/a",
+      }),
+    ).toBeNull();
+
+    patchSessionMeta("plain", { workspace: "/proj/a" });
+
+    expect(
+      promptHistoryStep({
+        direction: "older",
+        startSessionName: "plain",
+        workspace: "/proj/a",
+      })?.value,
+    ).toBe("now visible");
+  });
+
+  it("promptHistoryStep crosses desktop sessions within the same workspace", () => {
+    appendSessionMessage("older", { role: "user", content: "old one" });
+    appendSessionMessage("older", { role: "user", content: "old two" });
+    appendSessionMessage("newer", { role: "user", content: "new one" });
+    appendSessionMessage("newer", { role: "user", content: "new two" });
+    appendSessionMessage("other-workspace", { role: "user", content: "skip me" });
+    patchSessionMeta("older", { workspace: "/proj/a" });
+    patchSessionMeta("newer", { workspace: "/proj/a" });
+    patchSessionMeta("other-workspace", { workspace: "/proj/b" });
+    utimesSync(sessionPath("older"), new Date("2026-01-01"), new Date("2026-01-01"));
+    utimesSync(sessionPath("newer"), new Date("2026-01-02"), new Date("2026-01-02"));
+    utimesSync(sessionPath("other-workspace"), new Date("2026-01-03"), new Date("2026-01-03"));
+
+    const first = promptHistoryStep({
+      direction: "older",
+      startSessionName: "empty-current-session",
+      workspace: "/proj/a",
+    });
+    expect(first?.value).toBe("new two");
+
+    const second = promptHistoryStep({
+      direction: "older",
+      cursor: first!.cursor,
+      workspace: "/proj/a",
+    });
+    expect(second?.value).toBe("new one");
+
+    const third = promptHistoryStep({
+      direction: "older",
+      cursor: second!.cursor,
+      workspace: "/proj/a",
+    });
+    expect(third?.value).toBe("old two");
+
+    const backToNewerSession = promptHistoryStep({
+      direction: "newer",
+      cursor: third!.cursor,
+      workspace: "/proj/a",
+    });
+    expect(backToNewerSession?.value).toBe("new one");
+  });
+
+  it("promptHistoryStep reads persisted prompts after a desktop restart", () => {
+    appendSessionMessage("persisted", { role: "user", content: "after restart" });
+    patchSessionMeta("persisted", { workspace: "/proj/a" });
+
+    expect(
+      promptHistoryStep({
+        direction: "older",
+        startSessionName: "new-empty-session-after-restart",
+        workspace: "/proj/a",
+      })?.value,
+    ).toBe("after restart");
   });
 
   it("renameSession also moves the .events.jsonl sidecar", () => {

@@ -107,12 +107,14 @@ import {
 } from "../../index.js";
 import { parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
+  type PromptHistoryCursor,
   deleteSession,
   listSessionsForWorkspace,
   loadSessionMessages,
   loadSessionMeta,
   patchSessionMeta,
   patchSessionWorkspaceIfMissing,
+  promptHistoryStep,
   sessionPath,
   timestampSuffix,
 } from "../../memory/session.js";
@@ -205,6 +207,14 @@ type InMessage = { tabId?: string } & (
   | { cmd: "mention_query"; query: string; nonce: number }
   | { cmd: "mention_preview"; path: string; nonce: number }
   | { cmd: "mention_picked"; path: string }
+  | {
+      cmd: "prompt_history_step";
+      nonce: number;
+      direction: "older" | "newer";
+      cursor?: PromptHistoryCursor | null;
+      startSessionName?: string;
+      stopSessionName?: string;
+    }
   | { cmd: "tab_open"; workspaceDir?: string }
   | { cmd: "tab_close" }
   | { cmd: "tab_activate"; tabId: string }
@@ -335,6 +345,15 @@ interface MentionPreviewEvent {
   path: string;
   head: string;
   totalLines: number;
+}
+
+interface PromptHistoryResultEvent {
+  type: "$prompt_history_result";
+  nonce: number;
+  entry: {
+    value: string;
+    cursor: PromptHistoryCursor;
+  } | null;
 }
 
 interface TabOpenedEvent {
@@ -565,6 +584,7 @@ type EmittableEvent =
   | BalanceEvent
   | MentionResultsEvent
   | MentionPreviewEvent
+  | PromptHistoryResultEvent
   | RetryResultEvent
   | BtwResultEvent
   | TabOpenedEvent
@@ -2955,6 +2975,24 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       } catch (err) {
         emit(
           { type: "$error", message: `qq_disconnect failed: ${(err as Error).message}` },
+          tab.id,
+        );
+      }
+      return;
+    }
+    if (msg.cmd === "prompt_history_step") {
+      try {
+        const entry = promptHistoryStep({
+          direction: msg.direction,
+          cursor: msg.cursor ?? null,
+          startSessionName: msg.startSessionName,
+          stopSessionName: msg.stopSessionName,
+          workspace: tab.rootDir,
+        });
+        emit({ type: "$prompt_history_result", nonce: msg.nonce, entry }, tab.id);
+      } catch (err) {
+        emit(
+          { type: "$error", message: `prompt_history_step failed: ${(err as Error).message}` },
           tab.id,
         );
       }

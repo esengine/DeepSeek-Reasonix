@@ -68,6 +68,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     balance: null,
     mentionResults: null,
     mentionPreview: null,
+    promptHistoryResult: null,
     mcpSpecs: [],
     mcpBridged: false,
     skills: [],

@@ -160,4 +160,38 @@ describe("desktop Composer @ popup", () => {
 
     expect(container.querySelector(".popup-list.at-popup-list")).not.toBeNull();
   });
+
+  it("delegates ArrowUp prompt-history navigation only at the input start", () => {
+    const onPromptHistoryNavigate = vi.fn(() => true);
+    const { container } = renderComposer({
+      draft: "current prompt",
+      onPromptHistoryNavigate,
+    });
+    const textarea = container.querySelector("textarea");
+    if (!textarea) throw new Error("missing textarea");
+
+    textarea.setSelectionRange(3, 3);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(onPromptHistoryNavigate).not.toHaveBeenCalled();
+
+    textarea.setSelectionRange(0, 0);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(onPromptHistoryNavigate).toHaveBeenCalledWith("older");
+  });
+
+  it("allows ArrowDown prompt-history navigation while browsing at a boundary", () => {
+    const onPromptHistoryNavigate = vi.fn(() => true);
+    const { container } = renderComposer({
+      draft: "recalled prompt",
+      promptHistoryBrowsing: true,
+      onPromptHistoryNavigate,
+    });
+    const textarea = container.querySelector("textarea");
+    if (!textarea) throw new Error("missing textarea");
+
+    textarea.setSelectionRange("recalled prompt".length, "recalled prompt".length);
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+
+    expect(onPromptHistoryNavigate).toHaveBeenCalledWith("newer");
+  });
 });

@@ -54,6 +54,7 @@ import type {
   MemoryEntryInfo,
   OutgoingCommand,
   PlanVerdict,
+  PromptHistoryCursor,
   RevisionVerdict,
   SettingsPatch,
   SkillInfo,
@@ -288,6 +289,13 @@ type MentionPreviewState = {
   totalLines: number;
 };
 
+type PromptHistoryNavState = {
+  mode: "idle" | "browsing";
+  draft: string;
+  cursor: PromptHistoryCursor | null;
+  originSessionName: string | null;
+};
+
 type State = {
   ready: boolean;
   needsSetup: boolean;
@@ -310,6 +318,10 @@ type State = {
   balance: Balance | null;
   mentionResults: MentionResults | null;
   mentionPreview: MentionPreviewState | null;
+  promptHistoryResult: {
+    nonce: number;
+    entry: { value: string; cursor: PromptHistoryCursor } | null;
+  } | null;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   skills: SkillInfo[];
@@ -1081,6 +1093,11 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
         ],
       };
     }
+    case "$prompt_history_result":
+      return {
+        ...state,
+        promptHistoryResult: { nonce: ev.nonce, entry: ev.entry },
+      };
     case "$error":
     case "error": {
       // Kernel-level errors carry a `recoverable` flag — true for
@@ -1378,6 +1395,7 @@ function TabRuntime({
     balance: null,
     mentionResults: null,
     mentionPreview: null,
+    promptHistoryResult: null,
     mcpSpecs: [],
     mcpBridged: false,
     skills: [],
@@ -1392,6 +1410,22 @@ function TabRuntime({
   useLang();
   useDisableTextAssist();
   const [draft, setDraft] = useState("");
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const [promptHistoryNav, setPromptHistoryNav] = useState<PromptHistoryNavState>({
+    mode: "idle",
+    draft: "",
+    cursor: null,
+    originSessionName: null,
+  });
+  const promptHistoryNavRef = useRef(promptHistoryNav);
+  promptHistoryNavRef.current = promptHistoryNav;
+  const promptHistoryRequestRef = useRef<{
+    nonce: number;
+    direction: "older" | "newer";
+    draft: string;
+  } | null>(null);
+  const promptHistoryNonceRef = useRef(0);
   const [toast, setToast] = useState<{ msg: string; yolo?: boolean } | null>(null);
   const [splashOn, setSplashOn] = useState<boolean>(() => shouldShowSplash());
   const [wdOpen, setWdOpen] = useState(false);
@@ -1448,6 +1482,35 @@ function TabRuntime({
     [tabId],
   );
 
+  const resetPromptHistoryNav = useCallback(() => {
+    promptHistoryRequestRef.current = null;
+    setPromptHistoryNav({
+      mode: "idle",
+      draft: "",
+      cursor: null,
+      originSessionName: null,
+    });
+  }, []);
+
+  const requestPromptHistoryNavigation = useCallback(
+    (direction: "older" | "newer", currentDraft: string) => {
+      const nav = promptHistoryNavRef.current;
+      if (direction === "newer" && nav.mode === "idle") return false;
+      const nonce = ++promptHistoryNonceRef.current;
+      promptHistoryRequestRef.current = { nonce, direction, draft: currentDraft };
+      sendRpc({
+        cmd: "prompt_history_step",
+        nonce,
+        direction,
+        cursor: nav.mode === "browsing" ? nav.cursor : null,
+        startSessionName: nav.mode === "idle" ? state.currentSession : undefined,
+        stopSessionName: nav.originSessionName ?? undefined,
+      });
+      return true;
+    },
+    [sendRpc, state.currentSession],
+  );
+
   const queryMentions = useCallback(
     (query: string, nonce: number) => sendRpc({ cmd: "mention_query", query, nonce }),
     [sendRpc],
@@ -1493,9 +1556,10 @@ function TabRuntime({
   );
   const newChat = useCallback(() => {
     clearAbortDraft();
+    resetPromptHistoryNav();
     sendRpc({ cmd: "new_chat" });
     dispatch({ t: "clear" });
-  }, [clearAbortDraft, sendRpc]);
+  }, [clearAbortDraft, resetPromptHistoryNav, sendRpc]);
 
   const pickWorkspace = useCallback(async () => {
     try {
@@ -1621,6 +1685,7 @@ function TabRuntime({
     (override?: string) => {
       const text = (override ?? draft).trim();
       if (!text || !state.ready || state.busy) return;
+      resetPromptHistoryNav();
 
       const settingsCommand = parseSlashSettingsCommand(text);
       if (settingsCommand) {
@@ -1690,6 +1755,7 @@ function TabRuntime({
       recordAbortDraft,
       applySlashSettingsCommand,
       openSettingsAt,
+      resetPromptHistoryNav,
     ],
   );
 
@@ -1709,12 +1775,14 @@ function TabRuntime({
 
   const clearConversation = useCallback(() => {
     clearAbortDraft();
+    resetPromptHistoryNav();
     dispatch({ t: "clear" });
-  }, [clearAbortDraft]);
+  }, [clearAbortDraft, resetPromptHistoryNav]);
 
   // When /retry returns the last user text, set it as the composer draft
   useEffect(() => {
     if (state.retryNonce > 0 && state.retryText) {
+      resetPromptHistoryNav();
       setDraft(state.retryText);
       composerRef.current?.focus();
     }
@@ -1723,9 +1791,10 @@ function TabRuntime({
   }, [state.retryNonce]);
 
   const onEditUserMsg = useCallback((t: string) => {
+    resetPromptHistoryNav();
     setDraft(t);
     composerRef.current?.focus();
-  }, []);
+  }, [resetPromptHistoryNav]);
 
   useEffect(() => {
     if (state.busy || !state.ready || state.queuedSends.length === 0) return;
@@ -1734,6 +1803,49 @@ function TabRuntime({
     dispatch({ t: "shift_queued_send" });
     send(next);
   }, [state.busy, state.ready, state.queuedSends, send]);
+
+  useEffect(() => {
+    const result = state.promptHistoryResult;
+    const request = promptHistoryRequestRef.current;
+    if (!result || !request || result.nonce !== request.nonce) return;
+    promptHistoryRequestRef.current = null;
+
+    const nav = promptHistoryNavRef.current;
+    if (!result.entry) {
+      if (request.direction === "newer" && nav.mode === "browsing") {
+        const restored = nav.draft;
+        setDraft(restored);
+        setPromptHistoryNav({
+          mode: "idle",
+          draft: "",
+          cursor: null,
+          originSessionName: null,
+        });
+        requestAnimationFrame(() => {
+          composerRef.current?.focus();
+          composerRef.current?.setSelectionRange(restored.length, restored.length);
+        });
+      }
+      return;
+    }
+
+    const value = result.entry.value;
+    setDraft(value);
+    setPromptHistoryNav((prev) => ({
+      mode: "browsing",
+      draft: prev.mode === "idle" ? request.draft : prev.draft,
+      cursor: result.entry?.cursor ?? null,
+      originSessionName: prev.mode === "idle" ? (state.currentSession ?? null) : prev.originSessionName,
+    }));
+    requestAnimationFrame(() => {
+      composerRef.current?.focus();
+      composerRef.current?.setSelectionRange(value.length, value.length);
+    });
+  }, [state.promptHistoryResult, state.currentSession]);
+
+  useEffect(() => {
+    resetPromptHistoryNav();
+  }, [resetPromptHistoryNav, state.currentSession]);
 
   useEffect(() => {
     const currentSnapshot: ApprovalSnapshot = {
@@ -2417,6 +2529,11 @@ function TabRuntime({
               <Composer
                 draft={draft}
                 setDraft={setDraft}
+                onDraftUserEdit={resetPromptHistoryNav}
+                promptHistoryBrowsing={promptHistoryNav.mode === "browsing"}
+                onPromptHistoryNavigate={(direction) =>
+                  requestPromptHistoryNavigation(direction, draftRef.current)
+                }
                 onSend={() => send()}
                 onAbort={abort}
                 disabled={!state.ready}
@@ -2447,6 +2564,7 @@ function TabRuntime({
                 mentionResults={state.mentionResults}
                 queuedSends={state.queuedSends}
                 onQueueWhileBusy={(text) => {
+                  resetPromptHistoryNav();
                   dispatch({ t: "enqueue_send", text });
                   setDraft("");
                 }}

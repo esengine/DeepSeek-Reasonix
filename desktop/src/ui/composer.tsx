@@ -132,6 +132,9 @@ function guessImageExtension(mime: string): string {
 export function Composer({
   draft,
   setDraft,
+  onDraftUserEdit,
+  promptHistoryBrowsing,
+  onPromptHistoryNavigate,
   onSend,
   onAbort,
   disabled,
@@ -159,6 +162,9 @@ export function Composer({
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
+  onDraftUserEdit?: () => void;
+  promptHistoryBrowsing?: boolean;
+  onPromptHistoryNavigate?: (direction: "older" | "newer") => boolean | void;
   onSend: () => void;
   onAbort: () => void;
   disabled?: boolean;
@@ -343,6 +349,7 @@ export function Composer({
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
+    onDraftUserEdit?.();
     setDraft(v);
     const trail = v.match(/(^|\s)([/@])([^\s]*)$/);
     if (trail) {
@@ -427,6 +434,22 @@ export function Composer({
     }
   };
 
+  const shouldNavigatePromptHistory = (
+    e: KeyboardEvent<HTMLTextAreaElement>,
+    direction: "older" | "newer",
+  ) => {
+    if (!onPromptHistoryNavigate) return false;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+    const native = e.nativeEvent as globalThis.KeyboardEvent;
+    if (native.isComposing) return false;
+    const ta = textareaRef.current;
+    if (!ta || ta.selectionStart !== ta.selectionEnd) return false;
+    const atStart = ta.selectionStart === 0;
+    const atEnd = ta.selectionStart === draft.length;
+    if (promptHistoryBrowsing) return atStart || atEnd;
+    return direction === "older" && atStart;
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (popup) {
       if (e.key === "ArrowDown") {
@@ -481,13 +504,28 @@ export function Composer({
       }
     }
     if (!popup) {
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        const direction = e.key === "ArrowUp" ? "older" : "newer";
+        if (shouldNavigatePromptHistory(e, direction)) {
+          const handled = onPromptHistoryNavigate?.(direction);
+          if (handled !== false) {
+            e.preventDefault();
+            return;
+          }
+        }
+      }
       const ta = textareaRef.current;
-      if (e.key === "ArrowUp" && ta && ta.selectionStart === 0) {
+      if (!onPromptHistoryNavigate && e.key === "ArrowUp" && ta && ta.selectionStart === 0) {
         e.preventDefault();
         navigateHistory(-1);
         return;
       }
-      if (e.key === "ArrowDown" && ta && ta.selectionStart === draft.length) {
+      if (
+        !onPromptHistoryNavigate &&
+        e.key === "ArrowDown" &&
+        ta &&
+        ta.selectionStart === draft.length
+      ) {
         e.preventDefault();
         navigateHistory(1);
         return;
@@ -698,7 +736,6 @@ export function Composer({
                 disabled={disabled || !draft.trim()}
                 onClick={() => {
                   if (!disabled && draft.trim()) {
-                    recordSendAndReset();
                     onSend();
                     setChips([]);
                   }
