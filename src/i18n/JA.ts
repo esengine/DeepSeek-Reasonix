@@ -1253,6 +1253,12 @@ export const JA: TranslationSchema = {
         "  /search-engine perplexity          Perplexity AIを使用（AIネイティブ回答+引用 — PERPLEXITY_API_KEY または perplexityApiKey を設定; https://perplexity.ai/settings/api で取得）",
       usageExa:
         "  /search-engine exa                 Exa APIを使用（AIネイティブ回答+引用、無料1000回/月 — EXA_API_KEY または exaApiKey を設定; https://exa.ai で登録）",
+      usageBingIntl:
+        "  /search-engine bing-intl          Bing国際版を使用（www.bing.com、GitHub/Wikipedia/Stack Overflowをインデックス）",
+      usageOllama:
+        "  /search-engine ollama              OllamaクラウドWeb検索を使用 — OLLAMA_API_KEY または configのollamaApiKeyを設定; https://ollama.com/settings/keys で取得",
+      usageBrave:
+        "  /search-engine brave               Brave Search APIを使用（独立インデックス、月2000回無料 — BRAVE_SEARCH_API_KEY または braveApiKey を設定; https://brave.com/search/api/ で取得）",
       alias: "エイリアス: /se",
       searxngInfo:
         "SearXNG はセルフホストのメタサーチエンジンです（https://github.com/searxng/searxng）。",
@@ -1266,6 +1272,10 @@ export const JA: TranslationSchema = {
         " PERPLEXITY_API_KEY または `perplexityApiKey` を設定してください; https://perplexity.ai/settings/api で取得。",
       switchedExaNote:
         " EXA_API_KEY または `exaApiKey` を設定してください; https://exa.ai で登録。",
+      switchedOllamaNote:
+        " OLLAMA_API_KEY または configの `ollamaApiKey` を設定してください; https://ollama.com/settings/keys で取得。",
+      switchedBraveNote:
+        " BRAVE_SEARCH_API_KEY (または BRAVE_API_KEY) または `braveApiKey` をconfigに設定; https://brave.com/search/api/ で月2000回無料。",
       keyNeeded:
         '"{engine}" のAPIキーが設定されていません。\n\n  1. {envVar} 環境変数を設定\n  2. またはインラインで提供:  /search-engine {engine} <your-key>\n  3. または "{engine}ApiKey" を ~/.reasonix/config.json に追加\n\nその後 /search-engine {engine} を再試行してください。',
       keySaved: " APIキーを設定に保存しました。",
@@ -1649,6 +1659,26 @@ export const JA: TranslationSchema = {
       "web_search: Brave Searchサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa|brave でエンジンを切り替えてください",
     braveParseError:
       "web_search: Brave Searchが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
+    ollamaMissingKey:
+      "Ollama には API キーが必要です — OLLAMA_API_KEY 環境変数を設定するか、~/.reasonix/config.json に `ollamaApiKey` を設定してください。https://ollama.com/settings/keys で取得できます",
+    ollamaUnauthorized:
+      "Ollama API キーが拒否されました — OLLAMA_API_KEY を確認するか、https://ollama.com/settings/keys で取得してください",
+    ollamaRateLimit:
+      "Ollama がレート制限中またはクォータを超過しました — 待ってから再試行するか、/search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+    ollamaServerError:
+      "Ollama サーバーエラー ({status}) ({url}) — 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+    ollamaParseError:
+      "Ollama が解析不能なレスポンスを返しました (HTTP {status}) ({url}) — 後で再試行してください",
+    fetchOllamaMissingKey:
+      "web_fetch: Ollama 取得には API キーが必要です — OLLAMA_API_KEY 環境変数を設定するか、~/.reasonix/config.json に `ollamaApiKey` を設定してください。https://ollama.com/settings/keys で取得できます",
+    fetchOllamaUnauthorized:
+      "web_fetch: Ollama API キーが拒否されました — OLLAMA_API_KEY を確認するか、https://ollama.com/settings/keys で取得してください",
+    fetchOllamaRateLimit:
+      "web_fetch: Ollama 取得がレート制限中またはクォータを超過しました — 待ってから再試行してください",
+    fetchOllamaServerError:
+      "web_fetch: Ollama 取得サーバーエラー ({status}) ({url}) — 後で再試行してください",
+    fetchOllamaParseError:
+      "web_fetch: Ollama 取得が解析不能なレスポンスを返しました (HTTP {status}) ({url}) — 後で再試行してください",
     fetchStatus:
       "web_fetch {status} ({url}) \u2014 対処: ブラウザでURLが解決できるか確認してください。ステータスはホストがエラーページを返したことを示しています",
     fetchRateLimit429:

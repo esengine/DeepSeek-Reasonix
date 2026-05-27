@@ -555,13 +555,39 @@ export const ru: TranslationSchema = {
       "web_search: Ошибка сервера Brave Search ({status}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     braveParseError:
       "web_search: Brave Search вернул неразборчивый ответ (HTTP {status}) — попробуйте позже",
+    ollamaMissingKey:
+      "web_search: Для Ollama требуется ключ API — задайте переменную среды OLLAMA_API_KEY или параметр `ollamaApiKey` в ~/.reasonix/config.json; получить ключ можно на https://ollama.com/settings/keys",
+    ollamaUnauthorized:
+      "web_search: Ключ API Ollama отклонён — проверьте OLLAMA_API_KEY или получите новый на https://ollama.com/settings/keys",
+    ollamaRateLimit:
+      "web_search: Ollama превысил лимит или квоту — подождите и повторите или выберите другой поисковик: /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+    ollamaServerError:
+      "web_search: Ошибка сервера Ollama ({status}) ({url}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+    ollamaParseError:
+      "web_search: Ollama вернул неразборчивый ответ (HTTP {status}) ({url}) — попробуйте позже",
+    fetchOllamaMissingKey:
+      "web_fetch: Для получения через Ollama требуется ключ API — задайте OLLAMA_API_KEY или `ollamaApiKey` в конфигурации; ключ на https://ollama.com/settings/keys",
+    fetchOllamaUnauthorized:
+      "web_fetch: Ключ API Ollama отклонён — проверьте OLLAMA_API_KEY или получите новый на https://ollama.com/settings/keys",
+    fetchOllamaRateLimit:
+      "web_fetch: Получение через Ollama превысило лимит или квоту — подождите и повторите попытку",
+    fetchOllamaServerError:
+      "web_fetch: Ошибка сервера Ollama при получении ({status}) ({url}) — попробуйте позже",
+    fetchOllamaParseError:
+      "web_fetch: Ollama вернул неразборчивый ответ при получении (HTTP {status}) ({url}) — попробуйте позже",
   },
   handlers: {
     ...EN.handlers,
     webSearchEngine: {
       ...EN.handlers.webSearchEngine,
+      usageBingIntl:
+        "  /search-engine bing-intl          использовать Bing International (www.bing.com, индексирует GitHub/Wikipedia/Stack Overflow)",
+      usageOllama:
+        "  /search-engine ollama              использовать облачный веб-поиск Ollama — задайте OLLAMA_API_KEY или ollamaApiKey в конфигурации; ключ на https://ollama.com/settings/keys",
       usageBrave:
         "  /search-engine brave               использует Brave Search API (независимый индекс, бесплатно 2000 запросов в месяц — установите BRAVE_SEARCH_API_KEY или braveApiKey в конфигурации; получить ключ можно на сайте https://brave.com/search/api/)",
+      switchedOllamaNote:
+        " Укажите OLLAMA_API_KEY или `ollamaApiKey` в файле конфигурации; получить ключ можно на https://ollama.com/settings/keys.",
       switchedBraveNote:
         " Укажите параметр BRAVE_SEARCH_API_KEY (или BRAVE_API_KEY) или `braveApiKey` в файле конфигурации; 2000 бесплатных запросов в месяц доступны по адресу https://brave.com/search/api/.",
     },

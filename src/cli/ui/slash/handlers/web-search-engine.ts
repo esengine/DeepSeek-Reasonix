@@ -57,18 +57,15 @@ export const handlers: Record<string, SlashHandler> = {
 
     const apiKeyEngines = new Set(["tavily", "perplexity", "exa", "metaso", "ollama", "brave"]);
     if (apiKeyEngines.has(engine)) {
-      const loadKey =
-        engine === "tavily"
-          ? loadTavilyApiKey
-          : engine === "perplexity"
-            ? loadPerplexityApiKey
-            : engine === "exa"
-              ? loadExaApiKey
-              : engine === "ollama"
-                ? loadOllamaApiKey
-                : engine === "brave"
-                  ? loadBraveApiKey
-                  : loadMetasoApiKey;
+      const KEY_LOADERS: Record<string, () => string | undefined> = {
+        tavily: loadTavilyApiKey,
+        perplexity: loadPerplexityApiKey,
+        exa: loadExaApiKey,
+        ollama: loadOllamaApiKey,
+        brave: loadBraveApiKey,
+        metaso: loadMetasoApiKey,
+      };
+      const loadKey = KEY_LOADERS[engine] ?? loadMetasoApiKey;
 
       if (args[1]) {
         cfg.webSearchEngine = engine;
@@ -97,22 +94,6 @@ export const handlers: Record<string, SlashHandler> = {
     }
     writeConfig(cfg);
 
-    const note =
-      engine === "searxng"
-        ? t("handlers.webSearchEngine.switchedSearxngNote", { endpoint: webSearchEndpoint() })
-        : engine === "metaso"
-          ? t("handlers.webSearchEngine.switchedMetasoNote")
-          : engine === "tavily"
-            ? t("handlers.webSearchEngine.switchedTavilyNote")
-            : engine === "perplexity"
-              ? t("handlers.webSearchEngine.switchedPerplexityNote")
-              : engine === "exa"
-                ? t("handlers.webSearchEngine.switchedExaNote")
-                : engine === "ollama"
-                  ? t("handlers.webSearchEngine.switchedOllamaNote")
-                  : engine === "brave"
-                    ? t("handlers.webSearchEngine.switchedBraveNote")
-                    : "";
     const detail =
       engine === "searxng"
         ? t("handlers.webSearchEngine.confirmedDetail", { endpoint: webSearchEndpoint() })

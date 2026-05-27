@@ -1540,7 +1540,7 @@ export const EN: TranslationSchema = {
     rateLimit429:
       "web_search 429 \u2014 try: wait 10s before retrying, or rephrase the query; the search backend is rate-limiting this client",
     forbidden403:
-      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave, or wait and retry later",
+      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama, or wait and retry later",
     serverError5xx:
       "web_search {status} \u2014 try: open the search URL in a browser; if it loads this is transient and a retry in 30s may help",
     bingBlocked:
@@ -1573,7 +1573,7 @@ export const EN: TranslationSchema = {
     tavilyUnauthorized:
       "web_search: Tavily API key rejected \u2014 check TAVILY_API_KEY or get one at https://tavily.com",
     tavilyRateLimit:
-      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave, or upgrade your Tavily plan",
+      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama, or upgrade your Tavily plan",
     tavilyServerError:
       "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     tavilyParseError:
@@ -1608,6 +1608,26 @@ export const EN: TranslationSchema = {
       "web_search: Brave Search server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     braveParseError:
       "web_search: Brave Search returned unparseable response (HTTP {status}) \u2014 try again later",
+    ollamaMissingKey:
+      "Ollama requires an API key \u2014 set OLLAMA_API_KEY env var or `ollamaApiKey` in ~/.reasonix/config.json; get one at https://ollama.com/settings/keys",
+    ollamaUnauthorized:
+      "Ollama API key rejected \u2014 check OLLAMA_API_KEY or get one at https://ollama.com/settings/keys",
+    ollamaRateLimit:
+      "Ollama rate-limited or quota exceeded \u2014 wait and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+    ollamaServerError:
+      "Ollama server error ({status}) for {url} \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+    ollamaParseError:
+      "Ollama returned unparseable response (HTTP {status}) for {url} \u2014 try again later",
+    fetchOllamaMissingKey:
+      "web_fetch: Ollama fetch requires an API key \u2014 set OLLAMA_API_KEY env var or `ollamaApiKey` in ~/.reasonix/config.json; get one at https://ollama.com/settings/keys",
+    fetchOllamaUnauthorized:
+      "web_fetch: Ollama API key rejected \u2014 check OLLAMA_API_KEY or get one at https://ollama.com/settings/keys",
+    fetchOllamaRateLimit:
+      "web_fetch: Ollama fetch is rate-limited or quota exceeded \u2014 wait and retry",
+    fetchOllamaServerError:
+      "web_fetch: Ollama fetch server error ({status}) for {url} \u2014 try again later",
+    fetchOllamaParseError:
+      "web_fetch: Ollama fetch returned unparseable response (HTTP {status}) for {url} \u2014 try again later",
     fetchStatus:
       "web_fetch {status} for {url} \u2014 try: confirm the URL resolves in a browser; status suggests the host returned an error page",
     fetchRateLimit429:
