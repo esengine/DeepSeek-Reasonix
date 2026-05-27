@@ -89,6 +89,7 @@ import {
   takeQQPendingInteraction,
 } from "../../desktop/qq-turn-routing.js";
 import { loadDotenv } from "../../env.js";
+import { type ResolvedHook, formatHookOutcomeMessage, loadHooks, runHooks } from "../../hooks.js";
 import {
   CacheFirstLoop,
   DeepSeekClient,
@@ -977,6 +978,7 @@ interface Tab {
   mcpStatuses: Map<string, { kind: McpSpecStatus; reason?: string; toolCount?: number }>;
   /** True while a session switch is in progress — prevents stale events from the old turn. */
   switching: boolean;
+  hooks: ResolvedHook[];
 }
 
 let tabCounter = 0;
@@ -1011,6 +1013,8 @@ function buildRuntimeFor(tab: Tab): RuntimeState {
     budgetUsd: tab.budgetUsd,
     session: tab.currentSession,
     reasoningEffort,
+    hooks: tab.hooks,
+    hookCwd: tab.rootDir,
   });
   const eventizer = new Eventizer();
   const ctx = { model: tab.currentModel, prefixHash: prefix.fingerprint, reasoningEffort };
@@ -1460,6 +1464,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       mcpRuntime: null,
       mcpStatuses: new Map(),
       switching: false,
+      hooks: loadHooks({ projectRoot: dir }),
     };
     tab.currentSession = mintSessionFor(dir);
     tabs.set(tab.id, tab);
@@ -1596,6 +1601,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         }
       }
     }
+    if (tab.hooks.some((h) => h.event === "UserPromptSubmit")) {
+      const report = await runHooks({
+        hooks: tab.hooks,
+        payload: { event: "UserPromptSubmit", cwd: tab.rootDir, prompt: text },
+      });
+      for (const o of report.outcomes) {
+        if (o.decision === "pass") continue;
+        emit({ type: "$error", message: formatHookOutcomeMessage(o) }, tab.id);
+      }
+      if (report.blocked) {
+        tab.aborter = null;
+        emit({ type: "$turn_complete" }, tab.id);
+        if (fromQQ) markQQTurnFinished(qqRuntime.routing, tab.id);
+        return;
+      }
+    }
     await tabContext.run(tab.id, async () => {
       try {
         let emittedTurnContext = false;
@@ -1647,6 +1668,21 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           emitSessions(tab);
           void emitBalance(tab);
+          if (tab.hooks.some((h) => h.event === "Stop")) {
+            const stopReport = await runHooks({
+              hooks: tab.hooks,
+              payload: {
+                event: "Stop",
+                cwd: tab.rootDir,
+                lastAssistantText,
+                turn: rt.loop.stats.summary().turns,
+              },
+            });
+            for (const o of stopReport.outcomes) {
+              if (o.decision === "pass") continue;
+              emit({ type: "$error", message: formatHookOutcomeMessage(o) }, tab.id);
+            }
+          }
         }
         if (fromQQ) markQQTurnFinished(qqRuntime.routing, tab.id);
         tab.switching = false;
@@ -1680,6 +1716,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.symbolIndex = null;
     tab.symbolBuilding = null;
     tab.recentMentions.length = 0;
+    tab.hooks = loadHooks({ projectRoot: target });
     tab.currentSession = mintSessionFor(target);
     tab.toolset = await buildCodeToolset({
       rootDir: target,
