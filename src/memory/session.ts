@@ -199,7 +199,6 @@ const READ_CHUNK_SIZE = 65536; // Balance I/O overhead vs read amplification for
  * Backward JSONL scanner — reads tail N messages. Falls back to full file read.
  */
 export function readTailMessages(path: string, count: number): ChatMessage[] {
-  if (!existsSync(path)) return [];
   try {
     const fd = openSync(path, "r");
     try {
