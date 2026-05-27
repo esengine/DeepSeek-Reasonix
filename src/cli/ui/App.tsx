@@ -563,10 +563,14 @@ function AppInner({
   // reads from a ref populated AFTER useSessionInfo loads balance, so the
   // subagent-end cost suffix renders in the live wallet's symbol.
   const walletCurrencyRef = useRef<string | undefined>(undefined);
+  const loopRef = useRef<CacheFirstLoop | null>(null);
   const { activities: subagentActivities, sinkRef: subagentSinkRef } = useSubagent({
     session,
     log,
     getWalletCurrency: () => walletCurrencyRef.current,
+    // Fold subagent usage into the parent session's stats so the
+    // stats panel reflects total cost including child loops. (#2008)
+    onSubagentEnd: (model, usage) => loopRef.current?.stats.recordExternal(model, usage),
   });
   const { currentRootDir, setCurrentRootDir, currentRootDirRef } = useWorkspaceRoot(
     codeMode?.rootDir,
@@ -964,7 +968,6 @@ function AppInner({
     };
   }, []);
 
-  const loopRef = useRef<CacheFirstLoop | null>(null);
   // hookList + currentRootDir intentionally NOT in deps —they seed
   // the loop on first construction (loopRef guards a single
   // instantiation), and later edits flow in through the mutable
