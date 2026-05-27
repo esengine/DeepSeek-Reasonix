@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const targets = [
@@ -15,6 +15,12 @@ for (const [src, dst] of targets) {
 // Marks dist/cli/ as ESM so Node skips the CJS-then-ESM reparse warning when
 // the bundle is loaded outside its own npm install (e.g. desktop sidecar).
 const cliMarker = resolve("dist/cli/package.json");
+const rootPackage = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
+const cliPackage = {
+  name: rootPackage.name ?? "reasonix",
+  version: rootPackage.version ?? "0.0.0-dev",
+  type: "module",
+};
 mkdirSync(dirname(cliMarker), { recursive: true });
-writeFileSync(cliMarker, `${JSON.stringify({ type: "module" }, null, 2)}\n`);
+writeFileSync(cliMarker, `${JSON.stringify(cliPackage, null, 2)}\n`);
 console.log(`wrote ${cliMarker}`);
