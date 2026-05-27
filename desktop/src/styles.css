@@ -134,9 +134,9 @@ body[data-drag-over="1"]::after {
   --muted: oklch(54% 0.005 260);
   --muted-2: oklch(68% 0.004 260);
 
-  --accent: oklch(58% 0.18 36);
-  --accent-soft: oklch(58% 0.18 36 / 0.1);
-  --accent-strong: oklch(52% 0.2 34);
+  --accent: oklch(56% 0.12 285);
+  --accent-soft: oklch(56% 0.12 285 / 0.1);
+  --accent-strong: oklch(50% 0.14 285);
 
   --success: oklch(48% 0.13 155);
   --success-soft: oklch(48% 0.13 155 / 0.1);
