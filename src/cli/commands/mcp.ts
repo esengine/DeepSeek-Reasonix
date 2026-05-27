@@ -1,4 +1,4 @@
-import { defaultConfigPath, readConfig, writeConfig } from "../../config.js";
+import { defaultConfigPath, normalizeMcpConfig, readConfig, writeConfig } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { MCP_CATALOG, mcpCommandFor } from "../../mcp/catalog.js";
 import {
@@ -301,7 +301,10 @@ export async function mcpInstallCommand(name: string, opts: McpInstallOptions = 
 
   const cfg = readConfig();
   const existing = cfg.mcp ?? [];
-  if (existing.includes(spec)) {
+  const installedName = parseInstalledName(spec);
+  const normalized = normalizeMcpConfig(cfg);
+  const nameCollision = installedName && normalized.some((s) => s.name === installedName);
+  if (existing.includes(spec) || nameCollision) {
     console.log(t("mcpCli.alreadyInstalled", { spec }));
     return;
   }
@@ -310,7 +313,6 @@ export async function mcpInstallCommand(name: string, opts: McpInstallOptions = 
 
   console.log(t("mcpCli.installed", { spec: entry.name }));
   console.log(`  spec:    ${spec}`);
-  const installedName = parseInstalledName(spec);
   if (entry.install.requiredEnv?.length) {
     console.log(`  needs:   ${entry.install.requiredEnv.join(", ")}`);
     console.log("           Either export these before launching, or add them to config:");

@@ -41,6 +41,7 @@ import {
   loadSubagentModels,
   loadTavilyApiKey,
   loadWorkspaceDir,
+  normalizeMcpConfig,
   pushRecentWorkspace,
   readConfig,
   webSearchEngine as readWebSearchEngine,
@@ -96,7 +97,7 @@ import {
   ImmutablePrefix,
   type LoopAbortOptions,
 } from "../../index.js";
-import { parseMcpSpec } from "../../mcp/spec.js";
+import { parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   deleteSession,
   listSessionsForWorkspace,
@@ -163,6 +164,7 @@ type InMessage = { tabId?: string } & (
       editor?: string;
       webSearchEngine?:
         | "bing"
+        | "bing-intl"
         | "searxng"
         | "metaso"
         | "tavily"
@@ -227,6 +229,7 @@ interface SettingsEvent {
   editor?: string;
   webSearchEngine?:
     | "bing"
+    | "bing-intl"
     | "searxng"
     | "metaso"
     | "tavily"
@@ -571,6 +574,11 @@ export function normalizeSessionTitle(raw: string): string {
   return raw.replace(/\s+/g, " ").trim().slice(0, SESSION_TITLE_MAX_CHARS);
 }
 
+/** Return all MCP specs as raw strings, reading both legacy `cfg.mcp` and canonical `cfg.mcpServers`. */
+export function getAllMcpSpecs(cfg: ReturnType<typeof readConfig>): string[] {
+  return normalizeMcpConfig(cfg).map(specToRaw);
+}
+
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
 export function writeAllSync(
   fd: number,
@@ -610,7 +618,7 @@ function tailLines(s: string, n: number): string {
   return lines.slice(-n).join("\n");
 }
 
-const LOADED_RECENT_MESSAGE_WINDOW = 200;
+const LOADED_RECENT_MESSAGE_WINDOW = 120;
 const LOADED_MIN_ELIDE_CHARS = 4096;
 const LOADED_ELIDED_PREFIX = "[elided — older than the last ";
 
@@ -884,7 +892,8 @@ function summarizeMcpSpec(raw: string): McpSpecInfo {
 
 function emitMcpSpecs(tab: Tab): void {
   const cfg = readConfig();
-  const specs = (cfg.mcp ?? []).map((raw) => {
+  const allSpecs = getAllMcpSpecs(cfg);
+  const specs = allSpecs.map((raw) => {
     const base = summarizeMcpSpec(raw);
     const live = tab.mcpStatuses.get(raw);
     if (!live) return base;
@@ -1516,7 +1525,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           emit({ type: "$error", message: `mcp reload failed: ${(err as Error).message}` }, tab.id);
         });
     }
-    const requested = (readConfig().mcp ?? []).length;
+    const allSpecs = getAllMcpSpecs(readConfig());
+    const requested = allSpecs.length;
     if (requested === 0) return Promise.resolve();
     const runtime = createMcpRuntime({
       getTools: () => {
@@ -1531,8 +1541,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     tab.mcpRuntime = runtime;
     runtime.setLifecycleSink((notice) => {
       if (notice.kind === "slow") return; // not surfaced in the desktop panel
-      const cfg = readConfig().mcp ?? [];
-      const target = cfg.find((raw) => {
+      const specs = getAllMcpSpecs(readConfig());
+      const target = specs.find((raw) => {
         try {
           return parseMcpSpec(raw).name === notice.name;
         } catch {
@@ -1690,6 +1700,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
                 event: "Stop",
                 cwd: tab.rootDir,
                 lastAssistantText,
+                last_assistant_message: lastAssistantText,
                 turn: rt.loop.stats.summary().turns,
               },
             });

@@ -13,6 +13,7 @@ import type {
   PendingRevision,
   SkillOrigin,
 } from "../App";
+import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import {
@@ -319,7 +320,7 @@ export function PlanBanner({
           {t("thread.planRunning", { step: Math.min(done + 1, total), total })}
           {current ? ` — ${current.title}` : ""}
         </div>
-        <div className="s">{plan.plan}</div>
+        <Markdown source={plan.plan} />
       </div>
       <div className="prog">
         <div className="meter-mini">
@@ -378,8 +379,12 @@ export function PlanApprovalCard({
       sub={sub}
       body={
         <>
-          {p.summary ? <div style={{ marginBottom: 6 }}>{p.summary}</div> : null}
-          <div style={{ whiteSpace: "pre-wrap" }}>{p.plan}</div>
+          {p.summary ? (
+            <div style={{ marginBottom: 6 }}>
+              <Markdown source={p.summary} />
+            </div>
+          ) : null}
+          <Markdown source={p.plan} />
         </>
       }
       meta={`plan/#${p.id}`}

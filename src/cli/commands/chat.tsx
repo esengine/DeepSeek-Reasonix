@@ -6,6 +6,7 @@ import {
   loadApiKey,
   loadHistoryScrollMode,
   loadToolRateLimit,
+  normalizeMcpConfig,
   readConfig,
   searchEnabled,
 } from "../../config.js";
@@ -305,7 +306,8 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     platform: process.platform,
   });
   const startupInfoHints: string[] = [];
-  if (cfg.setupCompleted === true && (cfg.mcp?.length ?? 0) === 0 && mcpSpecs.length === 0) {
+  const hasAnyMcp = normalizeMcpConfig(cfg).length > 0 || mcpSpecs.length > 0;
+  if (cfg.setupCompleted === true && !hasAnyMcp) {
     startupInfoHints.push(t("mcpHealth.emptyHint"));
   }
 

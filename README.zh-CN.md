@@ -7,6 +7,8 @@
   &nbsp;·&nbsp;
   <strong>简体中文</strong>
   &nbsp;·&nbsp;
+  <a href="./README.ja-JP.md">日本語</a>
+  &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">官方网站</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh">配置指南</a>

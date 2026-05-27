@@ -46,6 +46,7 @@ function parseBody(raw: string): SettingsBody {
 
 const VALID_WEB_SEARCH_ENGINES = new Set([
   "bing",
+  "bing-intl",
   "searxng",
   "metaso",
   "tavily",
@@ -182,12 +183,13 @@ export async function handleSettings(
           status: 400,
           body: {
             error:
-              "webSearchEngine must be bing | searxng | metaso | tavily | perplexity | exa | brave | ollama",
+              "webSearchEngine must be bing | bing-intl | searxng | metaso | tavily | perplexity | exa | brave | ollama",
           },
         };
       }
       cfg.webSearchEngine = fields.webSearchEngine as
         | "bing"
+        | "bing-intl"
         | "searxng"
         | "metaso"
         | "tavily"

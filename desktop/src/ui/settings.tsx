@@ -729,6 +729,7 @@ function PageGeneral({
               onSave({
                 webSearchEngine: e.target.value as
                   | "bing"
+                  | "bing-intl"
                   | "searxng"
                   | "metaso"
                   | "tavily"
@@ -740,6 +741,7 @@ function PageGeneral({
             }
           >
             <option value="bing">{t("settings.webSearchEngineBing")}</option>
+            <option value="bing-intl">{t("settings.webSearchEngineBingIntl")}</option>
             <option value="searxng">{t("settings.webSearchEngineSearxng")}</option>
             <option value="metaso">{t("settings.webSearchEngineMetaso")}</option>
             <option value="tavily">{t("settings.webSearchEngineTavily")}</option>
@@ -780,7 +782,7 @@ function WebSearchEngineCredentials({
   onSave: (patch: SettingsPatch) => void;
 }) {
   const engine = settings.webSearchEngine ?? "bing";
-  if (engine === "bing") return null;
+  if (engine === "bing" || engine === "bing-intl") return null;
   if (engine === "searxng") {
     return <SearxngEndpointRow settings={settings} onSave={onSave} />;
   }

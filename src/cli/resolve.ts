@@ -3,6 +3,7 @@ import {
   type ReasoningEffort,
   type ReasonixConfig,
   isReasoningEffort,
+  loadModel,
   loadReasoningEffort,
   normalizeMcpConfig,
   readConfig,
@@ -30,7 +31,8 @@ export interface RawCliFlags {
 
 export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
   const cfg: ReasonixConfig = flags.noConfig ? {} : readConfig();
-  const model = flags.model?.trim() || cfg.model?.trim() || DEFAULT_MODEL;
+  const model =
+    flags.model?.trim() || (flags.noConfig ? cfg.model?.trim() : loadModel()) || DEFAULT_MODEL;
 
   const flagEffort = flags.effort?.toLowerCase();
   const reasoningEffort: ReasoningEffort = isReasoningEffort(flagEffort)

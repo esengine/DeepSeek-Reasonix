@@ -29,9 +29,17 @@ export interface StreamableHttpMcpSpec {
 export type McpSpec = StdioMcpSpec | SseMcpSpec | StreamableHttpMcpSpec;
 
 export type McpServerSpec =
-  | (StdioMcpSpec & { env?: Record<string, string>; disabled?: boolean })
-  | (SseMcpSpec & { headers?: Record<string, string>; disabled?: boolean })
-  | (StreamableHttpMcpSpec & { headers?: Record<string, string>; disabled?: boolean });
+  | (StdioMcpSpec & { env?: Record<string, string>; disabled?: boolean; requestTimeoutMs?: number })
+  | (SseMcpSpec & {
+      headers?: Record<string, string>;
+      disabled?: boolean;
+      requestTimeoutMs?: number;
+    })
+  | (StreamableHttpMcpSpec & {
+      headers?: Record<string, string>;
+      disabled?: boolean;
+      requestTimeoutMs?: number;
+    });
 
 export function getMcpServerEnv(spec: McpServerSpec): Record<string, string> | undefined {
   return spec.transport === "stdio" ? spec.env : undefined;

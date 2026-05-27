@@ -231,6 +231,17 @@ function normalizeMathDelimiters(source: string): string {
     .replace(/\\\)/g, "$$");
   // Restore protected sequences
   result = result.replace(/\x00LB\x00/g, "\\\\[");
+
+  // Replace | with \vert inside math to prevent GFM table column splitting.
+  // \vert renders identically to | in KaTeX — it's the same vertical-bar
+  // glyph — but the markdown parser won't mistake it for a table separator.
+  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_: string, m: string) =>
+    "$$" + m.replace(/\|/g, "\\vert ") + "$$",
+  );
+  result = result.replace(/\$([^$\n]+)\$/g, (_: string, m: string) =>
+    "$" + m.replace(/\|/g, "\\vert ") + "$",
+  );
+
   return result;
 }
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync("dashboard/src/styles.css", "utf8");
+const css = readFileSync("desktop/src/styles.css", "utf8");
 
 function cssRule(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -9,7 +9,7 @@ function cssRule(selector: string): string {
   return match?.groups?.body ?? "";
 }
 
-describe("dashboard sidebar new chat button layout", () => {
+describe("desktop sidebar new chat button layout", () => {
   it("keeps localized labels on one line in the compact desktop sidebar", () => {
     expect(cssRule(".sidebar")).toContain("container: sidebar / inline-size");
     expect(cssRule(".side-head .new-btn")).toContain("flex-wrap: nowrap");

@@ -20,6 +20,8 @@ export interface ReconnectArgs {
   env?: Record<string, string>;
   /** SSE / Streamable-HTTP headers overlay. */
   headers?: Record<string, string>;
+  /** Per-request timeout override in ms. */
+  requestTimeoutMs?: number;
 }
 
 export type ReconnectResult =
@@ -64,7 +66,7 @@ export async function reconnectMcpServer(args: ReconnectArgs): Promise<Reconnect
     headers: args.headers,
     cwd: workspaceDir,
   });
-  const next = new McpClient({ transport, workspaceDir });
+  const next = new McpClient({ transport, workspaceDir, requestTimeoutMs: args.requestTimeoutMs });
   try {
     await next.initialize();
     const listed = await next.listTools();

@@ -317,10 +317,20 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "search-engine",
     group: "advanced",
-    argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|brave|ollama> [<key>]",
+    argsHint: "<bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama> [<key>]",
     summary:
-      "switch web search backend — bing (default, works from CN without proxy), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), brave (independent index, free 2000/mo), or ollama (Ollama cloud web search). Provider with no key prompts inline config.",
-    argCompleter: ["bing", "searxng", "metaso", "tavily", "perplexity", "exa", "brave", "ollama"],
+      "switch web search backend — bing (default, works from CN without proxy), bing-intl (international index via www.bing.com), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), brave (independent index, free 2000/mo), or ollama (Ollama cloud web search). Provider with no key prompts inline config.",
+    argCompleter: [
+      "bing",
+      "bing-intl",
+      "searxng",
+      "metaso",
+      "tavily",
+      "perplexity",
+      "exa",
+      "brave",
+      "ollama",
+    ],
     aliases: ["se"],
   },
   {

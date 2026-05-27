@@ -274,10 +274,7 @@ export function useCompletionPickers({
         projectRoot: codeMode?.rootDir,
         customSkillPaths: loadResolvedSkillPaths(baseDir),
       });
-      const names = store
-        .list()
-        .filter((s) => s.scope !== "builtin")
-        .map((s) => s.name);
+      const names = store.list().map((s) => s.name);
       if (partial && names.some((n) => n.toLowerCase() === needle)) return null;
       if (!partial) return names.slice(0, 40);
       return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);

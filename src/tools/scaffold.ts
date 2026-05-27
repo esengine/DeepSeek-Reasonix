@@ -1,6 +1,12 @@
 /** Agent-facing tools for scaffolding skills + MCP servers from chat. Persists via the same paths the wizard / `/skill new` use. */
 
-import { defaultConfigPath, loadResolvedSkillPaths, readConfig, writeConfig } from "../config.js";
+import {
+  defaultConfigPath,
+  loadResolvedSkillPaths,
+  normalizeMcpConfig,
+  readConfig,
+  writeConfig,
+} from "../config.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import { preflightStdioSpec } from "../mcp/preflight.js";
 import { type McpSpec, parseMcpSpec } from "../mcp/spec.js";
@@ -224,10 +230,12 @@ export function registerScaffoldTools(
 
       const cfg = readConfig(configPath);
       const existing = cfg.mcp ?? [];
+      const normalized = normalizeMcpConfig(cfg);
       const collision = existing.find((s) => parseSpecName(s) === name);
-      if (collision) {
+      const nameCollision = normalized.some((s) => s.name === name);
+      if (collision || nameCollision) {
         return JSON.stringify({
-          error: `MCP server ${JSON.stringify(name)} already registered: ${collision}`,
+          error: `MCP server ${JSON.stringify(name)} already registered: ${collision ?? name}`,
         });
       }
       cfg.mcp = [...existing, specStr.spec];

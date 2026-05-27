@@ -134,9 +134,9 @@ body[data-drag-over="1"]::after {
   --muted: oklch(54% 0.005 260);
   --muted-2: oklch(68% 0.004 260);
 
-  --accent: oklch(58% 0.18 36);
-  --accent-soft: oklch(58% 0.18 36 / 0.1);
-  --accent-strong: oklch(52% 0.2 34);
+  --accent: oklch(56% 0.12 285);
+  --accent-soft: oklch(56% 0.12 285 / 0.1);
+  --accent-strong: oklch(50% 0.14 285);
 
   --success: oklch(48% 0.13 155);
   --success-soft: oklch(48% 0.13 155 / 0.1);
@@ -832,6 +832,7 @@ html[data-platform="macos"] .titlebar .tb-left {
 
 .sidebar {
   grid-area: side;
+  container: sidebar / inline-size;
   background: var(--bg-2);
   border-right: 1px solid var(--border);
   display: flex;
@@ -848,9 +849,11 @@ html[data-platform="macos"] .titlebar .tb-left {
 }
 .side-head .new-btn {
   flex: 1;
+  min-width: 0;
   height: 30px;
   display: inline-flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 0 10px;
   font-size: 14px;
@@ -863,6 +866,15 @@ html[data-platform="macos"] .titlebar .tb-left {
 .side-head .new-btn:hover {
   background: var(--accent-strong);
 }
+.side-head .new-btn svg {
+  flex: 0 0 auto;
+}
+.side-head .new-btn > span:not(.shortcut) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .side-head .new-btn kbd {
   font-family: inherit;
   font-size: 14px;
@@ -872,6 +884,8 @@ html[data-platform="macos"] .titlebar .tb-left {
   font-weight: 500;
 }
 .side-head .new-btn .shortcut {
+  display: none;
+  flex: 0 0 auto;
   margin-left: auto;
 }
 .side-head .new-btn .shortcut kbd {
@@ -886,7 +900,13 @@ html[data-platform="macos"] .titlebar .tb-left {
   padding: 1px 5px;
   box-shadow: none;
 }
+@container sidebar (min-width: 191px) {
+  .side-head .new-btn .shortcut {
+    display: inline-flex;
+  }
+}
 .side-head .icon-btn {
+  flex: 0 0 auto;
   width: 30px;
   height: 30px;
   border-radius: 6px;
@@ -3336,14 +3356,14 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   line-height: 1.5;
 }
 .mem-detail {
-  max-height: 220px;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   margin: 8px 0 0;
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
-  white-space: pre-wrap;
   color: var(--fg-1);
   font-family: var(--mono);
   font-size: 12px;
@@ -3821,9 +3841,29 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 .ctx-body {
   flex: 1;
   margin-right: 12px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 12px;
   padding-right: 20px;
+}
+.ctx-body-tokens {
+  flex-shrink: 0;
+}
+.ctx-body-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.ctx-body-tab::-webkit-scrollbar {
+  width: 8px;
+}
+.ctx-body-tab::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+.ctx-body-tab::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
 }
 .ctx-body::-webkit-scrollbar {
   width: 8px;
@@ -7412,4 +7452,3 @@ html[data-platform="macos"] .splash {
     grid-template-columns: 1fr;
   }
 }
-

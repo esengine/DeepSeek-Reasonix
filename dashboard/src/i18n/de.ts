@@ -250,6 +250,7 @@ export const de: typeof en = {
     webSearchNote: "web_fetch + web_search Werkzeuge",
     webSearchEngine: "Suchmaschine",
     webSearchEngineBing: "bing — Standard, funktioniert von CN ohne Proxy",
+    webSearchEngineBingIntl: "bing-intl — internationaler Index über www.bing.com",
     webSearchEngineSearxng: "searxng — selbst gehostet (Endpunkt via /se searxng <url>)",
     webSearchEngineMetaso: "metaso — 100/Tag kostenlos (CN-freundlich, kostenloser Schlüssel auf metaso.cn)",
     webSearchEngineTavily: "tavily — 1000/Monat kostenlos (TAVILY_API_KEY setzen)",

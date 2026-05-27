@@ -360,10 +360,14 @@ Tips:
 `;
 }
 
+export function builtinSkillDescription(name: string): string {
+  const key = name === "security-review" ? "securityReview" : name;
+  return t(`builtinSkills.${key}`);
+}
+
 function skillDescription(s: Pick<Skill, "name" | "description" | "scope">): string {
   if (s.scope !== "builtin") return s.description;
-  const key = s.name === "security-review" ? "securityReview" : s.name;
-  return t(`builtinSkills.${key}`);
+  return builtinSkillDescription(s.name);
 }
 
 /** Subagent tag goes AFTER the name in brackets — leading-marker tags get copied into `name` arg verbatim. */
@@ -555,6 +559,47 @@ Don't:
 
 Lead each turn with a one-line status: "▸ running \`npm test\` ..." → "▸ 2 failures in tests/foo.test.ts — first is …" → so the user always knows where you are without scrolling tool output.`;
 
+const BUILTIN_QQ_BODY = `Help the user configure or troubleshoot the built-in QQ channel in Reasonix. This skill is INLINED on purpose — stay in the parent loop and keep the guidance short.
+
+What this skill is for:
+- QQ first-time setup
+- QQ common troubleshooting
+- CLI and desktop paths
+
+Key facts:
+- QQ is a remote channel attached to an existing Reasonix session, not a separate mode.
+- On desktop, QQ follows the current active tab.
+- After desktop QQ runtime landed, inbound QQ messages should appear in the local transcript and replies should route back to QQ.
+- \`未绑定\` / \`unbound\` is an access-control state, not a transport failure by itself.
+
+Safety boundary:
+- Use this reminder when needed: "⚠️ 安全提醒：App Secret 是敏感凭据，不要把它作为对话内容发给模型。只有在 QQ 连接提示出现后，才在该输入步骤里填写；如果刚刚已经发过，建议立刻去 QQ 开放平台重置。"
+- If credentials are needed, tell the user to enter them only in:
+  - the CLI \`/qq connect\` prompt, or
+  - desktop \`Settings -> General -> QQ Channel -> Configure\`.
+- You cannot apply for a QQ Bot, log into the QQ Open Platform, or inspect the user's platform console for them.
+- If the user pastes a secret into chat, tell them to rotate it and continue without repeating it back.
+
+How to answer:
+- If the user only mentions "qq" or uses another vague reference, first confirm whether they want QQ channel setup, connection help, or troubleshooting before giving steps.
+- First figure out whether they are on CLI or desktop.
+- Then figure out whether this is first-time setup or troubleshooting.
+- Prefer the shortest next action, not a long manual.
+- Use one concrete verification step at a time.
+- Ask only the minimum follow-up needed to unblock them.
+
+Do not:
+- dump long architecture explanations unless asked
+- broaden into Feishu / Discord / cc-connect unless explicitly asked
+
+Docs are the fallback, not the main path:
+- QQ Bot apply page: https://q.qq.com/qqbot/openclaw/login.html
+- Official config guide (zh): https://esengine.github.io/DeepSeek-Reasonix/configuration.html?lang=zh
+- QQ guide (zh): https://github.com/esengine/DeepSeek-Reasonix/blob/main/docs/qq-connect.zh-CN.md
+- Non-official fallback mirror for the QQ guide: https://cdn.jsdelivr.net/gh/esengine/DeepSeek-Reasonix@main/docs/qq-connect.zh-CN.md
+
+Use this skill when the user needs help getting QQ working.`;
+
 const BUILTIN_SKILLS: readonly Skill[] = Object.freeze([
   Object.freeze<Skill>({
     name: "explore",
@@ -597,6 +642,15 @@ const BUILTIN_SKILLS: readonly Skill[] = Object.freeze([
     description:
       "Run the project's test suite, diagnose failures, propose SEARCH/REPLACE fixes, re-run until green (or stop after 2 fix attempts on the same failure). Inlined — runs in the parent loop so you see the edit blocks and can /apply them. Detects npm/pnpm/yarn/pytest/go/cargo.",
     body: BUILTIN_TEST_BODY,
+    scope: "builtin",
+    path: "(builtin)",
+    runAs: "inline",
+  }),
+  Object.freeze<Skill>({
+    name: "qq",
+    description:
+      "Guide QQ channel setup and troubleshooting for CLI or desktop. Best for: first-time setup, QQ connection failures, desktop QQ not replying, App ID / App Secret / QQ environment questions, and current-session routing behavior. Inlined — use when the user clearly needs help configuring or fixing the QQ channel.",
+    body: BUILTIN_QQ_BODY,
     scope: "builtin",
     path: "(builtin)",
     runAs: "inline",

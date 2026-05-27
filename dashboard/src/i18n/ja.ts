@@ -233,6 +233,7 @@ export const ja = {
     webSearchNote: "web_fetch + web_search ツール",
     webSearchEngine: "検索エンジン",
     webSearchEngineBing: "bing — デフォルト、プロキシなしで中国から利用可",
+    webSearchEngineBingIntl: "bing-intl — www.bing.com 経由の国際版インデックス",
     webSearchEngineSearxng: "searxng — セルフホスト (/se searxng <url> でエンドポイント設定)",
     webSearchEngineMetaso: "metaso — 100回/日無料 (中国対応、metaso.cnで無料キー取得)",
     webSearchEngineTavily: "tavily — 1000回/月無料 (TAVILY_API_KEY を設定)",
