@@ -17,7 +17,7 @@ type AssistantMessageLike = {
   segments: SegmentLike[];
 };
 
-export const TRANSCRIPT_RECENT_MESSAGE_WINDOW = 60;
+export const TRANSCRIPT_RECENT_MESSAGE_WINDOW = 120;
 const MIN_ELIDE_CHARS = 4096;
 const ELIDED_PREFIX = "[elided -- older than the last ";
 
