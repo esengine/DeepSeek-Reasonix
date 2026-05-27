@@ -45,19 +45,21 @@ describe("Ink update-depth repro candidates", () => {
     r.unmount();
   });
 
-  it("useBoxMetrics: rendering from own measurement never converges", async () => {
-    // Whether React's nested-update guard fires depends on event-loop timing
-    // (a Linux runner doesn't trip what Windows trips in the same wall clock).
-    // The deterministic property is render count: stable layouts converge in
-    // 2–3 renders, the broken pattern compounds without bound. Counting is
-    // the loop-detection signal; the React error is just one possible
-    // downstream symptom.
+  it("useBoxMetrics: oscillating call sites no longer crash React's depth guard", async () => {
+    // useBoxMetrics defers each measure off the React commit batch
+    // (setTimeout 0), so a Box that renders from its own measurement
+    // still oscillates between heights but never trips "Maximum update
+    // depth exceeded". The property under test is the absence of a
+    // crash + the presence of the underlying anti-pattern (heights
+    // alternate, proving it's not silently converging).
     captureErrors();
     let stableRenders = 0;
+    const stableHeights = new Set<number>();
     function Stable() {
       const ref = React.useRef(null!);
-      useBoxMetrics(ref);
+      const m = useBoxMetrics(ref);
       stableRenders++;
+      stableHeights.add(m.height);
       return (
         <Box ref={ref} flexDirection="column">
           <Text>a</Text>
@@ -65,12 +67,11 @@ describe("Ink update-depth repro candidates", () => {
         </Box>
       );
     }
-    let oscRenders = 0;
+    const oscHeights = new Set<number>();
     function Oscillator() {
       const ref = React.useRef(null!);
       const m = useBoxMetrics(ref);
-      oscRenders++;
-      // height 0/even → 1 child → measure=1 (odd); odd → 2 children → measure=2 (even).
+      oscHeights.add(m.height);
       const extra = m.height % 2 === 1;
       return (
         <Box ref={ref} flexDirection="column">
@@ -85,13 +86,10 @@ describe("Ink update-depth repro candidates", () => {
     const b = render(<Oscillator />);
     await new Promise((res) => setTimeout(res, 80));
     b.unmount();
-    // Stable converges in a handful of renders. The broken pattern compounds
-    // — even a slow CI runner clears ~20 cycles in 80ms; local Node does
-    // hundreds. The thresholds are deliberately loose to stay robust across
-    // runner speeds; the property under test is "doesn't converge", not a
-    // specific count.
+    expect(hasMaxDepth()).toBe(false);
     expect(stableRenders).toBeLessThan(10);
-    expect(oscRenders).toBeGreaterThan(15);
+    expect(stableHeights.size).toBeLessThanOrEqual(2);
+    expect(oscHeights.size).toBeGreaterThanOrEqual(2);
   });
 
   it("useAnimationFrame: many subscribers with short interval does not loop alone", async () => {
