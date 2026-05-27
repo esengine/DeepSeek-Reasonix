@@ -224,6 +224,8 @@ export type UsageStats = {
   lastCallCacheMiss: number | null;
   /** System prompt + tool specs — constant for the session, sent on tab open. */
   reservedTokens: number;
+  /** Current conversation log tokens, refreshed by the desktop sidecar. */
+  liveLogTokens: number;
 };
 
 export type SessionInfo = {
@@ -713,6 +715,7 @@ function zeroUsage(): UsageStats {
     lastCallCacheHit: null,
     lastCallCacheMiss: null,
     reservedTokens: 0,
+    liveLogTokens: 0,
   };
 }
 
@@ -894,10 +897,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$ctx_breakdown": {
       const next: UsageStats = { ...state.usage, reservedTokens: ev.reservedTokens };
       if (typeof ev.logTokens === "number") {
-        next.cacheHitTokens = 0;
-        next.cacheMissTokens = ev.logTokens;
-        next.lastCallCacheHit = 0;
-        next.lastCallCacheMiss = ev.logTokens;
+        next.liveLogTokens = ev.logTokens;
       }
       return { ...state, usage: next };
     }
@@ -1100,18 +1100,22 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "model.final": {
       const u = ev.usage;
+      const promptTokens =
+        u?.prompt_tokens ??
+        (u?.prompt_cache_hit_tokens ?? 0) + (u?.prompt_cache_miss_tokens ?? 0);
       const callHit = u?.prompt_cache_hit_tokens ?? 0;
-      const callMiss = u?.prompt_cache_miss_tokens ?? 0;
-      const hasCall = callHit > 0 || callMiss > 0;
+      const callMiss = u?.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - callHit);
+      const hasCall = promptTokens > 0 || callHit > 0 || callMiss > 0;
       const usage: UsageStats = {
         totalCostUsd: state.usage.totalCostUsd + (ev.costUsd ?? 0),
-        totalPromptTokens: state.usage.totalPromptTokens + (u?.prompt_tokens ?? 0),
+        totalPromptTokens: state.usage.totalPromptTokens + promptTokens,
         totalCompletionTokens: state.usage.totalCompletionTokens + (u?.completion_tokens ?? 0),
         cacheHitTokens: state.usage.cacheHitTokens + callHit,
         cacheMissTokens: state.usage.cacheMissTokens + callMiss,
         lastCallCacheHit: hasCall ? callHit : state.usage.lastCallCacheHit,
         lastCallCacheMiss: hasCall ? callMiss : state.usage.lastCallCacheMiss,
         reservedTokens: state.usage.reservedTokens,
+        liveLogTokens: state.usage.liveLogTokens,
       };
       return {
         ...state,

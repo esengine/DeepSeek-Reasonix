@@ -171,6 +171,7 @@ export class DeepSeekClient {
       messages: opts.messages,
       stream,
     };
+    if (stream) payload.stream_options = { include_usage: true };
     if (opts.tools?.length) payload.tools = opts.tools;
     if (opts.temperature !== undefined) payload.temperature = opts.temperature;
     if (opts.maxTokens !== undefined) payload.max_tokens = opts.maxTokens;

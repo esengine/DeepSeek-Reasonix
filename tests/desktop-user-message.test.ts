@@ -67,6 +67,7 @@ function makeState(messages: ChatMessage[] = []): AppState {
       lastCallCacheHit: null,
       lastCallCacheMiss: null,
       reservedTokens: 0,
+      liveLogTokens: 0,
     },
     sessions: [],
     settings: null,

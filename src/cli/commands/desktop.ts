@@ -819,6 +819,7 @@ function loadSessionIntoTab(
     },
     tab.id,
   );
+  emitCtxBreakdown(tab);
   if (backfilledWorkspace) emitSessions(tab);
 }
 
@@ -876,19 +877,33 @@ function emitMemory(tab: Tab): void {
   }
 }
 
+function countTokensForMeter(text: string): number {
+  try {
+    return countTokensBounded(text);
+  } catch {
+    return text.length === 0 ? 0 : Math.max(1, Math.ceil(text.length * 0.3));
+  }
+}
+
 // reserved = system prompt + tool specs, constant for the tab's lifetime once
-// the loop is built. The growing log portion is already covered by the
-// per-turn cache hit/miss numbers in `model.final`.
+// the loop is built. logTokens is refreshed during turns so Desktop doesn't
+// show a fake zero while the streaming call is still waiting on usage metadata.
 function emitCtxBreakdown(tab: Tab): void {
   if (!tab.runtime) return;
+  const sys = countTokensForMeter(tab.runtime.loop.prefix.system);
+  const tools = countTokensForMeter(JSON.stringify(tab.runtime.loop.prefix.toolSpecs));
+  let logTokens = 0;
   try {
-    const sys = countTokensBounded(tab.runtime.loop.prefix.system);
-    const tools = countTokensBounded(JSON.stringify(tab.runtime.loop.prefix.toolSpecs));
-    const logTokens = tab.runtime.loop.getCurrentLogTokens();
-    emit({ type: "$ctx_breakdown", reservedTokens: sys + tools, logTokens }, tab.id);
+    logTokens = tab.runtime.loop.getCurrentLogTokens();
   } catch {
-    // tokenizer warmup can throw on first call before the data file loads
+    for (const msg of tab.runtime.loop.log.toMessages()) {
+      logTokens += countTokensForMeter(typeof msg.content === "string" ? msg.content : "");
+      if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+        logTokens += countTokensForMeter(JSON.stringify(msg.tool_calls));
+      }
+    }
   }
+  emit({ type: "$ctx_breakdown", reservedTokens: sys + tools, logTokens }, tab.id);
 }
 
 function emitSkills(tab: Tab): void {
@@ -1573,11 +1588,19 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     await tabContext.run(tab.id, async () => {
       try {
+        let emittedTurnContext = false;
         for await (const ev of rt.loop.step(text)) {
+          if (!emittedTurnContext) {
+            emittedTurnContext = true;
+            emitCtxBreakdown(tab);
+          }
           if (ev.role === "assistant_final" && ev.content) {
             lastAssistantText = ev.content;
           }
           for (const kev of rt.eventizer.consume(ev, rt.ctx)) emit(kev, tab.id);
+          if (ev.role === "assistant_final" || ev.role === "tool") {
+            emitCtxBreakdown(tab);
+          }
           // Memory tools mutate disk state behind the loop's back — the UI
           // panel won't know until we re-emit. Without this the right-hand
           // panel only updates on tab reopen.
@@ -2202,6 +2225,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
             // unreadable jsonl — skip re-emit
           }
         }
+        emitCtxBreakdown(t);
       }
       return;
     }

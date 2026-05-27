@@ -52,8 +52,12 @@ export function StatusBar({
   onOpenSettings: () => void;
   onOpenWorkdir?: (anchor: { bottom: number; left: number }) => void;
 }) {
-  const totalTokens = usage.cacheHitTokens + usage.cacheMissTokens;
-  const cacheHitPct = totalTokens > 0 ? Math.round((usage.cacheHitTokens / totalTokens) * 100) : 0;
+  const sessionPromptTokens =
+    usage.totalPromptTokens || usage.cacheHitTokens + usage.cacheMissTokens;
+  const liveContextTokens = usage.reservedTokens + usage.liveLogTokens;
+  const totalTokens = Math.max(sessionPromptTokens, liveContextTokens);
+  const cacheDenom = usage.cacheHitTokens + usage.cacheMissTokens;
+  const cacheHitPct = cacheDenom > 0 ? Math.round((usage.cacheHitTokens / cacheDenom) * 100) : 0;
   const runningJobs = jobs.filter((j) => j.running).length;
   const spent = formatMoney(usage.totalCostUsd, currency);
   const balanceLabel = balance
