@@ -2342,7 +2342,7 @@ function TabRuntime({
                 ) : (
                   <Virtuoso
                     ref={virtuosoRef}
-                    style={{ position: "absolute", inset: 0 }}
+                    style={{ height: "100%" }}
                     totalCount={messageItems.length}
                     followOutput={"auto"}
                     atBottomStateChange={(atBottom) => setShowJumpButton(!atBottom)}
@@ -2388,17 +2388,17 @@ function TabRuntime({
                     }}
                   />
                 )}
-                {showJumpButton ? (
-                  <button
-                    className="thread-jump-bottom"
-                    onClick={() => scrollToBottom()}
-                    title={t("app.jumpToBottom") ?? "Jump to bottom"}
-                    aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
-                  >
-                    <I.chev size={16} />
-                  </button>
-                ) : null}
               </div>
+              {showJumpButton ? (
+                <button
+                  className="thread-jump-bottom"
+                  onClick={() => scrollToBottom()}
+                  title={t("app.jumpToBottom") ?? "Jump to bottom"}
+                  aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
+                >
+                  <I.chev size={16} />
+                </button>
+              ) : null}
 
               {state.pendingPlans.length > 0 || state.pendingCheckpoints.length > 0 || state.pendingRevisions.length > 0 || state.pendingConfirms.length > 0 || state.pendingPathAccess.length > 0 || state.pendingChoices.length > 0 || !state.ready ? (
                 <div style={{ maxWidth: "var(--thread-max-width, 740px)", margin: "0 auto", padding: "0 32px", width: "100%" }}>
