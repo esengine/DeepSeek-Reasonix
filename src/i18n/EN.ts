@@ -1863,6 +1863,7 @@ export const EN: TranslationSchema = {
     securityReview:
       "Security-focused review of the current branch diff in an isolated subagent \u2014 flags injection/authz/secrets/deserialization/path-traversal/crypto issues, severity-tagged. Read-only. Use when shipping changes that touch auth, input parsing, file IO, or external requests.",
     test: "Run the project\u2019s test suite, diagnose failures, propose SEARCH/REPLACE fixes, re-run until green (or stop after 2 fix attempts on the same failure). Inlined \u2014 runs in the parent loop so you see the edit blocks and can /apply them. Detects npm/pnpm/yarn/pytest/go/cargo.",
+    qq: "Guide QQ channel setup and troubleshooting for CLI or desktop \u2014 first-time connect, App ID / App Secret / QQ environment, active-tab behavior, and the most common 'configured but not replying' cases. Inlined \u2014 use when the user needs help getting QQ working.",
   },
   shortcutsHelp: {
     title: "Shortcuts",

@@ -17,7 +17,7 @@ const model: SlashHandler = (args, loop, ctx) => {
   loop.configure({ model: id });
   ctx.dispatch?.({ type: "session.model.change", model: id });
   try {
-    saveModel(id);
+    saveModel(id, ctx.configPath);
   } catch {
     /* disk full / perms — runtime change still took effect */
   }
@@ -29,7 +29,7 @@ const model: SlashHandler = (args, loop, ctx) => {
   return { info: t("handlers.model.modelSet", { id }) };
 };
 
-const effort: SlashHandler = (args, loop) => {
+const effort: SlashHandler = (args, loop, ctx) => {
   const choices = effortChoicesForBaseUrl(loop.client.baseUrl);
   const list = choices.join(" | ");
   const usageKey =
@@ -46,7 +46,7 @@ const effort: SlashHandler = (args, loop) => {
   const next: ReasoningEffort = raw;
   loop.configure({ reasoningEffort: next });
   try {
-    saveReasoningEffort(next);
+    saveReasoningEffort(next, ctx.configPath);
   } catch {
     /* disk full / perms — runtime change still took effect */
   }
