@@ -553,7 +553,10 @@ export class CacheFirstLoop {
   }
 
   private discardLogFrom(index: number): void {
-    const preserved = this.log.toFullHistory().slice(0, index).map((m) => ({ ...m }));
+    const preserved = this.log
+      .toFullHistory()
+      .slice(0, index)
+      .map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
     if (this.sessionName) {
       try {
