@@ -1853,16 +1853,6 @@ function TabRuntime({
 
   const [showJumpButton, setShowJumpButton] = useState(false);
 
-  // Initial scroll to bottom when session loads.
-  useEffect(() => {
-    if (messageItems.length > 0) {
-      const id = setTimeout(() => {
-        virtuosoRef.current?.scrollToIndex({ index: messageItems.length - 1, behavior: "auto" });
-      }, 100);
-      return () => clearTimeout(id);
-    }
-  }, [messageItems.length]);
-
   const scrollToBottom = useCallback(() => {
     const len = messageItems.length;
     if (len > 0) virtuosoRef.current?.scrollToIndex({ index: len - 1, behavior: "smooth" });
@@ -1870,8 +1860,9 @@ function TabRuntime({
 
   // Persist the transcript scroll offset per session so a restart reopens
   // the conversation where the user left it (#1244).
+  const virtScrollerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    const scroller = threadRef.current?.firstElementChild;
+    const scroller = virtScrollerRef.current;
     if (!scroller || !state.currentSession) return;
     const key = `reasonix.scroll.${state.currentSession}`;
     let timer: ReturnType<typeof setTimeout>;
@@ -2345,6 +2336,8 @@ function TabRuntime({
                     style={{ height: "100%", minHeight: 0 }}
                     totalCount={messageItems.length}
                     followOutput={"auto"}
+                    initialTopMostItemIndex={messageItems.length > 0 ? messageItems.length - 1 : undefined}
+                    scrollerRef={(ref) => { virtScrollerRef.current = ref as HTMLElement | null; }}
                     atBottomStateChange={(atBottom) => setShowJumpButton(!atBottom)}
                     components={{
                       Header: state.activePlan ? () => (
