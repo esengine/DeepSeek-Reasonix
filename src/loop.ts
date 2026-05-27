@@ -521,7 +521,7 @@ export class CacheFirstLoop {
   }
 
   private healActiveLogBeforeSend(): ChatMessage[] {
-    const current = this.log.toMessages();
+    const current = this.log.toFullHistory();
     const healed = healLoadedMessages(current, DEFAULT_MAX_RESULT_CHARS);
     const argsShrunk = shrinkOversizedToolCallArgsByTokens(
       healed.messages,
@@ -553,7 +553,7 @@ export class CacheFirstLoop {
   }
 
   private discardLogFrom(index: number): void {
-    const preserved = this.log.entries.slice(0, index).map((m) => ({ ...m }));
+    const preserved = this.log.toFullHistory().slice(0, index).map((m) => ({ ...m }));
     this.log.compactInPlace(preserved);
     if (this.sessionName) {
       try {
@@ -566,7 +566,7 @@ export class CacheFirstLoop {
 
   /** Drop the last user message + everything after; caller re-sends. Persists to session file. */
   retryLastUser(): string | null {
-    const entries = this.log.entries;
+    const entries = this.log.toFullHistory();
     let lastUserIdx = -1;
     for (let i = entries.length - 1; i >= 0; i--) {
       if (entries[i]!.role === "user") {
@@ -591,7 +591,7 @@ export class CacheFirstLoop {
 
   /** Rewind to the N-th user turn (0-indexed). Drops that turn + everything after. */
   rewindToUserTurn(userTurnIndex: number): string | null {
-    const entries = this.log.entries;
+    const entries = this.log.toFullHistory();
     let count = 0;
     let targetIdx = -1;
     for (let i = 0; i < entries.length; i++) {

@@ -119,7 +119,7 @@ export class ContextManager {
   /** Real-time token count of the current log — used by Desktop to refresh the
    *  context meter after /compact when no API usage event is available. */
   getLogTokens(): number {
-    const entries = this.deps.log.toMessages();
+    const entries = this.deps.log.toFullHistory();
     let total = 0;
     for (const e of entries) {
       const content = typeof e.content === "string" ? e.content : "";
@@ -182,7 +182,7 @@ export class ContextManager {
   ): Promise<FoldResult> {
     const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
     const tailBudget = opts?.keepRecentTokens ?? Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
-    const all = this.deps.log.toMessages();
+    const all = this.deps.log.toFullHistory();
     const noop: FoldResult = {
       folded: false,
       beforeMessages: all.length,

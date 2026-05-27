@@ -931,7 +931,7 @@ function emitCtxBreakdown(tab: Tab): void {
   try {
     logTokens = tab.runtime.loop.getCurrentLogTokens();
   } catch {
-    for (const msg of tab.runtime.loop.log.toMessages()) {
+    for (const msg of tab.runtime.loop.log.toFullHistory()) {
       logTokens += countTokensForMeter(typeof msg.content === "string" ? msg.content : "");
       if (msg.role === "assistant" && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
         logTokens += countTokensForMeter(JSON.stringify(msg.tool_calls));

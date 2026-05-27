@@ -148,10 +148,15 @@ export class AppendOnlyLog {
     return undefined;
   }
 
-  // Returns all messages; reads from disk when window doesn't cover everything.
+  /** Window only — no disk I/O. */
   toMessages(): ChatMessage[] {
+    return this._entries.map((e) => ({ ...e }));
+  }
+
+  /** Full history — reads from disk when window doesn't cover everything. */
+  toFullHistory(): ChatMessage[] {
     if (!this._sessionPath || this._entries.length >= this._totalLength) {
-      return this._entries.map((e) => ({ ...e }));
+      return this.toMessages();
     }
     const whole = readTailMessages(this._sessionPath, this._totalLength);
     return whole.map((e) => ({ ...e }));
@@ -161,7 +166,13 @@ export class AppendOnlyLog {
     return this._entries;
   }
 
+  /** Number of messages currently in the memory window. */
   get length(): number {
+    return this._entries.length;
+  }
+
+  /** Total messages logically in the log (window + disk). */
+  get totalLength(): number {
     return this._totalLength;
   }
 
