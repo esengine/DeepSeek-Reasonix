@@ -319,8 +319,8 @@ export const en = {
     shortcutSettings: "Settings",
   },
   modal: {
-    planFeedbackPlaceholder: "Optional feedback — write here if you want changes",
-    choiceCustomPlaceholder: "Or type your own answer…",
+    planFeedbackPlaceholder: "What problems does the plan have? What needs to be improved?",
+    choiceCustomPlaceholder: "Where can the plan be further refined?",
   },
   plan: {
     activeTitle: "Active plan",
@@ -715,6 +715,10 @@ export const en = {
     approve: "Approve",
     cancel: "Cancel",
     refine: "Refine",
+    sendFeedback: "Send",
+    skipFeedback: "Skip",
+    cancelFeedbackLabel: "Cancel — what went wrong?",
+    refineFeedbackLabel: "Refine — what should change?",
     checkpointKind: "plan checkpoint",
     checkpointTitle: "step {completed} / {total} complete",
     checkpointSub: "checkpoint · {completed} / {total}",

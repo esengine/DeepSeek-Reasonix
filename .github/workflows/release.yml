@@ -24,13 +24,11 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          # `rust` is the comma-separated list installed by dtolnay/rust-toolchain;
-          # `tauri` is what we pass to `cargo tauri build --target`. They differ
-          # only for the universal Mac shard, which produces one fat binary from
-          # two real Rust targets via lipo. Intel-only macos-13 runner is dropped
-          # — GH retired most of that pool, queue waits ran to hours.
+          # macOS now ships two single-arch shards so Apple Silicon and Intel
+          # users get separate DMGs. `rust` and `tauri` stay aligned per shard.
           - { os: ubuntu-22.04, label: "linux-x64", rust: "x86_64-unknown-linux-gnu", tauri: "x86_64-unknown-linux-gnu" }
-          - { os: macos-14, label: "macos-universal", rust: "aarch64-apple-darwin,x86_64-apple-darwin", tauri: "universal-apple-darwin" }
+          - { os: macos-15-intel, label: "macos-x64", rust: "x86_64-apple-darwin", tauri: "x86_64-apple-darwin" }
+          - { os: macos-14, label: "macos-arm64", rust: "aarch64-apple-darwin", tauri: "aarch64-apple-darwin" }
           - { os: windows-latest, label: "windows-x64", rust: "x86_64-pc-windows-msvc", tauri: "x86_64-pc-windows-msvc" }
     runs-on: ${{ matrix.target.os }}
     # secrets.* isn't accessible from step-level if:, so expose presence as a
@@ -96,14 +94,18 @@ jobs:
         working-directory: desktop
         run: npm run bundle:node
 
-      - name: Verify bundled Node is universal (macOS)
+      - name: Verify bundled Node matches host arch (macOS)
         if: startsWith(matrix.target.os, 'macos-')
         working-directory: desktop
         run: |
+          expected_arch=$(uname -m)
           archs=$(lipo -archs src-tauri/binaries/node)
           echo "node archs: $archs"
-          echo "$archs" | grep -q "arm64"
-          echo "$archs" | grep -q "x86_64"
+          echo "expected arch: $expected_arch"
+          if [ "$archs" != "$expected_arch" ]; then
+            echo "Expected $expected_arch Node, got: $archs" >&2
+            exit 1
+          fi
           codesign -d --entitlements :- src-tauri/binaries/node 2>&1 | grep -q "com.apple.security.inherit"
 
       - name: Build & verify desktop frontend

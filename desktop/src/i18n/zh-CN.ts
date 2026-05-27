@@ -305,8 +305,8 @@ export const zhCN: typeof en = {
     shortcutSettings: "设置",
   },
   modal: {
-    planFeedbackPlaceholder: "可选反馈 — 想要修改时写这里",
-    choiceCustomPlaceholder: "或者自己写一个答案…",
+    planFeedbackPlaceholder: "计划存在哪些问题？需要改进哪些地方？",
+    choiceCustomPlaceholder: "计划可以如何进一步细化？",
   },
   plan: {
     activeTitle: "进行中的计划",
@@ -700,6 +700,10 @@ export const zhCN: typeof en = {
     approve: "批准",
     cancel: "取消",
     refine: "细化",
+    sendFeedback: "发送",
+    skipFeedback: "跳过",
+    cancelFeedbackLabel: "取消 — 哪里有问题？",
+    refineFeedbackLabel: "细化 — 还需要什么？",
     checkpointKind: "计划检查点",
     checkpointTitle: "step {completed} / {total} 完成",
     checkpointSub: "检查点 · {completed} / {total}",

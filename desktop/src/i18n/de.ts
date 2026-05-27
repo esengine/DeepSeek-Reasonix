@@ -327,8 +327,8 @@ export const de: typeof en = {
   },
   modal: {
     ...en.modal,
-    planFeedbackPlaceholder: "Optional: Feedback — schreibe hier, wenn du Änderungen möchtest",
-    choiceCustomPlaceholder: "Oder gib deine eigene Antwort ein…",
+    planFeedbackPlaceholder: "Welche Probleme hat der Plan? Was muss verbessert werden?",
+    choiceCustomPlaceholder: "Wo kann der Plan weiter verfeinert werden?",
   },
   plan: {
     ...en.plan,
@@ -733,6 +733,8 @@ export const de: typeof en = {
   },
   thread: {
     ...en.thread,
+    toolCalls: "{count} Tool-Aufrufe",
+    oneToolCall: "1 Tool-Aufruf",
     keepSteps: "{n} verbleibende(n) Schritt(e) behalten",
     keepOriginal: "Original behalten",
     you: "Du",
@@ -746,6 +748,10 @@ export const de: typeof en = {
     approve: "Genehmigen",
     cancel: "Abbrechen",
     refine: "Verfeinern",
+    sendFeedback: "Senden",
+    skipFeedback: "Überspringen",
+    cancelFeedbackLabel: "Abbrechen — was ist falsch?",
+    refineFeedbackLabel: "Verfeinern — was soll geändert werden?",
     checkpointKind: "Plan-Checkpoint",
     checkpointTitle: "Schritt {completed} / {total} abgeschlossen",
     checkpointSub: "Checkpoint · {completed} / {total}",

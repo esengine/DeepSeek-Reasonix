@@ -65,8 +65,9 @@ function renderTodos(todos: TodoItem[]): string {
     else pending++;
   }
   const header = `todos updated · ${done} done · ${inProgress} in progress · ${pending} pending`;
-  const lines = todos.map((t) => {
-    if (t.status === "completed") return `[x] ${t.content}`;
+  const active = todos.filter((t) => t.status !== "completed");
+  if (active.length === 0) return header;
+  const lines = active.map((t) => {
     if (t.status === "in_progress") return `[>] ${t.activeForm}`;
     return `[ ] ${t.content}`;
   });

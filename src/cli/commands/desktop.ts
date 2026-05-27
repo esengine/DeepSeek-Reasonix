@@ -76,6 +76,11 @@ import {
   readMemoryEntryDetail,
 } from "../../desktop/memory-browser.js";
 import {
+  parseQQRemoteDesktopCommand,
+  qqRemoteCommandBypassesBusy,
+  qqRemoteDesktopHelpText,
+} from "../../desktop/qq-remote-commands.js";
+import {
   loadDesktopQQState,
   saveDesktopQQSettings,
   setDesktopQQEnabled,
@@ -1207,8 +1212,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     broadcastQQSettings();
   }
 
-  function sendQQInfo(message: string): void {
-    const tab = activeDesktopTab();
+  function sendQQInfo(message: string, tabOverride?: Tab): void {
+    const tab = tabOverride ?? activeDesktopTab();
     if (tab) {
       emit(
         {
@@ -1227,6 +1232,145 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emit({ type: "$error", message: `qq send failed: ${(err as Error).message}` }, active.id);
       }
     });
+  }
+
+  function startNewChatInTab(tab: Tab): void {
+    if (tab.aborter) tab.switching = true;
+    abortTurn(tab);
+    cancelPendingGates(tab);
+    tab.currentSession = mintSessionFor(tab.rootDir);
+    persistOpenTabs();
+    if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
+    emitSessions(tab);
+  }
+
+  function buildSkillPayload(tab: Tab, name: string, args?: string): string | null {
+    const store = new SkillStore({
+      projectRoot: tab.rootDir,
+      customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+    });
+    const found = store.read(name);
+    if (!found) return null;
+    const extra = args?.trim() ?? "";
+    const header = `# Skill: ${found.name}${found.description ? `\n> ${found.description}` : ""}`;
+    const argsLine = extra ? `\n\nArguments: ${extra}` : "";
+    return `${header}\n\n${found.body}${argsLine}`;
+  }
+
+  function availableSkillNamesForTab(tab: Tab): string[] {
+    const store = new SkillStore({
+      projectRoot: tab.rootDir,
+      customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+      subagentModels: loadSubagentModels(),
+    });
+    return store.list().map((s) => s.name);
+  }
+
+  function runBtwOnTab(
+    tab: Tab,
+    question: string,
+    hooks?: {
+      onAnswer?: (answer: string) => void;
+      onError?: (message: string) => void;
+    },
+  ): void {
+    if (!tab.runtime) return;
+    void (async () => {
+      try {
+        const reply = await tab.runtime!.loop.client.chat({
+          model: tab.currentModel,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are answering a side question that is unrelated to the current coding conversation. Answer concisely (1-3 sentences) in plain prose. Do not call tools, do not ask clarifying questions, and do not reference any prior turns.",
+            },
+            { role: "user", content: question },
+          ],
+        });
+        const answer =
+          (typeof reply.content === "string" ? reply.content.trim() : "") || "(no answer)";
+        emit({ type: "$btw_result", question, answer }, tab.id);
+        hooks?.onAnswer?.(answer);
+      } catch (err) {
+        const message = `/btw failed: ${(err as Error).message}`;
+        emit({ type: "$error", message }, tab.id);
+        hooks?.onError?.(message);
+      }
+    })();
+  }
+
+  function handleQQRemoteDesktopCommand(tab: Tab, text: string): boolean {
+    const cmd = parseQQRemoteDesktopCommand(text, availableSkillNamesForTab(tab));
+    if (!cmd) return false;
+    if (tab.aborter && !qqRemoteCommandBypassesBusy(cmd)) {
+      void qqRuntime.channel
+        ?.sendResponse("Session is busy. Wait for the current turn or reply to the pending prompt.")
+        .catch(() => undefined);
+      return true;
+    }
+    switch (cmd.kind) {
+      case "help":
+        sendQQInfo(qqRemoteDesktopHelpText(availableSkillNamesForTab(tab)), tab);
+        return true;
+      case "abort":
+        abortTurn(tab, { discardCurrentTurn: true });
+        cancelPendingGates(tab);
+        sendQQInfo("Stopped the current desktop conversation.", tab);
+        return true;
+      case "new":
+        startNewChatInTab(tab);
+        sendQQInfo("Started a new desktop conversation in the current tab.", tab);
+        return true;
+      case "compact":
+        if (!tab.runtime) {
+          sendQQInfo("Desktop is not configured yet.", tab);
+          return true;
+        }
+        void tab.runtime.loop
+          .compactHistory()
+          .then(() => {
+            emitCtxBreakdown(tab);
+            sendQQInfo("Compacted the current desktop conversation history.", tab);
+          })
+          .catch((err: Error) => {
+            emit({ type: "$error", message: `/compact failed: ${err.message}` }, tab.id);
+            void qqRuntime.channel
+              ?.sendResponse(`/compact failed: ${err.message}`)
+              .catch(() => undefined);
+          });
+        return true;
+      case "btw":
+        if (!tab.runtime) {
+          sendQQInfo("Desktop is not configured yet.", tab);
+          return true;
+        }
+        runBtwOnTab(tab, cmd.text, {
+          onAnswer: (answer) =>
+            void qqRuntime.channel?.sendResponse(`≫ btw\n${answer}`).catch(() => undefined),
+          onError: (message) =>
+            void qqRuntime.channel?.sendResponse(message).catch(() => undefined),
+        });
+        return true;
+      case "skill": {
+        if (!tab.runtime) {
+          sendQQInfo("Desktop is not configured yet.", tab);
+          return true;
+        }
+        const payload = buildSkillPayload(tab, cmd.name, cmd.args);
+        if (!payload) {
+          emit({ type: "$error", message: `skill not found: ${cmd.name}` }, tab.id);
+          void qqRuntime.channel
+            ?.sendResponse(`skill not found: ${cmd.name}`)
+            .catch(() => undefined);
+          return true;
+        }
+        void runTurn(tab, payload, true);
+        return true;
+      }
+      default:
+        return false;
+    }
   }
 
   function parseIndexedChoice(text: string): number {
@@ -1411,6 +1555,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         if (!tab) return;
         const trimmed = text.trim();
         if (!trimmed) return;
+        if (handleQQRemoteDesktopCommand(tab, trimmed)) return;
         emit(
           {
             type: "user.message",
@@ -2394,19 +2539,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         return;
       }
       try {
-        const store = new SkillStore({
-          projectRoot: tab.rootDir,
-          customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
-        });
-        const found = store.read(msg.name);
-        if (!found) {
+        const payload = buildSkillPayload(tab, msg.name, msg.args);
+        if (!payload) {
           emit({ type: "$error", message: `skill not found: ${msg.name}` }, tab.id);
           return;
         }
-        const extra = msg.args?.trim() ?? "";
-        const header = `# Skill: ${found.name}${found.description ? `\n> ${found.description}` : ""}`;
-        const argsLine = extra ? `\n\nArguments: ${extra}` : "";
-        const payload = `${header}\n\n${found.body}${argsLine}`;
         void runTurn(tab, payload);
       } catch (err) {
         emit({ type: "$error", message: `skill_run: ${(err as Error).message}` }, tab.id);
@@ -2524,13 +2661,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "new_chat") {
       // Only set switching flag when there's a live turn to abort —
       // otherwise the flag stays true and suppresses the first turn's events (#1217).
-      if (tab.aborter) tab.switching = true;
-      abortTurn(tab);
-      cancelPendingGates(tab);
-      tab.currentSession = mintSessionFor(tab.rootDir);
-      persistOpenTabs();
-      if (tab.runtime) tab.runtime = buildRuntimeFor(tab);
-      emitSessions(tab);
+      startNewChatInTab(tab);
       return;
     }
     if (msg.cmd === "settings_get") {
@@ -2816,26 +2947,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       if (!tab.runtime) return;
       const question = msg.text.trim();
       if (!question) return;
-      void (async () => {
-        try {
-          const reply = await tab.runtime!.loop.client.chat({
-            model: tab.currentModel,
-            messages: [
-              {
-                role: "system",
-                content:
-                  "You are answering a side question that is unrelated to the current coding conversation. Answer concisely (1-3 sentences) in plain prose. Do not call tools, do not ask clarifying questions, and do not reference any prior turns.",
-              },
-              { role: "user", content: question },
-            ],
-          });
-          const answer =
-            (typeof reply.content === "string" ? reply.content.trim() : "") || "(no answer)";
-          emit({ type: "$btw_result", question, answer }, tab.id);
-        } catch (err) {
-          emit({ type: "$error", message: `/btw failed: ${(err as Error).message}` }, tab.id);
-        }
-      })();
+      runBtwOnTab(tab, question);
       return;
     }
     if (msg.cmd === "user_input") {

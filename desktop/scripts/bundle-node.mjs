@@ -1,5 +1,5 @@
 // Pulls Node 22 from nodejs.org into desktop/src-tauri/binaries/.
-// Mac always produces a universal Mach-O so Intel + Apple Silicon ship from one .dmg (issue #1234).
+// macOS downloads the host-arch binary so arm64 and x64 releases stay split.
 import { execSync } from "node:child_process";
 import { chmodSync, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import https from "node:https";
@@ -22,6 +22,7 @@ if (!HOST_ARCH || !["win32", "darwin", "linux"].includes(PLAT)) {
 
 const isWin = PLAT === "win32";
 const targetExe = join(binDir, isWin ? "node.exe" : "node");
+const MAC_ARCH = HOST_ARCH === "x64" ? "x86_64" : HOST_ARCH;
 
 function adhocSignMac(binPath) {
   // #1611: child node needs com.apple.security.inherit so it inherits the
@@ -53,16 +54,16 @@ if (existsSync(targetExe) && statSync(targetExe).size > 1024 * 1024) {
   if (PLAT === "darwin") {
     try {
       const archs = execSync(`lipo -archs "${targetExe}"`, { encoding: "utf8" }).trim();
-      if (archs.includes("arm64") && archs.includes("x86_64")) {
+      if (archs === MAC_ARCH) {
         if (!hasMacTccInheritance(targetExe)) {
-          console.log(`${targetExe} universal but missing TCC inheritance — applying ad-hoc sign`);
+          console.log(`${targetExe} ${MAC_ARCH} build missing TCC inheritance — applying ad-hoc sign`);
           adhocSignMac(targetExe);
         } else {
-          console.log(`${targetExe} already universal + TCC-inheriting (${archs}) — delete to refetch`);
+          console.log(`${targetExe} already ${MAC_ARCH} + TCC-inheriting — delete to refetch`);
         }
         process.exit(0);
       }
-      console.log(`${targetExe} present but not universal (${archs}) — rebuilding`);
+      console.log(`${targetExe} present but not ${MAC_ARCH} (${archs}) — rebuilding`);
       rmSync(targetExe);
     } catch {
       console.log(`${targetExe} present but not verifiable as Mach-O — rebuilding`);
@@ -148,36 +149,25 @@ async function fetchAndExtract(arch) {
   return { inner, extractDir };
 }
 
+const { inner, extractDir } = await fetchAndExtract(HOST_ARCH);
+
+if (existsSync(targetExe)) rmSync(targetExe);
+renameSync(inner, targetExe);
+if (!isWin) {
+  try {
+    chmodSync(targetExe, 0o755);
+  } catch {
+    /* ignore */
+  }
+}
+rmSync(extractDir, { recursive: true, force: true });
+
 if (PLAT === "darwin") {
-  const [arm, x64] = await Promise.all([fetchAndExtract("arm64"), fetchAndExtract("x64")]);
-
-  console.log("Creating universal binary with lipo ...");
-  if (existsSync(targetExe)) rmSync(targetExe);
-  execSync(`lipo -create "${arm.inner}" "${x64.inner}" -output "${targetExe}"`, { stdio: "inherit" });
-  chmodSync(targetExe, 0o755);
-
-  rmSync(arm.extractDir, { recursive: true, force: true });
-  rmSync(x64.extractDir, { recursive: true, force: true });
-
   adhocSignMac(targetExe);
-
   const archs = execSync(`lipo -archs "${targetExe}"`, { encoding: "utf8" }).trim();
   const mb = (statSync(targetExe).size / 1024 / 1024).toFixed(1);
   console.log(`Done: ${targetExe} (${mb} MB, archs: ${archs})`);
 } else {
-  const { inner, extractDir } = await fetchAndExtract(HOST_ARCH);
-
-  if (existsSync(targetExe)) rmSync(targetExe);
-  renameSync(inner, targetExe);
-  if (!isWin) {
-    try {
-      chmodSync(targetExe, 0o755);
-    } catch {
-      /* ignore */
-    }
-  }
-  rmSync(extractDir, { recursive: true, force: true });
-
   const mb = (statSync(targetExe).size / 1024 / 1024).toFixed(1);
   console.log(`Done: ${targetExe} (${mb} MB)`);
 }
