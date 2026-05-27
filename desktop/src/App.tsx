@@ -2580,6 +2580,10 @@ function TabRuntime({
             saveSettings({ workspaceDir: path });
           }}
           onBrowse={pickWorkspace}
+          onRemoveRecent={(path) => {
+            const nextRecent = (state.settings?.recentWorkspaces ?? []).filter((p) => p !== path);
+            applySettingsPatch({ recentWorkspaces: nextRecent });
+          }}
         />
 
         {aboutOpen ? <AboutModal onClose={() => setAboutOpen(false)} /> : null}

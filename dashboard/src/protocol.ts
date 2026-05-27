@@ -342,6 +342,7 @@ export type SettingsPatch = {
   budgetUsd?: number | null;
   baseUrl?: string;
   workspaceDir?: string;
+  recentWorkspaces?: string[];
   model?: string;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;

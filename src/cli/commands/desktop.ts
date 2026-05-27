@@ -159,6 +159,7 @@ type InMessage = { tabId?: string } & (
       budgetUsd?: number | null;
       baseUrl?: string;
       workspaceDir?: string;
+      recentWorkspaces?: string[];
       model?: string;
       editor?: string;
       webSearchEngine?:
@@ -2548,6 +2549,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         if (msg.workspaceDir !== undefined) {
           void switchWorkspace(tab, msg.workspaceDir);
           return;
+        }
+        if (msg.recentWorkspaces !== undefined) {
+          const cfg = readConfig();
+          cfg.recentWorkspaces = msg.recentWorkspaces;
+          writeConfig(cfg);
+          process.stderr.write(`[desktop] saved recentWorkspaces: ${JSON.stringify(msg.recentWorkspaces)}\n`);
         }
         if (msg.editor !== undefined) saveEditor(msg.editor);
         if (msg.showSystemEvents !== undefined) saveShowSystemEvents(msg.showSystemEvents);
