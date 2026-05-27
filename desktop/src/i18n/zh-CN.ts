@@ -306,7 +306,7 @@ export const zhCN: typeof en = {
   },
   modal: {
     planFeedbackPlaceholder: "计划存在哪些问题？需要改进哪些地方？",
-    choiceCustomPlaceholder: "计划可以在哪里地方进一步细化深化？",
+    choiceCustomPlaceholder: "计划可以如何进一步细化？",
   },
   plan: {
     activeTitle: "进行中的计划",
