@@ -71,6 +71,33 @@ describe("chat history scroll store", () => {
       vi.useRealTimers();
     }
   });
+
+  it("coalesces CardStream measurement bursts into one subscriber update", () => {
+    vi.useFakeTimers();
+    try {
+      const store = createChatScrollStore();
+      let notifications = 0;
+      store.subscribe(() => {
+        notifications += 1;
+      });
+
+      for (let i = 0; i < 60; i++) {
+        store.setCardHeight(`edit-${i}`, i + 1);
+        store.setMaxScroll(i + 1);
+      }
+
+      expect(notifications).toBe(0);
+
+      vi.advanceTimersByTime(16);
+
+      expect(notifications).toBe(1);
+      expect(store.getState().maxScroll).toBe(60);
+      expect(store.getState().scrollRows).toBe(60);
+      expect(store.getState().cardHeights.size).toBe(60);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("history scroll mode resolution", () => {

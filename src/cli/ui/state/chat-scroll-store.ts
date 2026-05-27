@@ -59,8 +59,11 @@ export function createChatScrollStore(opts: CreateChatScrollStoreOptions = {}): 
   const listeners = new Set<ScrollListener>();
   let pendingDelta = 0;
   let flushTimer: NodeJS.Timeout | null = null;
-  let pendingMaxShrink: number | null = null;
-  let shrinkTimer: NodeJS.Timeout | null = null;
+  // CardStream can report many measured edit-result cards in one render burst;
+  // coalesce them so React/Ink sees one external-store notification.
+  let pendingMaxScroll: number | null = null;
+  let pendingCardHeights: Map<string, number> | null = null;
+  let measurementTimer: NodeJS.Timeout | null = null;
 
   function set(next: Partial<ChatScrollState>): void {
     const merged = { ...state, ...next };
@@ -90,6 +93,7 @@ export function createChatScrollStore(opts: CreateChatScrollStoreOptions = {}): 
   }
 
   function schedule(delta: number): void {
+    flushMeasurements();
     if (flushTimer === null) {
       pendingDelta = delta;
       applyDelta();
@@ -102,16 +106,42 @@ export function createChatScrollStore(opts: CreateChatScrollStoreOptions = {}): 
     }
   }
 
-  function flushShrink(): void {
-    if (shrinkTimer !== null) {
-      clearTimeout(shrinkTimer);
-      shrinkTimer = null;
+  function scheduleMeasurementFlush(): void {
+    if (measurementTimer !== null) return;
+    measurementTimer = setTimeout(() => {
+      measurementTimer = null;
+      flushMeasurements();
+    }, COALESCE_MS);
+  }
+
+  function flushMeasurements(): void {
+    if (measurementTimer !== null) {
+      clearTimeout(measurementTimer);
+      measurementTimer = null;
     }
-    const target = pendingMaxShrink;
-    pendingMaxShrink = null;
-    if (target === null) return;
-    const nextScrollRows = state.pinned ? target : Math.min(state.scrollRows, target);
-    set({ maxScroll: target, scrollRows: nextScrollRows });
+
+    const next: Partial<ChatScrollState> = {};
+    if (pendingCardHeights !== null) {
+      const heights = new Map(state.cardHeights);
+      let changed = false;
+      for (const [id, rows] of pendingCardHeights) {
+        if (heights.get(id) === rows) continue;
+        heights.set(id, rows);
+        changed = true;
+      }
+      pendingCardHeights = null;
+      if (changed) next.cardHeights = heights;
+    }
+
+    if (pendingMaxScroll !== null) {
+      const maxScroll = pendingMaxScroll;
+      pendingMaxScroll = null;
+      const nextScrollRows = state.pinned ? maxScroll : Math.min(state.scrollRows, maxScroll);
+      next.maxScroll = maxScroll;
+      next.scrollRows = nextScrollRows;
+    }
+
+    if (Object.keys(next).length > 0) set(next);
   }
 
   return {
@@ -136,37 +166,32 @@ export function createChatScrollStore(opts: CreateChatScrollStoreOptions = {}): 
         clearTimeout(flushTimer);
         flushTimer = null;
       }
-      pendingMaxShrink = null;
-      if (shrinkTimer !== null) {
-        clearTimeout(shrinkTimer);
-        shrinkTimer = null;
-      }
+      flushMeasurements();
       set({ pinned: true, scrollRows: state.maxScroll });
     },
     setMaxScroll(rows: number) {
       const maxScroll = rows < 0 ? 0 : rows;
-      const currentMax = pendingMaxShrink ?? state.maxScroll;
-      if (state.pinned && maxScroll < currentMax) {
-        pendingMaxShrink = maxScroll;
-        if (shrinkTimer === null) {
-          shrinkTimer = setTimeout(() => {
-            shrinkTimer = null;
-            flushShrink();
-          }, COALESCE_MS);
-        }
+      const currentTarget = pendingMaxScroll ?? state.maxScroll;
+      if (maxScroll === currentTarget) {
         return;
       }
-      if (pendingMaxShrink !== null) flushShrink();
-      const nextScrollRows = state.pinned ? maxScroll : Math.min(state.scrollRows, maxScroll);
-      set({ maxScroll, scrollRows: nextScrollRows });
+      pendingMaxScroll = maxScroll;
+      scheduleMeasurementFlush();
     },
     setCardHeight(id: string, rows: number) {
-      if (state.cardHeights.get(id) === rows) return;
-      const next = new Map(state.cardHeights);
-      next.set(id, rows);
-      set({ cardHeights: next });
+      const currentRows = pendingCardHeights?.get(id) ?? state.cardHeights.get(id);
+      if (currentRows === rows) return;
+      if (pendingCardHeights === null) pendingCardHeights = new Map();
+      pendingCardHeights.set(id, rows);
+      scheduleMeasurementFlush();
     },
     pruneCardHeights(liveIds: ReadonlySet<string>) {
+      if (pendingCardHeights !== null) {
+        for (const id of pendingCardHeights.keys()) {
+          if (!liveIds.has(id)) pendingCardHeights.delete(id);
+        }
+        if (pendingCardHeights.size === 0) pendingCardHeights = null;
+      }
       let changed = false;
       const next = new Map<string, number>();
       for (const [id, rows] of state.cardHeights) {
