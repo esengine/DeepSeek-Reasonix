@@ -415,7 +415,7 @@ export const de: TranslationSchema = {
     "search-engine": {
       ...EN.slash["search-engine"],
       description:
-        "Web-Search-Backend wechseln — bing (Standard, funktioniert von CN ohne Proxy), searxng (selbst gehostet), metaso (kostenlos 100/Tag), tavily (kostenlos 1000/Monat), perplexity (AI-native) oder exa (AI-native)",
+        "Web-Search-Backend wechseln — bing (Standard, funktioniert von CN ohne Proxy), bing-intl (internationaler Index), searxng (selbst gehostet), metaso (kostenlos 100/Tag), tavily (kostenlos 1000/Monat), perplexity (AI-native), exa (AI-native), brave (unabhängiger Index) oder ollama (Ollama Cloud-Websuche)",
     },
     theme: {
       ...EN.slash.theme,
@@ -1266,6 +1266,8 @@ export const de: TranslationSchema = {
       usageHeader: "Verwendung:",
       usageBing:
         "  /search-engine bing              Bing verwenden (Standard, funktioniert von CN ohne Proxy)",
+      usageBingIntl:
+        "  /search-engine bing-intl          Bing International verwenden (www.bing.com, indexiert GitHub/Wikipedia/Stack Overflow)",
       usageSearxng: "  /search-engine searxng            SearXNG verwenden (Standard-Endpunkt)",
       usageSearxngUrl:
         "  /search-engine searxng <url>      SearXNG mit benutzerdefiniertem Endpunkt",
@@ -1277,6 +1279,8 @@ export const de: TranslationSchema = {
         "  /search-engine perplexity          Perplexity AI verwenden (AI-native Antwort + Quellenangaben — setze PERPLEXITY_API_KEY oder perplexityApiKey in der Konfiguration; erhalte einen unter https://perplexity.ai/settings/api)",
       usageExa:
         "  /search-engine exa                 Exa-API verwenden (AI-native Antwort + Quellenangaben, kostenlos 1000/Monat — setze EXA_API_KEY oder exaApiKey in der Konfiguration; registriere dich unter https://exa.ai)",
+      usageOllama:
+        "  /search-engine ollama                Ollama Cloud-Web-Suche verwenden — setze OLLAMA_API_KEY oder ollamaApiKey in der Konfiguration; Schlüssel unter https://ollama.com/settings/keys",
       usageBrave:
         "  /search-engine brave               Brave Search API nutzen (unabhängiger Index, kostenlos 2000/Monat — setze BRAVE_SEARCH_API_KEY oder braveApiKey in der Konfiguration; Schlüssel unter https://brave.com/search/api/)",
       alias: "Alias: /se",
@@ -1624,25 +1628,25 @@ export const de: TranslationSchema = {
   webErrors: {
     ...EN.webErrors,
     status:
-      "web_search {status} — versuche: Das Such-Backend hat einen Fehler zurückgegeben; formuliere die Abfrage um oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search {status} — versuche: Das Such-Backend hat einen Fehler zurückgegeben; formuliere die Abfrage um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     rateLimit429:
       "web_search 429 — versuche: 10s warten vor erneuter Abfrage oder Abfrage umformulieren; das Such-Backend hat das Rate-Limit für diesen Client erreicht",
     forbidden403:
-      "web_search 403 — versuche: Das Such-Backend blockiert diesen Client; wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama oder warte und versuche es später erneut",
+      "web_search 403 — versuche: Das Such-Backend blockiert diesen Client; wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama oder warte und versuche es später erneut",
     serverError5xx:
       "web_search {status} — versuche: Öffne die Such-URL in einem Browser; falls sie lädt, ist dies vorübergehend und ein erneuter Versuch in 30s kann helfen",
     bingBlocked:
-      "web_search: Bing-Anti-Bot-Seite — Rate-Limit erreicht oder blockiert — versuche: 30s warten und erneut versuchen, oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Bing-Anti-Bot-Seite — Rate-Limit erreicht oder blockiert — versuche: 30s warten und erneut versuchen, oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     bingNoResults:
-      "web_search: 0 Ergebnisse, aber die Antwort sieht nicht wie eine echte leere Seite aus ({chars} Zeichen, erste 120: {preview}) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: 0 Ergebnisse, aber die Antwort sieht nicht wie eine echte leere Seite aus ({chars} Zeichen, erste 120: {preview}) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     invalidEndpoint:
       'web_search: ungültiger SearXNG-Endpunkt "{endpoint}" — versuche: setze eine gültige URL mit /search-endpoint http://host:port',
     endpointMustBeHttp:
       "web_search: SearXNG-Endpunkt muss http(s) sein, {protocol} erhalten — versuche: setze eine gültige URL mit /search-endpoint http://host:port",
     cannotReach:
-      "web_search: SearXNG-Server unter {endpoint} nicht erreichbar — versuche: SearXNG installieren und starten (https://github.com/searxng/searxng, z.B. `docker run -d -p 8080:8080 searxng/searxng`), oder wechsle zu einer anderen Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: SearXNG-Server unter {endpoint} nicht erreichbar — versuche: SearXNG installieren und starten (https://github.com/searxng/searxng, z.B. `docker run -d -p 8080:8080 searxng/searxng`), oder wechsle zu einer anderen Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     searxngNoResults:
-      "web_search: 0 Ergebnisse, aber SearXNG-Antwort sieht nicht wie eine leere Ergebnisseite aus ({chars} Zeichen) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: 0 Ergebnisse, aber SearXNG-Antwort sieht nicht wie eine leere Ergebnisseite aus ({chars} Zeichen) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     metasoMissingKey:
       "web_search: Metaso benötigt einen API-Schlüssel — setze METASO_API_KEY oder konfiguriere einen mit /search-engine metaso <schlüssel>. Erhalte einen unter https://metaso.cn/search-api/playground",
     metasoDailyLimit:
@@ -1652,7 +1656,7 @@ export const de: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metaso-Rate-Limit erreicht — warte und versuche es erneut, oder erhalte einen eigenen API-Schlüssel unter https://metaso.cn/search-api/playground",
     metasoServerError:
-      "web_search: Metaso-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Metaso-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     metasoParseError:
       "web_search: Metaso hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     metasoApiError:
@@ -1662,9 +1666,9 @@ export const de: TranslationSchema = {
     tavilyUnauthorized:
       "web_search: Tavily-API-Schlüssel abgelehnt — überprüfe TAVILY_API_KEY oder erhalte einen unter https://tavily.com",
     tavilyRateLimit:
-      "web_search: Tavily-Rate-Limit erreicht oder monatliches Kontingent überschritten — warte, wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama oder upgrade deinen Tavily-Plan",
+      "web_search: Tavily-Rate-Limit erreicht oder monatliches Kontingent überschritten — warte, wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama oder upgrade deinen Tavily-Plan",
     tavilyServerError:
-      "web_search: Tavily-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Tavily-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     tavilyParseError:
       "web_search: Tavily hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     perplexityMissingKey:
@@ -1672,9 +1676,9 @@ export const de: TranslationSchema = {
     perplexityUnauthorized:
       "web_search: Perplexity-API-Schlüssel abgelehnt — überprüfe PERPLEXITY_API_KEY oder erhalte einen unter https://perplexity.ai/settings/api",
     perplexityRateLimit:
-      "web_search: Perplexity-Rate-Limit erreicht — warte und versuche es erneut, oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Perplexity-Rate-Limit erreicht — warte und versuche es erneut, oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     perplexityServerError:
-      "web_search: Perplexity-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Perplexity-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     perplexityParseError:
       "web_search: Perplexity hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     exaMissingKey:
@@ -1684,7 +1688,7 @@ export const de: TranslationSchema = {
     exaRateLimit:
       "web_search: Exa-API-Rate-Limit erreicht oder monatliches Kontingent überschritten — warte oder upgrade unter https://exa.ai/pricing",
     exaServerError:
-      "web_search: Exa-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Exa-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     exaParseError:
       "web_search: Exa hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     braveMissingKey:
@@ -1694,7 +1698,7 @@ export const de: TranslationSchema = {
     braveRateLimit:
       "web_search: Die Brave Search API unterliegt einer Ratenbegrenzung oder das monatliche Kontingent wurde überschritten — warten oder ein Upgrade durchführen unter https://brave.com/search/api/",
     braveServerError:
-      "web_search: Fehler beim Brave-Suchserver ({status}) — später erneut versuchen oder die Engine wechseln mit /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Fehler beim Brave-Suchserver ({status}) — später erneut versuchen oder die Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     braveParseError:
       "web_search: Brave Search hat eine nicht auswertbare Antwort zurückgegeben (HTTP {status}) — später erneut versuchen",
     fetchStatus:

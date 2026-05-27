@@ -178,9 +178,10 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
   webSearchEngine?:
     | "bing"
+    | "bing-intl"
     | "searxng"
     | "metaso"
     | "tavily"
@@ -936,8 +937,18 @@ export function loadJavaSourceEnabled(path: string = defaultConfigPath()): boole
 
 export function webSearchEngine(
   path: string = defaultConfigPath(),
-): "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama" {
+):
+  | "bing"
+  | "bing-intl"
+  | "searxng"
+  | "metaso"
+  | "tavily"
+  | "perplexity"
+  | "exa"
+  | "brave"
+  | "ollama" {
   const cfg = readConfig(path).webSearchEngine;
+  if (cfg === "bing-intl") return "bing-intl";
   if (cfg === "searxng") return "searxng";
   if (cfg === "metaso") return "metaso";
   if (cfg === "tavily") return "tavily";

@@ -291,6 +291,7 @@ export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 export type WebSearchEngineName =
   | "bing"
+  | "bing-intl"
   | "searxng"
   | "metaso"
   | "tavily"

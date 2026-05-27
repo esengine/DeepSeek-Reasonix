@@ -47,8 +47,17 @@ export interface WebSearchOptions {
   signal?: AbortSignal;
   /** Config path for provider-specific keys. Defaults to ~/.reasonix/config.json. */
   configPath?: string;
-  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
-  engine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  engine?:
+    | "bing"
+    | "bing-intl"
+    | "searxng"
+    | "metaso"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -66,6 +75,7 @@ const USER_AGENT =
 // HTML; the international endpoint wraps them in `bing.com/ck/a?u=a1<base64>`
 // click-tracking redirects we'd have to decode per result.
 const BING_ENDPOINT = "https://cn.bing.com/search";
+const BING_INTL_ENDPOINT = "https://www.bing.com/search";
 const METASO_ENDPOINT = "https://metaso.cn/api/v1";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
@@ -259,12 +269,19 @@ export async function webSearch(
   if (opts.engine === "brave") {
     return searchBrave(query, opts);
   }
+  if (opts.engine === "bing-intl") {
+    return searchBing(query, opts, BING_INTL_ENDPOINT);
+  }
   return searchBing(query, opts);
 }
 
-async function searchBing(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+async function searchBing(
+  query: string,
+  opts: WebSearchOptions = {},
+  endpoint = BING_ENDPOINT,
+): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
-  const resp = await fetch(`${BING_ENDPOINT}?q=${encodeURIComponent(query)}`, {
+  const resp = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9",
@@ -899,6 +916,23 @@ export function parseSearxngHtmlResults(html: string): SearchResult[] {
   return results;
 }
 
+/** Decode Bing /ck/a click-tracking redirects to the real target. www.bing.com (bing-intl) emits
+ *  these as root-relative `/ck/a?…` hrefs, so resolve against a base before parsing (a bare
+ *  `new URL("/ck/a?…")` throws); the `u=a1…` value is base64url, often unpadded. */
+function unwrapBingUrl(href: string): string {
+  if (!/\/ck\/a\b/.test(href)) return href;
+  try {
+    const u = new URL(href, BING_INTL_ENDPOINT).searchParams.get("u");
+    if (!u) return href;
+    const b64 = u.startsWith("a1") ? u.slice(2) : u;
+    const decoded = Buffer.from(b64, "base64url").toString("utf-8");
+    if (/^https?:\/\//i.test(decoded)) return decoded;
+  } catch {
+    // ignore decode errors and fall back to raw href
+  }
+  return href;
+}
+
 /** Title-anchor + snippet-paragraph passes paired positionally — robust to attribute reorder. */
 export function parseBingResults(html: string): SearchResult[] {
   // DOM walk rather than regex — `<li[^>]*\bclass\b[^>]*>` triggers
@@ -908,7 +942,7 @@ export function parseBingResults(html: string): SearchResult[] {
   for (const li of root.querySelectorAll("li.b_algo")) {
     const anchor = li.querySelector("h2 a[href]");
     if (!anchor) continue;
-    const href = anchor.getAttribute("href");
+    const href = unwrapBingUrl(anchor.getAttribute("href") || "");
     if (!href) continue;
     const title = anchor.textContent.trim();
     if (!title) continue;

@@ -164,6 +164,7 @@ export const en = {
     budgetPlaceholder: "no cap",
     webSearchEngine: "search engine",
     webSearchEngineBing: "bing — default, works from CN without proxy",
+    webSearchEngineBingIntl: "bing-intl — international index via www.bing.com",
     webSearchEngineSearxng: "searxng — self-hosted (set endpoint via /se searxng <url>)",
     webSearchEngineMetaso: "metaso — 100/day free (CN-friendly, free key at metaso.cn)",
     webSearchEngineTavily: "tavily — 1000/mo free (set TAVILY_API_KEY)",
