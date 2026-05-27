@@ -1968,7 +1968,7 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .thread {
   flex: 1;
   min-height: 0;
-  height: 100%;
+  position: relative;
 }
 .thread::-webkit-scrollbar {
   width: 8px;

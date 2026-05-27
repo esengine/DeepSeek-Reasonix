@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 interface JumpBarProps {
   messages: { kind: string; text?: string; turn?: number }[];
-  onScrollToTurn?: (turn: number) => void;
+  threadEl: HTMLElement | null;
 }
 
-export function JumpBar({ messages, onScrollToTurn }: JumpBarProps) {
+export function JumpBar({ messages, threadEl }: JumpBarProps) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [active, setActive] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -65,7 +65,9 @@ export function JumpBar({ messages, onScrollToTurn }: JumpBarProps) {
 
   const scrollTo = (turn: number) => {
     setActive(turn);
-    onScrollToTurn?.(turn);
+    threadEl
+      ?.querySelector(`[data-turn="${turn}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const dotProps = (
