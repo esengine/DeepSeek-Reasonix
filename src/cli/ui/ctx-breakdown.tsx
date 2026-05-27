@@ -27,7 +27,7 @@ export interface CtxBreakdownData {
 export function computeCtxBreakdown(loop: CacheFirstLoop): CtxBreakdownData {
   const systemTokens = countTokensBounded(loop.prefix.system);
   const toolsTokens = countTokensBounded(JSON.stringify(loop.prefix.toolSpecs));
-  const entries = loop.log.toMessages();
+  const entries = loop.log.toFullHistory();
   let userTokens = 0;
   let assistantTokens = 0;
   let toolResultTokens = 0;
