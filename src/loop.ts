@@ -15,7 +15,9 @@ import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
 import { dispatchToolCallsChunked } from "./loop/dispatch.js";
 import {
+  errorMeta,
   formatLoopError,
+  is4xxError,
   is5xxError,
   isDeepSeekHost,
   probeDeepSeekReachable,
@@ -857,8 +859,8 @@ export class CacheFirstLoop {
         const probe =
           is5xxError(err) && dsHost ? await probeDeepSeekReachable(this.client) : undefined;
         const cause = err instanceof Error ? err : new Error(String(err));
-        const isClientError = /^DeepSeek (4\d{2}):/.test(cause.message);
-        const retryable = !isClientError && cause.name !== "AbortError";
+        const retryable = !is4xxError(cause) && cause.name !== "AbortError";
+        const { code, phase } = errorMeta(cause);
         yield {
           turn: this._turn,
           role: "error",
@@ -867,10 +869,10 @@ export class CacheFirstLoop {
           errorDetail: {
             name: cause.name,
             message: cause.message,
-            phase: (cause as any).phase,
-            code: (cause as any).code,
+            phase,
+            code,
             retryable,
-            recoverable: retryable,
+            recoverable: false,
           },
         };
         this._steerQueue.length = 0;

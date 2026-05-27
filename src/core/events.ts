@@ -217,6 +217,7 @@ export interface ErrorEvent extends EventBase {
   type: "error";
   message: string;
   recoverable: boolean;
+  name?: string;
   code?: string;
   phase?: string;
   retryable?: boolean;

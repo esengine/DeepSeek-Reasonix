@@ -87,6 +87,7 @@ export class Eventizer {
       case "error":
         out.push(
           this.errorEvent(ev.turn, ev.error ?? ev.content, ev.errorDetail?.recoverable ?? false, {
+            name: ev.errorDetail?.name,
             code: ev.errorDetail?.code,
             phase: ev.errorDetail?.phase,
             retryable: ev.errorDetail?.retryable,
@@ -338,7 +339,7 @@ export class Eventizer {
     turn: number,
     message: string,
     recoverable: boolean,
-    detail?: { code?: string; phase?: string; retryable?: boolean },
+    detail?: { name?: string; code?: string; phase?: string; retryable?: boolean },
   ): KernelErrorEvent {
     return {
       id: ++this.nextId,

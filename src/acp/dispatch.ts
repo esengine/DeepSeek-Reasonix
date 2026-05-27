@@ -91,7 +91,7 @@ export function dispatchKernelEvent(server: AcpServer, sessionId: string, ev: Ke
           content: { type: "text", text: `\n\n[error] ${ev.message}` },
           metadata: {
             error: {
-              name: ev.message.split(":")[0] || "Error",
+              name: ev.name ?? "Error",
               message: ev.message,
               code: ev.code,
               phase: ev.phase,

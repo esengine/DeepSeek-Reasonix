@@ -340,6 +340,7 @@ describe("ACP kernel-event dispatch", () => {
       kev("error", {
         message: "SSE body read failed: terminated",
         recoverable: true,
+        name: "StreamError",
         code: "UND_ERR_ABORTED",
         phase: "stream_body_read",
         retryable: true,
@@ -353,7 +354,7 @@ describe("ACP kernel-event dispatch", () => {
       content: { type: "text", text: expect.stringContaining("terminated") },
       metadata: {
         error: {
-          name: "SSE body read failed",
+          name: "StreamError",
           message: "SSE body read failed: terminated",
           code: "UND_ERR_ABORTED",
           phase: "stream_body_read",

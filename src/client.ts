@@ -374,9 +374,10 @@ export class DeepSeekClient {
           ({ value, done: streamDone } = await reader.read());
         } catch (readErr) {
           const cause = readErr instanceof Error ? readErr : new Error(String(readErr));
+          const code = "code" in cause && typeof cause.code === "string" ? cause.code : undefined;
           throw Object.assign(new Error(`SSE body read failed: ${cause.message}`), {
             phase: "stream_body_read" as const,
-            code: (cause as any).code,
+            code,
           });
         }
         if (streamDone) break;

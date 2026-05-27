@@ -40,6 +40,7 @@ import { autoResolveVerdict } from "../../core/pause-policy.js";
 import { loadDotenv } from "../../env.js";
 import { t } from "../../i18n/index.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../../index.js";
+import { errorMeta } from "../../loop/errors.js";
 import { McpClient } from "../../mcp/client.js";
 import { preflightStdioSpec } from "../../mcp/preflight.js";
 import { bridgeMcpTools } from "../../mcp/registry.js";
@@ -312,7 +313,9 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
         }
       });
     } catch (err) {
-      const message = (err as Error).message;
+      const cause = err instanceof Error ? err : new Error(String(err));
+      const message = cause.message;
+      const { code, phase } = errorMeta(cause);
       server.sendNotification("session/update", {
         sessionId: session.id,
         update: {
@@ -320,10 +323,10 @@ export async function acpCommand(opts: AcpOptions): Promise<void> {
           content: { type: "text", text: `\n\n[error] ${message}` },
           metadata: {
             error: {
-              name: (err as Error).name || "Error",
+              name: cause.name || "Error",
               message,
-              code: (err as any).code,
-              phase: (err as any).phase,
+              code,
+              phase,
               retryable: false,
             },
           },

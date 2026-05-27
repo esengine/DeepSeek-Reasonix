@@ -2355,7 +2355,7 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
       phase: "stream_body_read",
       code: "UND_ERR_ABORTED",
       retryable: true,
-      recoverable: true,
+      recoverable: false,
     });
   });
 });
