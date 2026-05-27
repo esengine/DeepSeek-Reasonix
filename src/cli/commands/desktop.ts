@@ -610,7 +610,7 @@ function tailLines(s: string, n: number): string {
   return lines.slice(-n).join("\n");
 }
 
-const LOADED_RECENT_MESSAGE_WINDOW = 200;
+const LOADED_RECENT_MESSAGE_WINDOW = 120;
 const LOADED_MIN_ELIDE_CHARS = 4096;
 const LOADED_ELIDED_PREFIX = "[elided — older than the last ";
 
