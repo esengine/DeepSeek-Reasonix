@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { getThreadMaxWidth } from "./thread-layout";
 
 const MIN_WIDTH = 160;
@@ -12,6 +12,7 @@ export function useResizable(
   collapsed: boolean,
 ): {
   width: number;
+  setWidth: Dispatch<SetStateAction<number>>;
   onMouseDown: (e: React.MouseEvent) => void;
 } {
   const persistKey = side === "side" ? PERSIST_KEY_SIDE : PERSIST_KEY_CTX;
@@ -106,5 +107,5 @@ export function useResizable(
     };
   }, [collapsed, side, persistKey, cssVar]);
 
-  return { width, onMouseDown };
+  return { width, setWidth, onMouseDown };
 }

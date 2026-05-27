@@ -8,6 +8,7 @@ import { useCallback, useRef, useState } from "react";
 export function useAutoCollapse(persistKey: string): {
   collapsed: boolean;
   toggle: () => void;
+  open: () => void;
   requireCollapsed: () => void;
   releaseCollapsed: () => void;
 } {
@@ -41,5 +42,11 @@ export function useAutoCollapse(persistKey: string): {
     });
   }, []);
 
-  return { collapsed, toggle, requireCollapsed, releaseCollapsed };
+  const open = useCallback(() => {
+    sourceRef.current = "user";
+    setCollapsed(false);
+    try { localStorage.setItem(persistKey, "0"); } catch { /* */ }
+  }, [persistKey]);
+
+  return { collapsed, toggle, open, requireCollapsed, releaseCollapsed };
 }
