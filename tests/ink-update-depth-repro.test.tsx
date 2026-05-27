@@ -85,10 +85,13 @@ describe("Ink update-depth repro candidates", () => {
     const b = render(<Oscillator />);
     await new Promise((res) => setTimeout(res, 80));
     b.unmount();
-    // Stable converges; broken pattern keeps re-measuring forever (or until
-    // React's guard happens to fire downstream). 10× headroom for jitter.
+    // Stable converges in a handful of renders. The broken pattern compounds
+    // — even a slow CI runner clears ~20 cycles in 80ms; local Node does
+    // hundreds. The thresholds are deliberately loose to stay robust across
+    // runner speeds; the property under test is "doesn't converge", not a
+    // specific count.
     expect(stableRenders).toBeLessThan(10);
-    expect(oscRenders).toBeGreaterThan(stableRenders * 10);
+    expect(oscRenders).toBeGreaterThan(15);
   });
 
   it("useAnimationFrame: many subscribers with short interval does not loop alone", async () => {
