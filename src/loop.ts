@@ -53,6 +53,7 @@ import {
   loadSessionMeta,
   patchSessionMeta,
   rewriteSession,
+  sessionPath,
 } from "./memory/session.js";
 import { type RepairReport, ToolCallRepair } from "./repair/index.js";
 import { SessionStats, type TurnStats } from "./telemetry/stats.js";
@@ -126,7 +127,8 @@ export class CacheFirstLoop {
   readonly client: DeepSeekClient;
   readonly prefix: ImmutablePrefix;
   readonly tools: ToolRegistry;
-  readonly log = new AppendOnlyLog();
+  // Session-backed AppendOnlyLog — only keeps recent window in memory, older messages on disk.
+  readonly log: AppendOnlyLog;
   readonly scratch = new VolatileScratch();
   readonly stats = new SessionStats();
   readonly repair: ToolCallRepair;
@@ -201,6 +203,10 @@ export class CacheFirstLoop {
     this.client = opts.client;
     this.prefix = opts.prefix;
     this.tools = opts.tools ?? new ToolRegistry();
+    this.sessionName = opts.session ?? null;
+    this.log = new AppendOnlyLog({
+      sessionPath: this.sessionName ? sessionPath(this.sessionName) : undefined,
+    });
     this.model = opts.model ?? "deepseek-v4-flash";
     this.reasoningEffort = opts.reasoningEffort ?? "high";
     this.budgetUsd =
@@ -231,7 +237,6 @@ export class CacheFirstLoop {
     });
 
     // Heal-on-load: oversized tool results would 400 the next call before the user types.
-    this.sessionName = opts.session ?? null;
     if (this.sessionName) {
       const prior = loadSessionMessages(this.sessionName);
       const shrunk = healLoadedMessagesByTokens(prior, DEFAULT_MAX_RESULT_TOKENS);
@@ -242,7 +247,7 @@ export class CacheFirstLoop {
       const messages = pruned.messages;
       const healedCount = shrunk.healedCount + stamped.stampedCount;
       const tokensSaved = shrunk.tokensSaved;
-      for (const msg of messages) this.log.append(msg);
+      this.log.initWindow(messages);
       this.resumedMessageCount = messages.length;
       this._turn = messages.reduce((n, m) => (m.role === "assistant" ? n + 1 : n), 0);
       // Carry forward cumulative cost / turn count so the TUI's session

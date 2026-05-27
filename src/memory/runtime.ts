@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ChatMessage, ToolSpec } from "../types.js";
+import { readTailMessages } from "./session.js";
 
 export interface ImmutablePrefixOptions {
   system: string;
@@ -88,14 +89,38 @@ export class ImmutablePrefix {
   }
 }
 
+const DEFAULT_WINDOW = 200;
+
 export class AppendOnlyLog {
   private _entries: ChatMessage[] = [];
+  private _windowSize: number;
+  private _sessionPath: string | null;
+  /** Total messages logically in the log (windowed entries + older messages on disk). */
+  private _totalLength: number;
+
+  constructor(opts?: { windowSize?: number; sessionPath?: string }) {
+    this._windowSize = opts?.windowSize ?? DEFAULT_WINDOW;
+    this._sessionPath = opts?.sessionPath ?? null;
+    this._totalLength = 0;
+  }
+
+  /** Load initial messages into the window. Must be called before any append. */
+  initWindow(messages: ChatMessage[]): void {
+    this._entries = messages.length > this._windowSize
+      ? messages.slice(messages.length - this._windowSize)
+      : [...messages];
+    this._totalLength = messages.length;
+  }
 
   append(message: ChatMessage): void {
     if (!message || typeof message !== "object" || !("role" in message)) {
       throw new Error(`invalid log entry: ${JSON.stringify(message)}`);
     }
     this._entries.push(message);
+    this._totalLength++;
+    if (this._entries.length > this._windowSize) {
+      this._entries.shift();
+    }
   }
 
   extend(messages: ChatMessage[]): void {
@@ -105,18 +130,48 @@ export class AppendOnlyLog {
   /** The one append-only-breaking path — reserved for `/compact` + recovery. Use `append()` otherwise. */
   compactInPlace(replacement: ChatMessage[]): void {
     this._entries = [...replacement];
+    this._totalLength = replacement.length;
+  }
+
+  /** Look up a message by logical index — checks memory window first, falls back to disk. */
+  getEntry(index: number): ChatMessage | undefined {
+    if (index < 0 || index >= this._totalLength) return undefined;
+    const windowStart = this._totalLength - this._entries.length;
+    if (index >= windowStart) {
+      return this._entries[index - windowStart];
+    }
+    // Message is outside the window — load from session file
+    if (this._sessionPath) {
+      const whole = readTailMessages(this._sessionPath, this._totalLength);
+      if (index < whole.length) return whole[index];
+    }
+    return undefined;
+  }
+
+  /** Return all messages in logical order — loads missing window from file if needed. */
+  toMessages(): ChatMessage[] {
+    if (!this._sessionPath || this._entries.length >= this._totalLength) {
+      return this._entries.map((e) => ({ ...e }));
+    }
+    // Load the full history from file
+    const whole = readTailMessages(this._sessionPath, this._totalLength);
+    return whole.map((e) => ({ ...e }));
   }
 
   get entries(): readonly ChatMessage[] {
     return this._entries;
   }
 
-  toMessages(): ChatMessage[] {
-    return this._entries.map((e) => ({ ...e }));
+  get length(): number {
+    return this._totalLength;
   }
 
-  get length(): number {
-    return this._entries.length;
+  get windowSize(): number {
+    return this._windowSize;
+  }
+
+  get sessionPath(): string | null {
+    return this._sessionPath;
   }
 }
 
