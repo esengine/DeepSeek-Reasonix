@@ -1861,21 +1861,12 @@ function TabRuntime({
       }, 100);
       return () => clearTimeout(id);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [messageItems.length]);
 
   const scrollToBottom = useCallback(() => {
     const len = messageItems.length;
     if (len > 0) virtuosoRef.current?.scrollToIndex({ index: len - 1, behavior: "smooth" });
   }, [messageItems.length]);
-
-  // Scroll to bottom when busy becomes true (user just sent a message).
-  const prevBusyRef = useRef(state.busy);
-  useEffect(() => {
-    if (state.busy && !prevBusyRef.current) {
-      scrollToBottom();
-    }
-    prevBusyRef.current = state.busy;
-  }, [state.busy, scrollToBottom]);
 
   // Persist the transcript scroll offset per session so a restart reopens
   // the conversation where the user left it (#1244).
