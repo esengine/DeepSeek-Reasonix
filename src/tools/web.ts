@@ -157,10 +157,7 @@ function isInternalAddress(address: string): boolean {
   return false;
 }
 
-/**
- * Fallback DNS resolver via Cloudflare DoH (DNS-over-HTTPS).
- * Used when system DNS returns fake internal IPs (e.g. TUN Fake-IP mode).
- */
+/** DoH fallback for when system DNS returns Fake-IP (TUN proxies). */
 interface DohAnswer {
   type: number;
   data: string;
