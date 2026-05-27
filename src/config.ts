@@ -113,6 +113,8 @@ export interface McpServerConfig {
   url?: string;
   headers?: Record<string, string>;
   disabled?: boolean;
+  /** Per-request timeout in ms for this MCP server. Overrides the 60s default. (#2023) */
+  requestTimeoutMs?: number;
 }
 
 export interface QQBotConfig {
@@ -597,6 +599,7 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
         args: (serverCfg as McpServerConfig).args ?? [],
         env,
         disabled,
+        requestTimeoutMs: (serverCfg as McpServerConfig).requestTimeoutMs,
       };
       if (seen.has(name)) {
         const idx = result.findIndex((s) => s.name === name);
@@ -617,6 +620,7 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
           url,
           headers,
           disabled,
+          requestTimeoutMs: (serverCfg as McpServerConfig).requestTimeoutMs,
         };
         if (seen.has(name)) {
           const idx = result.findIndex((s) => s.name === name);
@@ -632,6 +636,7 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
           url,
           headers,
           disabled,
+          requestTimeoutMs: (serverCfg as McpServerConfig).requestTimeoutMs,
         };
         if (seen.has(name)) {
           const idx = result.findIndex((s) => s.name === name);

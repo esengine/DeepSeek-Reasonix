@@ -22,7 +22,11 @@ export async function mcpInspectCommand(opts: McpInspectOptions): Promise<void> 
   if (spec.transport === "stdio") preflightStdioSpec(spec);
   const workspaceDir = process.cwd();
   const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
-  const client = new McpClient({ transport, workspaceDir });
+  const client = new McpClient({
+    transport,
+    workspaceDir,
+    requestTimeoutMs: spec.requestTimeoutMs,
+  });
   try {
     await client.initialize();
     const report = await inspectMcpServer(client);

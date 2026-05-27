@@ -469,3 +469,64 @@ describe("normalizeMcpConfig: Claude .mcp.json compatibility", () => {
     expect(result[0]!.transport).toBe("stdio");
   });
 });
+
+describe("normalizeMcpConfig: requestTimeoutMs (#2023)", () => {
+  it("passes requestTimeoutMs through for stdio mcpServers", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        slow: {
+          command: "npx",
+          args: ["-y", "@scope/slow-server"],
+          requestTimeoutMs: 120_000,
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const spec = findByName(result, "slow")!;
+    expect(spec.requestTimeoutMs).toBe(120_000);
+  });
+
+  it("passes requestTimeoutMs through for SSE mcpServers", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        remote: {
+          transport: "sse",
+          url: "https://example.com/sse",
+          requestTimeoutMs: 90_000,
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const spec = findByName(result, "remote")!;
+    expect(spec.requestTimeoutMs).toBe(90_000);
+  });
+
+  it("passes requestTimeoutMs through for streamable-http mcpServers", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        edge: {
+          transport: "streamable-http",
+          url: "https://edge.example.com/mcp",
+          requestTimeoutMs: 180_000,
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const spec = findByName(result, "edge")!;
+    expect(spec.requestTimeoutMs).toBe(180_000);
+  });
+
+  it("leaves requestTimeoutMs undefined when not set", () => {
+    const cfg: ReasonixConfig = {
+      mcpServers: {
+        normal: {
+          command: "npx",
+          args: ["-y", "@scope/normal-server"],
+        },
+      },
+    };
+    const result = normalizeMcpConfig(cfg);
+    const spec = findByName(result, "normal")!;
+    expect(spec.requestTimeoutMs).toBeUndefined();
+  });
+});
