@@ -1,10 +1,15 @@
 /** `reasonix doctor --json` — structured report shape and exit-code semantics. */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type DoctorCheck, doctorCommand, formatDoctorJson } from "../src/cli/commands/doctor.js";
+import {
+  type DoctorCheck,
+  doctorCommand,
+  formatDoctorJson,
+  runDoctorChecks,
+} from "../src/cli/commands/doctor.js";
 import { VERSION } from "../src/version.js";
 
 describe("formatDoctorJson", () => {
@@ -64,6 +69,7 @@ describe("doctorCommand --json (integration)", () => {
     logSpy.mockRestore();
     exitSpy.mockRestore();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     process.chdir(origCwd);
     rmSync(tmpHome, { recursive: true, force: true });
     rmSync(tmpCwd, { recursive: true, force: true });
@@ -102,5 +108,45 @@ describe("doctorCommand --json (integration)", () => {
     } else {
       expect(exitSpy).not.toHaveBeenCalled();
     }
+  });
+
+  it("accepts /models as api reach when /user/balance is unavailable", async () => {
+    const configDir = join(tmpHome, ".reasonix");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({
+        apiKey: "sk-test",
+        baseUrl: "https://compat.example/v1",
+      }),
+    );
+    const fetchSpy = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.endsWith("/models")) {
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: [{ id: "deepseek-v4-pro:cloud", object: "model", owned_by: "reasonix" }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const checks = await runDoctorChecks(tmpCwd);
+    const apiReach = checks.find((c) => c.id === "api-reach");
+
+    expect(apiReach).toMatchObject({
+      level: "ok",
+      detail: expect.stringContaining("/models ok"),
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://compat.example/v1/models",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
   });
 });
