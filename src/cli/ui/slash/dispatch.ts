@@ -17,6 +17,7 @@ import { handlers as plansHandlers } from "./handlers/plans.js";
 import { handlers as qqHandlers } from "./handlers/qq.js";
 import { handlers as sessionsHandlers } from "./handlers/sessions.js";
 import { handlers as skillHandlers } from "./handlers/skill.js";
+import { handlers as telegramHandlers } from "./handlers/telegram.js";
 import { handlers as themeHandlers } from "./handlers/theme.js";
 import { handlers as webSearchEngineHandlers } from "./handlers/web-search-engine.js";
 import { nearestCommands } from "./nearest.js";
@@ -43,6 +44,7 @@ const HANDLERS: Record<string, SlashHandler> = {
   ...sessionsHandlers,
   ...themeHandlers,
   ...skillHandlers,
+  ...telegramHandlers,
   ...webSearchEngineHandlers,
 };
 

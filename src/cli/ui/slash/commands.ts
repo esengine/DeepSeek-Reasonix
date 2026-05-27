@@ -183,6 +183,14 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "connect, inspect, or disconnect the QQ channel",
     argCompleter: ["connect", "status", "disconnect"],
   },
+  {
+    cmd: "telegram",
+    group: "extend",
+    argsHint: "<connect|status|disconnect>",
+    summary: "connect, inspect, or disconnect the Telegram channel",
+    argCompleter: ["connect", "status", "disconnect"],
+    aliases: ["tg"],
+  },
 
   {
     cmd: "init",

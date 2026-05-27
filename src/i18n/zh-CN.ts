@@ -339,6 +339,10 @@ export const zhCN: TranslationSchema = {
       description:
         "连接/查看/断开 QQ 通道，首次连接需提供 AppId + AppSecret（可选沙箱模式 sandbox）",
     },
+    telegram: {
+      description: "连接/查看/断开 Telegram 通道，首次连接需提供 BotFather bot token",
+      argsHint: "[connect [botToken]|status|disconnect]",
+    },
     setup: { description: "提醒您退出并运行 `reasonix setup`" },
     semantic: {
       description: "显示 semantic_search 状态 — 已构建？Ollama 已安装？如何启用",
@@ -819,6 +823,47 @@ export const zhCN: TranslationSchema = {
       missingAppSecret: "缺少 QQ App Secret。请先运行 `/qq connect` 完成配置。",
       authFailed: "QQ 机器人鉴权失败，请检查 App ID 和 App Secret。",
       readyTimeout: "QQ 机器人 15 秒内未收到 READY，请检查 App ID 和 App Secret。",
+    },
+    telegram: {
+      unavailable: "/telegram 在当前会话中不可用。",
+      connecting: "Telegram：正在连接...",
+      connectFailed: "Telegram 连接失败：{reason}",
+      disconnecting: "Telegram：正在断开...",
+      disconnectFailed: "Telegram 断开失败：{reason}",
+      usage: "用法：/telegram connect [botToken] | /telegram status | /telegram disconnect",
+      promptBotToken:
+        "Telegram 首次配置：请输入 BotFather 提供的 bot token 后回车。输入 /cancel 可取消。",
+      setupWaitingBotToken: "等待输入 bot token",
+      setupCancelled: "Telegram 首次配置已取消。",
+      credentialsRequired: "Telegram bot token 不能为空。",
+      connected: "Telegram 已在{mode}模式下连接成功，后续启动会自动启用。",
+      alreadyConnected: "Telegram 已在{mode}模式下连接，自动启动已启用。",
+      disconnected: "Telegram 已断开连接，自动启动已关闭。",
+      status:
+        "Telegram：{connected}，自动启动{enabled}，凭据{configured}，botToken {botToken}，访问控制 {access}，当前模式 {mode}。",
+      statusSetup: "Telegram：首次配置进行中 - {step}",
+      stateConnected: "已连接",
+      stateDisconnected: "未连接",
+      stateEnabled: "已启用",
+      stateDisabled: "未启用",
+      stateConfigured: "已配置",
+      stateNotConfigured: "未配置",
+      none: "无",
+      modeChat: "聊天",
+      modeCode: "代码",
+      accessOwner: "所有者 {owner}",
+      accessOwnerWithAllowlist: "所有者 {owner}，白名单 {count}",
+      accessAllowlist: "白名单 {count}",
+      accessRuntime: "首个 Telegram 用户（仅本次运行，{owner}）",
+      accessRequiredShort: "需要配置访问控制",
+      lockAlreadyRunning:
+        "Telegram 通道已在进程 {pid} 中运行。请先停止该进程，再启动新的 Telegram 通道。",
+      unauthorizedMessage: "Telegram 忽略了未授权用户 {userId} 的消息。当前访问控制：{access}。",
+      runtimeBound:
+        "Telegram 已在本次运行中临时绑定到首个发送者 {userId}。如需持久化，请在配置中设置 `telegram.ownerUserId`。",
+      missingBotToken: "缺少 Telegram bot token。请先运行 `/telegram connect` 完成配置。",
+      accessRequired:
+        "Telegram 启动前必须配置访问控制。请在配置中设置 `telegram.ownerUserId` 或 `telegram.allowlist`。",
     },
     admin: {
       doctorNeedsTui: "/doctor 需要 TUI 上下文（postDoctor 已连接）。",

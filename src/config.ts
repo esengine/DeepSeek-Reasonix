@@ -15,6 +15,7 @@ import {
 } from "./index/config.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 import { normalizeQQAllowlist, normalizeQQOpenId } from "./qq/access.js";
+import { normalizeTelegramAllowlist, normalizeTelegramUserId } from "./telegram/access.js";
 import {
   type NormalizedToolRateLimitConfig,
   type ToolRateLimitConfig,
@@ -123,6 +124,13 @@ export interface QQBotConfig {
   sandbox?: boolean;
   enabled?: boolean;
   ownerOpenId?: string;
+  allowlist?: string[];
+}
+
+export interface TelegramBotConfig {
+  botToken?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
   allowlist?: string[];
 }
 
@@ -296,6 +304,7 @@ export interface ReasonixConfig {
   };
   /** QQ Bot configuration */
   qq?: QQBotConfig;
+  telegram?: TelegramBotConfig;
 }
 
 export interface CustomMemoryTypeConfig {
@@ -1602,6 +1611,51 @@ export function saveQQConfig(cfg: LoadedQQConfig, path: string = defaultConfigPa
     sandbox: cfg.sandbox,
     enabled: cfg.enabled,
     ownerOpenId,
+    allowlist,
+  };
+  writeConfig(rootCfg, path);
+}
+
+export interface LoadedTelegramConfig {
+  botToken?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
+  allowlist?: string[];
+}
+
+export function loadTelegramConfig(path: string = defaultConfigPath()): LoadedTelegramConfig {
+  const envAllowlist = normalizeTelegramAllowlist(process.env.TELEGRAM_ALLOWLIST);
+  const fromEnv = {
+    botToken: process.env.TELEGRAM_BOT_TOKEN,
+    ownerUserId: normalizeTelegramUserId(process.env.TELEGRAM_OWNER_USER_ID),
+    allowlist: envAllowlist,
+  };
+  const fromCfg = readConfig(path).telegram ?? {};
+  const ownerUserId = fromEnv.ownerUserId ?? normalizeTelegramUserId(fromCfg.ownerUserId);
+  const allowlist = normalizeTelegramAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  return {
+    botToken: fromEnv.botToken ?? fromCfg.botToken,
+    enabled: fromCfg.enabled === true,
+    ownerUserId,
+    allowlist,
+  };
+}
+
+export function saveTelegramConfig(
+  cfg: LoadedTelegramConfig,
+  path: string = defaultConfigPath(),
+): void {
+  const rootCfg = readConfig(path);
+  const ownerUserId = normalizeTelegramUserId(cfg.ownerUserId);
+  const allowlist = normalizeTelegramAllowlist(cfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  rootCfg.telegram = {
+    botToken: cfg.botToken,
+    enabled: cfg.enabled,
+    ownerUserId,
     allowlist,
   };
   writeConfig(rootCfg, path);

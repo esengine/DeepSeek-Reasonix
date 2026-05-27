@@ -353,6 +353,11 @@ export const EN: TranslationSchema = {
         "connect, inspect, or disconnect the QQ channel for this session (first connect guides App ID / App Secret setup)",
       argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
     },
+    telegram: {
+      description:
+        "connect, inspect, or disconnect the Telegram channel for this session (first connect guides bot token setup)",
+      argsHint: "[connect [botToken]|status|disconnect]",
+    },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
       description: "show semantic_search status — built? Ollama installed? how to enable",
@@ -862,6 +867,48 @@ export const EN: TranslationSchema = {
       missingAppSecret: "QQ App Secret is required. Run `/qq connect` to configure.",
       authFailed: "QQ bot authentication failed — check your App ID and App Secret.",
       readyTimeout: "QQ bot did not receive READY within 15s — check your App ID and App Secret.",
+    },
+    telegram: {
+      unavailable: "/telegram is not available in this session.",
+      connecting: "Telegram: connecting...",
+      connectFailed: "Telegram connect failed: {reason}",
+      disconnecting: "Telegram: disconnecting...",
+      disconnectFailed: "Telegram disconnect failed: {reason}",
+      usage: "Usage: /telegram connect [botToken] | /telegram status | /telegram disconnect",
+      promptBotToken:
+        "Telegram setup: enter your bot token from BotFather, then press Enter. Type /cancel to abort.",
+      setupWaitingBotToken: "waiting for bot token",
+      setupCancelled: "Telegram setup cancelled.",
+      credentialsRequired: "Telegram bot token is required.",
+      connected: "Telegram connected in {mode} mode. It will auto-start on future launches.",
+      alreadyConnected: "Telegram is already connected in {mode} mode. Auto-start is enabled.",
+      disconnected: "Telegram disconnected. Auto-start is disabled.",
+      status:
+        "Telegram: {connected}, auto-start {enabled}, token {configured}, botToken {botToken}, access {access}, current mode {mode}.",
+      statusSetup: "Telegram: setup in progress - {step}",
+      stateConnected: "connected",
+      stateDisconnected: "disconnected",
+      stateEnabled: "enabled",
+      stateDisabled: "disabled",
+      stateConfigured: "configured",
+      stateNotConfigured: "not configured",
+      none: "none",
+      modeChat: "chat",
+      modeCode: "code",
+      accessOwner: "owner {owner}",
+      accessOwnerWithAllowlist: "owner {owner}, allowlist {count}",
+      accessAllowlist: "allowlist {count}",
+      accessRuntime: "first-sender (runtime only, {owner})",
+      accessRequiredShort: "access control required",
+      lockAlreadyRunning:
+        "Telegram channel is already running in process {pid}. Stop that process before starting another Telegram channel.",
+      unauthorizedMessage:
+        "Telegram ignored message from unauthorized user {userId}. Current access: {access}.",
+      runtimeBound:
+        "Telegram temporarily bound this run to first sender {userId}. Set `telegram.ownerUserId` in config to persist access.",
+      missingBotToken: "Telegram bot token is required. Run `/telegram connect` to configure.",
+      accessRequired:
+        "Telegram requires access control before it can start. Set `telegram.ownerUserId` or `telegram.allowlist` in config.",
     },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",

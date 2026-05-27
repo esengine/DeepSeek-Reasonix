@@ -20,6 +20,7 @@ import {
   resolveSession,
 } from "../../memory/session.js";
 import { QQChannel } from "../../qq/channel.js";
+import { TelegramChannel } from "../../telegram/channel.js";
 import { ToolRegistry } from "../../tools.js";
 import { registerChoiceTool } from "../../tools/choice.js";
 import { registerMemoryTools } from "../../tools/memory.js";
@@ -130,10 +131,13 @@ interface RootProps extends ChatOptions {
   historyScrollMode: ResolvedHistoryScrollMode;
   /** Pre-created QQ channel (started before TUI mounts). */
   qqChannel?: QQChannel;
+  telegramChannel?: TelegramChannel;
   /** App fills this ref on mount so QQ messages flow into the TUI input queue. */
   qqSubmitRef: { current: ((text: string) => void) | null };
   /** App fills this ref on mount so QQ errors appear in the TUI log. */
   qqErrorRef: { current: ((msg: string) => void) | null };
+  telegramSubmitRef: { current: ((text: string) => void) | null };
+  telegramErrorRef: { current: ((msg: string) => void) | null };
 }
 
 function Root({
@@ -246,8 +250,11 @@ function Root({
         dashboardHost={appProps.dashboardHost}
         dashboardToken={appProps.dashboardToken}
         qqChannel={appProps.qqChannel}
+        telegramChannel={appProps.telegramChannel}
         qqSubmitRef={appProps.qqSubmitRef}
         qqErrorRef={appProps.qqErrorRef}
+        telegramSubmitRef={appProps.telegramSubmitRef}
+        telegramErrorRef={appProps.telegramErrorRef}
         historyScrollMode={historyScrollMode}
         onSwitchSession={setActiveSession}
       />
@@ -353,8 +360,12 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   // deterministic.
   const qqSubmitRef: { current: ((text: string) => void) | null } = { current: null };
   const qqErrorRef: { current: ((msg: string) => void) | null } = { current: null };
+  const telegramSubmitRef: { current: ((text: string) => void) | null } = { current: null };
+  const telegramErrorRef: { current: ((msg: string) => void) | null } = { current: null };
   const qqRequested = cfg.qq?.enabled === true;
+  const telegramRequested = cfg.telegram?.enabled === true;
   let qqChannel: QQChannel | undefined;
+  let telegramChannel: TelegramChannel | undefined;
   if (qqRequested) {
     const channel = new QQChannel({
       onSubmitMessage: (text) => qqSubmitRef.current?.(text),
@@ -367,6 +378,20 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       process.stderr.write("QQ bot connected\n");
     } catch (err) {
       process.stderr.write(`QQ bot failed: ${(err as Error).message}\n`);
+    }
+  }
+  if (telegramRequested) {
+    const channel = new TelegramChannel({
+      onSubmitMessage: (text) => telegramSubmitRef.current?.(text),
+      onError: (msg) => telegramErrorRef.current?.(msg),
+    });
+    process.stderr.write("Connecting Telegram bot...\n");
+    try {
+      await channel.start();
+      telegramChannel = channel;
+      process.stderr.write("Telegram bot connected\n");
+    } catch (err) {
+      process.stderr.write(`Telegram bot failed: ${(err as Error).message}\n`);
     }
   }
 
@@ -406,8 +431,11 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       codeMode={codeMode}
       session={resolvedSession}
       qqChannel={qqChannel}
+      telegramChannel={telegramChannel}
       qqSubmitRef={qqSubmitRef}
       qqErrorRef={qqErrorRef}
+      telegramSubmitRef={telegramSubmitRef}
+      telegramErrorRef={telegramErrorRef}
     />,
     { exitOnCtrlC: true, incrementalRendering: true },
   );
@@ -417,6 +445,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     disableMouseMode();
     await runtime.closeAll();
     qqChannel?.stop();
+    telegramChannel?.stop();
     await drainTtyResponses();
   }
 }
