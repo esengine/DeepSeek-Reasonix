@@ -346,7 +346,7 @@ function LoopStatusRow({
   const nextFireMs = Math.max(0, loop.nextFireAt - Date.now());
   return (
     <Box>
-      <Text color="cyan">{`> ${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} - /loop stop or type to cancel`}</Text>
+      <Text color="ansi:cyan">{`> ${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} - /loop stop or type to cancel`}</Text>
     </Box>
   );
 }
@@ -2267,6 +2267,9 @@ function AppInner({
             totalInputCostUsd: s.totalInputCostUsd,
             totalOutputCostUsd: s.totalOutputCostUsd,
             cacheHitRatio: s.cacheHitRatio,
+            cacheHitTokens: loop.stats.cumulativeCacheHitTokens,
+            cacheMissTokens: loop.stats.cumulativeCacheMissTokens,
+            totalCompletionTokens: loop.stats.cumulativeCompletionTokens,
             lastPromptTokens: s.lastPromptTokens,
             contextCapTokens: ctxCap,
             // useSessionInfo's Balance is a flat { currency, total }; the

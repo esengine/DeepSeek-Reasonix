@@ -254,12 +254,18 @@ export class QQBot extends EventEmitter {
     content: string,
     msgId?: string,
     msgSeq?: number,
+    markdown = false,
   ): Promise<void> {
     const token = await this.ensureToken();
-    const body: Record<string, unknown> = {
-      content,
-      msg_type: 0,
-    };
+    const body: Record<string, unknown> = markdown
+      ? {
+          markdown: { content },
+          msg_type: 2,
+        }
+      : {
+          content,
+          msg_type: 0,
+        };
     if (msgId) body.msg_id = msgId;
     if (typeof msgSeq === "number" && Number.isFinite(msgSeq)) body.msg_seq = Math.trunc(msgSeq);
     const res = await fetch(`${this.baseUrl}/v2/users/${encodeURIComponent(openid)}/messages`, {

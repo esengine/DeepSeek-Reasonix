@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
@@ -21,7 +21,7 @@ const VISIBLE_WINDOW = 5;
 
 export function PlanCard({ card }: { card: PlanCardData }): React.ReactElement {
   const { fg, tone, toneActive } = useThemeTokens();
-  const statusColor: Record<PlanStep["status"], string> = {
+  const statusColor: Record<PlanStep["status"], Color> = {
     queued: fg.faint,
     running: toneActive.brand,
     done: tone.ok,

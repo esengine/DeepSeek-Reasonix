@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
@@ -24,13 +24,13 @@ const TASK_GLYPH: Record<TaskCardData["status"], string> = {
 
 export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
   const { fg, tone } = useThemeTokens();
-  const stepColor: Record<TaskStep["status"], string> = {
+  const stepColor: Record<TaskStep["status"], Color> = {
     queued: fg.faint,
     running: tone.warn,
     done: tone.ok,
     failed: tone.err,
   };
-  const taskColor: Record<TaskCardData["status"], string> = {
+  const taskColor: Record<TaskCardData["status"], Color> = {
     running: tone.warn,
     done: tone.ok,
     failed: tone.err,

@@ -46,7 +46,7 @@ export function SplitDiff({ rows, totalCols }: SplitDiffProps): React.ReactEleme
       {rows.map((row, i) => (
         <Box key={`r-${i}-${row.left.num ?? "p"}-${row.right.num ?? "p"}`}>
           <Cell side={row.left} width={halfCols} which="left" />
-          <Text color={COLOR.info} dimColor>
+          <Text color={COLOR.info} dim>
             {" │ "}
           </Text>
           <Cell side={row.right} width={halfCols} which="right" />
@@ -98,11 +98,11 @@ function Cell({
     // lines" capRows marker also rides this kind on the left side
     // when present, so we render its text dim italic.
     return (
-      <Text color={COLOR.info} dimColor italic={!!raw}>
+      <Text color={COLOR.info} dim italic={!!raw}>
         {`${numStr} ${sign} ${padded}`}
       </Text>
     );
   }
   // ctx: same content both sides, dim
-  return <Text dimColor>{`${numStr} ${sign} ${padded}`}</Text>;
+  return <Text dim>{`${numStr} ${sign} ${padded}`}</Text>;
 }

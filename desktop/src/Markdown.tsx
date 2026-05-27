@@ -37,10 +37,14 @@ export const WorkspaceProvider = WorkspaceContext.Provider;
 
 function resolveAgainstWorkspace(rel: string, ws: string | undefined): string {
   if (!ws) return rel;
-  if (/^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith("/")) return rel;
-  const sep = ws.includes("\\") ? "\\" : "/";
+  const isWindows = ws.includes("\\");
+  if (/^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith("/")) {
+    return isWindows ? rel.replace(/\//g, "\\") : rel;
+  }
+  const sep = isWindows ? "\\" : "/";
   const trimmed = ws.replace(/[\\/]$/, "");
-  return `${trimmed}${sep}${rel.replace(/^\.[\\/]/, "")}`;
+  const relative = rel.replace(/^\.[\\/]/, "").replace(/\//g, sep);
+  return `${trimmed}${sep}${relative}`;
 }
 
 const KNOWN_EXTS =
@@ -204,6 +208,32 @@ function withFilePills(children: ReactNode): ReactNode {
   });
 }
 
+/**
+ * Convert bracket-style math delimiters to dollar-style so they survive
+ * the markdown parser (which would otherwise consume the backslash in `\[`
+ * as an escape). Handles both display math \[...\] → $$...$$ and inline
+ * math \(...\) → $...$.
+ *
+ * Protects `\\[` sequences (LaTeX line-break spacing like `\\[4pt]`)
+ * from being mangled — the regex must not match the `\[` inside `\\[`.
+ */
+function normalizeMathDelimiters(source: string): string {
+  // Protect LaTeX line-break spacing \\[ ... ] — use a sentinel that
+  // can't appear in normal text.
+  const LB = "\x00LB\x00";
+  let result = source.replace(/\\\\\[/g, LB);
+  result = result
+    // display math: \[ ... \] → $$ ... $$
+    .replace(/\\\[/g, "$$$$")
+    .replace(/\\\]/g, "$$$$")
+    // inline math: \( ... \) → $ ... $
+    .replace(/\\\(/g, "$$")
+    .replace(/\\\)/g, "$$");
+  // Restore protected sequences
+  result = result.replace(/\x00LB\x00/g, "\\\\[");
+  return result;
+}
+
 export const Markdown = memo(function Markdown({ source }: { source: string }) {
   return (
     <div className="markdown">
@@ -233,7 +263,7 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
           td: ({ children }) => <td>{withFilePills(children)}</td>,
         }}
       >
-        {source}
+        {normalizeMathDelimiters(source)}
       </ReactMarkdown>
     </div>
   );

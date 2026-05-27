@@ -172,7 +172,7 @@ function LoopStatusRow({
   const nextFireMs = Math.max(0, loop.nextFireAt - Date.now());
   return (
     <Box>
-      <Text color="cyan">
+      <Text color="ansi:cyan">
         {`loop: ${formatLoopStatus(loop.prompt, nextFireMs, loop.iter)} — /loop stop or type to cancel`}
       </Text>
     </Box>

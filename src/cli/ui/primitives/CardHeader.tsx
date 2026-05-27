@@ -1,13 +1,13 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 import React, { useContext } from "react";
 import { FG } from "../theme/tokens.js";
 import { ActiveCardContext } from "./Card.js";
 
-export type MetaItem = string | { text: string; color: string };
+export type MetaItem = string | { text: string; color: Color };
 
 export interface CardHeaderProps {
   glyph: string | React.ReactElement;
-  tone: string;
+  tone: Color;
   title: string;
   /** Body-tone text after the title, separated by a space (no `·`). */
   subtitle?: string;

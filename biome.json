@@ -30,7 +30,7 @@
       "coverage",
       "*.d.ts",
       "dashboard/codemirror.js",
-      "src/vendor/**"
+      "packages/ink/**"
     ]
   }
 }

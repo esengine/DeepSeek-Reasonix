@@ -51,6 +51,7 @@ const VALID_WEB_SEARCH_ENGINES = new Set([
   "tavily",
   "perplexity",
   "exa",
+  "brave",
   "ollama",
 ]);
 
@@ -181,7 +182,7 @@ export async function handleSettings(
           status: 400,
           body: {
             error:
-              "webSearchEngine must be bing | searxng | metaso | tavily | perplexity | exa | ollama",
+              "webSearchEngine must be bing | searxng | metaso | tavily | perplexity | exa | brave | ollama",
           },
         };
       }
@@ -192,6 +193,7 @@ export async function handleSettings(
         | "tavily"
         | "perplexity"
         | "exa"
+        | "brave"
         | "ollama";
       changed.push("webSearchEngine");
     }

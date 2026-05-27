@@ -1,4 +1,4 @@
-import { Box, Text, Transform } from "ink";
+import { Box, Link, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { type InlineSpan, type MdLine, markdownToLines } from "./markdown-lines.js";
@@ -163,7 +163,7 @@ function SpanText({
       color={color}
       bold={!!(span.bold || ambientBold)}
       italic={!!(span.italic || ambientItalic)}
-      dimColor={!!ambientDim}
+      dim={!!ambientDim}
       strikethrough={!!(span.strike || ambientStrike)}
       underline={!!(span.link || span.fileRef)}
     >
@@ -172,11 +172,7 @@ function SpanText({
   );
   const target = linkTarget(span);
   if (!target) return inner;
-  return (
-    <Transform transform={(text) => `\x1b]8;;${target}\x1b\\${text}\x1b]8;;\x1b\\`}>
-      {inner}
-    </Transform>
-  );
+  return <Link url={target}>{inner}</Link>;
 }
 
 function linkTarget(span: InlineSpan): string | null {

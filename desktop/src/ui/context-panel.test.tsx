@@ -20,6 +20,7 @@ const usage: UsageStats = {
   lastCallCacheHit: null,
   lastCallCacheMiss: null,
   reservedTokens: 0,
+  liveLogTokens: 0,
 };
 
 const settings: Settings = {
@@ -70,5 +71,23 @@ describe("ContextPanel files", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open file: src/new-file.ts" }));
 
     await waitFor(() => expect(openPath).toHaveBeenCalledWith("/repo/src/new-file.ts"));
+  });
+
+  it("renders live log tokens even before final usage arrives", () => {
+    render(
+      <ContextPanel
+        settings={settings}
+        usage={{ ...usage, reservedTokens: 50, liveLogTokens: 100 }}
+        mcpSpecs={[]}
+        mcpBridged={false}
+        sessionFiles={[]}
+        memory={[]}
+        memoryDetail={null}
+        onReadMemory={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("150 / 1,000,000")).toBeTruthy();
+    expect(screen.getByText("100")).toBeTruthy();
   });
 });

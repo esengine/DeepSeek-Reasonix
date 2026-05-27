@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { Box, Text, useStdout } from "ink";
+import { Box, type Color, Text, useStdout } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
@@ -444,7 +444,7 @@ interface PasteChipRowProps {
   isFirst: boolean;
   active: boolean;
   visibleCells: number;
-  accentColor: string;
+  accentColor: Color;
 }
 
 function PasteChipRow({
@@ -469,7 +469,7 @@ function PasteChipRow({
         <Text bold color={accentColor}>
           {"▸ "}
         </Text>
-        <Text bold color="black" backgroundColor={accentColor}>
+        <Text bold color="ansi:black" backgroundColor={accentColor}>
           {`  ${labelText}  `}
         </Text>
       </Box>
@@ -532,7 +532,7 @@ interface PromptLineProps {
   promptPrefix: string;
   continuationIndent: string;
   visibleCells: number;
-  accentColor: string;
+  accentColor: Color;
   pastes: ReadonlyMap<number, PasteEntry>;
   disabled: boolean;
   steerBusy?: boolean;
@@ -601,7 +601,7 @@ function ViewportContent({
 }: {
   segments: Segment[];
   cursorCell: number | null;
-  accentColor: string;
+  accentColor: Color;
   cursorVisible: boolean;
 }) {
   // No cursor on this line — straight render.

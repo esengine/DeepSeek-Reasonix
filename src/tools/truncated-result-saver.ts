@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { join, parse, relative, resolve } from "node:path";
 
 const TRUNCATED_DIR = "truncated-results";
 const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -19,9 +19,17 @@ function sanitizeToolName(name: string): string {
   return name.replace(/[^\w\-]/g, "_").slice(0, 48) || "unknown";
 }
 
+function useHomeFallback(rootDir: string): boolean {
+  if (!rootDir) return true;
+  const abs = resolve(rootDir);
+  return abs === parse(abs).root;
+}
+
 /** Resolve the absolute storage directory for truncated results. */
 export function storageDir(rootDir: string): string {
-  const base = rootDir ? join(resolve(rootDir), ".reasonix") : join(homedir(), ".reasonix");
+  const base = useHomeFallback(rootDir)
+    ? join(homedir(), ".reasonix")
+    : join(resolve(rootDir), ".reasonix");
   return join(base, TRUNCATED_DIR);
 }
 
@@ -56,7 +64,7 @@ export function saveTruncatedResult(content: string, toolName: string, rootDir: 
 
   // Return a relative path the model can pass to read_file.
   // Normalize to forward slashes for cross-platform consistency.
-  if (rootDir) {
+  if (!useHomeFallback(rootDir)) {
     const absRoot = resolve(rootDir);
     return relative(absRoot, absPath).replaceAll("\\", "/");
   }

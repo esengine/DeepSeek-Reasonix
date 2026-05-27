@@ -92,6 +92,7 @@ Skip dependency, build, and VCS directories unless asked (the pinned .gitignore 
 
 - **Filesystem tools** (\`read_file\`, \`list_directory\`, \`edit_file\`, etc.): paths resolve against the sandbox root. Relative, POSIX-absolute (\`/\` = project root), and OS-absolute (e.g. \`D:\\\\path\\\\foo.cpp\`) all work as long as they resolve INSIDE the sandbox. Don't refuse on path shape — the tool returns a clear sandbox-escape error if it's actually out of scope.
 - **\`run_command\`**: cwd pinned to project root. Never use a leading \`/\` in arguments — Windows reads it as drive root, POSIX as filesystem root. Use relative paths.
+- By default, run generated scripts from the directory where the script was written. Do not assume an input or data directory is the cwd just because the task reads files there; pass data paths as arguments unless the command explicitly needs that cwd.
 
 # Workspace is pinned
 

@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from "ink";
+import { Box, type Color, Text, useStdout } from "ink";
 import React from "react";
 import { t } from "../../../i18n/index.js";
 import { Markdown } from "../markdown.js";
@@ -97,7 +97,7 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
                 <Text
                   key={`${card.id}:line:${row.index}`}
                   color={errColor}
-                  dimColor={!card.exitCode || card.exitCode === 0}
+                  dim={!card.exitCode || card.exitCode === 0}
                 >
                   {clipToCells(row.text, lineCells) || " "}
                 </Text>
@@ -167,7 +167,7 @@ function statusGlyph(s: ToolStatus): string {
   }
 }
 
-function headerColorFor(s: ToolStatus): string {
+function headerColorFor(s: ToolStatus): Color {
   switch (s) {
     case "ok":
       return TONE.ok;

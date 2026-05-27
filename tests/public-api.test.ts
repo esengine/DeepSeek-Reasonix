@@ -280,6 +280,7 @@ const PUBLIC_API: readonly string[] = [
   "listSessions",
   "loadApiKey",
   "loadBaseUrl",
+  "loadBraveApiKey",
   "loadDotenv",
   "loadExaApiKey",
   "loadHooks",

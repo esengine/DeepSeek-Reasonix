@@ -123,4 +123,64 @@ describe("DeepSeekClient usage parsing", () => {
     expect(resp.usage.totalTokens).toBe(49);
     expect(resp.usage.promptCacheMissTokens).toBe(42);
   });
+
+  it("requests usage metadata for streaming calls", async () => {
+    let body: { stream_options?: unknown } | null = null;
+    const fetch = vi.fn(async (_url, init) => {
+      body = JSON.parse(String((init as RequestInit).body)) as { stream_options?: unknown };
+      const frames = [
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ finish_reason: "stop", delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } })}\n\n`,
+        "data: [DONE]\n\n",
+      ];
+      const stream = new ReadableStream({
+        start(controller) {
+          for (const frame of frames) controller.enqueue(new TextEncoder().encode(frame));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch });
+
+    const chunks = [];
+    for await (const chunk of client.stream({
+      model: "deepseek-chat",
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(body?.stream_options).toEqual({ include_usage: true });
+    expect(chunks.at(-1)?.usage?.promptTokens).toBe(10);
+    expect(chunks.at(-1)?.usage?.promptCacheMissTokens).toBe(10);
+  });
+});
+
+describe("DeepSeekClient request serialization", () => {
+  it("replaces lone UTF-16 surrogates before sending JSON", async () => {
+    let sentBody = "";
+    const spy = vi.fn(async (_url: unknown, init: unknown) => {
+      sentBody = String((init as RequestInit).body ?? "");
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: spy as unknown as typeof fetch,
+    });
+
+    await client.chat({
+      model: "deepseek-chat",
+      messages: [{ role: "user", content: `bad ${String.fromCharCode(0xd800)} text` }],
+    });
+
+    expect(sentBody).not.toMatch(/\\ud[89ab][0-9a-f]{2}/i);
+    expect(JSON.parse(sentBody).messages[0].content).toBe("bad \uFFFD text");
+  });
 });

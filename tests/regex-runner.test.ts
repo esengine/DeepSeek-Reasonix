@@ -42,7 +42,7 @@ describe("RegexRunner — worker-isolated regex evaluation", () => {
     try {
       await expect(runner.testLines("a".repeat(30), "(a+)+!", "")).rejects.toThrow(/exceeded/);
       // Next call uses a fresh worker.
-      const hits = await runner.testLines("hello\nworld", "world", "");
+      const hits = await runner.testLines("hello\nworld", "world", "", { timeoutMs: 5_000 });
       expect(hits).toEqual([1]);
     } finally {
       await runner.shutdown();

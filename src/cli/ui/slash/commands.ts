@@ -86,9 +86,9 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "language",
     group: "setup",
-    argsHint: "<EN|zh-CN|de>",
+    argsHint: "<EN|zh-CN|de|ru>",
     summary: "switch the runtime language",
-    argCompleter: ["EN", "zh-CN", "de"],
+    argCompleter: ["EN", "zh-CN", "de", "ru"],
     aliases: ["lang"],
   },
   {
@@ -317,10 +317,10 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "search-engine",
     group: "advanced",
-    argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|ollama> [<key>]",
+    argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|brave|ollama> [<key>]",
     summary:
-      "switch web search backend — bing (default, works from CN without proxy), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), or ollama (Ollama cloud web search). Provider with no key prompts inline config.",
-    argCompleter: ["bing", "searxng", "metaso", "tavily", "perplexity", "exa", "ollama"],
+      "switch web search backend — bing (default, works from CN without proxy), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), brave (independent index, free 2000/mo), or ollama (Ollama cloud web search). Provider with no key prompts inline config.",
+    argCompleter: ["bing", "searxng", "metaso", "tavily", "perplexity", "exa", "brave", "ollama"],
     aliases: ["se"],
   },
   {

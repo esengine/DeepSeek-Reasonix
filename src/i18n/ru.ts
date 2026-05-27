@@ -543,4 +543,27 @@ export const ru: TranslationSchema = {
     riskHigh: " выс",
     completeMsg: "\u25b8 план выполнен — все {total} шаг(ов) сделаны · архивирован",
   },
+  webErrors: {
+    ...EN.webErrors,
+    braveMissingKey:
+      "web_search: Для работы Brave Search требуется ключ API — задайте переменную среды BRAVE_SEARCH_API_KEY (или BRAVE_API_KEY) или параметр `braveApiKey` в файле ~/.reasonix/config.json; бесплатная регистрация с лимитом 2000 запросов в месяц на сайте https://brave.com/search/api/",
+    braveUnauthorized:
+      "web_search: Ключ API Brave Search отклонен — проверьте значение BRAVE_SEARCH_API_KEY или получите новый ключ на сайте https://brave.com/search/api/",
+    braveRateLimit:
+      "web_search: Превышен лимит запросов или месячная квота для Brave Search API — подождите или перейдите на платную версию на сайте https://brave.com/search/api/",
+    braveServerError:
+      "web_search: Ошибка сервера Brave Search ({status}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
+    braveParseError:
+      "web_search: Brave Search вернул неразборчивый ответ (HTTP {status}) — попробуйте позже",
+  },
+  handlers: {
+    ...EN.handlers,
+    webSearchEngine: {
+      ...EN.handlers.webSearchEngine,
+      usageBrave:
+        "  /search-engine brave               использует Brave Search API (независимый индекс, бесплатно 2000 запросов в месяц — установите BRAVE_SEARCH_API_KEY или braveApiKey в конфигурации; получить ключ можно на сайте https://brave.com/search/api/)",
+      switchedBraveNote:
+        " Укажите параметр BRAVE_SEARCH_API_KEY (или BRAVE_API_KEY) или `braveApiKey` в файле конфигурации; 2000 бесплатных запросов в месяц доступны по адресу https://brave.com/search/api/.",
+    },
+  },
 };

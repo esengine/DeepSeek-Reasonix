@@ -255,6 +255,7 @@ export const de: typeof en = {
     webSearchEngineTavily: "tavily — 1000/Monat kostenlos (TAVILY_API_KEY setzen)",
     webSearchEnginePerplexity: "perplexity — AI-native (PERPLEXITY_API_KEY setzen)",
     webSearchEngineExa: "exa — AI-native 1000/Monat kostenlos (EXA_API_KEY setzen)",
+    webSearchEngineBrave: "brave — unabhängiger Index, 2000/Monat kostenlos (BRAVE_SEARCH_API_KEY setzen)",
     webSearchEngineOllama: "ollama — Ollama Cloud-Websuche (OLLAMA_API_KEY setzen)",
     webSearchEngineNote: "gilt für den nächsten web_search-Aufruf",
     sectionBudget: "Budget",

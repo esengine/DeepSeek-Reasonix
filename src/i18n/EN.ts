@@ -425,7 +425,7 @@ export const EN: TranslationSchema = {
     "search-engine": {
       description:
         "switch web search backend — bing (default, works from CN without proxy), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), or ollama (Ollama cloud web search)",
-      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|ollama> [<key>]",
+      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa|brave|ollama> [<key>]",
     },
   },
   wizard: {
@@ -1209,6 +1209,8 @@ export const EN: TranslationSchema = {
         "  /search-engine exa                 use Exa API (AI-native answer + citations, free 1000/mo — set EXA_API_KEY or exaApiKey in config; sign up at https://exa.ai)",
       usageOllama:
         "  /search-engine ollama              use Ollama cloud web search — set OLLAMA_API_KEY or ollamaApiKey in config; get one at https://ollama.com/settings/keys",
+      usageBrave:
+        "  /search-engine brave               use Brave Search API (independent index, free 2000/mo — set BRAVE_SEARCH_API_KEY or braveApiKey in config; get one at https://brave.com/search/api/)",
       alias: "Alias: /se",
       searxngInfo:
         "SearXNG is a self-hosted metasearch engine (https://github.com/searxng/searxng).",
@@ -1224,6 +1226,8 @@ export const EN: TranslationSchema = {
       switchedExaNote: " Set EXA_API_KEY or `exaApiKey` in config; sign up at https://exa.ai.",
       switchedOllamaNote:
         " Set OLLAMA_API_KEY or `ollamaApiKey` in config; get one at https://ollama.com/settings/keys.",
+      switchedBraveNote:
+        " Set BRAVE_SEARCH_API_KEY (or BRAVE_API_KEY) or `braveApiKey` in config; free 2000/mo at https://brave.com/search/api/.",
       keyNeeded:
         'No API key configured for "{engine}".\n\n  1. Set the {envVar} environment variable\n  2. Or provide one inline:  /search-engine {engine} <your-key>\n  3. Or add "{engine}ApiKey" to ~/.reasonix/config.json\n\nThen retry /search-engine {engine}.',
       keySaved: " API key saved to config.",
@@ -1530,25 +1534,25 @@ export const EN: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     rateLimit429:
       "web_search 429 \u2014 try: wait 10s before retrying, or rephrase the query; the search backend is rate-limiting this client",
     forbidden403:
-      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa, or wait and retry later",
+      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave, or wait and retry later",
     serverError5xx:
       "web_search {status} \u2014 try: open the search URL in a browser; if it loads this is transient and a retry in 30s may help",
     bingBlocked:
-      "web_search: Bing anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Bing anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     bingNoResults:
-      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     invalidEndpoint:
       'web_search: invalid SearXNG endpoint "{endpoint}" \u2014 try: set a valid URL with /search-endpoint http://host:port',
     endpointMustBeHttp:
       "web_search: SearXNG endpoint must be http(s), got {protocol} \u2014 try: set a valid URL with /search-endpoint http://host:port",
     cannotReach:
-      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to another engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to another engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     searxngNoResults:
-      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     metasoMissingKey:
       "web_search: Metaso requires an API key \u2014 set METASO_API_KEY or configure one with /search-engine metaso <key>. Get one at https://metaso.cn/search-api/playground",
     metasoDailyLimit:
@@ -1558,7 +1562,7 @@ export const EN: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metaso rate-limited \u2014 wait and retry, or get your own API key at https://metaso.cn/search-api/playground",
     metasoServerError:
-      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     metasoParseError:
       "web_search: Metaso returned unparseable response (HTTP {status}) \u2014 try again later",
     metasoApiError: "web_search: Metaso API error (code {code}: {message}) \u2014 try again later",
@@ -1567,9 +1571,9 @@ export const EN: TranslationSchema = {
     tavilyUnauthorized:
       "web_search: Tavily API key rejected \u2014 check TAVILY_API_KEY or get one at https://tavily.com",
     tavilyRateLimit:
-      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa, or upgrade your Tavily plan",
+      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave, or upgrade your Tavily plan",
     tavilyServerError:
-      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     tavilyParseError:
       "web_search: Tavily returned unparseable response (HTTP {status}) \u2014 try again later",
     perplexityMissingKey:
@@ -1577,9 +1581,9 @@ export const EN: TranslationSchema = {
     perplexityUnauthorized:
       "web_search: Perplexity API key rejected \u2014 check PERPLEXITY_API_KEY or get one at https://perplexity.ai/settings/api",
     perplexityRateLimit:
-      "web_search: Perplexity rate-limited \u2014 wait and retry, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Perplexity rate-limited \u2014 wait and retry, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     perplexityServerError:
-      "web_search: Perplexity server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Perplexity server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     perplexityParseError:
       "web_search: Perplexity returned unparseable response (HTTP {status}) \u2014 try again later",
     exaMissingKey:
@@ -1589,9 +1593,19 @@ export const EN: TranslationSchema = {
     exaRateLimit:
       "web_search: Exa API rate-limited or monthly quota exceeded \u2014 wait or upgrade at https://exa.ai/pricing",
     exaServerError:
-      "web_search: Exa server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa",
+      "web_search: Exa server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
     exaParseError:
       "web_search: Exa returned unparseable response (HTTP {status}) \u2014 try again later",
+    braveMissingKey:
+      "web_search: Brave Search requires an API key \u2014 set BRAVE_SEARCH_API_KEY (or BRAVE_API_KEY) env var or `braveApiKey` in ~/.reasonix/config.json; free 2000/mo signup at https://brave.com/search/api/",
+    braveUnauthorized:
+      "web_search: Brave Search API key rejected \u2014 check BRAVE_SEARCH_API_KEY or get one at https://brave.com/search/api/",
+    braveRateLimit:
+      "web_search: Brave Search API rate-limited or monthly quota exceeded \u2014 wait or upgrade at https://brave.com/search/api/",
+    braveServerError:
+      "web_search: Brave Search server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
+    braveParseError:
+      "web_search: Brave Search returned unparseable response (HTTP {status}) \u2014 try again later",
     fetchStatus:
       "web_fetch {status} for {url} \u2014 try: confirm the URL resolves in a browser; status suggests the host returned an error page",
     fetchRateLimit429:

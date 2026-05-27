@@ -27,7 +27,7 @@ export function CompactionCard({ card }: { card: CompactionCardData }): React.Re
       ))}
       {hiddenCount > 0 ? (
         <Box marginTop={1}>
-          <Text color={FG.sub} dimColor>
+          <Text color={FG.sub} dim>
             … {hiddenCount} more line{hiddenCount === 1 ? "" : "s"} (full summary in session log)
           </Text>
         </Box>

@@ -27,6 +27,15 @@ export interface TranscriptRecord {
   prefixHash?: string;
   /** Optional error message (role === "error"). */
   error?: string;
+  /** Structured error detail (role === "error"). */
+  errorDetail?: {
+    name: string;
+    message: string;
+    code?: string;
+    phase?: string;
+    retryable: boolean;
+    recoverable: boolean;
+  };
 }
 
 export interface TranscriptMeta {
@@ -62,6 +71,7 @@ export function recordFromLoopEvent(
   if (ev.toolName !== undefined) rec.tool = ev.toolName;
   if (ev.toolArgs !== undefined) rec.args = ev.toolArgs;
   if (ev.error !== undefined) rec.error = ev.error;
+  if (ev.errorDetail !== undefined) rec.errorDetail = ev.errorDetail;
   if (ev.stats) {
     rec.usage = {
       prompt_tokens: ev.stats.usage.promptTokens,

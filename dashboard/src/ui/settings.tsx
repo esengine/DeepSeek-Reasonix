@@ -674,6 +674,7 @@ function PageGeneral({
                   | "tavily"
                   | "perplexity"
                   | "exa"
+                  | "brave"
                   | "ollama",
               })
             }
@@ -684,6 +685,7 @@ function PageGeneral({
             <option value="tavily">{t("settings.webSearchEngineTavily")}</option>
             <option value="perplexity">{t("settings.webSearchEnginePerplexity")}</option>
             <option value="exa">{t("settings.webSearchEngineExa")}</option>
+            <option value="brave">{t("settings.webSearchEngineBrave")}</option>
             <option value="ollama">{t("settings.webSearchEngineOllama")}</option>
           </select>
         </div>

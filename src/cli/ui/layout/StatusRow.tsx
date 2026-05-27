@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from "ink";
+import { Box, type Color, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
@@ -368,7 +368,7 @@ function RecordingPill({ rec }: { rec: NonNullable<StatusBar["recording"]> }): R
   );
 }
 
-function modeGlyph(mode: Mode): { glyph: string; color: string } {
+function modeGlyph(mode: Mode): { glyph: string; color: Color } {
   switch (mode) {
     case "auto":
       return { glyph: "●", color: TONE.ok };
@@ -381,7 +381,7 @@ function modeGlyph(mode: Mode): { glyph: string; color: string } {
   }
 }
 
-function networkDot(state: NetworkState): { glyph: string; color: string } {
+function networkDot(state: NetworkState): { glyph: string; color: Color } {
   switch (state) {
     case "online":
       return { glyph: "●", color: TONE.ok };

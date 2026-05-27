@@ -237,6 +237,7 @@ export const zhCN = {
     webSearchEngineTavily: "tavily — 每月 1000 次免费（设置 TAVILY_API_KEY）",
     webSearchEnginePerplexity: "perplexity — AI 直接回答（设置 PERPLEXITY_API_KEY）",
     webSearchEngineExa: "exa — AI 直接回答，每月 1000 次免费（设置 EXA_API_KEY）",
+    webSearchEngineBrave: "brave — 独立索引，每月 2000 次免费（设置 BRAVE_SEARCH_API_KEY）",
     webSearchEngineOllama: "ollama — Ollama 云端网页搜索（设置 OLLAMA_API_KEY）",
     webSearchEngineNote: "下一次 web_search 调用生效",
     sectionBudget: "预算",

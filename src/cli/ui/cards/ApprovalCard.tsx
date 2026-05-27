@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
@@ -14,7 +14,7 @@ export interface ApprovalCardProps {
   title: string;
   metaRight?: string;
   /** Override metaRight color — defaults to FG.faint. Use the tone color to match design's status indicator (e.g. "awaiting" in accent for plan-confirm). */
-  metaRightColor?: string;
+  metaRightColor?: Color;
   children?: React.ReactNode;
   footerHint?: string;
 }

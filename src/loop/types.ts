@@ -42,6 +42,14 @@ export interface LoopEvent {
   stats?: TurnStats;
   repair?: RepairReport;
   error?: string;
+  errorDetail?: {
+    name: string;
+    message: string;
+    code?: string;
+    phase?: string;
+    retryable: boolean;
+    recoverable: boolean;
+  };
   /** Display-only — code-mode applier MUST skip SEARCH/REPLACE in forced-summary text. */
   forcedSummary?: boolean;
 }

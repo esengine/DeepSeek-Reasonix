@@ -224,6 +224,8 @@ export type UsageStats = {
   lastCallCacheMiss: number | null;
   /** System prompt + tool specs — constant for the session, sent on tab open. */
   reservedTokens: number;
+  /** Current conversation log tokens, refreshed by the desktop sidecar. */
+  liveLogTokens: number;
 };
 
 export type SessionInfo = {
@@ -244,7 +246,7 @@ export type Settings = {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
-  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "ollama";
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
@@ -252,16 +254,25 @@ export type Settings = {
     perplexity?: string;
     exa?: string;
     ollama?: string;
+    brave?: string;
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
   version: string;
 };
 
+export type BalanceInfoItem = {
+  currency: string;
+  total: number;
+  granted?: number;
+  toppedUp?: number;
+};
+
 export type Balance = {
   currency: string;
   total: number;
   isAvailable: boolean;
+  infos: BalanceInfoItem[];
 };
 
 type MentionResults = { nonce: number; query: string; results: string[] };
@@ -712,6 +723,7 @@ function zeroUsage(): UsageStats {
     lastCallCacheHit: null,
     lastCallCacheMiss: null,
     reservedTokens: 0,
+    liveLogTokens: 0,
   };
 }
 
@@ -893,10 +905,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
     case "$ctx_breakdown": {
       const next: UsageStats = { ...state.usage, reservedTokens: ev.reservedTokens };
       if (typeof ev.logTokens === "number") {
-        next.cacheHitTokens = 0;
-        next.cacheMissTokens = ev.logTokens;
-        next.lastCallCacheHit = 0;
-        next.lastCallCacheMiss = ev.logTokens;
+        next.liveLogTokens = ev.logTokens;
       }
       return { ...state, usage: next };
     }
@@ -920,6 +929,7 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
           currency: ev.currency,
           total: ev.total,
           isAvailable: ev.isAvailable,
+          infos: ev.balanceInfos ?? [],
         },
       };
     case "$qq_settings":
@@ -1061,12 +1071,18 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       // ones so a session full of self-repaired loops doesn't look
       // like everything's on fire (#1456-followup).
       const recoverable = ev.type === "error" ? ev.recoverable : false;
+      // Loop has returned (any error path ends the turn); flip the still-
+      // streaming assistant message to settled so the UI doesn't keep
+      // showing a "thinking" spinner above the error card (#1660).
+      const settled = state.messages.map((m) =>
+        m.kind === "assistant" && m.pending ? { ...m, pending: false } : m,
+      );
       return {
         ...state,
         busy: false,
         activeSkill: null,
         messages: [
-          ...state.messages,
+          ...settled,
           { kind: "error", message: ev.message, id: nextErrorId(), recoverable },
         ],
       };
@@ -1099,18 +1115,22 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
       };
     case "model.final": {
       const u = ev.usage;
+      const promptTokens =
+        u?.prompt_tokens ??
+        (u?.prompt_cache_hit_tokens ?? 0) + (u?.prompt_cache_miss_tokens ?? 0);
       const callHit = u?.prompt_cache_hit_tokens ?? 0;
-      const callMiss = u?.prompt_cache_miss_tokens ?? 0;
-      const hasCall = callHit > 0 || callMiss > 0;
+      const callMiss = u?.prompt_cache_miss_tokens ?? Math.max(0, promptTokens - callHit);
+      const hasCall = promptTokens > 0 || callHit > 0 || callMiss > 0;
       const usage: UsageStats = {
         totalCostUsd: state.usage.totalCostUsd + (ev.costUsd ?? 0),
-        totalPromptTokens: state.usage.totalPromptTokens + (u?.prompt_tokens ?? 0),
+        totalPromptTokens: state.usage.totalPromptTokens + promptTokens,
         totalCompletionTokens: state.usage.totalCompletionTokens + (u?.completion_tokens ?? 0),
         cacheHitTokens: state.usage.cacheHitTokens + callHit,
         cacheMissTokens: state.usage.cacheMissTokens + callMiss,
         lastCallCacheHit: hasCall ? callHit : state.usage.lastCallCacheHit,
         lastCallCacheMiss: hasCall ? callMiss : state.usage.lastCallCacheMiss,
         reservedTokens: state.usage.reservedTokens,
+        liveLogTokens: state.usage.liveLogTokens,
       };
       return {
         ...state,
@@ -1635,6 +1655,11 @@ function TabRuntime({
           if (!override) setDraft("");
           return;
         }
+        if (name === "skill" || name === "skills") {
+          openSettingsAt("skills");
+          if (!override) setDraft("");
+          return;
+        }
         const skill = state.skills.find((s) => s.name === name);
         if (skill) {
           const clientId = `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2021,6 +2046,8 @@ function TabRuntime({
       desc: t("app.cmd.searchEngine"),
       run: () => openSettingsAt("general"),
     },
+    { cmd: "/skill", desc: t("app.cmd.skill"), run: () => openSettingsAt("skills") },
+    { cmd: "/skills", desc: t("app.cmd.skill"), run: () => openSettingsAt("skills") },
     ...slashSettingCommands,
     { cmd: "/theme", desc: t("app.cmd.toggleTheme"), run: onToggleTheme },
     {
@@ -2202,6 +2229,7 @@ function TabRuntime({
           sessions={state.sessions}
           importSources={state.externalImportSources}
           activeName={state.currentSession}
+          workspaceDir={state.settings?.workspaceDir}
           onNewChat={newChat}
           onLoadSession={(name) => {
             clearAbortDraft();
@@ -2216,6 +2244,10 @@ function TabRuntime({
           onImportSession={({ source, path, name }) =>
             sendRpc({ cmd: "session_import", source, path, ...(name ? { name } : {}) })
           }
+          onOpenWorkdir={(anchor) => {
+            setWdAnchor(anchor);
+            setWdOpen(true);
+          }}
           onOpenSettings={() => openSettingsAt("general")}
           onOpenRules={() => openSettingsAt("rules")}
           onOpenCommands={() => palette.setOpen(true)}

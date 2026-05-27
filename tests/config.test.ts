@@ -12,6 +12,7 @@ import {
   isPlausibleKey,
   loadApiKey,
   loadBaseUrl,
+  loadBraveApiKey,
   loadDesktopOpenTabs,
   loadEditMode,
   loadEndpoint,
@@ -134,6 +135,16 @@ describe("config", () => {
     expect(loadApiKey(path)).toBe("sk-fromfile1234567890ab");
   });
 
+  it("saveApiKey overrides a stale env var so an explicit UI save takes effect immediately", () => {
+    // Repro: user has DEEPSEEK_API_KEY=<old> in User-level env / .env / shell rc.
+    // Without the env update inside saveApiKey, loadEndpoint's fallback branch
+    // keeps returning the stale env, so the desktop UI save looks like a no-op.
+    process.env.DEEPSEEK_API_KEY = "sk-staleenv00000000000000";
+    saveApiKey("sk-freshfromui00000000000", path);
+    expect(loadApiKey(path)).toBe("sk-freshfromui00000000000");
+    expect(process.env.DEEPSEEK_API_KEY).toBe("sk-freshfromui00000000000");
+  });
+
   it("loadApiKey returns undefined when nothing set", () => {
     expect(loadApiKey(path)).toBeUndefined();
   });
@@ -230,8 +241,12 @@ describe("config", () => {
   it("loadEndpoint: env tuple wins when env sets baseUrl", () => {
     process.env.DEEPSEEK_BASE_URL = "https://env-proxy.example.com";
     process.env.DEEPSEEK_API_KEY = "sk-env-tuple-token-abc";
-    saveBaseUrl("https://config-only.example.com", path);
-    saveApiKey("sk-config-token-xyz1234", path);
+    // Write config directly — saveApiKey would mutate env as part of the desktop-UI
+    // contract; here we want to test loadEndpoint's read precedence in isolation.
+    writeConfig(
+      { baseUrl: "https://config-only.example.com", apiKey: "sk-config-token-xyz1234" },
+      path,
+    );
     try {
       const ep = loadEndpoint(path);
       expect(ep.baseUrl).toBe("https://env-proxy.example.com");
@@ -244,9 +259,9 @@ describe("config", () => {
 
   it("loadEndpoint: default endpoint pairs env apiKey > config apiKey", () => {
     // Neither source sets baseUrl → default endpoint. Standard 12-factor
-    // env > config for the apiKey, unchanged from pre-fix behavior.
+    // env > config for the apiKey on the read path.
     process.env.DEEPSEEK_API_KEY = "sk-env-default-token-abc";
-    saveApiKey("sk-config-token-xyz1234", path);
+    writeConfig({ apiKey: "sk-config-token-xyz1234" }, path);
     const ep = loadEndpoint(path);
     expect(ep.baseUrl).toBeUndefined();
     expect(ep.apiKey).toBe("sk-env-default-token-abc");
@@ -833,6 +848,7 @@ describe("config", () => {
         "tavily",
         "perplexity",
         "exa",
+        "brave",
         "ollama",
       ] as const) {
         writeConfig({ webSearchEngine: engine }, path);
@@ -852,6 +868,68 @@ describe("config", () => {
       // so an explicit `/search-engine mojeek` later still rejects loudly.
       writeConfig({ webSearchEngine: "mojeek" as unknown as "bing" }, path);
       expect(webSearchEngine(path)).toBe("bing");
+    });
+  });
+
+  describe("loadBraveApiKey", () => {
+    it("returns BRAVE_SEARCH_API_KEY env var when set", () => {
+      const orig = process.env.BRAVE_SEARCH_API_KEY;
+      process.env.BRAVE_SEARCH_API_KEY = "bsk-123";
+      try {
+        expect(loadBraveApiKey(path)).toBe("bsk-123");
+      } finally {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        if (orig === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
+        else process.env.BRAVE_SEARCH_API_KEY = orig;
+      }
+    });
+
+    it("falls back to BRAVE_API_KEY when BRAVE_SEARCH_API_KEY is unset", () => {
+      const origLong = process.env.BRAVE_SEARCH_API_KEY;
+      const origShort = process.env.BRAVE_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BRAVE_SEARCH_API_KEY;
+      process.env.BRAVE_API_KEY = "bak-456";
+      try {
+        expect(loadBraveApiKey(path)).toBe("bak-456");
+      } finally {
+        if (origLong !== undefined) process.env.BRAVE_SEARCH_API_KEY = origLong;
+        // biome-ignore lint/performance/noDelete: same reason
+        if (origShort === undefined) delete process.env.BRAVE_API_KEY;
+        else process.env.BRAVE_API_KEY = origShort;
+      }
+    });
+
+    it("falls back to config.braveApiKey when no env vars are set", () => {
+      const origLong = process.env.BRAVE_SEARCH_API_KEY;
+      const origShort = process.env.BRAVE_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BRAVE_SEARCH_API_KEY;
+      // biome-ignore lint/performance/noDelete: same reason
+      delete process.env.BRAVE_API_KEY;
+      try {
+        writeConfig({ braveApiKey: "cfg-brave" }, path);
+        expect(loadBraveApiKey(path)).toBe("cfg-brave");
+      } finally {
+        if (origLong !== undefined) process.env.BRAVE_SEARCH_API_KEY = origLong;
+        if (origShort !== undefined) process.env.BRAVE_API_KEY = origShort;
+      }
+    });
+
+    it("returns undefined when nothing is set", () => {
+      const origLong = process.env.BRAVE_SEARCH_API_KEY;
+      const origShort = process.env.BRAVE_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BRAVE_SEARCH_API_KEY;
+      // biome-ignore lint/performance/noDelete: same reason
+      delete process.env.BRAVE_API_KEY;
+      try {
+        writeConfig({ braveApiKey: undefined }, path);
+        expect(loadBraveApiKey(path)).toBeUndefined();
+      } finally {
+        if (origLong !== undefined) process.env.BRAVE_SEARCH_API_KEY = origLong;
+        if (origShort !== undefined) process.env.BRAVE_API_KEY = origShort;
+      }
     });
   });
 

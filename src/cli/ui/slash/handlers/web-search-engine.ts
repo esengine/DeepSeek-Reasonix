@@ -1,4 +1,5 @@
 import {
+  loadBraveApiKey,
   loadExaApiKey,
   loadMetasoApiKey,
   loadOllamaApiKey,
@@ -23,6 +24,7 @@ export const handlers: Record<string, SlashHandler> = {
         engine !== "tavily" &&
         engine !== "perplexity" &&
         engine !== "exa" &&
+        engine !== "brave" &&
         engine !== "ollama")
     ) {
       return {
@@ -39,6 +41,7 @@ export const handlers: Record<string, SlashHandler> = {
           t("handlers.webSearchEngine.usagePerplexity"),
           t("handlers.webSearchEngine.usageExa"),
           t("handlers.webSearchEngine.usageOllama"),
+          t("handlers.webSearchEngine.usageBrave"),
           "",
           t("handlers.webSearchEngine.alias"),
           "",
@@ -50,7 +53,7 @@ export const handlers: Record<string, SlashHandler> = {
 
     const cfg = readConfig();
 
-    const apiKeyEngines = new Set(["tavily", "perplexity", "exa", "metaso", "ollama"]);
+    const apiKeyEngines = new Set(["tavily", "perplexity", "exa", "metaso", "ollama", "brave"]);
     if (apiKeyEngines.has(engine)) {
       const loadKey =
         engine === "tavily"
@@ -61,7 +64,9 @@ export const handlers: Record<string, SlashHandler> = {
               ? loadExaApiKey
               : engine === "ollama"
                 ? loadOllamaApiKey
-                : loadMetasoApiKey;
+                : engine === "brave"
+                  ? loadBraveApiKey
+                  : loadMetasoApiKey;
 
       if (args[1]) {
         cfg.webSearchEngine = engine;
@@ -103,7 +108,9 @@ export const handlers: Record<string, SlashHandler> = {
                 ? t("handlers.webSearchEngine.switchedExaNote")
                 : engine === "ollama"
                   ? t("handlers.webSearchEngine.switchedOllamaNote")
-                  : "";
+                  : engine === "brave"
+                    ? t("handlers.webSearchEngine.switchedBraveNote")
+                    : "";
     const detail =
       engine === "searxng"
         ? t("handlers.webSearchEngine.confirmedDetail", { endpoint: webSearchEndpoint() })

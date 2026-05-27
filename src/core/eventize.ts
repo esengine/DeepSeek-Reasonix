@@ -85,7 +85,14 @@ export class Eventizer {
         break;
       }
       case "error":
-        out.push(this.errorEvent(ev.turn, ev.error ?? ev.content, false));
+        out.push(
+          this.errorEvent(ev.turn, ev.error ?? ev.content, ev.errorDetail?.recoverable ?? false, {
+            name: ev.errorDetail?.name,
+            code: ev.errorDetail?.code,
+            phase: ev.errorDetail?.phase,
+            retryable: ev.errorDetail?.retryable,
+          }),
+        );
         break;
       case "status":
         out.push(this.statusEvent(ev.turn, ev.content));
@@ -328,7 +335,12 @@ export class Eventizer {
     };
   }
 
-  private errorEvent(turn: number, message: string, recoverable: boolean): KernelErrorEvent {
+  private errorEvent(
+    turn: number,
+    message: string,
+    recoverable: boolean,
+    detail?: { name?: string; code?: string; phase?: string; retryable?: boolean },
+  ): KernelErrorEvent {
     return {
       id: ++this.nextId,
       ts: new Date().toISOString(),
@@ -336,6 +348,7 @@ export class Eventizer {
       type: "error",
       message,
       recoverable,
+      ...detail,
     };
   }
 

@@ -47,10 +47,10 @@ export function Setup({ onReady }: SetupProps) {
         <Text color={COLOR.info}>{t("wizard.apiKeyPrompt")}</Text>
       </Box>
       <Box>
-        <Text dimColor>{`  ${t("wizard.apiKeyGetOne")}`}</Text>
+        <Text dim>{`  ${t("wizard.apiKeyGetOne")}`}</Text>
       </Box>
       <Box>
-        <Text dimColor>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
+        <Text dim>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
       </Box>
       <Box marginTop={1}>
         <Text bold color={COLOR.brand}>
@@ -76,11 +76,11 @@ export function Setup({ onReady }: SetupProps) {
         </Box>
       ) : value ? (
         <Box marginTop={1}>
-          <Text dimColor>{t("wizard.apiKeyPreview", { redacted: redactKey(value) })}</Text>
+          <Text dim>{t("wizard.apiKeyPreview", { redacted: redactKey(value) })}</Text>
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>{t("wizard.exitHint")}</Text>
+        <Text dim>{t("wizard.exitHint")}</Text>
       </Box>
     </Box>
   );

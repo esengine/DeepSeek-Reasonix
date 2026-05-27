@@ -11,6 +11,7 @@ import { formatQQAccessSummary } from "./strings.js";
 const QQ_LOCK_FILE = join(homedir(), ".reasonix", "qq-channel.pid");
 const QQ_MAX_CHUNK_BYTES = 1500;
 const NATURAL_SPLIT_MIN_FRACTION = 0.6;
+const QQ_MARKDOWN_WRAPPER_RE = /^```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n```$/i;
 
 function fitUtf8Slice(text: string, maxBytes: number): string {
   let end = 0;
@@ -51,6 +52,15 @@ export function splitQQMessage(text: string, maxBytes = QQ_MAX_CHUNK_BYTES): str
   return chunks;
 }
 
+export function normalizeQQMarkdownReply(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(QQ_MARKDOWN_WRAPPER_RE);
+  if (!match) {
+    return text;
+  }
+  return match[1] ?? text;
+}
+
 export class QQChannel {
   private bot: QQBot | null = null;
   private qqUserId: string | null = null;
@@ -62,6 +72,7 @@ export class QQChannel {
   private processedMsgIdQueue: string[] = [];
   private lockAcquired = false;
   private nextOutboundMsgSeq = 1;
+  private markdownDisabled = false;
 
   constructor(
     private callbacks: {
@@ -235,16 +246,36 @@ export class QQChannel {
 
   async sendResponse(text: string): Promise<void> {
     if (!this.bot || !this.qqUserId) return;
-    const chunks = splitQQMessage(text);
+    const chunks = splitQQMessage(normalizeQQMarkdownReply(text));
     for (let index = 0; index < chunks.length; index++) {
       const chunk = chunks[index];
       if (!chunk) continue;
       try {
+        const msgSeq = this.nextOutboundMsgSeq++;
+        if (!this.markdownDisabled) {
+          try {
+            await this.bot.sendPrivateMessage(
+              this.qqUserId,
+              chunk,
+              this.qqMessageId ?? undefined,
+              msgSeq,
+              true,
+            );
+            continue;
+          } catch (err) {
+            this.markdownDisabled = true;
+            this.callbacks.onError?.(
+              `QQ markdown delivery disabled after first failure: ${(err as Error).message}`,
+            );
+          }
+        }
+
         await this.bot.sendPrivateMessage(
           this.qqUserId,
           chunk,
           this.qqMessageId ?? undefined,
           this.nextOutboundMsgSeq++,
+          false,
         );
       } catch (err) {
         const msg = `QQ sendResponse chunk ${index + 1}/${chunks.length} failed: ${(err as Error).message}`;

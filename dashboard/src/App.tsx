@@ -193,7 +193,7 @@ export type Settings = {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
-  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "ollama";
+  webSearchEngine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
   version: string;
@@ -686,8 +686,49 @@ export function applyIncoming(state: State, ev: IncomingEvent): State {
         pendingCheckpoints: [],
         pendingRevisions: [],
       };
-    case "$sessions":
-      return { ...state, sessions: ev.items };
+    case "$sessions": {
+      const hasCurrent = "currentSession" in ev;
+      const nextCurrent =
+        ev.currentSession === null ? undefined : (ev.currentSession ?? state.currentSession);
+      const currentChanged = hasCurrent && nextCurrent !== state.currentSession;
+      return {
+        ...state,
+        sessions: ev.items,
+        currentSession: nextCurrent,
+        messages: currentChanged ? [] : state.messages,
+        pendingConfirms: currentChanged ? [] : state.pendingConfirms,
+        pendingPathAccess: currentChanged ? [] : state.pendingPathAccess,
+        pendingChoices: currentChanged ? [] : state.pendingChoices,
+        pendingPlans: currentChanged ? [] : state.pendingPlans,
+        pendingCheckpoints: currentChanged ? [] : state.pendingCheckpoints,
+        pendingRevisions: currentChanged ? [] : state.pendingRevisions,
+        activePlan: currentChanged ? null : state.activePlan,
+        usage: currentChanged ? zeroUsage() : state.usage,
+        sessionFiles: currentChanged ? [] : state.sessionFiles,
+        queuedSends: currentChanged ? [] : state.queuedSends,
+      };
+    }
+    case "$session_usage": {
+      const empty =
+        ev.totalCostUsd === 0 &&
+        ev.totalPromptTokens === 0 &&
+        ev.totalCompletionTokens === 0 &&
+        ev.cacheHitTokens === 0 &&
+        ev.cacheMissTokens === 0;
+      return {
+        ...state,
+        usage: {
+          ...state.usage,
+          totalCostUsd: ev.totalCostUsd,
+          totalPromptTokens: ev.totalPromptTokens,
+          totalCompletionTokens: ev.totalCompletionTokens,
+          cacheHitTokens: ev.cacheHitTokens,
+          cacheMissTokens: ev.cacheMissTokens,
+          lastCallCacheHit: empty ? null : state.usage.lastCallCacheHit,
+          lastCallCacheMiss: empty ? null : state.usage.lastCallCacheMiss,
+        },
+      };
+    }
     case "$mcp_specs":
       return {
         ...state,

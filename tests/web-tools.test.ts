@@ -896,6 +896,202 @@ describe("searchExa", () => {
   });
 });
 
+describe("searchBrave", () => {
+  const sampleResponse = {
+    web: {
+      results: [
+        {
+          title: "Brave Result One",
+          url: "https://brave.example.com/1",
+          description: "First snippet.",
+        },
+        {
+          title: "Brave Result Two",
+          url: "https://brave.example.com/2",
+          description: "Second snippet.",
+        },
+      ],
+    },
+  };
+
+  it("requires an API key — throws a setup-pointing error when none is set", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    const origKeyShort = process.env.BRAVE_API_KEY;
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.BRAVE_SEARCH_API_KEY;
+    // biome-ignore lint/performance/noDelete: also clear the short alias
+    delete process.env.BRAVE_API_KEY;
+    try {
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/Brave.*API key/i);
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow("brave.com/search/api");
+    } finally {
+      if (origKey !== undefined) process.env.BRAVE_SEARCH_API_KEY = origKey;
+      if (origKeyShort !== undefined) process.env.BRAVE_API_KEY = origKeyShort;
+    }
+  });
+
+  it("GETs Brave Search API with X-Subscription-Token header and query params", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const captured: { url: string; method: string; token: string } = {
+      url: "",
+      method: "",
+      token: "",
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.token = String(
+        (init?.headers as Record<string, string>)?.["X-Subscription-Token"] ?? "",
+      );
+      return new Response(JSON.stringify(sampleResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "brave", topK: 5 });
+      expect(captured.url).toContain("api.search.brave.com/res/v1/web/search");
+      expect(captured.url).toContain("q=test%20query");
+      expect(captured.url).toContain("count=5");
+      expect(captured.method).toBe("GET");
+      expect(captured.token).toBe("brave-test-key");
+      expect(out).toHaveLength(2);
+      expect(out[0]).toEqual({
+        title: "Brave Result One",
+        url: "https://brave.example.com/1",
+        snippet: "First snippet.",
+      });
+      expect(out[1]).toEqual({
+        title: "Brave Result Two",
+        url: "https://brave.example.com/2",
+        snippet: "Second snippet.",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 401/403 to a key-rejected error", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-bad";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("forbidden", { status: 403 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/Brave.*rejected/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps 429 to a rate-limit/quota error", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("too many", { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/rate-limit|quota/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("maps unparseable JSON to a parse error", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("<html>not json</html>", { status: 200 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "brave" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("returns empty array when web.results is missing or empty", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ web: { results: [] } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("x", { engine: "brave" });
+      expect(out).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+
+  it("clamps topK to [1, 20]", async () => {
+    const origKey = process.env.BRAVE_SEARCH_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = "brave-test-key";
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify(sampleResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      const outMax = await webSearch("x", { engine: "brave", topK: 99 });
+      expect(outMax.length).toBeLessThanOrEqual(2);
+      const outMin = await webSearch("x", { engine: "brave", topK: 0 });
+      expect(outMin.length).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (origKey === undefined) {
+        // biome-ignore lint/performance/noDelete: same reason
+        delete process.env.BRAVE_SEARCH_API_KEY;
+      } else {
+        process.env.BRAVE_SEARCH_API_KEY = origKey;
+      }
+    }
+  });
+});
+
 describe("formatSearchResults", () => {
   it("renders a query header + numbered list", () => {
     const out = formatSearchResults("hello", [
@@ -1125,15 +1321,23 @@ describe("webFetch", () => {
     }
   });
 
-  it("refuses DNS names that resolve to internal addresses", async () => {
+  it("refuses DNS names that resolve to internal addresses (even after DoH fallback)", async () => {
     mockedLookup.mockResolvedValueOnce([{ address: "10.0.0.5", family: 4 }]);
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    // Stub fetch so the DoH fallback also fails — correct rejection must happen
+    // without relying on a real Cloudflare round-trip.
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("network offline");
+    }) as unknown as typeof fetch;
     try {
       await expect(webFetch("https://metadata.example/")).rejects.toThrow(
         /refuses internal or reserved host: metadata\.example/,
       );
-      expect(globalThis.fetch).not.toHaveBeenCalled();
+      // The DoH fallback attempted a fetch; verify it went to the right endpoint.
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/^https:\/\/1\.1\.1\.1\/dns-query\?name=metadata\.example&type=A$/),
+        expect.objectContaining({ headers: { Accept: "application/dns-json" } }),
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 import { de } from "./de";
 import { en } from "./en";
+import { ja } from "./ja";
 import { zhCN } from "./zh-CN";
 
-export type Lang = "en" | "zh-CN" | "de";
+export type Lang = "en" | "zh-CN" | "de" | "ja";
 
-const SUPPORTED_LANGS: readonly Lang[] = ["en", "zh-CN", "de"];
+const SUPPORTED_LANGS: readonly Lang[] = ["en", "zh-CN", "de", "ja"];
 const SUPPORTED: ReadonlySet<Lang> = new Set<Lang>(SUPPORTED_LANGS);
-const LANG_LABELS: Record<Lang, string> = { en: "English", "zh-CN": "简体中文", de: "Deutsch" };
+const LANG_LABELS: Record<Lang, string> = {
+  en: "English",
+  "zh-CN": "简体中文",
+  de: "Deutsch",
+  ja: "日本語",
+};
 const STORAGE_KEY = "reasonix.lang";
 
 type Listener = () => void;
@@ -24,6 +30,7 @@ function detectDefault(): Lang {
   const lower = nav.toLowerCase();
   if (lower.startsWith("zh")) return "zh-CN";
   if (lower.startsWith("de")) return "de";
+  if (lower.startsWith("ja")) return "ja";
   return "en";
 }
 
@@ -77,7 +84,7 @@ export function useLang(): Lang {
   return currentLang;
 }
 
-const dicts = { en, "zh-CN": zhCN, de } as const;
+const dicts = { en, "zh-CN": zhCN, de, ja } as const;
 
 type Dict = typeof en;
 type Path<T, K extends keyof T = keyof T> = K extends string

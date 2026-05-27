@@ -60,6 +60,28 @@ describe("saveTruncatedResult", () => {
     expect(filename).not.toMatch(/[/:]/);
   });
 
+  it("falls back to ~/.reasonix when rootDir is the filesystem root", () => {
+    const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
+    const fakeHome = mkdtempSync(join(tmpdir(), "reasonix-trunc-home-"));
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+
+    try {
+      const fsRoot = process.platform === "win32" ? "C:\\" : "/";
+      const path = saveTruncatedResult("root cwd", "run_skill", fsRoot);
+      expect(path).toMatch(/\.reasonix\/truncated-results\//);
+      expect(path.startsWith("/.reasonix")).toBe(false);
+      expect(existsSync(path)).toBe(true);
+    } finally {
+      if (origHome === undefined) process.env.HOME = undefined;
+      else process.env.HOME = origHome;
+      if (origUserProfile === undefined) process.env.USERPROFILE = undefined;
+      else process.env.USERPROFILE = origUserProfile;
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
   it("falls back to ~/.reasonix when rootDir is empty", () => {
     // Redirect HOME so os.homedir() points to a temp dir instead of real home.
     const origHome = process.env.HOME;

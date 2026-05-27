@@ -56,14 +56,7 @@ export function CardStream({
   const cardHeights = useChatScrollState((s) => s.cardHeights);
   const { setMaxScroll, setCardHeight, pruneCardHeights } = useChatScrollActions();
   const outerRef = useRef<DOMElement>(null!);
-  const innerRef = useRef<DOMElement>(null!);
   const outer = useBoxMetrics(outerRef);
-  const inner = useBoxMetrics(innerRef);
-  const maxScroll = Math.max(0, inner.height - outer.height);
-
-  useEffect(() => {
-    setMaxScroll(maxScroll);
-  }, [maxScroll, setMaxScroll]);
 
   useEffect(() => {
     pruneCardHeights(new Set(cards.map((c) => c.id)));
@@ -73,6 +66,19 @@ export function CardStream({
   if (suppressLive && cards.length > 0 && !isFullySettled(cards[cards.length - 1]!)) {
     visible = cards.slice(0, -1);
   }
+
+  // Sum from store, never measure inner — measuring couples inner.height to
+  // scrollRows via items composition, which feeds back into inner.height.
+  const totalInnerRows = useMemo(() => {
+    let sum = 0;
+    for (const card of visible) sum += cardHeights.get(card.id) ?? 0;
+    return sum;
+  }, [visible, cardHeights]);
+  const maxScroll = Math.max(0, totalInnerRows - outer.height);
+
+  useEffect(() => {
+    setMaxScroll(maxScroll);
+  }, [maxScroll, setMaxScroll]);
 
   const items = useMemo(
     () => computeCardStreamItems(visible, cardHeights, scrollRows, outer.height),
@@ -85,7 +91,7 @@ export function CardStream({
         {scrollRows > 0 ? <ScrollIndicator scrollRows={scrollRows} maxScroll={maxScroll} /> : null}
       </Box>
       <Box ref={outerRef} flexDirection="column" flexGrow={1} overflow="hidden">
-        <Box ref={innerRef} flexDirection="column" marginTop={-scrollRows} flexShrink={0}>
+        <Box flexDirection="column" marginTop={-scrollRows} flexShrink={0}>
           {items.map((item) =>
             item.kind === "spacer" ? (
               <Box key={item.key} height={item.rows} flexShrink={0} />

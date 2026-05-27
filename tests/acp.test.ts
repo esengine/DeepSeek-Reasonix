@@ -331,6 +331,39 @@ describe("ACP kernel-event dispatch", () => {
     expect(toolKindFor("run_background")).toBe("execute");
     expect(toolKindFor("totally_made_up_tool")).toBe("other");
   });
+
+  it("error kernel event emits agent_message_chunk with metadata.error", async () => {
+    const { server, updates } = captureUpdates();
+    dispatchKernelEvent(
+      server,
+      "s1",
+      kev("error", {
+        message: "SSE body read failed: terminated",
+        recoverable: true,
+        name: "StreamError",
+        code: "UND_ERR_ABORTED",
+        phase: "stream_body_read",
+        retryable: true,
+      } as never),
+    );
+    await wait(5);
+    const seen = updates();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: expect.stringContaining("terminated") },
+      metadata: {
+        error: {
+          name: "StreamError",
+          message: "SSE body read failed: terminated",
+          code: "UND_ERR_ABORTED",
+          phase: "stream_body_read",
+          retryable: true,
+        },
+      },
+    });
+    server.close();
+  });
 });
 
 describe("ACP outbound requests + gate bridge", () => {

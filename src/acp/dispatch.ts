@@ -83,6 +83,25 @@ export function dispatchKernelEvent(server: AcpServer, sessionId: string, ev: Ke
       });
       return;
     }
+    case "error": {
+      emit(server, {
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: `\n\n[error] ${ev.message}` },
+          metadata: {
+            error: {
+              name: ev.name ?? "Error",
+              message: ev.message,
+              code: ev.code,
+              phase: ev.phase,
+              retryable: ev.retryable,
+            },
+          },
+        },
+      });
+      return;
+    }
     default:
       return;
   }

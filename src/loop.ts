@@ -15,7 +15,9 @@ import { InflightSet } from "./core/inflight.js";
 import { t } from "./i18n/index.js";
 import { dispatchToolCallsChunked } from "./loop/dispatch.js";
 import {
+  errorMeta,
   formatLoopError,
+  is4xxError,
   is5xxError,
   isDeepSeekHost,
   probeDeepSeekReachable,
@@ -622,14 +624,21 @@ export class CacheFirstLoop {
     if (this.budgetUsd !== null) {
       const spent = this.stats.totalCost;
       if (spent >= this.budgetUsd) {
+        const message = t("loop.budgetExhausted", {
+          spent: spent.toFixed(4),
+          cap: this.budgetUsd.toFixed(2),
+        });
         yield {
           turn: this._turn,
           role: "error",
           content: "",
-          error: t("loop.budgetExhausted", {
-            spent: spent.toFixed(4),
-            cap: this.budgetUsd.toFixed(2),
-          }),
+          error: message,
+          errorDetail: {
+            name: "BudgetExhausted",
+            message,
+            retryable: false,
+            recoverable: false,
+          },
         };
         this._steerQueue.length = 0;
         return;
@@ -849,11 +858,22 @@ export class CacheFirstLoop {
         const dsHost = isDeepSeekHost(upstreamHost);
         const probe =
           is5xxError(err) && dsHost ? await probeDeepSeekReachable(this.client) : undefined;
+        const cause = err instanceof Error ? err : new Error(String(err));
+        const retryable = !is4xxError(cause) && cause.name !== "AbortError";
+        const { code, phase } = errorMeta(cause);
         yield {
           turn: this._turn,
           role: "error",
           content: "",
           error: formatLoopError(err as Error, probe, { upstreamHost }),
+          errorDetail: {
+            name: cause.name,
+            message: cause.message,
+            phase,
+            code,
+            retryable,
+            recoverable: false,
+          },
         };
         this._steerQueue.length = 0;
         return;
@@ -1031,6 +1051,7 @@ export class CacheFirstLoop {
       appendAndPersist: (m) => this.appendAndPersist(m),
       recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
       turn: this._turn,
+      model: this.model,
     };
   }
 

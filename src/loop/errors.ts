@@ -45,6 +45,19 @@ export function is5xxError(err: unknown): boolean {
   return m !== null;
 }
 
+export function is4xxError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return /^DeepSeek (4\d{2}):/.test(err.message ?? "");
+}
+
+/** Read structured metadata off thrown errors without resorting to `as any`. */
+export function errorMeta(err: unknown): { code?: string; phase?: string } {
+  if (!(err instanceof Error)) return {};
+  const code = "code" in err && typeof err.code === "string" ? err.code : undefined;
+  const phase = "phase" in err && typeof err.phase === "string" ? err.phase : undefined;
+  return { code, phase };
+}
+
 export async function probeDeepSeekReachable(
   client: DeepSeekClient,
   timeoutMs = 1500,

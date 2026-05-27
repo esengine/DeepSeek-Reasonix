@@ -4,6 +4,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { parse as parseHtml } from "node-html-parser";
 import {
+  loadBraveApiKey,
   loadExaApiKey,
   loadMetasoApiKey,
   loadOllamaApiKey,
@@ -46,8 +47,8 @@ export interface WebSearchOptions {
   signal?: AbortSignal;
   /** Config path for provider-specific keys. Defaults to ~/.reasonix/config.json. */
   configPath?: string;
-  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), or "ollama" (Ollama cloud web search). */
-  engine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "ollama";
+  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  engine?: "bing" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
   /** Base URL for SearXNG. Default http://localhost:8080. */
   endpoint?: string;
 }
@@ -69,6 +70,7 @@ const METASO_ENDPOINT = "https://metaso.cn/api/v1";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
 const EXA_ENDPOINT = "https://api.exa.ai/answer";
+const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const OLLAMA_WEB_SEARCH_ENDPOINT = "https://ollama.com/api/web_search";
 const OLLAMA_WEB_FETCH_ENDPOINT = "https://ollama.com/api/web_fetch";
 const FETCH_MAX_REDIRECTS = 5;
@@ -157,6 +159,38 @@ function isInternalAddress(address: string): boolean {
   return false;
 }
 
+/** DoH fallback for when system DNS returns Fake-IP (TUN proxies). */
+interface DohAnswer {
+  type: number;
+  data: string;
+}
+
+interface DohResponse {
+  Status: number;
+  Answer?: DohAnswer[];
+}
+
+async function dohResolve(host: string): Promise<string[]> {
+  const url = new URL("https://1.1.1.1/dns-query");
+  url.searchParams.set("name", host);
+  url.searchParams.set("type", "A");
+
+  const resp = await fetch(url.toString(), {
+    headers: { Accept: "application/dns-json" },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!resp.ok) throw new Error(`DoH resolve failed: HTTP ${resp.status} for ${host}`);
+
+  const data = (await resp.json()) as DohResponse;
+  if (data.Status !== 0)
+    throw new Error(`DoH resolve failed: DNS status ${data.Status} for ${host}`);
+
+  const addresses = (data.Answer ?? []).filter((a) => a.type === 1).map((a) => a.data);
+
+  if (addresses.length === 0) throw new Error(`DoH resolve returned no A records for ${host}`);
+  return addresses;
+}
+
 async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
   const url = new URL(rawUrl);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -165,12 +199,30 @@ async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
 
   const host = url.hostname;
   const literal = isIP(host);
-  const addresses = literal
-    ? [host]
-    : (await lookup(host, { all: true, verbatim: true })).map((entry) => entry.address);
-  if (addresses.length === 0 || addresses.some(isInternalAddress)) {
+  if (literal) {
+    if (isInternalAddress(host)) {
+      throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
+    }
+    return url;
+  }
+
+  // Primary: system DNS
+  const sysAddrs = (await lookup(host, { all: true, verbatim: true })).map((e) => e.address);
+
+  if (sysAddrs.length === 0) {
     throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
   }
+
+  if (sysAddrs.some(isInternalAddress)) {
+    // System DNS returned fake/internal addresses (e.g. TUN Fake-IP) —
+    // fall back to DoH to get the real public IPs
+    const dohAddrs = await dohResolve(host).catch(() => null);
+    if (!dohAddrs || dohAddrs.some(isInternalAddress)) {
+      throw new Error(`web_fetch refuses internal or reserved host: ${host}`);
+    }
+    // DoH resolved to public IPs → host is legitimate
+  }
+
   return url;
 }
 
@@ -203,6 +255,9 @@ export async function webSearch(
   }
   if (opts.engine === "ollama") {
     return searchOllama(query, opts);
+  }
+  if (opts.engine === "brave") {
+    return searchBrave(query, opts);
   }
   return searchBing(query, opts);
 }
@@ -660,6 +715,68 @@ async function searchOllama(query: string, opts: WebSearchOptions = {}): Promise
     title: r.title || `Result ${i + 1}`,
     url: r.url || "",
     snippet: r.content ?? "",
+  }));
+}
+
+interface BraveWebResult {
+  title?: string;
+  url?: string;
+  description?: string;
+}
+
+interface BraveSearchResponse {
+  web?: {
+    results?: BraveWebResult[];
+  };
+}
+
+async function searchBrave(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(20, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadBraveApiKey(opts.configPath);
+  if (!apiKey) throw new Error(t("webErrors.braveMissingKey"));
+
+  const url = `${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}&count=${topK}`;
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": apiKey,
+      },
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: BRAVE_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.braveUnauthorized"));
+    }
+    if (resp.status === 429) {
+      throw new Error(t("webErrors.braveRateLimit"));
+    }
+    throw new Error(t("webErrors.braveServerError", { status: resp.status }));
+  }
+
+  const raw = await resp.text();
+  let data: BraveSearchResponse;
+  try {
+    data = JSON.parse(raw) as BraveSearchResponse;
+  } catch {
+    throw new Error(t("webErrors.braveParseError", { status: resp.status }));
+  }
+
+  const results = data.web?.results ?? [];
+  return results.slice(0, topK).map((r) => ({
+    title: r.title ?? "",
+    url: r.url ?? "",
+    snippet: r.description ?? "",
   }));
 }
 

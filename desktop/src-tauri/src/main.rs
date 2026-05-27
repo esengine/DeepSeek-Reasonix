@@ -183,12 +183,14 @@ fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<()
     #[cfg(windows)]
     {
         // Spawn through cmd.exe so `.cmd` shims (code.cmd, cursor.cmd) resolve via PATH.
+        // Normalize forward slashes to backslashes — cmd.exe doesn't handle them reliably.
+        let normalized = path.replace('/', "\\");
         cmd = Command::new("cmd");
         cmd.arg("/c").arg(trimmed);
         if let Some(l) = line {
-            cmd.arg("-g").arg(format!("{}:{}", path, l));
+            cmd.arg("-g").arg(format!("{}:{}", normalized, l));
         } else {
-            cmd.arg(&path);
+            cmd.arg(&normalized);
         }
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;

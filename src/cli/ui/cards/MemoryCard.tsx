@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
@@ -34,7 +34,7 @@ const CATEGORY_GLYPH: Record<MemoryEntry["category"], string> = {
   reference: "●",
 };
 
-const CATEGORY_GLYPH_COLOR: Record<MemoryEntry["category"], string> = {
+const CATEGORY_GLYPH_COLOR: Record<MemoryEntry["category"], Color> = {
   user: FG.meta,
   feedback: TONE.warn,
   project: FG.meta,

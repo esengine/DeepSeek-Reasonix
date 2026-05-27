@@ -1,3 +1,4 @@
+import type { Color } from "ink";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/index.js";
 import type { LoopEvent } from "../../loop.js";
@@ -110,7 +111,7 @@ function summariseInner(ev: LoopEvent): SubagentInnerSummary | null {
 export interface SubagentInnerSummary {
   /** Card-kind-ish glyph (◆ reasoning, ▣ tool, ▶ streaming, ✖ error). */
   glyph: string;
-  color: string;
+  color: Color;
   label: string;
   meta?: string;
 }

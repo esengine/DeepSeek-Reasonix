@@ -82,11 +82,11 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
 
       <Box flexDirection="column" marginTop={1} paddingX={1}>
         <Box justifyContent="space-between">
-          <Text color="cyan" bold>
+          <Text color="ansi:cyan" bold>
             {progressLabel}
           </Text>
           {meta ? (
-            <Text dimColor>
+            <Text dim>
               {meta.source}
               {meta.task ? ` · ${meta.task}` : ""}
               {meta.mode ? ` · ${meta.mode}` : ""}
@@ -99,14 +99,14 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
             {({ key, rec }) => <RecordView key={key} rec={rec} />}
           </Static>
         ) : (
-          <Text dimColor italic>
+          <Text dim italic>
             {t("replayApp.noRecords")}
           </Text>
         )}
       </Box>
 
-      <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="gray">
-        <Text dimColor>
+      <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="ansi:blackBright">
+        <Text dim>
           <Text bold>j</Text>/<Text bold>↓</Text>/<Text bold>space</Text> next · <Text bold>k</Text>
           /<Text bold>↑</Text> prev · <Text bold>g</Text> first · <Text bold>G</Text> last ·{" "}
           <Text bold>q</Text> quit

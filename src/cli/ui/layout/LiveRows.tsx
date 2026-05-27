@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React as a runtime value (classic transform)
 import React, { useRef } from "react";
 import type { ApplyResult } from "../../../code/edit-blocks.js";
@@ -150,7 +150,7 @@ function ModePill({
   flash,
 }: {
   label: string;
-  color: string;
+  color: Color;
   flash: boolean;
 }) {
   return (
@@ -171,15 +171,15 @@ export function UndoBanner({
   const total = banner.results.length;
   return (
     <Box marginY={1} paddingX={1}>
-      <Text backgroundColor={TONE.accent} color="black" bold>
+      <Text backgroundColor={TONE.accent} color="ansi:black" bold>
         {` ✓ AUTO-APPLIED ${ok}/${total} `}
       </Text>
       <Text color={FG.faint}>{"   press "}</Text>
-      <Text backgroundColor={TONE.brand} color="black" bold>
+      <Text backgroundColor={TONE.brand} color="ansi:black" bold>
         {" u "}
       </Text>
       <Text color={FG.faint}>{" to undo · "}</Text>
-      <Text backgroundColor={paused ? TONE.warn : FG.faint} color="black" bold>
+      <Text backgroundColor={paused ? TONE.warn : FG.faint} color="ansi:black" bold>
         {" space "}
       </Text>
       <Text color={FG.faint}>{paused ? " to resume" : " to pause"}</Text>

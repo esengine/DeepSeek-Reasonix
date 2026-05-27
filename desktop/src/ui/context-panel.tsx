@@ -35,8 +35,10 @@ export function ContextPanel({
   const reserved = usage.reservedTokens;
   const lastHit = usage.lastCallCacheHit ?? 0;
   const lastMiss = usage.lastCallCacheMiss ?? 0;
-  const cached = Math.max(0, lastHit - reserved);
-  const used = Math.max(0, lastMiss - Math.max(0, reserved - lastHit));
+  const observedLog = Math.max(0, lastHit + lastMiss - reserved);
+  const logTokens = Math.max(usage.liveLogTokens, observedLog);
+  const cached = Math.min(logTokens, Math.max(0, lastHit - reserved));
+  const used = Math.max(0, logTokens - cached);
   const reservedPct = Math.min(100, (reserved / CONTEXT_MAX_TOKENS) * 100);
   const usedPct = Math.min(100, (used / CONTEXT_MAX_TOKENS) * 100);
   const cachedPct = Math.min(100, (cached / CONTEXT_MAX_TOKENS) * 100);
@@ -110,11 +112,14 @@ type TreeNode =
 
 async function openContextFile(path: string, settings: Settings | null): Promise<void> {
   const workspaceDir = settings?.workspaceDir;
-  const sep = workspaceDir?.includes("\\") ? "\\" : "/";
+  const isWindows = workspaceDir?.includes("\\") ?? false;
+  const sep = isWindows ? "\\" : "/";
   const abs =
     workspaceDir && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith("/")
-      ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "")}`
-      : path;
+      ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "").replace(/\//g, sep)}`
+      : isWindows
+        ? path.replace(/\//g, "\\")
+        : path;
   const editor = settings?.editor?.trim();
   if (editor) {
     await invoke("open_in_editor", { command: editor, path: abs, line: null });

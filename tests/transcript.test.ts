@@ -111,4 +111,45 @@ describe("transcript writer / reader round-trip", () => {
     const { records } = parseTranscript(raw);
     expect(records).toHaveLength(2);
   });
+
+  it("preserves errorDetail on error records", async () => {
+    const path = join(tmpDir, "error-detail.jsonl");
+    const stream = openTranscriptFile(path, {
+      version: 1,
+      source: "test",
+      startedAt: "2026-04-21T00:00:00Z",
+    });
+
+    const errorEv: LoopEvent = {
+      turn: 1,
+      role: "error",
+      content: "",
+      error: "SSE body read failed: terminated",
+      errorDetail: {
+        name: "Error",
+        message: "SSE body read failed: terminated",
+        phase: "stream_body_read",
+        code: "UND_ERR_ABORTED",
+        retryable: true,
+        recoverable: true,
+      },
+    };
+
+    writeRecord(stream, recordFromLoopEvent(errorEv, { model: "m", prefixHash: "h" }));
+    await new Promise<void>((resolve) => stream.end(resolve));
+
+    const raw = readFileSync(path, "utf8");
+    const { records } = parseTranscript(raw);
+    expect(records).toHaveLength(1);
+    const r = records[0]!;
+    expect(r.role).toBe("error");
+    expect(r.error).toBe("SSE body read failed: terminated");
+    expect(r.errorDetail).toMatchObject({
+      name: "Error",
+      phase: "stream_body_read",
+      code: "UND_ERR_ABORTED",
+      retryable: true,
+      recoverable: true,
+    });
+  });
 });
