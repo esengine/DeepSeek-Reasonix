@@ -1863,7 +1863,28 @@ function TabRuntime({
     return Number.isFinite(n) ? n : null;
   }, []);
 
+  const atBottomRef = useRef(true);
   const [showJumpButton, setShowJumpButton] = useState(false);
+
+  // Auto-scroll on new content when user is at bottom. Virtuoso's followOutput only
+  // fires on totalCount changes, but streaming (model.delta) mutates a message in-place
+  // without changing the array length.
+  const prevMsgsLen = useRef(messageItems.length);
+  useEffect(() => {
+    if (atBottomRef.current && messageItems.length > 0) {
+      const changed = messageItems.length !== prevMsgsLen.current || state.busy;
+      prevMsgsLen.current = messageItems.length;
+      if (changed) {
+        const id = requestAnimationFrame(() => {
+          virtuosoRef.current?.scrollToIndex({ index: messageItems.length - 1, align: "end", behavior: "auto" });
+        });
+        return () => cancelAnimationFrame(id);
+      }
+    } else {
+      prevMsgsLen.current = messageItems.length;
+    }
+  }, [state.messages, state.busy, messageItems.length]);
+
   const { scrollToBottom } = useAutoScroll(
     threadRef,
     threadInnerRef,
@@ -2347,7 +2368,7 @@ function TabRuntime({
                     totalCount={messageItems.length}
                     followOutput={"auto"}
                     initialTopMostItemIndex={messageItems.length > 0 ? messageItems.length - 1 : undefined}
-                    atBottomStateChange={(atBottom) => setShowJumpButton(!atBottom)}
+                    atBottomStateChange={(atBottom) => { atBottomRef.current = atBottom; setShowJumpButton(!atBottom); }}
                     components={{
                       Header: state.activePlan ? () => (
                         <div className="thread-inner">
