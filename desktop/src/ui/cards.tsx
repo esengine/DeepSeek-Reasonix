@@ -218,7 +218,7 @@ export function ShellCard({
   onApprove,
   onReject,
   onAlwaysAllow,
-  defaultOpen: _defaultOpen,
+  defaultOpen,
 }: {
   command: string;
   output?: string;
@@ -238,7 +238,7 @@ export function ShellCard({
       kind="shell"
       name="shell"
       compact
-      defaultOpen={_defaultOpen ?? false}
+      defaultOpen={defaultOpen ?? false}
       meta={
         <>
           {state === "await" ? (
@@ -337,7 +337,7 @@ export function ToolCard({
   result,
   ok,
   durationMs,
-  defaultOpen: _defaultOpen,
+  defaultOpen,
 }: {
   name: string;
   args?: string;
@@ -355,7 +355,7 @@ export function ToolCard({
       icon={<I.wrench size={12} />}
       kind="tool"
       name={name}
-      defaultOpen={_defaultOpen ?? false}
+      defaultOpen={defaultOpen ?? false}
       compact
       meta={
         <>

@@ -102,6 +102,26 @@ export const UserMsg = memo(function UserMsg({
   );
 });
 
+function ToolGroupShell({ segs, renderTool: rt }: {
+  segs: (AssistantSegment & { kind: "tool" })[];
+  renderTool: (s: AssistantSegment & { kind: "tool" }, idx: number, expanded?: boolean) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="tool-group">
+      <button className="tool-group-header" onClick={() => setOpen((o) => !o)}>
+        <span>{segs.length > 1 ? t("thread.toolCalls", { count: segs.length }) : t("thread.oneToolCall")}</span>
+        <span className={`chevron ${open ? "open" : ""}`}>{I.chev({ size: 12 })}</span>
+      </button>
+      {open && (
+        <div className="tool-group-body">
+          {segs.map((ts) => rt(ts, segs.indexOf(ts), true))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const AssistantMsg = memo(function AssistantMsg({
   segments,
   pending,
@@ -146,26 +166,9 @@ export const AssistantMsg = memo(function AssistantMsg({
     const { segments: tSegs } = toolGroup;
     const groupKey = toolGroup.indices[0]!;
     if (tSegs.length === 1) {
-      // Single tool — render inline without group wrapper
       rendered.push(renderTool(tSegs[0]!, groupKey));
     } else {
-      const GroupShell = ({ groupKey, segs }: { groupKey: number; segs: (AssistantSegment & { kind: "tool" })[] }) => {
-        const [open, setOpen] = useState(false);
-        return (
-          <div key={`tool-group-${groupKey}`} className="tool-group">
-            <button className="tool-group-header" onClick={() => setOpen((o) => !o)}>
-              <span>{segs.length > 1 ? t("thread.toolCalls", { count: segs.length }) : t("thread.oneToolCall")}</span>
-              <span className={`chevron ${open ? "open" : ""}`}>{I.chev({ size: 12 })}</span>
-            </button>
-            {open && (
-              <div className="tool-group-body">
-                {segs.map((ts) => renderTool(ts, segs.indexOf(ts), true))}
-              </div>
-            )}
-          </div>
-        );
-      };
-      rendered.push(<GroupShell key={`tool-group-${groupKey}`} groupKey={groupKey} segs={tSegs} />);
+      rendered.push(<ToolGroupShell key={`tool-group-${groupKey}`} segs={tSegs} renderTool={renderTool} />);
     }
     toolGroup = null;
   }
@@ -192,7 +195,7 @@ export const AssistantMsg = memo(function AssistantMsg({
           output={s.result}
           state={state}
           durationMs={s.durationMs}
-          defaultOpen={expanded}
+          defaultOpen={expanded ?? state !== "done"}
           onApprove={pendingConfirm ? () => onApproveConfirm(pendingConfirm.id) : undefined}
           onReject={pendingConfirm ? () => onRejectConfirm(pendingConfirm.id) : undefined}
           onAlwaysAllow={
