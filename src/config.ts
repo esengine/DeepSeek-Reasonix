@@ -959,8 +959,12 @@ export function webSearchEndpoint(path: string = defaultConfigPath()): string {
 
 export function saveApiKey(key: string, path: string = defaultConfigPath()): void {
   const cfg = readConfig(path);
-  cfg.apiKey = key.trim();
+  const trimmed = key.trim();
+  cfg.apiKey = trimmed;
   writeConfig(cfg, path);
+  // A stale process env (User-level Windows env, `.env`, shell rc) shadows config in
+  // loadEndpoint's fallback branch — an explicit UI save must win for the current run.
+  if (trimmed) process.env.DEEPSEEK_API_KEY = trimmed;
 }
 
 /** Windows: case-insensitive — NTFS treats `F:\Foo` and `f:\foo` as one directory (#402). */

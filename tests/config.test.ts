@@ -135,6 +135,16 @@ describe("config", () => {
     expect(loadApiKey(path)).toBe("sk-fromfile1234567890ab");
   });
 
+  it("saveApiKey overrides a stale env var so an explicit UI save takes effect immediately", () => {
+    // Repro: user has DEEPSEEK_API_KEY=<old> in User-level env / .env / shell rc.
+    // Without the env update inside saveApiKey, loadEndpoint's fallback branch
+    // keeps returning the stale env, so the desktop UI save looks like a no-op.
+    process.env.DEEPSEEK_API_KEY = "sk-staleenv00000000000000";
+    saveApiKey("sk-freshfromui00000000000", path);
+    expect(loadApiKey(path)).toBe("sk-freshfromui00000000000");
+    expect(process.env.DEEPSEEK_API_KEY).toBe("sk-freshfromui00000000000");
+  });
+
   it("loadApiKey returns undefined when nothing set", () => {
     expect(loadApiKey(path)).toBeUndefined();
   });
@@ -231,8 +241,12 @@ describe("config", () => {
   it("loadEndpoint: env tuple wins when env sets baseUrl", () => {
     process.env.DEEPSEEK_BASE_URL = "https://env-proxy.example.com";
     process.env.DEEPSEEK_API_KEY = "sk-env-tuple-token-abc";
-    saveBaseUrl("https://config-only.example.com", path);
-    saveApiKey("sk-config-token-xyz1234", path);
+    // Write config directly — saveApiKey would mutate env as part of the desktop-UI
+    // contract; here we want to test loadEndpoint's read precedence in isolation.
+    writeConfig(
+      { baseUrl: "https://config-only.example.com", apiKey: "sk-config-token-xyz1234" },
+      path,
+    );
     try {
       const ep = loadEndpoint(path);
       expect(ep.baseUrl).toBe("https://env-proxy.example.com");
@@ -245,9 +259,9 @@ describe("config", () => {
 
   it("loadEndpoint: default endpoint pairs env apiKey > config apiKey", () => {
     // Neither source sets baseUrl → default endpoint. Standard 12-factor
-    // env > config for the apiKey, unchanged from pre-fix behavior.
+    // env > config for the apiKey on the read path.
     process.env.DEEPSEEK_API_KEY = "sk-env-default-token-abc";
-    saveApiKey("sk-config-token-xyz1234", path);
+    writeConfig({ apiKey: "sk-config-token-xyz1234" }, path);
     const ep = loadEndpoint(path);
     expect(ep.baseUrl).toBeUndefined();
     expect(ep.apiKey).toBe("sk-env-default-token-abc");
