@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { Box, Text, useStdout } from "ink";
+import { Box, type Color, Text, useStdout } from "ink";
 import React from "react";
 import stringWidth from "string-width";
 import type { EditMode } from "../../config.js";
@@ -124,13 +124,13 @@ function ChromeRow({
       </Text>
       {projectName ? (
         <>
-          <Text color={COLOR.info} dimColor>
+          <Text color={COLOR.info} dim>
             {"  ·  "}
           </Text>
           <Text>{projectName}</Text>
           {showSession && sessionName ? (
             <>
-              <Text color={COLOR.info} dimColor>
+              <Text color={COLOR.info} dim>
                 {"  ›  "}
               </Text>
               <Text color={COLOR.info}>{sessionName}</Text>
@@ -162,7 +162,7 @@ function ChromeRow({
           summary.turns === 0 || coldStart ? COLOR.info : sessionCostColor(summary.totalCostUsd)
         }
         bold={summary.turns > 0 && !coldStart}
-        dimColor={summary.turns === 0 || coldStart}
+        dim={summary.turns === 0 || coldStart}
       >
         {costLabel}
       </Text>
@@ -177,8 +177,8 @@ function ChromeRow({
       {showCache ? (
         <>
           <Text>{"  "}</Text>
-          <Text dimColor>{"["}</Text>
-          <Text dimColor>{"c "}</Text>
+          <Text dim>{"["}</Text>
+          <Text dim>{"c "}</Text>
           <Bar
             ratio={summary.cacheHitRatio}
             color={coldStart ? COLOR.info : cacheColor}
@@ -186,10 +186,10 @@ function ChromeRow({
             dim={coldStart}
           />
           <Text> </Text>
-          <Text color={coldStart ? undefined : cacheColor} dimColor={coldStart}>
+          <Text color={coldStart ? undefined : cacheColor} dim={coldStart}>
             {coldStart && summary.turns === 0 ? "—" : `${cachePct}%`}
           </Text>
-          <Text dimColor>{"]"}</Text>
+          <Text dim>{"]"}</Text>
         </>
       ) : null}
     </Box>
@@ -199,7 +199,7 @@ function ChromeRow({
 function pickModePill(
   planMode: boolean | undefined,
   editMode: EditMode | undefined,
-): { label: string; color: string } | null {
+): { label: string; color: Color } | null {
   if (planMode) return { label: t("statsPanel.modePlan"), color: COLOR.err };
   if (editMode === "yolo") return { label: t("statsPanel.modeYolo"), color: COLOR.err };
   if (editMode === "auto") return { label: t("statsPanel.modeAuto"), color: COLOR.primary };
@@ -212,16 +212,16 @@ function BudgetRow({ spent, cap }: { spent: number; cap: number }) {
   const color = pct >= 100 ? "#f87171" : pct >= 80 ? "#fbbf24" : "#94a3b8";
   return (
     <Box>
-      <Text dimColor>{t("statsPanel.budget")}</Text>
+      <Text dim>{t("statsPanel.budget")}</Text>
       <Text color={color}>
         {`$${spent.toFixed(4)} / $${cap.toFixed(2)}`}
-        <Text dimColor>{`  (${pct.toFixed(0)}%)`}</Text>
+        <Text dim>{`  (${pct.toFixed(0)}%)`}</Text>
       </Text>
     </Box>
   );
 }
 
-function sessionCostColor(cost: number): string | undefined {
+function sessionCostColor(cost: number): Color | undefined {
   if (cost <= 0) return undefined;
   if (cost >= 5) return COLOR.err;
   if (cost >= 0.5) return COLOR.warn;

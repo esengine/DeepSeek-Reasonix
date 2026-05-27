@@ -1,10 +1,11 @@
+import type { Color } from "ink";
 import { t } from "../../i18n/index.js";
 import { COLOR } from "./theme.js";
 
 export interface HealthBadge {
   glyph: string;
   label: string;
-  color: string;
+  color: Color;
 }
 
 export function healthBadge(elapsedMs: number): HealthBadge {

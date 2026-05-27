@@ -1,33 +1,35 @@
+import type { Color } from "ink";
+
 export type ThemeName = "dark" | "light" | "midnight" | "deep-blue" | "high-contrast";
 
 export interface ThemeTokens {
   fg: {
-    strong: string;
-    body: string;
-    sub: string;
-    meta: string;
-    faint: string;
+    strong: Color;
+    body: Color;
+    sub: Color;
+    meta: Color;
+    faint: Color;
   };
   tone: {
-    brand: string;
-    accent: string;
-    violet: string;
-    ok: string;
-    warn: string;
-    err: string;
-    info: string;
+    brand: Color;
+    accent: Color;
+    violet: Color;
+    ok: Color;
+    warn: Color;
+    err: Color;
+    info: Color;
   };
   toneActive: ThemeTokens["tone"];
   surface: {
-    bg: string;
-    bgInput: string;
-    bgCode: string;
-    bgElev: string;
+    bg: Color;
+    bgInput: Color;
+    bgCode: Color;
+    bgElev: Color;
   };
   messageBg: {
-    user: string;
-    bash: string;
-    selected: string;
+    user: Color;
+    bash: Color;
+    selected: Color;
   };
   card: Record<
     | "user"
@@ -47,7 +49,7 @@ export interface ThemeTokens {
     | "ctx"
     | "doctor"
     | "branch",
-    { color: string; glyph: string }
+    { color: Color; glyph: string }
   >;
 }
 
@@ -375,7 +377,7 @@ export function formatCost(costUsd: number, currency?: string, fractionDigits = 
 }
 
 /** Threshold color for a wallet balance. USD is converted to CNY before the threshold check. */
-export function balanceColor(amount: number, currency?: string): string {
+export function balanceColor(amount: number, currency?: string): Color {
   const cny = (currency ?? "CNY") === "USD" ? amount * USD_TO_CNY : amount;
   if (cny < 5) return TONE.err;
   if (cny < 20) return TONE.warn;

@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
@@ -16,7 +16,7 @@ function compactNum(n: number): string {
   return String(n);
 }
 
-function bar(ratio: number, color: string): React.ReactElement {
+function bar(ratio: number, color: Color): React.ReactElement {
   const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(ratio * BAR_CELLS)));
   const empty = BAR_CELLS - filled;
   return (

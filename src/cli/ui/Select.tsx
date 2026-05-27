@@ -78,7 +78,7 @@ export function SingleSelect<V extends string>({
       ))}
       {footer ? (
         <Box marginTop={1}>
-          <Text dimColor>{footer}</Text>
+          <Text dim>{footer}</Text>
         </Box>
       ) : null}
     </Box>
@@ -155,7 +155,7 @@ export function MultiSelect<V extends string>({
       })}
       {footer ? (
         <Box marginTop={1}>
-          <Text dimColor>{footer}</Text>
+          <Text dim>{footer}</Text>
         </Box>
       ) : null}
     </Box>
@@ -180,23 +180,23 @@ function SelectRow<V extends string>({
   if (inlineHint) {
     return (
       <Box flexDirection="row" flexWrap="nowrap" minHeight={1}>
-        <Text color={rowColor} bold={active} dimColor={item.disabled} wrap="truncate">
+        <Text color={rowColor} bold={active} dim={item.disabled} wrap="truncate">
           {labelText}
         </Text>
-        {item.hint ? <Text dimColor wrap="truncate">{`  ${item.hint}`}</Text> : null}
+        {item.hint ? <Text dim wrap="truncate">{`  ${item.hint}`}</Text> : null}
       </Box>
     );
   }
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={rowColor} bold={active} dimColor={item.disabled}>
+        <Text color={rowColor} bold={active} dim={item.disabled}>
           {labelText}
         </Text>
       </Box>
       {item.hint ? (
         <Box paddingLeft={marker.length + 1}>
-          <Text dimColor>{item.hint}</Text>
+          <Text dim>{item.hint}</Text>
         </Box>
       ) : null}
     </Box>

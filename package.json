@@ -46,7 +46,11 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p dashboard",
     "verify": "npm run build && npm run lint && npm run typecheck && npm run test --silent",
     "prepare": "simple-git-hooks || true",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm run test"
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run build && npm run test",
+    "pitch:pptx": "npx -y @marp-team/marp-cli pitch/pitch.md -o pitch/dist/pitch.pptx --allow-local-files",
+    "pitch:pdf": "npx -y @marp-team/marp-cli pitch/pitch.md -o pitch/dist/pitch.pdf --allow-local-files",
+    "pitch:html": "npx -y @marp-team/marp-cli pitch/pitch.md -o pitch/dist/pitch.html --allow-local-files",
+    "pitch:watch": "npx -y @marp-team/marp-cli pitch/pitch.md --preview --watch --allow-local-files"
   },
   "simple-git-hooks": {
     "pre-commit": "npm run lint",
@@ -90,6 +94,7 @@
     "iconv-lite": "^0.7.2",
     "ignore": "^7.0.5",
     "indent-string": "^5.0.0",
+    "ink": "workspace:*",
     "lodash-es": "^4.17.21",
     "node-html-parser": "^7.1.0",
     "picomatch": "^4.0.4",

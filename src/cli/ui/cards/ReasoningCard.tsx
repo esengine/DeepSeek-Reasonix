@@ -83,7 +83,7 @@ function ReasoningHeader({
         settled="◆"
         color={card.aborted ? TONE.err : FG.faint}
       />
-      <Text italic dimColor color={card.aborted ? TONE.err : undefined}>
+      <Text italic dim color={card.aborted ? TONE.err : undefined}>
         {`${baseTitle}${metaTrail}${collapsedHint}`}
       </Text>
       {modelBadge ? (

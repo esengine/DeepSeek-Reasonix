@@ -63,7 +63,7 @@ export function DiffApp({ report }: DiffAppProps) {
       <DiffHeader report={report} />
 
       <Box marginTop={1} paddingX={1} justifyContent="space-between">
-        <Text color="cyan" bold>
+        <Text color="ansi:cyan" bold>
           {t("diffApp.turnLabel", {
             turn: pair?.turn ?? "?",
             current: idx + 1,
@@ -74,19 +74,19 @@ export function DiffApp({ report }: DiffAppProps) {
       </Box>
 
       <Box flexDirection="row" marginTop={1}>
-        <Pane label={report.a.label} headerColor="blue" records={paneRecords(pair, "a")} />
-        <Pane label={report.b.label} headerColor="magenta" records={paneRecords(pair, "b")} />
+        <Pane label={report.a.label} headerColor="ansi:blue" records={paneRecords(pair, "a")} />
+        <Pane label={report.b.label} headerColor="ansi:magenta" records={paneRecords(pair, "b")} />
       </Box>
 
       {pair?.divergenceNote ? (
         <Box marginTop={1} paddingX={1}>
-          <Text color="yellow">★ </Text>
+          <Text color="ansi:yellow">★ </Text>
           <Text>{pair.divergenceNote}</Text>
         </Box>
       ) : null}
 
-      <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="gray">
-        <Text dimColor>
+      <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="ansi:blackBright">
+        <Text dim>
           <Text bold>j</Text>/<Text bold>\u2193</Text> next \u00b7 <Text bold>k</Text>/
           <Text bold>\u2191</Text> prev \u00b7 <Text bold>n</Text> next-diverge \u00b7{" "}
           <Text bold>N</Text>/<Text bold>p</Text> prev-diverge \u00b7 <Text bold>g</Text>/
@@ -123,45 +123,45 @@ function DiffHeader({ report }: { report: DiffReport }) {
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor="ansi:cyan" paddingX={1}>
       <Box justifyContent="space-between">
         <Text>
-          <Text color="cyan" bold>
+          <Text color="ansi:cyan" bold>
             {t("diffApp.title")}
           </Text>
-          <Text dimColor> \u00b7 A=</Text>
-          <Text color="blue">{a.label}</Text>
-          <Text dimColor> vs B=</Text>
-          <Text color="magenta">{b.label}</Text>
+          <Text dim> \u00b7 A=</Text>
+          <Text color="ansi:blue">{a.label}</Text>
+          <Text dim> vs B=</Text>
+          <Text color="ansi:magenta">{b.label}</Text>
         </Text>
-        <Text dimColor>{t("diffApp.turnsAligned", { count: report.pairs.length })}</Text>
+        <Text dim>{t("diffApp.turnsAligned", { count: report.pairs.length })}</Text>
       </Box>
 
       <Box marginTop={1} gap={3}>
         <Text>
-          <Text dimColor>cache </Text>
+          <Text dim>cache </Text>
           <Text>{(a.stats.cacheHitRatio * 100).toFixed(1)}%</Text>
-          <Text dimColor> → </Text>
+          <Text dim> → </Text>
           <Text>{(b.stats.cacheHitRatio * 100).toFixed(1)}%</Text>
-          <Text color={cacheDelta >= 0 ? "green" : "red"} bold>
+          <Text color={cacheDelta >= 0 ? "ansi:green" : "ansi:red"} bold>
             {"  "}
             {cacheDelta >= 0 ? "+" : ""}
             {(cacheDelta * 100).toFixed(1)}pp
           </Text>
         </Text>
         <Text>
-          <Text dimColor>cost </Text>
+          <Text dim>cost </Text>
           <Text>${a.stats.totalCostUsd.toFixed(6)}</Text>
-          <Text dimColor> → </Text>
+          <Text dim> → </Text>
           <Text>${b.stats.totalCostUsd.toFixed(6)}</Text>
-          <Text color={costDelta <= 0 ? "green" : "red"} bold>
+          <Text color={costDelta <= 0 ? "ansi:green" : "ansi:red"} bold>
             {"  "}
             {costDelta >= 0 ? "+" : ""}
             {costDelta.toFixed(1)}%
           </Text>
         </Text>
         <Text>
-          <Text dimColor>model calls </Text>
+          <Text dim>model calls </Text>
           <Text>
             {a.stats.turns} → {b.stats.turns}
           </Text>
@@ -170,7 +170,7 @@ function DiffHeader({ report }: { report: DiffReport }) {
 
       {prefixLine ? (
         <Box marginTop={1}>
-          <Text dimColor italic>
+          <Text dim italic>
             {prefixLine}
           </Text>
         </Box>
@@ -185,7 +185,7 @@ function Pane({
   records,
 }: {
   label: string;
-  headerColor: "blue" | "magenta";
+  headerColor: "ansi:blue" | "ansi:magenta";
   records: TurnPair["aTools"];
 }) {
   return (
@@ -201,7 +201,7 @@ function Pane({
       </Text>
       {records.length === 0 ? (
         <Box marginTop={1}>
-          <Text dimColor italic>
+          <Text dim italic>
             {t("diffApp.paneEmpty")}
           </Text>
         </Box>
@@ -216,15 +216,15 @@ function Pane({
 
 function KindBadge({ kind }: { kind: TurnPair["kind"] }) {
   if (kind === "match") {
-    return <Text color="green">{t("diffApp.kindMatch")}</Text>;
+    return <Text color="ansi:green">{t("diffApp.kindMatch")}</Text>;
   }
   if (kind === "diverge") {
-    return <Text color="yellow">{t("diffApp.kindDiverge")}</Text>;
+    return <Text color="ansi:yellow">{t("diffApp.kindDiverge")}</Text>;
   }
   if (kind === "only_in_a") {
-    return <Text color="blue">{t("diffApp.kindOnlyInA")}</Text>;
+    return <Text color="ansi:blue">{t("diffApp.kindOnlyInA")}</Text>;
   }
-  return <Text color="magenta">{t("diffApp.kindOnlyInB")}</Text>;
+  return <Text color="ansi:magenta">{t("diffApp.kindOnlyInB")}</Text>;
 }
 
 // ----------------------------------------------------------------------------

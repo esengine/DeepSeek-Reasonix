@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React, { useContext } from "react";
 import { t } from "../../../i18n/index.js";
@@ -17,7 +17,7 @@ import { CARD } from "../theme/tokens.js";
 
 export function SubAgentCard({ card }: { card: SubAgentCardData }): React.ReactElement {
   const { fg, tone, toneActive } = useThemeTokens();
-  const statusColor: Record<SubAgentCardData["status"], string> = {
+  const statusColor: Record<SubAgentCardData["status"], Color> = {
     running: toneActive.violet,
     done: tone.ok,
     failed: tone.err,
@@ -72,7 +72,7 @@ function isChildDone(card: Card): boolean {
 interface ChildVisual {
   statusGlyph: React.ReactElement;
   kindGlyph: string;
-  kindColor: string;
+  kindColor: Color;
   text: string;
 }
 
@@ -84,33 +84,33 @@ function ChildRow({ card }: { card: Card }): React.ReactElement {
     <>
       {v.statusGlyph}
       <Text color={v.kindColor}>{v.kindGlyph}</Text>
-      <Text dimColor={isDone} color={fg.body}>
+      <Text dim={isDone} color={fg.body}>
         {v.text}
       </Text>
     </>
   );
 }
 
-function runningGlyph(color: string, kind: "reasoning" | "tool" | "streaming"): React.ReactElement {
+function runningGlyph(color: Color, kind: "reasoning" | "tool" | "streaming"): React.ReactElement {
   const frames =
     kind === "tool" ? PULSE_SQUARE : kind === "streaming" ? PULSE_CIRCLE : PULSE_DIAMOND;
   const settled = kind === "tool" ? "▣" : kind === "streaming" ? "●" : "◆";
   return <Pulse active frames={frames} settled={settled} color={color} />;
 }
 
-function doneGlyph(color: string): React.ReactElement {
+function doneGlyph(color: Color): React.ReactElement {
   return <Text color={color}>✓</Text>;
 }
 
-function failedGlyph(color: string): React.ReactElement {
+function failedGlyph(color: Color): React.ReactElement {
   return <Text color={color}>✗</Text>;
 }
 
 function childVisual(
   card: Card,
-  doneColor: string,
-  failedColor: string,
-  fallbackColor: string,
+  doneColor: Color,
+  failedColor: Color,
+  fallbackColor: Color,
 ): ChildVisual {
   switch (card.kind) {
     case "reasoning": {

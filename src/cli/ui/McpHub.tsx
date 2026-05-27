@@ -62,7 +62,7 @@ export function McpHub({
         />
         <Text>{"  "}</Text>
         <TabPill label={t("handlers.mcp.marketplaceTab")} active={tab === "marketplace"} />
-        <Text dimColor>{`   ${t("handlers.mcp.tabHint")}`}</Text>
+        <Text dim>{`   ${t("handlers.mcp.tabHint")}`}</Text>
       </Box>
       {tab === "live" ? (
         <McpBrowser
@@ -93,5 +93,5 @@ function TabPill({ label, count, active }: { label: string; count?: number; acti
       </Text>
     );
   }
-  return <Text dimColor>{` ${text} `}</Text>;
+  return <Text dim>{` ${text} `}</Text>;
 }

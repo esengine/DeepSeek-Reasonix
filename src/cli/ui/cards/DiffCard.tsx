@@ -42,7 +42,7 @@ export function DiffCard({ card }: { card: DiffCardData }): React.ReactElement {
           {hunk.lines.map((line, li) => (
             <Box key={`${card.id}:${hunk.header}:${li}`} flexDirection="row" gap={1}>
               <Text color={LINE_COLOR[line.kind]}>{LINE_GLYPH[line.kind]}</Text>
-              <Text color={LINE_COLOR[line.kind]} dimColor={line.kind === "ctx"}>
+              <Text color={LINE_COLOR[line.kind]} dim={line.kind === "ctx"}>
                 {line.text}
               </Text>
             </Box>

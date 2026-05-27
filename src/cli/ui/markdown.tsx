@@ -1,7 +1,7 @@
 /** Markdown → Ink. Parsing via marked; visual mapping mirrors dashboard/app.css `.md` rules. Code blocks pass through cli-highlight for ANSI syntax coloring. */
 
 import { highlight, supportsLanguage } from "cli-highlight";
-import { Box, Text, Transform, useStdout } from "ink";
+import { Box, type Color, Link, Text, useStdout } from "ink";
 import { type Token, type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
@@ -372,13 +372,13 @@ function looksLikeFileRef(path: string, hasLine: boolean): boolean {
   return ext.length >= 2;
 }
 
-function osc8(children: React.ReactNode, target: string, color: string): React.ReactElement {
+function osc8(children: React.ReactNode, target: string, color: Color): React.ReactElement {
   return (
-    <Transform transform={(text) => `\x1b]8;;${target}\x1b\\${text}\x1b]8;;\x1b\\`}>
+    <Link url={target}>
       <Text color={color} underline>
         {children}
       </Text>
-    </Transform>
+    </Link>
   );
 }
 

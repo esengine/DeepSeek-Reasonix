@@ -59,12 +59,12 @@ export function McpBrowser({
           {t("mcpBrowser.title")}
         </Text>
         <Text
-          dimColor
+          dim
         >{`  \u00b7  ${configPath}  \u00b7  ${t("mcpBrowser.serverCount", { count: servers.length, s: servers.length === 1 ? "" : "s" })}`}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {servers.length === 0 ? (
-          <Text dimColor>{t("mcpBrowser.empty")}</Text>
+          <Text dim>{t("mcpBrowser.empty")}</Text>
         ) : (
           servers.map((s, i) => (
             <ServerRow key={s.label + s.spec} server={s} active={i === index} />
@@ -72,7 +72,7 @@ export function McpBrowser({
         )}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>{t("mcpBrowser.footer")}</Text>
+        <Text dim>{t("mcpBrowser.footer")}</Text>
       </Box>
     </Box>
   );
@@ -94,11 +94,11 @@ function ServerRow({ server, active }: { server: McpServerSummary; active: boole
           {label.padEnd(14)}
         </Text>
         <Text color={health.color}>{`${health.glyph} ${health.label}`}</Text>
-        <Text dimColor>{`      ${counts}`}</Text>
+        <Text dim>{`      ${counts}`}</Text>
       </Box>
       {active ? (
         <Box>
-          <Text dimColor>{`     ${capabilityList(server)}`}</Text>
+          <Text dim>{`     ${capabilityList(server)}`}</Text>
         </Box>
       ) : null}
     </Box>

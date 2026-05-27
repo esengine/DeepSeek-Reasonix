@@ -1,4 +1,4 @@
-import { Box, Text, useAnimationFrame } from "ink";
+import { Box, type Color, Text, useAnimationFrame } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 
@@ -9,7 +9,7 @@ export interface PulseProps {
   /** Glyph when inactive. Defaults to the last (most-filled) frame. */
   settled?: string;
   active: boolean;
-  color?: string;
+  color?: Color;
   frameMs?: number;
 }
 

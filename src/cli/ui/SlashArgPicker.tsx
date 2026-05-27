@@ -65,8 +65,8 @@ export function SlashArgPicker({
       <Text color={color.accent} bold>
         {`/${spec.cmd}`}
       </Text>
-      {headerArgsHint ? <Text dimColor>{` ${headerArgsHint}`}</Text> : null}
-      <Text dimColor>{`  ${headerSummary}`}</Text>
+      {headerArgsHint ? <Text dim>{` ${headerArgsHint}`}</Text> : null}
+      <Text dim>{`  ${headerSummary}`}</Text>
     </Box>
   );
 
@@ -88,7 +88,7 @@ export function SlashArgPicker({
             {GLYPH.warn}
           </Text>
           <Text color={color.warn}>{t("slashArgPicker.noMatch", { partial })}</Text>
-          <Text dimColor>{t("slashArgPicker.keepTyping")}</Text>
+          <Text dim>{t("slashArgPicker.keepTyping")}</Text>
         </Box>
       </Box>
     );
@@ -105,7 +105,7 @@ export function SlashArgPicker({
     <Box flexDirection="column" paddingX={1} marginTop={1}>
       {headerRow}
       {hiddenAbove > 0 ? (
-        <Text dimColor>{t("slashArgPicker.above", { hidden: hiddenAbove })}</Text>
+        <Text dim>{t("slashArgPicker.above", { hidden: hiddenAbove })}</Text>
       ) : null}
       {shown.map((value, i) => {
         const idx = windowStart + i;
@@ -115,10 +115,10 @@ export function SlashArgPicker({
         );
       })}
       {hiddenBelow > 0 ? (
-        <Text dimColor>{t("slashArgPicker.below", { hidden: hiddenBelow })}</Text>
+        <Text dim>{t("slashArgPicker.below", { hidden: hiddenBelow })}</Text>
       ) : null}
       <Box marginTop={0}>
-        <Text dimColor>{t("slashArgPicker.footer")}</Text>
+        <Text dim>{t("slashArgPicker.footer")}</Text>
       </Box>
     </Box>
   );
@@ -139,10 +139,10 @@ function ArgRow({
       <Text color={isSelected ? color.primary : color.info} bold={isSelected}>
         {isSelected ? `${GLYPH.cur} ` : "  "}
       </Text>
-      <Text color={isSelected ? color.user : color.info} bold={isSelected} dimColor={!isSelected}>
+      <Text color={isSelected ? color.user : color.info} bold={isSelected} dim={!isSelected}>
         {value}
       </Text>
-      {isDir ? <Text dimColor>/</Text> : null}
+      {isDir ? <Text dim>/</Text> : null}
     </Box>
   );
 }

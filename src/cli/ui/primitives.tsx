@@ -1,4 +1,4 @@
-import { Text, useStdout } from "ink";
+import { type Color, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../i18n/index.js";
@@ -14,7 +14,7 @@ export function ChromeRule(): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const w = Math.max(20, cols - 2);
-  return <Text dimColor>{"─".repeat(w)}</Text>;
+  return <Text dim>{"─".repeat(w)}</Text>;
 }
 
 /** Compact decimal-K token formatter — `1234 → "1.2K"`, `131000 → "131K"`. Base-1000 matches DeepSeek's "1M context" / "128K" wording and the web dashboard's display, so the CLI bottom bar and the web bar agree on ctx capacity. */
@@ -35,17 +35,17 @@ export function Bar({
   dim,
 }: {
   ratio: number;
-  color: string;
+  color: Color;
   cells?: number;
   dim?: boolean;
 }): React.ReactElement {
   const filled = Math.max(0, Math.min(cells, Math.round(ratio * cells)));
   return (
     <Text>
-      <Text color={color} dimColor={dim}>
+      <Text color={color} dim={dim}>
         {"▰".repeat(filled)}
       </Text>
-      <Text dimColor>{"▱".repeat(cells - filled)}</Text>
+      <Text dim>{"▱".repeat(cells - filled)}</Text>
     </Text>
   );
 }
@@ -70,10 +70,10 @@ export function ContextCell({
   if (promptTokens === 0) {
     return (
       <Text>
-        <Text color={COLOR.info} dimColor>
+        <Text color={COLOR.info} dim>
           {"▣ ctx "}
         </Text>
-        <Text dimColor>{`\u2014 ${t("common.noTurns")}`}</Text>
+        <Text dim>{`\u2014 ${t("common.noTurns")}`}</Text>
       </Text>
     );
   }
@@ -87,7 +87,7 @@ export function ContextCell({
       <Text color={color} bold>
         {formatTokens(promptTokens)}/{formatTokens(ctxMax)}
       </Text>
-      <Text dimColor> ({pct}%)</Text>
+      <Text dim> ({pct}%)</Text>
       {ratio >= 0.8 ? (
         <Text color={COLOR.err} bold>
           {"  ·  /compact"}

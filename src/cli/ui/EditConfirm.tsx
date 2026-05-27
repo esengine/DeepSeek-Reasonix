@@ -133,7 +133,7 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
       footerHint={t("editConfirm.footer")}
     >
       {hiddenAbove > 0 ? (
-        <Text dimColor>
+        <Text dim>
           {t(hiddenAbove === 1 ? "editConfirm.linesAbove" : "editConfirm.linesAbovePlural", {
             count: hiddenAbove,
           })}
@@ -148,10 +148,10 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
         <Text color="#bef0c8" backgroundColor="#0c2718">
           {t("editConfirm.newLabel")}
         </Text>
-        <Text dimColor>{t("editConfirm.sideBySide")}</Text>
+        <Text dim>{t("editConfirm.sideBySide")}</Text>
       </Box>
       {hiddenBelow > 0 ? (
-        <Text dimColor>
+        <Text dim>
           {t(hiddenBelow === 1 ? "editConfirm.linesBelow" : "editConfirm.linesBelowPlural", {
             count: hiddenBelow,
           })}

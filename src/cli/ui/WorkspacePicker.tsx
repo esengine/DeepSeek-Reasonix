@@ -133,7 +133,7 @@ export function WorkspacePicker({
           <Text bold color={TONE.brand}>
             {query}
           </Text>
-          <Text backgroundColor={TONE.brand} color="black">
+          <Text backgroundColor={TONE.brand} color="ansi:black">
             {" "}
           </Text>
         </Box>

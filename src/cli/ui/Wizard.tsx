@@ -212,7 +212,7 @@ export function Wizard({
             {specs.map((spec, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: review-only render, order fixed
               <Box key={i} paddingLeft={14}>
-                <Text dimColor>· {spec}</Text>
+                <Text dim>· {spec}</Text>
               </Box>
             ))}
             <Box marginTop={1}>
@@ -220,11 +220,11 @@ export function Wizard({
             </Box>
             {error ? (
               <Box marginTop={1}>
-                <Text color="red">{error}</Text>
+                <Text color="ansi:red">{error}</Text>
               </Box>
             ) : null}
             <Box marginTop={1}>
-              <Text dimColor>{t("wizard.reviewFooter")}</Text>
+              <Text dim>{t("wizard.reviewFooter")}</Text>
             </Box>
           </Box>
           <ReviewConfirm
@@ -254,18 +254,18 @@ export function Wizard({
     }
 
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1}>
-        <Text bold color="green">
+      <Box flexDirection="column" borderStyle="round" borderColor="ansi:green" paddingX={1}>
+        <Text bold color="ansi:green">
           {t("wizard.savedTitle")}
         </Text>
         <Box marginTop={1}>
           <Text>{t("ui.welcome")}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text dimColor>{t("wizard.savedShellHint")}</Text>
+          <Text dim>{t("wizard.savedShellHint")}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text dimColor>{t("wizard.savedFooter")}</Text>
+          <Text dim>{t("wizard.savedFooter")}</Text>
         </Box>
         <ExitOnEnter onExit={exit} />
       </Box>
@@ -310,7 +310,7 @@ function ThemeStep({
         {t("wizard.themeTitle")}
       </Text>
       <Box marginTop={1}>
-        <Text dimColor>{t("wizard.themeSubtitle")}</Text>
+        <Text dim>{t("wizard.themeSubtitle")}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {THEME_NAMES.map((name, i) => (
@@ -356,7 +356,7 @@ function ThemeStep({
         </Box>
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>{t("wizard.themeFooter")}</Text>
+        <Text dim>{t("wizard.themeFooter")}</Text>
       </Box>
     </Box>
   );
@@ -377,12 +377,12 @@ function LanguageStep({
     hint: code === detectSystemLanguage() ? "(detected)" : undefined,
   }));
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold color="cyan">
+    <Box flexDirection="column" borderStyle="round" borderColor="ansi:cyan" paddingX={1}>
+      <Text bold color="ansi:cyan">
         {t("wizard.languageTitle")}
       </Text>
       <Box marginTop={1}>
-        <Text dimColor>{t("wizard.languageSubtitle")}</Text>
+        <Text dim>{t("wizard.languageSubtitle")}</Text>
       </Box>
       <Box marginTop={1}>
         <SingleSelect<LanguageCode>
@@ -412,20 +412,20 @@ function ApiKeyStep({
   const [value, setValue] = useState("");
   const [checking, setChecking] = useState(false);
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold color="cyan">
+    <Box flexDirection="column" borderStyle="round" borderColor="ansi:cyan" paddingX={1}>
+      <Text bold color="ansi:cyan">
         {t("wizard.welcomeTitle")}
       </Text>
       <Box marginTop={1}>
         <Text>{t("wizard.apiKeyPrompt")}</Text>
       </Box>
-      <Text dimColor>{t("wizard.apiKeyGetOne")}</Text>
-      <Text dimColor>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
+      <Text dim>{t("wizard.apiKeyGetOne")}</Text>
+      <Text dim>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
       {initialValue ? (
-        <Text dimColor>{t("wizard.apiKeyPreview", { redacted: redactKey(initialValue) })}</Text>
+        <Text dim>{t("wizard.apiKeyPreview", { redacted: redactKey(initialValue) })}</Text>
       ) : null}
       <Box marginTop={1}>
-        <Text bold color="cyan">
+        <Text bold color="ansi:cyan">
           {t("wizard.apiKeyInputLabel")}
         </Text>
         <TextInput
@@ -460,15 +460,15 @@ function ApiKeyStep({
       </Box>
       {checking ? (
         <Box marginTop={1}>
-          <Text color="yellow">{t("wizard.apiKeyChecking")}</Text>
+          <Text color="ansi:yellow">{t("wizard.apiKeyChecking")}</Text>
         </Box>
       ) : error ? (
         <Box marginTop={1}>
-          <Text color="red">{error}</Text>
+          <Text color="ansi:red">{error}</Text>
         </Box>
       ) : value ? (
         <Box marginTop={1}>
-          <Text dimColor>{t("wizard.apiKeyPreview", { redacted: redactKey(value) })}</Text>
+          <Text dim>{t("wizard.apiKeyPreview", { redacted: redactKey(value) })}</Text>
         </Box>
       ) : null}
     </Box>
@@ -555,11 +555,11 @@ function McpArgsStep({
         <Box flexDirection="column">
           <Text>{t("wizard.mcpArgsDirMissing", { path: pendingCreate })}</Text>
           <Box marginTop={1}>
-            <Text dimColor>{t("wizard.mcpArgsDirCreateHint")}</Text>
+            <Text dim>{t("wizard.mcpArgsDirCreateHint")}</Text>
           </Box>
           {error ? (
             <Box marginTop={1}>
-              <Text color="red">{error}</Text>
+              <Text color="ansi:red">{error}</Text>
             </Box>
           ) : null}
         </Box>
@@ -573,7 +573,7 @@ function McpArgsStep({
         <Text>{entry.summary}</Text>
         {entry.note ? (
           <Box marginTop={1}>
-            <Text dimColor>{entry.note}</Text>
+            <Text dim>{entry.note}</Text>
           </Box>
         ) : null}
         <Box marginTop={1}>
@@ -581,7 +581,7 @@ function McpArgsStep({
           <Text bold>{entry.userArgs}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text bold color="cyan">
+          <Text bold color="ansi:cyan">
             {entry.userArgs}
             {" › "}
           </Text>
@@ -613,7 +613,7 @@ function McpArgsStep({
         </Box>
         {error ? (
           <Box marginTop={1}>
-            <Text color="red">{error}</Text>
+            <Text color="ansi:red">{error}</Text>
           </Box>
         ) : null}
       </Box>
@@ -655,10 +655,10 @@ function StepFrame({
   children: React.ReactNode;
 }) {
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor="ansi:cyan" paddingX={1}>
       <Box>
-        <Text dimColor>{t("wizard.stepCounter", { step, total })}</Text>
-        <Text bold color="cyan">
+        <Text dim>{t("wizard.stepCounter", { step, total })}</Text>
+        <Text bold color="ansi:cyan">
           {title}
         </Text>
       </Box>

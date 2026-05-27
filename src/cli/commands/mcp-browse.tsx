@@ -169,19 +169,19 @@ function McpBrowseApp() {
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box>
-        <Text bold color="cyan">
+        <Text bold color="ansi:cyan">
           ◈ MCP marketplace
         </Text>
-        <Text dimColor>{`  ·  ${state.status}`}</Text>
+        <Text dim>{`  ·  ${state.status}`}</Text>
       </Box>
       <Box marginTop={1}>
         <Text>search: </Text>
-        <Text color="white">{state.query || "(type to filter)"}</Text>
-        <Text dimColor>{`  ${filtered.length} match${filtered.length === 1 ? "" : "es"}`}</Text>
+        <Text color="ansi:white">{state.query || "(type to filter)"}</Text>
+        <Text dim>{`  ${filtered.length} match${filtered.length === 1 ? "" : "es"}`}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {window.length === 0 ? (
-          <Text dimColor>{state.loading ? "loading…" : "no entries"}</Text>
+          <Text dim>{state.loading ? "loading…" : "no entries"}</Text>
         ) : (
           window.map((e, i) => {
             const idx = (start || 0) + i;
@@ -191,9 +191,9 @@ function McpBrowseApp() {
             const pop = e.popularity !== undefined ? ` · ${e.popularity.toLocaleString()}` : "";
             return (
               <Box key={e.name}>
-                <Text color={active ? "cyan" : undefined}>{active ? "▸ " : "  "}</Text>
+                <Text color={active ? "ansi:cyan" : undefined}>{active ? "▸ " : "  "}</Text>
                 <Text bold={active}>{e.name.padEnd(40).slice(0, 40)}</Text>
-                <Text dimColor>{` ${tag}${pop}`}</Text>
+                <Text dim>{` ${tag}${pop}`}</Text>
               </Box>
             );
           })
@@ -201,29 +201,27 @@ function McpBrowseApp() {
       </Box>
       {selected ? (
         <Box marginTop={1} flexDirection="column">
-          <Text bold color="white">
+          <Text bold color="ansi:white">
             {overlay?.[selected.name]?.title ?? selected.title}
-            {overlay?.[selected.name] ? (
-              <Text dimColor>{`  \u00b7  ${selected.title}`}</Text>
-            ) : null}
+            {overlay?.[selected.name] ? <Text dim>{`  \u00b7  ${selected.title}`}</Text> : null}
           </Text>
-          <Text dimColor>
+          <Text dim>
             {overlay?.[selected.name]?.description ?? selected.description?.slice(0, 160) ?? null}
           </Text>
           {selected.install ? (
-            <Text dimColor>
+            <Text dim>
               {`spec: ${selected.install.runtime} ${selected.install.packageId ?? selected.install.url ?? "—"} · ${selected.install.transport}`}
             </Text>
           ) : (
-            <Text dimColor>(smithery listing — install info not exposed)</Text>
+            <Text dim>(smithery listing — install info not exposed)</Text>
           )}
           {selected.install?.requiredEnv?.length ? (
-            <Text color="yellow">{`needs: ${selected.install.requiredEnv.join(", ")}`}</Text>
+            <Text color="ansi:yellow">{`needs: ${selected.install.requiredEnv.join(", ")}`}</Text>
           ) : null}
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>type to filter · ↑↓ pick · enter install · tab load more · esc quit</Text>
+        <Text dim>type to filter · ↑↓ pick · enter install · tab load more · esc quit</Text>
       </Box>
     </Box>
   );

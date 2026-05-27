@@ -98,8 +98,8 @@ export function CtxBreakdownBlock({ data }: { data: CtxBreakdownData }): React.R
         <Text color={COLOR.brand} bold>
           {t("ctxBreakdown.title")}
         </Text>
-        <Text dimColor>{`  ${formatTokens(total)} of ${formatTokens(data.ctxMax)}`}</Text>
-        <Text dimColor>{"  ·  "}</Text>
+        <Text dim>{`  ${formatTokens(total)} of ${formatTokens(data.ctxMax)}`}</Text>
+        <Text dim>{"  ·  "}</Text>
         <Text color={sevColor} bold>
           {`${winPct}%`}
         </Text>
@@ -114,41 +114,41 @@ export function CtxBreakdownBlock({ data }: { data: CtxBreakdownData }): React.R
         <Text color={COLOR.accent}>{"█".repeat(toolsCells)}</Text>
         <Text color={COLOR.primary}>{"█".repeat(logCells)}</Text>
         <Text color={COLOR.tool}>{"█".repeat(inputCells)}</Text>
-        <Text color={COLOR.info} dimColor>
+        <Text color={COLOR.info} dim>
           {"░".repeat(freeCells)}
         </Text>
       </Box>
       <Box>
         <Text color={COLOR.brand}>■</Text>
-        <Text dimColor>{` ${t("cardLabels.system")} ${formatTokens(data.systemTokens)}`}</Text>
+        <Text dim>{` ${t("cardLabels.system")} ${formatTokens(data.systemTokens)}`}</Text>
         <Text>{"   "}</Text>
         <Text color={COLOR.accent}>■</Text>
-        <Text dimColor>{` ${t("cardLabels.tools")} ${formatTokens(data.toolsTokens)}`}</Text>
-        <Text dimColor>{` (${data.toolsCount})`}</Text>
+        <Text dim>{` ${t("cardLabels.tools")} ${formatTokens(data.toolsTokens)}`}</Text>
+        <Text dim>{` (${data.toolsCount})`}</Text>
         <Text>{"   "}</Text>
         <Text color={COLOR.primary}>■</Text>
-        <Text dimColor>{` ${t("cardLabels.log")} ${formatTokens(data.logTokens)}`}</Text>
-        <Text dimColor>{` (${data.logMessages} ${t("ctxBreakdown.msg")})`}</Text>
+        <Text dim>{` ${t("cardLabels.log")} ${formatTokens(data.logTokens)}`}</Text>
+        <Text dim>{` (${data.logMessages} ${t("ctxBreakdown.msg")})`}</Text>
         <Text>{"   "}</Text>
         <Text color={COLOR.tool}>■</Text>
-        <Text dimColor>{` ${t("cardLabels.input")} ${formatTokens(data.inputTokens)}`}</Text>
+        <Text dim>{` ${t("cardLabels.input")} ${formatTokens(data.inputTokens)}`}</Text>
       </Box>
       {data.topTools.length > 0 ? (
         <Box marginTop={1} flexDirection="column">
-          <Text dimColor>{t("ctxBreakdown.topTools", { count: data.topTools.length })}</Text>
+          <Text dim>{t("ctxBreakdown.topTools", { count: data.topTools.length })}</Text>
           {data.topTools.map((tool) => (
             <Box key={`${tool.turn}-${tool.name}`}>
               <Text
-                dimColor
+                dim
               >{`    ${t("ctxBreakdown.turnLabel")} ${String(tool.turn).padStart(3)}  `}</Text>
               <Text color={COLOR.info}>{tool.name.padEnd(22)}</Text>
-              <Text dimColor>{`  ${formatTokens(tool.tokens).padStart(8)}`}</Text>
+              <Text dim>{`  ${formatTokens(tool.tokens).padStart(8)}`}</Text>
             </Box>
           ))}
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dimColor>{t("ctxBreakdown.compactHint")}</Text>
+        <Text dim>{t("ctxBreakdown.compactHint")}</Text>
       </Box>
     </Box>
   );

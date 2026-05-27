@@ -1,13 +1,13 @@
 /** Bg-tinted inline chip — section labels (REASONING / TASK / TOOL) and badges (model / path). */
 
-import { Text } from "ink";
+import { type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 
 export interface PillProps {
   label: string;
-  bg: string;
-  fg: string;
+  bg: Color;
+  fg: Color;
   bold?: boolean;
 }
 

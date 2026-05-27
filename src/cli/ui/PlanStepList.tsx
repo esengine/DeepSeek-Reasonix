@@ -27,7 +27,7 @@
  *     we" answerable from the cursor's eye position alone.
  */
 
-import { Box, Text } from "ink";
+import { Box, type Color, Text } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import type { PlanStep, PlanStepRisk } from "../../tools/plan.js";
@@ -62,7 +62,7 @@ function getStatus(stepId: string, statuses: PlanStepListProps["statuses"]): Ste
 
 interface StatusGlyph {
   glyph: string;
-  color: string;
+  color: Color;
 }
 
 /**
@@ -80,7 +80,7 @@ function statusGlyph(status: StepStatus, isCur: boolean): StatusGlyph {
   return { glyph: GLYPH.pending, color: COLOR.info };
 }
 
-function riskLabel(risk: PlanStepRisk | undefined): { text: string; color: string } | null {
+function riskLabel(risk: PlanStepRisk | undefined): { text: string; color: Color } | null {
   if (risk === "med") return { text: `${GLYPH.warn}${t("planFlow.riskMed")}`, color: COLOR.warn };
   if (risk === "high") return { text: `${GLYPH.warn}${t("planFlow.riskHigh")}`, color: COLOR.err };
   // low + undefined: omitted entirely (the default reading should be
@@ -102,7 +102,7 @@ function PlanStepListInner({ steps, statuses, focusStepId }: PlanStepListProps) 
   return (
     <Box flexDirection="column">
       <Box>
-        <Text dimColor>
+        <Text dim>
           {showProgress
             ? t(
                 total === 1
@@ -125,7 +125,7 @@ function PlanStepListInner({ steps, statuses, focusStepId }: PlanStepListProps) 
           const titleDim = status === "done" || status === "skipped";
           return (
             <Box key={step.id}>
-              <Text color={COLOR.info} dimColor>
+              <Text color={COLOR.info} dim>
                 {isLast ? GLYPH.branchEnd : GLYPH.branch}
               </Text>
               <Text>{"  "}</Text>
@@ -134,7 +134,7 @@ function PlanStepListInner({ steps, statuses, focusStepId }: PlanStepListProps) 
               </Text>
               <Text>{"  "}</Text>
               <Text
-                dimColor={titleDim}
+                dim={titleDim}
                 bold={isCur || status === "running"}
                 strikethrough={status === "done" || status === "skipped"}
               >
