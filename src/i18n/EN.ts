@@ -701,6 +701,8 @@ export const EN: TranslationSchema = {
       "context {before}/{ctxMax} ({pct}%) — aggressively folded {beforeMessages} messages → {afterMessages} (summary {summaryChars} chars). Continuing.",
     forcingSummary:
       "context {before}/{ctxMax} ({pct}%) — forcing summary from what was gathered. Run /compact, /clear, or /new to reset.",
+    iterLimitReached:
+      "Reached the per-turn iteration cap ({max} tool-call rounds). Forcing a summary of what was gathered. Override with maxIterPerTurn in config or REASONIX_MAX_ITER env var.",
   },
   errors: {
     contextOverflow:

@@ -675,6 +675,8 @@ export const zhCN: TranslationSchema = {
       "上下文 {before}/{ctxMax}（{pct}%）— 已激进折叠 {beforeMessages} 条消息 → {afterMessages}（总结 {summaryChars} 字）。继续。",
     forcingSummary:
       "上下文 {before}/{ctxMax}（{pct}%）— 基于已收集到的内容强制总结。请运行 /compact、/clear 或 /new 重置。",
+    iterLimitReached:
+      "已达到单轮迭代上限（{max} 次工具调用轮次）。正在强制总结已收集的内容。可通过配置 maxIterPerTurn 或 REASONIX_MAX_ITER 环境变量调整上限。",
   },
   errors: {
     contextOverflow:
