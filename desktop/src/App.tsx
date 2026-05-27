@@ -99,7 +99,7 @@ import { WorkdirPop } from "./ui/workdir-pop";
 import { parseEditResult } from "./ui/cards";
 import { useAutoCollapse } from "./ui/useAutoCollapse";
 import { useResizable } from "./ui/useResizable";
-import { useAutoScroll } from "./ui/useAutoScroll";
+// Scroll handled by Virtuoso's followOutput + scrollToIndex.
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 import { elideTranscriptMessages } from "./ui/transcript-elision";
@@ -1396,7 +1396,6 @@ function TabRuntime({
   >(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
-  const threadInnerRef = useRef<HTMLDivElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
@@ -1855,41 +1854,47 @@ function TabRuntime({
   currentSessionRef.current = state.currentSession;
   const messageItems = state.messages;
 
-  const restoreScrollTop = useCallback(() => {
-    const session = currentSessionRef.current;
-    if (!session) return null;
-    const raw = localStorage.getItem(`reasonix.scroll.${session}`);
-    const n = raw ? Number(raw) : Number.NaN;
-    return Number.isFinite(n) ? n : null;
-  }, []);
-
   const [showJumpButton, setShowJumpButton] = useState(false);
-  const { scrollToBottom } = useAutoScroll(
-    threadRef,
-    threadInnerRef,
-    state.busy,
-    restoreScrollTop,
-  );
+  const scrollToBottom = useCallback(() => {
+    const len = messageItems.length;
+    if (len > 0) virtuosoRef.current?.scrollToIndex({ index: len - 1, behavior: "smooth" });
+  }, [messageItems.length]);
+
+  // Initial scroll to bottom when session loads.
+  useEffect(() => {
+    if (messageItems.length > 0) {
+      const id = setTimeout(() => scrollToBottom(), 100);
+      return () => clearTimeout(id);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scroll to bottom on init and when busy becomes true (user just sent a message).
+  const prevBusy = useRef(state.busy);
+  useEffect(() => {
+    if (state.busy && !prevBusy.current) {
+      scrollToBottom();
+    }
+    prevBusy.current = state.busy;
+  }, [state.busy, scrollToBottom]);
 
   // Persist the transcript scroll offset per session so a restart reopens
   // the conversation where the user left it (#1244).
   useEffect(() => {
-    const el = threadRef.current;
-    const session = state.currentSession;
-    if (!el || !session) return;
-    const key = `reasonix.scroll.${session}`;
+    const scroller = threadRef.current?.firstElementChild;
+    if (!scroller || !state.currentSession) return;
+    const key = `reasonix.scroll.${state.currentSession}`;
     let timer: ReturnType<typeof setTimeout>;
     const onScroll = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
+        const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 80;
         if (atBottom) localStorage.removeItem(key);
-        else localStorage.setItem(key, String(Math.round(el.scrollTop)));
+        else localStorage.setItem(key, String(Math.round(scroller.scrollTop)));
       }, 250);
     };
-    el.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
     return () => {
-      el.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("scroll", onScroll);
       clearTimeout(timer);
     };
   }, [state.currentSession]);
@@ -2389,7 +2394,7 @@ function TabRuntime({
                 {showJumpButton ? (
                   <button
                     className="thread-jump-bottom"
-                    onClick={() => scrollToBottom(true)}
+                    onClick={() => scrollToBottom()}
                     title={t("app.jumpToBottom") ?? "Jump to bottom"}
                     aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
                   >
