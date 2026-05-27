@@ -45,13 +45,32 @@ describe("Ink update-depth repro candidates", () => {
     r.unmount();
   });
 
-  it("useBoxMetrics: oscillating render-from-measurement triggers infinite loop", async () => {
+  it("useBoxMetrics: rendering from own measurement never converges", async () => {
+    // Whether React's nested-update guard fires depends on event-loop timing
+    // (a Linux runner doesn't trip what Windows trips in the same wall clock).
+    // The deterministic property is render count: stable layouts converge in
+    // 2–3 renders, the broken pattern compounds without bound. Counting is
+    // the loop-detection signal; the React error is just one possible
+    // downstream symptom.
     captureErrors();
+    let stableRenders = 0;
+    function Stable() {
+      const ref = React.useRef(null!);
+      useBoxMetrics(ref);
+      stableRenders++;
+      return (
+        <Box ref={ref} flexDirection="column">
+          <Text>a</Text>
+          <Text>b</Text>
+        </Box>
+      );
+    }
+    let oscRenders = 0;
     function Oscillator() {
       const ref = React.useRef(null!);
       const m = useBoxMetrics(ref);
+      oscRenders++;
       // height 0/even → 1 child → measure=1 (odd); odd → 2 children → measure=2 (even).
-      // This actually oscillates between heights 1 and 2 forever.
       const extra = m.height % 2 === 1;
       return (
         <Box ref={ref} flexDirection="column">
@@ -60,11 +79,16 @@ describe("Ink update-depth repro candidates", () => {
         </Box>
       );
     }
-    const r = render(<Oscillator />);
+    const a = render(<Stable />);
     await new Promise((res) => setTimeout(res, 80));
-    const tripped = hasMaxDepth();
-    r.unmount();
-    expect(tripped).toBe(true);
+    a.unmount();
+    const b = render(<Oscillator />);
+    await new Promise((res) => setTimeout(res, 80));
+    b.unmount();
+    // Stable converges; broken pattern keeps re-measuring forever (or until
+    // React's guard happens to fire downstream). 10× headroom for jitter.
+    expect(stableRenders).toBeLessThan(10);
+    expect(oscRenders).toBeGreaterThan(stableRenders * 10);
   });
 
   it("useAnimationFrame: many subscribers with short interval does not loop alone", async () => {
