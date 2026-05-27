@@ -1640,6 +1640,11 @@ function TabRuntime({
           if (!override) setDraft("");
           return;
         }
+        if (name === "skill" || name === "skills") {
+          openSettingsAt("skills");
+          if (!override) setDraft("");
+          return;
+        }
         const skill = state.skills.find((s) => s.name === name);
         if (skill) {
           const clientId = `skill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2026,6 +2031,8 @@ function TabRuntime({
       desc: t("app.cmd.searchEngine"),
       run: () => openSettingsAt("general"),
     },
+    { cmd: "/skill", desc: t("app.cmd.skill"), run: () => openSettingsAt("skills") },
+    { cmd: "/skills", desc: t("app.cmd.skill"), run: () => openSettingsAt("skills") },
     ...slashSettingCommands,
     { cmd: "/theme", desc: t("app.cmd.toggleTheme"), run: onToggleTheme },
     {

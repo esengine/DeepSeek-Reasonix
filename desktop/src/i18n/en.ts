@@ -401,6 +401,7 @@ export const en = {
       copyLast: "Copy last reply",
       switchModel: "Switch model",
       searchEngine: "Configure web search engine + API keys",
+      skill: "List and manage user skills (project + custom + global + builtin)",
       setMode: "Set mode to {mode}",
       setEffort: "Set reasoning effort to {effort}",
       toggleTheme: "Toggle theme",

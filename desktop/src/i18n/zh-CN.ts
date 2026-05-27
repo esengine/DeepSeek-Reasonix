@@ -420,6 +420,7 @@ export const zhCN: typeof en = {
       copyLast: "复制最后一条回复",
       switchModel: "切换模型",
       searchEngine: "配置搜索引擎 + API key",
+      skill: "列出 / 管理用户技能（项目 + 自定义 + 全局 + 内置）",
       setMode: "切换模式为 {mode}",
       setEffort: "切换推理强度为 {effort}",
       toggleTheme: "切换深浅主题",

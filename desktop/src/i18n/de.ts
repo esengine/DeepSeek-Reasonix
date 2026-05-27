@@ -419,6 +419,7 @@ export const de: typeof en = {
       copyLast: "Letzte Antwort kopieren",
       switchModel: "Modell wechseln",
       searchEngine: "Suchmaschine + API-Keys konfigurieren",
+      skill: "Skills auflisten / verwalten (Projekt + Custom + Global + Eingebaut)",
       setMode: "Modus auf {mode} setzen",
       setEffort: "Reasoning-Effort auf {effort} setzen",
       toggleTheme: "Theme wechseln",
