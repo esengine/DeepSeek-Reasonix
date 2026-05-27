@@ -95,7 +95,7 @@ export class AppendOnlyLog {
   private _entries: ChatMessage[] = [];
   private _windowSize: number;
   private _sessionPath: string | null;
-  /** Total messages logically in the log (windowed entries + older messages on disk). */
+  // Tracks total across window + disk so callers see the correct length.
   private _totalLength: number;
 
   constructor(opts?: { windowSize?: number; sessionPath?: string }) {
@@ -104,11 +104,12 @@ export class AppendOnlyLog {
     this._totalLength = 0;
   }
 
-  /** Load initial messages into the window. Must be called before any append. */
+  // Replaces manual append loops — keeps only the window, discards older entries.
   initWindow(messages: ChatMessage[]): void {
-    this._entries = messages.length > this._windowSize
-      ? messages.slice(messages.length - this._windowSize)
-      : [...messages];
+    this._entries =
+      messages.length > this._windowSize
+        ? messages.slice(messages.length - this._windowSize)
+        : [...messages];
     this._totalLength = messages.length;
   }
 
@@ -133,14 +134,13 @@ export class AppendOnlyLog {
     this._totalLength = replacement.length;
   }
 
-  /** Look up a message by logical index — checks memory window first, falls back to disk. */
+  // Checks memory window first; falls back to disk for older messages.
   getEntry(index: number): ChatMessage | undefined {
     if (index < 0 || index >= this._totalLength) return undefined;
     const windowStart = this._totalLength - this._entries.length;
     if (index >= windowStart) {
       return this._entries[index - windowStart];
     }
-    // Message is outside the window — load from session file
     if (this._sessionPath) {
       const whole = readTailMessages(this._sessionPath, this._totalLength);
       if (index < whole.length) return whole[index];
@@ -148,12 +148,11 @@ export class AppendOnlyLog {
     return undefined;
   }
 
-  /** Return all messages in logical order — loads missing window from file if needed. */
+  // Returns all messages; reads from disk when window doesn't cover everything.
   toMessages(): ChatMessage[] {
     if (!this._sessionPath || this._entries.length >= this._totalLength) {
       return this._entries.map((e) => ({ ...e }));
     }
-    // Load the full history from file
     const whole = readTailMessages(this._sessionPath, this._totalLength);
     return whole.map((e) => ({ ...e }));
   }

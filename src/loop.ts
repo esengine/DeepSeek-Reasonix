@@ -127,7 +127,6 @@ export class CacheFirstLoop {
   readonly client: DeepSeekClient;
   readonly prefix: ImmutablePrefix;
   readonly tools: ToolRegistry;
-  // Session-backed AppendOnlyLog — only keeps recent window in memory, older messages on disk.
   readonly log: AppendOnlyLog;
   readonly scratch = new VolatileScratch();
   readonly stats = new SessionStats();
