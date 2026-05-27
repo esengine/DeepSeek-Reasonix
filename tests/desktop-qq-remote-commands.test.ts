@@ -14,6 +14,18 @@ describe("desktop QQ remote commands", () => {
     expect(parseQQRemoteDesktopCommand("/abort", skills)).toEqual({ kind: "abort" });
     expect(parseQQRemoteDesktopCommand("/compact", skills)).toEqual({ kind: "compact" });
     expect(parseQQRemoteDesktopCommand("/retry", skills)).toEqual({ kind: "retry" });
+    expect(parseQQRemoteDesktopCommand("/model flash", skills)).toEqual({
+      kind: "model",
+      value: "flash",
+    });
+    expect(parseQQRemoteDesktopCommand("/effort high", skills)).toEqual({
+      kind: "effort",
+      value: "high",
+    });
+    expect(parseQQRemoteDesktopCommand("/plan auto", skills)).toEqual({
+      kind: "plan",
+      value: "auto",
+    });
     expect(parseQQRemoteDesktopCommand("/btw what's up", skills)).toEqual({
       kind: "btw",
       text: "what's up",
@@ -29,6 +41,8 @@ describe("desktop QQ remote commands", () => {
     expect(parseQQRemoteDesktopCommand("/theme", skills)).toBeNull();
     expect(parseQQRemoteDesktopCommand("/skill qq", skills)).toBeNull();
     expect(parseQQRemoteDesktopCommand("/btw", skills)).toBeNull();
+    expect(parseQQRemoteDesktopCommand("/effort impossible", skills)).toBeNull();
+    expect(parseQQRemoteDesktopCommand("/plan maybe", skills)).toBeNull();
     expect(parseQQRemoteDesktopCommand("/unknown", skills)).toBeNull();
   });
 
@@ -36,6 +50,9 @@ describe("desktop QQ remote commands", () => {
     expect(qqRemoteCommandBypassesBusy({ kind: "help" })).toBe(true);
     expect(qqRemoteCommandBypassesBusy({ kind: "new" })).toBe(true);
     expect(qqRemoteCommandBypassesBusy({ kind: "abort" })).toBe(true);
+    expect(qqRemoteCommandBypassesBusy({ kind: "model", value: "flash" })).toBe(true);
+    expect(qqRemoteCommandBypassesBusy({ kind: "effort", value: "high" })).toBe(true);
+    expect(qqRemoteCommandBypassesBusy({ kind: "plan", value: "auto" })).toBe(true);
     expect(qqRemoteCommandBypassesBusy({ kind: "compact" })).toBe(false);
     expect(qqRemoteCommandBypassesBusy({ kind: "retry" })).toBe(false);
     expect(qqRemoteCommandBypassesBusy({ kind: "btw", text: "hi" })).toBe(false);
@@ -49,6 +66,9 @@ describe("desktop QQ remote commands", () => {
     expect(help).toContain("/abort");
     expect(help).toContain("/compact");
     expect(help).toContain("/retry");
+    expect(help).toContain("/model <flash|pro|deepseek-v4-flash|deepseek-v4-pro>");
+    expect(help).toContain("/effort <low|medium|high|max>");
+    expect(help).toContain("/plan <review|auto|yolo>");
     expect(help).toContain("/btw <question>");
     expect(help).toContain("/<skill> [args]");
     expect(help).toContain("agent-reach, qq");
