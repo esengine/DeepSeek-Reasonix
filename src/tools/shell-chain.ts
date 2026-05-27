@@ -241,7 +241,7 @@ export function parseCommandChain(cmd: string): CommandChain | null {
     const cmdName = seg.argv[0] ?? "";
     if (cmdName.toLowerCase() === "cd") {
       throw new UnsupportedSyntaxError(
-        "cd in parsed command chains does not change cwd for later segments. Run generated scripts from the workspace root, and pass input/data paths as arguments instead of cd-ing into a data directory. For package tools, use command-native cwd flags such as `npm --prefix <dir> run <script>`, `git -C <dir> ...`, or `cargo -C <dir> ...`.",
+        "cd in parsed command chains does not change cwd for later segments. By default, run generated scripts from the directory where the script was written; do not assume an input/data directory is the cwd just because the task reads files there. Pass input/data paths as arguments unless the command truly depends on that cwd. For package tools, use command-native cwd flags such as `npm --prefix <dir> run <script>`, `git -C <dir> ...`, or `cargo -C <dir> ...`.",
       );
     }
   }

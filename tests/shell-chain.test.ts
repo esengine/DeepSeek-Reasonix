@@ -110,9 +110,12 @@ describe("parseCommandChain", () => {
     );
   });
 
-  it("tells Python script tests to run from the workspace root instead of the data dir", () => {
+  it("tells Python script tests to run near the script without making workspace-root cwd mandatory", () => {
     expect(() => parseCommandChain("cd data && python3 parse_fire_protocol.py")).toThrow(
-      /run generated scripts from the workspace root/i,
+      /default.*directory where the script was written/i,
+    );
+    expect(() => parseCommandChain("cd data && python3 parse_fire_protocol.py")).toThrow(
+      /do not assume.*input\/data.*cwd/i,
     );
     expect(() => parseCommandChain("cd data && python3 parse_fire_protocol.py")).toThrow(
       /pass input\/data paths as arguments/i,

@@ -67,9 +67,9 @@ describe("codeSystemPrompt", () => {
     expect(CODE_SYSTEM_PROMPT).toMatch(/not a sub-profile/);
   });
 
-  it("keeps generated script tests rooted at the workspace instead of input data dirs", () => {
-    expect(CODE_SYSTEM_PROMPT).toMatch(/generated scripts from the workspace root/i);
-    expect(CODE_SYSTEM_PROMPT).toMatch(/do not `cd` into input/i);
+  it("keeps generated script tests near the script without making workspace-root cwd mandatory", () => {
+    expect(CODE_SYSTEM_PROMPT).toMatch(/default.*directory where the script was written/i);
+    expect(CODE_SYSTEM_PROMPT).toMatch(/do not assume.*input.*data.*directory.*cwd/i);
     expect(CODE_SYSTEM_PROMPT).toMatch(/pass data paths as arguments/i);
   });
 
