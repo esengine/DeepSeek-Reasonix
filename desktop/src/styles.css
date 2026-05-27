@@ -832,6 +832,7 @@ html[data-platform="macos"] .titlebar .tb-left {
 
 .sidebar {
   grid-area: side;
+  container: sidebar / inline-size;
   background: var(--bg-2);
   border-right: 1px solid var(--border);
   display: flex;
@@ -848,9 +849,11 @@ html[data-platform="macos"] .titlebar .tb-left {
 }
 .side-head .new-btn {
   flex: 1;
+  min-width: 0;
   height: 30px;
   display: inline-flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 0 10px;
   font-size: 14px;
@@ -863,6 +866,15 @@ html[data-platform="macos"] .titlebar .tb-left {
 .side-head .new-btn:hover {
   background: var(--accent-strong);
 }
+.side-head .new-btn svg {
+  flex: 0 0 auto;
+}
+.side-head .new-btn > span:not(.shortcut) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .side-head .new-btn kbd {
   font-family: inherit;
   font-size: 14px;
@@ -872,6 +884,8 @@ html[data-platform="macos"] .titlebar .tb-left {
   font-weight: 500;
 }
 .side-head .new-btn .shortcut {
+  display: none;
+  flex: 0 0 auto;
   margin-left: auto;
 }
 .side-head .new-btn .shortcut kbd {
@@ -886,7 +900,13 @@ html[data-platform="macos"] .titlebar .tb-left {
   padding: 1px 5px;
   box-shadow: none;
 }
+@container sidebar (min-width: 191px) {
+  .side-head .new-btn .shortcut {
+    display: inline-flex;
+  }
+}
 .side-head .icon-btn {
+  flex: 0 0 auto;
   width: 30px;
   height: 30px;
   border-radius: 6px;
@@ -7378,4 +7398,3 @@ html[data-platform="macos"] .splash {
     grid-template-columns: 1fr;
   }
 }
-
