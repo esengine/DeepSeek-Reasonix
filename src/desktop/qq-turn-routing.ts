@@ -40,6 +40,10 @@ export function setQQPendingInteraction(
   state.pendingByTab.set(tabId, { gateId, kind, payload });
 }
 
+export function hasQQPendingInteraction(state: QQTurnRoutingState, tabId: string): boolean {
+  return state.pendingByTab.has(tabId);
+}
+
 export function takeQQPendingInteraction(
   state: QQTurnRoutingState,
   tabId: string,
