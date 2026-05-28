@@ -9,6 +9,7 @@ import React from "react";
 import type { EditMode } from "../../config.js";
 import type { JobRegistry } from "../../tools/jobs.js";
 import { useRenderTrace } from "./render-trace.js";
+import { SURFACE } from "./theme/tokens.js";
 
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
 import { PromptInput } from "./PromptInput.js";
@@ -110,7 +111,12 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
   }) => {
     useRenderTrace("ComposerArea");
     const inputArea = (
-      <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+      <Box
+        flexDirection="column"
+        flexShrink={0}
+        flexWrap="nowrap"
+        backgroundColor={SURFACE.bgInput}
+      >
         <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
           {slashMatches !== null ? (
             <SlashSuggestions
