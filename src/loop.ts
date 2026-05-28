@@ -92,7 +92,7 @@ export interface CacheFirstLoopOptions {
   reasoningEffort?: ReasoningEffort;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
-  /** Maximum tool-call iterations per turn. Overrides config/env. Default 9. */
+  /** Maximum tool-call iterations per turn. Overrides config/env. Default 50. */
   maxIterPerTurn?: number;
   session?: string;
   /** PreToolUse + PostToolUse only — UserPromptSubmit / Stop live at the App boundary. */
@@ -135,7 +135,7 @@ export class CacheFirstLoop {
   /** Hard iteration cap per turn — prevents runaway tool-call loops from
    *  burning unlimited API budget. The model gets one final force-summary
    *  call when the cap fires. Override via REASONIX_MAX_ITER env var. */
-  static readonly DEFAULT_MAX_ITER_PER_TURN = 9;
+  static readonly DEFAULT_MAX_ITER_PER_TURN = 50;
   /** Files the model has read this session; gates edit_file / multi_edit so SEARCH text matches on-disk bytes. Cleared on fold / mechanical truncate (the model's byte-level view of the elided history is gone). In-memory only — naturally empty on resume. */
   readonly readTracker = new ReadTracker();
 
@@ -769,13 +769,12 @@ export class CacheFirstLoop {
       }
       // Hard iteration cap — prevents runaway tool-call loops from
       // consuming unlimited API budget. (#2037 BUG-028)
-      const maxIter = parsePositiveIntEnv(process.env.REASONIX_MAX_ITER) ?? this.maxIterPerTurn;
-      if (iter >= maxIter) {
+      if (iter >= this.maxIterPerTurn) {
         yield {
           turn: this._turn,
           role: "warning",
           severity: "high",
-          content: t("loop.iterLimitReached", { max: maxIter }),
+          content: t("loop.iterLimitReached", { max: this.maxIterPerTurn }),
         };
         yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
         this._steerQueue.length = 0;

@@ -2490,4 +2490,54 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
     // The +1 is the summary API call recorded as a turn.
     expect(fetchMock).toHaveBeenCalledTimes(CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN + 1);
   });
+
+  it("respects custom maxIterPerTurn option", async () => {
+    const customCap = 3;
+    const infiniteResponses: FakeResponseShape[] = Array.from(
+      { length: customCap + 50 },
+      (_, i) => ({
+        content: "",
+        tool_calls: [
+          {
+            id: `call_${i}`,
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i }) },
+          },
+        ],
+      }),
+    );
+    infiniteResponses.push({ content: "Summary." });
+
+    const fetchMock = fakeFetch(infiniteResponses);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "noop",
+      description: "does nothing",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      maxIterPerTurn: customCap,
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
+    const warnEv = events.find(
+      (e) => e.role === "warning" && /iteration cap/i.test(e.content ?? ""),
+    );
+    expect(warnEv).toBeDefined();
+    expect(warnEv!.content).toContain(String(customCap));
+
+    // Tool dispatches = customCap (one per iter) + 1 force-summary call.
+    expect(fetchMock).toHaveBeenCalledTimes(customCap + 1);
+  });
 });

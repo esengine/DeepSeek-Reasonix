@@ -239,7 +239,7 @@ export interface ReasonixConfig {
    *  to the wallet currency if available, then defaults to CNY. */
   costCurrency?: string;
   /** Maximum tool-call iterations per turn. Prevents runaway loops from consuming
-   *  unlimited API budget. Default 9. Env `REASONIX_MAX_ITER` overrides. */
+   *  unlimited API budget. Default 50. Env `REASONIX_MAX_ITER` overrides. */
   maxIterPerTurn?: number;
   projects?: {
     [absoluteRootDir: string]: {
@@ -1262,7 +1262,7 @@ export function saveShowSystemEvents(on: boolean, path: string = defaultConfigPa
   writeConfig(cfg, path);
 }
 
-/** Load the per-turn iteration cap. Config > env > default (9). */
+/** Load the per-turn iteration cap. Config > env > default (50). */
 export function loadMaxIterPerTurn(path: string = defaultConfigPath()): number {
   const fromConfig = readConfig(path).maxIterPerTurn;
   if (typeof fromConfig === "number" && fromConfig > 0) return fromConfig;
@@ -1271,7 +1271,7 @@ export function loadMaxIterPerTurn(path: string = defaultConfigPath()): number {
     const n = Number(fromEnv);
     if (Number.isFinite(n) && n > 0) return n;
   }
-  return 9;
+  return 50;
 }
 
 export function loadRecentWorkspaces(path: string = defaultConfigPath()): string[] {

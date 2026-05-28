@@ -300,6 +300,7 @@ export interface TranslationSchema {
     foldedHistory: string;
     aggressivelyFoldedHistory: string;
     forcingSummary: string;
+    iterLimitReached: string;
   };
   errors: {
     contextOverflow: string;

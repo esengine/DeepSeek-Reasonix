@@ -734,6 +734,8 @@ export const JA: TranslationSchema = {
       "コンテキスト {before}/{ctxMax} ({pct}%) — {beforeMessages} メッセージ → {afterMessages} に強制折りたたみ（サマリー {summaryChars} 文字）。続行します。",
     forcingSummary:
       "コンテキスト {before}/{ctxMax} ({pct}%) — 収集内容からサマリーを強制生成中。/compact、/clear、または /new でリセットしてください。",
+    iterLimitReached:
+      "ターンあたりの反復上限（{max} 回のツール呼出しラウンド）に達しました。収集内容のサマリーを強制生成中。maxIterPerTurn 設定または REASONIX_MAX_ITER 環境変数で上書きできます。",
   },
   errors: {
     contextOverflow:
