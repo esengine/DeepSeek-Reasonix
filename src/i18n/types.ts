@@ -975,6 +975,7 @@ export interface TranslationSchema {
     securityReview: string;
     test: string;
     qq: string;
+    feishu: string;
   };
   shortcutsHelp: {
     title: string;

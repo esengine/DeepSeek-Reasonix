@@ -1,4 +1,4 @@
-/** Project scope wins over global. Only names+descriptions enter the prefix; bodies load lazily into the append-only log. */
+﻿/** Project scope wins over global. Only names+descriptions enter the prefix; bodies load lazily into the append-only log. */
 
 import {
   constants,
@@ -654,6 +654,42 @@ Docs are the fallback, not the main path:
 
 Use this skill when the user needs help getting QQ working.`;
 
+const BUILTIN_FEISHU_BODY = `Help the user configure or troubleshoot the built-in Feishu channel in Reasonix. This skill is INLINED on purpose — stay in the parent loop and keep the guidance short.
+
+What this skill is for:
+- Feishu first-time setup
+- Feishu common troubleshooting
+- CLI path
+
+Key facts:
+- Feishu is a remote channel attached to an existing Reasonix session, not a separate mode.
+- Feishu for now is CLI-first; it attaches to the current CLI session.
+- Feishu requires explicit access control before it can accept messages.
+- If the channel has no configured owner or allowlist, treat that as setup incomplete rather than as a transport failure.
+
+Safety boundary:
+- Use this reminder when needed: "⚠️ App Secret is sensitive. Do not send it as a normal chat message to the model. Only enter it when the Feishu connect prompt asks for it; if you already pasted it into chat, rotate it in Feishu Open Platform."
+- If credentials are needed, tell the user to enter them only in the CLI \`/feishu connect\` prompt.
+- If access is not configured yet, tell the user they will also need an owner openid during \`/feishu connect\`.
+- You cannot apply for a Feishu app, log into Feishu Open Platform, or inspect the user's admin console for them.
+- If the user pastes a secret into chat, tell them to rotate it and continue without repeating it back.
+
+How to answer:
+- If the user only mentions "feishu" or uses another vague reference, first confirm whether they want Feishu channel setup, connection help, or troubleshooting before giving steps.
+- First figure out whether this is first-time setup or troubleshooting.
+- Prefer the shortest next action, not a long manual.
+- Use one concrete verification step at a time.
+- Ask only the minimum follow-up needed to unblock them.
+
+Do not:
+- dump long architecture explanations unless asked
+- broaden into QQ / Telegram / Discord unless explicitly asked
+
+Docs are the fallback, not the main path:
+- Feishu Open Platform: https://open.feishu.cn/
+
+Use this skill when the user needs help getting Feishu working.`;
+
 const BUILTIN_SKILLS: readonly Skill[] = Object.freeze([
   Object.freeze<Skill>({
     name: "explore",
@@ -705,6 +741,15 @@ const BUILTIN_SKILLS: readonly Skill[] = Object.freeze([
     description:
       "Guide QQ channel setup and troubleshooting for CLI or desktop. Best for: first-time setup, QQ connection failures, desktop QQ not replying, App ID / App Secret / QQ environment questions, and current-session routing behavior. Inlined — use when the user clearly needs help configuring or fixing the QQ channel.",
     body: BUILTIN_QQ_BODY,
+    scope: "builtin",
+    path: "(builtin)",
+    runAs: "inline",
+  }),
+  Object.freeze<Skill>({
+    name: "feishu",
+    description:
+      "Guide Feishu channel setup and troubleshooting for CLI. Best for: first-time setup, Feishu connection failures, App ID / App Secret / owner openid questions, and 'connected but not replying' cases. Inlined — use when the user clearly needs help configuring or fixing the Feishu channel.",
+    body: BUILTIN_FEISHU_BODY,
     scope: "builtin",
     path: "(builtin)",
     runAs: "inline",

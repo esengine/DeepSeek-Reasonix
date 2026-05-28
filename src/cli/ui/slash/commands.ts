@@ -222,6 +222,13 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: ["connect", "status", "disconnect"],
     aliases: ["wx"],
   },
+  {
+    cmd: "feishu",
+    group: "extend",
+    argsHint: "<connect|status|disconnect>",
+    summary: "connect, inspect, or disconnect the Feishu channel",
+    argCompleter: ["connect", "status", "disconnect"],
+  },
 
   {
     cmd: "init",

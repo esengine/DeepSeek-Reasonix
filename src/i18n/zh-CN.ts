@@ -366,6 +366,10 @@ export const zhCN: TranslationSchema = {
       description: "连接/查看/断开微信通道，首次连接默认使用 iLink 扫码登录",
       argsHint: "[connect [manual token accountId [baseUrl]]|status|disconnect]",
     },
+    feishu: {
+      description: "连接/查看/断开飞书通道，首次连接需提供 App ID、App Secret 和 owner openid",
+      argsHint: "[connect [appId appSecret ownerOpenId]|status|disconnect]",
+    },
     setup: { description: "提醒您退出并运行 `reasonix setup`" },
     semantic: {
       description: "显示 semantic_search 状态 — 已构建？Ollama 已安装？如何启用",
@@ -960,6 +964,53 @@ export const zhCN: TranslationSchema = {
       accessRequired:
         "微信启动前必须配置访问控制。请在配置中设置 `weixin.ownerUserId` 或 `weixin.allowlist`。",
       rateLimited: "微信已限流授权用户 {userId}：{seconds} 秒内超过 5 条消息。",
+    },
+    feishu: {
+      unavailable: "/feishu 在当前会话中不可用。",
+      connecting: "飞书：正在连接...",
+      connectFailed: "飞书连接失败：{reason}",
+      disconnecting: "飞书：正在断开...",
+      disconnectFailed: "飞书断开失败：{reason}",
+      usage: "用法：/feishu connect [appId appSecret ownerOpenId] | /feishu status | /feishu disconnect",
+      promptAppId:
+        "飞书首次配置：请输入飞书开放平台 App ID 后回车。输入 /cancel 可取消。",
+      promptAppSecret:
+        "飞书首次配置：请输入飞书开放平台 App Secret 后回车。输入 /cancel 可取消。",
+      promptOwnerOpenId:
+        "飞书首次配置：请输入要允许控制此通道的用户 openid 后回车。输入 /cancel 可取消。",
+      setupWaitingAppId: "等待输入 App ID",
+      setupWaitingAppSecret: "等待输入 App Secret",
+      setupWaitingOwnerOpenId: "等待输入 owner openid",
+      setupCancelled: "飞书首次配置已取消。",
+      credentialsRequired: "飞书 App ID、App Secret 和 owner openid 不能为空。",
+      connected: "飞书已在{mode}模式下连接成功，后续启动会自动启用。",
+      alreadyConnected: "飞书已在{mode}模式下连接，自动启动已启用。",
+      disconnected: "飞书已断开连接，自动启动已关闭。",
+      status:
+        "飞书：{connected}，自动启动{enabled}，凭据{configured}，appId {appId}，访问控制 {access}，当前模式 {mode}。",
+      statusSetup: "飞书：首次配置进行中 - {step}",
+      stateConnected: "已连接",
+      stateDisconnected: "未连接",
+      stateEnabled: "已启用",
+      stateDisabled: "未启用",
+      stateConfigured: "已配置",
+      stateNotConfigured: "未配置",
+      none: "无",
+      modeChat: "聊天",
+      modeCode: "代码",
+      accessOwner: "所有者 {owner}",
+      accessOwnerWithAllowlist: "所有者 {owner}，白名单 {count}",
+      accessAllowlist: "白名单 {count}",
+      accessRestricted: "访问控制未配置",
+      lockAlreadyRunning:
+        "飞书通道已在进程 {pid} 中运行。请先停止该进程，再启动新的飞书通道。",
+      unauthorizedMessage: "飞书忽略了未授权 openid {openid} 的消息。当前访问控制：{access}。",
+      missingAppId: "缺少飞书 App ID。请先运行 `/feishu connect` 完成配置。",
+      missingAppSecret: "缺少飞书 App Secret。请先运行 `/feishu connect` 完成配置。",
+      missingOwnerOpenId:
+        "缺少飞书 owner openid。请先运行 `/feishu connect` 完成访问控制配置。",
+      authFailed: "飞书机器人鉴权失败，请检查 App ID 和 App Secret。",
+      readyTimeout: "飞书机器人 15 秒内未就绪，请检查 App ID 和 App Secret。",
     },
     admin: {
       doctorNeedsTui: "/doctor 需要 TUI 上下文（postDoctor 已连接）。",

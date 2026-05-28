@@ -781,7 +781,7 @@ describe("Built-in skills", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it("ships explore/research/review/security-review/test/qq as builtins", () => {
+  it("ships explore/research/review/security-review/test/qq/feishu as builtins", () => {
     const store = new SkillStore({ homeDir: home }); // builtins ON
     const names = store.list().map((s) => s.name);
     expect(names).toContain("explore");
@@ -790,6 +790,7 @@ describe("Built-in skills", () => {
     expect(names).toContain("security-review");
     expect(names).toContain("test");
     expect(names).toContain("qq");
+    expect(names).toContain("feishu");
     const explore = store.read("explore");
     expect(explore?.runAs).toBe("subagent");
     expect(explore?.scope).toBe("builtin");
@@ -815,6 +816,11 @@ describe("Built-in skills", () => {
     expect(qq?.scope).toBe("builtin");
     expect(qq?.body).toMatch(/\/qq connect/);
     expect(qq?.body).toMatch(/QQ Channel/);
+    const feishu = store.read("feishu");
+    expect(feishu?.runAs).toBe("inline");
+    expect(feishu?.scope).toBe("builtin");
+    expect(feishu?.body).toMatch(/\/feishu connect/);
+    expect(feishu?.body).toMatch(/Feishu/);
   });
 
   it("user-authored skills override a builtin with the same name", () => {
@@ -843,5 +849,7 @@ describe("Built-in skills", () => {
     expect(out).not.toContain("test [🧬 subagent]");
     expect(out).toContain("qq —");
     expect(out).not.toContain("qq [🧬 subagent]");
+    expect(out).toContain("feishu —");
+    expect(out).not.toContain("feishu [🧬 subagent]");
   });
 });

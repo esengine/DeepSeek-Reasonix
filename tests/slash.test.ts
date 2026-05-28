@@ -704,6 +704,7 @@ describe("handleSlash", () => {
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("logs");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("language");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("weixin");
+    expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("feishu");
     expect(suggestSlashCommands("lan").map((s) => s.cmd)).toContain("language");
   });
 

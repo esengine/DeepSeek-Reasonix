@@ -148,6 +148,14 @@ export interface WeixinBotConfig {
   allowlist?: string[];
 }
 
+export interface FeishuBotConfig {
+  appId?: string;
+  appSecret?: string;
+  enabled?: boolean;
+  ownerOpenId?: string;
+  allowlist?: string[];
+}
+
 export interface PricingOverride {
   inputCacheHit?: number;
   inputCacheMiss?: number;
@@ -330,6 +338,8 @@ export interface ReasonixConfig {
   qq?: QQBotConfig;
   telegram?: TelegramBotConfig;
   weixin?: WeixinBotConfig;
+  /** Feishu Bot configuration */
+  feishu?: FeishuBotConfig;
 }
 
 export interface CustomMemoryTypeConfig {
@@ -1864,6 +1874,25 @@ export function saveWeixinConfig(
     baseUrl: cfg.baseUrl,
     enabled: cfg.enabled,
     ownerUserId,
+    allowlist,
+  };
+  writeConfig(rootCfg, path);
+}
+
+export function saveFeishuConfig(
+  cfg: LoadedFeishuConfig,
+  path: string = defaultConfigPath(),
+): void {
+  const rootCfg = readConfig(path);
+  const ownerOpenId = normalizeFeishuOpenId(cfg.ownerOpenId);
+  const allowlist = normalizeFeishuAllowlist(cfg.allowlist)?.filter(
+    (openid) => openid !== ownerOpenId,
+  );
+  rootCfg.feishu = {
+    appId: cfg.appId,
+    appSecret: cfg.appSecret,
+    enabled: cfg.enabled,
+    ownerOpenId,
     allowlist,
   };
   writeConfig(rootCfg, path);

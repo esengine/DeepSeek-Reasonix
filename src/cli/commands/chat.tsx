@@ -11,6 +11,7 @@ import {
   searchEnabled,
 } from "../../config.js";
 import { loadDotenv } from "../../env.js";
+import { FeishuChannel } from "../../feishu/channel.js";
 import { t } from "../../i18n/index.js";
 import {
   deleteSession,
@@ -134,6 +135,7 @@ interface RootProps extends ChatOptions {
   qqChannel?: QQChannel;
   telegramChannel?: TelegramChannel;
   weixinChannel?: WeixinChannel;
+  feishuChannel?: FeishuChannel;
   /** App fills this ref on mount so QQ messages flow into the TUI input queue. */
   qqSubmitRef: { current: ((text: string) => void) | null };
   /** App fills this ref on mount so QQ errors appear in the TUI log. */
@@ -142,6 +144,8 @@ interface RootProps extends ChatOptions {
   telegramErrorRef: { current: ((msg: string) => void) | null };
   weixinSubmitRef: { current: ((text: string) => void) | null };
   weixinErrorRef: { current: ((msg: string) => void) | null };
+  feishuSubmitRef: { current: ((text: string) => void) | null };
+  feishuErrorRef: { current: ((msg: string) => void) | null };
 }
 
 function Root({
@@ -256,12 +260,15 @@ function Root({
         qqChannel={appProps.qqChannel}
         telegramChannel={appProps.telegramChannel}
         weixinChannel={appProps.weixinChannel}
+        feishuChannel={appProps.feishuChannel}
         qqSubmitRef={appProps.qqSubmitRef}
         qqErrorRef={appProps.qqErrorRef}
         telegramSubmitRef={appProps.telegramSubmitRef}
         telegramErrorRef={appProps.telegramErrorRef}
         weixinSubmitRef={appProps.weixinSubmitRef}
         weixinErrorRef={appProps.weixinErrorRef}
+        feishuSubmitRef={appProps.feishuSubmitRef}
+        feishuErrorRef={appProps.feishuErrorRef}
         historyScrollMode={historyScrollMode}
         onSwitchSession={setActiveSession}
       />
@@ -371,12 +378,16 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   const telegramErrorRef: { current: ((msg: string) => void) | null } = { current: null };
   const weixinSubmitRef: { current: ((text: string) => void) | null } = { current: null };
   const weixinErrorRef: { current: ((msg: string) => void) | null } = { current: null };
+  const feishuSubmitRef: { current: ((text: string) => void) | null } = { current: null };
+  const feishuErrorRef: { current: ((msg: string) => void) | null } = { current: null };
   const qqRequested = cfg.qq?.enabled === true;
   const telegramRequested = cfg.telegram?.enabled === true;
   const weixinRequested = cfg.weixin?.enabled === true;
+  const feishuRequested = cfg.feishu?.enabled === true;
   let qqChannel: QQChannel | undefined;
   let telegramChannel: TelegramChannel | undefined;
   let weixinChannel: WeixinChannel | undefined;
+  let feishuChannel: FeishuChannel | undefined;
   if (qqRequested) {
     const channel = new QQChannel({
       onSubmitMessage: (text) => qqSubmitRef.current?.(text),
@@ -419,6 +430,20 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       process.stderr.write(`Weixin channel failed: ${(err as Error).message}\n`);
     }
   }
+  if (feishuRequested) {
+    const channel = new FeishuChannel({
+      onSubmitMessage: (text) => feishuSubmitRef.current?.(text),
+      onError: (msg) => feishuErrorRef.current?.(msg),
+    });
+    process.stderr.write("Connecting Feishu bot...\n");
+    try {
+      await channel.start();
+      feishuChannel = channel;
+      process.stderr.write("Feishu bot connected\n");
+    } catch (err) {
+      process.stderr.write(`Feishu bot failed: ${(err as Error).message}\n`);
+    }
+  }
 
   // Before render() — shims Ink's per-card useBoxMetrics resize subscribe
   // path so N cards don't accumulate N native stdout listeners.
@@ -458,12 +483,15 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
       qqChannel={qqChannel}
       telegramChannel={telegramChannel}
       weixinChannel={weixinChannel}
+      feishuChannel={feishuChannel}
       qqSubmitRef={qqSubmitRef}
       qqErrorRef={qqErrorRef}
       telegramSubmitRef={telegramSubmitRef}
       telegramErrorRef={telegramErrorRef}
       weixinSubmitRef={weixinSubmitRef}
       weixinErrorRef={weixinErrorRef}
+      feishuSubmitRef={feishuSubmitRef}
+      feishuErrorRef={feishuErrorRef}
     />,
     { exitOnCtrlC: true, incrementalRendering: true },
   );
@@ -475,6 +503,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     qqChannel?.stop();
     telegramChannel?.stop();
     weixinChannel?.stop();
+    feishuChannel?.stop();
     await drainTtyResponses();
   }
 }

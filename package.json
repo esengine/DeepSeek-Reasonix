@@ -81,6 +81,7 @@
   },
   "dependencies": {
     "@alcalzone/ansi-tokenize": "^0.3.0",
+    "@larksuiteoapi/node-sdk": "^1.60.0",
     "auto-bind": "^5.0.1",
     "bidi-js": "^1.0.3",
     "chalk": "^5.3.0",

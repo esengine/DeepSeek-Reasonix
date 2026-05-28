@@ -384,6 +384,11 @@ export const EN: TranslationSchema = {
         "connect, inspect, or disconnect the Weixin channel for this session (first connect uses iLink QR login)",
       argsHint: "[connect [manual token accountId [baseUrl]]|status|disconnect]",
     },
+    feishu: {
+      description:
+        "connect, inspect, or disconnect the Feishu channel for this session (first connect guides App ID / App Secret / owner openid setup)",
+      argsHint: "[connect [appId appSecret ownerOpenId]|status|disconnect]",
+    },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
       description: "show semantic_search status — built? Ollama installed? how to enable",
@@ -1014,6 +1019,56 @@ export const EN: TranslationSchema = {
         "Weixin requires access control before it can start. Set `weixin.ownerUserId` or `weixin.allowlist` in config.",
       rateLimited:
         "Weixin rate-limited authorized user {userId}: more than 5 messages in {seconds}s.",
+    },
+    feishu: {
+      unavailable: "/feishu is not available in this session.",
+      connecting: "Feishu: connecting...",
+      connectFailed: "Feishu connect failed: {reason}",
+      disconnecting: "Feishu: disconnecting...",
+      disconnectFailed: "Feishu disconnect failed: {reason}",
+      usage:
+        "Usage: /feishu connect [appId appSecret ownerOpenId] | /feishu status | /feishu disconnect",
+      promptAppId:
+        "Feishu setup: enter your Feishu Open Platform App ID, then press Enter. Type /cancel to abort.",
+      promptAppSecret:
+        "Feishu setup: enter your Feishu Open Platform App Secret, then press Enter. Type /cancel to abort.",
+      promptOwnerOpenId:
+        "Feishu setup: enter the user openid that should be allowed to control this channel, then press Enter. Type /cancel to abort.",
+      setupWaitingAppId: "waiting for App ID",
+      setupWaitingAppSecret: "waiting for App Secret",
+      setupWaitingOwnerOpenId: "waiting for owner openid",
+      setupCancelled: "Feishu setup cancelled.",
+      credentialsRequired: "Feishu App ID, App Secret, and owner openid are required.",
+      connected: "Feishu connected in {mode} mode. It will auto-start on future launches.",
+      alreadyConnected: "Feishu is already connected in {mode} mode. Auto-start is enabled.",
+      disconnected: "Feishu disconnected. Auto-start is disabled.",
+      status:
+        "Feishu: {connected}, auto-start {enabled}, credentials {configured}, appId {appId}, access {access}, current mode {mode}.",
+      statusSetup: "Feishu: setup in progress - {step}",
+      stateConnected: "connected",
+      stateDisconnected: "disconnected",
+      stateEnabled: "enabled",
+      stateDisabled: "disabled",
+      stateConfigured: "configured",
+      stateNotConfigured: "not configured",
+      none: "none",
+      modeChat: "chat",
+      modeCode: "code",
+      accessOwner: "owner {owner}",
+      accessOwnerWithAllowlist: "owner {owner}, allowlist {count}",
+      accessAllowlist: "allowlist {count}",
+      accessRestricted: "restricted (unconfigured)",
+      lockAlreadyRunning:
+        "Feishu channel is already running in process {pid}. Stop that process before starting another Feishu channel.",
+      unauthorizedMessage:
+        "Feishu ignored message from unauthorized openid {openid}. Current access: {access}.",
+      missingAppId: "Feishu App ID is required. Run `/feishu connect` to configure.",
+      missingAppSecret: "Feishu App Secret is required. Run `/feishu connect` to configure.",
+      missingOwnerOpenId:
+        "Feishu owner openid is required. Run `/feishu connect` to configure access control.",
+      authFailed: "Feishu bot authentication failed - check your App ID and App Secret.",
+      readyTimeout:
+        "Feishu bot did not become ready within 15s - check your App ID and App Secret.",
     },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",
