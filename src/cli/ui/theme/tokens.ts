@@ -31,6 +31,24 @@ export interface ThemeTokens {
     bash: Color;
     selected: Color;
   };
+  pill: {
+    bg: Color;
+    section: Record<
+      | "reason"
+      | "output"
+      | "tool"
+      | "shell"
+      | "task"
+      | "taskDone"
+      | "taskFailed"
+      | "plan"
+      | "user"
+      | "empty",
+      { bg: Color; fg: Color }
+    >;
+    path: { bg: Color; fg: Color };
+    model: Record<"flash" | "pro" | "r1" | "unknown", { bg: Color; fg: Color }>;
+  };
   card: Record<
     | "user"
     | "reasoning"
@@ -53,7 +71,7 @@ export interface ThemeTokens {
   >;
 }
 
-type ThemeBase = Omit<ThemeTokens, "card">;
+type ThemeBase = Omit<ThemeTokens, "card" | "pill">;
 
 function card(fg: ThemeTokens["fg"], tone: ThemeTokens["tone"]): ThemeTokens["card"] {
   return {
@@ -77,8 +95,38 @@ function card(fg: ThemeTokens["fg"], tone: ThemeTokens["tone"]): ThemeTokens["ca
   };
 }
 
+function pill(
+  surface: ThemeTokens["surface"],
+  tone: ThemeTokens["tone"],
+  fg: ThemeTokens["fg"],
+): ThemeTokens["pill"] {
+  const bg = surface.bgElev;
+  return {
+    bg,
+    section: {
+      reason: { bg, fg: tone.violet },
+      output: { bg, fg: tone.info },
+      tool: { bg, fg: tone.info },
+      shell: { bg, fg: tone.info },
+      task: { bg, fg: tone.info },
+      taskDone: { bg, fg: tone.ok },
+      taskFailed: { bg, fg: tone.err },
+      plan: { bg, fg: tone.violet },
+      user: { bg, fg: tone.brand },
+      empty: { bg, fg: fg.faint },
+    },
+    path: { bg, fg: fg.meta },
+    model: {
+      flash: { bg, fg: tone.info },
+      pro: { bg, fg: tone.violet },
+      r1: { bg, fg: tone.accent },
+      unknown: { bg, fg: fg.meta },
+    },
+  };
+}
+
 function defineTheme(base: ThemeBase): ThemeTokens {
-  return { ...base, card: card(base.fg, base.tone) };
+  return { ...base, card: card(base.fg, base.tone), pill: pill(base.surface, base.tone, base.fg) };
 }
 
 const dark = defineTheme({
@@ -348,6 +396,7 @@ export const TONE_ACTIVE = proxyTokens((theme) => theme.toneActive);
 export const SURFACE = proxyTokens((theme) => theme.surface);
 export const MESSAGE_BG = proxyTokens((theme) => theme.messageBg);
 export const CARD = proxyTokens((theme) => theme.card);
+export const PILL = proxyTokens((theme) => theme.pill);
 
 export type CardTone = keyof ThemeTokens["card"];
 

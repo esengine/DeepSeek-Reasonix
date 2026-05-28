@@ -6,7 +6,7 @@ import { LiveExpandContext } from "../layout/LiveExpandContext.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
-import { PILL_MODEL, Pill, modelBadgeFor } from "../primitives/Pill.js";
+import { Pill, modelBadgeFor, pillModel, pillPath } from "../primitives/Pill.js";
 import { PULSE_CIRCLE, Pulse } from "../primitives/Pulse.js";
 import type { StreamingCard as StreamingCardData } from "../state/cards.js";
 import { clipToCells } from "../text-width.js";
@@ -91,7 +91,7 @@ function useLiveTokenRate(card: StreamingCardData, enabled: boolean): TokenRate 
   return rateFromTokens(estimate.tokens, card.ts, Date.now());
 }
 
-const PILL_RATE = { bg: "#11141a", fg: "#8b949e" } as const;
+const pillRate = pillPath;
 
 export function StreamingCard({ card }: { card: StreamingCardData }): React.ReactElement {
   const { stdout } = useStdout();
@@ -103,14 +103,14 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
 
   const modelBadge = card.model ? modelBadgeFor(card.model) : null;
   const modelPill = modelBadge ? (
-    <Pill label={modelBadge.label} {...PILL_MODEL[modelBadge.kind]} bold={false} />
+    <Pill label={modelBadge.label} {...pillModel()[modelBadge.kind]} bold={false} />
   ) : null;
 
   if (card.done && !card.aborted) {
     const { tokens, tps } = tokenRate(card.text, card.ts, card.endedAt ?? Date.now());
     const ratePill =
       tokens >= MIN_TOKENS_FOR_RATE && tps !== null ? (
-        <Pill label={`${formatTokenCount(tokens)} tok · ${tps} t/s`} {...PILL_RATE} bold={false} />
+        <Pill label={`${formatTokenCount(tokens)} tok · ${tps} t/s`} {...pillRate()} bold={false} />
       ) : null;
     return (
       <Card tone={TONE.ok}>
@@ -144,10 +144,10 @@ export function StreamingCard({ card }: { card: StreamingCardData }): React.Reac
 
   const liveRatePill =
     !aborted && liveRate.tokens >= MIN_TOKENS_FOR_RATE && liveRate.tps !== null ? (
-      <Pill label={`${liveRate.tps} t/s`} {...PILL_RATE} bold={false} />
+      <Pill label={`${liveRate.tps} t/s`} {...pillRate()} bold={false} />
     ) : null;
   const expandPill = !aborted ? (
-    <Pill label={expanded ? "expanded ⌃o" : "preview ⌃o"} {...PILL_RATE} bold={false} />
+    <Pill label={expanded ? "expanded ⌃o" : "preview ⌃o"} {...pillRate()} bold={false} />
   ) : null;
 
   return (

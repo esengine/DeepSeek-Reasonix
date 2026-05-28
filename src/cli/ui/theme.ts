@@ -3,6 +3,7 @@ import React from "react";
 import { useThemeTokens } from "./theme/context.js";
 import {
   CARD,
+  PILL,
   FG as TOKEN_FG,
   MESSAGE_BG as TOKEN_MESSAGE_BG,
   SURFACE as TOKEN_SURFACE,
@@ -94,6 +95,7 @@ function currentTheme(): ThemeTokens {
     surface: TOKEN_SURFACE,
     messageBg: TOKEN_MESSAGE_BG,
     card: CARD,
+    pill: PILL,
   };
 }
 

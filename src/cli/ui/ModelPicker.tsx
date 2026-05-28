@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import type { ReasoningEffort } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
-import { PILL_MODEL, Pill, modelBadgeFor } from "./primitives/Pill.js";
+import { Pill, modelBadgeFor, pillModel } from "./primitives/Pill.js";
 import { FG, TONE } from "./theme/tokens.js";
 
 export type ModelPickerOutcome =
@@ -187,7 +187,7 @@ function ModelRow({
         {id.padEnd(24)}
       </Text>
       <Text> </Text>
-      <Pill label={badge.label} {...PILL_MODEL[badge.kind]} bold={false} />
+      <Pill label={badge.label} {...pillModel()[badge.kind]} bold={false} />
       {active ? <Text color={TONE.brand}>{t("modelPicker.currentLabel")}</Text> : null}
     </Box>
   );
