@@ -1179,6 +1179,13 @@ export const JA: TranslationSchema = {
       projectNone2: "   `/permissions add <prefix>` で直接追加してください。）",
       projectNoRoot:
         "プロジェクト許可リスト — （プロジェクトルートなし; チャットモードではビルトインエントリのみ表示）",
+      globalHeader: "グローバル許可リスト ({count}) — すべてのプロジェクトに適用",
+      globalNone: "  （なし — `/permissions add --global <prefix>` で追加）",
+      addGlobalInfo:
+        "▸ グローバル許可リストに追加: {prefix}\n  → 以降 `{prefix}` はすべてのプロジェクトで確認なしに実行されます。",
+      removeGlobalEmpty: "▸ 削除できるグローバル許可リストの項目がありません。",
+      clearGlobalConfirm:
+        "グローバル許可リストの {count} 件を削除しようとしています。'confirm' を付けて再実行してください: /permissions clear --global confirm",
       builtinHeader: "ビルトイン許可リスト ({count}) — 読み取り専用、組み込み",
       subcommands:
         "サブコマンド: /permissions add <prefix> · /permissions remove <prefix-or-N> · /permissions clear confirm",

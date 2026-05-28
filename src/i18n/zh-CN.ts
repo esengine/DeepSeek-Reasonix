@@ -1048,6 +1048,13 @@ export const zhCN: TranslationSchema = {
       projectNone1: '  （无 — 在 ShellConfirm 提示中选择 "always allow" 添加一个，',
       projectNone2: "   或直接 `/permissions add <prefix>`。）",
       projectNoRoot: "项目允许列表 — （无项目根目录；聊天模式仅显示内置条目）",
+      globalHeader: "全局允许列表（{count}）— 对所有项目生效",
+      globalNone: "  （无 — 用 `/permissions add --global <prefix>` 添加。）",
+      addGlobalInfo:
+        "▸ 已添加到全局允许列表：{prefix}\n  → 之后 `{prefix}` 在所有项目中执行都不再询问。",
+      removeGlobalEmpty: "▸ 全局允许列表没有可删除的条目。",
+      clearGlobalConfirm:
+        "将清除 {count} 条全局允许列表条目。请加上 'confirm' 重新执行：/permissions clear --global confirm",
       builtinHeader: "内置允许列表（{count}）— 只读，已编译",
       subcommands:
         "子命令：/permissions add <prefix> · /permissions remove <prefix-or-N> · /permissions clear confirm",

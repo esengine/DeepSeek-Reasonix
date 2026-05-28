@@ -4,6 +4,7 @@ import {
   loadEditMode,
   loadEndpoint,
   loadFilesystemOutlineThresholdBytes,
+  loadGlobalShellAllowed,
   loadJavaSourceEnabled,
   loadProjectShellAllowed,
   loadResolvedSkillPaths,
@@ -70,11 +71,17 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
       outlineThresholdBytes,
       autoGitRollback: {},
     });
-    const cfg = readConfig();
+    const cfg = readConfig(opts.configPath);
     registerShellTools(tools, {
       rootDir: root,
-      extraAllowed: () => loadProjectShellAllowed(root),
-      allowAll: () => loadEditMode() === "yolo",
+      // Global allowlist applies everywhere; project list adds to it (#2059).
+      extraAllowed: () => [
+        ...new Set([
+          ...loadGlobalShellAllowed(opts.configPath),
+          ...loadProjectShellAllowed(root, opts.configPath),
+        ]),
+      ],
+      allowAll: () => loadEditMode(opts.configPath) === "yolo",
       jobs,
       onJobsChanged: opts.onJobsChanged,
       sensitivePaths: cfg.sensitivePaths,

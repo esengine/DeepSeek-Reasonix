@@ -1112,6 +1112,13 @@ export const EN: TranslationSchema = {
       projectNone1: '  (none — pick "always allow" on a ShellConfirm prompt to add one,',
       projectNone2: "   or `/permissions add <prefix>` directly.)",
       projectNoRoot: "Project allowlist — (no project root; chat mode shows builtin entries only)",
+      globalHeader: "Global allowlist ({count}) — applies to every project",
+      globalNone: "  (none — add with `/permissions add --global <prefix>`.)",
+      addGlobalInfo:
+        "▸ added to global allowlist: {prefix}\n  → next `{prefix}` invocation runs without prompting in every project.",
+      removeGlobalEmpty: "▸ no global allowlist entries to remove.",
+      clearGlobalConfirm:
+        "about to drop {count} global allowlist entr{plural}. Re-run with the word 'confirm': /permissions clear --global confirm",
       builtinHeader: "Builtin allowlist ({count}) — read-only, baked in",
       subcommands:
         "Subcommands: /permissions add <prefix> · /permissions remove <prefix-or-N> · /permissions clear confirm",

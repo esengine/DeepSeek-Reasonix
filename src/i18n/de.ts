@@ -1085,6 +1085,13 @@ export const de: TranslationSchema = {
       projectNone2: "   oder `/permissions add <präfix>` direkt.)",
       projectNoRoot:
         "Projekt-Allowlist — (kein Projekt-Root; Chat-Modus zeigt nur Builtin-Einträge)",
+      globalHeader: "Globale Allowlist ({count}) — gilt für alle Projekte",
+      globalNone: "  (keine — mit `/permissions add --global <prefix>` hinzufügen.)",
+      addGlobalInfo:
+        "▸ zur globalen Allowlist hinzugefügt: {prefix}\n  → der nächste Aufruf von `{prefix}` läuft in jedem Projekt ohne Rückfrage.",
+      removeGlobalEmpty: "▸ keine Einträge in der globalen Allowlist zum Entfernen.",
+      clearGlobalConfirm:
+        "{count} Einträge der globalen Allowlist werden entfernt. Mit dem Wort 'confirm' erneut ausführen: /permissions clear --global confirm",
       builtinHeader: "Builtin-Allowlist ({count}) — schreibgeschützt, fest eincompiliert",
       subcommands:
         "Unterbefehle: /permissions add <präfix> · /permissions remove <präfix-oder-N> · /permissions clear confirm",

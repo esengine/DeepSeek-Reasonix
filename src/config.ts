@@ -275,6 +275,9 @@ export interface ReasonixConfig {
       pathAllowed?: string[];
     };
   };
+  /** Global shell allowlist — command prefixes auto-approved across ALL projects (#2059).
+   *  Merged (union) with the per-project `projects[<root>].shellAllowed` at check time. */
+  shellAllowedGlobal?: string[];
   /** Issue #259 — user-configurable sensitive-path prefixes and filename patterns.
    *  Commands touching these paths are demoted to the confirm gate even when allowlisted. */
   sensitivePaths?: {
@@ -459,6 +462,7 @@ const STRING_ARRAY_FIELDS: Array<readonly string[]> = [
   ["mcpDisabled"],
   ["promptHistory"],
   ["recentWorkspaces"],
+  ["shellAllowedGlobal"],
   ["skills", "paths"],
 ];
 
@@ -1160,6 +1164,45 @@ export function clearProjectShellAllowed(
   if (!cfg.projects) cfg.projects = {};
   if (!cfg.projects[key]) cfg.projects[key] = {};
   cfg.projects[key].shellAllowed = [];
+  writeConfig(cfg, path);
+  return existing.length;
+}
+
+/** Global allowlist applies to every project (#2059) — read with no rootDir. */
+export function loadGlobalShellAllowed(path: string = defaultConfigPath()): string[] {
+  return readConfig(path).shellAllowedGlobal ?? [];
+}
+
+export function addGlobalShellAllowed(prefix: string, path: string = defaultConfigPath()): void {
+  const trimmed = prefix.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (existing.includes(trimmed)) return;
+  cfg.shellAllowedGlobal = [...existing, trimmed];
+  writeConfig(cfg, path);
+}
+
+/** Match is exact after trim — NOT prefix-match (mirrors removeProjectShellAllowed). */
+export function removeGlobalShellAllowed(
+  prefix: string,
+  path: string = defaultConfigPath(),
+): boolean {
+  const trimmed = prefix.trim();
+  if (!trimmed) return false;
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (!existing.includes(trimmed)) return false;
+  cfg.shellAllowedGlobal = existing.filter((p) => p !== trimmed);
+  writeConfig(cfg, path);
+  return true;
+}
+
+export function clearGlobalShellAllowed(path: string = defaultConfigPath()): number {
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (existing.length === 0) return 0;
+  cfg.shellAllowedGlobal = [];
   writeConfig(cfg, path);
   return existing.length;
 }
