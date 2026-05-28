@@ -3568,19 +3568,33 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   background: var(--violet-soft);
   border-color: transparent;
 }
-.chip .x {
-  cursor: pointer;
-  opacity: 0.5;
+.composer-textarea-wrap {
+  position: relative;
 }
-.chip .x:hover {
-  opacity: 1;
+.composer-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 14px 6px;
+  font-size: 14px;
+  line-height: 1.55;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--fg);
 }
-
+.composer-backdrop .hl-token {
+  color: var(--accent);
+}
 .composer textarea {
   display: block;
   width: 100%;
   resize: none;
-  background: none;
+  background: transparent;
   border: none;
   outline: none;
   padding: 12px 14px 6px;
@@ -3589,6 +3603,10 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   min-height: calc(2 * 1.55em + 18px);
   overflow-y: hidden;
   font-family: inherit;
+  color: transparent;
+  caret-color: var(--fg);
+  position: relative;
+  z-index: 1;
 }
 .composer textarea::placeholder {
   color: var(--muted-2);
