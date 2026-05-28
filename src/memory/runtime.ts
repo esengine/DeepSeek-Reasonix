@@ -113,6 +113,9 @@ export class AppendOnlyLog {
    *  buildMessages() is called 2-3x per loop iteration. Invalidated by
    *  append / compactInPlace / initWindow. */
   private _fullHistoryCache: { version: number; messages: ChatMessage[] } | null = null;
+  // Monotonic counter bumped on every mutation. Consumers compare against
+  // their own snapshot to detect staleness without destructive check-and-clear.
+  private _version = 0;
 
   constructor(opts?: { windowSize?: number; sessionPath?: string }) {
     this._windowSize = opts?.windowSize ?? DEFAULT_WINDOW;
@@ -128,6 +131,7 @@ export class AppendOnlyLog {
         : [...messages];
     this._totalLength = messages.length;
     this._fullHistoryCache = null;
+    this._version++;
   }
 
   append(message: ChatMessage): void {
@@ -140,6 +144,7 @@ export class AppendOnlyLog {
       this._entries.shift();
     }
     this._fullHistoryCache = null;
+    this._version++;
   }
 
   extend(messages: ChatMessage[]): void {
@@ -151,6 +156,7 @@ export class AppendOnlyLog {
     this._entries = [...replacement];
     this._totalLength = replacement.length;
     this._fullHistoryCache = null;
+    this._version++;
   }
 
   // Checks memory window first; falls back to disk for older messages.
@@ -205,6 +211,12 @@ export class AppendOnlyLog {
 
   get sessionPath(): string | null {
     return this._sessionPath;
+  }
+
+  /** Monotonic version counter — bumped on every mutation. Consumers store
+   *  their own snapshot and compare to detect staleness (non-destructive). */
+  get version(): number {
+    return this._version;
   }
 }
 

@@ -524,12 +524,23 @@ export class CacheFirstLoop {
   }
   private _inflightCounter = 0;
 
+  // Cached result from the last healActiveLogBeforeSend() pass.
+  // Invalidated when the log version changes (append/compactInPlace).
+  private _healedCache: ChatMessage[] | null = null;
+  private _healedVersion = -1;
+
   private buildMessages(): ChatMessage[] {
     const healedMessages = this.healActiveLogBeforeSend();
     return [...this.prefix.toMessages(), ...healedMessages];
   }
 
   private healActiveLogBeforeSend(): ChatMessage[] {
+    // Skip the expensive 4-pass healing pipeline when the log hasn't
+    // changed since the last call — the common case between iterations
+    // where no new messages were appended.
+    if (this._healedCache && this._healedVersion === this.log.version) {
+      return this._healedCache;
+    }
     const current = this.log.toFullHistory();
     const healed = healLoadedMessages(current, DEFAULT_MAX_RESULT_CHARS);
     const argsShrunk = shrinkOversizedToolCallArgsByTokens(
@@ -538,9 +549,13 @@ export class CacheFirstLoop {
     );
     const pruned = stripDroppableReasoningContent(argsShrunk.messages);
     if (healed.healedCount === 0 && argsShrunk.healedCount === 0 && pruned.prunedCount === 0) {
+      this._healedCache = current;
+      this._healedVersion = this.log.version;
       return current;
     }
     this.log.compactInPlace(pruned.messages);
+    this._healedCache = pruned.messages;
+    this._healedVersion = this.log.version;
     if (this.sessionName) {
       try {
         rewriteSession(this.sessionName, pruned.messages);
