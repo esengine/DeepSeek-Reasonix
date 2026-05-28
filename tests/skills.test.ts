@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillStore, applySkillsIndex, validateSkillFrontmatter } from "../src/skills.js";
 
 const BASE = "You are a test assistant.";
+const DIR_LINK_TYPE = process.platform === "win32" ? "junction" : "dir";
 
 type SkillRoot = "project" | "global" | "custom";
 
@@ -453,7 +454,7 @@ describe("SkillStore", () => {
       // Create a symlink to it inside the global skills dir
       const skillsDir = join(home, ".reasonix", "skills");
       mkdirSync(skillsDir, { recursive: true });
-      symlinkSync(realDir, join(skillsDir, "linked-skill"));
+      symlinkSync(realDir, join(skillsDir, "linked-skill"), DIR_LINK_TYPE);
 
       const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
       const skills = store.list();
@@ -470,7 +471,11 @@ describe("SkillStore", () => {
   it.skipIf(process.platform === "win32")("skips broken symlinks gracefully", () => {
     const skillsDir = join(home, ".reasonix", "skills");
     mkdirSync(skillsDir, { recursive: true });
-    symlinkSync(join(tmpdir(), `nonexistent-target-${Date.now()}`), join(skillsDir, "broken"));
+    symlinkSync(
+      join(tmpdir(), `nonexistent-target-${Date.now()}`),
+      join(skillsDir, "broken"),
+      DIR_LINK_TYPE,
+    );
 
     const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
     expect(store.list()).toEqual([]);
