@@ -408,8 +408,8 @@ export const zhCN: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "切换网络搜索后端 — bing（默认，国内裸 IP 直连）、bing-intl（国际版索引）、searxng（自托管）、metaso（每日 100 次）、tavily（每月 1000 次免费）、perplexity（AI 直接回答）、exa（AI 直接回答）、brave（独立索引）或 ollama（Ollama 云端搜索）",
-      argsHint: "<bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama> [<key>]",
+        "切换网络搜索后端 — bing（默认，国内裸 IP 直连）、bing-intl（国际版索引）、searxng（自托管）、metaso（每日 100 次）、baidu（百度 AI Search，官方文档写有每月 1500 次免费额度）、tavily（每月 1000 次免费）、perplexity（AI 直接回答）、exa（AI 直接回答）、brave（独立索引）或 ollama（Ollama 云端搜索）",
+      argsHint: "<bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama> [<key>]",
     },
   },
   wizard: {
@@ -1136,6 +1136,8 @@ export const zhCN: TranslationSchema = {
       usageSearxngUrl: "  /search-engine searxng <url>      使用 SearXNG 自定义端点",
       usageMetaso:
         "  /search-engine metaso              使用 Metaso API（每天 100 次免费，配置你自己的 API 密钥可提升限额）",
+      usageBaidu:
+        "  /search-engine baidu               使用百度 AI Search API（官方文档写有每月 1500 次免费额度 — 设置 BAIDU_API_KEY 或 QIANFAN_API_KEY）",
       usageTavily:
         "  /search-engine tavily              使用 Tavily API（LLM 友好，每月 1000 次免费 — 设置 TAVILY_API_KEY 或 config 的 tavilyApiKey；注册 https://tavily.com）",
       usagePerplexity:
@@ -1152,6 +1154,8 @@ export const zhCN: TranslationSchema = {
       switched: '已切换网页搜索引擎为 "{engine}"。{note}',
       switchedSearxngNote: " 请确保 SearXNG 在 {endpoint} 运行。",
       switchedMetasoNote: " 每日限额 100 次（配置你自己的 API 密钥可提升限额）。",
+      switchedBaiduNote:
+        " 请设置 BAIDU_API_KEY、QIANFAN_API_KEY 或 config 中的 `baiduApiKey`；百度官方文档写有每月 1500 次免费额度。",
       switchedTavilyNote:
         " 请设置环境变量 TAVILY_API_KEY 或 config 中的 `tavilyApiKey`；https://tavily.com 每月 1000 次免费。",
       switchedPerplexityNote:
@@ -1455,25 +1459,25 @@ export const zhCN: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} — try: 搜索后端返回错误；请改写查询，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search {status} — try: 搜索后端返回错误；请改写查询，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     rateLimit429:
       "web_search 429 — try: 等待 10 秒后重试，或改写查询；搜索后端正在对该客户端进行限流",
     forbidden403:
-      "web_search 403 — try: 搜索后端拒绝该客户端访问；使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎，或稍后重试",
+      "web_search 403 — try: 搜索后端拒绝该客户端访问；使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎，或稍后重试",
     serverError5xx:
       "web_search {status} — try: 在浏览器中打开搜索 URL；若能加载则属临时故障，等 30 秒重试即可",
     bingBlocked:
-      "web_search: Bing 反爬页面 — 频率限制或被屏蔽 — try: 等待 30 秒后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: Bing 反爬页面 — 频率限制或被屏蔽 — try: 等待 30 秒后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     bingNoResults:
-      "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）— try: 使用更简单的关键词改写查询，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: 返回 0 条结果但响应看起来不是正常空结果页（{chars} 字符，前 120 字符：{preview}）— try: 使用更简单的关键词改写查询，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     invalidEndpoint:
       'web_search: 无效的 SearXNG 端点 "{endpoint}" — try: 使用 /search-endpoint http://host:port 设置有效的 URL',
     endpointMustBeHttp:
       "web_search: SearXNG 端点必须是 http(s) 协议，当前为 {protocol} — try: 使用 /search-endpoint http://host:port 设置有效的 URL",
     cannotReach:
-      "web_search: 无法访问 SearXNG 服务器 {endpoint} — try: 安装并启动 SearXNG（https://github.com/searxng/searxng，例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: 无法访问 SearXNG 服务器 {endpoint} — try: 安装并启动 SearXNG（https://github.com/searxng/searxng，例如 `docker run -d -p 8080:8080 searxng/searxng`），或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     searxngNoResults:
-      "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）— try: 使用更简单的关键词改写查询，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: 返回 0 条结果但 SearXNG 响应看起来不是正常空结果页（{chars} 字符）— try: 使用更简单的关键词改写查询，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     metasoMissingKey:
       "web_search: Metaso 需要 API 密钥 — 设置 METASO_API_KEY，或使用 /search-engine metaso <key> 配置；可在 https://metaso.cn/search-api/playground 获取密钥",
     metasoDailyLimit:
@@ -1483,26 +1487,35 @@ export const zhCN: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metaso 请求频率限制 — 等待后重试，或在 https://metaso.cn/search-api/playground 获取自己的密钥",
     metasoServerError:
-      "web_search: Metaso 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: Metaso 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     metasoParseError: "web_search: Metaso 返回无法解析的响应（HTTP {status}）— 稍后重试",
     metasoApiError: "web_search: Metaso API 错误（code {code}: {message}）— 稍后重试",
+    baiduMissingKey:
+      "web_search: 百度 AI Search 需要 API 密钥 — 设置 BAIDU_API_KEY 或 QIANFAN_API_KEY 环境变量，在 ~/.reasonix/config.json 配置 `baiduApiKey`，或运行 /search-engine baidu <key>；可在百度智能云千帆获取密钥",
+    baiduUnauthorized:
+      "web_search: 百度 AI Search API 密钥被拒绝 — 检查 BAIDU_API_KEY、QIANFAN_API_KEY 或 `baiduApiKey`",
+    baiduRateLimit:
+      "web_search: 百度 AI Search 请求频率限制或配额用尽 — 等待后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
+    baiduServerError:
+      "web_search: 百度 AI Search 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
+    baiduParseError: "web_search: 百度 AI Search 返回无法解析的响应（HTTP {status}）— 稍后重试",
     tavilyMissingKey:
       "web_search: Tavily 后端需要 API 密钥 — 设置 TAVILY_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `tavilyApiKey`；https://tavily.com 每月 1000 次免费",
     tavilyUnauthorized:
       "web_search: Tavily API 密钥被拒绝 — 检查 TAVILY_API_KEY，或在 https://tavily.com 获取密钥",
     tavilyRateLimit:
-      "web_search: Tavily 请求频率限制或月度配额用尽 — 等待、用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎，或升级 Tavily 计划",
+      "web_search: Tavily 请求频率限制或月度配额用尽 — 等待、用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎，或升级 Tavily 计划",
     tavilyServerError:
-      "web_search: Tavily 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: Tavily 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     tavilyParseError: "web_search: Tavily 返回无法解析的响应（HTTP {status}）— 稍后重试",
     perplexityMissingKey:
       "web_search: Perplexity 后端需要 API 密钥 — 设置 PERPLEXITY_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `perplexityApiKey`；在 https://perplexity.ai/settings/api 获取密钥",
     perplexityUnauthorized:
       "web_search: Perplexity API 密钥被拒绝 — 检查 PERPLEXITY_API_KEY，或在 https://perplexity.ai/settings/api 获取密钥",
     perplexityRateLimit:
-      "web_search: Perplexity 请求频率限制 — 等待后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: Perplexity 请求频率限制 — 等待后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     perplexityServerError:
-      "web_search: Perplexity 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: Perplexity 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     perplexityParseError: "web_search: Perplexity 返回无法解析的响应（HTTP {status}）— 稍后重试",
     exaMissingKey:
       "web_search: Exa 后端需要 API 密钥 — 设置 EXA_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `exaApiKey`；https://exa.ai 每月 1000 次免费",
@@ -1511,7 +1524,7 @@ export const zhCN: TranslationSchema = {
     exaRateLimit:
       "web_search: Exa 请求频率限制或月度配额用尽 — 等待升级，或在 https://exa.ai/pricing 查看计划",
     exaServerError:
-      "web_search: Exa 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: Exa 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     exaParseError: "web_search: Exa 返回无法解析的响应（HTTP {status}）— 稍后重试",
     braveMissingKey:
       "web_search: Brave Search 需要 API 密钥 — 设置环境变量 BRAVE_SEARCH_API_KEY（或 BRAVE_API_KEY）或 config 的 `braveApiKey`；https://brave.com/search/api/ 每月 2000 次免费",
@@ -1520,16 +1533,16 @@ export const zhCN: TranslationSchema = {
     braveRateLimit:
       "web_search: Brave Search API 达到速率限制或月度配额用尽 — 等待或升级 https://brave.com/search/api/",
     braveServerError:
-      "web_search: Brave Search 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "web_search: Brave Search 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     braveParseError: "web_search: Brave Search 返回无法解析的响应（HTTP {status}）— 稍后重试",
     ollamaMissingKey:
       "Ollama 需要 API 密钥 — 设置 OLLAMA_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `ollamaApiKey`；在 https://ollama.com/settings/keys 获取密钥",
     ollamaUnauthorized:
       "Ollama API 密钥被拒绝 — 检查 OLLAMA_API_KEY 或在 https://ollama.com/settings/keys 获取密钥",
     ollamaRateLimit:
-      "Ollama 请求频率限制或配额用尽 — 等待后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "Ollama 请求频率限制或配额用尽 — 等待后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     ollamaServerError:
-      "Ollama 服务器错误（{status}）— {url} — 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+      "Ollama 服务器错误（{status}）— {url} — 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama 切换引擎",
     ollamaParseError: "Ollama 返回无法解析的响应（HTTP {status}）— {url} — 稍后重试",
     fetchOllamaMissingKey:
       "web_fetch: Ollama 抓取需要 API 密钥 — 设置 OLLAMA_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `ollamaApiKey`；在 https://ollama.com/settings/keys 获取密钥",

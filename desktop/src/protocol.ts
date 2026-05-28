@@ -296,8 +296,17 @@ export type EditMode = "review" | "auto" | "yolo" | "plan";
 
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
-export type WebSearchEngineName = "bing" | "bing-intl" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa"
-  | "brave" | "ollama";
+export type WebSearchEngineName =
+  | "bing"
+  | "bing-intl"
+  | "searxng"
+  | "metaso"
+  | "baidu"
+  | "tavily"
+  | "perplexity"
+  | "exa"
+  | "brave"
+  | "ollama";
 
 export type SettingsEvent = {
   type: "$settings";
@@ -314,6 +323,7 @@ export type SettingsEvent = {
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
+    baidu?: string;
     tavily?: string;
     perplexity?: string;
     exa?: string;
@@ -365,6 +375,7 @@ export type SettingsPatch = {
   webSearchEngine?: WebSearchEngineName;
   webSearchEndpoint?: string | null;
   metasoApiKey?: string | null;
+  baiduApiKey?: string | null;
   tavilyApiKey?: string | null;
   perplexityApiKey?: string | null;
   exaApiKey?: string | null;

@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadMetasoApiKey, writeConfig } from "../src/config.js";
+import { loadBaiduApiKey, loadMetasoApiKey, writeConfig } from "../src/config.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
   formatSearchResults,
@@ -499,6 +499,173 @@ describe("searchMetaso", () => {
       expect(outMax.length).toBeLessThanOrEqual(2);
       const outMin = await webSearch("x", { engine: "metaso", topK: 0 });
       expect(outMin.length).toBe(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("searchBaidu", () => {
+  const originalBaiduKey = process.env.BAIDU_API_KEY;
+
+  beforeEach(() => {
+    process.env.BAIDU_API_KEY = "test-baidu-key";
+  });
+
+  afterEach(() => {
+    if (originalBaiduKey === undefined) {
+      // biome-ignore lint/performance/noDelete: env var must be restored to absent
+      delete process.env.BAIDU_API_KEY;
+    } else {
+      process.env.BAIDU_API_KEY = originalBaiduKey;
+    }
+  });
+
+  it("requires an API key before contacting Baidu AI Search", async () => {
+    // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+    delete process.env.BAIDU_API_KEY;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/Baidu.*API key/i);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("POSTs to Baidu AI Search with JSON body and auth header", async () => {
+    const captured: { url: string; method: string; headers: Record<string, string>; body: string } =
+      { url: "", method: "", headers: {}, body: "" };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      captured.url = String(url);
+      captured.method = init?.method ?? "GET";
+      captured.headers = (init?.headers ?? {}) as Record<string, string>;
+      captured.body = String(init?.body ?? "");
+      return new Response(
+        JSON.stringify({
+          references: [
+            { title: "Result One", url: "https://example.com/1", content: "Snippet one." },
+            { title: "Result Two", url: "https://example.com/2", content: "Snippet two." },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const out = await webSearch("test query", { engine: "baidu", topK: 5 });
+      expect(captured.url).toBe("https://qianfan.baidubce.com/v2/ai_search/web_search");
+      expect(captured.method).toBe("POST");
+      expect(captured.headers.Authorization).toBe(`Bearer ${loadBaiduApiKey()}`);
+      expect(captured.headers["Content-Type"]).toBe("application/json");
+      const body = JSON.parse(captured.body);
+      expect(body.messages).toEqual([{ role: "user", content: "test query" }]);
+      expect(out).toEqual([
+        { title: "Result One", url: "https://example.com/1", snippet: "Snippet one." },
+        { title: "Result Two", url: "https://example.com/2", snippet: "Snippet two." },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("returns [] when Baidu returns no references", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ references: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("empty", { engine: "baidu" })).resolves.toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("skips Baidu references without a URL or title", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            references: [
+              { title: "No URL", content: "skip" },
+              { url: "https://example.com/no-title", content: "skip" },
+              { title: "Good", url: "https://example.com/good", content: "keep" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("mixed", { engine: "baidu" })).resolves.toEqual([
+        { title: "Good", url: "https://example.com/good", snippet: "keep" },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("clamps Baidu topK to [1, 10]", async () => {
+    const references = Array.from({ length: 12 }, (_, i) => ({
+      title: `Result ${i + 1}`,
+      url: `https://example.com/${i + 1}`,
+      content: `Snippet ${i + 1}`,
+    }));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ references }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("x", { engine: "baidu", topK: 99 })).resolves.toHaveLength(10);
+      await expect(webSearch("x", { engine: "baidu", topK: 0 })).resolves.toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Baidu auth error on 401 and 403", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ error: "invalid key" }), { status: 401 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/Baidu.*API key/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Baidu rate-limit error on 429", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ error: "rate limited" }), { status: 429 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/rate-limit|quota/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Baidu parse error on invalid JSON", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response("not json", { status: 200 }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/unparseable/i);
     } finally {
       globalThis.fetch = originalFetch;
     }

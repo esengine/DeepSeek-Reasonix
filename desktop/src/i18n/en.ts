@@ -168,6 +168,8 @@ export const en = {
     webSearchEngineBingIntl: "bing-intl — international index via www.bing.com",
     webSearchEngineSearxng: "searxng — self-hosted (set endpoint via /se searxng <url>)",
     webSearchEngineMetaso: "metaso — 100/day free (CN-friendly, free key at metaso.cn)",
+    webSearchEngineBaidu:
+      "baidu — Baidu AI Search, 1500/mo free in Baidu docs (set BAIDU_API_KEY or QIANFAN_API_KEY)",
     webSearchEngineTavily: "tavily — 1000/mo free (set TAVILY_API_KEY)",
     webSearchEnginePerplexity: "perplexity — AI-native (set PERPLEXITY_API_KEY)",
     webSearchEngineExa: "exa — AI-native 1000/mo free (set EXA_API_KEY)",
@@ -180,6 +182,7 @@ export const en = {
     webSearchApiKeyClear: "Clear",
     webSearchApiKey: {
       metaso: "Metaso API key",
+      baidu: "Baidu API key",
       tavily: "Tavily API key",
       perplexity: "Perplexity API key",
       exa: "Exa API key",

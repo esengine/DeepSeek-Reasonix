@@ -6,6 +6,7 @@ import {
   type ReasoningEffort,
   isPlausibleKey,
   isReasoningEffort,
+  loadBaiduApiKey,
   loadModel,
   normalizeSkillPathEntries,
   normalizeSkillPaths,
@@ -28,6 +29,7 @@ interface SettingsBody {
   reasoningEffort?: unknown;
   search?: unknown;
   webSearchEngine?: unknown;
+  baiduApiKey?: unknown;
   model?: unknown;
   budgetUsd?: unknown;
   skillPaths?: unknown;
@@ -49,6 +51,7 @@ const VALID_WEB_SEARCH_ENGINES = new Set([
   "bing-intl",
   "searxng",
   "metaso",
+  "baidu",
   "tavily",
   "perplexity",
   "exa",
@@ -73,6 +76,7 @@ export async function handleSettings(
       writeConfig(cfg, ctx.configPath);
     }
     const live = ctx.loop;
+    const baiduApiKey = loadBaiduApiKey(ctx.configPath);
     return {
       status: 200,
       body: {
@@ -83,6 +87,9 @@ export async function handleSettings(
         reasoningEffort: isReasoningEffort(cfg.reasoningEffort) ? cfg.reasoningEffort : "high",
         search: cfg.search !== false,
         webSearchEngine: readWebSearchEngine(ctx.configPath),
+        webSearchApiKeys: {
+          baidu: baiduApiKey ? redactKey(baiduApiKey) : undefined,
+        },
         editMode: ctx.getEditMode?.() ?? cfg.editMode ?? "review",
         session: cfg.session ?? null,
         model: live?.model ?? loadModel(ctx.configPath),
@@ -183,7 +190,7 @@ export async function handleSettings(
           status: 400,
           body: {
             error:
-              "webSearchEngine must be bing | bing-intl | searxng | metaso | tavily | perplexity | exa | brave | ollama",
+              "webSearchEngine must be bing | bing-intl | searxng | metaso | baidu | tavily | perplexity | exa | brave | ollama",
           },
         };
       }
@@ -192,12 +199,21 @@ export async function handleSettings(
         | "bing-intl"
         | "searxng"
         | "metaso"
+        | "baidu"
         | "tavily"
         | "perplexity"
         | "exa"
         | "brave"
         | "ollama";
       changed.push("webSearchEngine");
+    }
+    if (fields.baiduApiKey !== undefined) {
+      if (fields.baiduApiKey !== null && typeof fields.baiduApiKey !== "string") {
+        return { status: 400, body: { error: "baiduApiKey must be a string or null" } };
+      }
+      const trimmed = typeof fields.baiduApiKey === "string" ? fields.baiduApiKey.trim() : "";
+      cfg.baiduApiKey = trimmed.length > 0 ? trimmed : undefined;
+      changed.push("baiduApiKey");
     }
     let modelPendingLive: string | null = null;
     let budgetPending: number | null | undefined;

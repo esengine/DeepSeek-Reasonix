@@ -711,6 +711,11 @@ export interface TranslationSchema {
     metasoServerError: string;
     metasoParseError: string;
     metasoApiError: string;
+    baiduMissingKey: string;
+    baiduUnauthorized: string;
+    baiduRateLimit: string;
+    baiduServerError: string;
+    baiduParseError: string;
     tavilyMissingKey: string;
     tavilyUnauthorized: string;
     tavilyRateLimit: string;

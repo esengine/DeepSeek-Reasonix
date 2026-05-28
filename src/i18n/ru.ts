@@ -552,7 +552,7 @@ export const ru: TranslationSchema = {
     braveRateLimit:
       "web_search: Превышен лимит запросов или месячная квота для Brave Search API — подождите или перейдите на платную версию на сайте https://brave.com/search/api/",
     braveServerError:
-      "web_search: Ошибка сервера Brave Search ({status}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
+      "web_search: Ошибка сервера Brave Search ({status}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     braveParseError:
       "web_search: Brave Search вернул неразборчивый ответ (HTTP {status}) — попробуйте позже",
     ollamaMissingKey:
@@ -560,9 +560,9 @@ export const ru: TranslationSchema = {
     ollamaUnauthorized:
       "web_search: Ключ API Ollama отклонён — проверьте OLLAMA_API_KEY или получите новый на https://ollama.com/settings/keys",
     ollamaRateLimit:
-      "web_search: Ollama превысил лимит или квоту — подождите и повторите или выберите другой поисковик: /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Ollama превысил лимит или квоту — подождите и повторите или выберите другой поисковик: /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     ollamaServerError:
-      "web_search: Ошибка сервера Ollama ({status}) ({url}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Ошибка сервера Ollama ({status}) ({url}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     ollamaParseError:
       "web_search: Ollama вернул неразборчивый ответ (HTTP {status}) ({url}) — попробуйте позже",
     fetchOllamaMissingKey:

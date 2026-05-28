@@ -248,10 +248,21 @@ export type Settings = {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
-  webSearchEngine?: "bing" | "bing-intl" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  webSearchEngine?:
+    | "bing"
+    | "bing-intl"
+    | "searxng"
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama";
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
+    baidu?: string;
     tavily?: string;
     perplexity?: string;
     exa?: string;
@@ -362,6 +373,7 @@ type Action =
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
   const {
     metasoApiKey: _metaso,
+    baiduApiKey: _baidu,
     tavilyApiKey: _tavily,
     perplexityApiKey: _perplexity,
     exaApiKey: _exa,

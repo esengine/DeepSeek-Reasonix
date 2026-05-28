@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +11,7 @@ import {
   suggestSlashCommands,
 } from "../src/cli/ui/slash.js";
 import { DeepSeekClient, Usage } from "../src/client.js";
-import { loadTheme } from "../src/config.js";
+import { loadTheme, readConfig } from "../src/config.js";
 import {
   getLanguage,
   notifyLanguageChange,
@@ -200,6 +200,81 @@ describe("handleSlash", () => {
       expect(saved.model).toBe("deepseek-made-up");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("/search-engine accepts baidu and saves an inline API key", () => {
+    const tempHome = mkdtempSync(join(tmpdir(), "reasonix-slash-search-engine-"));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    try {
+      process.env.HOME = tempHome;
+      process.env.USERPROFILE = tempHome;
+      const result = handleSlash("search-engine", ["baidu", "test-baidu-key"], makeLoop());
+      expect(result.info).toContain("baidu");
+      const configPath = join(tempHome, ".reasonix", "config.json");
+      expect(readConfig(configPath)).toMatchObject({
+        webSearchEngine: "baidu",
+        baiduApiKey: "test-baidu-key",
+      });
+    } finally {
+      if (originalHome === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
+      if (existsSync(tempHome)) rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("/search-engine baidu without a key points at both supported env vars", () => {
+    const tempHome = mkdtempSync(join(tmpdir(), "reasonix-slash-search-engine-"));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    const originalBaidu = process.env.BAIDU_API_KEY;
+    const originalQianfan = process.env.QIANFAN_API_KEY;
+    try {
+      process.env.HOME = tempHome;
+      process.env.USERPROFILE = tempHome;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BAIDU_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.QIANFAN_API_KEY;
+      const result = handleSlash("search-engine", ["baidu"], makeLoop());
+      expect(result.info).toContain("BAIDU_API_KEY or QIANFAN_API_KEY");
+    } finally {
+      if (originalHome === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (originalUserProfile === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = originalUserProfile;
+      }
+      if (originalBaidu === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.BAIDU_API_KEY;
+      } else {
+        process.env.BAIDU_API_KEY = originalBaidu;
+      }
+      if (originalQianfan === undefined) {
+        // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+        delete process.env.QIANFAN_API_KEY;
+      } else {
+        process.env.QIANFAN_API_KEY = originalQianfan;
+      }
+      if (existsSync(tempHome)) rmSync(tempHome, { recursive: true, force: true });
     }
   });
 

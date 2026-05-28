@@ -4,6 +4,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { parse as parseHtml } from "node-html-parser";
 import {
+  loadBaiduApiKey,
   loadBraveApiKey,
   loadExaApiKey,
   loadMetasoApiKey,
@@ -47,12 +48,13 @@ export interface WebSearchOptions {
   signal?: AbortSignal;
   /** Config path for provider-specific keys. Defaults to ~/.reasonix/config.json. */
   configPath?: string;
-  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  /** Backend engine: "bing" (scrapes cn.bing.com HTML — default, works from CN without proxy), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "baidu" (Baidu AI Search API), "tavily" (LLM-friendly JSON API), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
   engine?:
     | "bing"
     | "bing-intl"
     | "searxng"
     | "metaso"
+    | "baidu"
     | "tavily"
     | "perplexity"
     | "exa"
@@ -77,6 +79,7 @@ const USER_AGENT =
 const BING_ENDPOINT = "https://cn.bing.com/search";
 const BING_INTL_ENDPOINT = "https://www.bing.com/search";
 const METASO_ENDPOINT = "https://metaso.cn/api/v1";
+const BAIDU_AI_SEARCH_ENDPOINT = "https://qianfan.baidubce.com/v2/ai_search/web_search";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions";
 const EXA_ENDPOINT = "https://api.exa.ai/answer";
@@ -251,6 +254,9 @@ export async function webSearch(
   if (opts.engine === "metaso") {
     return searchMetaso(query, opts);
   }
+  if (opts.engine === "baidu") {
+    return searchBaidu(query, opts);
+  }
   if (opts.engine === "searxng") {
     return searchSearxng(query, opts);
   }
@@ -375,7 +381,7 @@ interface MetasoSearchResponse {
 
 async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(100, opts.topK ?? DEFAULT_TOPK));
-  const apiKey = loadMetasoApiKey();
+  const apiKey = loadMetasoApiKey(opts.configPath);
   if (!apiKey) throw new Error(t("webErrors.metasoMissingKey"));
 
   let resp: Response;
@@ -441,6 +447,69 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
     url: wp.link,
     snippet: wp.snippet ?? wp.summary ?? "",
   }));
+}
+
+interface BaiduReference {
+  title?: string;
+  url?: string;
+  content?: string;
+  snippet?: string;
+}
+
+interface BaiduSearchResponse {
+  references?: BaiduReference[];
+}
+
+async function searchBaidu(query: string, opts: WebSearchOptions = {}): Promise<SearchResult[]> {
+  const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
+  const apiKey = loadBaiduApiKey(opts.configPath);
+  if (!apiKey) throw new Error(t("webErrors.baiduMissingKey"));
+
+  let resp: Response;
+  try {
+    resp = await fetch(BAIDU_AI_SEARCH_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: query }],
+      }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
+      throw new Error(t("webErrors.cannotReach", { endpoint: BAIDU_AI_SEARCH_ENDPOINT }));
+    }
+    throw err;
+  }
+
+  const raw = await resp.text();
+  let data: BaiduSearchResponse;
+  try {
+    data = raw ? (JSON.parse(raw) as BaiduSearchResponse) : {};
+  } catch {
+    throw new Error(t("webErrors.baiduParseError", { status: resp.status }));
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(t("webErrors.baiduUnauthorized"));
+    }
+    if (resp.status === 429) throw new Error(t("webErrors.baiduRateLimit"));
+    throw new Error(t("webErrors.baiduServerError", { status: resp.status }));
+  }
+
+  return (data.references ?? [])
+    .filter((r) => typeof r.title === "string" && typeof r.url === "string")
+    .slice(0, topK)
+    .map((r) => ({
+      title: r.title!,
+      url: r.url!,
+      snippet: r.content ?? r.snippet ?? "",
+    }));
 }
 
 interface TavilyResultItem {

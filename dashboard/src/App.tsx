@@ -194,7 +194,20 @@ export type Settings = {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
-  webSearchEngine?: "bing" | "bing-intl" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  webSearchEngine?:
+    | "bing"
+    | "bing-intl"
+    | "searxng"
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama";
+  webSearchApiKeys?: {
+    baidu?: string;
+  };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
   version: string;
@@ -818,6 +831,7 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
           model: ev.model,
           editor: ev.editor,
           webSearchEngine: ev.webSearchEngine,
+          webSearchApiKeys: ev.webSearchApiKeys,
           subagentModels: ev.subagentModels,
           showSystemEvents: ev.showSystemEvents,
           version: ev.version,

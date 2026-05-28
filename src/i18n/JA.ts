@@ -449,8 +449,8 @@ export const JA: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "Web検索バックエンドを切り替え — bing（デフォルト、プロキシなしで中国から利用可）、searxng（セルフホスト）、metaso（無料100回/日）、tavily（無料1000回/月）、perplexity（AIネイティブ）、exa（AIネイティブ）",
-      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa> [<key>]",
+        "Web検索バックエンドを切り替え — bing（デフォルト、プロキシなしで中国から利用可）、bing-intl（国際インデックス）、searxng（セルフホスト）、metaso（無料100回/日）、baidu（Baidu AI Search、公式ドキュメントでは1500回/月無料）、tavily（無料1000回/月）、perplexity（AIネイティブ）、exa（AIネイティブ）、brave（独立インデックス）、ollama（OllamaクラウドWeb検索）",
+      argsHint: "<bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama> [<key>]",
     },
   },
   wizard: {
@@ -1249,6 +1249,8 @@ export const JA: TranslationSchema = {
       usageSearxngUrl: "  /search-engine searxng <url>      カスタムエンドポイントでSearXNGを使用",
       usageMetaso:
         "  /search-engine metaso              Metaso APIを使用（100回/日無料、独自APIキーで上限増）",
+      usageBaidu:
+        "  /search-engine baidu               Baidu AI Search APIを使用（公式ドキュメントでは1500回/月無料 — BAIDU_API_KEY または QIANFAN_API_KEY を設定）",
       usageTavily:
         "  /search-engine tavily              Tavily APIを使用（LLM向け、無料1000回/月 — TAVILY_API_KEY または tavilyApiKey を設定; https://tavily.com で取得）",
       usagePerplexity:
@@ -1268,6 +1270,8 @@ export const JA: TranslationSchema = {
       switched: 'Web検索エンジンを "{engine}" に切り替えました。{note}',
       switchedSearxngNote: " SearXNG が {endpoint} で実行されていることを確認してください。",
       switchedMetasoNote: " 1日100回のクォータがあります（独自APIキーでより高い上限に設定可能）。",
+      switchedBaiduNote:
+        " BAIDU_API_KEY、QIANFAN_API_KEY、または config の `baiduApiKey` を設定してください。Baiduドキュメントには月1500回無料と記載されています。",
       switchedTavilyNote:
         " TAVILY_API_KEY または `tavilyApiKey` を設定してください; 無料1000回/月 https://tavily.com。",
       switchedPerplexityNote:
@@ -1588,25 +1592,25 @@ export const JA: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} \u2014 対処: 検索バックエンドがエラーを返しました。クエリを言い換えるか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search {status} \u2014 対処: 検索バックエンドがエラーを返しました。クエリを言い換えるか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     rateLimit429:
       "web_search 429 \u2014 対処: 10秒待ってから再試行するか、クエリを言い換えてください。検索バックエンドがこのクライアントをレート制限しています",
     forbidden403:
-      "web_search 403 \u2014 対処: 検索バックエンドがこのクライアントをブロックしています。/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えるか、しばらく待って再試行してください",
+      "web_search 403 \u2014 対処: 検索バックエンドがこのクライアントをブロックしています。/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えるか、しばらく待って再試行してください",
     serverError5xx:
       "web_search {status} \u2014 対処: 検索URLをブラウザで開いてみてください。読み込める場合は一時的な問題で、30秒後に再試行すると改善する可能性があります",
     bingBlocked:
-      "web_search: Bingのアンチボットページ \u2014 レート制限またはブロックされました \u2014 対処: 30秒待って再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Bingのアンチボットページ \u2014 レート制限またはブロックされました \u2014 対処: 30秒待って再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     bingNoResults:
-      "web_search: 0件の結果ですが、レスポンスが実際の空ページとは異なります（{chars}文字、先頭120: {preview}）\u2014 対処: より簡単な用語でクエリを言い換えるか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: 0件の結果ですが、レスポンスが実際の空ページとは異なります（{chars}文字、先頭120: {preview}）\u2014 対処: より簡単な用語でクエリを言い換えるか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     invalidEndpoint:
       'web_search: 無効なSearXNGエンドポイント "{endpoint}" \u2014 対処: /search-endpoint http://host:port で有効なURLを設定してください',
     endpointMustBeHttp:
       "web_search: SearXNGエンドポイントはhttp(s)である必要がありますが、{protocol} が指定されました \u2014 対処: /search-endpoint http://host:port で有効なURLを設定してください",
     cannotReach:
-      "web_search: {endpoint} のSearXNGサーバーに到達できません \u2014 対処: SearXNGをインストールして起動するか（https://github.com/searxng/searxng, 例: `docker run -d -p 8080:8080 searxng/searxng`）、/search-engine bing|searxng|metaso|tavily|perplexity|exa で別のエンジンに切り替えてください",
+      "web_search: {endpoint} のSearXNGサーバーに到達できません \u2014 対処: SearXNGをインストールして起動するか（https://github.com/searxng/searxng, 例: `docker run -d -p 8080:8080 searxng/searxng`）、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama で別のエンジンに切り替えてください",
     searxngNoResults:
-      "web_search: 0件の結果ですが、SearXNGのレスポンスが空の結果ページとは異なります（{chars}文字）\u2014 対処: より簡単な用語でクエリを言い換えるか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: 0件の結果ですが、SearXNGのレスポンスが空の結果ページとは異なります（{chars}文字）\u2014 対処: より簡単な用語でクエリを言い換えるか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     metasoMissingKey:
       "web_search: MetasoにはAPIキーが必要です \u2014 METASO_API_KEY を設定するか、/search-engine metaso <key> で設定してください。https://metaso.cn/search-api/playground から取得できます",
     metasoDailyLimit:
@@ -1616,19 +1620,29 @@ export const JA: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metasoがレート制限されました \u2014 待って再試行するか、https://metaso.cn/search-api/playground から独自のAPIキーを取得してください",
     metasoServerError:
-      "web_search: Metasoサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Metasoサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     metasoParseError:
       "web_search: Metasoが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     metasoApiError:
       "web_search: Metaso APIエラー (コード {code}: {message}) \u2014 後で再試行してください",
+    baiduMissingKey:
+      "web_search: Baidu AI SearchにはAPIキーが必要です \u2014 BAIDU_API_KEY または QIANFAN_API_KEY 環境変数、~/.reasonix/config.json の `baiduApiKey`、または /search-engine baidu <key> を設定してください",
+    baiduUnauthorized:
+      "web_search: Baidu AI Search APIキーが拒否されました \u2014 BAIDU_API_KEY、QIANFAN_API_KEY、または `baiduApiKey` を確認してください",
+    baiduRateLimit:
+      "web_search: Baidu AI Searchがレート制限中またはクォータを超過しました \u2014 待ってから再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+    baiduServerError:
+      "web_search: Baidu AI Searchサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+    baiduParseError:
+      "web_search: Baidu AI Searchが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     tavilyMissingKey:
       "web_search: TavilyバックエンドにはAPIキーが必要です \u2014 TAVILY_API_KEY 環境変数または ~/.reasonix/config.json の `tavilyApiKey` を設定してください。無料1000回/月の登録は https://tavily.com から",
     tavilyUnauthorized:
       "web_search: Tavily APIキーが拒否されました \u2014 TAVILY_API_KEY を確認するか、https://tavily.com から取得してください",
     tavilyRateLimit:
-      "web_search: Tavilyがレート制限または月間クォータを超過しました \u2014 待つか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えるか、Tavilyプランをアップグレードしてください",
+      "web_search: Tavilyがレート制限または月間クォータを超過しました \u2014 待つか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えるか、Tavilyプランをアップグレードしてください",
     tavilyServerError:
-      "web_search: Tavilyサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Tavilyサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     tavilyParseError:
       "web_search: Tavilyが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     perplexityMissingKey:
@@ -1636,9 +1650,9 @@ export const JA: TranslationSchema = {
     perplexityUnauthorized:
       "web_search: Perplexity APIキーが拒否されました \u2014 PERPLEXITY_API_KEY を確認するか、https://perplexity.ai/settings/api から取得してください",
     perplexityRateLimit:
-      "web_search: Perplexityがレート制限されました \u2014 待って再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Perplexityがレート制限されました \u2014 待って再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     perplexityServerError:
-      "web_search: Perplexityサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Perplexityサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     perplexityParseError:
       "web_search: Perplexityが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     exaMissingKey:
@@ -1648,7 +1662,7 @@ export const JA: TranslationSchema = {
     exaRateLimit:
       "web_search: Exa APIがレート制限または月間クォータを超過しました \u2014 待つか、https://exa.ai/pricing でアップグレードしてください",
     exaServerError:
-      "web_search: Exaサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Exaサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     exaParseError:
       "web_search: Exaが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     braveMissingKey:
@@ -1658,7 +1672,7 @@ export const JA: TranslationSchema = {
     braveRateLimit:
       "web_search: Brave Search APIがレート制限または月間クォータを超過しました \u2014 待つか、https://brave.com/search/api/ でアップグレードしてください",
     braveServerError:
-      "web_search: Brave Searchサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa|brave でエンジンを切り替えてください",
+      "web_search: Brave Searchサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     braveParseError:
       "web_search: Brave Searchが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     ollamaMissingKey:
@@ -1666,9 +1680,9 @@ export const JA: TranslationSchema = {
     ollamaUnauthorized:
       "Ollama API キーが拒否されました — OLLAMA_API_KEY を確認するか、https://ollama.com/settings/keys で取得してください",
     ollamaRateLimit:
-      "Ollama がレート制限中またはクォータを超過しました — 待ってから再試行するか、/search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+      "Ollama がレート制限中またはクォータを超過しました — 待ってから再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     ollamaServerError:
-      "Ollama サーバーエラー ({status}) ({url}) — 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+      "Ollama サーバーエラー ({status}) ({url}) — 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     ollamaParseError:
       "Ollama が解析不能なレスポンスを返しました (HTTP {status}) ({url}) — 後で再試行してください",
     fetchOllamaMissingKey:

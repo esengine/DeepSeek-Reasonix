@@ -180,12 +180,13 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "baidu" (Baidu AI Search API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
   webSearchEngine?:
     | "bing"
     | "bing-intl"
     | "searxng"
     | "metaso"
+    | "baidu"
     | "tavily"
     | "perplexity"
     | "exa"
@@ -195,6 +196,8 @@ export interface ReasonixConfig {
   webSearchEndpoint?: string;
   /** Metaso API key. Falls back to METASO_API_KEY env var. */
   metasoApiKey?: string;
+  /** Baidu AI Search API key. Falls back to BAIDU_API_KEY or QIANFAN_API_KEY env var. */
+  baiduApiKey?: string;
   /** Tavily API key. Falls back to TAVILY_API_KEY env var. No baked-in default — free tier is 1000/mo per account, sharing would burn out. */
   tavilyApiKey?: string;
   /** Perplexity API key. Falls back to PERPLEXITY_API_KEY env var. Get one at https://perplexity.ai/settings/api */
@@ -351,6 +354,14 @@ export function memoryTypeDefaults(
 export function loadMetasoApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.METASO_API_KEY) return process.env.METASO_API_KEY.trim();
   const cfg = readConfig(path).metasoApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
+export function loadBaiduApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.BAIDU_API_KEY) return process.env.BAIDU_API_KEY.trim();
+  if (process.env.QIANFAN_API_KEY) return process.env.QIANFAN_API_KEY.trim();
+  const cfg = readConfig(path).baiduApiKey;
   if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
   return undefined;
 }
@@ -947,6 +958,7 @@ export function webSearchEngine(
   | "bing-intl"
   | "searxng"
   | "metaso"
+  | "baidu"
   | "tavily"
   | "perplexity"
   | "exa"
@@ -956,6 +968,7 @@ export function webSearchEngine(
   if (cfg === "bing-intl") return "bing-intl";
   if (cfg === "searxng") return "searxng";
   if (cfg === "metaso") return "metaso";
+  if (cfg === "baidu") return "baidu";
   if (cfg === "tavily") return "tavily";
   if (cfg === "perplexity") return "perplexity";
   if (cfg === "exa") return "exa";

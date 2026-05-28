@@ -294,6 +294,7 @@ export type WebSearchEngineName =
   | "bing-intl"
   | "searxng"
   | "metaso"
+  | "baidu"
   | "tavily"
   | "perplexity"
   | "exa"
@@ -312,6 +313,9 @@ export type SettingsEvent = {
   model: string;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
+  webSearchApiKeys?: {
+    baidu?: string;
+  };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
   version: string;
@@ -347,6 +351,7 @@ export type SettingsPatch = {
   model?: string;
   editor?: string;
   webSearchEngine?: WebSearchEngineName;
+  baiduApiKey?: string | null;
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
 };

@@ -732,6 +732,7 @@ function PageGeneral({
                   | "bing-intl"
                   | "searxng"
                   | "metaso"
+                  | "baidu"
                   | "tavily"
                   | "perplexity"
                   | "exa"
@@ -744,6 +745,7 @@ function PageGeneral({
             <option value="bing-intl">{t("settings.webSearchEngineBingIntl")}</option>
             <option value="searxng">{t("settings.webSearchEngineSearxng")}</option>
             <option value="metaso">{t("settings.webSearchEngineMetaso")}</option>
+            <option value="baidu">{t("settings.webSearchEngineBaidu")}</option>
             <option value="tavily">{t("settings.webSearchEngineTavily")}</option>
             <option value="perplexity">{t("settings.webSearchEnginePerplexity")}</option>
             <option value="exa">{t("settings.webSearchEngineExa")}</option>
@@ -758,11 +760,23 @@ function PageGeneral({
 }
 
 const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
-  engine: "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
-  patchKey: "metasoApiKey" | "tavilyApiKey" | "perplexityApiKey" | "exaApiKey" | "braveApiKey" | "ollamaApiKey";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  patchKey:
+    | "metasoApiKey"
+    | "baiduApiKey"
+    | "tavilyApiKey"
+    | "perplexityApiKey"
+    | "exaApiKey"
+    | "braveApiKey"
+    | "ollamaApiKey";
   signupUrl: string;
 }> = [
   { engine: "metaso", patchKey: "metasoApiKey", signupUrl: "https://metaso.cn/settings/api" },
+  {
+    engine: "baidu",
+    patchKey: "baiduApiKey",
+    signupUrl: "https://cloud.baidu.com/doc/qianfan/s/2mh4su4uy",
+  },
   { engine: "tavily", patchKey: "tavilyApiKey", signupUrl: "https://app.tavily.com" },
   {
     engine: "perplexity",
@@ -839,8 +853,15 @@ function WebSearchApiKeyRow({
   prefix,
   onSave,
 }: {
-  engine: "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
-  patchKey: "metasoApiKey" | "tavilyApiKey" | "perplexityApiKey" | "exaApiKey" | "braveApiKey" | "ollamaApiKey";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  patchKey:
+    | "metasoApiKey"
+    | "baiduApiKey"
+    | "tavilyApiKey"
+    | "perplexityApiKey"
+    | "exaApiKey"
+    | "braveApiKey"
+    | "ollamaApiKey";
   signupUrl: string;
   prefix?: string;
   onSave: (patch: SettingsPatch) => void;
