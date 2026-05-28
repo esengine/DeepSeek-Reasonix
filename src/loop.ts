@@ -145,7 +145,7 @@ export class CacheFirstLoop {
   stream: boolean;
   reasoningEffort: ReasoningEffort;
   budgetUsd: number | null;
-  /** Maximum tool-call iterations per turn. Config > env > default (9). */
+  /** Maximum tool-call iterations per turn. Config > env > default (50). */
   maxIterPerTurn: number;
   /** One-shot 80% warning latch — cleared by setBudget so a bump re-arms at the new boundary. */
   private _budgetWarned = false;
