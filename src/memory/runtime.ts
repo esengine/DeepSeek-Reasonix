@@ -16,6 +16,8 @@ export class ImmutablePrefix {
   readonly fewShots: readonly ChatMessage[];
   /** Invalidated by addTool / removeTool / replaceSystem; bypassing any of those leaves cache stale → fingerprint diverges from sent prefix. */
   private _fingerprintCache: string | null = null;
+  /** Frozen shallow-copy snapshot of _toolSpecs — avoids structuredClone per iteration. */
+  private _frozenToolsCache: ToolSpec[] | null = null;
 
   constructor(opts: ImmutablePrefixOptions) {
     this.system = opts.system;
@@ -39,8 +41,14 @@ export class ImmutablePrefix {
     return [{ role: "system", content: this.system }, ...this.fewShots.map((m) => ({ ...m }))];
   }
 
+  /** Frozen shallow copy — callers must not mutate returned objects. */
   tools(): ToolSpec[] {
-    return this._toolSpecs.map((t) => structuredClone(t) as ToolSpec);
+    if (this._frozenToolsCache) return this._frozenToolsCache;
+    const frozen = Object.freeze(
+      this._toolSpecs.map((t) => Object.freeze({ ...t, function: { ...t.function } }) as ToolSpec),
+    );
+    this._frozenToolsCache = frozen as unknown as ToolSpec[];
+    return this._frozenToolsCache;
   }
 
   addTool(spec: ToolSpec): boolean {
@@ -49,6 +57,7 @@ export class ImmutablePrefix {
     if (this._toolSpecs.some((t) => t.function?.name === name)) return false;
     this._toolSpecs.push(spec);
     this._fingerprintCache = null;
+    this._frozenToolsCache = null;
     return true;
   }
 
@@ -58,6 +67,7 @@ export class ImmutablePrefix {
     if (idx < 0) return false;
     this._toolSpecs.splice(idx, 1);
     this._fingerprintCache = null;
+    this._frozenToolsCache = null;
     return true;
   }
 
