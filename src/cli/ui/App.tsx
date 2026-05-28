@@ -198,8 +198,7 @@ import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
 import { VerboseContext } from "./state/verbose-context.js";
 import { ThemeProvider } from "./theme/context.js";
-import { listThemeNames } from "./theme/tokens.js";
-import { FG, type ThemeName } from "./theme/tokens.js";
+import { FG, SURFACE, type ThemeName, listThemeNames } from "./theme/tokens.js";
 import { TickerProvider, useSlowTick } from "./ticker.js";
 import { handleTurnInterrupt } from "./turn-interrupt.js";
 import { codeUndoContextMessage, codeUndoInfo } from "./undo-context.js";
@@ -4290,7 +4289,7 @@ function AppInner({
     <>
       <TickerProvider disabled={tickerSuspended}>
         <InflightProvider inflight={loop.inflight}>
-          <Box flexDirection="row">
+          <Box flexDirection="row" backgroundColor={SURFACE.bg}>
             <Box flexDirection="column" flexGrow={1}>
               <Box flexDirection="column" flexGrow={1}>
                 <LiveExpandContext.Provider value={liveExpand}>
