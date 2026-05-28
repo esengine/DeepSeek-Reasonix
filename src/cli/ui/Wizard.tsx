@@ -30,7 +30,7 @@ import { type CatalogEntry, MCP_CATALOG } from "../../mcp/catalog.js";
 import { MultiSelect, type SelectItem, SingleSelect } from "./Select.js";
 import { ThemeProvider, useTheme } from "./theme/context.js";
 import { themeChoiceLabel } from "./theme/labels.js";
-import { type ThemeName, listThemeNames, resolveThemeName } from "./theme/tokens.js";
+import { FG, type ThemeName, listThemeNames, resolveThemeName } from "./theme/tokens.js";
 
 export interface WizardProps {
   /** Called once the config has been saved. */
@@ -214,7 +214,7 @@ export function Wizard({
             {specs.map((spec, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: review-only render, order fixed
               <Box key={i} paddingLeft={14}>
-                <Text dim>· {spec}</Text>
+                <Text color={FG.faint}>· {spec}</Text>
               </Box>
             ))}
             <Box marginTop={1}>
@@ -226,7 +226,7 @@ export function Wizard({
               </Box>
             ) : null}
             <Box marginTop={1}>
-              <Text dim>{t("wizard.reviewFooter")}</Text>
+              <Text color={FG.faint}>{t("wizard.reviewFooter")}</Text>
             </Box>
           </Box>
           <ReviewConfirm
@@ -264,10 +264,10 @@ export function Wizard({
           <Text>{t("ui.welcome")}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text dim>{t("wizard.savedShellHint")}</Text>
+          <Text color={FG.faint}>{t("wizard.savedShellHint")}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text dim>{t("wizard.savedFooter")}</Text>
+          <Text color={FG.faint}>{t("wizard.savedFooter")}</Text>
         </Box>
         <ExitOnEnter onExit={exit} />
       </Box>
@@ -316,7 +316,7 @@ function ThemeStep({
         {t("wizard.themeTitle")}
       </Text>
       <Box marginTop={1}>
-        <Text dim>{t("wizard.themeSubtitle")}</Text>
+        <Text color={FG.faint}>{t("wizard.themeSubtitle")}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {THEME_NAMES.map((name, i) => (
@@ -362,7 +362,7 @@ function ThemeStep({
         </Box>
       </Box>
       <Box marginTop={1}>
-        <Text dim>{t("wizard.themeFooter")}</Text>
+        <Text color={FG.faint}>{t("wizard.themeFooter")}</Text>
       </Box>
     </Box>
   );
@@ -388,7 +388,7 @@ function LanguageStep({
         {t("wizard.languageTitle")}
       </Text>
       <Box marginTop={1}>
-        <Text dim>{t("wizard.languageSubtitle")}</Text>
+        <Text color={FG.faint}>{t("wizard.languageSubtitle")}</Text>
       </Box>
       <Box marginTop={1}>
         <SingleSelect<LanguageCode>
@@ -425,10 +425,12 @@ function ApiKeyStep({
       <Box marginTop={1}>
         <Text>{t("wizard.apiKeyPrompt")}</Text>
       </Box>
-      <Text dim>{t("wizard.apiKeyGetOne")}</Text>
-      <Text dim>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
+      <Text color={FG.faint}>{t("wizard.apiKeyGetOne")}</Text>
+      <Text color={FG.faint}>{t("wizard.apiKeySavedLocally", { path: defaultConfigPath() })}</Text>
       {initialValue ? (
-        <Text dim>{t("wizard.apiKeyPreview", { redacted: redactKey(initialValue) })}</Text>
+        <Text color={FG.faint}>
+          {t("wizard.apiKeyPreview", { redacted: redactKey(initialValue) })}
+        </Text>
       ) : null}
       <Box marginTop={1}>
         <Text bold color="ansi:cyan">
@@ -474,7 +476,7 @@ function ApiKeyStep({
         </Box>
       ) : value ? (
         <Box marginTop={1}>
-          <Text dim>{t("wizard.apiKeyPreview", { redacted: redactKey(value) })}</Text>
+          <Text color={FG.faint}>{t("wizard.apiKeyPreview", { redacted: redactKey(value) })}</Text>
         </Box>
       ) : null}
     </Box>
@@ -561,7 +563,7 @@ function McpArgsStep({
         <Box flexDirection="column">
           <Text>{t("wizard.mcpArgsDirMissing", { path: pendingCreate })}</Text>
           <Box marginTop={1}>
-            <Text dim>{t("wizard.mcpArgsDirCreateHint")}</Text>
+            <Text color={FG.faint}>{t("wizard.mcpArgsDirCreateHint")}</Text>
           </Box>
           {error ? (
             <Box marginTop={1}>
@@ -579,7 +581,7 @@ function McpArgsStep({
         <Text>{entry.summary}</Text>
         {entry.note ? (
           <Box marginTop={1}>
-            <Text dim>{entry.note}</Text>
+            <Text color={FG.faint}>{entry.note}</Text>
           </Box>
         ) : null}
         <Box marginTop={1}>
@@ -663,7 +665,7 @@ function StepFrame({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="ansi:cyan" paddingX={1}>
       <Box>
-        <Text dim>{t("wizard.stepCounter", { step, total })}</Text>
+        <Text color={FG.faint}>{t("wizard.stepCounter", { step, total })}</Text>
         <Text bold color="ansi:cyan">
           {title}
         </Text>

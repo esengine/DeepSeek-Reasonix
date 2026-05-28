@@ -3,6 +3,7 @@ import { type Color, Text, useStdout } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import { COLOR } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 /**
  * Faint full-width horizontal rule. Width tracks the terminal columns
@@ -14,7 +15,7 @@ export function ChromeRule(): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const w = Math.max(20, cols - 2);
-  return <Text dim>{"─".repeat(w)}</Text>;
+  return <Text color={FG.faint}>{"─".repeat(w)}</Text>;
 }
 
 /** Compact decimal-K token formatter — `1234 → "1.2K"`, `131000 → "131K"`. Base-1000 matches DeepSeek's "1M context" / "128K" wording and the web dashboard's display, so the CLI bottom bar and the web bar agree on ctx capacity. */
@@ -32,20 +33,16 @@ export function Bar({
   ratio,
   color,
   cells = 14,
-  dim,
 }: {
   ratio: number;
   color: Color;
   cells?: number;
-  dim?: boolean;
 }): React.ReactElement {
   const filled = Math.max(0, Math.min(cells, Math.round(ratio * cells)));
   return (
     <Text>
-      <Text color={color} dim={dim}>
-        {"▰".repeat(filled)}
-      </Text>
-      <Text dim>{"▱".repeat(cells - filled)}</Text>
+      <Text color={color}>{"▰".repeat(filled)}</Text>
+      <Text color={FG.faint}>{"▱".repeat(cells - filled)}</Text>
     </Text>
   );
 }
@@ -70,10 +67,8 @@ export function ContextCell({
   if (promptTokens === 0) {
     return (
       <Text>
-        <Text color={COLOR.info} dim>
-          {"▣ ctx "}
-        </Text>
-        <Text dim>{`\u2014 ${t("common.noTurns")}`}</Text>
+        <Text color={FG.faint}>{"▣ ctx "}</Text>
+        <Text color={FG.faint}>{`\u2014 ${t("common.noTurns")}`}</Text>
       </Text>
     );
   }
@@ -87,7 +82,7 @@ export function ContextCell({
       <Text color={color} bold>
         {formatTokens(promptTokens)}/{formatTokens(ctxMax)}
       </Text>
-      <Text dim> ({pct}%)</Text>
+      <Text color={FG.faint}> ({pct}%)</Text>
       {ratio >= 0.8 ? (
         <Text color={COLOR.err} bold>
           {"  ·  /compact"}

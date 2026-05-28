@@ -16,6 +16,7 @@ import type { RegistryEntry } from "../../mcp/registry-types.js";
 import { type PickerBroadcastPorts, usePickerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { useKeystroke } from "./keystroke-context.js";
 import { COLOR } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 const VISIBLE_ROWS = 10;
 
@@ -364,18 +365,18 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
         <Text bold color={COLOR.brand}>
           ◈ MCP marketplace
         </Text>
-        <Text dim>{`  ·  ${state.status}`}</Text>
+        <Text color={FG.faint}>{`  ·  ${state.status}`}</Text>
       </Box>
       <Box marginTop={1}>
         <Text>{t("mcpMarketplace.filter")}</Text>
         <Text>{state.query || t("mcpMarketplace.filterPlaceholder")}</Text>
         <Text
-          dim
+          color={FG.faint}
         >{`  ${t(filtered.length === 1 ? "mcpMarketplace.matchSingular" : "mcpMarketplace.matchPlural", { n: filtered.length })}`}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {window.length === 0 ? (
-          <Text dim>
+          <Text color={FG.faint}>
             {state.loading ? t("mcpMarketplace.loading") : t("mcpMarketplace.noEntries")}
           </Text>
         ) : (
@@ -391,7 +392,7 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
               <Box key={e.name}>
                 <Text color={active ? COLOR.brand : undefined}>{active ? "▸ " : "  "}</Text>
                 <Text bold={active}>{e.name.padEnd(38).slice(0, 38)}</Text>
-                <Text dim>{` ${tag}${pop}${installedBadge}`}</Text>
+                <Text color={FG.faint}>{` ${tag}${pop}${installedBadge}`}</Text>
               </Box>
             );
           })
@@ -401,13 +402,15 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
         <Box marginTop={1} flexDirection="column">
           <Text bold>
             {overlay?.[selected.name]?.title ?? selected.title}
-            {overlay?.[selected.name] ? <Text dim>{`  \u00b7  ${selected.title}`}</Text> : null}
+            {overlay?.[selected.name] ? (
+              <Text color={FG.faint}>{`  \u00b7  ${selected.title}`}</Text>
+            ) : null}
           </Text>
-          <Text dim>
+          <Text color={FG.faint}>
             {overlay?.[selected.name]?.description ?? selected.description?.slice(0, 200) ?? null}
           </Text>
           {selected.install ? (
-            <Text dim>
+            <Text color={FG.faint}>
               {t("mcpMarketplace.specLine", {
                 runtime: selected.install.runtime,
                 id: selected.install.packageId ?? selected.install.url ?? "\u2014",
@@ -415,7 +418,7 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
               })}
             </Text>
           ) : (
-            <Text dim>{t("mcpMarketplace.smitheryDetail")}</Text>
+            <Text color={FG.faint}>{t("mcpMarketplace.smitheryDetail")}</Text>
           )}
           {selected.install?.requiredEnv?.length ? (
             <Text color="ansi:yellow">
@@ -425,7 +428,7 @@ export function McpMarketplace({ onClose, postInfo, reloadMcp, pickerPorts }: Mc
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dim>{t("mcpMarketplace.footerHint")}</Text>
+        <Text color={FG.faint}>{t("mcpMarketplace.footerHint")}</Text>
       </Box>
     </Box>
   );
