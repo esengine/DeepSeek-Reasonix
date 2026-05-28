@@ -4,6 +4,7 @@ import { CardRenderer } from "../cards/CardRenderer.js";
 import { useRenderTrace } from "../render-trace.js";
 import type { Card } from "../state/cards.js";
 import { useAgentState } from "../state/provider.js";
+import { VerboseContext } from "../state/verbose-context.js";
 
 interface StaticCardStreamProps {
   suppressLive?: boolean;
@@ -33,7 +34,7 @@ function StaticCardStreamInner({
       <Static items={staticItems}>
         {(card) => (
           <Box key={card.id} flexDirection="column" flexShrink={0}>
-            <CardRenderer card={card} />
+            <StaticCardRenderer card={card} />
           </Box>
         )}
       </Static>
@@ -45,6 +46,16 @@ function StaticCardStreamInner({
         ))}
       </Box>
     </>
+  );
+}
+
+function StaticCardRenderer({ card }: { card: Card }): React.ReactElement {
+  const verbose = React.useContext(VerboseContext);
+  const frozenVerbose = useRef(verbose).current;
+  return (
+    <VerboseContext.Provider value={frozenVerbose}>
+      <CardRenderer card={card} />
+    </VerboseContext.Provider>
   );
 }
 
@@ -93,6 +104,7 @@ function partition(cards: readonly Card[]): {
   dynamicItems: Card[];
   hasUnsettledDynamic: boolean;
 } {
+  // Settled cards are immutable terminal scrollback; verbose toggles only affect live/future cards.
   const firstDynamic = cards.findIndex((c) => !isFullySettled(c));
   if (firstDynamic === -1) {
     return { staticItems: [...cards], dynamicItems: [], hasUnsettledDynamic: false };
