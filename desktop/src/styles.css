@@ -6779,6 +6779,26 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   margin-top: 1px;
 }
 .wd-row .pin { color: var(--accent); }
+.wd-row .wd-del {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.wd-row:hover .wd-del {
+  opacity: 1;
+}
+.wd-row .wd-del:hover {
+  background: var(--bg-3, rgba(255,255,255,0.08));
+  color: var(--tone-err, #ff3b30);
+}
 .wd-foot {
   display: flex;
   gap: 6px;

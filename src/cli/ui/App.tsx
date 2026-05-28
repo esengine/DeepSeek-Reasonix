@@ -175,6 +175,7 @@ import { ModeStatusBar } from "./layout/LiveRows.js";
 import { StaticCardStream } from "./layout/StaticCardStream.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import type { StatusBarConfig } from "./layout/StatusRow.js";
+import { shouldEnterPlanModeForExplicitIntent } from "./lifecycle-explicit-intent.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
@@ -3137,6 +3138,16 @@ function AppInner({
       }
 
       if (codeMode) {
+        if (
+          shouldEnterPlanModeForExplicitIntent({
+            text,
+            codeMode: true,
+            planMode,
+          })
+        ) {
+          togglePlanMode(true, "explicit-intent");
+          log.pushInfo(t("app.explicitPlanIntentArmed"));
+        }
         const before = engineeringLifecycleRef.current?.snapshot().state;
         engineeringLifecycleRef.current?.observeUserPrompt(text);
         const after = engineeringLifecycleRef.current?.snapshot().state;

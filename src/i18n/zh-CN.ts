@@ -604,6 +604,8 @@ export const zhCN: TranslationSchema = {
     continuingAfter: "▸ 在 {label}{counter} 之后继续",
     planStoppedAt: "▸ 计划在 {label}{counter} 处停止",
     revisingAfter: "▸ 在 {label} 之后修订 — {feedback}",
+    explicitPlanIntentArmed:
+      "▸ 检测到明确的先规划请求 — 已启用 strict lifecycle。可用 /plan off 退出。",
     historyScrollHint: " ↑ 正在查看历史 · End / PgDn 返回底部 · ↓ 向下滚动一行",
     editHistoryTitle: "编辑历史（从旧到新）：",
     editHistoryNoCodeMode: "不在代码模式中",
@@ -1520,6 +1522,23 @@ export const zhCN: TranslationSchema = {
     braveServerError:
       "web_search: Brave Search 服务器错误（{status}）— 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
     braveParseError: "web_search: Brave Search 返回无法解析的响应（HTTP {status}）— 稍后重试",
+    ollamaMissingKey:
+      "Ollama 需要 API 密钥 — 设置 OLLAMA_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `ollamaApiKey`；在 https://ollama.com/settings/keys 获取密钥",
+    ollamaUnauthorized:
+      "Ollama API 密钥被拒绝 — 检查 OLLAMA_API_KEY 或在 https://ollama.com/settings/keys 获取密钥",
+    ollamaRateLimit:
+      "Ollama 请求频率限制或配额用尽 — 等待后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+    ollamaServerError:
+      "Ollama 服务器错误（{status}）— {url} — 稍后重试，或使用 /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama 切换引擎",
+    ollamaParseError: "Ollama 返回无法解析的响应（HTTP {status}）— {url} — 稍后重试",
+    fetchOllamaMissingKey:
+      "web_fetch: Ollama 抓取需要 API 密钥 — 设置 OLLAMA_API_KEY 环境变量，或在 ~/.reasonix/config.json 中配置 `ollamaApiKey`；在 https://ollama.com/settings/keys 获取密钥",
+    fetchOllamaUnauthorized:
+      "web_fetch: Ollama API 密钥被拒绝 — 检查 OLLAMA_API_KEY 或在 https://ollama.com/settings/keys 获取密钥",
+    fetchOllamaRateLimit: "web_fetch: Ollama 抓取达到速率限制或配额用尽 — 等待后重试",
+    fetchOllamaServerError: "web_fetch: Ollama 抓取服务器错误（{status}）— {url} — 稍后重试",
+    fetchOllamaParseError:
+      "web_fetch: Ollama 抓取返回无法解析的响应（HTTP {status}）— {url} — 稍后重试",
     fetchStatus:
       "web_fetch {status} for {url} — try: 在浏览器中确认该 URL 能否访问；该状态码表明目标主机返回了错误页面",
     fetchRateLimit429:
