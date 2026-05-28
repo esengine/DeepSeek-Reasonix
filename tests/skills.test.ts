@@ -133,6 +133,42 @@ describe("SkillStore", () => {
     expect(names).toContain("review");
   });
 
+  // Skipped on Windows — file symlink creation also requires Developer Mode / admin.
+  it.skipIf(process.platform === "win32")("follows symlinked flat <name>.md skill files", () => {
+    const realRoot = mkdtempSync(join(tmpdir(), "reasonix-skills-real-md-"));
+    try {
+      const realFile = join(realRoot, "shipit.md");
+      writeFileSync(realFile, "---\ndescription: flat via symlink\n---\nbody\n", "utf8");
+      const scannedRoot = join(home, ".reasonix", "skills");
+      mkdirSync(scannedRoot, { recursive: true });
+      symlinkSync(realFile, join(scannedRoot, "shipit.md"), "file");
+
+      const skills = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true }).list();
+      expect(skills.map((s) => s.name)).toContain("shipit");
+    } finally {
+      rmSync(realRoot, { recursive: true, force: true });
+    }
+  });
+
+  // Skipped on Windows — symlinkSync to a nonexistent target throws EPERM there without
+  // Developer Mode / admin, unrelated to the readEntry behavior under test.
+  it.skipIf(process.platform === "win32")(
+    "silently skips a broken symlink instead of crashing the scan",
+    () => {
+      const scannedRoot = join(home, ".reasonix", "skills");
+      mkdirSync(scannedRoot, { recursive: true });
+      symlinkSync(
+        join(tmpdir(), "reasonix-skills-nonexistent-target"),
+        join(scannedRoot, "broken"),
+      );
+      writeSkillDir(projectRoot, "global", "good", { description: "real one" }, "body", home);
+
+      const skills = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true }).list();
+      // The broken symlink is dropped, but the sibling real skill still shows up.
+      expect(skills.map((s) => s.name)).toEqual(["good"]);
+    },
+  );
+
   it("project scope wins on a name collision with global", () => {
     writeSkillDir(projectRoot, "global", "review", { description: "global one" }, "G", home);
     writeSkillDir(projectRoot, "project", "review", { description: "project one" }, "P", home);

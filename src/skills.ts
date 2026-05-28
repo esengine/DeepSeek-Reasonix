@@ -251,13 +251,17 @@ export class SkillStore {
   private readEntry(dir: string, scope: SkillScope, entry: import("node:fs").Dirent): Skill | null {
     const isDir =
       entry.isDirectory() || (entry.isSymbolicLink() && this.isSymlinkDirectory(dir, entry.name));
+    // Symlinked flat `<name>.md` files: `entry.isFile()` returns false for symlinks.
+    // Reuse the same `statSync` pattern as `isSymlinkDirectory` (#2104).
+    const isFile =
+      entry.isFile() || (entry.isSymbolicLink() && !isDir && this.isSymlinkFile(dir, entry.name));
     if (isDir) {
       if (!isValidSkillName(entry.name)) return null;
       const file = join(dir, entry.name, SKILL_FILE);
       if (!existsSync(file)) return null;
       return this.parse(file, entry.name, scope);
     }
-    if (entry.isFile() && entry.name.endsWith(".md")) {
+    if (isFile && entry.name.endsWith(".md")) {
       const stem = entry.name.slice(0, -3);
       if (!isValidSkillName(stem)) return null;
       return this.parse(join(dir, entry.name), stem, scope);
@@ -269,6 +273,15 @@ export class SkillStore {
   private isSymlinkDirectory(parentDir: string, name: string): boolean {
     try {
       return statSync(join(parentDir, name)).isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  /** Check if a symlink points to a file. Returns false for broken symlinks. */
+  private isSymlinkFile(parentDir: string, name: string): boolean {
+    try {
+      return statSync(join(parentDir, name)).isFile();
     } catch {
       return false;
     }
