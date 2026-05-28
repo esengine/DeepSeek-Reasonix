@@ -150,4 +150,61 @@ describe("Ink update-depth repro candidates", () => {
     r.unmount();
     expect(tripped).toBe(false);
   });
+
+  it("useBoxMetrics: re-measures when parent layout changes after initial render", async () => {
+    // Regression test for #2076 / PR #2095 review feedback:
+    // The reviewer noted that using `[ref.current]` as a dependency would
+    // cause useBoxMetrics to capture the first measurement and never
+    // update — so a parent resize would leave the child stuck on stale
+    // dimensions. This test verifies that when a parent's layout changes
+    // (via a state update that adds content), the child's useBoxMetrics
+    // reports the new dimensions.
+    captureErrors();
+    const measurements: Array<{ width: number; height: number }> = [];
+
+    function Child() {
+      const ref = React.useRef(null!);
+      const m = useBoxMetrics(ref);
+      measurements.push({ ...m });
+      return (
+        <Box ref={ref} flexDirection="column">
+          <Text>child content</Text>
+        </Box>
+      );
+    }
+
+    function Parent() {
+      const [expanded, setExpanded] = React.useState(false);
+      React.useEffect(() => {
+        // Expand after initial render to simulate a parent layout change
+        const timer = setTimeout(() => setExpanded(true), 50);
+        return () => clearTimeout(timer);
+      }, []);
+
+      return (
+        <Box flexDirection="column">
+          {expanded && (
+            <Box padding={2}>
+              <Text>extra content that changes layout</Text>
+            </Box>
+          )}
+          <Child />
+        </Box>
+      );
+    }
+
+    const r = render(<Parent />);
+    // Wait for the state update to propagate and effects to settle
+    await new Promise((res) => setTimeout(res, 200));
+    r.unmount();
+
+    expect(hasMaxDepth()).toBe(false);
+
+    // We should have collected multiple measurements, and at least one
+    // should differ from the initial (0,0) — proving that useBoxMetrics
+    // re-measured after the parent layout changed.
+    expect(measurements.length).toBeGreaterThanOrEqual(2);
+    const hasNonZero = measurements.some((m) => m.width > 0 || m.height > 0);
+    expect(hasNonZero).toBe(true);
+  });
 });
