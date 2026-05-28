@@ -24,6 +24,7 @@ import React from "react";
 import type { SplitDiffRow } from "../../code/diff-preview.js";
 import { clipToCells, padToCells } from "./text-width.js";
 import { COLOR } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 export interface SplitDiffProps {
   rows: readonly SplitDiffRow[];
@@ -46,9 +47,7 @@ export function SplitDiff({ rows, totalCols }: SplitDiffProps): React.ReactEleme
       {rows.map((row, i) => (
         <Box key={`r-${i}-${row.left.num ?? "p"}-${row.right.num ?? "p"}`}>
           <Cell side={row.left} width={halfCols} which="left" />
-          <Text color={COLOR.info} dim>
-            {" │ "}
-          </Text>
+          <Text color={FG.faint}>{" │ "}</Text>
           <Cell side={row.right} width={halfCols} which="right" />
         </Box>
       ))}
@@ -98,11 +97,11 @@ function Cell({
     // lines" capRows marker also rides this kind on the left side
     // when present, so we render its text dim italic.
     return (
-      <Text color={COLOR.info} dim italic={!!raw}>
+      <Text color={FG.faint} italic={!!raw}>
         {`${numStr} ${sign} ${padded}`}
       </Text>
     );
   }
   // ctx: same content both sides, dim
-  return <Text dim>{`${numStr} ${sign} ${padded}`}</Text>;
+  return <Text color={FG.faint}>{`${numStr} ${sign} ${padded}`}</Text>;
 }
