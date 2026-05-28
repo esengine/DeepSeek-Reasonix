@@ -1,4 +1,4 @@
-/** StaticCardStream must let verbose mode expand already-settled tool cards. */
+/** StaticCardStream keeps append-only history isolated from parent re-renders. */
 
 import { type ComponentType, type ReactElement, createElement } from "react";
 import { describe, expect, it, vi } from "vitest";

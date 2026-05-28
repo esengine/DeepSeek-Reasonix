@@ -54,7 +54,7 @@ function StaticCardStreamInner({
  *  the gate. New cards added DURING drain are held back until the backlog
  *  catches up — keeps Static's append-only contract intact so chronological
  *  order is preserved. Gates the FULL cards array (not just the static partition)
- *  so verbose-sensitive tool/reasoning cards in the live region also drip. */
+ *  so an old unsettled live tail also drips while fresh cards bypass the gate. */
 function useProgressiveBacklog(cards: readonly Card[]): Card[] {
   const backlogRef = useRef<number | null>(null);
   if (backlogRef.current === null && cards.length > 0) {
@@ -93,7 +93,7 @@ function partition(cards: readonly Card[]): {
   dynamicItems: Card[];
   hasUnsettledDynamic: boolean;
 } {
-  const firstDynamic = cards.findIndex((c) => !isFullySettled(c) || isVerboseSensitive(c));
+  const firstDynamic = cards.findIndex((c) => !isFullySettled(c));
   if (firstDynamic === -1) {
     return { staticItems: [...cards], dynamicItems: [], hasUnsettledDynamic: false };
   }
@@ -103,10 +103,6 @@ function partition(cards: readonly Card[]): {
     dynamicItems,
     hasUnsettledDynamic: dynamicItems.some((c) => !isFullySettled(c)),
   };
-}
-
-function isVerboseSensitive(card: Card): boolean {
-  return card.kind === "reasoning" || card.kind === "tool";
 }
 
 function isFullySettled(card: Card): boolean {
