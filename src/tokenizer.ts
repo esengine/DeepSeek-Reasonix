@@ -185,9 +185,9 @@ function applySplit(chunks: string[], re: RegExp): string[] {
 /** UTF-8 bytes of `s`, each mapped to its byte-level visible char. */
 function byteLevelEncode(s: string, byteToChar: string[]): string {
   const bytes = new TextEncoder().encode(s);
-  let out = "";
-  for (let i = 0; i < bytes.length; i++) out += byteToChar[bytes[i]!];
-  return out;
+  const parts: string[] = new Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) parts[i] = byteToChar[bytes[i]!]!;
+  return parts.join("");
 }
 
 /** Repetitive tool output / identifier chunks re-encode thousands of times per session; LRU bounds at ~400KB. */
@@ -259,7 +259,38 @@ export function encode(text: string): number[] {
 }
 
 export function countTokens(text: string): number {
-  return encode(text).length;
+  if (!text) return 0;
+  const t = loadTokenizer();
+  let count = 0;
+
+  const process = (segment: string) => {
+    if (!segment) return;
+    let chunks: string[] = [segment];
+    for (const re of t.splitRegexes) chunks = applySplit(chunks, re);
+    for (const chunk of chunks) {
+      if (!chunk) continue;
+      const byteLevel = byteLevelEncode(chunk, t.byteToChar);
+      const pieces = bpeEncode(byteLevel, t.mergeRank);
+      for (const p of pieces) {
+        if (t.vocab[p] !== undefined) count++;
+      }
+    }
+  };
+
+  if (t.addedPattern) {
+    t.addedPattern.lastIndex = 0;
+    let last = 0;
+    for (const m of text.matchAll(t.addedPattern)) {
+      const idx = m.index ?? 0;
+      if (idx > last) process(text.slice(last, idx));
+      if (t.addedMap.has(m[0])) count++;
+      last = idx + m[0].length;
+    }
+    if (last < text.length) process(text.slice(last));
+  } else {
+    process(text);
+  }
+  return count;
 }
 
 export const DEFAULT_BOUNDED_TOKENIZE_CHARS = 2 * 1024;
@@ -468,7 +499,7 @@ export function formatDeepSeekPrompt(
   }
   const merged = mergeToolMessages(msgs);
 
-  let prompt = BOS;
+  const parts: string[] = [BOS];
 
   for (let i = 0; i < merged.length; i++) {
     const msg = merged[i]!;
@@ -476,26 +507,26 @@ export function formatDeepSeekPrompt(
     const nextRole = i + 1 < merged.length ? (merged[i + 1]!.role ?? "user") : null;
 
     if (role === "system") {
-      prompt += msg.content ?? "";
+      parts.push(msg.content ?? "");
     } else if (role === "user") {
-      prompt += USER_SP + (msg.content ?? "");
+      parts.push(USER_SP, msg.content ?? "");
       if (nextRole === "assistant" || nextRole === null) {
-        prompt += ASSISTANT_SP + THINK_END;
+        parts.push(ASSISTANT_SP, THINK_END);
       }
     } else if (role === "assistant") {
       if (msg.reasoning_content) {
-        prompt += THINK_START + msg.reasoning_content + THINK_END;
+        parts.push(THINK_START, msg.reasoning_content, THINK_END);
       }
-      if (msg.content) prompt += msg.content;
+      if (msg.content) parts.push(msg.content);
       const tcs = msg.tool_calls;
       if (Array.isArray(tcs) && tcs.length > 0) {
-        prompt += renderToolCallsDsml(tcs);
+        parts.push(renderToolCallsDsml(tcs));
       }
-      prompt += EOS;
+      parts.push(EOS);
     }
   }
 
-  return prompt;
+  return parts.join("");
 }
 
 const PER_MESSAGE_TEMPLATE_TOKENS = 6;
@@ -503,12 +534,15 @@ const PER_MESSAGE_TEMPLATE_TOKENS = 6;
 /** Keyed by content string — WeakMap-on-message can't be used because callers spread `{...e}` defensive copies, breaking identity every turn. */
 const contentTokenCache = new LruCache<string, number>(4096);
 
+/** Skip caching strings >10KB — 4096 entries of 50KB+ tool outputs would retain 200MB+ of string keys. */
+const MAX_CACHEABLE_CHARS = 10 * 1024;
+
 function cachedBoundedTokens(s: string): number {
   if (s.length === 0) return 0;
   const cached = contentTokenCache.get(s);
   if (cached !== undefined) return cached;
   const n = countTokensBounded(s);
-  contentTokenCache.set(s, n);
+  if (s.length <= MAX_CACHEABLE_CHARS) contentTokenCache.set(s, n);
   return n;
 }
 
