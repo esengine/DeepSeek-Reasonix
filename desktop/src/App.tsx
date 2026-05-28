@@ -263,7 +263,6 @@ export type Settings = {
   /** Per-model context-window override (tokens). */
   contextTokens?: Record<string, number>;
   showSystemEvents?: boolean;
-  promptHistory?: string[];
   version: string;
 };
 
@@ -1009,7 +1008,6 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
           webSearchApiKeys: ev.webSearchApiKeys,
           subagentModels: ev.subagentModels,
           showSystemEvents: ev.showSystemEvents,
-          promptHistory: ev.promptHistory,
           version: ev.version,
         },
       };
@@ -2569,15 +2567,6 @@ function TabRuntime({
                   setDraft("");
                 }}
                 onDequeueSend={(index) => dispatch({ t: "dequeue_send", index })}
-                initialHistory={state.settings?.promptHistory}
-                onHistoryPush={(entry) => {
-                  // Use saveSettings (RPC only, no local state patch) so the
-                  // sentinel [entry] is never written into state.settings and
-                  // historyRef is not transiently reset. The backend merges
-                  // against the freshly-loaded persisted list and re-emits
-                  // $settings with the merged result (#2051).
-                  saveSettings({ promptHistory: [entry] });
-                }}
               />
             </>
           )}

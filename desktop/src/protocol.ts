@@ -336,8 +336,6 @@ export type SettingsEvent = {
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
-  /** Desktop prompt-history entries seeded on tab load, most-recent-first (#2051). */
-  promptHistory?: string[];
   version: string;
 };
 
@@ -390,8 +388,6 @@ export type SettingsPatch = {
   /** Per-model context-window override (tokens). Keys are model ids; values are the prompt-side token cap. */
   contextTokens?: Record<string, number>;
   showSystemEvents?: boolean;
-  /** Persisted prompt-history entries to update on each send (#2051). */
-  promptHistory?: string[];
 };
 
 export type QQConfigPatch = {

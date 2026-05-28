@@ -168,8 +168,6 @@ export interface ReasonixConfig {
   desktopOpenTabs?: DesktopOpenTab[];
   /** Desktop only — `openWith` value for clicking file links. Empty/undefined = OS default app. Examples: "code", "cursor", "C:\\path\\to\\editor.exe". */
   editor?: string;
-  /** Desktop prompt-history entries, most-recent-first, capped at 100 (#2051). */
-  promptHistory?: string[];
   theme?: ThemeName | "auto";
   /** Stored as `--mcp`-format strings so one parser handles both flag and config. */
   mcp?: string[];
@@ -413,22 +411,9 @@ export function defaultConfigPath(): string {
   return join(homedir(), ".reasonix", "config.json");
 }
 
-const PROMPT_HISTORY_CAP = 100;
-
-export function loadPromptHistory(path: string = defaultConfigPath()): string[] {
-  return readConfig(path).promptHistory ?? [];
-}
-
-export function savePromptHistory(entries: string[], path: string = defaultConfigPath()): void {
-  const cfg = readConfig(path);
-  cfg.promptHistory = entries.slice(0, PROMPT_HISTORY_CAP);
-  writeConfig(cfg, path);
-}
-
 const STRING_ARRAY_FIELDS: Array<readonly string[]> = [
   ["mcp"],
   ["mcpDisabled"],
-  ["promptHistory"],
   ["recentWorkspaces"],
   ["skills", "paths"],
 ];

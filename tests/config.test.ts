@@ -26,7 +26,6 @@ import {
   loadPricingOverride,
   loadProjectPathAllowed,
   loadProjectShellAllowed,
-  loadPromptHistory,
   loadProxyConfig,
   loadRateLimit,
   loadReasoningEffort,
@@ -47,7 +46,6 @@ import {
   saveDesktopOpenTabs,
   saveEditMode,
   saveIndexConfig,
-  savePromptHistory,
   saveReasoningEffort,
   saveSemanticEmbeddingConfig,
   saveSubagentModels,
@@ -516,22 +514,6 @@ describe("config", () => {
 
   it("clearProjectShellAllowed returns 0 when nothing stored", () => {
     expect(clearProjectShellAllowed("/empty", path)).toBe(0);
-  });
-
-  it("loadPromptHistory returns [] when nothing stored", () => {
-    expect(loadPromptHistory(path)).toEqual([]);
-  });
-
-  it("savePromptHistory / loadPromptHistory round-trip", () => {
-    savePromptHistory(["npm run build", "git commit -am 'wip'"], path);
-    expect(loadPromptHistory(path)).toEqual(["npm run build", "git commit -am 'wip'"]);
-  });
-
-  it("savePromptHistory caps at 100 entries", () => {
-    const entries = Array.from({ length: 150 }, (_, i) => `cmd-${i}`);
-    savePromptHistory(entries, path);
-    expect(loadPromptHistory(path)).toHaveLength(100);
-    expect(loadPromptHistory(path)[0]).toBe("cmd-0");
   });
 
   it("pathAllowed CRUD mirrors shellAllowed (load/add/dedup/remove/clear)", () => {
