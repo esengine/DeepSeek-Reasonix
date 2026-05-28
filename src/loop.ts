@@ -908,6 +908,15 @@ export class CacheFirstLoop {
         return;
       }
 
+      // Headless escalation: flash model emits <<<NEEDS_PRO>>> when it
+      // can't handle a task. In TUI mode, the UI layer retries with pro.
+      // In headless mode (reasonix run), no TUI is listening — we detect
+      // the marker here and retry the iteration with deepseek-v4-pro.
+      if (/<<<NEEDS_PRO/.test(assistantContent) && this.model !== "deepseek-v4-pro") {
+        this.model = "deepseek-v4-pro";
+        continue;
+      }
+
       // Attribute under the actual model used (escalated → pro, else
       // this.model) so cost/usage logs reflect reality.
       const turnStats = this.stats.record(this._turn, this.model, usage ?? new Usage());
