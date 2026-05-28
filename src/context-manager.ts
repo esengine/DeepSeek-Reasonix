@@ -7,11 +7,7 @@ import { buildAssistantMessage } from "./loop/messages.js";
 import { DEFAULT_MAX_RESULT_CHARS } from "./mcp/registry.js";
 import type { AppendOnlyLog } from "./memory/runtime.js";
 import { rewriteSession } from "./memory/session.js";
-import {
-  DEEPSEEK_CONTEXT_TOKENS,
-  DEFAULT_CONTEXT_TOKENS,
-  type SessionStats,
-} from "./telemetry/stats.js";
+import { type SessionStats, resolveContextTokens } from "./telemetry/stats.js";
 import { countTokensBounded, estimateRequestTokens } from "./tokenizer.js";
 import type { ChatMessage, ToolSpec } from "./types.js";
 
@@ -137,7 +133,7 @@ export class ContextManager {
     model: string,
     alreadyFoldedThisTurn: boolean,
   ): PostUsageDecision {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+    const ctxMax = resolveContextTokens(model);
     if (!usage) return { kind: "none", promptTokens: 0, ctxMax, ratio: 0 };
     const ratio = usage.promptTokens / ctxMax;
     const base = { promptTokens: usage.promptTokens, ctxMax, ratio };
@@ -171,7 +167,7 @@ export class ContextManager {
     toolSpecs: ReadonlyArray<unknown> | undefined | null,
     model: string,
   ): { estimateTokens: number; ctxMax: number; ratio: number } {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+    const ctxMax = resolveContextTokens(model);
     const estimate = estimateRequestTokens(messages, toolSpecs ?? null, true);
     return { estimateTokens: estimate, ctxMax, ratio: estimate / ctxMax };
   }
@@ -180,7 +176,7 @@ export class ContextManager {
     model: string,
     opts?: { keepRecentTokens?: number; requireTailBoundary?: boolean },
   ): Promise<FoldResult> {
-    const ctxMax = DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+    const ctxMax = resolveContextTokens(model);
     const tailBudget = opts?.keepRecentTokens ?? Math.floor(ctxMax * HISTORY_FOLD_TAIL_FRACTION);
     const all = this.deps.log.toFullHistory();
     const noop: FoldResult = {

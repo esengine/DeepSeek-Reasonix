@@ -89,11 +89,7 @@ import {
   shouldAutoNameSession,
 } from "../../session-title.js";
 import { loadSlashUsage, recordSlashUse } from "../../slash-usage.js";
-import {
-  DEEPSEEK_CONTEXT_TOKENS,
-  DEFAULT_CONTEXT_TOKENS,
-  type SessionSummary,
-} from "../../telemetry/stats.js";
+import { type SessionSummary, resolveContextTokens } from "../../telemetry/stats.js";
 import { defaultUsageLogPath } from "../../telemetry/usage.js";
 import { warmupTokenizer } from "../../tokenizer.js";
 import type { ToolRegistry } from "../../tools.js";
@@ -478,9 +474,7 @@ function AppInner({
   const sessionModel = useAgentState((s) => s.session.model);
   const sessionEffort = useAgentState((s) => s.status.reasoningEffort);
   const ctxTokens = useAgentState((s) => s.status.promptTokens);
-  const ctxCap = useAgentState(
-    (s) => s.status.promptCap ?? DEEPSEEK_CONTEXT_TOKENS[s.session.model] ?? DEFAULT_CONTEXT_TOKENS,
-  );
+  const ctxCap = useAgentState((s) => s.status.promptCap ?? resolveContextTokens(s.session.model));
   const sessionCostUsd = useAgentState((s) => s.status.sessionCost);
   const lastTurnCostUsd = useAgentState((s) => s.status.cost);
   const cacheHitRatio = useAgentState((s) => s.status.cacheHit);
@@ -2262,7 +2256,7 @@ function AppInner({
           // StatsPanel reads). `balance` comes from useSessionInfo via a
           // ref-mirror so this callback stays cheap.
           const s = loop.stats.summary();
-          const ctxCap = DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS;
+          const ctxCap = resolveContextTokens(loop.model);
           return {
             turns: s.turns,
             totalCostUsd: s.totalCostUsd,
@@ -3346,7 +3340,7 @@ function AppInner({
               armUndoBanner,
               pendingEdits,
               syncPendingCount,
-              ctxMax: DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS,
+              ctxMax: resolveContextTokens(loop.model),
             });
             if (session) {
               const m = loadSessionMeta(session);

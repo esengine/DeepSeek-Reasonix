@@ -370,6 +370,8 @@ export type SettingsPatch = {
   ollamaApiKey?: string | null;
   braveApiKey?: string | null;
   subagentModels?: Record<string, "flash" | "pro">;
+  /** Per-model context-window override (tokens). Keys are model ids; values are the prompt-side token cap. */
+  contextTokens?: Record<string, number>;
   showSystemEvents?: boolean;
 };
 

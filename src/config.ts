@@ -267,6 +267,8 @@ export interface ReasonixConfig {
   subagentModels?: Record<string, "flash" | "pro">;
   /** Enable the `java_source` tool for finding and decompiling Java class source. Default off. */
   javaSource?: boolean;
+  /** Per-model context-window override (tokens). Keys are model ids; values are prompt-side token caps. */
+  contextTokens?: Record<string, number>;
   /** User-declared extensions to the built-in memory types (#709). Unknown types round-trip even without a declaration; declaring one lets you attach a default priority + lifecycle. */
   memory?: {
     customTypes?: CustomMemoryTypeConfig[];
@@ -718,6 +720,18 @@ export function loadPricingOverride(
     if (isNonNegativeNumber(value.inputCacheMiss)) pricing.inputCacheMiss = value.inputCacheMiss;
     if (isNonNegativeNumber(value.output)) pricing.output = value.output;
     if (Object.keys(pricing).length > 0) result[model] = pricing;
+  }
+  return result;
+}
+
+export function loadContextTokens(path: string = defaultConfigPath()): Record<string, number> {
+  const raw = readConfig(path).contextTokens;
+  if (!isPlainObject(raw)) return {};
+  const result: Record<string, number> = {};
+  for (const [model, value] of Object.entries(raw)) {
+    if (typeof value === "number" && value > 0 && Number.isFinite(value)) {
+      result[model] = Math.floor(value);
+    }
   }
   return result;
 }

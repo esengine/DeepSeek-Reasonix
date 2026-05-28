@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import type { CacheFirstLoop } from "../../loop.js";
-import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS } from "../../telemetry/stats.js";
+import { resolveContextTokens } from "../../telemetry/stats.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import { formatTokens } from "./primitives.js";
 import { COLOR } from "./theme.js";
@@ -51,7 +51,7 @@ export function computeCtxBreakdown(loop: CacheFirstLoop): CtxBreakdownData {
     }
   }
   const logTokens = userTokens + assistantTokens + toolResultTokens + toolCallTokens;
-  const ctxMax = DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS;
+  const ctxMax = resolveContextTokens(loop.model);
   const topTools = [...toolBreakdown].sort((a, b) => b.tokens - a.tokens).slice(0, 5);
   return {
     systemTokens,

@@ -259,6 +259,8 @@ export type Settings = {
     brave?: string;
   };
   subagentModels?: Record<string, "flash" | "pro">;
+  /** Per-model context-window override (tokens). */
+  contextTokens?: Record<string, number>;
   showSystemEvents?: boolean;
   version: string;
 };

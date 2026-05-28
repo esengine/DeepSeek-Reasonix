@@ -283,6 +283,9 @@ export const de: typeof en = {
     modelCustomHint:
       "Jede OpenAI-kompatible ID, die dein Endpunkt bereitstellt (vLLM, Ollama, Together, …).",
     modelCustomActive: "Läuft aktuell auf benutzerdefinierter ID: {model}",
+    contextTokensLabel: "Kontextfenstergröße",
+    contextTokensHint: "Überschreiben Sie die Prompt-seitige Token-Obergrenze für das aktuelle Modell (z. B. 1000000 für 1M). Leer lassen für den eingebauten Standard.",
+    contextTokensPlaceholder: "Automatisch",
     effortSection: "Reasoning-Effort",
     ctxWindow: "Kontext",
     maxOutput: "Ausgabe",

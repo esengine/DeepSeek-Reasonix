@@ -1,5 +1,5 @@
 import type { Usage } from "../client.js";
-import { loadPricingOverride } from "../config.js";
+import { loadContextTokens, loadPricingOverride } from "../config.js";
 
 /** USD per 1M tokens; display currency conversion happens at the UI boundary. */
 export const DEEPSEEK_PRICING: Record<
@@ -43,6 +43,13 @@ export const DEEPSEEK_CONTEXT_TOKENS: Record<string, number> = {
 
 /** Fallback when the caller's model id isn't in the table — safe lower bound. */
 export const DEFAULT_CONTEXT_TOKENS = 131_072;
+
+/** Resolve context-window size: user config → built-in table → 131 K default. */
+export function resolveContextTokens(model: string, configPath?: string): number {
+  const userOverride = loadContextTokens(configPath)[model];
+  if (userOverride && userOverride > 0) return userOverride;
+  return DEEPSEEK_CONTEXT_TOKENS[model] ?? DEFAULT_CONTEXT_TOKENS;
+}
 
 /** Maximum turns retained in memory before old entries are rolled into carryover.
  *  Each TurnStats holds usage + cost + model — at N=200 this caps memory at ~50KB. */

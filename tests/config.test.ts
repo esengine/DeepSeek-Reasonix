@@ -13,6 +13,7 @@ import {
   loadApiKey,
   loadBaseUrl,
   loadBraveApiKey,
+  loadContextTokens,
   loadDesktopOpenTabs,
   loadEditMode,
   loadEndpoint,
@@ -957,6 +958,38 @@ describe("config", () => {
       saveSubagentModels({}, path);
       expect(loadSubagentModels(path)).toEqual({});
       expect(readConfig(path).subagentModels).toBeUndefined();
+    });
+  });
+
+  describe("contextTokens", () => {
+    it("returns empty when nothing is set", () => {
+      expect(loadContextTokens(path)).toEqual({});
+    });
+
+    it("round-trips per-model token caps", () => {
+      writeConfig({ contextTokens: { mimo: 1_000_000, "qwen-72b": 131_072 } }, path);
+      expect(loadContextTokens(path)).toEqual({ mimo: 1_000_000, "qwen-72b": 131_072 });
+    });
+
+    it("drops non-positive and non-finite values", () => {
+      writeConfig(
+        {
+          contextTokens: {
+            mimo: 1_000_000,
+            bad1: -1,
+            bad2: 0,
+            bad3: Number.POSITIVE_INFINITY,
+            bad4: "nope" as any,
+          },
+        },
+        path,
+      );
+      expect(loadContextTokens(path)).toEqual({ mimo: 1_000_000 });
+    });
+
+    it("floors fractional values", () => {
+      writeConfig({ contextTokens: { mimo: 999_999.7 } }, path);
+      expect(loadContextTokens(path)).toEqual({ mimo: 999_999 });
     });
   });
 });
