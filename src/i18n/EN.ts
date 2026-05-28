@@ -626,6 +626,8 @@ export const EN: TranslationSchema = {
     revisingAfter: "▸ revising after {label} — {feedback}",
     explicitPlanIntentArmed:
       "▸ explicit plan-first request detected — strict lifecycle enabled. Use /plan off to leave.",
+    lifecyclePlanSuggestion:
+      "▸ high-risk engineering task detected - use /plan strict to require an approved plan first.",
     historyScrollHint: " ↑ reading history · End / PgDn returns to bottom · ↓ advances one line",
     editHistoryTitle: "Edit history (oldest first):",
     editHistoryNoCodeMode: "not in code mode",

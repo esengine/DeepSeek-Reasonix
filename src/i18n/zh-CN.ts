@@ -606,6 +606,7 @@ export const zhCN: TranslationSchema = {
     revisingAfter: "▸ 在 {label} 之后修订 — {feedback}",
     explicitPlanIntentArmed:
       "▸ 检测到明确的先规划请求 — 已启用 strict lifecycle。可用 /plan off 退出。",
+    lifecyclePlanSuggestion: "▸ 检测到高风险工程任务 - 可使用 /plan strict 先要求批准计划。",
     historyScrollHint: " ↑ 正在查看历史 · End / PgDn 返回底部 · ↓ 向下滚动一行",
     editHistoryTitle: "编辑历史（从旧到新）：",
     editHistoryNoCodeMode: "不在代码模式中",

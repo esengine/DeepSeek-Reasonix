@@ -176,6 +176,7 @@ import { StaticCardStream } from "./layout/StaticCardStream.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import type { StatusBarConfig } from "./layout/StatusRow.js";
 import { shouldEnterPlanModeForExplicitIntent } from "./lifecycle-explicit-intent.js";
+import { shouldSuggestPlanForEngineeringIntent } from "./lifecycle-plan-suggestion.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
@@ -3138,15 +3139,23 @@ function AppInner({
       }
 
       if (codeMode) {
-        if (
-          shouldEnterPlanModeForExplicitIntent({
+        const explicitPlanIntent = shouldEnterPlanModeForExplicitIntent({
+          text,
+          codeMode: true,
+          planMode,
+        });
+        if (explicitPlanIntent) {
+          togglePlanMode(true, "explicit-intent");
+          log.pushInfo(t("app.explicitPlanIntentArmed"));
+        } else if (
+          shouldSuggestPlanForEngineeringIntent({
             text,
             codeMode: true,
             planMode,
+            lifecycleMode: engineeringLifecycleRef.current?.snapshot().mode ?? "off",
           })
         ) {
-          togglePlanMode(true, "explicit-intent");
-          log.pushInfo(t("app.explicitPlanIntentArmed"));
+          log.pushInfo(t("app.lifecyclePlanSuggestion"));
         }
         const before = engineeringLifecycleRef.current?.snapshot().state;
         engineeringLifecycleRef.current?.observeUserPrompt(text);

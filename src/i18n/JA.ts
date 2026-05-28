@@ -655,6 +655,8 @@ export const JA: TranslationSchema = {
     revisingAfter: "▸ {label} の後に修正 — {feedback}",
     explicitPlanIntentArmed:
       "▸ 明示的な plan-first リクエストを検出 — strict lifecycle を有効化しました。/plan off で終了できます。",
+    lifecyclePlanSuggestion:
+      "▸ 高リスクのエンジニアリング作業を検出 - /plan strict で承認済みプランを先に要求できます。",
     historyScrollHint: " ↑ 履歴を読込中 · End / PgDn で最下部に戻る · ↓ で1行進む",
     editHistoryTitle: "編集履歴（古い順）:",
     editHistoryNoCodeMode: "コードモードではありません",

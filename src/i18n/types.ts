@@ -228,6 +228,7 @@ export interface TranslationSchema {
     planStoppedAt: string;
     revisingAfter: string;
     explicitPlanIntentArmed: string;
+    lifecyclePlanSuggestion: string;
     historyScrollHint: string;
     editHistoryTitle: string;
     editHistoryNoCodeMode: string;
