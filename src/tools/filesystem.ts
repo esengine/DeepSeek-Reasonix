@@ -15,7 +15,7 @@ import {
   readSubdirMemoryContent,
 } from "../memory/subdir.js";
 import type { ToolCallContext, ToolRegistry } from "../tools.js";
-import { applyEdit, applyMultiEdit } from "./fs/edit.js";
+import { applyEdit, applyMultiEdit, generateWriteDiff } from "./fs/edit.js";
 import { globFiles } from "./fs/glob.js";
 import { extractOutline, formatOutline } from "./fs/outline.js";
 import { searchContent, searchFiles } from "./fs/search.js";
@@ -666,8 +666,12 @@ export function registerFilesystemTools(
       const abs = await safePath(args.path, "write_file", ctx, "write");
       await fs.mkdir(pathMod.dirname(abs), { recursive: true });
       let encoding: ReturnType<typeof decodeFileBuffer>["encoding"] = "utf8";
+      let oldContent: string | null = null;
       try {
-        encoding = decodeFileBuffer(await fs.readFile(abs)).encoding;
+        const buf = await fs.readFile(abs);
+        const decoded = decodeFileBuffer(buf);
+        encoding = decoded.encoding;
+        oldContent = decoded.text;
       } catch {
         // New file or unreadable — fall back to utf8.
       }
@@ -675,7 +679,8 @@ export function registerFilesystemTools(
       // Just wrote the content; the model knows what's on disk, so a
       // follow-up edit_file shouldn't be gated for re-reading.
       ctx?.readTracker?.markRead(abs);
-      return `wrote ${args.content.length} chars to ${displayRel(rootDir, abs)}`;
+      const rel = displayRel(rootDir, abs);
+      return generateWriteDiff(oldContent, args.content, rel);
     },
   });
 

@@ -93,12 +93,12 @@ describe("SlashSuggestions", () => {
     const frame = lastFrame() ?? "";
     unmount();
 
-    expect(matches).toHaveLength(42);
+    expect(matches).toHaveLength(43);
     expect(names).toContain("language");
     expect(names).toContain("btw");
     expect(names).toContain("about");
     expect(countAdvancedCommands(true)).toBe(10);
-    expect(frame).toContain("42 commands");
+    expect(frame).toContain("43 commands");
     expect(frame).toContain("+ 10 advanced");
   });
 

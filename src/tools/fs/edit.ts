@@ -188,6 +188,49 @@ function renderEditDiff(search: string, replace: string, startLine: number): str
   return `${hunk}\n${body}`;
 }
 
+/** Thresholds beyond which write_file skips full diff to avoid slow LCS on huge files. */
+const WRITE_DIFF_MAX_LINES = 5000;
+const WRITE_DIFF_MAX_BYTES = 100 * 1024;
+
+/** Generate write_file result with unified diff, matching edit_file format. New file → `created path (N chars)`, overwrite → `edited path (old→new chars)` + diff, large file → summary only. */
+export function generateWriteDiff(
+  oldContent: string | null,
+  newContent: string,
+  rel: string,
+): string {
+  const newLen = newContent.length;
+
+  // New file — no old content to diff against.
+  if (oldContent === null) {
+    return `created ${rel} (${newLen} chars)`;
+  }
+
+  const oldLen = oldContent.length;
+
+  // No changes.
+  if (oldContent === newContent) {
+    return `edited ${rel} (${oldLen}→${newLen} chars)`;
+  }
+
+  // Large file — skip diff computation to avoid O(n*m) LCS blowup.
+  if (
+    oldContent.length > WRITE_DIFF_MAX_BYTES ||
+    newContent.length > WRITE_DIFF_MAX_BYTES ||
+    oldContent.split(/\r?\n/).length > WRITE_DIFF_MAX_LINES ||
+    newContent.split(/\r?\n/).length > WRITE_DIFF_MAX_LINES
+  ) {
+    return `edited ${rel} (${oldLen}→${newLen} chars) [diff too large]`;
+  }
+
+  const header = `edited ${rel} (${oldLen}→${newLen} chars)`;
+  const oldLines = oldContent.split(/\r?\n/);
+  const newLines = newContent.split(/\r?\n/);
+  const diff = lineDiff(oldLines, newLines);
+  const hunk = `@@ -1,${oldLines.length} +1,${newLines.length} @@`;
+  const body = diff.map((d) => `${d.op === " " ? " " : d.op} ${d.line}`).join("\n");
+  return `${header}\n${hunk}\n${body}`;
+}
+
 export function lineDiff(
   a: readonly string[],
   b: readonly string[],

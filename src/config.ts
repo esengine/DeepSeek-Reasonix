@@ -43,6 +43,7 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
 
 export type EngineeringLifecycleMode = "off" | "strict";
 export type HistoryScrollMode = "auto" | "native" | "app";
+export type DiffDisplay = "summary" | "full" | "none";
 
 export type EmbeddingProvider = "ollama" | "openai-compat";
 
@@ -212,6 +213,8 @@ export interface ReasonixConfig {
   mouseWheelRows?: number;
   /** Chat-history scrolling: "native" leaves terminal scrollback in charge; "app" captures wheel/PgUp/PgDn/End inside the TUI; "auto" enables app mode for terminals with known jumpy native scrollback. */
   historyScrollMode?: HistoryScrollMode;
+  /** Diff display mode for edit_file / write_file / multi_edit results in CLI. */
+  diffDisplay?: DiffDisplay;
   dashboard?: {
     /** Whether the embedded dashboard auto-starts on launch. Default true. Set false to disable without passing --no-dashboard each time. */
     enabled?: boolean;
@@ -755,6 +758,18 @@ export function loadMouseWheelRows(path: string = defaultConfigPath()): number |
 export function loadHistoryScrollMode(path: string = defaultConfigPath()): HistoryScrollMode {
   const raw = readConfig(path).historyScrollMode;
   return raw === "native" || raw === "app" || raw === "auto" ? raw : "auto";
+}
+
+export function loadDiffDisplay(path: string = defaultConfigPath()): DiffDisplay {
+  const raw = readConfig(path).diffDisplay;
+  if (raw === "full" || raw === "none") return raw;
+  return "summary";
+}
+
+export function saveDiffDisplay(mode: DiffDisplay, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.diffDisplay = mode;
+  writeConfig(cfg, path);
 }
 
 export function loadToolRateLimit(

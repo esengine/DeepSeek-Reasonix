@@ -783,7 +783,7 @@ describe("filesystem tools (built-in, sandbox-enforced)", () => {
         "write_file",
         JSON.stringify({ path: "new.md", content: "hi" }),
       );
-      expect(out).toMatch(/wrote 2 chars/);
+      expect(out).toMatch(/created new\.md \(2 chars\)/);
       const disk = await fs.readFile(join(root, "new.md"), "utf8");
       expect(disk).toBe("hi");
     });

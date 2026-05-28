@@ -251,6 +251,15 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: ["review", "auto", "yolo", "plan"],
   },
   {
+    cmd: "diff",
+    group: "code",
+    argsHint: "[summary|full|none]",
+    summary:
+      "diff display mode: summary (path +stats, default) · full (unified diff) · none (checkmark only)",
+    contextual: "code",
+    argCompleter: ["summary", "full", "none"],
+  },
+  {
     cmd: "plan",
     group: "code",
     argsHint: "[on|off|strict]",

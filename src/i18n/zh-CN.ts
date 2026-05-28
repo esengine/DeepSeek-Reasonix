@@ -273,6 +273,11 @@ export const zhCN: TranslationSchema = {
       description: "会话美元上限 — 80% 时警告，100% 时拒绝下一轮。默认关闭。单独 /budget 显示状态",
       argsHint: "[usd|off]",
     },
+    diff: {
+      description:
+        "配置 edit_file / write_file diff 的显示方式：summary（路径 +统计，默认）· full（unified diff）· none（仅勾选）",
+      argsHint: "[summary|full|none]",
+    },
     mcp: { description: "列出附加到此会话的 MCP 服务器 + 工具" },
     resource: {
       description: "浏览 + 读取 MCP 资源（无参数 → 列出 URI；<uri> → 获取内容）",
@@ -917,6 +922,11 @@ export const zhCN: TranslationSchema = {
         "▲ budget → ${cap} 但已花费 ${spent}。下一轮将被拒绝 — 提高上限以继续，或结束会话。",
       budgetSet:
         "budget → ${cap}  （迄今：${spent} · 80% 时警告，100% 时拒绝下一轮 · /budget off 清除）",
+    },
+    diff: {
+      diffStatus: "diff 显示 → {current}",
+      diffSet: "diff 显示 → {mode}",
+      diffInvalid: "未知模式：{mode}\n可用：{choices}",
     },
     permissions: {
       mutateCodeOnly:

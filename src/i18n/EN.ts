@@ -284,6 +284,11 @@ export const EN: TranslationSchema = {
         "session USD cap — warns at 80%, refuses next turn at 100%. Off by default. /budget alone shows status",
       argsHint: "[usd|off]",
     },
+    diff: {
+      description:
+        "configure how edit_file / write_file diffs are displayed: summary (path +stats, default) · full (unified diff) · none (checkmark only)",
+      argsHint: "[summary|full|none]",
+    },
     mcp: { description: "list MCP servers + tools attached to this session" },
     resource: {
       description: "browse + read MCP resources (no arg → list URIs; <uri> → fetch contents)",
@@ -970,6 +975,11 @@ export const EN: TranslationSchema = {
         "▲ budget → ${cap} but already spent ${spent}. Next turn will be refused — bump the cap higher to keep going, or end the session.",
       budgetSet:
         "budget → ${cap}  (so far: ${spent} · warns at 80%, refuses next turn at 100% · /budget off to clear)",
+    },
+    diff: {
+      diffStatus: "diff display → {current}",
+      diffSet: "diff display → {mode}",
+      diffInvalid: "unknown mode: {mode}\navailable: {choices}",
     },
     permissions: {
       mutateCodeOnly:
