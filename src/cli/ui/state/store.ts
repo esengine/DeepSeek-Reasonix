@@ -18,7 +18,7 @@ export function createStore(session: SessionInfo, initialCards?: ReadonlyArray<C
   const stateListeners = new Set<StateListener>();
   const eventListeners = new Set<EventListener>();
 
-  // RAF-batched notification: during rapid streaming, dozens of chunks arrive
+  // Macrotask-batched notification: during rapid streaming, dozens of chunks arrive
   // within a single event-loop drain.  Each `dispatch()` used to synchronously
   // notify every listener, causing React's `useSyncExternalStore` to re-render
   // on *every* token.  When renders couldn't keep up, React hit "Maximum update
