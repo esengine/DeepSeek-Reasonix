@@ -40,6 +40,22 @@ function enableAutoGitRollback(home: string, root: string): void {
     body: [
       "Before edit_file, multi_edit, or write_file, create a git rollback point.",
       "Run git add for the target files, then git diff --cached --quiet || git commit.",
+      "Refuse edits unless the worktree is clean after that checkpoint.",
+    ].join("\n"),
+    priority: "high",
+  });
+}
+
+function writePlainGitWorkflowMemory(home: string, root: string): void {
+  const store = new MemoryStore({ homeDir: home, projectRoot: root });
+  store.write({
+    name: "normal-git-workflow",
+    type: "workflow",
+    scope: "global",
+    description: "documents git add and git commit around edit_file usage",
+    body: [
+      "Before larger changes, inspect the diff and decide what to stage.",
+      "Use git add and git commit intentionally after edit_file, multi_edit, or write_file changes.",
     ].join("\n"),
     priority: "high",
   });
@@ -95,6 +111,23 @@ describe("auto-git-rollback memory guard", () => {
     expect(out).toMatch(/edited tracked\.txt/);
     expect(git(root, ["show", "HEAD:tracked.txt"])).toBe("dirty-before-edit");
     expect(git(root, ["log", "-1", "--format=%s"])).toMatch(/pre-edit: edit_file tracked\.txt/);
+    expect(await fs.readFile(join(root, "tracked.txt"), "utf8")).toBe("after-edit\n");
+  });
+
+  it("does not activate from a high-priority memory that only describes ordinary git workflow", async () => {
+    writePlainGitWorkflowMemory(home, root);
+    await fs.writeFile(join(root, "tracked.txt"), "dirty-before-edit\n", "utf8");
+
+    await tools.dispatch("read_file", { path: "tracked.txt" }, { readTracker });
+    const out = await tools.dispatch(
+      "edit_file",
+      { path: "tracked.txt", search: "dirty-before-edit", replace: "after-edit" },
+      { readTracker },
+    );
+
+    expect(out).toMatch(/edited tracked\.txt/);
+    expect(git(root, ["show", "HEAD:tracked.txt"])).toBe("baseline");
+    expect(git(root, ["log", "--format=%s"])).not.toContain("pre-edit:");
     expect(await fs.readFile(join(root, "tracked.txt"), "utf8")).toBe("after-edit\n");
   });
 

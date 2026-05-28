@@ -77,12 +77,7 @@ function gitTopLevel(rootDir: string): string | null {
 function isAutoGitRollbackEntry(entry: MemoryEntry, cfg: ReasonixConfig | undefined): boolean {
   if (effectivePriority(entry, cfg) !== "high") return false;
   const text = [entry.name, entry.type, entry.description, entry.body].join("\n").toLowerCase();
-  if (text.includes("auto-git-rollback")) return true;
-  return (
-    text.includes("git add") &&
-    text.includes("git commit") &&
-    (text.includes("edit_file") || text.includes("multi_edit") || text.includes("write_file"))
-  );
+  return text.includes("auto-git-rollback");
 }
 
 function autoGitRollbackActive(
