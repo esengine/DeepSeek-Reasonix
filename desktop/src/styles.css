@@ -3611,12 +3611,18 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   font-size: 14px;
   line-height: 1.55;
   min-height: calc(2 * 1.55em + 18px);
-  overflow-y: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+  scrollbar-width: none;
   font-family: inherit;
   color: transparent;
   caret-color: var(--fg);
   position: relative;
   z-index: 1;
+}
+.composer textarea::-webkit-scrollbar {
+  display: none;
 }
 .composer textarea::placeholder {
   color: var(--muted-2);
