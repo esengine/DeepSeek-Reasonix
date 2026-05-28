@@ -3,6 +3,7 @@
 import { promises as fs } from "node:fs";
 import * as pathMod from "node:path";
 import picomatch from "picomatch";
+import { type AutoGitRollbackConfig, prepareAutoGitRollback } from "../code/auto-git-rollback.js";
 import { decodeFileBuffer, encodeFile } from "../code/file-encoding.js";
 import { addProjectPathAllowed, loadProjectPathAllowed } from "../config.js";
 import { type ConfirmationChoice, pauseGate as defaultPauseGate } from "../core/pause-gate.js";
@@ -31,6 +32,8 @@ export interface FilesystemToolsOptions {
   outlineThresholdBytes?: number;
   /** Cap on total bytes from listing/grep tools — bounds tree-as-one-string accidents. */
   maxListBytes?: number;
+  /** Opt-in host guard for high-priority auto-git-rollback memories. */
+  autoGitRollback?: AutoGitRollbackConfig;
 }
 
 /** 64 KiB covers ~99% of source files; larger ones (generated bundles, lockfiles, novels) outline-mode by default to keep the cache prefix slim. */
@@ -117,6 +120,7 @@ export function registerFilesystemTools(
   const allowWriting = opts.allowWriting !== false;
   const outlineThresholdBytes = opts.outlineThresholdBytes ?? DEFAULT_OUTLINE_THRESHOLD_BYTES;
   const maxListBytes = opts.maxListBytes ?? DEFAULT_MAX_LIST_BYTES;
+  const autoGitRollback = opts.autoGitRollback;
 
   const normRoot = pathMod.resolve(rootDir);
   /** Approved-this-session directory prefixes — `run_once` keeps the user from being asked twice for follow-up reads in the same dir. Wiped on process exit, not persisted. */
@@ -664,6 +668,13 @@ export function registerFilesystemTools(
     },
     fn: async (args: { path: string; content: string }, ctx?: ToolCallContext) => {
       const abs = await safePath(args.path, "write_file", ctx, "write");
+      const guard = prepareAutoGitRollback({
+        rootDir,
+        toolName: "write_file",
+        absPaths: [abs],
+        autoGitRollback,
+      });
+      if (guard) return guard;
       await fs.mkdir(pathMod.dirname(abs), { recursive: true });
       let encoding: ReturnType<typeof decodeFileBuffer>["encoding"] = "utf8";
       try {
@@ -692,13 +703,22 @@ export function registerFilesystemTools(
       },
       required: ["path", "search", "replace"],
     },
-    fn: async (args: { path: string; search: string; replace: string }, ctx?: ToolCallContext) =>
-      applyEdit(
+    fn: async (args: { path: string; search: string; replace: string }, ctx?: ToolCallContext) => {
+      const abs = await safePath(args.path, "edit_file", ctx, "write");
+      const guard = prepareAutoGitRollback({
         rootDir,
-        await safePath(args.path, "edit_file", ctx, "write"),
+        toolName: "edit_file",
+        absPaths: [abs],
+        autoGitRollback,
+      });
+      if (guard) return guard;
+      return applyEdit(
+        rootDir,
+        abs,
         args,
         ctx?.readTracker ? (abs) => ctx.readTracker!.hasRead(abs) : undefined,
-      ),
+      );
+    },
   });
 
   registry.register({
@@ -741,6 +761,13 @@ export function registerFilesystemTools(
           replace: e?.replace,
         })),
       );
+      const guard = prepareAutoGitRollback({
+        rootDir,
+        toolName: "multi_edit",
+        absPaths: resolved.map((e) => e.abs),
+        autoGitRollback,
+      });
+      if (guard) return guard;
       return applyMultiEdit(
         rootDir,
         resolved,

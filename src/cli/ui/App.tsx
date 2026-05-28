@@ -9,6 +9,7 @@ import {
   openEventSink,
 } from "../../adapters/event-sink-jsonl.js";
 import { type AtUrlExpansion, expandAtMentions, expandAtUrls } from "../../at-mentions.js";
+import { prepareAutoGitRollbackForEditBlocks } from "../../code/auto-git-rollback.js";
 import {
   type CheckpointMeta,
   createCheckpoint,
@@ -2050,6 +2051,8 @@ function AppInner({
       // after —ToolCard renders that with the same text. Pushing here
       // would produce "result shown twice".
       const applyNow = (): string => {
+        const guard = prepareAutoGitRollbackForEditBlocks(rootForEdit, blocks, {});
+        if (guard) return guard;
         const snaps = snapshotBeforeEdits(blocks, rootForEdit);
         const results = applyEditBlocks(blocks, rootForEdit);
         const good = results.some((r) => r.status === "applied" || r.status === "created");
