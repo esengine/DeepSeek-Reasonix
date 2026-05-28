@@ -230,6 +230,17 @@ export type UsageStats = {
   liveLogTokens: number;
 };
 
+type WindowControls = Pick<ReturnType<typeof getCurrentWindow>, "isFullscreen" | "isMaximized" | "setFullscreen" | "toggleMaximize">;
+
+export function readWindowExpanded(win: WindowControls, isMac: boolean): Promise<boolean> {
+  return isMac ? win.isFullscreen() : win.isMaximized();
+}
+
+export function toggleWindowExpanded(win: WindowControls, isMac: boolean, expanded: boolean): Promise<void> {
+  if (isMac) return win.setFullscreen(!expanded);
+  return win.toggleMaximize();
+}
+
 export type SessionInfo = {
   name: string;
   messageCount: number;
@@ -2639,13 +2650,23 @@ function TitleBar({
 
   useEffect(() => {
     const win = getCurrentWindow();
-    win.isMaximized().then(setIsMaximized);
+    const syncWindowState = async () => {
+      setIsMaximized(await readWindowExpanded(win, isMac));
+    };
+    void syncWindowState();
     let unlisten: (() => void) | undefined;
     win.listen("tauri://resize", async () => {
-      setIsMaximized(await win.isMaximized());
+      await syncWindowState();
     }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
-  }, []);
+    let fullscreenUnlisten: (() => void) | undefined;
+    win.listen("tauri://fullscreen", async () => {
+      await syncWindowState();
+    }).then((fn) => { fullscreenUnlisten = fn; });
+    return () => {
+      unlisten?.();
+      fullscreenUnlisten?.();
+    };
+  }, [isMac]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -2696,7 +2717,7 @@ function TitleBar({
               aria-label={isMaximized ? t("app.titlebar.restore") : t("app.titlebar.maximize")}
               onMouseDown={(e) => {
                 e.stopPropagation();
-                win.toggleMaximize();
+                void toggleWindowExpanded(win, true, isMaximized);
               }}
             >
               {isMaximized ? <WinRestore /> : <WinMaximize />}
@@ -2810,7 +2831,7 @@ function TitleBar({
               type="button"
               className="win-ctrl"
               title={isMaximized ? t("app.titlebar.restore") : t("app.titlebar.maximize")}
-              onMouseDown={(e) => { e.stopPropagation(); win.toggleMaximize(); }}
+              onMouseDown={(e) => { e.stopPropagation(); void toggleWindowExpanded(win, false, isMaximized); }}
             >
               {isMaximized ? <WinRestore /> : <WinMaximize />}
             </button>
