@@ -1,6 +1,6 @@
 /** Skills store + prefix-index composer — temp homeDir / projectRoot per test, no real skill dirs touched. */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -371,6 +371,40 @@ describe("SkillStore", () => {
       const r = store.create("nope", "project");
       expect("error" in r).toBe(true);
     });
+  });
+
+  it("loads skills from symlinked directories (#2104)", () => {
+    // Create a real skill directory outside the skills root
+    const realDir = mkdtempSync(join(tmpdir(), "reasonix-skills-real-"));
+    try {
+      writeFileSync(
+        join(realDir, "SKILL.md"),
+        "---\ndescription: symlinked skill\n---\nSymlinked body\n",
+        "utf8",
+      );
+      // Create a symlink to it inside the global skills dir
+      const skillsDir = join(home, ".reasonix", "skills");
+      mkdirSync(skillsDir, { recursive: true });
+      symlinkSync(realDir, join(skillsDir, "linked-skill"));
+
+      const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+      const skills = store.list();
+      expect(skills).toHaveLength(1);
+      expect(skills[0]?.name).toBe("linked-skill");
+      expect(skills[0]?.description).toBe("symlinked skill");
+      expect(skills[0]?.body).toBe("Symlinked body");
+    } finally {
+      rmSync(realDir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips broken symlinks gracefully", () => {
+    const skillsDir = join(home, ".reasonix", "skills");
+    mkdirSync(skillsDir, { recursive: true });
+    symlinkSync(join(tmpdir(), `nonexistent-target-${Date.now()}`), join(skillsDir, "broken"));
+
+    const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
+    expect(store.list()).toEqual([]);
   });
 });
 
