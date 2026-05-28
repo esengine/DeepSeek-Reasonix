@@ -3,11 +3,11 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { Check, Copy, ExternalLink, FileText } from "lucide-react";
 import {
   Children,
+  type ReactNode,
   cloneElement,
   createContext,
   isValidElement,
   memo,
-  type ReactNode,
   useContext,
   useState,
 } from "react";
@@ -24,26 +24,80 @@ async function openWithEditor(
   abs: string,
   line?: number,
 ): Promise<void> {
-  if (editor && editor.trim()) {
+  if (editor?.trim()) {
     await invoke("open_in_editor", { command: editor, path: abs, line: line ?? null });
     return;
   }
   await openPath(abs);
 }
 
-type WorkspaceCtx = { dir?: string; editor?: string };
+type TrackedFile = { path: string; status: string };
+
+type WorkspaceCtx = { dir?: string; editor?: string; sessionFiles?: TrackedFile[] };
 const WorkspaceContext = createContext<WorkspaceCtx>({});
 export const WorkspaceProvider = WorkspaceContext.Provider;
 
-function resolveAgainstWorkspace(rel: string, ws: string | undefined): string {
-  if (!ws) return rel;
-  const isWindows = ws.includes("\\");
-  if (/^[a-zA-Z]:[\\/]/.test(rel) || rel.startsWith("/")) {
-    return isWindows ? rel.replace(/\//g, "\\") : rel;
+/**
+ * Try to find a tracked session file whose path ends with the displayed text.
+ * This handles cases where the AI writes a short/relative path in conversation
+ * but the actual file lives at a different absolute path (which is known from
+ * the tool call args in sessionFiles).
+ */
+function resolveBySessionFiles(
+  displayPath: string,
+  sessionFiles: TrackedFile[] | undefined,
+): string | null {
+  if (!sessionFiles || sessionFiles.length === 0) return null;
+  const normalizedDisplay = displayPath.replace(/\\/g, "/");
+  let bestMatch: string | null = null;
+  let bestMatchLen = 0;
+
+  for (const sf of sessionFiles) {
+    const normalizedFull = sf.path.replace(/\\/g, "/");
+
+    // Exact match — the displayed path is already the tool arg path
+    if (normalizedFull === normalizedDisplay) {
+      return sf.path;
+    }
+
+    // Suffix match: displayed path ends with the tail of a tracked file
+    // e.g. "config.yaml" matches ".../.reasonix/config.yaml"
+    //      "GPQADiamond/train/template/op_prompt.py" matches ".../optimized/GPQADiamond/train/template/op_prompt.py"
+    if (
+      normalizedFull.endsWith(`/${normalizedDisplay}`) ||
+      normalizedFull.endsWith(`\\${normalizedDisplay}`)
+    ) {
+      if (normalizedDisplay.length > bestMatchLen) {
+        bestMatch = sf.path;
+        bestMatchLen = normalizedDisplay.length;
+      }
+    }
   }
+
+  return bestMatch;
+}
+
+function resolveAgainstWorkspace(
+  rel: string,
+  ws: string | undefined,
+  sessionFiles?: TrackedFile[],
+): string {
+  // Step 1: Try suffix matching against tracked session files.
+  // If found, use the tracked path as the base instead of the display text.
+  const sessionResolved = resolveBySessionFiles(rel, sessionFiles);
+  const basePath = sessionResolved ?? rel;
+
+  // Step 2: If basePath is already absolute, return it normalized
+  if (/^[a-zA-Z]:[\\/]/.test(basePath) || basePath.startsWith("/")) {
+    return ws?.includes("\\") ? basePath.replace(/\//g, "\\") : basePath;
+  }
+
+  // Step 3: Resolve relative basePath against workspace
+  if (!ws) return basePath;
+  const isWindows = ws.includes("\\");
   const sep = isWindows ? "\\" : "/";
   const trimmed = ws.replace(/[\\/]$/, "");
-  const relative = rel.replace(/^\.[\\/]/, "").replace(/\//g, sep);
+  const relative = basePath.replace(/^\.[\\/]/, "").replace(/\//g, sep);
   return `${trimmed}${sep}${relative}`;
 }
 
@@ -118,9 +172,9 @@ function FilePill({ path, line }: { path: string; line?: string }) {
   const ctx = useContext(WorkspaceContext);
   const [done, setDone] = useState<"open" | "copy" | null>(null);
   const display = line ? `${path}:${line}` : path;
+  const abs = resolveAgainstWorkspace(path, ctx.dir, ctx.sessionFiles);
   const openInEditor = async () => {
     try {
-      const abs = resolveAgainstWorkspace(path, ctx.dir);
       await openWithEditor(ctx.editor, abs, firstLine(line));
       setDone("open");
       setTimeout(() => setDone(null), 1200);
@@ -235,11 +289,13 @@ function normalizeMathDelimiters(source: string): string {
   // Replace | with \vert inside math to prevent GFM table column splitting.
   // \vert renders identically to | in KaTeX — it's the same vertical-bar
   // glyph — but the markdown parser won't mistake it for a table separator.
-  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_: string, m: string) =>
-    "$$" + m.replace(/\|/g, "\\vert ") + "$$",
+  result = result.replace(
+    /\$\$([\s\S]*?)\$\$/g,
+    (_: string, m: string) => `$$${m.replace(/\|/g, "\\vert ")}$$`,
   );
-  result = result.replace(/\$([^$\n]+)\$/g, (_: string, m: string) =>
-    "$" + m.replace(/\|/g, "\\vert ") + "$",
+  result = result.replace(
+    /\$([^$\n]+)\$/g,
+    (_: string, m: string) => `$${m.replace(/\|/g, "\\vert ")}$`,
   );
 
   return result;
@@ -300,7 +356,7 @@ function SafeLink({ href, children }: { href?: string; children: ReactNode }) {
     try {
       const parsed = parseFileHref(href);
       const target = parsed ?? { path: decodeMaybeUri(stripFileScheme(href)) };
-      const abs = resolveAgainstWorkspace(target.path, ctx.dir);
+      const abs = resolveAgainstWorkspace(target.path, ctx.dir, ctx.sessionFiles);
       await openWithEditor(ctx.editor, abs, firstLine(target.line));
     } catch {
       try {
@@ -349,7 +405,8 @@ export function extractFencedLang(children: ReactNode): string {
 function flattenChildText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(flattenChildText).join("");
-  if (isValidElement(node)) return flattenChildText((node.props as { children?: ReactNode }).children);
+  if (isValidElement(node))
+    return flattenChildText((node.props as { children?: ReactNode }).children);
   return "";
 }
 
