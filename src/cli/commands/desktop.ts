@@ -2573,6 +2573,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           },
           tab.id,
         );
+        emitCtxBreakdown(tab);
       } else {
         emitSessions(tab);
       }
