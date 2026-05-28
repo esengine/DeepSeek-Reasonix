@@ -1,7 +1,7 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
@@ -446,14 +446,18 @@ function sanitizeStringArrayField(
   parent[leaf] = filtered;
 }
 
+/** mtime-based cache — avoids repeated disk I/O + JSON.parse when multiple
+ *  config loaders fire in the same UI frame (loadModel, loadLanguage, etc.). */
+let _configCache: { path: string; mtimeMs: number; cfg: ReasonixConfig } | null = null;
+
 export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
   try {
-    // Strip the UTF-8 BOM if a foreign writer left one in — Windows
-    // PowerShell 5's `Set-Content -Encoding UTF8` and several text
-    // editors emit `EF BB BF` at the head of the file. `JSON.parse`
-    // refuses BOM-prefixed input and throws, which used to fall
-    // through to `return {}` and silently nuke every saved field on
-    // the next read-modify-write.
+    const stat = statSync(path);
+    if (_configCache && _configCache.path === path && _configCache.mtimeMs === stat.mtimeMs) {
+      return _configCache.cfg;
+    }
+    // Strip UTF-8 BOM (Windows PowerShell 5's Set-Content -Encoding UTF8
+    // emits EF BB BF; JSON.parse refuses BOM-prefixed input).
     const raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -461,7 +465,9 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
       for (const segments of STRING_ARRAY_FIELDS) {
         sanitizeStringArrayField(cfg, segments, path);
       }
-      return cfg as ReasonixConfig;
+      const result = cfg as ReasonixConfig;
+      _configCache = { path, mtimeMs: stat.mtimeMs, cfg: result };
+      return result;
     }
   } catch {
     /* missing or malformed → empty config */
@@ -518,6 +524,7 @@ export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPat
   // baseline (issue #1535).
   const tmp = `${path}.${process.pid}.tmp`;
   atomicWriteSync(path, JSON.stringify(cfg, null, 2), tmp);
+  _configCache = null;
 }
 
 /** Resolve the language from config file. */
