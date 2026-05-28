@@ -1701,6 +1701,26 @@ export const de: TranslationSchema = {
       "web_search: Fehler beim Brave-Suchserver ({status}) — später erneut versuchen oder die Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
     braveParseError:
       "web_search: Brave Search hat eine nicht auswertbare Antwort zurückgegeben (HTTP {status}) — später erneut versuchen",
+    ollamaMissingKey:
+      "Ollama benötigt einen API-Schlüssel — setze die Umgebungsvariable OLLAMA_API_KEY oder `ollamaApiKey` in ~/.reasonix/config.json; Schlüssel unter https://ollama.com/settings/keys",
+    ollamaUnauthorized:
+      "Ollama API-Schlüssel abgelehnt — OLLAMA_API_KEY prüfen oder neuen Schlüssel unter https://ollama.com/settings/keys holen",
+    ollamaRateLimit:
+      "Ollama ist ratenbegrenzt oder das Kontingent ist überschritten — warten und erneut versuchen oder Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+    ollamaServerError:
+      "Ollama-Serverfehler ({status}) für {url} — später erneut versuchen oder Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+    ollamaParseError:
+      "Ollama hat eine nicht auswertbare Antwort zurückgegeben (HTTP {status}) für {url} — später erneut versuchen",
+    fetchOllamaMissingKey:
+      "web_fetch: Ollama-Abruf benötigt einen API-Schlüssel — OLLAMA_API_KEY Umgebungsvariable oder `ollamaApiKey` in der Konfiguration setzen; Schlüssel unter https://ollama.com/settings/keys",
+    fetchOllamaUnauthorized:
+      "web_fetch: Ollama API-Schlüssel abgelehnt — OLLAMA_API_KEY prüfen oder neuen Schlüssel unter https://ollama.com/settings/keys holen",
+    fetchOllamaRateLimit:
+      "web_fetch: Ollama-Abruf ist ratenbegrenzt oder Kontingent überschritten — warten und erneut versuchen",
+    fetchOllamaServerError:
+      "web_fetch: Ollama-Abruf Serverfehler ({status}) für {url} — später erneut versuchen",
+    fetchOllamaParseError:
+      "web_fetch: Ollama-Abruf hat eine nicht auswertbare Antwort zurückgegeben (HTTP {status}) für {url} — später erneut versuchen",
     fetchStatus:
       "web_fetch {status} für {url} — versuche: Bestätige, dass die URL im Browser aufgelöst wird; der Status deutet darauf hin, dass der Host eine Fehlerseite zurückgegeben hat",
     fetchRateLimit429:

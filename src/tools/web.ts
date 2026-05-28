@@ -687,9 +687,7 @@ async function searchOllama(query: string, opts: WebSearchOptions = {}): Promise
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
   const apiKey = loadOllamaApiKey(opts.configPath);
   if (!apiKey) {
-    throw new Error(
-      "web_search: Ollama web search requires an API key — set OLLAMA_API_KEY, `ollamaApiKey`, or use /search-engine ollama <key>.",
-    );
+    throw new Error(t("webErrors.ollamaMissingKey"));
   }
 
   let resp: Response;
@@ -713,19 +711,23 @@ async function searchOllama(query: string, opts: WebSearchOptions = {}): Promise
 
   if (!resp.ok) {
     if (resp.status === 401 || resp.status === 403) {
-      throw new Error("web_search: Ollama API key rejected — check OLLAMA_API_KEY.");
+      throw new Error(t("webErrors.ollamaUnauthorized"));
     }
     if (resp.status === 429) {
-      throw new Error("web_search: Ollama web search is rate-limited or quota-limited.");
+      throw new Error(t("webErrors.ollamaRateLimit"));
     }
-    throw new Error(`web_search: Ollama web search returned HTTP ${resp.status}.`);
+    throw new Error(
+      t("webErrors.ollamaServerError", { status: resp.status, url: OLLAMA_WEB_SEARCH_ENDPOINT }),
+    );
   }
 
   let data: OllamaSearchResponse;
   try {
     data = (await resp.json()) as OllamaSearchResponse;
   } catch {
-    throw new Error(`web_search: Ollama returned unparseable response (HTTP ${resp.status}).`);
+    throw new Error(
+      t("webErrors.ollamaParseError", { status: resp.status, url: OLLAMA_WEB_SEARCH_ENDPOINT }),
+    );
   }
 
   return (data.results ?? []).slice(0, topK).map((r, i) => ({
@@ -809,9 +811,7 @@ async function webFetchOllama(
 ): Promise<PageContent & { links?: string[] }> {
   const apiKey = loadOllamaApiKey(opts.configPath);
   if (!apiKey) {
-    throw new Error(
-      "web_fetch: Ollama web fetch requires an API key — set OLLAMA_API_KEY, `ollamaApiKey`, or use /search-engine ollama <key>.",
-    );
+    throw new Error(t("webErrors.fetchOllamaMissingKey"));
   }
 
   const ctrl = new AbortController();
@@ -844,19 +844,19 @@ async function webFetchOllama(
 
   if (!resp.ok) {
     if (resp.status === 401 || resp.status === 403) {
-      throw new Error("web_fetch: Ollama API key rejected — check OLLAMA_API_KEY.");
+      throw new Error(t("webErrors.fetchOllamaUnauthorized"));
     }
     if (resp.status === 429) {
-      throw new Error("web_fetch: Ollama web fetch is rate-limited or quota-limited.");
+      throw new Error(t("webErrors.fetchOllamaRateLimit"));
     }
-    throw new Error(`web_fetch: Ollama web fetch returned HTTP ${resp.status} for ${url}.`);
+    throw new Error(t("webErrors.fetchOllamaServerError", { status: resp.status, url }));
   }
 
   let data: OllamaFetchResponse;
   try {
     data = (await resp.json()) as OllamaFetchResponse;
   } catch {
-    throw new Error(`web_fetch: Ollama returned unparseable response for ${url}.`);
+    throw new Error(t("webErrors.fetchOllamaParseError", { status: resp.status, url }));
   }
 
   const maxChars = opts.maxChars ?? DEFAULT_FETCH_MAX_CHARS;

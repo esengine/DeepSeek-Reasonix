@@ -53,6 +53,7 @@ export const zhCN: typeof en = {
     searchPlaceholder: "搜索最近路径…",
     empty: "暂无最近工作目录",
     browse: "浏览本地…",
+    removeRecent: "移除此记录",
   },
   sidebar: {
     newChat: "新建会话",

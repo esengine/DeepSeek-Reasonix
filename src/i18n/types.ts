@@ -227,6 +227,7 @@ export interface TranslationSchema {
     continuingAfter: string;
     planStoppedAt: string;
     revisingAfter: string;
+    explicitPlanIntentArmed: string;
     historyScrollHint: string;
     editHistoryTitle: string;
     editHistoryNoCodeMode: string;
@@ -730,6 +731,16 @@ export interface TranslationSchema {
     braveRateLimit: string;
     braveServerError: string;
     braveParseError: string;
+    ollamaMissingKey: string;
+    ollamaUnauthorized: string;
+    ollamaRateLimit: string;
+    ollamaServerError: string;
+    ollamaParseError: string;
+    fetchOllamaMissingKey: string;
+    fetchOllamaUnauthorized: string;
+    fetchOllamaRateLimit: string;
+    fetchOllamaServerError: string;
+    fetchOllamaParseError: string;
     fetchStatus: string;
     fetchRateLimit429: string;
     fetchForbidden403: string;

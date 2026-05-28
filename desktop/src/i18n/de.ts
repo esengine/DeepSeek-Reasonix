@@ -57,6 +57,7 @@ export const de: typeof en = {
     searchPlaceholder: "Letzte Pfade suchen...",
     empty: "Keine letzten Arbeitsbereiche",
     browse: "Lokal durchsuchen...",
+    removeRecent: "Aus Liste entfernen",
   },
   sidebar: {
     ...en.sidebar,

@@ -341,6 +341,23 @@ export function isAllowed(
       )
     )
       return false;
+    // Issue #2081 — demote when a path-like argument resolves outside the
+    // workspace.  Prevents allowlisted commands (find, tree, grep, cat …)
+    // from silently scanning the entire filesystem (e.g. `find / -name x`).
+    // Relative paths are resolved against projectRoot, so `find .` stays
+    // allowed; only paths that escape the workspace trigger the confirm gate.
+    if (projectRoot) {
+      const root = pathMod.resolve(projectRoot);
+      for (const tok of argv) {
+        if (!tok || tok.startsWith("-") || tok.includes("://") || tok.startsWith("$")) continue;
+        let expanded = tok;
+        if (expanded.startsWith("~")) expanded = pathMod.join(homedir(), expanded.slice(1));
+        const resolved = pathMod.resolve(root, expanded);
+        if (pathMod.isAbsolute(resolved) && !pathIsUnder(resolved, root)) {
+          return false;
+        }
+      }
+    }
     return true;
   }
   return false;

@@ -59,7 +59,7 @@ export interface SlashResult {
   };
 }
 
-export type PlanModeToggleSource = "slash";
+export type PlanModeToggleSource = "slash" | "explicit-intent";
 
 export interface SlashContext {
   configPath?: string;
