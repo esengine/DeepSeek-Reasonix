@@ -249,7 +249,9 @@ export class SkillStore {
   }
 
   private readEntry(dir: string, scope: SkillScope, entry: import("node:fs").Dirent): Skill | null {
-    if (entry.isDirectory()) {
+    const isDir =
+      entry.isDirectory() || (entry.isSymbolicLink() && this.isSymlinkDirectory(dir, entry.name));
+    if (isDir) {
       if (!isValidSkillName(entry.name)) return null;
       const file = join(dir, entry.name, SKILL_FILE);
       if (!existsSync(file)) return null;
@@ -261,6 +263,15 @@ export class SkillStore {
       return this.parse(join(dir, entry.name), stem, scope);
     }
     return null;
+  }
+
+  /** Check if a symlink points to a directory. Returns false for broken symlinks. */
+  private isSymlinkDirectory(parentDir: string, name: string): boolean {
+    try {
+      return statSync(join(parentDir, name)).isDirectory();
+    } catch {
+      return false;
+    }
   }
 
   private parse(path: string, stem: string, scope: SkillScope): Skill | null {
