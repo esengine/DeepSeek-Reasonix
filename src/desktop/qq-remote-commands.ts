@@ -98,12 +98,5 @@ export function qqRemoteDesktopHelpText(skillNames: Iterable<string>): string {
 }
 
 export function qqRemoteCommandBypassesBusy(cmd: QQRemoteDesktopCommand): boolean {
-  return (
-    cmd.kind === "help" ||
-    cmd.kind === "new" ||
-    cmd.kind === "abort" ||
-    cmd.kind === "model" ||
-    cmd.kind === "effort" ||
-    cmd.kind === "plan"
-  );
+  return cmd.kind === "help" || cmd.kind === "new" || cmd.kind === "abort" || cmd.kind === "effort";
 }
