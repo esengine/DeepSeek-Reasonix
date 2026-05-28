@@ -71,7 +71,7 @@ export function useTerminalViewport(): [
     if (visible !== entryRef.current.isVisible) {
       entryRef.current = { isVisible: visible }
     }
-  })
+  }, [elementRef.current, terminalSize])
 
   return [setElement, entryRef.current]
 }

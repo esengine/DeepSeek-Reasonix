@@ -145,6 +145,6 @@ export function useBoxMetrics(ref: { current: DOMElement | null }): {
         prev.width === width && prev.height === height ? prev : { width, height },
       );
     }, 0);
-  });
+  }, [ref.current]);
   return size;
 }
