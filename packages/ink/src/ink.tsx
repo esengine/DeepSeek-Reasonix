@@ -105,6 +105,14 @@ export default class Ink {
   private backFrame: Frame;
   private lastPoolResetTime = performance.now();
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  // Microtask coalescing: prevents double-render when leading + trailing
+  // throttle edges both queue a microtask in the same event-loop tick.
+  private renderMicrotaskPending = false;
+  // Track previous selection/highlight state so we only force full-screen
+  // damage on TRANSITION frames (activate/deactivate), not every frame
+  // while they're continuously active. Cuts ~50% diff work in xterm.js.
+  private prevSelActive = false;
+  private prevHlActive = false;
   private lastYogaCounters: {
     ms: number;
     visited: number;
@@ -222,7 +230,14 @@ export default class Ink {
     // a one-keystroke lag. Same event-loop tick, so throughput is unchanged.
     // Test env uses onImmediateRender (direct onRender, no throttle) so
     // existing synchronous lastFrame() tests are unaffected.
-    const deferredRender = (): void => queueMicrotask(this.onRender);
+    const deferredRender = (): void => {
+      if (this.renderMicrotaskPending) return;
+      this.renderMicrotaskPending = true;
+      queueMicrotask(() => {
+        this.renderMicrotaskPending = false;
+        this.onRender();
+      });
+    };
     this.scheduleRender = throttle(deferredRender, FRAME_INTERVAL_MS, {
       leading: true,
       trailing: true
@@ -557,9 +572,14 @@ export default class Ink {
     // Full-damage backstop: applies on BOTH alt-screen and main-screen.
     // Layout shifts (spinner appears, status line resizes) can leave stale
     // cells at sibling boundaries that per-node damage tracking misses.
-    // Selection/highlight overlays write via setCellStyleId which doesn't
-    // track damage. prevFrameContaminated covers the cleanup frame.
-    if (didLayoutShift() || selActive || hlActive || this.prevFrameContaminated) {
+    // For selection/highlight: force full damage only on TRANSITION frames
+    // (activate or deactivate). While continuously active the overlay is
+    // stable across frames, so normal cell diff handles it — no need to
+    // rescan every cell each frame. prevFrameContaminated covers the
+    // cleanup frame (selection was active, now isn't).
+    const selTransition = selActive !== this.prevSelActive;
+    const hlTransition = hlActive !== this.prevHlActive;
+    if (didLayoutShift() || selTransition || hlTransition || this.prevFrameContaminated) {
       frame.screen.damage = {
         x: 0,
         y: 0,
@@ -567,6 +587,8 @@ export default class Ink {
         height: frame.screen.height
       };
     }
+    this.prevSelActive = selActive;
+    this.prevHlActive = hlActive;
 
     // Alt-screen: anchor the physical cursor to (0,0) before every diff.
     // All cursor moves in log-update are RELATIVE to prev.cursor; if tmux
@@ -754,11 +776,14 @@ export default class Ink {
     // its scheduleRender path fires a render which clears this timer at
     // the top of onRender — no double.
     //
-    // Drain frames are cheap (DECSTBM + ~10 patches, ~200 bytes) so run at
-    // quarter interval (~250fps, setTimeout practical floor) for max scroll
-    // speed. Regular renders stay at FRAME_INTERVAL_MS via the throttle.
+    // Drain frames are cheap (DECSTBM + ~10 patches, ~200 bytes) but still
+    // run the full render pipeline (React reconcile + diff + paint).
+    // xterm.js (VS Code) is single-threaded for ANSI parsing — running at
+    // 4ms (250fps) overwhelmed it. Use FRAME_INTERVAL_MS (16ms, ~60fps)
+    // which matches the regular render budget and is well within xterm.js's
+    // comfortable throughput. Native terminals handle this fine too.
     if (frame.scrollDrainPending) {
-      this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
+      this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS);
     }
     const yogaMs = getLastYogaMs();
     const commitMs = getLastCommitMs();
