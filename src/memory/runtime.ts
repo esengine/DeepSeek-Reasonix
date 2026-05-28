@@ -16,6 +16,8 @@ export class ImmutablePrefix {
   readonly fewShots: readonly ChatMessage[];
   /** Invalidated by addTool / removeTool / replaceSystem; bypassing any of those leaves cache stale → fingerprint diverges from sent prefix. */
   private _fingerprintCache: string | null = null;
+  /** Frozen tool-spec snapshot — avoids structuredClone per iteration. Invalidated by addTool/removeTool. */
+  private _frozenToolsCache: ToolSpec[] | null = null;
 
   constructor(opts: ImmutablePrefixOptions) {
     this.system = opts.system;
@@ -40,7 +42,12 @@ export class ImmutablePrefix {
   }
 
   tools(): ToolSpec[] {
-    return this._toolSpecs.map((t) => structuredClone(t) as ToolSpec);
+    if (this._frozenToolsCache) return this._frozenToolsCache;
+    const frozen = Object.freeze(
+      this._toolSpecs.map((t) => Object.freeze({ ...t, function: { ...t.function } }) as ToolSpec),
+    );
+    this._frozenToolsCache = frozen as unknown as ToolSpec[];
+    return this._frozenToolsCache;
   }
 
   addTool(spec: ToolSpec): boolean {
@@ -49,6 +56,7 @@ export class ImmutablePrefix {
     if (this._toolSpecs.some((t) => t.function?.name === name)) return false;
     this._toolSpecs.push(spec);
     this._fingerprintCache = null;
+    this._frozenToolsCache = null;
     return true;
   }
 
@@ -58,6 +66,7 @@ export class ImmutablePrefix {
     if (idx < 0) return false;
     this._toolSpecs.splice(idx, 1);
     this._fingerprintCache = null;
+    this._frozenToolsCache = null;
     return true;
   }
 
@@ -97,6 +106,10 @@ export class AppendOnlyLog {
   private _sessionPath: string | null;
   // Tracks total across window + disk so callers see the correct length.
   private _totalLength: number;
+  /** Cached full-history result — avoids redundant sync disk I/O when
+   *  buildMessages() is called 2-3x per loop iteration. Invalidated by
+   *  append / compactInPlace / initWindow. */
+  private _fullHistoryCache: { version: number; messages: ChatMessage[] } | null = null;
 
   constructor(opts?: { windowSize?: number; sessionPath?: string }) {
     this._windowSize = opts?.windowSize ?? DEFAULT_WINDOW;
@@ -111,6 +124,7 @@ export class AppendOnlyLog {
         ? messages.slice(messages.length - this._windowSize)
         : [...messages];
     this._totalLength = messages.length;
+    this._fullHistoryCache = null;
   }
 
   append(message: ChatMessage): void {
@@ -122,6 +136,7 @@ export class AppendOnlyLog {
     if (this._entries.length > this._windowSize) {
       this._entries.shift();
     }
+    this._fullHistoryCache = null;
   }
 
   extend(messages: ChatMessage[]): void {
@@ -132,6 +147,7 @@ export class AppendOnlyLog {
   compactInPlace(replacement: ChatMessage[]): void {
     this._entries = [...replacement];
     this._totalLength = replacement.length;
+    this._fullHistoryCache = null;
   }
 
   // Checks memory window first; falls back to disk for older messages.
@@ -158,7 +174,11 @@ export class AppendOnlyLog {
     if (!this._sessionPath || this._entries.length >= this._totalLength) {
       return this.toMessages();
     }
+    if (this._fullHistoryCache && this._fullHistoryCache.version === this._totalLength) {
+      return this._fullHistoryCache.messages.map((e) => ({ ...e }));
+    }
     const whole = readTailMessages(this._sessionPath, this._totalLength);
+    this._fullHistoryCache = { version: this._totalLength, messages: whole };
     return whole.map((e) => ({ ...e }));
   }
 
