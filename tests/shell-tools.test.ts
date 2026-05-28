@@ -355,10 +355,13 @@ describe("isAllowed", () => {
     });
 
     it("accepts user-configured extra prefixes", () => {
-      expect(isAllowed("cat /opt/secrets/config.yml", [], projectRoot)).toBe(true);
+      // /opt/secrets is outside workspace — workspace-escape check (#2081) demotes it even without sensitive-prefix config
+      expect(isAllowed("cat /opt/secrets/config.yml", [], projectRoot)).toBe(false);
       expect(
         isAllowed("cat /opt/secrets/config.yml", [], projectRoot, { prefixes: ["/opt/secrets"] }),
       ).toBe(false);
+      // A path inside the workspace that isn't in sensitive prefixes should pass
+      expect(isAllowed("cat secrets/config.yml", [], projectRoot)).toBe(true);
     });
 
     it("accepts user-configured extra patterns", () => {
@@ -390,6 +393,61 @@ describe("isAllowed", () => {
       expect(isCommandAllowed("cat < .env", [], projectRoot)).toBe(false);
       expect(isCommandAllowed("cat < ~/.ssh/id_rsa", [], projectRoot)).toBe(false);
       expect(isCommandAllowed("cat < README.md", [], projectRoot)).toBe(true);
+    });
+  });
+
+  // Issue #2081 — allowlisted commands with path arguments that resolve
+  // outside the workspace are demoted to the confirm gate.
+  describe("workspace-escape path demotion", () => {
+    const projectRoot = "/home/user/project";
+
+    it("demotes find with absolute path outside workspace", () => {
+      expect(isAllowed("find / -name '*.ts'", [], projectRoot)).toBe(false);
+      expect(isAllowed("find /etc -name '*.conf'", [], projectRoot)).toBe(false);
+      expect(isAllowed("find /tmp -name '*.log'", [], projectRoot)).toBe(false);
+    });
+
+    it("allows find with workspace-relative paths", () => {
+      expect(isAllowed("find . -name '*.ts'", [], projectRoot)).toBe(true);
+      expect(isAllowed("find src -type f", [], projectRoot)).toBe(true);
+      expect(isAllowed("find ./dist -name '*.js'", [], projectRoot)).toBe(true);
+    });
+
+    it("demotes tree with path outside workspace", () => {
+      expect(isAllowed("tree /etc", [], projectRoot)).toBe(false);
+      expect(isAllowed("tree /", [], projectRoot)).toBe(false);
+    });
+
+    it("allows tree with workspace-relative path", () => {
+      expect(isAllowed("tree src", [], projectRoot)).toBe(true);
+      expect(isAllowed("tree -L 2", [], projectRoot)).toBe(true);
+    });
+
+    it("demotes grep/cat/ls with absolute path outside workspace", () => {
+      expect(isAllowed("grep foo /etc/passwd", [], projectRoot)).toBe(false);
+      expect(isAllowed("cat /etc/hosts", [], projectRoot)).toBe(false);
+      expect(isAllowed("ls /root", [], projectRoot)).toBe(false);
+    });
+
+    it("allows grep/cat/ls with workspace-relative path", () => {
+      expect(isAllowed("grep TODO src/", [], projectRoot)).toBe(true);
+      expect(isAllowed("cat README.md", [], projectRoot)).toBe(true);
+      expect(isAllowed("ls src/", [], projectRoot)).toBe(true);
+    });
+
+    it("does NOT demote when projectRoot is not provided (backward compat)", () => {
+      expect(isAllowed("find / -name '*.ts'")).toBe(true);
+      expect(isAllowed("tree /etc")).toBe(true);
+    });
+
+    it("skips flags, URLs, and env vars", () => {
+      expect(isAllowed("ls --color", [], projectRoot)).toBe(true);
+      expect(isAllowed("grep --include=*.ts foo src/", [], projectRoot)).toBe(true);
+    });
+
+    it("works through isCommandAllowed for chain commands", () => {
+      expect(isCommandAllowed("find / -name '*.ts' | head", [], projectRoot)).toBe(false);
+      expect(isCommandAllowed("find . -name '*.ts' | head", [], projectRoot)).toBe(true);
     });
   });
 });

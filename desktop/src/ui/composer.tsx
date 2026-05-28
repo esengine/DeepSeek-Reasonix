@@ -154,6 +154,8 @@ export function Composer({
   queuedSends,
   onQueueWhileBusy,
   onDequeueSend,
+  initialHistory,
+  onHistoryPush,
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -182,6 +184,10 @@ export function Composer({
   /** Called when the user presses Enter while busy with a non-empty draft. Owns clearing the draft. */
   onQueueWhileBusy?: (text: string) => void;
   onDequeueSend?: (index: number) => void;
+  /** Seed the in-session history from persisted storage so ArrowUp works after restart (#2051). */
+  initialHistory?: string[];
+  /** Called whenever an entry is pushed so the caller can persist the updated list. */
+  onHistoryPush?: (entry: string, history: string[]) => void;
 }) {
   const [chips, setChips] = useState<Chip[]>([]);
   const [popup, setPopup] = useState<Popup>(null);
@@ -192,9 +198,20 @@ export function Composer({
   // macOS Chinese IME fires compositionend BEFORE the confirm keydown.
   const composingRef = useRef(false);
   const compositionEndedAtRef = useRef(0);
-  const historyRef = useRef<string[]>([]);
+  // Persisted history is stored most-recent-first; historyRef uses oldest-first
+  // (entries are appended via push, ArrowUp reads from the end). Reverse on load.
+  const historyRef = useRef<string[]>(initialHistory ? [...initialHistory].reverse() : []);
   const [browseIdx, setBrowseIdx] = useState(-1);
   const savedDraftRef = useRef("");
+
+  // `initialHistory` arrives asynchronously (settings load after mount).
+  // Sync historyRef when it first becomes available and the user hasn't
+  // started navigating yet, so ArrowUp works from the first keystroke (#2051).
+  useEffect(() => {
+    if (initialHistory && initialHistory.length > 0 && browseIdx === -1) {
+      historyRef.current = [...initialHistory].reverse();
+    }
+  }, [initialHistory, browseIdx]);
 
   const insertMention = (picked: string) => {
     const rel =
@@ -385,6 +402,7 @@ export function Composer({
     historyRef.current.push(trimmed);
     if (historyRef.current.length > 100) historyRef.current.shift();
     setBrowseIdx(-1);
+    onHistoryPush?.(trimmed, [...historyRef.current]);
   };
 
   const navigateHistory = (dir: -1 | 1) => {

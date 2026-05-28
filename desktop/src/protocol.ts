@@ -322,6 +322,8 @@ export type SettingsEvent = {
   };
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
+  /** Desktop prompt-history entries seeded on tab load, most-recent-first (#2051). */
+  promptHistory?: string[];
   version: string;
 };
 
@@ -372,6 +374,8 @@ export type SettingsPatch = {
   braveApiKey?: string | null;
   subagentModels?: Record<string, "flash" | "pro">;
   showSystemEvents?: boolean;
+  /** Persisted prompt-history entries to update on each send (#2051). */
+  promptHistory?: string[];
 };
 
 export type QQConfigPatch = {
