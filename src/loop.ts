@@ -515,12 +515,21 @@ export class CacheFirstLoop {
   }
   private _inflightCounter = 0;
 
+  /** Heal result cache — keyed by log.totalLength so we skip the 3-pass
+   *  healing pipeline (tokenize + shrink + prune) when the log hasn't changed. */
+  private _healCacheVersion = -1;
+  private _healCacheResult: ChatMessage[] | null = null;
+
   private buildMessages(): ChatMessage[] {
     const healedMessages = this.healActiveLogBeforeSend();
     return [...this.prefix.toMessages(), ...healedMessages];
   }
 
   private healActiveLogBeforeSend(): ChatMessage[] {
+    const version = this.log.totalLength;
+    if (this._healCacheVersion === version && this._healCacheResult) {
+      return this._healCacheResult;
+    }
     const current = this.log.toFullHistory();
     const healed = healLoadedMessages(current, DEFAULT_MAX_RESULT_CHARS);
     const argsShrunk = shrinkOversizedToolCallArgsByTokens(
@@ -529,6 +538,8 @@ export class CacheFirstLoop {
     );
     const pruned = stripDroppableReasoningContent(argsShrunk.messages);
     if (healed.healedCount === 0 && argsShrunk.healedCount === 0 && pruned.prunedCount === 0) {
+      this._healCacheVersion = version;
+      this._healCacheResult = current;
       return current;
     }
     this.log.compactInPlace(pruned.messages);
@@ -539,6 +550,8 @@ export class CacheFirstLoop {
         /* disk issue shouldn't block the in-memory heal */
       }
     }
+    this._healCacheVersion = this.log.totalLength;
+    this._healCacheResult = pruned.messages;
     return pruned.messages;
   }
 
