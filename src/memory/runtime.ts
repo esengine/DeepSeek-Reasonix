@@ -41,7 +41,10 @@ export class ImmutablePrefix {
     return [{ role: "system", content: this.system }, ...this.fewShots.map((m) => ({ ...m }))];
   }
 
-  tools(): ToolSpec[] {
+  /** Frozen shallow copy of the current tool list. Callers must treat the
+   *  returned array and its elements as read-only — mutating them corrupts
+   *  the cache shared across turns. */
+  tools(): readonly ToolSpec[] {
     if (this._frozenToolsCache) return this._frozenToolsCache;
     const frozen = Object.freeze(
       this._toolSpecs.map((t) => Object.freeze({ ...t, function: { ...t.function } }) as ToolSpec),

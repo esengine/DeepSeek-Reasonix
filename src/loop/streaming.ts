@@ -9,7 +9,7 @@ export interface StreamModelOptions {
   client: DeepSeekClient;
   model: string;
   messages: ChatMessage[];
-  toolSpecs: ToolSpec[];
+  toolSpecs: readonly ToolSpec[];
   signal: AbortSignal;
   reasoningEffort: ReasoningEffort;
   turn: number;

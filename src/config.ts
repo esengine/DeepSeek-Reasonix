@@ -1,7 +1,7 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
@@ -446,23 +446,32 @@ function sanitizeStringArrayField(
   parent[leaf] = filtered;
 }
 
-/** Mtime-keyed cache — eliminates redundant readFileSync + JSON.parse across
- *  the 37+ call sites that read config per session. statSync is ~0.005 ms vs
- *  ~0.05 ms for readFileSync + parse; the cache pays for itself after 2 hits. */
+/** Mtime-keyed cache for readConfig (shared, read-only — callers must not mutate).
+ *  Caveat: mtime resolution ~1 s; external edits may be missed within that window. */
 const _configCache = new Map<string, { mtimeMs: number; cfg: ReasonixConfig }>();
 
 export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
+  let fd: number | undefined;
   try {
+    // Open the file descriptor first, then fstat + read from the same fd.
+    // This eliminates the TOCTOU race where statSync sees one mtime but
+    // readFileSync reads a different version of the file (CodeQL flagged).
+    fd = openSync(path, "r");
+    const st = fstatSync(fd);
+    const cached = _configCache.get(path);
+    if (cached && cached.mtimeMs === st.mtimeMs) {
+      closeSync(fd);
+      return cached.cfg;
+    }
     // Strip the UTF-8 BOM if a foreign writer left one in — Windows
     // PowerShell 5's `Set-Content -Encoding UTF8` and several text
     // editors emit `EF BB BF` at the head of the file. `JSON.parse`
     // refuses BOM-prefixed input and throws, which used to fall
     // through to `return {}` and silently nuke every saved field on
     // the next read-modify-write.
-    const st = statSync(path);
-    const cached = _configCache.get(path);
-    if (cached && cached.mtimeMs === st.mtimeMs) return cached.cfg;
-    const raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+    const raw = readFileSync(fd, "utf8").replace(/^\uFEFF/, "");
+    closeSync(fd);
+    fd = undefined;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const cfg = parsed as Record<string, unknown>;
@@ -475,6 +484,14 @@ export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
     }
   } catch {
     /* missing or malformed → empty config */
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+    }
   }
   return {};
 }
