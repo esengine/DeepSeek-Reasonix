@@ -93,6 +93,16 @@ function parseAllowedTools(raw: string | undefined): readonly string[] | undefin
   return names.length > 0 ? Object.freeze(names) : undefined;
 }
 
+/** Check if a Dirent is a symlink whose target (following the link) is a directory. Broken symlinks return false. */
+function symlinkPointsToDirectory(dir: string, entry: import("node:fs").Dirent): boolean {
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return statSync(join(dir, entry.name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** flash/pro preset → concrete deepseek model id. Kept local so this file doesn't import the CLI preset bundle. */
 function subagentModelForPreset(preset: "flash" | "pro"): string {
   return preset === "pro" ? "deepseek-v4-pro" : "deepseek-v4-flash";
@@ -249,7 +259,7 @@ export class SkillStore {
   }
 
   private readEntry(dir: string, scope: SkillScope, entry: import("node:fs").Dirent): Skill | null {
-    if (entry.isDirectory()) {
+    if (entry.isDirectory() || symlinkPointsToDirectory(dir, entry)) {
       if (!isValidSkillName(entry.name)) return null;
       const file = join(dir, entry.name, SKILL_FILE);
       if (!existsSync(file)) return null;
