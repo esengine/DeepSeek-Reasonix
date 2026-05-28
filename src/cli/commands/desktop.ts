@@ -2557,7 +2557,25 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "session_delete") {
       deleteSession(msg.name);
-      emitSessions(tab);
+      if (tab.currentSession === msg.name) {
+        startNewChatInTab(tab);
+        emit(
+          {
+            type: "$session_loaded",
+            name: tab.currentSession,
+            messages: [],
+            carryover: {
+              totalCostUsd: 0,
+              cacheHitTokens: 0,
+              cacheMissTokens: 0,
+              totalCompletionTokens: 0,
+            },
+          },
+          tab.id,
+        );
+      } else {
+        emitSessions(tab);
+      }
       return;
     }
     if (msg.cmd === "session_rename") {
