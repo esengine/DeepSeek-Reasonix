@@ -319,6 +319,39 @@ describe("countTokensBounded", () => {
   });
 });
 
+describe("countTokens ↔ encode equivalence", () => {
+  const corpus: [string, string][] = [
+    ["empty", ""],
+    ["plain ASCII", "Hello, world!"],
+    ["ASCII sentence", "The quick brown fox jumps over the lazy dog."],
+    ["CJK characters", "你好世界"],
+    ["CJK prose", "深度求索是一家专注于人工智能基础技术研究的公司"],
+    ["mixed English+CJK", "mixed 中文 and english 混合"],
+    ["emoji (surrogate pairs)", "🎉🚀💻🔥"],
+    ["emoji in sentence", "Great job! 🎉 Let's go 🚀"],
+    ["digits", "1 + 1 = 2, 1234567890"],
+    ["special added tokens", "<think>reasoning here</think>"],
+    ["multiple added tokens", "<｜begin▁of▁sentence｜>Hello<｜User｜>Hi<｜Assistant｜>"],
+    ["code snippet", "function add(a, b) { return a + b; }"],
+    ["JSON payload", '{"name":"test","values":[1,2,3],"nested":{"key":"value"}}'],
+    ["repeated text", "Hello world! ".repeat(100)],
+    ["whitespace heavy", "  \t\n  hello  \n\t  world  \t\n  "],
+    ["long ASCII", "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(50)],
+  ];
+
+  for (const [label, text] of corpus) {
+    it(`countTokens matches encode.length for: ${label}`, () => {
+      expect(countTokens(text)).toBe(encode(text).length);
+    });
+  }
+
+  it("countTokens matches encode.length for >10KB blob", () => {
+    const big = "The quick brown fox jumps over the lazy dog. 你好世界 🎉 ".repeat(200);
+    expect(big.length).toBeGreaterThan(10_000);
+    expect(countTokens(big)).toBe(encode(big).length);
+  });
+});
+
 describe("performance sanity", () => {
   it("tokenizes 10k chars of typical mixed content in under 200 ms", () => {
     const block = "Hello world! 你好 deepseek ".repeat(400);
