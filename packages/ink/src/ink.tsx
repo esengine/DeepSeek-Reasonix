@@ -108,11 +108,6 @@ export default class Ink {
   // Microtask coalescing: prevents double-render when leading + trailing
   // throttle edges both queue a microtask in the same event-loop tick.
   private renderMicrotaskPending = false;
-  // Track previous selection/highlight state so we only force full-screen
-  // damage on TRANSITION frames (activate/deactivate), not every frame
-  // while they're continuously active. Cuts ~50% diff work in xterm.js.
-  private prevSelActive = false;
-  private prevHlActive = false;
   private lastYogaCounters: {
     ms: number;
     visited: number;
@@ -572,14 +567,9 @@ export default class Ink {
     // Full-damage backstop: applies on BOTH alt-screen and main-screen.
     // Layout shifts (spinner appears, status line resizes) can leave stale
     // cells at sibling boundaries that per-node damage tracking misses.
-    // For selection/highlight: force full damage only on TRANSITION frames
-    // (activate or deactivate). While continuously active the overlay is
-    // stable across frames, so normal cell diff handles it — no need to
-    // rescan every cell each frame. prevFrameContaminated covers the
-    // cleanup frame (selection was active, now isn't).
-    const selTransition = selActive !== this.prevSelActive;
-    const hlTransition = hlActive !== this.prevHlActive;
-    if (didLayoutShift() || selTransition || hlTransition || this.prevFrameContaminated) {
+    // Selection/highlight overlays write via setCellStyleId which doesn't
+    // track damage. prevFrameContaminated covers the cleanup frame.
+    if (didLayoutShift() || selActive || hlActive || this.prevFrameContaminated) {
       frame.screen.damage = {
         x: 0,
         y: 0,
@@ -587,8 +577,6 @@ export default class Ink {
         height: frame.screen.height
       };
     }
-    this.prevSelActive = selActive;
-    this.prevHlActive = hlActive;
 
     // Alt-screen: anchor the physical cursor to (0,0) before every diff.
     // All cursor moves in log-update are RELATIVE to prev.cursor; if tmux
