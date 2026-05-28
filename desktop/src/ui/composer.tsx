@@ -78,6 +78,16 @@ export type Chip =
   | { kind: "at"; label: string }
   | { kind: "slash"; label: string };
 
+/** For long paths show only the filename; truncate filename if it's still too long. */
+function chipLabel(label: string, maxLen = 32): string {
+  if (label.length <= maxLen) return label;
+  const sep = label.includes("/") ? "/" : "\\";
+  const segments = label.split(sep);
+  const filename = segments[segments.length - 1]!;
+  if (filename.length <= maxLen) return filename;
+  return filename.slice(0, maxLen - 1) + "…";
+}
+
 type Popup =
   | { kind: "slash"; query: string }
   | { kind: "at"; query: string; nonce: number }
@@ -673,13 +683,13 @@ export function Composer({
           {chips.length > 0 ? (
             <div className="composer-tags">
               {chips.map((c, i) => (
-                <span key={`${c.kind}-${c.label}-${i}`} className={`chip ${c.kind}`}>
+                <span key={`${c.kind}-${c.label}-${i}`} className={`chip ${c.kind}`} title={c.label}>
                   {c.kind === "slash" ? (
                     <I.slash size={11} />
                   ) : (
                     <I.at size={11} />
                   )}
-                  <span>{c.label}</span>
+                  <span>{chipLabel(c.label)}</span>
                 </span>
               ))}
             </div>

@@ -3542,9 +3542,12 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .composer-tags {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
   padding: 8px 10px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 .chip {
   display: inline-flex;
@@ -3557,6 +3560,13 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   font-size: 14px;
   font-family: inherit;
   color: var(--fg-2);
+  max-width: 220px;
+  flex-shrink: 0;
+}
+.chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chip.at {
   color: var(--accent);
