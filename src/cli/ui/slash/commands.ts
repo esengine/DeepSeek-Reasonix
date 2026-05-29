@@ -74,8 +74,9 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "model",
     group: "setup",
-    argsHint: "<id>",
-    summary: "switch DeepSeek model id. Bare opens picker.",
+    argsHint: "<id|workflow-policy>",
+    summary:
+      "switch DeepSeek model id. Bare opens picker. Use workflow-policy to tune workflow routing.",
     argCompleter: "models",
   },
   {

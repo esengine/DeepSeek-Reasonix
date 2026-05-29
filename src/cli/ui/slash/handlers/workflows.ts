@@ -5,7 +5,10 @@ import type { SlashContext, SlashResult } from "../types.js";
 
 export function handleWorkflowsSlash(
   args: readonly string[],
-  ctx: Pick<SlashContext, "workflowManager" | "workflowRunner" | "codeRoot" | "homeDir">,
+  ctx: Pick<
+    SlashContext,
+    "workflowManager" | "workflowRunner" | "workflowModelPolicy" | "codeRoot" | "homeDir"
+  >,
 ): SlashResult {
   const manager = ctx.workflowManager;
   if (!manager) return { info: "workflows are not available in this session" };
@@ -24,7 +27,10 @@ export function handleWorkflowsSlash(
   }
 
   if (cmd === "retry" && runId) {
-    const started = manager.retryRun(runId, { runner: ctx.workflowRunner });
+    const started = manager.retryRun(runId, {
+      runner: ctx.workflowRunner,
+      modelPolicy: ctx.workflowModelPolicy?.(),
+    });
     return { info: `started retry ${started.id} from ${runId}` };
   }
 
@@ -48,6 +54,7 @@ export function handleWorkflowsSlash(
       mode: "run",
       args: { input: args.slice(2).join(" ") },
       runner: ctx.workflowRunner,
+      modelPolicy: ctx.workflowModelPolicy?.(),
     });
     return { info: `workflow ${started.id} running ${workflow.name}` };
   }

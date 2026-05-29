@@ -295,6 +295,10 @@ export interface AppProps {
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
     workflowManager?: import("../../workflow/manager.js").WorkflowRunManager;
     workflowRunner?: import("../../workflow/types.js").WorkflowAgentRunner;
+    workflowModelPolicy?: () => import("../../workflow/types.js").WorkflowModelPolicy;
+    setWorkflowModelPolicy?: (
+      policy: import("../../workflow/types.js").WorkflowModelPolicy,
+    ) => void;
     /** Notify the launcher/root wrapper that the workspace root changed so session switches remount into the new root. */
     onRootChange?: (newRoot: string) => void;
   };
@@ -3086,6 +3090,8 @@ function AppInner({
           sessionId: session,
           workflowManager: codeMode?.workflowManager,
           workflowRunner: codeMode?.workflowRunner,
+          workflowModelPolicy: codeMode?.workflowModelPolicy,
+          setWorkflowModelPolicy: codeMode?.setWorkflowModelPolicy,
           getEngineeringLifecycleSnapshot: codeMode
             ? () => engineeringLifecycleRef.current?.snapshot() ?? null
             : undefined,

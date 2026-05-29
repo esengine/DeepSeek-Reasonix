@@ -92,6 +92,10 @@ export interface ChatOptions {
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
     workflowManager?: import("../../workflow/manager.js").WorkflowRunManager;
     workflowRunner?: import("../../workflow/types.js").WorkflowAgentRunner;
+    workflowModelPolicy?: () => import("../../workflow/types.js").WorkflowModelPolicy;
+    setWorkflowModelPolicy?: (
+      policy: import("../../workflow/types.js").WorkflowModelPolicy,
+    ) => void;
     /** Notify the launcher that the workspace root just changed — lets the rebuildSystem closure see the new dir. */
     onRootChange?: (newRoot: string) => void;
   };

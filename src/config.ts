@@ -23,6 +23,7 @@ import {
 } from "./tools/rate-limit.js";
 import { normalizeWeixinAllowlist, normalizeWeixinUserId } from "./weixin/access.js";
 import { loadWeixinAccount, saveWeixinAccount } from "./weixin/account.js";
+import type { WorkflowModelPolicy } from "./workflow/types.js";
 
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
 export type EditMode = "review" | "auto" | "yolo" | "plan";
@@ -302,6 +303,9 @@ export interface ReasonixConfig {
   semantic?: SemanticEmbeddingUserConfig;
   skills?: {
     paths?: string[];
+  };
+  workflow?: {
+    modelPolicy?: WorkflowModelPolicy;
   };
   /** Per-skill model override for `runAs: subagent` skills, keyed by skill name. Empty / missing entry → spawn site's default. */
   subagentModels?: Record<string, "flash" | "pro">;
@@ -1001,6 +1005,30 @@ export function saveSubagentModels(
     if (value === "flash" || value === "pro") out[name] = value;
   }
   cfg.subagentModels = Object.keys(out).length > 0 ? out : undefined;
+  writeConfig(cfg, path);
+}
+
+export function isWorkflowModelPolicy(value: unknown): value is WorkflowModelPolicy {
+  return (
+    value === "inherit" ||
+    value === "flash" ||
+    value === "pro" ||
+    value === "mixed" ||
+    value === "auto"
+  );
+}
+
+export function loadWorkflowModelPolicy(path: string = defaultConfigPath()): WorkflowModelPolicy {
+  const raw = readConfig(path).workflow?.modelPolicy;
+  return isWorkflowModelPolicy(raw) ? raw : "mixed";
+}
+
+export function saveWorkflowModelPolicy(
+  policy: WorkflowModelPolicy,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.workflow = { ...(cfg.workflow ?? {}), modelPolicy: policy };
   writeConfig(cfg, path);
 }
 

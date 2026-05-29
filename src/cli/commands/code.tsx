@@ -84,6 +84,8 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     jobs,
     workflowManager,
     workflowRunner,
+    workflowModelPolicy,
+    setWorkflowModelPolicy,
     registerRooted,
     reBootstrapSemantic,
     semantic,
@@ -162,6 +164,8 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
       jobs,
       workflowManager,
       workflowRunner,
+      workflowModelPolicy,
+      setWorkflowModelPolicy,
       reregisterTools: registerRooted,
       reBootstrapSemantic: async (root: string) => {
         const r = await reBootstrapSemantic(root);

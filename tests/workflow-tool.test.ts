@@ -52,6 +52,20 @@ describe("registerWorkflowTool", () => {
     expect(combined).toMatch(/cost-sensitive.*verifier/i);
   });
 
+  it("exposes a workflow model policy tool argument", () => {
+    const registry = new ToolRegistry();
+    registerWorkflowTool(registry);
+
+    const spec = registry.specs().find((item) => item.function.name === "workflow");
+    const modelPolicy = spec?.function.parameters.properties?.model_policy;
+
+    expect(modelPolicy).toMatchObject({
+      type: "string",
+      enum: ["inherit", "flash", "pro", "mixed", "auto"],
+    });
+    expect(modelPolicy?.description).toMatch(/agent\(\{ model \}\).*phase.*model_policy/i);
+  });
+
   it("validates scripts without running agents", async () => {
     const registry = new ToolRegistry();
     const runner = new StaticRunner();

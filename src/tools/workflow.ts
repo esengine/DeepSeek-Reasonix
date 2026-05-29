@@ -8,6 +8,7 @@ import { runWorkflow } from "../workflow/runtime.js";
 import type {
   WorkflowAgentRunner,
   WorkflowMode,
+  WorkflowModelPolicy,
   WorkflowRunResult,
   WorkflowRunSnapshot,
   WorkflowToolMode,
@@ -21,6 +22,7 @@ export interface WorkflowToolOptions {
   clientFactory?: () => DeepSeekClient;
   subagentSink?: SubagentSink;
   defaultModel?: string;
+  defaultModelPolicy?: WorkflowModelPolicy | (() => WorkflowModelPolicy);
 }
 
 const WORKFLOW_DESCRIPTION =
@@ -74,6 +76,12 @@ export function registerWorkflowTool(
           type: "number",
           description: "Optional workflow token budget exposed through budget.remaining().",
         },
+        model_policy: {
+          type: "string",
+          enum: ["inherit", "flash", "pro", "mixed", "auto"],
+          description:
+            "Workflow subagent model routing policy. Precedence: agent({ model }) > phase model > model_policy > session default. inherit leaves subagents on the runner default, flash forces deepseek-v4-flash, pro forces deepseek-v4-pro, mixed/auto route explore/inventory scans to flash and verify/adversarial/synthesis work to pro.",
+        },
         background: {
           type: "boolean",
           description:
@@ -96,6 +104,7 @@ export function registerWorkflowTool(
 
       const mode = workflowMode(args.mode);
       const toolMode = workflowToolMode(args.tool_mode);
+      const modelPolicy = workflowModelPolicy(args.model_policy, opts.defaultModelPolicy);
       const parsed = parseWorkflowScript(script);
       const confirmation = await confirmWorkflowRun(args, ctx, parsed, mode, toolMode);
       if (confirmation) return confirmation;
@@ -125,6 +134,7 @@ export function registerWorkflowTool(
             args: args.args,
             concurrency: numberOption(args.concurrency),
             maxAgents: numberOption(args.max_agents),
+            modelPolicy,
             tokenBudget: numberOption(args.token_budget) ?? null,
             runner,
           });
@@ -143,6 +153,7 @@ export function registerWorkflowTool(
             args: args.args,
             concurrency: numberOption(args.concurrency),
             maxAgents: numberOption(args.max_agents),
+            modelPolicy,
             tokenBudget: numberOption(args.token_budget) ?? null,
             runner,
           });
@@ -162,6 +173,7 @@ export function registerWorkflowTool(
           cwd: opts.rootDir,
           concurrency: numberOption(args.concurrency),
           maxAgents: numberOption(args.max_agents),
+          modelPolicy,
           tokenBudget: numberOption(args.token_budget) ?? null,
           signal: ctx?.signal,
           runner,
@@ -243,6 +255,22 @@ function workflowMode(value: unknown): WorkflowMode {
 
 function workflowToolMode(value: unknown): WorkflowToolMode {
   return value === "full" ? "full" : "read_only";
+}
+
+function workflowModelPolicy(
+  value: unknown,
+  fallback: WorkflowModelPolicy | (() => WorkflowModelPolicy) | undefined,
+): WorkflowModelPolicy {
+  if (
+    value === "inherit" ||
+    value === "flash" ||
+    value === "pro" ||
+    value === "mixed" ||
+    value === "auto"
+  ) {
+    return value;
+  }
+  return typeof fallback === "function" ? fallback() : (fallback ?? "mixed");
 }
 
 function numberOption(value: unknown): number | undefined {

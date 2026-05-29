@@ -10,6 +10,7 @@ import {
   loadResolvedSkillPaths,
   loadSubagentModels,
   loadToolRateLimit,
+  loadWorkflowModelPolicy,
   readConfig,
   searchEnabled,
 } from "../config.js";
@@ -36,7 +37,11 @@ import { registerWebTools } from "../tools/web.js";
 import { registerWorkflowTool } from "../tools/workflow.js";
 import { ReasonixWorkflowAgentRunner } from "../workflow/agent-runner.js";
 import { WorkflowRunManager } from "../workflow/manager.js";
-import type { WorkflowAgentRunner, WorkflowRunEvent } from "../workflow/types.js";
+import type {
+  WorkflowAgentRunner,
+  WorkflowModelPolicy,
+  WorkflowRunEvent,
+} from "../workflow/types.js";
 
 export interface CodeToolsetOpts {
   rootDir: string;
@@ -56,6 +61,8 @@ export interface CodeToolset {
   jobs: JobRegistry;
   workflowManager: WorkflowRunManager;
   workflowRunner: WorkflowAgentRunner;
+  workflowModelPolicy: () => WorkflowModelPolicy;
+  setWorkflowModelPolicy: (policy: WorkflowModelPolicy) => void;
   registerRooted: (root: string) => void;
   reBootstrapSemantic: (root: string) => Promise<{ enabled: boolean }>;
   semantic: { enabled: boolean };
@@ -115,6 +122,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     registerJavaSourceTool(tools, { projectRoot: opts.rootDir });
   }
   let workflowClient: DeepSeekClient | null = null;
+  let workflowModelPolicy = loadWorkflowModelPolicy(opts.configPath);
   const workflowRunner: WorkflowAgentRunner = {
     async run(prompt, agentOpts) {
       if (!workflowClient) {
@@ -138,6 +146,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     rootDir: opts.rootDir,
     manager: workflowManager,
     subagentSink: opts.subagentSink ?? SHARED_SUBAGENT_SINK,
+    defaultModelPolicy: () => workflowModelPolicy,
   });
   // Lazy: constructing DeepSeekClient throws when DEEPSEEK_API_KEY is unset,
   // which would kill `reasonix code` before the setup wizard can prompt for
@@ -180,6 +189,10 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     jobs,
     workflowManager,
     workflowRunner,
+    workflowModelPolicy: () => workflowModelPolicy,
+    setWorkflowModelPolicy: (policy) => {
+      workflowModelPolicy = policy;
+    },
     registerRooted,
     reBootstrapSemantic,
     semantic,

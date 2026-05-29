@@ -8,6 +8,7 @@ import type {
   WorkflowAgentResult,
   WorkflowAgentRunner,
   WorkflowMode,
+  WorkflowModelPolicy,
   WorkflowRunEvent,
   WorkflowRunSnapshot,
   WorkflowRunStatus,
@@ -28,6 +29,7 @@ export interface WorkflowRunStartOptions {
   args?: unknown;
   concurrency?: number;
   maxAgents?: number;
+  modelPolicy?: WorkflowModelPolicy;
   tokenBudget?: number | null;
   runner?: WorkflowAgentRunner;
 }
@@ -163,6 +165,7 @@ export class WorkflowRunManager {
       args: overrides.args,
       concurrency: overrides.concurrency,
       maxAgents: overrides.maxAgents,
+      modelPolicy: overrides.modelPolicy,
       tokenBudget: overrides.tokenBudget,
       runner: overrides.runner,
     });
@@ -180,6 +183,7 @@ export class WorkflowRunManager {
         cwd: this.rootDir,
         concurrency: opts.concurrency,
         maxAgents: opts.maxAgents,
+        modelPolicy: opts.modelPolicy,
         tokenBudget: opts.tokenBudget,
         signal: run.controller.signal,
         runner: opts.runner ?? this.runner,

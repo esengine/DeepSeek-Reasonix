@@ -115,6 +115,58 @@ return { scan }
     });
   });
 
+  it("applies workflow model policy with agent and phase overrides", async () => {
+    const runner = new RecordingRunner();
+    const result = await runWorkflow(
+      `export const meta = {
+  name: "model_policy",
+  description: "Model policy",
+  phases: [{ title: "Deep review", model: "deepseek-v4-pro" }],
+}
+phase("Deep review")
+const phaseModel = await agent("phase model", { label: "phase", type: "explore" })
+const explicit = await agent("explicit model", { label: "explicit", model: "deepseek-v4-flash", type: "verify" })
+const mixedExplore = await agent("mixed explore", { label: "mixed explore", phase: "Scan", type: "explore" })
+const mixedVerify = await agent("mixed verify", { label: "mixed verify", phase: "Verify", type: "verify" })
+const mixedSynthesis = await agent("mixed synth", { label: "mixed synth", phase: "Synthesis", type: "synthesis" })
+phase({ title: "Object phase", model: "deepseek-v4-pro" })
+const objectPhase = await agent("object phase", { label: "object phase", type: "explore" })
+return { phaseModel, explicit, mixedExplore, mixedVerify, mixedSynthesis, objectPhase }
+`,
+      { runner, modelPolicy: "mixed" },
+    );
+
+    expect(result.success).toBe(true);
+    expect(runner.calls.map((call) => [call.opts.label, call.opts.model])).toEqual([
+      ["phase", "deepseek-v4-pro"],
+      ["explicit", "deepseek-v4-flash"],
+      ["mixed explore", "deepseek-v4-flash"],
+      ["mixed verify", "deepseek-v4-pro"],
+      ["mixed synth", "deepseek-v4-pro"],
+      ["object phase", "deepseek-v4-pro"],
+    ]);
+  });
+
+  it("supports inherit, flash, and pro workflow model policies", async () => {
+    for (const [policy, expected] of [
+      ["inherit", undefined],
+      ["flash", "deepseek-v4-flash"],
+      ["pro", "deepseek-v4-pro"],
+    ] as const) {
+      const runner = new RecordingRunner();
+      const result = await runWorkflow(
+        `${header}
+await agent("inspect", { label: "${policy}", type: "verify" })
+return true
+`,
+        { runner, modelPolicy: policy },
+      );
+
+      expect(result.success).toBe(true);
+      expect(runner.calls[0]?.opts.model).toBe(expected);
+    }
+  });
+
   it("rejects parallel inputs that are not thunks", async () => {
     const runner = new RecordingRunner();
     const result = await runWorkflow(

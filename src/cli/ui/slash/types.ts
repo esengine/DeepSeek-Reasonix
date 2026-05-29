@@ -85,6 +85,10 @@ export interface SlashContext {
   jobs?: JobRegistry;
   workflowManager?: import("../../../workflow/manager.js").WorkflowRunManager;
   workflowRunner?: import("../../../workflow/types.js").WorkflowAgentRunner;
+  workflowModelPolicy?: () => import("../../../workflow/types.js").WorkflowModelPolicy;
+  setWorkflowModelPolicy?: (
+    policy: import("../../../workflow/types.js").WorkflowModelPolicy,
+  ) => void;
   postInfo?: (text: string) => void;
   /** Push a structured Doctor card with check-by-check status; used by `/doctor`. */
   postDoctor?: (

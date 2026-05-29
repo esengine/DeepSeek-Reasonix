@@ -16,6 +16,7 @@ export interface WorkflowMeta {
 
 export type WorkflowMode = "run" | "dry_run" | "validate_only";
 export type WorkflowToolMode = "read_only" | "full";
+export type WorkflowModelPolicy = "inherit" | "flash" | "pro" | "mixed" | "auto";
 export type WorkflowAgentType = "explore" | "verify" | "synthesis";
 export type WorkflowRunStatus = "running" | "completed" | "failed" | "aborted";
 export type WorkflowSaveTarget = "project" | "user";
@@ -117,6 +118,7 @@ export interface WorkflowRunOptions {
   cwd?: string;
   concurrency?: number;
   maxAgents?: number;
+  modelPolicy?: WorkflowModelPolicy;
   tokenBudget?: number | null;
   signal?: AbortSignal;
   runner?: WorkflowAgentRunner;

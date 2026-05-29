@@ -37,6 +37,7 @@ import {
   loadSubagentModels,
   loadTheme,
   loadToolRateLimit,
+  loadWorkflowModelPolicy,
   markEditModeHintShown,
   readConfig,
   redactKey,
@@ -55,6 +56,7 @@ import {
   saveSemanticEmbeddingConfig,
   saveSubagentModels,
   saveTheme,
+  saveWorkflowModelPolicy,
   searchEnabled,
   webSearchEngine,
   writeConfig,
@@ -1067,6 +1069,23 @@ describe("config", () => {
       saveSubagentModels({}, path);
       expect(loadSubagentModels(path)).toEqual({});
       expect(readConfig(path).subagentModels).toBeUndefined();
+    });
+  });
+
+  describe("workflow model policy", () => {
+    it("defaults to mixed", () => {
+      expect(loadWorkflowModelPolicy(path)).toBe("mixed");
+    });
+
+    it("round-trips valid policies", () => {
+      saveWorkflowModelPolicy("flash", path);
+      expect(loadWorkflowModelPolicy(path)).toBe("flash");
+      expect(readConfig(path).workflow?.modelPolicy).toBe("flash");
+    });
+
+    it("drops invalid values back to mixed", () => {
+      writeConfig({ workflow: { modelPolicy: "expensive" as never } }, path);
+      expect(loadWorkflowModelPolicy(path)).toBe("mixed");
     });
   });
 

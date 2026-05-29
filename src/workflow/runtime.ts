@@ -4,12 +4,14 @@ import type {
   WorkflowAgentOptions,
   WorkflowAgentResult,
   WorkflowAgentRunner,
+  WorkflowModelPolicy,
   WorkflowRunOptions,
   WorkflowRunResult,
 } from "./types.js";
 
 interface RuntimeState {
   currentPhase?: string;
+  currentPhaseModel?: string;
   logs: string[];
   phases: string[];
   agentCount: number;
@@ -27,6 +29,12 @@ interface AgentInputOptions {
   type?: unknown;
   model?: unknown;
   allowedTools?: unknown;
+}
+
+interface PhaseInputOptions {
+  title?: unknown;
+  name?: unknown;
+  model?: unknown;
 }
 
 const DEFAULT_CONCURRENCY = 3;
@@ -69,6 +77,12 @@ export async function runWorkflow<T = unknown>(
   const limiter = createLimiter(concurrency);
   const runner =
     options.mode === "dry_run" ? dryRunRunner(state) : (options.runner ?? missingRunner());
+  const phaseModels = new Map(
+    (parsed.meta.phases ?? [])
+      .map((phaseMeta) => [phaseMeta.title, phaseMeta.model] as const)
+      .filter((entry): entry is readonly [string, string] => typeof entry[1] === "string"),
+  );
+  const modelPolicy = options.modelPolicy ?? "mixed";
 
   const throwIfAborted = (): void => {
     if (options.signal?.aborted) throw new Error("workflow aborted");
@@ -80,10 +94,17 @@ export async function runWorkflow<T = unknown>(
     options.onLog?.(text);
   };
 
-  const phase = (title: unknown): void => {
-    const text = String(title).trim();
+  const phase = (title: unknown, phaseOptions: PhaseInputOptions = {}): void => {
+    const normalized =
+      typeof title === "object" && title !== null && !Array.isArray(title)
+        ? (title as PhaseInputOptions)
+        : ({ title, ...phaseOptions } as PhaseInputOptions);
+    const text = String(
+      stringOption(normalized.title) ?? stringOption(normalized.name) ?? "",
+    ).trim();
     if (!text) throw new Error("phase() requires a non-empty title");
     state.currentPhase = text;
+    state.currentPhaseModel = stringOption(normalized.model) ?? phaseModels.get(text);
     if (!state.phases.includes(text)) state.phases.push(text);
     options.onPhase?.(text);
   };
@@ -112,7 +133,14 @@ export async function runWorkflow<T = unknown>(
     if (phaseName) opts.phase = phaseName;
     const type = workflowAgentType(input.options.type);
     if (type) opts.type = type;
-    const model = stringOption(input.options.model);
+    const model = resolveAgentModel({
+      explicit: stringOption(input.options.model),
+      phaseModel: resolvePhaseModel(phaseName, state, phaseModels),
+      policy: modelPolicy,
+      type,
+      label,
+      phase: phaseName,
+    });
     if (model) opts.model = model;
     const allowedTools = stringArrayOption(input.options.allowedTools);
     if (allowedTools) opts.allowedTools = allowedTools;
@@ -406,6 +434,44 @@ function normalizeFinding(
 
 function workflowAgentType(value: unknown): WorkflowAgentOptions["type"] | undefined {
   return value === "explore" || value === "verify" || value === "synthesis" ? value : undefined;
+}
+
+function resolvePhaseModel(
+  phaseName: string | undefined,
+  state: RuntimeState,
+  phaseModels: ReadonlyMap<string, string>,
+): string | undefined {
+  if (!phaseName) return state.currentPhaseModel;
+  return (
+    phaseModels.get(phaseName) ??
+    (phaseName === state.currentPhase ? state.currentPhaseModel : undefined)
+  );
+}
+
+function resolveAgentModel(opts: {
+  explicit?: string;
+  phaseModel?: string;
+  policy: WorkflowModelPolicy;
+  type?: WorkflowAgentOptions["type"];
+  label?: string;
+  phase?: string;
+}): string | undefined {
+  if (opts.explicit) return opts.explicit;
+  if (opts.phaseModel) return opts.phaseModel;
+  if (opts.policy === "inherit") return undefined;
+  if (opts.policy === "flash") return "deepseek-v4-flash";
+  if (opts.policy === "pro") return "deepseek-v4-pro";
+  if (opts.type === "verify" || opts.type === "synthesis") return "deepseek-v4-pro";
+  const text = `${opts.label ?? ""} ${opts.phase ?? ""}`.toLowerCase();
+  if (
+    text.includes("verify") ||
+    text.includes("adversarial") ||
+    text.includes("synthesis") ||
+    text.includes("synthesize")
+  ) {
+    return "deepseek-v4-pro";
+  }
+  return "deepseek-v4-flash";
 }
 
 function estimateTokens(value: unknown): number {
