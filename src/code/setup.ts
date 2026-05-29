@@ -68,8 +68,6 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
 
   const outlineThresholdBytes = loadFilesystemOutlineThresholdBytes();
   const registerRooted = (root: string): void => {
-    registerFilesystemTools(tools, { rootDir: root, outlineThresholdBytes });
-    const cfg = readConfig();
     registerFilesystemTools(tools, {
       rootDir: root,
       outlineThresholdBytes,
