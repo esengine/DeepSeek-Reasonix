@@ -2018,13 +2018,19 @@ function TabRuntime({
     }
   }, [messageItems.length]);
 
-  // Always scroll to bottom on every content change.
+  // Follow the bottom while the assistant is streaming and the user hasn't
+  // scrolled up. The dependency on messageItems.length covers new messages;
+  // atBottomRef guards against re-pinning when the user intentionally scrolled
+  // up to read earlier content (#2159).
   useEffect(() => {
     const s = virtScrollerRef.current;
     if (!s || messageItems.length === 0) return;
-    const id = requestAnimationFrame(() => { s.scrollTop = s.scrollHeight; });
+    if (!atBottomRef.current) return;
+    const id = requestAnimationFrame(() => {
+      if (atBottomRef.current) s.scrollTop = s.scrollHeight;
+    });
     return () => cancelAnimationFrame(id);
-  });
+  }, [messageItems]);
 
   // Persist the transcript scroll offset per session so a restart reopens
   // the conversation where the user left it (#1244).
