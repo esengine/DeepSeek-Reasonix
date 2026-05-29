@@ -15,8 +15,11 @@ import {
   ensureDashboardToken,
   isReasoningEffort,
   loadDashboardEnabled,
+  loadDisabledSkills,
   loadProxyConfig,
   readConfig,
+  resolveSkillDir,
+  resolveSkillPath,
   saveReasoningEffort,
 } from "../config.js";
 import { t } from "../i18n/index.js";
@@ -219,6 +222,7 @@ program
     "--profile [path]",
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
+  .option("--skill-dir <path>", "add extra skill directory (appended to custom paths)")
   .action(async (dir: string | undefined, opts) => {
     // ssh:// without --dry-run is not yet implemented (RFC #2140).
     if (typeof dir === "string" && dir.startsWith("ssh://") && !opts.dryRun) {
@@ -270,6 +274,7 @@ program
         noMouse: opts.mouse === false,
         systemAppend: opts.systemAppend,
         systemAppendFile: opts.systemAppendFile,
+        skillDir: opts.skillDir,
       });
     } finally {
       if (profiling) await stopAndSaveCpuProfile();
@@ -306,6 +311,7 @@ program
     "--dashboard-host <host>",
     "bind address for the dashboard (default 127.0.0.1; use 0.0.0.0 for LAN access — the URL token is then the only auth)",
   )
+  .option("--skill-dir <path>", "add extra skill directory (appended to custom paths)")
   .option(
     "--profile [path]",
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
@@ -336,7 +342,13 @@ program
       const { chatCommand } = await import("./commands/chat.js");
       const chatBase = opts.system ?? defaultSystemPrompt(defaults.model);
       const chatCwd = process.cwd();
-      const chatRebuildSystem = () => applyMemoryStack(chatBase, chatCwd);
+      const chatSkillDir = opts.skillDir ? resolveSkillPath(opts.skillDir, chatCwd) : undefined;
+      const chatDisabledSkills = loadDisabledSkills();
+      const chatRebuildSystem = () =>
+        applyMemoryStack(chatBase, chatCwd, {
+          skillDir: chatSkillDir,
+          disabledSkills: chatDisabledSkills,
+        });
       await chatCommand({
         model: defaults.model,
         reasoningEffort: defaults.reasoningEffort,

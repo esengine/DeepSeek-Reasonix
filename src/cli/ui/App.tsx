@@ -37,6 +37,7 @@ import {
   defaultConfigPath,
   editModeHintShown,
   isReasoningEffort,
+  loadDisabledSkills,
   loadEndpoint,
   loadEngineeringLifecycleMode,
   loadHistoryScrollMode,
@@ -49,6 +50,7 @@ import {
   markMouseClipboardHintShown,
   mouseClipboardHintShown,
   readConfig,
+  resolveSkillDir,
   resolveThemePreference,
   saveEditMode,
   saveModel,
@@ -1000,6 +1002,8 @@ function AppInner({
     if (tools && !tools.has("run_skill")) {
       registerSkillTools(tools, {
         projectRoot: codeMode?.rootDir,
+        skillDir: resolveSkillDir(codeMode?.rootDir),
+        disabledSkills: loadDisabledSkills(),
         subagentRunner: async (skill, task, signal) => {
           const result = await spawnSubagent({
             client,

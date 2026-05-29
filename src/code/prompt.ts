@@ -153,12 +153,19 @@ export interface CodeSystemPromptOptions {
   modelId?: string;
   /** Back-compat no-op: lifecycle is runtime-only so strict/off do not change the cache prefix. */
   engineeringLifecycleMode?: "off" | "strict";
+  /** Extra skill directory appended to custom paths. */
+  skillDir?: string;
+  /** Names of disabled skills. */
+  disabledSkills?: string[];
 }
 
 export function codeSystemPrompt(rootDir: string, opts: CodeSystemPromptOptions = {}): string {
   const codeBase = codeSystemBase(opts.modelId ?? DEFAULT_CODE_MODEL);
   const base = opts.hasSemanticSearch ? `${codeBase}${SEMANTIC_SEARCH_ROUTING}` : codeBase;
-  const withMemory = applyMemoryStack(base, rootDir);
+  const withMemory = applyMemoryStack(base, rootDir, {
+    skillDir: opts.skillDir,
+    disabledSkills: opts.disabledSkills,
+  });
   const gitignorePath = join(rootDir, ".gitignore");
   let result = withMemory;
   if (existsSync(gitignorePath)) {

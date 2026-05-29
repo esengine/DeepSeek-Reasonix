@@ -1,12 +1,15 @@
 import {
   addSkillPath,
   defaultConfigPath,
+  loadDisabledSkills,
   loadResolvedSkillPaths,
   loadSkillPaths,
   removeSkillPath,
+  resolveSkillDir,
+  toggleSkillDisabled,
 } from "@/config.js";
 import { t } from "@/i18n/index.js";
-import { SkillStore, builtinSkillDescription } from "@/skills.js";
+import { SkillStore } from "@/skills.js";
 import type { SlashHandler } from "../dispatch.js";
 
 const skill: SlashHandler = (args, _loop, ctx) => {
@@ -16,6 +19,8 @@ const skill: SlashHandler = (args, _loop, ctx) => {
   const store = new SkillStore({
     projectRoot: ctx.codeRoot,
     customSkillPaths: loadResolvedSkillPaths(baseDir, configPath),
+    skillDir: resolveSkillDir(baseDir, configPath),
+    disabledSkills: loadDisabledSkills(configPath),
   });
   const sub = (args[0] ?? "").toLowerCase();
 
@@ -77,6 +82,22 @@ const skill: SlashHandler = (args, _loop, ctx) => {
     return { info: lines.join("\n") };
   }
 
+  if (sub === "enable") {
+    const name = args[1];
+    if (!name) return { info: t("handlers.skill.enableUsage") };
+    const result = toggleSkillDisabled("enable", name, configPath);
+    if ("error" in result) return { info: result.error };
+    return { info: t("handlers.skill.enabled", { name }) };
+  }
+
+  if (sub === "disable") {
+    const name = args[1];
+    if (!name) return { info: t("handlers.skill.disableUsage") };
+    const result = toggleSkillDisabled("disable", name, configPath);
+    if ("error" in result) return { info: result.error };
+    return { info: t("handlers.skill.disabled", { name }) };
+  }
+
   if (sub === "" || sub === "list" || sub === "ls") {
     const skills = store.list();
     if (skills.length === 0) {
@@ -101,10 +122,16 @@ const skill: SlashHandler = (args, _loop, ctx) => {
     for (const s of skills) {
       const scope = `(${s.scope})`.padEnd(11);
       const name = s.name.padEnd(24);
-      const resolvedDesc = s.scope === "builtin" ? builtinSkillDescription(s.name) : s.description;
-      const desc = resolvedDesc.length > 70 ? `${resolvedDesc.slice(0, 69)}…` : resolvedDesc;
+      const desc = s.description.length > 70 ? `${s.description.slice(0, 69)}…` : s.description;
       const shortPath = s.path.replace(baseDir, ".");
       lines.push(`  ${scope} ${name}  ${desc}  ${shortPath}`);
+    }
+    const disabledSet = new Set(loadDisabledSkills(configPath));
+    if (disabledSet.size > 0) {
+      lines.push("", t("handlers.skill.disabledHeader", { count: disabledSet.size }));
+      for (const name of [...disabledSet].sort()) {
+        lines.push(`  (disabled) ${name}`);
+      }
     }
     lines.push("");
     lines.push(t("handlers.skill.listFooter"));
@@ -119,9 +146,7 @@ const skill: SlashHandler = (args, _loop, ctx) => {
     return {
       info: [
         `▸ ${found.name}  (${found.scope})`,
-        found.description
-          ? `  ${found.scope === "builtin" ? builtinSkillDescription(found.name) : found.description}`
-          : "",
+        found.description ? `  ${found.description}` : "",
         `  ${found.path}`,
         "",
         found.body,
@@ -137,9 +162,7 @@ const skill: SlashHandler = (args, _loop, ctx) => {
     return { info: t("handlers.skill.runNotFound", { name }) };
   }
   const extra = args.slice(1).join(" ").trim();
-  const skillDesc =
-    found.scope === "builtin" ? builtinSkillDescription(found.name) : found.description;
-  const header = `# Skill: ${found.name}${skillDesc ? `\n> ${skillDesc}` : ""}`;
+  const header = `# Skill: ${found.name}${found.description ? `\n> ${found.description}` : ""}`;
   const argsLine = extra ? `\n\nArguments: ${extra}` : "";
   const payload = `${header}\n\n${found.body}${argsLine}`;
   return {

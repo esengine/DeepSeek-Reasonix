@@ -13,8 +13,10 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   type ReasonixConfig,
+  loadDisabledSkills,
   loadResolvedSkillPaths,
   memoryTypeDefaults,
+  resolveSkillDir,
   resolveSkillPaths,
 } from "../config.js";
 import { parseFrontmatter } from "../frontmatter.js";
@@ -458,7 +460,12 @@ export function applyUserMemory(
 export function applyMemoryStack(
   basePrompt: string,
   rootDir: string,
-  opts: { homeDir?: string; cfg?: ReasonixConfig } = {},
+  opts: {
+    homeDir?: string;
+    cfg?: ReasonixConfig;
+    skillDir?: string;
+    disabledSkills?: string[];
+  } = {},
 ): string {
   const homeDir = opts.homeDir;
   const cfg = opts.cfg;
@@ -472,5 +479,13 @@ export function applyMemoryStack(
   const customSkillPaths = cfg?.skills?.paths
     ? resolveSkillPaths(cfg.skills.paths, rootDir)
     : loadResolvedSkillPaths(rootDir);
-  return applySkillsIndex(withMemory, { projectRoot: rootDir, homeDir, customSkillPaths });
+  const skillDir = opts.skillDir ?? resolveSkillDir(rootDir);
+  const disabledSkills = opts.disabledSkills ?? loadDisabledSkills();
+  return applySkillsIndex(withMemory, {
+    projectRoot: rootDir,
+    homeDir,
+    customSkillPaths,
+    skillDir,
+    disabledSkills,
+  });
 }

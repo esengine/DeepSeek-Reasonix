@@ -6,9 +6,12 @@ import { buildCodeToolset } from "../../code/setup.js";
 import {
   DEFAULT_MODEL,
   bridgeEndpointEnv,
+  loadDisabledSkills,
   loadModel,
   normalizeMcpConfig,
   readConfig,
+  resolveSkillDir,
+  resolveSkillPath,
 } from "../../config.js";
 import { loadDotenv } from "../../env.js";
 import { t } from "../../i18n/index.js";
@@ -53,6 +56,8 @@ export interface CodeOptions {
   systemAppendFile?: string;
   /** Disable SGR mouse tracking so the terminal keeps native selection and right-click behavior. */
   noMouse?: boolean;
+  /** Extra skill directory appended to custom paths. */
+  skillDir?: string;
 }
 
 export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
@@ -128,12 +133,16 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   // new workspace's REASONIX.md / memory without restarting the loop.
   let currentRoot = rootDir;
   let semanticEnabled = semantic.enabled;
+  const resolvedSkillDir = opts.skillDir ? resolveSkillPath(opts.skillDir, rootDir) : undefined;
+  const resolvedDisabledSkills = loadDisabledSkills();
   const codeRebuildSystem = () =>
     codeSystemPrompt(currentRoot, {
       hasSemanticSearch: semanticEnabled,
       systemAppend: opts.systemAppend,
       systemAppendFile: systemAppendFileContents,
       modelId: resolvedModel,
+      skillDir: resolvedSkillDir,
+      disabledSkills: resolvedDisabledSkills,
     });
   await chatCommand({
     model: resolvedModel,

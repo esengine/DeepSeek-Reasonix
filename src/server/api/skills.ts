@@ -15,7 +15,12 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { loadResolvedSkillPaths, loadSubagentModels } from "../../config.js";
+import {
+  loadDisabledSkills,
+  loadResolvedSkillPaths,
+  loadSubagentModels,
+  toggleSkillDisabled,
+} from "../../config.js";
 import { parseFrontmatter } from "../../frontmatter.js";
 import { SKILLS_DIRNAME, SKILL_FILE, SkillStore, validateSkillFrontmatter } from "../../skills.js";
 import { readUsageLog } from "../../telemetry/usage.js";
@@ -209,8 +214,24 @@ export async function handleSkills(
           project: cwd ? projectSkillsDir(cwd) : null,
           custom: customRoots,
         },
+        disabled: loadDisabledSkills(ctx.configPath),
       },
     };
+  }
+
+  // PATCH /api/skills/toggle/:name — toggle a skill's disabled state
+  if (method === "PATCH" && rest[0] === "toggle") {
+    const skillName = rest.slice(1).join("/");
+    if (!skillName) return { status: 400, body: { error: "skill name required" } };
+    const disabled = new Set(loadDisabledSkills(ctx.configPath));
+    const wasDisabled = disabled.has(skillName);
+    const result = toggleSkillDisabled(
+      wasDisabled ? "enable" : "disable",
+      skillName,
+      ctx.configPath,
+    );
+    if ("error" in result) return { status: 400, body: { error: result.error } };
+    return { status: 200, body: { name: skillName, disabled: !wasDisabled } };
   }
 
   const [scope, ...nameParts] = rest;

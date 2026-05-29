@@ -296,8 +296,8 @@ export const zhCN: TranslationSchema = {
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
     },
     skill: {
-      description: "列出 / 运行用户技能（项目 + 自定义 + 全局 + 内置）",
-      argsHint: "[list|paths|show <name>|<name> [args]]",
+      description: "列出 / 运行 / 启用 / 禁用用户技能（项目 + 自定义 + 全局 + 内置）",
+      argsHint: "[list|paths|enable <name>|disable <name>|show <name>|<name> [args]]",
     },
     hooks: {
       description: "列出活跃的 hooks（.reasonix/ 下的 settings.json）· reload 从磁盘重新读取",
@@ -1294,6 +1294,11 @@ export const zhCN: TranslationSchema = {
       pathsRemoved: "▸ 已移除自定义技能路径：{path}",
       pathsRemoveNotFound: "▸ 没有匹配的自定义技能路径：{target}",
       pathsRestartHint: "当前会话的系统提示词不会热更新；运行 /new 或启动新会话以刷新技能索引。",
+      enableUsage: "用法：/skill enable <name>",
+      disableUsage: "用法：/skill disable <name>",
+      enabled: "▸ {name} 已重新启用 — 下次 /new 或新会话时生效。",
+      disabled: "▸ {name} 已禁用 — 下次 /new 或新会话时生效。",
+      disabledHeader: "已禁用的技能（{count}）：",
     },
   },
   statusBar: {

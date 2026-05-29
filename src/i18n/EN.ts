@@ -308,8 +308,9 @@ export const EN: TranslationSchema = {
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
     },
     skill: {
-      description: "list / run user skills (project + custom + global + builtin)",
-      argsHint: "[list|paths|show <name>|<name> [args]]",
+      description:
+        "list / run / enable / disable user skills (project + custom + global + builtin)",
+      argsHint: "[list|paths|enable <name>|disable <name>|show <name>|<name> [args]]",
     },
     hooks: {
       description: "list active hooks (settings.json under .reasonix/) · reload re-reads from disk",
@@ -1374,6 +1375,11 @@ export const EN: TranslationSchema = {
       pathsRemoveNotFound: "▸ no custom skills path matches: {target}",
       pathsRestartHint:
         "The current session's system prompt is unchanged; run /new or start a new session to refresh the skills index.",
+      enableUsage: "usage: /skill enable <name>",
+      disableUsage: "usage: /skill disable <name>",
+      enabled: "▸ {name} re-enabled — takes effect on next /new or new session.",
+      disabled: "▸ {name} disabled — takes effect on next /new or new session.",
+      disabledHeader: "Disabled skills ({count}):",
     },
   },
   statusBar: {

@@ -1,5 +1,6 @@
 /** runAs: inline appends the body to the parent log; subagent spawns an isolated child loop and only returns the final answer. */
 
+import { toggleSkillDisabled } from "../config.js";
 import { type Skill, SkillStore } from "../skills.js";
 import type { ToolRegistry } from "../tools.js";
 
@@ -26,6 +27,10 @@ export interface SkillToolsOptions {
   onSkillInstalled?: SkillInstalledHook;
   /** Per-skill model override for `runAs: subagent` skills — sourced from config.json's `subagentModels`. */
   subagentModels?: Record<string, "flash" | "pro">;
+  /** Extra skill directory appended to custom paths. */
+  skillDir?: string;
+  /** Names of skills to exclude from listing and invocation. */
+  disabledSkills?: readonly string[];
 }
 
 interface BuiltinSubagentToolSpec {
@@ -97,6 +102,8 @@ export function registerSkillTools(
     customSkillPaths: opts.customSkillPaths,
     disableBuiltins: opts.disableBuiltins,
     subagentModels: opts.subagentModels,
+    skillDir: opts.skillDir,
+    disabledSkills: opts.disabledSkills,
   });
   const subagentRunner = opts.subagentRunner;
   const onSkillInstalled = opts.onSkillInstalled;
@@ -355,6 +362,56 @@ export function registerSkillTools(
         runAs,
         note: "Skill is callable right now via run_skill({ name }). It will appear in the pinned Skills index after the next /new or launch.",
       });
+    },
+  });
+
+  registry.register({
+    name: "enable_skill",
+    description:
+      "Re-enable a previously disabled skill so it appears in the Skills index and can be invoked again.",
+    readOnly: false,
+    parallelSafe: false,
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Skill name to enable",
+        },
+      },
+      required: ["name"],
+    },
+    fn: async (args: { name?: unknown }) => {
+      const name = typeof args.name === "string" ? args.name.trim() : "";
+      if (!name) return JSON.stringify({ error: "enable_skill requires a 'name'" });
+      const result = toggleSkillDisabled("enable", name);
+      if ("error" in result) return JSON.stringify({ error: result.error });
+      return JSON.stringify({ ok: true, enabled: true });
+    },
+  });
+
+  registry.register({
+    name: "disable_skill",
+    description:
+      "Disable a skill so it no longer appears in the Skills index or can be invoked. Re-enable with enable_skill.",
+    readOnly: false,
+    parallelSafe: false,
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Skill name to disable",
+        },
+      },
+      required: ["name"],
+    },
+    fn: async (args: { name?: unknown }) => {
+      const name = typeof args.name === "string" ? args.name.trim() : "";
+      if (!name) return JSON.stringify({ error: "disable_skill requires a 'name'" });
+      const result = toggleSkillDisabled("disable", name);
+      if ("error" in result) return JSON.stringify({ error: result.error });
+      return JSON.stringify({ ok: true, enabled: false });
     },
   });
 

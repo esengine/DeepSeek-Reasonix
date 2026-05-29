@@ -65,6 +65,10 @@ export interface SkillStoreOptions {
   disableBuiltins?: boolean;
   /** Per-skill model override applied to `runAs: subagent` skills (overrides frontmatter `model:`). */
   subagentModels?: Record<string, "flash" | "pro">;
+  /** Extra skill directory appended to custom paths (from CLI --skill-dir or config). */
+  skillDir?: string;
+  /** Names of skills to exclude from listing and invocation. */
+  disabledSkills?: readonly string[];
 }
 
 /** Reject skill files that would silently disappear from the prefix index — `description:` is what `applySkillsIndex` keys on. */
@@ -104,6 +108,8 @@ export class SkillStore {
   private readonly customSkillPaths: readonly string[];
   private readonly disableBuiltins: boolean;
   private readonly subagentModels: Record<string, "flash" | "pro">;
+  private readonly skillDir: string | undefined;
+  private readonly disabledSkills: ReadonlySet<string>;
 
   constructor(opts: SkillStoreOptions = {}) {
     this.homeDir = opts.homeDir ?? homedir();
@@ -114,6 +120,8 @@ export class SkillStore {
     );
     this.disableBuiltins = opts.disableBuiltins === true;
     this.subagentModels = opts.subagentModels ?? {};
+    this.skillDir = opts.skillDir;
+    this.disabledSkills = new Set(opts.disabledSkills ?? []);
   }
 
   /** True iff this store was configured with a project root. */
@@ -142,6 +150,7 @@ export class SkillStore {
       });
     }
     for (const dir of this.customSkillPaths) out.push({ dir, scope: "custom" });
+    if (this.skillDir) out.push({ dir: this.skillDir, scope: "custom" });
     out.push({ dir: join(this.homeDir, ".reasonix", SKILLS_DIRNAME), scope: "global" });
     out.push({ dir: join(this.homeDir, ".agents", SKILLS_DIRNAME), scope: "global" });
     out.push({ dir: join(this.homeDir, ".claude", SKILLS_DIRNAME), scope: "global" });
@@ -166,12 +175,14 @@ export class SkillStore {
       for (const entry of entries) {
         const skill = this.readEntry(dir, scope, entry);
         if (!skill) continue;
+        if (this.disabledSkills.has(skill.name)) continue;
         if (!byName.has(skill.name)) byName.set(skill.name, skill);
       }
     }
     // Builtins last so user/project files override on name collision.
     if (!this.disableBuiltins) {
       for (const skill of BUILTIN_SKILLS) {
+        if (this.disabledSkills.has(skill.name)) continue;
         if (!byName.has(skill.name)) byName.set(skill.name, skill);
       }
     }
@@ -229,6 +240,7 @@ export class SkillStore {
   /** Resolve one skill by name. Returns `null` if not found or malformed. */
   read(name: string): Skill | null {
     if (!isValidSkillName(name)) return null;
+    if (this.disabledSkills.has(name)) return null;
     for (const { dir, scope, status } of this.roots()) {
       if (status !== "ok") continue;
       const dirCandidate = join(dir, name, SKILL_FILE);

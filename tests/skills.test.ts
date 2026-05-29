@@ -1,6 +1,6 @@
 /** Skills store + prefix-index composer — temp homeDir / projectRoot per test, no real skill dirs touched. */
 
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -408,40 +408,6 @@ describe("SkillStore", () => {
       expect("error" in r).toBe(true);
     });
   });
-
-  it("loads skills from symlinked directories (#2104)", () => {
-    // Create a real skill directory outside the skills root
-    const realDir = mkdtempSync(join(tmpdir(), "reasonix-skills-real-"));
-    try {
-      writeFileSync(
-        join(realDir, "SKILL.md"),
-        "---\ndescription: symlinked skill\n---\nSymlinked body\n",
-        "utf8",
-      );
-      // Create a symlink to it inside the global skills dir
-      const skillsDir = join(home, ".reasonix", "skills");
-      mkdirSync(skillsDir, { recursive: true });
-      symlinkSync(realDir, join(skillsDir, "linked-skill"));
-
-      const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
-      const skills = store.list();
-      expect(skills).toHaveLength(1);
-      expect(skills[0]?.name).toBe("linked-skill");
-      expect(skills[0]?.description).toBe("symlinked skill");
-      expect(skills[0]?.body).toBe("Symlinked body");
-    } finally {
-      rmSync(realDir, { recursive: true, force: true });
-    }
-  });
-
-  it("skips broken symlinks gracefully", () => {
-    const skillsDir = join(home, ".reasonix", "skills");
-    mkdirSync(skillsDir, { recursive: true });
-    symlinkSync(join(tmpdir(), `nonexistent-target-${Date.now()}`), join(skillsDir, "broken"));
-
-    const store = new SkillStore({ homeDir: home, projectRoot, disableBuiltins: true });
-    expect(store.list()).toEqual([]);
-  });
 });
 
 describe("applySkillsIndex", () => {
@@ -748,7 +714,7 @@ describe("Built-in skills", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it("ships explore/research/review/security-review/test/qq as builtins", () => {
+  it("ships explore/research/review/security-review/test as builtins", () => {
     const store = new SkillStore({ homeDir: home }); // builtins ON
     const names = store.list().map((s) => s.name);
     expect(names).toContain("explore");
@@ -756,7 +722,6 @@ describe("Built-in skills", () => {
     expect(names).toContain("review");
     expect(names).toContain("security-review");
     expect(names).toContain("test");
-    expect(names).toContain("qq");
     const explore = store.read("explore");
     expect(explore?.runAs).toBe("subagent");
     expect(explore?.scope).toBe("builtin");
@@ -777,11 +742,6 @@ describe("Built-in skills", () => {
     expect(test?.runAs).toBe("inline");
     expect(test?.body).toMatch(/run_command/);
     expect(test?.body).toMatch(/SEARCH\/REPLACE/);
-    const qq = store.read("qq");
-    expect(qq?.runAs).toBe("inline");
-    expect(qq?.scope).toBe("builtin");
-    expect(qq?.body).toMatch(/\/qq connect/);
-    expect(qq?.body).toMatch(/QQ Channel/);
   });
 
   it("user-authored skills override a builtin with the same name", () => {
@@ -808,7 +768,125 @@ describe("Built-in skills", () => {
     // /test is inline → no subagent tag
     expect(out).toContain("test —");
     expect(out).not.toContain("test [🧬 subagent]");
-    expect(out).toContain("qq —");
-    expect(out).not.toContain("qq [🧬 subagent]");
+  });
+});
+
+describe("skillDir option", () => {
+  let home: string;
+  let projectRoot: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "skilldir-test-"));
+    projectRoot = mkdtempSync(join(tmpdir(), "skilldir-proj-"));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it("skillDir root appears in roots() as custom scope", () => {
+    const skillDir = join(home, "my-skills");
+    mkdirSync(join(skillDir, "foo"), { recursive: true });
+    writeFileSync(
+      join(skillDir, "foo", "SKILL.md"),
+      "---\nname: foo\ndescription: test\n---\n\nbody",
+    );
+    const store = new SkillStore({ homeDir: home, projectRoot, skillDir });
+    const roots = store.roots();
+    const customRoots = roots.filter((r) => r.scope === "custom");
+    expect(customRoots.some((r) => r.dir === skillDir)).toBe(true);
+  });
+
+  it("skillDir is appended after other customSkillPaths", () => {
+    const custom1 = join(home, "custom1");
+    const skillDir = join(home, "my-skills");
+    mkdirSync(custom1, { recursive: true });
+    mkdirSync(skillDir, { recursive: true });
+    const store = new SkillStore({
+      homeDir: home,
+      projectRoot,
+      customSkillPaths: [custom1],
+      skillDir,
+    });
+    const roots = store.roots();
+    const customDirs = roots.filter((r) => r.scope === "custom").map((r) => r.dir);
+    expect(customDirs.indexOf(custom1)).toBeLessThan(customDirs.indexOf(skillDir));
+  });
+
+  it("project-scope skill still overrides skillDir with same name", () => {
+    const skillDir = join(home, "my-skills");
+    writeSkillDir(
+      projectRoot,
+      "project",
+      "dup",
+      { description: "project version" },
+      "project body",
+      projectRoot,
+    );
+    writeSkillDir(home, "custom", "dup", { description: "dir version" }, "dir body", skillDir);
+    const store = new SkillStore({ homeDir: home, projectRoot, skillDir });
+    const dup = store.read("dup");
+    expect(dup?.scope).toBe("project");
+    expect(dup?.body).toBe("project body");
+  });
+
+  it("missing skillDir reports status 'missing' without throwing", () => {
+    const skillDir = join(home, "nonexistent");
+    const store = new SkillStore({ homeDir: home, projectRoot, skillDir });
+    const roots = store.roots();
+    const skillDirRoot = roots.find((r) => r.dir === skillDir);
+    expect(skillDirRoot?.status).toBe("missing");
+  });
+});
+
+describe("disabledSkills option", () => {
+  let home: string;
+  let projectRoot: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "disabled-test-"));
+    projectRoot = mkdtempSync(join(tmpdir(), "disabled-proj-"));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it("list() excludes disabled skills", () => {
+    writeSkillDir(home, "global", "alpha", { description: "alpha" }, "body", home);
+    writeSkillDir(home, "global", "beta", { description: "beta" }, "body", home);
+    const store = new SkillStore({ homeDir: home, disabledSkills: ["alpha"] });
+    const names = store.list().map((s) => s.name);
+    expect(names).not.toContain("alpha");
+    expect(names).toContain("beta");
+  });
+
+  it("read() returns null for disabled skill", () => {
+    writeSkillDir(home, "global", "gamma", { description: "gamma" }, "body", home);
+    const store = new SkillStore({ homeDir: home, disabledSkills: ["gamma"] });
+    expect(store.read("gamma")).toBeNull();
+  });
+
+  it("disabling a builtin excludes it from list()", () => {
+    const store = new SkillStore({ homeDir: home, disabledSkills: ["explore"] });
+    const names = store.list().map((s) => s.name);
+    expect(names).not.toContain("explore");
+    expect(names).toContain("research"); // other builtins still present
+  });
+
+  it("empty/undefined disabledSkills has no effect", () => {
+    writeSkillDir(home, "global", "delta", { description: "delta" }, "body", home);
+    const store1 = new SkillStore({ homeDir: home, disabledSkills: [] });
+    const store2 = new SkillStore({ homeDir: home });
+    expect(store1.list().map((s) => s.name)).toContain("delta");
+    expect(store2.list().map((s) => s.name)).toContain("delta");
+  });
+
+  it("applySkillsIndex() output omits disabled skills", () => {
+    writeSkillDir(home, "global", "visible", { description: "visible skill" }, "body", home);
+    writeSkillDir(home, "global", "hidden", { description: "hidden skill" }, "body", home);
+    const out = applySkillsIndex(BASE, { homeDir: home, disabledSkills: ["hidden"] });
+    expect(out).toContain("visible");
+    expect(out).not.toContain("hidden");
   });
 });

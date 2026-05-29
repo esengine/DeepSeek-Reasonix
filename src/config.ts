@@ -287,6 +287,10 @@ export interface ReasonixConfig {
   semantic?: SemanticEmbeddingUserConfig;
   skills?: {
     paths?: string[];
+    /** Extra skill directory appended to custom paths (CLI --skill-dir / REASONIX_SKILL_DIR). */
+    skillDir?: string;
+    /** Names of disabled skills excluded from listing and invocation. */
+    disabled?: string[];
   };
   /** Per-skill model override for `runAs: subagent` skills, keyed by skill name. Empty / missing entry → spawn site's default. */
   subagentModels?: Record<string, "flash" | "pro">;
@@ -460,6 +464,7 @@ const STRING_ARRAY_FIELDS: Array<readonly string[]> = [
   ["promptHistory"],
   ["recentWorkspaces"],
   ["skills", "paths"],
+  ["skills", "disabled"],
 ];
 
 const stringArraySchema = z.array(z.string());
@@ -974,6 +979,61 @@ export function saveSubagentModels(
   }
   cfg.subagentModels = Object.keys(out).length > 0 ? out : undefined;
   writeConfig(cfg, path);
+}
+
+// --- skillDir ---
+
+export function loadSkillDir(
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): string | undefined {
+  const raw = readConfig(path).skills?.skillDir;
+  if (!raw || typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  return resolveSkillPath(trimmed, baseDir);
+}
+
+export function resolveSkillDir(
+  baseDir: string = process.cwd(),
+  path: string = defaultConfigPath(),
+): string | undefined {
+  const envDir = process.env.REASONIX_SKILL_DIR;
+  if (envDir?.trim()) return resolveSkillPath(envDir.trim(), baseDir);
+  return loadSkillDir(baseDir, path);
+}
+
+// --- disabledSkills ---
+
+export function loadDisabledSkills(path: string = defaultConfigPath()): string[] {
+  const raw = readConfig(path).skills?.disabled;
+  return Array.isArray(raw)
+    ? raw.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    : [];
+}
+
+export function toggleSkillDisabled(
+  action: "enable" | "disable",
+  name: string,
+  path: string = defaultConfigPath(),
+): { ok: true; enabled: boolean } | { error: string } {
+  const trimmed = name.trim();
+  if (!trimmed) return { error: "skill name is required" };
+  const cfg = readConfig(path);
+  const current = new Set(cfg.skills?.disabled ?? []);
+  if (action === "disable") {
+    if (current.has(trimmed)) return { ok: true, enabled: false };
+    current.add(trimmed);
+  } else {
+    if (!current.has(trimmed)) return { ok: true, enabled: true };
+    current.delete(trimmed);
+  }
+  cfg.skills = {
+    ...(cfg.skills ?? {}),
+    disabled: current.size > 0 ? [...current].sort() : undefined,
+  };
+  writeConfig(cfg, path);
+  return { ok: true, enabled: action === "enable" };
 }
 
 export function addSkillPath(

@@ -1,6 +1,7 @@
 import { DeepSeekClient } from "../client.js";
 import {
   type EditMode,
+  loadDisabledSkills,
   loadEditMode,
   loadEndpoint,
   loadFilesystemOutlineThresholdBytes,
@@ -10,6 +11,7 @@ import {
   loadSubagentModels,
   loadToolRateLimit,
   readConfig,
+  resolveSkillDir,
   searchEnabled,
 } from "../config.js";
 import { bootstrapSemanticSearchInCodeMode } from "../index/semantic/tool.js";
@@ -65,11 +67,7 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
 
   const outlineThresholdBytes = loadFilesystemOutlineThresholdBytes();
   const registerRooted = (root: string): void => {
-    registerFilesystemTools(tools, {
-      rootDir: root,
-      outlineThresholdBytes,
-      autoGitRollback: {},
-    });
+    registerFilesystemTools(tools, { rootDir: root, outlineThresholdBytes });
     const cfg = readConfig();
     registerShellTools(tools, {
       rootDir: root,
@@ -109,6 +107,8 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
     projectRoot: opts.rootDir,
     customSkillPaths: loadResolvedSkillPaths(opts.rootDir),
     subagentModels: loadSubagentModels(),
+    skillDir: resolveSkillDir(opts.rootDir),
+    disabledSkills: loadDisabledSkills(),
     onSkillInstalled: opts.onSkillInstalled,
     subagentRunner: async (skill, task, signal) => {
       if (!subagentClient) {
