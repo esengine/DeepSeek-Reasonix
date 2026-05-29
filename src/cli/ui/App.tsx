@@ -3230,6 +3230,14 @@ function AppInner({
         if (fromQQ && result.info) qq.sendText(result.info);
         if (fromTelegram && result.info) telegram.sendText(result.info);
         if (fromWeixin && result.info) weixin.sendText(result.info);
+        // Bridge slash command info results to web dashboard subscribers
+        if (result.info && eventSubscribersRef.current.size > 0) {
+          broadcastDashboardEvent({
+            kind: "info",
+            id: `slash-info-${Date.now()}`,
+            text: result.info,
+          });
+        }
         if (outcome.kind === "resubmit") {
           text = outcome.text;
         } else {
