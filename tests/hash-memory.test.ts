@@ -47,6 +47,19 @@ describe("detectHashMemory", () => {
     expect(detectHashMemory("### subsection")).toBeNull();
   });
 
+  it("does NOT trigger on GitHub-style issue/PR references (`#<number>)", () => {
+    // When discussing GitHub issues, `#123` is a common reference
+    // format and should not be intercepted as a memory note.
+    expect(detectHashMemory("#123")).toBeNull();
+    expect(detectHashMemory("#42")).toBeNull();
+    expect(detectHashMemory("#1")).toBeNull();
+    expect(detectHashMemory("#123 some text")).toBeNull();
+    expect(detectHashMemory("#42 这个问题需要修复")).toBeNull();
+    // Multiple issue references in one message also pass through
+    // since the message starts with `#<digits>`.
+    expect(detectHashMemory("#123 and #456 both apply")).toBeNull();
+  });
+
   it("does NOT trigger when `#` appears mid-string", () => {
     expect(detectHashMemory("look at #foo")).toBeNull();
     expect(detectHashMemory("issue #123")).toBeNull();
