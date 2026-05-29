@@ -74,6 +74,7 @@ export const I = {
   shield: (p: IconProps) => (<Ic {...p}><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6Z" /><path d="m9 12 2 2 4-4" /></Ic>),
   warn: (p: IconProps) => (<Ic {...p}><path d="M12 3 2 21h20Z" /><path d="M12 10v5M12 18h.01" /></Ic>),
   help: (p: IconProps) => (<Ic {...p}><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 4M12 17h.01" /></Ic>),
+  info: (p: IconProps) => (<Ic {...p}><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M12 12v4" /></Ic>),
   refresh: (p: IconProps) => (<Ic {...p}><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 4v4h-4M21 12a9 9 0 0 1-15 6.7L3 16M3 20v-4h4" /></Ic>),
   copy: (p: IconProps) => (<Ic {...p}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M4 16V6a2 2 0 0 1 2-2h10" /></Ic>),
 };

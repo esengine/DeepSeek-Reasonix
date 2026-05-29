@@ -1,5 +1,6 @@
 export type ReadyEvent = { type: "$ready" };
 export type ProtocolErrorEvent = { type: "$error"; message: string };
+export type InfoEvent = { type: "$info"; message: string };
 export type TurnCompleteEvent = { type: "$turn_complete" };
 export type PathAccessRequiredEvent = {
   type: "$path_access_required";
@@ -466,6 +467,7 @@ export type KernelErrorEvent = {
 export type IncomingEvent = { tabId?: string } & (
   | ReadyEvent
   | ProtocolErrorEvent
+  | InfoEvent
   | TurnCompleteEvent
   | ConfirmRequiredEvent
   | PathAccessRequiredEvent

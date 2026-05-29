@@ -212,6 +212,14 @@ function sseToIncoming(ev: any): Record<string, any>[] {
       });
       break;
     }
+    case "info": {
+      results.push({
+        type: "$info",
+        tabId: "tab-1",
+        message: ev.text,
+      });
+      break;
+    }
     case "status": {
       results.push({
         type: "status",
