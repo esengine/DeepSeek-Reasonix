@@ -1,7 +1,11 @@
+import type { CacheFirstLoop } from "../../../../loop.js";
+import type { ChatMessage } from "../../../../types.js";
 import { loadSavedWorkflows } from "../../../../workflow/saved.js";
 import type { WorkflowRunSnapshot } from "../../../../workflow/types.js";
 import type { SlashHandler } from "../dispatch.js";
 import type { SlashContext, SlashResult } from "../types.js";
+
+type WorkflowAttachLoop = Pick<CacheFirstLoop, "appendAndPersist">;
 
 export function handleWorkflowsSlash(
   args: readonly string[],
@@ -9,16 +13,43 @@ export function handleWorkflowsSlash(
     SlashContext,
     "workflowManager" | "workflowRunner" | "workflowModelPolicy" | "codeRoot" | "homeDir"
   >,
+  loop?: WorkflowAttachLoop,
 ): SlashResult {
   const manager = ctx.workflowManager;
   if (!manager) return { info: "workflows are not available in this session" };
 
   const [cmd, runId, target, name] = args;
-  if (!cmd) return { info: formatRunList(manager.listRuns()) };
+  if (!cmd || cmd === "list") return { info: formatRunList(manager.listRuns()) };
 
   if (cmd === "show" && runId) {
     const run = manager.getRun(runId);
     return { info: run ? formatRunDetail(run) : `workflow run not found: ${runId}` };
+  }
+
+  if ((cmd === "attach" || cmd === "use") && runId) {
+    const run = manager.getRun(runId);
+    if (!run) return { info: `workflow run not found: ${runId}` };
+    if (run.status === "running") {
+      return { info: `workflow ${runId} is still running; use /workflows show ${runId}` };
+    }
+    if (!loop) return { info: "workflow attach is not available in this session" };
+    appendWorkflowContext(loop, run);
+    return { info: `attached workflow ${run.id} to the current conversation` };
+  }
+
+  if (cmd === "continue" && runId) {
+    const run = manager.getRun(runId);
+    if (!run) return { info: `workflow run not found: ${runId}` };
+    if (run.status === "running") {
+      return { info: `workflow ${runId} is still running; use /workflows show ${runId}` };
+    }
+    if (!loop) return { info: "workflow continue is not available in this session" };
+    appendWorkflowContext(loop, run);
+    const instruction = args.slice(2).join(" ").trim();
+    return {
+      info: `attached workflow ${run.id} to the current conversation`,
+      resubmit: instruction || `Continue from workflow ${run.id}.`,
+    };
   }
 
   if (cmd === "stop" && runId) {
@@ -60,13 +91,20 @@ export function handleWorkflowsSlash(
   }
 
   return {
-    info: "usage: /workflows | /workflows show <runId> | /workflows stop <runId> | /workflows retry <runId> | /workflows delete <runId> | /workflows save <runId> project|user [name] | /workflows run <name> [input]",
+    info: "usage: /workflows [list] | /workflows show <runId> | /workflows attach <runId> | /workflows continue <runId> [instruction] | /workflows stop <runId> | /workflows retry <runId> | /workflows delete <runId> | /workflows save <runId> project|user [name] | /workflows run <name> [input]",
   };
 }
 
 export const handlers: Record<string, SlashHandler> = {
-  workflows: (args, _loop, ctx) => handleWorkflowsSlash(args, ctx),
+  workflows: (args, loop, ctx) => handleWorkflowsSlash(args, ctx, loop),
 };
+
+function appendWorkflowContext(loop: WorkflowAttachLoop, run: WorkflowRunSnapshot): void {
+  loop.appendAndPersist({
+    role: "system",
+    content: formatRunContext(run),
+  } satisfies ChatMessage);
+}
 
 function formatRunList(runs: WorkflowRunSnapshot[]): string {
   if (runs.length === 0) return "no workflow runs";
@@ -91,4 +129,41 @@ function formatRunDetail(run: WorkflowRunSnapshot): string {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function formatRunContext(run: WorkflowRunSnapshot): string {
+  return [
+    `Workflow run attached: ${run.id}`,
+    `Name: ${run.name}`,
+    `Description: ${run.description}`,
+    `Status: ${run.status}`,
+    `Mode: ${run.mode}`,
+    `Agents: ${run.agentCount}`,
+    run.error ? `Error: ${run.error}` : "",
+    run.phases.length > 0
+      ? `Phases:\n${run.phases.map((phase) => `- ${phase.title} agents=${phase.agentCount}`).join("\n")}`
+      : "",
+    run.agents.length > 0
+      ? `Agent results:\n${run.agents
+          .map(
+            (agent) =>
+              `- ${agent.status} ${agent.label}${agent.phase ? ` (${agent.phase})` : ""}${agent.outputPreview ? `: ${agent.outputPreview}` : ""}${agent.error ? ` error=${agent.error}` : ""}`,
+          )
+          .join("\n")}`
+      : "",
+    run.logs.length > 0
+      ? `Logs:\n${run.logs
+          .slice(-20)
+          .map((line) => `- ${line}`)
+          .join("\n")}`
+      : "",
+    `Result:\n${truncateWorkflowContextValue(run.result)}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function truncateWorkflowContextValue(value: unknown): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value ?? null, null, 2);
+  return text.length > 12_000 ? `${text.slice(0, 12_000)}\n[truncated]` : text;
 }

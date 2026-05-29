@@ -570,6 +570,24 @@ describe("handleSlash", () => {
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
       expect(ctx!.spec.argCompleter).toBe("models");
+      expect(ctx!.spec.argsHint).toContain("mixed");
+    });
+
+    it("activates policy picker for /model workflow-policy", () => {
+      const ctx = detectSlashArgContext("/model workflow-policy m");
+      expect(ctx).not.toBeNull();
+      expect(ctx!.kind).toBe("picker");
+      expect(ctx!.spec.argCompleter).toEqual(["inherit", "flash", "pro", "mixed", "auto"]);
+      expect(ctx!.partial).toBe("m");
+      expect(ctx!.partialOffset).toBe("/model workflow-policy ".length);
+    });
+
+    it("activates workflow subcommand picker for /workflows", () => {
+      const ctx = detectSlashArgContext("/workflows con", true);
+      expect(ctx).not.toBeNull();
+      expect(ctx!.kind).toBe("picker");
+      expect(ctx!.spec.argCompleter).toContain("continue");
+      expect(ctx!.partial).toBe("con");
     });
 
     it("activates enum picker for /plan in code mode", () => {

@@ -217,9 +217,20 @@ import { useSubagent } from "./useSubagent.js";
 
 const STASH_HINT_CARD_ID = "composer-stash-hint";
 
+export function parseBusyWorkflowSlashCommand(text: string): ReturnType<typeof parseSlash> | null {
+  const slash = parseSlash(text.trimStart());
+  return slash?.cmd === "workflows" ? slash : null;
+}
+
+export function canCompleteWorkflowPickerWhileBusy(args: {
+  slashCommand?: string;
+  slashArgCommand?: string;
+}): boolean {
+  return args.slashCommand === "workflows" || args.slashArgCommand === "workflows";
+}
+
 function isBusyWorkflowSlashCommand(text: string): boolean {
-  const slash = parseSlash(text);
-  return slash?.cmd === "workflows";
+  return parseBusyWorkflowSlashCommand(text) !== null;
 }
 
 export function isBusyPromptCommand(text: string): boolean {
@@ -1987,7 +1998,27 @@ function AppInner({
       setLiveExpand((v) => !v);
       return;
     }
-    if (busy) return;
+    if (busy) {
+      if (
+        key.tab &&
+        slashArgMatches &&
+        slashArgMatches.length > 0 &&
+        slashArgContext &&
+        canCompleteWorkflowPickerWhileBusy({ slashArgCommand: slashArgContext.spec.cmd })
+      ) {
+        const sel = slashArgMatches[slashArgSelected] ?? slashArgMatches[0];
+        if (sel) pickSlashArg(sel);
+        return;
+      }
+      if (key.tab && slashMatches && slashMatches.length > 0) {
+        const sel = slashMatches[slashSelected] ?? slashMatches[0];
+        if (sel && canCompleteWorkflowPickerWhileBusy({ slashCommand: sel.cmd })) {
+          setInput(`/${sel.cmd}`);
+        }
+        return;
+      }
+      return;
+    }
     // ShellConfirm owns the full keyboard while it's showing. If we
     // kept handling ↑/↓ / Tab here they'd race with its SingleSelect
     // — the picker would move AND history recall would fire into the
@@ -2841,6 +2872,49 @@ function AppInner({
       }
       if (busy || submittingRef.current) {
         if (busy && text.trim()) {
+          const workflowSlash = parseBusyWorkflowSlashCommand(text);
+          if (workflowSlash) {
+            setInput("");
+            resetCursor();
+            const sink = eventSinkRef.current;
+            const eventizer = eventizerRef.current;
+            if (sink && eventizer) {
+              sink.append(
+                eventizer.emitSlashInvoked(
+                  loop.currentTurn,
+                  workflowSlash.cmd,
+                  workflowSlash.args.join(" "),
+                ),
+              );
+            }
+            setSlashUsage(recordSlashUse(workflowSlash.cmd));
+            const result = handleSlash(workflowSlash.cmd, workflowSlash.args, loop, {
+              codeRoot: codeMode ? currentRootDir : undefined,
+              workflowManager: codeMode?.workflowManager,
+              workflowRunner: codeMode?.workflowRunner,
+              workflowModelPolicy: codeMode?.workflowModelPolicy,
+              dispatch: agentStore.dispatch,
+            });
+            const outcome = applySlashResult(result, {
+              log,
+              stdoutWrite: (chunk) => stdout?.write(chunk),
+              pendingEdits,
+              syncPendingCount,
+              session: session ?? null,
+              codeModeOn: !!codeMode,
+              isLoopActive,
+              stopLoop,
+              quitProcess,
+              pushHistory,
+              resetPendingModals,
+              text,
+            });
+            if (fromQQ && result.info) qq.sendText(result.info);
+            if (fromTelegram && result.info) telegram.sendText(result.info);
+            if (fromWeixin && result.info) weixin.sendText(result.info);
+            if (outcome.kind === "resubmit") setQueuedSubmit(outcome.text);
+            return;
+          }
           if (isBusyPromptCommand(text)) {
             log.pushInfo(t("app.steerCommandRejected"));
             return;

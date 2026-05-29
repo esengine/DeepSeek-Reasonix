@@ -28,6 +28,22 @@ describe("/workflows slash handler", () => {
     expect(result.info).toContain("completed");
   });
 
+  it("treats /workflows list as the explicit list form", async () => {
+    const runner: WorkflowAgentRunner = {
+      async run() {
+        return { ok: true, output: "ok" };
+      },
+    };
+    const manager = new WorkflowRunManager({ runner, rootDir: process.cwd() });
+    const started = manager.startRun({ script, mode: "run" });
+    await manager.waitForRun(started.id);
+
+    const result = handleWorkflowsSlash(["list"], { workflowManager: manager });
+
+    expect(result.info).toContain("audit");
+    expect(result.info).toContain("completed");
+  });
+
   it("shows run details", async () => {
     const runner: WorkflowAgentRunner = {
       async run() {
@@ -42,6 +58,50 @@ describe("/workflows slash handler", () => {
 
     expect(result.info).toContain("inspection");
     expect(result.info).toContain("ok");
+  });
+
+  it("attaches a completed workflow run to the current conversation", async () => {
+    const runner: WorkflowAgentRunner = {
+      async run() {
+        return { ok: true, output: "finding: unsafe parser" };
+      },
+    };
+    const manager = new WorkflowRunManager({ runner, rootDir: process.cwd() });
+    const started = manager.startRun({ script, mode: "run" });
+    await manager.waitForRun(started.id);
+    const messages: Array<{ role: string; content: string }> = [];
+
+    const result = handleWorkflowsSlash(
+      ["attach", started.id],
+      { workflowManager: manager },
+      { appendAndPersist: (message) => messages.push(message) },
+    );
+
+    expect(result.info).toContain(`attached workflow ${started.id}`);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.role).toBe("system");
+    expect(messages[0]?.content).toContain("finding: unsafe parser");
+  });
+
+  it("continues from a completed workflow run with a follow-up instruction", async () => {
+    const runner: WorkflowAgentRunner = {
+      async run() {
+        return { ok: true, output: "finding: missing tests" };
+      },
+    };
+    const manager = new WorkflowRunManager({ runner, rootDir: process.cwd() });
+    const started = manager.startRun({ script, mode: "run" });
+    await manager.waitForRun(started.id);
+    const messages: Array<{ role: string; content: string }> = [];
+
+    const result = handleWorkflowsSlash(
+      ["continue", started.id, "fix", "the", "issues"],
+      { workflowManager: manager },
+      { appendAndPersist: (message) => messages.push(message) },
+    );
+
+    expect(messages[0]?.content).toContain("finding: missing tests");
+    expect(result.resubmit).toBe("fix the issues");
   });
 
   it("reports missing manager clearly", () => {

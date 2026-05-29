@@ -359,8 +359,12 @@
                   <td>Switch model bundle. Bare opens picker</td>
                 </tr>
                 <tr>
-                  <td><code>/model &lt;id&gt;</code></td>
-                  <td>Switch DeepSeek model id. Bare opens picker</td>
+                  <td><code>/model &lt;id|workflow-policy&gt;</code></td>
+                  <td>Switch DeepSeek model id. Bare opens picker; <code>workflow-policy</code> tunes workflow routing</td>
+                </tr>
+                <tr>
+                  <td><code>/model workflow-policy [inherit|flash|pro|mixed|auto]</code></td>
+                  <td>Show or persist the default workflow model routing policy</td>
                 </tr>
                 <tr>
                   <td><code>/language &lt;EN|zh-CN&gt;</code> (<code>/lang</code>)</td>
@@ -517,6 +521,14 @@
                   <td>Inspect a workflow run: status, duration, agents, and final output</td>
                 </tr>
                 <tr>
+                  <td><code>/workflows attach &lt;runId&gt;</code> (<code>use</code>)</td>
+                  <td>Attach a completed workflow result to the current conversation so the next prompt can reference it</td>
+                </tr>
+                <tr>
+                  <td><code>/workflows continue &lt;runId&gt; [instruction]</code></td>
+                  <td>Attach a completed workflow result and immediately send the follow-up instruction to the model</td>
+                </tr>
+                <tr>
                   <td><code>/workflows stop &lt;runId&gt;</code></td>
                   <td>Abort a running workflow</td>
                 </tr>
@@ -569,7 +581,21 @@
               Use <code>parallel([() =&gt; agent(...), () =&gt; agent(...)])</code> for independent
               work. Consecutive <code>await agent(...)</code> calls are serial and should only be
               used when later steps depend on earlier results. For long runs, call the tool with
-              <code>background: true</code>, then inspect it with <code>/workflows</code>.
+              <code>background: true</code>, then inspect it with <code>/workflows</code>. After a
+              background run completes, use <code>/workflows attach &lt;runId&gt;</code> to bring its
+              result into the current conversation, or
+              <code>/workflows continue &lt;runId&gt; &lt;instruction&gt;</code> to continue from that
+              result immediately.
+            </p>
+            <p>
+              The <code>workflow</code> tool accepts <code>concurrency</code> and
+              <code>max_agents</code> when the model invokes it. Defaults are
+              <code>concurrency: 3</code> and <code>max_agents: 8</code>. Higher fan-out runs are
+              allowed, but formal <code>run</code> mode asks for confirmation when
+              <code>concurrency &gt; 4</code> or <code>max_agents &gt; 8</code>. The
+              <code>/workflows run &lt;name&gt; [input]</code> slash command currently starts a
+              saved workflow with its defaults and passes trailing text as <code>args.input</code>;
+              it does not parse <code>--concurrency</code> or <code>--max-agents</code>.
             </p>
             <p>
               Use <code>verifyFindings([...])</code> for independent verifier subagents,
@@ -577,6 +603,18 @@
               <code>synthesize(inputs)</code> for final synthesis. These helpers are wrappers
               around internal <code>agent()</code> calls and still count toward
               <code>max_agents</code>.
+            </p>
+            <p>
+              Workflow model routing defaults to
+              <code>/model workflow-policy mixed</code>: exploration agents use
+              <code>deepseek-v4-flash</code>, while verifier, adversarial, and synthesis agents
+              route to <code>deepseek-v4-pro</code>. Use <code>/model workflow-policy</code> to show
+              the current policy, or
+              <code>/model workflow-policy inherit|flash|pro|mixed|auto</code> to persist a new
+              default. A single workflow tool call can override it with
+              <code>model_policy</code>; workflow scripts can be more specific with
+              <code>phase({ title, model })</code>, <code>meta.phases[].model</code>, or
+              <code>agent(..., { model })</code>.
             </p>
 
             <h3 data-i18n="sl.h.advanced">Advanced</h3>
