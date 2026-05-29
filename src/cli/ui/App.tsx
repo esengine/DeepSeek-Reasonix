@@ -193,6 +193,7 @@ import { formatMcpSlowToast } from "./mcp-toast.js";
 import { openUrl } from "./open-url.js";
 import { formatLongPaste } from "./paste-collapse.js";
 import { extractOpenQuestionsSection } from "./plan-open-questions.js";
+import { resolveRemoteIncoming } from "./remote-incoming.js";
 import {
   type McpServerSummary,
   type PlanModeToggleSource,
@@ -2829,26 +2830,16 @@ function AppInner({
     onChoiceResolveRef: handleChoiceResolveRef,
   });
 
-  const handleSubmit = useCallback(
-    async (raw: string) => {
-      const qqIncoming = qq.parseSubmit(raw);
-      const telegramIncoming =
-        qqIncoming?.handled || qqIncoming?.fromQQ ? null : telegram.parseSubmit(raw);
-      const weixinIncoming =
-        qqIncoming?.handled || qqIncoming?.fromQQ
-          ? null
-          : telegramIncoming?.handled || telegramIncoming?.fromTelegram
-            ? null
-            : weixin.parseSubmit(raw);
-      const incoming =
-        qqIncoming?.handled || qqIncoming?.fromQQ
-          ? qqIncoming
-          : telegramIncoming?.handled || telegramIncoming?.fromTelegram
-            ? telegramIncoming
-            : weixinIncoming?.handled || weixinIncoming?.fromWeixin
-              ? weixinIncoming
-              : feishu.parseSubmit(raw);
-      if (!incoming) return;
+    const handleSubmit = useCallback(
+      async (raw: string) => {
+        const qqIncoming = qq.parseSubmit(raw);
+        const incoming = resolveRemoteIncoming(
+          qqIncoming,
+          () => telegram.parseSubmit(raw),
+          () => weixin.parseSubmit(raw),
+          () => feishu.parseSubmit(raw),
+        );
+        if (!incoming) return;
       let { text } = incoming;
       const fromQQ = "fromQQ" in incoming && incoming.fromQQ;
       const fromTelegram = "fromTelegram" in incoming && incoming.fromTelegram;
