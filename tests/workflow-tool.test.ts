@@ -34,6 +34,24 @@ describe("registerWorkflowTool", () => {
     expect(registry.has("workflow")).toBe(true);
   });
 
+  it("guides generated workflows toward fan-out, verification, and synthesis", () => {
+    const registry = new ToolRegistry();
+    registerWorkflowTool(registry);
+
+    const spec = registry.specs().find((item) => item.function.name === "workflow");
+    const description = spec?.function.description ?? "";
+    const scriptDescription =
+      spec?.function.parameters.properties?.script.description?.toString() ?? "";
+    const combined = `${description}\n${scriptDescription}`;
+
+    expect(combined).toMatch(/scope.*parallel agents.*verifier.*synthesis/i);
+    expect(combined).toContain("verifyFindings");
+    expect(combined).toContain("adversarialReview");
+    expect(combined).toContain("synthesize");
+    expect(combined).toMatch(/pipeline\(\).*dependency/i);
+    expect(combined).toMatch(/cost-sensitive.*verifier/i);
+  });
+
   it("validates scripts without running agents", async () => {
     const registry = new ToolRegistry();
     const runner = new StaticRunner();
