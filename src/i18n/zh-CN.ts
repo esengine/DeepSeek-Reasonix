@@ -869,6 +869,8 @@ export const zhCN: TranslationSchema = {
       missingBotToken: "缺少 Telegram bot token。请先运行 `/telegram connect` 完成配置。",
       accessRequired:
         "Telegram 启动前必须配置访问控制。请在配置中设置 `telegram.ownerUserId` 或 `telegram.allowlist`。",
+      rateLimited: "Telegram 已限流授权用户 {userId}：{seconds} 秒内超过 5 条消息。",
+      rateLimitedReply: "Telegram 收到消息过快，请等待 {seconds} 秒后再发送。",
     },
     admin: {
       doctorNeedsTui: "/doctor 需要 TUI 上下文（postDoctor 已连接）。",

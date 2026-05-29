@@ -45,11 +45,56 @@ export interface TelegramCallbackQuery {
   };
 }
 
+function getTelegramErrorCode(err: unknown): number | null {
+  if (!err || typeof err !== "object") return null;
+  const record = err as Record<string, unknown>;
+  const direct = record.error_code ?? record.status;
+  if (typeof direct === "number") return direct;
+  const nested = record.error;
+  if (nested && typeof nested === "object") {
+    const code = (nested as Record<string, unknown>).error_code;
+    if (typeof code === "number") return code;
+  }
+  return null;
+}
+
+export function formatTelegramBotError(
+  err: unknown,
+  token: string,
+  context = "Telegram bot",
+): string {
+  const raw =
+    err instanceof Error
+      ? err.message
+      : err &&
+          typeof err === "object" &&
+          typeof (err as Record<string, unknown>).description === "string"
+        ? ((err as Record<string, unknown>).description as string)
+        : String(err);
+  const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let message = escapedToken ? raw.replace(new RegExp(escapedToken, "g"), "<redacted>") : raw;
+  message = message.replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot<redacted>");
+
+  const code = getTelegramErrorCode(err);
+  if (code === 401) {
+    return `${context}: Telegram rejected the bot token (401). Check telegram.botToken.`;
+  }
+  if (code === 409) {
+    return `${context}: Telegram polling conflict (409). Stop the other bot instance or clear the webhook.`;
+  }
+  if (code !== null) {
+    return `${context}: Telegram API error ${code}: ${message}`;
+  }
+  return `${context}: ${message}`;
+}
+
 export class TelegramBot extends EventEmitter {
   private readonly bot: Bot<Context>;
+  private readonly token: string;
 
   constructor(config: TelegramBotConfig) {
     super();
+    this.token = config.token;
     this.bot = new Bot(config.token);
     this.bot.on("message:text", (ctx) => {
       const msg = ctx.message;
@@ -88,16 +133,20 @@ export class TelegramBot extends EventEmitter {
         },
       } satisfies TelegramCallbackQuery);
       await ctx.answerCallbackQuery().catch((err) => {
-        this.emit("bot_error", err instanceof Error ? err.message : String(err));
+        this.emit("bot_error", formatTelegramBotError(err, this.token, "Telegram callback"));
       });
     });
     this.bot.catch((err) => {
-      this.emit("bot_error", err instanceof Error ? err.message : String(err));
+      this.emit("bot_error", formatTelegramBotError(err, this.token, "Telegram polling"));
     });
   }
 
   async start(): Promise<void> {
-    await this.bot.init();
+    try {
+      await this.bot.init();
+    } catch (err) {
+      throw new Error(formatTelegramBotError(err, this.token, "Telegram initialization"));
+    }
     this.emit("online");
     void this.bot
       .start({
@@ -106,7 +155,7 @@ export class TelegramBot extends EventEmitter {
         onStart: () => undefined,
       })
       .catch((err) => {
-        this.emit("bot_error", err instanceof Error ? err.message : String(err));
+        this.emit("bot_error", formatTelegramBotError(err, this.token, "Telegram polling"));
       });
   }
 
@@ -115,9 +164,13 @@ export class TelegramBot extends EventEmitter {
   }
 
   async setCommands(commands: readonly TelegramBotCommand[]): Promise<void> {
-    await this.bot.api.setMyCommands(
-      commands.map(({ command, description }) => ({ command, description })),
-    );
+    try {
+      await this.bot.api.setMyCommands(
+        commands.map(({ command, description }) => ({ command, description })),
+      );
+    } catch (err) {
+      throw new Error(formatTelegramBotError(err, this.token, "Telegram command registration"));
+    }
   }
 
   async sendMessage(
@@ -127,20 +180,24 @@ export class TelegramBot extends EventEmitter {
     parseMode?: TelegramParseMode,
     buttons?: TelegramInlineButton[][],
   ): Promise<void> {
-    await this.bot.api.sendMessage(chatId, text, {
-      link_preview_options: { is_disabled: true },
-      parse_mode: parseMode,
-      reply_parameters: replyToMessageId ? { message_id: replyToMessageId } : undefined,
-      reply_markup: buttons
-        ? {
-            inline_keyboard: buttons.map((row) =>
-              row.map((button) => ({
-                text: button.text,
-                callback_data: button.callbackData,
-              })),
-            ),
-          }
-        : undefined,
-    });
+    try {
+      await this.bot.api.sendMessage(chatId, text, {
+        link_preview_options: { is_disabled: true },
+        parse_mode: parseMode,
+        reply_parameters: replyToMessageId ? { message_id: replyToMessageId } : undefined,
+        reply_markup: buttons
+          ? {
+              inline_keyboard: buttons.map((row) =>
+                row.map((button) => ({
+                  text: button.text,
+                  callback_data: button.callbackData,
+                })),
+              ),
+            }
+          : undefined,
+      });
+    } catch (err) {
+      throw new Error(formatTelegramBotError(err, this.token, "Telegram sendMessage"));
+    }
   }
 }

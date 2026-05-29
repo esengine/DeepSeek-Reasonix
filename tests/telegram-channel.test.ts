@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { formatTelegramBotError } from "../src/telegram/bot.js";
 import {
   TelegramChannel,
   buildTelegramBotCommands,
@@ -158,6 +159,74 @@ describe("TelegramChannel.sendResponse", () => {
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0]?.[0]).toContain(
       "Telegram markdown delivery disabled after first failure",
+    );
+  });
+});
+
+describe("TelegramChannel ingress rate limiting", () => {
+  it("rejects authorized users after the Telegram ingress cap", async () => {
+    const bot = { sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const onSubmitMessage = vi.fn();
+    const onError = vi.fn();
+    const channel = new TelegramChannel({
+      onSubmitMessage,
+      onError,
+    }) as unknown as {
+      bot: typeof bot;
+      ownerUserId: string;
+      handleMessage: (msg: {
+        message_id: number;
+        text: string;
+        chat: { id: number; type: string };
+        from: { id: number; is_bot?: boolean };
+        date: number;
+      }) => void;
+    };
+    channel.bot = bot;
+    channel.ownerUserId = "42";
+
+    for (let index = 1; index <= 6; index++) {
+      channel.handleMessage({
+        message_id: index,
+        text: `message ${index}`,
+        chat: { id: 123, type: "private" },
+        from: { id: 42 },
+        date: 1,
+      });
+    }
+
+    expect(onSubmitMessage).toHaveBeenCalledTimes(5);
+    expect(onSubmitMessage).toHaveBeenLastCalledWith("[TG] message 5");
+    expect(bot.sendMessage).toHaveBeenCalledTimes(1);
+    expect(bot.sendMessage.mock.calls[0]?.[1]).toContain("too quickly");
+    expect(onError.mock.calls[0]?.[0]).toContain("rate-limited");
+  });
+});
+
+describe("formatTelegramBotError", () => {
+  it("redacts bot tokens from network-facing errors", () => {
+    const token = "123456:ABC_secret-token";
+    expect(
+      formatTelegramBotError(
+        new Error(`request to https://api.telegram.org/bot${token}/sendMessage failed`),
+        token,
+        "Telegram polling",
+      ),
+    ).toBe(
+      "Telegram polling: request to https://api.telegram.org/bot<redacted>/sendMessage failed",
+    );
+  });
+
+  it("explains polling conflicts without leaking token details", () => {
+    const token = "123456:ABC_secret-token";
+    expect(
+      formatTelegramBotError(
+        { error_code: 409, description: `Conflict for bot${token}` },
+        token,
+        "Telegram polling",
+      ),
+    ).toBe(
+      "Telegram polling: Telegram polling conflict (409). Stop the other bot instance or clear the webhook.",
     );
   });
 });

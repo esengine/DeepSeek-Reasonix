@@ -914,6 +914,10 @@ export const EN: TranslationSchema = {
       missingBotToken: "Telegram bot token is required. Run `/telegram connect` to configure.",
       accessRequired:
         "Telegram requires access control before it can start. Set `telegram.ownerUserId` or `telegram.allowlist` in config.",
+      rateLimited:
+        "Telegram rate-limited authorized user {userId}: more than 5 messages in {seconds}s.",
+      rateLimitedReply:
+        "Telegram is receiving messages too quickly. Please wait {seconds}s before sending more.",
     },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",

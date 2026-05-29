@@ -21,6 +21,9 @@ const TELEGRAM_MARKDOWN_WRAPPER_RE = /^```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n
 const TELEGRAM_MARKDOWN_V2_SPECIAL_RE = /([_*\[\]()~`>#+\-=|{}.!])/g;
 const TELEGRAM_COMMAND_RE = /^[a-z0-9_]{1,32}$/;
 const TELEGRAM_COMMAND_DESCRIPTION_MAX = 256;
+const TELEGRAM_RATE_LIMIT_WINDOW_MS = 30_000;
+const TELEGRAM_RATE_LIMIT_MAX_MESSAGES = 5;
+const TELEGRAM_RATE_LIMIT_NOTICE_COOLDOWN_MS = 10_000;
 
 function pickNaturalSplit(candidate: string): number {
   const minSplit = Math.floor(candidate.length * NATURAL_SPLIT_MIN_FRACTION);
@@ -240,6 +243,8 @@ export class TelegramChannel {
   private runtimeBoundUserId: string | null = null;
   private processedUpdateIds = new Set<string>();
   private processedUpdateIdQueue: string[] = [];
+  private userMessageTimestamps = new Map<string, number[]>();
+  private rateLimitNoticeAt = new Map<string, number>();
   private lockAcquired = false;
   private markdownDisabled = false;
 
@@ -333,6 +338,43 @@ export class TelegramChannel {
     return true;
   }
 
+  private acceptRateLimit(userId: string, chatId: number, messageId: number): boolean {
+    const now = Date.now();
+    const since = now - TELEGRAM_RATE_LIMIT_WINDOW_MS;
+    const timestamps = (this.userMessageTimestamps.get(userId) ?? []).filter((at) => at > since);
+    if (timestamps.length >= TELEGRAM_RATE_LIMIT_MAX_MESSAGES) {
+      this.userMessageTimestamps.set(userId, timestamps);
+      const lastNoticeAt = this.rateLimitNoticeAt.get(userId) ?? 0;
+      if (now - lastNoticeAt >= TELEGRAM_RATE_LIMIT_NOTICE_COOLDOWN_MS) {
+        this.rateLimitNoticeAt.set(userId, now);
+        this.callbacks.onError?.(
+          t("handlers.telegram.rateLimited", {
+            userId: redactTelegramUserId(userId),
+            seconds: Math.ceil(TELEGRAM_RATE_LIMIT_WINDOW_MS / 1000),
+          }),
+        );
+        void this.bot
+          ?.sendMessage(
+            chatId,
+            t("handlers.telegram.rateLimitedReply", {
+              seconds: Math.ceil(TELEGRAM_RATE_LIMIT_WINDOW_MS / 1000),
+            }),
+            messageId,
+          )
+          .catch((err) => {
+            this.callbacks.onError?.(
+              `Telegram rate-limit notice failed: ${(err as Error).message}`,
+            );
+          });
+      }
+      return false;
+    }
+
+    timestamps.push(now);
+    this.userMessageTimestamps.set(userId, timestamps);
+    return true;
+  }
+
   private handleMessage(msg: TelegramMessage): void {
     const text = msg.text?.trim();
     if (!text || msg.from?.is_bot) return;
@@ -342,6 +384,7 @@ export class TelegramChannel {
 
     const userId = String(fromId);
     if (!this.acceptRemoteInput(userId)) return;
+    if (!this.acceptRateLimit(userId, msg.chat.id, msg.message_id)) return;
 
     this.chatId = msg.chat.id;
     this.messageId = msg.message_id;
