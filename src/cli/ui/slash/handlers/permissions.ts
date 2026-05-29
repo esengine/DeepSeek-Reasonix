@@ -1,12 +1,29 @@
 import {
+  addGlobalShellAllowed,
   addProjectShellAllowed,
+  clearGlobalShellAllowed,
   clearProjectShellAllowed,
+  loadGlobalShellAllowed,
   loadProjectShellAllowed,
+  removeGlobalShellAllowed,
   removeProjectShellAllowed,
 } from "@/config.js";
 import { t } from "@/i18n/index.js";
 import { BUILTIN_ALLOWLIST } from "@/tools/shell.js";
 import type { SlashHandler } from "../dispatch.js";
+
+/** Leading `--global` / `-g` flag targets the cross-project list (#2059); otherwise per-project.
+ *  Only the option position (before the prefix) is consumed, so a prefix like
+ *  `git config --global user.name` keeps its inner `--global` intact, and `g` stays usable. */
+function takeScope(args: string[]): { global: boolean; rest: string[] } {
+  let global = false;
+  let i = 0;
+  while (i < args.length && (args[i] === "--global" || args[i] === "-g")) {
+    global = true;
+    i++;
+  }
+  return { global, rest: args.slice(i) };
+}
 
 const permissions: SlashHandler = (args, _loop, ctx) => {
   const sub = (args[0] ?? "").toLowerCase();
@@ -17,32 +34,38 @@ const permissions: SlashHandler = (args, _loop, ctx) => {
     return { info: renderListing(root, mode) };
   }
 
-  if (!root) {
+  const { global, rest } = takeScope(args.slice(1));
+  // Global entries live in the user config and need no project root; project ones require it.
+  if (!global && !root) {
     return { info: t("handlers.permissions.mutateCodeOnly") };
   }
 
   if (sub === "add") {
-    const prefix = args.slice(1).join(" ").trim();
+    const prefix = rest.join(" ").trim();
     if (!prefix) {
       return { info: t("handlers.permissions.addUsage") };
     }
-    const before = loadProjectShellAllowed(root);
-    if (before.includes(prefix)) {
+    const existing = global ? loadGlobalShellAllowed() : loadProjectShellAllowed(root!);
+    if (existing.includes(prefix)) {
       return { info: t("handlers.permissions.addAlready", { prefix }) };
     }
     if (BUILTIN_ALLOWLIST.includes(prefix)) {
       return { info: t("handlers.permissions.addBuiltin", { prefix }) };
     }
-    addProjectShellAllowed(root, prefix);
+    if (global) {
+      addGlobalShellAllowed(prefix);
+      return { info: t("handlers.permissions.addGlobalInfo", { prefix }) };
+    }
+    addProjectShellAllowed(root!, prefix);
     return { info: t("handlers.permissions.addInfo", { prefix }) };
   }
 
   if (sub === "remove" || sub === "rm" || sub === "delete") {
-    const target = args.slice(1).join(" ").trim();
+    const target = rest.join(" ").trim();
     if (!target) {
       return { info: t("handlers.permissions.removeUsage") };
     }
-    const existing = loadProjectShellAllowed(root);
+    const existing = global ? loadGlobalShellAllowed() : loadProjectShellAllowed(root!);
     let prefix: string | null = null;
     if (/^\d+$/.test(target)) {
       const idx = Number.parseInt(target, 10);
@@ -50,7 +73,11 @@ const permissions: SlashHandler = (args, _loop, ctx) => {
         return {
           info:
             existing.length === 0
-              ? t("handlers.permissions.removeEmpty")
+              ? t(
+                  global
+                    ? "handlers.permissions.removeGlobalEmpty"
+                    : "handlers.permissions.removeEmpty",
+                )
               : t("handlers.permissions.removeIndexOob", { idx, count: existing.length }),
         };
       }
@@ -62,7 +89,7 @@ const permissions: SlashHandler = (args, _loop, ctx) => {
     if (BUILTIN_ALLOWLIST.includes(prefix) && !existing.includes(prefix)) {
       return { info: t("handlers.permissions.removeBuiltin", { prefix }) };
     }
-    const ok = removeProjectShellAllowed(root, prefix);
+    const ok = global ? removeGlobalShellAllowed(prefix) : removeProjectShellAllowed(root!, prefix);
     return {
       info: ok
         ? t("handlers.permissions.removeInfo", { prefix })
@@ -71,20 +98,25 @@ const permissions: SlashHandler = (args, _loop, ctx) => {
   }
 
   if (sub === "clear") {
-    if ((args[1] ?? "").toLowerCase() !== "confirm") {
-      const count = loadProjectShellAllowed(root).length;
+    if ((rest[0] ?? "").toLowerCase() !== "confirm") {
+      const count = global
+        ? loadGlobalShellAllowed().length
+        : loadProjectShellAllowed(root!).length;
+      if (count === 0) return { info: t("handlers.permissions.clearAlready") };
       return {
-        info:
-          count === 0
-            ? t("handlers.permissions.clearAlready")
-            : t("handlers.permissions.clearConfirm", {
-                count,
-                plural: count === 1 ? "y" : "ies",
-                root,
-              }),
+        info: global
+          ? t("handlers.permissions.clearGlobalConfirm", {
+              count,
+              plural: count === 1 ? "y" : "ies",
+            })
+          : t("handlers.permissions.clearConfirm", {
+              count,
+              plural: count === 1 ? "y" : "ies",
+              root: root!,
+            }),
       };
     }
-    const dropped = clearProjectShellAllowed(root);
+    const dropped = global ? clearGlobalShellAllowed() : clearProjectShellAllowed(root!);
     return {
       info:
         dropped === 0
@@ -99,6 +131,12 @@ const permissions: SlashHandler = (args, _loop, ctx) => {
   return { info: t("handlers.permissions.usage") };
 };
 
+function renderEntries(lines: string[], entries: string[]): void {
+  entries.forEach((p, i) => {
+    lines.push(`  ${String(i + 1).padStart(2)}. ${p}`);
+  });
+}
+
 function renderListing(root: string | undefined, mode: string | null): string {
   const lines: string[] = [];
   if (mode === "yolo") {
@@ -110,6 +148,15 @@ function renderListing(root: string | undefined, mode: string | null): string {
   }
   lines.push("");
 
+  const global = loadGlobalShellAllowed();
+  lines.push(t("handlers.permissions.globalHeader", { count: global.length }));
+  if (global.length === 0) {
+    lines.push(t("handlers.permissions.globalNone"));
+  } else {
+    renderEntries(lines, global);
+  }
+  lines.push("");
+
   if (root) {
     const project = loadProjectShellAllowed(root);
     lines.push(t("handlers.permissions.projectHeader", { count: project.length, root }));
@@ -117,9 +164,7 @@ function renderListing(root: string | undefined, mode: string | null): string {
       lines.push(t("handlers.permissions.projectNone1"));
       lines.push(t("handlers.permissions.projectNone2"));
     } else {
-      project.forEach((p, i) => {
-        lines.push(`  ${String(i + 1).padStart(2)}. ${p}`);
-      });
+      renderEntries(lines, project);
     }
   } else {
     lines.push(t("handlers.permissions.projectNoRoot"));

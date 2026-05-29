@@ -1,9 +1,10 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Balance, Settings as SettingsType, UsageStats } from "../App";
 import { getLangLabel, getSupportedLangs, setLang, t, useLang } from "../i18n";
 import { I } from "../icons";
 import type {
+  ImportedMcpServer,
   McpSpecInfo,
   MemoryDetail,
   MemoryEntryInfo,
@@ -27,6 +28,7 @@ import {
   type ThemeStyle,
   themeForStyle,
 } from "../theme";
+import { McpServerCard } from "./mcp-server-card";
 import { Shortcut, type ShortcutKey } from "./shortcut";
 
 export type PageId =
@@ -66,6 +68,8 @@ export function SettingsModal({
   customFontFamily,
   onSetCustomFontFamily,
   initialPage,
+  initialMcpEditRaw,
+  initialMcpEditNonce,
   mcpSpecs,
   mcpBridged,
   skills,
@@ -81,8 +85,11 @@ export function SettingsModal({
   onSaveQQConfig,
   onOpenQQApplyLink,
   onPickWorkspace,
+  onImportCcSwitchMcp,
   onAddMcpSpec,
   onRemoveMcpSpec,
+  onUpdateMcpSpec,
+  onRetryMcpSpec,
   onReadMemory,
 }: {
   settings: SettingsType;
@@ -100,6 +107,8 @@ export function SettingsModal({
   customFontFamily: string;
   onSetCustomFontFamily: (family: string) => void;
   initialPage?: PageId;
+  initialMcpEditRaw?: string | null;
+  initialMcpEditNonce?: number;
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   skills: SkillInfo[];
@@ -115,12 +124,18 @@ export function SettingsModal({
   onSaveQQConfig: (patch: { appId?: string; appSecret?: string; sandbox: boolean }) => void;
   onOpenQQApplyLink: () => void;
   onPickWorkspace: () => void;
+  onImportCcSwitchMcp: () => Promise<void>;
   onAddMcpSpec: (spec: string) => void;
   onRemoveMcpSpec: (spec: string) => void;
+  onUpdateMcpSpec: (raw: string, server: ImportedMcpServer) => void;
+  onRetryMcpSpec: (raw: string) => void;
   onReadMemory: (path: string) => void;
 }) {
   const [page, setPage] = useState<PageId>(initialPage ?? "general");
   const [qqConfigureOpen, setQQConfigureOpen] = useState(false);
+  useEffect(() => {
+    if (initialPage) setPage(initialPage);
+  }, [initialPage]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -191,8 +206,13 @@ export function SettingsModal({
               <PageMCP
                 specs={mcpSpecs}
                 bridged={mcpBridged}
+                initialEditRaw={initialMcpEditRaw}
+                initialEditNonce={initialMcpEditNonce}
+                onImportCcSwitch={onImportCcSwitchMcp}
                 onAdd={onAddMcpSpec}
                 onRemove={onRemoveMcpSpec}
+                onUpdate={onUpdateMcpSpec}
+                onRetry={onRetryMcpSpec}
               />
             )}
             {page === "skills" && (
@@ -703,6 +723,28 @@ function PageGeneral({
         </div>
         <div className="setting-row">
           <div className="l">
+            <div className="n">{t("settings.desktopCloseBehavior")}</div>
+            <div className="h">{t("settings.desktopCloseBehaviorHint")}</div>
+          </div>
+          <div className="seg-ctrl">
+            <button
+              type="button"
+              data-on={(settings.desktopCloseBehavior ?? "closeToQuit") === "closeToQuit"}
+              onClick={() => onSave({ desktopCloseBehavior: "closeToQuit" })}
+            >
+              {t("settings.closeToQuit")}
+            </button>
+            <button
+              type="button"
+              data-on={settings.desktopCloseBehavior === "closeToTray"}
+              onClick={() => onSave({ desktopCloseBehavior: "closeToTray" })}
+            >
+              {t("settings.closeToTray")}
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div className="l">
             <div className="n">{t("settings.budget")}</div>
             <div className="h">{t("settings.budgetHint")}</div>
           </div>
@@ -732,6 +774,7 @@ function PageGeneral({
                   | "bing-intl"
                   | "searxng"
                   | "metaso"
+                  | "baidu"
                   | "tavily"
                   | "perplexity"
                   | "exa"
@@ -744,6 +787,7 @@ function PageGeneral({
             <option value="bing-intl">{t("settings.webSearchEngineBingIntl")}</option>
             <option value="searxng">{t("settings.webSearchEngineSearxng")}</option>
             <option value="metaso">{t("settings.webSearchEngineMetaso")}</option>
+            <option value="baidu">{t("settings.webSearchEngineBaidu")}</option>
             <option value="tavily">{t("settings.webSearchEngineTavily")}</option>
             <option value="perplexity">{t("settings.webSearchEnginePerplexity")}</option>
             <option value="exa">{t("settings.webSearchEngineExa")}</option>
@@ -758,11 +802,23 @@ function PageGeneral({
 }
 
 const SEARCH_ENGINE_API_KEY_FIELDS: ReadonlyArray<{
-  engine: "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
-  patchKey: "metasoApiKey" | "tavilyApiKey" | "perplexityApiKey" | "exaApiKey" | "braveApiKey" | "ollamaApiKey";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  patchKey:
+    | "metasoApiKey"
+    | "baiduApiKey"
+    | "tavilyApiKey"
+    | "perplexityApiKey"
+    | "exaApiKey"
+    | "braveApiKey"
+    | "ollamaApiKey";
   signupUrl: string;
 }> = [
   { engine: "metaso", patchKey: "metasoApiKey", signupUrl: "https://metaso.cn/settings/api" },
+  {
+    engine: "baidu",
+    patchKey: "baiduApiKey",
+    signupUrl: "https://cloud.baidu.com/doc/qianfan/s/2mh4su4uy",
+  },
   { engine: "tavily", patchKey: "tavilyApiKey", signupUrl: "https://app.tavily.com" },
   {
     engine: "perplexity",
@@ -839,8 +895,15 @@ function WebSearchApiKeyRow({
   prefix,
   onSave,
 }: {
-  engine: "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
-  patchKey: "metasoApiKey" | "tavilyApiKey" | "perplexityApiKey" | "exaApiKey" | "braveApiKey" | "ollamaApiKey";
+  engine: "metaso" | "baidu" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  patchKey:
+    | "metasoApiKey"
+    | "baiduApiKey"
+    | "tavilyApiKey"
+    | "perplexityApiKey"
+    | "exaApiKey"
+    | "braveApiKey"
+    | "ollamaApiKey";
   signupUrl: string;
   prefix?: string;
   onSave: (patch: SettingsPatch) => void;
@@ -1076,36 +1139,112 @@ function PageModels({
 
 function PageMCP({
   specs,
-  bridged,
+  initialEditRaw,
+  initialEditNonce,
+  onImportCcSwitch,
   onAdd,
   onRemove,
+  onUpdate,
+  onRetry,
 }: {
   specs: McpSpecInfo[];
   bridged: boolean;
+  initialEditRaw?: string | null;
+  initialEditNonce?: number;
+  onImportCcSwitch: () => Promise<void>;
   onAdd: (spec: string) => void;
   onRemove: (spec: string) => void;
+  onUpdate: (raw: string, server: ImportedMcpServer) => void;
+  onRetry: (raw: string) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [editing, setEditing] = useState<McpSpecInfo | null>(null);
+  const appliedEditNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!initialEditRaw) return;
+    const nonce = initialEditNonce ?? 0;
+    if (appliedEditNonceRef.current === nonce) return;
+    const target = specs.find((s) => s.raw === initialEditRaw);
+    if (target && !target.parseError) {
+      appliedEditNonceRef.current = nonce;
+      setEditing(target);
+    }
+  }, [initialEditRaw, initialEditNonce, specs]);
+  const connectedCount = specs.filter((s) => s.status === "connected").length;
+  const failedCount = specs.filter((s) => s.status === "failed").length;
+  const disabledCount = specs.filter((s) => s.status === "disabled").length;
+  const connectingCount = specs.filter((s) => s.status === "configured" || s.status === "handshake")
+    .length;
+  const statusKind =
+    specs.length === 0
+      ? "empty"
+      : failedCount > 0
+        ? "failed"
+        : connectedCount === specs.length
+          ? "connected"
+          : connectingCount > 0
+            ? "connecting"
+            : disabledCount > 0
+              ? "disabled"
+              : "pending";
+  const statusText =
+    statusKind === "connected"
+      ? t("settings.mcpStatusConnected", { connected: connectedCount, total: specs.length })
+      : statusKind === "failed"
+        ? t("settings.mcpStatusFailed", {
+            connected: connectedCount,
+            total: specs.length,
+            failed: failedCount,
+          })
+        : statusKind === "connecting"
+          ? t("settings.mcpStatusConnecting", { connected: connectedCount, total: specs.length })
+          : statusKind === "disabled"
+            ? t("settings.mcpStatusDisabled", { disabled: disabledCount, total: specs.length })
+            : t("settings.mcpStatusPending");
   const submit = () => {
     const v = draft.trim();
     if (!v) return;
     onAdd(v);
     setDraft("");
   };
+  if (editing) {
+    return (
+      <McpEditPage
+        spec={editing}
+        onBack={() => setEditing(null)}
+        onSave={(raw, server) => {
+          onUpdate(raw, server);
+          setEditing(null);
+        }}
+      />
+    );
+  }
   return (
     <>
       <section className="section">
-        <div className="stitle">
-          {t("settings.mcpConfigured", { count: specs.length })}
-          {bridged ? (
-            <span style={{ color: "var(--accent)", marginLeft: 8, fontSize: 11 }}>
-              {t("settings.mcpBridged")}
+        <div className="mcp-section-head">
+          <div className="stitle">
+            {t("settings.mcpConfigured", { count: specs.length })}
+            <span className="mcp-status-summary" data-status={statusKind}>
+              {statusText}
             </span>
-          ) : (
-            <span style={{ color: "var(--muted)", marginLeft: 8, fontSize: 11 }}>
-              {t("settings.mcpNotBridged")}
-            </span>
-          )}
+          </div>
+          <button
+            type="button"
+            className="btn"
+            disabled={importing}
+            onClick={async () => {
+              setImporting(true);
+              try {
+                await onImportCcSwitch();
+              } finally {
+                setImporting(false);
+              }
+            }}
+          >
+            {importing ? t("settings.mcpImporting") : t("settings.mcpImport")}
+          </button>
         </div>
         {specs.length === 0 ? (
           <div
@@ -1122,32 +1261,14 @@ function PageMCP({
           </div>
         ) : (
           specs.map((s) => (
-            <div className="scard" key={s.raw}>
-              <div className="top">
-                <span className="ico">
-                  <I.wrench size={14} />
-                </span>
-                <div className="mcp-spec-body">
-                  <div className="nm">{s.name ?? "(anonymous)"}</div>
-                  <div className="sub mcp-spec-summary" title={s.summary}>
-                    {s.summary}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn ghost mcp-remove"
-                  style={{ color: "var(--danger)" }}
-                  onClick={() => onRemove(s.raw)}
-                >
-                  {t("settings.mcpRemove")}
-                </button>
-              </div>
-              {s.parseError ? (
-                <div className="desc" style={{ color: "var(--danger)" }}>
-                  {t("settings.parseError", { error: s.parseError })}
-                </div>
-              ) : null}
-            </div>
+            <McpServerCard
+              key={s.raw}
+              spec={s}
+              mode="settings"
+              onEdit={setEditing}
+              onRetry={onRetry}
+              onRemove={onRemove}
+            />
           ))
         )}
       </section>
@@ -1175,6 +1296,235 @@ function PageMCP({
         </div>
       </section>
     </>
+  );
+}
+
+const MCP_NAME_PREFIX = /^([a-zA-Z_][a-zA-Z0-9_-]*)=(.*)$/;
+const MCP_STREAMABLE_PREFIX = /^streamable\+(https?:\/\/.+)$/i;
+const MCP_HTTP_URL = /^https?:\/\//i;
+
+function splitMcpArgs(body: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let escaping = false;
+  for (const ch of body) {
+    if (escaping) {
+      current += ch;
+      escaping = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (current) {
+        out.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+function mcpServerFromRawSpec(spec: McpSpecInfo): ImportedMcpServer | undefined {
+  const trimmed = spec.raw.trim();
+  if (!trimmed) return undefined;
+  const match = MCP_NAME_PREFIX.exec(trimmed);
+  const name = match?.[1] ?? spec.name ?? "";
+  const body = (match?.[2] ?? trimmed).trim();
+  if (!name || !body) return undefined;
+  const streamable = MCP_STREAMABLE_PREFIX.exec(body);
+  if (streamable) {
+    return { name, transport: "streamable-http", url: streamable[1] };
+  }
+  if (MCP_HTTP_URL.test(body)) {
+    return { name, transport: spec.transport === "streamable-http" ? "streamable-http" : "sse", url: body };
+  }
+  const argv = splitMcpArgs(body);
+  const [command, ...args] = argv;
+  if (!command) return undefined;
+  return { name, transport: "stdio", command, args };
+}
+
+function editableMcpServer(spec: McpSpecInfo): ImportedMcpServer | undefined {
+  return spec.config ?? mcpServerFromRawSpec(spec);
+}
+
+function mcpServerToJson(server: ImportedMcpServer | undefined): Record<string, unknown> {
+  if (!server) return {};
+  const out: Record<string, unknown> = {};
+  if (server.transport === "stdio") {
+    out.command = server.command ?? "";
+    out.args = server.args ?? [];
+    if (server.env && Object.keys(server.env).length > 0) out.env = server.env;
+    if (server.cwd) out.cwd = server.cwd;
+  } else {
+    out.url = server.url ?? "";
+    if (server.headers && Object.keys(server.headers).length > 0) out.headers = server.headers;
+  }
+  if (server.disabled === true) out.disabled = true;
+  if (typeof server.requestTimeoutMs === "number") out.requestTimeoutMs = server.requestTimeoutMs;
+  return out;
+}
+
+function normalizeStringRecordForMcp(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string") out[key] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function normalizeMcpJsonDraft(
+  name: string,
+  transport: ImportedMcpServer["transport"],
+  value: unknown,
+): ImportedMcpServer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(t("settings.mcpEditJsonObjectRequired"));
+  }
+  const raw = value as Record<string, unknown>;
+  const requestTimeoutMs =
+    typeof raw.requestTimeoutMs === "number" && Number.isFinite(raw.requestTimeoutMs)
+      ? raw.requestTimeoutMs
+      : undefined;
+  const disabled = raw.disabled === true ? true : undefined;
+  if (transport === "stdio") {
+    const command = typeof raw.command === "string" ? raw.command.trim() : "";
+    if (!command) throw new Error(t("settings.mcpEditCommandRequired"));
+    return {
+      name,
+      transport,
+      command,
+      args: Array.isArray(raw.args) ? raw.args.filter((a): a is string => typeof a === "string") : [],
+      env: normalizeStringRecordForMcp(raw.env),
+      cwd: typeof raw.cwd === "string" && raw.cwd.trim() ? raw.cwd.trim() : undefined,
+      disabled,
+      requestTimeoutMs,
+    };
+  }
+  const url = typeof raw.url === "string" ? raw.url.trim() : "";
+  if (!url) throw new Error(t("settings.mcpEditUrlRequired"));
+  return {
+    name,
+    transport,
+    url,
+    headers: normalizeStringRecordForMcp(raw.headers),
+    disabled,
+    requestTimeoutMs,
+  };
+}
+
+function McpEditPage({
+  spec,
+  onBack,
+  onSave,
+}: {
+  spec: McpSpecInfo;
+  onBack: () => void;
+  onSave: (raw: string, server: ImportedMcpServer) => void;
+}) {
+  const initial = editableMcpServer(spec);
+  const [name, setName] = useState(initial?.name ?? spec.name ?? "");
+  const [transport, setTransport] = useState<ImportedMcpServer["transport"]>(
+    initial?.transport ?? spec.transport,
+  );
+  const [jsonDraft, setJsonDraft] = useState(() =>
+    JSON.stringify(mcpServerToJson(initial), null, 2),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const formatJson = () => {
+    try {
+      const parsed = JSON.parse(jsonDraft);
+      setJsonDraft(JSON.stringify(parsed, null, 2));
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const save = () => {
+    const nextName = name.trim();
+    if (!nextName) {
+      setError(t("settings.mcpEditNameRequired"));
+      return;
+    }
+    try {
+      const parsed = JSON.parse(jsonDraft);
+      onSave(spec.raw, normalizeMcpJsonDraft(nextName, transport, parsed));
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  return (
+    <div className="mcp-edit">
+      <div className="mcp-edit-top">
+        <button type="button" className="btn ghost mcp-back-btn" onClick={onBack}>
+          <I.chevR size={14} className="mcp-back-icon" />
+          {t("settings.mcpEditBack")}
+        </button>
+        <div className="stitle">{t("settings.mcpEditTitle")}</div>
+      </div>
+      <section className="section mcp-edit-section">
+        <label className="mcp-edit-field">
+          <span>{t("settings.mcpEditName")}</span>
+          <input className="field mono" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="mcp-edit-field">
+          <span>{t("settings.mcpEditTransport")}</span>
+          <select
+            className="field mono"
+            value={transport}
+            onChange={(e) => setTransport(e.target.value as ImportedMcpServer["transport"])}
+          >
+            <option value="stdio">stdio</option>
+            <option value="sse">sse</option>
+            <option value="streamable-http">streamable-http</option>
+          </select>
+        </label>
+      </section>
+      <section className="section mcp-edit-section">
+        <div className="mcp-edit-json-head">
+          <div className="stitle">{t("settings.mcpEditJson")}</div>
+          <button type="button" className="btn ghost" onClick={formatJson}>
+            {t("settings.mcpEditFormat")}
+          </button>
+        </div>
+        <textarea
+          className="mcp-json-editor"
+          value={jsonDraft}
+          spellCheck={false}
+          onChange={(e) => setJsonDraft(e.target.value)}
+        />
+        {error ? <div className="mcp-edit-error">{error}</div> : null}
+      </section>
+      <div className="mcp-edit-footer">
+        <button type="button" className="btn ghost" onClick={onBack}>
+          {t("revision.cancel")}
+        </button>
+        <button type="button" className="btn primary" onClick={save}>
+          <I.file size={14} />
+          {t("settings.mcpEditSave")}
+        </button>
+      </div>
+    </div>
   );
 }
 

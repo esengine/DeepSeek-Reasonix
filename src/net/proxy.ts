@@ -267,6 +267,15 @@ export function installProxyIfConfigured(
     installed = true;
     const bypassList = patterns.map((p) => p.raw).join(",");
     process.stderr.write(`[proxy] using ${url} (source: ${source}, NO_PROXY: ${bypassList})\n`);
+    // Hint for corporate firewalls where api.deepseek.com is only reachable via
+    // the proxy (not directly). The default bypass keeps clash/v2ray healthy, but
+    // enterprise users can flip it with an env var or config field (#2215).
+    const wantsDeepSeekDirect = resolveBypassDeepSeekDirect(env, opts.bypassDeepSeekDirect);
+    if (wantsDeepSeekDirect) {
+      process.stderr.write(
+        '[proxy] api.deepseek.com is bypassed (direct). If your firewall blocks direct egress, set REASONIX_PROXY_DEEPSEEK_DIRECT=0 or add "proxy":{"bypassDeepSeekDirect":false} to ~/.reasonix/config.json\n',
+      );
+    }
     return { url, source, reinstalled, noProxy: patterns };
   } catch (err) {
     process.stderr.write(

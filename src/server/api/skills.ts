@@ -1,18 +1,6 @@
 /** `/api/skills` — edits files only; loop reloads on /new or restart. `builtin` scope is read-only. */
 
-import {
-  closeSync,
-  existsSync,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { loadResolvedSkillPaths, loadSubagentModels } from "../../config.js";
@@ -67,56 +55,45 @@ function parseFrontmatterDescription(raw: string): string | undefined {
   return desc ? desc : undefined;
 }
 
-function readSkillListEntry(
+async function readSkillListEntry(
   skillPath: string,
   name: string,
   scope: "project" | "custom" | "global",
-): SkillListEntry | null {
+): Promise<SkillListEntry | null> {
+  // Open once and reuse the fd so size/mtime/content all bind to
+  // the same inode — closes the exists→stat→read TOCTOU races.
+  const fd = await open(skillPath, "r");
   try {
-    // Open once and reuse the fd so size/mtime/content all bind to
-    // the same inode — closes the exists→stat→read TOCTOU races.
-    const fd = openSync(skillPath, "r");
-    let stat: ReturnType<typeof fstatSync>;
-    let raw: string;
-    try {
-      stat = fstatSync(fd);
-      if (!stat.isFile()) return null;
-      const buf = Buffer.alloc(stat.size);
-      let read = 0;
-      while (read < stat.size) {
-        const n = readSync(fd, buf, read, stat.size - read, read);
-        if (n <= 0) break;
-        read += n;
-      }
-      raw = buf.toString("utf8", 0, read);
-    } finally {
-      closeSync(fd);
-    }
+    const fileStat = await fd.stat();
+    if (!fileStat.isFile()) return null;
+    const raw = await fd.readFile("utf8");
     const item: SkillListEntry = {
       name,
       scope,
       path: skillPath,
-      size: stat.size,
-      mtime: stat.mtime.getTime(),
+      size: fileStat.size,
+      mtime: fileStat.mtime.getTime(),
     };
     const desc = parseFrontmatterDescription(raw);
     if (desc) item.description = desc;
     return item;
   } catch {
     return null;
+  } finally {
+    await fd.close();
   }
 }
 
-function resolveSkillPath(dir: string, name: string): ResolvedSkillPath | null {
+async function resolveSkillPath(dir: string, name: string): Promise<ResolvedSkillPath | null> {
   const folderPath = join(dir, name, SKILL_FILE);
   try {
-    if (statSync(folderPath).isFile()) return { path: folderPath, layout: "folder" };
+    if ((await stat(folderPath)).isFile()) return { path: folderPath, layout: "folder" };
   } catch {
     /* try flat layout below */
   }
   const flatPath = join(dir, `${name}.md`);
   try {
-    if (statSync(flatPath).isFile()) return { path: flatPath, layout: "flat" };
+    if ((await stat(flatPath)).isFile()) return { path: flatPath, layout: "flat" };
   } catch {
     /* not found */
   }
@@ -127,25 +104,28 @@ function defaultSkillPath(dir: string, name: string): ResolvedSkillPath {
   return { path: join(dir, name, SKILL_FILE), layout: "folder" };
 }
 
-function listSkills(dir: string, scope: "project" | "custom" | "global"): SkillListEntry[] {
-  if (!existsSync(dir)) return [];
+async function listSkills(
+  dir: string,
+  scope: "project" | "custom" | "global",
+): Promise<SkillListEntry[]> {
   const out: SkillListEntry[] = [];
   try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      let name: string;
-      let skillPath: string;
+    const entries = await readdir(dir, { withFileTypes: true });
+    const candidates: Array<{ skillPath: string; name: string }> = [];
+    for (const entry of entries) {
       if (entry.isDirectory()) {
-        name = entry.name;
-        if (!SAFE_NAME.test(name)) continue;
-        skillPath = join(dir, name, SKILL_FILE);
+        if (!SAFE_NAME.test(entry.name)) continue;
+        candidates.push({ skillPath: join(dir, entry.name, SKILL_FILE), name: entry.name });
       } else if (entry.isFile() && entry.name.endsWith(".md")) {
-        name = entry.name.slice(0, -3);
+        const name = entry.name.slice(0, -3);
         if (!SAFE_NAME.test(name)) continue;
-        skillPath = join(dir, entry.name);
-      } else {
-        continue;
+        candidates.push({ skillPath: join(dir, entry.name), name });
       }
-      const item = readSkillListEntry(skillPath, name, scope);
+    }
+    const items = await Promise.all(
+      candidates.map(({ skillPath, name }) => readSkillListEntry(skillPath, name, scope)),
+    );
+    for (const item of items) {
       if (item) out.push(item);
     }
   } catch {
@@ -187,9 +167,11 @@ export async function handleSkills(
     return {
       status: 200,
       body: {
-        global: tag(listSkills(globalSkillsDir(), "global")),
-        custom: tag(customRoots.flatMap((root) => listSkills(root.dir, "custom"))),
-        project: cwd ? tag(listSkills(projectSkillsDir(cwd), "project")) : [],
+        global: tag(await listSkills(globalSkillsDir(), "global")),
+        custom: tag(
+          (await Promise.all(customRoots.map((root) => listSkills(root.dir, "custom")))).flat(),
+        ),
+        project: cwd ? tag(await listSkills(projectSkillsDir(cwd), "project")) : [],
         builtin: [
           {
             name: "explore",
@@ -237,13 +219,13 @@ export async function handleSkills(
   } else {
     dir = globalSkillsDir();
   }
-  const resolved = resolveSkillPath(dir, name);
+  const resolved = await resolveSkillPath(dir, name);
 
   if (method === "GET") {
     if (!resolved) return { status: 404, body: { error: "skill not found" } };
     return {
       status: 200,
-      body: { path: resolved.path, body: readFileSync(resolved.path, "utf8") },
+      body: { path: resolved.path, body: await readFile(resolved.path, "utf8") },
     };
   }
 
@@ -257,8 +239,8 @@ export async function handleSkills(
       return { status: 400, body: { error: fm.error } };
     }
     const target = resolved ?? defaultSkillPath(dir, name);
-    mkdirSync(dirname(target.path), { recursive: true });
-    writeFileSync(target.path, contents, "utf8");
+    await mkdir(dirname(target.path), { recursive: true });
+    await writeFile(target.path, contents, "utf8");
     ctx.audit?.({
       ts: Date.now(),
       action: "save-skill",
@@ -270,7 +252,7 @@ export async function handleSkills(
   if (method === "DELETE") {
     if (!resolved) return { status: 404, body: { error: "skill not found" } };
     // Folder-layout skills may carry assets next to SKILL.md; flat skills are single-file entries.
-    rmSync(resolved.layout === "folder" ? dirname(resolved.path) : resolved.path, {
+    await rm(resolved.layout === "folder" ? dirname(resolved.path) : resolved.path, {
       recursive: true,
       force: true,
     });

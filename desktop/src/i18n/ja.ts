@@ -1,5 +1,9 @@
-export const ja = {
+import { en } from "./en";
+
+export const ja: typeof en = {
+  ...en,
   palette: {
+    ...en.palette,
     searchPlaceholder: "コマンドを検索…",
     empty: "一致なし",
     footMove: "移動",
@@ -34,6 +38,7 @@ export const ja = {
     countSuffix: "項目",
   },
   about: {
+    ...en.about,
     sidebarLabel: "概要",
     tagline: "DeepSeekネイティブコーディングエージェント",
     version: "バージョン",
@@ -47,12 +52,15 @@ export const ja = {
     close: "閉じる",
   },
   workdir: {
+    ...en.workdir,
     title: "ワークスペース切替",
     searchPlaceholder: "最近のパスを検索…",
     empty: "最近のワークスペースはありません",
     browse: "ローカルを参照…",
+    removeRecent: "履歴から削除",
   },
   sidebar: {
+    ...en.sidebar,
     newChat: "新しいチャット",
     searchCommands: "コマンドを検索…",
     recent: "最近",
@@ -61,13 +69,18 @@ export const ja = {
     footHint: "キャッシュファーストエージェント",
   },
   toast: {
+    ...en.toast,
     copied: "コピーしました",
     copiedMd: "会話をMarkdownでコピーしました",
     newSession: "新しいセッションを開始しました",
     cleared: "UIをクリアしました",
+    mcpStatusOpened: "MCPステータスパネルを開きました",
+    mcpRetryNone: "再試行する失敗MCPサーバーはありません",
+    mcpRetryQueued: "失敗したMCPサーバー {count} 件を再試行しています",
     aboutLine: "Reasonix v{version} · キャッシュファーストDeepSeekエージェント",
   },
   composer: {
+    ...en.composer,
     busy: "reasonixが考え中…",
     idle: "質問する",
     send: "送信",
@@ -95,9 +108,11 @@ export const ja = {
     workspaceRoot: "ワークスペースルート",
   },
   dragDrop: {
+    ...en.dragDrop,
     overlay: "ドロップして@メンションとして添付",
   },
   settings: {
+    ...en.settings,
     title: "設定",
     close: "閉じる",
     language: "言語",
@@ -121,10 +136,18 @@ export const ja = {
     themeStyleHint: "選択したライト/ダークモードのビジュアルパレットを選択します。",
     themeStyleGraphite: "グラファイト",
     themeStyleGraphiteDesc: "ニュートラルなグラファイトパネルのオリジナルダークパレット。",
+    themeStyleEmber: "エンバー",
+    themeStyleEmberDesc: "Reasonixのオレンジを強めた暖かいダークパレット。",
+    themeStyleAurora: "オーロラ",
+    themeStyleAuroraDesc: "低照度でも柔らかいティールグリーンのダークパレット。",
     themeStyleSandstone: "サンドストーン",
     themeStyleSandstoneDesc: "オリジナルの温かみのあるライトパレット。",
     themeStylePorcelain: "ポーセリン",
     themeStylePorcelainDesc: "静かなコントラストのクリーンなCodexライクなライトパレット。",
+    themeStyleLinen: "リネン",
+    themeStyleLinenDesc: "紙のような表面を持つ編集調の暖かいライトパレット。",
+    themeStyleGlacier: "グレイシャー",
+    themeStyleGlacierDesc: "くっきりしたブルーアクセントのクールなライトパレット。",
     themeStyleMidnight: "ミッドナイト",
     themeStyleMidnightDesc: "クールなブルーの表面を持つネイビーダークパレット。",
     fontScale: "フォントスケール",
@@ -157,6 +180,11 @@ export const ja = {
       "コンテキスト圧縮、中断、レート制限の一時停止に関する静かなインライン通知を表示します。",
     shown: "表示",
     hidden: "非表示",
+    desktopCloseBehavior: "ウィンドウを閉じる",
+    desktopCloseBehaviorHint:
+      "既定では閉じると終了します。トレイに隠すと実行中のセッションを維持します。",
+    closeToQuit: "終了",
+    closeToTray: "トレイに隠す",
     editModeReviewDesc: "すべての書き込みを承認",
     editModeAutoDesc: "コマンドを承認、編集は自動",
     editModeYoloDesc: "すべて自動承認 — 完全自動",
@@ -168,6 +196,8 @@ export const ja = {
     webSearchEngineBingIntl: "bing-intl — www.bing.com 経由の国際版インデックス",
     webSearchEngineSearxng: "searxng — セルフホスト (/se searxng <url> でエンドポイント設定)",
     webSearchEngineMetaso: "metaso — 100回/日無料 (中国対応、metaso.cnで無料キー取得)",
+    webSearchEngineBaidu:
+      "baidu — Baidu AI Search、公式ドキュメントでは1500回/月無料 (BAIDU_API_KEY または QIANFAN_API_KEY を設定)",
     webSearchEngineTavily: "tavily — 1000回/月無料 (TAVILY_API_KEY を設定)",
     webSearchEnginePerplexity: "perplexity — AIネイティブ (PERPLEXITY_API_KEY を設定)",
     webSearchEngineExa: "exa — AIネイティブ 1000回/月無料 (EXA_API_KEY を設定)",
@@ -180,6 +210,7 @@ export const ja = {
     webSearchApiKeyClear: "クリア",
     webSearchApiKey: {
       metaso: "Metaso APIキー",
+      baidu: "Baidu APIキー",
       tavily: "Tavily APIキー",
       perplexity: "Perplexity APIキー",
       exa: "Exa APIキー",
@@ -270,22 +301,60 @@ export const ja = {
     modelCustomHint: "エンドポイントが提供するOpenAI互換ID (vLLM, Ollama, Together, …)。",
     modelCustomActive: "現在カスタムIDで実行中: {model}",
     contextTokensLabel: "コンテキストウィンドウサイズ",
-    contextTokensHint: "現在のモデルのプロンプト側トークン上限を上書きします（例: 1000000 で 1M）。空欄なら既定値を使用。",
+    contextTokensHint:
+      "現在のモデルのプロンプト側トークン上限を上書きします（例: 1000000 で 1M）。空欄なら既定値を使用。",
     contextTokensPlaceholder: "自動",
     effortSection: "推論努力",
     ctxWindow: "コンテキスト",
     maxOutput: "出力",
     mcpConfigured: "設定済み · {count}",
     mcpBridged: "· ブリッジ済み",
-    mcpNotBridged:
-      "· 現在のデスクトップセッションはブリッジされていません — reasonix code (TUI) を再起動すると有効になります",
+    mcpNotBridged: "· 現在のデスクトップセッションに適用中",
+    mcpStatusConnected: "· 接続済み {connected}/{total}",
+    mcpStatusConnecting: "· 接続中 {connected}/{total}、設定変更は自動適用されます",
+    mcpStatusFailed: "· 接続済み {connected}/{total}、{failed} 件失敗",
+    mcpStatusDisabled: "· {disabled}/{total} 件無効",
+    mcpStatusPending: "· 適用待ち",
+    mcpStatus: {
+      configured: "待機中",
+      handshake: "接続中",
+      connected: "接続済み",
+      failed: "接続失敗",
+      disabled: "無効",
+    },
+    mcpFailure: {
+      auth: "認証失敗 · headers に Authorization または x-api-key を設定してください",
+      missingToken: "Bearer Token がありません · headers に Authorization を設定してください",
+      command: "起動コマンドが利用できません · command/args またはローカル依存を確認してください",
+      network: "ネットワーク失敗 · エンドポイント、プロキシ、接続を確認してください",
+      unknown: "接続失敗 · 詳細で元のエラーを確認してください",
+    },
     mcpEmpty: "MCPサーバーがまだ設定されていません。以下に仕様を入力して追加してください。",
     mcpRemove: "削除",
+    mcpRetry: "再試行",
+    mcpDetail: "詳細",
+    mcpHideDetail: "閉じる",
+    mcpDetailTitle: "元のエラー",
+    mcpEditConfig: "編集",
     parseError: "パース失敗: {error}",
     mcpAddSection: "サーバーを追加",
     mcpSpecLabel: "仕様文字列",
     mcpSpecFormat: "形式: <code>name=command args</code> または <code>name=https://host/sse</code>",
     mcpAdd: "追加",
+    mcpImport: "cc-switch からインポート",
+    mcpImporting: "インポート中…",
+    mcpEdit: "編集",
+    mcpEditTitle: "MCP を編集",
+    mcpEditBack: "戻る",
+    mcpEditName: "MCP タイトル（一意）",
+    mcpEditTransport: "トランスポート",
+    mcpEditJson: "完全な JSON 設定",
+    mcpEditFormat: "整形",
+    mcpEditSave: "保存",
+    mcpEditNameRequired: "MCP タイトルは必須です",
+    mcpEditJsonObjectRequired: "JSON 設定はオブジェクトである必要があります",
+    mcpEditCommandRequired: "stdio 設定には command が必要です",
+    mcpEditUrlRequired: "リモート MCP 設定には url が必要です",
     skillsLoaded: "読み込み済み · {count} · / コマンドで呼び出し",
     skillsEmpty:
       "利用可能なスキルがありません。~/.reasonix/skills/ またはプロジェクトルートの .reasonix/skills/ に SKILL.md を作成してください。",
@@ -314,10 +383,12 @@ export const ja = {
     shortcutSettings: "設定",
   },
   modal: {
+    ...en.modal,
     planFeedbackPlaceholder: "任意のフィードバック — 変更が必要な場合はここに記入",
     choiceCustomPlaceholder: "または自分の回答を入力…",
   },
   plan: {
+    ...en.plan,
     activeTitle: "アクティブプラン",
     progress: "{done} / {total} ステップ",
     progressNoTotal: "{done} ステップ",
@@ -329,6 +400,7 @@ export const ja = {
     riskHigh: "高",
   },
   editMode: {
+    ...en.editMode,
     label: "編集ゲート",
     plan: "plan",
     review: "review",
@@ -344,6 +416,7 @@ export const ja = {
     yoloHint: "すべて自動承認 · 注意して使用してください",
   },
   markdown: {
+    ...en.markdown,
     filePillTitle: "クリックで開く · 右クリックでコピー",
     externalLinkTitle: "ブラウザで {href} を開く",
     localLinkTitle: "{href} を開く",
@@ -351,12 +424,14 @@ export const ja = {
     copied: "コピーしました",
   },
   effort: {
+    ...en.effort,
     lowDesc: "最速 — 最小限の推論",
     mediumDesc: "バランス",
     highDesc: "デフォルト — vLLM / Azure で安全",
     maxDesc: "DeepSeek拡張; 標準OpenAI / vLLMでは拒否されます",
   },
   checkpoint: {
+    ...en.checkpoint,
     title: "ステップ完了",
     progress: "{done} / {total}",
     notesLabel: "メモ",
@@ -367,6 +442,7 @@ export const ja = {
     sendRevise: "修正を送信",
   },
   revision: {
+    ...en.revision,
     title: "プラン修正",
     subtitle: "モデルが残りのステップを置き換えようとしています",
     remainingHeading: "新しい残りステップ",
@@ -375,7 +451,9 @@ export const ja = {
     cancel: "キャンセル",
   },
   app: {
+    ...en.app,
     toast: {
+      ...en.app.toast,
       newSession: "新しいセッションを作成しました",
       cleared: "クリアしました",
       copied: "コピーしました",
@@ -391,11 +469,16 @@ export const ja = {
       taskComplete: "タスク完了",
     },
     cmd: {
+      ...en.app.cmd,
       newSession: "新しいセッション",
       clearChat: "画面クリア",
       abort: "ストリーミング出力を停止",
       copyLast: "最後の返信をコピー",
       switchModel: "モデル切替",
+      mcp: "MCPサーバー設定を開く",
+      mcpStatus: "MCP接続ステータスを表示",
+      mcpRetry: "失敗したMCP接続を再試行",
+      mcpImport: "cc-switchからMCPサーバーをインポート",
       searchEngine: "Web検索エンジンとAPIキーを設定",
       skill: "ユーザースキルの一覧と管理（プロジェクト + カスタム + グローバル + 組み込み）",
       setMode: "モードを {mode} に設定",
@@ -411,8 +494,10 @@ export const ja = {
       btw: "脇道の質問をする（コンテキストに追加されません）",
     },
     skill: {
+      ...en.app.skill,
       generic: "{scope} スキル · {runAs}",
       scope: {
+        ...en.app.skill.scope,
         builtin: "ビルトイン",
         global: "グローバル",
         project: "プロジェクト",
@@ -423,6 +508,7 @@ export const ja = {
       },
     },
     yolo: {
+      ...en.app.yolo,
       banner1: "すべてのツール呼び出し、シェルコマンド、ファイル編集が",
       bannerBold: "自動承認",
       banner2: "されます（確認なし）。",
@@ -443,6 +529,7 @@ export const ja = {
     langZH: "中国語",
     langEN: "英語",
     titlebar: {
+      ...en.app.titlebar,
       sidebar: "サイドバー (⌘B)",
       contextPanel: "コンテキストパネル",
       more: "その他",
@@ -458,10 +545,12 @@ export const ja = {
       restore: "元に戻す",
     },
     tab: {
+      ...en.app.tab,
       newTabTitle: "新しいタブ ⌘T",
       newTab: "新しいタブ",
     },
     header: {
+      ...en.app.header,
       noWorkspace: "ワークスペースが選択されていません",
       running: "実行中",
       clickToSelect: "クリックしてワークスペースを選択",
@@ -473,6 +562,7 @@ export const ja = {
       abort: "停止",
     },
     empty: {
+      ...en.app.empty,
       welcome: "Reasonixへようこそ",
       currentWorkspace: "現在のワークスペース: ",
       selectWorkspace: "まずトップバーからワークスペースを選択してください",
@@ -482,6 +572,7 @@ export const ja = {
       suggestion3: "このリポジトリのCHANGELOGを生成",
     },
     setup: {
+      ...en.app.setup,
       welcome: "Reasonixへようこそ",
       description:
         "初回セットアップにはDeepSeek APIキーとワークスペースディレクトリが必要です。キーはローカルのみに保存されます。",
@@ -491,6 +582,7 @@ export const ja = {
       saveAndStart: "保存して開始",
     },
     update: {
+      ...en.app.update,
       available: "新しいバージョンが利用可能 · {current} → {latest}",
       installing: "インストール中…",
       downloading: "ダウンロード中 · {downloaded} / {total} ({pct}%)",
@@ -504,11 +596,13 @@ export const ja = {
     exportReasoningSummary: "推論",
     exportToolLabel: "ツール",
     session: {
+      ...en.app.session,
       new: "{workspace} · 新しいセッション",
       format: "セッション {month}-{day} {hour}:{minute}",
     },
   },
   planBadge: {
+    ...en.planBadge,
     failed: "失敗",
     blocked: "ブロック",
     running: "実行中",
@@ -516,6 +610,7 @@ export const ja = {
     pending: "保留中",
   },
   cards: {
+    ...en.cards,
     reasoningName: "思考中",
     reasoningComplete: "完了",
     compactionName: "履歴圧縮",
@@ -556,6 +651,7 @@ export const ja = {
     elapsed: "経過",
   },
   statusbar: {
+    ...en.statusbar,
     offline: "オフライン",
     busy: "実行中",
     online: "オンライン",
@@ -572,11 +668,16 @@ export const ja = {
     themeDark: "ダーク",
     themeLight: "ライト",
     themeStyleGraphite: "グラファイト",
+    themeStyleEmber: "エンバー",
+    themeStyleAurora: "オーロラ",
     themeStyleSandstone: "サンドストーン",
     themeStylePorcelain: "ポーセリン",
+    themeStyleLinen: "リネン",
+    themeStyleGlacier: "グレイシャー",
     themeStyleMidnight: "ミッドナイト",
   },
   jobs: {
+    ...en.jobs,
     title: "バックグラウンドジョブ",
     running: "実行中",
     exited: "終了",
@@ -589,6 +690,7 @@ export const ja = {
     kbClose: "閉じる",
   },
   contextPanel: {
+    ...en.contextPanel,
     reservedKey: "予約済み",
     usedKey: "使用中",
     filesTab: "ファイル",
@@ -614,6 +716,16 @@ export const ja = {
     mcpDisabled: "無効",
     mcpFailed: "失敗",
     mcpConfigured: "設定済み",
+    mcpHealthTotal: "MCP {count}",
+    mcpHealthReady: "接続済み {count}",
+    mcpHealthFailed: "失敗 {count}",
+    mcpHealthTools: "ツール {count}",
+    mcpFilterAll: "すべて",
+    mcpFilterReady: "利用可能",
+    mcpFilterFailed: "失敗",
+    mcpFilterEmpty: "このフィルターにサーバーはありません",
+    mcpRetryAll: "失敗項目を再試行",
+    mcpSettings: "設定",
     memoryTitle: "長期メモリ",
     itemCount: "{count} 項目",
     scopeProject: "プロジェクト",
@@ -630,6 +742,7 @@ export const ja = {
     noMemoriesMsg: "まだメモリは保存されていません。",
   },
   sidebarPanel: {
+    ...en.sidebarPanel,
     sessionTitle: "セッション {month}-{day} {hour}:{minute}",
     justNow: "たった今",
     minutesAgo: "{n}分前",
@@ -675,6 +788,7 @@ export const ja = {
     delete: "削除",
   },
   extraCards: {
+    ...en.extraCards,
     sessionUsage: "セッション使用量",
     sessionCost: "コスト {costLabel}",
     approve: "承認",
@@ -695,6 +809,7 @@ export const ja = {
     unknownKind: "# 不明なカードタイプ — フォールバック表示",
   },
   thread: {
+    ...en.thread,
     toolCalls: "{count} 件のツール呼び出し",
     oneToolCall: "1 件のツール呼び出し",
     keepSteps: "残り {n} ステップを保持",
@@ -747,6 +862,7 @@ export const ja = {
     copyResponse: "この返信をコピー",
   },
   live: {
+    ...en.live,
     reasoning: "ライブ · 推論",
     running: "実行中",
     you: "あなた",
@@ -754,9 +870,11 @@ export const ja = {
     deliveredWaiting: "配信済み · エージェント待ち",
   },
   panel: {
+    ...en.panel,
     renderError: "{panel} パネルレンダリングエラー",
   },
   notifications: {
+    ...en.notifications,
     approvalTitle: "Reasonixが承認待ちです",
     inputTitle: "Reasonixが入力を待っています",
     planApprovalTitle: "Reasonixがプラン承認待ちです",

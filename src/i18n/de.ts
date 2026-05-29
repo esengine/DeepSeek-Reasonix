@@ -208,6 +208,11 @@ export const de: TranslationSchema = {
       description:
         "Session-USD-Grenze — warnt bei 80 %, verweigert nächsten Turn bei 100 %. Standardmäßig aus. /budget allein zeigt Status.",
     },
+    "max-tokens": {
+      ...EN.slash["max-tokens"],
+      description:
+        "Ausgabe-Token pro Turn begrenzen — verhindert ausufernde Reasoning-Schleifen. Standardmäßig aus. Allein zeigt Status.",
+    },
     mcp: { ...EN.slash.mcp, description: "MCP-Server + Tools dieser Sitzung auflisten" },
     resource: {
       ...EN.slash.resource,
@@ -266,6 +271,10 @@ export const de: TranslationSchema = {
     doctor: {
       ...EN.slash.doctor,
       description: "Gesundheitscheck (API / Config / API-Reichweite / Index / Hooks / Projekt)",
+    },
+    "cache-miss-report": {
+      ...EN.slash["cache-miss-report"],
+      description: "Erklärt jüngste Prompt-Cache-Misses anhand lokaler Prefix-Evidenz",
     },
     context: {
       ...EN.slash.context,
@@ -419,7 +428,7 @@ export const de: TranslationSchema = {
     },
     theme: {
       ...EN.slash.theme,
-      argsHint: "[auto|dunkel|hell|mitternachtsblau|tiefblau|hoher Kontrast]",
+      argsHint: "[auto|graphite|ember|aurora|sandstone|porcelain|linen|glacier|midnight]",
       description: "Terminal-Theme anzeigen oder speichern. Ohne Argument öffnet die Auswahl.",
     },
     exit: { ...EN.slash.exit, description: "TUI beenden" },
@@ -446,13 +455,35 @@ export const de: TranslationSchema = {
     themeSubtitle: "Die Vorschau aktualisiert sich beim Navigieren. Später mit /theme änderbar.",
     themeSampleHeading: "Beispiel",
     themeFooter: "[↑↓] navigieren · [Enter] bestätigen · [Esc] abbrechen",
+    themeName: {
+      ...EN.wizard.themeName,
+      graphite: "Graphit",
+      ember: "Glut",
+      aurora: "Aurora",
+      sandstone: "Sandstein",
+      porcelain: "Porzellan",
+      linen: "Leinen",
+      glacier: "Gletscher",
+      midnight: "Mitternacht",
+      dark: "Dunkel",
+      light: "Hell",
+      "deep-blue": "Tiefblau",
+      "high-contrast": "Hoher Kontrast",
+    },
     themeCaption: {
       ...EN.wizard.themeCaption,
-      dark: "Kühle dunkle Töne (Standard)",
-      light: "Helle klare Ansicht",
-      midnight: "Tokyo-Night-Palette",
-      "deep-blue": "Tiefblau auf Schwarz",
-      "high-contrast": "Barrierefreiheit",
+      graphite: "Originale dunkle Palette mit neutralen Graphit-Flächen",
+      ember: "Warmes dunkles Theme mit stärkerem Reasonix-Orange",
+      aurora: "Türkisgrünes dunkles Theme für weicheres Arbeiten bei wenig Licht",
+      sandstone: "Originale warme helle Palette",
+      porcelain: "Klares helles Theme mit ruhigem Kontrast",
+      linen: "Redaktionelles warmes helles Theme mit papierartigen Flächen",
+      glacier: "Kühles helles Theme mit klaren blauen Akzenten",
+      midnight: "Marineblaues dunkles Theme mit kühlen blauen Flächen",
+      dark: "Kühle dunkle Töne (Legacy-Alias)",
+      light: "Helle klare Ansicht (Legacy-Alias)",
+      "deep-blue": "Tiefblau auf Schwarz (Legacy-Alias)",
+      "high-contrast": "Barrierefreiheit (Legacy-Alias)",
     },
     mcpTitle: "Welche MCP-Server soll Reasonix für dich einrichten?",
     mcpUserArgsHint: "(du wirst {arg} bereitstellen)",
@@ -488,6 +519,7 @@ export const de: TranslationSchema = {
     ...EN.themePicker,
     header: "Theme",
     footer: "↑↓ auswählen · ⏎ bestätigen · Esc abbrechen",
+    autoLabel: "Automatisch",
     currentPref: "Aktuelle Einstellung",
     activeNow: "Jetzt aktiv",
     autoDesc: "REASONIX_THEME oder Standard verwenden",
@@ -1053,6 +1085,13 @@ export const de: TranslationSchema = {
       projectNone2: "   oder `/permissions add <präfix>` direkt.)",
       projectNoRoot:
         "Projekt-Allowlist — (kein Projekt-Root; Chat-Modus zeigt nur Builtin-Einträge)",
+      globalHeader: "Globale Allowlist ({count}) — gilt für alle Projekte",
+      globalNone: "  (keine — mit `/permissions add --global <prefix>` hinzufügen.)",
+      addGlobalInfo:
+        "▸ zur globalen Allowlist hinzugefügt: {prefix}\n  → der nächste Aufruf von `{prefix}` läuft in jedem Projekt ohne Rückfrage.",
+      removeGlobalEmpty: "▸ keine Einträge in der globalen Allowlist zum Entfernen.",
+      clearGlobalConfirm:
+        "{count} Einträge der globalen Allowlist werden entfernt. Mit dem Wort 'confirm' erneut ausführen: /permissions clear --global confirm",
       builtinHeader: "Builtin-Allowlist ({count}) — schreibgeschützt, fest eincompiliert",
       subcommands:
         "Unterbefehle: /permissions add <präfix> · /permissions remove <präfix-oder-N> · /permissions clear confirm",
@@ -1273,6 +1312,8 @@ export const de: TranslationSchema = {
         "  /search-engine searxng <url>      SearXNG mit benutzerdefiniertem Endpunkt",
       usageMetaso:
         "  /search-engine metaso              Metaso-API verwenden (100/Tag kostenlos, konfiguriere eigenen API-Schlüssel für mehr)",
+      usageBaidu:
+        "  /search-engine baidu               Baidu AI Search API verwenden (laut Baidu-Doku 1500/Monat kostenlos — BAIDU_API_KEY oder QIANFAN_API_KEY setzen)",
       usageTavily:
         "  /search-engine tavily              Tavily-API verwenden (LLM-freundlich, kostenlos 1000/Monat — setze TAVILY_API_KEY oder tavilyApiKey in der Konfiguration; erhalte einen unter https://tavily.com)",
       usagePerplexity:
@@ -1291,6 +1332,8 @@ export const de: TranslationSchema = {
       switchedSearxngNote: " Stelle sicher, dass SearXNG unter {endpoint} läuft.",
       switchedMetasoNote:
         " Es gibt ein tägliches Kontingent von 100 (konfiguriere einen eigenen API-Schlüssel für höhere Grenzen).",
+      switchedBaiduNote:
+        " Setze BAIDU_API_KEY, QIANFAN_API_KEY oder `baiduApiKey` in der Konfiguration; die Baidu-Doku nennt 1500 kostenlose Suchen pro Monat.",
       switchedTavilyNote:
         " Setze TAVILY_API_KEY oder `tavilyApiKey` in der Konfiguration; kostenlos 1000/Monat unter https://tavily.com.",
       switchedPerplexityNote:
@@ -1628,25 +1671,25 @@ export const de: TranslationSchema = {
   webErrors: {
     ...EN.webErrors,
     status:
-      "web_search {status} — versuche: Das Such-Backend hat einen Fehler zurückgegeben; formuliere die Abfrage um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search {status} — versuche: Das Such-Backend hat einen Fehler zurückgegeben; formuliere die Abfrage um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     rateLimit429:
       "web_search 429 — versuche: 10s warten vor erneuter Abfrage oder Abfrage umformulieren; das Such-Backend hat das Rate-Limit für diesen Client erreicht",
     forbidden403:
-      "web_search 403 — versuche: Das Such-Backend blockiert diesen Client; wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama oder warte und versuche es später erneut",
+      "web_search 403 — versuche: Das Such-Backend blockiert diesen Client; wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama oder warte und versuche es später erneut",
     serverError5xx:
       "web_search {status} — versuche: Öffne die Such-URL in einem Browser; falls sie lädt, ist dies vorübergehend und ein erneuter Versuch in 30s kann helfen",
     bingBlocked:
-      "web_search: Bing-Anti-Bot-Seite — Rate-Limit erreicht oder blockiert — versuche: 30s warten und erneut versuchen, oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Bing-Anti-Bot-Seite — Rate-Limit erreicht oder blockiert — versuche: 30s warten und erneut versuchen, oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     bingNoResults:
-      "web_search: 0 Ergebnisse, aber die Antwort sieht nicht wie eine echte leere Seite aus ({chars} Zeichen, erste 120: {preview}) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: 0 Ergebnisse, aber die Antwort sieht nicht wie eine echte leere Seite aus ({chars} Zeichen, erste 120: {preview}) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     invalidEndpoint:
       'web_search: ungültiger SearXNG-Endpunkt "{endpoint}" — versuche: setze eine gültige URL mit /search-endpoint http://host:port',
     endpointMustBeHttp:
       "web_search: SearXNG-Endpunkt muss http(s) sein, {protocol} erhalten — versuche: setze eine gültige URL mit /search-endpoint http://host:port",
     cannotReach:
-      "web_search: SearXNG-Server unter {endpoint} nicht erreichbar — versuche: SearXNG installieren und starten (https://github.com/searxng/searxng, z.B. `docker run -d -p 8080:8080 searxng/searxng`), oder wechsle zu einer anderen Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: SearXNG-Server unter {endpoint} nicht erreichbar — versuche: SearXNG installieren und starten (https://github.com/searxng/searxng, z.B. `docker run -d -p 8080:8080 searxng/searxng`), oder wechsle zu einer anderen Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     searxngNoResults:
-      "web_search: 0 Ergebnisse, aber SearXNG-Antwort sieht nicht wie eine leere Ergebnisseite aus ({chars} Zeichen) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: 0 Ergebnisse, aber SearXNG-Antwort sieht nicht wie eine leere Ergebnisseite aus ({chars} Zeichen) — versuche: formuliere die Abfrage mit einfacheren Begriffen um oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     metasoMissingKey:
       "web_search: Metaso benötigt einen API-Schlüssel — setze METASO_API_KEY oder konfiguriere einen mit /search-engine metaso <schlüssel>. Erhalte einen unter https://metaso.cn/search-api/playground",
     metasoDailyLimit:
@@ -1656,7 +1699,7 @@ export const de: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metaso-Rate-Limit erreicht — warte und versuche es erneut, oder erhalte einen eigenen API-Schlüssel unter https://metaso.cn/search-api/playground",
     metasoServerError:
-      "web_search: Metaso-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Metaso-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     metasoParseError:
       "web_search: Metaso hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     metasoApiError:
@@ -1666,9 +1709,9 @@ export const de: TranslationSchema = {
     tavilyUnauthorized:
       "web_search: Tavily-API-Schlüssel abgelehnt — überprüfe TAVILY_API_KEY oder erhalte einen unter https://tavily.com",
     tavilyRateLimit:
-      "web_search: Tavily-Rate-Limit erreicht oder monatliches Kontingent überschritten — warte, wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama oder upgrade deinen Tavily-Plan",
+      "web_search: Tavily-Rate-Limit erreicht oder monatliches Kontingent überschritten — warte, wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama oder upgrade deinen Tavily-Plan",
     tavilyServerError:
-      "web_search: Tavily-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Tavily-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     tavilyParseError:
       "web_search: Tavily hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     perplexityMissingKey:
@@ -1676,9 +1719,9 @@ export const de: TranslationSchema = {
     perplexityUnauthorized:
       "web_search: Perplexity-API-Schlüssel abgelehnt — überprüfe PERPLEXITY_API_KEY oder erhalte einen unter https://perplexity.ai/settings/api",
     perplexityRateLimit:
-      "web_search: Perplexity-Rate-Limit erreicht — warte und versuche es erneut, oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Perplexity-Rate-Limit erreicht — warte und versuche es erneut, oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     perplexityServerError:
-      "web_search: Perplexity-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Perplexity-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     perplexityParseError:
       "web_search: Perplexity hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     exaMissingKey:
@@ -1688,7 +1731,7 @@ export const de: TranslationSchema = {
     exaRateLimit:
       "web_search: Exa-API-Rate-Limit erreicht oder monatliches Kontingent überschritten — warte oder upgrade unter https://exa.ai/pricing",
     exaServerError:
-      "web_search: Exa-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Exa-Serverfehler ({status}) — versuche es später erneut oder wechsle die Engine mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     exaParseError:
       "web_search: Exa hat unparsbare Antwort zurückgegeben (HTTP {status}) — versuche es später erneut",
     braveMissingKey:
@@ -1698,7 +1741,7 @@ export const de: TranslationSchema = {
     braveRateLimit:
       "web_search: Die Brave Search API unterliegt einer Ratenbegrenzung oder das monatliche Kontingent wurde überschritten — warten oder ein Upgrade durchführen unter https://brave.com/search/api/",
     braveServerError:
-      "web_search: Fehler beim Brave-Suchserver ({status}) — später erneut versuchen oder die Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Fehler beim Brave-Suchserver ({status}) — später erneut versuchen oder die Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     braveParseError:
       "web_search: Brave Search hat eine nicht auswertbare Antwort zurückgegeben (HTTP {status}) — später erneut versuchen",
     ollamaMissingKey:
@@ -1706,9 +1749,9 @@ export const de: TranslationSchema = {
     ollamaUnauthorized:
       "Ollama API-Schlüssel abgelehnt — OLLAMA_API_KEY prüfen oder neuen Schlüssel unter https://ollama.com/settings/keys holen",
     ollamaRateLimit:
-      "Ollama ist ratenbegrenzt oder das Kontingent ist überschritten — warten und erneut versuchen oder Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "Ollama ist ratenbegrenzt oder das Kontingent ist überschritten — warten und erneut versuchen oder Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     ollamaServerError:
-      "Ollama-Serverfehler ({status}) für {url} — später erneut versuchen oder Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "Ollama-Serverfehler ({status}) für {url} — später erneut versuchen oder Engine wechseln mit /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     ollamaParseError:
       "Ollama hat eine nicht auswertbare Antwort zurückgegeben (HTTP {status}) für {url} — später erneut versuchen",
     fetchOllamaMissingKey:

@@ -1,14 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SessionFile, Settings, UsageStats } from "../App";
 import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
+import { McpServerCard } from "./mcp-server-card";
 
-type Tab = "files" | "tools" | "memory" | "rules";
+export type ContextPanelTab = "files" | "tools" | "memory" | "rules";
 
 const CONTEXT_MAX_TOKENS = 1_000_000;
 
@@ -20,7 +21,12 @@ export function ContextPanel({
   sessionFiles,
   memory,
   memoryDetail,
+  activeTab,
+  activeTabNonce,
   onReadMemory,
+  onOpenMcpSettings,
+  onEditMcpSpec,
+  onRetryMcpSpec,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -29,10 +35,18 @@ export function ContextPanel({
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
+  activeTab?: ContextPanelTab;
+  activeTabNonce?: number;
   onReadMemory: (path: string) => void;
+  onOpenMcpSettings?: () => void;
+  onEditMcpSpec?: (spec: McpSpecInfo) => void;
+  onRetryMcpSpec?: (raw: string) => void;
 }) {
   useLang();
-  const [tab, setTab] = useState<Tab>("files");
+  const [tab, setTab] = useState<ContextPanelTab>("files");
+  useEffect(() => {
+    if (activeTab) setTab(activeTab);
+  }, [activeTab, activeTabNonce]);
   const reserved = usage.reservedTokens;
   const lastHit = usage.lastCallCacheHit ?? 0;
   const lastMiss = usage.lastCallCacheMiss ?? 0;
@@ -97,7 +111,15 @@ export function ContextPanel({
         <div className="ctx-body-tab">
           <PanelErrorBoundary key={tab} label={tab}>
             {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
-            {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
+            {tab === "tools" && (
+              <CtxTools
+                specs={mcpSpecs}
+                bridged={mcpBridged}
+                onOpenSettings={onOpenMcpSettings}
+                onEdit={onEditMcpSpec}
+                onRetry={onRetryMcpSpec}
+              />
+            )}
             {tab === "memory" && (
               <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
             )}
@@ -239,8 +261,36 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
   );
 }
 
-function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }) {
+type McpFilter = "all" | "ready" | "failed";
+
+function CtxTools({
+  specs,
+  bridged,
+  onOpenSettings,
+  onEdit,
+  onRetry,
+}: {
+  specs: McpSpecInfo[];
+  bridged: boolean;
+  onOpenSettings?: () => void;
+  onEdit?: (spec: McpSpecInfo) => void;
+  onRetry?: (raw: string) => void;
+}) {
+  const [filter, setFilter] = useState<McpFilter>("all");
   const readyCount = specs.filter((s) => s.status === "connected").length;
+  const failed = specs.filter((s) => s.status === "failed");
+  const failedCount = failed.length;
+  const toolCount = specs.reduce((sum, s) => sum + (s.toolCount ?? s.tools?.length ?? 0), 0);
+  const filtered =
+    filter === "ready"
+      ? specs.filter((s) => s.status === "connected")
+      : filter === "failed"
+        ? failed
+        : [...failed, ...specs.filter((s) => s.status !== "failed")];
+  const retryAll = () => {
+    if (!onRetry) return;
+    for (const spec of failed) onRetry(spec.raw);
+  };
   return (
     <div className="ctx-block">
       <div className="h">
@@ -256,42 +306,59 @@ function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }
       {specs.length === 0 ? (
         <div className="ctx-empty">{t("contextPanel.mcpEmpty")}</div>
       ) : (
-        specs.map((s) => {
-          const dot =
-            s.status === "connected"
-              ? "ok"
-              : s.status === "failed" || s.parseError
-                ? "off"
-                : "pending";
-          const suffix = s.statusReason
-            ? ` · ${s.statusReason}`
-            : s.status === "connected"
-              ? typeof s.toolCount === "number"
-                ? ` · ${t("contextPanel.mcpTools", { count: s.toolCount })}`
-                : ` · ${t("contextPanel.mcpReady")}`
-              : s.status === "handshake"
-                ? ` · ${t("contextPanel.mcpConnecting")}`
-                : s.status === "disabled"
-                  ? ` · ${t("contextPanel.mcpDisabled")}`
-                  : s.status === "failed"
-                    ? ` · ${t("contextPanel.mcpFailed")}`
-                    : ` · ${t("contextPanel.mcpConfigured")}`;
-          return (
-            <div className="mcp-row" key={s.raw}>
-              <span className="ico">
-                <I.wrench size={12} />
-              </span>
-              <div className="body">
-                <div className="n">{s.name ?? s.summary}</div>
-                <div className="m">
-                  {s.transport}
-                  {suffix}
-                </div>
-              </div>
-              <span className="status" data-s={dot} />
-            </div>
-          );
-        })
+        <>
+          <div className="mcp-health-strip">
+            <span>{t("contextPanel.mcpHealthTotal", { count: specs.length })}</span>
+            <span data-kind="ok">{t("contextPanel.mcpHealthReady", { count: readyCount })}</span>
+            <span data-kind={failedCount > 0 ? "failed" : "muted"}>
+              {t("contextPanel.mcpHealthFailed", { count: failedCount })}
+            </span>
+            <span>{t("contextPanel.mcpHealthTools", { count: toolCount })}</span>
+          </div>
+          <div className="mcp-filter-row">
+            {(["all", "ready", "failed"] as const).map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                className="mcp-filter"
+                data-active={filter === kind}
+                onClick={() => setFilter(kind)}
+              >
+                {kind === "all"
+                  ? t("contextPanel.mcpFilterAll")
+                  : kind === "ready"
+                    ? t("contextPanel.mcpFilterReady")
+                    : t("contextPanel.mcpFilterFailed")}
+              </button>
+            ))}
+            <span className="spacer" />
+            {failedCount > 0 && onRetry ? (
+              <button type="button" className="mcp-mini-action" onClick={retryAll}>
+                <I.refresh size={12} />
+                {t("contextPanel.mcpRetryAll")}
+              </button>
+            ) : null}
+            {onOpenSettings ? (
+              <button type="button" className="mcp-mini-action" onClick={onOpenSettings}>
+                <I.cog size={12} />
+                {t("contextPanel.mcpSettings")}
+              </button>
+            ) : null}
+          </div>
+          {filtered.length === 0 ? (
+            <div className="ctx-empty">{t("contextPanel.mcpFilterEmpty")}</div>
+          ) : (
+            filtered.map((s) => (
+              <McpServerCard
+                key={s.raw}
+                spec={s}
+                mode="context"
+                onRetry={onRetry}
+                onEdit={onEdit ?? (onOpenSettings ? () => onOpenSettings() : undefined)}
+              />
+            ))
+          )}
+        </>
       )}
     </div>
   );

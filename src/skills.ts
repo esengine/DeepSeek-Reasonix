@@ -251,13 +251,17 @@ export class SkillStore {
   private readEntry(dir: string, scope: SkillScope, entry: import("node:fs").Dirent): Skill | null {
     const isDir =
       entry.isDirectory() || (entry.isSymbolicLink() && this.isSymlinkDirectory(dir, entry.name));
+    // Symlinked flat `<name>.md` files: `entry.isFile()` returns false for symlinks.
+    // Reuse the same `statSync` pattern as `isSymlinkDirectory` (#2104).
+    const isFile =
+      entry.isFile() || (entry.isSymbolicLink() && !isDir && this.isSymlinkFile(dir, entry.name));
     if (isDir) {
       if (!isValidSkillName(entry.name)) return null;
       const file = join(dir, entry.name, SKILL_FILE);
       if (!existsSync(file)) return null;
       return this.parse(file, entry.name, scope);
     }
-    if (entry.isFile() && entry.name.endsWith(".md")) {
+    if (isFile && entry.name.endsWith(".md")) {
       const stem = entry.name.slice(0, -3);
       if (!isValidSkillName(stem)) return null;
       return this.parse(join(dir, entry.name), stem, scope);
@@ -269,6 +273,15 @@ export class SkillStore {
   private isSymlinkDirectory(parentDir: string, name: string): boolean {
     try {
       return statSync(join(parentDir, name)).isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  /** Check if a symlink points to a file. Returns false for broken symlinks. */
+  private isSymlinkFile(parentDir: string, name: string): boolean {
+    try {
+      return statSync(join(parentDir, name)).isFile();
     } catch {
       return false;
     }
@@ -294,7 +307,7 @@ export class SkillStore {
     return {
       name,
       description,
-      body: body.trim(),
+      body: loadBodyWithReferences(path, body.trim()),
       scope,
       path,
       allowedTools: parseAllowedTools(data["allowed-tools"]),
@@ -302,6 +315,36 @@ export class SkillStore {
       model: data.model?.startsWith("deepseek-") ? data.model : undefined,
     };
   }
+}
+
+/** Append Anthropic Skills `references/` files to the body (#2214) so depth material
+ *  is available without on-demand wikilink resolution. Only dir-layout skills
+ *  (SKILL.md inside a named folder) can have a sibling `references/` directory. */
+function loadBodyWithReferences(skillFilePath: string, body: string): string {
+  if (!skillFilePath.endsWith(SKILL_FILE)) return body;
+  const refsDir = join(dirname(skillFilePath), "references");
+  if (!existsSync(refsDir)) return body;
+  let entries: string[];
+  try {
+    entries = readdirSync(refsDir)
+      .filter((f) => f.endsWith(".md"))
+      .sort();
+  } catch {
+    return body;
+  }
+  if (entries.length === 0) return body;
+  const parts: string[] = [body];
+  for (const entry of entries) {
+    const slug = entry.slice(0, -3); // strip .md
+    let content: string;
+    try {
+      content = readFileSync(join(refsDir, entry), "utf8").trim();
+    } catch {
+      continue;
+    }
+    if (content) parts.push(`\n\n## Reference: ${slug}\n\n${content}`);
+  }
+  return parts.join("");
 }
 
 function dedupePaths(paths: readonly string[]): string[] {

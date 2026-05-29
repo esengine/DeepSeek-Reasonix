@@ -279,6 +279,7 @@ const PUBLIC_API: readonly string[] = [
   "listFilesWithStatsSync",
   "listSessions",
   "loadApiKey",
+  "loadBaiduApiKey",
   "loadBaseUrl",
   "loadBraveApiKey",
   "loadDotenv",

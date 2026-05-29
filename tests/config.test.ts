@@ -4,13 +4,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type DesktopOpenTab,
+  addGlobalShellAllowed,
   addProjectPathAllowed,
   addProjectShellAllowed,
+  clearGlobalShellAllowed,
   clearProjectPathAllowed,
   clearProjectShellAllowed,
   editModeHintShown,
   isPlausibleKey,
   loadApiKey,
+  loadBaiduApiKey,
   loadBaseUrl,
   loadBraveApiKey,
   loadContextTokens,
@@ -19,6 +22,7 @@ import {
   loadEndpoint,
   loadEngineeringLifecycleMode,
   loadFilesystemOutlineThresholdBytes,
+  loadGlobalShellAllowed,
   loadIndexConfig,
   loadIndexUserConfig,
   loadModel,
@@ -37,6 +41,7 @@ import {
   readConfig,
   redactKey,
   redactSemanticEmbeddingConfig,
+  removeGlobalShellAllowed,
   removeProjectPathAllowed,
   removeProjectShellAllowed,
   resolveSemanticEmbeddingConfig,
@@ -516,6 +521,31 @@ describe("config", () => {
     expect(clearProjectShellAllowed("/empty", path)).toBe(0);
   });
 
+  it("global shell allowlist CRUD mirrors project (load/add/dedup/remove/clear)", () => {
+    expect(loadGlobalShellAllowed(path)).toEqual([]);
+    addGlobalShellAllowed("npm install", path);
+    addGlobalShellAllowed("git commit", path);
+    addGlobalShellAllowed("npm install", path); // dedup
+    addGlobalShellAllowed("   ", path); // ignored
+    expect(loadGlobalShellAllowed(path)).toEqual(["npm install", "git commit"]);
+    expect(removeGlobalShellAllowed("npm install", path)).toBe(true);
+    expect(removeGlobalShellAllowed("npm install", path)).toBe(false);
+    expect(loadGlobalShellAllowed(path)).toEqual(["git commit"]);
+    expect(clearGlobalShellAllowed(path)).toBe(1);
+    expect(loadGlobalShellAllowed(path)).toEqual([]);
+    expect(clearGlobalShellAllowed(path)).toBe(0);
+  });
+
+  it("global allowlist is independent of any project's allowlist", () => {
+    addGlobalShellAllowed("brew install", path);
+    addProjectShellAllowed("/a", "npm install", path);
+    expect(loadGlobalShellAllowed(path)).toEqual(["brew install"]);
+    expect(loadProjectShellAllowed("/a", path)).toEqual(["npm install"]);
+    // Clearing the project list leaves the global list intact.
+    clearProjectShellAllowed("/a", path);
+    expect(loadGlobalShellAllowed(path)).toEqual(["brew install"]);
+  });
+
   it("pathAllowed CRUD mirrors shellAllowed (load/add/dedup/remove/clear)", () => {
     expect(loadProjectPathAllowed("/a", path)).toEqual([]);
     addProjectPathAllowed("/a", "/Users/foo/Documents", path);
@@ -667,10 +697,10 @@ describe("config", () => {
   });
 
   it("resolveThemePreference lets env override auto but not registered config themes", () => {
-    expect(resolveThemePreference("auto", "light")).toBe("light");
+    expect(resolveThemePreference("auto", "light")).toBe("porcelain");
     expect(resolveThemePreference(undefined, "midnight")).toBe("midnight");
-    expect(resolveThemePreference("dark", "light")).toBe("dark");
-    expect(resolveThemePreference("auto", "unknown")).toBe("dark");
+    expect(resolveThemePreference("dark", "light")).toBe("graphite");
+    expect(resolveThemePreference("auto", "unknown")).toBe("graphite");
   });
 
   it("saveTheme doesn't clobber other persisted fields", () => {
@@ -844,8 +874,10 @@ describe("config", () => {
     it("preserves each known engine end-to-end (no silent tavily→default fall-through, #1309)", () => {
       for (const engine of [
         "bing",
+        "bing-intl",
         "searxng",
         "metaso",
+        "baidu",
         "tavily",
         "perplexity",
         "exa",
@@ -869,6 +901,83 @@ describe("config", () => {
       // so an explicit `/search-engine mojeek` later still rejects loudly.
       writeConfig({ webSearchEngine: "mojeek" as unknown as "bing" }, path);
       expect(webSearchEngine(path)).toBe("bing");
+    });
+  });
+
+  describe("loadBaiduApiKey", () => {
+    it("returns BAIDU_API_KEY env var before QIANFAN_API_KEY and config", () => {
+      const origBaidu = process.env.BAIDU_API_KEY;
+      const origQianfan = process.env.QIANFAN_API_KEY;
+      process.env.BAIDU_API_KEY = "baidu-env";
+      process.env.QIANFAN_API_KEY = "qianfan-env";
+      try {
+        writeConfig({ baiduApiKey: "cfg-baidu" }, path);
+        expect(loadBaiduApiKey(path)).toBe("baidu-env");
+      } finally {
+        if (origBaidu === undefined) {
+          // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+          delete process.env.BAIDU_API_KEY;
+        } else {
+          process.env.BAIDU_API_KEY = origBaidu;
+        }
+        if (origQianfan === undefined) {
+          // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+          delete process.env.QIANFAN_API_KEY;
+        } else {
+          process.env.QIANFAN_API_KEY = origQianfan;
+        }
+      }
+    });
+
+    it("falls back to QIANFAN_API_KEY when BAIDU_API_KEY is unset", () => {
+      const origBaidu = process.env.BAIDU_API_KEY;
+      const origQianfan = process.env.QIANFAN_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BAIDU_API_KEY;
+      process.env.QIANFAN_API_KEY = "qianfan-env";
+      try {
+        expect(loadBaiduApiKey(path)).toBe("qianfan-env");
+      } finally {
+        if (origBaidu !== undefined) process.env.BAIDU_API_KEY = origBaidu;
+        if (origQianfan === undefined) {
+          // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+          delete process.env.QIANFAN_API_KEY;
+        } else {
+          process.env.QIANFAN_API_KEY = origQianfan;
+        }
+      }
+    });
+
+    it("falls back to config.baiduApiKey when env vars are unset", () => {
+      const origBaidu = process.env.BAIDU_API_KEY;
+      const origQianfan = process.env.QIANFAN_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BAIDU_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.QIANFAN_API_KEY;
+      try {
+        writeConfig({ baiduApiKey: "cfg-baidu" }, path);
+        expect(loadBaiduApiKey(path)).toBe("cfg-baidu");
+      } finally {
+        if (origBaidu !== undefined) process.env.BAIDU_API_KEY = origBaidu;
+        if (origQianfan !== undefined) process.env.QIANFAN_API_KEY = origQianfan;
+      }
+    });
+
+    it("returns undefined when no Baidu key is configured", () => {
+      const origBaidu = process.env.BAIDU_API_KEY;
+      const origQianfan = process.env.QIANFAN_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.BAIDU_API_KEY;
+      // biome-ignore lint/performance/noDelete: env var must be absent, not "undefined"
+      delete process.env.QIANFAN_API_KEY;
+      try {
+        writeConfig({ baiduApiKey: undefined }, path);
+        expect(loadBaiduApiKey(path)).toBeUndefined();
+      } finally {
+        if (origBaidu !== undefined) process.env.BAIDU_API_KEY = origBaidu;
+        if (origQianfan !== undefined) process.env.QIANFAN_API_KEY = origQianfan;
+      }
     });
   });
 

@@ -45,7 +45,7 @@ describe("dashboard build artifacts", () => {
 describe("dashboard server integration", () => {
   it("assets.ts resolveAssetDir finds dashboard", async () => {
     const { serveAsset } = await import("../src/server/assets.js");
-    const appJs = serveAsset("app.js");
+    const appJs = await serveAsset("app.js");
     expect(appJs).not.toBeNull();
     expect(appJs?.contentType).toMatch(/javascript/);
   });
@@ -53,7 +53,7 @@ describe("dashboard server integration", () => {
   it("renderIndexHtml replaces all token placeholders", async () => {
     const { renderIndexHtml } = await import("../src/server/assets.js");
     // Token is sanitized to alphanumeric only
-    const html = renderIndexHtml("test-token-123", "standalone");
+    const html = await renderIndexHtml("test-token-123", "standalone");
     expect(html).not.toContain("__REASONIX_TOKEN__");
     expect(html).not.toContain("__REASONIX_MODE__");
     expect(html).toContain("testtoken123"); // sanitized
@@ -62,7 +62,7 @@ describe("dashboard server integration", () => {
 
   it("serveAsset rewrites cross-chunk imports in app.js to carry the token", async () => {
     const { serveAsset } = await import("../src/server/assets.js");
-    const asset = serveAsset("app.js", "tkn123");
+    const asset = await serveAsset("app.js", "tkn123");
     expect(asset).not.toBeNull();
     const body = asset?.body as string;
     // Vendor chunks must be reachable; browsers strip query strings on relative
@@ -77,7 +77,7 @@ describe("dashboard server integration", () => {
   it("serveAsset rewrites cross-chunk imports inside vendor chunks too", async () => {
     const { serveAsset } = await import("../src/server/assets.js");
     // vendor-markdown imports vendor-react and vendor-katex — also relative.
-    const asset = serveAsset("vendor-markdown.js", "tkn456");
+    const asset = await serveAsset("vendor-markdown.js", "tkn456");
     if (asset == null) return; // not a build with that chunk; ignore
     const body = asset.body as string;
     const vendorImports = body.match(/from\s*["']\.\/vendor-[\w-]+\.js[^"']*["']/g) ?? [];
@@ -88,7 +88,7 @@ describe("dashboard server integration", () => {
 
   it("serveAsset injects the token into CSS url() font references", async () => {
     const { serveAsset } = await import("../src/server/assets.js");
-    const asset = serveAsset("app.css", "tknfont");
+    const asset = await serveAsset("app.css", "tknfont");
     expect(asset).not.toBeNull();
     const body = asset?.body as string;
     // CSS-context `url()` strips the parent stylesheet's query string when the
@@ -103,8 +103,8 @@ describe("dashboard server integration", () => {
 
   it("vendor CSS files are served when present", async () => {
     const { serveAsset } = await import("../src/server/assets.js");
-    const hljs = serveAsset("vendor-hljs.css");
-    const uplot = serveAsset("vendor-uplot.css");
+    const hljs = await serveAsset("vendor-hljs.css");
+    const uplot = await serveAsset("vendor-uplot.css");
     // These may be null if copy-dashboard-vendor-css.mjs hasn't run
     if (hljs) {
       expect(hljs.contentType).toMatch(/css/);

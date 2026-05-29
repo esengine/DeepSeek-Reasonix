@@ -1,6 +1,7 @@
 import {
   type ReasoningEffort,
   isReasoningEffort,
+  saveMaxOutputTokens,
   saveModel,
   saveReasoningEffort,
 } from "@/config.js";
@@ -96,8 +97,41 @@ const budget: SlashHandler = (args, loop) => {
   };
 };
 
+const maxTokens: SlashHandler = (args, loop, ctx) => {
+  const arg = (args[0] ?? "").trim().toLowerCase();
+  if (arg === "") {
+    return {
+      info:
+        loop.maxOutputTokens === undefined
+          ? t("handlers.model.maxTokensNoCap")
+          : t("handlers.model.maxTokensStatus", { n: loop.maxOutputTokens }),
+    };
+  }
+  if (arg === "off" || arg === "none" || arg === "0") {
+    loop.configure({ maxOutputTokens: null });
+    try {
+      saveMaxOutputTokens(null, ctx.configPath);
+    } catch {
+      /* ignore persist errors */
+    }
+    return { info: t("handlers.model.maxTokensOff") };
+  }
+  const n = Number(arg);
+  if (!Number.isInteger(n) || n <= 0) {
+    return { info: t("handlers.model.maxTokensUsage") };
+  }
+  loop.configure({ maxOutputTokens: n });
+  try {
+    saveMaxOutputTokens(n, ctx.configPath);
+  } catch {
+    /* ignore persist errors */
+  }
+  return { info: t("handlers.model.maxTokensSet", { n }) };
+};
+
 export const handlers: Record<string, SlashHandler> = {
   model,
   effort,
   budget,
+  "max-tokens": maxTokens,
 };

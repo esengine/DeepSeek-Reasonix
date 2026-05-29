@@ -19,8 +19,8 @@ export async function mcpInspectCommand(opts: McpInspectOptions): Promise<void> 
   const normalized = normalizeMcpConfig(cfg);
   const matched = parsed.name ? normalized.find((s) => s.name === parsed.name) : undefined;
   const spec = overlayMatchedSpec(parsed, matched);
-  if (spec.transport === "stdio") preflightStdioSpec(spec);
   const workspaceDir = process.cwd();
+  if (spec.transport === "stdio") preflightStdioSpec(spec, { cwd: workspaceDir });
   const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
   const client = new McpClient({
     transport,

@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import type { Stats } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
@@ -44,7 +45,12 @@ export async function handleFiles(
 ): Promise<ApiResult> {
   if (method !== "POST") return { status: 405, body: { error: "POST only" } };
   const cwd = ctx.getCurrentCwd?.();
-  if (!cwd || !existsSync(cwd)) {
+  if (!cwd) {
+    return { status: 503, body: { error: "@-mention picker requires a code-mode session" } };
+  }
+  try {
+    await stat(cwd);
+  } catch {
     return { status: 503, body: { error: "@-mention picker requires a code-mode session" } };
   }
   let parsed: { prefix?: unknown };
@@ -54,11 +60,11 @@ export async function handleFiles(
     return { status: 400, body: { error: "body must be JSON" } };
   }
   const prefix = typeof parsed.prefix === "string" ? parsed.prefix.trim().toLowerCase() : "";
-  const matches = walk(cwd, prefix);
+  const matches = await walk(cwd, prefix);
   return { status: 200, body: { files: matches } };
 }
 
-function walk(root: string, prefix: string): string[] {
+async function walk(root: string, prefix: string): Promise<string[]> {
   const out: string[] = [];
   const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
   while (stack.length > 0 && out.length < RESULT_CAP) {
@@ -66,7 +72,7 @@ function walk(root: string, prefix: string): string[] {
     if (depth > MAX_DEPTH) continue;
     let names: string[];
     try {
-      names = readdirSync(path);
+      names = await readdir(path);
     } catch {
       continue;
     }
@@ -75,9 +81,9 @@ function walk(root: string, prefix: string): string[] {
       if (name.startsWith(".") && depth === 0) continue;
       if (SKIP_DIRS.has(name)) continue;
       const full = join(path, name);
-      let st: ReturnType<typeof statSync>;
+      let st: Stats;
       try {
-        st = statSync(full);
+        st = await stat(full);
       } catch {
         continue;
       }

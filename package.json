@@ -91,6 +91,7 @@
     "emoji-regex": "^10.4.0",
     "eventsource-parser": "^3.0.0",
     "get-east-asian-width": "^1.3.0",
+    "grammy": "^1.43.0",
     "iconv-lite": "^0.7.2",
     "ignore": "^7.0.5",
     "indent-string": "^5.0.0",

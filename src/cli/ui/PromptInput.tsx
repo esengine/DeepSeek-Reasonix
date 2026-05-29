@@ -244,6 +244,7 @@ export function PromptInput({
       borderLeft={false}
       borderRight={false}
       borderColor={inputActive ? TONE.brand : FG.faint}
+      backgroundColor={SURFACE.bgInput}
       borderText={
         borderLabel ? { content: borderLabel, position: "top", align: "end", offset: 2 } : undefined
       }

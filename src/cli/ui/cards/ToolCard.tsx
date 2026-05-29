@@ -1,5 +1,6 @@
 import { Box, type Color, Text, useStdout } from "ink";
 import React from "react";
+import { type DiffDisplay, loadDiffDisplay } from "../../../config.js";
 import { t } from "../../../i18n/index.js";
 import { Markdown } from "../markdown.js";
 import { Card } from "../primitives/Card.js";
@@ -14,6 +15,52 @@ import { selectToolPreviewLines } from "../tool-summary.js";
 
 const READ_TAIL = 2;
 const OTHER_TAIL = 5;
+
+const EDIT_TOOL_NAMES = new Set(["edit_file", "write_file", "multi_edit"]);
+
+function isEditTool(name: string): boolean {
+  return EDIT_TOOL_NAMES.has(name) || EDIT_TOOL_NAMES.has(name.replace(/^.*_/, ""));
+}
+
+interface DiffLine {
+  kind: "ctx" | "add" | "del" | "hunk";
+  text: string;
+}
+
+function parseDiffFromOutput(output: string): { file: string; lines: DiffLine[] } | null {
+  const lines = output.split("\n");
+  if (lines.length < 2) return null;
+
+  let file = "";
+  const diffLines: DiffLine[] = [];
+  let inDiff = false;
+
+  for (const line of lines) {
+    // Header: "edited path (N→M chars)" or "created path (N chars)"
+    const headerMatch = line.match(/^(?:edited|created)\s+(.+?)\s+\(/);
+    if (headerMatch) {
+      file = headerMatch[1] ?? "";
+      continue;
+    }
+    // Hunk header
+    if (line.startsWith("@@ ")) {
+      inDiff = true;
+      diffLines.push({ kind: "hunk", text: line });
+      continue;
+    }
+    if (inDiff) {
+      if (line.startsWith("+") && !line.startsWith("+++")) {
+        diffLines.push({ kind: "add", text: line.slice(1) });
+      } else if (line.startsWith("-") && !line.startsWith("---")) {
+        diffLines.push({ kind: "del", text: line.slice(1) });
+      } else if (line.startsWith(" ")) {
+        diffLines.push({ kind: "ctx", text: line.slice(1) });
+      }
+    }
+  }
+  if (diffLines.length === 0) return null;
+  return { file, lines: diffLines };
+}
 
 /** Read-style tools dump file/list bodies — short tail is enough; the model already has the full text in context. */
 function tailLinesFor(name: string): number {
@@ -35,6 +82,13 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
     [card.name, card.output],
   );
 
+  const diffDisplay = React.useMemo<DiffDisplay>(() => loadDiffDisplay(), []);
+  const parsedDiff = React.useMemo(
+    () =>
+      diffDisplay === "full" && isEditTool(card.name) ? parseDiffFromOutput(card.output) : null,
+    [diffDisplay, card.name, card.output],
+  );
+
   const verbose = React.useContext(VerboseContext);
   const tail = tailLinesFor(card.name);
   const preview = selectToolPreviewLines({
@@ -53,12 +107,21 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
   // is already conveyed by the badge, so dropping the body keeps the card tight.
   const showBody = !card.rejected && (subagentMarkdown !== null || preview.rows.length > 0);
 
+  // In full mode, for edit tools, show diff instead of raw preview.
+  const showDiff = parsedDiff !== null && parsedDiff.lines.length > 0;
+
   const meta: MetaItem[] = [];
   if (card.retry) {
     meta.push({ text: `↻ ${card.retry.attempt}/${card.retry.max}`, color: TONE.warn });
   }
   if (card.rejected) {
     meta.push({ text: t("cardLabels.rejected"), color: TONE.err });
+  }
+  if (showDiff) {
+    const adds = parsedDiff!.lines.filter((l) => l.kind === "add").length;
+    const dels = parsedDiff!.lines.filter((l) => l.kind === "del").length;
+    meta.push({ text: `+${adds}`, color: TONE.ok });
+    meta.push({ text: `-${dels}`, color: TONE.err });
   }
   for (const part of metaTrail(card)) meta.push(part);
 
@@ -68,16 +131,45 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
     ) : (
       statusGlyph(status)
     );
+  const headerTitle = showDiff && parsedDiff!.file ? parsedDiff!.file : card.name;
+
+  const DIFF_LINE_COLOR: Record<string, Color> = {
+    add: TONE.ok,
+    del: TONE.err,
+    ctx: FG.sub,
+    hunk: FG.faint,
+  };
+  const DIFF_LINE_GLYPH: Record<string, string> = {
+    add: "+",
+    del: "-",
+    ctx: " ",
+    hunk: " ",
+  };
+
   return (
     <Card tone={headColor}>
       <CardHeader
         glyph={headerGlyph}
         tone={headColor}
-        title={card.name}
+        title={headerTitle}
         subtitle={argsLabel || undefined}
         meta={meta.length > 0 ? meta : undefined}
       />
-      {showBody &&
+      {showDiff ? (
+        <>
+          {parsedDiff!.lines.map((ln, i) => (
+            <Box key={`${card.id}:diff:${i}`} flexDirection="row" gap={1}>
+              <Text color={DIFF_LINE_COLOR[ln.kind] ?? FG.sub}>
+                {DIFF_LINE_GLYPH[ln.kind] ?? " "}
+              </Text>
+              <Text color={DIFF_LINE_COLOR[ln.kind] ?? FG.sub} dim={ln.kind === "ctx"}>
+                {clipToCells(ln.text, lineCells - 2) || " "}
+              </Text>
+            </Box>
+          ))}
+        </>
+      ) : (
+        showBody &&
         (subagentMarkdown !== null ? (
           <Markdown text={subagentMarkdown} width={lineCells} />
         ) : (
@@ -96,15 +188,15 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
               ) : (
                 <Text
                   key={`${card.id}:line:${row.index}`}
-                  color={errColor}
-                  dim={!card.exitCode || card.exitCode === 0}
+                  color={!card.exitCode || card.exitCode === 0 ? FG.faint : errColor}
                 >
                   {clipToCells(row.text, lineCells) || " "}
                 </Text>
               ),
             )}
           </>
-        ))}
+        ))
+      )}
     </Card>
   );
 }

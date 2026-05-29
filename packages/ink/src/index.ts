@@ -127,19 +127,36 @@ export function useBoxMetrics(ref: { current: DOMElement | null }): {
   height: number;
 } {
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const lastRef = useRef<DOMElement | null>(null);
   const scheduledRef = useRef(false);
+  const lastMeasureTimeRef = useRef(0);
+
+  // No dep array — this hook must re-measure when the parent layout
+  // changes, which can only be detected by re-running on every render.
+  // Using `ref.current` as a dependency is a React anti-pattern (refs
+  // are not reactive) and would cause stale dimensions after parent
+  // resizes.
+  //
+  // To prevent excessive measurements during rapid scrolling (10-20
+  // wheel events/100ms on Windows), we throttle to at most one measure
+  // per frame via the deferred setTimeout + scheduledRef guard, and
+  // skip re-measurement if less than 16ms have elapsed since the last
+  // successful measurement (one frame at 60fps).
   useEffect(() => {
     if (!ref.current) return;
-    lastRef.current = ref.current;
     if (scheduledRef.current) return;
+
+    const now = Date.now();
+    if (now - lastMeasureTimeRef.current < 16) return;
+
     scheduledRef.current = true;
-    // Defer measure off the React commit batch — re-measuring synchronously
-    // in the same depth-counted chain crashes with "Maximum update depth
-    // exceeded" when Box content doesn't converge in one layout pass.
+    // Defer measure off the React commit batch — re-measuring
+    // synchronously in the same depth-counted chain crashes with
+    // "Maximum update depth exceeded" when Box content doesn't
+    // converge in one layout pass.
     setTimeout(() => {
       scheduledRef.current = false;
       if (!ref.current) return;
+      lastMeasureTimeRef.current = Date.now();
       const { width, height } = measureElement(ref.current);
       setSize((prev) =>
         prev.width === width && prev.height === height ? prev : { width, height },

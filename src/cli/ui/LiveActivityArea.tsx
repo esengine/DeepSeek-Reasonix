@@ -23,6 +23,7 @@ type UndoBannerState = Parameters<typeof UndoBanner>[0]["banner"];
 
 export interface LiveActivityAreaProps {
   noTakeoverOverlay: boolean;
+  suppressPlanLiveRow?: boolean;
   ongoingTool: { name: string; args?: string } | null;
   toolProgress: { progress: number; total?: number; message?: string } | null;
   subagentActivities: ReadonlyArray<SubagentActivity>;
@@ -39,6 +40,7 @@ export interface LiveActivityAreaProps {
 export const LiveActivityArea: React.FC<LiveActivityAreaProps> = React.memo(
   ({
     noTakeoverOverlay,
+    suppressPlanLiveRow,
     ongoingTool,
     toolProgress,
     subagentActivities,
@@ -67,7 +69,7 @@ export const LiveActivityArea: React.FC<LiveActivityAreaProps> = React.memo(
         {noTakeoverOverlay && busy && !isStreaming && !ongoingTool && !statusLine ? (
           <ThinkingRow text={activityLabel} />
         ) : null}
-        {noTakeoverOverlay ? <PlanLiveRow /> : null}
+        {noTakeoverOverlay && !suppressPlanLiveRow ? <PlanLiveRow /> : null}
         <ToastRail />
       </Box>
     );

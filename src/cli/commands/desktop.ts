@@ -17,13 +17,18 @@ import { codeSystemPrompt } from "../../code/prompt.js";
 import { applyPlanMode, buildCodeToolset } from "../../code/setup.js";
 import {
   DEFAULT_MODEL,
+  type DesktopCloseBehavior,
   type DesktopOpenTab,
   type EditMode,
+  type McpServerConfig,
+  type ReasonixConfig,
   bridgeEndpointEnv,
   isPlausibleKey,
   isReasoningEffort,
   loadApiKey,
+  loadBaiduApiKey,
   loadBraveApiKey,
+  loadDesktopCloseBehavior,
   loadDesktopOpenTabs,
   loadEditMode,
   loadEditor,
@@ -48,6 +53,7 @@ import {
   webSearchEngine as readWebSearchEngine,
   saveApiKey,
   saveBaseUrl,
+  saveDesktopCloseBehavior,
   saveDesktopOpenTabs,
   saveEditMode,
   saveEditor,
@@ -76,6 +82,7 @@ import {
   collectMemoryEntriesForWorkspace,
   readMemoryEntryDetail,
 } from "../../desktop/memory-browser.js";
+import { classifyDesktopQQIngress } from "../../desktop/qq-ingress.js";
 import {
   parseQQRemoteDesktopCommand,
   qqRemoteCommandBypassesBusy,
@@ -89,6 +96,7 @@ import {
 import {
   clearQQTurnRouting,
   createQQTurnRoutingState,
+  hasQQPendingInteraction,
   markQQTurnFinished,
   markQQTurnStarted,
   setQQPendingInteraction,
@@ -103,7 +111,7 @@ import {
   ImmutablePrefix,
   type LoopAbortOptions,
 } from "../../index.js";
-import { parseMcpSpec, specToRaw } from "../../mcp/spec.js";
+import { type McpServerSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   type PromptHistoryCursor,
   deleteSession,
@@ -171,11 +179,13 @@ type InMessage = { tabId?: string } & (
       recentWorkspaces?: string[];
       model?: string;
       editor?: string;
+      desktopCloseBehavior?: DesktopCloseBehavior;
       webSearchEngine?:
         | "bing"
         | "bing-intl"
         | "searxng"
         | "metaso"
+        | "baidu"
         | "tavily"
         | "perplexity"
         | "exa"
@@ -183,6 +193,7 @@ type InMessage = { tabId?: string } & (
         | "ollama";
       webSearchEndpoint?: string | null;
       metasoApiKey?: string | null;
+      baiduApiKey?: string | null;
       tavilyApiKey?: string | null;
       perplexityApiKey?: string | null;
       exaApiKey?: string | null;
@@ -218,6 +229,9 @@ type InMessage = { tabId?: string } & (
   | { cmd: "mcp_specs_get" }
   | { cmd: "mcp_specs_add"; spec: string }
   | { cmd: "mcp_specs_remove"; spec: string }
+  | { cmd: "mcp_import_servers"; servers: unknown[] }
+  | { cmd: "mcp_specs_update"; raw: string; server: unknown }
+  | { cmd: "mcp_specs_retry"; raw: string }
   | { cmd: "skills_get" }
   | { cmd: "skill_run"; name: string; args?: string }
   | { cmd: "jobs_list" }
@@ -245,11 +259,13 @@ interface SettingsEvent {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
+  desktopCloseBehavior?: DesktopCloseBehavior;
   webSearchEngine?:
     | "bing"
     | "bing-intl"
     | "searxng"
     | "metaso"
+    | "baidu"
     | "tavily"
     | "perplexity"
     | "exa"
@@ -258,10 +274,12 @@ interface SettingsEvent {
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
+    baidu?: string;
     tavily?: string;
     perplexity?: string;
     exa?: string;
     ollama?: string;
+    brave?: string;
   };
   subagentModels?: Record<string, "flash" | "pro">;
   contextTokens?: Record<string, number>;
@@ -468,16 +486,39 @@ interface PlanClearedEvent {
 }
 
 type McpSpecStatus = "configured" | "handshake" | "connected" | "failed" | "disabled";
+type McpStatusHint = "auth" | "missing-token" | "command" | "network" | "unknown";
 
 interface McpSpecInfo {
   raw: string;
   name: string | null;
   transport: "stdio" | "sse" | "streamable-http";
   summary: string;
+  config?: ImportedMcpServerInfo;
   parseError?: string;
   status: McpSpecStatus;
+  statusHint?: McpStatusHint;
   statusReason?: string;
   toolCount?: number;
+  tools?: McpToolInfo[];
+}
+
+interface McpToolInfo {
+  name: string;
+  registeredName: string;
+  description?: string;
+}
+
+interface ImportedMcpServerInfo {
+  name: string;
+  transport: "stdio" | "sse" | "streamable-http";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  disabled?: boolean;
+  requestTimeoutMs?: number;
 }
 
 interface McpSpecsEvent {
@@ -606,6 +647,216 @@ export function normalizeSessionTitle(raw: string): string {
 /** Return all MCP specs as raw strings, reading both legacy `cfg.mcp` and canonical `cfg.mcpServers`. */
 export function getAllMcpSpecs(cfg: ReturnType<typeof readConfig>): string[] {
   return normalizeMcpConfig(cfg).map(specToRaw);
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string" && entry.length > 0) out[key] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+export function normalizeImportedMcpServer(
+  value: unknown,
+): { name: string; config: McpServerConfig } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (!name) return null;
+  const cwd = typeof raw.cwd === "string" && raw.cwd.trim().length > 0 ? raw.cwd.trim() : undefined;
+  const transport = raw.transport;
+  if (transport === "stdio") {
+    const command = typeof raw.command === "string" ? raw.command.trim() : "";
+    if (!command) return null;
+    return {
+      name,
+      config: {
+        transport,
+        command,
+        args: normalizeStringArray(raw.args) ?? [],
+        env: normalizeStringRecord(raw.env),
+        cwd,
+        disabled: raw.disabled === true ? true : undefined,
+        requestTimeoutMs:
+          typeof raw.requestTimeoutMs === "number" && Number.isFinite(raw.requestTimeoutMs)
+            ? raw.requestTimeoutMs
+            : undefined,
+      },
+    };
+  }
+  if (transport === "sse" || transport === "streamable-http") {
+    const url = typeof raw.url === "string" ? raw.url.trim() : "";
+    if (!url) return null;
+    return {
+      name,
+      config: {
+        transport,
+        url,
+        headers: normalizeStringRecord(raw.headers),
+        disabled: raw.disabled === true ? true : undefined,
+        requestTimeoutMs:
+          typeof raw.requestTimeoutMs === "number" && Number.isFinite(raw.requestTimeoutMs)
+            ? raw.requestTimeoutMs
+            : undefined,
+      },
+    };
+  }
+  return null;
+}
+
+function rawForImportedMcpServer(name: string | null, config: McpServerConfig): string | undefined {
+  if (config.transport === "stdio") {
+    if (!config.command) return undefined;
+    return specToRaw({
+      name,
+      transport: "stdio",
+      command: config.command,
+      args: config.args ?? [],
+    });
+  }
+  if (config.transport === "sse" || config.transport === "streamable-http") {
+    if (!config.url) return undefined;
+    return specToRaw({
+      name,
+      transport: config.transport,
+      url: config.url,
+    });
+  }
+  return undefined;
+}
+
+function importedMcpServerFromSpec(spec: McpServerSpec): ImportedMcpServerInfo | undefined {
+  if (!spec.name) return undefined;
+  const base = {
+    name: spec.name,
+    transport: spec.transport,
+    disabled: spec.disabled === true ? true : undefined,
+    requestTimeoutMs: spec.requestTimeoutMs,
+  };
+  if (spec.transport === "stdio") {
+    return {
+      ...base,
+      transport: "stdio",
+      command: spec.command,
+      args: spec.args,
+      env: spec.env,
+      cwd: spec.cwd,
+    };
+  }
+  return {
+    ...base,
+    transport: spec.transport,
+    url: spec.url,
+    headers: spec.headers,
+  };
+}
+
+function stripLegacyMcpConfigForNames(cfg: ReasonixConfig, names: ReadonlySet<string>): void {
+  if (names.size === 0) return;
+  if (Array.isArray(cfg.mcp) && cfg.mcp.length > 0) {
+    cfg.mcp = cfg.mcp.filter((raw) => {
+      try {
+        const parsed = parseMcpSpec(raw);
+        return !(parsed.name && names.has(parsed.name));
+      } catch {
+        return true;
+      }
+    });
+    if (cfg.mcp.length === 0) cfg.mcp = undefined;
+  }
+  if (Array.isArray(cfg.mcpDisabled) && cfg.mcpDisabled.length > 0) {
+    cfg.mcpDisabled = cfg.mcpDisabled.filter((name) => !names.has(name));
+    if (cfg.mcpDisabled.length === 0) cfg.mcpDisabled = undefined;
+  }
+  if (cfg.mcpEnv) {
+    for (const name of names) delete cfg.mcpEnv[name];
+    if (Object.keys(cfg.mcpEnv).length === 0) cfg.mcpEnv = undefined;
+  }
+}
+
+function legacyMcpRawMatches(entry: string, target: string): boolean {
+  if (entry === target) return true;
+  try {
+    return specToRaw(parseMcpSpec(entry)) === target;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove the legacy raw spec being edited before saving its canonical `mcpServers` entry. */
+export function stripLegacyMcpConfigForRaw(cfg: ReasonixConfig, raw: string): void {
+  if (!Array.isArray(cfg.mcp) || cfg.mcp.length === 0) return;
+  cfg.mcp = cfg.mcp.filter((entry) => !legacyMcpRawMatches(entry, raw));
+  if (cfg.mcp.length === 0) cfg.mcp = undefined;
+}
+
+function importedMcpRawVariants(name: string, config: McpServerConfig): string[] {
+  const variants = [rawForImportedMcpServer(name, config), rawForImportedMcpServer(null, config)];
+  return [...new Set(variants.filter((raw): raw is string => typeof raw === "string"))];
+}
+
+export function applyImportedMcpServersToConfig(
+  cfg: ReasonixConfig,
+  servers: unknown[],
+): { forceSpecs: string[] } {
+  const canonical = { ...(cfg.mcpServers ?? {}) };
+  const importedNames = new Set<string>();
+  const forceSpecs = new Set<string>();
+  const legacyRawSpecs = new Set<string>();
+  for (const server of servers) {
+    const normalized = normalizeImportedMcpServer(server);
+    if (!normalized) continue;
+    canonical[normalized.name] = normalized.config;
+    importedNames.add(normalized.name);
+    const [raw, ...legacyVariants] = importedMcpRawVariants(normalized.name, normalized.config);
+    if (raw) forceSpecs.add(raw);
+    for (const variant of legacyVariants) legacyRawSpecs.add(variant);
+  }
+  if (importedNames.size === 0) {
+    throw new Error("no valid servers received");
+  }
+  cfg.mcpServers = canonical;
+  stripLegacyMcpConfigForNames(cfg, importedNames);
+  for (const raw of legacyRawSpecs) stripLegacyMcpConfigForRaw(cfg, raw);
+  return { forceSpecs: [...forceSpecs] };
+}
+
+export function applyMcpSpecUpdateToConfig(
+  cfg: ReasonixConfig,
+  raw: string,
+  server: unknown,
+): { updatedRaw?: string; forceSpecs: string[] } {
+  const normalized = normalizeImportedMcpServer(server);
+  if (!normalized) {
+    throw new Error("invalid server config");
+  }
+  const canonical = { ...(cfg.mcpServers ?? {}) };
+  let oldName: string | undefined;
+  try {
+    oldName = parseMcpSpec(raw).name ?? undefined;
+  } catch {
+    oldName = undefined;
+  }
+  if (oldName && oldName !== normalized.name) {
+    delete canonical[oldName];
+  }
+  canonical[normalized.name] = normalized.config;
+  cfg.mcpServers = canonical;
+  stripLegacyMcpConfigForRaw(cfg, raw);
+  stripLegacyMcpConfigForNames(cfg, new Set([normalized.name, ...(oldName ? [oldName] : [])]));
+  for (const variant of importedMcpRawVariants(normalized.name, normalized.config).slice(1)) {
+    stripLegacyMcpConfigForRaw(cfg, variant);
+  }
+  if (Object.keys(cfg.mcpServers).length === 0) cfg.mcpServers = undefined;
+  const updatedRaw = rawForImportedMcpServer(normalized.name, normalized.config);
+  return { updatedRaw, forceSpecs: [...new Set([raw, ...(updatedRaw ? [updatedRaw] : [])])] };
 }
 
 /** Drain `buffer` to `fd` across partial writes; retry EAGAIN after a 5 ms park. Exported for tests. */
@@ -739,6 +990,7 @@ function maskApiKey(key: string | undefined): string | undefined {
 
 function collectWebSearchApiKeyPrefixes(): {
   metaso?: string;
+  baidu?: string;
   tavily?: string;
   perplexity?: string;
   exa?: string;
@@ -747,6 +999,7 @@ function collectWebSearchApiKeyPrefixes(): {
 } {
   return {
     metaso: maskApiKey(loadMetasoApiKey()),
+    baidu: maskApiKey(loadBaiduApiKey()),
     tavily: maskApiKey(loadTavilyApiKey()),
     perplexity: maskApiKey(loadPerplexityApiKey()),
     exa: maskApiKey(loadExaApiKey()),
@@ -772,6 +1025,7 @@ function emitSettings(tab: Tab): void {
       recentWorkspaces: recent,
       model: tab.currentModel,
       editor: loadEditor(),
+      desktopCloseBehavior: loadDesktopCloseBehavior(),
       webSearchEngine: readWebSearchEngine(),
       webSearchEndpoint: readConfig().webSearchEndpoint,
       webSearchApiKeys: collectWebSearchApiKeyPrefixes(),
@@ -920,14 +1174,80 @@ function summarizeMcpSpec(raw: string): McpSpecInfo {
   }
 }
 
+export function classifyMcpStatusReason(reason: string | undefined): McpStatusHint | undefined {
+  if (!reason) return undefined;
+  const lower = reason.toLowerCase();
+  if (lower.includes("no bearer token") || lower.includes("missing bearer")) {
+    return "missing-token";
+  }
+  if (
+    lower.includes("401") ||
+    lower.includes("unauthorized") ||
+    lower.includes("invalid_token") ||
+    lower.includes("authentication required") ||
+    lower.includes("forbidden") ||
+    lower.includes("403")
+  ) {
+    return "auth";
+  }
+  if (
+    lower.includes("enoent") ||
+    lower.includes("command not found") ||
+    lower.includes("not found in path") ||
+    lower.includes("spawn")
+  ) {
+    return "command";
+  }
+  if (
+    lower.includes("timeout") ||
+    lower.includes("econn") ||
+    lower.includes("network") ||
+    lower.includes("dns") ||
+    lower.includes("fetch failed")
+  ) {
+    return "network";
+  }
+  return "unknown";
+}
+
+function mcpToolsForSummary(
+  summary: ReturnType<McpRuntime["summaries"]>[number] | undefined,
+): McpToolInfo[] {
+  if (!summary || !summary.report.tools.supported) return [];
+  const prefix = summary.bridgeEnv.prefix ?? "";
+  return summary.report.tools.items.map((tool) => ({
+    name: tool.name,
+    registeredName: `${prefix}${tool.name}`,
+    description: tool.description,
+  }));
+}
+
 function emitMcpSpecs(tab: Tab): void {
   const cfg = readConfig();
-  const allSpecs = getAllMcpSpecs(cfg);
-  const specs = allSpecs.map((raw) => {
+  const allSpecs = normalizeMcpConfig(cfg);
+  const summaries = new Map(
+    (tab.mcpRuntime?.summaries() ?? []).map((summary) => [summary.spec, summary]),
+  );
+  const specs = allSpecs.map((spec) => {
+    const raw = specToRaw(spec);
     const base = summarizeMcpSpec(raw);
     const live = tab.mcpStatuses.get(raw);
-    if (!live) return base;
-    return { ...base, status: live.kind, statusReason: live.reason, toolCount: live.toolCount };
+    const summary = summaries.get(raw);
+    const tools = mcpToolsForSummary(summary);
+    const withConfig = {
+      ...base,
+      config: importedMcpServerFromSpec(spec),
+      toolCount: tools.length > 0 ? tools.length : summary?.toolCount,
+      tools,
+    };
+    if (!live) return withConfig;
+    return {
+      ...withConfig,
+      status: live.kind,
+      statusHint: live.kind === "failed" ? classifyMcpStatusReason(live.reason) : undefined,
+      statusReason: live.reason,
+      toolCount: tools.length > 0 ? tools.length : live.toolCount,
+    };
   });
   const bridged = specs.length > 0 && specs.every((s) => s.status === "connected");
   emit({ type: "$mcp_specs", specs, bridged }, tab.id);
@@ -1258,6 +1578,23 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emit({ type: "$error", message: `qq send failed: ${(err as Error).message}` }, active.id);
       }
     });
+  }
+
+  function emitQQNotice(message: string, tabOverride?: Tab): void {
+    const tab = tabOverride ?? activeDesktopTab();
+    if (tab) {
+      emit(
+        {
+          type: "warning",
+          id: Date.now(),
+          ts: new Date().toISOString(),
+          turn: 0,
+          text: message,
+          severity: "high",
+        },
+        tab.id,
+      );
+    }
   }
 
   function startNewChatInTab(tab: Tab): void {
@@ -1666,6 +2003,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const trimmed = text.trim();
         if (!trimmed) return;
         if (handleQQRemoteDesktopCommand(tab, trimmed)) return;
+        const decision = classifyDesktopQQIngress({
+          hasPendingInteraction: hasQQPendingInteraction(qqRuntime.routing, tab.id),
+          isBusy: !!tab.aborter,
+        });
+        if (decision === "pause_reply") {
+          handleQQPauseReply(tab, trimmed);
+          return;
+        }
+        if (decision === "busy") {
+          void channel
+            .sendResponse(
+              "Session is busy. Wait for the current turn or reply to the pending prompt.",
+            )
+            .catch(() => undefined);
+          return;
+        }
         emit(
           {
             type: "user.message",
@@ -1676,15 +2029,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           },
           tab.id,
         );
-        if (handleQQPauseReply(tab, trimmed)) return;
-        if (tab.aborter) {
-          void channel
-            .sendResponse(
-              "Session is busy. Wait for the current turn or reply to the pending prompt.",
-            )
-            .catch(() => undefined);
-          return;
-        }
         void runTurn(tab, trimmed, true);
       },
       onError: (message) => {
@@ -1692,6 +2036,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         setQQRuntimeState("failed", message);
         if (tab) emit({ type: "$error", message: `QQ: ${message}` }, tab.id);
       },
+      onInfo: (message) => emitQQNotice(`QQ: ${message}`),
     });
     try {
       await channel.start();
@@ -1711,7 +2056,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const channel = qqRuntime.channel;
     qqRuntime.channel = null;
     clearQQTurnRouting(qqRuntime.routing);
-    if (channel) await channel.stop();
+    if (channel) {
+      try {
+        await channel.stop();
+      } catch (err) {
+        setQQRuntimeState("failed", (err as Error).message);
+        throw err;
+      }
+    }
     if (shouldDisable) setDesktopQQEnabled(false);
     setQQRuntimeState("disconnected");
   }
@@ -1769,12 +2121,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
   }
 
-  function bridgeTabMcp(tab: Tab): Promise<void> {
+  function bridgeTabMcp(tab: Tab, opts: { forceSpecs?: string[] } = {}): Promise<void> {
     if (!tab.runtime || !tab.toolset) return Promise.resolve();
     if (tab.mcpRuntime) {
       // Already constructed — reload so new/removed specs settle without restart.
       return tab.mcpRuntime
-        .reloadFromConfig(tab.runtime.loop)
+        .reloadFromConfig(tab.runtime.loop, { force: opts.forceSpecs })
         .then(() => emitMcpSpecs(tab))
         .catch((err) => {
           emit({ type: "$error", message: `mcp reload failed: ${(err as Error).message}` }, tab.id);
@@ -2456,6 +2808,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "plan_response") {
       const tab = forgetGate(msg.id);
       if (tab && msg.response.type === "cancel") {
+        abortTurn(tab);
         tab.completedStepIds.clear();
         tab.planTotalSteps = 0;
         emit({ type: "$plan_cleared" }, tab.id);
@@ -2600,14 +2953,25 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         emit({ type: "$error", message: "mcp_specs_add: spec is empty" }, tab.id);
         return;
       }
+      let parsedSpec: ReturnType<typeof parseMcpSpec> | null = null;
       try {
-        parseMcpSpec(spec);
+        parsedSpec = parseMcpSpec(spec);
       } catch (err) {
         emit({ type: "$error", message: `mcp_specs_add: ${(err as Error).message}` }, tab.id);
         return;
       }
       try {
         const cfg = readConfig();
+        if (parsedSpec?.name && cfg.mcpServers?.[parsedSpec.name]) {
+          emit(
+            {
+              type: "$error",
+              message: `mcp_specs_add: ${parsedSpec.name} already exists in canonical mcpServers config`,
+            },
+            tab.id,
+          );
+          return;
+        }
         const list = cfg.mcp ?? [];
         if (!list.includes(spec)) {
           cfg.mcp = [...list, spec];
@@ -2623,16 +2987,67 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "mcp_specs_remove") {
       try {
         const cfg = readConfig();
-        const list = cfg.mcp ?? [];
-        if (list.includes(msg.spec)) {
-          cfg.mcp = list.filter((s) => s !== msg.spec);
-          writeConfig(cfg);
+        let changed = false;
+        if (Array.isArray(cfg.mcp) && cfg.mcp.includes(msg.spec)) {
+          cfg.mcp = cfg.mcp.filter((s) => s !== msg.spec);
+          if (cfg.mcp.length === 0) cfg.mcp = undefined;
+          changed = true;
         }
+        try {
+          const parsed = parseMcpSpec(msg.spec);
+          if (parsed.name) {
+            if (cfg.mcpServers?.[parsed.name]) {
+              delete cfg.mcpServers[parsed.name];
+              if (Object.keys(cfg.mcpServers).length === 0) cfg.mcpServers = undefined;
+              changed = true;
+            }
+            stripLegacyMcpConfigForNames(cfg, new Set([parsed.name]));
+          }
+        } catch {
+          /* ignore parse failure during removal — raw legacy match above is enough */
+        }
+        if (changed) writeConfig(cfg);
         tab.mcpStatuses.delete(msg.spec);
         emitMcpSpecs(tab);
         void bridgeTabMcp(tab);
       } catch (err) {
         emit({ type: "$error", message: `mcp_specs_remove: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "mcp_import_servers") {
+      try {
+        const cfg = readConfig();
+        const { forceSpecs } = applyImportedMcpServersToConfig(cfg, msg.servers);
+        writeConfig(cfg);
+        emitMcpSpecs(tab);
+        void bridgeTabMcp(tab, { forceSpecs });
+      } catch (err) {
+        emit({ type: "$error", message: `mcp_import_servers: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "mcp_specs_update") {
+      try {
+        const cfg = readConfig();
+        const { updatedRaw, forceSpecs } = applyMcpSpecUpdateToConfig(cfg, msg.raw, msg.server);
+        writeConfig(cfg);
+        tab.mcpStatuses.delete(msg.raw);
+        if (updatedRaw) tab.mcpStatuses.delete(updatedRaw);
+        emitMcpSpecs(tab);
+        void bridgeTabMcp(tab, { forceSpecs });
+      } catch (err) {
+        emit({ type: "$error", message: `mcp_specs_update: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "mcp_specs_retry") {
+      try {
+        tab.mcpStatuses.delete(msg.raw);
+        emitMcpSpecs(tab);
+        void bridgeTabMcp(tab);
+      } catch (err) {
+        emit({ type: "$error", message: `mcp_specs_retry: ${(err as Error).message}` }, tab.id);
       }
       return;
     }
@@ -2666,7 +3081,26 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "session_delete") {
       deleteSession(msg.name);
-      emitSessions(tab);
+      if (tab.currentSession === msg.name) {
+        startNewChatInTab(tab);
+        emit(
+          {
+            type: "$session_loaded",
+            name: tab.currentSession,
+            messages: [],
+            carryover: {
+              totalCostUsd: 0,
+              cacheHitTokens: 0,
+              cacheMissTokens: 0,
+              totalCompletionTokens: 0,
+            },
+          },
+          tab.id,
+        );
+        emitCtxBreakdown(tab);
+      } else {
+        emitSessions(tab);
+      }
       return;
     }
     if (msg.cmd === "session_rename") {
@@ -2807,11 +3241,18 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           writeConfig(cfg);
         }
         if (msg.editor !== undefined) saveEditor(msg.editor);
+        if (
+          msg.desktopCloseBehavior === "closeToTray" ||
+          msg.desktopCloseBehavior === "closeToQuit"
+        ) {
+          saveDesktopCloseBehavior(msg.desktopCloseBehavior);
+        }
         if (msg.showSystemEvents !== undefined) saveShowSystemEvents(msg.showSystemEvents);
         if (
           msg.webSearchEngine !== undefined ||
           msg.webSearchEndpoint !== undefined ||
           msg.metasoApiKey !== undefined ||
+          msg.baiduApiKey !== undefined ||
           msg.tavilyApiKey !== undefined ||
           msg.perplexityApiKey !== undefined ||
           msg.exaApiKey !== undefined ||
@@ -2825,6 +3266,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           }
           if (msg.metasoApiKey !== undefined) {
             cfg.metasoApiKey = msg.metasoApiKey?.trim() || undefined;
+          }
+          if (msg.baiduApiKey !== undefined) {
+            cfg.baiduApiKey = msg.baiduApiKey?.trim() || undefined;
           }
           if (msg.tavilyApiKey !== undefined) {
             cfg.tavilyApiKey = msg.tavilyApiKey?.trim() || undefined;
@@ -2956,6 +3400,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               { type: "$error", message: `qq_disconnect failed: ${(err as Error).message}` },
               tab.id,
             );
+            emitQQSettings(tab);
           },
         );
       } catch (err) {
@@ -2963,6 +3408,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           { type: "$error", message: `qq_disconnect failed: ${(err as Error).message}` },
           tab.id,
         );
+        emitQQSettings(tab);
       }
       return;
     }

@@ -55,7 +55,7 @@ export interface RawUsage {
 export interface ChatRequestOptions {
   model: string;
   messages: ChatMessage[];
-  tools?: ToolSpec[];
+  tools?: readonly ToolSpec[];
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;

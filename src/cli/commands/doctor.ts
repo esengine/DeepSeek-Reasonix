@@ -19,6 +19,7 @@ import { indexExists } from "../../index/semantic/builder.js";
 import { checkOllamaStatus } from "../../index/semantic/ollama-launcher.js";
 import { listSessions } from "../../memory/session.js";
 import { detectProxyUrl, matchesNoProxy, resolveNoProxy } from "../../net/proxy.js";
+import { isCacheDiagnosticEntry } from "../../telemetry/cache-diagnostics.js";
 import { resolveDataPath } from "../../tokenizer.js";
 import { VERSION } from "../../version.js";
 
@@ -33,6 +34,7 @@ export interface DoctorCheck {
 
 export interface DoctorOptions {
   json?: boolean;
+  cache?: boolean;
 }
 
 type Level = DoctorLevel;
@@ -53,6 +55,17 @@ export async function runDoctorChecks(projectRoot: string): Promise<DoctorCheck[
     checkProject(projectRoot),
   ]);
   return [r[0], r[1], ...checkProxy(), r[2], r[3], r[4], r[5], r[6], r[7]];
+}
+
+export async function runCacheDoctorChecks(projectRoot: string): Promise<DoctorCheck[]> {
+  const r = await Promise.all([
+    checkCacheDynamicPrompt(projectRoot),
+    checkCacheMcpOrder(),
+    checkCacheSkillsAndMemory(projectRoot),
+    checkCacheHooks(projectRoot),
+    checkCacheEvidence(),
+  ]);
+  return r;
 }
 
 /** Probe hosts used to show users what's going through the proxy vs. direct. Cheap (no I/O), purely a routing simulation against the same NO_PROXY patterns the dispatcher uses. */
@@ -379,6 +392,155 @@ async function checkHooks(projectRoot: string): Promise<Check> {
   }
 }
 
+async function checkCacheDynamicPrompt(projectRoot: string): Promise<Check> {
+  const path = join(projectRoot, "REASONIX.md");
+  if (!existsSync(path)) {
+    return {
+      id: "cache-dynamic-prompt",
+      label: "cache prompt ",
+      level: "ok",
+      detail: "no project REASONIX.md found; no obvious project-memory timestamp source",
+    };
+  }
+  try {
+    const body = readFileSync(path, "utf8");
+    const dynamicPattern =
+      /\b(Date\.now|new Date|toISOString|timestamp|current time|today is|当前时间|今天是)\b/i;
+    if (dynamicPattern.test(body)) {
+      return {
+        id: "cache-dynamic-prompt",
+        label: "cache prompt ",
+        level: "warn",
+        detail:
+          "REASONIX.md contains timestamp-like text/code; dynamic time in the system prompt changes the byte-stable prefix",
+      };
+    }
+    return {
+      id: "cache-dynamic-prompt",
+      label: "cache prompt ",
+      level: "ok",
+      detail: "REASONIX.md has no obvious timestamp injection markers",
+    };
+  } catch (err) {
+    return {
+      id: "cache-dynamic-prompt",
+      label: "cache prompt ",
+      level: "warn",
+      detail: `could not read REASONIX.md: ${(err as Error).message}`,
+    };
+  }
+}
+
+async function checkCacheMcpOrder(): Promise<Check> {
+  try {
+    const cfg = readConfig();
+    const specs = normalizeMcpConfig(cfg).filter((spec) => !spec.disabled);
+    if (specs.length === 0) {
+      return {
+        id: "cache-mcp-order",
+        label: "cache mcp    ",
+        level: "ok",
+        detail: "no enabled MCP servers configured",
+      };
+    }
+    const unnamed = specs.filter((spec) => !spec.name).length;
+    if (unnamed > 0) {
+      return {
+        id: "cache-mcp-order",
+        label: "cache mcp    ",
+        level: "warn",
+        detail: `${unnamed}/${specs.length} MCP server specs have no stable name; name servers so tool prefixes stay deterministic`,
+      };
+    }
+    return {
+      id: "cache-mcp-order",
+      label: "cache mcp    ",
+      level: "ok",
+      detail: `${specs.length} enabled MCP server${specs.length === 1 ? "" : "s"} have stable names; tool order/schema are normalized before prefix hashing`,
+    };
+  } catch (err) {
+    return {
+      id: "cache-mcp-order",
+      label: "cache mcp    ",
+      level: "warn",
+      detail: `could not inspect MCP config: ${(err as Error).message}`,
+    };
+  }
+}
+
+async function checkCacheSkillsAndMemory(projectRoot: string): Promise<Check> {
+  const markers = ["REASONIX.md", ".reasonix"].filter((name) =>
+    existsSync(join(projectRoot, name)),
+  );
+  return {
+    id: "cache-memory-skills",
+    label: "cache memory ",
+    level: "ok",
+    detail:
+      markers.length > 0
+        ? `${markers.join(", ")} present; project memory is loaded into the immutable prefix and should only change on /new or restart`
+        : "no project memory markers found; skill/memory prefix churn unlikely from this workspace",
+  };
+}
+
+async function checkCacheHooks(projectRoot: string): Promise<Check> {
+  try {
+    const all = loadHooks({ projectRoot });
+    if (all.length === 0) {
+      return {
+        id: "cache-hooks",
+        label: "cache hooks  ",
+        level: "ok",
+        detail: "no hooks loaded",
+      };
+    }
+    return {
+      id: "cache-hooks",
+      label: "cache hooks  ",
+      level: "warn",
+      detail: `${all.length} hook${all.length === 1 ? "" : "s"} loaded; ensure hook output does not inject timestamps or mutate prompt-visible files every turn`,
+    };
+  } catch (err) {
+    return {
+      id: "cache-hooks",
+      label: "cache hooks  ",
+      level: "warn",
+      detail: `could not inspect hooks: ${(err as Error).message}`,
+    };
+  }
+}
+
+async function checkCacheEvidence(): Promise<Check> {
+  try {
+    const sessions = listSessions();
+    const withEvidence = sessions.filter((s) =>
+      s.meta.cacheDiagnostics?.some((entry) => isCacheDiagnosticEntry(entry)),
+    );
+    if (withEvidence.length === 0) {
+      return {
+        id: "cache-evidence",
+        label: "cache report ",
+        level: "warn",
+        detail:
+          "no session has cacheDiagnostics yet; run a model turn, then use /cache-miss-report",
+      };
+    }
+    return {
+      id: "cache-evidence",
+      label: "cache report ",
+      level: "ok",
+      detail: `${withEvidence.length}/${sessions.length} saved session${sessions.length === 1 ? "" : "s"} include cacheDiagnostics evidence`,
+    };
+  } catch (err) {
+    return {
+      id: "cache-evidence",
+      label: "cache report ",
+      level: "warn",
+      detail: `could not inspect session meta: ${(err as Error).message}`,
+    };
+  }
+}
+
 async function checkOllama(projectRoot: string): Promise<Check> {
   let exists = false;
   try {
@@ -510,9 +672,12 @@ export async function doctorCommand(opts: DoctorOptions = {}): Promise<void> {
 
   const projectRoot = resolve(process.cwd());
   const json = !!opts.json;
+  const cacheOnly = !!opts.cache;
 
   if (!json) {
-    console.log(`${color(`reasonix ${VERSION}  ·  doctor`, "1")}  (cwd: ${projectRoot})`);
+    console.log(
+      `${color(`reasonix ${VERSION}  ·  ${cacheOnly ? "doctor --cache" : "doctor"}`, "1")}  (cwd: ${projectRoot})`,
+    );
     console.log(`  home: ${homedir()}`);
     console.log("");
   }
@@ -520,7 +685,9 @@ export async function doctorCommand(opts: DoctorOptions = {}): Promise<void> {
   // Run independent checks in parallel — saves ~5s when api-reach has
   // to time out. Each handler swallows its own throws into a `fail`
   // result so a thrown promise can't kill the whole report.
-  const checks = await runDoctorChecks(projectRoot);
+  const checks = cacheOnly
+    ? await runCacheDoctorChecks(projectRoot)
+    : await runDoctorChecks(projectRoot);
 
   const ok = checks.filter((c) => c.level === "ok").length;
   const warn = checks.filter((c) => c.level === "warn").length;

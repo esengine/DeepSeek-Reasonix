@@ -11,7 +11,13 @@ import type { AgentEvent } from "../src/cli/ui/state/events.js";
 import { parseEvent } from "../src/cli/ui/state/events.js";
 import { reduce } from "../src/cli/ui/state/reducer.js";
 import { type AgentState, type SessionInfo, initialState } from "../src/cli/ui/state/state.js";
-import { USD_TO_CNY, balanceColor, formatBalance, formatCost } from "../src/cli/ui/theme/tokens.js";
+import {
+  DEFAULT_THEME,
+  USD_TO_CNY,
+  balanceColor,
+  formatBalance,
+  formatCost,
+} from "../src/cli/ui/theme/tokens.js";
 
 const session: SessionInfo = {
   id: "test-session",
@@ -540,19 +546,19 @@ describe("balance currency in reducer", () => {
 });
 
 describe("balanceColor", () => {
-  // CNY thresholds: < ¥5 → err (red), ¥5-20 → warn (yellow), >= ¥20 → brand (blue).
+  // CNY thresholds: < ¥5 → err, ¥5-20 → warn, >= ¥20 → current theme brand.
   // USD balances are multiplied by USD_TO_CNY before the threshold check.
 
   it("CNY → threshold checked directly", () => {
     expect(balanceColor(3, "CNY")).toBe("#f87171"); // err
     expect(balanceColor(8, "CNY")).toBe("#fbbf24"); // warn
-    expect(balanceColor(25, "CNY")).toBe("#7dd3fc"); // brand
+    expect(balanceColor(25, "CNY")).toBe(DEFAULT_THEME.tone.brand);
   });
 
   it("USD → converted to CNY before threshold check ($0.91 ≈ ¥6.55 → warn)", () => {
     expect(balanceColor(0.5, "USD")).toBe("#f87171"); // ≈ ¥3.60 → err
     expect(balanceColor(0.91, "USD")).toBe("#fbbf24"); // ≈ ¥6.55 → warn
-    expect(balanceColor(3.0, "USD")).toBe("#7dd3fc"); // ≈ ¥21.60 → brand
+    expect(balanceColor(3.0, "USD")).toBe(DEFAULT_THEME.tone.brand); // ≈ ¥21.60 → brand
   });
 
   it("undefined currency defaults to CNY (matches pre-fix behavior)", () => {

@@ -20,6 +20,12 @@ export function useTerminalViewport(): [
     elementRef.current = el
   }, [])
 
+  // `terminalSize` is the only reactive dependency — it changes when the
+  // terminal resizes. `elementRef.current` is NOT a valid dependency:
+  // React doesn't track ref mutations, so `Object.is` comparison against
+  // the previous render's captured value means the effect runs once on
+  // mount and never again unless conditional rendering swaps the DOM node.
+  // The element reference is read imperatively inside the effect.
   useLayoutEffect(() => {
     const element = elementRef.current
     if (!element?.yogaNode || !terminalSize) {
@@ -71,7 +77,7 @@ export function useTerminalViewport(): [
     if (visible !== entryRef.current.isVisible) {
       entryRef.current = { isVisible: visible }
     }
-  })
+  }, [terminalSize])
 
   return [setElement, entryRef.current]
 }

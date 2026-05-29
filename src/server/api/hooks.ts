@@ -1,6 +1,6 @@
 /** Reload is a separate POST so save and apply stay decoupled; the SPA chains them by convention. */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { trustProjectHooks } from "../../config.js";
 import { HOOK_EVENTS, globalSettingsPath, loadHooks, projectSettingsPath } from "../../hooks.js";
@@ -23,10 +23,9 @@ function parseBody(raw: string): SaveBody {
   }
 }
 
-function readSettingsFile(path: string): { hooks?: Record<string, unknown[]> } {
-  if (!existsSync(path)) return {};
+async function readSettingsFile(path: string): Promise<{ hooks?: Record<string, unknown[]> }> {
   try {
-    const raw = readFileSync(path, "utf8");
+    const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
@@ -34,12 +33,12 @@ function readSettingsFile(path: string): { hooks?: Record<string, unknown[]> } {
   }
 }
 
-function writeSettingsFile(path: string, hooksBlock: unknown): void {
+async function writeSettingsFile(path: string, hooksBlock: unknown): Promise<void> {
   // Preserve any other top-level keys that may live in the file.
-  const existing = readSettingsFile(path);
+  const existing = await readSettingsFile(path);
   existing.hooks = hooksBlock as Record<string, unknown[]>;
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
 }
 
 export async function handleHooks(
@@ -51,8 +50,8 @@ export async function handleHooks(
   if (method === "GET" && rest.length === 0) {
     const projectPath = ctx.getCurrentCwd ? projectSettingsPath(ctx.getCurrentCwd() ?? "") : null;
     const globalPath = globalSettingsPath();
-    const projectFile = projectPath ? readSettingsFile(projectPath) : {};
-    const globalFile = readSettingsFile(globalPath);
+    const projectFile = projectPath ? await readSettingsFile(projectPath) : {};
+    const globalFile = await readSettingsFile(globalPath);
     const resolved = loadHooks({ projectRoot: ctx.getCurrentCwd?.() });
     return {
       status: 200,
@@ -97,7 +96,7 @@ export async function handleHooks(
     if (!path) {
       return { status: 500, body: { error: "could not resolve settings path" } };
     }
-    writeSettingsFile(path, hooks);
+    await writeSettingsFile(path, hooks);
     ctx.audit?.({ ts: Date.now(), action: "save-hooks", payload: { scope, path } });
     return { status: 200, body: { saved: true, path } };
   }

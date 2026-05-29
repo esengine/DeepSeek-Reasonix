@@ -4,7 +4,7 @@
 import { type ComponentType, type ReactElement, createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { StaticCardStream } from "../src/cli/ui/layout/StaticCardStream.js";
-import type { UserCard } from "../src/cli/ui/state/cards.js";
+import type { ToolCard, UserCard } from "../src/cli/ui/state/cards.js";
 import { AgentStoreProvider } from "../src/cli/ui/state/provider.js";
 import type { SessionInfo } from "../src/cli/ui/state/state.js";
 import { render } from "./helpers/ink-test.js";
@@ -32,6 +32,20 @@ const SESSION: SessionInfo = {
 
 function userCard(i: number): UserCard {
   return { id: `u-${i}`, ts: i, kind: "user", text: `prompt ${i}` };
+}
+
+function toolCard(i: number): ToolCard {
+  return {
+    id: `tool-${i}`,
+    ts: i,
+    kind: "tool",
+    name: "run_command",
+    args: { cmd: "npm test" },
+    output: "ok",
+    done: true,
+    exitCode: 0,
+    elapsedMs: 25,
+  };
 }
 
 async function flushImmediates(): Promise<void> {
@@ -102,6 +116,20 @@ describe("StaticCardStream progressive mount", () => {
     }
     const ids = lastStaticItems.map((c) => (c as UserCard).id);
     expect(ids).toEqual(cards.map((c) => c.id));
+    unmount();
+  });
+
+  it("commits settled tool cards to terminal scrollback instead of trapping the tail live", () => {
+    lastStaticItems = [];
+    const cards = [toolCard(1), userCard(2)];
+    const { unmount } = render(
+      createElement(
+        AgentStoreProvider,
+        { session: SESSION, initialCards: cards },
+        createElement(StaticCardStream),
+      ),
+    );
+    expect(lastStaticItems.map((c) => (c as ToolCard | UserCard).id)).toEqual(["tool-1", "u-2"]);
     unmount();
   });
 });

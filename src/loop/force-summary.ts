@@ -18,6 +18,8 @@ export interface ForceSummaryContext {
   turn: number;
   /** Model to call for the summary itself — must be valid on the user's endpoint. */
   model: string;
+  /** Honour the user's /max-tokens cap on the summary call too (#2196). */
+  maxOutputTokens?: number;
 }
 
 export async function* forceSummaryAfterIterLimit(
@@ -46,6 +48,7 @@ export async function* forceSummaryAfterIterLimit(
       messages,
       signal: ctx.signal,
       thinking: "disabled",
+      maxTokens: ctx.maxOutputTokens,
     });
     const rawContent = resp.content?.trim() ?? "";
     const cleaned = stripHallucinatedToolMarkup(rawContent);

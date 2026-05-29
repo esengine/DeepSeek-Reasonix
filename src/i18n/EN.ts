@@ -87,6 +87,9 @@ export const EN: TranslationSchema = {
       '▸ resumed session "{name}" with {count} prior messages · /new to start fresh · /sessions to manage',
     newSession: '▸ session "{name}" (new) — auto-saved as you chat · /sessions to rename or delete',
     ephemeralSession: "▸ ephemeral chat (no session persistence) — drop --no-session to enable",
+    systemPromptChanged: "▸ system prompt changed since last session",
+    systemPromptChangedDetail:
+      "REASONIX.md or a memory file changed — the first turn will be a full cache miss. Use /new to start fresh with the updated context.",
     restoredEdits:
       "▸ restored {count} pending edit block(s) from an interrupted prior run — /apply to commit or /discard to drop.",
     resumedPlan: "Resumed plan · {when}{summary}",
@@ -271,7 +274,7 @@ export const EN: TranslationSchema = {
     models: { description: "list available models fetched from DeepSeek /models" },
     theme: {
       description: "show or persist the terminal theme preference. Bare opens picker.",
-      argsHint: "[auto|dark|light|midnight|deep-blue|high-contrast]",
+      argsHint: "[auto|graphite|ember|aurora|sandstone|porcelain|linen|glacier|midnight]",
     },
     language: {
       description: "switch the runtime language",
@@ -283,6 +286,16 @@ export const EN: TranslationSchema = {
       description:
         "session USD cap — warns at 80%, refuses next turn at 100%. Off by default. /budget alone shows status",
       argsHint: "[usd|off]",
+    },
+    "max-tokens": {
+      description:
+        "cap output tokens per turn — limits runaway reasoning. Off by default. Bare shows status.",
+      argsHint: "[N|off]",
+    },
+    diff: {
+      description:
+        "configure how edit_file / write_file diffs are displayed: summary (path +stats, default) · full (unified diff) · none (checkmark only)",
+      argsHint: "[summary|full|none]",
     },
     mcp: { description: "list MCP servers + tools attached to this session" },
     resource: {
@@ -325,6 +338,9 @@ export const EN: TranslationSchema = {
       argsHint: "[text]",
     },
     doctor: { description: "health check (api / config / api-reach / index / hooks / project)" },
+    "cache-miss-report": {
+      description: "explain recent prompt-cache misses from local prefix evidence",
+    },
     context: { description: "show context-window breakdown (system / tools / log / input)" },
     retry: { description: "truncate & resend your last message (fresh sample)" },
     compact: {
@@ -352,6 +368,16 @@ export const EN: TranslationSchema = {
       description:
         "connect, inspect, or disconnect the QQ channel for this session (first connect guides App ID / App Secret setup)",
       argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
+    },
+    telegram: {
+      description:
+        "connect, inspect, or disconnect the Telegram channel for this session (first connect guides bot token setup)",
+      argsHint: "[connect [botToken]|status|disconnect]",
+    },
+    weixin: {
+      description:
+        "connect, inspect, or disconnect the Weixin channel for this session (first connect uses iLink QR login)",
+      argsHint: "[connect [manual token accountId [baseUrl]]|status|disconnect]",
     },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
@@ -424,8 +450,8 @@ export const EN: TranslationSchema = {
     },
     "search-engine": {
       description:
-        "switch web search backend — bing (default, works from CN without proxy), bing-intl (international index), searxng (self-hosted), metaso (free 100/d), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), brave (independent index), or ollama (Ollama cloud web search)",
-      argsHint: "<bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama> [<key>]",
+        "switch web search backend — bing (default, works from CN without proxy), bing-intl (international index), searxng (self-hosted), metaso (free 100/d), baidu (Baidu AI Search, free 1500/mo per docs), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), brave (independent index), or ollama (Ollama cloud web search)",
+      argsHint: "<bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama> [<key>]",
     },
   },
   wizard: {
@@ -447,12 +473,33 @@ export const EN: TranslationSchema = {
     themeSubtitle: "Preview updates live as you navigate. Change later with /theme.",
     themeSampleHeading: "Sample",
     themeFooter: "[↑↓] navigate · [Enter] confirm · [Esc] cancel",
+    themeName: {
+      graphite: "Graphite",
+      ember: "Ember",
+      aurora: "Aurora",
+      sandstone: "Sandstone",
+      porcelain: "Porcelain",
+      linen: "Linen",
+      glacier: "Glacier",
+      midnight: "Midnight",
+      dark: "Dark",
+      light: "Light",
+      "deep-blue": "Deep Blue",
+      "high-contrast": "High Contrast",
+    },
     themeCaption: {
-      dark: "Cool dark tones (default)",
-      light: "Clean light mode",
-      midnight: "Tokyo Night palette",
-      "deep-blue": "Deep blue on black",
-      "high-contrast": "Accessibility",
+      graphite: "Original dark palette with neutral graphite panels",
+      ember: "Warm dark palette with stronger Reasonix orange accents",
+      aurora: "Teal-green dark palette for a softer low-light workspace",
+      sandstone: "Original warm light palette",
+      porcelain: "Clean light palette with quiet contrast",
+      linen: "Editorial warm light palette with paper-like surfaces",
+      glacier: "Cool light palette with crisp blue accents",
+      midnight: "Navy dark palette with cool blue surfaces",
+      dark: "Cool dark tones (legacy alias)",
+      light: "Clean light mode (legacy alias)",
+      "deep-blue": "Deep blue on black (legacy alias)",
+      "high-contrast": "Accessibility (legacy alias)",
     },
     reviewLabelTheme: "Theme",
     mcpTitle: "Which MCP servers should Reasonix wire up for you?",
@@ -488,6 +535,7 @@ export const EN: TranslationSchema = {
   themePicker: {
     header: "Theme",
     footer: "↑↓ pick · ⏎ confirm · esc cancel",
+    autoLabel: "Auto",
     currentPref: "current preference",
     activeNow: "active now",
     autoDesc: "use REASONIX_THEME or default",
@@ -857,11 +905,103 @@ export const EN: TranslationSchema = {
       unauthorizedMessage:
         "QQ ignored message from unauthorized openid {openid}. Current access: {access}.",
       runtimeBound:
-        "QQ temporarily bound this run to first sender {openid}. Set `qq.ownerOpenId` in config to persist access.",
+        "QQ temporarily bound this run to first sender {openid}. If you want this account to stay fixed, set it in QQ settings.",
       missingAppId: "QQ App ID is required. Run `/qq connect` to configure.",
       missingAppSecret: "QQ App Secret is required. Run `/qq connect` to configure.",
       authFailed: "QQ bot authentication failed — check your App ID and App Secret.",
       readyTimeout: "QQ bot did not receive READY within 15s — check your App ID and App Secret.",
+    },
+    telegram: {
+      unavailable: "/telegram is not available in this session.",
+      connecting: "Telegram: connecting...",
+      connectFailed: "Telegram connect failed: {reason}",
+      disconnecting: "Telegram: disconnecting...",
+      disconnectFailed: "Telegram disconnect failed: {reason}",
+      usage: "Usage: /telegram connect [botToken] | /telegram status | /telegram disconnect",
+      promptBotToken:
+        "Telegram setup: enter your bot token from BotFather, then press Enter. Type /cancel to abort.",
+      setupWaitingBotToken: "waiting for bot token",
+      setupCancelled: "Telegram setup cancelled.",
+      credentialsRequired: "Telegram bot token is required.",
+      connected: "Telegram connected in {mode} mode. It will auto-start on future launches.",
+      alreadyConnected: "Telegram is already connected in {mode} mode. Auto-start is enabled.",
+      disconnected: "Telegram disconnected. Auto-start is disabled.",
+      status:
+        "Telegram: {connected}, auto-start {enabled}, token {configured}, botToken {botToken}, access {access}, current mode {mode}.",
+      statusSetup: "Telegram: setup in progress - {step}",
+      stateConnected: "connected",
+      stateDisconnected: "disconnected",
+      stateEnabled: "enabled",
+      stateDisabled: "disabled",
+      stateConfigured: "configured",
+      stateNotConfigured: "not configured",
+      none: "none",
+      modeChat: "chat",
+      modeCode: "code",
+      accessOwner: "owner {owner}",
+      accessOwnerWithAllowlist: "owner {owner}, allowlist {count}",
+      accessAllowlist: "allowlist {count}",
+      accessRuntime: "first-sender (runtime only, {owner})",
+      accessRequiredShort: "access control required",
+      lockAlreadyRunning:
+        "Telegram channel is already running in process {pid}. Stop that process before starting another Telegram channel.",
+      unauthorizedMessage:
+        "Telegram ignored message from unauthorized user {userId}. Current access: {access}.",
+      runtimeBound:
+        "Telegram temporarily bound this run to first sender {userId}. Set `telegram.ownerUserId` in config to persist access.",
+      missingBotToken: "Telegram bot token is required. Run `/telegram connect` to configure.",
+      accessRequired:
+        "Telegram requires access control before it can start. Set `telegram.ownerUserId` or `telegram.allowlist` in config.",
+      rateLimited:
+        "Telegram rate-limited authorized user {userId}: more than 5 messages in {seconds}s.",
+      rateLimitedReply:
+        "Telegram is receiving messages too quickly. Please wait {seconds}s before sending more.",
+    },
+    weixin: {
+      unavailable: "/weixin is not available in this session.",
+      connecting: "Weixin: connecting...",
+      connectFailed: "Weixin connect failed: {reason}",
+      disconnecting: "Weixin: disconnecting...",
+      disconnectFailed: "Weixin disconnect failed: {reason}",
+      usage:
+        "Usage: /weixin connect | /weixin connect manual [token accountId [baseUrl]] | /weixin status | /weixin disconnect",
+      promptCredentials:
+        "Weixin manual setup: enter iLink token and account id separated by a space, then press Enter. Type /cancel to abort.",
+      setupWaitingCredentials: "waiting for iLink token and account id",
+      setupCancelled: "Weixin setup cancelled.",
+      credentialsRequired: "Weixin token and account id are required.",
+      connected: "Weixin connected in {mode} mode. It will auto-start on future launches.",
+      alreadyConnected: "Weixin is already connected in {mode} mode. Auto-start is enabled.",
+      disconnected: "Weixin disconnected. Auto-start is disabled.",
+      status:
+        "Weixin: {connected}, auto-start {enabled}, credentials {configured}, token {token}, account {accountId}, access {access}, current mode {mode}.",
+      statusSetup: "Weixin: setup in progress - {step}",
+      stateConnected: "connected",
+      stateDisconnected: "disconnected",
+      stateEnabled: "enabled",
+      stateDisabled: "disabled",
+      stateConfigured: "configured",
+      stateNotConfigured: "not configured",
+      none: "none",
+      modeChat: "chat",
+      modeCode: "code",
+      accessOwner: "owner {owner}",
+      accessOwnerWithAllowlist: "owner {owner}, allowlist {count}",
+      accessAllowlist: "allowlist {count}",
+      accessRuntime: "first-sender (runtime only, {owner})",
+      accessRequiredShort: "access control required",
+      lockAlreadyRunning:
+        "Weixin channel is already running in process {pid}. Stop that process before starting another Weixin channel.",
+      unauthorizedMessage:
+        "Weixin ignored message from unauthorized user {userId}. Current access: {access}.",
+      runtimeBound:
+        "Weixin temporarily bound this run to first sender {userId}. Set `weixin.ownerUserId` in config to persist access.",
+      missingToken: "Weixin iLink token is required. Run `/weixin connect` to configure.",
+      missingAccountId: "Weixin account id is required. Run `/weixin connect` to configure.",
+      accessRequired:
+        "Weixin requires access control before it can start. Set `weixin.ownerUserId` or `weixin.allowlist` in config.",
+      rateLimited:
+        "Weixin rate-limited authorized user {userId}: more than 5 messages in {seconds}s.",
     },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",
@@ -974,6 +1114,17 @@ export const EN: TranslationSchema = {
         "▲ budget → ${cap} but already spent ${spent}. Next turn will be refused — bump the cap higher to keep going, or end the session.",
       budgetSet:
         "budget → ${cap}  (so far: ${spent} · warns at 80%, refuses next turn at 100% · /budget off to clear)",
+      maxTokensNoCap: "max-tokens → no cap  (server default applies · /max-tokens <N> to set)",
+      maxTokensStatus: "max-tokens → {n} tokens per turn  (/max-tokens off to clear)",
+      maxTokensSet: "max-tokens → {n}  (next turn capped at {n} output tokens)",
+      maxTokensOff: "max-tokens → off (no cap, server default applies)",
+      maxTokensUsage:
+        "usage: /max-tokens <positive integer>   e.g. /max-tokens 4096  ·  /max-tokens off",
+    },
+    diff: {
+      diffStatus: "diff display → {current}",
+      diffSet: "diff display → {mode}",
+      diffInvalid: "unknown mode: {mode}\navailable: {choices}",
     },
     permissions: {
       mutateCodeOnly:
@@ -1012,6 +1163,13 @@ export const EN: TranslationSchema = {
       projectNone1: '  (none — pick "always allow" on a ShellConfirm prompt to add one,',
       projectNone2: "   or `/permissions add <prefix>` directly.)",
       projectNoRoot: "Project allowlist — (no project root; chat mode shows builtin entries only)",
+      globalHeader: "Global allowlist ({count}) — applies to every project",
+      globalNone: "  (none — add with `/permissions add --global <prefix>`.)",
+      addGlobalInfo:
+        "▸ added to global allowlist: {prefix}\n  → next `{prefix}` invocation runs without prompting in every project.",
+      removeGlobalEmpty: "▸ no global allowlist entries to remove.",
+      clearGlobalConfirm:
+        "about to drop {count} global allowlist entr{plural}. Re-run with the word 'confirm': /permissions clear --global confirm",
       builtinHeader: "Builtin allowlist ({count}) — read-only, baked in",
       subcommands:
         "Subcommands: /permissions add <prefix> · /permissions remove <prefix-or-N> · /permissions clear confirm",
@@ -1209,6 +1367,8 @@ export const EN: TranslationSchema = {
       usageSearxngUrl: "  /search-engine searxng <url>      use SearXNG at custom endpoint",
       usageMetaso:
         "  /search-engine metaso              use Metaso API (100/d free, configure your own API key for more)",
+      usageBaidu:
+        "  /search-engine baidu               use Baidu AI Search API (free 1500/mo in Baidu docs — set BAIDU_API_KEY or QIANFAN_API_KEY)",
       usageTavily:
         "  /search-engine tavily              use Tavily API (LLM-friendly, free 1000/mo — set TAVILY_API_KEY or tavilyApiKey in config; get one at https://tavily.com)",
       usagePerplexity:
@@ -1227,6 +1387,8 @@ export const EN: TranslationSchema = {
       switchedSearxngNote: " Make sure SearXNG is running at {endpoint}.",
       switchedMetasoNote:
         " There is a daily quota of 100 (configure your own API key for higher limits).",
+      switchedBaiduNote:
+        " Set BAIDU_API_KEY, QIANFAN_API_KEY, or `baiduApiKey` in config; Baidu docs list 1500 free searches per month.",
       switchedTavilyNote:
         " Set TAVILY_API_KEY or `tavilyApiKey` in config; free 1000/mo at https://tavily.com.",
       switchedPerplexityNote:
@@ -1542,25 +1704,25 @@ export const EN: TranslationSchema = {
   },
   webErrors: {
     status:
-      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search {status} \u2014 try: the search backend returned an error; rephrase the query, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     rateLimit429:
       "web_search 429 \u2014 try: wait 10s before retrying, or rephrase the query; the search backend is rate-limiting this client",
     forbidden403:
-      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama, or wait and retry later",
+      "web_search 403 \u2014 try: the search backend is blocking this client; switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama, or wait and retry later",
     serverError5xx:
       "web_search {status} \u2014 try: open the search URL in a browser; if it loads this is transient and a retry in 30s may help",
     bingBlocked:
-      "web_search: Bing anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Bing anti-bot page \u2014 rate-limited or blocked \u2014 try: wait 30s and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     bingNoResults:
-      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: 0 results but response doesn't look like a real empty page ({chars} chars, first 120: {preview}) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     invalidEndpoint:
       'web_search: invalid SearXNG endpoint "{endpoint}" \u2014 try: set a valid URL with /search-endpoint http://host:port',
     endpointMustBeHttp:
       "web_search: SearXNG endpoint must be http(s), got {protocol} \u2014 try: set a valid URL with /search-endpoint http://host:port",
     cannotReach:
-      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to another engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Cannot reach SearXNG server at {endpoint} \u2014 try: install and start SearXNG (https://github.com/searxng/searxng, e.g. `docker run -d -p 8080:8080 searxng/searxng`), or switch to another engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     searxngNoResults:
-      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: 0 results but SearXNG response doesn't look like an empty results page ({chars} chars) \u2014 try: rephrase the query with simpler terms, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     metasoMissingKey:
       "web_search: Metaso requires an API key \u2014 set METASO_API_KEY or configure one with /search-engine metaso <key>. Get one at https://metaso.cn/search-api/playground",
     metasoDailyLimit:
@@ -1570,18 +1732,28 @@ export const EN: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metaso rate-limited \u2014 wait and retry, or get your own API key at https://metaso.cn/search-api/playground",
     metasoServerError:
-      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Metaso server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     metasoParseError:
       "web_search: Metaso returned unparseable response (HTTP {status}) \u2014 try again later",
     metasoApiError: "web_search: Metaso API error (code {code}: {message}) \u2014 try again later",
+    baiduMissingKey:
+      "web_search: Baidu AI Search requires an API key \u2014 set BAIDU_API_KEY or QIANFAN_API_KEY env var, configure `baiduApiKey` in ~/.reasonix/config.json, or run /search-engine baidu <key>. Get one from Baidu Cloud Qianfan.",
+    baiduUnauthorized:
+      "web_search: Baidu AI Search API key rejected \u2014 check BAIDU_API_KEY, QIANFAN_API_KEY, or `baiduApiKey`.",
+    baiduRateLimit:
+      "web_search: Baidu AI Search rate-limited or quota exceeded \u2014 wait and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
+    baiduServerError:
+      "web_search: Baidu AI Search server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
+    baiduParseError:
+      "web_search: Baidu AI Search returned an unparseable response (HTTP {status}) \u2014 try again later",
     tavilyMissingKey:
       "web_search: Tavily backend requires an API key \u2014 set TAVILY_API_KEY env var or `tavilyApiKey` in ~/.reasonix/config.json; free 1000/mo signup at https://tavily.com",
     tavilyUnauthorized:
       "web_search: Tavily API key rejected \u2014 check TAVILY_API_KEY or get one at https://tavily.com",
     tavilyRateLimit:
-      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama, or upgrade your Tavily plan",
+      "web_search: Tavily rate-limited or monthly quota exceeded \u2014 wait, switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama, or upgrade your Tavily plan",
     tavilyServerError:
-      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Tavily server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     tavilyParseError:
       "web_search: Tavily returned unparseable response (HTTP {status}) \u2014 try again later",
     perplexityMissingKey:
@@ -1589,9 +1761,9 @@ export const EN: TranslationSchema = {
     perplexityUnauthorized:
       "web_search: Perplexity API key rejected \u2014 check PERPLEXITY_API_KEY or get one at https://perplexity.ai/settings/api",
     perplexityRateLimit:
-      "web_search: Perplexity rate-limited \u2014 wait and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Perplexity rate-limited \u2014 wait and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     perplexityServerError:
-      "web_search: Perplexity server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Perplexity server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     perplexityParseError:
       "web_search: Perplexity returned unparseable response (HTTP {status}) \u2014 try again later",
     exaMissingKey:
@@ -1601,7 +1773,7 @@ export const EN: TranslationSchema = {
     exaRateLimit:
       "web_search: Exa API rate-limited or monthly quota exceeded \u2014 wait or upgrade at https://exa.ai/pricing",
     exaServerError:
-      "web_search: Exa server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Exa server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     exaParseError:
       "web_search: Exa returned unparseable response (HTTP {status}) \u2014 try again later",
     braveMissingKey:
@@ -1611,7 +1783,7 @@ export const EN: TranslationSchema = {
     braveRateLimit:
       "web_search: Brave Search API rate-limited or monthly quota exceeded \u2014 wait or upgrade at https://brave.com/search/api/",
     braveServerError:
-      "web_search: Brave Search server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "web_search: Brave Search server error ({status}) \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     braveParseError:
       "web_search: Brave Search returned unparseable response (HTTP {status}) \u2014 try again later",
     ollamaMissingKey:
@@ -1619,9 +1791,9 @@ export const EN: TranslationSchema = {
     ollamaUnauthorized:
       "Ollama API key rejected \u2014 check OLLAMA_API_KEY or get one at https://ollama.com/settings/keys",
     ollamaRateLimit:
-      "Ollama rate-limited or quota exceeded \u2014 wait and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "Ollama rate-limited or quota exceeded \u2014 wait and retry, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     ollamaServerError:
-      "Ollama server error ({status}) for {url} \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama",
+      "Ollama server error ({status}) for {url} \u2014 try again later, or switch engine with /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     ollamaParseError:
       "Ollama returned unparseable response (HTTP {status}) for {url} \u2014 try again later",
     fetchOllamaMissingKey:

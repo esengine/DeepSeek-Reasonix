@@ -1,7 +1,7 @@
 /** Library reads only DEEPSEEK_API_KEY from env; the CLI bridges config.json → env var. */
 
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
@@ -15,14 +15,18 @@ import {
 } from "./index/config.js";
 import { type McpServerSpec, parseMcpSpec } from "./mcp/spec.js";
 import { normalizeQQAllowlist, normalizeQQOpenId } from "./qq/access.js";
+import { normalizeTelegramAllowlist, normalizeTelegramUserId } from "./telegram/access.js";
 import {
   type NormalizedToolRateLimitConfig,
   type ToolRateLimitConfig,
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
+import { normalizeWeixinAllowlist, normalizeWeixinUserId } from "./weixin/access.js";
+import { loadWeixinAccount, saveWeixinAccount } from "./weixin/account.js";
 
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
 export type EditMode = "review" | "auto" | "yolo" | "plan";
+export type DesktopCloseBehavior = "closeToTray" | "closeToQuit";
 
 export const DEFAULT_MODEL = "deepseek-v4-flash";
 
@@ -43,6 +47,7 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
 
 export type EngineeringLifecycleMode = "off" | "strict";
 export type HistoryScrollMode = "auto" | "native" | "app";
+export type DiffDisplay = "summary" | "full" | "none";
 
 export type EmbeddingProvider = "ollama" | "openai-compat";
 
@@ -107,6 +112,7 @@ export interface McpServerConfig {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  cwd?: string;
   transport?: "stdio" | "sse" | "streamable-http";
   /** Claude `.mcp.json` alias for `transport`; `"http"` is treated as `"streamable-http"`. */
   type?: "stdio" | "sse" | "streamable-http" | "http";
@@ -123,6 +129,22 @@ export interface QQBotConfig {
   sandbox?: boolean;
   enabled?: boolean;
   ownerOpenId?: string;
+  allowlist?: string[];
+}
+
+export interface TelegramBotConfig {
+  botToken?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
+  allowlist?: string[];
+}
+
+export interface WeixinBotConfig {
+  token?: string;
+  accountId?: string;
+  baseUrl?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
   allowlist?: string[];
 }
 
@@ -160,12 +182,16 @@ export interface ReasonixConfig {
   /** When false, skip the boot splash animation and show the main UI immediately. Default true. */
   banner?: boolean;
   reasoningEffort?: ReasoningEffort;
+  /** Per-turn output token cap sent as `max_tokens` in the API request (#2196). Null = no cap. */
+  maxOutputTokens?: number | null;
   /** Default workspace root for the desktop client. CLI uses cwd. */
   workspaceDir?: string;
   /** Last N workspace paths the desktop client has opened, most recent first. */
   recentWorkspaces?: string[];
   /** Desktop only — open tabs in tab order, each with its workspace dir, loaded session and focus, persisted so restart restores every tab and its conversation (issues #933, #1244). Empty/absent → boot with a single default tab. */
   desktopOpenTabs?: DesktopOpenTab[];
+  /** Desktop only — window close behavior. "closeToTray" hides the window and keeps sessions running; "closeToQuit" exits Reasonix. Default closeToQuit. */
+  desktopCloseBehavior?: DesktopCloseBehavior;
   /** Desktop only — `openWith` value for clicking file links. Empty/undefined = OS default app. Examples: "code", "cursor", "C:\\path\\to\\editor.exe". */
   editor?: string;
   theme?: ThemeName | "auto";
@@ -180,12 +206,13 @@ export interface ReasonixConfig {
   session?: string | null;
   setupCompleted?: boolean;
   search?: boolean;
-  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
+  /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "baidu" (Baidu AI Search API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */
   webSearchEngine?:
     | "bing"
     | "bing-intl"
     | "searxng"
     | "metaso"
+    | "baidu"
     | "tavily"
     | "perplexity"
     | "exa"
@@ -195,6 +222,8 @@ export interface ReasonixConfig {
   webSearchEndpoint?: string;
   /** Metaso API key. Falls back to METASO_API_KEY env var. */
   metasoApiKey?: string;
+  /** Baidu AI Search API key. Falls back to BAIDU_API_KEY or QIANFAN_API_KEY env var. */
+  baiduApiKey?: string;
   /** Tavily API key. Falls back to TAVILY_API_KEY env var. No baked-in default — free tier is 1000/mo per account, sharing would burn out. */
   tavilyApiKey?: string;
   /** Perplexity API key. Falls back to PERPLEXITY_API_KEY env var. Get one at https://perplexity.ai/settings/api */
@@ -212,6 +241,8 @@ export interface ReasonixConfig {
   mouseWheelRows?: number;
   /** Chat-history scrolling: "native" leaves terminal scrollback in charge; "app" captures wheel/PgUp/PgDn/End inside the TUI; "auto" enables app mode for terminals with known jumpy native scrollback. */
   historyScrollMode?: HistoryScrollMode;
+  /** Diff display mode for edit_file / write_file / multi_edit results in CLI. */
+  diffDisplay?: DiffDisplay;
   dashboard?: {
     /** Whether the embedded dashboard auto-starts on launch. Default true. Set false to disable without passing --no-dashboard each time. */
     enabled?: boolean;
@@ -253,6 +284,9 @@ export interface ReasonixConfig {
       pathAllowed?: string[];
     };
   };
+  /** Global shell allowlist — command prefixes auto-approved across ALL projects (#2059).
+   *  Merged (union) with the per-project `projects[<root>].shellAllowed` at check time. */
+  shellAllowedGlobal?: string[];
   /** Issue #259 — user-configurable sensitive-path prefixes and filename patterns.
    *  Commands touching these paths are demoted to the confirm gate even when allowlisted. */
   sensitivePaths?: {
@@ -291,6 +325,8 @@ export interface ReasonixConfig {
   };
   /** QQ Bot configuration */
   qq?: QQBotConfig;
+  telegram?: TelegramBotConfig;
+  weixin?: WeixinBotConfig;
 }
 
 export interface CustomMemoryTypeConfig {
@@ -360,6 +396,14 @@ export function loadMetasoApiKey(path: string = defaultConfigPath()): string | u
   return undefined;
 }
 
+export function loadBaiduApiKey(path: string = defaultConfigPath()): string | undefined {
+  if (process.env.BAIDU_API_KEY) return process.env.BAIDU_API_KEY.trim();
+  if (process.env.QIANFAN_API_KEY) return process.env.QIANFAN_API_KEY.trim();
+  const cfg = readConfig(path).baiduApiKey;
+  if (cfg && typeof cfg === "string" && cfg.trim()) return cfg.trim();
+  return undefined;
+}
+
 /** Tavily API key — env > config > undefined. Returning undefined means the caller must error out with a clear "go get one at tavily.com" message; we deliberately ship no default because the free 1000/mo quota wouldn't survive being shared. */
 export function loadTavilyApiKey(path: string = defaultConfigPath()): string | undefined {
   if (process.env.TAVILY_API_KEY) return process.env.TAVILY_API_KEY.trim();
@@ -415,6 +459,7 @@ const STRING_ARRAY_FIELDS: Array<readonly string[]> = [
   ["mcp"],
   ["mcpDisabled"],
   ["recentWorkspaces"],
+  ["shellAllowedGlobal"],
   ["skills", "paths"],
 ];
 
@@ -451,25 +496,52 @@ function sanitizeStringArrayField(
   parent[leaf] = filtered;
 }
 
+/** Mtime-keyed cache for readConfig (shared, read-only — callers must not mutate).
+ *  Caveat: mtime resolution ~1 s; external edits may be missed within that window. */
+const _configCache = new Map<string, { mtimeMs: number; cfg: ReasonixConfig }>();
+
 export function readConfig(path: string = defaultConfigPath()): ReasonixConfig {
+  let fd: number | undefined;
   try {
+    // Open the file descriptor first, then fstat + read from the same fd.
+    // This eliminates the TOCTOU race where statSync sees one mtime but
+    // readFileSync reads a different version of the file (CodeQL flagged).
+    fd = openSync(path, "r");
+    const st = fstatSync(fd);
+    const cached = _configCache.get(path);
+    if (cached && cached.mtimeMs === st.mtimeMs) {
+      closeSync(fd);
+      return cached.cfg;
+    }
     // Strip the UTF-8 BOM if a foreign writer left one in — Windows
     // PowerShell 5's `Set-Content -Encoding UTF8` and several text
     // editors emit `EF BB BF` at the head of the file. `JSON.parse`
     // refuses BOM-prefixed input and throws, which used to fall
     // through to `return {}` and silently nuke every saved field on
     // the next read-modify-write.
-    const raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+    const raw = readFileSync(fd, "utf8").replace(/^\uFEFF/, "");
+    closeSync(fd);
+    fd = undefined;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const cfg = parsed as Record<string, unknown>;
       for (const segments of STRING_ARRAY_FIELDS) {
         sanitizeStringArrayField(cfg, segments, path);
       }
-      return cfg as ReasonixConfig;
+      const result = cfg as ReasonixConfig;
+      _configCache.set(path, { mtimeMs: st.mtimeMs, cfg: result });
+      return result;
     }
   } catch {
     /* missing or malformed → empty config */
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+    }
   }
   return {};
 }
@@ -521,8 +593,9 @@ export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPat
   // config.json, which readConfig would then parse as `{}` and the next
   // saveX would silently overwrite every other field with that empty
   // baseline (issue #1535).
-  const tmp = `${path}.${process.pid}.tmp`;
+  const tmp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
   atomicWriteSync(path, JSON.stringify(cfg, null, 2), tmp);
+  _configCache.delete(path);
 }
 
 /** Resolve the language from config file. */
@@ -565,6 +638,28 @@ function normalizeStringRecord(value: unknown): Record<string, string> | undefin
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Expand env var references in header values (#2148). Supported forms:
+ *  `${VAR}`, `${env:VAR}`, `${VAR:-default}`, `${env:VAR:-default}`.
+ *  Unset variables with no default are left as-is so the error surfaces at bridge time. */
+function expandEnvInRecord(
+  record: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!record) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(record)) {
+    out[k] = v.replace(
+      /\$\{(?:env:)?([^}:]+)(?::-((?:[^}]|\}(?!\}))*))?\}/g,
+      (match, name: string, defaultVal?: string) => {
+        const expanded = process.env[name.trim()];
+        if (expanded !== undefined) return expanded;
+        if (defaultVal !== undefined) return defaultVal;
+        return match;
+      },
+    );
+  }
+  return out;
+}
+
 export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]): McpServerSpec[] {
   const result: McpServerSpec[] = [];
   const seen = new Set<string>();
@@ -604,6 +699,7 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
         command: (serverCfg as McpServerConfig).command ?? "",
         args: (serverCfg as McpServerConfig).args ?? [],
         env,
+        cwd: (serverCfg as McpServerConfig).cwd,
         disabled,
         requestTimeoutMs: (serverCfg as McpServerConfig).requestTimeoutMs,
       };
@@ -618,7 +714,9 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
       let url = (serverCfg as McpServerConfig).url ?? "";
       const streamMatch = /^streamable\+(https?:\/\/.+)$/i.exec(url);
       if (streamMatch) url = streamMatch[1]!;
-      const headers = normalizeStringRecord((serverCfg as McpServerConfig).headers);
+      const headers = expandEnvInRecord(
+        normalizeStringRecord((serverCfg as McpServerConfig).headers),
+      );
       if (transport === "sse") {
         const spec: McpServerSpec = {
           transport: "sse",
@@ -772,6 +870,18 @@ export function loadMouseWheelRows(path: string = defaultConfigPath()): number |
 export function loadHistoryScrollMode(path: string = defaultConfigPath()): HistoryScrollMode {
   const raw = readConfig(path).historyScrollMode;
   return raw === "native" || raw === "app" || raw === "auto" ? raw : "auto";
+}
+
+export function loadDiffDisplay(path: string = defaultConfigPath()): DiffDisplay {
+  const raw = readConfig(path).diffDisplay;
+  if (raw === "full" || raw === "none") return raw;
+  return "summary";
+}
+
+export function saveDiffDisplay(mode: DiffDisplay, path: string = defaultConfigPath()): void {
+  const cfg = readConfig(path);
+  cfg.diffDisplay = mode;
+  writeConfig(cfg, path);
 }
 
 export function loadToolRateLimit(
@@ -964,6 +1074,7 @@ export function webSearchEngine(
   | "bing-intl"
   | "searxng"
   | "metaso"
+  | "baidu"
   | "tavily"
   | "perplexity"
   | "exa"
@@ -973,6 +1084,7 @@ export function webSearchEngine(
   if (cfg === "bing-intl") return "bing-intl";
   if (cfg === "searxng") return "searxng";
   if (cfg === "metaso") return "metaso";
+  if (cfg === "baidu") return "baidu";
   if (cfg === "tavily") return "tavily";
   if (cfg === "perplexity") return "perplexity";
   if (cfg === "exa") return "exa";
@@ -1073,6 +1185,45 @@ export function clearProjectShellAllowed(
   if (!cfg.projects) cfg.projects = {};
   if (!cfg.projects[key]) cfg.projects[key] = {};
   cfg.projects[key].shellAllowed = [];
+  writeConfig(cfg, path);
+  return existing.length;
+}
+
+/** Global allowlist applies to every project (#2059) — read with no rootDir. */
+export function loadGlobalShellAllowed(path: string = defaultConfigPath()): string[] {
+  return readConfig(path).shellAllowedGlobal ?? [];
+}
+
+export function addGlobalShellAllowed(prefix: string, path: string = defaultConfigPath()): void {
+  const trimmed = prefix.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (existing.includes(trimmed)) return;
+  cfg.shellAllowedGlobal = [...existing, trimmed];
+  writeConfig(cfg, path);
+}
+
+/** Match is exact after trim — NOT prefix-match (mirrors removeProjectShellAllowed). */
+export function removeGlobalShellAllowed(
+  prefix: string,
+  path: string = defaultConfigPath(),
+): boolean {
+  const trimmed = prefix.trim();
+  if (!trimmed) return false;
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (!existing.includes(trimmed)) return false;
+  cfg.shellAllowedGlobal = existing.filter((p) => p !== trimmed);
+  writeConfig(cfg, path);
+  return true;
+}
+
+export function clearGlobalShellAllowed(path: string = defaultConfigPath()): number {
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (existing.length === 0) return 0;
+  cfg.shellAllowedGlobal = [];
   writeConfig(cfg, path);
   return existing.length;
 }
@@ -1215,7 +1366,7 @@ export function resolveThemePreference(
   configTheme: ThemeName | "auto" | undefined,
   envTheme?: string | null,
 ): ThemeName {
-  if (configTheme && configTheme !== "auto") return configTheme;
+  if (configTheme && configTheme !== "auto") return resolveThemeName(configTheme);
   return resolveThemeName(envTheme);
 }
 
@@ -1232,6 +1383,22 @@ export function saveReasoningEffort(
 ): void {
   const cfg = readConfig(path);
   cfg.reasoningEffort = effort;
+  writeConfig(cfg, path);
+}
+
+/** Returns undefined when no cap is set (caller passes nothing to the API, server default applies). */
+export function loadMaxOutputTokens(path: string = defaultConfigPath()): number | undefined {
+  const v = readConfig(path).maxOutputTokens;
+  if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
+  return undefined;
+}
+
+export function saveMaxOutputTokens(
+  tokens: number | null,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.maxOutputTokens = tokens ?? undefined;
   writeConfig(cfg, path);
 }
 
@@ -1277,6 +1444,19 @@ export function saveEditor(editor: string, path: string = defaultConfigPath()): 
   const trimmed = editor.trim();
   if (trimmed) cfg.editor = trimmed;
   else cfg.editor = undefined;
+  writeConfig(cfg, path);
+}
+
+export function loadDesktopCloseBehavior(path: string = defaultConfigPath()): DesktopCloseBehavior {
+  return readConfig(path).desktopCloseBehavior === "closeToTray" ? "closeToTray" : "closeToQuit";
+}
+
+export function saveDesktopCloseBehavior(
+  behavior: DesktopCloseBehavior,
+  path: string = defaultConfigPath(),
+): void {
+  const cfg = readConfig(path);
+  cfg.desktopCloseBehavior = behavior;
   writeConfig(cfg, path);
 }
 
@@ -1574,6 +1754,113 @@ export function saveQQConfig(cfg: LoadedQQConfig, path: string = defaultConfigPa
     sandbox: cfg.sandbox,
     enabled: cfg.enabled,
     ownerOpenId,
+    allowlist,
+  };
+  writeConfig(rootCfg, path);
+}
+
+export interface LoadedTelegramConfig {
+  botToken?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
+  allowlist?: string[];
+}
+
+export function loadTelegramConfig(path: string = defaultConfigPath()): LoadedTelegramConfig {
+  const envAllowlist = normalizeTelegramAllowlist(process.env.TELEGRAM_ALLOWLIST);
+  const fromEnv = {
+    botToken: process.env.TELEGRAM_BOT_TOKEN,
+    ownerUserId: normalizeTelegramUserId(process.env.TELEGRAM_OWNER_USER_ID),
+    allowlist: envAllowlist,
+  };
+  const fromCfg = readConfig(path).telegram ?? {};
+  const ownerUserId = fromEnv.ownerUserId ?? normalizeTelegramUserId(fromCfg.ownerUserId);
+  const allowlist = normalizeTelegramAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  return {
+    botToken: fromEnv.botToken ?? fromCfg.botToken,
+    enabled: fromCfg.enabled === true,
+    ownerUserId,
+    allowlist,
+  };
+}
+
+export function saveTelegramConfig(
+  cfg: LoadedTelegramConfig,
+  path: string = defaultConfigPath(),
+): void {
+  const rootCfg = readConfig(path);
+  const ownerUserId = normalizeTelegramUserId(cfg.ownerUserId);
+  const allowlist = normalizeTelegramAllowlist(cfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  rootCfg.telegram = {
+    botToken: cfg.botToken,
+    enabled: cfg.enabled,
+    ownerUserId,
+    allowlist,
+  };
+  writeConfig(rootCfg, path);
+}
+
+export interface LoadedWeixinConfig {
+  token?: string;
+  accountId?: string;
+  baseUrl?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
+  allowlist?: string[];
+}
+
+export function loadWeixinConfig(path: string = defaultConfigPath()): LoadedWeixinConfig {
+  const envAllowlist = normalizeWeixinAllowlist(process.env.WEIXIN_ALLOWLIST);
+  const fromEnv = {
+    token: process.env.WEIXIN_TOKEN,
+    accountId: process.env.WEIXIN_ACCOUNT_ID,
+    baseUrl: process.env.WEIXIN_BASE_URL,
+    ownerUserId: normalizeWeixinUserId(process.env.WEIXIN_OWNER_USER_ID),
+    allowlist: envAllowlist,
+  };
+  const fromCfg = readConfig(path).weixin ?? {};
+  const ownerUserId = fromEnv.ownerUserId ?? normalizeWeixinUserId(fromCfg.ownerUserId);
+  const allowlist = normalizeWeixinAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  const accountId = fromEnv.accountId ?? fromCfg.accountId;
+  const persisted = accountId ? loadWeixinAccount(accountId) : null;
+  return {
+    token: fromEnv.token ?? fromCfg.token ?? persisted?.token,
+    accountId,
+    baseUrl: fromEnv.baseUrl ?? fromCfg.baseUrl ?? persisted?.baseUrl,
+    enabled: fromCfg.enabled === true,
+    ownerUserId,
+    allowlist,
+  };
+}
+
+export function saveWeixinConfig(
+  cfg: LoadedWeixinConfig,
+  path: string = defaultConfigPath(),
+): void {
+  const rootCfg = readConfig(path);
+  const ownerUserId = normalizeWeixinUserId(cfg.ownerUserId);
+  const allowlist = normalizeWeixinAllowlist(cfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  if (cfg.accountId && cfg.token) {
+    saveWeixinAccount({
+      accountId: cfg.accountId,
+      token: cfg.token,
+      baseUrl: cfg.baseUrl,
+    });
+  }
+  rootCfg.weixin = {
+    token: undefined,
+    accountId: cfg.accountId,
+    baseUrl: cfg.baseUrl,
+    enabled: cfg.enabled,
+    ownerUserId,
     allowlist,
   };
   writeConfig(rootCfg, path);

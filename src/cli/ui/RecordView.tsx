@@ -4,6 +4,7 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import type { TranscriptRecord } from "../../transcript/log.js";
+import { FG } from "./theme/tokens.js";
 
 export interface RecordViewProps {
   rec: TranscriptRecord;
@@ -43,7 +44,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
             {t("recordView.assistant")}
           </Text>
           {rec.cost !== undefined ? (
-            <Text dim>
+            <Text color={FG.faint}>
               {"  $"}
               {rec.cost.toFixed(6)}
             </Text>
@@ -53,7 +54,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
         {rec.content ? (
           <Text>{rec.content}</Text>
         ) : (
-          <Text dim italic>
+          <Text color={FG.faint} italic>
             {t("recordView.toolCallOnly")}
           </Text>
         )}
@@ -69,12 +70,12 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
           {">"}
         </Text>
         {rec.args ? (
-          <Text dim>
+          <Text color={FG.faint}>
             {t("recordView.argsLabel")}
             {truncate(rec.args, toolArgsMax)}
           </Text>
         ) : null}
-        <Text dim>
+        <Text color={FG.faint}>
           {t("recordView.resultArrow")}
           {truncate(rec.content, toolContentMax)}
         </Text>
@@ -97,7 +98,7 @@ export function RecordView({ rec, compact = false }: RecordViewProps) {
   }
   return (
     <Box>
-      <Text dim>
+      <Text color={FG.faint}>
         [{rec.role}] {rec.content}
       </Text>
     </Box>
@@ -113,7 +114,7 @@ function CacheBadge({ usage }: { usage: NonNullable<TranscriptRecord["usage"]> }
   const color = pct >= 70 ? "ansi:green" : pct >= 40 ? "ansi:yellow" : "ansi:red";
   return (
     <Text>
-      <Text dim>{t("recordView.cache")}</Text>
+      <Text color={FG.faint}>{t("recordView.cache")}</Text>
       <Text color={color}>{pct.toFixed(1)}%</Text>
     </Text>
   );
