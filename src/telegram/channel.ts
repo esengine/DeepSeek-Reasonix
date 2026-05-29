@@ -10,6 +10,8 @@ import { TelegramBot, type TelegramMessage } from "./bot.js";
 const TELEGRAM_LOCK_FILE = join(homedir(), ".reasonix", "telegram-channel.pid");
 const TELEGRAM_MAX_CHARS = 3900;
 const NATURAL_SPLIT_MIN_FRACTION = 0.6;
+const TELEGRAM_MARKDOWN_WRAPPER_RE = /^```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n```$/i;
+const TELEGRAM_MARKDOWN_V2_SPECIAL_RE = /([_*\[\]()~`>#+\-=|{}.!])/g;
 
 function pickNaturalSplit(candidate: string): number {
   const minSplit = Math.floor(candidate.length * NATURAL_SPLIT_MIN_FRACTION);
@@ -37,6 +39,164 @@ export function splitTelegramMessage(text: string, maxChars = TELEGRAM_MAX_CHARS
   return chunks;
 }
 
+export function normalizeTelegramMarkdownReply(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(TELEGRAM_MARKDOWN_WRAPPER_RE);
+  if (!match) {
+    return text;
+  }
+  return match[1] ?? text;
+}
+
+function escapeTelegramMarkdownV2(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(TELEGRAM_MARKDOWN_V2_SPECIAL_RE, "\\$1");
+}
+
+function escapeTelegramMarkdownV2Code(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/`/g, "\\`");
+}
+
+function stripMarkdownEmphasis(text: string): string {
+  return text.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/__([^_\n]+)__/g, "$1");
+}
+
+function formatTelegramMarkdownV2Inline(text: string): string {
+  let formatted = "";
+  let index = 0;
+  while (index < text.length) {
+    if (text.startsWith("`", index)) {
+      const end = text.indexOf("`", index + 1);
+      if (end > index) {
+        formatted += `\`${escapeTelegramMarkdownV2Code(text.slice(index + 1, end))}\``;
+        index = end + 1;
+        continue;
+      }
+    }
+
+    if (text.startsWith("**", index)) {
+      const end = text.indexOf("**", index + 2);
+      if (end > index + 2) {
+        formatted += `*${escapeTelegramMarkdownV2(text.slice(index + 2, end))}*`;
+        index = end + 2;
+        continue;
+      }
+    }
+
+    if (text.startsWith("__", index)) {
+      const end = text.indexOf("__", index + 2);
+      if (end > index + 2) {
+        formatted += `*${escapeTelegramMarkdownV2(text.slice(index + 2, end))}*`;
+        index = end + 2;
+        continue;
+      }
+    }
+
+    formatted += escapeTelegramMarkdownV2(text[index] ?? "");
+    index++;
+  }
+  return formatted;
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  const cells = line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function parseMarkdownTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function formatTelegramMarkdownV2Table(
+  lines: string[],
+  start: number,
+): { text: string; next: number } {
+  const headers = parseMarkdownTableRow(lines[start] ?? "");
+  let index = start + 2;
+  const rows: string[] = [];
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    if (!line.includes("|") || isMarkdownTableSeparator(line)) break;
+    const cells = parseMarkdownTableRow(line);
+    if (cells.length < 2) break;
+    for (let cellIndex = 0; cellIndex < Math.min(headers.length, cells.length); cellIndex++) {
+      const header = stripMarkdownEmphasis(headers[cellIndex] ?? "");
+      const cell = cells[cellIndex] ?? "";
+      if (!header && !cell) continue;
+      rows.push(`• *${escapeTelegramMarkdownV2(header)}*: ${formatTelegramMarkdownV2Inline(cell)}`);
+    }
+    rows.push("");
+    index++;
+  }
+  while (rows.at(-1) === "") rows.pop();
+  return { text: rows.join("\n"), next: index };
+}
+
+export function formatTelegramMarkdownV2(text: string): string {
+  const lines = normalizeTelegramMarkdownReply(text).trim().split(/\r?\n/);
+  const formatted: string[] = [];
+  let inFence = false;
+  let fenceLang = "";
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] ?? "";
+    const fenceMatch = line.match(/^```([A-Za-z0-9_-]*)\s*$/);
+    if (fenceMatch) {
+      if (inFence) {
+        formatted.push("```");
+        inFence = false;
+        fenceLang = "";
+      } else {
+        inFence = true;
+        fenceLang = fenceMatch[1] ?? "";
+        formatted.push(`\`\`\`${escapeTelegramMarkdownV2Code(fenceLang)}`);
+      }
+      continue;
+    }
+
+    if (inFence) {
+      formatted.push(escapeTelegramMarkdownV2Code(line));
+      continue;
+    }
+
+    if (
+      line.includes("|") &&
+      index + 1 < lines.length &&
+      isMarkdownTableSeparator(lines[index + 1] ?? "")
+    ) {
+      const table = formatTelegramMarkdownV2Table(lines, index);
+      if (table.text) formatted.push(table.text);
+      index = table.next - 1;
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      formatted.push(`*${escapeTelegramMarkdownV2(stripMarkdownEmphasis(heading[2] ?? ""))}*`);
+      continue;
+    }
+
+    if (/^\s*---+\s*$/.test(line)) {
+      formatted.push("────────");
+      continue;
+    }
+
+    formatted.push(formatTelegramMarkdownV2Inline(line));
+  }
+
+  if (inFence) formatted.push("```");
+  return formatted.join("\n");
+}
+
 export class TelegramChannel {
   private bot: TelegramBot | null = null;
   private chatId: number | null = null;
@@ -47,6 +207,7 @@ export class TelegramChannel {
   private processedUpdateIds = new Set<string>();
   private processedUpdateIdQueue: string[] = [];
   private lockAcquired = false;
+  private markdownDisabled = false;
 
   constructor(
     private callbacks: {
@@ -201,11 +362,29 @@ export class TelegramChannel {
 
   async sendResponse(text: string): Promise<void> {
     if (!this.bot || this.chatId === null) return;
-    const chunks = splitTelegramMessage(text.trim());
+    const markdownText = formatTelegramMarkdownV2(text);
+    const chunks = splitTelegramMessage(markdownText);
     for (let index = 0; index < chunks.length; index++) {
       const chunk = chunks[index];
       if (!chunk) continue;
       try {
+        if (!this.markdownDisabled) {
+          try {
+            await this.bot.sendMessage(
+              this.chatId,
+              chunk,
+              this.messageId ?? undefined,
+              "MarkdownV2",
+            );
+            continue;
+          } catch (err) {
+            this.markdownDisabled = true;
+            this.callbacks.onError?.(
+              `Telegram markdown delivery disabled after first failure: ${(err as Error).message}`,
+            );
+          }
+        }
+
         await this.bot.sendMessage(this.chatId, chunk, this.messageId ?? undefined);
       } catch (err) {
         this.callbacks.onError?.(

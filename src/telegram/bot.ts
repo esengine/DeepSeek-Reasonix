@@ -5,6 +5,8 @@ interface TelegramBotConfig {
   token: string;
 }
 
+export type TelegramParseMode = "MarkdownV2";
+
 export interface TelegramMessage {
   message_id: number;
   text?: string;
@@ -64,9 +66,15 @@ export class TelegramBot extends EventEmitter {
     await this.bot.stop();
   }
 
-  async sendMessage(chatId: number, text: string, replyToMessageId?: number): Promise<void> {
+  async sendMessage(
+    chatId: number,
+    text: string,
+    replyToMessageId?: number,
+    parseMode?: TelegramParseMode,
+  ): Promise<void> {
     await this.bot.api.sendMessage(chatId, text, {
       link_preview_options: { is_disabled: true },
+      parse_mode: parseMode,
       reply_parameters: replyToMessageId ? { message_id: replyToMessageId } : undefined,
     });
   }
