@@ -124,6 +124,7 @@ import { ModelPicker } from "./ModelPicker.js";
 import { PathConfirm } from "./PathConfirm.js";
 import { PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
+import { PlanPanel } from "./PlanPanel.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
 import { PlanReviseConfirm, type ReviseChoice } from "./PlanReviseConfirm.js";
 import { PlanReviseEditor } from "./PlanReviseEditor.js";
@@ -804,14 +805,11 @@ function AppInner({
   const noTakeoverOverlay =
     !pendingShell &&
     !pendingPath &&
-    !pendingPlan &&
-    !pendingReviseEditor &&
     !pendingSessionsPicker &&
     !pendingEditPicker &&
     !pendingWorkspacePicker &&
     !pendingCheckpointPicker &&
     !pendingMcpHub &&
-    !stagedInput &&
     !pendingEditReview;
   // Plan-mode indicator —displayed in the StatsPanel, mirrored onto
   // the ToolRegistry so dispatch enforces read-only. Toggled via the
@@ -915,6 +913,14 @@ function AppInner({
   // identify plans by intent rather than by filename.
   const planBodyRef = useRef<string | null>(null);
   const planSummaryRef = useRef<string | null>(null);
+  const planPanelOpen = !!(
+    pendingPlan ||
+    stagedInput ||
+    pendingCheckpoint ||
+    pendingRevision ||
+    pendingReviseEditor ||
+    (planStepsRef.current && planStepsRef.current.length > 0 && !planMode)
+  );
   // Wall-clock when the latest tool_start fired. Cleared when the
   // matching `tool` event arrives (or at turn end). Tools are
   // dispatched serially in the loop, so a single ref is enough —no
@@ -4427,7 +4433,11 @@ function AppInner({
       <TickerProvider disabled={tickerSuspended}>
         <InflightProvider inflight={loop.inflight}>
           <Box flexDirection="row" backgroundColor={SURFACE.bg}>
-            <Box flexDirection="column" flexGrow={1}>
+            <Box
+              flexDirection="column"
+              flexGrow={planPanelOpen ? 0 : 1}
+              width={planPanelOpen ? "35%" : undefined}
+            >
               <Box flexDirection="column" flexGrow={1}>
                 <LiveExpandContext.Provider value={liveExpand}>
                   <VerboseContext.Provider value={verboseMode}>
@@ -4456,6 +4466,7 @@ function AppInner({
                 ) : null}
                 <LiveActivityArea
                   noTakeoverOverlay={noTakeoverOverlay}
+                  suppressPlanLiveRow={planPanelOpen}
                   ongoingTool={ongoingTool}
                   toolProgress={toolProgress}
                   subagentActivities={subagentActivities}
@@ -4483,12 +4494,46 @@ function AppInner({
                   }
                 />
               </Box>
-              {stagedInput ? (
-                <PlanRefineInput
-                  mode={stagedInput.mode}
-                  questions={stagedInput.questions}
-                  onSubmit={handleStagedInputSubmit}
-                  onCancel={handleStagedInputCancel}
+              {planPanelOpen ? (
+                <ComposerArea
+                  editMode={editMode}
+                  pendingCount={pendingCount}
+                  modeFlash={modeFlash}
+                  planMode={planMode}
+                  undoArmed={!!undoBanner || hasUndoable()}
+                  jobs={codeMode ? codeMode.jobs : undefined}
+                  activeLoop={activeLoop}
+                  statusBar={statusBar}
+                  showShortcuts={pendingShortcuts}
+                  mode={
+                    editMode === "yolo"
+                      ? t("statsPanel.modeYolo")
+                      : editMode === "auto"
+                        ? t("statsPanel.modeAuto")
+                        : editMode === "review"
+                          ? t("statsPanel.modeReview")
+                          : editMode
+                  }
+                  model={`${sessionModel} \u00b7 ${sessionEffort ?? loop.reasoningEffort}`}
+                  input={input}
+                  setInput={setInput}
+                  busy={busy}
+                  steerBusy={busy}
+                  onSubmit={handleSubmit}
+                  onHistoryPrev={handleHistoryPrev}
+                  onHistoryNext={handleHistoryNext}
+                  onOpenExternalEditor={handleOpenExternalEditor}
+                  onCursorChange={setComposerCursor}
+                  isHistoryMode={isHistoryMode}
+                  slashMatches={slashMatches}
+                  slashSelected={slashSelected}
+                  slashGroupMode={slashGroupMode}
+                  slashAdvancedHidden={slashAdvancedHidden}
+                  atState={atState}
+                  atSelected={atSelected}
+                  slashArgContext={slashArgContext}
+                  slashArgMatches={slashArgMatches}
+                  slashArgSelected={slashArgSelected}
                 />
               ) : stagedChoiceCustom ? (
                 <PlanRefineInput
@@ -4508,26 +4553,6 @@ function AppInner({
                   options={pendingChoice.options}
                   allowCustom={pendingChoice.allowCustom}
                   onChoose={stableHandleChoiceConfirm}
-                />
-              ) : pendingRevision ? (
-                <PlanReviseConfirm
-                  reason={pendingRevision.reason}
-                  oldRemaining={(planStepsRef.current ?? []).filter(
-                    (s) => !completedStepIdsRef.current.has(s.id),
-                  )}
-                  newRemaining={pendingRevision.remainingSteps}
-                  summary={pendingRevision.summary}
-                  onChoose={stableHandleReviseConfirm}
-                />
-              ) : pendingCheckpoint ? (
-                <PlanCheckpointConfirm
-                  stepId={pendingCheckpoint.stepId}
-                  title={pendingCheckpoint.title}
-                  completed={pendingCheckpoint.completed}
-                  total={pendingCheckpoint.total}
-                  steps={planStepsRef.current ?? undefined}
-                  completedStepIds={completedStepIdsRef.current}
-                  onChoose={stableHandleCheckpointConfirm}
                 />
               ) : pendingCheckpointPicker ? (
                 <CheckpointPicker
@@ -4725,32 +4750,6 @@ function AppInner({
                       : undefined
                   }
                 />
-              ) : pendingPlan ? (
-                <PlanConfirm
-                  plan={pendingPlan}
-                  steps={planStepsRef.current ?? undefined}
-                  summary={planSummaryRef.current ?? undefined}
-                  onChoose={stableHandlePlanConfirm}
-                  projectRoot={currentRootDir}
-                />
-              ) : pendingReviseEditor ? (
-                <PlanReviseEditor
-                  steps={planStepsRef.current ?? []}
-                  completedStepIds={completedStepIdsRef.current}
-                  onAccept={(revised, skippedIds) => {
-                    planStepsRef.current = revised;
-                    for (const id of skippedIds) completedStepIdsRef.current.add(id);
-                    persistPlanState();
-                    const planText = pendingReviseEditor;
-                    setPendingReviseEditor(null);
-                    setPendingPlan(planText);
-                  }}
-                  onCancel={() => {
-                    const planText = pendingReviseEditor;
-                    setPendingReviseEditor(null);
-                    setPendingPlan(planText);
-                  }}
-                />
               ) : pendingShell ? (
                 <ShellConfirm
                   prompt={toApprovalPrompt({
@@ -4844,6 +4843,27 @@ function AppInner({
                 />
               )}
             </Box>
+            {planPanelOpen ? (
+              <PlanPanel
+                planBody={planBodyRef.current}
+                planSummary={planSummaryRef.current}
+                planSteps={planStepsRef.current}
+                completedStepIds={completedStepIdsRef.current}
+                pendingPlan={pendingPlan}
+                stagedInput={stagedInput}
+                pendingCheckpoint={pendingCheckpoint}
+                pendingRevision={pendingRevision}
+                pendingReviseEditor={pendingReviseEditor}
+                isExecuting={
+                  planStepsRef.current !== null && planStepsRef.current.length > 0 && !planMode
+                }
+                onPlanConfirm={stableHandlePlanConfirm}
+                onStagedInputSubmit={handleStagedInputSubmit}
+                onStagedInputCancel={handleStagedInputCancel}
+                onCheckpointChoose={stableHandleCheckpointConfirm}
+                onReviseConfirm={stableHandleReviseConfirm}
+              />
+            ) : null}
           </Box>
         </InflightProvider>
       </TickerProvider>

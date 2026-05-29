@@ -21,6 +21,7 @@ import {
   tokenizeCommand,
 } from "../src/tools/shell.js";
 import { normalizeWindowsEnvVars } from "../src/tools/shell/exec.js";
+import { expandShellVars } from "../src/tools/shell/parse.js";
 
 /** A PauseGate that records call args and denies — denial keeps the spawn from actually running. */
 class SpyGate extends PauseGate {
@@ -1206,5 +1207,66 @@ describe("smartDecodeOutput", () => {
     // arise there; the test pins the single-buffer contract.)
     const buf = Buffer.from("你好", "utf8");
     expect(smartDecodeOutput(buf)).toBe("你好");
+  });
+});
+
+describe("expandShellVars (#2105)", () => {
+  it("expands ~ at start of command to homedir", () => {
+    const home = require("node:os").homedir();
+    expect(expandShellVars("cat ~/foo")).toBe(`cat ${home}/foo`);
+  });
+
+  it("expands ~ after chain operators", () => {
+    const home = require("node:os").homedir();
+    expect(expandShellVars("echo x && ~/run.sh")).toBe(`echo x && ${home}/run.sh`);
+    expect(expandShellVars("echo x || ~/run.sh")).toBe(`echo x || ${home}/run.sh`);
+    expect(expandShellVars("echo x; ~/run.sh")).toBe(`echo x; ${home}/run.sh`);
+  });
+
+  it("does not expand ~ inside a word like ~notexpand", () => {
+    expect(expandShellVars("echo ~notexpand")).toBe("echo ~notexpand");
+  });
+
+  it("expands $VAR when set", () => {
+    const orig = process.env.SHELL_TEST_VAR_REASONIX;
+    process.env.SHELL_TEST_VAR_REASONIX = "/tmp/test";
+    try {
+      expect(expandShellVars("ls $SHELL_TEST_VAR_REASONIX/src")).toBe("ls /tmp/test/src");
+    } finally {
+      if (orig === undefined) {
+        // biome-ignore lint/performance/noDelete: restore env
+        delete process.env.SHELL_TEST_VAR_REASONIX;
+      } else {
+        process.env.SHELL_TEST_VAR_REASONIX = orig;
+      }
+    }
+  });
+
+  it("expands ${VAR} syntax when set", () => {
+    const orig = process.env.SHELL_TEST_VAR_REASONIX;
+    process.env.SHELL_TEST_VAR_REASONIX = "/my/dir";
+    try {
+      expect(expandShellVars("ls ${SHELL_TEST_VAR_REASONIX}/src")).toBe("ls /my/dir/src");
+    } finally {
+      if (orig === undefined) {
+        // biome-ignore lint/performance/noDelete: restore env
+        delete process.env.SHELL_TEST_VAR_REASONIX;
+      } else {
+        process.env.SHELL_TEST_VAR_REASONIX = orig;
+      }
+    }
+  });
+
+  it("leaves unset $VAR unexpanded", () => {
+    // biome-ignore lint/performance/noDelete: ensure var is unset for test
+    delete process.env.SHELL_TEST_UNSET_REASONIX_VAR;
+    expect(expandShellVars("echo $SHELL_TEST_UNSET_REASONIX_VAR")).toBe(
+      "echo $SHELL_TEST_UNSET_REASONIX_VAR",
+    );
+  });
+
+  it("does not expand glob characters", () => {
+    expect(expandShellVars("ls *.ts")).toBe("ls *.ts");
+    expect(expandShellVars("echo foo*")).toBe("echo foo*");
   });
 });

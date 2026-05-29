@@ -275,6 +275,17 @@ export function hasSensitivePathArgs(
   return false;
 }
 
+/** Expand `~` and `$VAR`/`${VAR}` in a command string (#2105). Called AFTER the
+ *  allowlist check so only already-approved commands get expanded. Globs are
+ *  intentionally left unexpanded to prevent allowlist bypass via concatenation. */
+export function expandShellVars(cmd: string): string {
+  const home = homedir();
+  return cmd
+    .replace(/\$\{([^}]+)\}/g, (_, name: string) => process.env[name.trim()] ?? `\${${name}}`)
+    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, name: string) => process.env[name] ?? `$${name}`)
+    .replace(/(^|(?<=[|&;()\s]))~(?=\/|$)/g, home);
+}
+
 function pathIsUnder(child: string, parent: string): boolean {
   const rel = pathMod.relative(parent, child);
   return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
