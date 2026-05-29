@@ -217,8 +217,14 @@ import { useSubagent } from "./useSubagent.js";
 
 const STASH_HINT_CARD_ID = "composer-stash-hint";
 
-function isBusyPromptCommand(text: string): boolean {
+function isBusyWorkflowSlashCommand(text: string): boolean {
+  const slash = parseSlash(text);
+  return slash?.cmd === "workflows";
+}
+
+export function isBusyPromptCommand(text: string): boolean {
   const trimmed = text.trimStart();
+  if (isBusyWorkflowSlashCommand(trimmed)) return false;
   return trimmed.startsWith("/") || trimmed.startsWith("#") || detectBangCommand(trimmed) !== null;
 }
 
@@ -288,6 +294,7 @@ export interface AppProps {
      */
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
     workflowManager?: import("../../workflow/manager.js").WorkflowRunManager;
+    workflowRunner?: import("../../workflow/types.js").WorkflowAgentRunner;
     /** Notify the launcher/root wrapper that the workspace root changed so session switches remount into the new root. */
     onRootChange?: (newRoot: string) => void;
   };
@@ -3078,6 +3085,7 @@ function AppInner({
           },
           sessionId: session,
           workflowManager: codeMode?.workflowManager,
+          workflowRunner: codeMode?.workflowRunner,
           getEngineeringLifecycleSnapshot: codeMode
             ? () => engineeringLifecycleRef.current?.snapshot() ?? null
             : undefined,

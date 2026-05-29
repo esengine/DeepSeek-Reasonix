@@ -9,6 +9,7 @@ import type {
   WorkflowAgentRunner,
   WorkflowMode,
   WorkflowRunResult,
+  WorkflowRunSnapshot,
   WorkflowToolMode,
 } from "../workflow/types.js";
 import type { SubagentSink } from "./subagent.js";
@@ -135,6 +136,26 @@ export function registerWorkflowTool(
           });
         }
 
+        if (opts.manager && mode === "run") {
+          const started = opts.manager.startRun({
+            script,
+            mode,
+            args: args.args,
+            concurrency: numberOption(args.concurrency),
+            maxAgents: numberOption(args.max_agents),
+            tokenBudget: numberOption(args.token_budget) ?? null,
+            runner,
+          });
+          const abort = (): void => {
+            if (opts.manager?.getRun(started.id)?.status === "running")
+              opts.manager.stopRun(started.id);
+          };
+          ctx?.signal?.addEventListener("abort", abort, { once: true });
+          const done = await opts.manager.waitForRun(started.id);
+          ctx?.signal?.removeEventListener("abort", abort);
+          return JSON.stringify(formatWorkflowSnapshot(done));
+        }
+
         const result = await runWorkflow(script, {
           mode,
           args: args.args,
@@ -242,5 +263,35 @@ function formatWorkflowResult(result: WorkflowRunResult): Record<string, unknown
   if (result.plannedAgents) out.planned_agents = result.plannedAgents;
   if (result.usage) out.usage = result.usage;
   if (result.costUsd !== undefined) out.cost_usd = result.costUsd;
+  return out;
+}
+
+function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    success: snapshot.status === "completed",
+    run_id: snapshot.id,
+    status: snapshot.status,
+    meta: { name: snapshot.name, description: snapshot.description },
+    logs: snapshot.logs,
+    phases: snapshot.phases.map((phase) => phase.title),
+    agent_count: snapshot.agentCount,
+    duration_ms: snapshot.durationMs ?? 0,
+  };
+  if (snapshot.result !== undefined) out.result = snapshot.result;
+  if (snapshot.error) out.error = snapshot.error;
+  if (snapshot.agents.length > 0) {
+    out.agents = snapshot.agents.map((agent) => ({
+      id: agent.id,
+      label: agent.label,
+      phase: agent.phase,
+      status: agent.status,
+      prompt_preview: agent.promptPreview,
+      output_preview: agent.outputPreview,
+      error: agent.error,
+      duration_ms: agent.durationMs,
+    }));
+  }
+  if (snapshot.usage) out.usage = snapshot.usage;
+  if (snapshot.costUsd !== undefined) out.cost_usd = snapshot.costUsd;
   return out;
 }

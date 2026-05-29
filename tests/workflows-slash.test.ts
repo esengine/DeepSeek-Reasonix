@@ -80,6 +80,36 @@ describe("/workflows slash handler", () => {
     }
   });
 
+  it("injects the workflow runner when running a saved workflow", async () => {
+    const root = mkdtempSync(join(tmpdir(), "reasonix-workflows-slash-runner-"));
+    const home = mkdtempSync(join(tmpdir(), "reasonix-workflows-home-runner-"));
+    try {
+      mkdirSync(join(root, ".reasonix", "workflows"), { recursive: true });
+      writeFileSync(join(root, ".reasonix", "workflows", "audit.js"), script, "utf8");
+      const runner: WorkflowAgentRunner = {
+        async run(prompt) {
+          return { ok: true, output: `runner:${prompt}` };
+        },
+      };
+      const manager = new WorkflowRunManager({ rootDir: root, homeDir: home });
+
+      const result = handleWorkflowsSlash(["run", "audit"], {
+        workflowManager: manager,
+        workflowRunner: runner,
+        codeRoot: root,
+        homeDir: home,
+      });
+      const runId = result.info?.match(/wf_[a-z0-9]+/)?.[0];
+
+      expect(runId).toBeDefined();
+      const done = await manager.waitForRun(runId!);
+      expect(done.result).toBe("runner:inspect");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("retries a completed run with the original script", async () => {
     const runner: WorkflowAgentRunner = {
       async run() {
@@ -94,6 +124,27 @@ describe("/workflows slash handler", () => {
 
     expect(result.info).toMatch(/started retry/);
     expect(manager.listRuns()).toHaveLength(2);
+  });
+
+  it("injects the workflow runner when retrying a run", async () => {
+    const runner: WorkflowAgentRunner = {
+      async run() {
+        return { ok: true, output: "retry-ok" };
+      },
+    };
+    const manager = new WorkflowRunManager({ rootDir: process.cwd() });
+    const first = manager.startRun({ script, mode: "run", maxAgents: 1, runner });
+    await manager.waitForRun(first.id);
+
+    const result = handleWorkflowsSlash(["retry", first.id], {
+      workflowManager: manager,
+      workflowRunner: runner,
+    });
+    const runId = result.info?.match(/wf_[a-z0-9]+/)?.[0];
+
+    expect(runId).toBeDefined();
+    const done = await manager.waitForRun(runId!);
+    expect(done.result).toBe("retry-ok");
   });
 
   it("deletes completed runs", async () => {

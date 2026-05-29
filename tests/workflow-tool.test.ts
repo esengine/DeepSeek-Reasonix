@@ -76,6 +76,28 @@ describe("registerWorkflowTool", () => {
     expect(runner.calls).toHaveLength(1);
   });
 
+  it("records foreground workflows in the manager while still returning the final result", async () => {
+    const registry = new ToolRegistry();
+    const runner = new StaticRunner();
+    const { WorkflowRunManager } = await import("../src/workflow/manager.js");
+    const manager = new WorkflowRunManager({ runner, rootDir: process.cwd() });
+    registerWorkflowTool(registry, { runner, manager });
+
+    const out = await registry.dispatch("workflow", { script });
+    const parsed = JSON.parse(out);
+    const runs = manager.listRuns();
+
+    expect(parsed.success).toBe(true);
+    expect(parsed.result).toEqual({ value: "ran:inspection" });
+    expect(parsed.run_id).toMatch(/^wf_/);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      id: parsed.run_id,
+      status: "completed",
+      result: { value: "ran:inspection" },
+    });
+  });
+
   it("starts background workflows through the manager", async () => {
     const registry = new ToolRegistry();
     const runner = new StaticRunner();

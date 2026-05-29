@@ -84,6 +84,7 @@ export interface SlashContext {
   /** stop_job is async; handlers return synchronously and let the registry resolve in the background. */
   jobs?: JobRegistry;
   workflowManager?: import("../../../workflow/manager.js").WorkflowRunManager;
+  workflowRunner?: import("../../../workflow/types.js").WorkflowAgentRunner;
   postInfo?: (text: string) => void;
   /** Push a structured Doctor card with check-by-check status; used by `/doctor`. */
   postDoctor?: (

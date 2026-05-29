@@ -34,8 +34,9 @@ import {
 import { registerTodoTool } from "../tools/todo.js";
 import { registerWebTools } from "../tools/web.js";
 import { registerWorkflowTool } from "../tools/workflow.js";
+import { ReasonixWorkflowAgentRunner } from "../workflow/agent-runner.js";
 import { WorkflowRunManager } from "../workflow/manager.js";
-import type { WorkflowRunEvent } from "../workflow/types.js";
+import type { WorkflowAgentRunner, WorkflowRunEvent } from "../workflow/types.js";
 
 export interface CodeToolsetOpts {
   rootDir: string;
@@ -54,6 +55,7 @@ export interface CodeToolset {
   tools: ToolRegistry;
   jobs: JobRegistry;
   workflowManager: WorkflowRunManager;
+  workflowRunner: WorkflowAgentRunner;
   registerRooted: (root: string) => void;
   reBootstrapSemantic: (root: string) => Promise<{ enabled: boolean }>;
   semantic: { enabled: boolean };
@@ -112,7 +114,22 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   if (loadJavaSourceEnabled()) {
     registerJavaSourceTool(tools, { projectRoot: opts.rootDir });
   }
+  let workflowClient: DeepSeekClient | null = null;
+  const workflowRunner: WorkflowAgentRunner = {
+    async run(prompt, agentOpts) {
+      if (!workflowClient) {
+        const ep = loadEndpoint();
+        workflowClient = new DeepSeekClient({ apiKey: ep.apiKey, baseUrl: ep.baseUrl });
+      }
+      return new ReasonixWorkflowAgentRunner({
+        client: workflowClient,
+        parentRegistry: tools,
+        sink: opts.subagentSink ?? SHARED_SUBAGENT_SINK,
+      }).run(prompt, agentOpts);
+    },
+  };
   const workflowManager = new WorkflowRunManager({
+    runner: workflowRunner,
     rootDir: opts.rootDir,
     homeDir: process.env.HOME,
     onEvent: opts.onWorkflowEvent,
@@ -158,5 +175,13 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
 
   const semantic = await reBootstrapSemantic(opts.rootDir);
 
-  return { tools, jobs, workflowManager, registerRooted, reBootstrapSemantic, semantic };
+  return {
+    tools,
+    jobs,
+    workflowManager,
+    workflowRunner,
+    registerRooted,
+    reBootstrapSemantic,
+    semantic,
+  };
 }
