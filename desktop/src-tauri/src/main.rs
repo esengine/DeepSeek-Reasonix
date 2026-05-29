@@ -263,6 +263,99 @@ fn git_status(root: String) -> Result<Vec<GitStatusEntry>, String> {
     Ok(out)
 }
 
+#[derive(Serialize)]
+struct FileDiff {
+    file: String,
+    additions: u32,
+    deletions: u32,
+    patch: Option<String>,
+    status: String,
+}
+
+#[derive(Serialize)]
+struct GitDiffsResult {
+    staged: Vec<FileDiff>,
+    unstaged: Vec<FileDiff>,
+    untracked: Vec<String>,
+}
+
+fn parse_diff_output(stdout: &str) -> Vec<FileDiff> {
+    let mut files = Vec::new();
+    // Split on "diff --git " headers
+    for block in stdout.split("\ndiff --git ") {
+        let full = if block.starts_with("diff --git ") {
+            block.to_string()
+        } else {
+            format!("diff --git {block}")
+        };
+        // Extract b/ path
+        let b_path = full
+            .lines()
+            .find(|l| l.starts_with("diff --git "))
+            .and_then(|l| l.strip_prefix("diff --git a/").and_then(|r| r.split_once(" b/")))
+            .map(|(_, b)| b.trim().to_string());
+        let Some(file) = b_path else { continue };
+        let additions = full.lines().filter(|l| l.starts_with('+')).count() as u32;
+        let deletions = full.lines().filter(|l| l.starts_with('-')).count() as u32;
+        let status = if full.contains("new file mode") {
+            "added"
+        } else if full.contains("deleted file mode") {
+            "deleted"
+        } else {
+            "modified"
+        };
+        files.push(FileDiff {
+            file,
+            additions,
+            deletions,
+            patch: Some(full),
+            status: status.to_string(),
+        });
+    }
+    files
+}
+
+fn run_git(args: &[&str], cwd: &Path) -> String {
+    use std::process::Command;
+    let mut cmd = Command::new("git");
+    cmd.args(args).current_dir(cwd);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    match cmd.output() {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        _ => String::new(),
+    }
+}
+
+#[tauri::command]
+fn git_diffs(root: String) -> Result<GitDiffsResult, String> {
+    let root_path = Path::new(&root);
+    if !root_path.is_dir() {
+        return Err(format!("not a directory: {root}"));
+    }
+    let staged_out = run_git(&["diff", "--no-color", "--unified=3", "--cached"], root_path);
+    let unstaged_out = run_git(&["diff", "--no-color", "--unified=3", "HEAD"], root_path);
+    let untracked_out = run_git(&["ls-files", "--others", "--exclude-standard"], root_path);
+
+    let staged = parse_diff_output(&staged_out);
+    let unstaged = parse_diff_output(&unstaged_out);
+    let untracked: Vec<String> = untracked_out
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect();
+
+    Ok(GitDiffsResult {
+        staged,
+        unstaged,
+        untracked,
+    })
+}
+
 #[tauri::command]
 fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<(), String> {
     use std::process::{Command, Stdio};
@@ -390,6 +483,7 @@ fn main() {
             open_in_editor,
             list_workspace_tree,
             git_status,
+            git_diffs,
             write_text_file,
             save_clipboard_image
         ])

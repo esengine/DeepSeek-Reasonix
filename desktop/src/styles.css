@@ -4308,6 +4308,58 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   font-family: inherit;
 }
 
+.ctx-action {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.ctx-action:hover { color: var(--fg); background: var(--panel-2); }
+.ctx-action:disabled { opacity: 0.4; cursor: default; }
+
+/* git diff file list */
+.diff-file { border-bottom: 1px solid var(--border); }
+.diff-file:last-child { border-bottom: none; }
+.diff-file-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: "Geist Mono", monospace;
+  color: var(--fg-2);
+}
+.diff-file-head:hover { background: var(--panel); }
+.diff-file-chevron {
+  width: 0; height: 0;
+  border-left: 4px solid var(--muted);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  transition: transform 0.12s;
+  flex-shrink: 0;
+}
+.diff-file-chevron[data-open="true"] { transform: rotate(90deg); }
+.diff-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-file-stats { display: flex; gap: 6px; font-size: 11px; flex-shrink: 0; }
+.diff-add { color: var(--success); }
+.diff-rm { color: var(--danger); }
+.diff-file-status {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.diff-file-status.diff-added { background: var(--success-soft); color: var(--success); }
+.diff-file-status.diff-deleted { background: var(--danger-soft); color: var(--danger); }
+.diff-file-status.diff-modified { background: var(--accent-soft); color: var(--accent); }
+.diff-file-body { padding: 0 4px 6px; }
+
 /* mcp list */
 .mcp-row {
   display: flex;

@@ -6,10 +6,11 @@ import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
+import { DiffCard, type DiffLine } from "./cards";
 import { PanelErrorBoundary } from "./error-boundary";
 import { McpServerCard } from "./mcp-server-card";
 
-export type ContextPanelTab = "files" | "tools" | "memory" | "rules";
+export type ContextPanelTab = "files" | "tools" | "memory" | "rules" | "diffs";
 
 const CONTEXT_MAX_TOKENS = 1_000_000;
 
@@ -73,6 +74,9 @@ export function ContextPanel({
         <div className="ctx-tab" data-active={tab === "rules"} onClick={() => setTab("rules")}>
           {t("contextPanel.rulesTab")}
         </div>
+        <div className="ctx-tab" data-active={tab === "diffs"} onClick={() => setTab("diffs")}>
+          {t("contextPanel.diffsTab")}
+        </div>
       </div>
 
       <div className="ctx-body">
@@ -124,6 +128,7 @@ export function ContextPanel({
               <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
             )}
             {tab === "rules" && <CtxRules settings={settings} />}
+            {tab === "diffs" && <CtxDiffs workspaceDir={settings?.workspaceDir} />}
           </PanelErrorBoundary>
         </div>
       </div>
@@ -444,5 +449,205 @@ function CtxRules({ settings }: { settings: Settings | null }) {
         </div>
       ))}
     </div>
+  );
+}
+
+interface FileDiff {
+  file: string;
+  additions: number;
+  deletions: number;
+  patch?: string;
+  status: string;
+}
+
+interface GitDiffsResult {
+  staged: FileDiff[];
+  unstaged: FileDiff[];
+  untracked: string[];
+}
+
+function parsePatch(patch: string): DiffLine[] {
+  const lines = patch.split("\n");
+  const result: DiffLine[] = [];
+  let leftLine = 0;
+  let rightLine = 0;
+  for (const line of lines) {
+    const hunkMatch = line.match(/^@@\s+-(\d+),?(\d*)\s+\+(\d+),?(\d*)\s+@@/);
+    if (hunkMatch) {
+      leftLine = Number(hunkMatch[1]);
+      rightLine = Number(hunkMatch[3]);
+      result.push({ t: "hunk", s: line });
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      result.push({ t: "add", r: rightLine, s: line.slice(1) });
+      rightLine++;
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      result.push({ t: "rm", l: leftLine, s: line.slice(1) });
+      leftLine++;
+    } else if (line.startsWith(" ")) {
+      result.push({ t: "ctx", l: leftLine, r: rightLine, s: line.slice(1) });
+      leftLine++;
+      rightLine++;
+    }
+  }
+  return result;
+}
+
+function DiffSection({
+  title,
+  diffs,
+  emptyText,
+}: {
+  title: string;
+  diffs: FileDiff[];
+  emptyText: string;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  if (diffs.length === 0) {
+    return (
+      <div className="ctx-block">
+        <div className="h">
+          <span>{title}</span>
+          <span className="right">0</span>
+        </div>
+        <div className="ctx-empty">{emptyText}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="ctx-block">
+      <div className="h">
+        <span>{title}</span>
+        <span className="right">{diffs.length}</span>
+      </div>
+      {diffs.map((d) => {
+        const isOpen = expanded === d.file;
+        const lines = d.patch ? parsePatch(d.patch) : [];
+        return (
+          <div key={d.file} className="diff-file">
+            <div
+              className="diff-file-head"
+              onClick={() => setExpanded(isOpen ? null : d.file)}
+            >
+              <span className="diff-file-chevron" data-open={isOpen} />
+              <span className="diff-file-name">{d.file}</span>
+              <span className="diff-file-stats">
+                {d.additions > 0 ? (
+                  <span className="diff-add">+{d.additions}</span>
+                ) : null}
+                {d.deletions > 0 ? (
+                  <span className="diff-rm">-{d.deletions}</span>
+                ) : null}
+              </span>
+              <span className={`diff-file-status diff-${d.status}`}>
+                {d.status}
+              </span>
+            </div>
+            {isOpen && lines.length > 0 ? (
+              <div className="diff-file-body">
+                <DiffCard filename={d.file} lines={lines} applied />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CtxDiffs({ workspaceDir }: { workspaceDir?: string }) {
+  useLang();
+  const [diffs, setDiffs] = useState<GitDiffsResult | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchDiffs = async () => {
+    if (!workspaceDir) return;
+    setLoading(true);
+    try {
+      const result = await invoke<GitDiffsResult>("git_diffs", { root: workspaceDir });
+      setDiffs(result);
+    } catch {
+      setDiffs(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchDiffs();
+  }, [workspaceDir]);
+
+  if (!workspaceDir) {
+    return (
+      <div className="ctx-block">
+        <div className="h">
+          <span>{t("contextPanel.diffsTitle")}</span>
+        </div>
+        <div className="ctx-empty">{t("contextPanel.diffsNoWorkspace")}</div>
+      </div>
+    );
+  }
+
+  const total =
+    (diffs?.staged.length ?? 0) +
+    (diffs?.unstaged.length ?? 0) +
+    (diffs?.untracked.length ?? 0);
+
+  return (
+    <>
+      <div className="ctx-block" style={{ padding: "6px 10px", display: "flex", alignItems: "center" }}>
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>
+          {t("contextPanel.diffsTitle")}
+          {total > 0 ? ` · ${total}` : ""}
+        </span>
+        <span style={{ flex: 1 }} />
+        <button
+          type="button"
+          className="ctx-action"
+          onClick={() => void fetchDiffs()}
+          disabled={loading}
+          title={t("contextPanel.diffsRefresh")}
+        >
+          <I.refresh size={12} />
+        </button>
+      </div>
+      {!diffs ? (
+        <div className="ctx-block">
+          <div className="ctx-empty">
+            {loading ? t("contextPanel.diffsLoading") : t("contextPanel.diffsEmpty")}
+          </div>
+        </div>
+      ) : (
+        <>
+          <DiffSection
+            title={t("contextPanel.diffsStaged")}
+            diffs={diffs.staged}
+            emptyText={t("contextPanel.diffsNoStaged")}
+          />
+          <DiffSection
+            title={t("contextPanel.diffsUnstaged")}
+            diffs={diffs.unstaged}
+            emptyText={t("contextPanel.diffsNoUnstaged")}
+          />
+          {diffs.untracked.length > 0 ? (
+            <div className="ctx-block">
+              <div className="h">
+                <span>{t("contextPanel.diffsUntracked")}</span>
+                <span className="right">{diffs.untracked.length}</span>
+              </div>
+              {diffs.untracked.map((f) => (
+                <div key={f} className="node" data-kind="file" style={{ paddingLeft: 4 }}>
+                  <span className="ico">
+                    <I.file size={12} />
+                  </span>
+                  <span className="nm">{f}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
+    </>
   );
 }
