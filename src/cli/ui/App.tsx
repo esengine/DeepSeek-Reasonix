@@ -4425,6 +4425,7 @@ function AppInner({
   // Suspend cosmetic animations during modal interactions and idle so
   // a quiescent TUI is byte-stable.
   const tickerSuspended = modalOpen || (!busy && !isStreaming);
+  const viewportHeight = historyScrollMode === "app" ? Math.max(1, stdout?.rows ?? 24) : undefined;
 
   if (!bootReady) return <BootSplash />;
 
@@ -4432,7 +4433,12 @@ function AppInner({
     <>
       <TickerProvider disabled={tickerSuspended}>
         <InflightProvider inflight={loop.inflight}>
-          <Box flexDirection="row" backgroundColor={SURFACE.bg}>
+          <Box
+            flexDirection="row"
+            backgroundColor={SURFACE.bg}
+            height={viewportHeight}
+            flexShrink={viewportHeight ? 0 : undefined}
+          >
             <Box
               flexDirection="column"
               flexGrow={planPanelOpen ? 0 : 1}
