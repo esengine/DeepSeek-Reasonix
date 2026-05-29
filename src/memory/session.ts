@@ -1,6 +1,7 @@
 /** JSONL append-only message log under `~/.reasonix/sessions/`; concurrent-write safe. */
 
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -431,7 +432,7 @@ export function rewriteSession(name: string, messages: ChatMessage[]): void {
   const path = sessionPath(name);
   mkdirSync(dirname(path), { recursive: true });
   const body = messages.map((m) => JSON.stringify(m)).join("\n");
-  const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+  const tmp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
   if (existsSync(path) && statSync(path).size > 0) {
     const backup = sessionBackupPath(path);
     copyFileSync(path, backup);

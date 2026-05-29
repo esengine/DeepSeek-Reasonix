@@ -543,7 +543,7 @@ export function writeConfig(cfg: ReasonixConfig, path: string = defaultConfigPat
   // config.json, which readConfig would then parse as `{}` and the next
   // saveX would silently overwrite every other field with that empty
   // baseline (issue #1535).
-  const tmp = `${path}.${process.pid}.tmp`;
+  const tmp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
   atomicWriteSync(path, JSON.stringify(cfg, null, 2), tmp);
   _configCache.delete(path);
 }
