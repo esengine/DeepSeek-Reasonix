@@ -973,10 +973,11 @@ export const zhCN: TranslationSchema = {
       disconnectFailed: "飞书断开失败：{reason}",
       usage:
         "用法：/feishu connect [appId appSecret ownerOpenId] | /feishu status | /feishu disconnect",
-      promptAppId: "飞书首次配置：请输入飞书开放平台 App ID 后回车。输入 /cancel 可取消。",
+      promptAppId:
+        "飞书首次配置：推荐使用方式一，先打开 https://open.feishu.cn/page/openclaw?form=multiAgent 创建 OpenClaw 飞书机器人，再把它的 App ID 填到这里。输入 /cancel 可取消。",
       promptAppSecret: "飞书首次配置：请输入飞书开放平台 App Secret 后回车。输入 /cancel 可取消。",
       promptOwnerOpenId:
-        "飞书首次配置：请输入要允许控制此通道的用户 openid 后回车。输入 /cancel 可取消。",
+        "飞书首次配置：请输入要允许控制此通道的用户 openid 后回车。如果还没有，可先参考“如何获取用户的 Open ID”：https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-openid?lang=zh-CN 。输入 /cancel 可取消。",
       setupWaitingAppId: "等待输入 App ID",
       setupWaitingAppSecret: "等待输入 App Secret",
       setupWaitingOwnerOpenId: "等待输入 owner openid",

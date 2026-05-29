@@ -2855,6 +2855,10 @@ function AppInner({
       const fromWeixin = "fromWeixin" in incoming && incoming.fromWeixin;
       const fromFeishu = "fromFeishu" in incoming && incoming.fromFeishu;
       if (incoming.handled) {
+        if (!fromQQ && !fromTelegram && !fromFeishu && text.trim()) {
+          setInput("");
+          resetCursor();
+        }
         return;
       }
       if (busy || submittingRef.current) {

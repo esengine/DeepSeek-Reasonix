@@ -15,6 +15,7 @@ export class FeishuChannel {
   private chatId: string | null = null;
   private ownerOpenId: string | undefined;
   private allowlist: string[] | undefined;
+  private markdownDisabled = false;
   private processedMsgIds = new Set<string>();
   private processedMsgIdQueue: string[] = [];
   private lockAcquired = false;
@@ -157,7 +158,19 @@ export class FeishuChannel {
 
   async sendResponse(text: string): Promise<void> {
     if (!this.bot || !this.chatId) return;
-    await this.bot.sendPrivateMessage(this.chatId, text);
+    if (!this.markdownDisabled) {
+      try {
+        await this.bot.sendPrivateMessage(this.chatId, text, true);
+        return;
+      } catch (err) {
+        this.markdownDisabled = true;
+        this.callbacks.onInfo?.(
+          `Feishu markdown delivery disabled after first failure: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    await this.bot.sendPrivateMessage(this.chatId, text, false);
   }
 
   async stop(): Promise<void> {

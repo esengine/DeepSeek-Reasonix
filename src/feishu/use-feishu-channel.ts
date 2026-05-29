@@ -722,14 +722,8 @@ export function useFeishuChannel({
   );
 
   const buildModelChoices = useCallback(
-    (models: string[] | null | undefined) => [
-      "auto",
-      "flash",
-      "pro",
-      ...((models && models.length > 0
-        ? models
-        : ["deepseek-v4-flash", "deepseek-v4-pro"]) as string[]),
-    ],
+    (models: string[] | null | undefined) =>
+      (models && models.length > 0 ? models : ["deepseek-v4-flash", "deepseek-v4-pro"]) as string[],
     [],
   );
 

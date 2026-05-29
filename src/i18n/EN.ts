@@ -1029,11 +1029,11 @@ export const EN: TranslationSchema = {
       usage:
         "Usage: /feishu connect [appId appSecret ownerOpenId] | /feishu status | /feishu disconnect",
       promptAppId:
-        "Feishu setup: enter your Feishu Open Platform App ID, then press Enter. Type /cancel to abort.",
+        "Feishu setup: Method 1 is recommended — create an OpenClaw Feishu bot at https://open.feishu.cn/page/openclaw?form=multiAgent, then enter its App ID here. Type /cancel to abort.",
       promptAppSecret:
         "Feishu setup: enter your Feishu Open Platform App Secret, then press Enter. Type /cancel to abort.",
       promptOwnerOpenId:
-        "Feishu setup: enter the user openid that should be allowed to control this channel, then press Enter. Type /cancel to abort.",
+        "Feishu setup: enter the user openid that should be allowed to control this channel, then press Enter. If you still need it, see https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-openid?lang=zh-CN . Type /cancel to abort.",
       setupWaitingAppId: "waiting for App ID",
       setupWaitingAppSecret: "waiting for App Secret",
       setupWaitingOwnerOpenId: "waiting for owner openid",

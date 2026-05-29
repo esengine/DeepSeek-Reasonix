@@ -86,14 +86,35 @@ export class FeishuBot extends EventEmitter {
     this.wsClient = null;
   }
 
-  async sendPrivateMessage(chatId: string, content: string): Promise<void> {
+  async sendPrivateMessage(chatId: string, content: string, markdown = false): Promise<void> {
+    const payload = markdown
+      ? {
+          receive_id: chatId,
+          msg_type: "interactive",
+          content: JSON.stringify({
+            config: {
+              enable_forward: true,
+              update_multi: true,
+            },
+            elements: [
+              {
+                tag: "div",
+                text: {
+                  tag: "lark_md",
+                  content,
+                },
+              },
+            ],
+          }),
+        }
+      : {
+          receive_id: chatId,
+          msg_type: "text",
+          content: JSON.stringify({ text: content }),
+        };
     const response = await this.client.im.message.create({
       params: { receive_id_type: "chat_id" },
-      data: {
-        receive_id: chatId,
-        msg_type: "text",
-        content: JSON.stringify({ text: content }),
-      },
+      data: payload,
     });
     if (response.code && response.code !== 0) {
       throw new Error(response.msg || `Feishu sendPrivateMessage failed (${response.code})`);

@@ -686,7 +686,9 @@ Do not:
 - broaden into QQ / Telegram / Discord unless explicitly asked
 
 Docs are the fallback, not the main path:
-- Feishu Open Platform: https://open.feishu.cn/
+- Method 1 (recommended): create an OpenClaw Feishu bot here, then copy its App ID and App Secret: https://open.feishu.cn/page/openclaw?form=multiAgent
+- How to obtain the user's open_id: https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-openid?lang=zh-CN
+- Feishu Open Platform home: https://open.feishu.cn/
 
 Use this skill when the user needs help getting Feishu working.`;
 

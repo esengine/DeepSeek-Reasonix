@@ -96,7 +96,7 @@ describe("Feishu first-connect onboarding", () => {
 
     const pending = api.connect([]);
     expect(log.pushInfo).toHaveBeenLastCalledWith(
-      "Feishu setup: enter your Feishu Open Platform App ID, then press Enter. Type /cancel to abort.",
+      "Feishu setup: Method 1 is recommended — create an OpenClaw Feishu bot at https://open.feishu.cn/page/openclaw?form=multiAgent, then enter its App ID here. Type /cancel to abort.",
     );
     expect(api.status()).toBe("Feishu: setup in progress - waiting for App ID");
 
@@ -125,7 +125,7 @@ describe("Feishu first-connect onboarding", () => {
       text: "secret-value",
     });
     expect(log.pushInfo).toHaveBeenLastCalledWith(
-      "Feishu setup: enter the user openid that should be allowed to control this channel, then press Enter. Type /cancel to abort.",
+      "Feishu setup: enter the user openid that should be allowed to control this channel, then press Enter. If you still need it, see https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-openid?lang=zh-CN . Type /cancel to abort.",
     );
 
     expect(api.parseSubmit("/mode")).toMatchObject({
@@ -134,7 +134,7 @@ describe("Feishu first-connect onboarding", () => {
       text: "/mode",
     });
     expect(log.pushInfo).toHaveBeenLastCalledWith(
-      "Feishu setup: enter the user openid that should be allowed to control this channel, then press Enter. Type /cancel to abort.",
+      "Feishu setup: enter the user openid that should be allowed to control this channel, then press Enter. If you still need it, see https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-openid?lang=zh-CN . Type /cancel to abort.",
     );
 
     expect(api.parseSubmit("ou_owner_123")).toMatchObject({
