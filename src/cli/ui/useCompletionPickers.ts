@@ -21,6 +21,7 @@ import {
   detectSlashArgContext,
   suggestSlashCommands,
 } from "./slash.js";
+import { type ThemeChoice, themeChoiceLabel } from "./theme/labels.js";
 
 export interface UseCompletionPickersParams {
   input: string;
@@ -238,7 +239,13 @@ export function useCompletionPickers({
     if (Array.isArray(completer)) {
       if (partial && completer.some((v) => v.toLowerCase() === needle)) return null;
       if (!partial) return completer.slice();
-      return completer.filter((v) => v.toLowerCase().startsWith(needle));
+      return completer.filter((v) => {
+        if (v.toLowerCase().startsWith(needle)) return true;
+        if (slashArgContext.spec.cmd !== "theme") return false;
+        return themeChoiceLabel(v as ThemeChoice)
+          .toLowerCase()
+          .includes(needle);
+      });
     }
     if (completer === "models") {
       const all = models ?? [];

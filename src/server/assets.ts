@@ -1,4 +1,5 @@
-import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,48 +36,35 @@ const textCache = new Map<string, { body: string; mtimeMs: number }>();
 /** mtime-keyed cache for binary files (fonts, images). */
 const binaryCache = new Map<string, { body: Buffer; mtimeMs: number }>();
 
-function loadCachedText(path: string): string {
-  const fd = openSync(path, "r");
+async function loadCachedText(path: string): Promise<string> {
+  const fd = await open(path, "r");
   try {
-    const stat = fstatSync(fd);
+    const fileStat = await fd.stat();
     const cached = textCache.get(path);
-    if (cached && cached.mtimeMs === stat.mtimeMs) return cached.body;
-    const buf = Buffer.alloc(stat.size);
-    let read = 0;
-    while (read < stat.size) {
-      const n = readSync(fd, buf, read, stat.size - read, read);
-      if (n <= 0) break;
-      read += n;
-    }
-    const body = buf.toString("utf8", 0, read);
-    textCache.set(path, { body, mtimeMs: stat.mtimeMs });
+    if (cached && cached.mtimeMs === fileStat.mtimeMs) return cached.body;
+    const body = await fd.readFile("utf8");
+    textCache.set(path, { body, mtimeMs: fileStat.mtimeMs });
     return body;
   } finally {
-    closeSync(fd);
+    await fd.close();
   }
 }
 
-function loadCachedBinary(path: string): Buffer {
-  const fd = openSync(path, "r");
+async function loadCachedBinary(path: string): Promise<Buffer> {
+  const fd = await open(path, "r");
   try {
-    const stat = fstatSync(fd);
+    const fileStat = await fd.stat();
     const cached = binaryCache.get(path);
-    if (cached && cached.mtimeMs === stat.mtimeMs) return cached.body;
-    const buf = Buffer.alloc(stat.size);
-    let read = 0;
-    while (read < stat.size) {
-      const n = readSync(fd, buf, read, stat.size - read, read);
-      if (n <= 0) break;
-      read += n;
-    }
-    binaryCache.set(path, { body: buf.slice(0, read), mtimeMs: stat.mtimeMs });
-    return buf.slice(0, read);
+    if (cached && cached.mtimeMs === fileStat.mtimeMs) return cached.body;
+    const body = Buffer.from(await fd.readFile());
+    binaryCache.set(path, { body, mtimeMs: fileStat.mtimeMs });
+    return body;
   } finally {
-    closeSync(fd);
+    await fd.close();
   }
 }
 
-function loadIndexTemplate(): string {
+async function loadIndexTemplate(): Promise<string> {
   return loadCachedText(join(ASSET_DIR, "index.html"));
 }
 
@@ -96,21 +84,21 @@ function injectTokenIntoCssAssetUrls(body: string, token: string): string {
   );
 }
 
-function loadApp(token: string): string {
-  const raw = loadCachedText(join(ASSET_DIR, "dist", "app.js"));
+async function loadApp(token: string): Promise<string> {
+  const raw = await loadCachedText(join(ASSET_DIR, "dist", "app.js"));
   return injectTokenIntoChunkImports(raw, token);
 }
 
-function loadChunk(name: string, token: string): string | null {
+async function loadChunk(name: string, token: string): Promise<string | null> {
   try {
-    const raw = loadCachedText(join(ASSET_DIR, "dist", name));
+    const raw = await loadCachedText(join(ASSET_DIR, "dist", name));
     return injectTokenIntoChunkImports(raw, token);
   } catch {
     return null;
   }
 }
 
-function loadAppMap(): string | null {
+async function loadAppMap(): Promise<string | null> {
   try {
     return loadCachedText(join(ASSET_DIR, "dist", "app.js.map"));
   } catch {
@@ -118,20 +106,23 @@ function loadAppMap(): string | null {
   }
 }
 
-function loadCss(token: string): string {
+async function loadCss(token: string): Promise<string> {
   // Try new React dashboard first, then fall back to old Preact
   let raw: string;
   try {
-    raw = loadCachedText(join(ASSET_DIR, "dist", "app.css"));
+    raw = await loadCachedText(join(ASSET_DIR, "dist", "app.css"));
   } catch {
-    raw = loadCachedText(join(ASSET_DIR, "app.css"));
+    raw = await loadCachedText(join(ASSET_DIR, "app.css"));
   }
   return injectTokenIntoCssAssetUrls(raw, token);
 }
 
 /** Token HTML-attribute-escaped in case a future mint produces non-hex bytes. */
-export function renderIndexHtml(token: string, mode: "standalone" | "attached"): string {
-  const tpl = loadIndexTemplate();
+export async function renderIndexHtml(
+  token: string,
+  mode: "standalone" | "attached",
+): Promise<string> {
+  const tpl = await loadIndexTemplate();
   const safeToken = token.replace(/[^a-zA-Z0-9]/g, "");
   // String.replace(string, replacement) only swaps the FIRST match. The
   // template has __REASONIX_TOKEN__ in three places (meta + css href +
@@ -145,9 +136,9 @@ export function renderIndexHtml(token: string, mode: "standalone" | "attached"):
 /** Vendor CSS the bundle pulls from npm and the build script copies into `dashboard/dist/`. */
 const VENDOR_CSS_NAMES = new Set(["vendor-hljs.css", "vendor-uplot.css"]);
 
-function loadVendorCss(name: string, token: string): string | null {
+async function loadVendorCss(name: string, token: string): Promise<string | null> {
   try {
-    return injectTokenIntoCssAssetUrls(loadCachedText(join(ASSET_DIR, "dist", name)), token);
+    return injectTokenIntoCssAssetUrls(await loadCachedText(join(ASSET_DIR, "dist", name)), token);
   } catch {
     return null;
   }
@@ -184,13 +175,15 @@ function isBinaryAsset(name: string): boolean {
   return false;
 }
 
-function loadDistFile(name: string): { body: string | Buffer; isBinary: boolean } | null {
+async function loadDistFile(
+  name: string,
+): Promise<{ body: string | Buffer; isBinary: boolean } | null> {
   const paths = [join(ASSET_DIR, "dist", "assets", name), join(ASSET_DIR, "dist", name)];
   const binary = isBinaryAsset(name);
   for (const p of paths) {
     try {
       return {
-        body: binary ? loadCachedBinary(p) : loadCachedText(p),
+        body: binary ? await loadCachedBinary(p) : await loadCachedText(p),
         isBinary: binary,
       };
     } catch {
@@ -200,35 +193,35 @@ function loadDistFile(name: string): { body: string | Buffer; isBinary: boolean 
   return null;
 }
 
-export function serveAsset(
+export async function serveAsset(
   name: string,
   token = "",
-): { body: string | Buffer; contentType: string } | null {
+): Promise<{ body: string | Buffer; contentType: string } | null> {
   if (name === "app.js") {
-    return { body: loadApp(token), contentType: "application/javascript; charset=utf-8" };
+    return { body: await loadApp(token), contentType: "application/javascript; charset=utf-8" };
   }
   if (name === "app.js.map") {
-    const body = loadAppMap();
+    const body = await loadAppMap();
     return body == null ? null : { body, contentType: "application/json; charset=utf-8" };
   }
   if (name === "app.css") {
-    return { body: loadCss(token), contentType: "text/css; charset=utf-8" };
+    return { body: await loadCss(token), contentType: "text/css; charset=utf-8" };
   }
   // Same rewrite for chunk-to-chunk imports (e.g. vendor-markdown → vendor-react).
   if (/^vendor-[\w.-]+\.js$/.test(name)) {
-    const body = loadChunk(name, token);
+    const body = await loadChunk(name, token);
     if (body == null) return null;
     return { body, contentType: "application/javascript; charset=utf-8" };
   }
   if (VENDOR_CSS_NAMES.has(name)) {
-    const body = loadVendorCss(name, token);
+    const body = await loadVendorCss(name, token);
     if (body == null) return null;
     return { body, contentType: "text/css; charset=utf-8" };
   }
   // 通用静态文件：字体、图片等
   const mt = mimetypeFor(name);
   if (mt) {
-    const result = loadDistFile(name);
+    const result = await loadDistFile(name);
     if (result != null) return { body: result.body, contentType: mt };
   }
   return null;

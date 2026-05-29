@@ -11,8 +11,12 @@ export function isTheme(value: unknown): value is Theme {
 
 export const THEME_STYLE = {
   GRAPHITE: "graphite",
+  EMBER: "ember",
+  AURORA: "aurora",
   SANDSTONE: "sandstone",
   PORCELAIN: "porcelain",
+  LINEN: "linen",
+  GLACIER: "glacier",
   MIDNIGHT: "midnight",
 } as const;
 
@@ -25,23 +29,35 @@ export const DEFAULT_THEME_STYLE: Record<Theme, ThemeStyle> = {
 
 export const THEME_STYLE_THEME: Record<ThemeStyle, Theme> = {
   graphite: THEME.DARK,
+  ember: THEME.DARK,
+  aurora: THEME.DARK,
   sandstone: THEME.LIGHT,
   porcelain: THEME.LIGHT,
+  linen: THEME.LIGHT,
+  glacier: THEME.LIGHT,
   midnight: THEME.DARK,
 };
 
 export const THEME_STYLES = [
   THEME_STYLE.GRAPHITE,
+  THEME_STYLE.EMBER,
+  THEME_STYLE.AURORA,
   THEME_STYLE.SANDSTONE,
   THEME_STYLE.PORCELAIN,
+  THEME_STYLE.LINEN,
+  THEME_STYLE.GLACIER,
   THEME_STYLE.MIDNIGHT,
 ] as const;
 
 export function isThemeStyle(value: unknown): value is ThemeStyle {
   return (
     value === THEME_STYLE.GRAPHITE ||
+    value === THEME_STYLE.EMBER ||
+    value === THEME_STYLE.AURORA ||
     value === THEME_STYLE.SANDSTONE ||
     value === THEME_STYLE.PORCELAIN ||
+    value === THEME_STYLE.LINEN ||
+    value === THEME_STYLE.GLACIER ||
     value === THEME_STYLE.MIDNIGHT
   );
 }

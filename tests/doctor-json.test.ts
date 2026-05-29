@@ -8,6 +8,7 @@ import {
   type DoctorCheck,
   doctorCommand,
   formatDoctorJson,
+  runCacheDoctorChecks,
   runDoctorChecks,
 } from "../src/cli/commands/doctor.js";
 import { VERSION } from "../src/version.js";
@@ -148,5 +149,18 @@ describe("doctorCommand --json (integration)", () => {
         method: "GET",
       }),
     );
+  });
+
+  it("supports cache-only doctor checks without probing the API", async () => {
+    const checks = await runCacheDoctorChecks(tmpCwd);
+
+    expect(checks.map((c) => c.id)).toEqual([
+      "cache-dynamic-prompt",
+      "cache-mcp-order",
+      "cache-memory-skills",
+      "cache-hooks",
+      "cache-evidence",
+    ]);
+    expect(checks.every((c) => c.id.startsWith("cache-"))).toBe(true);
   });
 });

@@ -29,6 +29,6 @@ export function buildTransportFromSpec(
     command: spec.command,
     args: spec.args,
     env: opts.env ?? spec.env,
-    cwd: opts.cwd,
+    cwd: spec.cwd ?? opts.cwd,
   });
 }

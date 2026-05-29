@@ -4,7 +4,7 @@ import React from "react";
 import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
-import { PILL_PATH, Pill } from "../primitives/Pill.js";
+import { Pill, pillPath } from "../primitives/Pill.js";
 import { PULSE_TRIANGLE, Pulse } from "../primitives/Pulse.js";
 import type { TaskCard as TaskCardData, TaskStep } from "../state/cards.js";
 import { useThemeTokens } from "../theme/context.js";
@@ -61,7 +61,7 @@ export function TaskCard({ card }: { card: TaskCardData }): React.ReactElement {
           <Text bold color={fg.body}>
             {(step.toolName ?? t("cardLabels.stepLabel")).padEnd(7)}
           </Text>
-          <Pill label={step.title} {...PILL_PATH} bold={false} />
+          <Pill label={step.title} {...pillPath()} bold={false} />
           {step.detail ? <Text color={fg.faint}>{step.detail}</Text> : null}
           {step.elapsedMs !== undefined ? (
             <Text color={fg.faint}>{`${(step.elapsedMs / 1000).toFixed(2)}s`}</Text>

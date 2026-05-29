@@ -1,5 +1,9 @@
 import { type MutableRefObject, useCallback } from "react";
 import {
+  formatAutoGitRollbackRejection,
+  prepareAutoGitRollbackForEditBlocks,
+} from "../../../code/auto-git-rollback.js";
+import {
   type ApplyResult,
   type EditBlock,
   type EditSnapshot,
@@ -49,6 +53,8 @@ export function useCodeMode(opts: UseCodeModeOptions): UseCodeModeResult {
       if (selected.length === 0) {
         return t("app.noMatchedApply");
       }
+      const guard = prepareAutoGitRollbackForEditBlocks(currentRootDir, selected, {});
+      if (guard) return formatAutoGitRollbackRejection(guard);
       const snaps = snapshotBeforeEdits(selected, currentRootDir);
       const results = applyEditBlocks(selected, currentRootDir);
       const anyApplied = results.some((r) => r.status === "applied" || r.status === "created");

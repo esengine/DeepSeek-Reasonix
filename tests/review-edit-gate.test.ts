@@ -4,15 +4,18 @@ import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildEditToolBlocks,
+  buildEditToolBlocksForReview,
   isReviewGatedEditTool,
   shouldApplyEditToolImmediately,
 } from "../src/cli/ui/edit-tool-gate.js";
 
 describe("review edit gate tool matching", () => {
-  it("includes multi_edit in the same review gate as single-file edit tools", () => {
+  it("includes delete tools in the same review gate as single-file edit tools", () => {
     expect(isReviewGatedEditTool("edit_file")).toBe(true);
     expect(isReviewGatedEditTool("write_file")).toBe(true);
     expect(isReviewGatedEditTool("multi_edit")).toBe(true);
+    expect(isReviewGatedEditTool("delete_range")).toBe(true);
+    expect(isReviewGatedEditTool("delete_symbol")).toBe(true);
     expect(isReviewGatedEditTool("read_file")).toBe(false);
   });
 });
@@ -65,5 +68,53 @@ describe("buildEditToolBlocks", () => {
     );
 
     expect(blocks).toEqual([{ path: `nested${sep}file.ts`, search: "a", replace: "b", offset: 0 }]);
+  });
+
+  it("turns delete_range args into a reviewable deletion block", async () => {
+    writeFileSync(join(root, "range.ts"), "before\nSTART\nremove\nEND\nafter\n", "utf8");
+
+    const blocks = await buildEditToolBlocksForReview(
+      "delete_range",
+      { path: "range.ts", start_anchor: "START\n", end_anchor: "END\n" },
+      root,
+    );
+
+    expect(blocks).toEqual([
+      { path: "range.ts", search: "START\nremove\nEND\n", replace: "", offset: 0 },
+    ]);
+  });
+
+  it("turns delete_symbol args into a reviewable deletion block", async () => {
+    writeFileSync(
+      join(root, "symbols.ts"),
+      [
+        "export function keep() {",
+        "  return 1;",
+        "}",
+        "",
+        "/** Remove this class. */",
+        "@sealed",
+        "export class RemoveMe {",
+        "  value = 2;",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const blocks = await buildEditToolBlocksForReview(
+      "delete_symbol",
+      { path: "symbols.ts", name: "RemoveMe", kind: "class" },
+      root,
+    );
+
+    expect(blocks).toEqual([
+      {
+        path: "symbols.ts",
+        search: "/** Remove this class. */\n@sealed\nexport class RemoveMe {\n  value = 2;\n}\n",
+        replace: "",
+        offset: 0,
+      },
+    ]);
   });
 });

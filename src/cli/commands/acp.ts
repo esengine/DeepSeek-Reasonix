@@ -29,6 +29,7 @@ import {
   loadApiKey,
   loadEditMode,
   loadEndpoint,
+  loadMaxIterPerTurn,
   loadModel,
   loadReasoningEffort,
   normalizeMcpConfig,
@@ -112,7 +113,7 @@ export async function loadMcpServers(
       process.stderr.write(`${formatMcpLifecycleEvent({ state: "handshake", name: label })}\n`);
       const t0 = Date.now();
       const prefix = resolveMcpPrefix(spec.name, normalizedSpecs.length, globalPrefix);
-      if (spec.transport === "stdio") preflightStdioSpec(spec);
+      if (spec.transport === "stdio") preflightStdioSpec(spec, { cwd: workspaceDir });
       const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
       mcp = new McpClient({ transport, workspaceDir, requestTimeoutMs: spec.requestTimeoutMs });
       await mcp.initialize();
@@ -184,6 +185,7 @@ async function buildSession(opts: {
     tools: toolset.tools,
     model,
     budgetUsd: opts.budgetUsd,
+    maxIterPerTurn: loadMaxIterPerTurn(),
     session: `acp-${timestampSuffix()}`,
   });
   return {

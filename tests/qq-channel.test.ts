@@ -204,3 +204,37 @@ describe("QQChannel.sendResponse", () => {
     expect(onError.mock.calls[1]?.[0]).toContain("chunk 2/3 failed");
   });
 });
+
+describe("QQChannel inbound messaging", () => {
+  it("surfaces first-sender runtime binding as info instead of an error", () => {
+    const onSubmitMessage = vi.fn();
+    const onError = vi.fn();
+    const onInfo = vi.fn();
+    const channel = new QQChannel({
+      onSubmitMessage,
+      onError,
+      onInfo,
+    }) as QQChannel & {
+      ownerOpenId?: string;
+      allowlist?: string[];
+      runtimeBoundOpenId: string | null;
+      handlePrivateMessage: (msg: {
+        author: { user_openid: string };
+        content: string;
+        id: string;
+        timestamp: string;
+      }) => void;
+    };
+
+    channel.handlePrivateMessage({
+      author: { user_openid: "abcdefghijklmnop" },
+      content: "hello",
+      id: "msg-1",
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(onInfo).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+    expect(onSubmitMessage).toHaveBeenCalledWith("[QQ] hello");
+  });
+});

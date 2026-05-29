@@ -160,10 +160,9 @@ function SpanText({
         : FG_BODY;
   const inner = (
     <Text
-      color={color}
+      color={ambientDim ? FG_FAINT : color}
       bold={!!(span.bold || ambientBold)}
       italic={!!(span.italic || ambientItalic)}
-      dim={!!ambientDim}
       strikethrough={!!(span.strike || ambientStrike)}
       underline={!!(span.link || span.fileRef)}
     >

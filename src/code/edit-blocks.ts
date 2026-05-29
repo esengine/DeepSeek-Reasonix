@@ -1,5 +1,6 @@
 /** SEARCH must match byte-for-byte; empty SEARCH = create new file. No fuzzy match — silent wrong edit beats a missing one. */
 
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -116,7 +117,7 @@ function fsyncDirectoryBestEffort(path: string): void {
 }
 
 function atomicReplaceFileSync(path: string, buf: Buffer, mode: number): void {
-  const tmp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+  const tmp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
   const permissions = mode & 0o7777;
   let fd: number | undefined;
   try {

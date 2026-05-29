@@ -25,6 +25,8 @@ sessions/
 .turbo/
 # Local-only Claude Code settings — personal overrides, never committed.
 .claude/settings.local.json
+# Local agent notes — personal workflow reminders, never committed.
+agent.md
 # Per-user Reasonix state under .reasonix/ — committable team-level
 # files (settings.json, skills/) stay tracked, but the user-private
 # bits (semantic index, sessions, opt-out markers) never should.

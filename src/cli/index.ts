@@ -212,10 +212,44 @@ program
   .option("--system-append <prompt>", t("ui.systemAppendHint"))
   .option("--system-append-file <path>", t("ui.systemAppendFileHint"))
   .option(
+    "--dry-run",
+    "for ssh:// targets: parse the URI, check local SSH, print planned steps (no remote commands execute). RFC for #2140.",
+  )
+  .option(
     "--profile [path]",
     "record a V8 CPU profile; saved on exit. Send the .cpuprofile back if you're reporting a perf bug.",
   )
   .action(async (dir: string | undefined, opts) => {
+    // ssh:// without --dry-run is not yet implemented (RFC #2140).
+    if (typeof dir === "string" && dir.startsWith("ssh://") && !opts.dryRun) {
+      process.stderr.write(
+        "ssh:// remote workspaces require --dry-run (RFC #2140).\n" +
+          "Full remote execution is not yet implemented.\n" +
+          "\n" +
+          "Short-term recommendation:\n" +
+          "  Run Reasonix directly on the remote host, then use SSH tunnel for the dashboard:\n" +
+          "  $ ssh -L 8420:127.0.0.1:8420 user@host\n" +
+          "  $ reasonix code\n",
+      );
+      process.exit(1);
+    }
+
+    // SSH remote workspace RFC — dry-run bootstrap for #2140.
+    if (typeof dir === "string" && dir.startsWith("ssh://") && opts.dryRun) {
+      const { generateSshDryRunReport, parseSshUri, probeSsh } = await import("./ssh-remote.js");
+      const uri = parseSshUri(dir);
+      if (!uri) {
+        process.stderr.write(`invalid ssh:// URI: ${dir}\n`);
+        process.stderr.write("expected format: ssh://[user@]host[:port][/path]\n");
+        process.exit(1);
+      }
+      const ssh = probeSsh();
+      const report = generateSshDryRunReport(uri, ssh);
+      console.log(report);
+      if (!ssh) process.exit(1);
+      return;
+    }
+
     persistEffortFlag(opts.effort);
     const profiling = await maybeStartCpuProfile(opts.profile);
     try {
@@ -438,9 +472,19 @@ program
   .command("doctor")
   .description(t("cli.doctor"))
   .option("--json", t("ui.jsonHint"))
+  .option("--cache", "run cache-stability checks only")
   .action(async (opts) => {
     const { doctorCommand } = await import("./commands/doctor.js");
-    await doctorCommand({ json: !!opts.json });
+    await doctorCommand({ json: !!opts.json, cache: !!opts.cache });
+  });
+
+program
+  .command("doctor-cache")
+  .description("cache-stability health check")
+  .option("--json", t("ui.jsonHint"))
+  .action(async (opts) => {
+    const { doctorCommand } = await import("./commands/doctor.js");
+    await doctorCommand({ json: !!opts.json, cache: true });
   });
 
 program

@@ -1,4 +1,4 @@
-/** StaticCardStream must let verbose mode expand already-settled tool cards. */
+/** StaticCardStream keeps append-only history isolated from parent re-renders. */
 
 import { type ComponentType, type ReactElement, createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -62,6 +62,21 @@ const CARD: ToolCard = {
   elapsedMs: 410,
 };
 
+const SUCCESS_CARD: ToolCard = {
+  id: "tool-success",
+  ts: 0,
+  kind: "tool",
+  name: "run_command",
+  args: "npm test",
+  output: Array.from(
+    { length: 12 },
+    (_, i) => `success output line ${String(i + 1).padStart(2, "0")}`,
+  ).join("\n"),
+  done: true,
+  exitCode: 0,
+  elapsedMs: 410,
+};
+
 const USER_CARD: UserCard = {
   id: "user-1",
   ts: 0,
@@ -73,6 +88,14 @@ function Harness({ verbose }: { verbose: boolean }): ReactElement {
   return createElement(
     AgentStoreProvider,
     { session: SESSION, initialCards: [CARD] },
+    createElement(VerboseContext.Provider, { value: verbose }, createElement(StaticCardStream)),
+  );
+}
+
+function SuccessfulToolHarness({ verbose }: { verbose: boolean }): ReactElement {
+  return createElement(
+    AgentStoreProvider,
+    { session: SESSION, initialCards: [SUCCESS_CARD] },
     createElement(VerboseContext.Provider, { value: verbose }, createElement(StaticCardStream)),
   );
 }
@@ -96,6 +119,21 @@ describe("StaticCardStream render isolation", () => {
     rerender(createElement(ParentUpdateHarness, { revision: 1 }));
 
     expect(staticRenderSpy.mock.calls.length).toBe(renderCountAfterMount);
+    unmount();
+  });
+
+  it("does not retroactively expand settled tool cards after a verbose toggle", () => {
+    staticRenderSpy.mockClear();
+    const { lastFrame, rerender, unmount } = render(
+      createElement(SuccessfulToolHarness, { verbose: false }),
+    );
+    const renderCountAfterMount = staticRenderSpy.mock.calls.length;
+    expect(lastFrame()).not.toContain("success output line 01");
+
+    rerender(createElement(SuccessfulToolHarness, { verbose: true }));
+
+    expect(staticRenderSpy.mock.calls.length).toBe(renderCountAfterMount);
+    expect(lastFrame()).not.toContain("success output line 01");
     unmount();
   });
 });

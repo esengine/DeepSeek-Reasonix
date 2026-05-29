@@ -20,6 +20,7 @@ import { SlashSuggestions } from "./SlashSuggestions.js";
 
 import { StatusRow } from "./layout/StatusRow.js";
 import { formatLoopStatus } from "./loop.js";
+import { SURFACE } from "./theme/tokens.js";
 import { useSlowTick } from "./ticker.js";
 
 import type { StatusBarConfig } from "./layout/StatusRow.js";
@@ -110,7 +111,12 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
   }) => {
     useRenderTrace("ComposerArea");
     const inputArea = (
-      <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
+      <Box
+        flexDirection="column"
+        flexShrink={0}
+        flexWrap="nowrap"
+        backgroundColor={SURFACE.bgInput}
+      >
         <Box flexDirection="column" flexShrink={0} flexWrap="nowrap">
           {slashMatches !== null ? (
             <SlashSuggestions

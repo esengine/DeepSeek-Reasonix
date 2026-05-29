@@ -47,6 +47,7 @@ import type {
   ConfirmationChoice,
   ExternalSessionApp,
   ExternalSessionSource,
+  ImportedMcpServer,
   IncomingEvent,
   JobInfo,
   McpSpecInfo,
@@ -60,13 +61,14 @@ import type {
 } from "./protocol";
 import { type QQDesktopSettingsState } from "./qq-settings";
 import { Composer, type SlashCmd } from "./ui/composer";
-import { ContextPanel } from "./ui/context-panel";
+import { ContextPanel, type ContextPanelTab } from "./ui/context-panel";
 import { JobsPop } from "./ui/jobs-pop";
 import { useElapsed } from "./ui/live";
 import { AboutModal } from "./ui/about";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { JumpBar } from "./ui/jump-bar";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+
 import { Sidebar } from "./ui/sidebar";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
@@ -99,7 +101,7 @@ import { WorkdirPop } from "./ui/workdir-pop";
 import { parseEditResult } from "./ui/cards";
 import { useAutoCollapse } from "./ui/useAutoCollapse";
 import { useResizable } from "./ui/useResizable";
-import { useAutoScroll } from "./ui/useAutoScroll";
+// Auto-scroll handled by Virtuoso followOutput + scrollToIndex (useAutoScroll replaced).
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 import { elideTranscriptMessages } from "./ui/transcript-elision";
@@ -230,6 +232,30 @@ export type UsageStats = {
   liveLogTokens: number;
 };
 
+type CcSwitchImportResult = {
+  source: "db" | "config";
+  path: string;
+  servers: ImportedMcpServer[];
+};
+
+type WindowControls = Pick<
+  ReturnType<typeof getCurrentWindow>,
+  "isFullscreen" | "isMaximized" | "setFullscreen" | "toggleMaximize"
+>;
+
+export function readWindowExpanded(win: WindowControls, isMac: boolean): Promise<boolean> {
+  return isMac ? win.isFullscreen() : win.isMaximized();
+}
+
+export function toggleWindowExpanded(
+  win: WindowControls,
+  isMac: boolean,
+  expanded: boolean,
+): Promise<void> {
+  if (isMac) return win.setFullscreen(!expanded);
+  return win.toggleMaximize();
+}
+
 export type SessionInfo = {
   name: string;
   messageCount: number;
@@ -248,10 +274,22 @@ export type Settings = {
   recentWorkspaces: string[];
   model: string;
   editor?: string;
-  webSearchEngine?: "bing" | "bing-intl" | "searxng" | "metaso" | "tavily" | "perplexity" | "exa" | "brave" | "ollama";
+  desktopCloseBehavior?: "closeToTray" | "closeToQuit";
+  webSearchEngine?:
+    | "bing"
+    | "bing-intl"
+    | "searxng"
+    | "metaso"
+    | "baidu"
+    | "tavily"
+    | "perplexity"
+    | "exa"
+    | "brave"
+    | "ollama";
   webSearchEndpoint?: string;
   webSearchApiKeys?: {
     metaso?: string;
+    baidu?: string;
     tavily?: string;
     perplexity?: string;
     exa?: string;
@@ -259,7 +297,10 @@ export type Settings = {
     brave?: string;
   };
   subagentModels?: Record<string, "flash" | "pro">;
+  /** Per-model context-window override (tokens). */
+  contextTokens?: Record<string, number>;
   showSystemEvents?: boolean;
+  promptHistory?: string[];
   version: string;
 };
 
@@ -362,6 +403,7 @@ type Action =
 function sanitizeSettingsPatch(patch: SettingsPatch): Partial<Settings> {
   const {
     metasoApiKey: _metaso,
+    baiduApiKey: _baidu,
     tavilyApiKey: _tavily,
     perplexityApiKey: _perplexity,
     exaApiKey: _exa,
@@ -989,11 +1031,13 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
           recentWorkspaces: ev.recentWorkspaces,
           model: ev.model,
           editor: ev.editor,
+          desktopCloseBehavior: ev.desktopCloseBehavior,
           webSearchEngine: ev.webSearchEngine,
           webSearchEndpoint: ev.webSearchEndpoint,
           webSearchApiKeys: ev.webSearchApiKeys,
           subagentModels: ev.subagentModels,
           showSystemEvents: ev.showSystemEvents,
+          promptHistory: ev.promptHistory,
           version: ev.version,
         },
       };
@@ -1396,12 +1440,18 @@ function TabRuntime({
   >(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
-  const threadInnerRef = useRef<HTMLDivElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const virtScrollerRef = useRef<HTMLDivElement | null>(null);
+  const atBottomRef = useRef(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
+  const [mcpEditTarget, setMcpEditTarget] = useState<{ raw: string; nonce: number } | null>(
+    null,
+  );
   const [jobsOpen, setJobsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [contextPanelTab, setContextPanelTab] = useState<ContextPanelTab>("files");
+  const [contextPanelTabNonce, setContextPanelTabNonce] = useState(0);
   const previousApprovalSnapshotRef = useRef<ApprovalSnapshot>({
     confirms: [],
     pathAccess: [],
@@ -1425,6 +1475,12 @@ function TabRuntime({
   }, []);
   const openSettingsAt = useCallback((page: SettingsPageId = "general") => {
     setSettingsPage(page);
+    setMcpEditTarget(null);
+    setSettingsOpen(true);
+  }, []);
+  const openMcpEditor = useCallback((spec: McpSpecInfo) => {
+    setSettingsPage("mcp");
+    setMcpEditTarget((prev) => ({ raw: spec.raw, nonce: (prev?.nonce ?? 0) + 1 }));
     setSettingsOpen(true);
   }, []);
   const palette = useCommandPalette(active);
@@ -1487,6 +1543,14 @@ function TabRuntime({
     (spec: string) => sendRpc({ cmd: "mcp_specs_remove", spec }),
     [sendRpc],
   );
+  const updateMcpSpec = useCallback(
+    (raw: string, server: ImportedMcpServer) => sendRpc({ cmd: "mcp_specs_update", raw, server }),
+    [sendRpc],
+  );
+  const retryMcpSpec = useCallback(
+    (raw: string) => sendRpc({ cmd: "mcp_specs_retry", raw }),
+    [sendRpc],
+  );
   const newChat = useCallback(() => {
     clearAbortDraft();
     sendRpc({ cmd: "new_chat" });
@@ -1516,6 +1580,77 @@ function TabRuntime({
       window.setTimeout(() => setToast(null), opts?.duration ?? 1600);
     },
     [],
+  );
+
+  const importCcSwitchMcp = useCallback(async () => {
+    try {
+      const result = await invoke<CcSwitchImportResult>("import_cc_switch_mcp");
+      const existingNames = new Set(
+        state.mcpSpecs
+          .map((spec) => spec.name)
+          .filter((name): name is string => typeof name === "string" && name.length > 0),
+      );
+      const pending = result.servers.filter((server) => !existingNames.has(server.name));
+      const skipped = result.servers.length - pending.length;
+      if (pending.length === 0) {
+        flashToast(t("toast.mcpImportNone"));
+        return;
+      }
+      await invoke("rpc_send", {
+        line: JSON.stringify({ tabId, cmd: "mcp_import_servers", servers: pending }),
+      });
+      flashToast(
+        skipped > 0
+          ? t("toast.mcpImportedWithSkipped", { imported: pending.length, skipped })
+          : t("toast.mcpImported", { imported: pending.length }),
+        { duration: 2600 },
+      );
+    } catch (err) {
+      flashToast(t("toast.mcpImportFailed", { error: String(err) }), { duration: 3200 });
+      throw err;
+    }
+  }, [flashToast, state.mcpSpecs, tabId]);
+
+  const openMcpStatus = useCallback(() => {
+    setContextPanelTab("tools");
+    setContextPanelTabNonce((nonce) => nonce + 1);
+    if (ctxCollapsed) onToggleCtx();
+    flashToast(t("toast.mcpStatusOpened"));
+  }, [ctxCollapsed, flashToast, onToggleCtx]);
+
+  const retryFailedMcpSpecs = useCallback(() => {
+    const failed = state.mcpSpecs.filter((spec) => spec.status === "failed");
+    if (failed.length === 0) {
+      flashToast(t("toast.mcpRetryNone"));
+      return;
+    }
+    for (const spec of failed) retryMcpSpec(spec.raw);
+    flashToast(t("toast.mcpRetryQueued", { count: failed.length }), { duration: 2200 });
+  }, [flashToast, retryMcpSpec, state.mcpSpecs]);
+
+  const runMcpSlashCommand = useCallback(
+    (arg?: string) => {
+      const subcommand = arg?.trim().toLowerCase() ?? "";
+      if (!subcommand || subcommand === "settings" || subcommand === "config") {
+        openSettingsAt("mcp");
+        return true;
+      }
+      if (subcommand === "status" || subcommand === "list" || subcommand === "ls") {
+        openMcpStatus();
+        return true;
+      }
+      if (subcommand === "retry" || subcommand === "reconnect") {
+        retryFailedMcpSpecs();
+        return true;
+      }
+      if (subcommand === "import" || subcommand === "cc-switch" || subcommand === "ccswitch") {
+        openSettingsAt("mcp");
+        void importCcSwitchMcp().catch(() => undefined);
+        return true;
+      }
+      return false;
+    },
+    [importCcSwitchMcp, openMcpStatus, openSettingsAt, retryFailedMcpSpecs],
   );
 
   const applyReasoningEffort = useCallback(
@@ -1655,6 +1790,12 @@ function TabRuntime({
           if (!override) setDraft("");
           return;
         }
+        if (name === "mcp") {
+          if (runMcpSlashCommand(args?.trim())) {
+            if (!override) setDraft("");
+            return;
+          }
+        }
         if (name === "skill" || name === "skills") {
           openSettingsAt("skills");
           if (!override) setDraft("");
@@ -1686,6 +1827,7 @@ function TabRuntime({
       recordAbortDraft,
       applySlashSettingsCommand,
       openSettingsAt,
+      runMcpSlashCommand,
     ],
   );
 
@@ -1850,31 +1992,50 @@ function TabRuntime({
     [sendRpc],
   );
 
-  // Read the latest session inside the stable restore callback below.
-  const currentSessionRef = useRef(state.currentSession);
-  currentSessionRef.current = state.currentSession;
   const messageItems = state.messages;
 
-  const restoreScrollTop = useCallback(() => {
-    const session = currentSessionRef.current;
-    if (!session) return null;
-    const raw = localStorage.getItem(`reasonix.scroll.${session}`);
-    const n = raw ? Number(raw) : Number.NaN;
-    return Number.isFinite(n) ? n : null;
-  }, []);
-
   const [showJumpButton, setShowJumpButton] = useState(false);
-  const { scrollToBottom } = useAutoScroll(
-    threadRef,
-    threadInnerRef,
-    state.busy,
-    restoreScrollTop,
-  );
+
+  // Reserve scroll to bottom when busy becomes true (message just sent).
+  const busyPrevRef = useRef(state.busy);
+  useEffect(() => {
+    if (state.busy && !busyPrevRef.current) {
+      atBottomRef.current = true;
+      setShowJumpButton(false);
+    }
+    busyPrevRef.current = state.busy;
+  }, [state.busy]);
+
+  const scrollToBottom = useCallback(() => {
+    const len = messageItems.length;
+    if (len > 0) {
+      const scroller = virtScrollerRef.current;
+      if (scroller) {
+        scroller.scrollTop = scroller.scrollHeight;
+      } else {
+        virtuosoRef.current?.scrollToIndex({ index: len - 1, behavior: "auto" });
+      }
+    }
+  }, [messageItems.length]);
+
+  // Follow the bottom while the assistant is streaming and the user hasn't
+  // scrolled up. The dependency on messageItems.length covers new messages;
+  // atBottomRef guards against re-pinning when the user intentionally scrolled
+  // up to read earlier content (#2159).
+  useEffect(() => {
+    const s = virtScrollerRef.current;
+    if (!s || messageItems.length === 0) return;
+    if (!atBottomRef.current) return;
+    const id = requestAnimationFrame(() => {
+      if (atBottomRef.current) s.scrollTop = s.scrollHeight;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [messageItems]);
 
   // Persist the transcript scroll offset per session so a restart reopens
   // the conversation where the user left it (#1244).
   useEffect(() => {
-    const el = threadRef.current;
+    const el = virtScrollerRef.current;
     const session = state.currentSession;
     if (!el || !session) return;
     const key = `reasonix.scroll.${session}`;
@@ -2074,6 +2235,17 @@ function TabRuntime({
       },
     },
     { cmd: "/model", desc: t("app.cmd.switchModel"), run: () => openSettingsAt("models") },
+    { cmd: "/mcp", desc: t("app.cmd.mcp"), run: () => openSettingsAt("mcp") },
+    { cmd: "/mcp status", desc: t("app.cmd.mcpStatus"), run: openMcpStatus },
+    { cmd: "/mcp retry", desc: t("app.cmd.mcpRetry"), run: retryFailedMcpSpecs },
+    {
+      cmd: "/mcp import",
+      desc: t("app.cmd.mcpImport"),
+      run: () => {
+        openSettingsAt("mcp");
+        void importCcSwitchMcp().catch(() => undefined);
+      },
+    },
     {
       cmd: "/search-engine",
       desc: t("app.cmd.searchEngine"),
@@ -2214,7 +2386,7 @@ function TabRuntime({
 
   return (
     <WorkspaceProvider
-      value={{ dir: state.settings?.workspaceDir, editor: state.settings?.editor }}
+      value={{ dir: state.settings?.workspaceDir, editor: state.settings?.editor, sessionFiles: state.sessionFiles }}
     >
       <div
         className="app"
@@ -2297,7 +2469,10 @@ function TabRuntime({
         ) : null}
 
         <main className="main" style={{ position: "relative" }}>
-          <JumpBar messages={state.messages} threadEl={threadRef.current} />
+          <JumpBar messages={state.messages} threadEl={threadRef.current} onScrollToTurn={(turn) => {
+            const idx = state.messages.findIndex((m) => (m.kind === "user" || m.kind === "assistant") && m.turn === turn);
+            if (idx >= 0) virtuosoRef.current?.scrollToIndex(idx);
+          }} />
           {state.needsSetup ? (
             <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
@@ -2340,10 +2515,13 @@ function TabRuntime({
                 ) : (
                   <Virtuoso
                     ref={virtuosoRef}
-                    style={{ height: "100%" }}
+                    style={{ height: "90%" }}
+                    className="virtuoso-scroll"
                     totalCount={messageItems.length}
                     followOutput={"auto"}
-                    atBottomStateChange={(atBottom) => setShowJumpButton(!atBottom)}
+                    initialTopMostItemIndex={messageItems.length > 0 ? messageItems.length - 1 : undefined}
+                    scrollerRef={(ref) => { virtScrollerRef.current = ref as HTMLDivElement | null; }}
+                    atBottomStateChange={(atBottom) => { atBottomRef.current = atBottom; setShowJumpButton(!atBottom); }}
                     components={{
                       Header: state.activePlan ? () => (
                         <div className="thread-inner">
@@ -2354,6 +2532,17 @@ function TabRuntime({
                           <ActivePlanTaskCard plan={state.activePlan!} />
                         </div>
                       ) : undefined,
+                      Footer: () => (
+                        <div className="thread-inner">
+                          {state.pendingPlans.map((p) => <PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />)}
+                          {state.pendingCheckpoints.map((c) => <CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />)}
+                          {state.pendingRevisions.map((r) => <RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />)}
+                          {state.pendingConfirms.map((c) => <ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />)}
+                          {state.pendingPathAccess.map((p) => <PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />)}
+                          {state.pendingChoices.map((c) => <ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />)}
+                          {!state.ready ? <div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div> : null}
+                        </div>
+                      ),
                     }}
                     itemContent={(index) => {
                       const m = state.messages[index]!;
@@ -2382,6 +2571,35 @@ function TabRuntime({
                           </div>
                         );
                       }
+                      if (m.kind === "error") {
+                        const toneVar = m.recoverable ? "var(--tone-warn)" : "var(--tone-err)";
+                        const bgVar = m.recoverable ? "var(--warn-soft, var(--danger-soft))" : "var(--danger-soft)";
+                        const labelKey = m.recoverable ? "app.warningLabel" : "app.errorLabel";
+                        return (
+                          <div key={m.id} className="warn-card" style={{ borderColor: toneVar, background: bgVar, position: "relative" }}>
+                            <span className="ico" style={{ color: toneVar }}><I.warning size={16} /></span>
+                            <div style={{ flex: 1 }}>
+                              <div className="tt">{t(labelKey)}</div>
+                              <div className="ds">{m.message}</div>
+                            </div>
+                            <button type="button" className="warn-card-dismiss" title={t("app.dismissError")}
+                              onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
+                              style={{ background: "transparent", border: "none", color: toneVar, cursor: "pointer", padding: "4px", alignSelf: "flex-start" }}>
+                              <I.x size={14} />
+                            </button>
+                          </div>
+                        );
+                      }
+                      if (m.kind === "warning") {
+                        if (state.settings?.showSystemEvents === false) return null;
+                        return (
+                          <div key={m.id} className="sys-event-row" title={m.text}>
+                            <span className="line" />
+                            <span className="label">{m.text}</span>
+                            <span className="line" />
+                          </div>
+                        );
+                      }
                       return null;
                     }}
                   />
@@ -2389,7 +2607,7 @@ function TabRuntime({
                 {showJumpButton ? (
                   <button
                     className="thread-jump-bottom"
-                    onClick={() => scrollToBottom(true)}
+                    onClick={() => { atBottomRef.current = true; setShowJumpButton(false); scrollToBottom(); }}
                     title={t("app.jumpToBottom") ?? "Jump to bottom"}
                     aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
                   >
@@ -2397,18 +2615,6 @@ function TabRuntime({
                   </button>
                 ) : null}
               </div>
-
-              {state.pendingPlans.length > 0 || state.pendingCheckpoints.length > 0 || state.pendingRevisions.length > 0 || state.pendingConfirms.length > 0 || state.pendingPathAccess.length > 0 || state.pendingChoices.length > 0 || !state.ready ? (
-                <div style={{ maxWidth: "var(--thread-max-width, 740px)", margin: "0 auto", padding: "0 32px", width: "100%" }}>
-                  {state.pendingPlans.map((p) => (<PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />))}
-                  {state.pendingCheckpoints.map((c) => (<CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />))}
-                  {state.pendingRevisions.map((r) => (<RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />))}
-                  {state.pendingConfirms.map((c) => (<ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />))}
-                  {state.pendingPathAccess.map((p) => (<PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />))}
-                  {state.pendingChoices.map((c) => (<ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />))}
-                  {!state.ready ? (<div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div>) : null}
-                </div>
-              ) : null}
 
               <Composer
                 draft={draft}
@@ -2447,6 +2653,15 @@ function TabRuntime({
                   setDraft("");
                 }}
                 onDequeueSend={(index) => dispatch({ t: "dequeue_send", index })}
+                initialHistory={state.settings?.promptHistory}
+                onHistoryPush={(entry) => {
+                  // Use saveSettings (RPC only, no local state patch) so the
+                  // sentinel [entry] is never written into state.settings and
+                  // historyRef is not transiently reset. The backend merges
+                  // against the freshly-loaded persisted list and re-emits
+                  // $settings with the merged result (#2051).
+                  saveSettings({ promptHistory: [entry] });
+                }}
               />
             </>
           )}
@@ -2468,7 +2683,12 @@ function TabRuntime({
           sessionFiles={state.sessionFiles}
           memory={state.memory}
           memoryDetail={state.memoryDetail}
+          activeTab={contextPanelTab}
+          activeTabNonce={contextPanelTabNonce}
           onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
+          onOpenMcpSettings={() => openSettingsAt("mcp")}
+          onEditMcpSpec={openMcpEditor}
+          onRetryMcpSpec={retryMcpSpec}
         />
 
         <StatusBar
@@ -2509,6 +2729,10 @@ function TabRuntime({
             saveSettings({ workspaceDir: path });
           }}
           onBrowse={pickWorkspace}
+          onRemoveRecent={(path) => {
+            const nextRecent = (state.settings?.recentWorkspaces ?? []).filter((p) => p !== path);
+            applySettingsPatch({ recentWorkspaces: nextRecent });
+          }}
         />
 
         {aboutOpen ? <AboutModal onClose={() => setAboutOpen(false)} /> : null}
@@ -2530,6 +2754,8 @@ function TabRuntime({
             customFontFamily={customFontFamily}
             onSetCustomFontFamily={onSetCustomFontFamily}
             initialPage={settingsPage}
+            initialMcpEditRaw={mcpEditTarget?.raw}
+            initialMcpEditNonce={mcpEditTarget?.nonce ?? 0}
             mcpSpecs={state.mcpSpecs}
             mcpBridged={state.mcpBridged}
             skills={state.skills}
@@ -2547,8 +2773,11 @@ function TabRuntime({
               openUrl("https://q.qq.com/qqbot/openclaw/login.html").catch(() => undefined)
             }
             onPickWorkspace={pickWorkspace}
+            onImportCcSwitchMcp={importCcSwitchMcp}
             onAddMcpSpec={addMcpSpec}
             onRemoveMcpSpec={removeMcpSpec}
+            onUpdateMcpSpec={updateMcpSpec}
+            onRetryMcpSpec={retryMcpSpec}
             onReadMemory={(path) => sendRpc({ cmd: "memory_read", path })}
           />
         ) : null}
@@ -2635,13 +2864,23 @@ function TitleBar({
 
   useEffect(() => {
     const win = getCurrentWindow();
-    win.isMaximized().then(setIsMaximized);
+    const syncWindowState = async () => {
+      setIsMaximized(await readWindowExpanded(win, isMac));
+    };
+    void syncWindowState();
     let unlisten: (() => void) | undefined;
     win.listen("tauri://resize", async () => {
-      setIsMaximized(await win.isMaximized());
+      await syncWindowState();
     }).then((fn) => { unlisten = fn; });
-    return () => unlisten?.();
-  }, []);
+    let fullscreenUnlisten: (() => void) | undefined;
+    win.listen("tauri://fullscreen", async () => {
+      await syncWindowState();
+    }).then((fn) => { fullscreenUnlisten = fn; });
+    return () => {
+      unlisten?.();
+      fullscreenUnlisten?.();
+    };
+  }, [isMac]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -2692,7 +2931,7 @@ function TitleBar({
               aria-label={isMaximized ? t("app.titlebar.restore") : t("app.titlebar.maximize")}
               onMouseDown={(e) => {
                 e.stopPropagation();
-                win.toggleMaximize();
+                void toggleWindowExpanded(win, true, isMaximized);
               }}
             >
               {isMaximized ? <WinRestore /> : <WinMaximize />}
@@ -2806,7 +3045,7 @@ function TitleBar({
               type="button"
               className="win-ctrl"
               title={isMaximized ? t("app.titlebar.restore") : t("app.titlebar.maximize")}
-              onMouseDown={(e) => { e.stopPropagation(); win.toggleMaximize(); }}
+              onMouseDown={(e) => { e.stopPropagation(); void toggleWindowExpanded(win, false, isMaximized); }}
             >
               {isMaximized ? <WinRestore /> : <WinMaximize />}
             </button>

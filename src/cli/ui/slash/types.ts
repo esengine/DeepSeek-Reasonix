@@ -59,7 +59,7 @@ export interface SlashResult {
   };
 }
 
-export type PlanModeToggleSource = "slash";
+export type PlanModeToggleSource = "slash" | "explicit-intent";
 
 export interface SlashContext {
   configPath?: string;
@@ -151,6 +151,16 @@ export interface SlashContext {
   /** Snapshot the dashboard's URL when running, null otherwise. */
   getDashboardUrl?: () => string | null;
   qq?: {
+    connect: (args: readonly string[]) => Promise<string>;
+    disconnect: () => Promise<string>;
+    status: () => string;
+  };
+  telegram?: {
+    connect: (args: readonly string[]) => Promise<string>;
+    disconnect: () => Promise<string>;
+    status: () => string;
+  };
+  weixin?: {
     connect: (args: readonly string[]) => Promise<string>;
     disconnect: () => Promise<string>;
     status: () => string;

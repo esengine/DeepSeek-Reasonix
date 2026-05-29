@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import type { DashboardContext } from "../context.js";
 import type { ApiResult } from "../router.js";
@@ -51,18 +51,25 @@ export async function handleProjectTree(
 ): Promise<ApiResult> {
   if (method !== "GET") return { status: 405, body: { error: "GET only" } };
   const cwd = ctx.getCurrentCwd?.();
-  if (!cwd || !existsSync(cwd)) {
+  if (!cwd) {
     return { status: 503, body: { error: "no project directory available" } };
   }
-  const tree = buildTree(cwd, cwd, 0);
+  try {
+    if (!(await stat(cwd)).isDirectory()) {
+      return { status: 503, body: { error: "no project directory available" } };
+    }
+  } catch {
+    return { status: 503, body: { error: "no project directory available" } };
+  }
+  const tree = await buildTree(cwd, cwd, 0);
   return { status: 200, body: { tree } };
 }
 
-function buildTree(root: string, dirPath: string, depth: number): TreeNode[] {
+async function buildTree(root: string, dirPath: string, depth: number): Promise<TreeNode[]> {
   if (depth > MAX_DEPTH) return [];
   let names: string[];
   try {
-    names = readdirSync(dirPath);
+    names = await readdir(dirPath);
   } catch {
     return [];
   }
@@ -72,9 +79,9 @@ function buildTree(root: string, dirPath: string, depth: number): TreeNode[] {
   for (const name of names) {
     if (SKIP_DIRS.has(name)) continue;
     const full = join(dirPath, name);
-    let st: ReturnType<typeof statSync>;
+    let st: Awaited<ReturnType<typeof stat>>;
     try {
-      st = statSync(full);
+      st = await stat(full);
     } catch {
       continue;
     }
@@ -89,7 +96,7 @@ function buildTree(root: string, dirPath: string, depth: number): TreeNode[] {
   for (const name of dirs) {
     const full = join(dirPath, name);
     const rel = relative(root, full).split(sep).join("/");
-    const children = buildTree(root, full, depth + 1);
+    const children = await buildTree(root, full, depth + 1);
     nodes.push({ name, path: rel, isDir: true, children });
   }
   for (const name of files) {
@@ -111,7 +118,14 @@ export async function handleFiles(
   }
   if (method !== "POST") return { status: 405, body: { error: "GET or POST only" } };
   const cwd = ctx.getCurrentCwd?.();
-  if (!cwd || !existsSync(cwd)) {
+  if (!cwd) {
+    return { status: 503, body: { error: "@-mention picker requires a code-mode session" } };
+  }
+  try {
+    if (!(await stat(cwd)).isDirectory()) {
+      return { status: 503, body: { error: "@-mention picker requires a code-mode session" } };
+    }
+  } catch {
     return { status: 503, body: { error: "@-mention picker requires a code-mode session" } };
   }
   let parsed: { prefix?: unknown };
@@ -121,11 +135,11 @@ export async function handleFiles(
     return { status: 400, body: { error: "body must be JSON" } };
   }
   const prefix = typeof parsed.prefix === "string" ? parsed.prefix.trim().toLowerCase() : "";
-  const matches = walk(cwd, prefix);
+  const matches = await walk(cwd, prefix);
   return { status: 200, body: { files: matches } };
 }
 
-function walk(root: string, prefix: string): string[] {
+async function walk(root: string, prefix: string): Promise<string[]> {
   const out: string[] = [];
   const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
   while (stack.length > 0 && out.length < RESULT_CAP) {
@@ -133,7 +147,7 @@ function walk(root: string, prefix: string): string[] {
     if (depth > MAX_DEPTH) continue;
     let names: string[];
     try {
-      names = readdirSync(path);
+      names = await readdir(path);
     } catch {
       continue;
     }
@@ -141,9 +155,9 @@ function walk(root: string, prefix: string): string[] {
       if (out.length >= RESULT_CAP) break;
       if (SKIP_DIRS.has(name)) continue;
       const full = join(path, name);
-      let st: ReturnType<typeof statSync>;
+      let st: Awaited<ReturnType<typeof stat>>;
       try {
-        st = statSync(full);
+        st = await stat(full);
       } catch {
         continue;
       }

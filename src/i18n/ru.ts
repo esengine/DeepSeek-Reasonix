@@ -183,7 +183,7 @@ export const ru: TranslationSchema = {
     models: { ...EN.slash.models, description: "список доступных моделей от DeepSeek /models" },
     theme: {
       ...EN.slash.theme,
-      argsHint: "[auto|dark|light|midnight|deep-blue|high-contrast]",
+      argsHint: "[auto|graphite|ember|aurora|sandstone|porcelain|linen|glacier|midnight]",
       description: "показать или сохранить тему терминала. Без аргументов открывает выбор.",
     },
     language: {
@@ -409,13 +409,35 @@ export const ru: TranslationSchema = {
     themeSubtitle: "Предпросмотр обновляется сразу. Можно сменить позже через /theme.",
     themeSampleHeading: "Образец",
     themeFooter: "[↑↓] навигация · [Enter] подтвердить · [Esc] отмена",
+    themeName: {
+      ...EN.wizard.themeName,
+      graphite: "Графит",
+      ember: "Уголь",
+      aurora: "Аврора",
+      sandstone: "Песчаник",
+      porcelain: "Фарфор",
+      linen: "Лён",
+      glacier: "Ледник",
+      midnight: "Полночь",
+      dark: "Тёмная",
+      light: "Светлая",
+      "deep-blue": "Глубокий синий",
+      "high-contrast": "Высокий контраст",
+    },
     themeCaption: {
       ...EN.wizard.themeCaption,
-      dark: "Тёмные тона (по умолч.)",
-      light: "Светлый режим",
-      midnight: "Палитра Tokyo Night",
-      "deep-blue": "Глубокий синий на чёрном",
-      "high-contrast": "Доступность",
+      graphite: "Исходная тёмная палитра с нейтральными графитовыми панелями",
+      ember: "Тёплая тёмная тема с более ярким оранжевым акцентом Reasonix",
+      aurora: "Тёмная бирюзово-зелёная тема для мягкой работы при слабом освещении",
+      sandstone: "Исходная тёплая светлая палитра",
+      porcelain: "Чистая светлая тема со спокойным контрастом",
+      linen: "Тёплая редакционная светлая тема с поверхностями, похожими на бумагу",
+      glacier: "Холодная светлая тема с чёткими синими акцентами",
+      midnight: "Тёмная тема цвета navy с холодными синими поверхностями",
+      dark: "Тёмные тона (устаревший псевдоним)",
+      light: "Светлый режим (устаревший псевдоним)",
+      "deep-blue": "Глубокий синий на чёрном (устаревший псевдоним)",
+      "high-contrast": "Доступность (устаревший псевдоним)",
     },
     mcpTitle: "Какие MCP-серверы должен подключить Reasonix?",
     mcpUserArgsHint: "(вы предоставите {arg})",
@@ -451,6 +473,7 @@ export const ru: TranslationSchema = {
     ...EN.themePicker,
     header: "Тема",
     footer: "↑↓ выбор · ⏎ подтвердить · esc отмена",
+    autoLabel: "Авто",
     currentPref: "текущая настройка",
     activeNow: "активно сейчас",
     autoDesc: "использовать REASONIX_THEME или по умолчанию",
@@ -552,16 +575,42 @@ export const ru: TranslationSchema = {
     braveRateLimit:
       "web_search: Превышен лимит запросов или месячная квота для Brave Search API — подождите или перейдите на платную версию на сайте https://brave.com/search/api/",
     braveServerError:
-      "web_search: Ошибка сервера Brave Search ({status}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|searxng|metaso|tavily|perplexity|exa|brave",
+      "web_search: Ошибка сервера Brave Search ({status}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
     braveParseError:
       "web_search: Brave Search вернул неразборчивый ответ (HTTP {status}) — попробуйте позже",
+    ollamaMissingKey:
+      "web_search: Для Ollama требуется ключ API — задайте переменную среды OLLAMA_API_KEY или параметр `ollamaApiKey` в ~/.reasonix/config.json; получить ключ можно на https://ollama.com/settings/keys",
+    ollamaUnauthorized:
+      "web_search: Ключ API Ollama отклонён — проверьте OLLAMA_API_KEY или получите новый на https://ollama.com/settings/keys",
+    ollamaRateLimit:
+      "web_search: Ollama превысил лимит или квоту — подождите и повторите или выберите другой поисковик: /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
+    ollamaServerError:
+      "web_search: Ошибка сервера Ollama ({status}) ({url}) — попробуйте позже или выберите другой поисковик с помощью /search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama",
+    ollamaParseError:
+      "web_search: Ollama вернул неразборчивый ответ (HTTP {status}) ({url}) — попробуйте позже",
+    fetchOllamaMissingKey:
+      "web_fetch: Для получения через Ollama требуется ключ API — задайте OLLAMA_API_KEY или `ollamaApiKey` в конфигурации; ключ на https://ollama.com/settings/keys",
+    fetchOllamaUnauthorized:
+      "web_fetch: Ключ API Ollama отклонён — проверьте OLLAMA_API_KEY или получите новый на https://ollama.com/settings/keys",
+    fetchOllamaRateLimit:
+      "web_fetch: Получение через Ollama превысило лимит или квоту — подождите и повторите попытку",
+    fetchOllamaServerError:
+      "web_fetch: Ошибка сервера Ollama при получении ({status}) ({url}) — попробуйте позже",
+    fetchOllamaParseError:
+      "web_fetch: Ollama вернул неразборчивый ответ при получении (HTTP {status}) ({url}) — попробуйте позже",
   },
   handlers: {
     ...EN.handlers,
     webSearchEngine: {
       ...EN.handlers.webSearchEngine,
+      usageBingIntl:
+        "  /search-engine bing-intl          использовать Bing International (www.bing.com, индексирует GitHub/Wikipedia/Stack Overflow)",
+      usageOllama:
+        "  /search-engine ollama              использовать облачный веб-поиск Ollama — задайте OLLAMA_API_KEY или ollamaApiKey в конфигурации; ключ на https://ollama.com/settings/keys",
       usageBrave:
         "  /search-engine brave               использует Brave Search API (независимый индекс, бесплатно 2000 запросов в месяц — установите BRAVE_SEARCH_API_KEY или braveApiKey в конфигурации; получить ключ можно на сайте https://brave.com/search/api/)",
+      switchedOllamaNote:
+        " Укажите OLLAMA_API_KEY или `ollamaApiKey` в файле конфигурации; получить ключ можно на https://ollama.com/settings/keys.",
       switchedBraveNote:
         " Укажите параметр BRAVE_SEARCH_API_KEY (или BRAVE_API_KEY) или `braveApiKey` в файле конфигурации; 2000 бесплатных запросов в месяц доступны по адресу https://brave.com/search/api/.",
     },

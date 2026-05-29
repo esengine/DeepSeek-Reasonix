@@ -4,7 +4,8 @@ import React from "react";
 import { t } from "../../i18n/index.js";
 import type { SlashCommandSpec } from "./slash.js";
 import { GLYPH, useColor } from "./theme.js";
-import { SURFACE } from "./theme/tokens.js";
+import { type ThemeChoice, themeChoiceLabel } from "./theme/labels.js";
+import { FG, SURFACE } from "./theme/tokens.js";
 import type { AtPickerEntry } from "./useCompletionPickers.js";
 
 export interface SlashArgPickerProps {
@@ -65,8 +66,8 @@ export function SlashArgPicker({
       <Text color={color.accent} bold>
         {`/${spec.cmd}`}
       </Text>
-      {headerArgsHint ? <Text dim>{` ${headerArgsHint}`}</Text> : null}
-      <Text dim>{`  ${headerSummary}`}</Text>
+      {headerArgsHint ? <Text color={FG.faint}>{` ${headerArgsHint}`}</Text> : null}
+      <Text color={FG.faint}>{`  ${headerSummary}`}</Text>
     </Box>
   );
 
@@ -88,7 +89,7 @@ export function SlashArgPicker({
             {GLYPH.warn}
           </Text>
           <Text color={color.warn}>{t("slashArgPicker.noMatch", { partial })}</Text>
-          <Text dim>{t("slashArgPicker.keepTyping")}</Text>
+          <Text color={FG.faint}>{t("slashArgPicker.keepTyping")}</Text>
         </Box>
       </Box>
     );
@@ -105,20 +106,21 @@ export function SlashArgPicker({
     <Box flexDirection="column" paddingX={1} marginTop={1}>
       {headerRow}
       {hiddenAbove > 0 ? (
-        <Text dim>{t("slashArgPicker.above", { hidden: hiddenAbove })}</Text>
+        <Text color={FG.faint}>{t("slashArgPicker.above", { hidden: hiddenAbove })}</Text>
       ) : null}
       {shown.map((value, i) => {
         const idx = windowStart + i;
         const isDir = pathCandidates?.[idx]?.isDir ?? false;
+        const label = spec.cmd === "theme" ? themeChoiceLabel(value as ThemeChoice) : value;
         return (
-          <ArgRow key={value} value={value} isSelected={idx === selectedIndex} isDir={isDir} />
+          <ArgRow key={value} value={label} isSelected={idx === selectedIndex} isDir={isDir} />
         );
       })}
       {hiddenBelow > 0 ? (
-        <Text dim>{t("slashArgPicker.below", { hidden: hiddenBelow })}</Text>
+        <Text color={FG.faint}>{t("slashArgPicker.below", { hidden: hiddenBelow })}</Text>
       ) : null}
       <Box marginTop={0}>
-        <Text dim>{t("slashArgPicker.footer")}</Text>
+        <Text color={FG.faint}>{t("slashArgPicker.footer")}</Text>
       </Box>
     </Box>
   );
@@ -139,10 +141,10 @@ function ArgRow({
       <Text color={isSelected ? color.primary : color.info} bold={isSelected}>
         {isSelected ? `${GLYPH.cur} ` : "  "}
       </Text>
-      <Text color={isSelected ? color.user : color.info} bold={isSelected} dim={!isSelected}>
+      <Text color={isSelected ? color.user : FG.faint} bold={isSelected}>
         {value}
       </Text>
-      {isDir ? <Text dim>/</Text> : null}
+      {isDir ? <Text color={FG.faint}>/</Text> : null}
     </Box>
   );
 }

@@ -1,7 +1,8 @@
-import { execSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { exec } from "node:child_process";
+import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { promisify } from "node:util";
 import type { ApiResult } from "../router.js";
 
 interface BrowseEntry {
@@ -35,21 +36,29 @@ const SKIP_DIRS = new Set([
   "build",
 ]);
 
+const execAsync = promisify(exec);
+
 let cachedDriveList: string[] | null = null;
 
-function listWindowsDrives(): string[] {
+async function listWindowsDrives(): Promise<string[]> {
   if (cachedDriveList) return cachedDriveList;
   try {
-    const raw = execSync("wmic logicaldisk get deviceid /value", {
+    const { stdout } = await execAsync("wmic logicaldisk get deviceid /value", {
       encoding: "utf8",
       timeout: 1500,
     });
-    const drives = raw
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("DeviceID="))
-      .map((l) => `${l.slice("DeviceID=".length)}\\`)
-      .filter((d) => existsSync(d));
+    const drives: string[] = [];
+    for (const line of stdout.split(/\r?\n/)) {
+      const l = line.trim();
+      if (!l.startsWith("DeviceID=")) continue;
+      const d = `${l.slice("DeviceID=".length)}\\`;
+      try {
+        await stat(d);
+        drives.push(d);
+      } catch {
+        /* skip non-existent drive */
+      }
+    }
     cachedDriveList = drives.length > 0 ? drives : ["C:\\"];
   } catch {
     // wmic absent (newer Windows builds drop it) — fall back to probing letters.
@@ -57,7 +66,8 @@ function listWindowsDrives(): string[] {
     for (const letter of "CDEFGHIJKLMNOPQRSTUVWXYZ") {
       const p = `${letter}:\\`;
       try {
-        if (existsSync(p)) found.push(p);
+        await stat(p);
+        found.push(p);
       } catch {
         /* skip unreachable drives without blocking */
       }
@@ -79,10 +89,10 @@ function defaultRoot(): string {
   }
 }
 
-function readSubdirs(path: string): BrowseEntry[] {
+async function readSubdirs(path: string): Promise<BrowseEntry[]> {
   let names: string[];
   try {
-    names = readdirSync(path);
+    names = await readdir(path);
   } catch {
     return [];
   }
@@ -93,7 +103,7 @@ function readSubdirs(path: string): BrowseEntry[] {
     if (name.startsWith(".") && name.length > 1) continue;
     const full = resolve(path, name);
     try {
-      if (!statSync(full).isDirectory()) continue;
+      if (!(await stat(full)).isDirectory()) continue;
     } catch {
       continue;
     }
@@ -118,9 +128,9 @@ export async function handleBrowse(
   // so the user can navigate off the home drive without typing the letter.
   if (!rawPath) {
     const home = defaultRoot();
-    const entries = readSubdirs(home);
+    const entries = await readSubdirs(home);
     if (isWin) {
-      const drives = listWindowsDrives()
+      const drives = (await listWindowsDrives())
         .filter((d) => resolve(d) !== resolve(home))
         .map((d) => ({ name: d, full: d }));
       entries.unshift(...drives);
@@ -133,12 +143,9 @@ export async function handleBrowse(
     return { status: 400, body: { error: "path must be absolute" } };
   }
   const absolute = resolve(rawPath);
-  if (!existsSync(absolute)) {
-    return { status: 404, body: { error: `no such directory: ${absolute}` } };
-  }
   let isDir = false;
   try {
-    isDir = statSync(absolute).isDirectory();
+    isDir = (await stat(absolute)).isDirectory();
   } catch {
     /* falls through to 404-equivalent */
   }
@@ -152,7 +159,7 @@ export async function handleBrowse(
   const result: BrowseResult = {
     path: absolute,
     parent,
-    entries: readSubdirs(absolute),
+    entries: await readSubdirs(absolute),
   };
   return { status: 200, body: result };
 }

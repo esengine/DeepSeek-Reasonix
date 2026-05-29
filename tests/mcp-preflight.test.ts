@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -27,6 +27,30 @@ describe("preflightStdioSpec — filesystem MCP", () => {
   it("passes when the sandbox dir exists", () => {
     expect(() =>
       preflightStdioSpec(stdio(["-y", "@modelcontextprotocol/server-filesystem", tmp])),
+    ).not.toThrow();
+  });
+
+  it("resolves relative sandbox dirs against the effective cwd", () => {
+    mkdirSync(join(tmp, "docs"));
+
+    expect(() =>
+      preflightStdioSpec(stdio(["-y", "@modelcontextprotocol/server-filesystem", "docs"]), {
+        cwd: tmp,
+      }),
+    ).not.toThrow();
+  });
+
+  it("prefers spec cwd over the workspace cwd", () => {
+    const specCwd = join(tmp, "repo");
+    const workspaceCwd = join(tmp, "workspace");
+    mkdirSync(join(specCwd, "docs"), { recursive: true });
+    mkdirSync(workspaceCwd);
+
+    expect(() =>
+      preflightStdioSpec(
+        { ...stdio(["-y", "@modelcontextprotocol/server-filesystem", "docs"]), cwd: specCwd },
+        { cwd: workspaceCwd },
+      ),
     ).not.toThrow();
   });
 

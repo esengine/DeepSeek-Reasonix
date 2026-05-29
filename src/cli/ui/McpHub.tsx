@@ -10,6 +10,7 @@ import { useKeystroke } from "./keystroke-context.js";
 import type { ApplyAppend } from "./mcp-reconnect-kickoff.js";
 import type { McpServerSummary } from "./slash/types.js";
 import { COLOR } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 export type McpHubTab = "live" | "marketplace";
 
@@ -62,7 +63,7 @@ export function McpHub({
         />
         <Text>{"  "}</Text>
         <TabPill label={t("handlers.mcp.marketplaceTab")} active={tab === "marketplace"} />
-        <Text dim>{`   ${t("handlers.mcp.tabHint")}`}</Text>
+        <Text color={FG.faint}>{`   ${t("handlers.mcp.tabHint")}`}</Text>
       </Box>
       {tab === "live" ? (
         <McpBrowser
@@ -93,5 +94,5 @@ function TabPill({ label, count, active }: { label: string; count?: number; acti
       </Text>
     );
   }
-  return <Text dim>{` ${text} `}</Text>;
+  return <Text color={FG.faint}>{` ${text} `}</Text>;
 }

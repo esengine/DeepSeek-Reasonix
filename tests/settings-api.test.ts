@@ -134,6 +134,55 @@ describe("settings API — combined POST persistence (#274)", () => {
     expect((res.body as { baseUrl: string | null }).baseUrl).toBeNull();
   });
 
+  it("accepts baidu as a web search engine and persists its API key", async () => {
+    const res = await handleSettings(
+      "POST",
+      [],
+      JSON.stringify({ webSearchEngine: "baidu", baiduApiKey: "  baidu-test-key  " }),
+      makeCtx(configPath),
+    );
+    expect(res.status).toBe(200);
+    const cfg = readCfg(configPath);
+    expect(cfg.webSearchEngine).toBe("baidu");
+    expect(cfg.baiduApiKey).toBe("baidu-test-key");
+  });
+
+  it("GET exposes a masked baiduApiKey prefix for dashboard settings", async () => {
+    const prevBaidu = process.env.BAIDU_API_KEY;
+    const prevQianfan = process.env.QIANFAN_API_KEY;
+    Reflect.deleteProperty(process.env, "BAIDU_API_KEY");
+    Reflect.deleteProperty(process.env, "QIANFAN_API_KEY");
+    try {
+      writeFileSync(
+        configPath,
+        JSON.stringify({ baiduApiKey: "bce-v3-config-secret-123456" }),
+        "utf8",
+      );
+      const res = await handleSettings("GET", [], "", makeCtx(configPath));
+      expect(res.status).toBe(200);
+      expect((res.body as { webSearchApiKeys?: { baidu?: string } }).webSearchApiKeys?.baidu).toBe(
+        "bce-v3…3456",
+      );
+    } finally {
+      if (prevBaidu === undefined) Reflect.deleteProperty(process.env, "BAIDU_API_KEY");
+      else process.env.BAIDU_API_KEY = prevBaidu;
+      if (prevQianfan === undefined) Reflect.deleteProperty(process.env, "QIANFAN_API_KEY");
+      else process.env.QIANFAN_API_KEY = prevQianfan;
+    }
+  });
+
+  it("clears baiduApiKey when posted as null", async () => {
+    writeFileSync(configPath, JSON.stringify({ baiduApiKey: "old-key" }), "utf8");
+    const res = await handleSettings(
+      "POST",
+      [],
+      JSON.stringify({ baiduApiKey: null }),
+      makeCtx(configPath),
+    );
+    expect(res.status).toBe(200);
+    expect(readCfg(configPath).baiduApiKey).toBeUndefined();
+  });
+
   it("rejects a non-string baseUrl (issue #1409)", async () => {
     const res = await handleSettings(
       "POST",

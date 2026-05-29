@@ -116,7 +116,7 @@ export function t(path: string, params?: Record<string, string | number>): strin
   if (params) {
     let result = val;
     for (const [k, v] of Object.entries(params)) {
-      result = result.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+      result = result.replaceAll(`{${k}}`, String(v));
     }
     return result;
   }

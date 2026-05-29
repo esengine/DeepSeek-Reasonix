@@ -294,6 +294,7 @@ export {
   isPlausibleKey,
   loadApiKey,
   loadBaseUrl,
+  loadBaiduApiKey,
   loadMetasoApiKey,
   loadPerplexityApiKey,
   loadExaApiKey,

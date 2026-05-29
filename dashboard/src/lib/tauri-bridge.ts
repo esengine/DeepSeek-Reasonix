@@ -331,6 +331,7 @@ function emitServerSettings(settings: any, overview?: any): void {
     model: overview?.model ?? settings?.model ?? "deepseek-v4-flash",
     editor: "code",
     webSearchEngine: settings?.webSearchEngine ?? "bing",
+    webSearchApiKeys: settings?.webSearchApiKeys ?? {},
     subagentModels: settings?.subagentModels ?? {},
     version: overview?.version ?? "",
     baseUrl: settings?.baseUrl ?? "",

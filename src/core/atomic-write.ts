@@ -1,4 +1,5 @@
 import { chmodSync, copyFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmod, copyFile, rename, unlink, writeFile } from "node:fs/promises";
 
 export interface AtomicWriteFs {
   writeFileSync: typeof writeFileSync;
@@ -52,6 +53,46 @@ export function atomicWriteSync(
   }
   try {
     fs.unlinkSync(tmp);
+  } catch {
+    /* rename consumed it on the happy path; only present after EXDEV fallback */
+  }
+}
+
+/** Async atomic write with EXDEV fallback. */
+export async function atomicWrite(
+  path: string,
+  body: string,
+  tmp: string,
+  mode = 0o600,
+): Promise<void> {
+  try {
+    await writeFile(tmp, body, "utf8");
+    try {
+      await chmod(tmp, mode);
+    } catch {
+      /* platform without chmod */
+    }
+    try {
+      await rename(tmp, path);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+      await copyFile(tmp, path);
+      try {
+        await chmod(path, mode);
+      } catch {
+        /* platform without chmod */
+      }
+    }
+  } catch (err) {
+    try {
+      await unlink(tmp);
+    } catch {
+      /* tmp may already be gone or never existed */
+    }
+    throw err;
+  }
+  try {
+    await unlink(tmp);
   } catch {
     /* rename consumed it on the happy path; only present after EXDEV fallback */
   }
