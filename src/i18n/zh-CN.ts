@@ -971,11 +971,10 @@ export const zhCN: TranslationSchema = {
       connectFailed: "飞书连接失败：{reason}",
       disconnecting: "飞书：正在断开...",
       disconnectFailed: "飞书断开失败：{reason}",
-      usage: "用法：/feishu connect [appId appSecret ownerOpenId] | /feishu status | /feishu disconnect",
-      promptAppId:
-        "飞书首次配置：请输入飞书开放平台 App ID 后回车。输入 /cancel 可取消。",
-      promptAppSecret:
-        "飞书首次配置：请输入飞书开放平台 App Secret 后回车。输入 /cancel 可取消。",
+      usage:
+        "用法：/feishu connect [appId appSecret ownerOpenId] | /feishu status | /feishu disconnect",
+      promptAppId: "飞书首次配置：请输入飞书开放平台 App ID 后回车。输入 /cancel 可取消。",
+      promptAppSecret: "飞书首次配置：请输入飞书开放平台 App Secret 后回车。输入 /cancel 可取消。",
       promptOwnerOpenId:
         "飞书首次配置：请输入要允许控制此通道的用户 openid 后回车。输入 /cancel 可取消。",
       setupWaitingAppId: "等待输入 App ID",
@@ -1002,13 +1001,11 @@ export const zhCN: TranslationSchema = {
       accessOwnerWithAllowlist: "所有者 {owner}，白名单 {count}",
       accessAllowlist: "白名单 {count}",
       accessRestricted: "访问控制未配置",
-      lockAlreadyRunning:
-        "飞书通道已在进程 {pid} 中运行。请先停止该进程，再启动新的飞书通道。",
+      lockAlreadyRunning: "飞书通道已在进程 {pid} 中运行。请先停止该进程，再启动新的飞书通道。",
       unauthorizedMessage: "飞书忽略了未授权 openid {openid} 的消息。当前访问控制：{access}。",
       missingAppId: "缺少飞书 App ID。请先运行 `/feishu connect` 完成配置。",
       missingAppSecret: "缺少飞书 App Secret。请先运行 `/feishu connect` 完成配置。",
-      missingOwnerOpenId:
-        "缺少飞书 owner openid。请先运行 `/feishu connect` 完成访问控制配置。",
+      missingOwnerOpenId: "缺少飞书 owner openid。请先运行 `/feishu connect` 完成访问控制配置。",
       authFailed: "飞书机器人鉴权失败，请检查 App ID 和 App Secret。",
       readyTimeout: "飞书机器人 15 秒内未就绪，请检查 App ID 和 App Secret。",
     },

@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { type ThemeName, isThemeName, resolveThemeName } from "./cli/ui/theme/tokens.js";
 import { atomicWriteSync } from "./core/atomic-write.js";
+import { normalizeFeishuAllowlist, normalizeFeishuOpenId } from "./feishu/access.js";
 import type { LanguageCode } from "./i18n/types.js";
 import {
   type IndexUserConfig,

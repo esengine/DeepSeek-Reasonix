@@ -318,11 +318,7 @@ export function useFeishuChannel({
         resolveSetup = resolve;
         rejectSetup = reject;
       });
-      const step: FeishuSetupStep = !appId
-        ? "appId"
-        : !appSecret
-          ? "appSecret"
-          : "ownerOpenId";
+      const step: FeishuSetupStep = !appId ? "appId" : !appSecret ? "appSecret" : "ownerOpenId";
       pendingConnectSetupRef.current = {
         step,
         appId,

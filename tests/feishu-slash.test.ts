@@ -29,14 +29,19 @@ describe("/feishu slash handler", () => {
 
   it("routes /feishu connect through the feishu host surface", async () => {
     const connect = vi.fn(async () => "Feishu connected.");
-    const result = handleSlash("feishu", ["connect", "appid", "secret", "ou_owner_123"], makeLoop(), {
-      postInfo: (msg) => posts.push(msg),
-      feishu: {
-        connect,
-        disconnect: async () => "",
-        status: () => "",
+    const result = handleSlash(
+      "feishu",
+      ["connect", "appid", "secret", "ou_owner_123"],
+      makeLoop(),
+      {
+        postInfo: (msg) => posts.push(msg),
+        feishu: {
+          connect,
+          disconnect: async () => "",
+          status: () => "",
+        },
       },
-    });
+    );
     expect(result).toEqual({});
     await Promise.resolve();
     expect(connect).toHaveBeenCalledWith(["appid", "secret", "ou_owner_123"]);
