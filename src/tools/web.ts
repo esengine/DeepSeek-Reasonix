@@ -281,13 +281,15 @@ async function searchBing(
   endpoint = BING_ENDPOINT,
 ): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
+  const timeoutSignal = AbortSignal.timeout(15_000);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal;
   const resp = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9",
       "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     },
-    signal: opts.signal,
+    signal,
     redirect: "follow",
   });
   if (!resp.ok) throw new Error(searchStatusError(resp.status));
