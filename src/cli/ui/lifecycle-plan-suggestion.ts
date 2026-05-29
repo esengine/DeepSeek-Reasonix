@@ -3,6 +3,7 @@ export interface LifecyclePlanSuggestionRequest {
   codeMode: boolean;
   planMode: boolean;
   lifecycleMode: "off" | "strict";
+  alreadySuggested?: boolean;
 }
 
 export function shouldSuggestPlanForEngineeringIntent(
@@ -12,6 +13,7 @@ export function shouldSuggestPlanForEngineeringIntent(
     request.codeMode &&
     !request.planMode &&
     request.lifecycleMode === "off" &&
+    !request.alreadySuggested &&
     detectLifecyclePlanSuggestion(request.text)
   );
 }

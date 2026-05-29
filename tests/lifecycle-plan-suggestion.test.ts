@@ -69,4 +69,16 @@ describe("lifecycle plan suggestion intent", () => {
       }),
     ).toBe(false);
   });
+
+  it("does not repeat the suggestion after it was already shown in the session", () => {
+    const request = {
+      text: "Refactor multiple files to extract the auth module",
+      codeMode: true,
+      planMode: false,
+      lifecycleMode: "off",
+      alreadySuggested: true,
+    } as const;
+
+    expect(shouldSuggestPlanForEngineeringIntent(request)).toBe(false);
+  });
 });

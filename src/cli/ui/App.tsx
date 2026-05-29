@@ -625,6 +625,7 @@ function AppInner({
       mode: engineeringLifecycleBaseModeRef.current,
     });
   }
+  const lifecyclePlanSuggestionSessionRef = useRef<string | null | undefined>(undefined);
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -3195,9 +3196,11 @@ function AppInner({
             codeMode: true,
             planMode,
             lifecycleMode: engineeringLifecycleRef.current?.snapshot().mode ?? "off",
+            alreadySuggested: lifecyclePlanSuggestionSessionRef.current === (session ?? null),
           })
         ) {
           log.pushInfo(t("app.lifecyclePlanSuggestion"));
+          lifecyclePlanSuggestionSessionRef.current = session ?? null;
         }
         const before = engineeringLifecycleRef.current?.snapshot().state;
         engineeringLifecycleRef.current?.observeUserPrompt(text);
