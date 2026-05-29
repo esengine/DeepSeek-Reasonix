@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import * as QRCode from "qrcode";
 
 const ILINK_BASE_URL = "https://ilinkai.weixin.qq.com";
 const CHANNEL_VERSION = "2.2.0";
@@ -92,6 +93,17 @@ function headers(token: string | undefined): Record<string, string> {
   return result;
 }
 
+async function renderTerminalQr(data: string): Promise<string | null> {
+  try {
+    return await QRCode.toString(data, {
+      type: "utf8",
+      errorCorrectionLevel: "medium",
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function getIlink(
   baseUrl: string,
   endpoint: string,
@@ -132,7 +144,13 @@ export async function runWeixinQrLogin({
   let qrcode = String(qrResponse.qrcode ?? "").trim();
   let qrcodeUrl = String(qrResponse.qrcode_img_content ?? "").trim();
   if (!qrcode) throw new Error("Weixin QR login did not return a qrcode.");
-  onInfo?.(`Weixin QR login: scan this URL with WeChat:\n${qrcodeUrl || qrcode}`);
+  const qrScanData = qrcodeUrl || qrcode;
+  const terminalQr = await renderTerminalQr(qrScanData);
+  onInfo?.(
+    terminalQr
+      ? `Weixin QR login: scan this QR with WeChat:\n${terminalQr}\n${qrScanData}`
+      : `Weixin QR login: scan this URL with WeChat:\n${qrScanData}`,
+  );
 
   const deadline = Date.now() + timeoutSeconds * 1000;
   let baseUrl = ILINK_BASE_URL;
@@ -170,7 +188,13 @@ export async function runWeixinQrLogin({
       qrcode = String(qrResponse.qrcode ?? "").trim();
       qrcodeUrl = String(qrResponse.qrcode_img_content ?? "").trim();
       if (!qrcode) throw new Error("Weixin QR refresh did not return a qrcode.");
-      onInfo?.(`Weixin QR refreshed (${refreshCount}/3). Scan this URL:\n${qrcodeUrl || qrcode}`);
+      const refreshedScanData = qrcodeUrl || qrcode;
+      const refreshedTerminalQr = await renderTerminalQr(refreshedScanData);
+      onInfo?.(
+        refreshedTerminalQr
+          ? `Weixin QR refreshed (${refreshCount}/3). Scan this QR:\n${refreshedTerminalQr}\n${refreshedScanData}`
+          : `Weixin QR refreshed (${refreshCount}/3). Scan this URL:\n${refreshedScanData}`,
+      );
     } else if (status === "confirmed") {
       const accountId = String(statusResponse.ilink_bot_id ?? "").trim();
       const token = String(statusResponse.bot_token ?? "").trim();
