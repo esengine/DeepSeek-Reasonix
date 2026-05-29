@@ -3,6 +3,7 @@ import { en } from "./en";
 export const ja: typeof en = {
   ...en,
   palette: {
+    ...en.palette,
     searchPlaceholder: "コマンドを検索…",
     empty: "一致なし",
     footMove: "移動",
@@ -37,6 +38,7 @@ export const ja: typeof en = {
     countSuffix: "項目",
   },
   about: {
+    ...en.about,
     sidebarLabel: "概要",
     tagline: "DeepSeekネイティブコーディングエージェント",
     version: "バージョン",
@@ -50,6 +52,7 @@ export const ja: typeof en = {
     close: "閉じる",
   },
   workdir: {
+    ...en.workdir,
     title: "ワークスペース切替",
     searchPlaceholder: "最近のパスを検索…",
     empty: "最近のワークスペースはありません",
@@ -57,6 +60,7 @@ export const ja: typeof en = {
     removeRecent: "履歴から削除",
   },
   sidebar: {
+    ...en.sidebar,
     newChat: "新しいチャット",
     searchCommands: "コマンドを検索…",
     recent: "最近",
@@ -76,6 +80,7 @@ export const ja: typeof en = {
     aboutLine: "Reasonix v{version} · キャッシュファーストDeepSeekエージェント",
   },
   composer: {
+    ...en.composer,
     busy: "reasonixが考え中…",
     idle: "質問する",
     send: "送信",
@@ -103,9 +108,11 @@ export const ja: typeof en = {
     workspaceRoot: "ワークスペースルート",
   },
   dragDrop: {
+    ...en.dragDrop,
     overlay: "ドロップして@メンションとして添付",
   },
   settings: {
+    ...en.settings,
     title: "設定",
     close: "閉じる",
     language: "言語",
@@ -294,7 +301,8 @@ export const ja: typeof en = {
     modelCustomHint: "エンドポイントが提供するOpenAI互換ID (vLLM, Ollama, Together, …)。",
     modelCustomActive: "現在カスタムIDで実行中: {model}",
     contextTokensLabel: "コンテキストウィンドウサイズ",
-    contextTokensHint: "現在のモデルのプロンプト側トークン上限を上書きします（例: 1000000 で 1M）。空欄なら既定値を使用。",
+    contextTokensHint:
+      "現在のモデルのプロンプト側トークン上限を上書きします（例: 1000000 で 1M）。空欄なら既定値を使用。",
     contextTokensPlaceholder: "自動",
     effortSection: "推論努力",
     ctxWindow: "コンテキスト",
@@ -375,10 +383,12 @@ export const ja: typeof en = {
     shortcutSettings: "設定",
   },
   modal: {
+    ...en.modal,
     planFeedbackPlaceholder: "任意のフィードバック — 変更が必要な場合はここに記入",
     choiceCustomPlaceholder: "または自分の回答を入力…",
   },
   plan: {
+    ...en.plan,
     activeTitle: "アクティブプラン",
     progress: "{done} / {total} ステップ",
     progressNoTotal: "{done} ステップ",
@@ -390,6 +400,7 @@ export const ja: typeof en = {
     riskHigh: "高",
   },
   editMode: {
+    ...en.editMode,
     label: "編集ゲート",
     plan: "plan",
     review: "review",
@@ -405,6 +416,7 @@ export const ja: typeof en = {
     yoloHint: "すべて自動承認 · 注意して使用してください",
   },
   markdown: {
+    ...en.markdown,
     filePillTitle: "クリックで開く · 右クリックでコピー",
     externalLinkTitle: "ブラウザで {href} を開く",
     localLinkTitle: "{href} を開く",
@@ -412,12 +424,14 @@ export const ja: typeof en = {
     copied: "コピーしました",
   },
   effort: {
+    ...en.effort,
     lowDesc: "最速 — 最小限の推論",
     mediumDesc: "バランス",
     highDesc: "デフォルト — vLLM / Azure で安全",
     maxDesc: "DeepSeek拡張; 標準OpenAI / vLLMでは拒否されます",
   },
   checkpoint: {
+    ...en.checkpoint,
     title: "ステップ完了",
     progress: "{done} / {total}",
     notesLabel: "メモ",
@@ -428,6 +442,7 @@ export const ja: typeof en = {
     sendRevise: "修正を送信",
   },
   revision: {
+    ...en.revision,
     title: "プラン修正",
     subtitle: "モデルが残りのステップを置き換えようとしています",
     remainingHeading: "新しい残りステップ",
@@ -436,7 +451,9 @@ export const ja: typeof en = {
     cancel: "キャンセル",
   },
   app: {
+    ...en.app,
     toast: {
+      ...en.app.toast,
       newSession: "新しいセッションを作成しました",
       cleared: "クリアしました",
       copied: "コピーしました",
@@ -452,6 +469,7 @@ export const ja: typeof en = {
       taskComplete: "タスク完了",
     },
     cmd: {
+      ...en.app.cmd,
       newSession: "新しいセッション",
       clearChat: "画面クリア",
       abort: "ストリーミング出力を停止",
@@ -476,8 +494,10 @@ export const ja: typeof en = {
       btw: "脇道の質問をする（コンテキストに追加されません）",
     },
     skill: {
+      ...en.app.skill,
       generic: "{scope} スキル · {runAs}",
       scope: {
+        ...en.app.skill.scope,
         builtin: "ビルトイン",
         global: "グローバル",
         project: "プロジェクト",
@@ -488,6 +508,7 @@ export const ja: typeof en = {
       },
     },
     yolo: {
+      ...en.app.yolo,
       banner1: "すべてのツール呼び出し、シェルコマンド、ファイル編集が",
       bannerBold: "自動承認",
       banner2: "されます（確認なし）。",
@@ -508,6 +529,7 @@ export const ja: typeof en = {
     langZH: "中国語",
     langEN: "英語",
     titlebar: {
+      ...en.app.titlebar,
       sidebar: "サイドバー (⌘B)",
       contextPanel: "コンテキストパネル",
       more: "その他",
@@ -523,10 +545,12 @@ export const ja: typeof en = {
       restore: "元に戻す",
     },
     tab: {
+      ...en.app.tab,
       newTabTitle: "新しいタブ ⌘T",
       newTab: "新しいタブ",
     },
     header: {
+      ...en.app.header,
       noWorkspace: "ワークスペースが選択されていません",
       running: "実行中",
       clickToSelect: "クリックしてワークスペースを選択",
@@ -538,6 +562,7 @@ export const ja: typeof en = {
       abort: "停止",
     },
     empty: {
+      ...en.app.empty,
       welcome: "Reasonixへようこそ",
       currentWorkspace: "現在のワークスペース: ",
       selectWorkspace: "まずトップバーからワークスペースを選択してください",
@@ -547,6 +572,7 @@ export const ja: typeof en = {
       suggestion3: "このリポジトリのCHANGELOGを生成",
     },
     setup: {
+      ...en.app.setup,
       welcome: "Reasonixへようこそ",
       description:
         "初回セットアップにはDeepSeek APIキーとワークスペースディレクトリが必要です。キーはローカルのみに保存されます。",
@@ -556,6 +582,7 @@ export const ja: typeof en = {
       saveAndStart: "保存して開始",
     },
     update: {
+      ...en.app.update,
       available: "新しいバージョンが利用可能 · {current} → {latest}",
       installing: "インストール中…",
       downloading: "ダウンロード中 · {downloaded} / {total} ({pct}%)",
@@ -569,11 +596,13 @@ export const ja: typeof en = {
     exportReasoningSummary: "推論",
     exportToolLabel: "ツール",
     session: {
+      ...en.app.session,
       new: "{workspace} · 新しいセッション",
       format: "セッション {month}-{day} {hour}:{minute}",
     },
   },
   planBadge: {
+    ...en.planBadge,
     failed: "失敗",
     blocked: "ブロック",
     running: "実行中",
@@ -581,6 +610,7 @@ export const ja: typeof en = {
     pending: "保留中",
   },
   cards: {
+    ...en.cards,
     reasoningName: "思考中",
     reasoningComplete: "完了",
     compactionName: "履歴圧縮",
@@ -621,6 +651,7 @@ export const ja: typeof en = {
     elapsed: "経過",
   },
   statusbar: {
+    ...en.statusbar,
     offline: "オフライン",
     busy: "実行中",
     online: "オンライン",
@@ -646,6 +677,7 @@ export const ja: typeof en = {
     themeStyleMidnight: "ミッドナイト",
   },
   jobs: {
+    ...en.jobs,
     title: "バックグラウンドジョブ",
     running: "実行中",
     exited: "終了",
@@ -658,6 +690,7 @@ export const ja: typeof en = {
     kbClose: "閉じる",
   },
   contextPanel: {
+    ...en.contextPanel,
     reservedKey: "予約済み",
     usedKey: "使用中",
     filesTab: "ファイル",
@@ -709,6 +742,7 @@ export const ja: typeof en = {
     noMemoriesMsg: "まだメモリは保存されていません。",
   },
   sidebarPanel: {
+    ...en.sidebarPanel,
     sessionTitle: "セッション {month}-{day} {hour}:{minute}",
     justNow: "たった今",
     minutesAgo: "{n}分前",
@@ -754,6 +788,7 @@ export const ja: typeof en = {
     delete: "削除",
   },
   extraCards: {
+    ...en.extraCards,
     sessionUsage: "セッション使用量",
     sessionCost: "コスト {costLabel}",
     approve: "承認",
@@ -774,6 +809,7 @@ export const ja: typeof en = {
     unknownKind: "# 不明なカードタイプ — フォールバック表示",
   },
   thread: {
+    ...en.thread,
     toolCalls: "{count} 件のツール呼び出し",
     oneToolCall: "1 件のツール呼び出し",
     keepSteps: "残り {n} ステップを保持",
@@ -826,6 +862,7 @@ export const ja: typeof en = {
     copyResponse: "この返信をコピー",
   },
   live: {
+    ...en.live,
     reasoning: "ライブ · 推論",
     running: "実行中",
     you: "あなた",
@@ -833,9 +870,11 @@ export const ja: typeof en = {
     deliveredWaiting: "配信済み · エージェント待ち",
   },
   panel: {
+    ...en.panel,
     renderError: "{panel} パネルレンダリングエラー",
   },
   notifications: {
+    ...en.notifications,
     approvalTitle: "Reasonixが承認待ちです",
     inputTitle: "Reasonixが入力を待っています",
     planApprovalTitle: "Reasonixがプラン承認待ちです",
