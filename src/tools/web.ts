@@ -67,6 +67,8 @@ export interface WebSearchOptions {
 const DEFAULT_FETCH_MAX_CHARS = 32_000;
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 const DEFAULT_TOPK = 5;
+/** Timeout applied to every outbound search request (#2252 extended Bing; apply consistently). */
+const SEARCH_TIMEOUT_MS = 15_000;
 /** Bytes cap applied before `resp.text()` — char cap can't fire until the body is fully buffered. */
 const FETCH_MAX_BYTES = 10 * 1024 * 1024;
 // Real-browser UA. Most search backends gate obvious scraper UAs; a stock
@@ -281,14 +283,19 @@ export async function webSearch(
   return searchBing(query, opts);
 }
 
+/** Combine caller's abort signal with the per-request search timeout. */
+function searchSignal(callerSignal?: AbortSignal): AbortSignal {
+  const t = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+  return callerSignal ? AbortSignal.any([callerSignal, t]) : t;
+}
+
 async function searchBing(
   query: string,
   opts: WebSearchOptions = {},
   endpoint = BING_ENDPOINT,
 ): Promise<SearchResult[]> {
   const topK = Math.max(1, Math.min(10, opts.topK ?? DEFAULT_TOPK));
-  const timeoutSignal = AbortSignal.timeout(15_000);
-  const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal;
+  const signal = searchSignal(opts.signal);
   const resp = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, {
     headers: {
       "User-Agent": USER_AGENT,
@@ -343,7 +350,7 @@ async function searchSearxng(query: string, opts: WebSearchOptions = {}): Promis
         "User-Agent": USER_AGENT,
         Accept: "text/html",
       },
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -400,7 +407,7 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
         scope: "webpage",
         size: topK,
       }),
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -479,7 +486,7 @@ async function searchBaidu(query: string, opts: WebSearchOptions = {}): Promise<
       body: JSON.stringify({
         messages: [{ role: "user", content: query }],
       }),
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -549,7 +556,7 @@ async function searchTavily(query: string, opts: WebSearchOptions = {}): Promise
         include_raw_content: false,
         include_images: false,
       }),
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -612,7 +619,7 @@ async function searchPerplexity(
         max_tokens: 1024,
         return_related_questions: false,
       }),
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -695,7 +702,7 @@ async function searchExa(query: string, opts: WebSearchOptions = {}): Promise<Se
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ query, text: true }),
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -771,7 +778,7 @@ async function searchOllama(query: string, opts: WebSearchOptions = {}): Promise
         Accept: "application/json",
       },
       body: JSON.stringify({ query, max_results: topK }),
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
@@ -835,7 +842,7 @@ async function searchBrave(query: string, opts: WebSearchOptions = {}): Promise<
         "Accept-Encoding": "gzip",
         "X-Subscription-Token": apiKey,
       },
-      signal: opts.signal,
+      signal: searchSignal(opts.signal),
     });
   } catch (err) {
     if (err instanceof TypeError && (err as Error).message.includes("fetch")) {
