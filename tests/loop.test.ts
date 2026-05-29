@@ -11,7 +11,7 @@ import { CacheFirstLoop } from "../src/loop.js";
 import { ImmutablePrefix } from "../src/memory/runtime.js";
 import { DEEPSEEK_CONTEXT_TOKENS } from "../src/telemetry/stats.js";
 import { ToolRegistry } from "../src/tools.js";
-import type { ChatMessage } from "../src/types.js";
+import type { ChatMessage, ToolSpec } from "../src/types.js";
 
 const FOLD_TEST_MODEL = "test-fold-ctx";
 
@@ -62,6 +62,13 @@ function makeClient(responses: FakeResponseShape[]) {
   });
 }
 
+function toolSpec(name: string): ToolSpec {
+  return {
+    type: "function",
+    function: { name, description: "", parameters: { type: "object", properties: {} } },
+  };
+}
+
 describe("CacheFirstLoop (non-streaming)", () => {
   afterEach(() => {
     delete DEEPSEEK_CONTEXT_TOKENS[FOLD_TEST_MODEL];
@@ -84,6 +91,59 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(events[events.length - 1]).toBe("done");
     expect(loop.stats.turns.length).toBe(1);
     expect(loop.log.length).toBe(2); // user + assistant
+  });
+
+  it("restores the base model after a headless NEEDS_PRO one-shot retry", async () => {
+    const models: string[] = [];
+    const responses = ["<<<NEEDS_PRO: subtle invariant>>>", "pro answer", "flash answer"];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async (_url: any, init: any) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        models.push(body.model);
+        const content = responses.shift() ?? "extra";
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content,
+                  reasoning_content: null,
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 20,
+              total_tokens: 120,
+              prompt_cache_hit_tokens: 0,
+              prompt_cache_miss_tokens: 100,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: "deepseek-v4-flash",
+    });
+
+    await expect(loop.run("hard")).resolves.toBe("pro answer");
+    expect(loop.model).toBe("deepseek-v4-flash");
+    await expect(loop.run("simple")).resolves.toBe("flash answer");
+
+    expect(models).toEqual(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash"]);
+    expect(loop.stats.turns.map((turn) => turn.model)).toEqual([
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+    ]);
+    expect(JSON.stringify(loop.log.entries)).not.toContain("NEEDS_PRO");
   });
 
   it("records cache hit telemetry from API usage", async () => {
@@ -163,6 +223,51 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(toolContent).toBe("5");
     expect(finalContent).toBe("The answer is 5.");
     expect(loop.stats.turns.length).toBe(2); // two model round-trips
+  });
+
+  it("records cache diagnostics from the tool snapshot actually sent", async () => {
+    const client = makeClient([
+      {
+        content: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "probe", arguments: "{}" },
+          },
+        ],
+      },
+      { content: "done" },
+    ]);
+
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "probe",
+      description: "hot-adds another tool while the turn is running",
+      parameters: { type: "object", properties: {} },
+      fn: async () => {
+        prefix.addTool(toolSpec("mcp_dynamic_tool"));
+        return "ok";
+      },
+    });
+    const prefix = new ImmutablePrefix({ system: "s", toolSpecs: tools.specs() });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix,
+      tools,
+      stream: false,
+    });
+
+    await loop.run("go");
+
+    expect(prefix.toolSpecs.map((spec) => spec.function.name)).toEqual([
+      "probe",
+      "mcp_dynamic_tool",
+    ]);
+    expect(loop.stats.cacheDiagnostics).toHaveLength(2);
+    expect(loop.stats.cacheDiagnostics[0]?.toolNames).toEqual(["probe"]);
+    expect(loop.stats.cacheDiagnostics[1]?.toolNames).toEqual(["probe"]);
+    expect(loop.stats.cacheDiagnostics[1]?.missReason).not.toBe("mcp-tool-hot-add");
   });
 
   it("yields tool_start before each tool dispatch so the TUI can show 'running…'", async () => {
@@ -2429,5 +2534,115 @@ describe("CacheFirstLoop — mid-turn steer injection", () => {
       retryable: true,
       recoverable: false,
     });
+  });
+
+  it("stops at DEFAULT_MAX_ITER_PER_TURN and forces summary (#2037 BUG-028)", async () => {
+    // Build a client that always returns a tool call — the loop would
+    // run forever without the iteration cap. Use unique call IDs AND
+    // unique arguments so the storm breaker (threshold=3 for identical
+    // (name, args) tuples) doesn't fire first.
+    const infiniteResponses: FakeResponseShape[] = Array.from(
+      { length: CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN + 50 },
+      (_, i) => ({
+        content: "",
+        tool_calls: [
+          {
+            id: `call_${i}`,
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i }) },
+          },
+        ],
+      }),
+    );
+    // The last response (force-summary) must be a plain text reply.
+    infiniteResponses.push({ content: "Here is what I found." });
+
+    const fetchMock = fakeFetch(infiniteResponses);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "noop",
+      description: "does nothing",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
+    // Must have emitted the iteration-limit warning.
+    const warnEv = events.find(
+      (e) => e.role === "warning" && /iteration cap/i.test(e.content ?? ""),
+    );
+    expect(warnEv).toBeDefined();
+
+    // Must have produced a final summary (forced).
+    const finalEv = events.find((e) => e.role === "assistant_final");
+    expect(finalEv).toBeDefined();
+
+    // The loop must NOT have run all 150 iterations — it should stop
+    // at DEFAULT_MAX_ITER_PER_TURN + 1 (the summary call).
+    // Tool dispatches = DEFAULT_MAX_ITER_PER_TURN (one per iter).
+    // The +1 is the summary API call recorded as a turn.
+    expect(fetchMock).toHaveBeenCalledTimes(CacheFirstLoop.DEFAULT_MAX_ITER_PER_TURN + 1);
+  });
+
+  it("respects custom maxIterPerTurn option", async () => {
+    const customCap = 3;
+    const infiniteResponses: FakeResponseShape[] = Array.from(
+      { length: customCap + 50 },
+      (_, i) => ({
+        content: "",
+        tool_calls: [
+          {
+            id: `call_${i}`,
+            type: "function" as const,
+            function: { name: "noop", arguments: JSON.stringify({ i }) },
+          },
+        ],
+      }),
+    );
+    infiniteResponses.push({ content: "Summary." });
+
+    const fetchMock = fakeFetch(infiniteResponses);
+    const client = new DeepSeekClient({ apiKey: "sk-test", fetch: fetchMock });
+    const tools = new ToolRegistry();
+    tools.register({
+      name: "noop",
+      description: "does nothing",
+      parameters: { type: "object", properties: {} },
+      fn: async () => "ok",
+    });
+
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "be brief", toolSpecs: tools.specs() }),
+      tools,
+      stream: false,
+      maxIterPerTurn: customCap,
+    });
+
+    const events: any[] = [];
+    for await (const ev of loop.step("do stuff forever")) {
+      events.push(ev);
+    }
+
+    const warnEv = events.find(
+      (e) => e.role === "warning" && /iteration cap/i.test(e.content ?? ""),
+    );
+    expect(warnEv).toBeDefined();
+    expect(warnEv!.content).toContain(String(customCap));
+
+    // Tool dispatches = customCap (one per iter) + 1 force-summary call.
+    expect(fetchMock).toHaveBeenCalledTimes(customCap + 1);
   });
 });

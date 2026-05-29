@@ -40,7 +40,7 @@
     "cfg.k.effort": "high | max",
     "cfg.k.theme": "light | dark | auto",
     "cfg.k.search": "enable web_search/web_fetch tools",
-    "cfg.k.engine": "mojeek | searxng | metaso",
+    "cfg.k.engine": "bing | baidu | searxng | metaso | ...",
     "cfg.k.mcp": "MCP server specs",
     "cfg.k.mcpoff": "names skipped at startup",
     "cfg.k.projects": "per-workspace overrides",
@@ -154,10 +154,12 @@
 
     "ws.title": "Web search",
     "ws.body1":
-      "<code>web_search</code> + <code>web_fetch</code> ship in the box. Default backend is <strong>Mojeek</strong> (no setup); switch to a self-hosted <strong>SearXNG</strong> when you want full control over upstream engines, or use <strong>Metaso</strong> (100 free searches/day, configure your own API key for more).",
+      "<code>web_search</code> + <code>web_fetch</code> ship in the box. Default backend is <strong>Bing</strong> (works from CN without proxy); switch to <strong>Baidu AI Search</strong> when you want Baidu Cloud Qianfan's official search API. You can also use self-hosted <strong>SearXNG</strong>, <strong>Metaso</strong>, or other API engines.",
     "ws.body.json": "Equivalent <code>config.json</code>:",
     "ws.body.start": "Start a local SearXNG:",
     "ws.body.metaso": "Or for Metaso:",
+    "ws.body.baidu":
+      "Or for Baidu AI Search (Baidu's official docs currently list <strong>1,500 free AI Search calls per month</strong>):",
 
     "ix.title": "Semantic index",
     "ix.body1":
@@ -207,7 +209,7 @@
     "cfg.k.effort": "high | max",
     "cfg.k.theme": "light | dark | auto",
     "cfg.k.search": "启用 web_search / web_fetch 工具",
-    "cfg.k.engine": "mojeek | searxng | metaso",
+    "cfg.k.engine": "bing | baidu | searxng | metaso | ...",
     "cfg.k.mcp": "MCP 服务器列表",
     "cfg.k.mcpoff": "启动时跳过的服务器名",
     "cfg.k.projects": "按工作区的覆盖配置",
@@ -327,10 +329,12 @@
 
     "ws.title": "Web 搜索",
     "ws.body1":
-      "<code>web_search</code> + <code>web_fetch</code> 开箱即用。默认走 <strong>Mojeek</strong>（无需配置）；想完全控制上游引擎就切到自托管 <strong>SearXNG</strong>，或使用 <strong>Metaso</strong>（每天 100 次免费搜索，配置你自己的 API 密钥可提升限额）。",
+      "<code>web_search</code> + <code>web_fetch</code> 开箱即用。默认走 <strong>Bing</strong>（国内裸 IP 直连）；需要百度智能云千帆官方搜索 API 时可切到 <strong>百度 AI Search</strong>。也可以使用自托管 <strong>SearXNG</strong>、<strong>Metaso</strong> 或其他 API 引擎。",
     "ws.body.json": "等价的 <code>config.json</code>：",
     "ws.body.start": "本机起一个 SearXNG：",
     "ws.body.metaso": "或使用 Metaso：",
+    "ws.body.baidu":
+      "或使用百度 AI Search（百度官方文档当前写有 <strong>AI Search 每月 1500 次免费额度</strong>）：",
 
     "ix.title": "语义索引",
     "ix.body1":

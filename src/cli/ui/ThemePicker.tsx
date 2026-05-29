@@ -2,9 +2,10 @@ import { Box, Text } from "ink";
 import React from "react";
 import { t } from "../../i18n/index.js";
 import { type SelectItem, SingleSelect } from "./Select.js";
-import { type ThemeName, listThemeNames } from "./theme/tokens.js";
+import { type ThemeChoice, themeChoiceLabel } from "./theme/labels.js";
+import { type ThemeName, listThemeNames, resolveThemeName } from "./theme/tokens.js";
 
-export type ThemeChoice = ThemeName | "auto";
+export type { ThemeChoice } from "./theme/labels.js";
 
 export type ThemePickerOutcome = { kind: "select"; value: ThemeChoice } | { kind: "quit" };
 
@@ -18,10 +19,12 @@ export function ThemePicker({
   onChoose: (outcome: ThemePickerOutcome) => void;
 }) {
   const choices: ThemeChoice[] = ["auto", ...listThemeNames()];
+  const currentVisiblePreference =
+    currentPreference === "auto" ? currentPreference : resolveThemeName(currentPreference);
   const items: SelectItem<ThemeChoice>[] = choices.map((value) => ({
     value,
-    label: value,
-    hint: describeTheme(value, currentPreference, activeTheme),
+    label: themeChoiceLabel(value),
+    hint: describeTheme(value, currentVisiblePreference, activeTheme),
   }));
 
   return (
@@ -29,7 +32,7 @@ export function ThemePicker({
       <Text bold>{t("themePicker.header")}</Text>
       <SingleSelect
         items={items}
-        initialValue={currentPreference}
+        initialValue={currentVisiblePreference}
         onSubmit={(value) => onChoose({ kind: "select", value })}
         onCancel={() => onChoose({ kind: "quit" })}
         footer={t("themePicker.footer")}

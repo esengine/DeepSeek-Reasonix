@@ -1,7 +1,10 @@
+import { EN } from "./EN.js";
 import type { TranslationSchema } from "./types.js";
 
 export const JA: TranslationSchema = {
+  ...EN,
   common: {
+    ...EN.common,
     error: "エラー",
     warning: "警告",
     loading: "読み込み中...",
@@ -15,6 +18,7 @@ export const JA: TranslationSchema = {
     noTurns: "(まだターンがありません)",
   },
   cli: {
+    ...EN.cli,
     description:
       "DeepSeekネイティブのエージェントフレームワーク — キャッシュヒットと低コストトークンのために設計。",
     continue: "最後に使用したチャットセッションをピッカーなしで再開します。",
@@ -37,15 +41,18 @@ export const JA: TranslationSchema = {
     index: "ローカルのセマンティック検索インデックスを構築（または増分更新）します。",
   },
   stats: {
+    ...EN.stats,
     usageHint: "`reasonix chat`、`reasonix code`、または `reasonix run <task>` を実行するたびに",
     usageDetail: "ログに1行追加され、`reasonix stats` で集計されます。",
   },
   run: {
+    ...EN.run,
     missingApiKey:
       "DEEPSEEK_API_KEY が設定されておらず、stdin が TTY ではありません（プロンプトを表示できません）。\n" +
       "環境変数を設定するか、`reasonix chat` を一度対話的に実行してキーを保存してください。\n",
   },
   sessions: {
+    ...EN.sessions,
     emptyHint:
       "保存されたセッションはまだありません — `reasonix chat` を実行してください（--no-session を付けない限り自動保存されます）。",
     listHeader: "保存されたセッション (~/.reasonix/sessions/):",
@@ -60,6 +67,7 @@ export const JA: TranslationSchema = {
     daysInvalid: "--days は正の整数である必要があります（{days} が指定されました）。",
   },
   ui: {
+    ...EN.ui,
     welcome: "Run `reasonix` any time to start chatting — your settings are remembered.",
     taglineChat: "DeepSeekネイティブエージェント",
     taglineCode: "DeepSeekネイティブコーディングエージェント",
@@ -95,6 +103,7 @@ export const JA: TranslationSchema = {
       "▸ 中断された前回の実行から {count} 件の保留中編集ブロックを復元しました — /apply でコミット、/discard で破棄。",
     resumedPlan: "プランを再開しました · {when}{summary}",
     tipEditBindings: {
+      ...EN.ui.tipEditBindings,
       topic: "編集ゲートのキーバインド",
       sections: [
         {
@@ -111,6 +120,7 @@ export const JA: TranslationSchema = {
       footer: "現在のモードは下部ステータスバーに表示 · /keys で全リファレンス",
     },
     tipMouseClipboard: {
+      ...EN.ui.tipMouseClipboard,
       topic: "マウス + クリップボード",
       sections: [
         {
@@ -138,6 +148,7 @@ export const JA: TranslationSchema = {
       footer: "/keys でキーボード+マウスの全リファレンスを表示",
     },
     keysReference: {
+      ...EN.ui.keysReference,
       topic: "Reasonix キー + マウス リファレンス",
       sections: [
         {
@@ -272,6 +283,7 @@ export const JA: TranslationSchema = {
       "この実行でプランチェックポイントを自動承認（editMode=yolo 相当、設定は変更しません）",
   },
   code: {
+    ...EN.code,
     workspaceConflict:
       "⚠ ワークスペースに別のエージェントプラットフォームのファイル ({platforms}) が含まれています。Reasonix Code がそれらをプロジェクトコンテンツとして読み取る可能性があります。意図しない場合は --dir <your-project> で再起動してください。\n",
     systemAppendEmpty: "--system-append が空です — プロンプトテキストは追加されません\n",
@@ -279,181 +291,253 @@ export const JA: TranslationSchema = {
       'エラー: --system-append-file "{filePath}" を読み取れません: {errorDetails}\n',
   },
   slash: {
-    help: { description: "全コマンドリファレンスを表示" },
-    status: { description: "現在のモデル、フラグ、コンテキスト、セッション" },
+    ...EN.slash,
+    help: { ...EN.slash.help, description: "全コマンドリファレンスを表示" },
+    status: { ...EN.slash.status, description: "現在のモデル、フラグ、コンテキスト、セッション" },
     effort: {
+      ...EN.slash.effort,
       description:
         "reasoning_effort の上限 (low|medium|high|max); high は vLLM/Azure で安全なデフォルト",
       argsHint: "<low|medium|high|max>",
     },
-    model: { description: "DeepSeekモデルIDを切り替え", argsHint: "<id>" },
-    models: { description: "DeepSeek /models から取得した利用可能なモデル一覧" },
+    model: { ...EN.slash.model, description: "DeepSeekモデルIDを切り替え", argsHint: "<id>" },
+    models: {
+      ...EN.slash.models,
+      description: "DeepSeek /models から取得した利用可能なモデル一覧",
+    },
     theme: {
+      ...EN.slash.theme,
       description: "ターミナルテーマ設定を表示または保存。引数なしでピッカーを開きます。",
-      argsHint: "[auto|dark|light|midnight|deep-blue|high-contrast]",
+      argsHint: "[auto|graphite|ember|aurora|sandstone|porcelain|linen|glacier|midnight]",
     },
     language: {
+      ...EN.slash.language,
       description: "表示言語を切り替え",
       argsHint: "<EN|zh-CN|de|ja>",
       success: "言語を日本語に切り替えました。",
       unsupported: "未対応の言語コードです: {code}。対応: {supported}。",
     },
     budget: {
+      ...EN.slash.budget,
       description:
         "セッションUSD上限 — 80%で警告、100%で次のターンを拒否。デフォルトはオフ。/budget 単体で現在の状態を表示",
       argsHint: "[usd|off]",
     },
-    mcp: { description: "このセッションに接続されたMCPサーバーとツールを一覧表示" },
+    mcp: {
+      ...EN.slash.mcp,
+      description: "このセッションに接続されたMCPサーバーとツールを一覧表示",
+    },
     resource: {
+      ...EN.slash.resource,
       description: "MCPリソースの閲覧と読み取り（引数なし → URI一覧; <uri> → 内容取得）",
       argsHint: "[uri]",
     },
     prompt: {
+      ...EN.slash.prompt,
       description: "MCPプロンプトの閲覧と取得（引数なし → 名前一覧; <name> → プロンプト表示）",
       argsHint: "[name]",
     },
     memory: {
+      ...EN.slash.memory,
       description: "ピン留めメモリの表示/管理 (REASONIX.md + ~/.reasonix/memory)",
       argsHint: "[list|show <name>|forget <name>|clear <scope> confirm]",
     },
     skill: {
+      ...EN.slash.skill,
       description: "ユーザースキルの一覧/実行（プロジェクト + カスタム + グローバル + ビルトイン）",
       argsHint: "[list|paths|show <name>|<name> [args]]",
     },
     hooks: {
+      ...EN.slash.hooks,
       description:
         "アクティブなフックを一覧 (.reasonix/ 下の settings.json) · reload でディスクから再読込",
       argsHint: "[reload]",
     },
     permissions: {
+      ...EN.slash.permissions,
       description:
         "シェル許可リストの表示/編集（ビルトインは読取専用 · プロジェクト毎: ~/.reasonix/config.json）",
       argsHint: "[list|add <prefix>|remove <prefix|N>|clear confirm]",
     },
     dashboard: {
+      ...EN.slash.dashboard,
       description: "埋め込みWebダッシュボードを起動 (127.0.0.1, トークン認証)",
       argsHint: "[stop]",
     },
     update: {
+      ...EN.slash.update,
       description: "現在のバージョンと最新バージョン + アップグレード用シェルコマンドを表示",
     },
     stats: {
+      ...EN.slash.stats,
       description:
         "セッション横断のコストダッシュボード（今日/週/月/全期間 · キャッシュヒット · Claude比較）",
     },
     cost: {
+      ...EN.slash.cost,
       description:
         "引数なし → 前回ターンの消費 (Usageカード); テキスト付き → そのテキストを送信した場合のコスト見積もり（最悪ケース + キャッシュヒット想定）",
       argsHint: "[text]",
     },
-    doctor: { description: "ヘルスチェック (api / config / api-reach / index / hooks / project)" },
-    context: { description: "コンテキストウィンドウの内訳を表示 (system / tools / log / input)" },
-    retry: { description: "最後のメッセージを切り詰めて再送（新規サンプル）" },
+    doctor: {
+      ...EN.slash.doctor,
+      description: "ヘルスチェック (api / config / api-reach / index / hooks / project)",
+    },
+    context: {
+      ...EN.slash.context,
+      description: "コンテキストウィンドウの内訳を表示 (system / tools / log / input)",
+    },
+    retry: { ...EN.slash.retry, description: "最後のメッセージを切り詰めて再送（新規サンプル）" },
     compact: {
+      ...EN.slash.compact,
       description:
         "ログ内の大きすぎるツール結果とツール呼び出し引数を縮小; トークン数の上限、デフォルト4000",
       argsHint: "[tokens]",
     },
     cwd: {
+      ...EN.slash.cwd,
       description:
         "セッション中にワークスペースルートを切り替え — fs / shell / memory ツールの向き先を変更、プロジェクトフックを再読込、@メンションのウォーカーを更新",
       argsHint: "[path]",
     },
-    stop: { description: "現在のモデルターンを中断（Escの入力代替）" },
-    feedback: { description: "診断情報をクリップボードにコピーしてGitHub Issueを作成" },
-    about: { description: "プロジェクト情報 — バージョン、ウェブサイト、リポジトリ、ライセンス" },
-    keys: { description: "キーボード + マウス + コピー/貼り付け リファレンス" },
-    plans: { description: "このセッションのアクティブおよびアーカイブ済みプランを新しい順に表示" },
+    stop: { ...EN.slash.stop, description: "現在のモデルターンを中断（Escの入力代替）" },
+    feedback: {
+      ...EN.slash.feedback,
+      description: "診断情報をクリップボードにコピーしてGitHub Issueを作成",
+    },
+    about: {
+      ...EN.slash.about,
+      description: "プロジェクト情報 — バージョン、ウェブサイト、リポジトリ、ライセンス",
+    },
+    keys: { ...EN.slash.keys, description: "キーボード + マウス + コピー/貼り付け リファレンス" },
+    plans: {
+      ...EN.slash.plans,
+      description: "このセッションのアクティブおよびアーカイブ済みプランを新しい順に表示",
+    },
     replay: {
+      ...EN.slash.replay,
       description:
         "アーカイブ済みプランを読み取り専用のタイムトラベルスナップショットとして読み込み（デフォルト: 最新）",
       argsHint: "[N]",
     },
-    sessions: { description: "保存されたセッションを一覧（現在のセッションは ▸ で表示）" },
-    title: { description: "会話からこのセッションの名前をモデルに変更させる" },
+    sessions: {
+      ...EN.slash.sessions,
+      description: "保存されたセッションを一覧（現在のセッションは ▸ で表示）",
+    },
+    title: { ...EN.slash.title, description: "会話からこのセッションの名前をモデルに変更させる" },
     qq: {
+      ...EN.slash.qq,
       description:
         "このセッションのQQチャンネルを接続、検査、または切断（初回接続時にApp ID / App Secretの設定をガイド）",
       argsHint: "[connect [appId appSecret [sandbox]]|status|disconnect]",
     },
-    setup: { description: "終了して `reasonix setup` を実行するよう促します" },
+    setup: { ...EN.slash.setup, description: "終了して `reasonix setup` を実行するよう促します" },
     semantic: {
+      ...EN.slash.semantic,
       description: "semantic_search の状態を表示 — 構築済み？Ollama導入済み？有効化方法は？",
     },
-    clear: { description: "表示されているスクロールバックのみをクリア（ログ/コンテキストは保持）" },
-    new: { description: "新しい会話を開始（コンテキストとスクロールバックをクリア）" },
+    clear: {
+      ...EN.slash.clear,
+      description: "表示されているスクロールバックのみをクリア（ログ/コンテキストは保持）",
+    },
+    new: {
+      ...EN.slash.new,
+      description: "新しい会話を開始（コンテキストとスクロールバックをクリア）",
+    },
     loop: {
+      ...EN.slash.loop,
       description: "<prompt> を <interval> ごとに自動再送信（何か入力 / Esc / /loop stop で停止）",
       argsHint: "<5s..6h> <prompt>  ·  stop  ·  (引数なし = 状態表示)",
     },
-    exit: { description: "TUIを終了" },
+    exit: { ...EN.slash.exit, description: "TUIを終了" },
     init: {
+      ...EN.slash.init,
       description:
         "プロジェクトをスキャンしてベースラインの REASONIX.md を生成（モデルが作成; /apply でレビュー）。`force` で既存ファイルを上書き。",
       argsHint: "[force]",
     },
     apply: {
+      ...EN.slash.apply,
       description:
         "保留中の編集ブロックをディスクにコミット（引数なし → すべて; `1`, `1,3`, `1-4` → そのサブセット、残りは保留）",
       argsHint: "[N|N,M|N-M]",
     },
     discard: {
+      ...EN.slash.discard,
       description:
         "保留中の編集ブロックを書き込まずに破棄（引数なし → すべて; インデックス → そのサブセット）",
       argsHint: "[N|N,M|N-M]",
     },
     walk: {
+      ...EN.slash.walk,
       description:
         "保留中の編集を1ブロックずつ確認（git-add-p スタイル: ブロックごとに y/n、a で残りを適用、A でAUTOに切替）",
     },
-    undo: { description: "最後に適用された編集バッチをロールバック" },
+    undo: { ...EN.slash.undo, description: "最後に適用された編集バッチをロールバック" },
     history: {
+      ...EN.slash.history,
       description: "このセッションの全編集バッチを一覧（/show用のID、取り消しマーカー付き）",
     },
     show: {
+      ...EN.slash.show,
       description: "保存された編集差分を表示（idを省略すると最新の未取り消し分）",
       argsHint: "[id]",
     },
-    commit: { description: "git add -A && git commit -m ...", argsHint: '"msg"' },
+    commit: {
+      ...EN.slash.commit,
+      description: "git add -A && git commit -m ...",
+      argsHint: '"msg"',
+    },
     checkpoint: {
+      ...EN.slash.checkpoint,
       description:
         "セッションが触れた全ファイルのスナップショット（Cursorスタイルの内部ストア、gitではありません）。/checkpoint 単体で一覧表示。",
       argsHint: "[name|list|forget <id>]",
     },
     restore: {
+      ...EN.slash.restore,
       description: "指定されたチェックポイントにファイルをロールバック（/checkpoint list を参照）",
       argsHint: "<name|id>",
     },
     plan: {
+      ...EN.slash.plan,
       description:
         "読み取り専用プランモードの切替（submit_plan + 承認まで書き込みがブロックされます）",
       argsHint: "[on|off]",
     },
     mode: {
+      ...EN.slash.mode,
       description:
         "編集ゲート: review（キュー）· auto（適用+取り消し）· yolo（適用+シェル自動実行）。Shift+Tabで切り替え。",
       argsHint: "[review|auto|yolo]",
     },
-    jobs: { description: "run_background で起動されたバックグラウンドジョブを一覧表示" },
+    jobs: {
+      ...EN.slash.jobs,
+      description: "run_background で起動されたバックグラウンドジョブを一覧表示",
+    },
     kill: {
+      ...EN.slash.kill,
       description: "IDでバックグラウンドジョブを停止（SIGTERM → 猶予後にSIGKILL）",
       argsHint: "<id>",
     },
     logs: {
+      ...EN.slash.logs,
       description: "バックグラウンドジョブの出力をtail表示（デフォルト: 最後の80行）",
       argsHint: "<id> [lines]",
     },
     btw: {
+      ...EN.slash.btw,
       description: "簡単な脇道の質問 — 白紙状態から回答し、会話コンテキストには追加されません",
       argsHint: "<question>",
     },
     "search-engine": {
       description:
-        "Web検索バックエンドを切り替え — bing（デフォルト、プロキシなしで中国から利用可）、searxng（セルフホスト）、metaso（無料100回/日）、tavily（無料1000回/月）、perplexity（AIネイティブ）、exa（AIネイティブ）",
-      argsHint: "<bing|searxng|metaso|tavily|perplexity|exa> [<key>]",
+        "Web検索バックエンドを切り替え — bing（デフォルト、プロキシなしで中国から利用可）、bing-intl（国際インデックス）、searxng（セルフホスト）、metaso（無料100回/日）、baidu（Baidu AI Search、公式ドキュメントでは1500回/月無料）、tavily（無料1000回/月）、perplexity（AIネイティブ）、exa（AIネイティブ）、brave（独立インデックス）、ollama（OllamaクラウドWeb検索）",
+      argsHint: "<bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama> [<key>]",
     },
   },
   wizard: {
+    ...EN.wizard,
     languageTitle: "言語を選択",
     languageSubtitle: "システムロケールから検出されました。後で /language で切り替え可能です。",
     welcomeTitle: "Reasonix へようこそ。",
@@ -473,10 +557,32 @@ export const JA: TranslationSchema = {
     themeSubtitle: "操作に応じてプレビューがライブ更新されます。後で /theme で変更可能です。",
     themeSampleHeading: "サンプル",
     themeFooter: "[↑↓] 移動 · [Enter] 確定 · [Esc] キャンセル",
+    themeName: {
+      graphite: "グラファイト",
+      ember: "エンバー",
+      aurora: "オーロラ",
+      sandstone: "サンドストーン",
+      porcelain: "ポーセリン",
+      linen: "リネン",
+      glacier: "グレイシャー",
+      midnight: "ミッドナイト",
+      dark: "ダーク",
+      light: "ライト",
+      "deep-blue": "ディープブルー",
+      "high-contrast": "ハイコントラスト",
+    },
     themeCaption: {
+      ...EN.wizard.themeCaption,
+      graphite: "ニュートラルなグラファイトパネルのオリジナルダークテーマ",
+      ember: "Reasonixのオレンジを強めた暖かいダークテーマ",
+      aurora: "低照度でも柔らかいティールグリーンのダークテーマ",
+      sandstone: "オリジナルの暖色ライトテーマ",
+      porcelain: "静かなコントラストのクリーンなライトテーマ",
+      linen: "紙のような表面を持つエディトリアルな暖色ライトテーマ",
+      glacier: "鮮明なブルーアクセントのクールなライトテーマ",
+      midnight: "クールなブルー面を持つネイビー系ダークテーマ",
       dark: "クールなダークトーン（デフォルト）",
       light: "クリーンなライトモード",
-      midnight: "Tokyo Night パレット",
       "deep-blue": "黒背景にディープブルー",
       "high-contrast": "アクセシビリティ",
     },
@@ -512,13 +618,16 @@ export const JA: TranslationSchema = {
     themeSampleReasoning: "推論",
   },
   themePicker: {
+    ...EN.themePicker,
     header: "テーマ",
     footer: "↑↓ 選択 · ⏎ 確定 · esc キャンセル",
+    autoLabel: "自動",
     currentPref: "現在の設定",
     activeNow: "現在適用中",
     autoDesc: "REASONIX_THEME またはデフォルトを使用",
   },
   planFlow: {
+    ...EN.planFlow,
     approveCardTitle: "プランを承認",
     approveCardMetaRight: "待機中",
     openQuestionsBanner:
@@ -527,6 +636,7 @@ export const JA: TranslationSchema = {
     truncatedBodyMore: "… スクロールバックにさらに {n} 行あります",
     truncatedBodyMorePlural: "… スクロールバックにさらに {n} 行あります",
     picker: {
+      ...EN.planFlow.picker,
       accept: "承認",
       acceptHint: "このまま順番に実行",
       refine: "修正依頼",
@@ -539,6 +649,7 @@ export const JA: TranslationSchema = {
     refineFooter: "⏎ 送信  ·  esc でピッカーに戻る",
     refineQuestionsHeading: "以下に回答するか、希望する変更を記述してください:",
     modes: {
+      ...EN.planFlow.modes,
       approve: {
         title: "承認中 — 最後に指示はありますか？",
         hint: "プランが提起した質問に答えたり、制約を追加したり、そのままEnterで承認します。",
@@ -566,6 +677,7 @@ export const JA: TranslationSchema = {
       },
     },
     checkpoint: {
+      ...EN.planFlow.checkpoint,
       title: "チェックポイント — ステップ完了",
       continue: "続行 — 次のステップを実行",
       continueHint: "モデルが次のステップで再開します。",
@@ -577,6 +689,7 @@ export const JA: TranslationSchema = {
       stopHint: "モデルがここまでの内容をサマリーして終了します。",
     },
     stepList: {
+      ...EN.planFlow.stepList,
       counter: "{total} ステップ",
       counterSingular: "{total} ステップ",
       counterDone: "{done}/{total} 完了 ({pct}%) · {total} ステップ",
@@ -597,6 +710,7 @@ export const JA: TranslationSchema = {
     completeMsg: "\u25b8 プラン完了 \u2014 全 {total} ステップ完了 \u00b7 アーカイブ済み",
   },
   app: {
+    ...EN.app,
     walkCancelledRemaining: "▸ ウォークをキャンセルしました — {count} ブロックがまだ保留中です。",
     walkCancelled: "▸ ウォークをキャンセルしました。",
     editModeYolo:
@@ -655,6 +769,8 @@ export const JA: TranslationSchema = {
     revisingAfter: "▸ {label} の後に修正 — {feedback}",
     explicitPlanIntentArmed:
       "▸ 明示的な plan-first リクエストを検出 — strict lifecycle を有効化しました。/plan off で終了できます。",
+    lifecyclePlanSuggestion:
+      "▸ 高リスクのエンジニアリング作業を検出 - /plan strict で承認済みプランを先に要求できます。",
     historyScrollHint: " ↑ 履歴を読込中 · End / PgDn で最下部に戻る · ↓ で1行進む",
     editHistoryTitle: "編集履歴（古い順）:",
     editHistoryNoCodeMode: "コードモードではありません",
@@ -696,6 +812,7 @@ export const JA: TranslationSchema = {
       "（セッションは最初のターンでサイドカーを自動作成します — このセッションはまだ実行されていませんか？）",
   },
   hooks: {
+    ...EN.hooks,
     head: "フック {tag} `{cmd}` {decision}{truncTag}",
     headWithDetail: "フック {tag} `{cmd}` {decision}{truncTag}: {detail}",
     truncated: "（出力は256KBで切り詰められました）",
@@ -705,6 +822,7 @@ export const JA: TranslationSchema = {
     decisionError: "エラー",
   },
   summary: {
+    ...EN.summary,
     status: "収集内容をサマリー中…",
     hallucinatedFallback:
       "（モデルが散文サマリーの代わりに偽のツール呼び出しマークアップを出力しました — より狭い質問で /retry するか、/think でR1の推論を確認してください）",
@@ -712,6 +830,7 @@ export const JA: TranslationSchema = {
       "{label} の後、フォールバックサマリー呼び出しが失敗しました: {message}。/clear を実行してより狭い質問で再試行するか、--max-tool-iters を増やしてください。",
   },
   loop: {
+    ...EN.loop,
     budgetExhausted:
       "セッション予算を使い切りました — 消費 ${spent} ≥ 上限 ${cap}。/budget <usd> で上限を引き上げるか、/budget off でクリアするか、セッションを終了してください。",
     budget80Pct:
@@ -736,8 +855,11 @@ export const JA: TranslationSchema = {
       "コンテキスト {before}/{ctxMax} ({pct}%) — {beforeMessages} メッセージ → {afterMessages} に強制折りたたみ（サマリー {summaryChars} 文字）。続行します。",
     forcingSummary:
       "コンテキスト {before}/{ctxMax} ({pct}%) — 収集内容からサマリーを強制生成中。/compact、/clear、または /new でリセットしてください。",
+    iterLimitReached:
+      "ターンあたりの反復上限（{max} 回のツール呼出しラウンド）に達しました。収集内容のサマリーを強制生成中。maxIterPerTurn 設定または REASONIX_MAX_ITER 環境変数で上書きできます。",
   },
   errors: {
+    ...EN.errors,
     contextOverflow:
       "コンテキストオーバーフロー (DeepSeek 400): セッション履歴が {requested} で、モデルのプロンプト制限（V4: 1Mトークン; 旧来のchat/reasoner: 131k）を超えています。通常、単一のツール結果が大きすぎるのが原因です。Reasonixは新しいツール結果を8kトークンに制限し、セッション読み込み時に大きすぎる履歴を自動修復します — 再起動で解決することが多いです。それでもオーバーフローする場合は、/new で新規開始するか、/sessions を開いて [d] でこのセッションを削除してください。",
     contextOverflowTooMany: "トークンが多すぎます",
@@ -774,7 +896,9 @@ export const JA: TranslationSchema = {
     labelStuck: "スタック（ストームブレーカーが繰り返しツール呼び出しを抑制）",
   },
   handlers: {
+    ...EN.handlers,
     basic: {
+      ...EN.handlers.basic,
       newInfo:
         "▸ 新しい会話 — コンテキストから {count} 件のメッセージを削除しました。同じセッション、新規の状態です。",
       newInfoArchived:
@@ -839,11 +963,13 @@ export const JA: TranslationSchema = {
       unknownCommandShort: "不明なコマンド: /{cmd}  (/help を試してください)",
     },
     sessions: {
+      ...EN.handlers.sessions,
       titleUnavailable: "/title はアクティブな永続化TUIセッションでのみ利用可能です。",
       titleStarted: "▸ セッション名を生成中…",
       titleFailed: "▸ セッションタイトルが失敗しました: {reason}",
     },
     qq: {
+      ...EN.handlers.qq,
       unavailable: "/qq はこのセッションでは利用できません。",
       connecting: "QQ: 接続中…",
       connectFailed: "QQ 接続に失敗しました: {reason}",
@@ -893,6 +1019,7 @@ export const JA: TranslationSchema = {
         "QQ ボットが15秒以内に READY を受信しませんでした — App ID と App Secret を確認してください。",
     },
     admin: {
+      ...EN.handlers.admin,
       doctorNeedsTui: "/doctor は TUI コンテキストが必要です（postDoctor wired）。",
       doctorRunning: "⚕ Doctor — ヘルスチェック実行中…",
       hooksReloadUnavailable:
@@ -931,6 +1058,7 @@ export const JA: TranslationSchema = {
       statsWillAppear: "メッセージを送信するとダッシュボードに表示されます。",
     },
     edits: {
+      ...EN.handlers.edits,
       undoCodeOnly:
         "/undo は `reasonix code` 内でのみ利用可能です — チャットモードでは編集を適用しません。",
       historyCodeOnly: "/history は `reasonix code` 内でのみ利用可能です。",
@@ -989,6 +1117,7 @@ export const JA: TranslationSchema = {
       cwdUsageNoCurrent: "使い方: /cwd <path>   ワークスペースルートを <path> に変更します。",
     },
     model: {
+      ...EN.handlers.model,
       modelHint:
         "deepseek-v4-flash または deepseek-v4-pro を試してください — /models で最新リストを取得",
       modelUsage: "使い方: /model <id>   ({hint})",
@@ -1011,6 +1140,7 @@ export const JA: TranslationSchema = {
         "budget → ${cap}  （現在まで: ${spent} · 80%で警告、100%で次のターンを拒否 · /budget off で解除）",
     },
     permissions: {
+      ...EN.handlers.permissions,
       mutateCodeOnly:
         "/permissions add / remove / clear は `reasonix code` 内でのみ利用可能です — プロジェクトスコープの許可リストを編集します（`~/.reasonix/config.json` projects[<root>].shellAllowed）。",
       addUsage:
@@ -1049,11 +1179,19 @@ export const JA: TranslationSchema = {
       projectNone2: "   `/permissions add <prefix>` で直接追加してください。）",
       projectNoRoot:
         "プロジェクト許可リスト — （プロジェクトルートなし; チャットモードではビルトインエントリのみ表示）",
+      globalHeader: "グローバル許可リスト ({count}) — すべてのプロジェクトに適用",
+      globalNone: "  （なし — `/permissions add --global <prefix>` で追加）",
+      addGlobalInfo:
+        "▸ グローバル許可リストに追加: {prefix}\n  → 以降 `{prefix}` はすべてのプロジェクトで確認なしに実行されます。",
+      removeGlobalEmpty: "▸ 削除できるグローバル許可リストの項目がありません。",
+      clearGlobalConfirm:
+        "グローバル許可リストの {count} 件を削除しようとしています。'confirm' を付けて再実行してください: /permissions clear --global confirm",
       builtinHeader: "ビルトイン許可リスト ({count}) — 読み取り専用、組み込み",
       subcommands:
         "サブコマンド: /permissions add <prefix> · /permissions remove <prefix-or-N> · /permissions clear confirm",
     },
     dashboard: {
+      ...EN.handlers.dashboard,
       notAvailable:
         "/dashboard はこのコンテキストでは利用できません（startDashboard コールバックが未接続）。",
       stopNoCallback: "/dashboard stop: stop コールバックが未接続です。",
@@ -1070,6 +1208,7 @@ export const JA: TranslationSchema = {
       tokenReset: "▸ ダッシュボードトークンを再生成しました。新しいURL:",
     },
     observability: {
+      ...EN.handlers.observability,
       contextInfo: "context: ~{total} / {max} ({pct}%) · system {sys} · tools {tools} · log {log}",
       compactStarting: "▸ 古いターンをサマリーに折りたたみ中…",
       compactNoop:
@@ -1117,6 +1256,7 @@ export const JA: TranslationSchema = {
       statusDash: "  dash    {url}（ブラウザで開く · /dashboard stop）",
     },
     plans: {
+      ...EN.handlers.plans,
       noSession:
         "セッションが接続されていません — `/plans` はセッションごとです。プロジェクトで `reasonix code` を実行するとセッションが取得できます。",
       activePlan: "▸ アクティブプラン{label} — {done}/{total} ステップ完了 · 最終更新 {when}",
@@ -1150,6 +1290,7 @@ export const JA: TranslationSchema = {
       doneAllOk: "▸ {count} ステップを完了とマークしました。",
     },
     jobs: {
+      ...EN.handlers.jobs,
       codeOnly: "/jobs は `reasonix code` 内でのみ利用可能です。",
       killCodeOnly: "/kill は `reasonix code` 内でのみ利用可能です。",
       logsCodeOnly: "/logs は `reasonix code` 内でのみ利用可能です。",
@@ -1173,6 +1314,7 @@ export const JA: TranslationSchema = {
       logsStopped: "停止済み",
     },
     memory: {
+      ...EN.handlers.memory,
       disabled:
         "メモリが無効です（REASONIX_MEMORY=off が環境変数に設定されています）。変数を解除して再有効化してください — その間、REASONIX.md や ~/.reasonix/memory の内容はピン留めされません。",
       noRoot:
@@ -1208,6 +1350,7 @@ export const JA: TranslationSchema = {
         "変更は次回の /new または起動時に反映されます。サブコマンド: /memory list | show | forget | clear",
     },
     mcp: {
+      ...EN.handlers.mcp,
       noServers:
         'MCPサーバーが接続されていません。`reasonix setup` を実行して選択するか、--mcp "<spec>" で起動してください。`reasonix mcp list` でカタログを表示します。注意: モデル起動のシェルコマンドは呼び出しごとに制御されます（allow once / allow always / deny）— 全許可フラグはありません。',
       toolsLabel: "  tools     {count}",
@@ -1231,6 +1374,7 @@ export const JA: TranslationSchema = {
       tabHint: "tab で切り替え",
     },
     init: {
+      ...EN.handlers.init,
       codeOnly:
         "/init はコードモードでのみ動作します（ファイルシステムツールが必要です）。\n初期化したいプロジェクトをルートとして `reasonix code [path]` でセッションを開始し、/init を実行してください。",
       exists: "▸ REASONIX.md は既に {path} に存在します",
@@ -1240,6 +1384,7 @@ export const JA: TranslationSchema = {
       info: "▸ /init — モデルがプロジェクトをスキャンして REASONIX.md を生成します。\n  結果は保留中の編集として届きます; /apply または /walk でレビューしてください。",
     },
     webSearchEngine: {
+      ...EN.handlers.webSearchEngine,
       currentEngine: "現在のWeb検索エンジン: {engine}",
       endpoint: "SearXNG エンドポイント: {url}",
       usageHeader: "使い方:",
@@ -1249,6 +1394,8 @@ export const JA: TranslationSchema = {
       usageSearxngUrl: "  /search-engine searxng <url>      カスタムエンドポイントでSearXNGを使用",
       usageMetaso:
         "  /search-engine metaso              Metaso APIを使用（100回/日無料、独自APIキーで上限増）",
+      usageBaidu:
+        "  /search-engine baidu               Baidu AI Search APIを使用（公式ドキュメントでは1500回/月無料 — BAIDU_API_KEY または QIANFAN_API_KEY を設定）",
       usageTavily:
         "  /search-engine tavily              Tavily APIを使用（LLM向け、無料1000回/月 — TAVILY_API_KEY または tavilyApiKey を設定; https://tavily.com で取得）",
       usagePerplexity:
@@ -1268,6 +1415,8 @@ export const JA: TranslationSchema = {
       switched: 'Web検索エンジンを "{engine}" に切り替えました。{note}',
       switchedSearxngNote: " SearXNG が {endpoint} で実行されていることを確認してください。",
       switchedMetasoNote: " 1日100回のクォータがあります（独自APIキーでより高い上限に設定可能）。",
+      switchedBaiduNote:
+        " BAIDU_API_KEY、QIANFAN_API_KEY、または config の `baiduApiKey` を設定してください。Baiduドキュメントには月1500回無料と記載されています。",
       switchedTavilyNote:
         " TAVILY_API_KEY または `tavilyApiKey` を設定してください; 無料1000回/月 https://tavily.com。",
       switchedPerplexityNote:
@@ -1286,6 +1435,7 @@ export const JA: TranslationSchema = {
       confirmedDetail: " ({endpoint})",
     },
     skill: {
+      ...EN.handlers.skill,
       listEmpty: "スキルが見つかりません。Reasonix は以下からスキルを読み取ります:",
       listProjectScope:
         "  · <project>/.reasonix/skills/<name>/SKILL.md  （または <name>.md） — プロジェクトスコープ",
@@ -1324,6 +1474,7 @@ export const JA: TranslationSchema = {
     },
   },
   statusBar: {
+    ...EN.statusBar,
     turn: "ターン",
     cache: "キャッシュ",
     spent: "消費",
@@ -1342,6 +1493,7 @@ export const JA: TranslationSchema = {
     shortcutsHint: "Ctrl+P ショートカット",
   },
   editMode: {
+    ...EN.editMode,
     plan: "PLAN MODE",
     yolo: "YOLO",
     auto: "AUTO",
@@ -1355,6 +1507,7 @@ export const JA: TranslationSchema = {
     queuedDots: "キュー中\u2026",
   },
   composer: {
+    ...EN.composer,
     placeholder:
       "何でも聞いてください  \u00b7  スラッシュでコマンド  \u00b7  アットマークでファイル",
     waitingForResponse: "\u2026応答待機中\u2026",
@@ -1381,6 +1534,7 @@ export const JA: TranslationSchema = {
     stashRecall: "呼び戻しました",
   },
   pathConfirm: {
+    ...EN.pathConfirm,
     title: "サンドボックス外のパス",
     subtitleRead: "{tool} がプロジェクトサンドボックス外のファイルを読み取ろうとしています",
     subtitleWrite: "{tool} がプロジェクトサンドボックス外のファイルに書き込もうとしています",
@@ -1408,6 +1562,7 @@ export const JA: TranslationSchema = {
     actionDeny: "拒否",
   },
   shellConfirm: {
+    ...EN.shellConfirm,
     title: "シェルコマンド",
     bgTitle: "バックグラウンドプロセス",
     subtitle: "モデルがシェルコマンドを実行しようとしています",
@@ -1437,6 +1592,7 @@ export const JA: TranslationSchema = {
     actionDeny: "拒否",
   },
   editConfirm: {
+    ...EN.editConfirm,
     footer:
       "[y/Enter] 適用  \u00b7  [n] 理由を添えて拒否  \u00b7  [a] 残りを適用  \u00b7  [A] AUTOに切替  \u00b7  [\u2191\u2193/Space] スクロール  \u00b7  [Esc] 中断",
     newTag: "新規",
@@ -1453,6 +1609,7 @@ export const JA: TranslationSchema = {
     linesBelowPlural: "  \u2193 下に {count} 行  (\u2193/j または Space/PgDn)",
   },
   editPicker: {
+    ...EN.editPicker,
     title: "前のメッセージを編集",
     hint: "↑↓ 選択 · Enter で composer に読み込み · Esc でキャンセル",
     empty: "まだユーザーターンがありません — 編集するものがありません",
@@ -1460,6 +1617,7 @@ export const JA: TranslationSchema = {
     forked: "▸ ターン #{turn} でフォーク — バッファに元のテキストを保持",
   },
   sessionPicker: {
+    ...EN.sessionPicker,
     header: " \u25c8 REASONIX \u00b7 セッションを選択 ",
     title: "セッションを選択 \u2014 {workspace}",
     messages: "{count} メッセージ",
@@ -1482,6 +1640,7 @@ export const JA: TranslationSchema = {
     daysAgo: "{count} 日前",
   },
   workspacePicker: {
+    ...EN.workspacePicker,
     header: " ◈ REASONIX · ワークスペースを選択 ",
     title: "ワークスペースを選択 — {workspace}",
     sessions: "{count} セッション",
@@ -1494,6 +1653,7 @@ export const JA: TranslationSchema = {
     searchEmpty: "  検索に一致するワークスペースはありません",
   },
   modelPicker: {
+    ...EN.modelPicker,
     header: " \u25c8 REASONIX \u00b7 設定を選択 ",
     loading: "  \u00b7  カタログ読み込み中\u2026",
     catalogEmpty: "  \u00b7  カタログが空です \u2014 既知のフォールバックを使用",
@@ -1501,6 +1661,7 @@ export const JA: TranslationSchema = {
     effortHeader: "    EFFORT  \u00b7  reasoning_effort 上限",
     modelsHeader: "    MODELS  \u00b7  DeepSeek互換ID",
     effortDesc: {
+      ...EN.modelPicker.effortDesc,
       low: "最速 \u2014 最小限の推論",
       medium: "バランス",
       high: "デフォルト \u2014 vLLM / Azure で安全",
@@ -1511,6 +1672,7 @@ export const JA: TranslationSchema = {
     currentLabel: "  \u00b7 現在",
   },
   slashSuggestions: {
+    ...EN.slashSuggestions,
     noMatch: "そのプレフィックスに一致するスラッシュコマンドはありません",
     backspaceHint: " \u2014 Backspace で編集、または /help で全リスト",
     commandCount: "{count} コマンド",
@@ -1537,6 +1699,7 @@ export const JA: TranslationSchema = {
     groupDetailAdvanced: "高度な設定",
   },
   atMentions: {
+    ...EN.atMentions,
     loading: "読み込み中\u2026",
     entrySingular: "{count} エントリ",
     entryPlural: "{count} エントリ",
@@ -1555,6 +1718,7 @@ export const JA: TranslationSchema = {
     footerInsert: "\u2191\u2193 移動 \u00b7 Tab / \u23ce @path として挿入 \u00b7 esc キャンセル",
   },
   statsPanel: {
+    ...EN.statsPanel,
     modePlan: "PLAN",
     modeYolo: "yolo",
     modeAuto: "auto",
@@ -1563,11 +1727,13 @@ export const JA: TranslationSchema = {
     budget: "  予算  ",
   },
   welcomeBanner: {
+    ...EN.welcomeBanner,
     workspace: "\u25b8 ワークスペース",
     relaunchHint: "  （--dir <path> で再起動すると切替）",
     dashboard: "\u25b8 Web",
   },
   ctxBreakdown: {
+    ...EN.ctxBreakdown,
     title: "\u25a3 コンテキスト",
     compactHint: "  /compact で折りたたみ（50%で自動）\u00b7 /new でログ消去",
     topTools: "  コスト上位のツール結果（{count}）:",
@@ -1575,38 +1741,41 @@ export const JA: TranslationSchema = {
     turnLabel: "ターン",
   },
   startup: {
+    ...EN.startup,
     codeRooted:
       '\u25b8 reasonix code: ルート {rootDir}, セッション "{session}" \u00b7 {tools} ネイティブツール{semantic}',
     ephemeral: "（エフェメラル）",
     semanticOn: " \u00b7 semantic_search オン",
   },
   doctorErrors: {
+    ...EN.doctorErrors,
     unreadable: "{path} 読み取り不可 \u2014 {message}",
     cannotList: "一覧表示できません \u2014 {message}",
     parseFailed: "settings.json をパースできませんでした \u2014 {message}",
     probeFailed: "プローブに失敗しました \u2014 {message}",
   },
   webErrors: {
+    ...EN.webErrors,
     status:
-      "web_search {status} \u2014 対処: 検索バックエンドがエラーを返しました。クエリを言い換えるか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search {status} \u2014 対処: 検索バックエンドがエラーを返しました。クエリを言い換えるか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     rateLimit429:
       "web_search 429 \u2014 対処: 10秒待ってから再試行するか、クエリを言い換えてください。検索バックエンドがこのクライアントをレート制限しています",
     forbidden403:
-      "web_search 403 \u2014 対処: 検索バックエンドがこのクライアントをブロックしています。/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えるか、しばらく待って再試行してください",
+      "web_search 403 \u2014 対処: 検索バックエンドがこのクライアントをブロックしています。/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えるか、しばらく待って再試行してください",
     serverError5xx:
       "web_search {status} \u2014 対処: 検索URLをブラウザで開いてみてください。読み込める場合は一時的な問題で、30秒後に再試行すると改善する可能性があります",
     bingBlocked:
-      "web_search: Bingのアンチボットページ \u2014 レート制限またはブロックされました \u2014 対処: 30秒待って再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Bingのアンチボットページ \u2014 レート制限またはブロックされました \u2014 対処: 30秒待って再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     bingNoResults:
-      "web_search: 0件の結果ですが、レスポンスが実際の空ページとは異なります（{chars}文字、先頭120: {preview}）\u2014 対処: より簡単な用語でクエリを言い換えるか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: 0件の結果ですが、レスポンスが実際の空ページとは異なります（{chars}文字、先頭120: {preview}）\u2014 対処: より簡単な用語でクエリを言い換えるか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     invalidEndpoint:
       'web_search: 無効なSearXNGエンドポイント "{endpoint}" \u2014 対処: /search-endpoint http://host:port で有効なURLを設定してください',
     endpointMustBeHttp:
       "web_search: SearXNGエンドポイントはhttp(s)である必要がありますが、{protocol} が指定されました \u2014 対処: /search-endpoint http://host:port で有効なURLを設定してください",
     cannotReach:
-      "web_search: {endpoint} のSearXNGサーバーに到達できません \u2014 対処: SearXNGをインストールして起動するか（https://github.com/searxng/searxng, 例: `docker run -d -p 8080:8080 searxng/searxng`）、/search-engine bing|searxng|metaso|tavily|perplexity|exa で別のエンジンに切り替えてください",
+      "web_search: {endpoint} のSearXNGサーバーに到達できません \u2014 対処: SearXNGをインストールして起動するか（https://github.com/searxng/searxng, 例: `docker run -d -p 8080:8080 searxng/searxng`）、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama で別のエンジンに切り替えてください",
     searxngNoResults:
-      "web_search: 0件の結果ですが、SearXNGのレスポンスが空の結果ページとは異なります（{chars}文字）\u2014 対処: より簡単な用語でクエリを言い換えるか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: 0件の結果ですが、SearXNGのレスポンスが空の結果ページとは異なります（{chars}文字）\u2014 対処: より簡単な用語でクエリを言い換えるか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     metasoMissingKey:
       "web_search: MetasoにはAPIキーが必要です \u2014 METASO_API_KEY を設定するか、/search-engine metaso <key> で設定してください。https://metaso.cn/search-api/playground から取得できます",
     metasoDailyLimit:
@@ -1616,19 +1785,29 @@ export const JA: TranslationSchema = {
     metasoRateLimit:
       "web_search: Metasoがレート制限されました \u2014 待って再試行するか、https://metaso.cn/search-api/playground から独自のAPIキーを取得してください",
     metasoServerError:
-      "web_search: Metasoサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Metasoサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     metasoParseError:
       "web_search: Metasoが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     metasoApiError:
       "web_search: Metaso APIエラー (コード {code}: {message}) \u2014 後で再試行してください",
+    baiduMissingKey:
+      "web_search: Baidu AI SearchにはAPIキーが必要です \u2014 BAIDU_API_KEY または QIANFAN_API_KEY 環境変数、~/.reasonix/config.json の `baiduApiKey`、または /search-engine baidu <key> を設定してください",
+    baiduUnauthorized:
+      "web_search: Baidu AI Search APIキーが拒否されました \u2014 BAIDU_API_KEY、QIANFAN_API_KEY、または `baiduApiKey` を確認してください",
+    baiduRateLimit:
+      "web_search: Baidu AI Searchがレート制限中またはクォータを超過しました \u2014 待ってから再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+    baiduServerError:
+      "web_search: Baidu AI Searchサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+    baiduParseError:
+      "web_search: Baidu AI Searchが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     tavilyMissingKey:
       "web_search: TavilyバックエンドにはAPIキーが必要です \u2014 TAVILY_API_KEY 環境変数または ~/.reasonix/config.json の `tavilyApiKey` を設定してください。無料1000回/月の登録は https://tavily.com から",
     tavilyUnauthorized:
       "web_search: Tavily APIキーが拒否されました \u2014 TAVILY_API_KEY を確認するか、https://tavily.com から取得してください",
     tavilyRateLimit:
-      "web_search: Tavilyがレート制限または月間クォータを超過しました \u2014 待つか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えるか、Tavilyプランをアップグレードしてください",
+      "web_search: Tavilyがレート制限または月間クォータを超過しました \u2014 待つか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えるか、Tavilyプランをアップグレードしてください",
     tavilyServerError:
-      "web_search: Tavilyサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Tavilyサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     tavilyParseError:
       "web_search: Tavilyが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     perplexityMissingKey:
@@ -1636,9 +1815,9 @@ export const JA: TranslationSchema = {
     perplexityUnauthorized:
       "web_search: Perplexity APIキーが拒否されました \u2014 PERPLEXITY_API_KEY を確認するか、https://perplexity.ai/settings/api から取得してください",
     perplexityRateLimit:
-      "web_search: Perplexityがレート制限されました \u2014 待って再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Perplexityがレート制限されました \u2014 待って再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     perplexityServerError:
-      "web_search: Perplexityサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Perplexityサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     perplexityParseError:
       "web_search: Perplexityが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     exaMissingKey:
@@ -1648,7 +1827,7 @@ export const JA: TranslationSchema = {
     exaRateLimit:
       "web_search: Exa APIがレート制限または月間クォータを超過しました \u2014 待つか、https://exa.ai/pricing でアップグレードしてください",
     exaServerError:
-      "web_search: Exaサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa でエンジンを切り替えてください",
+      "web_search: Exaサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     exaParseError:
       "web_search: Exaが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     braveMissingKey:
@@ -1658,7 +1837,7 @@ export const JA: TranslationSchema = {
     braveRateLimit:
       "web_search: Brave Search APIがレート制限または月間クォータを超過しました \u2014 待つか、https://brave.com/search/api/ でアップグレードしてください",
     braveServerError:
-      "web_search: Brave Searchサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|searxng|metaso|tavily|perplexity|exa|brave でエンジンを切り替えてください",
+      "web_search: Brave Searchサーバーエラー ({status}) \u2014 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     braveParseError:
       "web_search: Brave Searchが解析不能なレスポンスを返しました (HTTP {status}) \u2014 後で再試行してください",
     ollamaMissingKey:
@@ -1666,9 +1845,9 @@ export const JA: TranslationSchema = {
     ollamaUnauthorized:
       "Ollama API キーが拒否されました — OLLAMA_API_KEY を確認するか、https://ollama.com/settings/keys で取得してください",
     ollamaRateLimit:
-      "Ollama がレート制限中またはクォータを超過しました — 待ってから再試行するか、/search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+      "Ollama がレート制限中またはクォータを超過しました — 待ってから再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     ollamaServerError:
-      "Ollama サーバーエラー ({status}) ({url}) — 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
+      "Ollama サーバーエラー ({status}) ({url}) — 後で再試行するか、/search-engine bing|bing-intl|searxng|metaso|baidu|tavily|perplexity|exa|brave|ollama でエンジンを切り替えてください",
     ollamaParseError:
       "Ollama が解析不能なレスポンスを返しました (HTTP {status}) ({url}) — 後で再試行してください",
     fetchOllamaMissingKey:
@@ -1699,6 +1878,7 @@ export const JA: TranslationSchema = {
       "web_fetch: URLは http:// または https:// で始まる必要があります \u2014 対処: 絶対http(s) URLを渡してください（URLが不正か、未対応のスキームを使用しています）",
   },
   choiceConfirm: {
+    ...EN.choiceConfirm,
     customLabel: "自由に回答を入力",
     customDesc:
       "上記のいずれも当てはまらない \u2014 自由形式で返信してください。モデルはそれをそのまま読み取ります。",
@@ -1706,6 +1886,7 @@ export const JA: TranslationSchema = {
     cancelDesc: "モデルが停止し、代わりに何が欲しいかを尋ねます。",
   },
   cardTitles: {
+    ...EN.cardTitles,
     usage: "使用量",
     context: "コンテキスト",
     search: "検索",
@@ -1720,6 +1901,7 @@ export const JA: TranslationSchema = {
     task: "タスク",
   },
   cardLabels: {
+    ...EN.cardLabels,
     prompt: "prompt",
     reason: "reason",
     output: "output",
@@ -1783,6 +1965,7 @@ export const JA: TranslationSchema = {
     categoryReference: "リファレンス",
   },
   mcpHealth: {
+    ...EN.mcpHealth,
     noData: "検査データなし",
     healthy: "正常 \u00b7 {ms}ms",
     slow: "低速 \u00b7 {ms}ms",
@@ -1792,10 +1975,12 @@ export const JA: TranslationSchema = {
       "\u2139 MCPサーバーが設定されていません \u2014 対処: `reasonix setup` で再選択するか、`reasonix mcp install filesystem` \u00b7 シェルコマンドは毎回確認（allow once / allow always / deny）、全許可フラグなし",
   },
   denyContextInput: {
+    ...EN.denyContextInput,
     description:
       "拒否した理由をエージェントに伝えてください。次の試行ではあなたの理由が追加コンテキストとして参照されます。",
   },
   cardStream: {
+    ...EN.cardStream,
     scrollAbove: " \u2191 {scroll} / {max} 行上",
     scrollAbovePlural: " \u2191 {scroll} / {max} 行上",
     scrollMore: " \u2014 さらに {remaining} 件",
@@ -1803,6 +1988,7 @@ export const JA: TranslationSchema = {
     scrollCopy: " \u00b7 /copy でコピーモード",
   },
   slashArgPicker: {
+    ...EN.slashArgPicker,
     noMatch: '"{partial}" に一致するものはありません',
     keepTyping: " \u2014 続けて入力するか、Backspace で編集",
     above: "   \u2191 上に {hidden} 件",
@@ -1810,6 +1996,7 @@ export const JA: TranslationSchema = {
     footer: "  \u2191\u2193 移動 \u00b7 Tab / \u23ce 選択 \u00b7 esc キャンセル",
   },
   mcpMarketplace: {
+    ...EN.mcpMarketplace,
     title: "MCP マーケットプレイス",
     filter: "フィルタ: ",
     filterPlaceholder: "（入力でフィルタ）",
@@ -1846,6 +2033,7 @@ export const JA: TranslationSchema = {
     statusError: "エラー: {message}",
   },
   mcpBrowser: {
+    ...EN.mcpBrowser,
     title: "\u25c8 MCP ブラウザ",
     empty:
       "MCPサーバーが接続されていません。`reasonix setup` を実行して選択するか、--mcp で起動してください。",
@@ -1853,6 +2041,7 @@ export const JA: TranslationSchema = {
     footer: "\u2191\u2193 選択 \u00b7 [r] 再接続 \u00b7 [d] 無効化 \u00b7 esc 終了",
   },
   mcpBrowse: {
+    ...EN.mcpBrowse,
     noResources:
       "接続されたMCPサーバーにリソースがありません（またはサーバーが接続されていません）。`/mcp` で現在の設定を表示します。",
     readOne: "読み取り: `/resource <uri>` \u2014 またはピッカーでTabを使用。",
@@ -1868,6 +2057,7 @@ export const JA: TranslationSchema = {
     fetchFailed: "getPrompt に失敗しました",
   },
   mcpLifecycle: {
+    ...EN.mcpLifecycle,
     handshake: "ハンドシェイク中\u2026",
     connected: "接続済み",
     failed: "失敗",
@@ -1886,6 +2076,7 @@ export const JA: TranslationSchema = {
     warnLabel: "警告",
   },
   checkpointPicker: {
+    ...EN.checkpointPicker,
     title: "チェックポイントを復元 \u2014 {workspace}",
     header: " \u25c8 REASONIX \u00b7 チェックポイントを選択 ",
     empty:
@@ -1895,6 +2086,7 @@ export const JA: TranslationSchema = {
     footerEmpty: "  esc 終了",
   },
   planReviseConfirm: {
+    ...EN.planReviseConfirm,
     title: "プラン修正案",
     metaRight: "\u2212{removed}  +{added}  \u00b7  {kept} 保持",
     updatedSummary: "更新されたサマリー: {summary}",
@@ -1905,6 +2097,7 @@ export const JA: TranslationSchema = {
     rejectHint: "提案を破棄します。モデルは元の残りステップで続行します。",
   },
   diffApp: {
+    ...EN.diffApp,
     title: "reasonix diff",
     turnLabel: "ターン {turn} ({current}/{total})",
     turnsAligned: "{count} ターンが一致",
@@ -1915,6 +2108,7 @@ export const JA: TranslationSchema = {
     kindOnlyInB: "\u2192 Bのみ",
   },
   recordView: {
+    ...EN.recordView,
     userPrefix: "あなた \u203a ",
     assistant: "アシスタント",
     toolPrefix: "tool<",
@@ -1926,6 +2120,7 @@ export const JA: TranslationSchema = {
     truncateExtra: "（+{extra} 文字）",
   },
   replayApp: {
+    ...EN.replayApp,
     emptyTranscript: "空のトランスクリプト",
     turnProgress: "ターン {current}/{total}",
     noRecords: "レコードなし",
@@ -1933,6 +2128,7 @@ export const JA: TranslationSchema = {
     churned: "（チャーン \u00d7{count}）",
   },
   builtinSkills: {
+    ...EN.builtinSkills,
     explore:
       "コードベースを分離サブエージェントで調査 — 広範囲の読み取り専用調査で1つの要約された回答を返します。最適: 「〜を使用している場所をすべて見つけて」「Xはプロジェクト全体でどのように動作するか」「Yのコードを調査して」。",
     research:
@@ -1945,6 +2141,7 @@ export const JA: TranslationSchema = {
     qq: "CLI または デスクトップでの QQ チャネル設定とトラブルシューティングをガイド — 初回接続、App ID / App Secret / QQ 環境、アクティブタブの動作、および最も一般的な「設定済みだが応答しない」ケースを扱います。インライン実行 — ユーザーが QQ を動作させる必要があるときに使用します。",
   },
   shortcutsHelp: {
+    ...EN.shortcutsHelp,
     title: "ショートカット",
     groupInput: "入力",
     groupNavigation: "ナビゲーション",
@@ -1976,6 +2173,7 @@ export const JA: TranslationSchema = {
     descAltS: "入力のスタッシュ / 呼び戻し",
   },
   mcpCli: {
+    ...EN.mcpCli,
     bundledCatalog: "バンドルMCPサーバー（オフラインカタログ）:",
     justFetched: "取得直後",
     cachedAge: "キャッシュ済み, {age}",

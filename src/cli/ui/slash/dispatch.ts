@@ -4,6 +4,7 @@ import { resolveSlashAlias } from "./commands.js";
 import { handlers as adminHandlers } from "./handlers/admin.js";
 import { handlers as basicHandlers } from "./handlers/basic.js";
 import { handlers as dashboardHandlers } from "./handlers/dashboard.js";
+import { handlers as diffHandlers } from "./handlers/diff.js";
 import { handlers as editsHandlers } from "./handlers/edits.js";
 import { handlers as initHandlers } from "./handlers/init.js";
 import { handlers as jobsHandlers } from "./handlers/jobs.js";
@@ -17,8 +18,10 @@ import { handlers as plansHandlers } from "./handlers/plans.js";
 import { handlers as qqHandlers } from "./handlers/qq.js";
 import { handlers as sessionsHandlers } from "./handlers/sessions.js";
 import { handlers as skillHandlers } from "./handlers/skill.js";
+import { handlers as telegramHandlers } from "./handlers/telegram.js";
 import { handlers as themeHandlers } from "./handlers/theme.js";
 import { handlers as webSearchEngineHandlers } from "./handlers/web-search-engine.js";
+import { handlers as weixinHandlers } from "./handlers/weixin.js";
 import { nearestCommands } from "./nearest.js";
 import type { SlashContext, SlashResult } from "./types.js";
 
@@ -29,6 +32,7 @@ const HANDLERS: Record<string, SlashHandler> = {
   ...adminHandlers,
   ...basicHandlers,
   ...dashboardHandlers,
+  ...diffHandlers,
   ...editsHandlers,
   ...initHandlers,
   ...jobsHandlers,
@@ -43,6 +47,8 @@ const HANDLERS: Record<string, SlashHandler> = {
   ...sessionsHandlers,
   ...themeHandlers,
   ...skillHandlers,
+  ...telegramHandlers,
+  ...weixinHandlers,
   ...webSearchEngineHandlers,
 };
 

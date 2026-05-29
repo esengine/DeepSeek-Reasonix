@@ -67,6 +67,7 @@ describe("createMcpRuntime — failure tracking", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     mocks.initializeMock.mockReset();
+    mocks.closeMock.mockReset();
     mocks.bridgeMcpToolsMock.mockClear();
     mocks.readConfigMock.mockReset();
   });
@@ -136,5 +137,35 @@ describe("createMcpRuntime — failure tracking", () => {
 
     await runtime.removeSpec(spec);
     expect(runtime.failures()).toEqual([]);
+  });
+
+  it("force reloads an existing raw spec so config-only fields take effect", async () => {
+    const cfgWithOldEnv = {
+      mcpServers: {
+        svc: { command: "npx", args: ["-y", "pkg"], env: { TOKEN: "old" } },
+      },
+      mcpDisabled: [],
+    };
+    const cfgWithNewEnv = {
+      mcpServers: {
+        svc: { command: "npx", args: ["-y", "pkg"], env: { TOKEN: "new" } },
+      },
+      mcpDisabled: [],
+    };
+    const spec = "svc=npx -y pkg";
+    mocks.readConfigMock.mockReturnValue(cfgWithOldEnv);
+    mocks.initializeMock.mockImplementation(async () => undefined);
+    const runtime = await buildRuntime();
+
+    await runtime.reloadFromConfig();
+    expect(mocks.initializeMock).toHaveBeenCalledTimes(1);
+
+    mocks.readConfigMock.mockReturnValue(cfgWithNewEnv);
+    const result = await runtime.reloadFromConfig(undefined, { force: [spec] });
+
+    expect(mocks.closeMock).toHaveBeenCalledTimes(1);
+    expect(mocks.initializeMock).toHaveBeenCalledTimes(2);
+    expect(result.added).toEqual([spec]);
+    expect(runtime.specs()).toEqual([spec]);
   });
 });

@@ -128,7 +128,7 @@ export async function dispatch(
       res.end("unauthorized — open the URL printed by /dashboard, including ?token=…");
       return;
     }
-    const html = renderIndexHtml(expectedToken, ctx.mode);
+    const html = await renderIndexHtml(expectedToken, ctx.mode);
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(html);
     return;
@@ -141,7 +141,7 @@ export async function dispatch(
       res.end();
       return;
     }
-    const asset = serveAsset(path.slice("/assets/".length), expectedToken);
+    const asset = await serveAsset(path.slice("/assets/".length), expectedToken);
     if (!asset) {
       res.writeHead(404);
       res.end("not found");

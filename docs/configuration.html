@@ -200,7 +200,7 @@
   "reasoningEffort": "high",          <span class="hash"># <span data-i18n="cfg.k.effort">high | max</span></span>
   "theme": "auto",                    <span class="hash"># <span data-i18n="cfg.k.theme">light | dark | auto</span></span>
   "search": false,                    <span class="hash"># <span data-i18n="cfg.k.search">enable web_search/web_fetch tools</span></span>
-  "webSearchEngine": "mojeek",        <span class="hash"># <span data-i18n="cfg.k.engine">mojeek | searxng | metaso</span></span>
+  "webSearchEngine": "bing",          <span class="hash"># <span data-i18n="cfg.k.engine">bing | baidu | searxng | metaso | ...</span></span>
   "webSearchEndpoint": "http://localhost:8080",
   "mcp": [],                          <span class="hash"># <span data-i18n="cfg.k.mcp">MCP server specs (legacy string format)</span></span>
   "mcpServers": {},                   <span class="hash"># <span data-i18n="cfg.k.mcpsrv">MCP server objects (canonical format)</span></span>
@@ -621,14 +621,16 @@ created: 2026-05-09
             <h2 data-i18n="ws.title">Web search</h2>
             <p data-i18n="ws.body1">
               <code>web_search</code> + <code>web_fetch</code> ship in the box. Default
-              backend is <strong>Mojeek</strong> (no setup); switch to a self-hosted
-              <strong>SearXNG</strong> when you want full control over upstream engines, or
-              use <strong>Metaso</strong> (100 free searches/day, configure your own API key for more).
+              backend is <strong>Bing</strong> (works from CN without proxy); switch to
+              <strong>Baidu AI Search</strong> when you want Baidu Cloud Qianfan's official
+              search API. You can also use self-hosted <strong>SearXNG</strong>,
+              <strong>Metaso</strong>, or other API engines.
             </p>
-            <pre class="code"><code>/search-engine mojeek
+            <pre class="code"><code>/search-engine bing
 /search-engine searxng                       <span class="hash"># http://localhost:8080</span>
 /search-engine searxng http://192.168.1.5:8888
-/search-engine metaso</code></pre>
+/search-engine metaso
+/search-engine baidu</code></pre>
             <p data-i18n="ws.body.json">Equivalent <code>config.json</code>:</p>
             <pre class="code"><code>{
   "webSearchEngine": "searxng",
@@ -638,6 +640,14 @@ created: 2026-05-09
             <pre class="code"><code>{
   "webSearchEngine": "metaso",
   "metasoApiKey": "mk-..."    <span class="hash"># Optional: 100 free searches/day, configure your own API key for more.</span>
+}</code></pre>
+            <p data-i18n="ws.body.baidu">
+              Or for Baidu AI Search (Baidu's official docs currently list
+              <strong>1,500 free AI Search calls per month</strong>):
+            </p>
+            <pre class="code"><code>{
+  "webSearchEngine": "baidu",
+  "baiduApiKey": "bce-v3/..." <span class="hash"># Or set BAIDU_API_KEY / QIANFAN_API_KEY</span>
 }</code></pre>
             <p data-i18n="ws.body.start">Start a local SearXNG:</p>
             <pre class="code"><code>podman run -d --replace --name searxng -p 8080:8080 docker.io/searxng/searxng</code></pre>

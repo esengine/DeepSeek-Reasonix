@@ -70,6 +70,7 @@ export type SlashCmd = {
 };
 export type MentionItem = {
   name: string;
+  path?: string;
   kind: "file" | "dir" | "url" | "agent" | "clip";
   desc?: string;
 };
@@ -78,10 +79,61 @@ export type Chip =
   | { kind: "at"; label: string }
   | { kind: "slash"; label: string };
 
+/** For long paths show only the filename; truncate filename if it's still too long. */
+function chipLabel(label: string, maxLen = 32): string {
+  if (label.length <= maxLen) return label;
+  const sep = label.includes("/") ? "/" : "\\";
+  const segments = label.split(sep);
+  const filename = segments[segments.length - 1]!;
+  if (filename.length <= maxLen) return filename;
+  return filename.slice(0, maxLen - 1) + "…";
+}
+
 type Popup =
   | { kind: "slash"; query: string }
   | { kind: "at"; query: string; nonce: number }
   | null;
+
+type ActiveRange = { start: number; end: number; sigil: string; query: string };
+
+/** Return the @word or /word range at cursorPos, or null. */
+function findActiveRange(text: string, cursorPos: number): ActiveRange | null {
+  if (cursorPos < 0 || cursorPos > text.length) return null;
+  let wordStart = cursorPos;
+  while (wordStart > 0 && !/\s/.test(text[wordStart - 1]!)) wordStart--;
+  let wordEnd = cursorPos;
+  while (wordEnd < text.length && !/\s/.test(text[wordEnd]!)) wordEnd++;
+  if (wordStart === wordEnd) return null;
+  const word = text.slice(wordStart, wordEnd);
+  if (word.length > 0 && (word[0] === "@" || word[0] === "/")) {
+    if (wordStart === 0 || /\s/.test(text[wordStart - 1]!)) {
+      return { start: wordStart, end: wordEnd, sigil: word[0], query: word.slice(1) };
+    }
+  }
+  return null;
+}
+
+/** Render draft text with @word and /word tokens wrapped in highlight spans. */
+function highlightTokens(text: string): React.ReactNode {
+  if (!text) return text;
+  const parts: React.ReactNode[] = [];
+  let lastIdx = 0;
+  for (const m of text.matchAll(/(\s|^)([@\/]\S+)/g)) {
+    const pre = text.slice(lastIdx, m.index);
+    if (pre) parts.push(pre);
+    parts.push(
+      <span key={m.index}>
+        {m[1]}
+        <span className="hl-token">{m[2]}</span>
+      </span>,
+    );
+    lastIdx = m.index + m[0].length;
+  }
+  if (lastIdx < text.length) {
+    parts.push(text.slice(lastIdx));
+  }
+  return parts.length > 0 ? parts : text;
+}
 
 function slashIcon(cmd: string) {
   const m: Record<string, React.ReactNode> = {
@@ -107,6 +159,20 @@ function parentOfAtQuery(query: string): string | null {
   if (!dirContext) return null;
   const parentIdx = dirContext.lastIndexOf("/");
   return parentIdx >= 0 ? `${dirContext.slice(0, parentIdx)}/` : "";
+}
+
+function displayMentionPath(path: string): { name: string; desc?: string } {
+  const normalized = path.replace(/\\/g, "/");
+  const isDir = /[\\/]$/.test(path);
+  const trimmed = normalized.replace(/\/+$/, "");
+  if (!trimmed) return { name: path };
+  const slash = trimmed.lastIndexOf("/");
+  const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+  const parent = slash >= 0 ? `${trimmed.slice(0, slash)}/` : "";
+  return {
+    name: isDir ? `${base}/` : base,
+    desc: parent || undefined,
+  };
 }
 
 function atIcon(k: MentionItem["kind"]) {
@@ -154,6 +220,8 @@ export function Composer({
   queuedSends,
   onQueueWhileBusy,
   onDequeueSend,
+  initialHistory,
+  onHistoryPush,
 }: {
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -182,30 +250,75 @@ export function Composer({
   /** Called when the user presses Enter while busy with a non-empty draft. Owns clearing the draft. */
   onQueueWhileBusy?: (text: string) => void;
   onDequeueSend?: (index: number) => void;
+  /** Seed the in-session history from persisted storage so ArrowUp works after restart (#2051). */
+  initialHistory?: string[];
+  /** Called whenever an entry is pushed so the caller can persist the updated list. */
+  onHistoryPush?: (entry: string, history: string[]) => void;
 }) {
-  const [chips, setChips] = useState<Chip[]>([]);
   const [popup, setPopup] = useState<Popup>(null);
+  const [pickedChips, setPickedChips] = useState<Map<string, Chip["kind"]>>(new Map());
+  const chips = useMemo(() => {
+    const result: Chip[] = [];
+    for (const [label, kind] of pickedChips) {
+      const sigil = kind === "at" ? "@" : "/";
+      const escaped = sigil + label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(?:^|\\s)${escaped}(?:\\s|$)`);
+      if (re.test(draft)) {
+        result.push({ kind, label });
+      }
+    }
+    return result;
+  }, [draft, pickedChips]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const backdropContent = useMemo(() => highlightTokens(draft), [draft]);
   const nonceRef = useRef(0);
   const modelWrapRef = useRef<HTMLDivElement>(null);
   // macOS Chinese IME fires compositionend BEFORE the confirm keydown.
   const composingRef = useRef(false);
   const compositionEndedAtRef = useRef(0);
-  const historyRef = useRef<string[]>([]);
+  // Persisted history is stored most-recent-first; historyRef uses oldest-first
+  // (entries are appended via push, ArrowUp reads from the end). Reverse on load.
+  const historyRef = useRef<string[]>(initialHistory ? [...initialHistory].reverse() : []);
   const [browseIdx, setBrowseIdx] = useState(-1);
   const savedDraftRef = useRef("");
+  const activeRangeRef = useRef<ActiveRange | null>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  // `initialHistory` arrives asynchronously (settings load after mount).
+  // Sync historyRef when it first becomes available and the user hasn't
+  // started navigating yet, so ArrowUp works from the first keystroke (#2051).
+  useEffect(() => {
+    if (initialHistory && initialHistory.length > 0 && browseIdx === -1) {
+      historyRef.current = [...initialHistory].reverse();
+    }
+  }, [initialHistory, browseIdx]);
 
   const insertMention = (picked: string) => {
     const rel =
       workspaceDir && picked.startsWith(workspaceDir)
         ? picked.slice(workspaceDir.length).replace(/^[\\/]+/, "")
         : picked;
-    setDraft((current) =>
-      current ? `${current.replace(/\s+$/, "")} @${rel} ` : `@${rel} `,
-    );
-    setChips((c) => [...c, { kind: "at", label: rel }]);
+    const range = activeRangeRef.current;
+    if (range && range.sigil === "@") {
+      const savedRange = { ...range };
+      setDraft((current) => {
+        const before = current.slice(0, savedRange.start);
+        const after = current.slice(savedRange.end);
+        const insertion = `@${rel}`;
+        const spacerBefore = before && !before.endsWith(" ") ? " " : "";
+        const spacerAfter = after ? (after.startsWith(" ") ? "" : " ") : " ";
+        return `${before}${spacerBefore}${insertion}${spacerAfter}${after}`;
+      });
+    } else {
+      setDraft((current) =>
+        current ? `${current.replace(/\s+$/, "")} @${rel} ` : `@${rel} `,
+      );
+    }
+    activeRangeRef.current = null;
+    setPickedChips((prev) => new Map(prev).set(rel, "at"));
     onMentionPicked?.(rel);
+    setPopup(null);
     textareaRef.current?.focus();
   };
 
@@ -221,6 +334,7 @@ export function Composer({
     const prev = prevDraftRef.current;
     prevDraftRef.current = draft;
     if (draft === "/" && prev !== "/") {
+      activeRangeRef.current = { start: 0, end: 1, sigil: "/", query: "" };
       setPopup({ kind: "slash", query: "" });
     }
   }, [draft]);
@@ -291,11 +405,15 @@ export function Composer({
   const atItems = useMemo<MentionItem[]>(() => {
     if (!popup || popup.kind !== "at") return [];
     if (!mentionResults || mentionResults.nonce !== popup.nonce) return [];
-    const base: MentionItem[] = mentionResults.results.map((path) => ({
-      name: path,
-      kind: path.endsWith("/") || path.endsWith("\\") ? "dir" : "file",
-      desc: path,
-    }));
+    const base: MentionItem[] = mentionResults.results.map((path) => {
+      const display = displayMentionPath(path);
+      return {
+        name: display.name,
+        path,
+        kind: path.endsWith("/") || path.endsWith("\\") ? "dir" : "file",
+        desc: display.desc,
+      };
+    });
     // "../" entry (#1019): one level up whenever the @ query is inside a subdir.
     const parent = parentOfAtQuery(popup.query);
     if (parent !== null) {
@@ -324,21 +442,43 @@ export function Composer({
     onMentionQuery(popup.query, popup.nonce);
   }, [popup, onMentionQuery]);
 
+  const syncPopupFromCursor = (value: string, cursorPos: number) => {
+    const range = findActiveRange(value, cursorPos);
+    if (range && (range.sigil === "/" || range.sigil === "@")) {
+      activeRangeRef.current = range;
+      if (range.sigil === "/") {
+        if (popup?.kind !== "slash" || popup.query !== range.query) {
+          setPopup({ kind: "slash", query: range.query });
+        }
+      } else {
+        if (popup?.kind !== "at" || popup.query !== range.query) {
+          const nonce = ++nonceRef.current;
+          setPopup({ kind: "at", query: range.query, nonce });
+        }
+      }
+    } else if (popup) {
+      activeRangeRef.current = null;
+      setPopup(null);
+    }
+  };
+
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
     setDraft(v);
-    const trail = v.match(/(^|\s)([/@])([^\s]*)$/);
-    if (trail) {
-      const sigil = trail[2];
-      const query = trail[3] ?? "";
-      if (sigil === "/") {
-        setPopup({ kind: "slash", query });
-      } else {
-        const nonce = ++nonceRef.current;
-        setPopup({ kind: "at", query, nonce });
-      }
-    } else if (popup) {
-      setPopup(null);
+    const cursorPos = e.target.selectionStart ?? v.length;
+    syncPopupFromCursor(v, cursorPos);
+  };
+
+  const handleSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    const ta = e.currentTarget;
+    const cursorPos = ta.selectionStart;
+    if (cursorPos === null) return;
+    syncPopupFromCursor(ta.value, cursorPos);
+  };
+
+  const handleTextareaScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
+    if (backdropRef.current) {
+      backdropRef.current.scrollTop = e.currentTarget.scrollTop;
     }
   };
 
@@ -347,35 +487,43 @@ export function Composer({
   const pickItem = (idx: number) => {
     const it = items[idx];
     if (!it || !popup) return;
+    const range = activeRangeRef.current;
+    const before = range ? draft.slice(0, range.start) : draft;
+    const after = range ? draft.slice(range.end) : "";
     if (popup.kind === "slash") {
       const cmd = (it as SlashCmd).cmd;
       const insertOnly = (it as SlashCmd).insertOnly === true;
       if (insertOnly) {
-        const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
-        setDraft(next ? `${next} ${cmd} ` : `${cmd} `);
-        setChips((c) => [...c, { kind: "slash", label: cmd.replace(/^\//, "") }]);
+        const spacer = before && !before.endsWith(" ") ? " " : "";
+        setDraft(`${before}${spacer}${cmd} ${after}`);
+        setPickedChips((prev) => new Map(prev).set(cmd.replace(/^\//, ""), "slash"));
       } else {
-        const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
-        setDraft(next);
-        setChips((c) => [...c, { kind: "slash", label: cmd.replace(/^\//, "") }]);
+        setDraft(`${before}${after}`);
         (it as SlashCmd).run();
       }
     } else {
       const mention = it as MentionItem;
       if (mention.name === "..") {
         const parent = parentOfAtQuery(popup.query) ?? "";
-        const next = draft.replace(/[@][^\s]*$/, `@${parent}`);
+        const newText = `@${parent}`;
+        const next = `${before}${newText}${after}`;
         setDraft(next);
+        activeRangeRef.current = {
+          start: range?.start ?? 0,
+          end: (range?.start ?? 0) + newText.length,
+          sigil: "@",
+          query: parent,
+        };
         const nonce = ++nonceRef.current;
         setPopup({ kind: "at", query: parent, nonce });
         textareaRef.current?.focus();
         return;
       }
-      const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
-      setDraft(next ? `${next} @${mention.name} ` : `@${mention.name} `);
-      setChips((c) => [...c, { kind: "at", label: mention.name }]);
-      onMentionPicked?.(mention.name);
+      const mentionPath = mention.path ?? mention.name;
+      insertMention(mentionPath);
+      return;
     }
+    activeRangeRef.current = null;
     setPopup(null);
     textareaRef.current?.focus();
   };
@@ -385,6 +533,7 @@ export function Composer({
     historyRef.current.push(trimmed);
     if (historyRef.current.length > 100) historyRef.current.shift();
     setBrowseIdx(-1);
+    onHistoryPush?.(trimmed, [...historyRef.current]);
   };
 
   const navigateHistory = (dir: -1 | 1) => {
@@ -429,25 +578,40 @@ export function Composer({
         return;
       }
       if (e.key === "Tab" && popup.kind === "at" && items.length > 0) {
-        // Tab on a directory enters it — replaces `@src` with `@src/`
-        // and re-queries so the popup shows that directory's children.
+        e.preventDefault();
         // `..` is the synthetic parent-dir entry (#1019); same shape
         // but rewrites to the parent path.
         const it = items[activeIdx];
         if (it && (it as MentionItem).kind === "dir") {
-          e.preventDefault();
           const mention = it as MentionItem;
+          const range = activeRangeRef.current;
+          const before = range ? draft.slice(0, range.start) : draft;
+          const after = range ? draft.slice(range.end) : "";
           if (mention.name === "..") {
             const parent = parentOfAtQuery(popup.query) ?? "";
-            const next = draft.replace(/[@][^\s]*$/, `@${parent}`);
+            const newText = `@${parent}`;
+            const next = `${before}${newText}${after}`;
             setDraft(next);
+            activeRangeRef.current = {
+              start: range?.start ?? 0,
+              end: (range?.start ?? 0) + newText.length,
+              sigil: "@",
+              query: parent,
+            };
             const nonce = ++nonceRef.current;
             setPopup({ kind: "at", query: parent, nonce });
             return;
           }
-          const dirPath = mention.name.replace(/\/+$/, "");
-          const next = draft.replace(/[@][^\s]*$/, `@${dirPath}/`);
+          const dirPath = (mention.path ?? mention.name).replace(/[\\/]+$/, "");
+          const newText = `@${dirPath}/`;
+          const next = `${before}${newText}${after}`;
           setDraft(next);
+          activeRangeRef.current = {
+            start: range?.start ?? 0,
+            end: (range?.start ?? 0) + newText.length,
+            sigil: "@",
+            query: `${dirPath}/`,
+          };
           const nonce = ++nonceRef.current;
           setPopup({ kind: "at", query: `${dirPath}/`, nonce });
           return;
@@ -475,19 +639,19 @@ export function Composer({
         return;
       }
     }
-    if (composingRef.current || Date.now() - compositionEndedAtRef.current < 50) return;
+    if (composingRef.current || e.nativeEvent.isComposing || Date.now() - compositionEndedAtRef.current < 50) return;
     if (e.key === "Enter" && !e.shiftKey && !popup) {
       e.preventDefault();
       if (busy) {
         const text = draft.trim();
         if (text && onQueueWhileBusy) {
           onQueueWhileBusy(text);
-          setChips([]);
+          setPickedChips(new Map());
         }
       } else if (!disabled && draft.trim()) {
         recordSendAndReset();
         onSend();
-        setChips([]);
+        setPickedChips(new Map());
       }
     }
   };
@@ -553,41 +717,40 @@ export function Composer({
           {chips.length > 0 ? (
             <div className="composer-tags">
               {chips.map((c, i) => (
-                <span key={i} className={`chip ${c.kind}`}>
+                <span key={`${c.kind}-${c.label}-${i}`} className={`chip ${c.kind}`} title={c.label}>
                   {c.kind === "slash" ? (
                     <I.slash size={11} />
                   ) : (
                     <I.at size={11} />
                   )}
-                  <span>{c.label}</span>
-                  <span
-                    className="x"
-                    onClick={() =>
-                      setChips((cs) => cs.filter((_, j) => j !== i))
-                    }
-                  >
-                    <I.x size={10} />
-                  </span>
+                  <span>{chipLabel(c.label)}</span>
                 </span>
               ))}
             </div>
           ) : null}
 
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            placeholder={t("composer.placeholder")}
-            onChange={handleChange}
-            onPaste={(e) => void handlePaste(e)}
-            onKeyDown={handleKeyDown}
-            onCompositionStart={() => { composingRef.current = true; }}
-            onCompositionEnd={() => {
-              composingRef.current = false;
-              compositionEndedAtRef.current = Date.now();
-            }}
-            rows={DEFAULT_COMPOSER_ROWS}
-            disabled={disabled}
-          />
+          <div className="composer-textarea-wrap">
+            <div className="composer-backdrop" ref={backdropRef} aria-hidden="true">
+              {backdropContent}
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              placeholder={t("composer.placeholder")}
+              onChange={handleChange}
+              onSelect={handleSelect}
+              onScroll={handleTextareaScroll}
+              onPaste={(e) => void handlePaste(e)}
+              onKeyDown={handleKeyDown}
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={() => {
+                composingRef.current = false;
+                compositionEndedAtRef.current = Date.now();
+              }}
+              rows={DEFAULT_COMPOSER_ROWS}
+              disabled={disabled}
+            />
+          </div>
 
           <div className="composer-foot">
             <button
@@ -682,7 +845,7 @@ export function Composer({
                   if (!disabled && draft.trim()) {
                     recordSendAndReset();
                     onSend();
-                    setChips([]);
+                    setPickedChips(new Map());
                   }
                 }}
               >
@@ -701,7 +864,8 @@ export function Composer({
               onHover={(i, item) => {
                 setActiveIdx(i);
                 if (popup.kind === "at" && onMentionPreview) {
-                  const path = (item as MentionItem).name;
+                  const mention = item as MentionItem;
+                  const path = mention.path ?? mention.name;
                   onMentionPreview(path, popup.nonce);
                 }
               }}
@@ -738,7 +902,10 @@ function Popup({
   }, [activeIdx]);
 
   return (
-    <div className="popup" onMouseDown={(e) => e.preventDefault()}>
+    <div
+      className={kind === "at" ? "popup at-popup" : "popup"}
+      onMouseDown={(e) => e.preventDefault()}
+    >
       <div className="ph">
         <span className="tok">{kind === "slash" ? "/" : "@"}</span>
         <span>
@@ -785,7 +952,7 @@ function Popup({
                 </>
               ) : (
                 <>
-                  <span>{(it as MentionItem).name}</span>
+                  <span className="mention-name">{(it as MentionItem).name}</span>
                   {(it as MentionItem).desc ? (
                     <div className="desc">{(it as MentionItem).desc}</div>
                   ) : null}

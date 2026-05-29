@@ -19,6 +19,7 @@ import {
   findPrevDivergence,
 } from "../../transcript/diff.js";
 import { RecordView } from "./RecordView.js";
+import { FG } from "./theme/tokens.js";
 
 export interface DiffAppProps {
   report: DiffReport;
@@ -86,7 +87,7 @@ export function DiffApp({ report }: DiffAppProps) {
       ) : null}
 
       <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="ansi:blackBright">
-        <Text dim>
+        <Text color={FG.faint}>
           <Text bold>j</Text>/<Text bold>\u2193</Text> next \u00b7 <Text bold>k</Text>/
           <Text bold>\u2191</Text> prev \u00b7 <Text bold>n</Text> next-diverge \u00b7{" "}
           <Text bold>N</Text>/<Text bold>p</Text> prev-diverge \u00b7 <Text bold>g</Text>/
@@ -129,19 +130,19 @@ function DiffHeader({ report }: { report: DiffReport }) {
           <Text color="ansi:cyan" bold>
             {t("diffApp.title")}
           </Text>
-          <Text dim> \u00b7 A=</Text>
+          <Text color={FG.faint}> \u00b7 A=</Text>
           <Text color="ansi:blue">{a.label}</Text>
-          <Text dim> vs B=</Text>
+          <Text color={FG.faint}> vs B=</Text>
           <Text color="ansi:magenta">{b.label}</Text>
         </Text>
-        <Text dim>{t("diffApp.turnsAligned", { count: report.pairs.length })}</Text>
+        <Text color={FG.faint}>{t("diffApp.turnsAligned", { count: report.pairs.length })}</Text>
       </Box>
 
       <Box marginTop={1} gap={3}>
         <Text>
-          <Text dim>cache </Text>
+          <Text color={FG.faint}>cache </Text>
           <Text>{(a.stats.cacheHitRatio * 100).toFixed(1)}%</Text>
-          <Text dim> → </Text>
+          <Text color={FG.faint}> → </Text>
           <Text>{(b.stats.cacheHitRatio * 100).toFixed(1)}%</Text>
           <Text color={cacheDelta >= 0 ? "ansi:green" : "ansi:red"} bold>
             {"  "}
@@ -150,9 +151,9 @@ function DiffHeader({ report }: { report: DiffReport }) {
           </Text>
         </Text>
         <Text>
-          <Text dim>cost </Text>
+          <Text color={FG.faint}>cost </Text>
           <Text>${a.stats.totalCostUsd.toFixed(6)}</Text>
-          <Text dim> → </Text>
+          <Text color={FG.faint}> → </Text>
           <Text>${b.stats.totalCostUsd.toFixed(6)}</Text>
           <Text color={costDelta <= 0 ? "ansi:green" : "ansi:red"} bold>
             {"  "}
@@ -161,7 +162,7 @@ function DiffHeader({ report }: { report: DiffReport }) {
           </Text>
         </Text>
         <Text>
-          <Text dim>model calls </Text>
+          <Text color={FG.faint}>model calls </Text>
           <Text>
             {a.stats.turns} → {b.stats.turns}
           </Text>
@@ -170,7 +171,7 @@ function DiffHeader({ report }: { report: DiffReport }) {
 
       {prefixLine ? (
         <Box marginTop={1}>
-          <Text dim italic>
+          <Text color={FG.faint} italic>
             {prefixLine}
           </Text>
         </Box>
@@ -201,7 +202,7 @@ function Pane({
       </Text>
       {records.length === 0 ? (
         <Box marginTop={1}>
-          <Text dim italic>
+          <Text color={FG.faint} italic>
             {t("diffApp.paneEmpty")}
           </Text>
         </Box>

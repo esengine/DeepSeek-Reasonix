@@ -258,7 +258,13 @@ export function UsageFull({
   useLang();
   const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
   const total = promptTokens + reasoningTokens + outputTokens + cacheHitTokens || 1;
-  const pct = (n: number) => Math.round((n / total) * 100);
+  const pct = (n: number): number => {
+    const raw = (n / total) * 100;
+    if (raw === 100) return 100;
+    const rounded = Math.round(raw * 100) / 100;
+    if (rounded >= 100) return 99.99;
+    return rounded;
+  };
   return (
     <div className="usage-full">
       <div className="uh">

@@ -33,6 +33,7 @@ import { t } from "../../i18n/index.js";
 import type { PlanStep, PlanStepRisk } from "../../tools/plan.js";
 import { CharBar } from "./char-bar.js";
 import { COLOR, GLYPH } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 export type StepStatus = "pending" | "running" | "done" | "skipped";
 
@@ -102,7 +103,7 @@ function PlanStepListInner({ steps, statuses, focusStepId }: PlanStepListProps) 
   return (
     <Box flexDirection="column">
       <Box>
-        <Text dim>
+        <Text color={FG.faint}>
           {showProgress
             ? t(
                 total === 1
@@ -125,16 +126,14 @@ function PlanStepListInner({ steps, statuses, focusStepId }: PlanStepListProps) 
           const titleDim = status === "done" || status === "skipped";
           return (
             <Box key={step.id}>
-              <Text color={COLOR.info} dim>
-                {isLast ? GLYPH.branchEnd : GLYPH.branch}
-              </Text>
+              <Text color={FG.faint}>{isLast ? GLYPH.branchEnd : GLYPH.branch}</Text>
               <Text>{"  "}</Text>
               <Text color={sg.color} bold={status === "running" || isCur}>
                 {sg.glyph}
               </Text>
               <Text>{"  "}</Text>
               <Text
-                dim={titleDim}
+                color={titleDim ? FG.faint : undefined}
                 bold={isCur || status === "running"}
                 strikethrough={status === "done" || status === "skipped"}
               >

@@ -7,6 +7,7 @@ import {
   isPlausibleKey,
   loadApiKey,
   loadEndpoint,
+  loadMaxIterPerTurn,
   loadToolRateLimit,
   normalizeMcpConfig,
   readConfig,
@@ -102,7 +103,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
           : normalizedSpecs.length === 1 && opts.mcpPrefix
             ? opts.mcpPrefix
             : "";
-        if (spec.transport === "stdio") preflightStdioSpec(spec);
+        if (spec.transport === "stdio") preflightStdioSpec(spec, { cwd: workspaceDir });
         const transport = buildTransportFromSpec(spec, { cwd: workspaceDir });
         mcp = new McpClient({ transport, workspaceDir, requestTimeoutMs: spec.requestTimeoutMs });
         await mcp.initialize();
@@ -151,6 +152,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     tools,
     model: opts.model,
     budgetUsd: opts.budgetUsd,
+    maxIterPerTurn: loadMaxIterPerTurn(),
   });
   const prefixHash = prefix.fingerprint;
 

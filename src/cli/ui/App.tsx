@@ -9,6 +9,7 @@ import {
   openEventSink,
 } from "../../adapters/event-sink-jsonl.js";
 import { type AtUrlExpansion, expandAtMentions, expandAtUrls } from "../../at-mentions.js";
+import { prepareAutoGitRollbackForEditBlocks } from "../../code/auto-git-rollback.js";
 import {
   type CheckpointMeta,
   createCheckpoint,
@@ -39,6 +40,8 @@ import {
   loadEndpoint,
   loadEngineeringLifecycleMode,
   loadHistoryScrollMode,
+  loadMaxIterPerTurn,
+  loadMaxOutputTokens,
   loadMouseWheelRows,
   loadReasoningEffort,
   loadTheme,
@@ -63,6 +66,7 @@ import {
   deleteSession,
   detectGitBranch,
   freshSessionName,
+  hashSystemPrompt,
   type listSessions,
   listSessionsForWorkspace,
   loadSessionMessages,
@@ -89,11 +93,9 @@ import {
   shouldAutoNameSession,
 } from "../../session-title.js";
 import { loadSlashUsage, recordSlashUse } from "../../slash-usage.js";
-import {
-  DEEPSEEK_CONTEXT_TOKENS,
-  DEFAULT_CONTEXT_TOKENS,
-  type SessionSummary,
-} from "../../telemetry/stats.js";
+import type { TelegramChannel } from "../../telegram/channel.js";
+import { useTelegramChannel } from "../../telegram/use-telegram-channel.js";
+import { type SessionSummary, resolveContextTokens } from "../../telemetry/stats.js";
 import { defaultUsageLogPath } from "../../telemetry/usage.js";
 import { warmupTokenizer } from "../../tokenizer.js";
 import type { ToolRegistry } from "../../tools.js";
@@ -104,6 +106,8 @@ import { registerSkillTools } from "../../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
 import { webFetch } from "../../tools/web.js";
 import { openTranscriptFile } from "../../transcript/log.js";
+import type { WeixinChannel } from "../../weixin/channel.js";
+import { useWeixinChannel } from "../../weixin/use-weixin-channel.js";
 import { listKnownWorkspaces, rememberWorkspace } from "../../workspaces.js";
 import { openInExternalEditor } from "../edit/external-editor.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
@@ -120,6 +124,7 @@ import { ModelPicker } from "./ModelPicker.js";
 import { PathConfirm } from "./PathConfirm.js";
 import { PlanCheckpointConfirm } from "./PlanCheckpointConfirm.js";
 import { PlanConfirm, type PlanConfirmChoice } from "./PlanConfirm.js";
+import { PlanPanel } from "./PlanPanel.js";
 import { PlanRefineInput } from "./PlanRefineInput.js";
 import { PlanReviseConfirm, type ReviseChoice } from "./PlanReviseConfirm.js";
 import { PlanReviseEditor } from "./PlanReviseEditor.js";
@@ -138,7 +143,7 @@ import type { PickerSnapshot, ViewerSnapshot } from "./dashboard/use-picker-broa
 import { useViewerBroadcast } from "./dashboard/use-picker-broadcast.js";
 import { formatEditResults, formatPendingPreview } from "./edit-history.js";
 import {
-  buildEditToolBlocks,
+  buildEditToolBlocksForReview,
   formatQueuedReviewToolResult,
   isReviewGatedEditTool,
   shouldApplyEditToolImmediately,
@@ -176,6 +181,7 @@ import { StaticCardStream } from "./layout/StaticCardStream.js";
 import { StatusRow } from "./layout/StatusRow.js";
 import type { StatusBarConfig } from "./layout/StatusRow.js";
 import { shouldEnterPlanModeForExplicitIntent } from "./lifecycle-explicit-intent.js";
+import { shouldSuggestPlanForEngineeringIntent } from "./lifecycle-plan-suggestion.js";
 import { formatLoopStatus } from "./loop.js";
 import { applyMcpAppend } from "./mcp-append.js";
 import { handleMcpBrowseSlash } from "./mcp-browse.js";
@@ -200,8 +206,7 @@ import { InflightProvider } from "./state/inflight-context.js";
 import { AgentStoreProvider, useAgentState, useAgentStore } from "./state/provider.js";
 import { VerboseContext } from "./state/verbose-context.js";
 import { ThemeProvider } from "./theme/context.js";
-import { listThemeNames } from "./theme/tokens.js";
-import { FG, type ThemeName } from "./theme/tokens.js";
+import { FG, SURFACE, type ThemeName, listThemeNames } from "./theme/tokens.js";
 import { TickerProvider, useSlowTick } from "./ticker.js";
 import { handleTurnInterrupt } from "./turn-interrupt.js";
 import { codeUndoContextMessage, codeUndoInfo } from "./undo-context.js";
@@ -308,10 +313,16 @@ export interface AppProps {
   startupInfoHints?: string[];
   /** Pre-created QQ channel (started before TUI mounts). */
   qqChannel?: QQChannel;
+  telegramChannel?: TelegramChannel;
+  weixinChannel?: WeixinChannel;
   /** Ref filled by App on mount so QQ messages flow into the TUI input queue. */
   qqSubmitRef?: { current: ((text: string) => void) | null };
   /** Ref filled by App on mount so QQ errors appear in the TUI log. */
   qqErrorRef?: { current: ((msg: string) => void) | null };
+  telegramSubmitRef?: { current: ((text: string) => void) | null };
+  telegramErrorRef?: { current: ((msg: string) => void) | null };
+  weixinSubmitRef?: { current: ((text: string) => void) | null };
+  weixinErrorRef?: { current: ((msg: string) => void) | null };
   /** Resolved chat-history scroll mode, computed by the launcher from config/env. */
   historyScrollMode?: ResolvedHistoryScrollMode;
 }
@@ -460,8 +471,14 @@ function AppInner({
   onSwitchSession,
   startupInfoHints,
   qqChannel,
+  telegramChannel,
+  weixinChannel,
   qqSubmitRef,
   qqErrorRef,
+  telegramSubmitRef,
+  telegramErrorRef,
+  weixinSubmitRef,
+  weixinErrorRef,
   historyScrollMode,
   themeName,
   setThemeName,
@@ -479,9 +496,7 @@ function AppInner({
   const sessionModel = useAgentState((s) => s.session.model);
   const sessionEffort = useAgentState((s) => s.status.reasoningEffort);
   const ctxTokens = useAgentState((s) => s.status.promptTokens);
-  const ctxCap = useAgentState(
-    (s) => s.status.promptCap ?? DEEPSEEK_CONTEXT_TOKENS[s.session.model] ?? DEFAULT_CONTEXT_TOKENS,
-  );
+  const ctxCap = useAgentState((s) => s.status.promptCap ?? resolveContextTokens(s.session.model));
   const sessionCostUsd = useAgentState((s) => s.status.sessionCost);
   const lastTurnCostUsd = useAgentState((s) => s.status.cost);
   const cacheHitRatio = useAgentState((s) => s.status.cacheHit);
@@ -620,6 +635,7 @@ function AppInner({
       mode: engineeringLifecycleBaseModeRef.current,
     });
   }
+  const lifecyclePlanSuggestionSessionRef = useRef<string | null | undefined>(undefined);
   // Refs that mirror state for stable read-callbacks handed to the
   // embedded dashboard server. The server's `getXxx()` closures are
   // captured once at startDashboard time; without ref-mirrors the
@@ -789,14 +805,11 @@ function AppInner({
   const noTakeoverOverlay =
     !pendingShell &&
     !pendingPath &&
-    !pendingPlan &&
-    !pendingReviseEditor &&
     !pendingSessionsPicker &&
     !pendingEditPicker &&
     !pendingWorkspacePicker &&
     !pendingCheckpointPicker &&
     !pendingMcpHub &&
-    !stagedInput &&
     !pendingEditReview;
   // Plan-mode indicator —displayed in the StatsPanel, mirrored onto
   // the ToolRegistry so dispatch enforces read-only. Toggled via the
@@ -900,6 +913,14 @@ function AppInner({
   // identify plans by intent rather than by filename.
   const planBodyRef = useRef<string | null>(null);
   const planSummaryRef = useRef<string | null>(null);
+  const planPanelOpen = !!(
+    pendingPlan ||
+    stagedInput ||
+    pendingCheckpoint ||
+    pendingRevision ||
+    pendingReviseEditor ||
+    (planStepsRef.current && planStepsRef.current.length > 0 && !planMode)
+  );
   // Wall-clock when the latest tool_start fired. Cleared when the
   // matching `tool` event arrives (or at turn end). Tools are
   // dispatched serially in the loop, so a single ref is enough —no
@@ -1029,6 +1050,8 @@ function AppInner({
       hooks: hookList,
       hookCwd: currentRootDir,
       reasoningEffort: initialReasoningEffort ?? loadReasoningEffort(),
+      maxOutputTokens: loadMaxOutputTokens(),
+      maxIterPerTurn: loadMaxIterPerTurn(),
       rebuildSystem,
     });
     loopRef.current = l;
@@ -1576,6 +1599,12 @@ function AppInner({
       log.pushInfo(t("ui.ephemeralSession"));
     } else if (loop.resumedMessageCount > 0) {
       log.pushInfo(t("ui.resumedSession", { name: session, count: loop.resumedMessageCount }));
+      // Warn if system prompt changed since the session was last used — REASONIX.md
+      // or global memory edits cause a cache miss on the first resumed turn (#2212).
+      const savedFingerprint = loadSessionMeta(session).systemFingerprint;
+      if (savedFingerprint && savedFingerprint !== hashSystemPrompt(system)) {
+        log.pushWarning(t("ui.systemPromptChanged"), t("ui.systemPromptChangedDetail"));
+      }
     } else {
       log.pushInfo(t("ui.newSession", { name: session }));
     }
@@ -1658,7 +1687,7 @@ function AppInner({
       log.pushTip({ topic: tip.topic, sections: tip.sections, footer: tip.footer });
       markMouseClipboardHintShown();
     }
-  }, [session, loop, codeMode, syncPendingCount, log, pendingEdits, startupInfoHints]);
+  }, [session, loop, codeMode, syncPendingCount, log, pendingEdits, startupInfoHints, system]);
 
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
@@ -2037,7 +2066,7 @@ function AppInner({
       // otherwise edit_file writes to the OLD root while read_file looks in
       // the NEW one, producing ENOENT on the next read of a just-edited file.
       const rootForEdit = currentRootDirRef.current;
-      const blocks = buildEditToolBlocks(name, args, rootForEdit);
+      const blocks = await buildEditToolBlocksForReview(name, args, rootForEdit, loop.readTracker);
       if (!blocks || blocks.length === 0) return null;
 
       // Helper: apply the current block(s) + record into history + arm
@@ -2050,6 +2079,8 @@ function AppInner({
       // after —ToolCard renders that with the same text. Pushing here
       // would produce "result shown twice".
       const applyNow = (): string => {
+        const guard = prepareAutoGitRollbackForEditBlocks(rootForEdit, blocks, {});
+        if (guard) return guard;
         const snaps = snapshotBeforeEdits(blocks, rootForEdit);
         const results = applyEditBlocks(blocks, rootForEdit);
         const good = results.some((r) => r.status === "applied" || r.status === "created");
@@ -2263,7 +2294,7 @@ function AppInner({
           // StatsPanel reads). `balance` comes from useSessionInfo via a
           // ref-mirror so this callback stays cheap.
           const s = loop.stats.summary();
-          const ctxCap = DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS;
+          const ctxCap = resolveContextTokens(loop.model);
           return {
             turns: s.turns,
             totalCostUsd: s.totalCostUsd,
@@ -2712,11 +2743,74 @@ function AppInner({
     onChoiceResolveRef: handleChoiceResolveRef,
   });
 
+  const telegram = useTelegramChannel({
+    codeMode: !!codeMode,
+    initialChannel: telegramChannel,
+    log,
+    setQueuedSubmit,
+    telegramSubmitRef,
+    telegramErrorRef,
+    sessionName: session,
+    currentRootDir,
+    pendingGateIdRef,
+    completedStepIdsRef,
+    planStepsRef,
+    onCreateSession: onSwitchSession ? (name) => onSwitchSession(name) : undefined,
+    onSelectSession: onSwitchSession ? (name) => onSwitchSession(name) : undefined,
+    onModelPick: handleQQModelPick,
+    onThemePick: handleQQThemePick,
+    onShellConfirmRef: handleShellConfirmRef,
+    onPathConfirmRef: handlePathConfirmRef,
+    onPlanCancelRef: handlePlanCancelRef,
+    onPlanFeedbackRef: handlePlanFeedbackRef,
+    onCheckpointConfirmRef: handleCheckpointConfirmRef,
+    onCheckpointReviseRef: handleCheckpointReviseSubmitRef,
+    onPlanRevisionRef: handleReviseConfirmRef,
+    onChoiceResolveRef: handleChoiceResolveRef,
+  });
+
+  const weixin = useWeixinChannel({
+    codeMode: !!codeMode,
+    initialChannel: weixinChannel,
+    log,
+    setQueuedSubmit,
+    weixinSubmitRef,
+    weixinErrorRef,
+    sessionName: session,
+    currentRootDir,
+    pendingGateIdRef,
+    completedStepIdsRef,
+    planStepsRef,
+    onCreateSession: onSwitchSession ? (name) => onSwitchSession(name) : undefined,
+    onSelectSession: onSwitchSession ? (name) => onSwitchSession(name) : undefined,
+    onModelPick: handleQQModelPick,
+    onThemePick: handleQQThemePick,
+    onShellConfirmRef: handleShellConfirmRef,
+    onPathConfirmRef: handlePathConfirmRef,
+    onPlanCancelRef: handlePlanCancelRef,
+    onPlanFeedbackRef: handlePlanFeedbackRef,
+    onCheckpointConfirmRef: handleCheckpointConfirmRef,
+    onCheckpointReviseRef: handleCheckpointReviseSubmitRef,
+    onPlanRevisionRef: handleReviseConfirmRef,
+    onChoiceResolveRef: handleChoiceResolveRef,
+  });
+
   const handleSubmit = useCallback(
     async (raw: string) => {
-      const incoming = qq.parseSubmit(raw);
+      const qqIncoming = qq.parseSubmit(raw);
+      const telegramIncoming =
+        qqIncoming?.handled || qqIncoming?.fromQQ ? null : telegram.parseSubmit(raw);
+      const incoming =
+        qqIncoming?.handled || qqIncoming?.fromQQ
+          ? qqIncoming
+          : telegramIncoming?.handled || telegramIncoming?.fromTelegram
+            ? telegramIncoming
+            : weixin.parseSubmit(raw);
       if (!incoming) return;
-      let { text, fromQQ } = incoming;
+      let { text } = incoming;
+      const fromQQ = "fromQQ" in incoming && incoming.fromQQ;
+      const fromTelegram = "fromTelegram" in incoming && incoming.fromTelegram;
+      const fromWeixin = "fromWeixin" in incoming && incoming.fromWeixin;
       if (incoming.handled) {
         return;
       }
@@ -2958,12 +3052,28 @@ function AppInner({
             disconnect: qq.disconnect,
             status: qq.status,
           },
+          telegram: {
+            connect: telegram.connect,
+            disconnect: telegram.disconnect,
+            status: telegram.status,
+          },
+          weixin: {
+            connect: weixin.connect,
+            disconnect: weixin.disconnect,
+            status: weixin.status,
+          },
           sessionId: session,
           getEngineeringLifecycleSnapshot: codeMode
             ? () => engineeringLifecycleRef.current?.snapshot() ?? null
             : undefined,
           jobs: codeMode?.jobs,
-          postInfo: fromQQ ? qq.sendInfo : log.pushInfo,
+          postInfo: fromQQ
+            ? qq.sendInfo
+            : fromTelegram
+              ? telegram.sendInfo
+              : fromWeixin
+                ? weixin.sendInfo
+                : log.pushInfo,
           postDoctor: (checks) => log.showDoctor(checks),
           postUsage: (args) => log.showUsageVerbose(args),
           postKeys: (args) =>
@@ -3023,8 +3133,14 @@ function AppInner({
           generateSessionTitle: generateCurrentSessionTitle,
         });
         if (
-          fromQQ &&
-          qq.handleRemoteSlashResult({
+          (fromQQ
+            ? qq
+            : fromTelegram
+              ? telegram
+              : fromWeixin
+                ? weixin
+                : null
+          )?.handleRemoteSlashResult({
             result,
             codeMode: !!codeMode,
             sessions: listSessionsForWorkspace(currentRootDir),
@@ -3112,6 +3228,8 @@ function AppInner({
           text,
         });
         if (fromQQ && result.info) qq.sendText(result.info);
+        if (fromTelegram && result.info) telegram.sendText(result.info);
+        if (fromWeixin && result.info) weixin.sendText(result.info);
         if (outcome.kind === "resubmit") {
           text = outcome.text;
         } else {
@@ -3138,15 +3256,25 @@ function AppInner({
       }
 
       if (codeMode) {
-        if (
-          shouldEnterPlanModeForExplicitIntent({
+        const explicitPlanIntent = shouldEnterPlanModeForExplicitIntent({
+          text,
+          codeMode: true,
+          planMode,
+        });
+        if (explicitPlanIntent) {
+          togglePlanMode(true, "explicit-intent");
+          log.pushInfo(t("app.explicitPlanIntentArmed"));
+        } else if (
+          shouldSuggestPlanForEngineeringIntent({
             text,
             codeMode: true,
             planMode,
+            lifecycleMode: engineeringLifecycleRef.current?.snapshot().mode ?? "off",
+            alreadySuggested: lifecyclePlanSuggestionSessionRef.current === (session ?? null),
           })
         ) {
-          togglePlanMode(true, "explicit-intent");
-          log.pushInfo(t("app.explicitPlanIntentArmed"));
+          log.pushInfo(t("app.lifecyclePlanSuggestion"));
+          lifecyclePlanSuggestionSessionRef.current = session ?? null;
         }
         const before = engineeringLifecycleRef.current?.snapshot().state;
         engineeringLifecycleRef.current?.observeUserPrompt(text);
@@ -3172,6 +3300,9 @@ function AppInner({
         if (!existing.summary) patch.summary = text.replace(/\s+/g, " ").slice(0, 80);
         if (!existing.branch) patch.branch = detectGitBranch(currentRootDir);
         if (!existing.workspace) patch.workspace = currentRootDir;
+        // Always refresh the system-prompt fingerprint so the next resume can
+        // detect REASONIX.md / memory changes that happened since this turn.
+        patch.systemFingerprint = hashSystemPrompt(system);
         if (Object.keys(patch).length > 0) patchSessionMeta(session, patch);
       }
 
@@ -3196,6 +3327,8 @@ function AppInner({
       busyRef.current = true;
       setBusy(true);
       qq.noteTurnFromQQ(fromQQ);
+      telegram.noteTurnFromTelegram(fromTelegram);
+      weixin.noteTurnFromWeixin(fromWeixin);
       abortedThisTurn.current = false;
       // Seal the in-progress history entry so this turn's edits open
       // a new one —prior turns are preserved intact for /history and
@@ -3357,7 +3490,7 @@ function AppInner({
               armUndoBanner,
               pendingEdits,
               syncPendingCount,
-              ctxMax: DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS,
+              ctxMax: resolveContextTokens(loop.model),
             });
             if (session) {
               const m = loadSessionMeta(session);
@@ -3462,6 +3595,8 @@ function AppInner({
           }
         }
         qq.maybeSendFinalReply(lastAssistantText);
+        telegram.maybeSendFinalReply(lastAssistantText);
+        weixin.maybeSendFinalReply(lastAssistantText);
       } finally {
         flush();
         // Esc aborted the turn —close any in-flight cards (streaming /
@@ -3477,6 +3612,8 @@ function AppInner({
         setBusy(false);
         submittingRef.current = false;
         qq.clearTurnReply();
+        telegram.clearTurnReply();
+        weixin.clearTurnReply();
         // Refresh balance lazily —don't block the return.
         refreshBalance();
       }
@@ -3532,6 +3669,8 @@ function AppInner({
       startLoop,
       getLoopStatus,
       qq,
+      telegram,
+      weixin,
       isLoopActive,
       isLoopFiring,
       clearFiringFlag,
@@ -3551,6 +3690,7 @@ function AppInner({
       liveMcpServers,
       generateCurrentSessionTitle,
       switchWorkspaceRoot,
+      system,
     ],
   );
 
@@ -3632,8 +3772,10 @@ function AppInner({
     setStagedCheckpointRevise(null);
     pendingGateIdRef.current = null;
     qq.resetInteractions();
+    telegram.resetInteractions();
+    weixin.resetInteractions();
     pauseGate.cancelAll();
-  }, [qq]);
+  }, [qq, telegram, weixin]);
 
   // Drain queued submits after the in-flight turn tears down.
   // QQ pause-gate replies are the one exception: they need to re-enter
@@ -3641,13 +3783,16 @@ function AppInner({
   // pauseGate.ask() can be resolved from the remote reply.
   useEffect(() => {
     if (queuedSubmit === null) return;
-    const canBypassBusy = qq.canBypassBusy(queuedSubmit);
+    const canBypassBusy =
+      qq.canBypassBusy(queuedSubmit) ||
+      telegram.canBypassBusy(queuedSubmit) ||
+      weixin.canBypassBusy(queuedSubmit);
     if ((!busy && !submittingRef.current) || canBypassBusy) {
       const text = queuedSubmit;
       setQueuedSubmit(null);
       void handleSubmit(text);
     }
-  }, [busy, queuedSubmit, handleSubmit, qq]);
+  }, [busy, queuedSubmit, handleSubmit, qq, telegram, weixin]);
 
   /**
    * PlanConfirm callback. Three outcomes, all ending with a synthetic
@@ -3909,6 +4054,8 @@ function AppInner({
       pendingGateIdRef.current = request.id;
 
       qq.handlePauseRequest(request.kind, payload);
+      telegram.handlePauseRequest(request.kind, payload);
+      weixin.handlePauseRequest(request.kind, payload);
 
       switch (request.kind) {
         case "run_command":
@@ -4285,8 +4432,12 @@ function AppInner({
     <>
       <TickerProvider disabled={tickerSuspended}>
         <InflightProvider inflight={loop.inflight}>
-          <Box flexDirection="row">
-            <Box flexDirection="column" flexGrow={1}>
+          <Box flexDirection="row" backgroundColor={SURFACE.bg}>
+            <Box
+              flexDirection="column"
+              flexGrow={planPanelOpen ? 0 : 1}
+              width={planPanelOpen ? "35%" : undefined}
+            >
               <Box flexDirection="column" flexGrow={1}>
                 <LiveExpandContext.Provider value={liveExpand}>
                   <VerboseContext.Provider value={verboseMode}>
@@ -4315,6 +4466,7 @@ function AppInner({
                 ) : null}
                 <LiveActivityArea
                   noTakeoverOverlay={noTakeoverOverlay}
+                  suppressPlanLiveRow={planPanelOpen}
                   ongoingTool={ongoingTool}
                   toolProgress={toolProgress}
                   subagentActivities={subagentActivities}
@@ -4342,12 +4494,46 @@ function AppInner({
                   }
                 />
               </Box>
-              {stagedInput ? (
-                <PlanRefineInput
-                  mode={stagedInput.mode}
-                  questions={stagedInput.questions}
-                  onSubmit={handleStagedInputSubmit}
-                  onCancel={handleStagedInputCancel}
+              {planPanelOpen ? (
+                <ComposerArea
+                  editMode={editMode}
+                  pendingCount={pendingCount}
+                  modeFlash={modeFlash}
+                  planMode={planMode}
+                  undoArmed={!!undoBanner || hasUndoable()}
+                  jobs={codeMode ? codeMode.jobs : undefined}
+                  activeLoop={activeLoop}
+                  statusBar={statusBar}
+                  showShortcuts={pendingShortcuts}
+                  mode={
+                    editMode === "yolo"
+                      ? t("statsPanel.modeYolo")
+                      : editMode === "auto"
+                        ? t("statsPanel.modeAuto")
+                        : editMode === "review"
+                          ? t("statsPanel.modeReview")
+                          : editMode
+                  }
+                  model={`${sessionModel} \u00b7 ${sessionEffort ?? loop.reasoningEffort}`}
+                  input={input}
+                  setInput={setInput}
+                  busy={busy}
+                  steerBusy={busy}
+                  onSubmit={handleSubmit}
+                  onHistoryPrev={handleHistoryPrev}
+                  onHistoryNext={handleHistoryNext}
+                  onOpenExternalEditor={handleOpenExternalEditor}
+                  onCursorChange={setComposerCursor}
+                  isHistoryMode={isHistoryMode}
+                  slashMatches={slashMatches}
+                  slashSelected={slashSelected}
+                  slashGroupMode={slashGroupMode}
+                  slashAdvancedHidden={slashAdvancedHidden}
+                  atState={atState}
+                  atSelected={atSelected}
+                  slashArgContext={slashArgContext}
+                  slashArgMatches={slashArgMatches}
+                  slashArgSelected={slashArgSelected}
                 />
               ) : stagedChoiceCustom ? (
                 <PlanRefineInput
@@ -4367,26 +4553,6 @@ function AppInner({
                   options={pendingChoice.options}
                   allowCustom={pendingChoice.allowCustom}
                   onChoose={stableHandleChoiceConfirm}
-                />
-              ) : pendingRevision ? (
-                <PlanReviseConfirm
-                  reason={pendingRevision.reason}
-                  oldRemaining={(planStepsRef.current ?? []).filter(
-                    (s) => !completedStepIdsRef.current.has(s.id),
-                  )}
-                  newRemaining={pendingRevision.remainingSteps}
-                  summary={pendingRevision.summary}
-                  onChoose={stableHandleReviseConfirm}
-                />
-              ) : pendingCheckpoint ? (
-                <PlanCheckpointConfirm
-                  stepId={pendingCheckpoint.stepId}
-                  title={pendingCheckpoint.title}
-                  completed={pendingCheckpoint.completed}
-                  total={pendingCheckpoint.total}
-                  steps={planStepsRef.current ?? undefined}
-                  completedStepIds={completedStepIdsRef.current}
-                  onChoose={stableHandleCheckpointConfirm}
                 />
               ) : pendingCheckpointPicker ? (
                 <CheckpointPicker
@@ -4584,32 +4750,6 @@ function AppInner({
                       : undefined
                   }
                 />
-              ) : pendingPlan ? (
-                <PlanConfirm
-                  plan={pendingPlan}
-                  steps={planStepsRef.current ?? undefined}
-                  summary={planSummaryRef.current ?? undefined}
-                  onChoose={stableHandlePlanConfirm}
-                  projectRoot={currentRootDir}
-                />
-              ) : pendingReviseEditor ? (
-                <PlanReviseEditor
-                  steps={planStepsRef.current ?? []}
-                  completedStepIds={completedStepIdsRef.current}
-                  onAccept={(revised, skippedIds) => {
-                    planStepsRef.current = revised;
-                    for (const id of skippedIds) completedStepIdsRef.current.add(id);
-                    persistPlanState();
-                    const planText = pendingReviseEditor;
-                    setPendingReviseEditor(null);
-                    setPendingPlan(planText);
-                  }}
-                  onCancel={() => {
-                    const planText = pendingReviseEditor;
-                    setPendingReviseEditor(null);
-                    setPendingPlan(planText);
-                  }}
-                />
               ) : pendingShell ? (
                 <ShellConfirm
                   prompt={toApprovalPrompt({
@@ -4703,6 +4843,27 @@ function AppInner({
                 />
               )}
             </Box>
+            {planPanelOpen ? (
+              <PlanPanel
+                planBody={planBodyRef.current}
+                planSummary={planSummaryRef.current}
+                planSteps={planStepsRef.current}
+                completedStepIds={completedStepIdsRef.current}
+                pendingPlan={pendingPlan}
+                stagedInput={stagedInput}
+                pendingCheckpoint={pendingCheckpoint}
+                pendingRevision={pendingRevision}
+                pendingReviseEditor={pendingReviseEditor}
+                isExecuting={
+                  planStepsRef.current !== null && planStepsRef.current.length > 0 && !planMode
+                }
+                onPlanConfirm={stableHandlePlanConfirm}
+                onStagedInputSubmit={handleStagedInputSubmit}
+                onStagedInputCancel={handleStagedInputCancel}
+                onCheckpointChoose={stableHandleCheckpointConfirm}
+                onReviseConfirm={stableHandleReviseConfirm}
+              />
+            ) : null}
           </Box>
         </InflightProvider>
       </TickerProvider>

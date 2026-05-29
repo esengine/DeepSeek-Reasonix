@@ -77,6 +77,8 @@ export interface TranslationSchema {
     resumedSession: string;
     newSession: string;
     ephemeralSession: string;
+    systemPromptChanged: string;
+    systemPromptChangedDetail: string;
     restoredEdits: string;
     resumedPlan: string;
     tipEditBindings: {
@@ -228,6 +230,7 @@ export interface TranslationSchema {
     planStoppedAt: string;
     revisingAfter: string;
     explicitPlanIntentArmed: string;
+    lifecyclePlanSuggestion: string;
     historyScrollHint: string;
     editHistoryTitle: string;
     editHistoryNoCodeMode: string;
@@ -301,6 +304,7 @@ export interface TranslationSchema {
     foldedHistory: string;
     aggressivelyFoldedHistory: string;
     forcingSummary: string;
+    iterLimitReached: string;
   };
   errors: {
     contextOverflow: string;
@@ -357,6 +361,7 @@ export interface TranslationSchema {
     themeSubtitle: string;
     themeSampleHeading: string;
     themeFooter: string;
+    themeName: Record<string, string>;
     themeCaption: Record<string, string>;
     reviewTitle: string;
     reviewLabelApiKey: string;
@@ -380,6 +385,7 @@ export interface TranslationSchema {
   themePicker: {
     header: string;
     footer: string;
+    autoLabel: string;
     currentPref: string;
     activeNow: string;
     autoDesc: string;
@@ -711,6 +717,11 @@ export interface TranslationSchema {
     metasoServerError: string;
     metasoParseError: string;
     metasoApiError: string;
+    baiduMissingKey: string;
+    baiduUnauthorized: string;
+    baiduRateLimit: string;
+    baiduServerError: string;
+    baiduParseError: string;
     tavilyMissingKey: string;
     tavilyUnauthorized: string;
     tavilyRateLimit: string;

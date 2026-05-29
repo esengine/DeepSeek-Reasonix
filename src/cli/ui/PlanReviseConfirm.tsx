@@ -4,6 +4,7 @@ import { t } from "../../i18n/index.js";
 import type { PlanStep } from "../../tools/plan.js";
 import { SingleSelect } from "./Select.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
+import { FG } from "./theme/tokens.js";
 
 export type ReviseChoice = "accept" | "reject";
 
@@ -73,7 +74,7 @@ function PlanReviseConfirmInner({
       </Box>
       {summary ? (
         <Box marginBottom={1}>
-          <Text dim>{t("planReviseConfirm.updatedSummary", { summary })}</Text>
+          <Text color={FG.faint}>{t("planReviseConfirm.updatedSummary", { summary })}</Text>
         </Box>
       ) : null}
       <Box marginBottom={1} flexDirection="column">
@@ -89,10 +90,10 @@ function PlanReviseConfirmInner({
               <Text color={prefixColor} bold>
                 {`${prefix} `}
               </Text>
-              <Text color={risk.color} bold dim={dim}>
+              <Text color={dim ? FG.faint : risk.color} bold>
                 {risk.dots}
               </Text>
-              <Text dim={dim} strikethrough={strike}>
+              <Text color={dim ? FG.faint : undefined} strikethrough={strike}>
                 {` ${row.step.id} \u00b7 ${row.step.title}`}
               </Text>
             </Box>

@@ -3,7 +3,7 @@ import React from "react";
 import { t } from "../../../i18n/index.js";
 import { Card } from "../primitives/Card.js";
 import { CursorBlock } from "../primitives/CursorBlock.js";
-import { PILL_MODEL, Pill, modelBadgeFor } from "../primitives/Pill.js";
+import { Pill, modelBadgeFor, pillModel } from "../primitives/Pill.js";
 import { PULSE_DIAMOND, Pulse } from "../primitives/Pulse.js";
 import type { ReasoningCard as ReasoningCardData } from "../state/cards.js";
 import { VerboseContext } from "../state/verbose-context.js";
@@ -83,11 +83,11 @@ function ReasoningHeader({
         settled="◆"
         color={card.aborted ? TONE.err : FG.faint}
       />
-      <Text italic dim color={card.aborted ? TONE.err : undefined}>
+      <Text italic color={card.aborted ? TONE.err : FG.sub}>
         {`${baseTitle}${metaTrail}${collapsedHint}`}
       </Text>
       {modelBadge ? (
-        <Pill label={modelBadge.label} {...PILL_MODEL[modelBadge.kind]} bold={false} />
+        <Pill label={modelBadge.label} {...pillModel()[modelBadge.kind]} bold={false} />
       ) : null}
     </Box>
   );

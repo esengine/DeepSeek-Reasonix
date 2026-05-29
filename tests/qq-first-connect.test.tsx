@@ -150,6 +150,24 @@ describe("QQ first-connect onboarding", () => {
     unmount();
   });
 
+  it("does not treat slash-like input as credentials during staged first-time setup", async () => {
+    const log = {
+      pushInfo: vi.fn(),
+      pushWarning: vi.fn(),
+    };
+    const { api, unmount } = mountHarness(log);
+
+    void api.connect([]);
+    expect(api.parseSubmit("/help")).toMatchObject({ handled: true, fromQQ: false });
+    expect(log.pushInfo).toHaveBeenLastCalledWith(
+      "QQ setup: enter your QQ Open Platform App ID, then press Enter. Type /cancel to abort.",
+    );
+    expect(saveQQConfigMock).not.toHaveBeenCalled();
+    expect(startMock).not.toHaveBeenCalled();
+
+    unmount();
+  });
+
   it("localizes connect results and status in zh-CN", async () => {
     setLanguageRuntime("zh-CN");
     const log = {

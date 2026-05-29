@@ -105,6 +105,9 @@ export default class Ink {
   private backFrame: Frame;
   private lastPoolResetTime = performance.now();
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  // Microtask coalescing: prevents double-render when leading + trailing
+  // throttle edges both queue a microtask in the same event-loop tick.
+  private renderMicrotaskPending = false;
   private lastYogaCounters: {
     ms: number;
     visited: number;
@@ -222,7 +225,14 @@ export default class Ink {
     // a one-keystroke lag. Same event-loop tick, so throughput is unchanged.
     // Test env uses onImmediateRender (direct onRender, no throttle) so
     // existing synchronous lastFrame() tests are unaffected.
-    const deferredRender = (): void => queueMicrotask(this.onRender);
+    const deferredRender = (): void => {
+      if (this.renderMicrotaskPending) return;
+      this.renderMicrotaskPending = true;
+      queueMicrotask(() => {
+        this.renderMicrotaskPending = false;
+        this.onRender();
+      });
+    };
     this.scheduleRender = throttle(deferredRender, FRAME_INTERVAL_MS, {
       leading: true,
       trailing: true
@@ -754,11 +764,14 @@ export default class Ink {
     // its scheduleRender path fires a render which clears this timer at
     // the top of onRender — no double.
     //
-    // Drain frames are cheap (DECSTBM + ~10 patches, ~200 bytes) so run at
-    // quarter interval (~250fps, setTimeout practical floor) for max scroll
-    // speed. Regular renders stay at FRAME_INTERVAL_MS via the throttle.
+    // Drain frames are cheap (DECSTBM + ~10 patches, ~200 bytes) but still
+    // run the full render pipeline (React reconcile + diff + paint).
+    // xterm.js (VS Code) is single-threaded for ANSI parsing — running at
+    // 4ms (250fps) overwhelmed it. Use FRAME_INTERVAL_MS (16ms, ~60fps)
+    // which matches the regular render budget and is well within xterm.js's
+    // comfortable throughput. Native terminals handle this fine too.
     if (frame.scrollDrainPending) {
-      this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS >> 2);
+      this.drainTimer = setTimeout(() => this.onRender(), FRAME_INTERVAL_MS);
     }
     const yogaMs = getLastYogaMs();
     const commitMs = getLastCommitMs();

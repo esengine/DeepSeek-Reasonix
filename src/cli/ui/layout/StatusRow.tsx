@@ -2,7 +2,7 @@ import { Box, type Color, Text, useStdout } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { t } from "../../../i18n/index.js";
-import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS } from "../../../telemetry/stats.js";
+import { resolveContextTokens } from "../../../telemetry/stats.js";
 import { VERSION } from "../../../version.js";
 import { formatTokens } from "../primitives.js";
 import { Countdown } from "../primitives/Countdown.js";
@@ -117,11 +117,7 @@ export function StatusRow({
             <Pill>
               <CtxUsagePill
                 tokens={status.promptTokens}
-                cap={
-                  status.promptCap ??
-                  DEEPSEEK_CONTEXT_TOKENS[session.model] ??
-                  DEFAULT_CONTEXT_TOKENS
-                }
+                cap={status.promptCap ?? resolveContextTokens(session.model)}
                 cols={cols}
               />
             </Pill>

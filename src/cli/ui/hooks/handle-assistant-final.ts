@@ -1,5 +1,9 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
+  formatAutoGitRollbackRejection,
+  prepareAutoGitRollbackForEditBlocks,
+} from "../../../code/auto-git-rollback.js";
+import {
   type ApplyResult,
   type EditBlock,
   type EditSnapshot,
@@ -111,6 +115,11 @@ export function handleAssistantFinal(ev: LoopEvent, ctx: AssistantFinalContext):
   if (blocks.length === 0) return;
 
   if (ctx.editModeRef.current === "auto" || ctx.editModeRef.current === "yolo") {
+    const guard = prepareAutoGitRollbackForEditBlocks(ctx.currentRootDir, blocks, {});
+    if (guard) {
+      ctx.log.pushInfo(formatAutoGitRollbackRejection(guard), "warn");
+      return;
+    }
     const snaps = snapshotBeforeEdits(blocks, ctx.currentRootDir);
     const results = applyEditBlocks(blocks, ctx.currentRootDir);
     const good = results.some((r) => r.status === "applied" || r.status === "created");

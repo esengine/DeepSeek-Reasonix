@@ -22,6 +22,7 @@ import { Box, type Color, Text } from "ink";
 // biome-ignore lint/style/useImportType: tsconfig jsx=react needs React in value scope for JSX compilation
 import React from "react";
 import { COLOR, GLYPH } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 export interface CharBarProps {
   /** 0–100 (clamped). Negative or NaN → 0; >100 → 100. */
@@ -62,10 +63,8 @@ export function CharBar({
   return (
     <Box>
       <Text color={color}>{GLYPH.block.repeat(filled)}</Text>
-      <Text color={emptyColor ?? COLOR.info} dim>
-        {GLYPH.shade1.repeat(total - filled)}
-      </Text>
-      {showLabel ? <Text dim>{`  ${label ?? `${Math.round(clamped)}%`}`}</Text> : null}
+      <Text color={FG.faint}>{GLYPH.shade1.repeat(total - filled)}</Text>
+      {showLabel ? <Text color={FG.faint}>{`  ${label ?? `${Math.round(clamped)}%`}`}</Text> : null}
     </Box>
   );
 }
@@ -110,9 +109,7 @@ export function StackedCharBar({
           {GLYPH.block.repeat(cells[i] ?? 0)}
         </Text>
       ))}
-      <Text color={emptyColor ?? COLOR.info} dim>
-        {GLYPH.shade1.repeat(empty)}
-      </Text>
+      <Text color={FG.faint}>{GLYPH.shade1.repeat(empty)}</Text>
     </Box>
   );
 }

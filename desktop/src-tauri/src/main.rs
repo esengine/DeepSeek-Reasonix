@@ -1,14 +1,101 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cc_switch;
 mod rpc;
 
-use rpc::{RpcState, rpc_kill, rpc_send, rpc_spawn};
+use cc_switch::import_cc_switch_mcp;
+use rpc::{rpc_kill, rpc_send, rpc_spawn, RpcState};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::menu::MenuBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::Manager;
+
+const TRAY_MENU_SHOW: &str = "show";
+const TRAY_MENU_QUIT: &str = "quit";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DesktopCloseBehavior {
+    CloseToTray,
+    CloseToQuit,
+}
 
 fn pasted_images_dir() -> PathBuf {
     std::env::temp_dir().join("reasonix-pasted-images")
+}
+
+fn parse_desktop_close_behavior(value: &serde_json::Value) -> DesktopCloseBehavior {
+    match value
+        .get("desktopCloseBehavior")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("closeToTray") => DesktopCloseBehavior::CloseToTray,
+        _ => DesktopCloseBehavior::CloseToQuit,
+    }
+}
+
+fn config_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    Some(PathBuf::from(home).join(".reasonix").join("config.json"))
+}
+
+fn desktop_close_behavior() -> DesktopCloseBehavior {
+    let Some(path) = config_path() else {
+        return DesktopCloseBehavior::CloseToQuit;
+    };
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return DesktopCloseBehavior::CloseToQuit;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return DesktopCloseBehavior::CloseToQuit;
+    };
+    parse_desktop_close_behavior(&value)
+}
+
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn install_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_MENU_SHOW, "Show Window")
+        .separator()
+        .text(TRAY_MENU_QUIT, "Quit Reasonix")
+        .build()?;
+
+    let mut tray = TrayIconBuilder::with_id("main")
+        .tooltip("Reasonix")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_MENU_SHOW => show_main_window(app),
+            TRAY_MENU_QUIT => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(tray.app_handle()),
+            _ => {}
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
+    Ok(())
 }
 
 /// #892: bundled libwayland in AppImage can ABI-mismatch the host Wayland
@@ -88,7 +175,9 @@ fn walk_dir(dir: &Path, depth: u32, max_depth: u32, out: &mut Vec<FileEntry>) {
         if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
             continue;
         }
-        let Ok(file_type) = entry.file_type() else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         let path = entry.path().to_string_lossy().into_owned();
         if file_type.is_dir() {
             out.push(FileEntry {
@@ -134,7 +223,10 @@ fn git_status(root: String) -> Result<Vec<GitStatusEntry>, String> {
         return Err(format!("not a directory: {root}"));
     }
     let mut cmd = Command::new("git");
-    cmd.arg("status").arg("--porcelain").arg("-z").current_dir(root_path);
+    cmd.arg("status")
+        .arg("--porcelain")
+        .arg("-z")
+        .current_dir(root_path);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -205,7 +297,9 @@ fn open_in_editor(command: String, path: String, line: Option<u32>) -> Result<()
             cmd.arg(&path);
         }
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     cmd.spawn().map_err(|e| format!("spawn {trimmed}: {e}"))?;
     Ok(())
 }
@@ -222,7 +316,11 @@ fn sanitize_image_extension(raw: Option<&str>) -> String {
     let ok = !cleaned.is_empty()
         && cleaned.len() <= 8
         && cleaned.chars().all(|c| c.is_ascii_alphanumeric());
-    if ok { cleaned } else { "png".to_string() }
+    if ok {
+        cleaned
+    } else {
+        "png".to_string()
+    }
 }
 
 #[tauri::command]
@@ -241,12 +339,20 @@ fn save_clipboard_image(bytes: Vec<u8>, extension: Option<String>) -> Result<Str
 
 fn purge_old_pasted_images(max_age: Duration) {
     let dir = pasted_images_dir();
-    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
     let cutoff = SystemTime::now().checked_sub(max_age);
     for entry in entries.flatten() {
-        let Ok(metadata) = entry.metadata() else { continue };
-        if !metadata.is_file() { continue }
-        let Ok(modified) = metadata.modified() else { continue };
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
         if cutoff.is_some_and(|t| modified < t) {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -264,11 +370,23 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if desktop_close_behavior() == DesktopCloseBehavior::CloseToTray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .manage(RpcState::default())
         .invoke_handler(tauri::generate_handler![
             rpc_spawn,
             rpc_send,
             rpc_kill,
+            import_cc_switch_mcp,
             open_in_editor,
             list_workspace_tree,
             git_status,
@@ -276,8 +394,8 @@ fn main() {
             save_clipboard_image
         ])
         .setup(|app| {
-            use tauri::Manager;
             std::thread::spawn(|| purge_old_pasted_images(Duration::from_secs(24 * 60 * 60)));
+            install_tray(app)?;
             if let Some(w) = app.get_webview_window("main") {
                 // HiDPI fit: the JSON config asks for 1024x720 logical px.
                 // On Windows laptops at 200% scale (1920x1080 → 960x540
@@ -309,21 +427,27 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("tauri build failed")
-        .run(|app, event| {
+        .run(|app, event| match event {
             // Tauri 2 normally exits the process via Exit; managed-state drops
             // don't always run. ExitRequested fires before that, so we kill the
             // Node child here too — belt-and-braces vs the Drop on RpcHandle.
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                use tauri::Manager;
+            tauri::RunEvent::ExitRequested { .. } => {
                 let state = app.state::<RpcState>();
                 let _ = rpc::rpc_kill(state);
             }
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } => show_main_window(app),
+            _ => {}
         });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_image_extension;
+    use super::{parse_desktop_close_behavior, sanitize_image_extension, DesktopCloseBehavior};
+    use serde_json::json;
 
     #[test]
     fn accepts_alphanumeric_extensions() {
@@ -351,5 +475,29 @@ mod tests {
     #[test]
     fn rejects_overlong_extensions() {
         assert_eq!(sanitize_image_extension(Some("verylongext")), "png");
+    }
+
+    #[test]
+    fn desktop_close_behavior_defaults_to_quit() {
+        assert_eq!(
+            parse_desktop_close_behavior(&json!({})),
+            DesktopCloseBehavior::CloseToQuit
+        );
+    }
+
+    #[test]
+    fn desktop_close_behavior_accepts_tray_mode() {
+        assert_eq!(
+            parse_desktop_close_behavior(&json!({ "desktopCloseBehavior": "closeToTray" })),
+            DesktopCloseBehavior::CloseToTray
+        );
+    }
+
+    #[test]
+    fn desktop_close_behavior_accepts_quit_mode() {
+        assert_eq!(
+            parse_desktop_close_behavior(&json!({ "desktopCloseBehavior": "closeToQuit" })),
+            DesktopCloseBehavior::CloseToQuit
+        );
     }
 }

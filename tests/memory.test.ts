@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { AppendOnlyLog, ImmutablePrefix, VolatileScratch } from "../src/memory/runtime.js";
+import type { ToolSpec } from "../src/types.js";
+
+function tool(name: string): ToolSpec {
+  return {
+    type: "function",
+    function: { name, description: "", parameters: { type: "object" } },
+  };
+}
 
 describe("ImmutablePrefix", () => {
   it("fingerprint is stable for identical inputs", () => {
@@ -84,6 +92,39 @@ describe("ImmutablePrefix", () => {
       function: { name: "rogue", description: "", parameters: { type: "object" } },
     });
     expect(() => p.verifyFingerprint()).toThrow(/fingerprint drift/);
+  });
+
+  it("memoizes diagnostic hashes for immutable tool snapshots", () => {
+    const p = new ImmutablePrefix({ system: "x", toolSpecs: [tool("read")] });
+    const snapshot = p.tools();
+    const first = p.diagnosticHashes(snapshot);
+
+    expect(p.diagnosticHashes(snapshot)).toBe(first);
+
+    const mutableSnapshot = [tool("read")];
+    expect(p.diagnosticHashes(mutableSnapshot)).not.toBe(p.diagnosticHashes(mutableSnapshot));
+  });
+
+  it("invalidates diagnostic hash cache with prefix mutations", () => {
+    const p = new ImmutablePrefix({ system: "x", toolSpecs: [tool("read")] });
+    const firstSnapshot = p.tools();
+    const first = p.diagnosticHashes(firstSnapshot);
+
+    expect(p.replaceSystem("y")).toBe(true);
+    const afterSystem = p.diagnosticHashes(firstSnapshot);
+    expect(afterSystem).not.toBe(first);
+    expect(afterSystem.systemHash).not.toBe(first.systemHash);
+    expect(p.diagnosticHashes(firstSnapshot)).toBe(afterSystem);
+
+    expect(p.addTool(tool("write"))).toBe(true);
+    const afterAdd = p.diagnosticHashes(p.tools());
+    expect(afterAdd).not.toBe(afterSystem);
+    expect(afterAdd.toolNames).toEqual(["read", "write"]);
+
+    expect(p.removeTool("read")).toBe(true);
+    const afterRemove = p.diagnosticHashes(p.tools());
+    expect(afterRemove).not.toBe(afterAdd);
+    expect(afterRemove.toolNames).toEqual(["write"]);
   });
 });
 

@@ -287,6 +287,7 @@ export function useQQChannel({
       const channel = new QQChannel({
         onSubmitMessage: (message) => setQueuedSubmit(message),
         onError: (message) => log.pushWarning("QQ", message),
+        onInfo: (message) => log.pushInfo(message),
       });
       await channel.start();
       channelRef.current = channel;
@@ -799,6 +800,10 @@ export function useQQChannel({
           pendingConnectSetupRef.current = null;
           pending.reject(new Error(t("handlers.qq.setupCancelled")));
           log.pushInfo(t("handlers.qq.setupCancelled"));
+          return { handled: true, fromQQ, text };
+        }
+        if (text.startsWith("/")) {
+          log.pushInfo(formatQQSetupPrompt(pending.step));
           return { handled: true, fromQQ, text };
         }
 

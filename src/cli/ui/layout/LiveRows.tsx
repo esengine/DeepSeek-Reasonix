@@ -7,7 +7,7 @@ import { t } from "../../../i18n/index.js";
 import type { JobRegistry } from "../../../tools/jobs.js";
 import { Card } from "../primitives/Card.js";
 import { CardHeader } from "../primitives/CardHeader.js";
-import { PILL_MODEL, PILL_SECTION, Pill, modelBadgeFor } from "../primitives/Pill.js";
+import { Pill, modelBadgeFor, pillModel } from "../primitives/Pill.js";
 import { PULSE_CIRCLE, PULSE_HEX, PULSE_SQUARE, Pulse } from "../primitives/Pulse.js";
 import { useAgentState } from "../state/provider.js";
 import { useThemeTokens } from "../theme/context.js";
@@ -227,7 +227,7 @@ export function SubagentRow({ activity }: { activity: SubagentActivity }) {
         meta={[`iter ${activity.iter}`, `${seconds}s`]}
         right={
           modelBadge ? (
-            <Pill label={modelBadge.label} {...PILL_MODEL[modelBadge.kind]} bold={false} />
+            <Pill label={modelBadge.label} {...pillModel()[modelBadge.kind]} bold={false} />
           ) : null
         }
       />

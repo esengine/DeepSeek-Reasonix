@@ -13,7 +13,7 @@ import type {
   PendingRevision,
   SkillOrigin,
 } from "../App";
-import { Markdown } from "../Markdown";
+import { Markdown, WithToolPaths } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import {
@@ -156,6 +156,27 @@ export const AssistantMsg = memo(function AssistantMsg({
       /* ignore */
     }
   };
+  // Extract file paths from the current message's tool segments
+  const currentToolPaths: string[] = [];
+  for (const s of segments) {
+    if (s.kind !== "tool") continue;
+    if (s.name === "read_file" || s.name === "edit_file" || s.name === "write_file") {
+      try {
+        const path = JSON.parse(s.args)?.path;
+        if (typeof path === "string") currentToolPaths.push(path);
+      } catch { /* skip */ }
+    } else if (s.name === "multi_edit") {
+      try {
+        const edits = JSON.parse(s.args)?.edits;
+        if (Array.isArray(edits)) {
+          for (const e of edits) {
+            if (typeof e?.path === "string") currentToolPaths.push(e.path);
+          }
+        }
+      } catch { /* skip */ }
+    }
+  }
+
   // Render tool segments — consecutive tools get grouped into a collapsible section
   const rendered: ReactNode[] = [];
 
@@ -209,7 +230,7 @@ export const AssistantMsg = memo(function AssistantMsg({
         />
       );
     }
-    if (s.result && (s.name === "edit_file" || s.name === "multi_edit")) {
+    if (s.result && (s.name === "edit_file" || s.name === "multi_edit" || s.name === "write_file")) {
       const files = parseEditResult(s.result);
       return files.length > 0 ? (
         <>
@@ -234,7 +255,11 @@ export const AssistantMsg = memo(function AssistantMsg({
       if (isCompactionSummary(s.text)) {
         rendered.push(<CompactionCard key={`t-${i}`} summary={stripCompactionMarker(s.text)} />);
       } else {
-        rendered.push(<AssistantText key={`t-${i}`} text={s.text} />);
+        rendered.push(
+          <WithToolPaths key={`t-wrap-${i}`} toolPaths={currentToolPaths}>
+            <AssistantText text={s.text} />
+          </WithToolPaths>,
+        );
       }
       continue;
     }

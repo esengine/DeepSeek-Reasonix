@@ -34,7 +34,7 @@ vi.mock("./theme", () => ({
   themeForStyle: vi.fn(() => "dark"),
 }));
 
-import { reduce } from "./App";
+import { readWindowExpanded, reduce, toggleWindowExpanded } from "./App";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 
 function initialState(): Parameters<typeof reduce>[0] {
@@ -210,6 +210,47 @@ describe("Desktop App reducer — usage", () => {
     expect(next.usage.cacheHitTokens).toBe(80);
     expect(next.usage.cacheMissTokens).toBe(20);
     expect(next.usage.liveLogTokens).toBe(42);
+  });
+});
+
+describe("Desktop App window controls", () => {
+  it("treats macOS zoom state as fullscreen", async () => {
+    const win = {
+      isFullscreen: vi.fn(async () => true),
+      isMaximized: vi.fn(async () => false),
+      setFullscreen: vi.fn(async () => {}),
+      toggleMaximize: vi.fn(async () => {}),
+    };
+
+    await expect(readWindowExpanded(win, true)).resolves.toBe(true);
+    expect(win.isFullscreen).toHaveBeenCalledTimes(1);
+    expect(win.isMaximized).not.toHaveBeenCalled();
+  });
+
+  it("uses native fullscreen for macOS zoom button", async () => {
+    const win = {
+      isFullscreen: vi.fn(async () => false),
+      isMaximized: vi.fn(async () => false),
+      setFullscreen: vi.fn(async () => {}),
+      toggleMaximize: vi.fn(async () => {}),
+    };
+
+    await toggleWindowExpanded(win, true, false);
+    expect(win.setFullscreen).toHaveBeenCalledWith(true);
+    expect(win.toggleMaximize).not.toHaveBeenCalled();
+  });
+
+  it("keeps maximize behavior off macOS", async () => {
+    const win = {
+      isFullscreen: vi.fn(async () => false),
+      isMaximized: vi.fn(async () => false),
+      setFullscreen: vi.fn(async () => {}),
+      toggleMaximize: vi.fn(async () => {}),
+    };
+
+    await toggleWindowExpanded(win, false, false);
+    expect(win.toggleMaximize).toHaveBeenCalledTimes(1);
+    expect(win.setFullscreen).not.toHaveBeenCalled();
   });
 });
 

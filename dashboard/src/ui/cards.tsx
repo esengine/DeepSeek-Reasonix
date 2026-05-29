@@ -668,7 +668,8 @@ export function MetricStrip({
   costLabel,
   elapsed,
 }: {
-  cacheHit?: number;
+  /** Pre-formatted cache percentage string (e.g. "72.12%"). */
+  cacheHit?: string;
   promptTokens?: number;
   outputTokens?: number;
   costLabel?: string;
@@ -680,7 +681,7 @@ export function MetricStrip({
         <span className="item">
           <I.zap size={11} style={{ color: "var(--accent)" }} />
           <span>{t("cards.cacheHit")}</span>
-          <span className="v acc">{cacheHit}%</span>
+          <span className="v acc">{cacheHit}</span>
         </span>
       ) : null}
       {promptTokens !== undefined ? (

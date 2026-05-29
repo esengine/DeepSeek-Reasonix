@@ -4,6 +4,7 @@ import { CardRenderer } from "../cards/CardRenderer.js";
 import { useRenderTrace } from "../render-trace.js";
 import type { Card } from "../state/cards.js";
 import { useAgentState } from "../state/provider.js";
+import { VerboseContext } from "../state/verbose-context.js";
 
 interface StaticCardStreamProps {
   suppressLive?: boolean;
@@ -33,7 +34,7 @@ function StaticCardStreamInner({
       <Static items={staticItems}>
         {(card) => (
           <Box key={card.id} flexDirection="column" flexShrink={0}>
-            <CardRenderer card={card} />
+            <StaticCardRenderer card={card} />
           </Box>
         )}
       </Static>
@@ -48,13 +49,23 @@ function StaticCardStreamInner({
   );
 }
 
+function StaticCardRenderer({ card }: { card: Card }): React.ReactElement {
+  const verbose = React.useContext(VerboseContext);
+  const frozenVerbose = useRef(verbose).current;
+  return (
+    <VerboseContext.Provider value={frozenVerbose}>
+      <CardRenderer card={card} />
+    </VerboseContext.Provider>
+  );
+}
+
 /** Snapshot the initial backlog on first non-empty render; drain it in batches via
  *  setImmediate so first paint shows ~INITIAL_BATCH cards immediately and the
  *  event loop stays responsive for input. New cards added after drain bypass
  *  the gate. New cards added DURING drain are held back until the backlog
  *  catches up — keeps Static's append-only contract intact so chronological
  *  order is preserved. Gates the FULL cards array (not just the static partition)
- *  so verbose-sensitive tool/reasoning cards in the live region also drip. */
+ *  so an old unsettled live tail also drips while fresh cards bypass the gate. */
 function useProgressiveBacklog(cards: readonly Card[]): Card[] {
   const backlogRef = useRef<number | null>(null);
   if (backlogRef.current === null && cards.length > 0) {
@@ -93,7 +104,8 @@ function partition(cards: readonly Card[]): {
   dynamicItems: Card[];
   hasUnsettledDynamic: boolean;
 } {
-  const firstDynamic = cards.findIndex((c) => !isFullySettled(c) || isVerboseSensitive(c));
+  // Settled cards are immutable terminal scrollback; verbose toggles only affect live/future cards.
+  const firstDynamic = cards.findIndex((c) => !isFullySettled(c));
   if (firstDynamic === -1) {
     return { staticItems: [...cards], dynamicItems: [], hasUnsettledDynamic: false };
   }
@@ -103,10 +115,6 @@ function partition(cards: readonly Card[]): {
     dynamicItems,
     hasUnsettledDynamic: dynamicItems.some((c) => !isFullySettled(c)),
   };
-}
-
-function isVerboseSensitive(card: Card): boolean {
-  return card.kind === "reasoning" || card.kind === "tool";
 }
 
 function isFullySettled(card: Card): boolean {

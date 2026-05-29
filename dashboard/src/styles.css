@@ -86,6 +86,70 @@ body[data-drag-over="1"]::after {
   --radius-lg: 12px;
 }
 
+[data-theme-style="ember"] {
+  --bg: oklch(15% 0.018 38);
+  --bg-2: oklch(18% 0.018 38);
+  --panel: oklch(20.5% 0.018 38);
+  --panel-2: oklch(23.5% 0.02 38);
+  --card: oklch(22.5% 0.018 38);
+  --card-hover: oklch(26% 0.022 38);
+  --border: oklch(31% 0.026 38);
+  --border-strong: oklch(39% 0.032 38);
+  --fg: oklch(96% 0.012 72);
+  --fg-2: oklch(82% 0.014 72);
+  --muted: oklch(64% 0.014 70);
+  --muted-2: oklch(50% 0.014 68);
+
+  --accent: oklch(70% 0.18 38);
+  --accent-soft: oklch(70% 0.18 38 / 0.15);
+  --accent-strong: oklch(75% 0.19 36);
+
+  --success: oklch(69% 0.13 145);
+  --success-soft: oklch(69% 0.13 145 / 0.14);
+  --warning: oklch(78% 0.14 82);
+  --warning-soft: oklch(78% 0.14 82 / 0.16);
+  --danger: oklch(66% 0.18 25);
+  --danger-soft: oklch(66% 0.18 25 / 0.16);
+  --violet: oklch(72% 0.12 315);
+  --violet-soft: oklch(72% 0.12 315 / 0.16);
+
+  --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.38);
+  --shadow-md: 0 8px 24px -8px oklch(0% 0 0 / 0.54);
+  --shadow-lg: 0 24px 60px -16px oklch(0% 0 0 / 0.7);
+}
+
+[data-theme-style="aurora"] {
+  --bg: oklch(16% 0.018 190);
+  --bg-2: oklch(18.5% 0.02 190);
+  --panel: oklch(21% 0.022 190);
+  --panel-2: oklch(24.5% 0.024 190);
+  --card: oklch(23% 0.023 190);
+  --card-hover: oklch(27% 0.026 190);
+  --border: oklch(32% 0.028 190);
+  --border-strong: oklch(41% 0.033 190);
+  --fg: oklch(94% 0.012 185);
+  --fg-2: oklch(80% 0.018 185);
+  --muted: oklch(63% 0.02 185);
+  --muted-2: oklch(50% 0.02 185);
+
+  --accent: oklch(72% 0.13 175);
+  --accent-soft: oklch(72% 0.13 175 / 0.16);
+  --accent-strong: oklch(78% 0.14 170);
+
+  --success: oklch(73% 0.14 145);
+  --success-soft: oklch(73% 0.14 145 / 0.14);
+  --warning: oklch(79% 0.13 85);
+  --warning-soft: oklch(79% 0.13 85 / 0.16);
+  --danger: oklch(67% 0.17 25);
+  --danger-soft: oklch(67% 0.17 25 / 0.16);
+  --violet: oklch(72% 0.12 250);
+  --violet-soft: oklch(72% 0.12 250 / 0.16);
+
+  --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.38);
+  --shadow-md: 0 8px 24px -8px oklch(0% 0 0 / 0.52);
+  --shadow-lg: 0 24px 60px -16px oklch(0% 0 0 / 0.68);
+}
+
 [data-theme="light"],
 [data-theme-style="sandstone"] {
   --bg: oklch(97.5% 0.008 80);
@@ -150,6 +214,70 @@ body[data-drag-over="1"]::after {
   --shadow-sm: 0 1px 0 oklch(20% 0.01 260 / 0.04);
   --shadow-md: 0 8px 24px -12px oklch(20% 0.01 260 / 0.1);
   --shadow-lg: 0 24px 60px -22px oklch(20% 0.01 260 / 0.18);
+}
+
+[data-theme-style="linen"] {
+  --bg: oklch(98% 0.018 78);
+  --bg-2: oklch(95.5% 0.022 76);
+  --panel: oklch(99% 0.012 78);
+  --panel-2: oklch(93.5% 0.026 75);
+  --card: oklch(99.2% 0.01 78);
+  --card-hover: oklch(96% 0.018 76);
+  --border: oklch(87% 0.028 72);
+  --border-strong: oklch(76% 0.036 68);
+  --fg: oklch(22% 0.018 45);
+  --fg-2: oklch(36% 0.018 45);
+  --muted: oklch(53% 0.016 50);
+  --muted-2: oklch(67% 0.014 58);
+
+  --accent: oklch(57% 0.18 34);
+  --accent-soft: oklch(57% 0.18 34 / 0.1);
+  --accent-strong: oklch(51% 0.2 32);
+
+  --success: oklch(47% 0.13 150);
+  --success-soft: oklch(47% 0.13 150 / 0.1);
+  --warning: oklch(57% 0.14 72);
+  --warning-soft: oklch(57% 0.14 72 / 0.12);
+  --danger: oklch(53% 0.2 22);
+  --danger-soft: oklch(53% 0.2 22 / 0.1);
+  --violet: oklch(55% 0.13 315);
+  --violet-soft: oklch(55% 0.13 315 / 0.1);
+
+  --shadow-sm: 0 1px 0 oklch(30% 0.05 50 / 0.05);
+  --shadow-md: 0 8px 24px -10px oklch(30% 0.05 50 / 0.13);
+  --shadow-lg: 0 24px 60px -20px oklch(30% 0.05 50 / 0.2);
+}
+
+[data-theme-style="glacier"] {
+  --bg: oklch(98.2% 0.01 235);
+  --bg-2: oklch(95.8% 0.012 235);
+  --panel: oklch(99.6% 0.004 235);
+  --panel-2: oklch(94.5% 0.014 235);
+  --card: oklch(100% 0 0);
+  --card-hover: oklch(96.6% 0.012 235);
+  --border: oklch(88% 0.018 235);
+  --border-strong: oklch(78% 0.026 235);
+  --fg: oklch(23% 0.018 255);
+  --fg-2: oklch(37% 0.018 255);
+  --muted: oklch(54% 0.016 250);
+  --muted-2: oklch(68% 0.014 245);
+
+  --accent: oklch(56% 0.13 215);
+  --accent-soft: oklch(56% 0.13 215 / 0.1);
+  --accent-strong: oklch(50% 0.15 215);
+
+  --success: oklch(48% 0.13 155);
+  --success-soft: oklch(48% 0.13 155 / 0.1);
+  --warning: oklch(58% 0.14 78);
+  --warning-soft: oklch(58% 0.14 78 / 0.12);
+  --danger: oklch(54% 0.2 22);
+  --danger-soft: oklch(54% 0.2 22 / 0.1);
+  --violet: oklch(56% 0.12 285);
+  --violet-soft: oklch(56% 0.12 285 / 0.1);
+
+  --shadow-sm: 0 1px 0 oklch(20% 0.02 240 / 0.04);
+  --shadow-md: 0 8px 24px -12px oklch(20% 0.02 240 / 0.1);
+  --shadow-lg: 0 24px 60px -22px oklch(20% 0.02 240 / 0.18);
 }
 
 [data-theme-style="midnight"] {
@@ -3025,6 +3153,9 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   flex-direction: column;
   z-index: 50;
 }
+.popup.at-popup {
+  width: min(720px, calc(100vw - 32px));
+}
 .popup .ph {
   padding: 8px 12px;
   font-family: inherit;
@@ -3046,7 +3177,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .popup-list {
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 4px;
+}
+.at-popup-list .popup-item {
+  min-width: 0;
 }
 .popup-item {
   display: grid;
@@ -3075,11 +3210,19 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .popup-item .nm {
   font-weight: 500;
   color: var(--fg);
+  min-width: 0;
+  overflow: hidden;
 }
 .popup-item .nm .cmd {
   font-family: inherit;
   color: var(--accent);
   margin-right: 6px;
+}
+.popup-item .mention-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .popup-item .desc {
   display: block;
@@ -4457,6 +4600,30 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 .theme-pop-item[data-style="graphite"] .style-swatches span:nth-child(3) {
   background: oklch(68% 0.16 38);
 }
+.style-card[data-style="ember"] .style-swatches span:nth-child(1),
+.theme-pop-item[data-style="ember"] .style-swatches span:nth-child(1) {
+  background: oklch(15% 0.018 38);
+}
+.style-card[data-style="ember"] .style-swatches span:nth-child(2),
+.theme-pop-item[data-style="ember"] .style-swatches span:nth-child(2) {
+  background: oklch(23.5% 0.02 38);
+}
+.style-card[data-style="ember"] .style-swatches span:nth-child(3),
+.theme-pop-item[data-style="ember"] .style-swatches span:nth-child(3) {
+  background: oklch(70% 0.18 38);
+}
+.style-card[data-style="aurora"] .style-swatches span:nth-child(1),
+.theme-pop-item[data-style="aurora"] .style-swatches span:nth-child(1) {
+  background: oklch(16% 0.018 190);
+}
+.style-card[data-style="aurora"] .style-swatches span:nth-child(2),
+.theme-pop-item[data-style="aurora"] .style-swatches span:nth-child(2) {
+  background: oklch(24.5% 0.024 190);
+}
+.style-card[data-style="aurora"] .style-swatches span:nth-child(3),
+.theme-pop-item[data-style="aurora"] .style-swatches span:nth-child(3) {
+  background: oklch(72% 0.13 175);
+}
 .style-card[data-style="sandstone"] .style-swatches span:nth-child(1),
 .theme-pop-item[data-style="sandstone"] .style-swatches span:nth-child(1) {
   background: oklch(97.5% 0.008 80);
@@ -4480,6 +4647,30 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 .style-card[data-style="porcelain"] .style-swatches span:nth-child(3),
 .theme-pop-item[data-style="porcelain"] .style-swatches span:nth-child(3) {
   background: oklch(56% 0.12 285);
+}
+.style-card[data-style="linen"] .style-swatches span:nth-child(1),
+.theme-pop-item[data-style="linen"] .style-swatches span:nth-child(1) {
+  background: oklch(98% 0.018 78);
+}
+.style-card[data-style="linen"] .style-swatches span:nth-child(2),
+.theme-pop-item[data-style="linen"] .style-swatches span:nth-child(2) {
+  background: oklch(93.5% 0.026 75);
+}
+.style-card[data-style="linen"] .style-swatches span:nth-child(3),
+.theme-pop-item[data-style="linen"] .style-swatches span:nth-child(3) {
+  background: oklch(57% 0.18 34);
+}
+.style-card[data-style="glacier"] .style-swatches span:nth-child(1),
+.theme-pop-item[data-style="glacier"] .style-swatches span:nth-child(1) {
+  background: oklch(98.2% 0.01 235);
+}
+.style-card[data-style="glacier"] .style-swatches span:nth-child(2),
+.theme-pop-item[data-style="glacier"] .style-swatches span:nth-child(2) {
+  background: oklch(94.5% 0.014 235);
+}
+.style-card[data-style="glacier"] .style-swatches span:nth-child(3),
+.theme-pop-item[data-style="glacier"] .style-swatches span:nth-child(3) {
+  background: oklch(56% 0.13 215);
 }
 .style-card[data-style="midnight"] .style-swatches span:nth-child(1),
 .theme-pop-item[data-style="midnight"] .style-swatches span:nth-child(1) {

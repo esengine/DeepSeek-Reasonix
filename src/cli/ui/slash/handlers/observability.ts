@@ -1,7 +1,9 @@
 import { release } from "node:os";
 import { loadRateLimit, loadTheme, resolveThemePreference } from "@/config.js";
 import { getLanguage, t } from "@/i18n/index.js";
-import { DEEPSEEK_CONTEXT_TOKENS, DEFAULT_CONTEXT_TOKENS, pricingFor } from "@/telemetry/stats.js";
+import { loadSessionMeta } from "@/memory/session.js";
+import { type CacheDiagnosticEntry, renderCacheMissReport } from "@/telemetry/cache-diagnostics.js";
+import { pricingFor, resolveContextTokens } from "@/telemetry/stats.js";
 import { countTokensBounded } from "@/tokenizer.js";
 import { VERSION } from "@/version.js";
 import { writeClipboard } from "../../clipboard.js";
@@ -29,7 +31,7 @@ const context: SlashHandler = (_args, loop) => {
 };
 
 const status: SlashHandler = (_args, loop, ctx) => {
-  const ctxMax = DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS;
+  const ctxMax = resolveContextTokens(loop.model);
   const summary = loop.stats.summary();
   const lastPromptTokens = summary.lastPromptTokens;
   const ctxPct = ctxMax > 0 ? Math.round((lastPromptTokens / ctxMax) * 100) : 0;
@@ -167,7 +169,7 @@ const cost: SlashHandler = (args, loop, ctx) => {
     return { info: t("handlers.observability.costNeedsTui") };
   }
   const summary = loop.stats.summary();
-  const ctxMax = DEEPSEEK_CONTEXT_TOKENS[loop.model] ?? DEFAULT_CONTEXT_TOKENS;
+  const ctxMax = resolveContextTokens(loop.model);
   ctx.postUsage({
     turn: turn.turn,
     promptTokens: turn.usage.promptTokens,
@@ -184,6 +186,21 @@ const cost: SlashHandler = (args, loop, ctx) => {
   });
   return {};
 };
+
+const cacheMissReport: SlashHandler = (_args, loop) => {
+  const persisted = loop.sessionName ? loadSessionMeta(loop.sessionName).cacheDiagnostics : null;
+  const entries = persisted && persisted.length > 0 ? persisted : buildLiveCacheDiagnostics(loop);
+  return { info: renderCacheMissReport(entries) };
+};
+
+function buildLiveCacheDiagnostics(
+  loop: import("@/loop.js").CacheFirstLoop,
+): CacheDiagnosticEntry[] {
+  // Replay the per-turn cache diagnostics that were stored at turn-completion
+  // time, so each historical turn carries the prefix hashes that were actually
+  // in effect (rather than recomputing everything from the current prefix).
+  return [...loop.stats.cacheDiagnostics] as CacheDiagnosticEntry[];
+}
 
 function estimateCost(userText: string, loop: import("@/loop.js").CacheFirstLoop) {
   const pricing = pricingFor(loop.model);
@@ -283,5 +300,6 @@ export const handlers: Record<string, SlashHandler> = {
   status,
   compact,
   cost,
+  "cache-miss-report": cacheMissReport,
   feedback,
 };
