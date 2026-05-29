@@ -39,8 +39,12 @@ function parseMarkdownTableRow(line: string): string[] {
     .map((cell) => cell.trim());
 }
 
+function stripMarkdownEmphasis(text: string): string {
+  return text.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/__([^_\n]+)__/g, "$1");
+}
+
 function formatFeishuTable(lines: string[], start: number): { text: string; next: number } {
-  const headers = parseMarkdownTableRow(lines[start] ?? "");
+  const headers = parseMarkdownTableRow(lines[start] ?? "").map(stripMarkdownEmphasis);
   let index = start + 2;
   const rows: string[] = [];
   while (index < lines.length) {
@@ -52,7 +56,7 @@ function formatFeishuTable(lines: string[], start: number): { text: string; next
       const header = headers[cellIndex] ?? "";
       const cell = cells[cellIndex] ?? "";
       if (!header && !cell) continue;
-      rows.push(`- **${header}**：${cell}`);
+      rows.push(`- **${header}:** ${cell}`);
     }
     rows.push("");
     index++;
@@ -70,7 +74,7 @@ export function formatFeishuMarkdownReply(text: string): string {
 
   const flushFence = () => {
     if (!inFence) return;
-    const label = fenceLang ? `**代码（${fenceLang}）**` : "**代码**";
+    const label = fenceLang ? `**Code (${fenceLang})**` : "**Code**";
     formatted.push(label);
     if (fenceLines.length > 0) {
       formatted.push(fenceLines.join("\n"));
@@ -112,12 +116,12 @@ export function formatFeishuMarkdownReply(text: string): string {
 
     const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
-      formatted.push(`**${heading[2]}**`);
+      formatted.push(`**${stripMarkdownEmphasis(heading[2] ?? "")}**`);
       continue;
     }
 
     if (/^\s*---+\s*$/.test(line)) {
-      formatted.push("────────");
+      formatted.push("--------");
       continue;
     }
 

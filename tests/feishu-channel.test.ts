@@ -14,12 +14,12 @@ describe("FeishuChannel", () => {
 
   it("converts headings, tables, separators, and code fences into Feishu-friendly text", () => {
     expect(
-      formatFeishuMarkdownReply(`### 测试标题
+      formatFeishuMarkdownReply(`### Test Heading
 
-| 项目 | 值 |
+| Project | Value |
 |---|---|
-| 平台 | Feishu |
-| 状态 | 测试中 |
+| Platform | Feishu |
+| Status | Testing |
 
 ---
 
@@ -27,17 +27,17 @@ describe("FeishuChannel", () => {
 def hello():
   print("Hello, World!")
 \`\`\``),
-    ).toBe(`**测试标题**
+    ).toBe(`**Test Heading**
 
-- **项目**：平台
-- **值**：Feishu
+- **Project:** Platform
+- **Value:** Feishu
 
-- **项目**：状态
-- **值**：测试中
+- **Project:** Status
+- **Value:** Testing
 
-────────
+--------
 
-**代码（python）**
+**Code (python)**
 def hello():
   print("Hello, World!")`);
   });
@@ -65,11 +65,11 @@ def hello():
     channel.bot = bot;
     channel.chatId = "oc_chat";
 
-    await channel.sendResponse("### 标题\n\n```python\nprint('hi')\n```");
+    await channel.sendResponse("### Heading\n\n```python\nprint('hi')\n```");
 
     expect(bot.sendPrivateMessage).toHaveBeenCalledWith(
       "oc_chat",
-      "**标题**\n\n**代码（python）**\nprint('hi')",
+      "**Heading**\n\n**Code (python)**\nprint('hi')",
       true,
     );
   });
@@ -93,10 +93,10 @@ def hello():
     channel.bot = bot;
     channel.chatId = "oc_chat";
 
-    await channel.sendResponse("### 标题");
+    await channel.sendResponse("### Heading");
 
-    expect(bot.sendPrivateMessage).toHaveBeenNthCalledWith(1, "oc_chat", "**标题**", true);
-    expect(bot.sendPrivateMessage).toHaveBeenNthCalledWith(2, "oc_chat", "**标题**", false);
+    expect(bot.sendPrivateMessage).toHaveBeenNthCalledWith(1, "oc_chat", "**Heading**", true);
+    expect(bot.sendPrivateMessage).toHaveBeenNthCalledWith(2, "oc_chat", "**Heading**", false);
     expect(onInfo).toHaveBeenCalledWith(
       expect.stringContaining("Feishu markdown delivery disabled after first failure"),
     );
