@@ -1,5 +1,14 @@
 export type TurnInterruptKey = "escape" | "ctrl-c";
-export type TurnInterruptOutcome = "aborted" | "already-aborted" | "stopped-loop" | "idle" | "quit";
+export type TurnInterruptOutcome =
+  | "aborted"
+  | "already-aborted"
+  | "stopped-loop"
+  | "idle"
+  | "quit-armed"
+  | "quit";
+
+/** 1.5-second window for double-Ctrl+C confirmation. */
+const DOUBLE_PRESS_WINDOW_MS = 1500;
 
 export interface TurnInterruptController {
   turnActiveRef: { readonly current: boolean };
@@ -9,6 +18,8 @@ export interface TurnInterruptController {
   stopLoop: () => void;
   loop: { abort: () => void };
   quitProcess: () => void;
+  /** Timestamp of the last Ctrl+C press while idle; null if none or expired. */
+  lastCtrlCAt: { current: number | null };
 }
 
 export function handleTurnInterrupt(
@@ -21,6 +32,7 @@ export function handleTurnInterrupt(
     stopLoop,
     loop,
     quitProcess,
+    lastCtrlCAt,
   }: TurnInterruptController,
 ): TurnInterruptOutcome {
   if (turnActiveRef.current) {
@@ -38,8 +50,13 @@ export function handleTurnInterrupt(
   }
 
   if (key === "ctrl-c") {
-    quitProcess();
-    return "quit";
+    const now = Date.now();
+    if (lastCtrlCAt.current !== null && now - lastCtrlCAt.current < DOUBLE_PRESS_WINDOW_MS) {
+      quitProcess();
+      return "quit";
+    }
+    lastCtrlCAt.current = now;
+    return "quit-armed";
   }
 
   return "idle";

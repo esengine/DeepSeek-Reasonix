@@ -1408,6 +1408,7 @@ export const zhCN: TranslationSchema = {
     hintAbort: "中止",
     hintQuit: "退出",
     abortedHint: "用户已中止本轮 · 再按 Esc 清除 · ⏎ 继续提问",
+    ctrlCQuitHint: "再按一次 Ctrl+C 退出",
     editorNoRawMode: "外部编辑器不可用 — 当前终端不支持 raw-mode 切换",
     editorFailed: "外部编辑器：",
     editorMissing:

@@ -491,6 +491,7 @@ export interface TranslationSchema {
     hintAbort: string;
     hintQuit: string;
     abortedHint: string;
+    ctrlCQuitHint: string;
     editorNoRawMode: string;
     editorFailed: string;
     editorMissing: string;

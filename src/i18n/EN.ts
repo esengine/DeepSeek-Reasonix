@@ -1494,6 +1494,7 @@ export const EN: TranslationSchema = {
     hintAbort: "abort",
     hintQuit: "quit",
     abortedHint: "turn aborted by user \u00b7 esc again to clear \u00b7 \u23ce to ask a follow-up",
+    ctrlCQuitHint: "Press Ctrl+C again to quit",
     editorNoRawMode:
       "external editor unavailable \u2014 stdin doesn't support raw-mode toggling on this terminal",
     editorFailed: "external editor:",
