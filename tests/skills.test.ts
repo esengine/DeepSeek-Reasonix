@@ -439,7 +439,9 @@ describe("SkillStore", () => {
     });
   });
 
-  it("loads skills from symlinked directories (#2104)", () => {
+  // Skipped on Windows — symlinkSync throws EPERM there without Developer Mode / admin,
+  // unrelated to the readEntry behavior under test.
+  it.skipIf(process.platform === "win32")("loads skills from symlinked directories (#2104)", () => {
     // Create a real skill directory outside the skills root
     const realDir = mkdtempSync(join(tmpdir(), "reasonix-skills-real-"));
     try {
@@ -464,7 +466,8 @@ describe("SkillStore", () => {
     }
   });
 
-  it("skips broken symlinks gracefully", () => {
+  // Skipped on Windows — symlinkSync to a nonexistent target throws EPERM without admin.
+  it.skipIf(process.platform === "win32")("skips broken symlinks gracefully", () => {
     const skillsDir = join(home, ".reasonix", "skills");
     mkdirSync(skillsDir, { recursive: true });
     symlinkSync(join(tmpdir(), `nonexistent-target-${Date.now()}`), join(skillsDir, "broken"));
