@@ -51,6 +51,7 @@ export class WorkflowRunStore {
       ...parsed,
       status: "failed",
       error: "workflow interrupted before completion",
+      errorKind: "internal",
       updatedAt: Date.now(),
       agents: parsed.agents.map((agent) =>
         agent.status === "running"

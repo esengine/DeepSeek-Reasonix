@@ -125,7 +125,7 @@ function formatRunDetail(run: WorkflowRunSnapshot): string {
     run.description,
     `agents=${run.agentCount} duration=${run.durationMs ?? 0}ms`,
     agents,
-    run.error ? `error: ${run.error}` : "",
+    run.error ? `error${run.errorKind ? ` (${run.errorKind})` : ""}: ${run.error}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -139,7 +139,7 @@ function formatRunContext(run: WorkflowRunSnapshot): string {
     `Status: ${run.status}`,
     `Mode: ${run.mode}`,
     `Agents: ${run.agentCount}`,
-    run.error ? `Error: ${run.error}` : "",
+    run.error ? `Error${run.errorKind ? ` (${run.errorKind})` : ""}: ${run.error}` : "",
     run.phases.length > 0
       ? `Phases:\n${run.phases.map((phase) => `- ${phase.title} agents=${phase.agentCount}`).join("\n")}`
       : "",

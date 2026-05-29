@@ -19,6 +19,7 @@ export type WorkflowToolMode = "read_only" | "full";
 export type WorkflowModelPolicy = "inherit" | "flash" | "pro" | "mixed" | "auto";
 export type WorkflowAgentType = "explore" | "verify" | "synthesis";
 export type WorkflowRunStatus = "running" | "completed" | "failed" | "aborted";
+export type WorkflowErrorKind = "script" | "internal" | "aborted";
 export type WorkflowSaveTarget = "project" | "user";
 
 export interface WorkflowAgentOptions {
@@ -138,6 +139,7 @@ export interface WorkflowRunResult<T = unknown> {
   meta: WorkflowMeta;
   result?: T;
   error?: string;
+  errorKind?: WorkflowErrorKind;
   logs: string[];
   phases: string[];
   agentCount: number;
@@ -161,6 +163,7 @@ export interface WorkflowRunSnapshot<T = unknown> {
   logs: string[];
   result?: T;
   error?: string;
+  errorKind?: WorkflowErrorKind;
   agentCount: number;
   usage?: Usage;
   costUsd?: number;

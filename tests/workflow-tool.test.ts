@@ -168,6 +168,40 @@ describe("registerWorkflowTool", () => {
     expect(parsed.error).toMatch(/must call agent/i);
   });
 
+  it("returns error_kind for script failures", async () => {
+    const registry = new ToolRegistry();
+    registerWorkflowTool(registry, { runner: new StaticRunner() });
+
+    const out = await registry.dispatch("workflow", {
+      script: `export const meta = { name: "bad_script", description: "Bad script" }
+return await parallel([() => missingFunction()])
+`,
+    });
+    const parsed = JSON.parse(out);
+
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toMatch(/missingFunction/);
+    expect(parsed.error_kind).toBe("script");
+  });
+
+  it("returns error_kind for internal runner failures", async () => {
+    const registry = new ToolRegistry();
+    registerWorkflowTool(registry, {
+      runner: {
+        async run() {
+          throw new Error("runner exploded");
+        },
+      },
+    });
+
+    const out = await registry.dispatch("workflow", { script });
+    const parsed = JSON.parse(out);
+
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toMatch(/runner exploded/);
+    expect(parsed.error_kind).toBe("internal");
+  });
+
   it("reports tool_mode full as mutating for plan-mode gating", async () => {
     const registry = new ToolRegistry();
     registerWorkflowTool(registry, { runner: new StaticRunner() });

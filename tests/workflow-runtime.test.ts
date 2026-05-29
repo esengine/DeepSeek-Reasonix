@@ -178,6 +178,62 @@ return await parallel([agent("already started", { label: "bad" })])
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/parallel\(\) expects an array of functions/);
+    expect(result.errorKind).toBe("script");
+  });
+
+  it("fails the workflow when an agent runner throws", async () => {
+    const runner: WorkflowAgentRunner = {
+      async run() {
+        throw new Error("runner exploded");
+      },
+    };
+
+    const result = await runWorkflow(
+      `${header}
+return await agent("inspect", { label: "boom" })
+`,
+      { runner },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/runner exploded/);
+    expect(result.errorKind).toBe("internal");
+  });
+
+  it("fails the workflow when a parallel thunk throws", async () => {
+    const runner = new RecordingRunner();
+    const result = await runWorkflow(
+      `${header}
+return await parallel([
+  () => agent("ok", { label: "ok" }),
+  () => missingFunction(),
+])
+`,
+      { runner },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/missingFunction/);
+    expect(result.errorKind).toBe("script");
+  });
+
+  it("classifies lifecycle hook failures as internal errors", async () => {
+    const runner = new RecordingRunner();
+    const result = await runWorkflow(
+      `${header}
+return await agent("inspect", { label: "hook" })
+`,
+      {
+        runner,
+        onAgentEnd: () => {
+          throw new Error("manager invariant broke");
+        },
+      },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/onAgentEnd hook failed.*manager invariant broke/);
+    expect(result.errorKind).toBe("internal");
   });
 
   it("runs pipeline stages sequentially per item", async () => {
@@ -202,6 +258,23 @@ return values
       "result:stage1 a:stage2:a",
       "result:stage1 b:stage2:b",
     ]);
+  });
+
+  it("fails the workflow when a pipeline stage throws", async () => {
+    const runner = new RecordingRunner();
+    const result = await runWorkflow(
+      `${header}
+return await pipeline(
+  ["a"],
+  () => missingStage(),
+)
+`,
+      { runner },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/missingStage/);
+    expect(result.errorKind).toBe("script");
   });
 
   it("supports validate-only without executing the body", async () => {
@@ -250,6 +323,7 @@ return true
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/maxAgents/i);
+    expect(result.errorKind).toBe("script");
     expect(runner.calls).toHaveLength(1);
   });
 });

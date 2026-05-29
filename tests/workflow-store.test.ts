@@ -69,6 +69,7 @@ describe("WorkflowRunStore", () => {
       id: "wf_running",
       status: "failed",
       error: "workflow interrupted before completion",
+      errorKind: "internal",
     });
     expect(loaded[0]?.agents[0]).toMatchObject({ status: "completed" });
   });

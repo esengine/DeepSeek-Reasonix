@@ -115,6 +115,7 @@ export class WorkflowRunManager {
       const now = Date.now();
       run.snapshot.status = "aborted";
       run.snapshot.error = "workflow aborted";
+      run.snapshot.errorKind = "aborted";
       run.snapshot.updatedAt = now;
       run.snapshot.durationMs = now - run.snapshot.startedAt;
       for (const agent of run.snapshot.agents) {
@@ -196,6 +197,7 @@ export class WorkflowRunManager {
       const now = Date.now();
       run.snapshot.result = result.result;
       run.snapshot.error = result.error;
+      run.snapshot.errorKind = result.errorKind;
       run.snapshot.agentCount = result.agentCount;
       run.snapshot.durationMs = now - run.snapshot.startedAt;
       run.snapshot.updatedAt = now;
@@ -209,8 +211,10 @@ export class WorkflowRunManager {
       const now = Date.now();
       run.snapshot.status = run.controller.signal.aborted ? "aborted" : "failed";
       run.snapshot.error = errorMessage(error);
+      run.snapshot.errorKind = run.controller.signal.aborted ? "aborted" : "internal";
       run.snapshot.durationMs = now - run.snapshot.startedAt;
       run.snapshot.updatedAt = now;
+      this.finishRunningAgents(run, now, run.snapshot.status, run.snapshot.error);
       this.persist(run);
       this.emitTerminalEvent(id, run.snapshot, false);
     }
@@ -280,7 +284,10 @@ export class WorkflowRunManager {
     const agent = [...run.snapshot.agents]
       .reverse()
       .find((item) => item.label === label && item.status === "running");
-    if (!agent) return;
+    if (!agent) {
+      if (run.snapshot.status !== "running") return;
+      throw new Error(`no running workflow agent for label "${label}" in ${runId}`);
+    }
     const now = Date.now();
     agent.status = result?.ok ? "completed" : "failed";
     agent.completedAt = now;
@@ -349,6 +356,21 @@ export class WorkflowRunManager {
 
   private persist(run: ManagedRun): void {
     this.store?.save(run.snapshot);
+  }
+
+  private finishRunningAgents(
+    run: ManagedRun,
+    now: number,
+    status: Extract<WorkflowRunStatus, "failed" | "aborted">,
+    error: string | undefined,
+  ): void {
+    for (const agent of run.snapshot.agents) {
+      if (agent.status !== "running") continue;
+      agent.status = status;
+      agent.completedAt = now;
+      agent.durationMs = now - agent.startedAt;
+      agent.error = error;
+    }
   }
 }
 

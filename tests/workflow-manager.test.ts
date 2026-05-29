@@ -61,6 +61,7 @@ describe("WorkflowRunManager", () => {
     const done = await manager.waitForRun(started.id);
     expect(done.status).toBe("aborted");
     expect(done.error).toMatch(/aborted/i);
+    expect(done.errorKind).toBe("aborted");
   });
 
   it("aggregates usage and cost from raw subagent results when available", async () => {
@@ -93,5 +94,73 @@ describe("WorkflowRunManager", () => {
     expect(done.usage?.promptCacheHitTokens).toBe(16);
     expect(done.usage?.promptCacheMissTokens).toBe(4);
     expect(done.costUsd).toBe(0.002);
+  });
+
+  it("marks running agents failed when the runner throws", async () => {
+    const runner: WorkflowAgentRunner = {
+      async run() {
+        throw new Error("runner exploded");
+      },
+    };
+    const manager = new WorkflowRunManager({ runner, rootDir: process.cwd() });
+
+    const started = manager.startRun({ script, mode: "run" });
+    const done = await manager.waitForRun(started.id);
+
+    expect(done.status).toBe("failed");
+    expect(done.error).toMatch(/runner exploded/);
+    expect(done.errorKind).toBe("internal");
+    expect(done.agents).toHaveLength(2);
+    expect(done.agents.every((agent) => agent.status === "failed")).toBe(true);
+  });
+
+  it("marks script failures separately from internal failures", async () => {
+    const manager = new WorkflowRunManager({
+      runner: {
+        async run() {
+          return { ok: true, output: "ok" };
+        },
+      },
+      rootDir: process.cwd(),
+    });
+    const started = manager.startRun({
+      script: `export const meta = { name: "script_failure", description: "Script failure" }
+return await parallel([() => missingFunction()])
+`,
+      mode: "run",
+    });
+
+    const done = await manager.waitForRun(started.id);
+
+    expect(done.status).toBe("failed");
+    expect(done.error).toMatch(/missingFunction/);
+    expect(done.errorKind).toBe("script");
+  });
+
+  it("throws when an agent end event has no matching running agent", async () => {
+    const manager = new WorkflowRunManager({ rootDir: process.cwd() });
+    const run = {
+      snapshot: {
+        id: "wf_invariant",
+        name: "invariant",
+        description: "Invariant",
+        status: "running",
+        mode: "run",
+        startedAt: Date.now(),
+        updatedAt: Date.now(),
+        phases: [],
+        agents: [],
+        logs: [],
+        agentCount: 0,
+        script,
+      },
+    };
+    const internal = manager as unknown as {
+      recordAgentEnd(run: unknown, runId: string, label: string, result: null): void;
+    };
+
+    expect(() => internal.recordAgentEnd(run, "wf_invariant", "missing", null)).toThrow(
+      /no running workflow agent/,
+    );
   });
 });

@@ -4,6 +4,7 @@ import type {
   WorkflowAgentOptions,
   WorkflowAgentResult,
   WorkflowAgentRunner,
+  WorkflowErrorKind,
   WorkflowModelPolicy,
   WorkflowRunOptions,
   WorkflowRunResult,
@@ -42,6 +43,15 @@ const HARD_CONCURRENCY_CAP = 16;
 const DEFAULT_MAX_AGENTS = 8;
 const HARD_MAX_AGENTS = 32;
 const SCRIPT_TIMEOUT_MS = 10_000;
+
+class WorkflowInternalError extends Error {
+  readonly workflowErrorKind = "internal" as const;
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "WorkflowInternalError";
+  }
+}
 
 export async function runWorkflow<T = unknown>(
   script: string,
@@ -91,7 +101,7 @@ export async function runWorkflow<T = unknown>(
   const log = (message: unknown): void => {
     const text = String(message);
     state.logs.push(text);
-    options.onLog?.(text);
+    callWorkflowHook("onLog", () => options.onLog?.(text));
   };
 
   const phase = (title: unknown, phaseOptions: PhaseInputOptions = {}): void => {
@@ -106,7 +116,7 @@ export async function runWorkflow<T = unknown>(
     state.currentPhase = text;
     state.currentPhaseModel = stringOption(normalized.model) ?? phaseModels.get(text);
     if (!state.phases.includes(text)) state.phases.push(text);
-    options.onPhase?.(text);
+    callWorkflowHook("onPhase", () => options.onPhase?.(text));
   };
 
   const agent = async (
@@ -154,25 +164,36 @@ export async function runWorkflow<T = unknown>(
     }
 
     return limiter(async () => {
-      options.onAgentStart?.({ label, phase: phaseName, prompt });
+      callWorkflowHook("onAgentStart", () =>
+        options.onAgentStart?.({ label, phase: phaseName, prompt }),
+      );
+      throwIfAborted();
+      let result: WorkflowAgentResult;
       try {
-        throwIfAborted();
-        const result = await runner.run(prompt, opts);
-        throwIfAborted();
-        state.spent += estimateTokens(result.output);
-        options.onAgentEnd?.({ label, phase: phaseName, result });
-        if (!result.ok) {
-          log(`agent ${label} failed: ${result.error ?? "unknown error"}`);
-          return null;
-        }
-        return result.output;
+        result = await runner.run(prompt, opts);
       } catch (error) {
-        if (options.signal?.aborted) throw error;
-        const message = error instanceof Error ? error.message : String(error);
-        log(`agent ${label} failed: ${message}`);
-        options.onAgentEnd?.({ label, phase: phaseName, result: null });
+        callWorkflowHook("onAgentEnd", () =>
+          options.onAgentEnd?.({
+            label,
+            phase: phaseName,
+            result: { ok: false, output: "", error: errorMessage(error) },
+          }),
+        );
+        if (options.signal?.aborted) throw new Error("workflow aborted");
+        throw new WorkflowInternalError(`workflow agent runner failed: ${errorMessage(error)}`, {
+          cause: error,
+        });
+      }
+      throwIfAborted();
+      state.spent += estimateTokens(result.output);
+      callWorkflowHook("onAgentEnd", () =>
+        options.onAgentEnd?.({ label, phase: phaseName, result }),
+      );
+      if (!result.ok) {
+        log(`agent ${label} failed: ${result.error ?? "unknown error"}`);
         return null;
       }
+      return result.output;
     });
   };
 
@@ -183,17 +204,7 @@ export async function runWorkflow<T = unknown>(
         "parallel() expects an array of functions, not promises. Wrap each call: () => agent(...)",
       );
     }
-    return Promise.all(
-      thunks.map(async (thunk, index) => {
-        try {
-          return await (thunk as () => unknown)();
-        } catch (error) {
-          if (options.signal?.aborted) throw error;
-          log(`parallel[${index}] failed: ${errorMessage(error)}`);
-          return null;
-        }
-      }),
-    );
+    return Promise.all(thunks.map(async (thunk) => (thunk as () => unknown)()));
   };
 
   const pipeline = async (
@@ -210,15 +221,9 @@ export async function runWorkflow<T = unknown>(
       items.map(async (item, index) => {
         let value: unknown = item;
         for (const stage of stages) {
-          try {
-            throwIfAborted();
-            value = await stage(value, item, index);
-            throwIfAborted();
-          } catch (error) {
-            if (options.signal?.aborted) throw error;
-            log(`pipeline[${index}] failed: ${errorMessage(error)}`);
-            return null;
-          }
+          throwIfAborted();
+          value = await stage(value, item, index);
+          throwIfAborted();
         }
         return value;
       }),
@@ -326,6 +331,7 @@ export async function runWorkflow<T = unknown>(
       success: false,
       meta: parsed.meta,
       error: errorMessage(error),
+      errorKind: workflowErrorKind(error),
       logs: state.logs,
       phases: state.phases,
       agentCount: state.agentCount,
@@ -347,9 +353,19 @@ function dryRunRunner(state: RuntimeState): WorkflowAgentRunner {
 function missingRunner(): WorkflowAgentRunner {
   return {
     async run() {
-      throw new Error("workflow runner is required for mode=run");
+      throw new WorkflowInternalError("workflow runner is required for mode=run");
     },
   };
+}
+
+function callWorkflowHook(name: string, callback: () => void): void {
+  try {
+    callback();
+  } catch (error) {
+    throw new WorkflowInternalError(`workflow ${name} hook failed: ${errorMessage(error)}`, {
+      cause: error,
+    });
+  }
 }
 
 function normalizeAgentInput(
@@ -480,6 +496,21 @@ function estimateTokens(value: unknown): number {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function workflowErrorKind(error: unknown): WorkflowErrorKind {
+  if (isWorkflowInternalError(error)) return "internal";
+  if (errorMessage(error).toLowerCase().includes("aborted")) return "aborted";
+  return "script";
+}
+
+function isWorkflowInternalError(error: unknown): error is WorkflowInternalError {
+  return (
+    error instanceof WorkflowInternalError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { workflowErrorKind?: unknown }).workflowErrorKind === "internal")
+  );
 }
 
 function safeMath(): Record<string, unknown> {

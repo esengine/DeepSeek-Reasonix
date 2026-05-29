@@ -99,13 +99,26 @@ export function registerWorkflowTool(
     fn: async (args, ctx) => {
       const script = normalizeWorkflowScript(args.script);
       if (!script) {
-        return JSON.stringify({ success: false, error: "workflow requires a non-empty script" });
+        return JSON.stringify({
+          success: false,
+          error: "workflow requires a non-empty script",
+          error_kind: "script",
+        });
       }
 
       const mode = workflowMode(args.mode);
       const toolMode = workflowToolMode(args.tool_mode);
       const modelPolicy = workflowModelPolicy(args.model_policy, opts.defaultModelPolicy);
-      const parsed = parseWorkflowScript(script);
+      let parsed: ParsedWorkflowScript;
+      try {
+        parsed = parseWorkflowScript(script);
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: errorMessage(error),
+          error_kind: "script",
+        });
+      }
       const confirmation = await confirmWorkflowRun(args, ctx, parsed, mode, toolMode);
       if (confirmation) return confirmation;
       const runner =
@@ -120,78 +133,73 @@ export function registerWorkflowTool(
             }))
           : opts.runner;
 
-      try {
-        if (args.background === true) {
-          if (!opts.manager) {
-            return JSON.stringify({
-              success: false,
-              error: "background workflow requires a WorkflowRunManager",
-            });
-          }
-          const started = opts.manager.startRun({
-            script,
-            mode,
-            args: args.args,
-            concurrency: numberOption(args.concurrency),
-            maxAgents: numberOption(args.max_agents),
-            modelPolicy,
-            tokenBudget: numberOption(args.token_budget) ?? null,
-            runner,
-          });
+      if (args.background === true) {
+        if (!opts.manager) {
           return JSON.stringify({
-            success: true,
-            run_id: started.id,
-            status: started.status,
-            meta: { name: started.name, description: started.description },
+            success: false,
+            error: "background workflow requires a WorkflowRunManager",
+            error_kind: "internal",
           });
         }
-
-        if (opts.manager && mode === "run") {
-          const started = opts.manager.startRun({
-            script,
-            mode,
-            args: args.args,
-            concurrency: numberOption(args.concurrency),
-            maxAgents: numberOption(args.max_agents),
-            modelPolicy,
-            tokenBudget: numberOption(args.token_budget) ?? null,
-            runner,
-          });
-          const abort = (): void => {
-            if (opts.manager?.getRun(started.id)?.status === "running")
-              opts.manager.stopRun(started.id);
-          };
-          ctx?.signal?.addEventListener("abort", abort, { once: true });
-          const done = await opts.manager.waitForRun(started.id);
-          ctx?.signal?.removeEventListener("abort", abort);
-          return JSON.stringify(formatWorkflowSnapshot(done));
-        }
-
-        const result = await runWorkflow(script, {
+        const started = opts.manager.startRun({
+          script,
           mode,
           args: args.args,
-          cwd: opts.rootDir,
           concurrency: numberOption(args.concurrency),
           maxAgents: numberOption(args.max_agents),
           modelPolicy,
           tokenBudget: numberOption(args.token_budget) ?? null,
-          signal: ctx?.signal,
           runner,
         });
-        if (mode !== "validate_only" && result.success && result.agentCount === 0) {
-          return JSON.stringify({
-            ...formatWorkflowResult(result),
-            success: false,
-            error: "workflow scripts must call agent() at least once",
-          });
-        }
-        return JSON.stringify(formatWorkflowResult(result));
-      } catch (error) {
         return JSON.stringify({
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
+          success: true,
+          run_id: started.id,
+          status: started.status,
+          meta: { name: started.name, description: started.description },
         });
       }
+
+      if (opts.manager && mode === "run") {
+        const started = opts.manager.startRun({
+          script,
+          mode,
+          args: args.args,
+          concurrency: numberOption(args.concurrency),
+          maxAgents: numberOption(args.max_agents),
+          modelPolicy,
+          tokenBudget: numberOption(args.token_budget) ?? null,
+          runner,
+        });
+        const abort = (): void => {
+          if (opts.manager?.getRun(started.id)?.status === "running")
+            opts.manager.stopRun(started.id);
+        };
+        ctx?.signal?.addEventListener("abort", abort, { once: true });
+        const done = await opts.manager.waitForRun(started.id);
+        ctx?.signal?.removeEventListener("abort", abort);
+        return JSON.stringify(formatWorkflowSnapshot(done));
+      }
+
+      const result = await runWorkflow(script, {
+        mode,
+        args: args.args,
+        cwd: opts.rootDir,
+        concurrency: numberOption(args.concurrency),
+        maxAgents: numberOption(args.max_agents),
+        modelPolicy,
+        tokenBudget: numberOption(args.token_budget) ?? null,
+        signal: ctx?.signal,
+        runner,
+      });
+      if (mode !== "validate_only" && result.success && result.agentCount === 0) {
+        return JSON.stringify({
+          ...formatWorkflowResult(result),
+          success: false,
+          error: "workflow scripts must call agent() at least once",
+          error_kind: "script",
+        });
+      }
+      return JSON.stringify(formatWorkflowResult(result));
     },
   });
 
@@ -277,6 +285,10 @@ function numberOption(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function formatWorkflowResult(result: WorkflowRunResult): Record<string, unknown> {
   const out: Record<string, unknown> = {
     success: result.success,
@@ -288,6 +300,7 @@ function formatWorkflowResult(result: WorkflowRunResult): Record<string, unknown
   };
   if (result.result !== undefined) out.result = result.result;
   if (result.error) out.error = result.error;
+  if (result.errorKind) out.error_kind = result.errorKind;
   if (result.plannedAgents) out.planned_agents = result.plannedAgents;
   if (result.usage) out.usage = result.usage;
   if (result.costUsd !== undefined) out.cost_usd = result.costUsd;
@@ -307,6 +320,7 @@ function formatWorkflowSnapshot(snapshot: WorkflowRunSnapshot): Record<string, u
   };
   if (snapshot.result !== undefined) out.result = snapshot.result;
   if (snapshot.error) out.error = snapshot.error;
+  if (snapshot.errorKind) out.error_kind = snapshot.errorKind;
   if (snapshot.agents.length > 0) {
     out.agents = snapshot.agents.map((agent) => ({
       id: agent.id,
