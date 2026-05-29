@@ -11,7 +11,7 @@ import {
   type RunCommandResult,
   runCommand,
 } from "./shell/exec.js";
-import { isCommandAllowed } from "./shell/parse.js";
+import { expandShellVars, isCommandAllowed } from "./shell/parse.js";
 
 export {
   BUILTIN_ALLOWLIST,
@@ -136,13 +136,37 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
         }
         // "run_once" — fall through and execute
       }
-      const result = await runCommand(cmd, {
+      // Expand ~ and $VAR so the model can write natural paths like
+      // `cat ~/.config/file` or `ls $PROJECT_DIR/src`.
+      const expandedCmd = expandShellVars(cmd);
+      // Re-run the sensitive-path check on the expanded string: `cat $HOME/.ssh/id_rsa`
+      // passes allowlist as harmless `cat`, but after expansion the path is sensitive.
+      // If the expanded form would be demoted (isCommandAllowed returns false for it),
+      // route it through the confirmation gate instead of executing silently.
+      if (!isAllowAll() && expandedCmd !== cmd) {
+        if (!isCommandAllowed(expandedCmd, getExtraAllowed(), rootDir, opts.sensitivePaths)) {
+          const gate = ctx?.confirmationGate ?? pauseGate;
+          const choice = await gate.ask({
+            kind: "run_command",
+            payload: { command: expandedCmd, cwd: rootDir, timeoutSec: effectiveTimeout },
+          });
+          if (choice.type === "deny") {
+            throw new Error(
+              `user denied: ${expandedCmd}${choice.denyContext ? ` — ${choice.denyContext}` : ""}`,
+            );
+          }
+          if (choice.type === "always_allow") {
+            addProjectShellAllowed(rootDir, choice.prefix);
+          }
+        }
+      }
+      const result = await runCommand(expandedCmd, {
         cwd: rootDir,
         timeoutSec: effectiveTimeout,
         maxOutputChars,
         signal: ctx?.signal,
       });
-      return formatCommandResult(cmd, result);
+      return formatCommandResult(expandedCmd, result);
     },
   });
 

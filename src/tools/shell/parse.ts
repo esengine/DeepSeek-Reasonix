@@ -275,6 +275,85 @@ export function hasSensitivePathArgs(
   return false;
 }
 
+/** Safely embed an env-var value into a command string without letting shell
+ *  metacharacters in the value become syntax. Inside an existing double-quote
+ *  span we just insert the value (the outer quotes already prevent re-parsing);
+ *  outside quotes we wrap in single quotes, escaping any single-quote in the
+ *  value itself via the shell idiom `'...'\\''...'`. */
+function quoteEnvValue(val: string, inDouble: boolean): string {
+  if (inDouble) return val;
+  if (!/[|&;<>()$`\\"\s'!]/.test(val)) return val;
+  return `'${val.replace(/'/g, "'\\''")}'`;
+}
+
+/** Expand `~` and `$VAR`/`${VAR}` in a command string (#2105). Called AFTER the
+ *  allowlist check so only already-approved commands get expanded. Globs are
+ *  intentionally left unexpanded to prevent allowlist bypass via concatenation. */
+export function expandShellVars(cmd: string): string {
+  const home = homedir();
+  let out = "";
+  let i = 0;
+  let inSingle = false;
+  let inDouble = false;
+  while (i < cmd.length) {
+    const ch = cmd[i]!;
+    // Track quote state — single quotes suppress all expansion.
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      out += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      out += ch;
+      i++;
+      continue;
+    }
+    // Inside single quotes: pass through literally.
+    if (inSingle) {
+      out += ch;
+      i++;
+      continue;
+    }
+    // ${ VAR } expansion.
+    if (ch === "$" && cmd[i + 1] === "{") {
+      const end = cmd.indexOf("}", i + 2);
+      if (end !== -1) {
+        const name = cmd.slice(i + 2, end).trim();
+        const val = process.env[name];
+        out += val !== undefined ? quoteEnvValue(val, inDouble) : `\${${name}}`;
+        i = end + 1;
+        continue;
+      }
+    }
+    // $VAR expansion.
+    if (ch === "$") {
+      const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(cmd.slice(i + 1));
+      if (m) {
+        const val = process.env[m[0]];
+        out += val !== undefined ? quoteEnvValue(val, inDouble) : `$${m[0]}`;
+        i += 1 + m[0].length;
+        continue;
+      }
+    }
+    // ~ expansion: only at start or after chain/whitespace chars, and not inside quotes.
+    if (ch === "~" && !inDouble) {
+      const prev = out[out.length - 1];
+      const atBoundary = prev === undefined || /[|&;()\s]/.test(prev);
+      const nextCh = cmd[i + 1];
+      if (atBoundary && (nextCh === "/" || nextCh === undefined)) {
+        out += home;
+        i++;
+        continue;
+      }
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 function pathIsUnder(child: string, parent: string): boolean {
   const rel = pathMod.relative(parent, child);
   return rel === "" || (!rel.startsWith("..") && !pathMod.isAbsolute(rel));
