@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   TelegramChannel,
+  buildTelegramBotCommands,
   formatTelegramMarkdownV2,
   normalizeTelegramMarkdownReply,
   splitTelegramMessage,
@@ -27,6 +28,29 @@ describe("normalizeTelegramMarkdownReply", () => {
     expect(normalizeTelegramMarkdownReply("Here is code:\n```ts\nconsole.log('hi')\n```")).toBe(
       "Here is code:\n```ts\nconsole.log('hi')\n```",
     );
+  });
+});
+
+describe("buildTelegramBotCommands", () => {
+  it("exports slash commands in Telegram command format", () => {
+    const commands = buildTelegramBotCommands();
+    expect(commands.length).toBeGreaterThan(40);
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        command: "telegram",
+        description: expect.stringContaining("Telegram"),
+      }),
+    );
+    expect(commands).toContainEqual(
+      expect.objectContaining({
+        command: "search_engine",
+      }),
+    );
+    for (const command of commands) {
+      expect(command.command).toMatch(/^[a-z0-9_]{1,32}$/);
+      expect(command.description.length).toBeGreaterThan(0);
+      expect(command.description.length).toBeLessThanOrEqual(256);
+    }
   });
 });
 

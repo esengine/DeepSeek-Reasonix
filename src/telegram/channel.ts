@@ -1,12 +1,14 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { SLASH_COMMANDS, orderSlashCommandsByGroup } from "../cli/ui/slash/commands.js";
 import { loadTelegramConfig } from "../config.js";
 import { loadDotenv } from "../env.js";
 import { t } from "../i18n/index.js";
 import { decideTelegramAccess, describeTelegramAccess, redactTelegramUserId } from "./access.js";
 import {
   TelegramBot,
+  type TelegramBotCommand,
   type TelegramCallbackQuery,
   type TelegramInlineButton,
   type TelegramMessage,
@@ -17,6 +19,8 @@ const TELEGRAM_MAX_CHARS = 3900;
 const NATURAL_SPLIT_MIN_FRACTION = 0.6;
 const TELEGRAM_MARKDOWN_WRAPPER_RE = /^```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n```$/i;
 const TELEGRAM_MARKDOWN_V2_SPECIAL_RE = /([_*\[\]()~`>#+\-=|{}.!])/g;
+const TELEGRAM_COMMAND_RE = /^[a-z0-9_]{1,32}$/;
+const TELEGRAM_COMMAND_DESCRIPTION_MAX = 256;
 
 function pickNaturalSplit(candidate: string): number {
   const minSplit = Math.floor(candidate.length * NATURAL_SPLIT_MIN_FRACTION);
@@ -42,6 +46,31 @@ export function splitTelegramMessage(text: string, maxChars = TELEGRAM_MAX_CHARS
     remaining = remaining.slice(splitAt).trimStart();
   }
   return chunks;
+}
+
+function toTelegramCommandName(command: string): string | null {
+  const normalized = command.toLowerCase().replace(/-/g, "_");
+  return TELEGRAM_COMMAND_RE.test(normalized) ? normalized : null;
+}
+
+function toTelegramCommandDescription(summary: string): string {
+  const normalized = summary.replace(/\s+/g, " ").trim();
+  if (normalized.length <= TELEGRAM_COMMAND_DESCRIPTION_MAX) return normalized;
+  return normalized.slice(0, TELEGRAM_COMMAND_DESCRIPTION_MAX - 1).trimEnd();
+}
+
+export function buildTelegramBotCommands(): TelegramBotCommand[] {
+  const seen = new Set<string>();
+  const commands: TelegramBotCommand[] = [];
+  for (const spec of orderSlashCommandsByGroup(SLASH_COMMANDS)) {
+    const command = toTelegramCommandName(spec.cmd);
+    if (!command || seen.has(command)) continue;
+    const description = toTelegramCommandDescription(spec.summary);
+    if (!description) continue;
+    seen.add(command);
+    commands.push({ command, description });
+  }
+  return commands;
 }
 
 export function normalizeTelegramMarkdownReply(text: string): string {
@@ -379,6 +408,7 @@ export class TelegramChannel {
 
     this.bot = bot;
     try {
+      await bot.setCommands(buildTelegramBotCommands());
       await bot.start();
     } catch (err) {
       this.releaseLock();

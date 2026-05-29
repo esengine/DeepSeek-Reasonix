@@ -349,7 +349,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
       "brave",
       "ollama",
     ],
-    aliases: ["se"],
+    aliases: ["se", "search_engine"],
   },
   {
     cmd: "hooks",
@@ -469,7 +469,7 @@ export function parseSlash(text: string): { cmd: string; args: string[] } | null
   // "//" is a line comment, not a slash command
   if (text.startsWith("//")) return null;
   const parts = text.slice(1).trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase() ?? "";
+  const cmd = resolveSlashAlias(parts[0]?.toLowerCase() ?? "");
   if (!cmd) return null;
   return { cmd, args: parts.slice(1) };
 }

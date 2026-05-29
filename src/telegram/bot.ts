@@ -12,6 +12,11 @@ export interface TelegramInlineButton {
   callbackData: string;
 }
 
+export interface TelegramBotCommand {
+  command: string;
+  description: string;
+}
+
 export interface TelegramMessage {
   message_id: number;
   text?: string;
@@ -107,6 +112,12 @@ export class TelegramBot extends EventEmitter {
 
   async stop(): Promise<void> {
     await this.bot.stop();
+  }
+
+  async setCommands(commands: readonly TelegramBotCommand[]): Promise<void> {
+    await this.bot.api.setMyCommands(
+      commands.map(({ command, description }) => ({ command, description })),
+    );
   }
 
   async sendMessage(
