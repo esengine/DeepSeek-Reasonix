@@ -140,11 +140,11 @@ export async function handleMemory(
       if (!dir) return { status: 503, body: { error: "no project root for project-mem" } };
       const path = join(dir, `${name}.md`);
       try {
-        await stat(path);
+        const body = await readFile(path, "utf8");
+        return { status: 200, body: { path, body } };
       } catch {
         return { status: 404, body: { error: "not found" } };
       }
-      return { status: 200, body: { path, body: await readFile(path, "utf8") } };
     }
     return { status: 400, body: { error: "bad scope or name" } };
   }
