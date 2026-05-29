@@ -101,7 +101,8 @@ export type ChatMessage =
     }
   | { kind: "status"; text: string }
   | { kind: "warning"; id: string; text: string; severity: "low" | "high" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  | { kind: "info"; message: string };
 
 export type PendingConfirm = {
   id: number;
@@ -923,6 +924,11 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
         activeSkill: null,
         messages: [...state.messages, { kind: "error", message: ev.message }],
       };
+    case "$info":
+      return {
+        ...state,
+        messages: [...state.messages, { kind: "info", message: ev.message }],
+      };
     case "model.turn.started":
       if (state.messages.some((m) => m.kind === "assistant" && m.turn === ev.turn)) {
         return { ...state, model: ev.model };
@@ -1103,6 +1109,7 @@ function formatConversationMarkdown(messages: ChatMessage[], userLabel: string):
         return `### Reasonix\n\n${body}`;
       }
       if (m.kind === "error") return `### Error\n\n${m.message}`;
+      if (m.kind === "info") return `> ℹ ${m.message}`;
       return "";
     })
     .filter(Boolean)
@@ -2033,6 +2040,20 @@ function TabRuntime({
                             <div className="tt">{t("app.errorLabel")}</div>
                             <div className="ds">{m.message}</div>
                           </div>
+                        </div>
+                      );
+                    }
+                    if (m.kind === "info") {
+                      return (
+                        <div
+                          key={`info-${i}`}
+                          className="warn-card"
+                          style={{ opacity: 0.85, fontStyle: "italic" }}
+                        >
+                          <span className="ico" style={{ color: "var(--tone-info, #888)" }}>
+                            <I.info size={16} />
+                          </span>
+                          <div className="ds">{m.message}</div>
                         </div>
                       );
                     }
