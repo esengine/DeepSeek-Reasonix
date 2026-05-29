@@ -3120,6 +3120,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "skill_save") {
       try {
+        // Guard: reject names with path traversal or separators
+        if (msg.name.includes("..") || msg.name.includes("/") || msg.name.includes("\\")) {
+          emit({ type: "$error", message: `invalid skill name: ${msg.name}` }, tab.id);
+          return;
+        }
         const fm = validateSkillFrontmatter(msg.body);
         if ("error" in fm) {
           emit({ type: "$error", message: fm.error }, tab.id);
@@ -3139,6 +3144,13 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         } else {
           targetPath = flatPath;
         }
+        // Verify resolved path stays inside the skills directory
+        const resolvedTarget = resolve(targetPath);
+        const resolvedDir = resolve(dir);
+        if (!resolvedTarget.startsWith(resolvedDir + "/") && resolvedTarget !== resolvedDir) {
+          emit({ type: "$error", message: `invalid skill name: ${msg.name}` }, tab.id);
+          return;
+        }
         mkdirSync(dirname(targetPath), { recursive: true });
         writeFileSync(targetPath, msg.body, "utf8");
         emitSkills(tab);
@@ -3149,12 +3161,28 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "skill_delete") {
       try {
+        // Guard: reject names with path traversal or separators
+        if (msg.name.includes("..") || msg.name.includes("/") || msg.name.includes("\\")) {
+          emit({ type: "$error", message: `invalid skill name: ${msg.name}` }, tab.id);
+          return;
+        }
         const dir =
           msg.scope === "project"
             ? join(tab.rootDir, ".reasonix", SKILLS_DIRNAME)
             : join(homedir(), ".reasonix", SKILLS_DIRNAME);
         const folderPath = join(dir, msg.name, SKILL_FILE);
         const flatPath = join(dir, `${msg.name}.md`);
+        // Verify resolved path stays inside the skills directory
+        const resolvedFolder = resolve(dirname(folderPath));
+        const resolvedFlat = resolve(flatPath);
+        const resolvedDir = resolve(dir);
+        if (
+          !(resolvedFolder.startsWith(resolvedDir + "/") || resolvedFolder === resolvedDir) &&
+          !(resolvedFlat.startsWith(resolvedDir + "/"))
+        ) {
+          emit({ type: "$error", message: `invalid skill name: ${msg.name}` }, tab.id);
+          return;
+        }
         if (existsSync(folderPath)) {
           rmSync(dirname(folderPath), { recursive: true, force: true });
         } else if (existsSync(flatPath)) {
