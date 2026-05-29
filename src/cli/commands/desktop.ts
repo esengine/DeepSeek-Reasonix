@@ -111,6 +111,7 @@ import {
   ImmutablePrefix,
   type LoopAbortOptions,
 } from "../../index.js";
+import { sanitizeRegisteredName } from "../../mcp/registry.js";
 import { type McpServerSpec, parseMcpSpec, specToRaw } from "../../mcp/spec.js";
 import {
   type PromptHistoryCursor,
@@ -1215,9 +1216,11 @@ function mcpToolsForSummary(
 ): McpToolInfo[] {
   if (!summary || !summary.report.tools.supported) return [];
   const prefix = summary.bridgeEnv.prefix ?? "";
+  // Best-effort display name. Mirrors the registry's sanitizer so the panel matches the
+  // dispatch name; it shows the base form and won't reflect a collision `_N` suffix.
   return summary.report.tools.items.map((tool) => ({
     name: tool.name,
-    registeredName: `${prefix}${tool.name}`,
+    registeredName: sanitizeRegisteredName(`${prefix}${tool.name}`),
     description: tool.description,
   }));
 }

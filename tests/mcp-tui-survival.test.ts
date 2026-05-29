@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     opts.registry.register({ name: "mcp_fs_write", fn: () => "ok", description: "write" });
     return {
       registeredNames: ["mcp_fs_read", "mcp_fs_write"],
+      renamed: [],
       env: {
         registry: opts.registry,
         host: opts.host,

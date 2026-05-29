@@ -211,6 +211,13 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
             sampleSize: info.sampleSize,
           }),
       });
+      for (const r of bridge.renamed) {
+        sink({
+          kind: "warn",
+          name: label,
+          reason: `tool "${r.from}" exposed as "${r.to}" (API name charset)`,
+        });
+      }
       // Tools are registered — record the bridge NOW so the UI shows
       // "bridged" even if later non-critical steps (inspect, hot-add) fail.
       const ms = Date.now() - t0;

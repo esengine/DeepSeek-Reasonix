@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
   const closeMock = vi.fn(async () => undefined);
   const bridgeMcpToolsMock = vi.fn(async (_client: unknown, opts: any) => ({
     registeredNames: [],
+    renamed: [],
     env: {
       registry: opts.registry,
       host: opts.host,

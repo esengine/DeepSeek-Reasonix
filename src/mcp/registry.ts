@@ -54,6 +54,8 @@ export interface BridgeResult {
   registeredNames: string[];
   /** Names the server listed but the bridge skipped (e.g. invalid schemas). */
   skipped: Array<{ name: string; reason: string }>;
+  /** Tools whose model-facing name was rewritten to satisfy the API charset / avoid a collision. */
+  renamed: Array<{ from: string; to: string }>;
 }
 
 /** Resolved bridge environment that `registerSingleMcpTool` needs. Stored on summaries so reconnect can append new tools later. */
@@ -72,11 +74,39 @@ export interface BridgeEnv {
   serverName?: string;
 }
 
+/** OpenAI-style function names (DeepSeek follows the same schema) must match this. A raw MCP
+ *  name like `unity/health` is rejected with a 400 before the loop runs, so we rewrite it. */
+const API_TOOL_NAME_MAX = 64;
+
+/** FNV-1a — deterministic, dependency-free; used only to keep over-length names unique. */
+function nameHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** Rewrite a tool name to the OpenAI/DeepSeek function-name charset `[a-zA-Z0-9_-]`, capped at
+ *  64 chars. This only affects the *model-facing* name; the bridge still calls the MCP server
+ *  with the original name (see `registerSingleMcpTool`), so no reverse mapping is needed. */
+export function sanitizeRegisteredName(raw: string): string {
+  const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, "_");
+  if (cleaned.length <= API_TOOL_NAME_MAX) return cleaned;
+  const suffix = `_${nameHash(raw).toString(36)}`;
+  return `${cleaned.slice(0, API_TOOL_NAME_MAX - suffix.length)}${suffix}`;
+}
+
 /** Register one MCP tool's bridged closure into the registry. Returns the registered name (or "" if skipped). */
 export function registerSingleMcpTool(mcpTool: McpTool, env: BridgeEnv): string {
   const stableTool = canonicalizeMcpToolForCache(mcpTool);
   if (!stableTool.name) return "";
-  const registeredName = `${env.prefix}${stableTool.name}`;
+  const base = sanitizeRegisteredName(`${env.prefix}${stableTool.name}`);
+  let registeredName = base;
+  for (let n = 2; env.registry.has(registeredName); n++) {
+    registeredName = `${base}_${n}`;
+  }
   env.registry.register({
     name: registeredName,
     description: stableTool.description ?? "",
@@ -169,7 +199,7 @@ export async function bridgeMcpTools(
   const registry = opts.registry ?? new ToolRegistry({ autoFlatten: opts.autoFlatten });
   const prefix = opts.namePrefix ?? "";
   const maxResultChars = opts.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
-  const result: BridgeResult = { registry, registeredNames: [], skipped: [] };
+  const result: BridgeResult = { registry, registeredNames: [], skipped: [], renamed: [] };
 
   const serverName = opts.serverName ?? prefix.replace(/_$/, "") ?? "anon";
   const tracker = opts.onSlow
@@ -200,8 +230,14 @@ export async function bridgeMcpTools(
       result.skipped.push({ name: "?", reason: "empty tool name" });
       continue;
     }
+    const original = `${prefix}${mcpTool.name}`;
     const registeredName = registerSingleMcpTool(mcpTool, env);
-    if (registeredName) result.registeredNames.push(registeredName);
+    if (registeredName) {
+      result.registeredNames.push(registeredName);
+      if (registeredName !== original) {
+        result.renamed.push({ from: original, to: registeredName });
+      }
+    }
   }
   return { ...result, env };
 }
