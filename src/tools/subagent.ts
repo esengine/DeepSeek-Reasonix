@@ -124,6 +124,8 @@ const SUBAGENT_TOOL_NAME = "spawn_subagent";
 /** spawn_subagent excluded → depth=1 hard cap; submit_plan excluded → no picker mid-parent-turn. */
 const NEVER_INHERITED_TOOLS = new Set<string>([SUBAGENT_TOOL_NAME, "submit_plan"]);
 
+/** Hard cap on subagent spawns per session — prevents runaway recursion (issue #2272). */
+export const MAX_SUBAGENT_SPAWNS_PER_SESSION = 50;
 /** Per-session spawn count past which the soft hint fires on every subsequent return. */
 const SOFT_HINT_AFTER_SPAWNS = 1;
 /** Per-session count past which the strong hint fires (asks the model to justify the next spawn). */
@@ -527,6 +529,11 @@ export function registerSubagentTool(
       if (!task) {
         return JSON.stringify({
           error: "spawn_subagent requires a non-empty 'task' argument.",
+        });
+      }
+      if (sessionSpawnCount >= MAX_SUBAGENT_SPAWNS_PER_SESSION) {
+        return JSON.stringify({
+          error: `spawn_subagent hard limit reached: this session has already spawned ${sessionSpawnCount} subagents (max ${MAX_SUBAGENT_SPAWNS_PER_SESSION}). Use direct tools to answer remaining questions.`,
         });
       }
       const typeSpec = getSubagentType(args.type);

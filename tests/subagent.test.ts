@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DeepSeekClient, Usage } from "../src/client.js";
 import { ToolRegistry } from "../src/tools.js";
 import {
+  MAX_SUBAGENT_SPAWNS_PER_SESSION,
   type SubagentEvent,
   type SubagentResult,
   type SubagentSink,
@@ -535,6 +536,21 @@ describe("registerSubagentTool — per-session budget feedback", () => {
     expect(outs[2]).toMatch(/\[note: this session has spawned 3 subagents/);
     expect(outs[3]).toMatch(/\[note: this session has spawned 4 subagents/);
     expect(outs[4]).toMatch(/\[budget: this session has now spawned 5 subagents/);
+  });
+
+  it("hard-caps at MAX_SUBAGENT_SPAWNS_PER_SESSION and returns an error without spawning", async () => {
+    const parent = new ToolRegistry();
+    const client = makeClient([{ content: "answer" }]);
+    registerSubagentTool(parent, { client });
+
+    for (let i = 0; i < MAX_SUBAGENT_SPAWNS_PER_SESSION; i++) {
+      await parent.dispatch("spawn_subagent", JSON.stringify({ task: `q${i}` }));
+    }
+
+    const over = await parent.dispatch("spawn_subagent", JSON.stringify({ task: "one too many" }));
+    const parsed = JSON.parse(over) as { error?: string };
+    expect(parsed.error).toMatch(/hard limit reached/);
+    expect(parsed.error).toMatch(new RegExp(`max ${MAX_SUBAGENT_SPAWNS_PER_SESSION}`));
   });
 });
 
