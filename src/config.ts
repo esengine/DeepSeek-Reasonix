@@ -206,6 +206,9 @@ export interface ReasonixConfig {
   /** Canonical MCP server configuration — merges with and overrides legacy `mcp`/`mcpEnv`/`mcpDisabled`. */
   mcpServers?: Record<string, McpServerConfig>;
   session?: string | null;
+  /** When false, each `reasonix code` / `reasonix chat` launch starts a fresh session instead
+   *  of resuming the last one (#2238). Default true preserves existing behavior. */
+  autoResumeSession?: boolean;
   setupCompleted?: boolean;
   search?: boolean;
   /** Web search engine backend: "bing" (default, scrapes cn.bing.com), "bing-intl" (www.bing.com, indexes international sites), "searxng" (self-hosted SearXNG), "metaso" (Metaso API), "baidu" (Baidu AI Search API), "tavily" (LLM-friendly API, free tier), "perplexity" (Perplexity AI), "exa" (Exa API), "brave" (Brave Search API), or "ollama" (Ollama cloud web search). */

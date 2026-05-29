@@ -157,6 +157,13 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
 
   { cmd: "sessions", group: "session", summary: "list saved sessions (current marked with ▸)" },
   {
+    cmd: "session-persist",
+    group: "session",
+    argsHint: "<on|off>",
+    summary:
+      "toggle whether reasonix resumes the last session on launch. 'off' = always start fresh (#2238).",
+  },
+  {
     cmd: "title",
     group: "session",
     summary: "ask the model to rename this session from the conversation",

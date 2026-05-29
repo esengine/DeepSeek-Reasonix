@@ -349,6 +349,10 @@ export const zhCN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "列出已保存的会话（当前标记为 ▸）" },
+    "session-persist": {
+      description: "切换是否在启动时恢复上次会话。/session-persist off = 每次启动新会话",
+      argsHint: "<on|off>",
+    },
     title: { description: "让模型根据当前对话重命名此会话" },
     qq: {
       description:
@@ -817,6 +821,12 @@ export const zhCN: TranslationSchema = {
       unknownCommandShort: "未知命令：/{cmd}  （试试 /help）",
     },
     sessions: {
+      persistOn: "▸ session-persist → on（下次启动将恢复上次会话）",
+      persistOff: "▸ session-persist → off（下次启动将开始新会话）",
+      persistSetOn: "▸ session-persist 已设为 on — 下次 `reasonix code/chat` 将恢复上次会话。",
+      persistSetOff:
+        "▸ session-persist 已设为 off — 下次启动将开启新会话。使用 -c/--continue 可显式恢复。",
+      persistUsage: "用法：/session-persist <on|off>",
       titleUnavailable: "/title 只能在已启用会话持久化的 TUI 会话中使用。",
       titleStarted: "▸ 正在命名会话…",
       titleFailed: "▸ 会话命名失败：{reason}",

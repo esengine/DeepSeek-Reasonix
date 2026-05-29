@@ -16,6 +16,8 @@ export interface ResolvedDefaults {
   reasoningEffort: ReasoningEffort;
   mcp: string[];
   session: string | undefined;
+  /** True when autoResumeSession:false is in effect — tells callers to skip the session picker. */
+  forceNew?: boolean;
 }
 
 export interface RawCliFlags {
@@ -49,9 +51,11 @@ export function resolveDefaults(flags: RawCliFlags): ResolvedDefaults {
   );
   const mcp = normalizedMcp.map(specToRaw);
 
-  const session = resolveSession(flags.session, cfg.session);
+  const session = resolveSession(flags.session, cfg.session, cfg.autoResumeSession);
+  const forceNew =
+    cfg.autoResumeSession === false && flags.session === undefined ? true : undefined;
 
-  return { model, reasoningEffort, mcp, session };
+  return { model, reasoningEffort, mcp, session, forceNew };
 }
 
 function mergeDotMcpJson(cfg: ReasonixConfig, projectRoot: string): ReasonixConfig {
@@ -63,11 +67,15 @@ function mergeDotMcpJson(cfg: ReasonixConfig, projectRoot: string): ReasonixConf
 function resolveSession(
   flag: string | false | undefined,
   configSession: string | null | undefined,
+  autoResume?: boolean,
 ): string | undefined {
   if (flag === false) return undefined;
   if (typeof flag === "string" && flag.length > 0) return flag;
   if (configSession === null) return undefined;
   if (typeof configSession === "string" && configSession.length > 0) return configSession;
+  // When autoResumeSession is explicitly false, don't default to "default" session
+  // so each launch starts fresh instead of resuming the previous conversation (#2238).
+  if (autoResume === false) return undefined;
   return "default";
 }
 

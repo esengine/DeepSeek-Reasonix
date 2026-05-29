@@ -70,7 +70,13 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   // Per-directory session so switching projects doesn't mix histories.
   // `code-<sanitized-basename>` fits the session name rules without
   // truncating most project names.
-  const session = opts.noSession ? undefined : `code-${sanitizeName(basename(rootDir))}`;
+  // Per-directory session unless --no-session or autoResumeSession:false in config (#2238).
+  // Explicit -r/--resume or --new flags override autoResumeSession so users can still
+  // manually resume or start fresh even when the default behaviour has been toggled.
+  const cfg = readConfig();
+  const explicitResume = opts.forceResume || opts.forceNew;
+  const autoResume = opts.noSession ? false : explicitResume || cfg.autoResumeSession !== false;
+  const session = autoResume ? `code-${sanitizeName(basename(rootDir))}` : undefined;
 
   markPhase("semantic_bootstrap_start");
   const { tools, jobs, registerRooted, reBootstrapSemantic, semantic } = await buildCodeToolset({

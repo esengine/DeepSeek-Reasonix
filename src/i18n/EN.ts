@@ -363,6 +363,11 @@ export const EN: TranslationSchema = {
       argsHint: "[N]",
     },
     sessions: { description: "list saved sessions (current marked with ▸)" },
+    "session-persist": {
+      description:
+        "toggle whether reasonix resumes the last session on launch. /session-persist off = always start fresh",
+      argsHint: "<on|off>",
+    },
     title: { description: "ask the model to rename this session from the conversation" },
     qq: {
       description:
@@ -859,6 +864,13 @@ export const EN: TranslationSchema = {
       unknownCommandShort: "unknown command: /{cmd}  (try /help)",
     },
     sessions: {
+      persistOn: "▸ session-persist → on  (next launch will resume the last session)",
+      persistOff: "▸ session-persist → off  (next launch will start a fresh session)",
+      persistSetOn:
+        "▸ session-persist set to on — next `reasonix code/chat` will resume the last session.",
+      persistSetOff:
+        "▸ session-persist set to off — next launch starts fresh. Use -c/--continue to resume.",
+      persistUsage: "usage: /session-persist <on|off>",
       titleUnavailable: "/title is only available in an active persisted TUI session.",
       titleStarted: "▸ naming session…",
       titleFailed: "▸ session title failed: {reason}",

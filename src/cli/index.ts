@@ -348,7 +348,7 @@ program
         mcp: defaults.mcp,
         mcpPrefix: opts.mcpPrefix,
         forceResume: continueOpts.forceResume,
-        forceNew: !!opts.new,
+        forceNew: !!opts.new || !!defaults.forceNew,
         noDashboard: opts.dashboard === false || !loadDashboardEnabled(opts.config === false),
         openDashboard: opts.openDashboard === true,
         dashboardPort: resolveDashboardPort(
