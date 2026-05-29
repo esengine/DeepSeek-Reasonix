@@ -1,5 +1,8 @@
-import { execSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { exec } from "node:child_process";
+import { readdir, stat } from "node:fs/promises";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 import type { ApiResult } from "../router.js";
@@ -37,19 +40,25 @@ const SKIP_DIRS = new Set([
 
 let cachedDriveList: string[] | null = null;
 
-function listWindowsDrives(): string[] {
+async function listWindowsDrives(): Promise<string[]> {
   if (cachedDriveList) return cachedDriveList;
   try {
-    const raw = execSync("wmic logicaldisk get deviceid /value", {
-      encoding: "utf8",
+    const { stdout } = await execAsync("wmic logicaldisk get deviceid /value", {
       timeout: 1500,
     });
-    const drives = raw
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("DeviceID="))
-      .map((l) => `${l.slice("DeviceID=".length)}\\`)
-      .filter((d) => existsSync(d));
+    const drives: string[] = [];
+    for (const line of stdout.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("DeviceID=")) {
+        const drive = `${trimmed.slice("DeviceID=".length)}\\`;
+        try {
+          await stat(drive);
+          drives.push(drive);
+        } catch {
+          /* skip */
+        }
+      }
+    }
     cachedDriveList = drives.length > 0 ? drives : ["C:\\"];
   } catch {
     // wmic absent (newer Windows builds drop it) — fall back to probing letters.
@@ -57,7 +66,8 @@ function listWindowsDrives(): string[] {
     for (const letter of "CDEFGHIJKLMNOPQRSTUVWXYZ") {
       const p = `${letter}:\\`;
       try {
-        if (existsSync(p)) found.push(p);
+        await stat(p);
+        found.push(p);
       } catch {
         /* skip unreachable drives without blocking */
       }
@@ -79,21 +89,20 @@ function defaultRoot(): string {
   }
 }
 
-function readSubdirs(path: string): BrowseEntry[] {
+async function readSubdirs(path: string): Promise<BrowseEntry[]> {
   let names: string[];
   try {
-    names = readdirSync(path);
+    names = await readdir(path);
   } catch {
     return [];
   }
   const out: BrowseEntry[] = [];
   for (const name of names) {
     if (SKIP_DIRS.has(name)) continue;
-    // Hide dotfile dirs but keep them reachable by typing the path manually.
     if (name.startsWith(".") && name.length > 1) continue;
     const full = resolve(path, name);
     try {
-      if (!statSync(full).isDirectory()) continue;
+      if (!(await stat(full)).isDirectory()) continue;
     } catch {
       continue;
     }
@@ -118,9 +127,9 @@ export async function handleBrowse(
   // so the user can navigate off the home drive without typing the letter.
   if (!rawPath) {
     const home = defaultRoot();
-    const entries = readSubdirs(home);
+    const entries = await readSubdirs(home);
     if (isWin) {
-      const drives = listWindowsDrives()
+      const drives = (await listWindowsDrives())
         .filter((d) => resolve(d) !== resolve(home))
         .map((d) => ({ name: d, full: d }));
       entries.unshift(...drives);
@@ -133,14 +142,11 @@ export async function handleBrowse(
     return { status: 400, body: { error: "path must be absolute" } };
   }
   const absolute = resolve(rawPath);
-  if (!existsSync(absolute)) {
-    return { status: 404, body: { error: `no such directory: ${absolute}` } };
-  }
   let isDir = false;
   try {
-    isDir = statSync(absolute).isDirectory();
+    isDir = (await stat(absolute)).isDirectory();
   } catch {
-    /* falls through to 404-equivalent */
+    return { status: 404, body: { error: `no such directory: ${absolute}` } };
   }
   if (!isDir) {
     return { status: 400, body: { error: `not a directory: ${absolute}` } };
@@ -152,7 +158,7 @@ export async function handleBrowse(
   const result: BrowseResult = {
     path: absolute,
     parent,
-    entries: readSubdirs(absolute),
+    entries: await readSubdirs(absolute),
   };
   return { status: 200, body: result };
 }

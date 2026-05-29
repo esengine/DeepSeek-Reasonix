@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadCheckpoint } from "../../code/checkpoints.js";
 import { lineDiff } from "../../tools/fs/edit.js";
@@ -37,7 +37,7 @@ export async function handleCheckpointDiffs(
     const absPath = resolve(rootDir, snap.path);
     let currentContent: string | null = null;
     try {
-      currentContent = readFileSync(absPath, "utf8");
+      currentContent = await readFile(absPath, "utf8");
     } catch {
       currentContent = null;
     }
