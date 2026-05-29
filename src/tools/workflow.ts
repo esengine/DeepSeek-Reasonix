@@ -1,8 +1,9 @@
 import { DeepSeekClient } from "../client.js";
 import { loadEndpoint } from "../config.js";
-import type { ToolRegistry } from "../tools.js";
+import type { ToolCallContext, ToolRegistry } from "../tools.js";
 import { ReasonixWorkflowAgentRunner } from "../workflow/agent-runner.js";
 import type { WorkflowRunManager } from "../workflow/manager.js";
+import { type ParsedWorkflowScript, parseWorkflowScript } from "../workflow/parser.js";
 import { runWorkflow } from "../workflow/runtime.js";
 import type {
   WorkflowAgentRunner,
@@ -94,6 +95,9 @@ export function registerWorkflowTool(
 
       const mode = workflowMode(args.mode);
       const toolMode = workflowToolMode(args.tool_mode);
+      const parsed = parseWorkflowScript(script);
+      const confirmation = await confirmWorkflowRun(args, ctx, parsed, mode, toolMode);
+      if (confirmation) return confirmation;
       const runner =
         mode === "run"
           ? (opts.runner ??
@@ -159,6 +163,49 @@ export function registerWorkflowTool(
   });
 
   return registry;
+}
+
+async function confirmWorkflowRun(
+  args: Record<string, unknown>,
+  ctx: ToolCallContext | undefined,
+  parsed: ParsedWorkflowScript,
+  mode: WorkflowMode,
+  toolMode: WorkflowToolMode,
+): Promise<string | null> {
+  const background = args.background === true;
+  const maxAgents = numberOption(args.max_agents) ?? 8;
+  const concurrency = numberOption(args.concurrency) ?? 3;
+  const needsGate =
+    mode === "run" && (toolMode === "full" || background || maxAgents > 8 || concurrency > 4);
+  if (!needsGate) return null;
+  if (!ctx?.confirmationGate) {
+    return JSON.stringify({
+      success: false,
+      error: "workflow requires interactive confirmation for this run",
+      rejectedReason: "workflow-confirmation",
+    });
+  }
+  const verdict = await ctx.confirmationGate.ask({
+    kind: "workflow_confirm",
+    payload: {
+      name: parsed.meta.name,
+      description: parsed.meta.description,
+      mode,
+      toolMode,
+      background,
+      concurrency,
+      maxAgents,
+      phases: parsed.meta.phases?.map((phase) => phase.title) ?? [],
+    },
+  });
+  if (verdict.type === "deny") {
+    return JSON.stringify({
+      success: false,
+      error: "workflow denied by user",
+      rejectedReason: "workflow-confirmation",
+    });
+  }
+  return null;
 }
 
 function normalizeWorkflowScript(value: unknown): string {

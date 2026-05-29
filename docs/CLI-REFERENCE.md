@@ -119,8 +119,25 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 | Command | What it does |
 |---|---|
 | `/jobs` | List background jobs |
+| `/workflows` | List session-local workflow runs started by `workflow` with `background: true` |
+| `/workflows show <runId>` | Inspect a workflow run: status, duration, agents, and final output |
+| `/workflows stop <runId>` | Abort a running workflow |
+| `/workflows retry <runId>` | Start a new run from a completed, failed, or aborted run's original script |
+| `/workflows delete <runId>` | Remove a completed, failed, or aborted workflow from the session and persisted store |
+| `/workflows save <runId> project\|user [name]` | Save the run's script to `.reasonix/workflows/<name>.js` or `~/.reasonix/workflows/<name>.js` |
+| `/workflows run <name> [input]` | Start a saved workflow and pass trailing text as `args.input` |
 | `/kill <id>` | Stop a background job (SIGTERM → SIGKILL) |
 | `/logs <id> [lines]` | Tail a job's output (default 80 lines) |
+
+### Dynamic workflows (code mode)
+
+Reasonix has a built-in `workflow` tool for multi-agent repository work. Use it for repository-wide audits, large refactors, migrations, multi-module bug hunts, architecture or security review, test coverage sweeps, and explicit requests for dynamic workflows, parallel agents, subagents, or fan-out analysis. Do not use it for simple single-file edits, small fixes, direct Q&A, formatting-only tasks, or when the user asks not to spawn subagents.
+
+Workflow scripts are JavaScript snippets that start with `export const meta = { name, description }` and can call `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()`, `args`, `cwd`, and `budget`. `agent()` uses Reasonix's internal `spawnSubagent()` runtime; it does not start a `reasonix run` child process.
+
+Use `parallel([() => agent(...), () => agent(...)])` for independent work. Consecutive `await agent(...)` calls are serial and should only be used when later steps depend on earlier results. For long runs, call the tool with `background: true`, then inspect it with `/workflows`.
+
+Use `verifyFindings([...])` for independent verifier subagents, `adversarialReview(result)` to challenge a draft result, and `synthesize(inputs)` for final synthesis. These helpers are wrappers around internal `agent()` calls and still count toward `max_agents`.
 
 ### Advanced
 

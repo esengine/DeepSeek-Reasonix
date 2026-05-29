@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { PauseGate } from "../src/core/pause-gate.js";
 import { ToolRegistry } from "../src/tools.js";
 import { registerWorkflowTool } from "../src/tools/workflow.js";
 import type {
@@ -81,8 +82,14 @@ describe("registerWorkflowTool", () => {
     const { WorkflowRunManager } = await import("../src/workflow/manager.js");
     const manager = new WorkflowRunManager({ runner, rootDir: process.cwd() });
     registerWorkflowTool(registry, { runner, manager });
+    const gate = new PauseGate();
+    gate.on((request) => gate.resolve(request.id, { type: "run_once" }));
 
-    const out = await registry.dispatch("workflow", { script, background: true });
+    const out = await registry.dispatch(
+      "workflow",
+      { script, background: true },
+      { confirmationGate: gate },
+    );
     const parsed = JSON.parse(out);
 
     expect(parsed.success).toBe(true);

@@ -79,4 +79,36 @@ describe("/workflows slash handler", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it("retries a completed run with the original script", async () => {
+    const runner: WorkflowAgentRunner = {
+      async run() {
+        return { ok: true, output: "ok" };
+      },
+    };
+    const manager = new WorkflowRunManager({ runner, rootDir: process.cwd() });
+    const first = manager.startRun({ script, mode: "run", maxAgents: 1 });
+    await manager.waitForRun(first.id);
+
+    const result = handleWorkflowsSlash(["retry", first.id], { workflowManager: manager });
+
+    expect(result.info).toMatch(/started retry/);
+    expect(manager.listRuns()).toHaveLength(2);
+  });
+
+  it("deletes completed runs", async () => {
+    const runner: WorkflowAgentRunner = {
+      async run() {
+        return { ok: true, output: "ok" };
+      },
+    };
+    const manager = new WorkflowRunManager({ runner, rootDir: process.cwd() });
+    const first = manager.startRun({ script, mode: "run", maxAgents: 1 });
+    await manager.waitForRun(first.id);
+
+    const result = handleWorkflowsSlash(["delete", first.id], { workflowManager: manager });
+
+    expect(result.info).toBe(`deleted workflow ${first.id}`);
+    expect(manager.listRuns()).toEqual([]);
+  });
 });

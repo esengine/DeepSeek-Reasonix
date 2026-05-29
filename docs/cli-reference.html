@@ -509,6 +509,34 @@
                   <td>List background jobs</td>
                 </tr>
                 <tr>
+                  <td><code>/workflows</code></td>
+                  <td>List session-local workflow runs started by <code>workflow</code> with <code>background: true</code></td>
+                </tr>
+                <tr>
+                  <td><code>/workflows show &lt;runId&gt;</code></td>
+                  <td>Inspect a workflow run: status, duration, agents, and final output</td>
+                </tr>
+                <tr>
+                  <td><code>/workflows stop &lt;runId&gt;</code></td>
+                  <td>Abort a running workflow</td>
+                </tr>
+                <tr>
+                  <td><code>/workflows retry &lt;runId&gt;</code></td>
+                  <td>Start a new run from a completed, failed, or aborted run's original script</td>
+                </tr>
+                <tr>
+                  <td><code>/workflows delete &lt;runId&gt;</code></td>
+                  <td>Remove a completed, failed, or aborted workflow from the session and persisted store</td>
+                </tr>
+                <tr>
+                  <td><code>/workflows save &lt;runId&gt; project|user [name]</code></td>
+                  <td>Save the run's script to <code>.reasonix/workflows/&lt;name&gt;.js</code> or <code>~/.reasonix/workflows/&lt;name&gt;.js</code></td>
+                </tr>
+                <tr>
+                  <td><code>/workflows run &lt;name&gt; [input]</code></td>
+                  <td>Start a saved workflow and pass trailing text as <code>args.input</code></td>
+                </tr>
+                <tr>
                   <td><code>/kill &lt;id&gt;</code></td>
                   <td>Stop a background job (SIGTERM → SIGKILL)</td>
                 </tr>
@@ -518,6 +546,38 @@
                 </tr>
               </tbody>
             </table>
+
+            <h3>Dynamic workflows (code mode)</h3>
+            <p>
+              Reasonix has a built-in <code>workflow</code> tool for multi-agent repository work.
+              Use it for repository-wide audits, large refactors, migrations, multi-module bug
+              hunts, architecture or security review, test coverage sweeps, and explicit requests
+              for dynamic workflows, parallel agents, subagents, or fan-out analysis. Do not use it
+              for simple single-file edits, small fixes, direct Q&amp;A, formatting-only tasks, or
+              when the user asks not to spawn subagents.
+            </p>
+            <p>
+              Workflow scripts are JavaScript snippets that start with
+              <code>export const meta = { name, description }</code> and can call
+              <code>agent()</code>, <code>parallel()</code>, <code>pipeline()</code>,
+              <code>phase()</code>, <code>log()</code>, <code>args</code>, <code>cwd</code>, and
+              <code>budget</code>. <code>agent()</code> uses Reasonix's internal
+              <code>spawnSubagent()</code> runtime; it does not start a <code>reasonix run</code>
+              child process.
+            </p>
+            <p>
+              Use <code>parallel([() =&gt; agent(...), () =&gt; agent(...)])</code> for independent
+              work. Consecutive <code>await agent(...)</code> calls are serial and should only be
+              used when later steps depend on earlier results. For long runs, call the tool with
+              <code>background: true</code>, then inspect it with <code>/workflows</code>.
+            </p>
+            <p>
+              Use <code>verifyFindings([...])</code> for independent verifier subagents,
+              <code>adversarialReview(result)</code> to challenge a draft result, and
+              <code>synthesize(inputs)</code> for final synthesis. These helpers are wrappers
+              around internal <code>agent()</code> calls and still count toward
+              <code>max_agents</code>.
+            </p>
 
             <h3 data-i18n="sl.h.advanced">Advanced</h3>
             <table class="cmd-table">

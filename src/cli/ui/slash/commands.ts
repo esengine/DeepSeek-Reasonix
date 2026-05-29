@@ -342,7 +342,7 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "workflows",
     group: "jobs",
-    argsHint: "[show|stop|save|run] [runId|name]",
+    argsHint: "[show|stop|retry|delete|save|run] [runId|name]",
     summary: "list, inspect, stop, save, or run workflows",
     contextual: "code",
   },

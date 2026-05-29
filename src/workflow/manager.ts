@@ -3,6 +3,7 @@ import { Usage } from "../client.js";
 import { parseWorkflowScript } from "./parser.js";
 import { runWorkflow } from "./runtime.js";
 import { saveWorkflowScript } from "./saved.js";
+import { WorkflowRunStore } from "./store.js";
 import type {
   WorkflowAgentResult,
   WorkflowAgentRunner,
@@ -18,6 +19,7 @@ export interface WorkflowRunManagerOptions {
   rootDir: string;
   homeDir?: string;
   onEvent?: (event: WorkflowRunEvent) => void;
+  persist?: boolean;
 }
 
 export interface WorkflowRunStartOptions {
@@ -42,12 +44,21 @@ export class WorkflowRunManager {
   private readonly rootDir: string;
   private readonly homeDir: string;
   private readonly onEvent?: (event: WorkflowRunEvent) => void;
+  private readonly store?: WorkflowRunStore;
 
   constructor(opts: WorkflowRunManagerOptions) {
     this.runner = opts.runner;
     this.rootDir = opts.rootDir;
     this.homeDir = opts.homeDir ?? process.env.HOME ?? this.rootDir;
     this.onEvent = opts.onEvent;
+    this.store = opts.persist ? new WorkflowRunStore({ rootDir: this.rootDir }) : undefined;
+    for (const snapshot of this.store?.loadAll() ?? []) {
+      this.runs.set(snapshot.id, {
+        snapshot,
+        controller: new AbortController(),
+        promise: Promise.resolve(this.clone(snapshot)),
+      });
+    }
   }
 
   startRun(opts: WorkflowRunStartOptions): WorkflowRunSnapshot {
@@ -75,6 +86,7 @@ export class WorkflowRunManager {
       promise: Promise.resolve(snapshot),
     };
     this.runs.set(id, run);
+    this.persist(run);
     this.emit({
       type: "workflow.started",
       runId: id,
@@ -110,6 +122,7 @@ export class WorkflowRunManager {
         agent.durationMs = now - agent.startedAt;
       }
       run.controller.abort();
+      this.persist(run);
     }
     return this.clone(run.snapshot);
   }
@@ -126,6 +139,32 @@ export class WorkflowRunManager {
       target,
       name: name ?? run.name,
       script: run.script,
+    });
+  }
+
+  deleteRun(id: string): boolean {
+    const run = this.runs.get(id);
+    if (run?.snapshot.status === "running") {
+      throw new Error(`cannot delete running workflow: ${id}`);
+    }
+    const deletedMemory = this.runs.delete(id);
+    const deletedDisk = this.store?.delete(id) ?? false;
+    return deletedMemory || deletedDisk;
+  }
+
+  retryRun(id: string, overrides: Partial<WorkflowRunStartOptions> = {}): WorkflowRunSnapshot {
+    const prior = this.requireRun(id).snapshot;
+    if (prior.status === "running") {
+      throw new Error(`cannot retry running workflow: ${id}`);
+    }
+    return this.startRun({
+      script: prior.script,
+      mode: overrides.mode ?? prior.mode,
+      args: overrides.args,
+      concurrency: overrides.concurrency,
+      maxAgents: overrides.maxAgents,
+      tokenBudget: overrides.tokenBudget,
+      runner: overrides.runner,
     });
   }
 
@@ -160,6 +199,7 @@ export class WorkflowRunManager {
         run.snapshot.status === "aborted"
           ? "aborted"
           : statusFromResult(result.success, result.error);
+      this.persist(run);
       this.emitTerminalEvent(id, run.snapshot, result.success);
     } catch (error) {
       const now = Date.now();
@@ -167,6 +207,7 @@ export class WorkflowRunManager {
       run.snapshot.error = errorMessage(error);
       run.snapshot.durationMs = now - run.snapshot.startedAt;
       run.snapshot.updatedAt = now;
+      this.persist(run);
       this.emitTerminalEvent(id, run.snapshot, false);
     }
     return this.clone(run.snapshot);
@@ -178,6 +219,7 @@ export class WorkflowRunManager {
       run.snapshot.phases.push({ title: phase, startedAt: now, agentCount: 0 });
     }
     run.snapshot.updatedAt = now;
+    this.persist(run);
     this.emit({ type: "workflow.phase.started", runId, phase, ts: now });
   }
 
@@ -185,6 +227,7 @@ export class WorkflowRunManager {
     const now = Date.now();
     run.snapshot.logs.push(message);
     run.snapshot.updatedAt = now;
+    this.persist(run);
     this.emit({ type: "workflow.log", runId, message, ts: now });
   }
 
@@ -212,6 +255,7 @@ export class WorkflowRunManager {
       : undefined;
     if (phaseSnapshot) phaseSnapshot.agentCount += 1;
     run.snapshot.updatedAt = now;
+    this.persist(run);
     this.emit({
       type: "workflow.agent.started",
       runId,
@@ -244,6 +288,7 @@ export class WorkflowRunManager {
       run.snapshot.costUsd = (run.snapshot.costUsd ?? 0) + result.raw.costUsd;
     }
     run.snapshot.updatedAt = now;
+    this.persist(run);
     this.emit({
       type: "workflow.agent.completed",
       runId,
@@ -296,6 +341,10 @@ export class WorkflowRunManager {
 
   private emit(event: WorkflowRunEvent): void {
     this.onEvent?.(event);
+  }
+
+  private persist(run: ManagedRun): void {
+    this.store?.save(run.snapshot);
   }
 }
 

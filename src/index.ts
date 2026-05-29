@@ -124,16 +124,19 @@ export type {
 export { parseWorkflowScript } from "./workflow/parser.js";
 export { runWorkflow } from "./workflow/runtime.js";
 export { loadSavedWorkflows, saveWorkflowScript, savedWorkflowPath } from "./workflow/saved.js";
+export { WorkflowRunStore } from "./workflow/store.js";
 export type {
   SavedWorkflow,
   WorkflowStorageOptions,
 } from "./workflow/saved.js";
+export type { WorkflowRunStoreOptions } from "./workflow/store.js";
 export type {
   WorkflowAgentOptions,
   WorkflowAgentResult,
   WorkflowAgentRunner,
   WorkflowAgentSnapshot,
   WorkflowAgentType,
+  WorkflowFinding,
   WorkflowMeta,
   WorkflowMetaPhase,
   WorkflowMode,
@@ -145,6 +148,7 @@ export type {
   WorkflowRunResult,
   WorkflowSaveTarget,
   WorkflowToolMode,
+  WorkflowVerifiedFinding,
 } from "./workflow/types.js";
 export { registerWorkflowTool } from "./tools/workflow.js";
 export type { WorkflowToolOptions } from "./tools/workflow.js";

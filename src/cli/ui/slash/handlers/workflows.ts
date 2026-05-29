@@ -23,6 +23,16 @@ export function handleWorkflowsSlash(
     return { info: `workflow ${run.id} ${run.status}` };
   }
 
+  if (cmd === "retry" && runId) {
+    const started = manager.retryRun(runId);
+    return { info: `started retry ${started.id} from ${runId}` };
+  }
+
+  if (cmd === "delete" && runId) {
+    manager.deleteRun(runId);
+    return { info: `deleted workflow ${runId}` };
+  }
+
   if (cmd === "save" && runId && (target === "project" || target === "user")) {
     const saved = manager.saveRun(runId, target, name);
     return { info: `saved workflow ${saved.name} to ${saved.path}` };
@@ -42,7 +52,7 @@ export function handleWorkflowsSlash(
   }
 
   return {
-    info: "usage: /workflows | /workflows show <runId> | /workflows stop <runId> | /workflows save <runId> project|user [name] | /workflows run <name> [input]",
+    info: "usage: /workflows | /workflows show <runId> | /workflows stop <runId> | /workflows retry <runId> | /workflows delete <runId> | /workflows save <runId> project|user [name] | /workflows run <name> [input]",
   };
 }
 

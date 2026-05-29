@@ -37,6 +37,16 @@ export interface WorkflowAgentResult {
   raw?: SubagentResult;
 }
 
+export interface WorkflowFinding {
+  id?: string;
+  finding: string;
+  evidence?: string;
+}
+
+export interface WorkflowVerifiedFinding extends WorkflowFinding {
+  verification: string | null;
+}
+
 export interface WorkflowPhaseSnapshot {
   title: string;
   startedAt: number;

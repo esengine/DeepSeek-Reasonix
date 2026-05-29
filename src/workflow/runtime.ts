@@ -197,6 +197,45 @@ export async function runWorkflow<T = unknown>(
     );
   };
 
+  const verifyFindings = async (findings: unknown): Promise<unknown[]> => {
+    if (!Array.isArray(findings)) {
+      throw new TypeError("verifyFindings() expects an array of findings");
+    }
+    return parallel(
+      findings.map((finding, index) => {
+        const item = normalizeFinding(finding, index);
+        return async () => ({
+          ...item,
+          verification: await agent({
+            label: `verify-${item.id}`,
+            type: "verify",
+            instruction: `Verify this finding independently. Return concise evidence-backed judgment.\n\nFinding: ${item.finding}\nEvidence: ${item.evidence ?? "not provided"}`,
+          }),
+        });
+      }),
+    );
+  };
+
+  const adversarialReview = async (
+    subject: unknown,
+    opts: AgentInputOptions = {},
+  ): Promise<string | null> =>
+    agent({
+      label: stringOption(opts.label) ?? "adversarial-review",
+      type: "verify",
+      instruction: `Try to refute, falsify, or weaken the following workflow result. Return only concrete objections with evidence.\n\n${String(subject)}`,
+    });
+
+  const synthesize = async (
+    inputs: unknown,
+    opts: AgentInputOptions = {},
+  ): Promise<string | null> =>
+    agent({
+      label: stringOption(opts.label) ?? "synthesis",
+      type: "synthesis",
+      instruction: `Synthesize these workflow results into one final answer. Preserve uncertainty and cite which inputs support each conclusion.\n\n${JSON.stringify(inputs)}`,
+    });
+
   const budget = Object.freeze({
     total: options.tokenBudget ?? null,
     spent: () => state.spent,
@@ -212,6 +251,9 @@ export async function runWorkflow<T = unknown>(
         agent,
         parallel,
         pipeline,
+        verifyFindings,
+        adversarialReview,
+        synthesize,
         phase,
         log,
         args: options.args,
@@ -340,6 +382,26 @@ function stringArrayOption(value: unknown): readonly string[] | undefined {
     .map((item) => item.trim())
     .filter(Boolean);
   return items.length ? items : undefined;
+}
+
+function normalizeFinding(
+  value: unknown,
+  index: number,
+): { id: string; finding: string; evidence?: string } {
+  if (typeof value === "string") return { id: String(index + 1), finding: value };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`finding[${index}] must be a string or object`);
+  }
+  const record = value as Record<string, unknown>;
+  const finding = typeof record.finding === "string" ? record.finding.trim() : "";
+  if (!finding) throw new TypeError(`finding[${index}].finding must be a non-empty string`);
+  const id =
+    typeof record.id === "string" && record.id.trim() ? record.id.trim() : String(index + 1);
+  const evidence =
+    typeof record.evidence === "string" && record.evidence.trim()
+      ? record.evidence.trim()
+      : undefined;
+  return evidence ? { id, finding, evidence } : { id, finding };
 }
 
 function workflowAgentType(value: unknown): WorkflowAgentOptions["type"] | undefined {

@@ -677,6 +677,17 @@ function AppInner({
     timeoutSec?: number;
     waitSec?: number;
   } | null>(null);
+  const [pendingWorkflowConfirm, setPendingWorkflowConfirm] = useState<{
+    id: number;
+    name: string;
+    description: string;
+    mode: string;
+    toolMode: string;
+    background: boolean;
+    concurrency: number;
+    maxAgents: number;
+    phases: string[];
+  } | null>(null);
   /** Outside-sandbox file access the model asked for (#684). Non-null renders PathConfirm and blocks the gate behind it. */
   const [pendingPath, setPendingPath] = useState<{
     id: number;
@@ -780,6 +791,7 @@ function AppInner({
   // hotkeys (chat-scroll, etc.) so they don't fire behind a picker.
   const modalOpen =
     !!pendingShell ||
+    !!pendingWorkflowConfirm ||
     !!pendingPlan ||
     !!pendingReviseEditor ||
     !!pendingSessionsPicker ||
@@ -805,6 +817,7 @@ function AppInner({
   // the bottom rows.
   const noTakeoverOverlay =
     !pendingShell &&
+    !pendingWorkflowConfirm &&
     !pendingPath &&
     !pendingSessionsPicker &&
     !pendingEditPicker &&
@@ -3735,6 +3748,21 @@ function AppInner({
     [pendingShell, codeMode, currentRootDir, log],
   );
 
+  const handleWorkflowConfirm = useCallback(
+    (choice: ShellConfirmChoice, denyContext?: string) => {
+      const pending = pendingWorkflowConfirm;
+      if (!pending) return;
+      setPendingWorkflowConfirm(null);
+      if (choice === "deny") {
+        pauseGate.resolve(pending.id, { type: "deny", denyContext });
+      } else {
+        log.pushInfo(`starting workflow ${pending.name}`);
+        pauseGate.resolve(pending.id, { type: "run_once" });
+      }
+    },
+    [pendingWorkflowConfirm, log],
+  );
+
   /** PathConfirm callback —mirrors handleShellConfirm. Resolves the gate, no synthetic user message. */
   const handlePathConfirm = useCallback(
     (choice: "run_once" | "always_allow" | "deny", denyContext?: string) => {
@@ -4075,6 +4103,30 @@ function AppInner({
             cwd: p.cwd,
             timeoutSec: p.timeoutSec,
             waitSec: p.waitSec,
+          });
+          break;
+        }
+        case "workflow_confirm": {
+          const p = payload as {
+            name: string;
+            description: string;
+            mode: string;
+            toolMode: string;
+            background: boolean;
+            concurrency: number;
+            maxAgents: number;
+            phases: string[];
+          };
+          setPendingWorkflowConfirm({
+            id: request.id,
+            name: p.name,
+            description: p.description,
+            mode: p.mode,
+            toolMode: p.toolMode,
+            background: p.background,
+            concurrency: p.concurrency,
+            maxAgents: p.maxAgents,
+            phases: p.phases,
           });
           break;
         }
@@ -4765,6 +4817,24 @@ function AppInner({
                     },
                   })}
                   onChoose={handleShellConfirm}
+                />
+              ) : pendingWorkflowConfirm ? (
+                <ShellConfirm
+                  prompt={toApprovalPrompt({
+                    id: pendingWorkflowConfirm.id,
+                    kind: "workflow_confirm",
+                    payload: {
+                      name: pendingWorkflowConfirm.name,
+                      description: pendingWorkflowConfirm.description,
+                      mode: pendingWorkflowConfirm.mode,
+                      toolMode: pendingWorkflowConfirm.toolMode,
+                      background: pendingWorkflowConfirm.background,
+                      concurrency: pendingWorkflowConfirm.concurrency,
+                      maxAgents: pendingWorkflowConfirm.maxAgents,
+                      phases: pendingWorkflowConfirm.phases,
+                    },
+                  })}
+                  onChoose={handleWorkflowConfirm}
                 />
               ) : pendingPath ? (
                 <PathConfirm

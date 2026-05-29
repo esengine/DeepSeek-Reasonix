@@ -423,7 +423,7 @@ interface SessionEmptyEvent {
 interface ConfirmRequiredEvent {
   type: "$confirm_required";
   id: number;
-  kind: "run_command" | "run_background";
+  kind: "run_command" | "run_background" | "workflow_confirm";
   command: string;
   prompt?: import("@reasonix/core-utils").ApprovalPrompt;
 }
@@ -1853,6 +1853,12 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     return "cancel";
   }
 
+  function parseWorkflowChoice(text: string): "run_once" | "deny" {
+    const lower = text.toLowerCase();
+    if (lower.includes("2") || lower.includes("deny") || lower.includes("cancel")) return "deny";
+    return "run_once";
+  }
+
   function stripFollowupPrefix(text: string): string {
     return text
       .replace(
@@ -1875,6 +1881,11 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
       case "path_access":
         pauseGate.resolve(gateId, parseRunPermissionChoice(text));
         return true;
+      case "workflow_confirm": {
+        const choice = parseWorkflowChoice(text);
+        pauseGate.resolve(gateId, choice === "run_once" ? { type: "run_once" } : { type: "deny" });
+        return true;
+      }
       case "plan_proposed": {
         const payload = (interaction.payload as { plan?: string }) ?? {};
         const choice = parsePlanChoice(text);
@@ -1950,6 +1961,20 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const p = payload as { path: string; intent: "read" | "write"; toolName: string };
         const intentText = p.intent === "read" ? "Read" : "Write";
         qqMessage = `Need file access confirmation\n\nAction: ${intentText}\nPath: ${p.path}\nTool: ${p.toolName}\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
+        break;
+      }
+      case "workflow_confirm": {
+        const p = payload as {
+          name?: string;
+          description?: string;
+          concurrency?: number;
+          maxAgents?: number;
+        };
+        qqMessage = `Workflow confirmation\n\nName: ${p.name ?? "workflow"}\nDescription: ${
+          p.description ?? ""
+        }\nConcurrency: ${p.concurrency ?? "default"}\nMax agents: ${
+          p.maxAgents ?? "default"
+        }\n\nReply with:\n1. Run workflow\n2. Deny`;
         break;
       }
       case "plan_proposed": {
@@ -2524,6 +2549,34 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           id: req.id,
           kind: req.kind,
           command: payload.command ?? "",
+          prompt: toApprovalPrompt({
+            id: req.id,
+            kind: req.kind,
+            payload,
+          }),
+        },
+        tabId,
+      );
+      if (tab) handleQQPauseRequest(tab, req.kind, payload as Record<string, unknown>);
+      return;
+    }
+    if (req.kind === "workflow_confirm") {
+      const payload = req.payload as {
+        name?: string;
+        description?: string;
+        mode?: string;
+        toolMode?: string;
+        background?: boolean;
+        concurrency?: number;
+        maxAgents?: number;
+      };
+      if (tab) setQQPendingInteraction(qqRuntime.routing, tab.id, req.id, req.kind, payload);
+      emit(
+        {
+          type: "$confirm_required",
+          id: req.id,
+          kind: req.kind,
+          command: payload.name ?? "workflow",
           prompt: toApprovalPrompt({
             id: req.id,
             kind: req.kind,
