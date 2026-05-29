@@ -1,0 +1,580 @@
+1:import { invoke } from "@tauri-apps/api/core";
+2:import { openPath } from "@tauri-apps/plugin-opener";
+3:import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+4:import type { ActivePlan, ArchivedPlan, PendingPlan, SessionFile, Settings, UsageStats } from "../App";
+5:import { Markdown } from "../Markdown";
+6:import { t, useLang } from "../i18n";
+7:import { I } from "../icons";
+8:import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
+9:import { PanelErrorBoundary } from "./error-boundary";
+10:
+11:export type ContextPanelTab = "files" | "tools" | "memory" | "rules" | "plan";
+12:
+13:const CONTEXT_MAX_TOKENS = 1_000_000;
+14:
+15:export function ContextPanel({
+16:  settings,
+17:  usage,
+18:  mcpSpecs,
+19:  mcpBridged,
+20:  sessionFiles,
+21:  memory,
+22:  memoryDetail,
+23:  onReadMemory,
+24:  activePlan,
+25:  pendingPlans,
+26:  planArchived,
+27:  activeTab,
+28:  onTabChange,
+29:  selectedPlanIdx: externalSelectedPlanIdx,
+30:  onPlanSelect,
+31:  activeTabNonce,
+32:}: {
+33:  settings: Settings | null;
+34:  usage: UsageStats;
+35:  mcpSpecs: McpSpecInfo[];
+36:  mcpBridged: boolean;
+37:  sessionFiles: SessionFile[];
+38:  memory: MemoryEntryInfo[];
+39:  memoryDetail: MemoryDetail | null;
+40:  onReadMemory: (path: string) => void;
+41:  activePlan: ActivePlan | null;
+42:  pendingPlans: PendingPlan[];
+43:  planArchived: ArchivedPlan[];
+44:  activeTab?: ContextPanelTab;
+45:  onTabChange?: (tab: ContextPanelTab) => void;
+46:  onOpenMcpSettings?: () => void;
+47:  onEditMcpSpec?: (spec: McpSpecInfo) => void;
+48:  onRetryMcpSpec?: (raw: string) => void;
+49:  selectedPlanIdx?: number | null;
+50:  onPlanSelect?: (idx: number | null) => void;
+51:  activeTabNonce?: number;
+52:}) {
+53:  useLang();
+54:  const [tab, setTabInternal] = useState<ContextPanelTab>("files");
+55:  const [internalSelectedPlanIdx, setInternalSelectedPlanIdx] = useState<number | null>(null);
+56:
+57:  const selectedPlanIdx = externalSelectedPlanIdx !== undefined ? externalSelectedPlanIdx : internalSelectedPlanIdx;
+58:  const setSelectedPlanIdx = onPlanSelect ?? setInternalSelectedPlanIdx;
+59:
+60:  const setTab = useCallback(
+61:    (next: ContextPanelTab) => {
+62:      setTabInternal(next);
+63:      onTabChange?.(next);
+64:    },
+65:    [onTabChange],
+66:  );
+67:
+68:  // Sync external tab override
+69:  useEffect(() => {
+70:    if (activeTab) setTab(activeTab);
+71:  }, [activeTab, activeTabNonce]);
+72:
+73:  // Auto-load first memory entry when switching to the memory tab.
+74:  const prevTabRef = useRef<ContextPanelTab>("files");
+75:  useEffect(() => {
+76:    if (tab === "memory" && prevTabRef.current !== "memory" && memory.length > 0 && !memoryDetail) {
+77:      onReadMemory(memory[0]!.path);
+78:    }
+79:    prevTabRef.current = tab;
+80:  }, [tab, memory, memoryDetail, onReadMemory]);
+81:  const reserved = usage.reservedTokens;
+82:  const lastHit = usage.lastCallCacheHit ?? 0;
+83:  const lastMiss = usage.lastCallCacheMiss ?? 0;
+84:  const observedLog = Math.max(0, lastHit + lastMiss - reserved);
+85:  const logTokens = Math.max(usage.liveLogTokens, observedLog);
+86:  const cached = Math.min(logTokens, Math.max(0, lastHit - reserved));
+87:  const used = Math.max(0, logTokens - cached);
+88:  const reservedPct = Math.min(100, (reserved / CONTEXT_MAX_TOKENS) * 100);
+89:  const usedPct = Math.min(100, (used / CONTEXT_MAX_TOKENS) * 100);
+90:  const cachedPct = Math.min(100, (cached / CONTEXT_MAX_TOKENS) * 100);
+91:  const free = Math.max(0, CONTEXT_MAX_TOKENS - reserved - used - cached);
+92:  return (
+93:    <aside className="ctx">
+94:      <div className="ctx-tabs">
+95:        <div className="ctx-tab" data-active={tab === "files"} onClick={() => setTab("files")}>
+96:          {t("contextPanel.filesTab")}
+97:        </div>
+98:        <div className="ctx-tab" data-active={tab === "tools"} onClick={() => setTab("tools")}>
+99:          {t("contextPanel.toolsTab")}
+100:        </div>
+101:        <div className="ctx-tab" data-active={tab === "memory"} onClick={() => setTab("memory")}>
+102:          {t("contextPanel.memoryTab")}
+103:        </div>
+104:        <div className="ctx-tab" data-active={tab === "rules"} onClick={() => setTab("rules")}>
+105:          {t("contextPanel.rulesTab")}
+106:        </div>
+107:        <div className="ctx-tab" data-active={tab === "plan"} onClick={() => setTab("plan")}>
+108:          {t("contextPanel.planTab")}
+109:        </div>
+110:      </div>
+111:
+112:      <div className="ctx-body">
+113:        <div className="ctx-block ctx-body-tokens">
+114:          <div className="h">
+115:            <span>{t("contextPanel.contextTokens")}</span>
+116:            <span className="right">
+117:              {(reserved + used + cached).toLocaleString()} /{" "}
+118:              {CONTEXT_MAX_TOKENS.toLocaleString()}
+119:            </span>
+120:          </div>
+121:          <div className="meter">
+122:            <span className="rsvd" style={{ width: `${reservedPct}%` }} />
+123:            <span className="cached" style={{ width: `${cachedPct}%` }} />
+124:            <span className="used" style={{ width: `${usedPct}%` }} />
+125:          </div>
+126:          <div className="legend">
+127:            <span className="l">
+128:              <span className="sw r" />
+129:              {t("contextPanel.reservedKey")} <span className="v">{reserved.toLocaleString()}</span>
+130:            </span>
+131:            <span className="l">
+132:              <span className="sw c" />
+133:              {t("contextPanel.cacheKey")} <span className="v">{cached.toLocaleString()}</span>
+134:            </span>
+135:            <span className="l">
+136:              <span className="sw u" />
+137:              {t("contextPanel.usedKey")} <span className="v">{used.toLocaleString()}</span>
+138:            </span>
+139:            <span className="l">
+140:              {t("contextPanel.freeKey")} <span className="v">{free.toLocaleString()}</span>
+141:            </span>
+142:          </div>
+143:        </div>
+144:
+145:        <div className="ctx-body-tab">
+146:          <PanelErrorBoundary key={tab} label={tab}>
+147:            {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
+148:            {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
+149:            {tab === "memory" && (
+150:              <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
+151:            )}
+152:            {tab === "rules" && <CtxRules settings={settings} />}
+153:            {tab === "plan" && (
+154:              <CtxPlan
+155:                activePlan={activePlan}
+156:                pendingPlans={pendingPlans}
+157:                planArchived={planArchived}
+158:                selectedIdx={selectedPlanIdx}
+159:                onSelect={(idx) => setSelectedPlanIdx(idx === selectedPlanIdx ? null : idx)}
+160:              />
+161:            )}
+162:          </PanelErrorBoundary>
+163:        </div>
+164:      </div>
+165:    </aside>
+166:  );
+167:}
+168:
+169:type TreeNode =
+170:  | { kind: "dir"; depth: number; name: string; key: string }
+171:  | { kind: "file"; depth: number; name: string; path: string; key: string; status: "c" | "m" };
+172:
+173:async function openContextFile(path: string, settings: Settings | null): Promise<void> {
+174:  const workspaceDir = settings?.workspaceDir;
+175:  const isWindows = workspaceDir?.includes("\\") ?? false;
+176:  const sep = isWindows ? "\\" : "/";
+177:  const abs =
+178:    workspaceDir && !/^[a-zA-Z]:[\\/]/.test(path) && !path.startsWith("/")
+179:      ? `${workspaceDir.replace(/[\\/]$/, "")}${sep}${path.replace(/^[\\/]+/, "").replace(/\//g, sep)}`
+180:      : isWindows
+181:        ? path.replace(/\//g, "\\")
+182:        : path;
+183:  const editor = settings?.editor?.trim();
+184:  if (editor) {
+185:    await invoke("open_in_editor", { command: editor, path: abs, line: null });
+186:    return;
+187:  }
+188:  await openPath(abs);
+189:}
+190:
+191:function buildSessionTree(files: SessionFile[]): TreeNode[] {
+192:  const sorted = [...files].sort((a, b) =>
+193:    a.path.replace(/\\/g, "/").localeCompare(b.path.replace(/\\/g, "/")),
+194:  );
+195:  const out: TreeNode[] = [];
+196:  const seenDirs = new Set<string>();
+197:  for (const f of sorted) {
+198:    const displayPath = f.path.replace(/\\/g, "/");
+199:    const parts = displayPath.split("/").filter(Boolean);
+200:    if (parts.length === 0) continue;
+201:    let prefix = "";
+202:    for (let i = 0; i < parts.length - 1; i++) {
+203:      const seg = parts[i] ?? "";
+204:      prefix = prefix ? `${prefix}/${seg}` : seg;
+205:      if (!seenDirs.has(prefix)) {
+206:        seenDirs.add(prefix);
+207:        out.push({ kind: "dir", depth: i, name: seg, key: `d:${prefix}` });
+208:      }
+209:    }
+210:    const leaf = parts[parts.length - 1] ?? "";
+211:    out.push({
+212:      kind: "file",
+213:      depth: parts.length - 1,
+214:      name: leaf,
+215:      path: displayPath,
+216:      key: `f:${f.path}`,
+217:      status: f.status,
+218:    });
+219:  }
+220:  return out;
+221:}
+222:
+223:function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Settings | null }) {
+224:  const tree = useMemo(() => buildSessionTree(files), [files]);
+225:  return (
+226:    <div className="ctx-block">
+227:      <div className="h">
+228:        <span>{t("contextPanel.filesTitle")}</span>
+229:        <span className="right">
+230:          {files.length === 0 ? "—" : t("contextPanel.filesCount", { count: files.length })}
+231:        </span>
+232:      </div>
+233:      <div className="tree">
+234:        {files.length === 0 ? (
+235:          <div className="ctx-empty">{t("contextPanel.noFilesMsg")}</div>
+236:        ) : (
+237:          tree.map((n) =>
+238:            n.kind === "dir" ? (
+239:              <div
+240:                className="node"
+241:                key={n.key}
+242:                data-d={n.depth}
+243:                data-kind="dir"
+244:                style={{ paddingLeft: 4 + n.depth * 14 }}
+245:              >
+246:                <span className="ico">
+247:                  <I.folder size={12} />
+248:                </span>
+249:                <span className="nm">{n.name}/</span>
+250:              </div>
+251:            ) : (
+252:              <div
+253:                className="node"
+254:                key={n.key}
+255:                data-d={n.depth}
+256:                data-kind="file"
+257:                title={n.path}
+258:                style={{ paddingLeft: 4 + n.depth * 14 }}
+259:              >
+260:                <span className="ico">
+261:                  <I.file size={12} />
+262:                </span>
+263:                <span className="node-text">
+264:                  <span className="nm">{n.name}</span>
+265:                  <span className="full-path">{n.path}</span>
+266:                </span>
+267:                <span
+268:                  className="dot"
+269:                  data-s={n.status}
+270:                  title={n.status === "m" ? t("contextPanel.fileModified") : t("contextPanel.fileInContext")}
+271:                />
+272:                <button
+273:                  type="button"
+274:                  className="tree-action"
+275:                  aria-label={t("contextPanel.openFile", { path: n.path })}
+276:                  title={t("contextPanel.openFile", { path: n.path })}
+277:                  onClick={() => void openContextFile(n.path, settings)}
+278:                >
+279:                  <I.file size={12} />
+280:                </button>
+281:                <button
+282:                  type="button"
+283:                  className="tree-action"
+284:                  aria-label={t("contextPanel.copyPath", { path: n.path })}
+285:                  title={t("contextPanel.copyPath", { path: n.path })}
+286:                  onClick={() => void navigator.clipboard?.writeText(n.path)}
+287:                >
+288:                  <I.copy size={12} />
+289:                </button>
+290:              </div>
+291:            ),
+292:          )
+293:        )}
+294:      </div>
+295:    </div>
+296:  );
+297:}
+298:
+299:function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }) {
+300:  const readyCount = specs.filter((s) => s.status === "connected").length;
+301:  return (
+302:    <div className="ctx-block">
+303:      <div className="h">
+304:        <span>{t("contextPanel.mcpTitle")}</span>
+305:        <span className="right">
+306:          {specs.length === 0
+307:            ? "—"
+308:            : bridged
+309:              ? t("contextPanel.mcpReadyAll", { count: specs.length })
+310:              : t("contextPanel.mcpReadySome", { ready: readyCount, count: specs.length })}
+311:        </span>
+312:      </div>
+313:      {specs.length === 0 ? (
+314:        <div className="ctx-empty">{t("contextPanel.mcpEmpty")}</div>
+315:      ) : (
+316:        specs.map((s) => {
+317:          const dot =
+318:            s.status === "connected"
+319:              ? "ok"
+320:              : s.status === "failed" || s.parseError
+321:                ? "off"
+322:                : "pending";
+323:          const suffix = s.statusReason
+324:            ? ` · ${s.statusReason}`
+325:            : s.status === "connected"
+326:              ? typeof s.toolCount === "number"
+327:                ? ` · ${t("contextPanel.mcpTools", { count: s.toolCount })}`
+328:                : ` · ${t("contextPanel.mcpReady")}`
+329:              : s.status === "handshake"
+330:                ? ` · ${t("contextPanel.mcpConnecting")}`
+331:                : s.status === "disabled"
+332:                  ? ` · ${t("contextPanel.mcpDisabled")}`
+333:                  : s.status === "failed"
+334:                    ? ` · ${t("contextPanel.mcpFailed")}`
+335:                    : ` · ${t("contextPanel.mcpConfigured")}`;
+336:          return (
+337:            <div className="mcp-row" key={s.raw}>
+338:              <span className="ico">
+339:                <I.wrench size={12} />
+340:              </span>
+341:              <div className="body">
+342:                <div className="n">{s.name ?? s.summary}</div>
+343:                <div className="m">
+344:                  {s.transport}
+345:                  {suffix}
+346:                </div>
+347:              </div>
+348:              <span className="status" data-s={dot} />
+349:            </div>
+350:          );
+351:        })
+352:      )}
+353:    </div>
+354:  );
+355:}
+356:
+357:function CtxMemory({
+358:  entries,
+359:  detail,
+360:  onRead,
+361:}: {
+362:  entries: MemoryEntryInfo[];
+363:  detail: MemoryDetail | null;
+364:  onRead: (path: string) => void;
+365:}) {
+366:  return (
+367:    <div className="ctx-block" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+368:      <div className="h">
+369:        <span>{t("contextPanel.memoryTitle")}</span>
+370:        <span className="right">
+371:          {entries.length === 0 ? "—" : t("contextPanel.itemCount", { count: entries.length })}
+372:        </span>
+373:      </div>
+374:      {entries.length === 0 ? (
+375:        <div className="ctx-empty">{t("contextPanel.noMemoriesMsg")}</div>
+376:      ) : (
+377:        <div className="mem" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+378:          <div style={{ flexShrink: 0 }}>
+379:            {entries.map((m) => (
+380:              <button
+381:                type="button"
+382:                className="mem-row"
+383:                data-active={detail?.path === m.path}
+384:                key={m.path}
+385:                onClick={() => onRead(m.path)}
+386:              >
+387:                <span className="scope" data-s={m.scope}>
+388:                  {m.scope === "project" ? t("contextPanel.scopeProject") : t("contextPanel.scopeGlobal")}
+389:                </span>
+390:                <span className="txt">{m.description || m.name}</span>
+391:              </button>
+392:            ))}
+393:          </div>
+394:          {detail ? (
+395:            <div className="mem-detail">
+396:              <Markdown source={detail.body} />
+397:            </div>
+398:          ) : null}
+399:        </div>
+400:      )}
+401:    </div>
+402:  );
+403:}
+404:
+405:function CtxRules({ settings }: { settings: Settings | null }) {
+406:  const editMode = settings?.editMode ?? "review";
+407:  const items: { p: string; allow: boolean; desc: string }[] =
+408:    editMode === "yolo"
+409:      ? [{ p: "*", allow: true, desc: t("contextPanel.ruleYolo") }]
+410:      : editMode === "auto"
+411:        ? [
+412:            { p: "read_file, list_directory, search_files, *", allow: true, desc: t("contextPanel.ruleReadOnly") },
+413:            { p: "run_command (allowlist)", allow: true, desc: t("contextPanel.ruleShellAllowlist") },
+414:            { p: "edit_file, write_file, run_command (other)", allow: false, desc: t("contextPanel.ruleWritesAsk") },
+415:          ]
+416:        : [
+417:            { p: "*", allow: false, desc: t("contextPanel.ruleReview") },
+418:          ];
+419:  return (
+420:    <div className="ctx-block">
+421:      <div className="h">
+422:        <span>{t("contextPanel.autoApproveTitle")}</span>
+423:        <span className="right">{editMode}</span>
+424:      </div>
+425:      {items.map((r) => (
+426:        <div className="rule" key={r.p}>
+427:          <div className="top">
+428:            <span className={`pat ${r.allow ? "" : "deny"}`}>{r.p}</span>
+429:            <span className={`sw ${r.allow ? "" : "deny"}`}>
+430:              {r.allow ? t("contextPanel.allow") : t("contextPanel.ask")}
+431:            </span>
+432:          </div>
+433:          <div className="desc">{r.desc}</div>
+434:        </div>
+435:      ))}
+436:    </div>
+437:  );
+438:}
+439:
+440:type PlanEntry =
+441:  | { kind: "active"; plan: ActivePlan }
+442:  | { kind: "pending"; plan: PendingPlan }
+443:  | { kind: "archived"; plan: ArchivedPlan; index: number };
+444:
+445:function CtxPlan({
+446:  activePlan,
+447:  pendingPlans,
+448:  planArchived,
+449:  selectedIdx,
+450:  onSelect,
+451:}: {
+452:  activePlan: ActivePlan | null;
+453:  pendingPlans: PendingPlan[];
+454:  planArchived: ArchivedPlan[];
+455:  selectedIdx: number | null;
+456:  onSelect: (idx: number) => void;
+457:}) {
+458:  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+459:
+460:  const entries: PlanEntry[] = [];
+461:  if (activePlan) entries.push({ kind: "active", plan: activePlan });
+462:  for (const p of pendingPlans) entries.push({ kind: "pending", plan: p });
+463:  for (let i = 0; i < planArchived.length; i++) {
+464:    entries.push({ kind: "archived", plan: planArchived[i]!, index: i });
+465:  }
+466:
+467:  // Highlight: first active/pending plan when nothing explicit is selected.
+468:  const effectiveIdx =
+469:    selectedIdx !== null
+470:      ? selectedIdx
+471:      : entries.findIndex((e) => e.kind === "active" || e.kind === "pending");
+472:
+473:  // Detail is only shown when the user (or system) explicitly selects an entry.
+474:  const showDetail = selectedIdx !== null && effectiveIdx >= 0;
+475:  const selected = showDetail ? (entries[effectiveIdx] ?? null) : null;
+476:
+477:  const detailBody =
+478:    selected?.kind === "active" || selected?.kind === "pending"
+479:      ? (selected.plan as ActivePlan | PendingPlan).plan
+480:      : selected?.kind === "archived"
+481:        ? (selected.plan as ArchivedPlan).plan
+482:        : null;
+483:
+484:  const isSelectedRefining =
+485:    selected?.kind === "pending" && (selected.plan as PendingPlan).refining === true;
+486:
+487:  return (
+488:    <div
+489:      className="ctx-block"
+490:      style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+491:    >
+492:      <div className="h">
+493:        <span>{t("contextPanel.planTitle")}</span>
+494:        <span className="right">
+495:          {entries.length === 0 ? "—" : t("contextPanel.itemCount", { count: entries.length })}
+496:        </span>
+497:      </div>
+498:      {entries.length === 0 ? (
+499:        <div className="ctx-empty">{t("contextPanel.noPlansMsg")}</div>
+500:      ) : (
+501:        <div className={`mem${showDetail ? " mem--split" : ""}`}>
+502:          <div className="mem-list">
+503:            {entries.map((e, i) => {
+504:              const summary =
+505:                e.kind === "active" || e.kind === "pending"
+506:                  ? (e.plan as ActivePlan | PendingPlan).summary
+507:                  : (e.plan as ArchivedPlan).summary;
+508:              const isRefining =
+509:                e.kind === "pending" && (e.plan as PendingPlan).refining === true;
+510:              const label =
+511:                e.kind === "active"
+512:                  ? t("contextPanel.planActive")
+513:                  : isRefining
+514:                    ? t("contextPanel.planRefining")
+515:                    : e.kind === "pending"
+516:                      ? t("contextPanel.planPending")
+517:                      : (e.plan as ArchivedPlan).status === "cancelled"
+518:                        ? t("contextPanel.planCancelled")
+519:                        : t("contextPanel.planArchived");
+520:              const tone =
+521:                e.kind === "active"
+522:                  ? "ok"
+523:                  : isRefining
+524:                    ? "accent"
+525:                    : e.kind === "pending"
+526:                      ? "warn"
+527:                      : (e.kind === "archived" && (e.plan as ArchivedPlan).status === "cancelled")
+528:                        ? "err"
+529:                        : "muted";
+530:              const tipText = summary || t("contextPanel.planUntitled");
+531:              return (
+532:                <button
+533:                  type="button"
+534:                  className="mem-row"
+535:                  data-active={effectiveIdx === i}
+536:                  data-compact={showDetail}
+537:                  key={`${e.kind}-${i}`}
+538:                  onClick={() => onSelect(i)}
+539:                  onMouseEnter={
+540:                    showDetail
+541:                      ? (ev) => {
+542:                          const r = ev.currentTarget.getBoundingClientRect();
+543:                          setTooltip({ text: tipText, x: r.right + 8, y: r.top + r.height / 2 });
+544:                        }
+545:                      : undefined
+546:                  }
+547:                  onMouseLeave={showDetail ? () => setTooltip(null) : undefined}
+548:                >
+549:                  <span className="scope" data-s={tone}>
+550:                    {label}
+551:                  </span>
+552:                  <span className="txt">{tipText}</span>
+553:                </button>
+554:              );
+555:            })}
+556:          </div>
+557:          {detailBody ? (
+558:            <div className="mem-detail">
+559:              {isSelectedRefining && (
+560:                <div className="plan-refining-bar">
+561:                  <span className="plan-refining-dot" />
+562:                  {t("contextPanel.planRefiningInProgress")}
+563:                </div>
+564:              )}
+565:              <Markdown source={detailBody} />
+566:            </div>
+567:          ) : null}
+568:        </div>
+569:      )}
+570:      {tooltip && (
+571:        <div
+572:          className="plan-name-tooltip"
+573:          style={{ left: tooltip.x, top: tooltip.y }}
+574:        >
+575:          {tooltip.text}
+576:        </div>
+577:      )}
+578:    </div>
+579:  );
+580:}
