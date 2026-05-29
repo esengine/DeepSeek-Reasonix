@@ -52,6 +52,8 @@ const PAGE_META: ReadonlyArray<{ id: PageId; icon: keyof typeof I }> = [
   { id: "shortcuts", icon: "cpu" },
 ];
 
+const MIN_CONTEXT_TOKENS = 1024;
+
 export function SettingsModal({
   settings,
   balance,
@@ -1094,18 +1096,18 @@ function PageModels({
             <input
               className="field mono"
               type="number"
-              min={1}
+              min={MIN_CONTEXT_TOKENS}
               value={settings.contextTokens?.[settings.model] ?? ""}
               onChange={(e) => {
                 const raw = e.target.value.trim();
-                const num = raw ? parseInt(raw, 10) : 0;
+                const num = raw ? Number.parseInt(raw, 10) : 0;
                 const next = { ...(settings.contextTokens ?? {}) };
-                if (num > 0 && Number.isFinite(num)) {
+                if (num >= MIN_CONTEXT_TOKENS && Number.isFinite(num)) {
                   next[settings.model] = num;
                 } else {
                   delete next[settings.model];
                 }
-                onSave({ contextTokens: Object.keys(next).length > 0 ? next : undefined });
+                onSave({ contextTokens: next });
               }}
               placeholder={t("settings.contextTokensPlaceholder")}
             />

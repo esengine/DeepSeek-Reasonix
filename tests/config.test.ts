@@ -1080,11 +1080,14 @@ describe("config", () => {
       expect(loadContextTokens(path)).toEqual({ mimo: 1_000_000, "qwen-72b": 131_072 });
     });
 
-    it("drops non-positive and non-finite values", () => {
+    it("drops implausibly small, non-positive, and non-finite values", () => {
       writeConfig(
         {
           contextTokens: {
             mimo: 1_000_000,
+            min: 1024,
+            tiny1: 1,
+            tiny2: 1023,
             bad1: -1,
             bad2: 0,
             bad3: Number.POSITIVE_INFINITY,
@@ -1093,7 +1096,7 @@ describe("config", () => {
         },
         path,
       );
-      expect(loadContextTokens(path)).toEqual({ mimo: 1_000_000 });
+      expect(loadContextTokens(path)).toEqual({ mimo: 1_000_000, min: 1024 });
     });
 
     it("floors fractional values", () => {

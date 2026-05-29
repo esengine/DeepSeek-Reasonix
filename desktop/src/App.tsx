@@ -1047,6 +1047,7 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
           webSearchEndpoint: ev.webSearchEndpoint,
           webSearchApiKeys: ev.webSearchApiKeys,
           subagentModels: ev.subagentModels,
+          contextTokens: ev.contextTokens,
           showSystemEvents: ev.showSystemEvents,
           version: ev.version,
         },

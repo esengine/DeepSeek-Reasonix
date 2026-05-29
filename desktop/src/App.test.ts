@@ -389,6 +389,25 @@ describe("Desktop App reducer — ApprovalPrompt integration", () => {
     expect(next.settings?.reasoningEffort).toBe("low");
     expect(next.settings?.editMode).toBe("auto");
   });
+
+  it("hydrates context token overrides from settings events", () => {
+    const next = reduce(initialState(), {
+      t: "incoming",
+      event: {
+        type: "$settings",
+        reasoningEffort: "high",
+        editMode: "review",
+        budgetUsd: null,
+        workspaceDir: "/workspace",
+        recentWorkspaces: [],
+        model: "deepseek-v4-pro",
+        contextTokens: { "deepseek-v4-pro": 1 },
+        version: "0.50.1",
+      },
+    });
+
+    expect(next.settings?.contextTokens).toEqual({ "deepseek-v4-pro": 1 });
+  });
 });
 
 describe("desktop thread layout", () => {

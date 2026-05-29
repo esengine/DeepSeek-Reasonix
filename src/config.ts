@@ -810,6 +810,8 @@ function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+export const MIN_CONTEXT_TOKEN_OVERRIDE = 1024;
+
 export function loadPricingOverride(
   path: string = defaultConfigPath(),
 ): Record<string, PricingOverride> {
@@ -833,7 +835,11 @@ export function loadContextTokens(path: string = defaultConfigPath()): Record<st
   if (!isPlainObject(raw)) return {};
   const result: Record<string, number> = {};
   for (const [model, value] of Object.entries(raw)) {
-    if (typeof value === "number" && value > 0 && Number.isFinite(value)) {
+    if (
+      typeof value === "number" &&
+      value >= MIN_CONTEXT_TOKEN_OVERRIDE &&
+      Number.isFinite(value)
+    ) {
       result[model] = Math.floor(value);
     }
   }

@@ -368,6 +368,7 @@ export type SettingsEvent = {
     brave?: string;
   };
   subagentModels?: Record<string, "flash" | "pro">;
+  contextTokens?: Record<string, number>;
   showSystemEvents?: boolean;
   version: string;
 };
