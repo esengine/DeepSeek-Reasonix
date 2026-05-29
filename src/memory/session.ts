@@ -502,9 +502,7 @@ function chmodPrivate(path: string): void {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Async variants — non-blocking counterparts for server API handlers.
-// ---------------------------------------------------------------------------
 
 async function countLinesAsync(path: string): Promise<number> {
   try {
