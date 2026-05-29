@@ -15,6 +15,8 @@ export type EventRole =
   | "warning"
   /** Transient indicator for silent phases; UI clears on next primary event. */
   | "status"
+  /** Informational message from slash commands or system feedback; bridged to dashboard via SSE. */
+  | "info"
   /** Mid-turn steer injected as queued user guidance without aborting the current turn. */
   | "steer";
 

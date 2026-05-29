@@ -73,6 +73,18 @@ describe("loopEventToDashboard", () => {
     });
   });
 
+  it("converts info events to DashboardEvent kind=info", () => {
+    const result = loopEventToDashboard(
+      ev({ role: "info", content: "Unknown command: /xyz" }),
+      ctx,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.kind).toBe("info");
+    if (result!.kind === "info") {
+      expect(result!.text).toBe("Unknown command: /xyz");
+    }
+  });
+
   it("returns null for unrecognized roles", () => {
     expect(loopEventToDashboard(ev({ role: "assistant_final" }), ctx)).toBeNull();
     expect(loopEventToDashboard(ev({ role: "tool_call_delta" }), ctx)).toBeNull();

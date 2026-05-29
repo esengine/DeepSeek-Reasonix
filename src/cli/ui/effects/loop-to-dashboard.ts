@@ -41,6 +41,8 @@ export function loopEventToDashboard(
       return { kind: "error", id, text: ev.content };
     case "status":
       return { kind: "status", text: ev.content };
+    case "info":
+      return { kind: "info", id, text: ev.content };
     case "steer":
       return { kind: "user", id, text: ev.content };
     default:
