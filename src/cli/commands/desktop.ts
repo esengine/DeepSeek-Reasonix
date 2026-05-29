@@ -3176,10 +3176,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const resolvedFolder = resolve(dirname(folderPath));
         const resolvedFlat = resolve(flatPath);
         const resolvedDir = resolve(dir);
-        if (
-          !(resolvedFolder.startsWith(`${resolvedDir}/`) || resolvedFolder === resolvedDir) &&
-          !(resolvedFlat.startsWith(`${resolvedDir}/`))
-        ) {
+        const insideDir =
+          resolvedFolder.startsWith(`${resolvedDir}/`) || resolvedFolder === resolvedDir;
+        const flatInside = resolvedFlat.startsWith(`${resolvedDir}/`);
+        if (!insideDir && !flatInside) {
           emit({ type: "$error", message: `invalid skill name: ${msg.name}` }, tab.id);
           return;
         }
