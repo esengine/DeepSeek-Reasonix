@@ -1433,6 +1433,7 @@ export const de: TranslationSchema = {
     hintAbort: "abbrechen",
     hintQuit: "beenden",
     abortedHint: "Turn vom Benutzer abgebrochen · erneut Esc zum Leeren · ⏎ für eine Folgefrage",
+    ctrlCQuitHint: "Ctrl+C erneut drücken zum Beenden",
     editorNoRawMode:
       "Externer Editor nicht verfügbar — stdin unterstützt Raw-Mode-Umschaltung auf diesem Terminal nicht",
     editorFailed: "Externer Editor:",

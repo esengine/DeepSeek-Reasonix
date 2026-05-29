@@ -15,6 +15,7 @@ describe("handleTurnInterrupt", () => {
       stopLoop,
       loop: { abort },
       quitProcess,
+      lastCtrlCAt: { current: null as number | null },
     };
 
     expect(handleTurnInterrupt("ctrl-c", controller)).toBe("aborted");
@@ -25,25 +26,58 @@ describe("handleTurnInterrupt", () => {
     expect(quitProcess).not.toHaveBeenCalled();
   });
 
-  it("quits on Ctrl+C when no model turn is active", () => {
+  it("arms quit on first Ctrl+C when idle, quits on second press within window", () => {
     const resetPendingModals = vi.fn();
     const abort = vi.fn();
     const quitProcess = vi.fn();
+    const lastCtrlCAt = { current: null as number | null };
 
-    const outcome = handleTurnInterrupt("ctrl-c", {
+    const base = {
       turnActiveRef: { current: false },
       abortedThisTurn: { current: false },
       resetPendingModals,
-      isLoopActive: () => true,
+      isLoopActive: () => false,
       stopLoop: vi.fn(),
       loop: { abort },
       quitProcess,
-    });
+      lastCtrlCAt,
+    };
 
-    expect(outcome).toBe("quit");
+    // First press: armed, does NOT quit
+    expect(handleTurnInterrupt("ctrl-c", base)).toBe("quit-armed");
+    expect(quitProcess).not.toHaveBeenCalled();
+    expect(lastCtrlCAt.current).not.toBeNull();
+
+    // Second press within 1.5s window: quits
+    expect(handleTurnInterrupt("ctrl-c", base)).toBe("quit");
     expect(quitProcess).toHaveBeenCalledTimes(1);
     expect(resetPendingModals).not.toHaveBeenCalled();
     expect(abort).not.toHaveBeenCalled();
+  });
+
+  it("re-arms if second Ctrl+C arrives after the window expires", () => {
+    const quitProcess = vi.fn();
+    const lastCtrlCAt = { current: null as number | null };
+    const base = {
+      turnActiveRef: { current: false },
+      abortedThisTurn: { current: false },
+      resetPendingModals: vi.fn(),
+      isLoopActive: () => false,
+      stopLoop: vi.fn(),
+      loop: { abort: vi.fn() },
+      quitProcess,
+      lastCtrlCAt,
+    };
+
+    // First press: armed
+    expect(handleTurnInterrupt("ctrl-c", base)).toBe("quit-armed");
+
+    // Simulate window expiry
+    lastCtrlCAt.current = Date.now() - 2000;
+
+    // Press after window: re-arms instead of quitting
+    expect(handleTurnInterrupt("ctrl-c", base)).toBe("quit-armed");
+    expect(quitProcess).not.toHaveBeenCalled();
   });
 
   it("stops an idle auto-loop on Esc without aborting the next turn", () => {
@@ -60,6 +94,7 @@ describe("handleTurnInterrupt", () => {
       stopLoop,
       loop: { abort },
       quitProcess,
+      lastCtrlCAt: { current: null },
     });
 
     expect(outcome).toBe("stopped-loop");
@@ -82,6 +117,7 @@ describe("handleTurnInterrupt", () => {
       stopLoop: vi.fn(),
       loop: { abort },
       quitProcess,
+      lastCtrlCAt: { current: null },
     });
 
     expect(outcome).toBe("idle");

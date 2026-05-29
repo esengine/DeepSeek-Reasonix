@@ -556,6 +556,8 @@ function AppInner({
   // Esc handler only fires once per turn (repeated presses would yield
   // stacked warning events).
   const abortedThisTurn = useRef(false);
+  // Timestamp of the last Ctrl+C while idle — enables "press Ctrl+C again to quit".
+  const lastCtrlCAtRef = useRef<number | null>(null);
   const stashRef = useRef("");
   // Mirrors the live `busy` flag for /loop's timer (it has no React
   // closure handle, only refs). Skips the firing when a prior turn is
@@ -1785,7 +1787,7 @@ function AppInner({
       return;
     }
     if (key.ctrl && key.input === "c") {
-      handleTurnInterrupt("ctrl-c", {
+      const outcome = handleTurnInterrupt("ctrl-c", {
         turnActiveRef: submittingRef,
         abortedThisTurn,
         resetPendingModals,
@@ -1793,7 +1795,11 @@ function AppInner({
         stopLoop,
         loop,
         quitProcess,
+        lastCtrlCAt: lastCtrlCAtRef,
       });
+      if (outcome === "quit-armed") {
+        log.pushInfo(t("composer.ctrlCQuitHint"));
+      }
       return;
     }
     if (key.ctrl && key.input === "p" && !busy && (!modalOpen || pendingShortcuts)) {
@@ -1821,6 +1827,7 @@ function AppInner({
         stopLoop,
         loop,
         quitProcess,
+        lastCtrlCAt: lastCtrlCAtRef,
       });
       return;
     }

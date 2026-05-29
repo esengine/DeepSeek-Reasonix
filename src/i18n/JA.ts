@@ -1520,6 +1520,7 @@ export const JA: TranslationSchema = {
     hintQuit: "終了",
     abortedHint:
       "ユーザーによりターン中断 \u00b7 もう一度escでクリア \u00b7 \u23ce でフォローアップ",
+    ctrlCQuitHint: "もう一度 Ctrl+C で終了",
     editorNoRawMode:
       "外部エディタが利用できません \u2014 この端末ではstdinのraw-mode切替がサポートされていません",
     editorFailed: "外部エディタ:",
