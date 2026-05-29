@@ -4,8 +4,8 @@ import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process"
 import { constants, closeSync, lstatSync, openSync, realpathSync } from "node:fs";
 import { devNull } from "node:os";
 import * as pathMod from "node:path";
-import { expandShellTokens } from "./shell/parse.js";
 import { isDqEscape, killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
+import { expandShellTokens } from "./shell/parse.js";
 
 export type ChainOp = "|" | "||" | "&&" | ";";
 

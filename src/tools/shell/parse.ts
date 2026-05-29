@@ -138,17 +138,16 @@ export function expandShellTokens(tokens: string[], cwd: string): string[] {
 
 /** 展开 $VAR 和 ${VAR}，未定义的变量保留原样。 */
 function expandEnvVars(tok: string): string {
-  // ${VAR} 形式
-  tok = tok.replace(/\$\{([^}]+)\}/g, (_match, varName: string) => {
+  let out = tok;
+  out = out.replace(/\$\{([^}]+)\}/g, (_match, varName: string) => {
     const val = process.env[varName];
     return val !== undefined ? val : `\${${varName}}`;
   });
-  // $VAR 形式（字母/数字/下划线组成）
-  tok = tok.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, varName: string) => {
+  out = out.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, varName: string) => {
     const val = process.env[varName];
     return val !== undefined ? val : `$${varName}`;
   });
-  return tok;
+  return out;
 }
 
 /** Glob 展开：token 含 * 或 ? 时在 cwd 下匹配，无匹配保留原样。返回匹配数组。 */

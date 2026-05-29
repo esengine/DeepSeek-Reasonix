@@ -115,7 +115,7 @@ describe("expandShellTokens", () => {
       const result = expandShellTokens(["cat", "$TEST_EXPAND_VAR/file"], tmp);
       expect(result[1]).toBe("/expanded/path/file");
     } finally {
-      if (original === undefined) delete process.env.TEST_EXPAND_VAR;
+      if (original === undefined) process.env.TEST_EXPAND_VAR = undefined;
       else process.env.TEST_EXPAND_VAR = original;
     }
   });
@@ -127,7 +127,7 @@ describe("expandShellTokens", () => {
       const result = expandShellTokens(["echo", "${TEST_EXPAND_VAR2}"], tmp);
       expect(result[1]).toBe("value");
     } finally {
-      if (original === undefined) delete process.env.TEST_EXPAND_VAR2;
+      if (original === undefined) process.env.TEST_EXPAND_VAR2 = undefined;
       else process.env.TEST_EXPAND_VAR2 = original;
     }
   });
