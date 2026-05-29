@@ -1,4 +1,4 @@
-﻿/** Project scope wins over global. Only names+descriptions enter the prefix; bodies load lazily into the append-only log. */
+/** Project scope wins over global. Only names+descriptions enter the prefix; bodies load lazily into the append-only log. */
 
 import {
   constants,
