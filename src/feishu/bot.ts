@@ -1,5 +1,21 @@
 import { EventEmitter } from "node:events";
-import * as Lark from "@larksuiteoapi/node-sdk";
+
+// Lazy-load the Feishu SDK so the module tree doesn't crash when
+// @larksuiteoapi/node-sdk is absent (e.g. CI runners that don't
+// install optional channel deps).
+let _lark: any;
+async function loadLark() {
+  if (!_lark) {
+    try {
+      _lark = await import("@larksuiteoapi/node-sdk");
+    } catch {
+      throw new Error(
+        "Feishu SDK (@larksuiteoapi/node-sdk) is not installed. Run: npm install @larksuiteoapi/node-sdk",
+      );
+    }
+  }
+  return _lark;
+}
 
 interface FeishuBotConfig {
   appId: string;
@@ -24,20 +40,23 @@ function parseFeishuText(content: string | undefined, messageType: string | unde
 }
 
 export class FeishuBot extends EventEmitter {
-  private client: Lark.Client;
-  private wsClient: InstanceType<typeof Lark.WSClient> | null = null;
+  private client: any = null;
+  private wsClient: any = null;
 
   constructor(private config: FeishuBotConfig) {
     super();
-    this.client = new Lark.Client({
-      appId: config.appId,
-      appSecret: config.appSecret,
-      appType: Lark.AppType.SelfBuild,
-      domain: Lark.Domain.Feishu,
-    });
   }
 
   async start(): Promise<void> {
+    const Lark = await loadLark();
+
+    this.client = new Lark.Client({
+      appId: this.config.appId,
+      appSecret: this.config.appSecret,
+      appType: Lark.AppType.SelfBuild,
+      domain: Lark.Domain.Feishu,
+    });
+
     const dispatcher = new Lark.EventDispatcher({});
     dispatcher.register({
       "im.message.receive_v1": async (data: unknown) => {
@@ -87,6 +106,9 @@ export class FeishuBot extends EventEmitter {
   }
 
   async sendPrivateMessage(chatId: string, content: string, markdown = false): Promise<void> {
+    if (!this.client) {
+      throw new Error("FeishuBot.start() must be called before sendPrivateMessage()");
+    }
     const payload = markdown
       ? {
           receive_id: chatId,
