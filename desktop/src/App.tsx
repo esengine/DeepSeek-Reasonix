@@ -2697,7 +2697,7 @@ function TabRuntime({
                         </div>
                       ) : undefined,
                       Footer: () => (
-                        <div className="thread-inner">
+                        <div className="thread-inner" style={{ minHeight: 60 }}>
                           {state.pendingPlans.map((p) => <PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />)}
                           {state.pendingCheckpoints.map((c) => <CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />)}
                           {state.pendingRevisions.map((r) => <RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />)}
