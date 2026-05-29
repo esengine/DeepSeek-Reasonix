@@ -9,6 +9,124 @@ import { FeishuBot, type FeishuPrivateMessage } from "./bot.js";
 import { formatFeishuAccessSummary } from "./strings.js";
 
 const FEISHU_LOCK_FILE = join(homedir(), ".reasonix", "feishu-channel.pid");
+const FEISHU_MARKDOWN_WRAPPER_RE = /^```(?:markdown|md)\s*\r?\n([\s\S]*?)\r?\n```$/i;
+
+export function normalizeFeishuMarkdownReply(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(FEISHU_MARKDOWN_WRAPPER_RE);
+  if (!match) {
+    return text;
+  }
+  return match[1] ?? text;
+}
+
+function isMarkdownTableSeparator(line: string): boolean {
+  const cells = line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function parseMarkdownTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function formatFeishuTable(lines: string[], start: number): { text: string; next: number } {
+  const headers = parseMarkdownTableRow(lines[start] ?? "");
+  let index = start + 2;
+  const rows: string[] = [];
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    if (!line.includes("|") || isMarkdownTableSeparator(line)) break;
+    const cells = parseMarkdownTableRow(line);
+    if (cells.length < 2) break;
+    for (let cellIndex = 0; cellIndex < Math.min(headers.length, cells.length); cellIndex++) {
+      const header = headers[cellIndex] ?? "";
+      const cell = cells[cellIndex] ?? "";
+      if (!header && !cell) continue;
+      rows.push(`- **${header}**：${cell}`);
+    }
+    rows.push("");
+    index++;
+  }
+  while (rows.at(-1) === "") rows.pop();
+  return { text: rows.join("\n"), next: index };
+}
+
+export function formatFeishuMarkdownReply(text: string): string {
+  const lines = normalizeFeishuMarkdownReply(text).trim().split(/\r?\n/);
+  const formatted: string[] = [];
+  let inFence = false;
+  let fenceLang = "";
+  let fenceLines: string[] = [];
+
+  const flushFence = () => {
+    if (!inFence) return;
+    const label = fenceLang ? `**代码（${fenceLang}）**` : "**代码**";
+    formatted.push(label);
+    if (fenceLines.length > 0) {
+      formatted.push(fenceLines.join("\n"));
+    }
+    inFence = false;
+    fenceLang = "";
+    fenceLines = [];
+  };
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] ?? "";
+    const fenceMatch = line.match(/^```([A-Za-z0-9_-]*)\s*$/);
+    if (fenceMatch) {
+      if (inFence) {
+        flushFence();
+      } else {
+        inFence = true;
+        fenceLang = fenceMatch[1] ?? "";
+        fenceLines = [];
+      }
+      continue;
+    }
+
+    if (inFence) {
+      fenceLines.push(line);
+      continue;
+    }
+
+    if (
+      line.includes("|") &&
+      index + 1 < lines.length &&
+      isMarkdownTableSeparator(lines[index + 1] ?? "")
+    ) {
+      const table = formatFeishuTable(lines, index);
+      if (table.text) formatted.push(table.text);
+      index = table.next - 1;
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      formatted.push(`**${heading[2]}**`);
+      continue;
+    }
+
+    if (/^\s*---+\s*$/.test(line)) {
+      formatted.push("────────");
+      continue;
+    }
+
+    formatted.push(line);
+  }
+
+  flushFence();
+  return formatted.join("\n");
+}
 
 export class FeishuChannel {
   private bot: FeishuBot | null = null;
@@ -158,9 +276,10 @@ export class FeishuChannel {
 
   async sendResponse(text: string): Promise<void> {
     if (!this.bot || !this.chatId) return;
+    const formatted = formatFeishuMarkdownReply(text);
     if (!this.markdownDisabled) {
       try {
-        await this.bot.sendPrivateMessage(this.chatId, text, true);
+        await this.bot.sendPrivateMessage(this.chatId, formatted, true);
         return;
       } catch (err) {
         this.markdownDisabled = true;
@@ -170,7 +289,7 @@ export class FeishuChannel {
       }
     }
 
-    await this.bot.sendPrivateMessage(this.chatId, text, false);
+    await this.bot.sendPrivateMessage(this.chatId, formatted, false);
   }
 
   async stop(): Promise<void> {
