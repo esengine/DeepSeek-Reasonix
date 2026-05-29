@@ -42,7 +42,27 @@ export async function handleFiles(
   _rest: string[],
   body: string,
   ctx: DashboardContext,
+  query: URLSearchParams = new URLSearchParams(),
 ): Promise<ApiResult> {
+  if (method === "GET" && _rest[0] === "search") {
+    const cwd = ctx.getCurrentCwd?.();
+    if (!cwd) {
+      return { status: 503, body: { error: "@-mention picker requires a code-mode session" } };
+    }
+    try {
+      if (!(await stat(cwd)).isDirectory()) {
+        return { status: 503, body: { error: "@-mention picker requires a code-mode session" } };
+      }
+    } catch {
+      return { status: 503, body: { error: "@-mention picker requires a code-mode session" } };
+    }
+    const prefix = (query.get("q") ?? "").trim().toLowerCase();
+    const matches = await walk(cwd, prefix);
+    return {
+      status: 200,
+      body: { nonce: query.get("nonce"), query: query.get("q") ?? "", results: matches },
+    };
+  }
   if (method !== "POST") return { status: 405, body: { error: "POST only" } };
   const cwd = ctx.getCurrentCwd?.();
   if (!cwd) {

@@ -209,6 +209,30 @@ describe("dashboard server: endpoints", () => {
     expect(r.body.cockpit.currentSession).toBeNull();
   });
 
+  it("serves browser bridge @-mention search and preview compatibility endpoints", async () => {
+    const projectDir = join(dir, "project");
+    await mkdir(join(projectDir, "src"), { recursive: true });
+    await writeFile(
+      join(projectDir, "src", "app.ts"),
+      "export const app = 1;\nconsole.log(app);\n",
+    );
+    await writeFile(join(projectDir, "README.md"), "# demo\n");
+
+    const base = await boot({ getCurrentCwd: () => projectDir });
+
+    const search = await call(`${base}api/files/search?q=app`, { token: TOKEN });
+    expect(search.status).toBe(200);
+    expect(search.body.results).toContain("src/app.ts");
+
+    const preview = await call(`${base}api/file-read?path=src%2Fapp.ts&nonce=7`, { token: TOKEN });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({
+      path: "src/app.ts",
+      head: "export const app = 1;\nconsole.log(app);",
+      totalLines: 2,
+    });
+  });
+
   it("GET /api/usage returns aggregateUsage + record count", async () => {
     const base = await boot();
     const r = await call(`${base}api/usage`, { token: TOKEN });
