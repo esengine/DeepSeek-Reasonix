@@ -425,7 +425,10 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   };
   const themeName = resolveThemeName(resolveThemePreference(readConfig().theme));
   const themeBg = THEMES[themeName].surface.bg;
-  if (process.stdout.isTTY && typeof themeBg === "string" && themeBg.startsWith("#")) {
+  // Only apply when: TTY available, NO_COLOR not set, and background is a
+  // hex color string. Non-hex theme backgrounds (e.g. "oklch(...)") are
+  // skipped because terminals only understand #RGB/#RRGGBB for OSC 11.
+  if (process.stdout.isTTY && !process.env.NO_COLOR && typeof themeBg === "string" && themeBg.startsWith("#")) {
     process.stdout.write(`\x1b]11;${themeBg}\x07`);
     process.once("exit", restoreTerminalBg);
     // Restore bg on signals without calling process.exit() —
