@@ -362,6 +362,7 @@ type State = {
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   skills: SkillInfo[];
+  skillDetail: { name: string; scope: string; body: string; path: string } | null;
   /** Files the agent has read or modified this session — paths as the tool args provided them. */
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
@@ -970,6 +971,8 @@ function applyIncomingRaw(state: State, ev: IncomingEvent): State {
       };
     case "$skills":
       return { ...state, skills: ev.items };
+    case "$skill_detail":
+      return { ...state, skillDetail: { name: ev.name, scope: ev.scope, body: ev.body, path: ev.path } };
     case "$ctx_breakdown": {
       const next: UsageStats = { ...state.usage, reservedTokens: ev.reservedTokens };
       if (typeof ev.logTokens === "number") {
@@ -1437,6 +1440,7 @@ function TabRuntime({
     mcpSpecs: [],
     mcpBridged: false,
     skills: [],
+    skillDetail: null,
     sessionFiles: [],
     memory: [],
     memoryDetail: null,
@@ -2866,12 +2870,16 @@ function TabRuntime({
             mcpSpecs={state.mcpSpecs}
             mcpBridged={state.mcpBridged}
             skills={state.skills}
+            skillDetail={state.skillDetail}
             memory={state.memory}
             memoryDetail={state.memoryDetail}
             qq={state.qq}
             onClose={() => setSettingsOpen(false)}
             onSave={saveSettings}
             onSaveApiKey={saveApiKey}
+            onSkillRead={(scope, name) => sendRpc({ cmd: "skill_read", scope, name })}
+            onSkillSave={(scope, name, body) => sendRpc({ cmd: "skill_save", scope, name, body })}
+            onSkillDelete={(scope, name) => sendRpc({ cmd: "skill_delete", scope, name })}
             onLoadQQ={loadQQSettings}
             onConnectQQ={connectQQ}
             onDisconnectQQ={disconnectQQ}

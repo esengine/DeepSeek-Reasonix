@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, statSync, writeSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { stdin } from "node:process";
 import { createInterface } from "node:readline";
 import { toApprovalPrompt } from "@reasonix/core-utils";
@@ -131,7 +132,7 @@ import {
   importExternalSession,
   importExternalSessions,
 } from "../../session-import.js";
-import { SkillStore } from "../../skills.js";
+import { SKILLS_DIRNAME, SKILL_FILE, SkillStore, validateSkillFrontmatter } from "../../skills.js";
 import { countTokensBounded } from "../../tokenizer.js";
 import type { ChoiceOption } from "../../tools/choice.js";
 import type { ChatMessage } from "../../types.js";
@@ -3072,6 +3073,76 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         void runTurn(tab, payload);
       } catch (err) {
         emit({ type: "$error", message: `skill_run: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "skill_read") {
+      try {
+        const store = new SkillStore({
+          projectRoot: tab.rootDir,
+          customSkillPaths: loadResolvedSkillPaths(tab.rootDir),
+          subagentModels: loadSubagentModels(),
+        });
+        const skill = store.read(msg.name);
+        if (!skill || skill.scope === "builtin") {
+          emit({ type: "$error", message: `skill not found: ${msg.name}` }, tab.id);
+          return;
+        }
+        const body = await readFile(skill.path, "utf8");
+        emit({ type: "$skill_detail", name: msg.name, scope: msg.scope, body, path: skill.path }, tab.id);
+      } catch (err) {
+        emit({ type: "$error", message: `skill_read: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "skill_save") {
+      try {
+        const fm = validateSkillFrontmatter(msg.body);
+        if ("error" in fm) {
+          emit({ type: "$error", message: fm.error }, tab.id);
+          return;
+        }
+        const dir = msg.scope === "project"
+          ? join(tab.rootDir, ".reasonix", SKILLS_DIRNAME)
+          : join(homedir(), ".reasonix", SKILLS_DIRNAME);
+        // Check if skill already exists (folder or flat layout)
+        const folderPath = join(dir, msg.name, SKILL_FILE);
+        const flatPath = join(dir, `${msg.name}.md`);
+        let targetPath: string;
+        if (existsSync(folderPath)) {
+          targetPath = folderPath;
+        } else if (existsSync(flatPath)) {
+          targetPath = flatPath;
+        } else {
+          // New skill — use flat layout
+          targetPath = flatPath;
+        }
+        await mkdir(dirname(targetPath), { recursive: true });
+        await writeFile(targetPath, msg.body, "utf8");
+        emitSkills(tab);
+      } catch (err) {
+        emit({ type: "$error", message: `skill_save: ${(err as Error).message}` }, tab.id);
+      }
+      return;
+    }
+    if (msg.cmd === "skill_delete") {
+      try {
+        const dir = msg.scope === "project"
+          ? join(tab.rootDir, ".reasonix", SKILLS_DIRNAME)
+          : join(homedir(), ".reasonix", SKILLS_DIRNAME);
+        const folderPath = join(dir, msg.name, SKILL_FILE);
+        const flatPath = join(dir, `${msg.name}.md`);
+        if (existsSync(folderPath)) {
+          await rm(dirname(folderPath), { recursive: true, force: true });
+        } else if (existsSync(flatPath)) {
+          await rm(flatPath, { force: true });
+        } else {
+          emit({ type: "$error", message: `skill not found: ${msg.name}` }, tab.id);
+          return;
+        }
+        emitSkills(tab);
+      } catch (err) {
+        emit({ type: "$error", message: `skill_delete: ${(err as Error).message}` }, tab.id);
       }
       return;
     }

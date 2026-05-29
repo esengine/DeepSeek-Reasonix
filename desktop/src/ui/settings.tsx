@@ -73,12 +73,16 @@ export function SettingsModal({
   mcpSpecs,
   mcpBridged,
   skills,
+  skillDetail,
   memory,
   memoryDetail,
   qq,
   onClose,
   onSave,
   onSaveApiKey,
+  onSkillRead,
+  onSkillSave,
+  onSkillDelete,
   onLoadQQ,
   onConnectQQ,
   onDisconnectQQ,
@@ -112,11 +116,15 @@ export function SettingsModal({
   mcpSpecs: McpSpecInfo[];
   mcpBridged: boolean;
   skills: SkillInfo[];
+  skillDetail: { name: string; scope: string; body: string; path: string } | null;
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
   qq: QQDesktopSettingsState | null;
   onClose: () => void;
   onSave: (patch: SettingsPatch) => void;
+  onSkillRead: (scope: "project" | "global", name: string) => void;
+  onSkillSave: (scope: "project" | "global", name: string, body: string) => void;
+  onSkillDelete: (scope: "project" | "global", name: string) => void;
   onSaveApiKey: (key: string) => void;
   onLoadQQ: () => void;
   onConnectQQ: () => void;
@@ -218,8 +226,12 @@ export function SettingsModal({
             {page === "skills" && (
               <PageSkills
                 skills={skills}
+                skillDetail={skillDetail}
                 subagentModels={settings.subagentModels ?? {}}
                 onSave={onSave}
+                onRead={onSkillRead}
+                onSkillSave={onSkillSave}
+                onSkillDelete={onSkillDelete}
               />
             )}
             {page === "memory" && (
@@ -1530,19 +1542,71 @@ function McpEditPage({
 
 function PageSkills({
   skills,
+  skillDetail,
   subagentModels,
   onSave,
+  onRead,
+  onSkillSave,
+  onSkillDelete,
 }: {
   skills: SkillInfo[];
+  skillDetail: { name: string; scope: string; body: string; path: string } | null;
   subagentModels: Record<string, "flash" | "pro">;
   onSave: (patch: SettingsPatch) => void;
+  onRead: (scope: "project" | "global", name: string) => void;
+  onSkillSave: (scope: "project" | "global", name: string, body: string) => void;
+  onSkillDelete: (scope: "project" | "global", name: string) => void;
 }) {
+  const [editor, setEditor] = useState<{
+    mode: "create" | "edit";
+    name: string;
+    scope: "project" | "global";
+    body: string;
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SkillInfo | null>(null);
+
+  // When a skill detail arrives for editing, populate the editor
+  useEffect(() => {
+    if (skillDetail && editor?.mode === "edit" && editor.name === skillDetail.name) {
+      setEditor({ ...editor, body: skillDetail.body });
+    }
+  }, [skillDetail]);
+
   const setSubagentModel = (name: string, value: "flash" | "pro") => {
     onSave({ subagentModels: { ...subagentModels, [name]: value } });
   };
+
+  const openCreate = () => {
+    setEditor({ mode: "create", name: "", scope: "project", body: "---\ndescription: \n---\n" });
+  };
+
+  const openEdit = (s: SkillInfo) => {
+    if (s.scope === "builtin") return;
+    setEditor({ mode: "edit", name: s.name, scope: s.scope as "project" | "global", body: "" });
+    onRead(s.scope as "project" | "global", s.name);
+  };
+
+  const handleSave = () => {
+    if (!editor || !editor.name.trim()) return;
+    onSkillSave(editor.scope, editor.name.trim(), editor.body);
+    setEditor(null);
+  };
+
+  const handleDelete = () => {
+    if (!deleteTarget) return;
+    onSkillDelete(deleteTarget.scope as "project" | "global", deleteTarget.name);
+    setDeleteTarget(null);
+  };
+
   return (
     <section className="section">
-      <div className="stitle">{t("settings.skillsLoaded", { count: skills.length })}</div>
+      <div className="stitle" style={{ display: "flex", alignItems: "center" }}>
+        <span>{t("settings.skillsLoaded", { count: skills.length })}</span>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn skill-create-btn" onClick={openCreate}>
+          <I.plus size={12} /> {t("settings.skillCreate")}
+        </button>
+      </div>
       {skills.length === 0 ? (
         <div
           style={{
@@ -1579,20 +1643,42 @@ function PageSkills({
                   {s.model ? ` · ${s.model}` : ""}
                 </div>
               </div>
-              {s.runAs === "subagent" ? (
-                <select
-                  className="field"
-                  style={{ marginLeft: "auto", minWidth: 96 }}
-                  value={subagentModels[s.name] ?? "flash"}
-                  onChange={(e) =>
-                    setSubagentModel(s.name, e.target.value as "flash" | "pro")
-                  }
-                  title={t("settings.subagentModelHint")}
-                >
-                  <option value="flash">{t("settings.subagentModelFlash")}</option>
-                  <option value="pro">{t("settings.subagentModelPro")}</option>
-                </select>
-              ) : null}
+              <div className="skill-actions">
+                {s.runAs === "subagent" ? (
+                  <select
+                    className="field"
+                    style={{ minWidth: 96 }}
+                    value={subagentModels[s.name] ?? "flash"}
+                    onChange={(e) =>
+                      setSubagentModel(s.name, e.target.value as "flash" | "pro")
+                    }
+                    title={t("settings.subagentModelHint")}
+                  >
+                    <option value="flash">{t("settings.subagentModelFlash")}</option>
+                    <option value="pro">{t("settings.subagentModelPro")}</option>
+                  </select>
+                ) : null}
+                {s.scope !== "builtin" ? (
+                  <>
+                    <button
+                      type="button"
+                      className="skill-action-btn"
+                      title={t("settings.skillEdit")}
+                      onClick={() => openEdit(s)}
+                    >
+                      <I.pencil size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="skill-action-btn skill-action-delete"
+                      title={t("settings.skillDelete")}
+                      onClick={() => setDeleteTarget(s)}
+                    >
+                      <I.trash size={12} />
+                    </button>
+                  </>
+                ) : null}
+              </div>
             </div>
             <div className="desc">{s.description}</div>
             <div
@@ -1605,9 +1691,84 @@ function PageSkills({
             >
               {s.path}
             </div>
+            {deleteTarget?.name === s.name && deleteTarget?.scope === s.scope ? (
+              <div className="skill-delete-confirm">
+                <span>{t("settings.skillDeleteConfirm", { name: s.name })}</span>
+                <button type="button" className="btn" onClick={() => setDeleteTarget(null)}>
+                  {t("settings.skillDeleteCancel")}
+                </button>
+                <button type="button" className="btn danger" onClick={handleDelete}>
+                  {t("settings.skillDeleteOk")}
+                </button>
+              </div>
+            ) : null}
           </div>
         ))
       )}
+
+      {editor ? (
+        <div className="skill-editor-mask" onClick={() => setEditor(null)}>
+          <div className="skill-editor" onClick={(e) => e.stopPropagation()}>
+            <div className="skill-editor-head">
+              <span>
+                {editor.mode === "create"
+                  ? t("settings.skillEditorCreate")
+                  : t("settings.skillEditorEdit")}
+              </span>
+              <button type="button" className="skill-action-btn" onClick={() => setEditor(null)}>
+                <I.x size={14} />
+              </button>
+            </div>
+            <div className="skill-editor-fields">
+              <label>
+                <span>{t("settings.skillEditorName")}</span>
+                <input
+                  className="field"
+                  value={editor.name}
+                  disabled={editor.mode === "edit"}
+                  onChange={(e) => setEditor({ ...editor, name: e.target.value })}
+                  placeholder="my-skill"
+                />
+              </label>
+              <label>
+                <span>{t("settings.skillEditorScope")}</span>
+                <select
+                  className="field"
+                  value={editor.scope}
+                  disabled={editor.mode === "edit"}
+                  onChange={(e) => setEditor({ ...editor, scope: e.target.value as "project" | "global" })}
+                >
+                  <option value="project">project</option>
+                  <option value="global">global</option>
+                </select>
+              </label>
+            </div>
+            <label className="skill-editor-body-label">
+              <span>{t("settings.skillEditorBody")}</span>
+              <textarea
+                className="skill-editor-body"
+                value={editor.body}
+                onChange={(e) => setEditor({ ...editor, body: e.target.value })}
+                placeholder="---\ndescription: My skill description\n---\n\n# Skill content"
+                spellCheck={false}
+              />
+            </label>
+            <div className="skill-editor-actions">
+              <button type="button" className="btn" onClick={() => setEditor(null)}>
+                {t("settings.skillEditorCancel")}
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={handleSave}
+                disabled={!editor.name.trim()}
+              >
+                {t("settings.skillEditorSave")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

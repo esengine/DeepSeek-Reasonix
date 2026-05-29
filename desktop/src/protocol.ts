@@ -231,6 +231,14 @@ export type SkillsEvent = {
   items: SkillInfo[];
 };
 
+export type SkillDetailEvent = {
+  type: "$skill_detail";
+  name: string;
+  scope: "project" | "global";
+  body: string;
+  path: string;
+};
+
 export type CtxBreakdownEvent = {
   type: "$ctx_breakdown";
   reservedTokens: number;
@@ -560,6 +568,7 @@ export type IncomingEvent = { tabId?: string } & (
   | TabClosedEvent
   | McpSpecsEvent
   | SkillsEvent
+  | SkillDetailEvent
   | CtxBreakdownEvent
   | MemoryEvent
   | MemoryDetailEvent
@@ -624,6 +633,9 @@ export type OutgoingCommand = { tabId?: string } & (
   | { cmd: "mcp_specs_retry"; raw: string }
   | { cmd: "skills_get" }
   | { cmd: "skill_run"; name: string; args?: string }
+  | { cmd: "skill_read"; scope: "project" | "global"; name: string }
+  | { cmd: "skill_save"; scope: "project" | "global"; name: string; body: string }
+  | { cmd: "skill_delete"; scope: "project" | "global"; name: string }
   | { cmd: "jobs_list" }
   | { cmd: "jobs_stop"; jobId: number }
   | { cmd: "jobs_stop_all" }
