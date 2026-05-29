@@ -8,6 +8,7 @@ const API_TIMEOUT_MS = 15_000;
 const QR_TIMEOUT_MS = 35_000;
 const SESSION_EXPIRED_ERRCODE = -14;
 const RATE_LIMIT_ERRCODE = -2;
+const ILINK_HOST_SUFFIX = ".weixin.qq.com";
 
 interface WeixinBotConfig {
   token: string;
@@ -54,6 +55,14 @@ function jsonBody(payload: Record<string, unknown>): string {
 
 function randomWechatUin(): string {
   return Buffer.from(String(Math.trunc(Math.random() * 0xffffffff))).toString("base64");
+}
+
+function normalizeIlinkBaseUrl(value: string | undefined): string {
+  const url = new URL(value || ILINK_BASE_URL);
+  if (url.protocol !== "https:" || !url.hostname.endsWith(ILINK_HOST_SUFFIX)) {
+    throw new Error("Weixin iLink baseUrl must be an HTTPS *.weixin.qq.com endpoint.");
+  }
+  return url.origin;
 }
 
 function describeError(err: unknown): string {
@@ -215,7 +224,7 @@ export class WeixinBot extends EventEmitter {
     super();
     this.token = config.token;
     this.accountId = config.accountId;
-    this.baseUrl = (config.baseUrl || ILINK_BASE_URL).replace(/\/+$/, "");
+    this.baseUrl = normalizeIlinkBaseUrl(config.baseUrl);
     this.syncBuf = config.initialSyncBuf ?? "";
   }
 
@@ -229,6 +238,7 @@ export class WeixinBot extends EventEmitter {
     const controller = abortController ?? new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      // codeql[js/file-access-to-http] iLink bot tokens are only sent to validated Weixin endpoints.
       const res = await fetch(`${this.baseUrl}/${endpoint}`, {
         method: "POST",
         headers: headers(this.token),

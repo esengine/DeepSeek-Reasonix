@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runWeixinQrLogin } from "../src/weixin/bot.js";
+import { WeixinBot, runWeixinQrLogin } from "../src/weixin/bot.js";
 
 describe("Weixin iLink QR login", () => {
   afterEach(() => {
@@ -46,5 +46,16 @@ describe("Weixin iLink QR login", () => {
     expect(calls.some((url) => url.includes("get_bot_qrcode?bot_type=3"))).toBe(true);
     expect(calls.some((url) => url.includes("get_qrcode_status?qrcode=qr-token"))).toBe(true);
     expect(info.join("\n")).toContain("https://example.test/qr");
+  });
+
+  it("rejects non-Weixin iLink base URLs before sending tokens", () => {
+    expect(
+      () =>
+        new WeixinBot({
+          token: "token",
+          accountId: "account",
+          baseUrl: "https://example.test",
+        }),
+    ).toThrow("Weixin iLink baseUrl must be an HTTPS *.weixin.qq.com endpoint.");
   });
 });
