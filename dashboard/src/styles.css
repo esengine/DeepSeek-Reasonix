@@ -352,7 +352,8 @@ button:disabled {
 .app {
   display: grid;
   grid-template-rows: 36px 36px 1fr 26px;
-  grid-template-columns: 244px 1fr 320px;
+  /* sidebar ≈ 17vw, ctx panel ≈ 23vw — scale with viewport but keep sane bounds */
+  grid-template-columns: clamp(180px, 17vw, 280px) 1fr clamp(240px, 23vw, 380px);
   grid-template-areas:
     "title  title   title"
     "tabs   tabs    tabs"
@@ -370,10 +371,10 @@ html[data-platform="macos"] .app {
 }
 
 .app[data-ctx-collapsed="true"] {
-  grid-template-columns: 244px 1fr 0;
+  grid-template-columns: clamp(180px, 17vw, 280px) 1fr 0;
 }
 .app[data-side-collapsed="true"] {
-  grid-template-columns: 0 1fr 320px;
+  grid-template-columns: 0 1fr clamp(240px, 23vw, 380px);
 }
 .app[data-ctx-collapsed="true"][data-side-collapsed="true"] {
   grid-template-columns: 0 1fr 0;
@@ -6972,6 +6973,36 @@ html[data-web="true"] .win-controls {
 }
 
 /* ════════════════════════════════════════════════════════════
+   NARROW DESKTOP: ≤ 860px
+   Collapse context panel, sidebar scales with viewport.
+   At ≤768px the mobile breakpoint below takes over.
+   ════════════════════════════════════════════════════════════ */
+@media (max-width: 860px) {
+  .app,
+  .app[data-ctx-collapsed="true"] {
+    grid-template-columns: clamp(160px, 23vw, 240px) 1fr;
+    grid-template-areas:
+      "title  title"
+      "tabs   tabs"
+      "side   main"
+      "status status";
+  }
+  .app[data-side-collapsed="true"],
+  .app[data-ctx-collapsed="true"][data-side-collapsed="true"] {
+    grid-template-columns: 0 1fr;
+    grid-template-areas:
+      "title  title"
+      "tabs   tabs"
+      "side   main"
+      "status status";
+  }
+
+  .app .ctx {
+    display: none !important;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    MOBILE BREAKPOINT: ≤ 768px
    ════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
@@ -7017,7 +7048,7 @@ html[data-web="true"] .win-controls {
   }
 
   /* Hide tabs bar (single tab on mobile) */
-  .app .tab-bar {
+  .app .tabbar {
     display: none;
   }
 
@@ -7041,7 +7072,7 @@ html[data-web="true"] .win-controls {
   }
 
   /* ── Context panel hidden on mobile (optional bottom sheet later) ── */
-  .app .context-panel {
+  .app .ctx {
     display: none !important;
   }
 
