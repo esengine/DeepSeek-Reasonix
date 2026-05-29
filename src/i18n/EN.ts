@@ -284,6 +284,11 @@ export const EN: TranslationSchema = {
         "session USD cap — warns at 80%, refuses next turn at 100%. Off by default. /budget alone shows status",
       argsHint: "[usd|off]",
     },
+    "max-tokens": {
+      description:
+        "cap output tokens per turn — limits runaway reasoning. Off by default. Bare shows status.",
+      argsHint: "[N|off]",
+    },
     diff: {
       description:
         "configure how edit_file / write_file diffs are displayed: summary (path +stats, default) · full (unified diff) · none (checkmark only)",
@@ -1026,6 +1031,12 @@ export const EN: TranslationSchema = {
         "▲ budget → ${cap} but already spent ${spent}. Next turn will be refused — bump the cap higher to keep going, or end the session.",
       budgetSet:
         "budget → ${cap}  (so far: ${spent} · warns at 80%, refuses next turn at 100% · /budget off to clear)",
+      maxTokensNoCap: "max-tokens → no cap  (server default applies · /max-tokens <N> to set)",
+      maxTokensStatus: "max-tokens → {n} tokens per turn  (/max-tokens off to clear)",
+      maxTokensSet: "max-tokens → {n}  (next turn capped at {n} output tokens)",
+      maxTokensOff: "max-tokens → off (no cap, server default applies)",
+      maxTokensUsage:
+        "usage: /max-tokens <positive integer>   e.g. /max-tokens 4096  ·  /max-tokens off",
     },
     diff: {
       diffStatus: "diff display → {current}",

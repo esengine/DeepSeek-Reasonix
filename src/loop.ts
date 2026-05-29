@@ -91,6 +91,8 @@ export interface CacheFirstLoopOptions {
   model?: string;
   stream?: boolean;
   reasoningEffort?: ReasoningEffort;
+  /** Per-turn output token cap passed as `max_tokens`. Undefined = no cap (server default). */
+  maxOutputTokens?: number;
   /** Soft USD cap — warns at 80%, refuses next turn at 100%. Opt-in (default no cap). */
   budgetUsd?: number;
   /** Maximum tool-call iterations per turn. Overrides config/env. Default 50. */
@@ -111,6 +113,8 @@ export interface ReconfigurableOptions {
   stream?: boolean;
   /** V4 thinking mode only; deepseek-chat ignores. */
   reasoningEffort?: ReasoningEffort;
+  /** Per-turn output token cap. Pass null to clear. */
+  maxOutputTokens?: number | null;
 }
 
 export interface LoopAbortOptions {
@@ -145,6 +149,7 @@ export class CacheFirstLoop {
   model: string;
   stream: boolean;
   reasoningEffort: ReasoningEffort;
+  maxOutputTokens: number | undefined;
   budgetUsd: number | null;
   /** Maximum tool-call iterations per turn. Config > env > default (50). */
   maxIterPerTurn: number;
@@ -216,6 +221,7 @@ export class CacheFirstLoop {
     });
     this.model = opts.model ?? "deepseek-v4-flash";
     this.reasoningEffort = opts.reasoningEffort ?? "high";
+    this.maxOutputTokens = opts.maxOutputTokens;
     this.budgetUsd =
       typeof opts.budgetUsd === "number" && opts.budgetUsd > 0 ? opts.budgetUsd : null;
 
@@ -415,6 +421,9 @@ export class CacheFirstLoop {
       this.stream = opts.stream;
     }
     if (opts.reasoningEffort !== undefined) this.reasoningEffort = opts.reasoningEffort;
+    if (opts.maxOutputTokens !== undefined) {
+      this.maxOutputTokens = opts.maxOutputTokens ?? undefined;
+    }
   }
 
   /** `null` disables the cap; any change re-arms the 80% warning. */
@@ -837,6 +846,7 @@ export class CacheFirstLoop {
             toolSpecs,
             signal,
             reasoningEffort: this.reasoningEffort,
+            maxTokens: this.maxOutputTokens,
             turn: this._turn,
           });
           assistantContent = result.assistantContent;
@@ -852,6 +862,7 @@ export class CacheFirstLoop {
             signal,
             thinking: thinkingModeForModel(callModel),
             reasoningEffort: this.reasoningEffort,
+            maxTokens: this.maxOutputTokens,
           });
           assistantContent = resp.content;
           reasoningContent = resp.reasoningContent ?? "";
@@ -1081,6 +1092,7 @@ export class CacheFirstLoop {
       recordStats: (model, usage) => this.stats.record(this._turn, model, usage),
       turn: this._turn,
       model: this.model,
+      maxOutputTokens: this.maxOutputTokens,
     };
   }
 

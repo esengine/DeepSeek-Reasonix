@@ -273,6 +273,10 @@ export const zhCN: TranslationSchema = {
       description: "会话美元上限 — 80% 时警告，100% 时拒绝下一轮。默认关闭。单独 /budget 显示状态",
       argsHint: "[usd|off]",
     },
+    "max-tokens": {
+      description: "限制每轮输出 token 数 — 防止推理失控。默认不限制。单独显示当前设置。",
+      argsHint: "[N|off]",
+    },
     diff: {
       description:
         "配置 edit_file / write_file diff 的显示方式：summary（路径 +统计，默认）· full（unified diff）· none（仅勾选）",
@@ -970,6 +974,11 @@ export const zhCN: TranslationSchema = {
         "▲ budget → ${cap} 但已花费 ${spent}。下一轮将被拒绝 — 提高上限以继续，或结束会话。",
       budgetSet:
         "budget → ${cap}  （迄今：${spent} · 80% 时警告，100% 时拒绝下一轮 · /budget off 清除）",
+      maxTokensNoCap: "max-tokens → 无限制（使用服务端默认值 · /max-tokens <N> 设置上限）",
+      maxTokensStatus: "max-tokens → 每轮最多 {n} 个输出 token  （/max-tokens off 清除）",
+      maxTokensSet: "max-tokens → {n}  （下一轮输出最多 {n} tokens）",
+      maxTokensOff: "max-tokens → 关闭（无限制，使用服务端默认值）",
+      maxTokensUsage: "用法：/max-tokens <正整数>   例如 /max-tokens 4096  ·  /max-tokens off",
     },
     diff: {
       diffStatus: "diff 显示 → {current}",

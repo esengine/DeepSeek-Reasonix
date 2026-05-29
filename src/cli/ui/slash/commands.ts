@@ -84,6 +84,13 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: ["low", "medium", "high", "max"],
   },
   {
+    cmd: "max-tokens",
+    group: "setup",
+    argsHint: "<N|off>",
+    summary:
+      "cap output tokens per turn — useful to limit runaway reasoning. Bare shows current value. 'off' clears the cap.",
+  },
+  {
     cmd: "language",
     group: "setup",
     argsHint: "<EN|zh-CN|de|ru>",

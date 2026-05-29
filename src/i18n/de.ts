@@ -208,6 +208,11 @@ export const de: TranslationSchema = {
       description:
         "Session-USD-Grenze — warnt bei 80 %, verweigert nächsten Turn bei 100 %. Standardmäßig aus. /budget allein zeigt Status.",
     },
+    "max-tokens": {
+      ...EN.slash["max-tokens"],
+      description:
+        "Ausgabe-Token pro Turn begrenzen — verhindert ausufernde Reasoning-Schleifen. Standardmäßig aus. Allein zeigt Status.",
+    },
     mcp: { ...EN.slash.mcp, description: "MCP-Server + Tools dieser Sitzung auflisten" },
     resource: {
       ...EN.slash.resource,
