@@ -882,11 +882,25 @@ async function serverRpc(payload: Record<string, any>): Promise<void> {
       break;
     }
     case "skill_run": {
-      const body: Record<string, any> = { name: payload.name };
-      if (payload.args) body.args = payload.args;
-      try {
-        await apiFetch("skills/run", { method: "POST", body: JSON.stringify(body) });
-      } catch {}
+      // Route through the submit endpoint so it goes through parseSlash →
+      // handleSlash → skill handler → resubmit, matching TUI behavior.
+      const skillText = payload.args
+        ? `/skill ${payload.name} ${payload.args}`
+        : `/skill ${payload.name}`;
+      const result = await apiFetch("submit", {
+        method: "POST",
+        body: JSON.stringify({ prompt: skillText }),
+      }).catch((err) => {
+        console.warn("[tauri-bridge] skill_run submit failed:", err);
+        return null;
+      });
+      if (!result?.accepted) {
+        emitEvent({
+          type: "$error",
+          tabId: "tab-1",
+          message: result?.reason ?? "技能运行失败，请重试",
+        });
+      }
       break;
     }
     case "mcp_specs_get": {
