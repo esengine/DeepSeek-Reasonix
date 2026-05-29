@@ -86,6 +86,9 @@ export const zhCN: TranslationSchema = {
       '▸ 已恢复会话 "{name}"，包含 {count} 条历史消息 · /new 重新开始 · /sessions 管理',
     newSession: '▸ 会话 "{name}" (新) — 随聊随存 · /sessions 重命名或删除',
     ephemeralSession: "▸ 临时聊天 (不保存会话) — 去掉 --no-session 以启用保存",
+    systemPromptChanged: "▸ 系统提示自上次会话后已变更",
+    systemPromptChangedDetail:
+      "REASONIX.md 或记忆文件发生了更改 — 本轮将产生完整缓存 miss。可使用 /new 以更新后的上下文开始新会话。",
     restoredEdits:
       "▸ 从中断的运行中恢复了 {count} 个待处理的编辑块 — /apply 提交或 /discard 放弃。",
     resumedPlan: "已恢复计划 · {when}{summary}",

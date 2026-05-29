@@ -87,6 +87,9 @@ export const EN: TranslationSchema = {
       '▸ resumed session "{name}" with {count} prior messages · /new to start fresh · /sessions to manage',
     newSession: '▸ session "{name}" (new) — auto-saved as you chat · /sessions to rename or delete',
     ephemeralSession: "▸ ephemeral chat (no session persistence) — drop --no-session to enable",
+    systemPromptChanged: "▸ system prompt changed since last session",
+    systemPromptChangedDetail:
+      "REASONIX.md or a memory file changed — the first turn will be a full cache miss. Use /new to start fresh with the updated context.",
     restoredEdits:
       "▸ restored {count} pending edit block(s) from an interrupted prior run — /apply to commit or /discard to drop.",
     resumedPlan: "Resumed plan · {when}{summary}",

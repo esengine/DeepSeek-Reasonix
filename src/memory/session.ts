@@ -1,7 +1,7 @@
 /** JSONL append-only message log under `~/.reasonix/sessions/`; concurrent-write safe. */
 
 import { execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -79,6 +79,9 @@ export interface SessionMeta {
   cacheDiagnostics?: CacheDiagnosticEntry[];
   /** True when the session filename/summary was generated from conversation content. */
   autoTitleGenerated?: boolean;
+  /** SHA-256[:16] of the system prompt active when the session was last used.
+   *  Compared on resume to warn the user if REASONIX.md or memory changed (#2212). */
+  systemFingerprint?: string;
   /** Source app when the session was imported from another local AI client. */
   importedSource?: "claude" | "codex";
   /** Absolute path of the source transcript used for import. */
@@ -375,6 +378,16 @@ export function patchSessionMeta(name: string, patch: Partial<SessionMeta>): Ses
     /* chmod not supported */
   }
   return next;
+}
+
+/** SHA-256[:16] of a system-prompt string — used to detect REASONIX.md changes on resume (#2212). */
+export function hashSystemPrompt(system: string): string {
+  return createHash("sha256").update(system).digest("hex").slice(0, 16);
+}
+
+/** Persist the current system-prompt fingerprint so resume can detect changes. */
+export function saveSessionSystemFingerprint(name: string, system: string): void {
+  patchSessionMeta(name, { systemFingerprint: hashSystemPrompt(system) });
 }
 
 /** Renames the JSONL plus all known sidecars together; returns false if target already exists. */

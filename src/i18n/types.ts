@@ -77,6 +77,8 @@ export interface TranslationSchema {
     resumedSession: string;
     newSession: string;
     ephemeralSession: string;
+    systemPromptChanged: string;
+    systemPromptChangedDetail: string;
     restoredEdits: string;
     resumedPlan: string;
     tipEditBindings: {

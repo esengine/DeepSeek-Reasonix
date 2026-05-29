@@ -66,6 +66,7 @@ import {
   deleteSession,
   detectGitBranch,
   freshSessionName,
+  hashSystemPrompt,
   type listSessions,
   listSessionsForWorkspace,
   loadSessionMessages,
@@ -1585,6 +1586,12 @@ function AppInner({
       log.pushInfo(t("ui.ephemeralSession"));
     } else if (loop.resumedMessageCount > 0) {
       log.pushInfo(t("ui.resumedSession", { name: session, count: loop.resumedMessageCount }));
+      // Warn if system prompt changed since the session was last used — REASONIX.md
+      // or global memory edits cause a cache miss on the first resumed turn (#2212).
+      const savedFingerprint = loadSessionMeta(session).systemFingerprint;
+      if (savedFingerprint && savedFingerprint !== hashSystemPrompt(system)) {
+        log.pushWarning(t("ui.systemPromptChanged"), t("ui.systemPromptChangedDetail"));
+      }
     } else {
       log.pushInfo(t("ui.newSession", { name: session }));
     }
@@ -1667,7 +1674,7 @@ function AppInner({
       log.pushTip({ topic: tip.topic, sections: tip.sections, footer: tip.footer });
       markMouseClipboardHintShown();
     }
-  }, [session, loop, codeMode, syncPendingCount, log, pendingEdits, startupInfoHints]);
+  }, [session, loop, codeMode, syncPendingCount, log, pendingEdits, startupInfoHints, system]);
 
   // Esc handles "abort the current turn" separately; Ctrl+C is the universal "I'm done" key.
   const quitProcess = useQuit(transcriptRef);
@@ -3228,6 +3235,9 @@ function AppInner({
         if (!existing.summary) patch.summary = text.replace(/\s+/g, " ").slice(0, 80);
         if (!existing.branch) patch.branch = detectGitBranch(currentRootDir);
         if (!existing.workspace) patch.workspace = currentRootDir;
+        // Always refresh the system-prompt fingerprint so the next resume can
+        // detect REASONIX.md / memory changes that happened since this turn.
+        patch.systemFingerprint = hashSystemPrompt(system);
         if (Object.keys(patch).length > 0) patchSessionMeta(session, patch);
       }
 
@@ -3611,6 +3621,7 @@ function AppInner({
       liveMcpServers,
       generateCurrentSessionTitle,
       switchWorkspaceRoot,
+      system,
     ],
   );
 
