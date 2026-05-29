@@ -50,6 +50,7 @@ function initialState(): Parameters<typeof reduce>[0] {
     pendingCheckpoints: [],
     pendingRevisions: [],
     activePlan: null,
+    planArchived: [],
     usage: {
       totalCostUsd: 0,
       totalPromptTokens: 0,

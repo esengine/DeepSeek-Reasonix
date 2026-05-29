@@ -1,15 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useEffect, useMemo, useState } from "react";
-import type { SessionFile, Settings, UsageStats } from "../App";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ActivePlan, ArchivedPlan, PendingPlan, SessionFile, Settings, UsageStats } from "../App";
 import { Markdown } from "../Markdown";
 import { t, useLang } from "../i18n";
 import { I } from "../icons";
 import type { McpSpecInfo, MemoryDetail, MemoryEntryInfo } from "../protocol";
 import { PanelErrorBoundary } from "./error-boundary";
-import { McpServerCard } from "./mcp-server-card";
 
-export type ContextPanelTab = "files" | "tools" | "memory" | "rules";
+export type ContextPanelTab = "files" | "tools" | "memory" | "rules" | "plan";
 
 const CONTEXT_MAX_TOKENS = 1_000_000;
 
@@ -21,12 +20,14 @@ export function ContextPanel({
   sessionFiles,
   memory,
   memoryDetail,
-  activeTab,
-  activeTabNonce,
   onReadMemory,
-  onOpenMcpSettings,
-  onEditMcpSpec,
-  onRetryMcpSpec,
+  activePlan,
+  pendingPlans,
+  planArchived,
+  activeTab,
+  onTabChange,
+  selectedPlanIdx: externalSelectedPlanIdx,
+  onPlanSelect,
 }: {
   settings: Settings | null;
   usage: UsageStats;
@@ -35,18 +36,47 @@ export function ContextPanel({
   sessionFiles: SessionFile[];
   memory: MemoryEntryInfo[];
   memoryDetail: MemoryDetail | null;
-  activeTab?: ContextPanelTab;
-  activeTabNonce?: number;
   onReadMemory: (path: string) => void;
+  activePlan: ActivePlan | null;
+  pendingPlans: PendingPlan[];
+  planArchived: ArchivedPlan[];
+  activeTab?: ContextPanelTab;
+  onTabChange?: (tab: ContextPanelTab) => void;
   onOpenMcpSettings?: () => void;
   onEditMcpSpec?: (spec: McpSpecInfo) => void;
   onRetryMcpSpec?: (raw: string) => void;
+  selectedPlanIdx?: number | null;
+  onPlanSelect?: (idx: number | null) => void;
+  activeTabNonce?: number;
 }) {
   useLang();
-  const [tab, setTab] = useState<ContextPanelTab>("files");
+  const [tab, setTabInternal] = useState<ContextPanelTab>("files");
+  const [internalSelectedPlanIdx, setInternalSelectedPlanIdx] = useState<number | null>(null);
+
+  const selectedPlanIdx = externalSelectedPlanIdx !== undefined ? externalSelectedPlanIdx : internalSelectedPlanIdx;
+  const setSelectedPlanIdx = onPlanSelect ?? setInternalSelectedPlanIdx;
+
+  const setTab = useCallback(
+    (next: ContextPanelTab) => {
+      setTabInternal(next);
+      onTabChange?.(next);
+    },
+    [onTabChange],
+  );
+
+  // Sync external tab override
   useEffect(() => {
     if (activeTab) setTab(activeTab);
   }, [activeTab, activeTabNonce]);
+
+  // Auto-load first memory entry when switching to the memory tab.
+  const prevTabRef = useRef<ContextPanelTab>("files");
+  useEffect(() => {
+    if (tab === "memory" && prevTabRef.current !== "memory" && memory.length > 0 && !memoryDetail) {
+      onReadMemory(memory[0]!.path);
+    }
+    prevTabRef.current = tab;
+  }, [tab, memory, memoryDetail, onReadMemory]);
   const reserved = usage.reservedTokens;
   const lastHit = usage.lastCallCacheHit ?? 0;
   const lastMiss = usage.lastCallCacheMiss ?? 0;
@@ -72,6 +102,9 @@ export function ContextPanel({
         </div>
         <div className="ctx-tab" data-active={tab === "rules"} onClick={() => setTab("rules")}>
           {t("contextPanel.rulesTab")}
+        </div>
+        <div className="ctx-tab" data-active={tab === "plan"} onClick={() => setTab("plan")}>
+          {t("contextPanel.planTab")}
         </div>
       </div>
 
@@ -111,19 +144,20 @@ export function ContextPanel({
         <div className="ctx-body-tab">
           <PanelErrorBoundary key={tab} label={tab}>
             {tab === "files" && <CtxFiles files={sessionFiles} settings={settings} />}
-            {tab === "tools" && (
-              <CtxTools
-                specs={mcpSpecs}
-                bridged={mcpBridged}
-                onOpenSettings={onOpenMcpSettings}
-                onEdit={onEditMcpSpec}
-                onRetry={onRetryMcpSpec}
-              />
-            )}
+            {tab === "tools" && <CtxTools specs={mcpSpecs} bridged={mcpBridged} />}
             {tab === "memory" && (
               <CtxMemory entries={memory} detail={memoryDetail} onRead={onReadMemory} />
             )}
             {tab === "rules" && <CtxRules settings={settings} />}
+            {tab === "plan" && (
+              <CtxPlan
+                activePlan={activePlan}
+                pendingPlans={pendingPlans}
+                planArchived={planArchived}
+                selectedIdx={selectedPlanIdx}
+                onSelect={(idx) => setSelectedPlanIdx(idx === selectedPlanIdx ? null : idx)}
+              />
+            )}
           </PanelErrorBoundary>
         </div>
       </div>
@@ -261,36 +295,8 @@ function CtxFiles({ files, settings }: { files: SessionFile[]; settings: Setting
   );
 }
 
-type McpFilter = "all" | "ready" | "failed";
-
-function CtxTools({
-  specs,
-  bridged,
-  onOpenSettings,
-  onEdit,
-  onRetry,
-}: {
-  specs: McpSpecInfo[];
-  bridged: boolean;
-  onOpenSettings?: () => void;
-  onEdit?: (spec: McpSpecInfo) => void;
-  onRetry?: (raw: string) => void;
-}) {
-  const [filter, setFilter] = useState<McpFilter>("all");
+function CtxTools({ specs, bridged }: { specs: McpSpecInfo[]; bridged: boolean }) {
   const readyCount = specs.filter((s) => s.status === "connected").length;
-  const failed = specs.filter((s) => s.status === "failed");
-  const failedCount = failed.length;
-  const toolCount = specs.reduce((sum, s) => sum + (s.toolCount ?? s.tools?.length ?? 0), 0);
-  const filtered =
-    filter === "ready"
-      ? specs.filter((s) => s.status === "connected")
-      : filter === "failed"
-        ? failed
-        : [...failed, ...specs.filter((s) => s.status !== "failed")];
-  const retryAll = () => {
-    if (!onRetry) return;
-    for (const spec of failed) onRetry(spec.raw);
-  };
   return (
     <div className="ctx-block">
       <div className="h">
@@ -306,59 +312,42 @@ function CtxTools({
       {specs.length === 0 ? (
         <div className="ctx-empty">{t("contextPanel.mcpEmpty")}</div>
       ) : (
-        <>
-          <div className="mcp-health-strip">
-            <span>{t("contextPanel.mcpHealthTotal", { count: specs.length })}</span>
-            <span data-kind="ok">{t("contextPanel.mcpHealthReady", { count: readyCount })}</span>
-            <span data-kind={failedCount > 0 ? "failed" : "muted"}>
-              {t("contextPanel.mcpHealthFailed", { count: failedCount })}
-            </span>
-            <span>{t("contextPanel.mcpHealthTools", { count: toolCount })}</span>
-          </div>
-          <div className="mcp-filter-row">
-            {(["all", "ready", "failed"] as const).map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                className="mcp-filter"
-                data-active={filter === kind}
-                onClick={() => setFilter(kind)}
-              >
-                {kind === "all"
-                  ? t("contextPanel.mcpFilterAll")
-                  : kind === "ready"
-                    ? t("contextPanel.mcpFilterReady")
-                    : t("contextPanel.mcpFilterFailed")}
-              </button>
-            ))}
-            <span className="spacer" />
-            {failedCount > 0 && onRetry ? (
-              <button type="button" className="mcp-mini-action" onClick={retryAll}>
-                <I.refresh size={12} />
-                {t("contextPanel.mcpRetryAll")}
-              </button>
-            ) : null}
-            {onOpenSettings ? (
-              <button type="button" className="mcp-mini-action" onClick={onOpenSettings}>
-                <I.cog size={12} />
-                {t("contextPanel.mcpSettings")}
-              </button>
-            ) : null}
-          </div>
-          {filtered.length === 0 ? (
-            <div className="ctx-empty">{t("contextPanel.mcpFilterEmpty")}</div>
-          ) : (
-            filtered.map((s) => (
-              <McpServerCard
-                key={s.raw}
-                spec={s}
-                mode="context"
-                onRetry={onRetry}
-                onEdit={onEdit ?? (onOpenSettings ? () => onOpenSettings() : undefined)}
-              />
-            ))
-          )}
-        </>
+        specs.map((s) => {
+          const dot =
+            s.status === "connected"
+              ? "ok"
+              : s.status === "failed" || s.parseError
+                ? "off"
+                : "pending";
+          const suffix = s.statusReason
+            ? ` · ${s.statusReason}`
+            : s.status === "connected"
+              ? typeof s.toolCount === "number"
+                ? ` · ${t("contextPanel.mcpTools", { count: s.toolCount })}`
+                : ` · ${t("contextPanel.mcpReady")}`
+              : s.status === "handshake"
+                ? ` · ${t("contextPanel.mcpConnecting")}`
+                : s.status === "disabled"
+                  ? ` · ${t("contextPanel.mcpDisabled")}`
+                  : s.status === "failed"
+                    ? ` · ${t("contextPanel.mcpFailed")}`
+                    : ` · ${t("contextPanel.mcpConfigured")}`;
+          return (
+            <div className="mcp-row" key={s.raw}>
+              <span className="ico">
+                <I.wrench size={12} />
+              </span>
+              <div className="body">
+                <div className="n">{s.name ?? s.summary}</div>
+                <div className="m">
+                  {s.transport}
+                  {suffix}
+                </div>
+              </div>
+              <span className="status" data-s={dot} />
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -443,6 +432,148 @@ function CtxRules({ settings }: { settings: Settings | null }) {
           <div className="desc">{r.desc}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+type PlanEntry =
+  | { kind: "active"; plan: ActivePlan }
+  | { kind: "pending"; plan: PendingPlan }
+  | { kind: "archived"; plan: ArchivedPlan; index: number };
+
+function CtxPlan({
+  activePlan,
+  pendingPlans,
+  planArchived,
+  selectedIdx,
+  onSelect,
+}: {
+  activePlan: ActivePlan | null;
+  pendingPlans: PendingPlan[];
+  planArchived: ArchivedPlan[];
+  selectedIdx: number | null;
+  onSelect: (idx: number) => void;
+}) {
+  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+
+  const entries: PlanEntry[] = [];
+  if (activePlan) entries.push({ kind: "active", plan: activePlan });
+  for (const p of pendingPlans) entries.push({ kind: "pending", plan: p });
+  for (let i = 0; i < planArchived.length; i++) {
+    entries.push({ kind: "archived", plan: planArchived[i]!, index: i });
+  }
+
+  // Highlight: first active/pending plan when nothing explicit is selected.
+  const effectiveIdx =
+    selectedIdx !== null
+      ? selectedIdx
+      : entries.findIndex((e) => e.kind === "active" || e.kind === "pending");
+
+  // Detail is only shown when the user (or system) explicitly selects an entry.
+  const showDetail = selectedIdx !== null && effectiveIdx >= 0;
+  const selected = showDetail ? (entries[effectiveIdx] ?? null) : null;
+
+  const detailBody =
+    selected?.kind === "active" || selected?.kind === "pending"
+      ? (selected.plan as ActivePlan | PendingPlan).plan
+      : selected?.kind === "archived"
+        ? (selected.plan as ArchivedPlan).plan
+        : null;
+
+  const isSelectedRefining =
+    selected?.kind === "pending" && (selected.plan as PendingPlan).refining === true;
+
+  return (
+    <div
+      className="ctx-block"
+      style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+    >
+      <div className="h">
+        <span>{t("contextPanel.planTitle")}</span>
+        <span className="right">
+          {entries.length === 0 ? "—" : t("contextPanel.itemCount", { count: entries.length })}
+        </span>
+      </div>
+      {entries.length === 0 ? (
+        <div className="ctx-empty">{t("contextPanel.noPlansMsg")}</div>
+      ) : (
+        <div className={`mem${showDetail ? " mem--split" : ""}`}>
+          <div className="mem-list">
+            {entries.map((e, i) => {
+              const summary =
+                e.kind === "active" || e.kind === "pending"
+                  ? (e.plan as ActivePlan | PendingPlan).summary
+                  : (e.plan as ArchivedPlan).summary;
+              const isRefining =
+                e.kind === "pending" && (e.plan as PendingPlan).refining === true;
+              const label =
+                e.kind === "active"
+                  ? t("contextPanel.planActive")
+                  : isRefining
+                    ? t("contextPanel.planRefining")
+                    : e.kind === "pending"
+                      ? t("contextPanel.planPending")
+                      : (e.plan as ArchivedPlan).status === "cancelled"
+                        ? t("contextPanel.planCancelled")
+                        : t("contextPanel.planArchived");
+              const tone =
+                e.kind === "active"
+                  ? "ok"
+                  : isRefining
+                    ? "accent"
+                    : e.kind === "pending"
+                      ? "warn"
+                      : (e.kind === "archived" && (e.plan as ArchivedPlan).status === "cancelled")
+                        ? "err"
+                        : "muted";
+              const tipText = summary || t("contextPanel.planUntitled");
+              return (
+                <button
+                  type="button"
+                  className="mem-row"
+                  data-active={effectiveIdx === i}
+                  data-compact={showDetail}
+                  key={`${e.kind}-${i}`}
+                  onClick={() => onSelect(i)}
+                  onMouseEnter={
+                    showDetail
+                      ? (ev) => {
+                          const r = ev.currentTarget.getBoundingClientRect();
+                          setTooltip({ text: tipText, x: r.right + 8, y: r.top + r.height / 2 });
+                        }
+                      : undefined
+                  }
+                  onMouseLeave={showDetail ? () => setTooltip(null) : undefined}
+                >
+                  <span className="scope" data-s={tone}>
+                    {label}
+                  </span>
+                  <span className="txt">{tipText}</span>
+                </button>
+              );
+            })}
+          </div>
+          {detailBody ? (
+            <div className="mem-detail">
+              {isSelectedRefining && (
+                <div className="plan-refining-bar">
+                  <span className="plan-refining-dot" />
+                  {t("contextPanel.planRefiningInProgress")}
+                </div>
+              )}
+              <Markdown source={detailBody} />
+            </div>
+          ) : null}
+        </div>
+      )}
+      {tooltip && (
+        <div
+          className="plan-name-tooltip"
+          style={{ left: tooltip.x, top: tooltip.y }}
+        >
+          {tooltip.text}
+        </div>
+      )}
     </div>
   );
 }
