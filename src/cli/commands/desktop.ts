@@ -243,6 +243,9 @@ type InMessage = { tabId?: string } & (
   | { cmd: "mcp_specs_retry"; raw: string }
   | { cmd: "skills_get" }
   | { cmd: "skill_run"; name: string; args?: string }
+  | { cmd: "skill_read"; scope: "project" | "global"; name: string }
+  | { cmd: "skill_save"; scope: "project" | "global"; name: string; body: string }
+  | { cmd: "skill_delete"; scope: "project" | "global"; name: string }
   | { cmd: "jobs_list" }
   | { cmd: "jobs_stop"; jobId: number }
   | { cmd: "jobs_stop_all" }
@@ -567,6 +570,14 @@ interface SkillsEvent {
   items: SkillInfo[];
 }
 
+interface SkillDetailEvent {
+  type: "$skill_detail";
+  name: string;
+  scope: "project" | "global";
+  body: string;
+  path: string;
+}
+
 interface JobInfoPayload {
   id: number;
   tabId: string;
@@ -637,6 +648,7 @@ type EmittableEvent =
   | TabClosedEvent
   | McpSpecsEvent
   | SkillsEvent
+  | SkillDetailEvent
   | CtxBreakdownEvent
   | MemoryEvent
   | MemoryDetailEvent
