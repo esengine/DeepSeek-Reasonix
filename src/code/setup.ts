@@ -33,6 +33,7 @@ import {
 } from "../tools/subagent.js";
 import { registerTodoTool } from "../tools/todo.js";
 import { registerWebTools } from "../tools/web.js";
+import { registerWorkflowTool } from "../tools/workflow.js";
 
 export interface CodeToolsetOpts {
   rootDir: string;
@@ -107,6 +108,10 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   if (loadJavaSourceEnabled()) {
     registerJavaSourceTool(tools, { projectRoot: opts.rootDir });
   }
+  registerWorkflowTool(tools, {
+    rootDir: opts.rootDir,
+    subagentSink: opts.subagentSink ?? SHARED_SUBAGENT_SINK,
+  });
   // Lazy: constructing DeepSeekClient throws when DEEPSEEK_API_KEY is unset,
   // which would kill `reasonix code` before the setup wizard can prompt for
   // one. Defer to first subagent dispatch — by then the user has either keyed

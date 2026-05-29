@@ -115,6 +115,23 @@ export type {
   SubagentResultLike,
   SubagentSessionSummary,
 } from "./telemetry/subagent-distillation.js";
+export { ReasonixWorkflowAgentRunner } from "./workflow/agent-runner.js";
+export { parseWorkflowScript } from "./workflow/parser.js";
+export { runWorkflow } from "./workflow/runtime.js";
+export type {
+  WorkflowAgentOptions,
+  WorkflowAgentResult,
+  WorkflowAgentRunner,
+  WorkflowAgentType,
+  WorkflowMeta,
+  WorkflowMetaPhase,
+  WorkflowMode,
+  WorkflowRunOptions,
+  WorkflowRunResult,
+  WorkflowToolMode,
+} from "./workflow/types.js";
+export { registerWorkflowTool } from "./tools/workflow.js";
+export type { WorkflowToolOptions } from "./tools/workflow.js";
 export {
   NeedsConfirmationError,
   detectShellOperator,
