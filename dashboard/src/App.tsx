@@ -346,7 +346,7 @@ function reduceRaw(state: State, action: Action): State {
           ...state.messages,
           {
             kind: "user",
-            text: `/${action.skill.name}${argsLine}`,
+            text: `/skill ${action.skill.name}${argsLine}`,
             clientId: action.clientId,
             turn: nextMessageTurn(state.messages),
             skill: action.skill,
@@ -1788,7 +1788,7 @@ function TabRuntime({
       },
     },
     ...state.skills.map((s) => ({
-      cmd: `/${s.name}`,
+      cmd: `/skill ${s.name}`,
       desc: s.description?.trim() || fallbackSkillDesc(s),
       insertOnly: true,
       run: () => {
