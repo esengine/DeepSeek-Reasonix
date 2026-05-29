@@ -2190,6 +2190,9 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .thread-inner--standalone {
   margin-top: 28px;
 }
+.thread-item-fallback {
+  min-height: 1px;
+}
 .thread-inner > div[data-turn] {
   content-visibility: auto;
   contain-intrinsic-size: auto 100px;
@@ -6480,6 +6483,15 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 .approval-textarea:focus {
   border-color: var(--approval-accent, var(--accent));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--approval-accent, var(--accent)) 20%, transparent);
+}
+.approval-feedback {
+  margin-top: 10px;
+}
+.approval-feedback-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .approval .ap-preview {
   margin: 0 14px 10px;

@@ -327,13 +327,24 @@ export function PlanApprovalCard({
 }: {
   p: PendingPlan;
   onApprove: () => void;
-  onRefine: () => void;
-  onCancel: () => void;
+  onRefine: (feedback?: string) => void;
+  onCancel: (feedback?: string) => void;
 }) {
   useLang();
+  const [feedbackMode, setFeedbackMode] = useState<"cancel" | "refine" | null>(null);
+  const [feedback, setFeedback] = useState("");
   const stepCount = p.steps?.length ?? 0;
   const sub = stepCount > 0 ? t("thread.planStepCount", { count: stepCount }) : undefined;
   const isRefining = p.refining === true;
+  const trimmedFeedback = feedback.trim();
+  const submitFeedback = () => {
+    if (feedbackMode === "cancel") onCancel(trimmedFeedback || undefined);
+    else if (feedbackMode === "refine") onRefine(trimmedFeedback || undefined);
+  };
+  const skipFeedback = () => {
+    if (feedbackMode === "cancel") onCancel();
+    else if (feedbackMode === "refine") onRefine();
+  };
   const body = (
     <>
       {isRefining && (
@@ -350,8 +361,27 @@ export function PlanApprovalCard({
       <div className="plan-view-hint" style={{ opacity: isRefining ? 0.5 : 1 }}>
         {t("thread.planViewInPanel")}
       </div>
+      {feedbackMode ? (
+        <div className="approval-feedback">
+          <label className="approval-feedback-label" htmlFor={`plan-feedback-${p.id}`}>
+            {feedbackMode === "cancel"
+              ? t("thread.cancelFeedbackLabel")
+              : t("thread.refineFeedbackLabel")}
+          </label>
+          <textarea
+            id={`plan-feedback-${p.id}`}
+            className="approval-textarea"
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder={t("modal.planFeedbackPlaceholder")}
+          />
+        </div>
+      ) : null}
     </>
   );
+  const primaryLabel = feedbackMode ? t("thread.sendFeedback") : t("thread.approve");
+  const secondaryLabel = feedbackMode ? t("thread.skipFeedback") : t("thread.cancel");
+  const tertiaryLabel = feedbackMode ? t("thread.back") : t("thread.refine");
   return (
     <ApprovalCard
       kind={t("thread.planConfirmationKind")}
@@ -360,12 +390,21 @@ export function PlanApprovalCard({
       sub={sub}
       body={body}
       meta={`plan/#${p.id}`}
-      primaryLabel={t("thread.approve")}
-      secondaryLabel={t("thread.cancel")}
-      tertiaryLabel={t("thread.refine")}
-      onPrimary={isRefining ? undefined : onApprove}
-      onSecondary={isRefining ? undefined : onCancel}
-      onTertiary={isRefining ? undefined : onRefine}
+      primaryLabel={primaryLabel}
+      secondaryLabel={secondaryLabel}
+      tertiaryLabel={tertiaryLabel}
+      onPrimary={isRefining ? undefined : feedbackMode ? submitFeedback : onApprove}
+      onSecondary={isRefining ? undefined : feedbackMode ? skipFeedback : () => setFeedbackMode("cancel")}
+      onTertiary={
+        isRefining
+          ? undefined
+          : feedbackMode
+            ? () => {
+                setFeedbackMode(null);
+                setFeedback("");
+              }
+            : () => setFeedbackMode("refine")
+      }
     />
   );
 }

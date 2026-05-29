@@ -11,7 +11,7 @@ vi.mock("./cards", () => ({
   ReasoningCard: () => null,
 }));
 
-import { ConfirmApprovalCard, PathAccessApprovalCard } from "./thread";
+import { ConfirmApprovalCard, PathAccessApprovalCard, PlanApprovalCard } from "./thread";
 
 function makeShellPrompt(command: string): import("@reasonix/core-utils").ApprovalPrompt {
   return {
@@ -67,6 +67,74 @@ function makePathPrompt(
 }
 
 afterEach(cleanup);
+
+describe("PlanApprovalCard", () => {
+  const plan = {
+    id: 42,
+    plan: "1. Inspect\n2. Fix",
+    summary: "Fix approval buttons",
+    steps: [
+      { id: "inspect", title: "Inspect", action: "read" },
+      { id: "fix", title: "Fix", action: "edit" },
+    ],
+  };
+
+  it("fires approve directly", () => {
+    const onApprove = vi.fn();
+    render(
+      <PlanApprovalCard
+        p={plan}
+        onApprove={onApprove}
+        onCancel={() => {}}
+        onRefine={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(onApprove).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for optional feedback before canceling", () => {
+    const onCancel = vi.fn();
+    render(
+      <PlanApprovalCard
+        p={plan}
+        onApprove={() => {}}
+        onCancel={onCancel}
+        onRefine={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Tell Reasonix why you want to cancel this plan")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Skip feedback" }));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledWith();
+  });
+
+  it("sends refine feedback when provided", () => {
+    const onRefine = vi.fn();
+    render(
+      <PlanApprovalCard
+        p={plan}
+        onApprove={() => {}}
+        onCancel={() => {}}
+        onRefine={onRefine}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refine" }));
+    fireEvent.change(screen.getByLabelText("Tell Reasonix what to refine in this plan"), {
+      target: { value: "Split the risky step first" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+
+    expect(onRefine).toHaveBeenCalledTimes(1);
+    expect(onRefine).toHaveBeenCalledWith("Split the risky step first");
+  });
+});
 
 describe("ConfirmApprovalCard — ApprovalPrompt rendering", () => {
   it("renders title, subtitle, and action buttons from prompt", () => {

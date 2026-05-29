@@ -9,7 +9,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { type Update, check } from "@tauri-apps/plugin-updater";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CommandPalette, Toast, buildCommands, useCommandPalette } from "./CommandPalette";
 import { WorkspaceProvider } from "./Markdown";
 import {
@@ -1484,6 +1484,105 @@ interface TabRuntimeProps {
   setActiveTabId: (id: string) => void;
 }
 
+function ThreadApprovalFooter({
+  pendingPlans,
+  pendingCheckpoints,
+  pendingRevisions,
+  pendingConfirms,
+  pendingPathAccess,
+  pendingChoices,
+  ready,
+  onResolvePlan,
+  onResolveCheckpoint,
+  onResolveRevision,
+  onResolveConfirm,
+  onResolvePathAccess,
+  onResolveChoice,
+}: {
+  pendingPlans: PendingPlan[];
+  pendingCheckpoints: PendingCheckpoint[];
+  pendingRevisions: PendingRevision[];
+  pendingConfirms: PendingConfirm[];
+  pendingPathAccess: PendingPathAccess[];
+  pendingChoices: PendingChoice[];
+  ready: boolean;
+  onResolvePlan: (id: number, response: PlanVerdict) => void;
+  onResolveCheckpoint: (id: number, response: CheckpointVerdict) => void;
+  onResolveRevision: (id: number, response: RevisionVerdict) => void;
+  onResolveConfirm: (id: number, response: ConfirmationChoice) => void;
+  onResolvePathAccess: (id: number, response: ConfirmationChoice) => void;
+  onResolveChoice: (id: number, response: ChoiceVerdict) => void;
+}) {
+  return (
+    <div className="thread-inner" style={{ minHeight: 60 }}>
+      {pendingPlans.map((p) => (
+        <PlanApprovalCard
+          key={`pp-${p.id}`}
+          p={p}
+          onApprove={() => onResolvePlan(p.id, { type: "approve" })}
+          onRefine={(feedback) => onResolvePlan(p.id, { type: "refine", feedback })}
+          onCancel={(feedback) => onResolvePlan(p.id, { type: "cancel", feedback })}
+        />
+      ))}
+      {pendingCheckpoints.map((c) => (
+        <CheckpointApprovalCard
+          key={`cp-${c.id}`}
+          c={c}
+          onContinue={() => onResolveCheckpoint(c.id, { type: "continue" })}
+          onRevise={() => onResolveCheckpoint(c.id, { type: "revise" })}
+          onStop={() => onResolveCheckpoint(c.id, { type: "stop" })}
+        />
+      ))}
+      {pendingRevisions.map((r) => (
+        <RevisionApprovalCard
+          key={`rv-${r.id}`}
+          r={r}
+          onAccept={() => onResolveRevision(r.id, { type: "accepted" })}
+          onReject={() => onResolveRevision(r.id, { type: "rejected" })}
+        />
+      ))}
+      {pendingConfirms.map((c) => (
+        <ConfirmApprovalCard
+          key={`cc-${c.id}`}
+          prompt={c.prompt}
+          onAllow={() => onResolveConfirm(c.id, { type: "run_once" })}
+          onAlwaysAllow={(prefix) => onResolveConfirm(c.id, { type: "always_allow", prefix })}
+          onDeny={() => onResolveConfirm(c.id, { type: "deny" })}
+        />
+      ))}
+      {pendingPathAccess.map((p) => (
+        <PathAccessApprovalCard
+          key={`pa-${p.id}`}
+          prompt={p.prompt}
+          onAllow={() => onResolvePathAccess(p.id, { type: "run_once" })}
+          onAlwaysAllow={(prefix) => onResolvePathAccess(p.id, { type: "always_allow", prefix })}
+          onDeny={() => onResolvePathAccess(p.id, { type: "deny" })}
+        />
+      ))}
+      {pendingChoices.map((c) => (
+        <ChoiceApprovalCard
+          key={`ch-${c.id}`}
+          c={c}
+          onPick={(optionId) => onResolveChoice(c.id, { type: "pick", optionId })}
+          onCancel={() => onResolveChoice(c.id, { type: "cancel" })}
+        />
+      ))}
+      {!ready ? (
+        <div
+          style={{
+            padding: 12,
+            color: "var(--muted)",
+            fontFamily: "Geist Mono, monospace",
+            fontSize: 11,
+          }}
+        >
+          {t("app.connecting")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function TabRuntime({
   tabId,
   active,
@@ -2156,7 +2255,65 @@ function TabRuntime({
     [sendRpc],
   );
 
-  const messageItems = state.messages;
+  const virtuosoComponents = useMemo(
+    () => ({
+      Header: state.activePlan
+        ? () => (
+            <div className="thread-inner">
+              <PlanBanner
+                plan={state.activePlan!}
+                onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
+              />
+              <ActivePlanTaskCard plan={state.activePlan!} />
+            </div>
+          )
+        : undefined,
+      Footer: () => (
+        <ThreadApprovalFooter
+          pendingPlans={state.pendingPlans}
+          pendingCheckpoints={state.pendingCheckpoints}
+          pendingRevisions={state.pendingRevisions}
+          pendingConfirms={state.pendingConfirms}
+          pendingPathAccess={state.pendingPathAccess}
+          pendingChoices={state.pendingChoices}
+          ready={state.ready}
+          onResolvePlan={resolvePlan}
+          onResolveCheckpoint={resolveCheckpoint}
+          onResolveRevision={resolveRevision}
+          onResolveConfirm={resolveConfirm}
+          onResolvePathAccess={resolvePathAccess}
+          onResolveChoice={resolveChoice}
+        />
+      ),
+    }),
+    [
+      state.activePlan,
+      state.busy,
+      state.pendingPlans,
+      state.pendingCheckpoints,
+      state.pendingRevisions,
+      state.pendingConfirms,
+      state.pendingPathAccess,
+      state.pendingChoices,
+      state.ready,
+      resolvePlan,
+      resolveCheckpoint,
+      resolveRevision,
+      resolveConfirm,
+      resolvePathAccess,
+      resolveChoice,
+    ],
+  );
+
+  const showSystemEvents = state.settings?.showSystemEvents !== false;
+  const messageItems = useMemo(
+    () =>
+      state.messages.filter((m) => {
+        if (!showSystemEvents && (m.kind === "status" || m.kind === "warning")) return false;
+        return true;
+      }),
+    [state.messages, showSystemEvents],
+  );
 
   const [showJumpButton, setShowJumpButton] = useState(false);
 
@@ -2634,7 +2791,7 @@ function TabRuntime({
 
         <main className="main" style={{ position: "relative" }}>
           <JumpBar messages={state.messages} threadEl={threadRef.current} onScrollToTurn={(turn) => {
-            const idx = state.messages.findIndex((m) => (m.kind === "user" || m.kind === "assistant") && m.turn === turn);
+            const idx = messageItems.findIndex((m) => (m.kind === "user" || m.kind === "assistant") && m.turn === turn);
             if (idx >= 0) virtuosoRef.current?.scrollToIndex(idx);
           }} />
           {state.needsSetup ? (
@@ -2686,30 +2843,9 @@ function TabRuntime({
                     initialTopMostItemIndex={messageItems.length > 0 ? messageItems.length - 1 : undefined}
                     scrollerRef={(ref) => { virtScrollerRef.current = ref as HTMLDivElement | null; }}
                     atBottomStateChange={(atBottom) => { atBottomRef.current = atBottom; setShowJumpButton(!atBottom); }}
-                    components={{
-                      Header: state.activePlan ? () => (
-                        <div className="thread-inner">
-                          <PlanBanner
-                            plan={state.activePlan!}
-                            onDismiss={state.busy ? undefined : () => dispatch({ t: "dismiss_plan" })}
-                          />
-                          <ActivePlanTaskCard plan={state.activePlan!} />
-                        </div>
-                      ) : undefined,
-                      Footer: () => (
-                        <div className="thread-inner" style={{ minHeight: 60 }}>
-                          {state.pendingPlans.map((p) => <PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />)}
-                          {state.pendingCheckpoints.map((c) => <CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />)}
-                          {state.pendingRevisions.map((r) => <RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />)}
-                          {state.pendingConfirms.map((c) => <ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />)}
-                          {state.pendingPathAccess.map((p) => <PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />)}
-                          {state.pendingChoices.map((c) => <ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />)}
-                          {!state.ready ? <div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div> : null}
-                        </div>
-                      ),
-                    }}
+                    components={virtuosoComponents}
                     itemContent={(index) => {
-                      const m = state.messages[index]!;
+                      const m = messageItems[index]!;
                       if (m.kind === "user") {
                         return (
                           <div className="thread-inner" data-turn={m.turn}>
@@ -2740,31 +2876,45 @@ function TabRuntime({
                         const bgVar = m.recoverable ? "var(--warn-soft, var(--danger-soft))" : "var(--danger-soft)";
                         const labelKey = m.recoverable ? "app.warningLabel" : "app.errorLabel";
                         return (
-                          <div key={m.id} className="warn-card" style={{ borderColor: toneVar, background: bgVar, position: "relative" }}>
-                            <span className="ico" style={{ color: toneVar }}><I.warning size={16} /></span>
-                            <div style={{ flex: 1 }}>
-                              <div className="tt">{t(labelKey)}</div>
-                              <div className="ds">{m.message}</div>
+                          <div className="thread-inner">
+                            <div key={m.id} className="warn-card" style={{ borderColor: toneVar, background: bgVar, position: "relative" }}>
+                              <span className="ico" style={{ color: toneVar }}><I.warning size={16} /></span>
+                              <div style={{ flex: 1 }}>
+                                <div className="tt">{t(labelKey)}</div>
+                                <div className="ds">{m.message}</div>
+                              </div>
+                              <button type="button" className="warn-card-dismiss" title={t("app.dismissError")}
+                                onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
+                                style={{ background: "transparent", border: "none", color: toneVar, cursor: "pointer", padding: "4px", alignSelf: "flex-start" }}>
+                                <I.x size={14} />
+                              </button>
                             </div>
-                            <button type="button" className="warn-card-dismiss" title={t("app.dismissError")}
-                              onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
-                              style={{ background: "transparent", border: "none", color: toneVar, cursor: "pointer", padding: "4px", alignSelf: "flex-start" }}>
-                              <I.x size={14} />
-                            </button>
+                          </div>
+                        );
+                      }
+                      if (m.kind === "status") {
+                        return (
+                          <div className="thread-inner">
+                            <div className="sys-event-row" title={m.text}>
+                              <span className="line" />
+                              <span className="label">{m.text}</span>
+                              <span className="line" />
+                            </div>
                           </div>
                         );
                       }
                       if (m.kind === "warning") {
-                        if (state.settings?.showSystemEvents === false) return null;
                         return (
-                          <div key={m.id} className="sys-event-row" title={m.text}>
-                            <span className="line" />
-                            <span className="label">{m.text}</span>
-                            <span className="line" />
+                          <div className="thread-inner">
+                            <div key={m.id} className="sys-event-row" title={m.text}>
+                              <span className="line" />
+                              <span className="label">{m.text}</span>
+                              <span className="line" />
+                            </div>
                           </div>
                         );
                       }
-                      return null;
+                      return <div className="thread-inner thread-item-fallback" />;
                     }}
                   />
                 )}
