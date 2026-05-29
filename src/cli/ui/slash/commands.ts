@@ -72,6 +72,14 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   },
 
   {
+    cmd: "buddy",
+    group: "chat",
+    argsHint: "[on|off|mute|unmute|pet|name <name>|status]",
+    summary: "show or configure the Reasonix whale companion near the composer",
+    argCompleter: ["on", "off", "mute", "unmute", "pet", "name", "status"],
+  },
+
+  {
     cmd: "model",
     group: "setup",
     argsHint: "<id>",

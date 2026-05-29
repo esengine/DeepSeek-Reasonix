@@ -58,6 +58,7 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 | `/compact` | Fold older turns into a summary (cache-safe). Auto-fires at 50% ctx; this is the manual trigger |
 | `/stop` | Abort the current model turn (typed alternative to Esc) |
 | `/copy` | Open vim/tmux-style copy mode — `j`/`k` navigate, `v` select, `y` yank to clipboard. The right answer for SSH / mosh / tmux where drag-select can't extend past the viewport |
+| `/buddy [on\|off\|mute\|unmute\|pet\|name <name>\|status]` | Show or configure the Reasonix whale companion near the composer |
 
 ### Setup
 

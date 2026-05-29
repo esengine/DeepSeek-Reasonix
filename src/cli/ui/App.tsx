@@ -34,9 +34,11 @@ import {
   type EngineeringLifecycleMode,
   type HistoryScrollMode,
   type ReasoningEffort,
+  type ResolvedBuddyConfig,
   defaultConfigPath,
   editModeHintShown,
   isReasoningEffort,
+  loadBuddyConfig,
   loadEndpoint,
   loadEngineeringLifecycleMode,
   loadHistoryScrollMode,
@@ -131,6 +133,12 @@ import { PlanReviseEditor } from "./PlanReviseEditor.js";
 import { PromptInput } from "./PromptInput.js";
 import { SessionPicker } from "./SessionPicker.js";
 import { ShellConfirm, type ShellConfirmChoice } from "./ShellConfirm.js";
+import {
+  BUDDY_PULSE_TTL_MS,
+  type BuddyPulse,
+  createBuddyPulse,
+  resolveBuddyMood,
+} from "./buddy/state.js";
 import { useRenderTrace } from "./render-trace.js";
 
 import { SlashArgPicker } from "./SlashArgPicker.js";
@@ -507,9 +515,19 @@ function AppInner({
   const [input, setInput] = useState("");
   const [composerCursor, setComposerCursor] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [buddyConfig, setBuddyConfig] = useState<ResolvedBuddyConfig>(() => loadBuddyConfig());
+  const [buddyPulse, setBuddyPulse] = useState<BuddyPulse | null>(null);
   const [slashUsage, setSlashUsage] = useState<Readonly<Record<string, number>>>(() =>
     loadSlashUsage(),
   );
+  const pulseBuddy = useCallback((kind: BuddyPulse["kind"]) => {
+    setBuddyPulse(createBuddyPulse(kind));
+  }, []);
+  useEffect(() => {
+    if (!buddyPulse) return;
+    const timer = setTimeout(() => setBuddyPulse(null), BUDDY_PULSE_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [buddyPulse]);
   // ctrl-o toggles full-tail view on the live streaming card.
   // Auto-resets at the end of every turn so the next reply starts collapsed.
   const [liveExpand, setLiveExpand] = useState(false);
@@ -3015,8 +3033,11 @@ function AppInner({
         }
         setSlashUsage(recordSlashUse(slash.cmd));
         const result = handleSlash(slash.cmd, slash.args, loop, {
+          configPath: defaultConfigPath(),
           mcpSpecs,
           mcpServers: liveMcpServers,
+          setBuddyConfig: (next) => setBuddyConfig(next),
+          pulseBuddy,
           codeUndo: codeMode ? codeUndo : undefined,
           codeApply: codeMode ? codeApply : undefined,
           codeDiscard: codeMode ? codeDiscard : undefined,
@@ -3634,6 +3655,7 @@ function AppInner({
       mcpSpecs,
       models,
       planMode,
+      pulseBuddy,
       session,
       slashSelected,
       slashUsage,
@@ -4425,6 +4447,14 @@ function AppInner({
   // Suspend cosmetic animations during modal interactions and idle so
   // a quiescent TUI is byte-stable.
   const tickerSuspended = modalOpen || (!busy && !isStreaming);
+  const buddyMood = resolveBuddyMood({
+    pulse: buddyPulse,
+    awaitingUser: !!(pendingShell || pendingPath || pendingEditReview || pendingPlan),
+    toolActive: !!(ongoingTool || toolProgress),
+    loopActive: isLoopFiring(),
+    busy,
+    streaming: isStreaming,
+  });
 
   if (!bootReady) return <BootSplash />;
 
@@ -4821,6 +4851,9 @@ function AppInner({
                           : editMode
                   }
                   model={`${sessionModel} \u00b7 ${sessionEffort ?? loop.reasoningEffort}`}
+                  buddy={buddyConfig}
+                  buddyMood={buddyMood}
+                  buddyPulse={buddyPulse}
                   input={input}
                   setInput={setInput}
                   busy={busy}

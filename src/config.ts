@@ -148,6 +148,18 @@ export interface WeixinBotConfig {
   allowlist?: string[];
 }
 
+export interface BuddyConfig {
+  enabled?: boolean;
+  muted?: boolean;
+  name?: string;
+}
+
+export interface ResolvedBuddyConfig {
+  enabled: boolean;
+  muted: boolean;
+  name: string;
+}
+
 export interface PricingOverride {
   inputCacheHit?: number;
   inputCacheMiss?: number;
@@ -181,6 +193,8 @@ export interface ReasonixConfig {
   mouseClipboardHintShown?: boolean;
   /** When false, skip the boot splash animation and show the main UI immediately. Default true. */
   banner?: boolean;
+  /** Terminal whale companion shown near the composer. */
+  buddy?: BuddyConfig;
   reasoningEffort?: ReasoningEffort;
   /** Per-turn output token cap sent as `max_tokens` in the API request (#2196). Null = no cap. */
   maxOutputTokens?: number | null;
@@ -456,6 +470,41 @@ const DEFAULT_BATCH_SIZE = 10;
 
 export function defaultConfigPath(): string {
   return join(homedir(), ".reasonix", "config.json");
+}
+
+const DEFAULT_BUDDY_NAME = "Whale";
+const BUDDY_NAME_MAX_CHARS = 24;
+
+function normalizeBuddyName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  if (!trimmed) return undefined;
+  return Array.from(trimmed).slice(0, BUDDY_NAME_MAX_CHARS).join("");
+}
+
+export function loadBuddyConfig(path: string = defaultConfigPath()): ResolvedBuddyConfig {
+  const raw = readConfig(path).buddy ?? {};
+  return {
+    enabled: raw.enabled !== false,
+    muted: raw.muted === true,
+    name: normalizeBuddyName(raw.name) ?? DEFAULT_BUDDY_NAME,
+  };
+}
+
+export function saveBuddyConfig(
+  patch: BuddyConfig,
+  path: string = defaultConfigPath(),
+): ResolvedBuddyConfig {
+  const cfg = readConfig(path);
+  const current = loadBuddyConfig(path);
+  const next: ResolvedBuddyConfig = {
+    enabled: patch.enabled ?? current.enabled,
+    muted: patch.muted ?? current.muted,
+    name: normalizeBuddyName(patch.name) ?? current.name,
+  };
+  cfg.buddy = next;
+  writeConfig(cfg, path);
+  return next;
 }
 
 const STRING_ARRAY_FIELDS: Array<readonly string[]> = [

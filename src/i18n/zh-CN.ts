@@ -433,6 +433,10 @@ export const zhCN: TranslationSchema = {
       description: "顺便问一下 — 从空白上下文回答，不写入会话历史",
       argsHint: "<question>",
     },
+    buddy: {
+      description: "显示或配置输入区旁边的 Reasonix 鲸鱼桌宠",
+      argsHint: "[on|off|mute|unmute|pet|name <name>|status]",
+    },
     "search-engine": {
       description:
         "切换网络搜索后端 — bing（默认，国内裸 IP 直连）、bing-intl（国际版索引）、searxng（自托管）、metaso（每日 100 次）、baidu（百度 AI Search，官方文档写有每月 1500 次免费额度）、tavily（每月 1000 次免费）、perplexity（AI 直接回答）、exa（AI 直接回答）、brave（独立索引）或 ollama（Ollama 云端搜索）",

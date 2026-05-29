@@ -421,6 +421,11 @@ export const de: TranslationSchema = {
       description:
         "Kurze Randfrage stellen — wird von Grund auf beantwortet, nie zum Gesprächskontext hinzugefügt",
     },
+    buddy: {
+      ...EN.slash.buddy,
+      argsHint: "[on|off|mute|unmute|pet|name <name>|status]",
+      description: "Reasonix-Wal-Begleiter neben dem Composer anzeigen oder konfigurieren",
+    },
     "search-engine": {
       ...EN.slash["search-engine"],
       description:

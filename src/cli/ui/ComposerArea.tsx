@@ -6,8 +6,10 @@
 import { Box, Text } from "ink";
 import React from "react";
 
-import type { EditMode } from "../../config.js";
+import type { EditMode, ResolvedBuddyConfig } from "../../config.js";
 import type { JobRegistry } from "../../tools/jobs.js";
+import { BuddySprite } from "./buddy/BuddySprite.js";
+import type { BuddyMood, BuddyPulse } from "./buddy/state.js";
 import { useRenderTrace } from "./render-trace.js";
 
 import { AtMentionSuggestions } from "./AtMentionSuggestions.js";
@@ -43,6 +45,9 @@ export interface ComposerAreaProps {
   model?: string;
   /** Show the shortcuts help modal above the input box. */
   showShortcuts?: boolean;
+  buddy?: ResolvedBuddyConfig;
+  buddyMood?: BuddyMood;
+  buddyPulse?: BuddyPulse | null;
 
   // ── prompt ───────────────────────────────────────────────────────
   input: string;
@@ -89,6 +94,9 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
     mode,
     model,
     showShortcuts,
+    buddy,
+    buddyMood,
+    buddyPulse,
     input,
     setInput,
     busy,
@@ -141,6 +149,9 @@ export const ComposerArea: React.FC<ComposerAreaProps> = React.memo(
           ) : null}
         </Box>
         {showShortcuts ? <ShortcutsHelpModal /> : null}
+        {buddy?.enabled ? (
+          <BuddySprite config={buddy} mood={buddyMood ?? "idle"} pulse={buddyPulse ?? null} />
+        ) : null}
         <PromptInput
           value={input}
           onChange={setInput}

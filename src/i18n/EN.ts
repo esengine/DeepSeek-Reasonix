@@ -453,6 +453,10 @@ export const EN: TranslationSchema = {
         "ask a quick side question — answered from a blank slate, never added to the conversation context",
       argsHint: "<question>",
     },
+    buddy: {
+      description: "show or configure the Reasonix whale companion near the composer",
+      argsHint: "[on|off|mute|unmute|pet|name <name>|status]",
+    },
     "search-engine": {
       description:
         "switch web search backend — bing (default, works from CN without proxy), bing-intl (international index), searxng (self-hosted), metaso (free 100/d), baidu (Baidu AI Search, free 1500/mo per docs), tavily (free 1000/mo), perplexity (AI-native), exa (AI-native), brave (independent index), or ollama (Ollama cloud web search)",

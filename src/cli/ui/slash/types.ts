@@ -1,8 +1,9 @@
 import type { EngineeringLifecycleSnapshot } from "../../../code/lifecycle.js";
-import type { EditMode } from "../../../config.js";
+import type { EditMode, ResolvedBuddyConfig } from "../../../config.js";
 import type { McpServerSummary } from "../../../mcp/summary.js";
 import type { JobRegistry } from "../../../tools/jobs.js";
 import type { PlanStep } from "../../../tools/plan.js";
+import type { BuddyPulseKind } from "../buddy/state.js";
 import type { CodeUndoOutput } from "../undo-context.js";
 
 export type { McpServerSummary } from "../../../mcp/summary.js";
@@ -112,6 +113,10 @@ export interface SlashContext {
     footer?: string;
   }) => void;
   dispatch?: (event: import("../state/events.js").AgentEvent) => void;
+  /** Update the local TUI companion immediately after `/buddy` persists config. */
+  setBuddyConfig?: (config: ResolvedBuddyConfig) => void;
+  /** Trigger a short local companion reaction without touching model context. */
+  pulseBuddy?: (kind: BuddyPulseKind) => void;
   setPlanMode?: (on: boolean, source?: PlanModeToggleSource) => void;
   /** Manual escape valve when the model forgot to call `mark_step_complete` — used by `/plans done <id>`. */
   markPlanStepDone?: (stepId: string) => "ok" | "not-in-plan" | "already-done" | "no-plan";

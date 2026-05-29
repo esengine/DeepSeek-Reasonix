@@ -161,6 +161,38 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/effort=high/);
   });
 
+  it("/buddy persists config and triggers local UI pulses", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "reasonix-slash-buddy-"));
+    const tempConfig = join(tempDir, "config.json");
+    const pulses: string[] = [];
+    let liveConfig: unknown;
+    try {
+      const nameResult = handleSlash("buddy", ["name", "Deep", "Whale"], makeLoop(), {
+        configPath: tempConfig,
+        setBuddyConfig: (config) => {
+          liveConfig = config;
+        },
+        pulseBuddy: (kind) => pulses.push(kind),
+      });
+      expect(nameResult.info).toContain("Deep Whale");
+      expect(liveConfig).toMatchObject({ enabled: true, muted: false, name: "Deep Whale" });
+      expect(readConfig(tempConfig).buddy).toMatchObject({
+        enabled: true,
+        muted: false,
+        name: "Deep Whale",
+      });
+
+      const petResult = handleSlash("buddy", ["pet"], makeLoop(), {
+        configPath: tempConfig,
+        pulseBuddy: (kind) => pulses.push(kind),
+      });
+      expect(petResult.info).toContain("Deep Whale");
+      expect(pulses).toEqual(["wake", "pet"]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("/model switches the model", () => {
     const loop = makeLoop();
     const tempDir = mkdtempSync(join(tmpdir(), "reasonix-slash-model-basic-"));
@@ -700,10 +732,11 @@ describe("handleSlash", () => {
     // Case-insensitive.
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
     // Empty prefix returns the full non-advanced release list, including code commands.
-    expect(suggestSlashCommands("", true)).toHaveLength(48);
+    expect(suggestSlashCommands("", true)).toHaveLength(49);
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("logs");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("language");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("weixin");
+    expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("buddy");
     expect(suggestSlashCommands("lan").map((s) => s.cmd)).toContain("language");
   });
 
