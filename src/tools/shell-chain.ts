@@ -4,6 +4,7 @@ import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process"
 import { constants, closeSync, lstatSync, openSync, realpathSync } from "node:fs";
 import { devNull } from "node:os";
 import * as pathMod from "node:path";
+import { expandShellTokens } from "./shell/parse.js";
 import { isDqEscape, killProcessTree, prepareSpawn, smartDecodeOutput } from "./shell.js";
 
 export type ChainOp = "|" | "||" | "&&" | ";";
@@ -468,7 +469,7 @@ async function runPipeGroup(
       const seg = segments[i]!;
       const io = openRedirects(seg.redirects, opts.cwd);
       allFds.push(...io.toClose);
-      const { bin, args, spawnOverrides } = prepareSpawn(seg.argv);
+      const { bin, args, spawnOverrides } = prepareSpawn(expandShellTokens(seg.argv, opts.cwd));
       const stdoutSpec = io.stdoutFd !== null ? io.stdoutFd : "pipe";
       const stderrSpec =
         io.stderrFd !== null ? io.stderrFd : io.mergeStderrToStdout ? stdoutSpec : "pipe";

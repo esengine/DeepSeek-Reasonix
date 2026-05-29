@@ -2,7 +2,7 @@ import { type ChildProcess, type SpawnOptions, spawn, spawnSync } from "node:chi
 import { existsSync, statSync } from "node:fs";
 import * as pathMod from "node:path";
 import { parseCommandChain, runChain } from "../shell-chain.js";
-import { tokenizeCommand } from "./parse.js";
+import { expandShellTokens, tokenizeCommand } from "./parse.js";
 
 export const DEFAULT_TIMEOUT_SEC = 60;
 export const DEFAULT_MAX_OUTPUT_CHARS = 32_000;
@@ -66,6 +66,7 @@ export async function runCommand(
   }
   const timeoutMs = timeoutSec * 1000;
   const normalizedEnv = normalizeWindowsEnvVars(process.env);
+  const expandedArgv = expandShellTokens(argv, opts.cwd);
 
   const spawnOpts: SpawnOptions = {
     cwd: opts.cwd,
@@ -99,7 +100,7 @@ export async function runCommand(
   //      with verbatim args + manual quoting, so shell metacharacters
   //      in arguments stay literal.
   // Unix path is unchanged.
-  const { bin, args, spawnOverrides } = prepareSpawn(argv, { env: normalizedEnv });
+  const { bin, args, spawnOverrides } = prepareSpawn(expandedArgv, { env: normalizedEnv });
   const effectiveSpawnOpts = { ...spawnOpts, ...spawnOverrides };
 
   return await new Promise<RunCommandResult>((resolve, reject) => {

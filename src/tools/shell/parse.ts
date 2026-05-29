@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import * as pathMod from "node:path";
 import {
@@ -107,6 +108,79 @@ export function tokenizeCommand(cmd: string): string[] {
   if (quote) throw new Error(`unclosed ${quote} in command`);
   if (cur.length > 0) out.push(cur);
   return out;
+}
+
+/**
+ * Shell 展开：~、$VAR/${VAR}、glob（*、?）。
+ * 展开失败时保留原样（优雅降级）。
+ * cwd 用于 glob 匹配和相对路径解析。
+ * 注意：glob 展开可能将一个 token 扩展为多个。
+ */
+export function expandShellTokens(tokens: string[], cwd: string): string[] {
+  const result: string[] = [];
+  for (let tok of tokens) {
+    // ~ 展开
+    if (tok === "~" || tok.startsWith("~/") || tok.startsWith("~\\")) {
+      tok = pathMod.join(homedir(), tok.slice(1));
+    }
+    // $VAR / ${VAR} 展开
+    tok = expandEnvVars(tok);
+    // Glob 展开（仅当 token 包含 * 或 ? 时）
+    if (tok.includes("*") || tok.includes("?")) {
+      const matches = expandGlob(tok, cwd);
+      result.push(...matches);
+    } else {
+      result.push(tok);
+    }
+  }
+  return result;
+}
+
+/** 展开 $VAR 和 ${VAR}，未定义的变量保留原样。 */
+function expandEnvVars(tok: string): string {
+  // ${VAR} 形式
+  tok = tok.replace(/\$\{([^}]+)\}/g, (_match, varName: string) => {
+    const val = process.env[varName];
+    return val !== undefined ? val : `\${${varName}}`;
+  });
+  // $VAR 形式（字母/数字/下划线组成）
+  tok = tok.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, varName: string) => {
+    const val = process.env[varName];
+    return val !== undefined ? val : `$${varName}`;
+  });
+  return tok;
+}
+
+/** Glob 展开：token 含 * 或 ? 时在 cwd 下匹配，无匹配保留原样。返回匹配数组。 */
+function expandGlob(pattern: string, cwd: string): string[] {
+  try {
+    const isAbs = pathMod.isAbsolute(pattern);
+    // 分离目录部分和文件名 glob 部分
+    const lastSep = Math.max(pattern.lastIndexOf("/"), pattern.lastIndexOf("\\"));
+    const dirPart = lastSep >= 0 ? pattern.slice(0, lastSep) : ".";
+    const basePart = lastSep >= 0 ? pattern.slice(lastSep + 1) : pattern;
+    const absDir = isAbs ? dirPart : pathMod.resolve(cwd, dirPart);
+    const entries = readdirSync(absDir, { withFileTypes: true });
+    const regex = new RegExp(
+      `^${basePart
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".")}$`,
+    );
+    const matches = entries
+      .filter((e) => e.isFile() && regex.test(e.name))
+      .map((e) => {
+        if (isAbs) return pathMod.join(absDir, e.name);
+        // 保持用户输入的分隔符风格（优先 /）
+        const sep = pattern.includes("/") ? "/" : pathMod.sep;
+        return dirPart === "." ? e.name : `${dirPart}${sep}${e.name}`;
+      })
+      .sort();
+    if (matches.length > 0) return matches;
+  } catch {
+    // readdirSync 失败时保留原样
+  }
+  return [pattern];
 }
 
 /** Up-front detection — without it, `dir | findstr foo` quotes `|` literal and pipe silently fails. */

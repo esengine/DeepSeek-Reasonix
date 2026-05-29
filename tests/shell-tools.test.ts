@@ -7,6 +7,7 @@ import { ToolRegistry } from "../src/tools.js";
 import {
   NeedsConfirmationError,
   detectShellOperator,
+  expandShellTokens,
   formatCommandResult,
   hasSensitivePathArgs,
   injectPowerShellUtf8,
@@ -82,6 +83,118 @@ describe("tokenizeCommand", () => {
   it("returns an empty array for an empty command", () => {
     expect(tokenizeCommand("")).toEqual([]);
     expect(tokenizeCommand("   ")).toEqual([]);
+  });
+});
+
+describe("expandShellTokens", () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "reasonix-expand-"));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("expands ~ to homedir", () => {
+    const { homedir } = require("node:os");
+    const result = expandShellTokens(["cat", "~/file.txt"], tmp);
+    expect(result[0]).toBe("cat");
+    expect(result[1]).toBe(join(homedir(), "file.txt"));
+  });
+
+  it("expands bare ~", () => {
+    const { homedir } = require("node:os");
+    const result = expandShellTokens(["ls", "~"], tmp);
+    expect(result[1]).toBe(homedir());
+  });
+
+  it("expands $VAR from process.env", () => {
+    const original = process.env.TEST_EXPAND_VAR;
+    process.env.TEST_EXPAND_VAR = "/expanded/path";
+    try {
+      const result = expandShellTokens(["cat", "$TEST_EXPAND_VAR/file"], tmp);
+      expect(result[1]).toBe("/expanded/path/file");
+    } finally {
+      if (original === undefined) delete process.env.TEST_EXPAND_VAR;
+      else process.env.TEST_EXPAND_VAR = original;
+    }
+  });
+
+  it("expands ${VAR} from process.env", () => {
+    const original = process.env.TEST_EXPAND_VAR2;
+    process.env.TEST_EXPAND_VAR2 = "value";
+    try {
+      const result = expandShellTokens(["echo", "${TEST_EXPAND_VAR2}"], tmp);
+      expect(result[1]).toBe("value");
+    } finally {
+      if (original === undefined) delete process.env.TEST_EXPAND_VAR2;
+      else process.env.TEST_EXPAND_VAR2 = original;
+    }
+  });
+
+  it("leaves undefined env vars as-is", () => {
+    const result = expandShellTokens(["echo", "$UNDEFINED_VAR_XYZ_123"], tmp);
+    expect(result[1]).toBe("$UNDEFINED_VAR_XYZ_123");
+  });
+
+  it("leaves undefined ${VAR} as-is", () => {
+    const result = expandShellTokens(["echo", "${UNDEFINED_VAR_XYZ_123}"], tmp);
+    expect(result[1]).toBe("${UNDEFINED_VAR_XYZ_123}");
+  });
+
+  it("expands glob * to matching files", () => {
+    writeFileSync(join(tmp, "a.ts"), "");
+    writeFileSync(join(tmp, "b.ts"), "");
+    writeFileSync(join(tmp, "c.js"), "");
+    const result = expandShellTokens(["ls", "*.ts"], tmp);
+    expect(result[0]).toBe("ls");
+    expect(result).toContain("a.ts");
+    expect(result).toContain("b.ts");
+    expect(result).not.toContain("c.js");
+    // Should have 3 entries: ls, a.ts, b.ts
+    expect(result.length).toBe(3);
+  });
+
+  it("expands glob ? to single-char匹配", () => {
+    writeFileSync(join(tmp, "a1.ts"), "");
+    writeFileSync(join(tmp, "a2.ts"), "");
+    writeFileSync(join(tmp, "ab.ts"), ""); // ? matches any single char
+    writeFileSync(join(tmp, "abc.ts"), ""); // too many chars
+    const result = expandShellTokens(["cat", "a?.ts"], tmp);
+    expect(result).toContain("a1.ts");
+    expect(result).toContain("a2.ts");
+    expect(result).toContain("ab.ts");
+    expect(result).not.toContain("abc.ts");
+  });
+
+  it("leaves unmatched glob as-is", () => {
+    const result = expandShellTokens(["ls", "*.nonexistent_ext_xyz"], tmp);
+    expect(result).toEqual(["ls", "*.nonexistent_ext_xyz"]);
+  });
+
+  it("handles glob in subdirectory", () => {
+    const sub = join(tmp, "sub");
+    require("node:fs").mkdirSync(sub);
+    writeFileSync(join(sub, "x.txt"), "");
+    writeFileSync(join(sub, "y.txt"), "");
+    // 用户输入用 / 时，输出也保持 /
+    const result = expandShellTokens(["cat", "sub/*.txt"], tmp);
+    expect(result).toContain("sub/x.txt");
+    expect(result).toContain("sub/y.txt");
+  });
+
+  it("does not expand * inside quotes (already unquoted by tokenizeCommand)", () => {
+    // tokenizeCommand strips quotes, so "a*b" becomes a*b as a single token.
+    // expandShellTokens treats it as a glob. This is expected — the user
+    // should escape with single quotes if they want literal *.
+    writeFileSync(join(tmp, "axb"), "");
+    const result = expandShellTokens(["echo", "a*b"], tmp);
+    expect(result).toContain("axb");
+  });
+
+  it("preserves tokens without special chars", () => {
+    const result = expandShellTokens(["git", "status", "-s"], tmp);
+    expect(result).toEqual(["git", "status", "-s"]);
   });
 });
 

@@ -16,6 +16,7 @@ import { isCommandAllowed } from "./shell/parse.js";
 export {
   BUILTIN_ALLOWLIST,
   detectShellOperator,
+  expandShellTokens,
   hasSensitivePathArgs,
   isAllowed,
   isCommandAllowed,
@@ -87,7 +88,7 @@ export function registerShellTools(registry: ToolRegistry, opts: ShellToolsOptio
   registry.register({
     name: "run_command",
     description:
-      'Run a shell command in the project root; returns combined stdout+stderr. Allowlisted read-only / test / lint / typecheck commands run immediately; mutating / network / install commands gate on user confirmation.\n\nDO NOT use run_command for file operations — use write_file, edit_file, multi_edit, copy_file, move_file, or delete_file instead. Shell utilities (echo, cp, sed, cat, tee, perl, python -c, etc.) bypass validation, lack rollback, and will trigger user confirmation gates that waste turns.\n\nNo real shell — argv parsed natively for cross-platform parity:\n• Supported: chains `|`/`||`/`&&`/`;` (each segment allowlist-checked) and file redirects `>`/`>>`/`<`/`2>`/`2>>`/`2>&1`/`&>`.\n• Rejected: background `&`, heredoc `<<`, `$(…)`, subshells, `$VAR` expansion, glob expansion. Quote operator chars as literals (`grep "a|b" file`).\n• `cd` is rejected in chains. By default, run generated scripts from the directory where the script was written; do not assume an input/data directory is the cwd. Pass input/data paths as arguments unless the command truly depends on that cwd. For package tools, use `npm --prefix <dir>`, `git -C <dir>`, `cargo -C <dir>`.\n• Filter at source — `grep -c` / `wc -l` / narrower paths over unbounded dumps.',
+      'Run a shell command in the project root; returns combined stdout+stderr. Allowlisted read-only / test / lint / typecheck commands run immediately; mutating / network / install commands gate on user confirmation.\n\nDO NOT use run_command for file operations — use write_file, edit_file, multi_edit, copy_file, move_file, or delete_file instead. Shell utilities (echo, cp, sed, cat, tee, perl, python -c, etc.) bypass validation, lack rollback, and will trigger user confirmation gates that waste turns.\n\nNo real shell — argv parsed natively for cross-platform parity:\n• Supported: chains `|`/`||`/`&&`/`;` (each segment allowlist-checked) and file redirects `>`/`>>`/`<`/`2>`/`2>>`/`2>&1`/`&>`.\n• Expanded: `~` (home dir), `$VAR`/`${VAR}` (env vars), glob `*`/`?` (file matching in cwd). Unmatched globs and undefined vars pass through as-is.\n• Rejected: background `&`, heredoc `<<`, `$(…)`, subshells. Quote operator chars as literals (`grep "a|b" file`).\n• `cd` is rejected in chains. By default, run generated scripts from the directory where the script was written; do not assume an input/data directory is the cwd. Pass input/data paths as arguments unless the command truly depends on that cwd. For package tools, use `npm --prefix <dir>`, `git -C <dir>`, `cargo -C <dir>`.\n• Filter at source — `grep -c` / `wc -l` / narrower paths over unbounded dumps.',
     // Plan-mode gate: allow allowlisted commands through (git status,
     // cargo check, ls, grep …) so the model can actually investigate
     // during planning. Anything that would otherwise trigger a
