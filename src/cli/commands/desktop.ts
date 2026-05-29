@@ -3113,9 +3113,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           emit({ type: "$error", message: fm.error }, tab.id);
           return;
         }
-        const dir = msg.scope === "project"
-          ? join(tab.rootDir, ".reasonix", SKILLS_DIRNAME)
-          : join(homedir(), ".reasonix", SKILLS_DIRNAME);
+        const dir =
+          msg.scope === "project"
+            ? join(tab.rootDir, ".reasonix", SKILLS_DIRNAME)
+            : join(homedir(), ".reasonix", SKILLS_DIRNAME);
         const folderPath = join(dir, msg.name, SKILL_FILE);
         const flatPath = join(dir, `${msg.name}.md`);
         let targetPath: string;
@@ -3136,9 +3137,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     }
     if (msg.cmd === "skill_delete") {
       try {
-        const dir = msg.scope === "project"
-          ? join(tab.rootDir, ".reasonix", SKILLS_DIRNAME)
-          : join(homedir(), ".reasonix", SKILLS_DIRNAME);
+        const dir =
+          msg.scope === "project"
+            ? join(tab.rootDir, ".reasonix", SKILLS_DIRNAME)
+            : join(homedir(), ".reasonix", SKILLS_DIRNAME);
         const folderPath = join(dir, msg.name, SKILL_FILE);
         const flatPath = join(dir, `${msg.name}.md`);
         if (existsSync(folderPath)) {
