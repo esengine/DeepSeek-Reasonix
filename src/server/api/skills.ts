@@ -156,36 +156,40 @@ export async function handleSkills(
 
   if (method === "GET" && rest.length === 0) {
     const runs7d = countSubagentRuns(ctx.usageLogPath);
-    const tag = (rows: SkillListEntry[]) =>
-      rows.map((r) => ({ ...r, runs7d: runs7d.get(r.name) ?? 0 }));
     const store = new SkillStore({
       projectRoot: cwd,
       customSkillPaths: loadResolvedSkillPaths(cwd ?? process.cwd(), ctx.configPath),
       subagentModels: loadSubagentModels(ctx.configPath),
     });
     const customRoots = store.customRoots();
+    // Use SkillStore.list() so symlinks are resolved identically to TUI.
+    const all = store.list();
+    const toEntries = (scope: string) =>
+      all
+        .filter((s) => s.scope === scope)
+        .map((s) => ({
+          name: s.name,
+          scope: s.scope as SkillListEntry["scope"],
+          description: s.description,
+          path: s.path,
+          size: 0,
+          mtime: 0,
+          runs7d: runs7d.get(s.name) ?? 0,
+        }));
     return {
       status: 200,
       body: {
-        global: tag(await listSkills(globalSkillsDir(), "global")),
-        custom: tag(
-          (await Promise.all(customRoots.map((root) => listSkills(root.dir, "custom")))).flat(),
-        ),
-        project: cwd ? tag(await listSkills(projectSkillsDir(cwd), "project")) : [],
-        builtin: [
-          {
-            name: "explore",
-            scope: "builtin",
-            description: "subagent — broad codebase survey",
-            runs7d: runs7d.get("explore") ?? 0,
-          },
-          {
-            name: "research",
-            scope: "builtin",
-            description: "subagent — deep web + repo research",
-            runs7d: runs7d.get("research") ?? 0,
-          },
-        ],
+        global: toEntries("global"),
+        custom: toEntries("custom"),
+        project: cwd ? toEntries("project") : [],
+        builtin: all
+          .filter((s) => s.scope === "builtin")
+          .map((s) => ({
+            name: s.name,
+            scope: "builtin" as const,
+            description: s.description,
+            runs7d: runs7d.get(s.name) ?? 0,
+          })),
         paths: {
           global: globalSkillsDir(),
           project: cwd ? projectSkillsDir(cwd) : null,
