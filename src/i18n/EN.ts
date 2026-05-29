@@ -87,6 +87,9 @@ export const EN: TranslationSchema = {
       '▸ resumed session "{name}" with {count} prior messages · /new to start fresh · /sessions to manage',
     newSession: '▸ session "{name}" (new) — auto-saved as you chat · /sessions to rename or delete',
     ephemeralSession: "▸ ephemeral chat (no session persistence) — drop --no-session to enable",
+    systemPromptChanged: "▸ system prompt changed since last session",
+    systemPromptChangedDetail:
+      "REASONIX.md or a memory file changed — the first turn will be a full cache miss. Use /new to start fresh with the updated context.",
     restoredEdits:
       "▸ restored {count} pending edit block(s) from an interrupted prior run — /apply to commit or /discard to drop.",
     resumedPlan: "Resumed plan · {when}{summary}",
@@ -336,6 +339,9 @@ export const EN: TranslationSchema = {
       argsHint: "[text]",
     },
     doctor: { description: "health check (api / config / api-reach / index / hooks / project)" },
+    "cache-miss-report": {
+      description: "explain recent prompt-cache misses from local prefix evidence",
+    },
     context: { description: "show context-window breakdown (system / tools / log / input)" },
     retry: { description: "truncate & resend your last message (fresh sample)" },
     compact: {
@@ -368,6 +374,11 @@ export const EN: TranslationSchema = {
       description:
         "connect, inspect, or disconnect the Telegram channel for this session (first connect guides bot token setup)",
       argsHint: "[connect [botToken]|status|disconnect]",
+    },
+    weixin: {
+      description:
+        "connect, inspect, or disconnect the Weixin channel for this session (first connect uses iLink QR login)",
+      argsHint: "[connect [manual token accountId [baseUrl]]|status|disconnect]",
     },
     setup: { description: "reminds you to exit and run `reasonix setup`" },
     semantic: {
@@ -947,6 +958,52 @@ export const EN: TranslationSchema = {
       rateLimitedReply:
         "Telegram is receiving messages too quickly. Please wait {seconds}s before sending more.",
     },
+    weixin: {
+      unavailable: "/weixin is not available in this session.",
+      connecting: "Weixin: connecting...",
+      connectFailed: "Weixin connect failed: {reason}",
+      disconnecting: "Weixin: disconnecting...",
+      disconnectFailed: "Weixin disconnect failed: {reason}",
+      usage:
+        "Usage: /weixin connect | /weixin connect manual [token accountId [baseUrl]] | /weixin status | /weixin disconnect",
+      promptCredentials:
+        "Weixin manual setup: enter iLink token and account id separated by a space, then press Enter. Type /cancel to abort.",
+      setupWaitingCredentials: "waiting for iLink token and account id",
+      setupCancelled: "Weixin setup cancelled.",
+      credentialsRequired: "Weixin token and account id are required.",
+      connected: "Weixin connected in {mode} mode. It will auto-start on future launches.",
+      alreadyConnected: "Weixin is already connected in {mode} mode. Auto-start is enabled.",
+      disconnected: "Weixin disconnected. Auto-start is disabled.",
+      status:
+        "Weixin: {connected}, auto-start {enabled}, credentials {configured}, token {token}, account {accountId}, access {access}, current mode {mode}.",
+      statusSetup: "Weixin: setup in progress - {step}",
+      stateConnected: "connected",
+      stateDisconnected: "disconnected",
+      stateEnabled: "enabled",
+      stateDisabled: "disabled",
+      stateConfigured: "configured",
+      stateNotConfigured: "not configured",
+      none: "none",
+      modeChat: "chat",
+      modeCode: "code",
+      accessOwner: "owner {owner}",
+      accessOwnerWithAllowlist: "owner {owner}, allowlist {count}",
+      accessAllowlist: "allowlist {count}",
+      accessRuntime: "first-sender (runtime only, {owner})",
+      accessRequiredShort: "access control required",
+      lockAlreadyRunning:
+        "Weixin channel is already running in process {pid}. Stop that process before starting another Weixin channel.",
+      unauthorizedMessage:
+        "Weixin ignored message from unauthorized user {userId}. Current access: {access}.",
+      runtimeBound:
+        "Weixin temporarily bound this run to first sender {userId}. Set `weixin.ownerUserId` in config to persist access.",
+      missingToken: "Weixin iLink token is required. Run `/weixin connect` to configure.",
+      missingAccountId: "Weixin account id is required. Run `/weixin connect` to configure.",
+      accessRequired:
+        "Weixin requires access control before it can start. Set `weixin.ownerUserId` or `weixin.allowlist` in config.",
+      rateLimited:
+        "Weixin rate-limited authorized user {userId}: more than 5 messages in {seconds}s.",
+    },
     admin: {
       doctorNeedsTui: "/doctor needs a TUI context (postDoctor wired).",
       doctorRunning: "⚕ Doctor — running health checks…",
@@ -1107,6 +1164,13 @@ export const EN: TranslationSchema = {
       projectNone1: '  (none — pick "always allow" on a ShellConfirm prompt to add one,',
       projectNone2: "   or `/permissions add <prefix>` directly.)",
       projectNoRoot: "Project allowlist — (no project root; chat mode shows builtin entries only)",
+      globalHeader: "Global allowlist ({count}) — applies to every project",
+      globalNone: "  (none — add with `/permissions add --global <prefix>`.)",
+      addGlobalInfo:
+        "▸ added to global allowlist: {prefix}\n  → next `{prefix}` invocation runs without prompting in every project.",
+      removeGlobalEmpty: "▸ no global allowlist entries to remove.",
+      clearGlobalConfirm:
+        "about to drop {count} global allowlist entr{plural}. Re-run with the word 'confirm': /permissions clear --global confirm",
       builtinHeader: "Builtin allowlist ({count}) — read-only, baked in",
       subcommands:
         "Subcommands: /permissions add <prefix> · /permissions remove <prefix-or-N> · /permissions clear confirm",

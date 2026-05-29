@@ -7,6 +7,7 @@ import { DenyContextInput } from "./DenyContextInput.js";
 import { SplitDiff } from "./SplitDiff.js";
 import { ApprovalCard } from "./cards/ApprovalCard.js";
 import { useKeystroke } from "./keystroke-context.js";
+import { FG } from "./theme/tokens.js";
 
 export type EditReviewChoice = "apply" | "reject" | "apply-rest-of-turn" | "flip-to-auto";
 
@@ -133,7 +134,7 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
       footerHint={t("editConfirm.footer")}
     >
       {hiddenAbove > 0 ? (
-        <Text dim>
+        <Text color={FG.faint}>
           {t(hiddenAbove === 1 ? "editConfirm.linesAbove" : "editConfirm.linesAbovePlural", {
             count: hiddenAbove,
           })}
@@ -148,10 +149,10 @@ export function EditConfirm({ block, onChoose }: EditConfirmProps) {
         <Text color="#bef0c8" backgroundColor="#0c2718">
           {t("editConfirm.newLabel")}
         </Text>
-        <Text dim>{t("editConfirm.sideBySide")}</Text>
+        <Text color={FG.faint}>{t("editConfirm.sideBySide")}</Text>
       </Box>
       {hiddenBelow > 0 ? (
-        <Text dim>
+        <Text color={FG.faint}>
           {t(hiddenBelow === 1 ? "editConfirm.linesBelow" : "editConfirm.linesBelowPlural", {
             count: hiddenBelow,
           })}

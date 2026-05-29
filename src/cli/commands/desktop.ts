@@ -2793,6 +2793,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     if (msg.cmd === "plan_response") {
       const tab = forgetGate(msg.id);
       if (tab && msg.response.type === "cancel") {
+        abortTurn(tab);
         tab.completedStepIds.clear();
         tab.planTotalSteps = 0;
         emit({ type: "$plan_cleared" }, tab.id);

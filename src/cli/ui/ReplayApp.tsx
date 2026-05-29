@@ -15,6 +15,7 @@ import type { TranscriptMeta } from "../../transcript/log.js";
 import { type TurnPage, computeCumulativeStats } from "../../transcript/replay.js";
 import { RecordView } from "./RecordView.js";
 import { StatsPanel } from "./StatsPanel.js";
+import { FG } from "./theme/tokens.js";
 
 export interface ReplayAppProps {
   meta: TranscriptMeta | null;
@@ -86,7 +87,7 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
             {progressLabel}
           </Text>
           {meta ? (
-            <Text dim>
+            <Text color={FG.faint}>
               {meta.source}
               {meta.task ? ` · ${meta.task}` : ""}
               {meta.mode ? ` · ${meta.mode}` : ""}
@@ -99,14 +100,14 @@ export function ReplayApp({ meta, pages }: ReplayAppProps) {
             {({ key, rec }) => <RecordView key={key} rec={rec} />}
           </Static>
         ) : (
-          <Text dim italic>
+          <Text color={FG.faint} italic>
             {t("replayApp.noRecords")}
           </Text>
         )}
       </Box>
 
       <Box marginTop={1} paddingX={1} borderStyle="single" borderColor="ansi:blackBright">
-        <Text dim>
+        <Text color={FG.faint}>
           <Text bold>j</Text>/<Text bold>↓</Text>/<Text bold>space</Text> next · <Text bold>k</Text>
           /<Text bold>↑</Text> prev · <Text bold>g</Text> first · <Text bold>G</Text> last ·{" "}
           <Text bold>q</Text> quit

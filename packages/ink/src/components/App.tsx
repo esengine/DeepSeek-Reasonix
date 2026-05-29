@@ -152,11 +152,24 @@ export default class App extends PureComponent<Props, State> {
   isRawModeSupported(): boolean {
     return this.props.stdin.isTTY;
   }
+  // Memoize terminal size context value to prevent unnecessary re-renders
+  // in consumers (useTerminalViewport). Without this, a new object is
+  // created on every render, defeating dependency-array checks.
+  private _lastTerminalColumns = 0;
+  private _lastTerminalRows = 0;
+  private _terminalSizeValue: { columns: number; rows: number } = { columns: 0, rows: 0 };
+
   override render() {
-    return <TerminalSizeContext.Provider value={{
-      columns: this.props.terminalColumns,
-      rows: this.props.terminalRows
-    }}>
+    if (this.props.terminalColumns !== this._lastTerminalColumns ||
+        this.props.terminalRows !== this._lastTerminalRows) {
+      this._lastTerminalColumns = this.props.terminalColumns;
+      this._lastTerminalRows = this.props.terminalRows;
+      this._terminalSizeValue = {
+        columns: this.props.terminalColumns,
+        rows: this.props.terminalRows,
+      };
+    }
+    return <TerminalSizeContext.Provider value={this._terminalSizeValue}>
         <AppContext.Provider value={{
         exit: this.handleExit
       }}>

@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { handleSlash } from "../src/cli/ui/slash/dispatch.js";
-import { addProjectShellAllowed, loadProjectShellAllowed } from "../src/config.js";
+import {
+  addProjectShellAllowed,
+  loadGlobalShellAllowed,
+  loadProjectShellAllowed,
+} from "../src/config.js";
 import { CacheFirstLoop, DeepSeekClient, ImmutablePrefix } from "../src/index.js";
 import { ToolRegistry } from "../src/tools.js";
 
@@ -101,6 +105,62 @@ describe("/permissions slash handler", () => {
     expect(result.info).toMatch(/builtin allowlist/i);
     // Should NOT have written a redundant project entry.
     expect(loadProjectShellAllowed(projectRoot, join(dir, ".reasonix", "config.json"))).toEqual([]);
+  });
+
+  it("/permissions add --global routes to the global list (project untouched, #2059)", () => {
+    const cfg = join(dir, ".reasonix", "config.json");
+    const result = handleSlash("permissions", ["add", "--global", "brew", "install"], makeLoop(), {
+      codeRoot: projectRoot,
+    });
+    expect(result.info).toMatch(/global allowlist/i);
+    expect(loadGlobalShellAllowed(cfg)).toContain("brew install");
+    expect(loadProjectShellAllowed(projectRoot, cfg)).toEqual([]);
+  });
+
+  it("/permissions add `g` is a project prefix, not hijacked as the global keyword (#2059)", () => {
+    const cfg = join(dir, ".reasonix", "config.json");
+    const result = handleSlash("permissions", ["add", "g"], makeLoop(), { codeRoot: projectRoot });
+    expect(result.info).toMatch(/added.*g/);
+    expect(loadProjectShellAllowed(projectRoot, cfg)).toContain("g");
+    expect(loadGlobalShellAllowed(cfg)).toEqual([]);
+  });
+
+  it("/permissions add --global works without a project root (chat mode)", () => {
+    const cfg = join(dir, ".reasonix", "config.json");
+    const result = handleSlash("permissions", ["add", "--global", "make", "test"], makeLoop(), {});
+    // Should NOT bail out with the "mutateCodeOnly" hint — global needs no root.
+    expect(result.info).not.toMatch(/reasonix code/i);
+    expect(loadGlobalShellAllowed(cfg)).toContain("make test");
+  });
+
+  it("/permissions add preserves an inner --global inside a real command prefix (#2059)", () => {
+    // Without leading-only flag parsing, `--global` mid-prefix would be stripped,
+    // landing the wrong prefix in the GLOBAL list. After the fix it must add the
+    // full prefix to PROJECT.
+    const cfg = join(dir, ".reasonix", "config.json");
+    const result = handleSlash(
+      "permissions",
+      ["add", "git", "config", "--global", "user.name"],
+      makeLoop(),
+      { codeRoot: projectRoot },
+    );
+    expect(result.info).toMatch(/added/);
+    expect(loadProjectShellAllowed(projectRoot, cfg)).toContain("git config --global user.name");
+    expect(loadGlobalShellAllowed(cfg)).toEqual([]);
+  });
+
+  it("/permissions add --global still applies when followed by a prefix containing --global", () => {
+    // Leading flag → global; inner flag → preserved verbatim.
+    const cfg = join(dir, ".reasonix", "config.json");
+    const result = handleSlash(
+      "permissions",
+      ["add", "--global", "npm", "install", "--global", "foo"],
+      makeLoop(),
+      { codeRoot: projectRoot },
+    );
+    expect(result.info).toMatch(/global allowlist/i);
+    expect(loadGlobalShellAllowed(cfg)).toContain("npm install --global foo");
+    expect(loadProjectShellAllowed(projectRoot, cfg)).toEqual([]);
   });
 
   it("/permissions remove drops by exact prefix", () => {

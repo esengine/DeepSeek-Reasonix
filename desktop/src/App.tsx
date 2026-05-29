@@ -68,6 +68,7 @@ import { AboutModal } from "./ui/about";
 import { SettingsModal, type PageId as SettingsPageId } from "./ui/settings";
 import { JumpBar } from "./ui/jump-bar";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+
 import { Sidebar } from "./ui/sidebar";
 import { Shortcut, localizeShortcutText, shortcutText } from "./ui/shortcut";
 import { Splash, shouldShowSplash } from "./ui/splash";
@@ -100,7 +101,7 @@ import { WorkdirPop } from "./ui/workdir-pop";
 import { parseEditResult } from "./ui/cards";
 import { useAutoCollapse } from "./ui/useAutoCollapse";
 import { useResizable } from "./ui/useResizable";
-import { useAutoScroll } from "./ui/useAutoScroll";
+// Auto-scroll handled by Virtuoso followOutput + scrollToIndex (useAutoScroll replaced).
 import { useDisableTextAssist } from "./ui/useDisableTextAssist";
 import { getThreadMaxWidth } from "./ui/thread-layout";
 import { elideTranscriptMessages } from "./ui/transcript-elision";
@@ -1439,8 +1440,9 @@ function TabRuntime({
   >(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
-  const threadInnerRef = useRef<HTMLDivElement>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const virtScrollerRef = useRef<HTMLDivElement | null>(null);
+  const atBottomRef = useRef(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
   const [mcpEditTarget, setMcpEditTarget] = useState<{ raw: string; nonce: number } | null>(
@@ -1990,31 +1992,50 @@ function TabRuntime({
     [sendRpc],
   );
 
-  // Read the latest session inside the stable restore callback below.
-  const currentSessionRef = useRef(state.currentSession);
-  currentSessionRef.current = state.currentSession;
   const messageItems = state.messages;
 
-  const restoreScrollTop = useCallback(() => {
-    const session = currentSessionRef.current;
-    if (!session) return null;
-    const raw = localStorage.getItem(`reasonix.scroll.${session}`);
-    const n = raw ? Number(raw) : Number.NaN;
-    return Number.isFinite(n) ? n : null;
-  }, []);
-
   const [showJumpButton, setShowJumpButton] = useState(false);
-  const { scrollToBottom } = useAutoScroll(
-    threadRef,
-    threadInnerRef,
-    state.busy,
-    restoreScrollTop,
-  );
+
+  // Reserve scroll to bottom when busy becomes true (message just sent).
+  const busyPrevRef = useRef(state.busy);
+  useEffect(() => {
+    if (state.busy && !busyPrevRef.current) {
+      atBottomRef.current = true;
+      setShowJumpButton(false);
+    }
+    busyPrevRef.current = state.busy;
+  }, [state.busy]);
+
+  const scrollToBottom = useCallback(() => {
+    const len = messageItems.length;
+    if (len > 0) {
+      const scroller = virtScrollerRef.current;
+      if (scroller) {
+        scroller.scrollTop = scroller.scrollHeight;
+      } else {
+        virtuosoRef.current?.scrollToIndex({ index: len - 1, behavior: "auto" });
+      }
+    }
+  }, [messageItems.length]);
+
+  // Follow the bottom while the assistant is streaming and the user hasn't
+  // scrolled up. The dependency on messageItems.length covers new messages;
+  // atBottomRef guards against re-pinning when the user intentionally scrolled
+  // up to read earlier content (#2159).
+  useEffect(() => {
+    const s = virtScrollerRef.current;
+    if (!s || messageItems.length === 0) return;
+    if (!atBottomRef.current) return;
+    const id = requestAnimationFrame(() => {
+      if (atBottomRef.current) s.scrollTop = s.scrollHeight;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [messageItems]);
 
   // Persist the transcript scroll offset per session so a restart reopens
   // the conversation where the user left it (#1244).
   useEffect(() => {
-    const el = threadRef.current;
+    const el = virtScrollerRef.current;
     const session = state.currentSession;
     if (!el || !session) return;
     const key = `reasonix.scroll.${session}`;
@@ -2448,7 +2469,10 @@ function TabRuntime({
         ) : null}
 
         <main className="main" style={{ position: "relative" }}>
-          <JumpBar messages={state.messages} threadEl={threadRef.current} />
+          <JumpBar messages={state.messages} threadEl={threadRef.current} onScrollToTurn={(turn) => {
+            const idx = state.messages.findIndex((m) => (m.kind === "user" || m.kind === "assistant") && m.turn === turn);
+            if (idx >= 0) virtuosoRef.current?.scrollToIndex(idx);
+          }} />
           {state.needsSetup ? (
             <NeedsSetupView
               workspaceDir={state.settings?.workspaceDir}
@@ -2491,10 +2515,13 @@ function TabRuntime({
                 ) : (
                   <Virtuoso
                     ref={virtuosoRef}
-                    style={{ height: "100%" }}
+                    style={{ height: "90%" }}
+                    className="virtuoso-scroll"
                     totalCount={messageItems.length}
                     followOutput={"auto"}
-                    atBottomStateChange={(atBottom) => setShowJumpButton(!atBottom)}
+                    initialTopMostItemIndex={messageItems.length > 0 ? messageItems.length - 1 : undefined}
+                    scrollerRef={(ref) => { virtScrollerRef.current = ref as HTMLDivElement | null; }}
+                    atBottomStateChange={(atBottom) => { atBottomRef.current = atBottom; setShowJumpButton(!atBottom); }}
                     components={{
                       Header: state.activePlan ? () => (
                         <div className="thread-inner">
@@ -2505,6 +2532,17 @@ function TabRuntime({
                           <ActivePlanTaskCard plan={state.activePlan!} />
                         </div>
                       ) : undefined,
+                      Footer: () => (
+                        <div className="thread-inner">
+                          {state.pendingPlans.map((p) => <PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />)}
+                          {state.pendingCheckpoints.map((c) => <CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />)}
+                          {state.pendingRevisions.map((r) => <RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />)}
+                          {state.pendingConfirms.map((c) => <ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />)}
+                          {state.pendingPathAccess.map((p) => <PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />)}
+                          {state.pendingChoices.map((c) => <ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />)}
+                          {!state.ready ? <div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div> : null}
+                        </div>
+                      ),
                     }}
                     itemContent={(index) => {
                       const m = state.messages[index]!;
@@ -2533,6 +2571,35 @@ function TabRuntime({
                           </div>
                         );
                       }
+                      if (m.kind === "error") {
+                        const toneVar = m.recoverable ? "var(--tone-warn)" : "var(--tone-err)";
+                        const bgVar = m.recoverable ? "var(--warn-soft, var(--danger-soft))" : "var(--danger-soft)";
+                        const labelKey = m.recoverable ? "app.warningLabel" : "app.errorLabel";
+                        return (
+                          <div key={m.id} className="warn-card" style={{ borderColor: toneVar, background: bgVar, position: "relative" }}>
+                            <span className="ico" style={{ color: toneVar }}><I.warning size={16} /></span>
+                            <div style={{ flex: 1 }}>
+                              <div className="tt">{t(labelKey)}</div>
+                              <div className="ds">{m.message}</div>
+                            </div>
+                            <button type="button" className="warn-card-dismiss" title={t("app.dismissError")}
+                              onClick={() => dispatch({ t: "dismiss_error", id: m.id })}
+                              style={{ background: "transparent", border: "none", color: toneVar, cursor: "pointer", padding: "4px", alignSelf: "flex-start" }}>
+                              <I.x size={14} />
+                            </button>
+                          </div>
+                        );
+                      }
+                      if (m.kind === "warning") {
+                        if (state.settings?.showSystemEvents === false) return null;
+                        return (
+                          <div key={m.id} className="sys-event-row" title={m.text}>
+                            <span className="line" />
+                            <span className="label">{m.text}</span>
+                            <span className="line" />
+                          </div>
+                        );
+                      }
                       return null;
                     }}
                   />
@@ -2540,7 +2607,7 @@ function TabRuntime({
                 {showJumpButton ? (
                   <button
                     className="thread-jump-bottom"
-                    onClick={() => scrollToBottom(true)}
+                    onClick={() => { atBottomRef.current = true; setShowJumpButton(false); scrollToBottom(); }}
                     title={t("app.jumpToBottom") ?? "Jump to bottom"}
                     aria-label={t("app.jumpToBottom") ?? "Jump to bottom"}
                   >
@@ -2548,18 +2615,6 @@ function TabRuntime({
                   </button>
                 ) : null}
               </div>
-
-              {state.pendingPlans.length > 0 || state.pendingCheckpoints.length > 0 || state.pendingRevisions.length > 0 || state.pendingConfirms.length > 0 || state.pendingPathAccess.length > 0 || state.pendingChoices.length > 0 || !state.ready ? (
-                <div style={{ maxWidth: "var(--thread-max-width, 740px)", margin: "0 auto", padding: "0 32px", width: "100%" }}>
-                  {state.pendingPlans.map((p) => (<PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />))}
-                  {state.pendingCheckpoints.map((c) => (<CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />))}
-                  {state.pendingRevisions.map((r) => (<RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />))}
-                  {state.pendingConfirms.map((c) => (<ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />))}
-                  {state.pendingPathAccess.map((p) => (<PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />))}
-                  {state.pendingChoices.map((c) => (<ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />))}
-                  {!state.ready ? (<div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div>) : null}
-                </div>
-              ) : null}
 
               <Composer
                 draft={draft}

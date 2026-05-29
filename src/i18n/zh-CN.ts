@@ -86,6 +86,9 @@ export const zhCN: TranslationSchema = {
       '▸ 已恢复会话 "{name}"，包含 {count} 条历史消息 · /new 重新开始 · /sessions 管理',
     newSession: '▸ 会话 "{name}" (新) — 随聊随存 · /sessions 重命名或删除',
     ephemeralSession: "▸ 临时聊天 (不保存会话) — 去掉 --no-session 以启用保存",
+    systemPromptChanged: "▸ 系统提示自上次会话后已变更",
+    systemPromptChangedDetail:
+      "REASONIX.md 或记忆文件发生了更改 — 本轮将产生完整缓存 miss。可使用 /new 以更新后的上下文开始新会话。",
     restoredEdits:
       "▸ 从中断的运行中恢复了 {count} 个待处理的编辑块 — /apply 提交或 /discard 放弃。",
     resumedPlan: "已恢复计划 · {when}{summary}",
@@ -322,6 +325,9 @@ export const zhCN: TranslationSchema = {
     doctor: {
       description: "健康检查（api / config / api-reach / index / hooks / project）",
     },
+    "cache-miss-report": {
+      description: "基于本地前缀证据解释最近的提示缓存未命中",
+    },
     context: { description: "显示上下文窗口分解（系统 / 工具 / 日志 / 输入）" },
     retry: { description: "截断并重发您的最后一条消息（重新采样）" },
     compact: {
@@ -351,6 +357,10 @@ export const zhCN: TranslationSchema = {
     telegram: {
       description: "连接/查看/断开 Telegram 通道，首次连接需提供 BotFather bot token",
       argsHint: "[connect [botToken]|status|disconnect]",
+    },
+    weixin: {
+      description: "连接/查看/断开微信通道，首次连接默认使用 iLink 扫码登录",
+      argsHint: "[connect [manual token accountId [baseUrl]]|status|disconnect]",
     },
     setup: { description: "提醒您退出并运行 `reasonix setup`" },
     semantic: {
@@ -898,6 +908,49 @@ export const zhCN: TranslationSchema = {
       rateLimited: "Telegram 已限流授权用户 {userId}：{seconds} 秒内超过 5 条消息。",
       rateLimitedReply: "Telegram 收到消息过快，请等待 {seconds} 秒后再发送。",
     },
+    weixin: {
+      unavailable: "/weixin 在当前会话中不可用。",
+      connecting: "微信：正在连接...",
+      connectFailed: "微信连接失败：{reason}",
+      disconnecting: "微信：正在断开...",
+      disconnectFailed: "微信断开失败：{reason}",
+      usage:
+        "用法：/weixin connect | /weixin connect manual [token accountId [baseUrl]] | /weixin status | /weixin disconnect",
+      promptCredentials:
+        "微信手动配置：请输入 iLink token 和账号 id，中间用空格分隔后回车。输入 /cancel 可取消。",
+      setupWaitingCredentials: "等待输入 iLink token 和账号 id",
+      setupCancelled: "微信首次配置已取消。",
+      credentialsRequired: "微信 token 和账号 id 不能为空。",
+      connected: "微信已在{mode}模式下连接成功，后续启动会自动启用。",
+      alreadyConnected: "微信已在{mode}模式下连接，自动启动已启用。",
+      disconnected: "微信已断开连接，自动启动已关闭。",
+      status:
+        "微信：{connected}，自动启动{enabled}，凭据{configured}，token {token}，账号 {accountId}，访问控制 {access}，当前模式 {mode}。",
+      statusSetup: "微信：首次配置进行中 - {step}",
+      stateConnected: "已连接",
+      stateDisconnected: "未连接",
+      stateEnabled: "已启用",
+      stateDisabled: "未启用",
+      stateConfigured: "已配置",
+      stateNotConfigured: "未配置",
+      none: "无",
+      modeChat: "聊天",
+      modeCode: "代码",
+      accessOwner: "所有者 {owner}",
+      accessOwnerWithAllowlist: "所有者 {owner}，白名单 {count}",
+      accessAllowlist: "白名单 {count}",
+      accessRuntime: "首个微信用户（仅本次运行，{owner}）",
+      accessRequiredShort: "需要配置访问控制",
+      lockAlreadyRunning: "微信通道已在进程 {pid} 中运行。请先停止该进程，再启动新的微信通道。",
+      unauthorizedMessage: "微信忽略了未授权用户 {userId} 的消息。当前访问控制：{access}。",
+      runtimeBound:
+        "微信已在本次运行中临时绑定到首个发送者 {userId}。如需持久化，请在配置中设置 `weixin.ownerUserId`。",
+      missingToken: "缺少微信 iLink token。请先运行 `/weixin connect` 完成配置。",
+      missingAccountId: "缺少微信账号 id。请先运行 `/weixin connect` 完成配置。",
+      accessRequired:
+        "微信启动前必须配置访问控制。请在配置中设置 `weixin.ownerUserId` 或 `weixin.allowlist`。",
+      rateLimited: "微信已限流授权用户 {userId}：{seconds} 秒内超过 5 条消息。",
+    },
     admin: {
       doctorNeedsTui: "/doctor 需要 TUI 上下文（postDoctor 已连接）。",
       doctorRunning: "⚕ 健康检查 — 正在运行…",
@@ -1042,6 +1095,13 @@ export const zhCN: TranslationSchema = {
       projectNone1: '  （无 — 在 ShellConfirm 提示中选择 "always allow" 添加一个，',
       projectNone2: "   或直接 `/permissions add <prefix>`。）",
       projectNoRoot: "项目允许列表 — （无项目根目录；聊天模式仅显示内置条目）",
+      globalHeader: "全局允许列表（{count}）— 对所有项目生效",
+      globalNone: "  （无 — 用 `/permissions add --global <prefix>` 添加。）",
+      addGlobalInfo:
+        "▸ 已添加到全局允许列表：{prefix}\n  → 之后 `{prefix}` 在所有项目中执行都不再询问。",
+      removeGlobalEmpty: "▸ 全局允许列表没有可删除的条目。",
+      clearGlobalConfirm:
+        "将清除 {count} 条全局允许列表条目。请加上 'confirm' 重新执行：/permissions clear --global confirm",
       builtinHeader: "内置允许列表（{count}）— 只读，已编译",
       subcommands:
         "子命令：/permissions add <prefix> · /permissions remove <prefix-or-N> · /permissions clear confirm",

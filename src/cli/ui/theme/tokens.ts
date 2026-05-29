@@ -146,8 +146,8 @@ const dark = defineTheme({
     strong: "#f4f7fb",
     body: "#d8dee9",
     sub: "#a7b1c2",
-    meta: "#778294",
-    faint: "#4d5666",
+    meta: "#9aa5b5",
+    faint: "#8791a3",
   },
   tone: {
     brand: "#7dd3fc",
@@ -171,7 +171,7 @@ const dark = defineTheme({
     bg: "#0b1020",
     bgInput: "#0f172a",
     bgCode: "#080c16",
-    bgElev: "#151d2f",
+    bgElev: "#1c2844",
   },
   messageBg: {
     user: "#373737",
@@ -187,8 +187,8 @@ const light = defineTheme({
     strong: "#111827",
     body: "#1f2937",
     sub: "#4b5563",
-    meta: "#6b7280",
-    faint: "#9ca3af",
+    meta: "#5c6371",
+    faint: "#666d7b",
   },
   tone: {
     brand: "#2563eb",
@@ -228,8 +228,8 @@ const midnight = defineTheme({
     strong: "#c0caf5",
     body: "#a9b1d6",
     sub: "#9aa5ce",
-    meta: "#565f89",
-    faint: "#414868",
+    meta: "#9da5bb",
+    faint: "#8a92a8",
   },
   tone: {
     brand: "#7aa2f7",
@@ -267,8 +267,8 @@ const deepBlue = defineTheme({
     strong: "#ffffff",
     body: "#e0e0e0",
     sub: "#b0b0b0",
-    meta: "#808080",
-    faint: "#606060",
+    meta: "#909090",
+    faint: "#8c8c8c",
   },
   tone: {
     brand: "#0153e5",

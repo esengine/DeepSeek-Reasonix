@@ -129,6 +129,12 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
       "cross-session cost dashboard (today / week / month / all-time · cache hit · vs Claude)",
   },
   {
+    cmd: "cache-miss-report",
+    group: "info",
+    summary: "explain recent prompt-cache misses from local prefix evidence",
+    aliases: ["cache-report", "cache"],
+  },
+  {
     cmd: "doctor",
     group: "info",
     summary: "health check (api / config / api-reach / index / hooks / project)",
@@ -200,6 +206,14 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     summary: "connect, inspect, or disconnect the Telegram channel",
     argCompleter: ["connect", "status", "disconnect"],
     aliases: ["tg"],
+  },
+  {
+    cmd: "weixin",
+    group: "extend",
+    argsHint: "<connect|status|disconnect> [manual token accountId [baseUrl]]",
+    summary: "connect, inspect, or disconnect the Weixin channel",
+    argCompleter: ["connect", "status", "disconnect"],
+    aliases: ["wx"],
   },
 
   {

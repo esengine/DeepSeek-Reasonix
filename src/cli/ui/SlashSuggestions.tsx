@@ -3,7 +3,7 @@ import React from "react";
 import { t } from "../../i18n/index.js";
 import type { SlashCommandSpec, SlashGroup } from "./slash.js";
 import { GLYPH, useColor } from "./theme.js";
-import { SURFACE } from "./theme/tokens.js";
+import { FG, SURFACE } from "./theme/tokens.js";
 
 const GROUP_MODE_MAX_ROWS = 24;
 const SEARCH_MODE_MAX_ROWS = 8;
@@ -61,7 +61,7 @@ export function SlashSuggestions({
         </Text>
         <Text> </Text>
         <Text color={color.warn}>{t("slashSuggestions.noMatch")}</Text>
-        <Text dim>{t("slashSuggestions.backspaceHint")}</Text>
+        <Text color={FG.faint}>{t("slashSuggestions.backspaceHint")}</Text>
       </Box>
     );
   }
@@ -76,14 +76,14 @@ export function SlashSuggestions({
         <Text color={color.accent} bold>
           {"/ "}
         </Text>
-        <Text dim>
+        <Text color={FG.faint}>
           {t(
             total === 1 ? "slashSuggestions.commandCount" : "slashSuggestions.commandCountPlural",
             { count: total },
           )}
         </Text>
         {hiddenAbove > 0 ? (
-          <Text dim>{t("slashSuggestions.aboveLabel", { count: hiddenAbove })}</Text>
+          <Text color={FG.faint}>{t("slashSuggestions.aboveLabel", { count: hiddenAbove })}</Text>
         ) : null}
       </Box>
       {items.map((item) => {
@@ -100,15 +100,17 @@ export function SlashSuggestions({
         );
       })}
       {hiddenBelow > 0 ? (
-        <Text dim>{t("slashSuggestions.belowLabel", { count: hiddenBelow })}</Text>
+        <Text color={FG.faint}>{t("slashSuggestions.belowLabel", { count: hiddenBelow })}</Text>
       ) : null}
       {groupMode && advancedHidden && advancedHidden > 0 ? (
         <Box marginTop={1}>
-          <Text dim>{t("slashSuggestions.advancedHint", { count: advancedHidden })}</Text>
+          <Text color={FG.faint}>
+            {t("slashSuggestions.advancedHint", { count: advancedHidden })}
+          </Text>
         </Box>
       ) : null}
       <Box marginTop={0}>
-        <Text dim>{t("slashSuggestions.footerHint")}</Text>
+        <Text color={FG.faint}>{t("slashSuggestions.footerHint")}</Text>
       </Box>
     </Box>
   );
@@ -166,7 +168,7 @@ function shouldShowGroupHeader(matches: readonly SlashCommandSpec[], idx: number
 function GroupHeader({ group }: { group: SlashGroup }): React.ReactElement {
   return (
     <Box flexShrink={0} height={1} flexWrap="nowrap">
-      <Text dim wrap="truncate">
+      <Text color={FG.faint} wrap="truncate">
         {`  ${groupLabel(group)}`}
       </Text>
     </Box>
@@ -207,11 +209,11 @@ function SuggestionRow({
       <Text color={color.accent} bold={isSelected} wrap="truncate">
         {padOrTrim(name, COMMAND_NAME_CELLS)}
       </Text>
-      <Text dim wrap="truncate">
+      <Text color={FG.faint} wrap="truncate">
         {padOrTrim(argsSuffix, ARGS_CELLS)}
       </Text>
       <Text wrap="truncate">{"  "}</Text>
-      <Text color={isSelected ? color.user : color.info} dim={!isSelected} wrap="truncate">
+      <Text color={isSelected ? color.user : FG.faint} wrap="truncate">
         {summaryText}
       </Text>
     </Box>

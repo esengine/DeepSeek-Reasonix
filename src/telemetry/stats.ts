@@ -1,5 +1,6 @@
 import type { Usage } from "../client.js";
 import { loadContextTokens, loadPricingOverride } from "../config.js";
+import type { CacheDiagnosticEntry } from "./cache-diagnostics.js";
 
 /** USD per 1M tokens; display currency conversion happens at the UI boundary. */
 export const DEEPSEEK_PRICING: Record<
@@ -134,6 +135,10 @@ export class SessionStats {
   private _carryoverCompletion = 0;
   /** Last turn's promptTokens before exit — surfaced via summary() until the next live turn lands. */
   private _carryoverLastPromptTokens = 0;
+  /** Per-turn cache diagnostics stored as each turn completes, so the live
+   *  /cache-miss-report can replay accurate prefix hashes per historical turn
+   *  rather than computing them all from the current prefix. */
+  private _cacheDiagnostics: CacheDiagnosticEntry[] = [];
 
   /** Seed totals from a resumed session's persisted meta — only call once at construction. */
   seedCarryover(opts: {
@@ -193,6 +198,7 @@ export class SessionStats {
     this._carryoverCacheMiss = 0;
     this._carryoverCompletion = 0;
     this._carryoverLastPromptTokens = 0;
+    this._cacheDiagnostics = [];
   }
 
   record(turn: number, model: string, usage: Usage): TurnStats {
@@ -215,6 +221,17 @@ export class SessionStats {
     this._carryoverCacheHit += usage.promptCacheHitTokens;
     this._carryoverCacheMiss += usage.promptCacheMissTokens;
     this._carryoverCompletion += usage.completionTokens;
+  }
+
+  /** Store a cache diagnostic entry per turn so the live /cache-miss-report
+   *  replays the prefix hashes that were actually in effect at turn time. */
+  addCacheDiagnostic(entry: CacheDiagnosticEntry): void {
+    this._cacheDiagnostics.push(entry);
+  }
+
+  /** Per-turn cache diagnostics stored in-memory for the current process. */
+  get cacheDiagnostics(): readonly CacheDiagnosticEntry[] {
+    return this._cacheDiagnostics;
   }
 
   /** Drop oldest turns beyond MAX_TURNS, folding their costs into carryover so

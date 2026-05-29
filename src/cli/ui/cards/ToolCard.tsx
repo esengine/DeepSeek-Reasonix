@@ -188,8 +188,7 @@ export function ToolCard({ card }: { card: ToolCardData }): React.ReactElement {
               ) : (
                 <Text
                   key={`${card.id}:line:${row.index}`}
-                  color={errColor}
-                  dim={!card.exitCode || card.exitCode === 0}
+                  color={!card.exitCode || card.exitCode === 0 ? FG.faint : errColor}
                 >
                   {clipToCells(row.text, lineCells) || " "}
                 </Text>

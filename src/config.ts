@@ -21,6 +21,8 @@ import {
   type ToolRateLimitConfig,
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
+import { normalizeWeixinAllowlist, normalizeWeixinUserId } from "./weixin/access.js";
+import { loadWeixinAccount, saveWeixinAccount } from "./weixin/account.js";
 
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
 export type EditMode = "review" | "auto" | "yolo" | "plan";
@@ -132,6 +134,15 @@ export interface QQBotConfig {
 
 export interface TelegramBotConfig {
   botToken?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
+  allowlist?: string[];
+}
+
+export interface WeixinBotConfig {
+  token?: string;
+  accountId?: string;
+  baseUrl?: string;
   enabled?: boolean;
   ownerUserId?: string;
   allowlist?: string[];
@@ -275,6 +286,9 @@ export interface ReasonixConfig {
       pathAllowed?: string[];
     };
   };
+  /** Global shell allowlist — command prefixes auto-approved across ALL projects (#2059).
+   *  Merged (union) with the per-project `projects[<root>].shellAllowed` at check time. */
+  shellAllowedGlobal?: string[];
   /** Issue #259 — user-configurable sensitive-path prefixes and filename patterns.
    *  Commands touching these paths are demoted to the confirm gate even when allowlisted. */
   sensitivePaths?: {
@@ -318,6 +332,7 @@ export interface ReasonixConfig {
   /** QQ Bot configuration */
   qq?: QQBotConfig;
   telegram?: TelegramBotConfig;
+  weixin?: WeixinBotConfig;
 }
 
 export interface CustomMemoryTypeConfig {
@@ -463,6 +478,7 @@ const STRING_ARRAY_FIELDS: Array<readonly string[]> = [
   ["mcpDisabled"],
   ["promptHistory"],
   ["recentWorkspaces"],
+  ["shellAllowedGlobal"],
   ["skills", "paths"],
   ["skills", "disabled"],
 ];
@@ -642,6 +658,28 @@ function normalizeStringRecord(value: unknown): Record<string, string> | undefin
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Expand env var references in header values (#2148). Supported forms:
+ *  `${VAR}`, `${env:VAR}`, `${VAR:-default}`, `${env:VAR:-default}`.
+ *  Unset variables with no default are left as-is so the error surfaces at bridge time. */
+function expandEnvInRecord(
+  record: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!record) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(record)) {
+    out[k] = v.replace(
+      /\$\{(?:env:)?([^}:]+)(?::-((?:[^}]|\}(?!\}))*))?\}/g,
+      (match, name: string, defaultVal?: string) => {
+        const expanded = process.env[name.trim()];
+        if (expanded !== undefined) return expanded;
+        if (defaultVal !== undefined) return defaultVal;
+        return match;
+      },
+    );
+  }
+  return out;
+}
+
 export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]): McpServerSpec[] {
   const result: McpServerSpec[] = [];
   const seen = new Set<string>();
@@ -696,7 +734,9 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
       let url = (serverCfg as McpServerConfig).url ?? "";
       const streamMatch = /^streamable\+(https?:\/\/.+)$/i.exec(url);
       if (streamMatch) url = streamMatch[1]!;
-      const headers = normalizeStringRecord((serverCfg as McpServerConfig).headers);
+      const headers = expandEnvInRecord(
+        normalizeStringRecord((serverCfg as McpServerConfig).headers),
+      );
       if (transport === "sse") {
         const spec: McpServerSpec = {
           transport: "sse",
@@ -1220,6 +1260,45 @@ export function clearProjectShellAllowed(
   if (!cfg.projects) cfg.projects = {};
   if (!cfg.projects[key]) cfg.projects[key] = {};
   cfg.projects[key].shellAllowed = [];
+  writeConfig(cfg, path);
+  return existing.length;
+}
+
+/** Global allowlist applies to every project (#2059) — read with no rootDir. */
+export function loadGlobalShellAllowed(path: string = defaultConfigPath()): string[] {
+  return readConfig(path).shellAllowedGlobal ?? [];
+}
+
+export function addGlobalShellAllowed(prefix: string, path: string = defaultConfigPath()): void {
+  const trimmed = prefix.trim();
+  if (!trimmed) return;
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (existing.includes(trimmed)) return;
+  cfg.shellAllowedGlobal = [...existing, trimmed];
+  writeConfig(cfg, path);
+}
+
+/** Match is exact after trim — NOT prefix-match (mirrors removeProjectShellAllowed). */
+export function removeGlobalShellAllowed(
+  prefix: string,
+  path: string = defaultConfigPath(),
+): boolean {
+  const trimmed = prefix.trim();
+  if (!trimmed) return false;
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (!existing.includes(trimmed)) return false;
+  cfg.shellAllowedGlobal = existing.filter((p) => p !== trimmed);
+  writeConfig(cfg, path);
+  return true;
+}
+
+export function clearGlobalShellAllowed(path: string = defaultConfigPath()): number {
+  const cfg = readConfig(path);
+  const existing = cfg.shellAllowedGlobal ?? [];
+  if (existing.length === 0) return 0;
+  cfg.shellAllowedGlobal = [];
   writeConfig(cfg, path);
   return existing.length;
 }
@@ -1793,6 +1872,68 @@ export function saveTelegramConfig(
   );
   rootCfg.telegram = {
     botToken: cfg.botToken,
+    enabled: cfg.enabled,
+    ownerUserId,
+    allowlist,
+  };
+  writeConfig(rootCfg, path);
+}
+
+export interface LoadedWeixinConfig {
+  token?: string;
+  accountId?: string;
+  baseUrl?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
+  allowlist?: string[];
+}
+
+export function loadWeixinConfig(path: string = defaultConfigPath()): LoadedWeixinConfig {
+  const envAllowlist = normalizeWeixinAllowlist(process.env.WEIXIN_ALLOWLIST);
+  const fromEnv = {
+    token: process.env.WEIXIN_TOKEN,
+    accountId: process.env.WEIXIN_ACCOUNT_ID,
+    baseUrl: process.env.WEIXIN_BASE_URL,
+    ownerUserId: normalizeWeixinUserId(process.env.WEIXIN_OWNER_USER_ID),
+    allowlist: envAllowlist,
+  };
+  const fromCfg = readConfig(path).weixin ?? {};
+  const ownerUserId = fromEnv.ownerUserId ?? normalizeWeixinUserId(fromCfg.ownerUserId);
+  const allowlist = normalizeWeixinAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  const accountId = fromEnv.accountId ?? fromCfg.accountId;
+  const persisted = accountId ? loadWeixinAccount(accountId) : null;
+  return {
+    token: fromEnv.token ?? fromCfg.token ?? persisted?.token,
+    accountId,
+    baseUrl: fromEnv.baseUrl ?? fromCfg.baseUrl ?? persisted?.baseUrl,
+    enabled: fromCfg.enabled === true,
+    ownerUserId,
+    allowlist,
+  };
+}
+
+export function saveWeixinConfig(
+  cfg: LoadedWeixinConfig,
+  path: string = defaultConfigPath(),
+): void {
+  const rootCfg = readConfig(path);
+  const ownerUserId = normalizeWeixinUserId(cfg.ownerUserId);
+  const allowlist = normalizeWeixinAllowlist(cfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  if (cfg.accountId && cfg.token) {
+    saveWeixinAccount({
+      accountId: cfg.accountId,
+      token: cfg.token,
+      baseUrl: cfg.baseUrl,
+    });
+  }
+  rootCfg.weixin = {
+    token: undefined,
+    accountId: cfg.accountId,
+    baseUrl: cfg.baseUrl,
     enabled: cfg.enabled,
     ownerUserId,
     allowlist,

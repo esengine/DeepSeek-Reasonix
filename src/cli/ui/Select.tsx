@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import { useKeystroke } from "./keystroke-context.js";
 import type { KeyEvent } from "./stdin-reader.js";
 import { type UiColor, useColor } from "./theme.js";
+import { FG } from "./theme/tokens.js";
 
 export interface SelectItem<V extends string = string> {
   value: V;
@@ -78,7 +79,7 @@ export function SingleSelect<V extends string>({
       ))}
       {footer ? (
         <Box marginTop={1}>
-          <Text dim>{footer}</Text>
+          <Text color={FG.faint}>{footer}</Text>
         </Box>
       ) : null}
     </Box>
@@ -155,7 +156,7 @@ export function MultiSelect<V extends string>({
       })}
       {footer ? (
         <Box marginTop={1}>
-          <Text dim>{footer}</Text>
+          <Text color={FG.faint}>{footer}</Text>
         </Box>
       ) : null}
     </Box>
@@ -180,23 +181,23 @@ function SelectRow<V extends string>({
   if (inlineHint) {
     return (
       <Box flexDirection="row" flexWrap="nowrap" minHeight={1}>
-        <Text color={rowColor} bold={active} dim={item.disabled} wrap="truncate">
+        <Text color={item.disabled ? FG.faint : rowColor} bold={active} wrap="truncate">
           {labelText}
         </Text>
-        {item.hint ? <Text dim wrap="truncate">{`  ${item.hint}`}</Text> : null}
+        {item.hint ? <Text color={FG.faint} wrap="truncate">{`  ${item.hint}`}</Text> : null}
       </Box>
     );
   }
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={rowColor} bold={active} dim={item.disabled}>
+        <Text color={item.disabled ? FG.faint : rowColor} bold={active}>
           {labelText}
         </Text>
       </Box>
       {item.hint ? (
         <Box paddingLeft={marker.length + 1}>
-          <Text dim>{item.hint}</Text>
+          <Text color={FG.faint}>{item.hint}</Text>
         </Box>
       ) : null}
     </Box>

@@ -12,6 +12,7 @@ import {
   specStringFor,
 } from "../../mcp/registry-fetch.js";
 import type { RegistryEntry } from "../../mcp/registry-types.js";
+import { FG } from "../ui/theme/tokens.js";
 
 const VISIBLE_ROWS = 12;
 
@@ -175,16 +176,18 @@ function McpBrowseApp() {
         <Text bold color="ansi:cyan">
           ◈ MCP marketplace
         </Text>
-        <Text dim>{`  ·  ${state.status}`}</Text>
+        <Text color={FG.faint}>{`  ·  ${state.status}`}</Text>
       </Box>
       <Box marginTop={1}>
         <Text>search: </Text>
         <Text color="ansi:white">{state.query || "(type to filter)"}</Text>
-        <Text dim>{`  ${filtered.length} match${filtered.length === 1 ? "" : "es"}`}</Text>
+        <Text
+          color={FG.faint}
+        >{`  ${filtered.length} match${filtered.length === 1 ? "" : "es"}`}</Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {window.length === 0 ? (
-          <Text dim>{state.loading ? "loading…" : "no entries"}</Text>
+          <Text color={FG.faint}>{state.loading ? "loading…" : "no entries"}</Text>
         ) : (
           window.map((e, i) => {
             const idx = (start || 0) + i;
@@ -196,7 +199,7 @@ function McpBrowseApp() {
               <Box key={e.name}>
                 <Text color={active ? "ansi:cyan" : undefined}>{active ? "▸ " : "  "}</Text>
                 <Text bold={active}>{e.name.padEnd(40).slice(0, 40)}</Text>
-                <Text dim>{` ${tag}${pop}`}</Text>
+                <Text color={FG.faint}>{` ${tag}${pop}`}</Text>
               </Box>
             );
           })
@@ -206,17 +209,19 @@ function McpBrowseApp() {
         <Box marginTop={1} flexDirection="column">
           <Text bold color="ansi:white">
             {overlay?.[selected.name]?.title ?? selected.title}
-            {overlay?.[selected.name] ? <Text dim>{`  \u00b7  ${selected.title}`}</Text> : null}
+            {overlay?.[selected.name] ? (
+              <Text color={FG.faint}>{`  \u00b7  ${selected.title}`}</Text>
+            ) : null}
           </Text>
-          <Text dim>
+          <Text color={FG.faint}>
             {overlay?.[selected.name]?.description ?? selected.description?.slice(0, 160) ?? null}
           </Text>
           {selected.install ? (
-            <Text dim>
+            <Text color={FG.faint}>
               {`spec: ${selected.install.runtime} ${selected.install.packageId ?? selected.install.url ?? "—"} · ${selected.install.transport}`}
             </Text>
           ) : (
-            <Text dim>(smithery listing — install info not exposed)</Text>
+            <Text color={FG.faint}>(smithery listing — install info not exposed)</Text>
           )}
           {selected.install?.requiredEnv?.length ? (
             <Text color="ansi:yellow">{`needs: ${selected.install.requiredEnv.join(", ")}`}</Text>
@@ -224,7 +229,9 @@ function McpBrowseApp() {
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text dim>type to filter · ↑↓ pick · enter install · tab load more · esc quit</Text>
+        <Text color={FG.faint}>
+          type to filter · ↑↓ pick · enter install · tab load more · esc quit
+        </Text>
       </Box>
     </Box>
   );

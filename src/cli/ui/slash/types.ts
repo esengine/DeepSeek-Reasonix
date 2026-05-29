@@ -160,6 +160,11 @@ export interface SlashContext {
     disconnect: () => Promise<string>;
     status: () => string;
   };
+  weixin?: {
+    connect: (args: readonly string[]) => Promise<string>;
+    disconnect: () => Promise<string>;
+    status: () => string;
+  };
   /** Current session id — included in `/feedback`'s diagnostic block when present. */
   sessionId?: string;
 }

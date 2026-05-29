@@ -7,7 +7,7 @@ import { t } from "../../i18n/index.js";
 import type { SessionSummary } from "../../telemetry/stats.js";
 import { Bar, ChromeRule } from "./primitives.js";
 import { COLOR, GRADIENT } from "./theme.js";
-import { formatBalance, formatCost } from "./theme/tokens.js";
+import { FG, formatBalance, formatCost } from "./theme/tokens.js";
 
 const COLD_START_TURNS = 3;
 
@@ -124,15 +124,11 @@ function ChromeRow({
       </Text>
       {projectName ? (
         <>
-          <Text color={COLOR.info} dim>
-            {"  ·  "}
-          </Text>
+          <Text color={FG.faint}>{"  ·  "}</Text>
           <Text>{projectName}</Text>
           {showSession && sessionName ? (
             <>
-              <Text color={COLOR.info} dim>
-                {"  ›  "}
-              </Text>
+              <Text color={FG.faint}>{"  ›  "}</Text>
               <Text color={COLOR.info}>{sessionName}</Text>
             </>
           ) : null}
@@ -158,11 +154,8 @@ function ChromeRow({
         </>
       ) : null}
       <Text
-        color={
-          summary.turns === 0 || coldStart ? COLOR.info : sessionCostColor(summary.totalCostUsd)
-        }
+        color={summary.turns === 0 || coldStart ? FG.faint : sessionCostColor(summary.totalCostUsd)}
         bold={summary.turns > 0 && !coldStart}
-        dim={summary.turns === 0 || coldStart}
       >
         {costLabel}
       </Text>
@@ -177,19 +170,14 @@ function ChromeRow({
       {showCache ? (
         <>
           <Text>{"  "}</Text>
-          <Text dim>{"["}</Text>
-          <Text dim>{"c "}</Text>
-          <Bar
-            ratio={summary.cacheHitRatio}
-            color={coldStart ? COLOR.info : cacheColor}
-            cells={6}
-            dim={coldStart}
-          />
+          <Text color={FG.faint}>{"["}</Text>
+          <Text color={FG.faint}>{"c "}</Text>
+          <Bar ratio={summary.cacheHitRatio} color={coldStart ? FG.faint : cacheColor} cells={6} />
           <Text> </Text>
-          <Text color={coldStart ? undefined : cacheColor} dim={coldStart}>
+          <Text color={coldStart ? FG.faint : cacheColor}>
             {coldStart && summary.turns === 0 ? "—" : `${cachePct}%`}
           </Text>
-          <Text dim>{"]"}</Text>
+          <Text color={FG.faint}>{"]"}</Text>
         </>
       ) : null}
     </Box>
@@ -212,10 +200,10 @@ function BudgetRow({ spent, cap }: { spent: number; cap: number }) {
   const color = pct >= 100 ? "#f87171" : pct >= 80 ? "#fbbf24" : "#94a3b8";
   return (
     <Box>
-      <Text dim>{t("statsPanel.budget")}</Text>
+      <Text color={FG.faint}>{t("statsPanel.budget")}</Text>
       <Text color={color}>
         {`$${spent.toFixed(4)} / $${cap.toFixed(2)}`}
-        <Text dim>{`  (${pct.toFixed(0)}%)`}</Text>
+        <Text color={FG.faint}>{`  (${pct.toFixed(0)}%)`}</Text>
       </Text>
     </Box>
   );

@@ -484,9 +484,19 @@ program
   .command("doctor")
   .description(t("cli.doctor"))
   .option("--json", t("ui.jsonHint"))
+  .option("--cache", "run cache-stability checks only")
   .action(async (opts) => {
     const { doctorCommand } = await import("./commands/doctor.js");
-    await doctorCommand({ json: !!opts.json });
+    await doctorCommand({ json: !!opts.json, cache: !!opts.cache });
+  });
+
+program
+  .command("doctor-cache")
+  .description("cache-stability health check")
+  .option("--json", t("ui.jsonHint"))
+  .action(async (opts) => {
+    const { doctorCommand } = await import("./commands/doctor.js");
+    await doctorCommand({ json: !!opts.json, cache: true });
   });
 
 program
