@@ -2190,10 +2190,8 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .thread-inner--standalone {
   margin-top: 28px;
 }
-.thread-inner > div[data-turn] {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 100px;
-}
+/* content-visibility: auto removed — conflicts with Virtuoso virtualization
+   and causes text jitter on scroll (issue #2076). */
 
 /* ---------- JUMP BAR (message navigation dock) ---------- */
 
