@@ -74,7 +74,33 @@ describe("TelegramChannel.sendResponse", () => {
 
     await channel.sendResponse("hello");
 
-    expect(bot.sendMessage).toHaveBeenCalledWith(123, "hello", 456, "MarkdownV2");
+    expect(bot.sendMessage).toHaveBeenCalledWith(123, "hello", 456, "MarkdownV2", undefined);
+  });
+
+  it("attaches inline buttons to the delivered response", async () => {
+    const bot = { sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const channel = new TelegramChannel({
+      onSubmitMessage: () => undefined,
+    }) as unknown as {
+      bot: typeof bot;
+      chatId: number;
+      messageId: number;
+      sendResponse: TelegramChannel["sendResponse"];
+    };
+    channel.bot = bot;
+    channel.chatId = 123;
+    channel.messageId = 456;
+    const buttons = [[{ text: "Run once", callbackData: "1" }]];
+
+    await channel.sendResponse("Need confirmation", buttons);
+
+    expect(bot.sendMessage).toHaveBeenCalledWith(
+      123,
+      "Need confirmation",
+      456,
+      "MarkdownV2",
+      buttons,
+    );
   });
 
   it("falls back to plain text when markdown delivery fails", async () => {
@@ -103,8 +129,8 @@ describe("TelegramChannel.sendResponse", () => {
 
     expect(channel.markdownDisabled).toBe(true);
     expect(bot.sendMessage).toHaveBeenCalledTimes(2);
-    expect(bot.sendMessage).toHaveBeenNthCalledWith(1, 123, "*bold*", 456, "MarkdownV2");
-    expect(bot.sendMessage).toHaveBeenNthCalledWith(2, 123, "*bold*", 456);
+    expect(bot.sendMessage).toHaveBeenNthCalledWith(1, 123, "*bold*", 456, "MarkdownV2", undefined);
+    expect(bot.sendMessage).toHaveBeenNthCalledWith(2, 123, "*bold*", 456, undefined, undefined);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0]?.[0]).toContain(
       "Telegram markdown delivery disabled after first failure",

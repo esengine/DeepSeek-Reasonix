@@ -5,7 +5,12 @@ import { loadTelegramConfig } from "../config.js";
 import { loadDotenv } from "../env.js";
 import { t } from "../i18n/index.js";
 import { decideTelegramAccess, describeTelegramAccess, redactTelegramUserId } from "./access.js";
-import { TelegramBot, type TelegramMessage } from "./bot.js";
+import {
+  TelegramBot,
+  type TelegramCallbackQuery,
+  type TelegramInlineButton,
+  type TelegramMessage,
+} from "./bot.js";
 
 const TELEGRAM_LOCK_FILE = join(homedir(), ".reasonix", "telegram-channel.pid");
 const TELEGRAM_MAX_CHARS = 3900;
@@ -270,14 +275,7 @@ export class TelegramChannel {
     return !!this.ownerUserId || (this.allowlist?.length ?? 0) > 0;
   }
 
-  private handleMessage(msg: TelegramMessage): void {
-    const text = msg.text?.trim();
-    if (!text || msg.from?.is_bot) return;
-    const fromId = msg.from?.id;
-    if (typeof fromId !== "number") return;
-    if (!this.rememberMessage(`${msg.chat.id}:${msg.message_id}`)) return;
-
-    const userId = String(fromId);
+  private acceptRemoteInput(userId: string): boolean {
     const verdict = decideTelegramAccess(
       {
         ownerUserId: this.ownerUserId,
@@ -293,7 +291,7 @@ export class TelegramChannel {
           access: this.describeAccess(),
         }),
       );
-      return;
+      return false;
     }
     if (verdict.bindRuntime) {
       this.runtimeBoundUserId = userId;
@@ -303,9 +301,34 @@ export class TelegramChannel {
         }),
       );
     }
+    return true;
+  }
+
+  private handleMessage(msg: TelegramMessage): void {
+    const text = msg.text?.trim();
+    if (!text || msg.from?.is_bot) return;
+    const fromId = msg.from?.id;
+    if (typeof fromId !== "number") return;
+    if (!this.rememberMessage(`${msg.chat.id}:${msg.message_id}`)) return;
+
+    const userId = String(fromId);
+    if (!this.acceptRemoteInput(userId)) return;
 
     this.chatId = msg.chat.id;
     this.messageId = msg.message_id;
+    this.callbacks.onSubmitMessage(`[TG] ${text}`);
+  }
+
+  private handleCallbackQuery(query: TelegramCallbackQuery): void {
+    const text = query.data.trim();
+    if (!text || query.from.is_bot || !query.message) return;
+    if (!this.rememberMessage(`callback:${query.id}`)) return;
+
+    const userId = String(query.from.id);
+    if (!this.acceptRemoteInput(userId)) return;
+
+    this.chatId = query.message.chat.id;
+    this.messageId = query.message.message_id;
     this.callbacks.onSubmitMessage(`[TG] ${text}`);
   }
 
@@ -350,6 +373,9 @@ export class TelegramChannel {
     bot.on("message", (msg: TelegramMessage) => {
       this.handleMessage(msg);
     });
+    bot.on("callback_query", (query: TelegramCallbackQuery) => {
+      this.handleCallbackQuery(query);
+    });
 
     this.bot = bot;
     try {
@@ -360,7 +386,7 @@ export class TelegramChannel {
     }
   }
 
-  async sendResponse(text: string): Promise<void> {
+  async sendResponse(text: string, buttons?: TelegramInlineButton[][]): Promise<void> {
     if (!this.bot || this.chatId === null) return;
     const markdownText = formatTelegramMarkdownV2(text);
     const chunks = splitTelegramMessage(markdownText);
@@ -375,6 +401,7 @@ export class TelegramChannel {
               chunk,
               this.messageId ?? undefined,
               "MarkdownV2",
+              index === chunks.length - 1 ? buttons : undefined,
             );
             continue;
           } catch (err) {
@@ -385,7 +412,13 @@ export class TelegramChannel {
           }
         }
 
-        await this.bot.sendMessage(this.chatId, chunk, this.messageId ?? undefined);
+        await this.bot.sendMessage(
+          this.chatId,
+          chunk,
+          this.messageId ?? undefined,
+          undefined,
+          index === chunks.length - 1 ? buttons : undefined,
+        );
       } catch (err) {
         this.callbacks.onError?.(
           `Telegram sendResponse chunk ${index + 1}/${chunks.length} failed: ${(err as Error).message}`,

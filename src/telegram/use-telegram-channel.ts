@@ -11,6 +11,7 @@ import { type SessionInfo, freshSessionName } from "../memory/session.js";
 import type { ChoiceOption } from "../tools/choice.js";
 import type { PlanStep } from "../tools/plan.js";
 import type { TelegramAccessConfig } from "./access.js";
+import type { TelegramInlineButton } from "./bot.js";
 import { TelegramChannel } from "./channel.js";
 import {
   type TelegramSetupStep,
@@ -209,8 +210,8 @@ export function useTelegramChannel({
   const pendingConnectSetupRef = useRef<PendingTelegramConnectSetup | null>(null);
 
   const sendText = useCallback(
-    (message: string) => {
-      const send = channelRef.current?.sendResponse(message);
+    (message: string, buttons?: TelegramInlineButton[][]) => {
+      const send = channelRef.current?.sendResponse(message, buttons);
       send?.catch((err) => {
         log.pushWarning("Telegram", `sendResponse error: ${(err as Error).message}`);
       });
@@ -711,11 +712,19 @@ export function useTelegramChannel({
       };
 
       let telegramMessage = "";
+      let telegramButtons: TelegramInlineButton[][] | undefined;
       switch (kind) {
         case "run_command":
         case "run_background": {
           const p = payload as { command: string };
-          telegramMessage = `Need confirmation\n\nCommand: \`${p.command}\`\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
+          telegramMessage = `Need confirmation\n\nCommand: \`${p.command}\``;
+          telegramButtons = [
+            [
+              { text: "✅ Run once", callbackData: "1" },
+              { text: "✅ Always allow", callbackData: "2" },
+              { text: "❌ Deny", callbackData: "3" },
+            ],
+          ];
           break;
         }
         case "path_access": {
@@ -725,24 +734,52 @@ export function useTelegramChannel({
             toolName: string;
           };
           const intentText = p.intent === "read" ? "Read" : "Write";
-          telegramMessage = `Need file access confirmation\n\nAction: ${intentText}\nPath: ${p.path}\nTool: ${p.toolName}\n\nReply with:\n1. Run once\n2. Always allow\n3. Deny`;
+          telegramMessage = `Need file access confirmation\n\nAction: ${intentText}\nPath: ${p.path}\nTool: ${p.toolName}`;
+          telegramButtons = [
+            [
+              { text: "✅ Run once", callbackData: "1" },
+              { text: "✅ Always allow", callbackData: "2" },
+              { text: "❌ Deny", callbackData: "3" },
+            ],
+          ];
           break;
         }
         case "plan_proposed": {
           const p = payload as { plan: string };
-          telegramMessage = `Plan confirmation\n\n${p.plan}\n\nReply with:\n1. Approve\n2. Refine\n3. Cancel`;
+          telegramMessage = `Plan confirmation\n\n${p.plan}`;
+          telegramButtons = [
+            [
+              { text: "Approve", callbackData: "1" },
+              { text: "Refine", callbackData: "2" },
+              { text: "Cancel", callbackData: "3" },
+            ],
+          ];
           break;
         }
         case "plan_checkpoint": {
           const p = payload as { title?: string; result: string };
           const completed = completedStepIdsRef.current.size;
           const total = planStepsRef.current?.length ?? 0;
-          telegramMessage = `Step complete (${completed}/${total})\n\n${p.title ? `Step: ${p.title}\n` : ""}Result: ${p.result}\n\nReply with:\n1. Continue\n2. Revise\n3. Stop`;
+          telegramMessage = `Step complete (${completed}/${total})\n\n${p.title ? `Step: ${p.title}\n` : ""}Result: ${p.result}`;
+          telegramButtons = [
+            [
+              { text: "Continue", callbackData: "1" },
+              { text: "Revise", callbackData: "2" },
+              { text: "Stop", callbackData: "3" },
+            ],
+          ];
           break;
         }
         case "plan_revision": {
           const p = payload as { reason: string };
-          telegramMessage = `Plan revision proposed\n\n${p.reason}\n\nReply with:\n1. Accept\n2. Reject\n3. Cancel`;
+          telegramMessage = `Plan revision proposed\n\n${p.reason}`;
+          telegramButtons = [
+            [
+              { text: "Accept", callbackData: "1" },
+              { text: "Reject", callbackData: "2" },
+              { text: "Cancel", callbackData: "3" },
+            ],
+          ];
           break;
         }
         case "choice": {
@@ -756,7 +793,7 @@ export function useTelegramChannel({
           break;
         }
       }
-      if (telegramMessage) sendText(telegramMessage);
+      if (telegramMessage) sendText(telegramMessage, telegramButtons);
     },
     [completedStepIdsRef, planStepsRef, sendText],
   );
