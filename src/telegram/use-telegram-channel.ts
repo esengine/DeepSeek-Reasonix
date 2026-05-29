@@ -39,6 +39,7 @@ type TelegramSlashInteractionKind =
 interface TelegramInteractionState {
   kind: TelegramInteractionKind | null;
   payload: unknown;
+  confirmationId: string | null;
 }
 
 interface TelegramSlashInteractionState {
@@ -172,6 +173,18 @@ function stripFollowupPrefix(text: string): string {
     .trim();
 }
 
+function telegramCallbackData(confirmationId: string, choice: string): string {
+  return `tg:${confirmationId}:${choice}`;
+}
+
+function parseTelegramCallbackData(
+  text: string,
+): { confirmationId: string; choice: string } | null {
+  const match = /^tg:([A-Za-z0-9_-]+):(.+)$/.exec(text);
+  if (!match) return null;
+  return { confirmationId: match[1] ?? "", choice: match[2] ?? "" };
+}
+
 export function useTelegramChannel({
   codeMode,
   initialChannel,
@@ -201,12 +214,14 @@ export function useTelegramChannel({
   const interactionRef = useRef<TelegramInteractionState>({
     kind: null,
     payload: null,
+    confirmationId: null,
   });
   const slashInteractionRef = useRef<TelegramSlashInteractionState>({
     kind: null,
     payload: null,
   });
   const replyThisTurnRef = useRef(false);
+  const nextConfirmationIdRef = useRef(0);
   const pendingConnectSetupRef = useRef<PendingTelegramConnectSetup | null>(null);
 
   const sendText = useCallback(
@@ -409,7 +424,7 @@ export function useTelegramChannel({
   }, [codeMode]);
 
   const resetInteractions = useCallback(() => {
-    interactionRef.current = { kind: null, payload: null };
+    interactionRef.current = { kind: null, payload: null, confirmationId: null };
     slashInteractionRef.current = { kind: null, payload: null };
     replyThisTurnRef.current = false;
   }, []);
@@ -594,23 +609,35 @@ export function useTelegramChannel({
 
   const consumePauseReply = useCallback(
     (text: string): boolean => {
-      if (interactionRef.current.kind === null || pendingGateIdRef.current === null) return false;
+      const callback = parseTelegramCallbackData(text);
+      if (interactionRef.current.kind === null || pendingGateIdRef.current === null) {
+        if (callback) {
+          sendText("That Telegram confirmation has expired.");
+          return true;
+        }
+        return false;
+      }
+      if (callback && callback.confirmationId !== interactionRef.current.confirmationId) {
+        sendText("That Telegram confirmation has expired.");
+        return true;
+      }
+      const choiceText = callback?.choice ?? text;
       replyThisTurnRef.current = true;
-      const followup = stripFollowupPrefix(text);
+      const followup = stripFollowupPrefix(choiceText);
       const interaction = interactionRef.current;
-      interactionRef.current = { kind: null, payload: null };
+      interactionRef.current = { kind: null, payload: null, confirmationId: null };
 
       switch (interaction.kind) {
         case "run_command":
         case "run_background":
-          onShellConfirmRef.current(parseRunPermissionChoice(text));
+          onShellConfirmRef.current(parseRunPermissionChoice(choiceText));
           return true;
         case "path_access":
-          onPathConfirmRef.current(parseRunPermissionChoice(text));
+          onPathConfirmRef.current(parseRunPermissionChoice(choiceText));
           return true;
         case "plan_proposed": {
           const payload = (interaction.payload as { plan?: string }) ?? {};
-          const choice = parsePlanChoice(text);
+          const choice = parsePlanChoice(choiceText);
           if (choice === "cancel") {
             void onPlanCancelRef.current();
           } else {
@@ -623,7 +650,7 @@ export function useTelegramChannel({
         }
         case "plan_checkpoint": {
           const payload = (interaction.payload as { stepId?: string; title?: string }) ?? {};
-          const choice = parseCheckpointChoice(text);
+          const choice = parseCheckpointChoice(choiceText);
           if (choice === "revise") {
             onCheckpointReviseRef.current(followup, {
               stepId: payload.stepId ?? "",
@@ -635,7 +662,7 @@ export function useTelegramChannel({
           return true;
         }
         case "plan_revision":
-          onPlanRevisionRef.current(parseRevisionChoice(text));
+          onPlanRevisionRef.current(parseRevisionChoice(choiceText));
           return true;
         case "choice": {
           const payload =
@@ -681,6 +708,7 @@ export function useTelegramChannel({
       onPlanRevisionRef,
       onShellConfirmRef,
       pendingGateIdRef,
+      sendText,
     ],
   );
 
@@ -706,9 +734,11 @@ export function useTelegramChannel({
   const handlePauseRequest = useCallback(
     (kind: string, payload: Record<string, unknown>) => {
       if (!channelRef.current) return;
+      const confirmationId = String(++nextConfirmationIdRef.current);
       interactionRef.current = {
         kind: kind as TelegramInteractionKind,
         payload,
+        confirmationId,
       };
 
       let telegramMessage = "";
@@ -720,9 +750,9 @@ export function useTelegramChannel({
           telegramMessage = `Need confirmation\n\nCommand: \`${p.command}\``;
           telegramButtons = [
             [
-              { text: "✅ Run once", callbackData: "1" },
-              { text: "✅ Always allow", callbackData: "2" },
-              { text: "❌ Deny", callbackData: "3" },
+              { text: "✅ Run once", callbackData: telegramCallbackData(confirmationId, "1") },
+              { text: "✅ Always allow", callbackData: telegramCallbackData(confirmationId, "2") },
+              { text: "❌ Deny", callbackData: telegramCallbackData(confirmationId, "3") },
             ],
           ];
           break;
@@ -737,9 +767,9 @@ export function useTelegramChannel({
           telegramMessage = `Need file access confirmation\n\nAction: ${intentText}\nPath: ${p.path}\nTool: ${p.toolName}`;
           telegramButtons = [
             [
-              { text: "✅ Run once", callbackData: "1" },
-              { text: "✅ Always allow", callbackData: "2" },
-              { text: "❌ Deny", callbackData: "3" },
+              { text: "✅ Run once", callbackData: telegramCallbackData(confirmationId, "1") },
+              { text: "✅ Always allow", callbackData: telegramCallbackData(confirmationId, "2") },
+              { text: "❌ Deny", callbackData: telegramCallbackData(confirmationId, "3") },
             ],
           ];
           break;
@@ -749,9 +779,9 @@ export function useTelegramChannel({
           telegramMessage = `Plan confirmation\n\n${p.plan}`;
           telegramButtons = [
             [
-              { text: "Approve", callbackData: "1" },
-              { text: "Refine", callbackData: "2" },
-              { text: "Cancel", callbackData: "3" },
+              { text: "Approve", callbackData: telegramCallbackData(confirmationId, "1") },
+              { text: "Refine", callbackData: telegramCallbackData(confirmationId, "2") },
+              { text: "Cancel", callbackData: telegramCallbackData(confirmationId, "3") },
             ],
           ];
           break;
@@ -763,9 +793,9 @@ export function useTelegramChannel({
           telegramMessage = `Step complete (${completed}/${total})\n\n${p.title ? `Step: ${p.title}\n` : ""}Result: ${p.result}`;
           telegramButtons = [
             [
-              { text: "Continue", callbackData: "1" },
-              { text: "Revise", callbackData: "2" },
-              { text: "Stop", callbackData: "3" },
+              { text: "Continue", callbackData: telegramCallbackData(confirmationId, "1") },
+              { text: "Revise", callbackData: telegramCallbackData(confirmationId, "2") },
+              { text: "Stop", callbackData: telegramCallbackData(confirmationId, "3") },
             ],
           ];
           break;
@@ -775,9 +805,9 @@ export function useTelegramChannel({
           telegramMessage = `Plan revision proposed\n\n${p.reason}`;
           telegramButtons = [
             [
-              { text: "Accept", callbackData: "1" },
-              { text: "Reject", callbackData: "2" },
-              { text: "Cancel", callbackData: "3" },
+              { text: "Accept", callbackData: telegramCallbackData(confirmationId, "1") },
+              { text: "Reject", callbackData: telegramCallbackData(confirmationId, "2") },
+              { text: "Cancel", callbackData: telegramCallbackData(confirmationId, "3") },
             ],
           ];
           break;

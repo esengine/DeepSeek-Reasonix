@@ -245,6 +245,7 @@ export class TelegramChannel {
   private processedUpdateIdQueue: string[] = [];
   private userMessageTimestamps = new Map<string, number[]>();
   private rateLimitNoticeAt = new Map<string, number>();
+  private activeCallbackMessageId: number | null = null;
   private lockAcquired = false;
   private markdownDisabled = false;
 
@@ -398,9 +399,19 @@ export class TelegramChannel {
 
     const userId = String(query.from.id);
     if (!this.acceptRemoteInput(userId)) return;
+    if (
+      this.activeCallbackMessageId === null ||
+      query.message.message_id !== this.activeCallbackMessageId
+    ) {
+      this.callbacks.onError?.(
+        "Telegram ignored stale callback from an older confirmation message.",
+      );
+      return;
+    }
 
     this.chatId = query.message.chat.id;
     this.messageId = query.message.message_id;
+    this.activeCallbackMessageId = null;
     this.callbacks.onSubmitMessage(`[TG] ${text}`);
   }
 
@@ -466,16 +477,18 @@ export class TelegramChannel {
     for (let index = 0; index < chunks.length; index++) {
       const chunk = chunks[index];
       if (!chunk) continue;
+      const chunkButtons = index === chunks.length - 1 ? buttons : undefined;
       try {
         if (!this.markdownDisabled) {
           try {
-            await this.bot.sendMessage(
+            const sentMessageId = await this.bot.sendMessage(
               this.chatId,
               chunk,
               this.messageId ?? undefined,
               "MarkdownV2",
-              index === chunks.length - 1 ? buttons : undefined,
+              chunkButtons,
             );
+            if (chunkButtons) this.activeCallbackMessageId = sentMessageId ?? null;
             continue;
           } catch (err) {
             this.markdownDisabled = true;
@@ -485,13 +498,14 @@ export class TelegramChannel {
           }
         }
 
-        await this.bot.sendMessage(
+        const sentMessageId = await this.bot.sendMessage(
           this.chatId,
           chunk,
           this.messageId ?? undefined,
           undefined,
-          index === chunks.length - 1 ? buttons : undefined,
+          chunkButtons,
         );
+        if (chunkButtons) this.activeCallbackMessageId = sentMessageId ?? null;
       } catch (err) {
         this.callbacks.onError?.(
           `Telegram sendResponse chunk ${index + 1}/${chunks.length} failed: ${(err as Error).message}`,

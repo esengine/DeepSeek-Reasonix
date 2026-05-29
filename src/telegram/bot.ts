@@ -179,9 +179,9 @@ export class TelegramBot extends EventEmitter {
     replyToMessageId?: number,
     parseMode?: TelegramParseMode,
     buttons?: TelegramInlineButton[][],
-  ): Promise<void> {
+  ): Promise<number | undefined> {
     try {
-      await this.bot.api.sendMessage(chatId, text, {
+      const message = await this.bot.api.sendMessage(chatId, text, {
         link_preview_options: { is_disabled: true },
         parse_mode: parseMode,
         reply_parameters: replyToMessageId ? { message_id: replyToMessageId } : undefined,
@@ -196,6 +196,7 @@ export class TelegramBot extends EventEmitter {
             }
           : undefined,
       });
+      return message.message_id;
     } catch (err) {
       throw new Error(formatTelegramBotError(err, this.token, "Telegram sendMessage"));
     }

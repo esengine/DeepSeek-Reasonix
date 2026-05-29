@@ -103,13 +103,14 @@ describe("TelegramChannel.sendResponse", () => {
   });
 
   it("attaches inline buttons to the delivered response", async () => {
-    const bot = { sendMessage: vi.fn().mockResolvedValue(undefined) };
+    const bot = { sendMessage: vi.fn().mockResolvedValue(789) };
     const channel = new TelegramChannel({
       onSubmitMessage: () => undefined,
     }) as unknown as {
       bot: typeof bot;
       chatId: number;
       messageId: number;
+      activeCallbackMessageId: number | null;
       sendResponse: TelegramChannel["sendResponse"];
     };
     channel.bot = bot;
@@ -126,6 +127,7 @@ describe("TelegramChannel.sendResponse", () => {
       "MarkdownV2",
       buttons,
     );
+    expect(channel.activeCallbackMessageId).toBe(789);
   });
 
   it("falls back to plain text when markdown delivery fails", async () => {
@@ -200,6 +202,96 @@ describe("TelegramChannel ingress rate limiting", () => {
     expect(bot.sendMessage).toHaveBeenCalledTimes(1);
     expect(bot.sendMessage.mock.calls[0]?.[1]).toContain("too quickly");
     expect(onError.mock.calls[0]?.[0]).toContain("rate-limited");
+  });
+});
+
+describe("TelegramChannel callback confirmation binding", () => {
+  it("ignores callbacks when no confirmation message is active", () => {
+    const onSubmitMessage = vi.fn();
+    const onError = vi.fn();
+    const channel = new TelegramChannel({
+      onSubmitMessage,
+      onError,
+    }) as unknown as {
+      ownerUserId: string;
+      activeCallbackMessageId: number | null;
+      handleCallbackQuery: (query: {
+        id: string;
+        data: string;
+        message?: { message_id: number; chat: { id: number; type: string } };
+        from: { id: number; is_bot?: boolean };
+      }) => void;
+    };
+    channel.ownerUserId = "42";
+    channel.activeCallbackMessageId = null;
+
+    channel.handleCallbackQuery({
+      id: "callback-1",
+      data: "tg:1:1",
+      message: { message_id: 200, chat: { id: 123, type: "private" } },
+      from: { id: 42 },
+    });
+
+    expect(onSubmitMessage).not.toHaveBeenCalled();
+    expect(onError.mock.calls[0]?.[0]).toContain("stale callback");
+  });
+
+  it("ignores callbacks from older confirmation messages", () => {
+    const onSubmitMessage = vi.fn();
+    const onError = vi.fn();
+    const channel = new TelegramChannel({
+      onSubmitMessage,
+      onError,
+    }) as unknown as {
+      ownerUserId: string;
+      activeCallbackMessageId: number | null;
+      handleCallbackQuery: (query: {
+        id: string;
+        data: string;
+        message?: { message_id: number; chat: { id: number; type: string } };
+        from: { id: number; is_bot?: boolean };
+      }) => void;
+    };
+    channel.ownerUserId = "42";
+    channel.activeCallbackMessageId = 200;
+
+    channel.handleCallbackQuery({
+      id: "callback-1",
+      data: "tg:1:1",
+      message: { message_id: 199, chat: { id: 123, type: "private" } },
+      from: { id: 42 },
+    });
+
+    expect(onSubmitMessage).not.toHaveBeenCalled();
+    expect(onError.mock.calls[0]?.[0]).toContain("stale callback");
+  });
+
+  it("accepts callbacks only from the current confirmation message", () => {
+    const onSubmitMessage = vi.fn();
+    const channel = new TelegramChannel({
+      onSubmitMessage,
+    }) as unknown as {
+      ownerUserId: string;
+      activeCallbackMessageId: number | null;
+      handleCallbackQuery: (query: {
+        id: string;
+        data: string;
+        message?: { message_id: number; chat: { id: number; type: string } };
+        from: { id: number; is_bot?: boolean };
+      }) => void;
+    };
+    channel.ownerUserId = "42";
+    channel.activeCallbackMessageId = 200;
+
+    channel.handleCallbackQuery({
+      id: "callback-1",
+      data: "tg:1:1",
+      message: { message_id: 200, chat: { id: 123, type: "private" } },
+      from: { id: 42 },
+    });
+
+    expect(onSubmitMessage).toHaveBeenCalledWith("[TG] tg:1:1");
+    expect(channel.activeCallbackMessageId).toBeNull();
   });
 });
 
