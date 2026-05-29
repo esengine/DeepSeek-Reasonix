@@ -823,7 +823,7 @@ export const zhCN: TranslationSchema = {
       lockAlreadyRunning: "QQ 通道已在进程 {pid} 中运行。请先停止该进程，再启动新的 QQ 通道。",
       unauthorizedMessage: "QQ 忽略了未授权 openid {openid} 的消息。当前访问控制：{access}。",
       runtimeBound:
-        "QQ 已在本次运行中临时绑定到首个发送者 {openid}。如需持久化，请在配置中设置 `qq.ownerOpenId`。",
+        "QQ 已在本次运行中临时绑定到首个发送者 {openid}。如果你希望固定绑定到这个账号，可以在 QQ 设置中手动指定。",
       missingAppId: "缺少 QQ App ID。请先运行 `/qq connect` 完成配置。",
       missingAppSecret: "缺少 QQ App Secret。请先运行 `/qq connect` 完成配置。",
       authFailed: "QQ 机器人鉴权失败，请检查 App ID 和 App Secret。",

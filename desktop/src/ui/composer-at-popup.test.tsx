@@ -160,4 +160,65 @@ describe("desktop Composer @ popup", () => {
 
     expect(container.querySelector(".popup-list.at-popup-list")).not.toBeNull();
   });
+
+  it("shows mention filenames first while preserving the full path for preview and pick", async () => {
+    const setDraft = vi.fn();
+    const onMentionPicked = vi.fn();
+    const onMentionPreview = vi.fn();
+    const { container, rerender, onMentionQuery } = renderComposer({
+      setDraft,
+      onMentionPicked,
+      onMentionPreview,
+    });
+    const textarea = container.querySelector("textarea");
+    if (!textarea) throw new Error("missing textarea");
+
+    fireEvent.change(textarea, { target: { value: "@foo" } });
+    await waitFor(() => expect(onMentionQuery).toHaveBeenCalled());
+    const nonce = onMentionQuery.mock.calls[0]?.[1] as number;
+
+    rerender(
+      <Composer
+        draft="@foo"
+        setDraft={setDraft}
+        onSend={vi.fn()}
+        onAbort={vi.fn()}
+        disabled={false}
+        busy={false}
+        modelLabel="deepseek-v4-flash"
+        reasoningEffort="high"
+        onModelChange={vi.fn()}
+        onEffortChange={vi.fn()}
+        editMode="review"
+        onEditModeChange={vi.fn()}
+        textareaRef={createRef<HTMLTextAreaElement>()}
+        slashCommands={[]}
+        onMentionQuery={onMentionQuery}
+        onMentionPreview={onMentionPreview}
+        onMentionPicked={onMentionPicked}
+        mentionResults={{ nonce, query: "foo", results: ["src/very/deep/foo.ts"] }}
+        workspaceDir="/repo"
+      />,
+    );
+
+    const row = await waitFor(() => {
+      const item = container.querySelector(".popup-item");
+      expect(item).not.toBeNull();
+      return item as HTMLElement;
+    });
+
+    expect(row.querySelector(".nm > span")?.textContent).toBe("foo.ts");
+    expect(row.querySelector(".desc")?.textContent).toBe("src/very/deep/");
+
+    fireEvent.mouseEnter(row);
+    expect(onMentionPreview).toHaveBeenCalledWith("src/very/deep/foo.ts", nonce);
+
+    fireEvent.click(row);
+    expect(onMentionPicked).toHaveBeenCalledWith("src/very/deep/foo.ts");
+    const draftUpdate = setDraft.mock.calls.at(-1)?.[0];
+    expect(typeof draftUpdate).toBe("function");
+    expect((draftUpdate as (current: string) => string)("@foo")).toBe(
+      "@src/very/deep/foo.ts ",
+    );
+  });
 });

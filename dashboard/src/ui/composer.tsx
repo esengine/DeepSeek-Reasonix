@@ -64,6 +64,7 @@ export type SlashCmd = {
 };
 export type MentionItem = {
   name: string;
+  path?: string;
   kind: "file" | "dir" | "url" | "agent" | "clip";
   desc?: string;
 };
@@ -101,6 +102,20 @@ function parentOfAtQuery(query: string): string | null {
   if (!dirContext) return null;
   const parentIdx = dirContext.lastIndexOf("/");
   return parentIdx >= 0 ? `${dirContext.slice(0, parentIdx)}/` : "";
+}
+
+function displayMentionPath(path: string): { name: string; desc?: string } {
+  const normalized = path.replace(/\\/g, "/");
+  const isDir = /[\\/]$/.test(path);
+  const trimmed = normalized.replace(/\/+$/, "");
+  if (!trimmed) return { name: path };
+  const slash = trimmed.lastIndexOf("/");
+  const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+  const parent = slash >= 0 ? `${trimmed.slice(0, slash)}/` : "";
+  return {
+    name: isDir ? `${base}/` : base,
+    desc: parent || undefined,
+  };
 }
 
 function atIcon(k: MentionItem["kind"]) {
@@ -240,11 +255,15 @@ export function Composer({
   const atItems = useMemo<MentionItem[]>(() => {
     if (!popup || popup.kind !== "at") return [];
     if (!mentionResults || mentionResults.nonce !== popup.nonce) return [];
-    const base: MentionItem[] = mentionResults.results.map((path) => ({
-      name: path,
-      kind: path.endsWith("/") || path.endsWith("\\") ? "dir" : "file",
-      desc: path,
-    }));
+    const base: MentionItem[] = mentionResults.results.map((path) => {
+      const display = displayMentionPath(path);
+      return {
+        name: display.name,
+        path,
+        kind: path.endsWith("/") || path.endsWith("\\") ? "dir" : "file",
+        desc: display.desc,
+      };
+    });
     // "../" entry (#1019): one level up whenever the @ query is inside a subdir.
     const parent = parentOfAtQuery(popup.query);
     if (parent !== null) {
@@ -317,9 +336,10 @@ export function Composer({
         return;
       }
       const next = draft.replace(/[/@][^\s]*$/, "").trimEnd();
-      setDraft(next ? `${next} @${mention.name} ` : `@${mention.name} `);
-      setChips((c) => [...c, { kind: "at", label: mention.name }]);
-      onMentionPicked?.(mention.name);
+      const mentionPath = mention.path ?? mention.name;
+      setDraft(next ? `${next} @${mentionPath} ` : `@${mentionPath} `);
+      setChips((c) => [...c, { kind: "at", label: mentionPath }]);
+      onMentionPicked?.(mentionPath);
     }
     setPopup(null);
     textareaRef.current?.focus();
@@ -361,7 +381,7 @@ export function Composer({
             setPopup({ kind: "at", query: parent, nonce });
             return;
           }
-          const dirPath = mention.name.replace(/\/+$/, "");
+          const dirPath = (mention.path ?? mention.name).replace(/[\\/]+$/, "");
           const next = draft.replace(/[@][^\s]*$/, `@${dirPath}/`);
           setDraft(next);
           const nonce = ++nonceRef.current;
@@ -603,7 +623,8 @@ export function Composer({
               onHover={(i, item) => {
                 setActiveIdx(i);
                 if (popup.kind === "at" && onMentionPreview) {
-                  const path = (item as MentionItem).name;
+                  const mention = item as MentionItem;
+                  const path = mention.path ?? mention.name;
                   onMentionPreview(path, popup.nonce);
                 }
               }}
@@ -640,7 +661,10 @@ function Popup({
   }, [activeIdx]);
 
   return (
-    <div className="popup" onMouseDown={(e) => e.preventDefault()}>
+    <div
+      className={kind === "at" ? "popup at-popup" : "popup"}
+      onMouseDown={(e) => e.preventDefault()}
+    >
       <div className="ph">
         <span className="tok">{kind === "slash" ? "/" : "@"}</span>
         <span>
@@ -653,7 +677,7 @@ function Popup({
           <I.x size={11} />
         </span>
       </div>
-      <div className="popup-list" ref={listRef}>
+      <div className={kind === "at" ? "popup-list at-popup-list" : "popup-list"} ref={listRef}>
         {items.length === 0 ? (
           <div
             style={{
@@ -687,7 +711,7 @@ function Popup({
                 </>
               ) : (
                 <>
-                  <span>{(it as MentionItem).name}</span>
+                  <span className="mention-name">{(it as MentionItem).name}</span>
                   {(it as MentionItem).desc ? (
                     <div className="desc">{(it as MentionItem).desc}</div>
                   ) : null}

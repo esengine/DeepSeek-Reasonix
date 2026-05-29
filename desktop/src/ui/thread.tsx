@@ -209,7 +209,7 @@ export const AssistantMsg = memo(function AssistantMsg({
         />
       );
     }
-    if (s.result && (s.name === "edit_file" || s.name === "multi_edit")) {
+    if (s.result && (s.name === "edit_file" || s.name === "multi_edit" || s.name === "write_file")) {
       const files = parseEditResult(s.result);
       return files.length > 0 ? (
         <>

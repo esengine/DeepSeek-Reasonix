@@ -78,6 +78,7 @@ export class QQChannel {
     private callbacks: {
       onSubmitMessage: (text: string) => void;
       onError?: (msg: string) => void;
+      onInfo?: (msg: string) => void;
     },
   ) {}
 
@@ -160,7 +161,7 @@ export class QQChannel {
     }
     if (verdict.bindRuntime) {
       this.runtimeBoundOpenId = openid;
-      this.callbacks.onError?.(
+      this.callbacks.onInfo?.(
         t("handlers.qq.runtimeBound", {
           openid: redactQQOpenId(openid),
         }),

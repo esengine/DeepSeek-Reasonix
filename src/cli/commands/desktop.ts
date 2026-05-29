@@ -82,6 +82,7 @@ import {
   collectMemoryEntriesForWorkspace,
   readMemoryEntryDetail,
 } from "../../desktop/memory-browser.js";
+import { classifyDesktopQQIngress } from "../../desktop/qq-ingress.js";
 import {
   parseQQRemoteDesktopCommand,
   qqRemoteCommandBypassesBusy,
@@ -95,6 +96,7 @@ import {
 import {
   clearQQTurnRouting,
   createQQTurnRoutingState,
+  hasQQPendingInteraction,
   markQQTurnFinished,
   markQQTurnStarted,
   setQQPendingInteraction,
@@ -1259,6 +1261,23 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     });
   }
 
+  function emitQQNotice(message: string, tabOverride?: Tab): void {
+    const tab = tabOverride ?? activeDesktopTab();
+    if (tab) {
+      emit(
+        {
+          type: "warning",
+          id: Date.now(),
+          ts: new Date().toISOString(),
+          turn: 0,
+          text: message,
+          severity: "high",
+        },
+        tab.id,
+      );
+    }
+  }
+
   function startNewChatInTab(tab: Tab): void {
     if (tab.aborter) tab.switching = true;
     abortTurn(tab);
@@ -1665,6 +1684,22 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const trimmed = text.trim();
         if (!trimmed) return;
         if (handleQQRemoteDesktopCommand(tab, trimmed)) return;
+        const decision = classifyDesktopQQIngress({
+          hasPendingInteraction: hasQQPendingInteraction(qqRuntime.routing, tab.id),
+          isBusy: !!tab.aborter,
+        });
+        if (decision === "pause_reply") {
+          handleQQPauseReply(tab, trimmed);
+          return;
+        }
+        if (decision === "busy") {
+          void channel
+            .sendResponse(
+              "Session is busy. Wait for the current turn or reply to the pending prompt.",
+            )
+            .catch(() => undefined);
+          return;
+        }
         emit(
           {
             type: "user.message",
@@ -1675,15 +1710,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           },
           tab.id,
         );
-        if (handleQQPauseReply(tab, trimmed)) return;
-        if (tab.aborter) {
-          void channel
-            .sendResponse(
-              "Session is busy. Wait for the current turn or reply to the pending prompt.",
-            )
-            .catch(() => undefined);
-          return;
-        }
         void runTurn(tab, trimmed, true);
       },
       onError: (message) => {
@@ -1691,6 +1717,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         setQQRuntimeState("failed", message);
         if (tab) emit({ type: "$error", message: `QQ: ${message}` }, tab.id);
       },
+      onInfo: (message) => emitQQNotice(`QQ: ${message}`),
     });
     try {
       await channel.start();
@@ -1710,7 +1737,14 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
     const channel = qqRuntime.channel;
     qqRuntime.channel = null;
     clearQQTurnRouting(qqRuntime.routing);
-    if (channel) await channel.stop();
+    if (channel) {
+      try {
+        await channel.stop();
+      } catch (err) {
+        setQQRuntimeState("failed", (err as Error).message);
+        throw err;
+      }
+    }
     if (shouldDisable) setDesktopQQEnabled(false);
     setQQRuntimeState("disconnected");
   }
@@ -2993,6 +3027,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
               { type: "$error", message: `qq_disconnect failed: ${(err as Error).message}` },
               tab.id,
             );
+            emitQQSettings(tab);
           },
         );
       } catch (err) {
@@ -3000,6 +3035,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           { type: "$error", message: `qq_disconnect failed: ${(err as Error).message}` },
           tab.id,
         );
+        emitQQSettings(tab);
       }
       return;
     }

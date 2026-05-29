@@ -3025,6 +3025,9 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   flex-direction: column;
   z-index: 50;
 }
+.popup.at-popup {
+  width: min(720px, calc(100vw - 32px));
+}
 .popup .ph {
   padding: 8px 12px;
   font-family: inherit;
@@ -3046,7 +3049,11 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 }
 .popup-list {
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 4px;
+}
+.at-popup-list .popup-item {
+  min-width: 0;
 }
 .popup-item {
   display: grid;
@@ -3075,11 +3082,19 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
 .popup-item .nm {
   font-weight: 500;
   color: var(--fg);
+  min-width: 0;
+  overflow: hidden;
 }
 .popup-item .nm .cmd {
   font-family: inherit;
   color: var(--accent);
   margin-right: 6px;
+}
+.popup-item .mention-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .popup-item .desc {
   display: block;

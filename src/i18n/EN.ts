@@ -867,7 +867,7 @@ export const EN: TranslationSchema = {
       unauthorizedMessage:
         "QQ ignored message from unauthorized openid {openid}. Current access: {access}.",
       runtimeBound:
-        "QQ temporarily bound this run to first sender {openid}. Set `qq.ownerOpenId` in config to persist access.",
+        "QQ temporarily bound this run to first sender {openid}. If you want this account to stay fixed, set it in QQ settings.",
       missingAppId: "QQ App ID is required. Run `/qq connect` to configure.",
       missingAppSecret: "QQ App Secret is required. Run `/qq connect` to configure.",
       authFailed: "QQ bot authentication failed — check your App ID and App Secret.",
