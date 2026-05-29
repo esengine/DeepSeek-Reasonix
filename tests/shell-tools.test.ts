@@ -1313,7 +1313,7 @@ describe("expandShellVars (#2105)", () => {
     const orig = process.env.SHELL_TEST_VAR_REASONIX;
     process.env.SHELL_TEST_VAR_REASONIX = "expanded";
     try {
-      expect(expandShellVars('grep $SHELL_TEST_VAR_REASONIX file')).toBe("grep expanded file");
+      expect(expandShellVars("grep $SHELL_TEST_VAR_REASONIX file")).toBe("grep expanded file");
       expect(expandShellVars("grep '$SHELL_TEST_VAR_REASONIX' file")).toBe(
         "grep '$SHELL_TEST_VAR_REASONIX' file",
       );
