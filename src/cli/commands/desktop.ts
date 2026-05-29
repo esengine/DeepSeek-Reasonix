@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, statSync, writeSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { stdin } from "node:process";
 import { createInterface } from "node:readline";
@@ -3088,7 +3088,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           emit({ type: "$error", message: `skill not found: ${msg.name}` }, tab.id);
           return;
         }
-        const body = await readFile(skill.path, "utf8");
+        const body = readFileSync(skill.path, "utf8");
         emit({ type: "$skill_detail", name: msg.name, scope: msg.scope, body, path: skill.path }, tab.id);
       } catch (err) {
         emit({ type: "$error", message: `skill_read: ${(err as Error).message}` }, tab.id);
@@ -3105,7 +3105,6 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const dir = msg.scope === "project"
           ? join(tab.rootDir, ".reasonix", SKILLS_DIRNAME)
           : join(homedir(), ".reasonix", SKILLS_DIRNAME);
-        // Check if skill already exists (folder or flat layout)
         const folderPath = join(dir, msg.name, SKILL_FILE);
         const flatPath = join(dir, `${msg.name}.md`);
         let targetPath: string;
@@ -3114,11 +3113,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         } else if (existsSync(flatPath)) {
           targetPath = flatPath;
         } else {
-          // New skill — use flat layout
           targetPath = flatPath;
         }
-        await mkdir(dirname(targetPath), { recursive: true });
-        await writeFile(targetPath, msg.body, "utf8");
+        mkdirSync(dirname(targetPath), { recursive: true });
+        writeFileSync(targetPath, msg.body, "utf8");
         emitSkills(tab);
       } catch (err) {
         emit({ type: "$error", message: `skill_save: ${(err as Error).message}` }, tab.id);
@@ -3133,9 +3131,9 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const folderPath = join(dir, msg.name, SKILL_FILE);
         const flatPath = join(dir, `${msg.name}.md`);
         if (existsSync(folderPath)) {
-          await rm(dirname(folderPath), { recursive: true, force: true });
+          rmSync(dirname(folderPath), { recursive: true, force: true });
         } else if (existsSync(flatPath)) {
-          await rm(flatPath, { force: true });
+          rmSync(flatPath, { force: true });
         } else {
           emit({ type: "$error", message: `skill not found: ${msg.name}` }, tab.id);
           return;
