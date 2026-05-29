@@ -8,6 +8,7 @@ import {
   loadToolRateLimit,
   normalizeMcpConfig,
   readConfig,
+  resolveThemePreference,
   searchEnabled,
 } from "../../config.js";
 import { loadDotenv } from "../../env.js";
@@ -37,6 +38,7 @@ import { KeystrokeProvider } from "../ui/keystroke-context.js";
 import { disableMouseMode, enableMouseMode } from "../ui/mouse-mode.js";
 import { installResizeBroadcaster } from "../ui/resize-broadcaster.js";
 import type { McpServerSummary } from "../ui/slash.js";
+import { THEMES, resolveThemeName } from "../ui/theme/tokens.js";
 import {
   type McpLifecycleNotice,
   type McpLifecycleSink,
@@ -416,6 +418,26 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
     });
   }
 
+  // Set terminal default background to match the theme so that empty areas
+  // below Ink's rendered content (main-screen mode) blend with the UI.
+  const restoreTerminalBg = (): void => {
+    if (process.stdout.isTTY) process.stdout.write("\x1b]111\x07");
+  };
+  const themeName = resolveThemeName(resolveThemePreference(readConfig().theme));
+  const themeBg = THEMES[themeName].surface.bg;
+  if (process.stdout.isTTY && typeof themeBg === "string" && themeBg.startsWith("#")) {
+    process.stdout.write(`\x1b]11;${themeBg}\x07`);
+    process.once("exit", restoreTerminalBg);
+    process.once("SIGINT", () => {
+      restoreTerminalBg();
+      process.exit(130);
+    });
+    process.once("SIGTERM", () => {
+      restoreTerminalBg();
+      process.exit(143);
+    });
+  }
+
   const { waitUntilExit } = render(
     <Root
       initialKey={initialKey}
@@ -442,6 +464,7 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   try {
     await waitUntilExit();
   } finally {
+    restoreTerminalBg();
     disableMouseMode();
     await runtime.closeAll();
     qqChannel?.stop();
