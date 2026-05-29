@@ -61,6 +61,60 @@ return values
     expect(runner.calls.map((call) => call.prompt)).toEqual(["first", "second"]);
   });
 
+  it("starts parallel agent thunks concurrently", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const runner: WorkflowAgentRunner = {
+      async run(_prompt, opts) {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active--;
+        return { ok: true, output: `result:${opts.label ?? "unlabeled"}` };
+      },
+    };
+
+    const result = await runWorkflow(
+      `${header}
+const values = await parallel([
+  () => agent("first", { label: "one" }),
+  () => agent("second", { label: "two" }),
+])
+return values
+`,
+      { runner, concurrency: 2 },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.result).toEqual(["result:one", "result:two"]);
+    expect(maxActive).toBe(2);
+  });
+
+  it("accepts object-style agent input and maps instruction/name aliases", async () => {
+    const runner = new RecordingRunner();
+    const result = await runWorkflow(
+      `${header}
+phase("Scan")
+const scan = await agent({
+  name: "repo scan",
+  instruction: "inspect repository",
+  type: "explore",
+})
+return { scan }
+`,
+      { runner },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.result).toEqual({ scan: "result:repo scan" });
+    expect(runner.calls[0]?.prompt).toBe("inspect repository");
+    expect(runner.calls[0]?.opts).toMatchObject({
+      label: "repo scan",
+      phase: "Scan",
+      type: "explore",
+    });
+  });
+
   it("rejects parallel inputs that are not thunks", async () => {
     const runner = new RecordingRunner();
     const result = await runWorkflow(

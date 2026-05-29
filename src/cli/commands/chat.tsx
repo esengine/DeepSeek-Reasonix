@@ -90,6 +90,7 @@ export interface ChatOptions {
     reregisterTools?: (rootDir: string) => void;
     /** Async tail of `/cwd` — re-probe the new dir for a semantic index. */
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
+    workflowManager?: import("../../workflow/manager.js").WorkflowRunManager;
     /** Notify the launcher that the workspace root just changed — lets the rebuildSystem closure see the new dir. */
     onRootChange?: (newRoot: string) => void;
   };

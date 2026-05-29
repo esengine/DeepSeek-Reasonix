@@ -18,6 +18,10 @@ interface RuntimeState {
 }
 
 interface AgentInputOptions {
+  name?: unknown;
+  instruction?: unknown;
+  prompt?: unknown;
+  task?: unknown;
   label?: unknown;
   phase?: unknown;
   type?: unknown;
@@ -92,22 +96,25 @@ export async function runWorkflow<T = unknown>(
     if (state.agentCount >= maxAgents) {
       throw new Error(`workflow maxAgents limit reached (${maxAgents})`);
     }
-    const prompt = String(promptInput);
+    const input = normalizeAgentInput(promptInput, agentOptions);
+    const prompt = input.prompt;
     state.agentCount++;
-    const phaseName = stringOption(agentOptions.phase) ?? state.currentPhase;
+    const phaseName = stringOption(input.options.phase) ?? state.currentPhase;
     const label =
-      stringOption(agentOptions.label) ?? defaultAgentLabel(phaseName, state.agentCount);
+      stringOption(input.options.label) ??
+      stringOption(input.options.name) ??
+      defaultAgentLabel(phaseName, state.agentCount);
     const opts: WorkflowAgentOptions = {
       workflowName: parsed.meta.name,
       label,
       signal: options.signal,
     };
     if (phaseName) opts.phase = phaseName;
-    const type = workflowAgentType(agentOptions.type);
+    const type = workflowAgentType(input.options.type);
     if (type) opts.type = type;
-    const model = stringOption(agentOptions.model);
+    const model = stringOption(input.options.model);
     if (model) opts.model = model;
-    const allowedTools = stringArrayOption(agentOptions.allowedTools);
+    const allowedTools = stringArrayOption(input.options.allowedTools);
     if (allowedTools) opts.allowedTools = allowedTools;
 
     if (options.mode === "dry_run") {
@@ -273,6 +280,26 @@ function missingRunner(): WorkflowAgentRunner {
       throw new Error("workflow runner is required for mode=run");
     },
   };
+}
+
+function normalizeAgentInput(
+  promptInput: unknown,
+  agentOptions: AgentInputOptions,
+): { prompt: string; options: AgentInputOptions } {
+  if (!isPlainRecord(promptInput)) return { prompt: String(promptInput), options: agentOptions };
+  const objectOptions = promptInput as AgentInputOptions;
+  const prompt =
+    stringOption(objectOptions.instruction) ??
+    stringOption(objectOptions.prompt) ??
+    stringOption(objectOptions.task);
+  if (!prompt) {
+    throw new TypeError("agent() object input requires instruction, prompt, or task string");
+  }
+  return { prompt, options: { ...objectOptions, ...agentOptions } };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function createLimiter(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {

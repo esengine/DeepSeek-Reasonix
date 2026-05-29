@@ -287,6 +287,7 @@ export interface AppProps {
      * isn't blocked on disk I/O.
      */
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
+    workflowManager?: import("../../workflow/manager.js").WorkflowRunManager;
     /** Notify the launcher/root wrapper that the workspace root changed so session switches remount into the new root. */
     onRootChange?: (newRoot: string) => void;
   };
@@ -3063,6 +3064,7 @@ function AppInner({
             status: weixin.status,
           },
           sessionId: session,
+          workflowManager: codeMode?.workflowManager,
           getEngineeringLifecycleSnapshot: codeMode
             ? () => engineeringLifecycleRef.current?.snapshot() ?? null
             : undefined,

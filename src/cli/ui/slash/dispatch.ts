@@ -22,6 +22,7 @@ import { handlers as telegramHandlers } from "./handlers/telegram.js";
 import { handlers as themeHandlers } from "./handlers/theme.js";
 import { handlers as webSearchEngineHandlers } from "./handlers/web-search-engine.js";
 import { handlers as weixinHandlers } from "./handlers/weixin.js";
+import { handlers as workflowHandlers } from "./handlers/workflows.js";
 import { nearestCommands } from "./nearest.js";
 import type { SlashContext, SlashResult } from "./types.js";
 
@@ -50,6 +51,7 @@ const HANDLERS: Record<string, SlashHandler> = {
   ...telegramHandlers,
   ...weixinHandlers,
   ...webSearchEngineHandlers,
+  ...workflowHandlers,
 };
 
 export function handleSlash(

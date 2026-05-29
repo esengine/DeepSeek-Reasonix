@@ -79,9 +79,10 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
   const session = autoResume ? `code-${sanitizeName(basename(rootDir))}` : undefined;
 
   markPhase("semantic_bootstrap_start");
-  const { tools, jobs, registerRooted, reBootstrapSemantic, semantic } = await buildCodeToolset({
-    rootDir,
-  });
+  const { tools, jobs, workflowManager, registerRooted, reBootstrapSemantic, semantic } =
+    await buildCodeToolset({
+      rootDir,
+    });
   markPhase(
     semantic.enabled ? "semantic_bootstrap_done_enabled" : "semantic_bootstrap_done_skipped",
   );
@@ -152,6 +153,7 @@ export async function codeCommand(opts: CodeOptions = {}): Promise<void> {
     codeMode: {
       rootDir,
       jobs,
+      workflowManager,
       reregisterTools: registerRooted,
       reBootstrapSemantic: async (root: string) => {
         const r = await reBootstrapSemantic(root);

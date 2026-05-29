@@ -34,6 +34,8 @@ import {
 import { registerTodoTool } from "../tools/todo.js";
 import { registerWebTools } from "../tools/web.js";
 import { registerWorkflowTool } from "../tools/workflow.js";
+import { WorkflowRunManager } from "../workflow/manager.js";
+import type { WorkflowRunEvent } from "../workflow/types.js";
 
 export interface CodeToolsetOpts {
   rootDir: string;
@@ -45,11 +47,13 @@ export interface CodeToolsetOpts {
   onJobsChanged?: () => void;
   /** Shared `{current: callback}` sink the TUI populates after mount. Setup forwards it into every `spawnSubagent` so live progress events reach the rich subagent row even though setup runs before the UI does. */
   subagentSink?: SubagentSink;
+  onWorkflowEvent?: (event: WorkflowRunEvent) => void;
 }
 
 export interface CodeToolset {
   tools: ToolRegistry;
   jobs: JobRegistry;
+  workflowManager: WorkflowRunManager;
   registerRooted: (root: string) => void;
   reBootstrapSemantic: (root: string) => Promise<{ enabled: boolean }>;
   semantic: { enabled: boolean };
@@ -108,8 +112,14 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
   if (loadJavaSourceEnabled()) {
     registerJavaSourceTool(tools, { projectRoot: opts.rootDir });
   }
+  const workflowManager = new WorkflowRunManager({
+    rootDir: opts.rootDir,
+    homeDir: process.env.HOME,
+    onEvent: opts.onWorkflowEvent,
+  });
   registerWorkflowTool(tools, {
     rootDir: opts.rootDir,
+    manager: workflowManager,
     subagentSink: opts.subagentSink ?? SHARED_SUBAGENT_SINK,
   });
   // Lazy: constructing DeepSeekClient throws when DEEPSEEK_API_KEY is unset,
@@ -148,5 +158,5 @@ export async function buildCodeToolset(opts: CodeToolsetOpts): Promise<CodeTools
 
   const semantic = await reBootstrapSemantic(opts.rootDir);
 
-  return { tools, jobs, registerRooted, reBootstrapSemantic, semantic };
+  return { tools, jobs, workflowManager, registerRooted, reBootstrapSemantic, semantic };
 }

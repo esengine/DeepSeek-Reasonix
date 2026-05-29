@@ -2,6 +2,7 @@ import { DeepSeekClient } from "../client.js";
 import { loadEndpoint } from "../config.js";
 import type { ToolRegistry } from "../tools.js";
 import { ReasonixWorkflowAgentRunner } from "../workflow/agent-runner.js";
+import type { WorkflowRunManager } from "../workflow/manager.js";
 import { runWorkflow } from "../workflow/runtime.js";
 import type {
   WorkflowAgentRunner,
@@ -14,13 +15,14 @@ import type { SubagentSink } from "./subagent.js";
 export interface WorkflowToolOptions {
   rootDir?: string;
   runner?: WorkflowAgentRunner;
+  manager?: WorkflowRunManager;
   clientFactory?: () => DeepSeekClient;
   subagentSink?: SubagentSink;
   defaultModel?: string;
 }
 
 const WORKFLOW_DESCRIPTION =
-  "Execute a deterministic JavaScript workflow that orchestrates multiple internal Reasonix subagents with agent(), parallel(), pipeline(), phase(), and log(). Use for repository-wide audits, large refactors, migrations, multi-module bug hunts, architecture/security review, test coverage sweeps, multi-perspective verification, or when the user explicitly asks for workflow/dynamic workflow/parallel agents/subagents/fan-out analysis. Do not use for simple single-file edits, small bug fixes, direct Q&A, formatting, tasks that do not need parallel analysis, or when the user asks not to spawn subagents. Script must be raw JavaScript, start with export const meta = { name, description, phases? }, and call agent() at least once.";
+  'Execute a deterministic JavaScript workflow that orchestrates multiple internal Reasonix subagents with agent(), parallel(), pipeline(), phase(), and log(). Use for repository-wide audits, large refactors, migrations, multi-module bug hunts, architecture/security review, test coverage sweeps, multi-perspective verification, or when the user explicitly asks for workflow/dynamic workflow/parallel agents/subagents/fan-out analysis. For independent subtasks, use parallel([() => agent("task", { label: "..." }), ...]); consecutive `await agent(...)` calls are serial and should only be used when each task depends on the previous result. agent() accepts agent(promptString, opts) or agent({ instruction, label/name, type, phase, model, allowedTools }). Do not use for simple single-file edits, small bug fixes, direct Q&A, formatting, tasks that do not need parallel analysis, or when the user asks not to spawn subagents. Script must be raw JavaScript, start with export const meta = { name, description, phases? }, and call agent() at least once.';
 
 export function registerWorkflowTool(
   registry: ToolRegistry,
@@ -46,7 +48,7 @@ export function registerWorkflowTool(
         script: {
           type: "string",
           description:
-            "Required raw JavaScript workflow script, with no Markdown fences. First statement must be `export const meta = { name, description, phases? }`. Available globals: agent(), parallel(), pipeline(), phase(), log(), args, cwd, budget. The workflow must call agent() at least once.",
+            'Required raw JavaScript workflow script, with no Markdown fences. First statement must be `export const meta = { name, description, phases? }`. Available globals: agent(), parallel(), pipeline(), phase(), log(), args, cwd, budget. Use `agent("prompt", { label, type })` or `agent({ instruction, label/name, type })`. Use `parallel([() => agent(...), () => agent(...)])` for independent fan-out; writing `await agent(...); await agent(...)` is serial. The workflow must call agent() at least once.',
         },
         args: {
           description: "Optional JSON value exposed to the workflow script as global `args`.",
@@ -69,6 +71,11 @@ export function registerWorkflowTool(
         token_budget: {
           type: "number",
           description: "Optional workflow token budget exposed through budget.remaining().",
+        },
+        background: {
+          type: "boolean",
+          description:
+            "When true, start the workflow in the session WorkflowRunManager and return a run_id immediately. Default false keeps the current synchronous behavior.",
         },
         tool_mode: {
           type: "string",
@@ -100,6 +107,30 @@ export function registerWorkflowTool(
           : opts.runner;
 
       try {
+        if (args.background === true) {
+          if (!opts.manager) {
+            return JSON.stringify({
+              success: false,
+              error: "background workflow requires a WorkflowRunManager",
+            });
+          }
+          const started = opts.manager.startRun({
+            script,
+            mode,
+            args: args.args,
+            concurrency: numberOption(args.concurrency),
+            maxAgents: numberOption(args.max_agents),
+            tokenBudget: numberOption(args.token_budget) ?? null,
+            runner,
+          });
+          return JSON.stringify({
+            success: true,
+            run_id: started.id,
+            status: started.status,
+            meta: { name: started.name, description: started.description },
+          });
+        }
+
         const result = await runWorkflow(script, {
           mode,
           args: args.args,
