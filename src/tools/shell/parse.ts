@@ -275,11 +275,7 @@ export function hasSensitivePathArgs(
   return false;
 }
 
-/** Safely embed an env-var value into a command string without letting shell
- *  metacharacters in the value become syntax. Inside an existing double-quote
- *  span we just insert the value (the outer quotes already prevent re-parsing);
- *  outside quotes we wrap in single quotes, escaping any single-quote in the
- *  value itself via the shell idiom `'...'\\''...'`. */
+/** Wrap val in single quotes if it contains shell metacharacters, using `'\''` to escape embedded single quotes. */
 function quoteEnvValue(val: string, inDouble: boolean): string {
   if (inDouble) return val;
   if (!/[|&;<>()$`\\"\s'!]/.test(val)) return val;
