@@ -468,6 +468,40 @@ describe("searchMetaso", () => {
     }
   });
 
+  it("throws Metaso server error on non-JSON 500 response", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("<html><body>upstream failure</body></html>", {
+          status: 500,
+          headers: { "Content-Type": "text/html" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(
+        /Metaso server error \(500\)/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Metaso parse error on 200 invalid JSON", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("not json", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "metaso" })).rejects.toThrow(/unparseable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("returns empty array on 0 results", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
@@ -654,6 +688,24 @@ describe("searchBaidu", () => {
     ) as unknown as typeof fetch;
     try {
       await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(/rate-limit|quota/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("throws Baidu server error on non-JSON 500 response", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response("<html><body>upstream failure</body></html>", {
+          status: 500,
+          headers: { "Content-Type": "text/html" },
+        }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(webSearch("q", { engine: "baidu" })).rejects.toThrow(
+        /Baidu AI Search server error \(500\)/,
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

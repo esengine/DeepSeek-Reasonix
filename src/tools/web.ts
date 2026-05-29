@@ -408,13 +408,6 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
   }
 
   const raw = await resp.text();
-  let data: MetasoSearchResponse;
-  try {
-    data = JSON.parse(raw) as MetasoSearchResponse;
-  } catch {
-    throw new Error(t("webErrors.metasoParseError", { status: resp.status }));
-  }
-
   if (!resp.ok) {
     if (resp.status === 401 || resp.status === 403) {
       throw new Error(t("webErrors.metasoUnauthorized"));
@@ -423,6 +416,13 @@ async function searchMetaso(query: string, opts: WebSearchOptions = {}): Promise
       throw new Error(t("webErrors.metasoRateLimit"));
     }
     throw new Error(t("webErrors.metasoServerError", { status: resp.status }));
+  }
+
+  let data: MetasoSearchResponse;
+  try {
+    data = JSON.parse(raw) as MetasoSearchResponse;
+  } catch {
+    throw new Error(t("webErrors.metasoParseError", { status: resp.status }));
   }
 
   if (data.code === 3003) {
@@ -487,19 +487,19 @@ async function searchBaidu(query: string, opts: WebSearchOptions = {}): Promise<
   }
 
   const raw = await resp.text();
-  let data: BaiduSearchResponse;
-  try {
-    data = raw ? (JSON.parse(raw) as BaiduSearchResponse) : {};
-  } catch {
-    throw new Error(t("webErrors.baiduParseError", { status: resp.status }));
-  }
-
   if (!resp.ok) {
     if (resp.status === 401 || resp.status === 403) {
       throw new Error(t("webErrors.baiduUnauthorized"));
     }
     if (resp.status === 429) throw new Error(t("webErrors.baiduRateLimit"));
     throw new Error(t("webErrors.baiduServerError", { status: resp.status }));
+  }
+
+  let data: BaiduSearchResponse;
+  try {
+    data = raw ? (JSON.parse(raw) as BaiduSearchResponse) : {};
+  } catch {
+    throw new Error(t("webErrors.baiduParseError", { status: resp.status }));
   }
 
   return (data.references ?? [])
