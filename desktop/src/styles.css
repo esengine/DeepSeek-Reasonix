@@ -2187,6 +2187,14 @@ html:not([data-platform="macos"]) .shortcut kbd[data-key="mod"] {
   margin: 0 auto 28px;
   padding: 0 32px;
 }
+.approval-dock {
+  flex-shrink: 0;
+  width: 100%;
+  margin-bottom: 10px;
+}
+.approval-dock .approval + .approval {
+  margin-top: 8px;
+}
 .thread-inner--standalone {
   margin-top: 28px;
 }

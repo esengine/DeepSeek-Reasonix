@@ -10,8 +10,12 @@ vi.mock("./cards", () => ({
   ToolCard: () => null,
   ReasoningCard: () => null,
 }));
+vi.mock("../Markdown", () => ({
+  Markdown: ({ source }: { source: string }) => <div>{source}</div>,
+}));
 
-import { ConfirmApprovalCard, PathAccessApprovalCard } from "./thread";
+import { t } from "../i18n";
+import { ConfirmApprovalCard, PathAccessApprovalCard, PlanApprovalCard } from "./thread";
 
 function makeShellPrompt(command: string): import("@reasonix/core-utils").ApprovalPrompt {
   return {
@@ -67,6 +71,70 @@ function makePathPrompt(
 }
 
 afterEach(cleanup);
+
+function makePendingPlan() {
+  return {
+    id: 7,
+    plan: "## Plan\n1. Update the approval UI",
+    summary: "Update plan approval",
+    steps: [{ id: "s1", title: "Patch approval UI", action: "edit_file" }],
+  };
+}
+
+describe("PlanApprovalCard — plan action buttons", () => {
+  it("approves the plan directly from the primary button", () => {
+    const onApprove = vi.fn();
+    render(
+      <PlanApprovalCard
+        p={makePendingPlan()}
+        onApprove={onApprove}
+        onRefine={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("thread.approve") }));
+
+    expect(onApprove).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends cancel feedback after entering feedback mode", () => {
+    const onCancel = vi.fn();
+    render(
+      <PlanApprovalCard
+        p={makePendingPlan()}
+        onApprove={() => {}}
+        onRefine={() => {}}
+        onCancel={onCancel}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("thread.cancel") }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "too risky" } });
+    fireEvent.click(screen.getByRole("button", { name: t("thread.sendFeedback") }));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledWith("too risky");
+  });
+
+  it("can refine without optional feedback", () => {
+    const onRefine = vi.fn();
+    render(
+      <PlanApprovalCard
+        p={makePendingPlan()}
+        onApprove={() => {}}
+        onRefine={onRefine}
+        onCancel={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("thread.refine") }));
+    fireEvent.click(screen.getByRole("button", { name: t("thread.skipFeedback") }));
+
+    expect(onRefine).toHaveBeenCalledTimes(1);
+    expect(onRefine.mock.calls[0]).toEqual([]);
+  });
+});
 
 describe("ConfirmApprovalCard — ApprovalPrompt rendering", () => {
   it("renders title, subtitle, and action buttons from prompt", () => {

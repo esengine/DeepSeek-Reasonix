@@ -2499,6 +2499,13 @@ function TabRuntime({
     void navigator.clipboard.writeText(md);
     flashToast(t("app.toast.copiedMd"));
   }, [state.messages, flashToast]);
+  const hasPendingApprovals =
+    state.pendingPlans.length > 0 ||
+    state.pendingCheckpoints.length > 0 ||
+    state.pendingRevisions.length > 0 ||
+    state.pendingConfirms.length > 0 ||
+    state.pendingPathAccess.length > 0 ||
+    state.pendingChoices.length > 0;
 
   return (
     <WorkspaceProvider
@@ -2631,7 +2638,7 @@ function TabRuntime({
                 ) : (
                   <Virtuoso
                     ref={virtuosoRef}
-                    style={{ height: "90%" }}
+                    style={{ height: "100%" }}
                     className="virtuoso-scroll"
                     totalCount={messageItems.length}
                     followOutput={"auto"}
@@ -2648,17 +2655,6 @@ function TabRuntime({
                           <ActivePlanTaskCard plan={state.activePlan!} />
                         </div>
                       ) : undefined,
-                      Footer: () => (
-                        <div className="thread-inner">
-                          {state.pendingPlans.map((p) => <PlanApprovalCard key={`pp-${p.id}`} p={p} onApprove={() => resolvePlan(p.id, { type: "approve" })} onRefine={() => resolvePlan(p.id, { type: "refine" })} onCancel={() => resolvePlan(p.id, { type: "cancel" })} />)}
-                          {state.pendingCheckpoints.map((c) => <CheckpointApprovalCard key={`cp-${c.id}`} c={c} onContinue={() => resolveCheckpoint(c.id, { type: "continue" })} onRevise={() => resolveCheckpoint(c.id, { type: "revise" })} onStop={() => resolveCheckpoint(c.id, { type: "stop" })} />)}
-                          {state.pendingRevisions.map((r) => <RevisionApprovalCard key={`rv-${r.id}`} r={r} onAccept={() => resolveRevision(r.id, { type: "accepted" })} onReject={() => resolveRevision(r.id, { type: "rejected" })} />)}
-                          {state.pendingConfirms.map((c) => <ConfirmApprovalCard key={`cc-${c.id}`} prompt={c.prompt} onAllow={() => resolveConfirm(c.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolveConfirm(c.id, { type: "always_allow", prefix })} onDeny={() => resolveConfirm(c.id, { type: "deny" })} />)}
-                          {state.pendingPathAccess.map((p) => <PathAccessApprovalCard key={`pa-${p.id}`} prompt={p.prompt} onAllow={() => resolvePathAccess(p.id, { type: "run_once" })} onAlwaysAllow={(prefix) => resolvePathAccess(p.id, { type: "always_allow", prefix })} onDeny={() => resolvePathAccess(p.id, { type: "deny" })} />)}
-                          {state.pendingChoices.map((c) => <ChoiceApprovalCard key={`ch-${c.id}`} c={c} onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })} onCancel={() => resolveChoice(c.id, { type: "cancel" })} />)}
-                          {!state.ready ? <div style={{ padding: 12, color: "var(--muted)", fontFamily: "Geist Mono, monospace", fontSize: 11 }}>{t("app.connecting")}</div> : null}
-                        </div>
-                      ),
                     }}
                     itemContent={(index) => {
                       const m = state.messages[index]!;
@@ -2731,6 +2727,79 @@ function TabRuntime({
                   </button>
                 ) : null}
               </div>
+
+              {hasPendingApprovals || !state.ready ? (
+                <div className="thread-inner approval-dock">
+                  {state.pendingPlans.map((p) => (
+                    <PlanApprovalCard
+                      key={`pp-${p.id}`}
+                      p={p}
+                      onApprove={() => resolvePlan(p.id, { type: "approve" })}
+                      onRefine={(feedback) => resolvePlan(p.id, { type: "refine", feedback })}
+                      onCancel={(feedback) => resolvePlan(p.id, { type: "cancel", feedback })}
+                    />
+                  ))}
+                  {state.pendingCheckpoints.map((c) => (
+                    <CheckpointApprovalCard
+                      key={`cp-${c.id}`}
+                      c={c}
+                      onContinue={() => resolveCheckpoint(c.id, { type: "continue" })}
+                      onRevise={() => resolveCheckpoint(c.id, { type: "revise" })}
+                      onStop={() => resolveCheckpoint(c.id, { type: "stop" })}
+                    />
+                  ))}
+                  {state.pendingRevisions.map((r) => (
+                    <RevisionApprovalCard
+                      key={`rv-${r.id}`}
+                      r={r}
+                      onAccept={() => resolveRevision(r.id, { type: "accepted" })}
+                      onReject={() => resolveRevision(r.id, { type: "rejected" })}
+                    />
+                  ))}
+                  {state.pendingConfirms.map((c) => (
+                    <ConfirmApprovalCard
+                      key={`cc-${c.id}`}
+                      prompt={c.prompt}
+                      onAllow={() => resolveConfirm(c.id, { type: "run_once" })}
+                      onAlwaysAllow={(prefix) =>
+                        resolveConfirm(c.id, { type: "always_allow", prefix })
+                      }
+                      onDeny={() => resolveConfirm(c.id, { type: "deny" })}
+                    />
+                  ))}
+                  {state.pendingPathAccess.map((p) => (
+                    <PathAccessApprovalCard
+                      key={`pa-${p.id}`}
+                      prompt={p.prompt}
+                      onAllow={() => resolvePathAccess(p.id, { type: "run_once" })}
+                      onAlwaysAllow={(prefix) =>
+                        resolvePathAccess(p.id, { type: "always_allow", prefix })
+                      }
+                      onDeny={() => resolvePathAccess(p.id, { type: "deny" })}
+                    />
+                  ))}
+                  {state.pendingChoices.map((c) => (
+                    <ChoiceApprovalCard
+                      key={`ch-${c.id}`}
+                      c={c}
+                      onPick={(optionId) => resolveChoice(c.id, { type: "pick", optionId })}
+                      onCancel={() => resolveChoice(c.id, { type: "cancel" })}
+                    />
+                  ))}
+                  {!state.ready ? (
+                    <div
+                      style={{
+                        padding: 12,
+                        color: "var(--muted)",
+                        fontFamily: "Geist Mono, monospace",
+                        fontSize: 11,
+                      }}
+                    >
+                      {t("app.connecting")}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               <Composer
                 draft={draft}
