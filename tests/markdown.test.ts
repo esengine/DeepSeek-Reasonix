@@ -2,6 +2,7 @@ import { type Tokens, marked } from "marked";
 import React from "react";
 import stringWidth from "string-width";
 import { describe, expect, it } from "vitest";
+import { markdownToLines, spansText } from "../src/cli/ui/markdown-lines.js";
 import { Markdown, plainText, tableLayout } from "../src/cli/ui/markdown.js";
 import { wrapToCells } from "../src/cli/ui/text-width.js";
 import { render } from "./helpers/ink-test.js";
@@ -245,6 +246,40 @@ describe("FallbackTable width invariants", () => {
         layout.labelPad + layout.valueCells,
         `width=${w}: labelPad(${layout.labelPad}) + valueCells(${layout.valueCells}) > ${w}`,
       ).toBeLessThanOrEqual(w);
+    }
+  });
+});
+
+describe("Markdown — escape backslash preservation (#2247)", () => {
+  it("preserves \\( backslash in Swift string interpolation", () => {
+    const lines = markdownToLines(String.raw`return "/\(APIVersion)/xxx"`);
+    const text = lines.map((l) => ("spans" in l ? spansText(l.spans) : "")).join("");
+    expect(text).toContain(String.raw`\(`);
+    expect(text).not.toContain("$"); // Regression: should not render as $APIVersion
+  });
+
+  it("preserves \\$ backslash in shell variable", () => {
+    const lines = markdownToLines(String.raw`echo "Price: \$5.99"`);
+    const text = lines.map((l) => ("spans" in l ? spansText(l.spans) : "")).join("");
+    expect(text).toContain(String.raw`\$`);
+  });
+
+  it("preserves \\[ escape bracket", () => {
+    const lines = markdownToLines(String.raw`foo \[bar\] baz`);
+    const text = lines.map((l) => ("spans" in l ? spansText(l.spans) : "")).join("");
+    expect(text).toContain(String.raw`\[`);
+    expect(text).toContain(String.raw`\]`);
+  });
+
+  it("preserves backslash in code-fenced text unchanged", () => {
+    // Code fences are block-level tokens, not inline — marked should not
+    // escape-process their content at all.
+    const md = ["```", String.raw`return "/\(APIVersion)/xxx"`, "```"].join("\n");
+    const lines = markdownToLines(md);
+    const codeLine = lines.find((l) => l.kind === "code");
+    expect(codeLine).toBeDefined();
+    if (codeLine?.kind === "code") {
+      expect(codeLine.text).toContain(String.raw`\(`);
     }
   });
 });

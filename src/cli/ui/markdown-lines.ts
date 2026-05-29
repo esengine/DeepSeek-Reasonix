@@ -185,7 +185,8 @@ function walk(tokens: Token[], style: InlineStyle, out: InlineSpan[]): void {
         out.push({ text: "\n", ...style });
         break;
       case "escape":
-        pushTextSpans((tok as Tokens.Escape).text, style, out);
+        // marked drops the escape backslash; restore it for chat/code content (#2247)
+        pushTextSpans(`\\${(tok as Tokens.Escape).text}`, style, out);
         break;
       case "html":
         pushTextSpans((tok as Tokens.HTML).text, style, out);

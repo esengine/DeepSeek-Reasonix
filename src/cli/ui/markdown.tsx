@@ -462,7 +462,8 @@ function InlineToken({ token }: { token: Token }): React.ReactElement {
     case "br":
       return <Text>{"\n"}</Text>;
     case "escape":
-      return <Text>{(token as Tokens.Escape).text}</Text>;
+      // marked drops the escape backslash; restore it for chat/code content (#2247)
+      return <Text>{`\\${(token as Tokens.Escape).text}`}</Text>;
     case "html":
       return <Text>{(token as Tokens.HTML).text}</Text>;
     default:
