@@ -15,6 +15,7 @@ import Text from './components/Text.js';
 import type { DOMElement } from './dom.js';
 import { useAnimationFrame } from './hooks/use-animation-frame.js';
 import useApp from './hooks/use-app.js';
+import { useDeclaredCursor } from './hooks/use-declared-cursor.js';
 import useInput from './hooks/use-input.js';
 import { useAnimationTimer, useInterval } from './hooks/use-interval.js';
 import { useSelection } from './hooks/use-selection.js';
@@ -46,6 +47,7 @@ export {
   useStdin,
   useAnimationFrame,
   useAnimationTimer,
+  useDeclaredCursor,
   useInterval,
   useSelection,
   useTabStatus,

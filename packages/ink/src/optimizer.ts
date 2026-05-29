@@ -1,4 +1,5 @@
 import type { Diff } from './frame.js';
+import { cursorMove } from './termio/csi.js';
 
 /** Compact a frame diff in a single forward pass. */
 export function optimize(diff: Diff): Diff {
@@ -7,6 +8,7 @@ export function optimize(diff: Diff): Diff {
   const result: Diff = [];
   let len = 0;
 
+  // Merge consecutive cursorMove patches first (original pass).
   for (const patch of diff) {
     const type = patch.type;
 
@@ -61,5 +63,92 @@ export function optimize(diff: Diff): Diff {
     len++;
   }
 
-  return result;
+  // Second pass: fold (cursorMove|carriageReturn) → (styleStr)* → stdout
+  // into a single stdout patch.  This collapses the common per-cell diff
+  //   [CR, stdout("X"), stdout("Y"), CR, stdout("Z"), …]
+  //   [cursorMove, styleStr?, stdout("X"), cursorMove, …]
+  // into fewer, larger stdout writes.  Fewer patches means fewer escape
+  // sequences for the terminal to parse, which reduces visible per-cell
+  // painting on terminals that lack DEC 2026 (synchronized output).
+  if (result.length <= 1) return result;
+
+  const merged: Diff = [];
+  let i = 0;
+  while (i < result.length) {
+    const patch = result[i]!;
+    const isCursorOp = patch.type === 'cursorMove' || patch.type === 'carriageReturn';
+
+    if (!isCursorOp) {
+      // Non-cursor patch — check if it's a stdout that can merge with
+      // preceding stdout (no cursor-op between them).
+      if (patch.type === 'stdout' && merged.length > 0) {
+        const prev = merged[merged.length - 1]!;
+        if (prev.type === 'stdout') {
+          (prev as { content: string }).content += patch.content;
+          i++;
+          continue;
+        }
+      }
+      merged.push(patch);
+      i++;
+      continue;
+    }
+
+    // Accumulate cursor ops and styleStr patches until we hit a stdout.
+    let accContent = '';
+    let styleBuf = '';
+    let j = i + 1;
+    let foundStdout = false;
+
+    if (patch.type === 'cursorMove') {
+      accContent = cursorMove(patch.x, patch.y);
+    } else {
+      // carriageReturn
+      accContent = '\r';
+    }
+
+    for (; j < result.length; j++) {
+      const next = result[j]!;
+      if (next.type === 'cursorMove') {
+        accContent += cursorMove(next.x, next.y);
+      } else if (next.type === 'carriageReturn') {
+        accContent += '\r';
+      } else if (next.type === 'styleStr') {
+        styleBuf += next.str;
+      } else if (next.type === 'stdout') {
+        foundStdout = true;
+        break;
+      } else {
+        // Any other patch type (clear, cursorHide, hyperlink, …)
+        // blocks the merge — stop scanning.
+        break;
+      }
+    }
+
+    if (foundStdout) {
+      // Combine accumulated cursor movement + styles + content into one
+      // stdout patch so the terminal receives a single contiguous byte
+      // run instead of alternating move / write escape sequences.
+      const stdoutPatch = result[j]! as { type: 'stdout'; content: string };
+      merged.push({
+        type: 'stdout',
+        content: accContent + styleBuf + stdoutPatch.content,
+      });
+      i = j + 1; // skip past the consumed stdout
+
+      // Continue merging consecutive stdout patches after this one.
+      while (i < result.length && result[i]!.type === 'stdout') {
+        (merged[merged.length - 1]! as { content: string }).content += (
+          result[i]! as { content: string }
+        ).content;
+        i++;
+      }
+    } else {
+      // No stdout found — emit the original patch and retry.
+      merged.push(patch);
+      i++;
+    }
+  }
+
+  return merged;
 }

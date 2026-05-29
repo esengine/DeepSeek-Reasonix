@@ -15,14 +15,15 @@ export function useDeclaredCursor({
 }: UseDeclaredCursorOptions): (element: DOMElement | null) => void {
   const setCursorDeclaration = useContext(CursorDeclarationContext)
   const nodeRef = useRef<DOMElement | null>(null)
+  const prevRef = useRef<{ line: number; column: number; active: boolean } | null>(null)
 
   const setNode = useCallback((node: DOMElement | null) => {
     nodeRef.current = node
   }, [])
 
-  // When active, set unconditionally. When inactive, clear only if the
-  // currently-declared node is ours — the node-identity check guards two
-  // hazards:
+  // When active, set only if position actually changed. When inactive,
+  // clear only if the currently-declared node is ours — the node-identity
+  // check guards two hazards:
   //
   //   1. A memoized active instance elsewhere (e.g. a search input inside
   //      a memo'd Footer) doesn't re-render this commit; an inactive
@@ -32,10 +33,18 @@ export function useDeclaredCursor({
   //      effect runs AFTER the newly-active item's set. Without the node
   //      check it would clobber the freshly-claimed declaration.
   //
-  // No dep array on purpose: this must re-declare every commit so the
-  // active instance can re-claim ownership after a peer's unmount cleanup
-  // or sibling handoff nulled it.
+  // The position-comparison guard prevents redundant set → null → set
+  // churn on every render, which caused visible cursor jitter when IME
+  // preedit committed text (the component re-renders but the cursor
+  // column is unchanged — skipping the write avoids a frame where the
+  // terminal briefly parks the cursor at a wrong intermediate spot).
   useLayoutEffect(() => {
+    const prev = prevRef.current
+    const positionUnchanged =
+      prev !== null && prev.active === active && prev.line === line && prev.column === column
+    if (positionUnchanged) return
+
+    prevRef.current = { line, column, active }
     const node = nodeRef.current
     if (active && node) {
       setCursorDeclaration({ relativeX: column, relativeY: line, node })

@@ -15,7 +15,7 @@ import { isXtermJs, setXtversionName, supportsExtendedKeys } from '../terminal.j
 import { getTerminalFocused, setTerminalFocused } from '../terminal-focus-state.js';
 import { TerminalQuerier, xtversion } from '../terminal-querier.js';
 import { DISABLE_KITTY_KEYBOARD, DISABLE_MODIFY_OTHER_KEYS, ENABLE_KITTY_KEYBOARD, ENABLE_MODIFY_OTHER_KEYS, FOCUS_IN, FOCUS_OUT } from '../termio/csi.js';
-import { DBP, DFE, DISABLE_MOUSE_TRACKING, EBP, EFE, HIDE_CURSOR, SHOW_CURSOR } from '../termio/dec.js';
+import { DBP, DFE, DISABLE_MOUSE_TRACKING, EBP, EFE, SHOW_CURSOR } from '../termio/dec.js';
 import AppContext from './AppContext.js';
 import { ClockProvider } from './ClockContext.js';
 import CursorDeclarationContext, { type CursorDeclarationSetter } from './CursorDeclarationContext.js';
@@ -193,12 +193,10 @@ export default class App extends PureComponent<Props, State> {
       </TerminalSizeContext.Provider>;
   }
   override componentDidMount() {
-    // Hide the native cursor while the app is running. In accessibility
-    // mode the cursor stays visible because screen magnifiers and similar
-    // assistive tools track its position to follow focus.
-    if (this.props.stdout.isTTY && !isEnvTruthy(process.env.REASONIX_ACCESSIBILITY)) {
-      this.props.stdout.write(HIDE_CURSOR);
-    }
+    // Keep the native cursor visible — it's positioned via useDeclaredCursor
+    // so CJK IME preedit renders inline and the cursor doesn't animate per-
+    // keystroke. The custom ▌ block cursor is disabled (cursorVisible=false)
+    // in favour of the terminal's own cursor.
   }
   override componentWillUnmount() {
     if (this.props.stdout.isTTY) {
@@ -440,13 +438,10 @@ export default class App extends PureComponent<Props, State> {
         }
       }
 
-      // Hide the cursor again (unless in accessibility mode) and
-      // re-enable focus reporting so the terminal is back in the state
-      // the app expected before suspension.
+      // Re-enable focus reporting so the terminal is back in the state
+      // the app expected before suspension. Cursor stays visible (see
+      // componentDidMount comment).
       if (this.props.stdout.isTTY) {
-        if (!isEnvTruthy(process.env.REASONIX_ACCESSIBILITY)) {
-          this.props.stdout.write(HIDE_CURSOR);
-        }
         this.props.stdout.write(EFE);
       }
 

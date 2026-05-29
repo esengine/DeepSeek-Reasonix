@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { Box, type Color, Text, useStdout } from "ink";
+import { Box, type Color, type DOMElement, Text, useDeclaredCursor, useStdout } from "ink";
 import React, { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n/index.js";
 import { useKeystroke } from "./keystroke-context.js";
@@ -90,6 +90,17 @@ export function PromptInput({
 }: PromptInputProps) {
   const [cursor, setCursor] = useState(value.length);
 
+  // Batch rapid input (IME pinyin composition) into a single frame.
+  // Each pinyin letter arrives as a separate stdin event; without batching,
+  // each triggers a re-render that moves the cursor one cell right.
+  // With batching, all letters within one rAF frame are coalesced — the
+  // cursor jumps directly to the final position.
+  const pendingValueRef = useRef<string | null>(null);
+  const pendingCursorRef = useRef<number | null>(null);
+  const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastInputAtRef = useRef(0);
+  const batchStartRef = useRef(0);
+
   useEffect(() => {
     onCursorChange?.(cursor);
   }, [cursor, onCursorChange]);
@@ -116,7 +127,21 @@ export function PromptInput({
       cursorRef.current = value.length;
       setCursor(value.length);
     }
+    // External value change (history, paste) — flush any pending batch.
+    if (batchTimerRef.current) {
+      clearTimeout(batchTimerRef.current);
+      batchTimerRef.current = null;
+      pendingValueRef.current = null;
+      pendingCursorRef.current = null;
+    }
   }
+
+  // Cleanup rAF on unmount.
+  useEffect(() => {
+    return () => {
+      if (batchTimerRef.current) clearTimeout(batchTimerRef.current);
+    };
+  }, []);
 
   const registerPaste = (content: string) => {
     const v = lastLocalValueRef.current;
@@ -132,6 +157,13 @@ export function PromptInput({
     const next = v.slice(0, c) + insertion + v.slice(c);
     lastLocalValueRef.current = next;
     cursorRef.current = c + insertion.length;
+    // Flush any pending batch before paste.
+    if (batchTimerRef.current) {
+      clearTimeout(batchTimerRef.current);
+      batchTimerRef.current = null;
+      pendingValueRef.current = null;
+      pendingCursorRef.current = null;
+    }
     onChange(next);
     setCursor(c + insertion.length);
   };
@@ -173,14 +205,63 @@ export function PromptInput({
       registerPaste(action.pasteRequest.content);
       return;
     }
-    if (action.next !== null) {
-      lastLocalValueRef.current = action.next;
-      onChange(action.next);
+    // Batch rapid lowercase-ASCII input (likely IME pinyin composition).
+    // Multiple keystrokes within one rAF frame are coalesced into a single
+    // re-render — the cursor jumps directly to the final position instead
+    // of moving one cell per letter.
+    const now = Date.now();
+    // Batch rapid character input — covers both IME pinyin (lowercase ASCII)
+    // and IME committed text (non-ASCII CJK). Space/Enter/special keys are
+    // not batched so they flush the batch immediately.
+    const isChar = ev.input.length > 0 && (ev.input.length === 1 || /^[a-z]+$/.test(ev.input));
+    const inBatch = isChar && now - lastInputAtRef.current < 50;
+    if (inBatch) {
+      // Accumulate — the pending rAF will flush the latest state.
+      if (action.next !== null) {
+        pendingValueRef.current = action.next;
+        lastLocalValueRef.current = action.next;
+      }
+      if (action.cursor !== null) {
+        pendingCursorRef.current = action.cursor;
+        cursorRef.current = action.cursor;
+      }
+      if (!batchTimerRef.current) {
+        batchTimerRef.current = setTimeout(() => {
+          batchTimerRef.current = null;
+          if (pendingValueRef.current !== null) {
+            onChange(pendingValueRef.current);
+            pendingValueRef.current = null;
+          }
+          if (pendingCursorRef.current !== null) {
+            setCursor(pendingCursorRef.current);
+            pendingCursorRef.current = null;
+          }
+        });
+      }
+    } else {
+      // Not batching — flush any pending batch first, then apply immediately.
+      if (batchTimerRef.current) {
+        clearTimeout(batchTimerRef.current);
+        batchTimerRef.current = null;
+        if (pendingValueRef.current !== null) {
+          onChange(pendingValueRef.current);
+          pendingValueRef.current = null;
+        }
+        if (pendingCursorRef.current !== null) {
+          setCursor(pendingCursorRef.current);
+          pendingCursorRef.current = null;
+        }
+      }
+      if (action.next !== null) {
+        lastLocalValueRef.current = action.next;
+        onChange(action.next);
+      }
+      if (action.cursor !== null) {
+        cursorRef.current = action.cursor;
+        setCursor(action.cursor);
+      }
     }
-    if (action.cursor !== null) {
-      cursorRef.current = action.cursor;
-      setCursor(action.cursor);
-    }
+    lastInputAtRef.current = now;
     if (action.submit) {
       if (Date.now() - lastImeCommitInputAtRef.current < IME_GUARD_MS) {
         lastImeCommitInputAtRef.current = 0;
@@ -218,7 +299,10 @@ export function PromptInput({
 
   const lines = value.length > 0 ? value.split("\n") : [""];
   const accentColor = steerBusy ? TONE.brand : disabled ? FG.faint : TONE.brand;
-  const cursorVisible = true;
+  // Use the terminal's native cursor (positioned via useDeclaredCursor) instead
+  // of a custom ▌ character. This prevents the cursor from animating during
+  // IME composition — the terminal handles cursor positioning atomically.
+  const cursorVisible = false;
   const { line: cursorLine, col: cursorCol } = lineAndColumn(value, cursor);
 
   const renderItems = collapseLinesForDisplay(lines, cursorLine);
@@ -556,9 +640,28 @@ function PromptLine({
   steerBusy,
 }: PromptLineProps) {
   const promptActive = !disabled || !!steerBusy;
+
+  // Build viewport once — used both for rendering and for IME cursor sync.
+  const viewport = buildViewport(line, isCursorLine ? cursorCol : null, visibleCells, pastes);
+
+  // Declare the native cursor position for IME sync. The terminal cursor
+  // is hidden (HIDE_CURSOR), but during CJK IME preedit the terminal
+  // renders composition text at the physical cursor position — we park
+  // that at the visual ▌ so fcitx5/ibus/Win-IME candidate popups align.
+  // Column: prefix (2) + left-marker (0/1) + cursor position in viewport.
+  const setCursorNode = useDeclaredCursor({
+    line: 0,
+    column: isCursorLine
+      ? (isFirst ? promptPrefix.length : continuationIndent.length) +
+        (viewport.hiddenLeft ? 1 : 0) +
+        (viewport.cursorCell ?? 0)
+      : 0,
+    active: isCursorLine && promptActive,
+  });
+
   if (showPlaceholder) {
     return (
-      <Box>
+      <Box ref={setCursorNode as React.LegacyRef<DOMElement>}>
         <Text bold color={accentColor}>
           {promptPrefix}
         </Text>
@@ -568,10 +671,8 @@ function PromptLine({
     );
   }
 
-  const viewport = buildViewport(line, isCursorLine ? cursorCol : null, visibleCells, pastes);
-
   return (
-    <Box>
+    <Box ref={isCursorLine ? (setCursorNode as React.LegacyRef<DOMElement>) : undefined}>
       {isFirst ? (
         <Text bold color={accentColor}>
           {promptPrefix}

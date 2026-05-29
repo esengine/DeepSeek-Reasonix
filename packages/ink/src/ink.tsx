@@ -746,7 +746,7 @@ export default class Ink {
       }
     }
     const tWrite = performance.now();
-    writeDiffToTerminal(this.terminal, optimized, this.altScreenActive && !SYNC_OUTPUT_SUPPORTED);
+    writeDiffToTerminal(this.terminal, optimized, this.altScreenActive ? !SYNC_OUTPUT_SUPPORTED : false);
     const writeMs = performance.now() - tWrite;
 
     // Update blit safety for the NEXT frame. The frame just rendered
