@@ -1,5 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -3089,7 +3097,10 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
           return;
         }
         const body = readFileSync(skill.path, "utf8");
-        emit({ type: "$skill_detail", name: msg.name, scope: msg.scope, body, path: skill.path }, tab.id);
+        emit(
+          { type: "$skill_detail", name: msg.name, scope: msg.scope, body, path: skill.path },
+          tab.id,
+        );
       } catch (err) {
         emit({ type: "$error", message: `skill_read: ${(err as Error).message}` }, tab.id);
       }
