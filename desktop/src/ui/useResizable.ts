@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getThreadMaxWidth } from "./thread-layout";
 
-const MIN_WIDTH = 160;
+const MIN_WIDTH = 200;
 const MAX_WIDTH_PCT = 0.4;
 const CSS_VAR = { side: "--side-width", ctx: "--ctx-width" } as const;
 const PERSIST_KEY_SIDE = "reasonix.sideWidth";
