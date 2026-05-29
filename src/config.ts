@@ -21,6 +21,8 @@ import {
   type ToolRateLimitConfig,
   normalizeToolRateLimitConfig,
 } from "./tools/rate-limit.js";
+import { normalizeWeixinAllowlist, normalizeWeixinUserId } from "./weixin/access.js";
+import { loadWeixinAccount, saveWeixinAccount } from "./weixin/account.js";
 
 /** Single trust dial: review queues edits + gates shell; auto applies + gates shell; yolo skips both gates; plan blocks every non-readonly tool (write_file / edit_file / multi_edit / run_command) at dispatch. */
 export type EditMode = "review" | "auto" | "yolo" | "plan";
@@ -132,6 +134,15 @@ export interface QQBotConfig {
 
 export interface TelegramBotConfig {
   botToken?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
+  allowlist?: string[];
+}
+
+export interface WeixinBotConfig {
+  token?: string;
+  accountId?: string;
+  baseUrl?: string;
   enabled?: boolean;
   ownerUserId?: string;
   allowlist?: string[];
@@ -314,6 +325,7 @@ export interface ReasonixConfig {
   /** QQ Bot configuration */
   qq?: QQBotConfig;
   telegram?: TelegramBotConfig;
+  weixin?: WeixinBotConfig;
 }
 
 export interface CustomMemoryTypeConfig {
@@ -1733,6 +1745,68 @@ export function saveTelegramConfig(
   );
   rootCfg.telegram = {
     botToken: cfg.botToken,
+    enabled: cfg.enabled,
+    ownerUserId,
+    allowlist,
+  };
+  writeConfig(rootCfg, path);
+}
+
+export interface LoadedWeixinConfig {
+  token?: string;
+  accountId?: string;
+  baseUrl?: string;
+  enabled?: boolean;
+  ownerUserId?: string;
+  allowlist?: string[];
+}
+
+export function loadWeixinConfig(path: string = defaultConfigPath()): LoadedWeixinConfig {
+  const envAllowlist = normalizeWeixinAllowlist(process.env.WEIXIN_ALLOWLIST);
+  const fromEnv = {
+    token: process.env.WEIXIN_TOKEN,
+    accountId: process.env.WEIXIN_ACCOUNT_ID,
+    baseUrl: process.env.WEIXIN_BASE_URL,
+    ownerUserId: normalizeWeixinUserId(process.env.WEIXIN_OWNER_USER_ID),
+    allowlist: envAllowlist,
+  };
+  const fromCfg = readConfig(path).weixin ?? {};
+  const ownerUserId = fromEnv.ownerUserId ?? normalizeWeixinUserId(fromCfg.ownerUserId);
+  const allowlist = normalizeWeixinAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  const accountId = fromEnv.accountId ?? fromCfg.accountId;
+  const persisted = accountId ? loadWeixinAccount(accountId) : null;
+  return {
+    token: fromEnv.token ?? fromCfg.token ?? persisted?.token,
+    accountId,
+    baseUrl: fromEnv.baseUrl ?? fromCfg.baseUrl ?? persisted?.baseUrl,
+    enabled: fromCfg.enabled === true,
+    ownerUserId,
+    allowlist,
+  };
+}
+
+export function saveWeixinConfig(
+  cfg: LoadedWeixinConfig,
+  path: string = defaultConfigPath(),
+): void {
+  const rootCfg = readConfig(path);
+  const ownerUserId = normalizeWeixinUserId(cfg.ownerUserId);
+  const allowlist = normalizeWeixinAllowlist(cfg.allowlist)?.filter(
+    (userId) => userId !== ownerUserId,
+  );
+  if (cfg.accountId && cfg.token) {
+    saveWeixinAccount({
+      accountId: cfg.accountId,
+      token: cfg.token,
+      baseUrl: cfg.baseUrl,
+    });
+  }
+  rootCfg.weixin = {
+    token: undefined,
+    accountId: cfg.accountId,
+    baseUrl: cfg.baseUrl,
     enabled: cfg.enabled,
     ownerUserId,
     allowlist,

@@ -106,6 +106,8 @@ import { registerSkillTools } from "../../tools/skills.js";
 import { formatSubagentResult, spawnSubagent } from "../../tools/subagent.js";
 import { webFetch } from "../../tools/web.js";
 import { openTranscriptFile } from "../../transcript/log.js";
+import type { WeixinChannel } from "../../weixin/channel.js";
+import { useWeixinChannel } from "../../weixin/use-weixin-channel.js";
 import { listKnownWorkspaces, rememberWorkspace } from "../../workspaces.js";
 import { openInExternalEditor } from "../edit/external-editor.js";
 import { dumpStartupProfile, markPhase } from "../startup-profile.js";
@@ -312,12 +314,15 @@ export interface AppProps {
   /** Pre-created QQ channel (started before TUI mounts). */
   qqChannel?: QQChannel;
   telegramChannel?: TelegramChannel;
+  weixinChannel?: WeixinChannel;
   /** Ref filled by App on mount so QQ messages flow into the TUI input queue. */
   qqSubmitRef?: { current: ((text: string) => void) | null };
   /** Ref filled by App on mount so QQ errors appear in the TUI log. */
   qqErrorRef?: { current: ((msg: string) => void) | null };
   telegramSubmitRef?: { current: ((text: string) => void) | null };
   telegramErrorRef?: { current: ((msg: string) => void) | null };
+  weixinSubmitRef?: { current: ((text: string) => void) | null };
+  weixinErrorRef?: { current: ((msg: string) => void) | null };
   /** Resolved chat-history scroll mode, computed by the launcher from config/env. */
   historyScrollMode?: ResolvedHistoryScrollMode;
 }
@@ -467,10 +472,13 @@ function AppInner({
   startupInfoHints,
   qqChannel,
   telegramChannel,
+  weixinChannel,
   qqSubmitRef,
   qqErrorRef,
   telegramSubmitRef,
   telegramErrorRef,
+  weixinSubmitRef,
+  weixinErrorRef,
   historyScrollMode,
   themeName,
   setThemeName,
@@ -2756,15 +2764,48 @@ function AppInner({
     onChoiceResolveRef: handleChoiceResolveRef,
   });
 
+  const weixin = useWeixinChannel({
+    codeMode: !!codeMode,
+    initialChannel: weixinChannel,
+    log,
+    setQueuedSubmit,
+    weixinSubmitRef,
+    weixinErrorRef,
+    sessionName: session,
+    currentRootDir,
+    pendingGateIdRef,
+    completedStepIdsRef,
+    planStepsRef,
+    onCreateSession: onSwitchSession ? (name) => onSwitchSession(name) : undefined,
+    onSelectSession: onSwitchSession ? (name) => onSwitchSession(name) : undefined,
+    onModelPick: handleQQModelPick,
+    onThemePick: handleQQThemePick,
+    onShellConfirmRef: handleShellConfirmRef,
+    onPathConfirmRef: handlePathConfirmRef,
+    onPlanCancelRef: handlePlanCancelRef,
+    onPlanFeedbackRef: handlePlanFeedbackRef,
+    onCheckpointConfirmRef: handleCheckpointConfirmRef,
+    onCheckpointReviseRef: handleCheckpointReviseSubmitRef,
+    onPlanRevisionRef: handleReviseConfirmRef,
+    onChoiceResolveRef: handleChoiceResolveRef,
+  });
+
   const handleSubmit = useCallback(
     async (raw: string) => {
       const qqIncoming = qq.parseSubmit(raw);
+      const telegramIncoming =
+        qqIncoming?.handled || qqIncoming?.fromQQ ? null : telegram.parseSubmit(raw);
       const incoming =
-        qqIncoming?.handled || qqIncoming?.fromQQ ? qqIncoming : telegram.parseSubmit(raw);
+        qqIncoming?.handled || qqIncoming?.fromQQ
+          ? qqIncoming
+          : telegramIncoming?.handled || telegramIncoming?.fromTelegram
+            ? telegramIncoming
+            : weixin.parseSubmit(raw);
       if (!incoming) return;
       let { text } = incoming;
       const fromQQ = "fromQQ" in incoming && incoming.fromQQ;
       const fromTelegram = "fromTelegram" in incoming && incoming.fromTelegram;
+      const fromWeixin = "fromWeixin" in incoming && incoming.fromWeixin;
       if (incoming.handled) {
         return;
       }
@@ -3011,12 +3052,23 @@ function AppInner({
             disconnect: telegram.disconnect,
             status: telegram.status,
           },
+          weixin: {
+            connect: weixin.connect,
+            disconnect: weixin.disconnect,
+            status: weixin.status,
+          },
           sessionId: session,
           getEngineeringLifecycleSnapshot: codeMode
             ? () => engineeringLifecycleRef.current?.snapshot() ?? null
             : undefined,
           jobs: codeMode?.jobs,
-          postInfo: fromQQ ? qq.sendInfo : fromTelegram ? telegram.sendInfo : log.pushInfo,
+          postInfo: fromQQ
+            ? qq.sendInfo
+            : fromTelegram
+              ? telegram.sendInfo
+              : fromWeixin
+                ? weixin.sendInfo
+                : log.pushInfo,
           postDoctor: (checks) => log.showDoctor(checks),
           postUsage: (args) => log.showUsageVerbose(args),
           postKeys: (args) =>
@@ -3076,7 +3128,14 @@ function AppInner({
           generateSessionTitle: generateCurrentSessionTitle,
         });
         if (
-          (fromQQ ? qq : fromTelegram ? telegram : null)?.handleRemoteSlashResult({
+          (fromQQ
+            ? qq
+            : fromTelegram
+              ? telegram
+              : fromWeixin
+                ? weixin
+                : null
+          )?.handleRemoteSlashResult({
             result,
             codeMode: !!codeMode,
             sessions: listSessionsForWorkspace(currentRootDir),
@@ -3165,6 +3224,7 @@ function AppInner({
         });
         if (fromQQ && result.info) qq.sendText(result.info);
         if (fromTelegram && result.info) telegram.sendText(result.info);
+        if (fromWeixin && result.info) weixin.sendText(result.info);
         if (outcome.kind === "resubmit") {
           text = outcome.text;
         } else {
@@ -3263,6 +3323,7 @@ function AppInner({
       setBusy(true);
       qq.noteTurnFromQQ(fromQQ);
       telegram.noteTurnFromTelegram(fromTelegram);
+      weixin.noteTurnFromWeixin(fromWeixin);
       abortedThisTurn.current = false;
       // Seal the in-progress history entry so this turn's edits open
       // a new one —prior turns are preserved intact for /history and
@@ -3530,6 +3591,7 @@ function AppInner({
         }
         qq.maybeSendFinalReply(lastAssistantText);
         telegram.maybeSendFinalReply(lastAssistantText);
+        weixin.maybeSendFinalReply(lastAssistantText);
       } finally {
         flush();
         // Esc aborted the turn —close any in-flight cards (streaming /
@@ -3546,6 +3608,7 @@ function AppInner({
         submittingRef.current = false;
         qq.clearTurnReply();
         telegram.clearTurnReply();
+        weixin.clearTurnReply();
         // Refresh balance lazily —don't block the return.
         refreshBalance();
       }
@@ -3602,6 +3665,7 @@ function AppInner({
       getLoopStatus,
       qq,
       telegram,
+      weixin,
       isLoopActive,
       isLoopFiring,
       clearFiringFlag,
@@ -3704,8 +3768,9 @@ function AppInner({
     pendingGateIdRef.current = null;
     qq.resetInteractions();
     telegram.resetInteractions();
+    weixin.resetInteractions();
     pauseGate.cancelAll();
-  }, [qq, telegram]);
+  }, [qq, telegram, weixin]);
 
   // Drain queued submits after the in-flight turn tears down.
   // QQ pause-gate replies are the one exception: they need to re-enter
@@ -3713,13 +3778,16 @@ function AppInner({
   // pauseGate.ask() can be resolved from the remote reply.
   useEffect(() => {
     if (queuedSubmit === null) return;
-    const canBypassBusy = qq.canBypassBusy(queuedSubmit) || telegram.canBypassBusy(queuedSubmit);
+    const canBypassBusy =
+      qq.canBypassBusy(queuedSubmit) ||
+      telegram.canBypassBusy(queuedSubmit) ||
+      weixin.canBypassBusy(queuedSubmit);
     if ((!busy && !submittingRef.current) || canBypassBusy) {
       const text = queuedSubmit;
       setQueuedSubmit(null);
       void handleSubmit(text);
     }
-  }, [busy, queuedSubmit, handleSubmit, qq, telegram]);
+  }, [busy, queuedSubmit, handleSubmit, qq, telegram, weixin]);
 
   /**
    * PlanConfirm callback. Three outcomes, all ending with a synthetic
@@ -3982,6 +4050,7 @@ function AppInner({
 
       qq.handlePauseRequest(request.kind, payload);
       telegram.handlePauseRequest(request.kind, payload);
+      weixin.handlePauseRequest(request.kind, payload);
 
       switch (request.kind) {
         case "run_command":

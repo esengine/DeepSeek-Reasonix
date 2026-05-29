@@ -207,6 +207,14 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     argCompleter: ["connect", "status", "disconnect"],
     aliases: ["tg"],
   },
+  {
+    cmd: "weixin",
+    group: "extend",
+    argsHint: "<connect|status|disconnect> [manual token accountId [baseUrl]]",
+    summary: "connect, inspect, or disconnect the Weixin channel",
+    argCompleter: ["connect", "status", "disconnect"],
+    aliases: ["wx"],
+  },
 
   {
     cmd: "init",
