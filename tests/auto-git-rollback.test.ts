@@ -149,7 +149,7 @@ describe("auto-git-rollback memory guard", () => {
     await tools.dispatch("read_file", { path: "tracked.txt" }, { readTracker });
     const out = await tools.dispatch(toolName, args, { readTracker });
 
-    expect(out).toMatch(toolName === "write_file" ? /wrote \d+ chars/ : /applied 1 edit/);
+    expect(out).toMatch(toolName === "write_file" ? /edited.*\d+.*chars/ : /applied 1 edit/);
     expect(git(root, ["show", "HEAD:tracked.txt"])).toBe("dirty-before-edit");
     expect(git(root, ["log", "-1", "--format=%s"])).toMatch(
       new RegExp(`pre-edit: ${toolName} tracked\\.txt`),
