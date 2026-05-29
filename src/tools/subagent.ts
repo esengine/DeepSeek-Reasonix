@@ -121,8 +121,8 @@ const DEFAULT_SUBAGENT_MODEL = "deepseek-v4-flash";
 const DEFAULT_SUBAGENT_EFFORT: import("../config.js").ReasoningEffort = "high";
 
 const SUBAGENT_TOOL_NAME = "spawn_subagent";
-/** spawn_subagent excluded → depth=1 hard cap; submit_plan excluded → no picker mid-parent-turn. */
-const NEVER_INHERITED_TOOLS = new Set<string>([SUBAGENT_TOOL_NAME, "submit_plan"]);
+/** Exclude orchestration tools from child loops so delegation stays one level deep. */
+const NEVER_INHERITED_TOOLS = new Set<string>([SUBAGENT_TOOL_NAME, "submit_plan", "workflow"]);
 
 /** Per-session spawn count past which the soft hint fires on every subsequent return. */
 const SOFT_HINT_AFTER_SPAWNS = 1;

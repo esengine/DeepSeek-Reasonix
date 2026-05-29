@@ -230,6 +230,7 @@ describe("registerSubagentTool", () => {
     const parent = new ToolRegistry();
     parent.register({ name: "harmless", readOnly: true, fn: () => "ok" });
     parent.register({ name: "submit_plan", readOnly: true, fn: () => "ok" });
+    parent.register({ name: "workflow", readOnly: true, fn: () => "ok" });
     const seenToolNames: string[][] = [];
     const client = new DeepSeekClient({
       apiKey: "sk-test",
@@ -256,10 +257,11 @@ describe("registerSubagentTool", () => {
     await parent.dispatch("spawn_subagent", JSON.stringify({ task: "go" }));
     expect(seenToolNames.length).toBe(1);
     const childTools = seenToolNames[0]!;
-    // Inherited the harmless tool, but NOT spawn_subagent or submit_plan.
+    // Inherited the harmless tool, but not orchestration tools.
     expect(childTools).toContain("harmless");
     expect(childTools).not.toContain("spawn_subagent");
     expect(childTools).not.toContain("submit_plan");
+    expect(childTools).not.toContain("workflow");
   });
 
   it("respects a custom system prompt passed in the tool args", async () => {
