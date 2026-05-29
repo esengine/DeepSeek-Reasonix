@@ -73,6 +73,10 @@ function formatSteerUserMessage(content: string): string {
   return [MID_TURN_STEER_WRAPPER, content].join("\n");
 }
 
+function parseNeedsProEscalation(content: string): boolean {
+  return /^\s*<<<NEEDS_PRO(?::\s*[^>\n]{1,150})?>>>/.test(content);
+}
+
 export {
   fixToolCallPairing,
   formatLoopError,
@@ -700,6 +704,14 @@ export class CacheFirstLoop {
         };
       }
     }
+    const baseModelForTurn = this.model;
+    let restoreModelAfterTurn = false;
+    const restoreModelIfNeeded = () => {
+      if (restoreModelAfterTurn && this.model === "deepseek-v4-pro") {
+        this.model = baseModelForTurn;
+      }
+    };
+
     this._turn++;
     this.scratch.reset();
     // A fresh user turn is a new intent — don't let StormBreaker's
@@ -796,6 +808,7 @@ export class CacheFirstLoop {
             content: stoppedMsg,
             forcedSummary: true,
           };
+          restoreModelIfNeeded();
           yield { turn: this._turn, role: "done", content: stoppedMsg };
         } finally {
           this.resetAbortState();
@@ -812,8 +825,12 @@ export class CacheFirstLoop {
           severity: "high",
           content: t("loop.iterLimitReached", { max: this.maxIterPerTurn }),
         };
-        yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
-        this._steerQueue.length = 0;
+        try {
+          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
+        } finally {
+          restoreModelIfNeeded();
+          this._steerQueue.length = 0;
+        }
         return;
       }
       // Bridge the silence between the PREVIOUS iter's tool result and
@@ -856,16 +873,18 @@ export class CacheFirstLoop {
       let reasoningContent = "";
       let toolCalls: ToolCall[] = [];
       let usage: TurnStats["usage"] | null = null;
+      let callModel = this.model;
 
       // Snapshot prefix evidence from the same turn-start tool list sent
       // to the API so MCP hot-adds during the turn don't rewrite history.
       const prefixEvidence = this.prefix.diagnosticHashes(toolSpecs);
 
       try {
+        callModel = this.model;
         if (this.stream) {
           const result = yield* streamModelResponse({
             client: this.client,
-            model: this.model,
+            model: callModel,
             messages,
             toolSpecs,
             signal,
@@ -878,7 +897,6 @@ export class CacheFirstLoop {
           toolCalls = result.toolCalls;
           usage = result.usage;
         } else {
-          const callModel = this.model;
           const resp = await this.client.chat({
             model: callModel,
             messages,
@@ -911,6 +929,7 @@ export class CacheFirstLoop {
           // leave carryAbort locked on the next step().
           if (this._discardAbortRequested) this.discardLogFrom(turnStartLogIndex);
           try {
+            restoreModelIfNeeded();
             yield { turn: this._turn, role: "done", content: "" };
           } finally {
             this.resetAbortState();
@@ -925,6 +944,7 @@ export class CacheFirstLoop {
         const cause = err instanceof Error ? err : new Error(String(err));
         const retryable = !is4xxError(cause) && cause.name !== "AbortError";
         const { code, phase } = errorMeta(cause);
+        restoreModelIfNeeded();
         yield {
           turn: this._turn,
           role: "error",
@@ -943,12 +963,18 @@ export class CacheFirstLoop {
         return;
       }
 
+      if (parseNeedsProEscalation(assistantContent) && callModel !== "deepseek-v4-pro") {
+        restoreModelAfterTurn = true;
+        this.model = "deepseek-v4-pro";
+        continue;
+      }
+
       // Attribute under the actual model used (escalated → pro, else
-      // this.model) so cost/usage logs reflect reality.
-      const turnStats = this.stats.record(this._turn, this.model, usage ?? new Usage());
+      // callModel) so cost/usage logs reflect reality.
+      const turnStats = this.stats.record(this._turn, callModel, usage ?? new Usage());
       let cacheDiagnostic = buildCacheDiagnostic({
         turn: this._turn,
-        model: this.model,
+        model: callModel,
         usage: turnStats.usage,
         estimatedCostUsd: turnStats.cost,
         prefix: prefixEvidence,
@@ -961,7 +987,7 @@ export class CacheFirstLoop {
           const meta = loadSessionMeta(this.sessionName);
           cacheDiagnostic = buildCacheDiagnostic({
             turn: this._turn,
-            model: this.model,
+            model: callModel,
             usage: turnStats.usage,
             estimatedCostUsd: turnStats.cost,
             prefix: prefixEvidence,
@@ -995,7 +1021,7 @@ export class CacheFirstLoop {
       );
 
       this.appendAndPersist(
-        buildAssistantMessage(assistantContent, repairedCalls, this.model, reasoningContent),
+        buildAssistantMessage(assistantContent, repairedCalls, callModel, reasoningContent),
       );
 
       yield {
@@ -1017,7 +1043,7 @@ export class CacheFirstLoop {
       if (allSuppressed && !this._turnSelfCorrected) {
         this._turnSelfCorrected = true;
         this.replaceTailAssistantMessage(
-          buildAssistantMessage(assistantContent, toolCalls, this.model, reasoningContent),
+          buildAssistantMessage(assistantContent, toolCalls, callModel, reasoningContent),
         );
         for (const call of toolCalls) {
           this.appendAndPersist({
@@ -1055,10 +1081,15 @@ export class CacheFirstLoop {
           continue;
         }
         if (allSuppressed) {
-          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
-          this._steerQueue.length = 0;
+          try {
+            yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "stuck" });
+          } finally {
+            restoreModelIfNeeded();
+            this._steerQueue.length = 0;
+          }
           return;
         }
+        restoreModelIfNeeded();
         yield { turn: this._turn, role: "done", content: assistantContent };
         this._steerQueue.length = 0;
         return;
@@ -1066,7 +1097,7 @@ export class CacheFirstLoop {
 
       // Context-management decision after each turn's response.
       // ContextManager owns the policy; loop renders the events.
-      const decision = this.context.decideAfterUsage(usage, this.model, this._foldedThisTurn);
+      const decision = this.context.decideAfterUsage(usage, callModel, this._foldedThisTurn);
       if (decision.kind === "fold") {
         this._foldedThisTurn = true;
         const before = decision.promptTokens;
@@ -1108,8 +1139,12 @@ export class CacheFirstLoop {
           }),
         };
         this.context.trimTrailingToolCalls();
-        yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "context-guard" });
-        this._steerQueue.length = 0;
+        try {
+          yield* forceSummaryAfterIterLimit(this.summaryContext(), { reason: "context-guard" });
+        } finally {
+          restoreModelIfNeeded();
+          this._steerQueue.length = 0;
+        }
         return;
       }
 

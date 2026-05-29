@@ -93,6 +93,59 @@ describe("CacheFirstLoop (non-streaming)", () => {
     expect(loop.log.length).toBe(2); // user + assistant
   });
 
+  it("restores the base model after a headless NEEDS_PRO one-shot retry", async () => {
+    const models: string[] = [];
+    const responses = ["<<<NEEDS_PRO: subtle invariant>>>", "pro answer", "flash answer"];
+    const client = new DeepSeekClient({
+      apiKey: "sk-test",
+      fetch: vi.fn(async (_url: any, init: any) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        models.push(body.model);
+        const content = responses.shift() ?? "extra";
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content,
+                  reasoning_content: null,
+                },
+                finish_reason: "stop",
+              },
+            ],
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 20,
+              total_tokens: 120,
+              prompt_cache_hit_tokens: 0,
+              prompt_cache_miss_tokens: 100,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }) as unknown as typeof fetch,
+    });
+    const loop = new CacheFirstLoop({
+      client,
+      prefix: new ImmutablePrefix({ system: "s" }),
+      stream: false,
+      model: "deepseek-v4-flash",
+    });
+
+    await expect(loop.run("hard")).resolves.toBe("pro answer");
+    expect(loop.model).toBe("deepseek-v4-flash");
+    await expect(loop.run("simple")).resolves.toBe("flash answer");
+
+    expect(models).toEqual(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash"]);
+    expect(loop.stats.turns.map((turn) => turn.model)).toEqual([
+      "deepseek-v4-pro",
+      "deepseek-v4-flash",
+    ]);
+    expect(JSON.stringify(loop.log.entries)).not.toContain("NEEDS_PRO");
+  });
+
   it("records cache hit telemetry from API usage", async () => {
     const client = makeClient([
       {
