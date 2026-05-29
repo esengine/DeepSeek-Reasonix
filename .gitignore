@@ -53,3 +53,4 @@ desktop/src-tauri/binaries/
 *.cpuprofile
 
 .probe-snapshots/
+.worktrees/
