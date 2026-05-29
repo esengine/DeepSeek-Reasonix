@@ -428,14 +428,11 @@ export async function chatCommand(opts: ChatOptions): Promise<void> {
   if (process.stdout.isTTY && typeof themeBg === "string" && themeBg.startsWith("#")) {
     process.stdout.write(`\x1b]11;${themeBg}\x07`);
     process.once("exit", restoreTerminalBg);
-    process.once("SIGINT", () => {
-      restoreTerminalBg();
-      process.exit(130);
-    });
-    process.once("SIGTERM", () => {
-      restoreTerminalBg();
-      process.exit(143);
-    });
+    // Restore bg on signals without calling process.exit() —
+    // useQuit owns the SIGINT exit path (async transcript flush + profile
+    // save). The "exit" listener above fires when useQuit eventually exits.
+    process.once("SIGINT", restoreTerminalBg);
+    process.once("SIGTERM", restoreTerminalBg);
   }
 
   const { waitUntilExit } = render(
