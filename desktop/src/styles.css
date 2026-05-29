@@ -4682,19 +4682,9 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   }
 }
 
-/* shimmer for streaming text */
+/* shimmer for streaming text — now static accent color, no animation */
 .shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--fg-2) 0%,
-    var(--accent) 50%,
-    var(--fg-2) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shim 2.2s linear infinite;
+  color: var(--accent);
 }
 @keyframes shim {
   0% {
@@ -4755,17 +4745,7 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 }
 
 .thinking .label .sh {
-  background: linear-gradient(
-    90deg,
-    var(--muted) 0%,
-    var(--accent) 50%,
-    var(--muted) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shim 2.2s linear infinite;
+  color: var(--accent);
 }
 
 .thinking .timer {
@@ -4887,15 +4867,7 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
     var(--panel) 100%
   );
   background-size: 220% 100%;
-  animation: shimmer-bg 1.4s linear infinite;
-}
-@keyframes shimmer-bg {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
+  animation: shim 1.4s linear infinite;
 }
 .skel-line.w-90 { width: 92%; }
 .skel-line.w-70 { width: 72%; }
@@ -5078,7 +5050,7 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 .shell.running .out::after {
   content: "▌";
   color: var(--accent);
-  animation: caret 1s steps(2) infinite;
+  animation: stream-caret 1s steps(2) infinite;
   margin-left: 2px;
 }
 
@@ -5093,11 +5065,6 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
   border-radius: 8px;
   background: var(--accent-soft);
   z-index: -1;
-  animation: pulse-soft 1.6s ease-in-out infinite;
-}
-@keyframes pulse-soft {
-  0%, 100% { opacity: 0; }
-  50% { opacity: 1; }
 }
 .user-status {
   display: inline-flex;
@@ -7101,11 +7068,6 @@ html:not([data-platform="macos"]) .cmdk-row .kb .shortcut kbd[data-key="mod"] {
 .mode-switch[data-mode="yolo"] {
   border-color: var(--tone-err);
   box-shadow: 0 0 0 2px oklch(68% 0.20 25 / 0.18);
-  animation: yolo-pulse 1.8s ease-in-out infinite;
-}
-@keyframes yolo-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px oklch(68% 0.20 25 / 0.18); }
-  50%      { box-shadow: 0 0 0 3px oklch(68% 0.20 25 / 0.32); }
 }
 .ms-seg {
   display: inline-flex;
@@ -7927,7 +7889,7 @@ html[data-platform="macos"] .splash {
   align-items: center;
   justify-content: center;
   z-index: 100;
-  animation: fade 0.16s ease-out;
+  animation: fade-in 0.16s ease-out;
 }
 .about-modal {
   position: relative;

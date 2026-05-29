@@ -1375,9 +1375,10 @@ interface TabRuntimeProps {
   onToggleSide: () => void;
   onToggleCtx: () => void;
   onToggleCurrency: () => void;
-  tabsList: { id: string; workspaceDir?: string }[];
+  tabsList: { id: string; workspaceDir?: string; busy?: boolean }[];
   activeTabId: string;
   setActiveTabId: (id: string) => void;
+  onBusyChange?: (tabId: string, busy: boolean) => void;
 }
 
 function TabRuntime({
@@ -1412,6 +1413,7 @@ function TabRuntime({
   tabsList,
   activeTabId,
   setActiveTabId,
+  onBusyChange,
 }: TabRuntimeProps) {
   const [state, dispatch] = useReducer(reduce, {
     ready: false,
@@ -1521,6 +1523,10 @@ function TabRuntime({
     registerDispatch(tabId, dispatch);
     return () => registerDispatch(tabId, null);
   }, [tabId, registerDispatch]);
+
+  useEffect(() => {
+    onBusyChange?.(tabId, state.busy);
+  }, [tabId, state.busy, onBusyChange]);
 
   const sendRpc = useCallback(
     (cmd: OutgoingCommand) => {
@@ -3179,7 +3185,7 @@ function TabBar({
   onNew,
   singleTab,
 }: {
-  tabs: { id: string; workspaceDir?: string }[];
+  tabs: { id: string; workspaceDir?: string; busy?: boolean }[];
   activeId: string;
   setActive: (id: string) => void;
   onClose: (id: string) => void;
@@ -3204,7 +3210,7 @@ function TabBar({
             onClick={() => setActive(t.id)}
             title={ws || label}
           >
-            <span className="dot" data-state="running" />
+            <span className="dot" data-state={t.busy ? "running" : "idle"} />
             <span className="label">{label}</span>
             {!singleTab ? (
               <span
@@ -3545,6 +3551,7 @@ export function App() {
   const [activeTabId, setActiveTabId] = useState<string>("");
   const [startupFailure, setStartupFailure] = useState<StartupFailureState | null>(null);
   const [startupRetryNonce, setStartupRetryNonce] = useState(0);
+  const tabBusyRef = useRef<Map<string, boolean>>(new Map());
   const dispatchersRef = useRef<Map<string, TabDispatcher>>(new Map());
   const pendingEventsRef = useRef<Map<string, TabAction[]>>(new Map());
   const pendingDeltasRef = useRef<Map<string, DeltaBatchItem[]>>(new Map());
@@ -3997,6 +4004,11 @@ export function App() {
     });
   }, []);
 
+  const onTabBusyChange = useCallback((tabId: string, busy: boolean) => {
+    tabBusyRef.current.set(tabId, busy);
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, busy } : t)));
+  }, []);
+
   if (startupFailure && tabs.length === 0) {
     return <StartupFailure details={startupFailure.details} onRetry={retryStartup} />;
   }
@@ -4037,6 +4049,7 @@ export function App() {
           tabsList={tabs}
           activeTabId={activeTabId}
           setActiveTabId={setActiveTabId}
+          onBusyChange={onTabBusyChange}
         />
       ))}
       {pendingUpdate ? (
