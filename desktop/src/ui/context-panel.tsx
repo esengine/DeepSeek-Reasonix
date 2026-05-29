@@ -28,6 +28,7 @@ export function ContextPanel({
   onTabChange,
   selectedPlanIdx: externalSelectedPlanIdx,
   onPlanSelect,
+  activeTabNonce,
 }: {
   settings: Settings | null;
   usage: UsageStats;

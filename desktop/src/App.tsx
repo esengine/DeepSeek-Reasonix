@@ -1574,7 +1574,6 @@ function TabRuntime({
     }
   }, [state.planArchived, state.settings?.workspaceDir]);
 
-  const [ctxTab, setCtxTab] = useState<ContextPanelTab>("files");
   const [ctxSelectedPlanIdx, setCtxSelectedPlanIdx] = useState<number | null>(null);
 
   // Auto-open right panel and collapse left sidebar when plans need approval.
@@ -1586,7 +1585,8 @@ function TabRuntime({
 
     if (curr > prev) {
       openCtx();
-      setCtxTab("plan");
+      setContextPanelTab("plan");
+      setContextPanelTabNonce((n) => n + 1);
       setCtxWidth(Math.floor(window.innerWidth * 0.4));
       setCtxSelectedPlanIdx(0);
       requireSideCollapsed();
@@ -2853,11 +2853,10 @@ function TabRuntime({
           onOpenMcpSettings={() => openSettingsAt("mcp")}
           onEditMcpSpec={openMcpEditor}
           onRetryMcpSpec={retryMcpSpec}
+          onTabChange={setContextPanelTab}
           activePlan={state.activePlan}
           pendingPlans={state.pendingPlans}
           planArchived={state.planArchived}
-          activeTab={ctxTab}
-          onTabChange={setCtxTab}
           selectedPlanIdx={ctxSelectedPlanIdx}
           onPlanSelect={setCtxSelectedPlanIdx}
         />
