@@ -45,7 +45,9 @@ describe("Weixin iLink QR login", () => {
     });
     expect(calls.some((url) => url.includes("get_bot_qrcode?bot_type=3"))).toBe(true);
     expect(calls.some((url) => url.includes("get_qrcode_status?qrcode=qr-token"))).toBe(true);
-    expect(info.join("\n")).toContain("https://example.test/qr");
+    const output = info.join("\n");
+    expect(output).toContain("https://example.test/qr");
+    expect(output).toContain("█▀▀▀▀▀█");
   });
 
   it("rejects non-Weixin iLink base URLs before sending tokens", () => {
