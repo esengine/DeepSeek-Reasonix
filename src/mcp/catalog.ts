@@ -5,12 +5,16 @@ export interface CatalogEntry {
   name: string;
   /** One-line description shown in `reasonix mcp list`. */
   summary: string;
-  /** npm package id (for `npx -y <pkg>`). */
-  package: string;
+  /** npm package id (for `npx -y <pkg>`). Absent for remote entries. */
+  package?: string;
   /** Extra args the user must supply (e.g. a directory path). */
   userArgs?: string;
   /** Notes the user needs to know — shown dimmed. */
   note?: string;
+  /** Remote URL for SSE / streamable-HTTP entries — mutually exclusive with `package`. */
+  url?: string;
+  /** Transport type. Defaults to "stdio" for npm entries; required when `url` is set. */
+  transport?: "stdio" | "sse" | "streamable-http";
 }
 
 // Every entry below is verified to exist on npm as of this release.
@@ -34,9 +38,10 @@ export const MCP_CATALOG: CatalogEntry[] = [
   },
   {
     name: "github",
-    summary: "read issues, PRs, code search (needs GITHUB_PERSONAL_ACCESS_TOKEN)",
-    package: "@modelcontextprotocol/server-github",
-    note: "set GITHUB_PERSONAL_ACCESS_TOKEN in your env before spawning",
+    summary: "read issues, PRs, code search (needs GitHub PAT in Authorization header)",
+    url: "https://api.githubcopilot.com/mcp/",
+    transport: "streamable-http",
+    note: 'remote streamable-HTTP — no Docker required. Pass your PAT via mcpServers config: {"github":{"url":"https://api.githubcopilot.com/mcp/","transport":"streamable-http","headers":{"Authorization":"Bearer <GITHUB_PERSONAL_ACCESS_TOKEN>"}}} (#2131)',
   },
   {
     name: "puppeteer",
@@ -53,7 +58,13 @@ export const MCP_CATALOG: CatalogEntry[] = [
 ];
 
 export function mcpCommandFor(entry: CatalogEntry): string {
-  const pkg = entry.package;
+  if (entry.url) {
+    // Remote entries need an Authorization header; --mcp strings can't carry
+    // headers, so show a mcpServers JSON snippet users can copy instead.
+    const transport = entry.transport ?? "sse";
+    return `# add to ~/.reasonix/config.json → mcpServers:\n"${entry.name}": { "url": "${entry.url}", "transport": "${transport}", "headers": { "Authorization": "Bearer <TOKEN>" } }`;
+  }
+  const pkg = entry.package ?? "";
   const tail = entry.userArgs ? ` ${entry.userArgs}` : "";
   return `--mcp "${entry.name}=npx -y ${pkg}${tail}"`;
 }

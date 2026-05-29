@@ -536,15 +536,23 @@ describe("fetchSmitheryDetail", () => {
 });
 
 describe("fallbackFromCatalog", () => {
-  it("maps every catalog entry to a stdio npm RegistryEntry", () => {
+  it("maps npm catalog entries to stdio npm RegistryEntry", () => {
     const entries = fallbackFromCatalog();
     expect(entries.length).toBeGreaterThan(0);
-    for (const e of entries) {
+    const npmEntries = entries.filter((e) => e.install?.runtime === "npm");
+    expect(npmEntries.length).toBeGreaterThan(0);
+    for (const e of npmEntries) {
       expect(e.source).toBe("local");
-      expect(e.install?.runtime).toBe("npm");
       expect(e.install?.transport).toBe("stdio");
       expect(e.install?.packageId).toBeTruthy();
     }
+  });
+
+  it("excludes remote (url-based) catalog entries from the fallback — they need headers that legacy mcp specs can't carry (#2131)", () => {
+    const entries = fallbackFromCatalog();
+    const remoteEntries = entries.filter((e) => e.install?.runtime === "remote");
+    expect(remoteEntries).toHaveLength(0);
+    expect(entries.find((e) => e.name === "github")).toBeUndefined();
   });
 });
 

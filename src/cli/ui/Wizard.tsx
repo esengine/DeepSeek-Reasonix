@@ -235,11 +235,30 @@ export function Wizard({
                   buildSpec(name, data.catalogArgs),
                 );
                 const prev = readConfig();
+                // Preserve specs that the wizard doesn't manage — either
+                // unrecognised custom entries OR catalog entries that are
+                // hidden from the MultiSelect (e.g. remote URL entries like
+                // GitHub) — so re-running setup never silently removes servers
+                // the user configured outside the wizard.
+                const visibleCatalogNames = new Set(mcpItems().map((i) => i.value));
+                // Parse the spec name (prefix before '=') so we can deduplicate by name.
+                const selectedNames = new Set(data.selectedCatalog);
+                const unmanaged = (prev.mcp ?? []).filter((s) => {
+                  const names = deriveInitialCatalog([s]);
+                  const specName = s.split("=")[0]?.trim() ?? "";
+                  // Drop if it matches a catalog entry that the wizard manages
+                  // (visible in MultiSelect) — the wizard's selection replaces it.
+                  // Also drop if the spec name collides with a newly-selected entry
+                  // to prevent duplicate namespace registrations (#2199).
+                  if (names.length > 0 && visibleCatalogNames.has(names[0]!)) return false;
+                  if (specName && selectedNames.has(specName)) return false;
+                  return true;
+                });
                 const next: ReasonixConfig = {
                   ...prev,
                   apiKey: data.apiKey,
                   theme: data.theme,
-                  mcp: specsNow,
+                  mcp: [...specsNow, ...unmanaged],
                   setupCompleted: true,
                 };
                 writeConfig(next);
@@ -680,7 +699,10 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
 }
 
 function mcpItems(): SelectItem<string>[] {
-  return MCP_CATALOG.map((entry) => {
+  // Remote entries (url-based) need headers that can't be persisted via the
+  // legacy mcp spec string; omit them from the wizard so users can't select
+  // a one-click config that would connect unauthenticated (#2131).
+  return MCP_CATALOG.filter((entry) => !entry.url).map((entry) => {
     const hintParts: string[] = [entry.summary];
     if (entry.userArgs) hintParts.push(t("wizard.mcpUserArgsHint", { arg: entry.userArgs }));
     if (entry.note) hintParts.push(entry.note);
@@ -698,14 +720,42 @@ function placeholderFor(entry: CatalogEntry): string {
   return entry.userArgs ?? "";
 }
 
+// Legacy npm packages for entries that have since moved to a remote URL — keeps
+// pre-existing specs recognised when re-running setup (#2131).
+const LEGACY_PACKAGE_ALIASES: Record<string, string> = {
+  "@modelcontextprotocol/server-github": "github",
+};
+
 function deriveInitialCatalog(existingSpecs: string[]): string[] {
-  const packageToName = new Map(MCP_CATALOG.map((e) => [e.package, e.name]));
+  const packageToName = new Map(
+    MCP_CATALOG.filter((e) => e.package).map((e) => [e.package!, e.name]),
+  );
+  const urlToName = new Map(MCP_CATALOG.filter((e) => e.url).map((e) => [e.url!, e.name]));
   const out: string[] = [];
   for (const spec of existingSpecs) {
+    let matched = false;
     for (const [pkg, name] of packageToName) {
       if (spec.includes(pkg)) {
         out.push(name);
+        matched = true;
         break;
+      }
+    }
+    if (!matched) {
+      for (const [url, name] of urlToName) {
+        if (spec.includes(url)) {
+          out.push(name);
+          matched = true;
+          break;
+        }
+      }
+    }
+    if (!matched) {
+      for (const [legacyPkg, name] of Object.entries(LEGACY_PACKAGE_ALIASES)) {
+        if (spec.includes(legacyPkg)) {
+          out.push(name);
+          break;
+        }
       }
     }
   }
@@ -722,7 +772,11 @@ export function buildSpec(name: string, argsByName: Record<string, string>): str
   if (!entry) return name;
   const userArg = entry.userArgs ? argsByName[name] : undefined;
   const tail = userArg ? ` ${quoteIfNeeded(userArg)}` : "";
-  return `${entry.name}=npx -y ${entry.package}${tail}`;
+  if (entry.url) {
+    const prefix = entry.transport === "streamable-http" ? "streamable+" : "";
+    return `${entry.name}=${prefix}${entry.url}`;
+  }
+  return `${entry.name}=npx -y ${entry.package ?? ""}${tail}`;
 }
 
 function quoteIfNeeded(s: string): string {

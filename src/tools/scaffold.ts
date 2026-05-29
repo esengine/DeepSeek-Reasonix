@@ -148,7 +148,7 @@ export function registerScaffoldTools(
   registry.register({
     name: "add_mcp_server",
     description:
-      'Register a new MCP server in the user\'s config (`mcp` array). Takes effect next session. Use stdio for local commands, sse/streamable-http for remote. Pass `from_catalog` (e.g. "filesystem", "github") to auto-fill command+args from the bundled catalog. Refuses name collisions.',
+      'Register a new MCP server in the user\'s config (`mcp` array). Takes effect next session. Use stdio for local commands, sse/streamable-http for remote. Pass `from_catalog` (e.g. "filesystem", "memory") to auto-fill command+args from the bundled catalog. Remote-only entries (e.g. github) require mcpServers headers and cannot be added via this tool. Refuses name collisions.',
     parameters: {
       type: "object",
       properties: {
@@ -180,7 +180,7 @@ export function registerScaffoldTools(
         from_catalog: {
           type: "string",
           description:
-            "Bundled catalog shortcut: filesystem / memory / github / puppeteer / everything. Fills command+args; user supplies user-args via `args`.",
+            "Bundled catalog shortcut: filesystem / memory / puppeteer / everything. Fills command+args; user supplies user-args via `args`. Remote-only entries like github require mcpServers headers and must be configured manually.",
         },
       },
       required: ["name"],
@@ -316,6 +316,11 @@ function buildSpecString(input: BuildSpecInput): { spec: string } | { error: str
         error: `unknown catalog entry: ${JSON.stringify(input.fromCatalog)} — known: ${known}`,
       };
     }
+    if (entry.url) {
+      return {
+        error: `catalog entry "${entry.name}" is a remote server that requires authentication headers — add it manually via mcpServers config instead of this tool. See the catalog note for the required mcpServers snippet.`,
+      };
+    }
     const userArgs = input.argv ?? [];
     if (entry.userArgs && userArgs.length === 0) {
       return {
@@ -323,7 +328,7 @@ function buildSpecString(input: BuildSpecInput): { spec: string } | { error: str
       };
     }
     const tail = userArgs.map(quoteIfNeeded).join(" ");
-    const body = `npx -y ${entry.package}${tail ? ` ${tail}` : ""}`;
+    const body = `npx -y ${entry.package ?? ""}${tail ? ` ${tail}` : ""}`;
     return { spec: `${input.name}=${body}` };
   }
 

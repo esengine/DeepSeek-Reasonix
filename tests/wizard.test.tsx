@@ -33,6 +33,14 @@ describe("Wizard.buildSpec → parseMcpSpec round-trip", () => {
     expect(parsed.args.at(-1)).toBe("/Users/me/My Documents");
   });
 
+  it("builds github spec using official streamable-HTTP endpoint (#2131 — no Docker required)", () => {
+    const spec = buildSpec("github", {});
+    expect(spec).toBe("github=streamable+https://api.githubcopilot.com/mcp/");
+    const parsed = parseMcpSpec(spec);
+    expect(parsed.transport).toBe("streamable-http");
+    expect(parsed.name).toBe("github");
+  });
+
   it("returns the name bare when the catalog entry is unknown", () => {
     // Defensive: if someone manually edits config.json and the wizard
     // sees an unfamiliar name on re-run, we degrade gracefully rather

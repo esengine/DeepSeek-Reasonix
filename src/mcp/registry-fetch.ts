@@ -232,14 +232,17 @@ export async function fetchSmitheryFirstPage(
 }
 
 export function fallbackFromCatalog(): RegistryEntry[] {
-  return MCP_CATALOG.map((e) => ({
+  // Remote (url-based) entries require headers that can't be persisted in the
+  // legacy mcp spec string; exclude them so `mcp install` doesn't write an
+  // unauthenticated remote config (#2131).
+  return MCP_CATALOG.filter((e) => !e.url).map((e) => ({
     name: e.name,
     title: e.name,
     description: e.summary,
     source: "local" as const,
     install: {
       runtime: "npm" as const,
-      packageId: e.package,
+      packageId: e.package ?? "",
       transport: "stdio" as const,
     },
   }));
