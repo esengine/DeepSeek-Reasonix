@@ -529,4 +529,77 @@ describe("normalizeMcpConfig: requestTimeoutMs (#2023)", () => {
     const spec = findByName(result, "normal")!;
     expect(spec.requestTimeoutMs).toBeUndefined();
   });
+
+  it("expands ${VAR} and ${env:VAR} in mcpServers headers (#2148)", () => {
+    const orig = process.env.TEST_MCP_TOKEN;
+    process.env.TEST_MCP_TOKEN = "secret-token-123";
+    try {
+      const cfg: ReasonixConfig = {
+        mcpServers: {
+          remote: {
+            url: "https://api.example.com/mcp",
+            transport: "sse",
+            headers: {
+              Authorization: "Bearer ${TEST_MCP_TOKEN}",
+              "X-Custom": "${env:TEST_MCP_TOKEN}",
+              Static: "no-expand",
+              Missing: "${NONEXISTENT_VAR_FOR_TEST}",
+            },
+          },
+        },
+      };
+      const result = normalizeMcpConfig(cfg);
+      const spec = findByName(result, "remote")!;
+      expect(spec.transport).toBe("sse");
+      if (spec.transport !== "sse") throw new Error("unreachable");
+      expect(spec.headers?.Authorization).toBe("Bearer secret-token-123");
+      expect(spec.headers?.["X-Custom"]).toBe("secret-token-123");
+      expect(spec.headers?.Static).toBe("no-expand");
+      expect(spec.headers?.Missing).toBe("${NONEXISTENT_VAR_FOR_TEST}");
+    } finally {
+      if (orig === undefined) {
+        // biome-ignore lint/performance/noDelete: restore env
+        delete process.env.TEST_MCP_TOKEN;
+      } else {
+        process.env.TEST_MCP_TOKEN = orig;
+      }
+    }
+  });
+
+  it("supports ${VAR:-default} and ${env:VAR:-default} fallback syntax (#2148)", () => {
+    // biome-ignore lint/performance/noDelete: ensure var is unset for test
+    delete process.env.MCP_HEADER_TEST_UNSET_VAR;
+    const orig = process.env.MCP_HEADER_TEST_SET_VAR;
+    process.env.MCP_HEADER_TEST_SET_VAR = "actual-value";
+    try {
+      const cfg: ReasonixConfig = {
+        mcpServers: {
+          remote: {
+            url: "https://api.example.com/mcp",
+            transport: "sse",
+            headers: {
+              A: "${MCP_HEADER_TEST_SET_VAR:-fallback}",
+              B: "${MCP_HEADER_TEST_UNSET_VAR:-dev-token}",
+              C: "${env:MCP_HEADER_TEST_SET_VAR:-fallback}",
+              D: "${env:MCP_HEADER_TEST_UNSET_VAR:-dev-token}",
+            },
+          },
+        },
+      };
+      const result = normalizeMcpConfig(cfg);
+      const spec = findByName(result, "remote")!;
+      if (spec.transport !== "sse") throw new Error("unreachable");
+      expect(spec.headers?.A).toBe("actual-value");
+      expect(spec.headers?.B).toBe("dev-token");
+      expect(spec.headers?.C).toBe("actual-value");
+      expect(spec.headers?.D).toBe("dev-token");
+    } finally {
+      if (orig === undefined) {
+        // biome-ignore lint/performance/noDelete: restore env
+        delete process.env.MCP_HEADER_TEST_SET_VAR;
+      } else {
+        process.env.MCP_HEADER_TEST_SET_VAR = orig;
+      }
+    }
+  });
 });

@@ -637,6 +637,28 @@ function normalizeStringRecord(value: unknown): Record<string, string> | undefin
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Expand env var references in header values (#2148). Supported forms:
+ *  `${VAR}`, `${env:VAR}`, `${VAR:-default}`, `${env:VAR:-default}`.
+ *  Unset variables with no default are left as-is so the error surfaces at bridge time. */
+function expandEnvInRecord(
+  record: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!record) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(record)) {
+    out[k] = v.replace(
+      /\$\{(?:env:)?([^}:]+)(?::-((?:[^}]|\}(?!\}))*))?\}/g,
+      (match, name: string, defaultVal?: string) => {
+        const expanded = process.env[name.trim()];
+        if (expanded !== undefined) return expanded;
+        if (defaultVal !== undefined) return defaultVal;
+        return match;
+      },
+    );
+  }
+  return out;
+}
+
 export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]): McpServerSpec[] {
   const result: McpServerSpec[] = [];
   const seen = new Set<string>();
@@ -691,7 +713,9 @@ export function normalizeMcpConfig(cfg: ReasonixConfig, extraLegacy?: string[]):
       let url = (serverCfg as McpServerConfig).url ?? "";
       const streamMatch = /^streamable\+(https?:\/\/.+)$/i.exec(url);
       if (streamMatch) url = streamMatch[1]!;
-      const headers = normalizeStringRecord((serverCfg as McpServerConfig).headers);
+      const headers = expandEnvInRecord(
+        normalizeStringRecord((serverCfg as McpServerConfig).headers),
+      );
       if (transport === "sse") {
         const spec: McpServerSpec = {
           transport: "sse",
