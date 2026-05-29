@@ -3147,7 +3147,7 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         // Verify resolved path stays inside the skills directory
         const resolvedTarget = resolve(targetPath);
         const resolvedDir = resolve(dir);
-        if (!resolvedTarget.startsWith(resolvedDir + "/") && resolvedTarget !== resolvedDir) {
+        if (!resolvedTarget.startsWith(`${resolvedDir}/`) && resolvedTarget !== resolvedDir) {
           emit({ type: "$error", message: `invalid skill name: ${msg.name}` }, tab.id);
           return;
         }
@@ -3177,8 +3177,8 @@ export async function desktopCommand(opts: DesktopOptions): Promise<void> {
         const resolvedFlat = resolve(flatPath);
         const resolvedDir = resolve(dir);
         if (
-          !(resolvedFolder.startsWith(resolvedDir + "/") || resolvedFolder === resolvedDir) &&
-          !(resolvedFlat.startsWith(resolvedDir + "/"))
+          !(resolvedFolder.startsWith(`${resolvedDir}/`) || resolvedFolder === resolvedDir) &&
+          !(resolvedFlat.startsWith(`${resolvedDir}/`))
         ) {
           emit({ type: "$error", message: `invalid skill name: ${msg.name}` }, tab.id);
           return;
