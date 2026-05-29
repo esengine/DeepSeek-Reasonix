@@ -2830,16 +2830,16 @@ function AppInner({
     onChoiceResolveRef: handleChoiceResolveRef,
   });
 
-    const handleSubmit = useCallback(
-      async (raw: string) => {
-        const qqIncoming = qq.parseSubmit(raw);
-        const incoming = resolveRemoteIncoming(
-          qqIncoming,
-          () => telegram.parseSubmit(raw),
-          () => weixin.parseSubmit(raw),
-          () => feishu.parseSubmit(raw),
-        );
-        if (!incoming) return;
+  const handleSubmit = useCallback(
+    async (raw: string) => {
+      const qqIncoming = qq.parseSubmit(raw);
+      const incoming = resolveRemoteIncoming(
+        qqIncoming,
+        () => telegram.parseSubmit(raw),
+        () => weixin.parseSubmit(raw),
+        () => feishu.parseSubmit(raw),
+      );
+      if (!incoming) return;
       let { text } = incoming;
       const fromQQ = "fromQQ" in incoming && incoming.fromQQ;
       const fromTelegram = "fromTelegram" in incoming && incoming.fromTelegram;
@@ -3118,7 +3118,7 @@ function AppInner({
                 ? weixin.sendInfo
                 : fromFeishu
                   ? feishu.sendInfo
-                : log.pushInfo,
+                  : log.pushInfo,
           postDoctor: (checks) => log.showDoctor(checks),
           postUsage: (args) => log.showUsageVerbose(args),
           postKeys: (args) =>
@@ -3374,10 +3374,10 @@ function AppInner({
       submittingRef.current = true;
       busyRef.current = true;
       setBusy(true);
-      qq.noteTurnFromQQ(fromQQ);
-      telegram.noteTurnFromTelegram(fromTelegram);
-      weixin.noteTurnFromWeixin(fromWeixin);
-      feishu.noteTurnFromFeishu(fromFeishu);
+      qq.noteTurnFromQQ(fromQQ === true);
+      telegram.noteTurnFromTelegram(fromTelegram === true);
+      weixin.noteTurnFromWeixin(fromWeixin === true);
+      feishu.noteTurnFromFeishu(fromFeishu === true);
       abortedThisTurn.current = false;
       // Seal the in-progress history entry so this turn's edits open
       // a new one —prior turns are preserved intact for /history and

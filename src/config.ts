@@ -1827,6 +1827,14 @@ export interface LoadedWeixinConfig {
   allowlist?: string[];
 }
 
+export interface LoadedFeishuConfig {
+  appId?: string;
+  appSecret?: string;
+  enabled?: boolean;
+  ownerOpenId?: string;
+  allowlist?: string[];
+}
+
 export function loadWeixinConfig(path: string = defaultConfigPath()): LoadedWeixinConfig {
   const envAllowlist = normalizeWeixinAllowlist(process.env.WEIXIN_ALLOWLIST);
   const fromEnv = {
@@ -1849,6 +1857,28 @@ export function loadWeixinConfig(path: string = defaultConfigPath()): LoadedWeix
     baseUrl: fromEnv.baseUrl ?? fromCfg.baseUrl ?? persisted?.baseUrl,
     enabled: fromCfg.enabled === true,
     ownerUserId,
+    allowlist,
+  };
+}
+
+export function loadFeishuConfig(path: string = defaultConfigPath()): LoadedFeishuConfig {
+  const envAllowlist = normalizeFeishuAllowlist(process.env.FEISHU_ALLOWLIST);
+  const fromEnv = {
+    appId: process.env.FEISHU_APP_ID?.trim() || undefined,
+    appSecret: process.env.FEISHU_APP_SECRET?.trim() || undefined,
+    ownerOpenId: normalizeFeishuOpenId(process.env.FEISHU_OWNER_OPENID),
+    allowlist: envAllowlist,
+  };
+  const fromCfg = readConfig(path).feishu ?? {};
+  const ownerOpenId = fromEnv.ownerOpenId ?? normalizeFeishuOpenId(fromCfg.ownerOpenId);
+  const allowlist = normalizeFeishuAllowlist(fromEnv.allowlist ?? fromCfg.allowlist)?.filter(
+    (openid) => openid !== ownerOpenId,
+  );
+  return {
+    appId: fromEnv.appId ?? fromCfg.appId,
+    appSecret: fromEnv.appSecret ?? fromCfg.appSecret,
+    enabled: fromCfg.enabled,
+    ownerOpenId,
     allowlist,
   };
 }
