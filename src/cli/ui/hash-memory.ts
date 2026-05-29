@@ -36,6 +36,8 @@ export function detectHashMemory(text: string): HashMemoryParse | null {
   // resolve that ambiguity in favor of memory write and document the
   // `\#` escape for users who want a literal H1 in the prompt.
   if (text.startsWith("##")) return null;
+  // `#<digits>` — GitHub issue/PR reference style (e.g. `#123`); pass through.
+  if (/^#\d/.test(text)) return null;
   // `#g <note>` — global memory. The space after `g` is mandatory so
   // notes like `#golang preference` route to project memory, not global.
   // `#g` alone (or `#g` + only whitespace) is treated as null — the

@@ -40,6 +40,12 @@ describe("detectHashMemory", () => {
     expect(detectHashMemory("#   ")).toBeNull();
   });
 
+  it("does NOT trigger on `#<digits>` GitHub issue/PR references", () => {
+    expect(detectHashMemory("#123")).toBeNull();
+    expect(detectHashMemory("#42 这个 bug 在哪个版本？")).toBeNull();
+    expect(detectHashMemory("#1")).toBeNull();
+  });
+
   it("does NOT trigger on `##` or higher markdown headings", () => {
     // Level-2+ headings pass through to the model so users can talk
     // about markdown without their headings being eaten.
