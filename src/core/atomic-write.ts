@@ -1,10 +1,4 @@
-import {
-  chmodSync,
-  copyFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, copyFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { chmod, copyFile, rename, unlink, writeFile } from "node:fs/promises";
 
 export interface AtomicWriteFs {

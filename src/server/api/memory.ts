@@ -44,7 +44,9 @@ function parseBody(raw: string): WriteBody {
 
 const SAFE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
-async function listMemoryFiles(dir: string): Promise<Array<{ name: string; size: number; mtime: number }>> {
+async function listMemoryFiles(
+  dir: string,
+): Promise<Array<{ name: string; size: number; mtime: number }>> {
   try {
     const entries = await readdir(dir);
     const mdFiles = entries.filter((f) => f.endsWith(".md"));

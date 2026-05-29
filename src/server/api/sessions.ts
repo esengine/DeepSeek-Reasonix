@@ -28,7 +28,10 @@ interface SessionMessage {
   toolName?: string;
 }
 
-async function parseTranscript(path: string, maxBytes = 4 * 1024 * 1024): Promise<SessionMessage[]> {
+async function parseTranscript(
+  path: string,
+  maxBytes = 4 * 1024 * 1024,
+): Promise<SessionMessage[]> {
   // Cap reads at 4 MB so a runaway session file (rare but possible)
   // doesn't tie up the server. The `head` of a long session is the
   // useful part; we surface a `truncated` flag in the response.
@@ -84,7 +87,9 @@ export async function handleSessions(
   // sidebar; users have reported 10 000+ entries in `~/.reasonix/sessions/`.
   if (method === "GET" && rest.length === 0) {
     const workspaceFilter = ctx.getCurrentCwd?.();
-    const sessions = workspaceFilter ? await listSessionsForWorkspaceAsync(workspaceFilter) : await listSessionsAsync();
+    const sessions = workspaceFilter
+      ? await listSessionsForWorkspaceAsync(workspaceFilter)
+      : await listSessionsAsync();
     const currentName = ctx.getSessionName?.() ?? null;
     return {
       status: 200,
@@ -132,7 +137,12 @@ export async function handleSessions(
 
   // Helper: check session file exists.
   const sessionExists = async (p: string): Promise<boolean> => {
-    try { await stat(p); return true; } catch { return false; }
+    try {
+      await stat(p);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   if (method === "POST" && rest[1] === "switch") {
@@ -142,7 +152,8 @@ export async function handleSessions(
         body: { error: "live session swap requires an attached CLI session." },
       };
     }
-    if (!(await sessionExists(path))) return { status: 404, body: { error: `no such session: ${name}` } };
+    if (!(await sessionExists(path)))
+      return { status: 404, body: { error: `no such session: ${name}` } };
     const result = ctx.switchSession(name);
     if (!result.ok) return { status: 500, body: { error: result.reason } };
     return { status: 200, body: { ok: true } };
@@ -161,7 +172,8 @@ export async function handleSessions(
         body: { error: "cannot delete the currently-active session — switch away first." },
       };
     }
-    if (!(await sessionExists(path))) return { status: 404, body: { error: `no such session: ${name}` } };
+    if (!(await sessionExists(path)))
+      return { status: 404, body: { error: `no such session: ${name}` } };
     const removed = await deleteSessionAsync(name);
     if (!removed) return { status: 500, body: { error: `failed to delete ${name}` } };
     ctx.audit?.({ ts: Date.now(), action: "delete-session", payload: { name } });
@@ -172,7 +184,8 @@ export async function handleSessions(
     if (rest.length !== 1) {
       return { status: 405, body: { error: `method ${method} not supported on this path` } };
     }
-    if (!(await sessionExists(path))) return { status: 404, body: { error: `no such session: ${name}` } };
+    if (!(await sessionExists(path)))
+      return { status: 404, body: { error: `no such session: ${name}` } };
     const messages = await parseTranscript(path);
     return {
       status: 200,

@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 import type { DashboardContext } from "../context.js";
@@ -80,7 +81,7 @@ async function walk(root: string, prefix: string): Promise<string[]> {
       if (name.startsWith(".") && depth === 0) continue;
       if (SKIP_DIRS.has(name)) continue;
       const full = join(path, name);
-      let st;
+      let st: Stats;
       try {
         st = await stat(full);
       } catch {

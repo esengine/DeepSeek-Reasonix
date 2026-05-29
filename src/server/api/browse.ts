@@ -1,8 +1,8 @@
 import { exec } from "node:child_process";
 import { readdir, stat } from "node:fs/promises";
-import { promisify } from "node:util";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { promisify } from "node:util";
 import type { ApiResult } from "../router.js";
 
 interface BrowseEntry {

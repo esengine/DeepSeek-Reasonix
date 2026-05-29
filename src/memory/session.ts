@@ -641,20 +641,14 @@ export async function readTailMessagesAsync(path: string, count: number): Promis
   }
 }
 
-export async function appendSessionMessageAsync(
-  name: string,
-  message: ChatMessage,
-): Promise<void> {
+export async function appendSessionMessageAsync(name: string, message: ChatMessage): Promise<void> {
   const path = sessionPath(name);
   await mkdir(dirname(path), { recursive: true });
   await appendFile(path, `${JSON.stringify(message)}\n`, "utf8");
   await chmodPrivateAsync(path);
 }
 
-export async function renameSessionAsync(
-  oldName: string,
-  newName: string,
-): Promise<boolean> {
+export async function renameSessionAsync(oldName: string, newName: string): Promise<boolean> {
   const safeOld = sanitizeName(oldName);
   const safeNew = sanitizeName(newName);
   if (safeOld === safeNew) return false;
@@ -702,10 +696,7 @@ export async function deleteSessionAsync(name: string): Promise<boolean> {
   }
 }
 
-export async function rewriteSessionAsync(
-  name: string,
-  messages: ChatMessage[],
-): Promise<void> {
+export async function rewriteSessionAsync(name: string, messages: ChatMessage[]): Promise<void> {
   const path = sessionPath(name);
   await mkdir(dirname(path), { recursive: true });
   const body = messages.map((m) => JSON.stringify(m)).join("\n");
@@ -768,17 +759,13 @@ export async function listSessionsAsync(opts?: {
         ];
       }),
     );
-    return results
-      .flat()
-      .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+    return results.flat().sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
   } catch {
     return [];
   }
 }
 
-export async function listSessionsForWorkspaceAsync(
-  workspace: string,
-): Promise<SessionInfo[]> {
+export async function listSessionsForWorkspaceAsync(workspace: string): Promise<SessionInfo[]> {
   return listSessionsAsync({
     workspaceFilter: workspace,
     includeLegacyWorkspaceMatches: true,

@@ -104,7 +104,10 @@ function defaultSkillPath(dir: string, name: string): ResolvedSkillPath {
   return { path: join(dir, name, SKILL_FILE), layout: "folder" };
 }
 
-async function listSkills(dir: string, scope: "project" | "custom" | "global"): Promise<SkillListEntry[]> {
+async function listSkills(
+  dir: string,
+  scope: "project" | "custom" | "global",
+): Promise<SkillListEntry[]> {
   const out: SkillListEntry[] = [];
   try {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -165,7 +168,9 @@ export async function handleSkills(
       status: 200,
       body: {
         global: tag(await listSkills(globalSkillsDir(), "global")),
-        custom: tag((await Promise.all(customRoots.map((root) => listSkills(root.dir, "custom")))).flat()),
+        custom: tag(
+          (await Promise.all(customRoots.map((root) => listSkills(root.dir, "custom")))).flat(),
+        ),
         project: cwd ? tag(await listSkills(projectSkillsDir(cwd), "project")) : [],
         builtin: [
           {

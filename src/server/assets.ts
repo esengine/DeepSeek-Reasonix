@@ -118,7 +118,10 @@ async function loadCss(token: string): Promise<string> {
 }
 
 /** Token HTML-attribute-escaped in case a future mint produces non-hex bytes. */
-export async function renderIndexHtml(token: string, mode: "standalone" | "attached"): Promise<string> {
+export async function renderIndexHtml(
+  token: string,
+  mode: "standalone" | "attached",
+): Promise<string> {
   const tpl = await loadIndexTemplate();
   const safeToken = token.replace(/[^a-zA-Z0-9]/g, "");
   // String.replace(string, replacement) only swaps the FIRST match. The
@@ -172,7 +175,9 @@ function isBinaryAsset(name: string): boolean {
   return false;
 }
 
-async function loadDistFile(name: string): Promise<{ body: string | Buffer; isBinary: boolean } | null> {
+async function loadDistFile(
+  name: string,
+): Promise<{ body: string | Buffer; isBinary: boolean } | null> {
   const paths = [join(ASSET_DIR, "dist", "assets", name), join(ASSET_DIR, "dist", name)];
   const binary = isBinaryAsset(name);
   for (const p of paths) {
