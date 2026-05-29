@@ -12,7 +12,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const binDir = join(here, "..", "src-tauri", "binaries");
 
 const PLAT = process.platform;
-const ARCH_RAW = process.arch;
+const ARCH_RAW = process.env.BUNDLE_ARCH || process.arch;
 const HOST_ARCH = ARCH_RAW === "arm64" ? "arm64" : ARCH_RAW === "x64" ? "x64" : null;
 
 if (!HOST_ARCH || !["win32", "darwin", "linux"].includes(PLAT)) {

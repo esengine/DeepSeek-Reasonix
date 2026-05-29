@@ -30,6 +30,7 @@ jobs:
           - { os: macos-15-intel, label: "macos-x64", rust: "x86_64-apple-darwin", tauri: "x86_64-apple-darwin" }
           - { os: macos-14, label: "macos-arm64", rust: "aarch64-apple-darwin", tauri: "aarch64-apple-darwin" }
           - { os: windows-latest, label: "windows-x64", rust: "x86_64-pc-windows-msvc", tauri: "x86_64-pc-windows-msvc" }
+          - { os: windows-latest, label: "windows-arm64", rust: "aarch64-pc-windows-msvc", tauri: "aarch64-pc-windows-msvc" }
     runs-on: ${{ matrix.target.os }}
     # secrets.* isn't accessible from step-level if:, so expose presence as a
     # job-level env. Treat "true"/"false" strings as booleans downstream.
@@ -92,6 +93,8 @@ jobs:
 
       - name: Download bundled Node runtime
         working-directory: desktop
+        env:
+          BUNDLE_ARCH: ${{ matrix.target.label == 'windows-arm64' && 'arm64' || '' }}
         run: npm run bundle:node
 
       - name: Verify bundled Node matches host arch (macOS)
