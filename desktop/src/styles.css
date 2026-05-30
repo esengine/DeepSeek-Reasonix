@@ -1057,6 +1057,8 @@ html[data-platform="macos"] .titlebar .tb-left {
   background: var(--accent);
   color: oklch(99% 0 0);
   box-shadow: var(--shadow-sm);
+  white-space: nowrap;
+  overflow: hidden;
 }
 .side-head .new-btn:hover {
   background: var(--accent-strong);
@@ -1066,6 +1068,7 @@ html[data-platform="macos"] .titlebar .tb-left {
 }
 .side-head .new-btn > span:not(.shortcut) {
   min-width: 0;
+  display: inline-block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
