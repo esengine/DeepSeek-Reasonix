@@ -64,7 +64,8 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 | Command | What it does |
 |---|---|
 | `/preset <auto\|flash\|pro>` | Switch model bundle. Bare opens picker |
-| `/model <id>` | Switch DeepSeek model id. Bare opens picker |
+| `/model <id\|workflow-policy>` | Switch DeepSeek model id. Bare opens picker; `workflow-policy` tunes workflow routing |
+| `/model workflow-policy [inherit\|flash\|pro\|mixed\|auto]` | Show or persist the default workflow model routing policy |
 | `/language <EN\|zh-CN>` (`/lang`) | Switch the runtime language |
 | `/theme <name>` | Show or persist terminal theme. Bare opens picker |
 
@@ -119,8 +120,31 @@ Type `/` mid-chat to open the picker. Aliases shown in parentheses. Code-mode-on
 | Command | What it does |
 |---|---|
 | `/jobs` | List background jobs |
+| `/workflows` | List session-local workflow runs started by `workflow` with `background: true` |
+| `/workflows show <runId>` | Inspect a workflow run: meta, mode, fan-out settings, status, duration, phases, agents, errors, and previews |
+| `/workflows attach <runId>` (`use`) | Attach a completed workflow result to the current conversation so the next prompt can reference it |
+| `/workflows continue <runId> [instruction]` | Attach a completed workflow result and immediately send the follow-up instruction to the model |
+| `/workflows stop <runId>` | Abort a running workflow |
+| `/workflows retry <runId>` | Start a new run from a completed, failed, or aborted run's original script |
+| `/workflows delete <runId>` | Remove a completed, failed, or aborted workflow from the session and persisted store |
+| `/workflows save <runId> project\|user [name]` | Save the run's script to `.reasonix/workflows/<name>.js` or `~/.reasonix/workflows/<name>.js` |
+| `/workflows run <name> [input] [--concurrency N] [--max-agents N] [--mode run\|dry_run\|validate_only] [--background] [--tool-mode read_only\|full]` | Start a saved workflow, pass non-flag trailing text as `args.input`, and control fan-out directly |
 | `/kill <id>` | Stop a background job (SIGTERM → SIGKILL) |
 | `/logs <id> [lines]` | Tail a job's output (default 80 lines) |
+
+### Dynamic workflows (code mode)
+
+Reasonix has a built-in `workflow` tool for multi-agent repository work. Use it for repository-wide audits, large refactors, migrations, multi-module bug hunts, architecture or security review, test coverage sweeps, and explicit requests for dynamic workflows, parallel agents, subagents, or fan-out analysis. Do not use it for simple single-file edits, small fixes, direct Q&A, formatting-only tasks, or when the user asks not to spawn subagents.
+
+Workflow scripts are JavaScript snippets that start with `export const meta = { name, description }` and can call `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()`, `args`, `cwd`, and `budget`. `agent()` uses Reasonix's internal `spawnSubagent()` runtime; it does not start a `reasonix run` child process.
+
+Use `parallel([() => agent(...), () => agent(...)])` for independent work. Consecutive `await agent(...)` calls are serial and should only be used when later steps depend on earlier results. For long runs, call the tool with `background: true`, then inspect it with `/workflows`. After a background run completes, use `/workflows attach <runId>` to bring its result into the current conversation, or `/workflows continue <runId> <instruction>` to continue from that result immediately.
+
+The `workflow` tool accepts `concurrency` and `max_agents` when the model invokes it. Defaults are `concurrency: 3` and `max_agents: 8`. Higher fan-out runs are allowed, but formal `run` mode asks for confirmation when `concurrency > 4` or `max_agents > 8`. Saved workflows can be run directly with `/workflows run <name> [input] --concurrency N --max-agents N --mode run|dry_run|validate_only --background --tool-mode read_only|full`; saved workflow names are suggested after `/workflows run`.
+
+Use `verifyFindings([...])` for independent verifier subagents, `adversarialReview(result)` to challenge a draft result, and `synthesize(inputs)` for final synthesis. These helpers are wrappers around internal `agent()` calls and still count toward `max_agents`.
+
+Workflow model routing defaults to `/model workflow-policy mixed`: exploration agents use `deepseek-v4-flash`, while verifier, adversarial, and synthesis agents route to `deepseek-v4-pro`. Use `/model workflow-policy` to show the current policy, or `/model workflow-policy inherit|flash|pro|mixed|auto` to persist a new default. A single workflow tool call can override it with `model_policy`; workflow scripts can be more specific with `phase({ title, model })`, `meta.phases[].model`, or `agent(..., { model })`.
 
 ### Advanced
 

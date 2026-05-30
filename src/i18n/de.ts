@@ -405,6 +405,10 @@ export const de: TranslationSchema = {
       ...EN.slash.jobs,
       description: "Hintergrund-Jobs auflisten, die mit run_background gestartet wurden",
     },
+    workflows: {
+      ...EN.slash.workflows,
+      description: "Workflows auflisten, prüfen, stoppen, speichern oder starten",
+    },
     kill: {
       ...EN.slash.kill,
       argsHint: "Bezeichner",

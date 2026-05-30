@@ -440,6 +440,10 @@ export const EN: TranslationSchema = {
       argsHint: "[review|auto|yolo]",
     },
     jobs: { description: "list background jobs started by run_background" },
+    workflows: {
+      description: "list, inspect, stop, save, or run workflows",
+      argsHint: "[show|stop|save|run] [runId|name]",
+    },
     kill: {
       description: "stop a background job by id (SIGTERM → SIGKILL after grace)",
       argsHint: "<id>",

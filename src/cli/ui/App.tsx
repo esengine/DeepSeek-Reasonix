@@ -217,8 +217,25 @@ import { useSubagent } from "./useSubagent.js";
 
 const STASH_HINT_CARD_ID = "composer-stash-hint";
 
-function isBusyPromptCommand(text: string): boolean {
+export function parseBusyWorkflowSlashCommand(text: string): ReturnType<typeof parseSlash> | null {
+  const slash = parseSlash(text.trimStart());
+  return slash?.cmd === "workflows" ? slash : null;
+}
+
+export function canCompleteWorkflowPickerWhileBusy(args: {
+  slashCommand?: string;
+  slashArgCommand?: string;
+}): boolean {
+  return args.slashCommand === "workflows" || args.slashArgCommand === "workflows";
+}
+
+function isBusyWorkflowSlashCommand(text: string): boolean {
+  return parseBusyWorkflowSlashCommand(text) !== null;
+}
+
+export function isBusyPromptCommand(text: string): boolean {
   const trimmed = text.trimStart();
+  if (isBusyWorkflowSlashCommand(trimmed)) return false;
   return trimmed.startsWith("/") || trimmed.startsWith("#") || detectBangCommand(trimmed) !== null;
 }
 
@@ -287,6 +304,15 @@ export interface AppProps {
      * isn't blocked on disk I/O.
      */
     reBootstrapSemantic?: (rootDir: string) => Promise<{ enabled: boolean }>;
+    workflowManager?: import("../../workflow/manager.js").WorkflowRunManager;
+    workflowRunner?: import("../../workflow/types.js").WorkflowAgentRunner;
+    workflowRunnerForToolMode?: (
+      toolMode: import("../../workflow/types.js").WorkflowToolMode,
+    ) => import("../../workflow/types.js").WorkflowAgentRunner;
+    workflowModelPolicy?: () => import("../../workflow/types.js").WorkflowModelPolicy;
+    setWorkflowModelPolicy?: (
+      policy: import("../../workflow/types.js").WorkflowModelPolicy,
+    ) => void;
     /** Notify the launcher/root wrapper that the workspace root changed so session switches remount into the new root. */
     onRootChange?: (newRoot: string) => void;
   };
@@ -676,6 +702,17 @@ function AppInner({
     timeoutSec?: number;
     waitSec?: number;
   } | null>(null);
+  const [pendingWorkflowConfirm, setPendingWorkflowConfirm] = useState<{
+    id: number;
+    name: string;
+    description: string;
+    mode: string;
+    toolMode: string;
+    background: boolean;
+    concurrency: number;
+    maxAgents: number;
+    phases: string[];
+  } | null>(null);
   /** Outside-sandbox file access the model asked for (#684). Non-null renders PathConfirm and blocks the gate behind it. */
   const [pendingPath, setPendingPath] = useState<{
     id: number;
@@ -779,6 +816,7 @@ function AppInner({
   // hotkeys (chat-scroll, etc.) so they don't fire behind a picker.
   const modalOpen =
     !!pendingShell ||
+    !!pendingWorkflowConfirm ||
     !!pendingPlan ||
     !!pendingReviseEditor ||
     !!pendingSessionsPicker ||
@@ -804,6 +842,7 @@ function AppInner({
   // the bottom rows.
   const noTakeoverOverlay =
     !pendingShell &&
+    !pendingWorkflowConfirm &&
     !pendingPath &&
     !pendingSessionsPicker &&
     !pendingEditPicker &&
@@ -1968,7 +2007,27 @@ function AppInner({
       setLiveExpand((v) => !v);
       return;
     }
-    if (busy) return;
+    if (busy) {
+      if (
+        key.tab &&
+        slashArgMatches &&
+        slashArgMatches.length > 0 &&
+        slashArgContext &&
+        canCompleteWorkflowPickerWhileBusy({ slashArgCommand: slashArgContext.spec.cmd })
+      ) {
+        const sel = slashArgMatches[slashArgSelected] ?? slashArgMatches[0];
+        if (sel) pickSlashArg(sel);
+        return;
+      }
+      if (key.tab && slashMatches && slashMatches.length > 0) {
+        const sel = slashMatches[slashSelected] ?? slashMatches[0];
+        if (sel && canCompleteWorkflowPickerWhileBusy({ slashCommand: sel.cmd })) {
+          setInput(`/${sel.cmd}`);
+        }
+        return;
+      }
+      return;
+    }
     // ShellConfirm owns the full keyboard while it's showing. If we
     // kept handling ↑/↓ / Tab here they'd race with its SingleSelect
     // — the picker would move AND history recall would fire into the
@@ -2822,6 +2881,50 @@ function AppInner({
       }
       if (busy || submittingRef.current) {
         if (busy && text.trim()) {
+          const workflowSlash = parseBusyWorkflowSlashCommand(text);
+          if (workflowSlash) {
+            setInput("");
+            resetCursor();
+            const sink = eventSinkRef.current;
+            const eventizer = eventizerRef.current;
+            if (sink && eventizer) {
+              sink.append(
+                eventizer.emitSlashInvoked(
+                  loop.currentTurn,
+                  workflowSlash.cmd,
+                  workflowSlash.args.join(" "),
+                ),
+              );
+            }
+            setSlashUsage(recordSlashUse(workflowSlash.cmd));
+            const result = handleSlash(workflowSlash.cmd, workflowSlash.args, loop, {
+              codeRoot: codeMode ? currentRootDir : undefined,
+              workflowManager: codeMode?.workflowManager,
+              workflowRunner: codeMode?.workflowRunner,
+              workflowRunnerForToolMode: codeMode?.workflowRunnerForToolMode,
+              workflowModelPolicy: codeMode?.workflowModelPolicy,
+              dispatch: agentStore.dispatch,
+            });
+            const outcome = applySlashResult(result, {
+              log,
+              stdoutWrite: (chunk) => stdout?.write(chunk),
+              pendingEdits,
+              syncPendingCount,
+              session: session ?? null,
+              codeModeOn: !!codeMode,
+              isLoopActive,
+              stopLoop,
+              quitProcess,
+              pushHistory,
+              resetPendingModals,
+              text,
+            });
+            if (fromQQ && result.info) qq.sendText(result.info);
+            if (fromTelegram && result.info) telegram.sendText(result.info);
+            if (fromWeixin && result.info) weixin.sendText(result.info);
+            if (outcome.kind === "resubmit") setQueuedSubmit(outcome.text);
+            return;
+          }
           if (isBusyPromptCommand(text)) {
             log.pushInfo(t("app.steerCommandRejected"));
             return;
@@ -3069,6 +3172,11 @@ function AppInner({
             status: weixin.status,
           },
           sessionId: session,
+          workflowManager: codeMode?.workflowManager,
+          workflowRunner: codeMode?.workflowRunner,
+          workflowRunnerForToolMode: codeMode?.workflowRunnerForToolMode,
+          workflowModelPolicy: codeMode?.workflowModelPolicy,
+          setWorkflowModelPolicy: codeMode?.setWorkflowModelPolicy,
           getEngineeringLifecycleSnapshot: codeMode
             ? () => engineeringLifecycleRef.current?.snapshot() ?? null
             : undefined,
@@ -3739,6 +3847,21 @@ function AppInner({
     [pendingShell, codeMode, currentRootDir, log],
   );
 
+  const handleWorkflowConfirm = useCallback(
+    (choice: ShellConfirmChoice, denyContext?: string) => {
+      const pending = pendingWorkflowConfirm;
+      if (!pending) return;
+      setPendingWorkflowConfirm(null);
+      if (choice === "deny") {
+        pauseGate.resolve(pending.id, { type: "deny", denyContext });
+      } else {
+        log.pushInfo(`starting workflow ${pending.name}`);
+        pauseGate.resolve(pending.id, { type: "run_once" });
+      }
+    },
+    [pendingWorkflowConfirm, log],
+  );
+
   /** PathConfirm callback —mirrors handleShellConfirm. Resolves the gate, no synthetic user message. */
   const handlePathConfirm = useCallback(
     (choice: "run_once" | "always_allow" | "deny", denyContext?: string) => {
@@ -4079,6 +4202,30 @@ function AppInner({
             cwd: p.cwd,
             timeoutSec: p.timeoutSec,
             waitSec: p.waitSec,
+          });
+          break;
+        }
+        case "workflow_confirm": {
+          const p = payload as {
+            name: string;
+            description: string;
+            mode: string;
+            toolMode: string;
+            background: boolean;
+            concurrency: number;
+            maxAgents: number;
+            phases: string[];
+          };
+          setPendingWorkflowConfirm({
+            id: request.id,
+            name: p.name,
+            description: p.description,
+            mode: p.mode,
+            toolMode: p.toolMode,
+            background: p.background,
+            concurrency: p.concurrency,
+            maxAgents: p.maxAgents,
+            phases: p.phases,
           });
           break;
         }
@@ -4769,6 +4916,24 @@ function AppInner({
                     },
                   })}
                   onChoose={handleShellConfirm}
+                />
+              ) : pendingWorkflowConfirm ? (
+                <ShellConfirm
+                  prompt={toApprovalPrompt({
+                    id: pendingWorkflowConfirm.id,
+                    kind: "workflow_confirm",
+                    payload: {
+                      name: pendingWorkflowConfirm.name,
+                      description: pendingWorkflowConfirm.description,
+                      mode: pendingWorkflowConfirm.mode,
+                      toolMode: pendingWorkflowConfirm.toolMode,
+                      background: pendingWorkflowConfirm.background,
+                      concurrency: pendingWorkflowConfirm.concurrency,
+                      maxAgents: pendingWorkflowConfirm.maxAgents,
+                      phases: pendingWorkflowConfirm.phases,
+                    },
+                  })}
+                  onChoose={handleWorkflowConfirm}
                 />
               ) : pendingPath ? (
                 <PathConfirm

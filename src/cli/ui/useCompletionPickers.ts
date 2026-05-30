@@ -12,6 +12,7 @@ import {
 } from "../../at-mentions.js";
 import { type ReasoningEffort, loadResolvedSkillPaths } from "../../config.js";
 import { SkillStore } from "../../skills.js";
+import { loadSavedWorkflows } from "../../workflow/saved.js";
 import { effortArgsHintFor } from "./effort-choices.js";
 import {
   type McpServerSummary,
@@ -91,6 +92,7 @@ export interface UseCompletionPickersResult {
 const SEARCH_DEBOUNCE_MS = 80;
 const SEARCH_FLUSH_MS = 50;
 const SEARCH_RESULT_CAP = 200;
+const MODEL_COMMAND_ARGS = ["workflow-policy"] as const;
 
 /** Picker priority: @ > slash-arg > slash-name. Detection already disambiguates by buffer shape. */
 export function useCompletionPickers({
@@ -248,7 +250,7 @@ export function useCompletionPickers({
       });
     }
     if (completer === "models") {
-      const all = models ?? [];
+      const all = [...MODEL_COMMAND_ARGS, ...(models ?? [])];
       if (partial && all.some((m) => m.toLowerCase() === needle)) return null;
       if (!partial) return all.slice(0, 40);
       return all.filter((m) => m.toLowerCase().includes(needle)).slice(0, 40);
@@ -282,6 +284,16 @@ export function useCompletionPickers({
         customSkillPaths: loadResolvedSkillPaths(baseDir),
       });
       const names = store.list().map((s) => s.name);
+      if (partial && names.some((n) => n.toLowerCase() === needle)) return null;
+      if (!partial) return names.slice(0, 40);
+      return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);
+    }
+    if (completer === "workflows") {
+      const baseDir = codeMode?.rootDir ?? process.cwd();
+      const names = loadSavedWorkflows({
+        rootDir: baseDir,
+        homeDir: process.env.HOME ?? baseDir,
+      }).map((workflow) => workflow.name);
       if (partial && names.some((n) => n.toLowerCase() === needle)) return null;
       if (!partial) return names.slice(0, 40);
       return names.filter((n) => n.toLowerCase().includes(needle)).slice(0, 40);

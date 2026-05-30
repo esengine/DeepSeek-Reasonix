@@ -33,6 +33,13 @@ describe("buildCodeToolset", () => {
     await toolset.jobs.shutdown();
   });
 
+  it("returns a workflow manager from the code toolset", async () => {
+    const toolset = await buildCodeToolset({ rootDir: tmpRoot });
+    expect(toolset.workflowManager).toBeDefined();
+    expect(toolset.tools.has("workflow")).toBe(true);
+    await toolset.jobs.shutdown();
+  });
+
   it("editMode=plan flips the registry's plan-mode gate so write tools refuse to dispatch", async () => {
     writeFileSync(cfgPath, JSON.stringify({ editMode: "plan" }), "utf8");
     const toolset = await buildCodeToolset({ rootDir: tmpRoot, configPath: cfgPath });

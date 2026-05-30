@@ -1,9 +1,12 @@
 import {
   type ReasoningEffort,
   isReasoningEffort,
+  isWorkflowModelPolicy,
+  loadWorkflowModelPolicy,
   saveMaxOutputTokens,
   saveModel,
   saveReasoningEffort,
+  saveWorkflowModelPolicy,
 } from "@/config.js";
 import { t } from "@/i18n/index.js";
 import { effortChoicesForBaseUrl } from "../../effort-choices.js";
@@ -12,6 +15,21 @@ import type { SlashHandler } from "../dispatch.js";
 const model: SlashHandler = (args, loop, ctx) => {
   const id = args[0];
   const known = ctx.models ?? null;
+  if (id === "workflow-policy") {
+    const raw = args[1]?.trim().toLowerCase() ?? "";
+    const current = ctx.workflowModelPolicy?.() ?? loadWorkflowModelPolicy(ctx.configPath);
+    if (!raw) return { info: `workflow model policy → ${current}` };
+    if (!isWorkflowModelPolicy(raw)) {
+      return { info: "usage: /model workflow-policy inherit|flash|pro|mixed|auto" };
+    }
+    ctx.setWorkflowModelPolicy?.(raw);
+    try {
+      saveWorkflowModelPolicy(raw, ctx.configPath);
+    } catch {
+      /* disk full / perms — runtime change still took effect */
+    }
+    return { info: `workflow model policy → ${raw}` };
+  }
   if (!id) {
     return { openModelPicker: true };
   }

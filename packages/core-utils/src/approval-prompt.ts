@@ -24,6 +24,7 @@ import type {
 export type ApprovalPromptKind =
   | "shell"
   | "path"
+  | "workflow"
   | "plan"
   | "checkpoint"
   | "revision"
@@ -70,6 +71,8 @@ export function toApprovalPrompt(req: {
       return shellPrompt(req.id, payload, true);
     case "path_access":
       return pathPrompt(req.id, payload);
+    case "workflow_confirm":
+      return workflowPrompt(req.id, payload);
     case "plan_proposed":
       return planPrompt(req.id, payload);
     case "plan_checkpoint":
@@ -90,6 +93,46 @@ export function toApprovalPrompt(req: {
         actions: [{ id: "deny", label: "Dismiss", kind: "reject" }],
       };
   }
+}
+
+function workflowPrompt(id: number, payload: Record<string, unknown>): ApprovalPrompt {
+  const name = String(payload.name ?? "");
+  const description = String(payload.description ?? "");
+  const mode = String(payload.mode ?? "");
+  const toolMode = String(payload.toolMode ?? "");
+  const background = payload.background === true;
+  const concurrency = typeof payload.concurrency === "number" ? payload.concurrency : 0;
+  const maxAgents = typeof payload.maxAgents === "number" ? payload.maxAgents : 0;
+
+  const meta: Record<string, string> = {
+    mode,
+    toolMode,
+    background: background ? "yes" : "no",
+    concurrency: String(concurrency),
+    maxAgents: String(maxAgents),
+  };
+
+  return {
+    id,
+    kind: "workflow",
+    tone: toolMode === "full" ? "warn" : "accent",
+    title: "Run workflow",
+    subtitle: name,
+    preview: description,
+    meta,
+    actions: [
+      { id: "run_once", label: "Run workflow", kind: "allow_once" },
+      {
+        id: "deny",
+        label: "Deny",
+        kind: "reject",
+        secondaryInput: {
+          hint: "Reason for denial (optional)",
+          required: false,
+        },
+      },
+    ],
+  };
 }
 
 function shellPrompt(
@@ -333,7 +376,8 @@ export function resolveApprovalPrompt(
 
   switch (prompt.kind) {
     case "shell":
-    case "path": {
+    case "path":
+    case "workflow": {
       if (action.kind === "reject") {
         return { type: "deny", denyContext: secondaryInput };
       }
@@ -377,6 +421,7 @@ function safeDefaultForKind(
   switch (kind) {
     case "shell":
     case "path":
+    case "workflow":
       return { type: "deny" };
     case "plan":
       return { type: "cancel" };

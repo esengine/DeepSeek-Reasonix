@@ -115,6 +115,43 @@ export type {
   SubagentResultLike,
   SubagentSessionSummary,
 } from "./telemetry/subagent-distillation.js";
+export { ReasonixWorkflowAgentRunner } from "./workflow/agent-runner.js";
+export { WorkflowRunManager } from "./workflow/manager.js";
+export type {
+  WorkflowRunManagerOptions,
+  WorkflowRunStartOptions,
+} from "./workflow/manager.js";
+export { parseWorkflowScript } from "./workflow/parser.js";
+export { runWorkflow } from "./workflow/runtime.js";
+export { loadSavedWorkflows, saveWorkflowScript, savedWorkflowPath } from "./workflow/saved.js";
+export { WorkflowRunStore } from "./workflow/store.js";
+export type {
+  SavedWorkflow,
+  WorkflowStorageOptions,
+} from "./workflow/saved.js";
+export type { WorkflowRunStoreOptions } from "./workflow/store.js";
+export type {
+  WorkflowAgentOptions,
+  WorkflowAgentResult,
+  WorkflowAgentRunner,
+  WorkflowAgentSnapshot,
+  WorkflowAgentType,
+  WorkflowFinding,
+  WorkflowMeta,
+  WorkflowMetaPhase,
+  WorkflowMode,
+  WorkflowPhaseSnapshot,
+  WorkflowRunEvent,
+  WorkflowRunSnapshot,
+  WorkflowRunStatus,
+  WorkflowRunOptions,
+  WorkflowRunResult,
+  WorkflowSaveTarget,
+  WorkflowToolMode,
+  WorkflowVerifiedFinding,
+} from "./workflow/types.js";
+export { registerWorkflowTool } from "./tools/workflow.js";
+export type { WorkflowToolOptions } from "./tools/workflow.js";
 export {
   NeedsConfirmationError,
   detectShellOperator,

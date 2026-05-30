@@ -421,6 +421,10 @@ export const zhCN: TranslationSchema = {
       argsHint: "[review|auto|yolo]",
     },
     jobs: { description: "列出 run_background 启动的后台作业" },
+    workflows: {
+      description: "列出、查看、停止、保存或运行 workflow",
+      argsHint: "[show|stop|save|run] [runId|name]",
+    },
     kill: {
       description: "按 ID 停止后台作业（SIGTERM → 宽限期后 SIGKILL）",
       argsHint: "<id>",

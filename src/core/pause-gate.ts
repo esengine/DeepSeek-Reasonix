@@ -35,6 +35,7 @@ interface PauseResponseMap {
   run_command: ConfirmationChoice;
   run_background: ConfirmationChoice;
   path_access: ConfirmationChoice;
+  workflow_confirm: ConfirmationChoice;
   plan_proposed: PlanVerdict;
   plan_checkpoint: CheckpointVerdict;
   plan_revision: RevisionVerdict;
@@ -46,6 +47,16 @@ type PauseKind = keyof PauseResponseMap;
 interface PausePayloadMap {
   run_command: { command: string; cwd?: string; timeoutSec?: number };
   run_background: { command: string; cwd?: string; waitSec?: number };
+  workflow_confirm: {
+    name: string;
+    description: string;
+    mode: string;
+    toolMode: string;
+    background: boolean;
+    concurrency: number;
+    maxAgents: number;
+    phases: string[];
+  };
   path_access: {
     /** Absolute path the tool wants to touch. */
     path: string;
@@ -206,6 +217,7 @@ function safeCancelVerdict(kind: PauseKind): unknown {
     case "run_command":
     case "run_background":
     case "path_access":
+    case "workflow_confirm":
       return { type: "deny" };
     case "plan_proposed":
       return { type: "cancel" };

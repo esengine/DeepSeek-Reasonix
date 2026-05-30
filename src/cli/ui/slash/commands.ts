@@ -28,6 +28,7 @@ const SLASH_GROUP_RANK = new Map<SlashGroup, number>(
 );
 const THEME_ARG_COMPLETER = ["auto", ...listThemeNames()] as const;
 const THEME_ARGS_HINT = `[${THEME_ARG_COMPLETER.join("|")}]`;
+const WORKFLOW_MODEL_POLICY_ARG_COMPLETER = ["inherit", "flash", "pro", "mixed", "auto"] as const;
 
 export function orderSlashCommandsByGroup<T extends Pick<SlashCommandSpec, "group">>(
   commands: readonly T[],
@@ -74,8 +75,9 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   {
     cmd: "model",
     group: "setup",
-    argsHint: "<id>",
-    summary: "switch DeepSeek model id. Bare opens picker.",
+    argsHint: "<id|workflow-policy [inherit|flash|pro|mixed|auto]>",
+    summary:
+      "switch DeepSeek model id. Bare opens picker. Use workflow-policy to tune workflow routing.",
     argCompleter: "models",
   },
   {
@@ -340,6 +342,26 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
     contextual: "code",
   },
   {
+    cmd: "workflows",
+    group: "jobs",
+    argsHint:
+      "[list|show|attach|continue|stop|retry|delete|save|run] [runId|name] [--concurrency N --max-agents N]",
+    summary: "list, inspect, attach, continue, stop, save, or run workflows",
+    argCompleter: [
+      "list",
+      "show",
+      "attach",
+      "use",
+      "continue",
+      "stop",
+      "retry",
+      "delete",
+      "save",
+      "run",
+    ],
+    contextual: "code",
+  },
+  {
     cmd: "kill",
     group: "jobs",
     argsHint: "<id>",
@@ -482,6 +504,30 @@ export function detectSlashArgContext(input: string, codeMode = false): SlashArg
     (s) => s.cmd === cmdName && (s.contextual !== "code" || codeMode),
   );
   if (!spec) return null;
+  if (cmdName === "model") {
+    const policyMatch = /^workflow-policy\s+(\S*)$/.exec(tail);
+    if (policyMatch) {
+      const partial = policyMatch[1] ?? "";
+      return {
+        spec: { ...spec, argCompleter: WORKFLOW_MODEL_POLICY_ARG_COMPLETER },
+        partial,
+        partialOffset: input.length - partial.length,
+        kind: "picker",
+      };
+    }
+  }
+  if (cmdName === "workflows") {
+    const runMatch = /^run\s+(\S*)$/.exec(tail);
+    if (runMatch) {
+      const partial = runMatch[1] ?? "";
+      return {
+        spec: { ...spec, argCompleter: "workflows" },
+        partial,
+        partialOffset: input.length - partial.length,
+        kind: "picker",
+      };
+    }
+  }
   const hasInternalSpace = /\s/.test(tail);
   const partialOffset = input.length - tail.length;
   if (hasInternalSpace) {

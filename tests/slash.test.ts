@@ -118,6 +118,28 @@ describe("handleSlash", () => {
     expect(r.info).toMatch(/\/compact/);
   });
 
+  it("/model workflow-policy persists workflow model routing policy", () => {
+    const loop = makeLoop();
+    const path = join(mkdtempSync(join(tmpdir(), "reasonix-workflow-policy-")), "config.json");
+    try {
+      const r = handleSlash("model", ["workflow-policy", "flash"], loop, { configPath: path });
+
+      expect(r.info).toMatch(/workflow model policy.*flash/i);
+      expect(readConfig(path).workflow?.modelPolicy).toBe("flash");
+    } finally {
+      rmSync(join(path, ".."), { recursive: true, force: true });
+    }
+  });
+
+  it("/model workflow-policy shows and validates policy values", () => {
+    const loop = makeLoop();
+
+    expect(handleSlash("model", ["workflow-policy"], loop).info).toMatch(/mixed/);
+    expect(handleSlash("model", ["workflow-policy", "bogus"], loop).info).toMatch(
+      /inherit\|flash\|pro\|mixed\|auto/,
+    );
+  });
+
   it("/help groups commands in the shared order", () => {
     const info = handleSlash("help", [], makeLoop()).info ?? "";
     const groupHeaders = [
@@ -548,6 +570,24 @@ describe("handleSlash", () => {
       expect(ctx).not.toBeNull();
       expect(ctx!.kind).toBe("picker");
       expect(ctx!.spec.argCompleter).toBe("models");
+      expect(ctx!.spec.argsHint).toContain("mixed");
+    });
+
+    it("activates policy picker for /model workflow-policy", () => {
+      const ctx = detectSlashArgContext("/model workflow-policy m");
+      expect(ctx).not.toBeNull();
+      expect(ctx!.kind).toBe("picker");
+      expect(ctx!.spec.argCompleter).toEqual(["inherit", "flash", "pro", "mixed", "auto"]);
+      expect(ctx!.partial).toBe("m");
+      expect(ctx!.partialOffset).toBe("/model workflow-policy ".length);
+    });
+
+    it("activates workflow subcommand picker for /workflows", () => {
+      const ctx = detectSlashArgContext("/workflows con", true);
+      expect(ctx).not.toBeNull();
+      expect(ctx!.kind).toBe("picker");
+      expect(ctx!.spec.argCompleter).toContain("continue");
+      expect(ctx!.partial).toBe("con");
     });
 
     it("activates enum picker for /plan in code mode", () => {
@@ -700,7 +740,7 @@ describe("handleSlash", () => {
     // Case-insensitive.
     expect(suggestSlashCommands("HE").map((s) => s.cmd)).toEqual(["help"]);
     // Empty prefix returns the full non-advanced release list, including code commands.
-    expect(suggestSlashCommands("", true)).toHaveLength(48);
+    expect(suggestSlashCommands("", true)).toHaveLength(49);
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("logs");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("language");
     expect(suggestSlashCommands("", true).map((s) => s.cmd)).toContain("weixin");
