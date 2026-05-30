@@ -96,6 +96,29 @@ export class ImmutablePrefix {
     return true;
   }
 
+  /** Batch variant of `addTool` — adds multiple specs in a single operation
+   *  with one cache invalidation. Callers that register N tools at once
+   *  (e.g. MCP server startup) should use this instead of looping `addTool`
+   *  to avoid N separate cache-miss turns.
+   *
+   *  Returns the number of tools actually added (skips duplicates and
+   *  nameless specs). */
+  addTools(specs: readonly ToolSpec[]): number {
+    const existing = new Set(this._toolSpecs.map((t) => t.function?.name).filter(Boolean));
+    const fresh: ToolSpec[] = [];
+    for (const spec of specs) {
+      const name = spec.function?.name;
+      if (!name || existing.has(name)) continue;
+      existing.add(name);
+      fresh.push(spec);
+    }
+    if (fresh.length === 0) return 0;
+    this._toolSpecs = sortToolSpecs([...this._toolSpecs, ...fresh]);
+    this.invalidatePrefixCaches();
+    this._frozenToolsCache = null;
+    return fresh.length;
+  }
+
   /** Mirror of addTool for MCP hot-unbridge. Same cache-miss cost — prefix changes shape. */
   removeTool(name: string): boolean {
     const idx = this._toolSpecs.findIndex((t) => t.function?.name === name);

@@ -40,6 +40,35 @@ describe("cache-shape diagnostics", () => {
     expect(prefix.toolSpecs.map((s) => s.function.name)).toEqual(["read", "write"]);
   });
 
+  it("addTools batches multiple specs into one cache invalidation", () => {
+    const prefix = new ImmutablePrefix({ system: "s", toolSpecs: [tool("alpha")] });
+    const fpBefore = prefix.fingerprint;
+
+    const count = prefix.addTools([tool("delta"), tool("beta"), tool("gamma")]);
+    expect(count).toBe(3);
+    expect(prefix.toolSpecs.map((s) => s.function.name)).toEqual([
+      "alpha",
+      "beta",
+      "delta",
+      "gamma",
+    ]);
+    // Fingerprint should have changed exactly once.
+    expect(prefix.fingerprint).not.toBe(fpBefore);
+  });
+
+  it("addTools skips duplicates and nameless specs", () => {
+    const prefix = new ImmutablePrefix({ system: "s", toolSpecs: [tool("alpha")] });
+
+    // Duplicate + nameless + one new
+    const count = prefix.addTools([
+      tool("alpha"), // duplicate
+      { type: "function", function: { name: "", description: "", parameters: { type: "object", properties: {} } } } as ToolSpec, // nameless
+      tool("beta"), // new
+    ]);
+    expect(count).toBe(1);
+    expect(prefix.toolSpecs.map((s) => s.function.name)).toEqual(["alpha", "beta"]);
+  });
+
   it("tracks append-only-breaking rewrites separately from normal appends", () => {
     const log = new AppendOnlyLog();
     expect(log.rewriteVersion).toBe(0);

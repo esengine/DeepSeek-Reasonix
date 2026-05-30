@@ -11,22 +11,25 @@ export function applyMcpAppend(
   target: McpServerSummary,
   addedTools: McpTool[],
 ): McpServerSummary {
+  const specs: ToolSpec[] = [];
   const accepted: McpTool[] = [];
   for (const mcpTool of addedTools) {
     if (!mcpTool.name) continue;
     const registeredName = registerSingleMcpTool(mcpTool, target.bridgeEnv);
     if (!registeredName) continue;
-    const spec: ToolSpec = {
+    specs.push({
       type: "function",
       function: {
         name: registeredName,
         description: mcpTool.description ?? "",
         parameters: mcpTool.inputSchema as unknown as JSONSchema,
       },
-    };
-    loop.prefix.addTool(spec);
+    });
     accepted.push(mcpTool);
   }
+  // Batch into a single prefix mutation → one cache-miss turn
+  // instead of one per tool.
+  loop.prefix.addTools(specs);
   if (accepted.length === 0 || !target.report.tools.supported) return target;
 
   const merged = [...target.report.tools.items, ...accepted];

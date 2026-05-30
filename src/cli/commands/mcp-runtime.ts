@@ -293,18 +293,18 @@ export function createMcpRuntime(ctx: RuntimeContext): McpRuntime {
         registeredSpecs,
       });
       // Hot-add: shift the prefix so the live loop sees the new tools
-      // on the very next turn. Each addTool is one cache-miss turn.
-      if (loop)
-        for (const s of registeredSpecs)
-          try {
-            loop.prefix.addTool(s);
-          } catch (err) {
-            sink({
-              kind: "warn",
-              name: label,
-              reason: `addTool failed for ${s.function.name}: ${(err as Error).message}`,
-            });
-          }
+      // on the very next turn. Batch via addTools so the entire server's
+      // tool set costs ONE cache-miss turn rather than one per tool.
+      if (loop && registeredSpecs.length) {
+        const added = loop.prefix.addTools(registeredSpecs);
+        if (added < registeredSpecs.length) {
+          sink({
+            kind: "warn",
+            name: label,
+            reason: `addTools: expected ${registeredSpecs.length}, got ${added} (some may be duplicates)`,
+          });
+        }
+      }
       return { ok: true, summary };
     } catch (err) {
       // If we got far enough to create a provisional record, keep it —
