@@ -62,7 +62,14 @@ describe("cache-shape diagnostics", () => {
     // Duplicate + nameless + one new
     const count = prefix.addTools([
       tool("alpha"), // duplicate
-      { type: "function", function: { name: "", description: "", parameters: { type: "object", properties: {} } } } as ToolSpec, // nameless
+      {
+        type: "function",
+        function: {
+          name: "",
+          description: "",
+          parameters: { type: "object", properties: {} },
+        },
+      } as ToolSpec, // nameless
       tool("beta"), // new
     ]);
     expect(count).toBe(1);
