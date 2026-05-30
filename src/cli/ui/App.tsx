@@ -1,7 +1,7 @@
 import { type WriteStream, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { derivePrefix, toApprovalPrompt } from "@reasonix/core-utils";
-import { Box, Text, useStdin, useStdout } from "ink";
+import { Box, Text, useStdin, useStdout, useTerminalSize } from "ink";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type JsonlEventSink,
@@ -573,6 +573,7 @@ function AppInner({
     clear: clearToolProgressDisplay,
   } = useToolProgressDisplay(progressSink);
   const { stdout } = useStdout();
+  const { rows: terminalRows } = useTerminalSize();
   // Subagent UI wiring: live activity row + sink ref the loop closure
   // captures. Must be declared BEFORE loop construction so the
   // subagentRunner closure can read the ref. The wallet-currency thunk
@@ -4438,13 +4439,13 @@ function AppInner({
     <>
       <TickerProvider disabled={tickerSuspended}>
         <InflightProvider inflight={loop.inflight}>
-          <Box flexDirection="row" backgroundColor={SURFACE.bg}>
+          <Box flexDirection="row" backgroundColor={SURFACE.bg} height={terminalRows}>
             <Box
               flexDirection="column"
               flexGrow={planPanelOpen ? 0 : 1}
               width={planPanelOpen ? "35%" : undefined}
             >
-              <Box flexDirection="column" flexGrow={1}>
+              <Box flexDirection="column" flexGrow={1} overflow="hidden">
                 <LiveExpandContext.Provider value={liveExpand}>
                   <VerboseContext.Provider value={verboseMode}>
                     {historyScrollMode === "app" ? (
