@@ -133,6 +133,13 @@ function getEmojiWidth(grapheme: string): number {
     }
   }
 
+  // Text-symbol emoji (✓ ⚡ ⛁ ⚑ … U+2600–U+27BF) are single-cell in
+  // terminal emulators and CJK code-page consoles.  Only true emoji
+  // presentation sequences (U+1F300–U+1FAFF, flags, keycaps) occupy 2 cells.
+  if (first >= 0x2600 && first <= 0x27bf) {
+    return 1;
+  }
+
   return 2;
 }
 
