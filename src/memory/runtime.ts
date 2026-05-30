@@ -97,9 +97,9 @@ export class ImmutablePrefix {
   }
 
   /** Batch variant of `addTool` — adds multiple specs in a single operation
-   *  with one cache invalidation. Callers that register N tools at once
-   *  (e.g. MCP server startup) should use this instead of looping `addTool`
-   *  to avoid N separate cache-miss turns.
+   *  with one sort + one cache invalidation. Callers that register N tools
+   *  at once (e.g. MCP server startup) should use this instead of looping
+   *  `addTool` to avoid N redundant sorts and intermediate fingerprint churn.
    *
    *  Returns the number of tools actually added (skips duplicates and
    *  nameless specs). */
